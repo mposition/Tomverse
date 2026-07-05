@@ -233,7 +233,10 @@ export default function Home() {
 	
 	setSelectedModels(nextModels);
     setDisabledPanels(nextDisabled);
-    syncModelSettingsToServer(nextModels, nextDisabled);
+    // 💡 현재 열려있는 방(currentChatId)이 있을 때만 서버에 동기화하도록 안전하게 묶어줍니다!
+    if (currentChatId && currentChatId !== "private-chat") {
+      syncModelSettingsToServer(currentChatId, nextModels, nextDisabled);
+    }
   };
 
   // 💡 완전히 창을 닫고 데이터베이스 기록을 날려버리는 기능 추가
