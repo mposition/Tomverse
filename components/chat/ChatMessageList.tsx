@@ -87,7 +87,7 @@ export function ChatMessageList({ messages, isPrivate = false }: ChatMessageList
       )}
 	  
         <div className="mx-auto flex max-w-4xl flex-col gap-4">
-          {messages.map((message) => {
+          {messages.map((msg, idx) => {
 			const isUser = message.role === "user";
 
 			// 💡 현재 메시지를 작성한 모델의 정보를 AVAILABLE_MODELS에서 찾아옵니다.
