@@ -11,6 +11,12 @@ export type Conversation = {
   title: string;
 };
 
+export type AiModel = {
+  id: string;
+  name: string;
+  icon: string;
+};
+
 export const AVAILABLE_MODELS: AiModel[] = [
   { id: "gpt-4o", name: "GPT-4o", icon: "🤖" },
   { id: "claude-haiku-4-5", name: "Claude Haiku 4.5", icon: "🧠" },
