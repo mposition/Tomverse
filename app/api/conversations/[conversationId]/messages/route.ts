@@ -7,19 +7,12 @@ type Params = {
   }>;
 };
 
-export async function POST(req: Request, { params }: Params) {
+export async function POST(req: Request, context: any) {
   try {
-    const { conversationId } = await params;
+	const params = await context.params;
+    const conversationId = params.conversationId || params.id;
     const body = await req.json();
-
     const messages = Array.isArray(body?.messages) ? body.messages : [];
-
-    if (!messages.length) {
-      return NextResponse.json(
-        { error: "저장할 메시지가 없습니다." },
-        { status: 400 }
-      );
-    }
 
 	for (const msg of messages) {
 	  // 유저의 질문은 중복 저장을 막기 위해 방 ID와 내용을 섞어 고유 ID를 생성합니다.
@@ -50,20 +43,42 @@ export async function POST(req: Request, { params }: Params) {
       });
     }
 
-    // 새 메시지가 추가되었으니 대화방의 최근 업데이트 시간을 갱신합니다.
-    await prisma.conversation.update({
-      where: { id: conversationId },
-      data: {
-        updatedAt: new Date(),
-      },
-    });
-
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("Message save error:", error);
+    console.error("❌ 메시지 저장 에러:", error);
     return NextResponse.json(
       { error: "메시지 저장 실패" },
       { status: 500 }
     );
+  }
+}
+
+// 모델 전용 기록 삭제 API
+export async function DELETE(req: Request, context: any) {
+  try {
+    const params = await context.params;
+    const conversationId = params.conversationId || params.id;
+    
+    // URL에서 modelId를 파싱해옵니다. (예: ?modelId=gpt-4o)
+    const { searchParams } = new URL(req.url);
+    const modelId = searchParams.get("modelId");
+
+    if (!conversationId || !modelId) {
+      return NextResponse.json({ error: "파라미터 누락" }, { status: 400 });
+    }
+
+    // 해당 대화방에서 특정 모델이 작성한 'assistant' 메시지만 전부 삭제합니다.
+    await prisma.message.deleteMany({
+      where: {
+        conversationId: conversationId,
+        modelId: modelId,
+        role: "assistant"
+      }
+    });
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("❌ 메시지 삭제 에러:", error);
+    return NextResponse.json({ error: "삭제 실패" }, { status: 500 });
   }
 }
