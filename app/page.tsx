@@ -25,11 +25,9 @@ export default function Home() {
   // 💡 대화방 목록을 서버에서 불러오는 함수 (부모가 관리)
   const fetchConversations = async () => {
     try {
-      const res = await fetch("/api/conversations");
-      if (res.ok) {
-        const data = await res.json();
-        setConversations(data);
-      }
+	  // 💡 캐시 무효화 옵션 추가
+      const res = await fetch("/api/conversations", { cache: "no-store" });
+      if (res.ok) setConversations(await res.json());
     } catch (error) {
       console.error("대화 목록을 불러오는 중 오류 발생:", error);
     }
@@ -57,11 +55,11 @@ export default function Home() {
 	setPromptPayload(null); // 방 이동 시 과거 질문 잔재 삭제
 
 	try {
-      const res = await fetch(`/api/conversations/${id}`);
+      const res = await fetch(`/api/conversations/${id}`, { cache: "no-store" });
       if (res.ok) {
         const data = await res.json();
-        // 대화방에 귀속되어 있던 모델 종류와 ON/OFF 상태 복원!
-        if (data.selectedModels) setSelectedModels(data.selectedModels);
+
+		if (data.selectedModels) setSelectedModels(data.selectedModels);
         if (data.disabledPanels) setDisabledPanels(data.disabledPanels);
       }
     } catch (error) {
@@ -110,7 +108,7 @@ export default function Home() {
   };
   
   // 💡 모델 세팅 상태가 변경되면 서버 DB에 실시간 동기화 요청 (PATCH)
-  const syncModelSettingsToServer = async (updatedModels: string[], updatedDisabled: string[]) => {
+  const syncModelSettingsToServer = async (targetChatId: string, updatedModels: string[], updatedDisabled: string[]) => {
     if (!currentChatId) return; // 새 채팅 상태일 때는 생성 전이므로 패스
     try {
       await fetch(`/api/conversations/${currentChatId}`, {
@@ -203,6 +201,30 @@ export default function Home() {
     syncModelSettingsToServer(nextModels, nextDisabled);
   };
 
+  // 💡 완전히 창을 닫고 데이터베이스 기록을 날려버리는 기능 추가
+  const handleRemoveModel = async (modelId: string) => {
+    const modelName = AVAILABLE_MODELS.find(m => m.id === modelId)?.name || modelId;
+    if (!confirm(`[${modelName}] 패널을 닫으시겠습니까?\n해당 모델과 나눈 대화 기록이 DB에서 영구 삭제됩니다.`)) return;
+
+    const nextModels = selectedModels.filter((id) => id !== modelId);
+    const nextDisabled = disabledPanels.filter((id) => id !== modelId);
+    
+    setSelectedModels(nextModels);
+    setDisabledPanels(nextDisabled);
+    
+    if (currentChatId) {
+      syncModelSettingsToServer(currentChatId, nextModels, nextDisabled);
+      try {
+        // 백엔드 삭제 API 호출
+        await fetch(`/api/conversations/${currentChatId}/messages?modelId=${modelId}`, {
+          method: "DELETE"
+        });
+      } catch (error) {
+        console.error("기록 삭제 실패:", error);
+      }
+    }
+  };
+
   // 💡 패널의 상태(ON/OFF)를 전환하는 함수
   const togglePanelDisable = (modelId: string) => {
 	const nextDisabled = disabledPanels.includes(modelId)
@@ -210,7 +232,7 @@ export default function Home() {
       : [...disabledPanels, modelId]; // 안 꺼져있으면 배열에 넣어 끔
       
     setDisabledPanels(nextDisabled);
-    syncModelSettingsToServer(selectedModels, nextDisabled);
+	if (currentChatId) syncModelSettingsToServer(currentChatId, selectedModels, nextDisabled);	
   };
   
   // 💡 특정 패널의 모델을 다른 모델로 스위칭하는 함수
@@ -220,13 +242,13 @@ export default function Home() {
     let nextDisabled = [...disabledPanels];
     
     // 2. 만약 해당 패널이 일시정지(OFF) 상태였다면, 바뀐 모델도 일시정지 상태를 유지해줍니다.
-    if (disabledPanels.includes(oldModelId)) {
-      nextDisabled = [...disabledPanels.filter((id) => id !== oldModelId), newModelId];
+    if (nextDisabled.includes(oldModelId)) {
+      nextDisabled = [...nextDisabled.filter((id) => id !== oldModelId), newModelId];
     }
 
     setSelectedModels(nextModels);
     setDisabledPanels(nextDisabled);
-    syncModelSettingsToServer(nextModels, nextDisabled);
+	if (currentChatId) syncModelSettingsToServer(currentChatId, nextModels, nextDisabled);
   };  
   
   return (
@@ -244,6 +266,16 @@ export default function Home() {
       <section className="flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">        
         {/* 💡 동적 화면 분할 영역 */}
         <div className="flex flex-1 min-h-0 overflow-hidden px-4 pb-4 pt-4 gap-4 bg-zinc-950">
+
+		{/* 켜진 패널이 하나도 없을 때 보여줄 예쁜 안내 문구 */}
+          {selectedModels.length === 0 && (
+            <div className="flex flex-1 flex-col items-center justify-center text-zinc-500 select-none">
+              <div className="text-4xl mb-4 opacity-50">🤖</div>
+              <p className="text-sm font-medium">활성화된 AI 패널이 없습니다.</p>
+              <p className="text-xs mt-1 opacity-70">하단 입력창 우측에서 원하는 모델을 켜주세요.</p>
+            </div>
+          )}
+		  
 		{selectedModels.map((modelId, index) => {
             const modelInfo = AVAILABLE_MODELS.find(m => m.id === modelId);
 			const isPanelDisabled = disabledPanels.includes(modelId);
@@ -252,7 +284,7 @@ export default function Home() {
               <React.Fragment key={modelId}>               
 				{/* 💡 패널이 OFF일 때 너비를 w-44(약 176px)으로 축소시킵니다 */}
                 <div className={`flex flex-col bg-zinc-900/40 border border-zinc-800 rounded-2xl overflow-hidden relative transition-all duration-300 ease-in-out shadow-sm ${
-                  isPanelDisabled ? "w-36 shrink-0" : "flex-1 min-w-0"
+                  isPanelDisabled ? "w-44 shrink-0" : "flex-1 min-w-0"
                 }`}>
 				  {/* 💡 모델 이름과 ON/OFF 토글 버튼이 있는 헤더 */}
                   {selectedModels.length > 1 && (
@@ -291,7 +323,7 @@ export default function Home() {
 						)}
                       </div>
                       
-					{/* 💡 ON/OFF 토글 스위치 적용 */}
+					{/* ON/OFF 버튼과 닫기(X) 버튼 그룹화 */}
                       <button
                         onClick={() => togglePanelDisable(modelId)}
                         className="cursor-pointer flex items-center gap-2 rounded px-2 py-0.5 hover:bg-zinc-800 transition-colors"
@@ -304,6 +336,19 @@ export default function Home() {
                           <div className={`h-3 w-3 rounded-full bg-white transition-transform ${!isPanelDisabled ? "translate-x-4" : "translate-x-0"}`} />
                         </div>
                       </button>
+					  
+					  <div className="w-[1px] h-4 bg-zinc-700/50"></div>
+                      
+                      <button
+                        onClick={() => handleRemoveModel(modelId)}
+                        className="cursor-pointer flex items-center justify-center p-1 rounded text-zinc-500 hover:bg-zinc-800 hover:text-red-400 transition-colors"
+                        title="창 닫기 (기록 삭제)"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <line x1="18" y1="6" x2="6" y2="18"></line>
+                          <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                      </button>					  
                     </div>
                   )}
                   
