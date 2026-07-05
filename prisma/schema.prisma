@@ -1,0 +1,36 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Conversation {
+  id             String    @id @default(uuid())
+  userId         String
+  title          String
+  
+  // 💡 대화방별 패널 상태를 기억하기 위한 필드 추가
+  // 💡 String[] 대신 일반 String으로 변경 (SQLite 호환성 확보)
+  selectedModels String    @default("[\"gpt-4o\"]")
+  disabledPanels String    @default("[]")
+  
+  messages       Message[]
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  role           String
+  content        String
+  status         String       @default("normal")
+  modelId        String?      // 💡 어떤 AI 모델이 쓴 답변인지 구분하는 꼬리표 추가
+  
+  conversationId String  
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId])
+}
