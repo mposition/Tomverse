@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
@@ -19,10 +21,16 @@ type Params = {
 };
 
 // 💡 특정 대화방의 상세 정보와 그 방에 쌓인 모든 메시지를 가져오는 GET 메서드
-export async function GET(req: Request, { params }: Params) {
+export async function GET(req: Request, context: any) {
   try {
-    const { conversationId } = await params;
+	// params 추출 (Next 15의 비동기 params 대응)
+    const params = await context.params;
+    const conversationId = params.conversationId || params.id; 
 
+    if (!conversationId) {
+      return NextResponse.json({ error: "대화방 ID가 누락되었습니다." }, { status: 400 });
+    }
+	
     // Prisma의 include 기능을 사용해 대화방을 찾으면서 내부에 연결된 메시지까지 한 번에 쿼리합니다.
     const conversation = await prisma.conversation.findUnique({
       where: { id: conversationId },
@@ -61,23 +69,45 @@ export async function GET(req: Request, { params }: Params) {
 }
 
 // 💡 대화방 정보 수정 (PATCH)
-export async function PATCH(req: Request, { params }: Params) {
+export async function PATCH(req: Request, context: any) {
   try {
-    const { conversationId } = await params;
-    const body = await req.json();
+	const params = await context.params;
+    const conversationId = params.conversationId || params.id; // 폴더명이 [id]일 경우도 방어
+
+    if (!conversationId) {
+      console.error("❌ [백엔드 PATCH] 대화방 ID를 찾을 수 없습니다. (폴더명을 확인하세요)");
+      return NextResponse.json({ error: "대화방 ID 누락" }, { status: 400 });
+    }
+
+	// 바디 파싱 에러 방어
+    let body;
+    try {
+      body = await req.json();
+    } catch (err) {
+      console.error("❌ [백엔드 PATCH] JSON 파싱 에러:", err);
+      return NextResponse.json({ error: "잘못된 JSON 형식" }, { status: 400 });
+    }
+
 	const updateData: any = {};
 
 	// 💡 제목 변경 요청이 있을 때
     if (body.title && body.title.trim()) {
       updateData.title = body.title.trim();
-    } else {
-      return NextResponse.json({ error: "제목이 필요합니다." }, { status: 400 });
-    }
+    } 
 
 	// 💡 모델 변경이나 ON/OFF 변경 요청이 있을 때
 	// 💡 업데이트 요청이 오면 다시 문자열로 압축하여 DB에 찌릅니다.
-    if (body.selectedModels) updateData.selectedModels = JSON.stringify(body.selectedModels);
-    if (body.disabledPanels) updateData.disabledPanels = JSON.stringify(body.disabledPanels);	
+	if (body.selectedModels !== undefined) {
+      updateData.selectedModels = JSON.stringify(body.selectedModels);
+    }
+    if (body.disabledPanels !== undefined) {
+      updateData.disabledPanels = JSON.stringify(body.disabledPanels);
+    }	
+	
+	// 만약 업데이트할 데이터가 없다면 그냥 기존 데이터 반환
+    if (Object.keys(updateData).length === 0) {
+      return NextResponse.json({ success: true, message: "변경사항 없음" });
+    }	
 	
     // Prisma를 통해 데이터베이스 업데이트 수행
     const updatedConversation = await prisma.conversation.update({
