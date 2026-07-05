@@ -91,8 +91,8 @@ export function ChatMessageList({ messages, isPrivate = false }: ChatMessageList
 			const isUser = message.role === "user";
 
 			// 💡 현재 메시지를 작성한 모델의 정보를 AVAILABLE_MODELS에서 찾아옵니다.
-			const modelInfo = !isUser && messages.modelId 
-			  ? AVAILABLE_MODELS.find(m => m.id === messages.modelId) 
+			const modelInfo = !isUser && msg.modelId 
+			  ? AVAILABLE_MODELS.find(m => m.id === msg.modelId) 
 			  : null;
 
             const assistantBoxClass =
