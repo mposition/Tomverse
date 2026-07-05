@@ -61,7 +61,7 @@ export async function POST(req: Request) {
         'Cache-Control': 'no-cache, no-transform',
       },
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("❌ [AI SDK] API 요청 에러:");
     console.error(error?.message || error);
 
