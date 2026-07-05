@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
@@ -28,11 +30,11 @@ export async function GET() {
     });
 
 	// 💡 프론트엔드가 기존 배열 구조로 인식할 수 있게 문자열을 다시 배열로 파싱합니다.
-    const formatted = conversations.map((c) => ({
-      ...c,
-      selectedModels: safeParse(c.selectedModels, ["gpt-4o"]),
-      disabledPanels: safeParse(c.disabledPanels, []),
-    }));
+    // const formatted = conversations.map((c) => ({
+      // ...c,
+      // selectedModels: safeParse(c.selectedModels, ["gpt-4o"]),
+      // disabledPanels: safeParse(c.disabledPanels, []),
+    // }));
 
     return NextResponse.json(conversations);
   } catch (error) {
@@ -71,11 +73,7 @@ export async function POST(req: Request) {
     });
 
 	// 💡 프론트엔드에게 응답할 때는 다시 깔끔한 배열로 변환해서 리턴합니다.
-    return NextResponse.json({
-      ...conversation,
-	  selectedModels: safeParse(conversation.selectedModels, ["gpt-4o"]),
-      disabledPanels: safeParse(conversation.disabledPanels, []),
-	  });
+    return NextResponse.json(conversation);
   } catch (error) {
     console.error("❌ [백엔드] 대화방 생성 에러:", error);
     return Nexesponse.json(
