@@ -76,7 +76,7 @@ export async function POST(req: Request) {
     return NextResponse.json(conversation);
   } catch (error) {
     console.error("❌ [백엔드] 대화방 생성 에러:", error);
-    return Nexesponse.json(
+    return NextResponse.json(
       { error: "대화방 생성 실패" },
       { status: 500 }
     );
