@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { AiModel, AVAILABLE_MODELS } from "@/components/chat/types";
+import { AVAILABLE_MODELS } from "@/components/chat/types";
 
 type ChatInputProps = {
   value: string;
