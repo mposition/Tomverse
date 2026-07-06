@@ -32,10 +32,6 @@ export async function GET() {
     const conversations = await prisma.conversation.findMany({
       where: { userId },
       orderBy: { updatedAt: "desc" }, // 최근 업데이트된 대화가 위로 오도록 정렬
-	  select: {
-        id: true,
-        title: true,
-      },
     });
 
 	// 프론트엔드가 기존 배열 구조로 인식할 수 있게 문자열을 다시 배열로 파싱합니다.
