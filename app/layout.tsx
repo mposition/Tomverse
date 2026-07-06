@@ -3,6 +3,9 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import SessionProviderWrapper from "@/components/auth/SessionProviderWrapper";
 
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "@/lib/auth";
+
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
@@ -18,18 +21,25 @@ export const metadata: Metadata = {
   description: "Tomverse 하나로 끝내세요! 다양한 최신 AI 모델의 답변을 동시에 비교하고 활용할 수 있는 올인원 AI 플랫폼입니다.",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+    let session = null;
+    try {
+        session = await getServerSession(authOptions);
+    } catch (e) {
+        console.error("Layout session fetch error:", e);
+    }
+
   return (
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full overflow-hidden flex flex-col">
-        <SessionProviderWrapper>
+        <SessionProviderWrapper session={session}>
           {children}
         </SessionProviderWrapper>      
       </body>

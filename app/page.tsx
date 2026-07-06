@@ -1,15 +1,16 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { ChatApp } from "@/components/chat/ChatApp";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { Conversation, AVAILABLE_MODELS } from "@/components/chat/types";
-
+import { useSession } from "next-auth/react";
 export default function Home() {
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  
+  const { data: session } = useSession();
+
   const [isSending, setIsSending] = useState(false);
   const [focusToken, setFocusToken] = useState(0);
 
@@ -24,22 +25,27 @@ export default function Home() {
 
   // 💡 프라이빗 모드 전역 상태 관리
   const [isPrivateMode, setIsPrivateMode] = useState(false);
-  
+
   // 💡 대화방 목록을 서버에서 불러오는 함수 (부모가 관리)
-  const fetchConversations = async () => {
+  const fetchConversations = useCallback(async () => {
+    // 세션이 없으면(로그인 안 했으면) 굳이 안 불러옵니다.
+    if (!session || !session?.user) return;
+
     try {
 	  // 💡 캐시 무효화 옵션 추가
-	  const res = await fetch(`/api/conversations?t=${Date.now()}`, { cache: "no-store" });
+	  const res = await fetch(`/api/conversations`, { cache: "no-store" });
       if (res.ok) setConversations(await res.json());
     } catch (error) {
       console.error("대화 목록을 불러오는 중 오류 발생:", error);
     }
-  };
+    }, [session?.user?.email]);
 
-  // 최초 페이지 로드 시 목록 가져오기
-  useEffect(() => {
-    fetchConversations();
-  }, []);
+    // 최초 페이지 로드 시 목록 가져오기
+    useEffect(() => {
+        if (session?.user) {
+            fetchConversations();
+        } 
+    }, [session?.user?.email, fetchConversations]);
 
   // + 새 채팅 버튼 클릭 시 호출
   const handleNewChat = () => {
@@ -63,10 +69,12 @@ export default function Home() {
       return;
     }
 
-	setIsPrivateMode(false);
+    setIsPrivateMode(false);
+
+    if (!session || !session.user) return;
 
 	try {
-	  const res = await fetch(`/api/conversations/${id}?t=${Date.now()}`, { cache: "no-store" });
+	  const res = await fetch(`/api/conversations/${id}`, { cache: "no-store" });
       if (res.ok) {
         const data = await res.json();
 		console.log("✅ [DB Load] 불러온 설정:", data.selectedModels);
@@ -122,7 +130,8 @@ export default function Home() {
   
   // 💡 모델 세팅 상태가 변경되면 서버 DB에 실시간 동기화 요청 (PATCH)
   const syncModelSettingsToServer = async (targetChatId: string, updatedModels: string[], updatedDisabled: string[]) => {
-	if (!targetChatId || targetChatId === "private-chat") return; // 새 채팅 상태일 때는 생성 전이므로 패스, 프라이빗 저장 금지
+    if (!targetChatId || targetChatId === "private-chat") return; // 새 채팅 상태일 때는 생성 전이므로 패스, 프라이빗 저장 금지
+    if (!session || !session.user) return;
     try {
       await fetch(`/api/conversations/${currentChatId}`, {
         method: "PATCH",
@@ -297,8 +306,8 @@ export default function Home() {
   return (
     <main className="flex h-screen overflow-hidden bg-zinc-950 text-zinc-100">
       <ChatSidebar 
-        userEmail="guest@example.com" 
-        conversations={conversations} // 동기화된 리스트 전달
+        userEmail={session?.user?.email || "guest@example.com"} 
+        conversations={blendedConversations} // 동기화된 리스트 전달
         currentChatId={currentChatId}  // 현재 활성화된 방 ID 전달 (UI 하이라이트용)
         onNewChat={handleNewChat}
         onSelectConversation={handleSelectConversation}

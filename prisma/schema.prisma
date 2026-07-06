@@ -1,9 +1,6 @@
 generator client {
 // 💡 Prisma 7에서는 provider가 변경되었습니다.
-  provider = "prisma-client" 
-  
-  // 💡 생성된 클라이언트 파일이 저장될 경로를 명시해야 합니다.
-  output   = "./generated/prisma"
+  provider = "prisma-client-js"   
 }
 
 datasource db {

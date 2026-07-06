@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ChatMessageList } from "@/components/chat/ChatMessageList";
 import { Message } from "@/components/chat/types";
+import { useSession } from "next-auth/react";
 
 type ChatAppProps = {
   modelId: string; // 💡 부모가 내려준 정체성(modelId)을 받습니다.
@@ -13,6 +14,8 @@ type ChatAppProps = {
 };
 
 export function ChatApp({ modelId, initialConversationId = null, onConversationCreated, promptPayload, isPanelDisabled = false }: ChatAppProps) {
+  const { data: session } = useSession();
+
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "welcome",
@@ -37,6 +40,8 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
 
   // 💡 부모로부터 새로운 질문 신호가 들어오면 감지해서 전송 로직을 실행합니다.
   useEffect(() => {
+    if (!session?.user) return;
+
     if (promptPayload && promptPayload.id !== lastProcessedPromptId) {
       setLastProcessedPromptId(promptPayload.id);
       
@@ -58,6 +63,9 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
 
   // 💡 DB에서 대화 내역을 불러오는 로직, 부모의 ID가 변경(새채팅 클릭 혹은 사이드바 클릭)될 때 호출되는 동기화 로직
   useEffect(() => {
+      if (!isPrivate && (!session || !session.user)) {
+        return;
+    }
 	let isMounted = true;
 
 // 💡 프라이빗 모드방일 경우: 서버 API 호출을 차단하고 웰컴 메시지만 상시 유지
@@ -151,7 +159,7 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
 	return () => {
       isMounted = false;
     };	
-  }, [initialConversationId]);
+  }, [initialConversationId, isPrivate, session?.user?.email]);
   
   // 메시지를 DB에 저장하는 함수
   const saveMessages = async (convId: string, assistantMsg: Message) => {

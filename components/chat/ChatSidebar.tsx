@@ -103,26 +103,7 @@ export function ChatSidebar({
       {/* 💡 3. 하단 사용자 정보 및 설정 관리 영역 복구 */}
       <div className="p-4 border-t border-zinc-800 bg-zinc-900/50 flex flex-col gap-2 shrink-0">
         <div className="flex items-center justify-between gap-2">
-          <div className="flex flex-col min-w-0 flex-1">
-            <span className="text-[9px] text-zinc-500 font-bold tracking-wider uppercase">
-              Signed in as
-            </span>
-            <span className="text-xs text-zinc-300 truncate font-medium" title={userEmail}>
-              {userEmail}
-            </span>
-          </div>
           <AuthButton />
-          {/* 추후 설정 모달이나 관리 페이지 라우팅용 버튼 */}
-          <button 
-            onClick={() => alert("추후 사용자 설정 기능이 구현될 예정입니다.")}
-            className="cursor-pointer p-2 rounded-xl text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors shrink-0"
-            title="사용자 설정"
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="3"></circle>
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-            </svg>
-          </button>
         </div>
       </div>
 
