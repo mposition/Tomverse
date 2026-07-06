@@ -1,13 +1,76 @@
 generator client {
-  provider = "prisma-client-js"
+// 💡 Prisma 7에서는 provider가 변경되었습니다.
+  provider = "prisma-client" 
+  
+  // 💡 생성된 클라이언트 파일이 저장될 경로를 명시해야 합니다.
+  output   = "./generated/prisma"
 }
 
 datasource db {
   provider = "postgresql"
 }
 
+// ==========================================
+// 💡 [신규 추가] NextAuth 필수 및 사용자 커스텀 모델
+// ==========================================
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  
+  // 💡 커스텀 설정 필드 (테마, 언어 등)
+  theme         String    @default("dark")
+  language      String    @default("ko")
+  
+  accounts      Account[]
+  sessions      Session[]
+  conversations Conversation[] // 사용자가 가진 대화방들
+}
+
+model Account {
+  id                 String  @id @default(cuid())
+  userId             String
+  type               String
+  provider           String
+  providerAccountId  String
+  refresh_token      String?  
+  access_token       String?  
+  expires_at         Int?
+  token_type         String?
+  scope              String?
+  id_token           String?  
+  session_state      String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ==========================================
+// 💡 [기존 모델 수정] 대화방과 메시지
+// ==========================================
+
 model Conversation {
-  id             String    @id @default(uuid())
+  id             String    @id @default(cuid())
   userId         String
   title          String
   
@@ -17,6 +80,7 @@ model Conversation {
   disabledPanels String    @default("[]")
   
   messages       Message[]
+  user           User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 }
