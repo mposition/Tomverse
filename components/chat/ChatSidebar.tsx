@@ -1,6 +1,7 @@
 "use client";
 
 import { Conversation } from "./types";
+import { AuthButton } from "@/components/auth/AuthButton";
 
 type ChatSidebarProps = {
   userEmail: string; // 💡 상위에서 전달받는 유저 이메일
@@ -110,7 +111,7 @@ export function ChatSidebar({
               {userEmail}
             </span>
           </div>
-          
+          <AuthButton />
           {/* 추후 설정 모달이나 관리 페이지 라우팅용 버튼 */}
           <button 
             onClick={() => alert("추후 사용자 설정 기능이 구현될 예정입니다.")}
