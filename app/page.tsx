@@ -133,7 +133,7 @@ export default function Home() {
   // 사이드바에서 특정 대화방 클릭 시 호출
   const handleSelectConversation = async (id: string) => {
     setCurrentChatId(id);
-	setPromptPayload(null); // 방 이동 시 과거 질문 잔재 삭제
+	  setPromptPayload(null); // 방 이동 시 과거 질문 잔재 삭제
 
 	// 💡 사이드바에서 프라이빗 룸을 선택한 경우 브라우저 렌더링만 처리하고 종료
     if (id === "private-chat") {
@@ -142,6 +142,17 @@ export default function Home() {
     }
 
     setIsPrivateMode(false);
+
+    // 게스트 모드일 때는 서버 통신 없이 로컬 상태에서 패널 설정을 복구합니다.
+    if (isGuestMode) {
+      const targetConv = conversations.find((c) => c.id === id);
+      if (targetConv) {
+        // types.tsx에 없는 속성이므로 as any로 캐스팅하여 안전하게 가져옵니다.
+        setSelectedModels(Array.isArray((targetConv as any).selectedModels) ? (targetConv as any).selectedModels : ["gpt-4o"]);
+        setDisabledPanels(Array.isArray((targetConv as any).disabledPanels) ? (targetConv as any).disabledPanels : []);
+      }
+      return; // 서버 API 호출을 막고 즉시 종료
+    }
 
     if (!session || !session.user) return;
 

@@ -41,7 +41,7 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
 
   // 💡 부모로부터 새로운 질문 신호가 들어오면 감지해서 전송 로직을 실행합니다.
   useEffect(() => {
-    if (!session?.user) return;
+    if (!isGuestMode && !session?.user) return;
 
     if (promptPayload && promptPayload.id !== lastProcessedPromptId) {
       setLastProcessedPromptId(promptPayload.id);
@@ -64,7 +64,7 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
 
   // 💡 DB에서 대화 내역을 불러오는 로직, 부모의 ID가 변경(새채팅 클릭 혹은 사이드바 클릭)될 때 호출되는 동기화 로직
   useEffect(() => {
-    if (!isPrivate && (!session || !session.user)) {
+    if (!isPrivate && !isPrivate && (!session || !session.user)) {
         return;
     }
 
@@ -188,6 +188,14 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
     };	
   }, [initialConversationId, isPrivate, isGuestMode, session?.user?.email]);
   
+  // 💡 [여기에 새로 추가해 주세요!] 게스트 모드 메시지 자동 저장 로직
+  useEffect(() => {
+    if (isGuestMode && initialConversationId && messages.length > 0) {
+      const storageKey = `guest_messages_${initialConversationId}_${modelId}`;
+      localStorage.setItem(storageKey, JSON.stringify(messages));
+    }
+  }, [messages, isGuestMode, initialConversationId, modelId]);
+
   // 메시지를 DB에 저장하는 함수
   const saveMessages = async (convId: string, assistantMsg: Message) => {
     // 💡 프라이빗 모드일 시 서버 DB 저장을 원천 차단합니다!
