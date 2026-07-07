@@ -48,8 +48,41 @@ export default function Home() {
         const count = parseInt(localStorage.getItem("guest_count") || "0", 10);
         setGuestMessageCount(count);
       }
+
+      const savedConversations = localStorage.getItem("guest_conversations");
+      if (savedConversations) {
+        try {
+          const parsed = JSON.parse(savedConversations);
+          setConversations(parsed);
+          // 저장된 방이 있다면 가장 최근 방을 기본 활성화
+          if (parsed.length > 0 && !currentChatId) {
+            setCurrentChatId(parsed[0].id);
+          }
+        } catch (e) {
+          console.error("게스트 대화방 파싱 에러:", e);
+        }
+      } else {
+        // 최초 진입 시 환영 인사를 띄울 기본 게스트 방 하나를 생성해 줍니다.
+        const initialChatId = `guest_${Date.now()}`;
+        const initialChat = {
+          id: initialChatId,
+          title: "새 대화 (게스트)",
+          selectedModels: "userDefaultEngine" in localStorage ? [localStorage.getItem("userDefaultEngine")!] : ["gpt-4o"],
+          disabledPanels: []
+        };
+        setConversations([initialChat]);
+        setCurrentChatId(initialChatId);
+        localStorage.setItem("guest_conversations", JSON.stringify([initialChat]));        
+      }
     }
   }, [isGuestMode]);  
+
+  // 💡 게스트 대화방 목록 상태가 변경될 때마다 로컬 스토리지에 자동 저장
+  useEffect(() => {
+    if (isGuestMode && conversations.length > 0) {
+      localStorage.setItem("guest_conversations", JSON.stringify(conversations));
+    }
+  }, [conversations, isGuestMode]);  
 
   // 💡 대화방 목록을 서버에서 불러오는 함수 (부모가 관리)
   const fetchConversations = useCallback(async () => {
@@ -74,13 +107,27 @@ export default function Home() {
 
   // + 새 채팅 버튼 클릭 시 호출
   const handleNewChat = () => {
-    setCurrentChatId(null);	// 대화방 ID 초기화
+  	// 💡 새 채팅을 누르면 패널 상태를 기본 1개 창으로 완벽하게 리셋합니다.
+    // 게스트용 독립 방 생성 (handleNewChat)
+    if (isGuestMode) {
+      const newGuestChat = {
+        id: `guest_${Date.now()}`, // 👈 고유 타임스탬프 ID 부여로 다중 방 지원
+        title: "새 대화 (게스트)",
+        selectedModels: ["gpt-4o"],
+        disabledPanels: []
+      };
+      // 최신 방이 위로 오도록 사이드바 목록 앞에 추가
+      setConversations((prev) => [newGuestChat, ...prev]);
+      setCurrentChatId(newGuestChat.id);
+    } else {
+      // 로그인 사용자 기존 로직
+      setCurrentChatId(null); // 대화방 ID 초기화
+      setSelectedModels(["gpt-4o"]);   // 기본 엔진 하나만 남기기
+    }
 
-	// 💡 새 채팅을 누르면 패널 상태를 기본 1개 창으로 완벽하게 리셋합니다.
-    setSelectedModels(["gpt-4o"]);   // 기본 엔진 하나만 남기기
     setDisabledPanels([]);           // OFF 상태였던 패널 기록 초기화
     setInputValue("");               // 혹시 쓰다 남은 입력창 텍스트 초기화	
-	setPromptPayload(null); 		 // 새 채팅 시 과거 질문 완벽 초기화
+	  setPromptPayload(null); 		 // 새 채팅 시 과거 질문 완벽 초기화
   };
 
   // 사이드바에서 특정 대화방 클릭 시 호출
@@ -121,15 +168,21 @@ export default function Home() {
 
   // 💡 대화방 이름 변경 요청
   const handleRename = async (id: string, newTitle: string) => {
-    try {
-      await fetch(`/api/conversations/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: newTitle }),
-      });
-      fetchConversations(); // 목록 새로고침
-    } catch (error) {
-      console.error("이름 변경 중 오류:", error);
+    if (isGuestMode) {
+        setConversations((prev) =>
+        prev.map((c) => (c.id === id ? { ...c, title: newTitle } : c))
+      );
+    } else {      
+      try {
+        await fetch(`/api/conversations/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: newTitle }),
+        });
+        fetchConversations(); // 목록 새로고침
+      } catch (error) {
+        console.error("이름 변경 중 오류:", error);
+      }
     }
   };
 
@@ -138,18 +191,32 @@ export default function Home() {
     const confirmDelete = confirm("이 대화방을 삭제하시겠습니까?");
     if (!confirmDelete) return;
 
-    try {
-      await fetch(`/api/conversations/${id}`, {
-        method: "DELETE",
-      });
+    if (isGuestMode) {
+      const updated = conversations.filter((c) => c.id !== id);
+      setConversations(updated);
+      localStorage.removeItem(`guest_messages_${id}`); // 💡 삭제된 방의 메시지 스토리지도 깔끔히 청소
       
-      // 만약 현재 보고 있던 방을 지웠다면, '새 채팅' 화면으로 초기화
+      // 현재 열려있는 방을 지웠다면 다른 방으로 포커스 이동
       if (currentChatId === id) {
-		handleNewChat();
+        setCurrentChatId(updated.length > 0 ? updated[0].id : null);
       }
-      fetchConversations(); // 목록 새로고침
-    } catch (error) {
-      console.error("대화방 삭제 에러:", error);
+      if (updated.length === 0) {
+        localStorage.removeItem("guest_conversations");
+      }
+    } else {    
+      try {
+        await fetch(`/api/conversations/${id}`, {
+          method: "DELETE",
+        });
+        
+        // 만약 현재 보고 있던 방을 지웠다면, '새 채팅' 화면으로 초기화
+        if (currentChatId === id) {
+          handleNewChat();
+        }
+        fetchConversations(); // 목록 새로고침
+      } catch (error) {
+        console.error("대화방 삭제 에러:", error);
+      }
     }
   };
   
@@ -204,6 +271,11 @@ export default function Home() {
 
 	// 현재 선택된 방이 없다면(새 채팅이라면), 부모가 대표로 딱 한 번만 방을 생성합니다!
     if (!activeChatId) {
+      if (isGuestMode) {
+        // 1. 게스트 모드인 경우 DB에 방을 만들지 않고 임시 가상 ID를 부여합니다.
+        activeChatId = "guest-chat";
+        setCurrentChatId(activeChatId);
+      } else {      
       try {
         const res = await fetch("/api/conversations", {
           method: "POST",
@@ -225,6 +297,7 @@ export default function Home() {
         console.error("대화방 생성 중 오류:", error);
         return; // 생성 실패 시 진행 중단
       }
+    }
     }
     
     // 생성되거나 기존에 있던 딱 1개의 방 ID(activeChatId)를 자식들에게 신호로 내려줍니다.

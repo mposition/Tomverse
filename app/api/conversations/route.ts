@@ -22,12 +22,8 @@ export async function GET() {
     // 현재 로그인한 실제 유저 세션을 가져옵니다.
     const session = await getServerSession(authOptions);
 
-    // 로그인이 안 되어 있다면 목록을 주지 않고 401 권한 없음 에러 반환
-    if (!session || !session.user || !(session.user as any).id) {
-        return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
-    }
-
-    const userId = (session.user as any).id; // 💡 로그인된 유저의 고유 DB ID 추출
+    // 💡 로그인된 유저의 고유 DB ID 추출, 세션이 없으면 'guest'로 취급하여 통과시켜 줍니다.
+    const userId = session?.user ? (session.user as any).id : "guest";
 
     const conversations = await prisma.conversation.findMany({
       where: { userId },
@@ -54,15 +50,14 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-      const session = await getServerSession(authOptions);
-
-      if (!session || !session.user || !(session.user as any).id) {
-          return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
-      }
-
-      const userId = (session.user as any).id; // 💡 로그인된 유저의 고유 DB ID 추출
-
-      const body = await req.json();
+    // 세션 식별 및 유저 인증 확인
+    const session = await getServerSession(authOptions);
+    if (!session || !session.user || !(session.user as any).id) {
+      return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
+    }
+    
+    // 요청 바디 데이터 파싱 (page.tsx에서 전송하는 구조와 일치)
+    const body = await req.json();
     const title = typeof body?.title === "string" && body.title.trim() ? body.title.trim() : "새 대화";
 
 	// 💡 프론트엔드에서 넘겨준 모델 세팅값을 받아옵니다 (없으면 기본값)
@@ -74,18 +69,19 @@ export async function POST(req: Request) {
     const disabledPanels = Array.isArray(body?.disabledPanels) 
       ? JSON.stringify(body.disabledPanels) 
       : JSON.stringify([]);
-	
-    const conversation = await prisma.conversation.create({
-	  data: {
-        userId,
-        title,
-        selectedModels,
-        disabledPanels,
+
+    // Prisma를 사용하여 DB에 새로운 대화방 레코드 생성
+    const newConversation = await prisma.conversation.create({
+      data: {
+        userId: (session.user as any).id,
+        title: title || "새 대화",
+        selectedModels: selectedModels ? JSON.stringify(selectedModels) : JSON.stringify(["gpt-4o"]),
+        disabledPanels: JSON.stringify([]),
       },
     });
 
-	// 💡 프론트엔드에게 응답할 때는 다시 깔끔한 배열로 변환해서 리턴합니다.
-    return NextResponse.json(conversation);
+	  // 💡 프론트엔드에게 응답할 때는 다시 깔끔한 배열로 변환해서 리턴합니다.
+    return NextResponse.json(newConversation);      
   } catch (error) {
     console.error("❌ [백엔드] 대화방 생성 에러:", error);
     return NextResponse.json(

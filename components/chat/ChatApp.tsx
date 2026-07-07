@@ -64,103 +64,129 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
 
   // 💡 DB에서 대화 내역을 불러오는 로직, 부모의 ID가 변경(새채팅 클릭 혹은 사이드바 클릭)될 때 호출되는 동기화 로직
   useEffect(() => {
-      if (!isPrivate && (!session || !session.user)) {
+    if (!isPrivate && (!session || !session.user)) {
         return;
     }
-	let isMounted = true;
 
-// 💡 프라이빗 모드방일 경우: 서버 API 호출을 차단하고 웰컴 메시지만 상시 유지
+	  let isMounted = true;
+
+    // 💡 프라이빗 모드방일 경우: 서버 API 호출을 차단하고 웰컴 메시지만 상시 유지
     if (isPrivate) {
       lastFetchedChatIdRef.current = "private-chat";
       setMessages([{ id: "welcome", role: "assistant", content: "안녕하세요! 무엇을 도와드릴까요?", status: "normal" }]);
       return;
     }
-	  
+
+    if (isGuestMode) {
+      if (initialConversationId) {
+        // 방 ID와 모델 ID를 조합하여 멀티 패널 및 다중 대화방 완벽 격리
+        const storageKey = `guest_messages_${initialConversationId}_${modelId}`;
+        const savedMessages = localStorage.getItem(storageKey);
+        if (savedMessages) {
+          try {
+            setMessages(JSON.parse(savedMessages));
+          } catch (e) {
+            console.error("메시지 로드 실패:", e);
+            setMessages([]);
+          }
+        } else {
+          // 최초 대화방 진입 시 시스템 환영 인사 주입
+          setMessages([
+            { id: "welcome", role: "assistant", content: "안녕하세요! 게스트 모드로 접속 중입니다. 질문을 입력해 주세요.", status: "normal" }
+          ]);
+        }
+      } else {
+        setMessages([]);
+      }
+      return; // 백엔드 API 통신 원천 차단
+    }
+
+    // 2. 일반 로그인 사용자용 기존 백엔드 API 로드 로직 실행
     // 사이드바에서 다른 대화방을 클릭하여 넘어온 경우
-	if (initialConversationId && initialConversationId !== lastFetchedChatIdRef.current) {
+  	if (initialConversationId && initialConversationId !== lastFetchedChatIdRef.current && initialConversationId !== "guest-chat") {
       lastFetchedChatIdRef.current = initialConversationId;
 	  
       const fetchPastMessages = async () => {
         try {
-		  const response = await fetch(`/api/conversations/${initialConversationId}`, { 
+		      const response = await fetch(`/api/conversations/${initialConversationId}`, { 
             cache: "no-store",
             headers: { 'Cache-Control': 'no-cache' }
           });			
           if (response.ok) {
             const data = await response.json();
-			if (isMounted) {              
+			    if (isMounted) {              
               // 방금 새로 만든 방이어서 현재 답변을 전송(스트리밍) 중이라면, 
               // 아직 DB 저장이 안 된 빈 데이터를 가져와서 화면을 덮어씌우지 않고 무시합니다!
               if (isSendingRef.current && streamingChatIdRef.current === initialConversationId) {
                 return; 
-			  }
-            }
-			
-            if (data.messages && data.messages.length > 0) {
-				// 자기 모델의 답변만 걸러냅니다!
-                const filteredMessages: Message[] = [];
-                const seenUserIds = new Set(); // 유저 질문 중복 렌더링 방지용
-				let hasMyAssistantMsg = false;
-
-                // 💡 1. 현재 모델이 작성한 답변이 DB에 하나라도 있는지 검사합니다.
-                for (const msg of data.messages) {
-                  if (msg.role === "assistant" && (!msg.modelId || msg.modelId === modelId)) {
-                    hasMyAssistantMsg = true;
-                    break;
-                  }
-                }
-
-				// 💡 2. 내 답변이 단 하나도 없다면? (기록을 지우고 다시 켠 상태) -> 완벽한 Blank 화면!
-                if (!hasMyAssistantMsg) {
-                  setMessages([{ id: "welcome", role: "assistant", content: "안녕하세요! 무엇을 도와드릴까요?", status: "normal" }]);
-                } else {				
-					for (const msg of data.messages) {
-					  if (msg.role === "user") {
-						if (!seenUserIds.has(msg.id)) {
-						  seenUserIds.add(msg.id);
-						  filteredMessages.push(msg);
-						}
-					  } 
-					  // 💡 AI 답변일 경우, 내 modelId와 일치하는 것만 통과시킵니다.
-					  else if (msg.role === "assistant" && msg.modelId === modelId) {
-						filteredMessages.push(msg);
-					  }
-					}
-				}
-				
-				setMessages(filteredMessages.length > 0 ? filteredMessages : [{ id: "welcome", role: "assistant", content: "안녕하세요! 무엇을 도와드릴까요?", status: "normal" }]);
-            } else {
-              setMessages([{ id: "welcome", role: "assistant", content: "안녕하세요! 무엇을 도와드릴까요?", status: "normal" }]);
-            }
+              }
           }
-        } catch (error) {
-          console.error("메시지를 불러오는 중 오류 발생:", error);
+
+          if (data.messages && data.messages.length > 0) {
+				    // 자기 모델의 답변만 걸러냅니다!
+            const filteredMessages: Message[] = [];
+            const seenUserIds = new Set(); // 유저 질문 중복 렌더링 방지용
+				    let hasMyAssistantMsg = false;
+
+            // 💡 현재 모델이 작성한 답변이 DB에 하나라도 있는지 검사합니다.
+            for (const msg of data.messages) {
+              if (msg.role === "assistant" && (!msg.modelId || msg.modelId === modelId)) {
+                hasMyAssistantMsg = true;
+                break;
+              }
+            }
+
+				    // 💡 내 답변이 단 하나도 없다면? (기록을 지우고 다시 켠 상태) -> 완벽한 Blank 화면!
+            if (!hasMyAssistantMsg) {
+              setMessages([{ id: "welcome", role: "assistant", content: "안녕하세요! 무엇을 도와드릴까요?", status: "normal" }]);
+            } else {				
+              for (const msg of data.messages) {
+                if (msg.role === "user") {
+                  if (!seenUserIds.has(msg.id)) {
+                    seenUserIds.add(msg.id);
+                    filteredMessages.push(msg);
+                  }
+                } 
+                // 💡 AI 답변일 경우, 내 modelId와 일치하는 것만 통과시킵니다.
+                else if (msg.role === "assistant" && msg.modelId === modelId) {
+                  filteredMessages.push(msg);
+					      }
+					    }
+				    }
+				
+				    setMessages(filteredMessages.length > 0 ? filteredMessages : [{ id: "welcome", role: "assistant", content: "안녕하세요! 무엇을 도와드릴까요?", status: "normal" }]);
+          } else {
+            setMessages([{ id: "welcome", role: "assistant", content: "안녕하세요! 무엇을 도와드릴까요?", status: "normal" }]);
+          }
         }
-      };
+      } catch (error) {
+        console.error("메시지를 불러오는 중 오류 발생:", error);
+      }
+    };
 
       fetchPastMessages();
-    } 
+  } 
     // 부모가 '새 채팅' 상태(null)로 명령을 내린 경우 내부 상태 완전 초기화
     else if (!initialConversationId) {
-	  lastFetchedChatIdRef.current = null;
+	    lastFetchedChatIdRef.current = null;
 	  
-	  // 새로운 채팅일 경우에만 화면 리셋 (단, 전송 중이 아닐 때만)
+	    // 새로운 채팅일 경우에만 화면 리셋 (단, 전송 중이 아닐 때만)
       if (!isSendingRef.current) {
-		  setMessages([
-			{
-			  id: "welcome",
-			  role: "assistant",
-			  content: "안녕하세요! 무엇을 도와드릴까요?",
-			  status: "normal",
-			},
-		  ]);
-	  }
+        setMessages([
+        {
+          id: "welcome",
+          role: "assistant",
+          content: "안녕하세요! 무엇을 도와드릴까요?",
+          status: "normal",
+        },
+        ]);
+	    }
     }
 	
-	return () => {
+	  return () => {
       isMounted = false;
     };	
-  }, [initialConversationId, isPrivate, session?.user?.email]);
+  }, [initialConversationId, isPrivate, isGuestMode, session?.user?.email]);
   
   // 메시지를 DB에 저장하는 함수
   const saveMessages = async (convId: string, assistantMsg: Message) => {
