@@ -191,7 +191,7 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
   // 메시지를 DB에 저장하는 함수
   const saveMessages = async (convId: string, assistantMsg: Message) => {
     // 💡 프라이빗 모드일 시 서버 DB 저장을 원천 차단합니다!
-    if (convId === "private-chat") return;
+    if (convId === "private-chat"|| isGuestMode) return;
 	
     await fetch(`/api/conversations/${convId}/messages`, {
       method: "POST",

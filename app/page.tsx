@@ -303,7 +303,9 @@ export default function Home() {
     // 생성되거나 기존에 있던 딱 1개의 방 ID(activeChatId)를 자식들에게 신호로 내려줍니다.
     if (activeChatId) {
 	  const userMsgId = crypto.randomUUID(); // 고유 유저 메시지 ID 생성
-      
+
+    // 게스트 모드가 아닐 때만 유저 메시지를 DB에 선저장합니다!
+      if (!isGuestMode) {
       try {
         // 💡 부모가 대표로 메시지 저장 요청을 먼저 수행
         await fetch(`/api/conversations/${activeChatId}/messages`, {
@@ -316,6 +318,7 @@ export default function Home() {
       } catch (e) {
         console.error("유저 메시지 선저장 에러:", e);
       }
+    }
 
       // 자식들에게 생성된 방 ID와 유저 메시지 ID 신호를 공유합니다.
       setPromptPayload({ 
