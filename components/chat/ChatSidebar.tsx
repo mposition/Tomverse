@@ -7,6 +7,9 @@ type ChatSidebarProps = {
   userEmail: string; // 💡 상위에서 전달받는 유저 이메일
   conversations: Conversation[];
   currentChatId: string | null;
+  isGuestMode?: boolean;
+  guestMessageCount?: number;
+  maxGuestMessages?: number;    
   onNewChat: () => void;
   onSelectConversation: (id: string) => void;
   onRename: (id: string, title: string) => void;
@@ -17,6 +20,9 @@ export function ChatSidebar({
   userEmail,
   conversations,
   currentChatId,
+  isGuestMode,
+  guestMessageCount,
+  maxGuestMessages,
   onNewChat,
   onSelectConversation,
   onRename,
@@ -100,8 +106,35 @@ export function ChatSidebar({
         })}
       </div>
 
+
       {/* 💡 3. 하단 사용자 정보 및 설정 관리 영역 복구 */}
       <div className="p-4 border-t border-zinc-800 bg-zinc-900/50 flex flex-col gap-2 shrink-0">
+{/* 💡 게스트 모드일 때만 렌더링되는 일일 사용량 게이지 */}
+        {isGuestMode && guestMessageCount !== undefined && maxGuestMessages !== undefined && (
+          <div className="px-1">
+            <div className="flex justify-between items-center mb-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+              <span className="font-medium">게스트 일일 사용량</span>
+              <span className="font-bold text-zinc-700 dark:text-zinc-300">
+                {guestMessageCount} <span className="opacity-50">/ {maxGuestMessages}</span>
+              </span>
+            </div>
+            {/* 프로그레스 바 배경 */}
+            <div className="h-1.5 w-full bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
+              {/* 실제 채워지는 게이지 */}
+              <div
+                className={`h-full transition-all duration-500 ease-out ${
+                  guestMessageCount >= maxGuestMessages ? 'bg-red-500' : 'bg-blue-500'
+                }`}
+                style={{ width: `${Math.min((guestMessageCount / maxGuestMessages) * 100, 100)}%` }}
+              />
+            </div>
+            {guestMessageCount >= maxGuestMessages && (
+              <p className="text-[10px] text-red-500 mt-1.5 text-center font-medium animate-pulse">
+                일일 한도를 초과했습니다.
+              </p>
+            )}
+          </div>
+        )}      
         <div className="flex items-center justify-between gap-2">
           <AuthButton />
         </div>

@@ -11,6 +11,7 @@ import { Message, AVAILABLE_MODELS } from "@/components/chat/types";
 type ChatMessageListProps = {
   messages: Message[];
   isPrivate?: boolean;
+  isGuestMode?: boolean; // 💡 게스트 모드 여부 추가  
 };
 
 function TypingIndicator() {
@@ -23,7 +24,7 @@ function TypingIndicator() {
   );
 }
 
-export function ChatMessageList({ messages, isPrivate = false }: ChatMessageListProps) {
+export function ChatMessageList({ messages, isPrivate = false, isGuestMode = false }: ChatMessageListProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [isNearBottom, setIsNearBottom] = useState(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
@@ -87,6 +88,19 @@ export function ChatMessageList({ messages, isPrivate = false }: ChatMessageList
               </p>
             </div>
           )}
+
+          {/* 💡 게스트 모드 안내 배너 추가 */}
+          {isGuestMode && (
+            <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 p-4 text-center text-sm text-blue-700 shadow-sm animate-fadeIn dark:border-blue-800/50 dark:bg-blue-950/30 dark:text-blue-300">
+              <p className="mb-1.5 flex items-center justify-center gap-2 font-bold text-blue-800 dark:text-blue-200">
+                <span className="text-lg">👤</span> 게스트 모드 활성화
+              </p>
+              <p className="break-keep text-xs opacity-90 dark:opacity-80">
+                게스트 모드이므로 모든 대화 정보는 웹 브라우저에 저장되며 서버에는 기록되지 않습니다.<br/>
+                <span className="font-semibold text-blue-600 dark:text-blue-400">(일일 최대 20회 제한)</span>
+              </p>
+            </div>
+          )}          
 
           {/* 💡 2. message -> msg 변수명 완벽 통일 */}
           {messages.map((msg, idx) => {

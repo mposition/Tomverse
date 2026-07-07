@@ -12,6 +12,7 @@ type ChatInputProps = {
   isSending?: boolean;
   focusToken?: number;
   selectedModels: string[];
+  isGuestLimitReached?: boolean;
   onToggleModel: (modelId: string) => void;
 };
 
@@ -24,6 +25,7 @@ export function ChatInput({
   isSending = false,
   focusToken,
   selectedModels,
+  isGuestLimitReached = false,
   onToggleModel,
 }: ChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -34,11 +36,16 @@ export function ChatInput({
     .filter(Boolean);
 
   let placeholderText = "메시지를 입력하세요...";
-  if (activeModelNames.length === 1) {
+  if (isGuestLimitReached) {
+    placeholderText = "일일 게스트 사용량을 모두 소진했습니다. 로그인 후 이용해주세요.";
+  } else if (activeModelNames.length === 1) {
     placeholderText = `[${activeModelNames[0]}]에게 메시지 보내기...`;
   } else if (activeModelNames.length > 1) {
     placeholderText = `${activeModelNames.join(", ")}에게 동시에 메시지 보내기...`;
   }
+  
+  // 💡 최종 비활성화 조건 계산
+  const isDisabled = disabled || isSending || isGuestLimitReached;
   
   // 팝업 메뉴 열림/닫힘 상태
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -76,7 +83,8 @@ export function ChatInput({
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      if (!disabled && !isSending) {
+      // isDisabled로 검사하도록 변경
+      if (!isDisabled) {
         onSubmit();
       }
     }
@@ -143,7 +151,7 @@ export function ChatInput({
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={placeholderText}
-          disabled={disabled || isSending}
+          disabled={isDisabled}
           rows={1}
           className="max-h-[160px] min-h-[48px] flex-1 resize-none overflow-y-auto rounded-2xl border border-zinc-700 bg-zinc-900 px-4 py-3 text-sm text-zinc-100 outline-none placeholder:text-zinc-500 focus:border-zinc-500 disabled:opacity-50"
         />
@@ -160,7 +168,7 @@ export function ChatInput({
           <button
             type="button"
             onClick={onSubmit}
-            disabled={disabled || !value.trim()}
+            disabled={isDisabled || !value.trim()}
             className="cursor-pointer rounded-2xl bg-blue-600 px-5 py-3 text-sm font-medium text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
             전송

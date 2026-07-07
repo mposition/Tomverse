@@ -6,10 +6,11 @@ import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { Conversation, AVAILABLE_MODELS } from "@/components/chat/types";
 import { useSession } from "next-auth/react";
+
 export default function Home() {
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const { data: session } = useSession();
+  const { data: session, status } = useSession();
 
   const [isSending, setIsSending] = useState(false);
   const [focusToken, setFocusToken] = useState(0);
@@ -25,6 +26,30 @@ export default function Home() {
 
   // 💡 프라이빗 모드 전역 상태 관리
   const [isPrivateMode, setIsPrivateMode] = useState(false);
+
+  // 💡 게스트 모드 판별 및 사용량 상태 추가
+  const isGuestMode = status !== "loading" && !session?.user;
+  const [guestMessageCount, setGuestMessageCount] = useState(0);
+  const MAX_GUEST_MESSAGES = 20;
+
+// 💡 컴포넌트 마운트 시 오늘 날짜 기준으로 게스트 카운트 초기화 및 로드
+  useEffect(() => {
+    if (isGuestMode) {
+      const today = new Date().toDateString();
+      const storedDate = localStorage.getItem("guest_date");
+      
+      // 날짜가 바뀌었으면 카운트 초기화
+      if (storedDate !== today) {
+        localStorage.setItem("guest_date", today);
+        localStorage.setItem("guest_count", "0");
+        setGuestMessageCount(0);
+      } else {
+        // 오늘 날짜면 기존 카운트 불러오기
+        const count = parseInt(localStorage.getItem("guest_count") || "0", 10);
+        setGuestMessageCount(count);
+      }
+    }
+  }, [isGuestMode]);  
 
   // 💡 대화방 목록을 서버에서 불러오는 함수 (부모가 관리)
   const fetchConversations = useCallback(async () => {
@@ -146,10 +171,23 @@ export default function Home() {
     }
   };  
   
+  // 💡 메시지 전송 함수
   const handleGlobalSubmit = async () => {
     const trimmed = inputValue.trim();
     if (!trimmed || selectedModels.length === 0) return;
 	
+    if (isGuestMode) {
+      if (guestMessageCount >= MAX_GUEST_MESSAGES) {
+        alert("일일 게스트 사용량을 모두 소진했습니다. 로그인 후 이용해 주세요.");
+        return; // 전송 차단
+      }
+      
+      // 전송 로직이 실행될 때 카운트 증가
+      const newCount = guestMessageCount + 1;
+      setGuestMessageCount(newCount);
+      localStorage.setItem("guest_count", newCount.toString());
+    }
+
 	// 💡 [프라이빗 분기]: 프라이빗 모드일 경우 서버 통신을 완전히 생략하고 페이로드만 전송
     if (isPrivateMode) {
       setPromptPayload({ 
@@ -311,8 +349,11 @@ export default function Home() {
         currentChatId={currentChatId}  // 현재 활성화된 방 ID 전달 (UI 하이라이트용)
         onNewChat={handleNewChat}
         onSelectConversation={handleSelectConversation}
-		onRename={handleRename}
+		    onRename={handleRename}
         onDelete={handleDelete}		
+        isGuestMode={isGuestMode} 
+        guestMessageCount={guestMessageCount} 
+        maxGuestMessages={MAX_GUEST_MESSAGES}        
       />
 
       <section className="flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">        
@@ -425,11 +466,12 @@ export default function Home() {
                   )}
                   
                   <ChatApp 
-				    modelId={modelId}
+				            modelId={modelId}
                     initialConversationId={currentChatId} 
                     onConversationCreated={handleConversationCreated}
                     promptPayload={promptPayload}
-					isPanelDisabled={isPanelDisabled}
+					          isPanelDisabled={isPanelDisabled}
+                    isGuestMode={isGuestMode}
                   />
                 </div>
               </React.Fragment>
@@ -444,9 +486,10 @@ export default function Home() {
           onSubmit={handleGlobalSubmit}
           onCancel={() => {}} 
           isSending={isSending}
-		  focusToken={focusToken}		  
+		      focusToken={focusToken}		  
           selectedModels={selectedModels}
           onToggleModel={toggleModel}
+          isGuestLimitReached={isGuestMode && guestMessageCount >= MAX_GUEST_MESSAGES}          
         />
       </section>
     </main>

@@ -11,9 +11,10 @@ type ChatAppProps = {
   onConversationCreated?: (id: string) => void; // 💡 새 방이 파졌을 때 부모에게 일러바칠 함수
   promptPayload?: { id: string; text: string; chatId: string; userMessageId: string } | null; // 💡 부모로부터 전달받을 공통 프롬프트 페이로드 (중복 방지를 위해 id 포함)
   isPanelDisabled?: boolean; // 💡 현재 패널이 비활성화(OFF) 상태인지 여부
+  isGuestMode?: boolean; // 💡 게스트 모드 여부 추가  
 };
 
-export function ChatApp({ modelId, initialConversationId = null, onConversationCreated, promptPayload, isPanelDisabled = false }: ChatAppProps) {
+export function ChatApp({ modelId, initialConversationId = null, onConversationCreated, promptPayload, isPanelDisabled = false, isGuestMode = false }: ChatAppProps) {
   const { data: session } = useSession();
 
   const [messages, setMessages] = useState<Message[]>([
@@ -296,7 +297,7 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
       {!isPanelDisabled ? (
         <div className="flex-1 min-h-0 overflow-hidden">
 		  {/* 💡 isPrivate 플래그를 전달하여 상단 경고 문구 활성화 */}
-          <ChatMessageList messages={messages} isPrivate={isPrivate} />
+          <ChatMessageList messages={messages} isPrivate={isPrivate} isGuestMode={isGuestMode}/>
 	    </div>
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center p-4 select-none">
