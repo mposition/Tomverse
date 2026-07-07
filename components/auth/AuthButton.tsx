@@ -4,14 +4,17 @@
 import { signIn, signOut, useSession } from "next-auth/react";
 import { useState, useEffect } from "react";
 import { AVAILABLE_MODELS } from "@/components/chat/types"; // 💡 AVAILABLE_MODELS 임포트
+import { useLanguage } from "@/components/LanguageProvider";
 
 export function AuthButton() {
   // 💡 현재 로그인 상태(session)를 가져옵니다.
   const { data: session, status } = useSession();
     const [isModalOpen, setIsModalOpen] = useState(false);
 
+    const { t, lang: globalLang, setLang: setGlobalLang } = useLanguage();
+
     const [theme, setTheme] = useState("dark");
-    const [language, setLanguage] = useState("ko");
+    const [language, setLanguage] = useState("en");
     const [defaultModel, setDefaultModel] = useState("gpt-4o");
 
     // 모달이 열릴 때 DB에서 최신 설정을 받아옴
@@ -22,12 +25,12 @@ export function AuthButton() {
                 .then((data) => {
                     if (!data.error) {
                         setTheme(data.theme || "dark");
-                        setLanguage(data.language || "ko");
+                        setLanguage(data.language || globalLang);
                         setDefaultModel(data.defaultModel || "gpt-4o");
                     }
                 });
         }
-    }, [isModalOpen, session]);
+    }, [isModalOpen, session, globalLang]);
 
     // 확인 버튼을 눌렀을 때 실행될 저장 함수
     const handleSaveSettings = async () => {
@@ -42,11 +45,19 @@ export function AuthButton() {
                 // 💡 중요: 새로고침(window.location.reload()) 대신 모달만 닫고 
                 // 렌더링에 필요한 스타일이나 전역 상태만 바꾸어 500 파싱 에러를 완벽 차단합니다.
                 setIsModalOpen(false);
-                alert("설정이 성공적으로 저장되었습니다.");
-                window.location.reload();
-                // 여기에 테마 적용 로직(document.documentElement.classList 업데이트 등)을 붙이면 좋습니다.
+                alert(t("auth.saveMessage"));
+
+                setGlobalLang(language as any);
+
+                if (theme === "light") {
+                    document.documentElement.classList.remove("dark");
+                } else {
+                    document.documentElement.classList.add("dark");
+                }
+
+                setDefaultModel(defaultModel);
             } else {
-                alert("설정 저장에 실패했습니다.");
+                alert(t("auth.failedMessage"));
             }
         } catch (e) {
             console.error(e);
@@ -54,7 +65,7 @@ export function AuthButton() {
     };
 
   if (status === "loading") {
-    return <div className="text-sm text-zinc-400">로딩 중...</div>;
+      return <div className="text-sm text-zinc-400">{ t("auth.loading") }</div>;
   }
 
 // 1️⃣ 로그인 세션이 있는 경우 (Signed as 이메일 표시)
@@ -80,14 +91,14 @@ export function AuthButton() {
           onClick={() => signOut()}
           className="cursor-pointer w-full mt-1 py-1.5 text-xs font-medium text-zinc-400 bg-zinc-800 hover:bg-zinc-700 hover:text-zinc-200 rounded-lg transition-colors"
         >
-          로그아웃
+                {t("auth.singedOut")}
         </button>
           {/* 추후 설정 모달이나 관리 페이지 라우팅용 버튼 */}
           <button 
                 onClick={() => setIsModalOpen(true)}
                 className=" w-full mt-1 py-1.5 text-xs font-medium text-zinc-400 bg-zinc-800 hover:bg-zinc-700 hover:text-zinc-200 rounded-lg transition-colors"
             >
-          ⚙️ 설정
+          ⚙️ {t("auth.setting")}
             </button>		
 
             {/* 💡 신규 추가되는 안전한 클라이언트 사이드 설정 모달 */}
@@ -108,8 +119,9 @@ export function AuthButton() {
                         <div className="mb-4">
                             <label className="text-xs text-zinc-400 block mb-1">언어</label>
                             <select value={language} onChange={(e) => setLanguage(e.target.value)} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-1.5 text-xs outline-none text-zinc-200">
-                                <option value="ko">한국어</option>
                                 <option value="en">English</option>
+                                <option value="zh">中文</option>
+                                <option value="ko">한국어</option>
                             </select>
                         </div>
 
@@ -128,10 +140,10 @@ export function AuthButton() {
                         {/* 하단 제어 버튼 (서버 새로고침 없는 안전한 방식) */}
                         <div className="flex justify-end gap-2 mt-5">
                             <button onClick={() => setIsModalOpen(false)} className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-medium transition-colors">
-                                취소
+                                {t("auth.cancel")}
                             </button>
                             <button onClick={handleSaveSettings} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-medium transition-colors">
-                                확인
+                                {t("auth.ok")}
                             </button>
                         </div>
                     </div>
@@ -147,7 +159,7 @@ export function AuthButton() {
       onClick={() => signIn()} 
       className="cursor-pointer w-full px-4 py-2.5 text-sm font-bold text-white bg-gradient-to-r from-indigo-600 to-blue-600 rounded-xl hover:from-indigo-500 hover:to-blue-500 transition-all shadow-lg"
     >
-      로그인 / 회원가입
+      {t("auth.login")}
     </button>
   );
 }

@@ -7,6 +7,7 @@ import SessionProviderWrapper from "@/components/auth/SessionProviderWrapper";
 
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
+import { LanguageProvider } from "@/components/LanguageProvider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -41,8 +42,10 @@ export default async function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full overflow-hidden flex flex-col">
-        <SessionProviderWrapper session={session}>
-          {children}
+              <SessionProviderWrapper session={session}>
+                  <LanguageProvider initialLang="en">
+                      {children}
+                  </LanguageProvider>
         </SessionProviderWrapper>      
       </body>
     </html>

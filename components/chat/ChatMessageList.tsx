@@ -4,9 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
-import "highlight.js/styles/github-dark.css";
-// 💡 1. AVAILABLE_MODELS 누락된 임포트 추가
 import { Message, AVAILABLE_MODELS } from "@/components/chat/types";
+import { useLanguage } from "@/components/LanguageProvider";
 
 type ChatMessageListProps = {
   messages: Message[];
@@ -29,6 +28,7 @@ export function ChatMessageList({ messages, isPrivate = false, isGuestMode = fal
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [isNearBottom, setIsNearBottom] = useState(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
+    const { t, lang, setLang } = useLanguage(); // 💡 t 함수 꺼내기
 
   const scrollToBottom = (behavior: ScrollBehavior = "smooth") => {
     const container = containerRef.current;
@@ -82,10 +82,10 @@ export function ChatMessageList({ messages, isPrivate = false, isGuestMode = fal
           {isPrivate && (
             <div className="mb-6 rounded-xl border border-purple-200 bg-purple-50 p-4 text-center text-sm text-purple-700 shadow-sm animate-fadeIn dark:border-purple-800/50 dark:bg-purple-950/30 dark:text-purple-300">
                 <p className="mb-1.5 flex items-center justify-center gap-2 font-bold text-purple-800 dark:text-purple-200">
-                <span className="text-lg">🔒</span> 프라이빗 보안 모드 활성화
+                              <span className="text-lg">🔒</span> {t("chat.onPrivateMode")}
               </p>
               <p className="break-keep text-xs opacity-90 dark:opacity-80">
-                해당 대화는 서버에 기록이 되지 않는 프라이빗 모드입니다. 새로고침시 내용이 모두 사라짐을 유의 바랍니다.
+                              {t("chat.privateModeMessage")}
               </p>
             </div>
           )}
@@ -94,11 +94,11 @@ export function ChatMessageList({ messages, isPrivate = false, isGuestMode = fal
           {isGuestMode && (
             <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 p-4 text-center text-sm text-blue-700 shadow-sm animate-fadeIn dark:border-blue-800/50 dark:bg-blue-950/30 dark:text-blue-300">
               <p className="mb-1.5 flex items-center justify-center gap-2 font-bold text-blue-800 dark:text-blue-200">
-                <span className="text-lg">👤</span> 게스트 모드 활성화
+                              <span className="text-lg">👤</span> {t("chat.onGuestMode")}
               </p>
               <p className="break-keep text-xs opacity-90 dark:opacity-80">
-                게스트 모드이므로 모든 대화 정보는 웹 브라우저에 저장되며 서버에는 기록되지 않습니다.<br/>
-                <span className="font-semibold text-blue-600 dark:text-blue-400">(일일 최대 20회 제한)</span>
+                              {t("chat.guestModeMessage")}<br/>
+                              <span className="font-semibold text-blue-600 dark:text-blue-400">{t("chat.guestModeLimitMessage")}</span>
               </p>
             </div>
           )}          
@@ -138,7 +138,7 @@ export function ChatMessageList({ messages, isPrivate = false, isGuestMode = fal
                 {!isUser && !modelInfo && msg.id === "welcome" && (
                   <div className="mb-1.5 ml-1 flex select-none items-center gap-1.5">
                     <span className="text-sm">🤖</span>
-                    <span className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">AI Assistant</span>
+                            <span className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">{t("chat.aiAssistant")}</span>
                   </div>
                 )}
 

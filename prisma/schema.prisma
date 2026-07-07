@@ -32,7 +32,7 @@ model UserSettings {
   user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   
   theme          String   @default("dark")      // "dark", "light", "system"
-  language       String   @default("ko")        // "ko", "en"
+  language       String   @default("en")        // "ko", "en"
   defaultModel  String   @default("gpt-4o") // JSON 스트링 배열 형태로 기본 선호 모델 저장
 
   createdAt      DateTime @default(now())

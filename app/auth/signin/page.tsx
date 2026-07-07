@@ -3,11 +3,13 @@
 import { signIn } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react"; // 💡 React에서 Suspense를 불러옵니다.
+import { useLanguage } from "@/components/LanguageProvider";
 
 // 💡 1. useSearchParams를 사용하는 버튼 영역을 별도의 컴포넌트로 분리합니다.
 function SignInButtons() {
     const searchParams = useSearchParams();
     const callbackUrl = searchParams.get("callbackUrl") || "/";
+    const { t, lang, setLang } = useLanguage(); // 💡 t 함수 꺼내기
 
     return (
         <div className="mt-8 space-y-3">
@@ -18,7 +20,7 @@ function SignInButtons() {
                 className="cursor-pointer flex w-full items-center justify-center gap-3 rounded-xl bg-white border border-zinc-200 px-4 py-3 text-sm font-semibold text-zinc-900 transition-all hover:bg-zinc-50 dark:border-transparent dark:hover:bg-zinc-200"
             >
                 <img src="https://authjs.dev/img/providers/google.svg" className="h-5 w-5" alt="Google" />
-                Google로 계속하기
+                {t("auth.google")}
             </button>
 
             {/* Microsoft */}
@@ -33,7 +35,7 @@ function SignInButtons() {
                     <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
                     <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
                 </svg>
-                Microsoft로 계속하기
+                {t("auth.microsoft") }
             </button>
 
             {/* Naver */}
@@ -43,7 +45,7 @@ function SignInButtons() {
                 className="cursor-pointer flex w-full items-center justify-center gap-3 rounded-xl bg-[#03C75A] px-4 py-3 text-sm font-semibold text-white transition-all hover:opacity-90"
             >
                 <span className="font-black text-white">N</span>
-                Naver로 계속하기
+                {t("auth.naver")}
             </button>
         </div>
     );
@@ -51,6 +53,8 @@ function SignInButtons() {
 
 // 💡 2. 메인 페이지에서는 분리한 컴포넌트를 Suspense로 감싸줍니다.
 export default function SignInPage() {
+    const { t, lang, setLang } = useLanguage(); // 💡 t 함수 꺼내기
+
     return (
         // 💡 전체 배경색 조절 (라이트: 연한 회색 bg-zinc-50, 다크: 무한 우주 bg-zinc-950)
         <div className="flex min-h-screen items-center justify-center bg-zinc-50 px-4 transition-colors duration-300 dark:bg-zinc-950">
@@ -65,7 +69,7 @@ export default function SignInPage() {
                     </h1>
                     {/* 💡 설명 문구 색상 최적화 */}
                     <p className="mt-2 text-zinc-500 dark:text-zinc-400">
-                        당신만의 AI 챗 허브에 로그인하세요
+                        {t("auth.description")}
                     </p>
                 </div>
 
@@ -76,7 +80,7 @@ export default function SignInPage() {
 
                 {/* 하단 안내 문구 */}
                 <p className="mt-6 text-center text-xs text-zinc-400 dark:text-zinc-500">
-                    로그인 시 Tomverse의 서비스 이용약관 및 개인정보 처리방침에 동의하게 됩니다.
+                    {t("auth.privacy") }
                 </p>
             </div>
         </div>

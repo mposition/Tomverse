@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AVAILABLE_MODELS } from "@/components/chat/types";
+import { useLanguage } from "@/components/LanguageProvider";
 
 type ChatInputProps = {
   value: string;
@@ -29,19 +30,20 @@ export function ChatInput({
   onToggleModel,
 }: ChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+    const { t, lang, setLang } = useLanguage(); // 💡 t 함수 꺼내기
 
   // 💡 선택된 모델의 이름들을 가져와서 플레이스홀더 문구를 동적으로 만듭니다.
   const activeModelNames = selectedModels
     .map(id => AVAILABLE_MODELS.find(m => m.id === id)?.name)
     .filter(Boolean);
 
-  let placeholderText = "메시지를 입력하세요...";
+    let placeholderText = t("chat.inputPlaceholder");
   if (isGuestLimitReached) {
-    placeholderText = "일일 게스트 사용량을 모두 소진했습니다. 로그인 후 이용해주세요.";
+      placeholderText = t("chat.exceedDailyLimit");
   } else if (activeModelNames.length === 1) {
-    placeholderText = `[${activeModelNames[0]}]에게 메시지 보내기...`;
+      placeholderText = `[${activeModelNames[0]}]` + t("chat.sendSingMessage");
   } else if (activeModelNames.length > 1) {
-    placeholderText = `${activeModelNames.join(", ")}에게 동시에 메시지 보내기...`;
+      placeholderText = `[${activeModelNames.join(", ")}]` + t("chat.sendMultipleMessages");
   }
   
   // 💡 최종 비활성화 조건 계산
@@ -91,8 +93,8 @@ export function ChatInput({
   };
 
   return (
-    <div className="shrink-0 border-t border-zinc-800 bg-zinc-950 px-4 py-4 md:px-8">
-      <div className="mx-auto flex max-w-3xl items-end gap-3">
+      <div className="shrink-0 border-t border-zinc-200 bg-white px-4 py-4 dark:border-zinc-800 dark:bg-zinc-950 md:px-8 transition-colors">
+          <div className="mx-auto flex max-w-3xl items-end gap-3">
 		{/* 💡 모델 선택 UI 영역 */}
         <div className="relative flex items-center gap-1 pl-2 mb-1" ref={menuRef}>
           {/* 선택된 모델 아이콘 표시 */}
@@ -124,8 +126,8 @@ export function ChatInput({
                     <button
                       key={model.id}
                       onClick={() => onToggleModel(model.id)}
-                      className="cursor-pointer flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm transition hover:bg-zinc-800"
-                    >
+                          className="cursor-pointer flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                      >
                       <span className="flex items-center gap-2">
                         <span>{model.icon}</span>
                         <span className={isSelected ? "text-zinc-900 dark:text-white font-medium" : "text-zinc-500 dark:text-zinc-400"}>
@@ -153,8 +155,8 @@ export function ChatInput({
           placeholder={placeholderText}
           disabled={isDisabled}
           rows={1}
-          className="max-h-[160px] min-h-[48px] flex-1 resize-none overflow-y-auto rounded-2xl border border-zinc-700 bg-zinc-900 px-4 py-3 text-sm text-zinc-100 outline-none placeholder:text-zinc-500 focus:border-zinc-500 disabled:opacity-50"
-        />
+                  className="max-h-[160px] min-h-[48px] flex-1 resize-none overflow-y-auto rounded-2xl border border-zinc-300 bg-zinc-50 px-4 py-3 text-sm text-zinc-900 outline-none transition-colors placeholder:text-zinc-400 focus:border-blue-500 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-zinc-500"
+              />
 
         {isSending ? (
           <button
@@ -162,7 +164,7 @@ export function ChatInput({
             onClick={onCancel}
             className="cursor-pointer rounded-2xl bg-red-600 px-5 py-3 text-sm font-medium text-white hover:bg-red-500"
           >
-            취소
+            {t("chat.cancel")}
           </button>
         ) : (
           <button
@@ -171,7 +173,7 @@ export function ChatInput({
             disabled={isDisabled || !value.trim()}
             className="cursor-pointer rounded-2xl bg-blue-600 px-5 py-3 text-sm font-medium text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            전송
+            {t("chat.send")}
           </button>
         )}
 		

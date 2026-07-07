@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChatMessageList } from "@/components/chat/ChatMessageList";
 import { Message } from "@/components/chat/types";
 import { useSession } from "next-auth/react";
+import { useLanguage } from "@/components/LanguageProvider";
 
 type ChatAppProps = {
   modelId: string; // 💡 부모가 내려준 정체성(modelId)을 받습니다.
@@ -17,12 +18,13 @@ type ChatAppProps = {
 export function ChatApp({ modelId, initialConversationId = null, onConversationCreated, promptPayload, isPanelDisabled = false, isGuestMode = false }: ChatAppProps) {
   const [isMessagesLoaded, setIsMessagesLoaded] = useState(false);
   const { data: session } = useSession();
+    const { t, lang, setLang } = useLanguage(); // 💡 t 함수 꺼내기
 
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "welcome",
       role: "assistant",
-      content: "안녕하세요! 무엇을 도와드릴까요?",
+          content: t("chat.welcome"),
 	  status: "normal",
     },
   ]);
@@ -75,7 +77,7 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
     // 💡 프라이빗 모드방일 경우: 서버 API 호출을 차단하고 웰컴 메시지만 상시 유지
     if (isPrivate) {
       lastFetchedChatIdRef.current = "private-chat";
-      setMessages([{ id: "welcome", role: "assistant", content: "안녕하세요! 무엇을 도와드릴까요?", status: "normal" }]);
+        setMessages([{ id: "welcome", role: "assistant", content: t("chat.welcome"), status: "normal" }]);
       return;
     }
 
@@ -99,7 +101,7 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
         } else {
           // 최초 대화방 진입 시 시스템 환영 인사 주입
           setMessages([
-            { id: "welcome", role: "assistant", content: "안녕하세요! 게스트 모드로 접속 중입니다. 질문을 입력해 주세요.", status: "normal" }
+            { id: "welcome", role: "assistant", content: t("chat.guestWelcome"), status: "normal" }
           ]);
         }
       } else {
@@ -148,7 +150,7 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
 
 				    // 💡 내 답변이 단 하나도 없다면? (기록을 지우고 다시 켠 상태) -> 완벽한 Blank 화면!
             if (!hasMyAssistantMsg) {
-              setMessages([{ id: "welcome", role: "assistant", content: "안녕하세요! 무엇을 도와드릴까요?", status: "normal" }]);
+              setMessages([{ id: "welcome", role: "assistant", content: t("chat.welcome"), status: "normal" }]);
             } else {				
               for (const msg of data.messages) {
                 if (msg.role === "user") {
@@ -164,9 +166,9 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
 					    }
 				    }
 				
-				    setMessages(filteredMessages.length > 0 ? filteredMessages : [{ id: "welcome", role: "assistant", content: "안녕하세요! 무엇을 도와드릴까요?", status: "normal" }]);
+              setMessages(filteredMessages.length > 0 ? filteredMessages : [{ id: "welcome", role: "assistant", content: t("chat.welcome"), status: "normal" }]);
           } else {
-            setMessages([{ id: "welcome", role: "assistant", content: "안녕하세요! 무엇을 도와드릴까요?", status: "normal" }]);
+              setMessages([{ id: "welcome", role: "assistant", content: t("chat.welcome"), status: "normal" }]);
           }
         }
       } catch (error) {
@@ -186,7 +188,7 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
         {
           id: "welcome",
           role: "assistant",
-          content: "안녕하세요! 무엇을 도와드릴까요?",
+                content: t("chat.welcome"),
           status: "normal",
         },
         ]);

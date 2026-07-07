@@ -48,13 +48,13 @@ export async function POST(req: Request) {
             where: { userId },
             update: {
                 theme: theme || "dark",
-                language: language || "ko",
+                language: language || "en",
                 defaultModel: defaultModel || "gpt-4o",
             },
             create: {
                 userId,
                 theme: theme || "dark",
-                language: language || "ko",
+                language: language || "en",
                 defaultModel: defaultModel || "gpt-4o",
             },
         });

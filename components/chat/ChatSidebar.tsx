@@ -3,6 +3,7 @@
 import { Conversation } from "./types";
 import { AuthButton } from "@/components/auth/AuthButton";
 import { useState, useEffect, useRef } from "react";
+import { useLanguage } from "@/components/LanguageProvider"; // 💡 훅 임포트
 
 type ChatSidebarProps = {
     userEmail: string;
@@ -35,11 +36,13 @@ export function ChatSidebar({
 }: ChatSidebarProps) {
     const [openMenuId, setOpenMenuId] = useState<string | null>(null);
     const menuRef = useRef<HTMLDivElement | null>(null);
+    const { t, lang, setLang } = useLanguage(); // 💡 t 함수 꺼내기
 
     // 메뉴 바깥 클릭 시 컨텍스트 메뉴가 자동으로 닫히도록 관리
     useEffect(() => {
         function handleClickOutside(event: MouseEvent) {
-            if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+            const target = event.target as HTMLElement;
+            if (!target.closest('.context-menu-wrapper')) {
                 setOpenMenuId(null);
             }
         }
@@ -64,7 +67,7 @@ export function ChatSidebar({
                     onClick={onNewChat}
                     className="w-full cursor-pointer flex items-center justify-center gap-2 rounded-xl bg-white border border-zinc-200 dark:bg-zinc-800/50 dark:border-zinc-700/50 px-4 py-2 text-xs font-medium text-zinc-600 dark:text-zinc-300 transition-all hover:bg-zinc-100 dark:hover:bg-zinc-700/60 hover:text-zinc-900 dark:hover:text-white"
                 >
-                    <span className="text-sm">+</span> 새 대화 시작하기
+                    <span className="text-sm">+</span> {t("sidebar.newChat")}
                 </button>
             </div>
 
@@ -79,7 +82,7 @@ export function ChatSidebar({
                         <div
                             key={conv.id}
                             onClick={() => onSelectConversation(conv.id)}
-                            className={`relative group flex items-center justify-between rounded-xl px-3 py-2 text-xs cursor-pointer transition-all border ${isPrivate
+                            className={`relative group flex items-center justify-between rounded-xl px-3 py-2 text-xs cursor-pointer transition-all border ${isMenuOpen ? "z-20" : "z-10"} ${isPrivate
                                     ? isActive
                                     ? "bg-purple-100 border-purple-300 text-purple-700 font-semibold dark:bg-purple-900/30 dark:border-purple-700/60 dark:text-purple-200"
                                     : "bg-purple-50/50 border-purple-100 text-purple-500 hover:bg-purple-100 dark:bg-purple-950/15 dark:border-purple-900/20 dark:text-purple-400/80 dark:hover:bg-purple-900/20 dark:hover:text-purple-300"
@@ -96,7 +99,7 @@ export function ChatSidebar({
                             </div>
 
                             {/* 💡 세 개의 점(⋮) 컨텍스트 메뉴 버튼 */}
-                            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center">
+                            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center context-menu-wrapper">
                                 <button
                                     type="button"
                                     onClick={(e) => {
@@ -121,27 +124,25 @@ export function ChatSidebar({
                                             onClick={(e) => {
                                                 e.stopPropagation();
                                                 setOpenMenuId(null);
-                                                const newTitle = prompt("새로운 대화방 이름을 입력하세요:", conv.title); // 💡 chat -> conv 수정
+                                                const newTitle = prompt(t("sidebar.newChatRoom"), conv.title); 
                                                 if (newTitle && newTitle.trim()) {
-                                                    onRename(conv.id, newTitle.trim()); // 💡 chat -> conv 수정
+                                                    onRename(conv.id, newTitle.trim()); 
                                                 }
                                             }}
                                             className="cursor-pointer w-full text-left px-2 py-1.5 rounded hover:bg-zinc-800 hover:text-zinc-100 transition-colors"
                                         >
-                                            이름 변경
+                                            {t("sidebar.rename")}
                                         </button>
                                         <button
                                             type="button"
                                             onClick={(e) => {
                                                 e.stopPropagation();
                                                 setOpenMenuId(null);
-                                                if (confirm("정말 이 대화방을 삭제하시겠습니까?")) {
-                                                    onDelete(conv.id); // 💡 chat -> conv 수정
-                                                }
+                                                onDelete(conv.id); 
                                             }}
                                             className="cursor-pointer w-full text-left px-2 py-1.5 rounded hover:bg-zinc-800 text-red-400 hover:text-red-300 transition-colors"
                                         >
-                                            삭제
+                                            {t("sidebar.delete")}
                                         </button>
 
                                         {/* 💡 잠금 기능 권한 분기 세팅 */}
@@ -151,7 +152,7 @@ export function ChatSidebar({
                                                 disabled
                                                 className="w-full text-left px-2 py-1.5 rounded opacity-50 cursor-not-allowed text-zinc-600 flex items-center justify-between font-medium"
                                             >
-                                                <span>대화 잠금</span>
+                                                <span>{t("sidebar.lock")}</span>
                                                 <span>👑</span>
                                             </button>
                                         ) : conv.isLocked ? ( 
@@ -160,11 +161,11 @@ export function ChatSidebar({
                                                 onClick={(e) => {
                                                     e.stopPropagation();
                                                     setOpenMenuId(null);
-                                                    if (onUnlock) onUnlock(conv.id); // 💡 chat -> conv 수정
+                                                    if (onUnlock) onUnlock(conv.id); 
                                                 }}
                                                     className="cursor-pointer w-full text-left px-2 py-1.5 rounded hover:bg-zinc-800 hover:text-zinc-100 transition-colors"
                                             >
-                                                잠금 해제
+                                                    {t("sidebar.unlock")}
                                             </button>
                                         ) : (
                                             <button
@@ -172,14 +173,14 @@ export function ChatSidebar({
                                                 onClick={(e) => {
                                                     e.stopPropagation();
                                                     setOpenMenuId(null);
-                                                    const pwd = prompt("설정할 잠금 비밀번호를 입력하세요:");
+                                                    const pwd = prompt(t("sidebar.enterPassword"));
                                                     if (pwd && pwd.trim()) {
-                                                        if (onLock) onLock(conv.id, pwd.trim()); // 💡 chat -> conv 수정
+                                                        if (onLock) onLock(conv.id, pwd.trim());
                                                     }
                                                 }}
                                                         className="cursor-pointer w-full text-left px-2 py-1.5 rounded hover:bg-zinc-800 hover:text-zinc-100 transition-colors"
                                             >
-                                                대화 잠금
+                                                        {t("sidebar.lock")}
                                             </button>
                                         )}
                                     </div>
@@ -196,7 +197,7 @@ export function ChatSidebar({
                 {isGuestMode && guestMessageCount !== undefined && maxGuestMessages !== undefined && (
                     <div className="px-1">
                         <div className="flex justify-between items-center mb-1.5 text-xs text-zinc-500 dark:text-zinc-400">
-                            <span className="font-medium">게스트 일일 사용량</span>
+                            <span className="font-medium">{t("sidebar.guestLimit")}</span>
                             <span className="font-bold text-zinc-700 dark:text-zinc-300">
                                 {guestMessageCount} <span className="opacity-50">/ {maxGuestMessages}</span>
                             </span>
@@ -212,7 +213,7 @@ export function ChatSidebar({
                         </div>
                         {guestMessageCount >= maxGuestMessages && (
                             <p className="text-[10px] text-red-500 mt-1.5 text-center font-medium animate-pulse">
-                                일일 한도를 초과했습니다.
+                                {t("sidebar.exceedDailyLimit")}
                             </p>
                         )}
                     </div>
