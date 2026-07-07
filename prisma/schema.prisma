@@ -19,12 +19,24 @@ model User {
   image         String?
   
   // 💡 커스텀 설정 필드 (테마, 언어 등)
-  theme         String    @default("dark")
-  language      String    @default("ko")
+  settings      UserSettings?
   
   accounts      Account[]
   sessions      Session[]
   conversations Conversation[] // 사용자가 가진 대화방들
+}
+
+model UserSettings {
+  id             String   @id @default(cuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  theme          String   @default("dark")      // "dark", "light", "system"
+  language       String   @default("ko")        // "ko", "en"
+  defaultModel  String   @default("gpt-4o") // JSON 스트링 배열 형태로 기본 선호 모델 저장
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 }
 
 model Account {
@@ -63,7 +75,7 @@ model VerificationToken {
 }
 
 // ==========================================
-// 💡 [기존 모델 수정] 대화방과 메시지
+// 대화방과 메시지
 // ==========================================
 
 model Conversation {
@@ -80,6 +92,7 @@ model Conversation {
   user           User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
+  password       String?   // 💡 잠금 비밀번호 (null이면 잠금 해제 상태)
 }
 
 model Message {

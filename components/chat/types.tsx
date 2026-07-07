@@ -8,7 +8,10 @@ export type Message = {
 
 export type Conversation = {
   id: string;
-  title: string;
+    title: string;
+    selectedModels?: string[];
+    disabledPanels?: string[];
+    isLocked?: boolean; // 💡 잠금 여부 (백엔드에서 password 존재 여부로 true/false 반환)
 };
 
 export type AiModel = {

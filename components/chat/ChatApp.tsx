@@ -338,7 +338,7 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
   };
 
   return (
-	<div className="flex flex-1 min-h-0 flex-col overflow-hidden bg-zinc-950">
+      <div className="flex flex-1 min-h-0 flex-col overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
       {/* 💡 패널이 켜져있을 때만 채팅 내역을 보여주고, 꺼지면 최소화 UI를 보여줍니다 */}
       {!isPanelDisabled ? (
         <div className="flex-1 min-h-0 overflow-hidden">

@@ -17,13 +17,14 @@ type ChatMessageListProps = {
 function TypingIndicator() {
   return (
     <div className="flex items-center gap-1 py-1">
-      <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 [animation-delay:-0.2s]" />
-      <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 [animation-delay:-0.1s]" />
-      <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400" />
+          <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 dark:bg-zinc-500 [animation-delay:-0.2s]" />
+          <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 dark:bg-zinc-500 [animation-delay:-0.1s]" />
+          <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 dark:bg-zinc-500" />
     </div>
   );
 }
 
+// 💡 Named Export 형태 유지로 이전의 모듈 엇박자 에러 재발을 차단합니다.
 export function ChatMessageList({ messages, isPrivate = false, isGuestMode = false }: ChatMessageListProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [isNearBottom, setIsNearBottom] = useState(true);
@@ -79,11 +80,11 @@ export function ChatMessageList({ messages, isPrivate = false, isGuestMode = fal
           
           {/* 프라이빗 배너 (하단 여백 mb-6 추가로 첫 인사글과 시원하게 띄움) */}
           {isPrivate && (
-            <div className="mb-6 rounded-xl border border-purple-800/50 bg-purple-950/30 p-4 text-center text-sm text-purple-300 shadow-sm animate-fadeIn">
-              <p className="mb-1.5 flex items-center justify-center gap-2 font-bold text-purple-200">
+            <div className="mb-6 rounded-xl border border-purple-200 bg-purple-50 p-4 text-center text-sm text-purple-700 shadow-sm animate-fadeIn dark:border-purple-800/50 dark:bg-purple-950/30 dark:text-purple-300">
+                <p className="mb-1.5 flex items-center justify-center gap-2 font-bold text-purple-800 dark:text-purple-200">
                 <span className="text-lg">🔒</span> 프라이빗 보안 모드 활성화
               </p>
-              <p className="break-keep text-xs opacity-80">
+              <p className="break-keep text-xs opacity-90 dark:opacity-80">
                 해당 대화는 서버에 기록이 되지 않는 프라이빗 모드입니다. 새로고침시 내용이 모두 사라짐을 유의 바랍니다.
               </p>
             </div>
@@ -110,16 +111,15 @@ export function ChatMessageList({ messages, isPrivate = false, isGuestMode = fal
               ? AVAILABLE_MODELS.find(m => m.id === msg.modelId) 
               : null;
 
-            const assistantBoxClass = msg.status === "error"
-              ? "bg-red-950 text-red-100 border border-red-800"
-              : msg.status === "cancelled"
-                ? "bg-zinc-800 text-zinc-300 italic"
-                : "bg-zinc-900 text-zinc-100 border border-zinc-700/50";
+              const assistantBoxClass = msg.status === "error"
+                  ? "bg-red-50 text-red-800 border border-red-200 dark:bg-red-950 dark:text-red-100 dark:border-red-800"
+                  : msg.status === "cancelled"
+                      ? "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-300 italic"
+                      : "bg-zinc-50 text-zinc-800 border border-zinc-200 dark:bg-zinc-900 dark:text-zinc-100 dark:border-zinc-700/50";
 
             const userBoxClass = "bg-blue-600 text-white";
 
             return (
-              // 💡 3. flex-col 추가 및 w-full 적용으로 왼쪽 여백 붕 뜨는 현상 해결
               <div
                 key={msg.id || idx}
                 className={`flex w-full flex-col ${isUser ? "items-end" : "items-start"}`}
@@ -128,7 +128,7 @@ export function ChatMessageList({ messages, isPrivate = false, isGuestMode = fal
                 {!isUser && modelInfo && (
                   <div className="mb-1.5 ml-1 flex select-none items-center gap-1.5">
                     <span className="text-sm">{modelInfo.icon}</span>
-                    <span className="text-[11px] font-semibold text-zinc-400">
+                    <span className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
                       {modelInfo.name}
                     </span>
                   </div>
@@ -138,7 +138,7 @@ export function ChatMessageList({ messages, isPrivate = false, isGuestMode = fal
                 {!isUser && !modelInfo && msg.id === "welcome" && (
                   <div className="mb-1.5 ml-1 flex select-none items-center gap-1.5">
                     <span className="text-sm">🤖</span>
-                    <span className="text-[11px] font-semibold text-zinc-400">AI Assistant</span>
+                    <span className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">AI Assistant</span>
                   </div>
                 )}
 
@@ -165,14 +165,14 @@ export function ChatMessageList({ messages, isPrivate = false, isGuestMode = fal
                         ),
                         code: ({ inline, children, ...props }: any) =>
                           inline ? (
-                            <code className="rounded bg-zinc-800 px-1 py-0.5 text-[0.9em] text-zinc-100" {...props}>
+                            <code className="rounded bg-zinc-200 text-zinc-800 px-1 py-0.5 text-[0.9em] dark:bg-zinc-800 dark:text-zinc-100" {...props}>
                               {children}
                             </code>
                           ) : (
                             <code {...props}>{children}</code>
                           ),
                         a: ({ children, href }) => (
-                          <a href={href} target="_blank" rel="noreferrer" className="text-blue-400 underline">
+                          <a href={href} target="_blank" rel="noreferrer" className="text-blue-600 dark:text-blue-400 underline">
                             {children}
                           </a>
                         ),

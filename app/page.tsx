@@ -16,6 +16,8 @@ export default function Home() {
   const [isSending, setIsSending] = useState(false);
   const [focusToken, setFocusToken] = useState(0);
 
+  const [userDefaultEngine, setUserDefaultEngine] = useState<string>("gpt-4o");
+
   const [inputValue, setInputValue] = useState("");
   const [promptPayload, setPromptPayload] = useState<{ id: string; text: string; chatId: string; userMessageId: string } | null>(null);
   
@@ -106,6 +108,30 @@ export default function Home() {
     useEffect(() => {
         if (session?.user) {
             fetchConversations();
+
+            // 💡 사용자 데이터베이스 설정 로드 파이프라인
+            fetch("/api/user/settings")
+                .then((res) => res.json())
+                .then((data) => {
+                    if (data && data.defaultModel) {
+                        setUserDefaultEngine(data.defaultModel);
+                        // 현재 활성화된 채팅방이 전혀 없을 때만 기본 엔진으로 패널 초기 스위칭
+                        if (!currentChatId) {
+                            setSelectedModels([data.defaultModel]);
+                        }
+                    }
+
+                    if (data && data.theme) {
+                        if (data.theme === "light") {
+                            // 라이트 테마일 때는 dark 클래스 제거
+                            document.documentElement.classList.remove("dark");
+                        } else {
+                            // 다크 테마일 때는 dark 클래스 추가
+                            document.documentElement.classList.add("dark");
+                        }
+                    }
+                })
+                .catch((err) => console.error("사용자 선호 엔진 조회 실패:", err));
         } 
     }, [session?.user?.email, fetchConversations]);
 
@@ -126,7 +152,7 @@ export default function Home() {
     } else {
       // 로그인 사용자 기존 로직
       setCurrentChatId(null); // 대화방 ID 초기화
-      setSelectedModels(["gpt-4o"]);   // 기본 엔진 하나만 남기기
+        setSelectedModels([userDefaultEngine]);   // 기본 엔진 하나만 남기기
     }
 
     setDisabledPanels([]);           // OFF 상태였던 패널 기록 초기화
@@ -135,8 +161,39 @@ export default function Home() {
   };
 
   // 사이드바에서 특정 대화방 클릭 시 호출
-  const handleSelectConversation = async (id: string) => {
-    setCurrentChatId(id);
+    const handleSelectConversation = async (id: string) => {
+        if (isSending) return;
+
+        // 💡 [검증 안전 가드] 게스트 모드가 아닐 때, 잠겨있는 대화방이면 패스워드 일치성 선행 확인
+        if (!isGuestMode) {
+            const targetConv = conversations.find((c) => c.id === id);
+
+            if (targetConv && targetConv.isLocked) {
+                const inputPwd = prompt("🔒 이 대화방은 잠겨 있습니다. 비밀번호를 입력하세요:");
+
+                if (inputPwd === null) return; // 취소 시 패널 진입 안 함
+
+                // 백엔드에 패스워드 검증 요청
+                try {
+                    const verifyRes = await fetch(`/api/conversations/${id}/verify`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ password: inputPwd }),
+                    });
+                    const verifyData = await verifyRes.json();
+
+                    if (!verifyData.success) {
+                        alert("❌ 비밀번호가 일치하지 않습니다.");
+                        return; // 패널 로딩 절차 전면 무력화 및 차단
+                    }
+                } catch (e) {
+                    console.error("검증 에러:", e);
+                    return;
+                }
+            }
+        }
+
+      setCurrentChatId(id);
 	  setPromptPayload(null); // 방 이동 시 과거 질문 잔재 삭제
 
 	// 💡 사이드바에서 프라이빗 룸을 선택한 경우 브라우저 렌더링만 처리하고 종료
@@ -154,7 +211,7 @@ export default function Home() {
         // types.tsx에 없는 속성이므로 as any로 캐스팅하여 안전하게 가져옵니다.
         setSelectedModels(Array.isArray((targetConv as any).selectedModels) ? (targetConv as any).selectedModels : ["gpt-4o"]);
         setDisabledPanels(Array.isArray((targetConv as any).disabledPanels) ? (targetConv as any).disabledPanels : []);
-      }
+        }
       return; // 서버 API 호출을 막고 즉시 종료
     }
 
@@ -173,7 +230,70 @@ export default function Home() {
     } catch (error) {
       console.error("대화방 정보 로드 실패:", error);
     }	
-  };
+
+        setFocusToken((prev) => prev + 1);
+
+    };
+
+    // 대화방 잠금 등록 핸들러
+    const handleLock = async (id: string, password: string) => {
+        setConversations((prev) =>
+            prev.map((c) => (c.id === id ? { ...c, isLocked: true } : c))
+        );
+        try {
+            await fetch(`/api/conversations/${id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ password }),
+            });
+        } catch (e) {
+            console.error("잠금 설정 에러:", e);
+        }
+    };
+
+    // 대화방 잠금 해제 핸들러
+    const handleUnlock = async (id: string) => {
+        // 잠금 해제 전 기존 비밀번호 일치성 검증
+        const targetConv = conversations.find((c) => c.id === id);
+        if (targetConv && targetConv.isLocked) {
+            const inputPwd = prompt("🔓 잠금을 완전히 해제하려면 기존 비밀번호를 입력하세요:");
+
+            // 취소를 누르거나 비밀번호가 틀린 경우 절차 차단
+            if (inputPwd === null) return; // 취소 버튼 클릭 시 종료
+
+            // 프론트엔드가 비밀번호를 모르므로 백엔드 검증 API를 반드시 거칩니다.
+            try {
+                const verifyRes = await fetch(`/api/conversations/${id}/verify`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ password: inputPwd }),
+                });
+                const verifyData = await verifyRes.json();
+
+                if (!verifyData.success) {
+                    alert("❌ 비밀번호가 일치하지 않습니다. 잠금을 해제할 수 없습니다.");
+                    return;
+                }
+            } catch (e) {
+                console.error("검증 통신 실패:", e);
+                return;
+            }
+        }
+
+        // 비밀번호가 일치하는 경우에만 기존 해제 및 API 동기화 로직 실행
+        setConversations((prev) =>
+            prev.map((c) => (c.id === id ? { ...c, isLocked: false } : c))
+        );
+        try {
+            await fetch(`/api/conversations/${id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ password: null }),
+            });
+        } catch (e) {
+            console.error("잠금 해제 에러:", e);
+        }
+    };
 
   // 💡 대화방이 생성되면 부모 상태를 동기화하고 리스트를 새로고침합니다.
   const handleConversationCreated = (id: string) => {
@@ -433,9 +553,9 @@ export default function Home() {
     : conversations;  
   
   return (
-    <main className="flex h-screen overflow-hidden bg-zinc-950 text-zinc-100">
+      <main className="flex h-screen overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
       <ChatSidebar 
-        userEmail={session?.user?.email || "guest@example.com"} 
+              userEmail={session?.user?.email || "Guest"} 
         conversations={blendedConversations} // 동기화된 리스트 전달
         currentChatId={currentChatId}  // 현재 활성화된 방 ID 전달 (UI 하이라이트용)
         onNewChat={handleNewChat}
@@ -444,12 +564,14 @@ export default function Home() {
         onDelete={handleDelete}		
         isGuestMode={isGuestMode} 
         guestMessageCount={guestMessageCount} 
-        maxGuestMessages={MAX_GUEST_MESSAGES}        
+              maxGuestMessages={MAX_GUEST_MESSAGES}        
+              onLock={handleLock}      // 💡 연결 완료
+              onUnlock={handleUnlock}  // 💡 연결 완료
       />
 
       <section className="flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">        
         {/* 💡 동적 화면 분할 영역 */}
-        <div className="flex flex-1 min-h-0 overflow-hidden px-4 pb-4 pt-4 gap-4 bg-zinc-950">
+              <div className="flex flex-1 min-h-0 overflow-hidden px-4 pb-4 pt-4 gap-4 bg-zinc-50 dark:bg-zinc-950">
 
 		{/* 켜진 패널이 하나도 없을 때 보여줄 예쁜 안내 문구 */}
           {selectedModels.length === 0 && (
@@ -466,13 +588,12 @@ export default function Home() {
             
 			return (
               <React.Fragment key={modelId}>               
-				{/* 💡 패널이 OFF일 때 너비를 w-44(약 176px)으로 축소시킵니다 */}
-                <div className={`flex flex-col bg-zinc-900/40 border border-zinc-800 rounded-2xl overflow-hidden relative transition-all duration-300 ease-in-out shadow-sm ${
-                  isPanelDisabled ? "w-44 shrink-0" : "flex-1 min-w-0"
+                    {/* 💡 패널이 OFF일 때 너비를 w-44(약 176px)으로 축소시킵니다 */}
+                <div className={`flex flex-col bg-white border border-zinc-200 dark:bg-zinc-900/40 dark:border-zinc-800 rounded-2xl overflow-hidden relative transition-all duration-300 ease-in-out shadow-sm ${isPanelDisabled ? "w-44 shrink-0" : "flex-1 min-w-0"
                 }`}>
 				  {/* 💡 모델 이름과 ON/OFF 토글 버튼이 있는 헤더 */}
                   {(
-                    <div className="flex items-center justify-between shrink-0 border-b border-zinc-800 bg-zinc-900/50 px-3 py-1.5 text-xs font-semibold text-zinc-400">
+                      <div className="flex items-center justify-between shrink-0 border-b border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/50 px-3 py-1.5 text-xs font-semibold text-zinc-500 dark:text-zinc-400">
                       <div className={`flex flex-1 min-w-0 items-center gap-2 transition-opacity ${isPanelDisabled ? 'opacity-50' : ''}`}>
                         <span className="text-sm">{modelInfo?.icon}</span>
                         

@@ -25,6 +25,12 @@ export async function GET() {
     // 💡 로그인된 유저의 고유 DB ID 추출, 세션이 없으면 'guest'로 취급하여 통과시켜 줍니다.
     const userId = session?.user ? (session.user as any).id : "guest";
 
+      // 사용자의 설정 정보(UserSettings)를 조회하여 설정된 기본 AI 엔진 모델을 가져옵니다.
+      const userSettings = await prisma.userSettings.findUnique({
+          where: { userId }
+      });
+      const defaultEngine = userSettings?.defaultModel || "gpt-4o";
+
     const conversations = await prisma.conversation.findMany({
       where: { userId },
       orderBy: { updatedAt: "desc" }, // 최근 업데이트된 대화가 위로 오도록 정렬
@@ -34,8 +40,10 @@ export async function GET() {
     const formattedConversations = conversations.map((conv) => ({
       id: conv.id,
       title: conv.title,
-      selectedModels: safeParse(conv.selectedModels, ["gpt-4o"]),
-      disabledPanels: safeParse(conv.disabledPanels, []),
+        selectedModels: safeParse(conv.selectedModels, [defaultEngine]),
+        disabledPanels: safeParse(conv.disabledPanels, []),
+        isLocked: !!conv.password, // 💡 비밀번호가 존재하면 true
+        password: undefined // 프론트로는 비밀번호를 절대 보내지 않음
     }));
 
       return NextResponse.json(formattedConversations);
@@ -55,16 +63,22 @@ export async function POST(req: Request) {
     if (!session || !session.user || !(session.user as any).id) {
       return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
     }
-    
+
+      const userId = (session.user as any).id; // 💡 로그인된 유저의 고유 DB ID 추출
     // 요청 바디 데이터 파싱 (page.tsx에서 전송하는 구조와 일치)
     const body = await req.json();
     const title = typeof body?.title === "string" && body.title.trim() ? body.title.trim() : "새 대화";
+
+      const userSettings = await prisma.userSettings.findUnique({
+          where: { userId }
+      });
+      const defaultEngine = userSettings?.defaultModel || "gpt-4o";
 
 	// 💡 프론트엔드에서 넘겨준 모델 세팅값을 받아옵니다 (없으면 기본값)
 	// 💡 배열 데이터를 DB 저장을 위해 JSON 문자열로 변환합니다.
     const selectedModels = Array.isArray(body?.selectedModels) 
       ? JSON.stringify(body.selectedModels) 
-      : JSON.stringify(["gpt-4o"]);
+        : JSON.stringify([defaultEngine]);
       
     const disabledPanels = Array.isArray(body?.disabledPanels) 
       ? JSON.stringify(body.disabledPanels) 
@@ -80,8 +94,16 @@ export async function POST(req: Request) {
       },
     });
 
+      const formattedConversation = {
+          ...newConversation,
+          selectedModels: safeParse(newConversation.selectedModels, [defaultEngine]),
+          disabledPanels: safeParse(newConversation.disabledPanels, []),
+          isLocked: !!newConversation.password,
+          password: undefined // 원본 암호는 절대 흘리지 않음
+      };
+
 	  // 💡 프론트엔드에게 응답할 때는 다시 깔끔한 배열로 변환해서 리턴합니다.
-    return NextResponse.json(newConversation);      
+      return NextResponse.json(formattedConversation);      
   } catch (error) {
     console.error("❌ [백엔드] 대화방 생성 에러:", error);
     return NextResponse.json(
