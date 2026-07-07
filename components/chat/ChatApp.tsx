@@ -15,6 +15,7 @@ type ChatAppProps = {
 };
 
 export function ChatApp({ modelId, initialConversationId = null, onConversationCreated, promptPayload, isPanelDisabled = false, isGuestMode = false }: ChatAppProps) {
+  const [isMessagesLoaded, setIsMessagesLoaded] = useState(false);
   const { data: session } = useSession();
 
   const [messages, setMessages] = useState<Message[]>([
@@ -78,6 +79,9 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
     }
 
     if (isGuestMode) {
+      // 💡 방이 바뀌거나 새로고침될 때 우선 저장 락을 걸기 위해 false로 초기화
+      setIsMessagesLoaded(false);
+
       if (initialConversationId) {
         // 방 ID와 모델 ID를 조합하여 멀티 패널 및 다중 대화방 완벽 격리
         const storageKey = `guest_messages_${initialConversationId}_${modelId}`;
@@ -98,6 +102,9 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
       } else {
         setMessages([]);
       }
+
+      // 불러오기 바인딩이 끝난 시점에만 락을 해제합니다.
+      setIsMessagesLoaded(true);
       return; // 백엔드 API 통신 원천 차단
     }
 
@@ -190,11 +197,11 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
   
   // 💡 [여기에 새로 추가해 주세요!] 게스트 모드 메시지 자동 저장 로직
   useEffect(() => {
-    if (isGuestMode && initialConversationId && messages.length > 0) {
+    if (isGuestMode && initialConversationId && isMessagesLoaded && messages.length > 0) {
       const storageKey = `guest_messages_${initialConversationId}_${modelId}`;
       localStorage.setItem(storageKey, JSON.stringify(messages));
     }
-  }, [messages, isGuestMode, initialConversationId, modelId]);
+  }, [messages, isGuestMode, initialConversationId, modelId, isMessagesLoaded]);
 
   // 메시지를 DB에 저장하는 함수
   const saveMessages = async (convId: string, assistantMsg: Message) => {

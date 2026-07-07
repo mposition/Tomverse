@@ -8,6 +8,7 @@ import { Conversation, AVAILABLE_MODELS } from "@/components/chat/types";
 import { useSession } from "next-auth/react";
 
 export default function Home() {
+  const [isConversationsLoaded, setIsConversationsLoaded] = useState(false);  
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const { data: session, status } = useSession();
@@ -74,12 +75,15 @@ export default function Home() {
         setCurrentChatId(initialChatId);
         localStorage.setItem("guest_conversations", JSON.stringify([initialChat]));        
       }
+
+      // 로컬 스토리지 조회가 완벽히 끝난 시점에 true로 변경합니다.
+      setIsConversationsLoaded(true);      
     }
   }, [isGuestMode]);  
 
   // 💡 게스트 대화방 목록 상태가 변경될 때마다 로컬 스토리지에 자동 저장
   useEffect(() => {
-    if (isGuestMode && conversations.length > 0) {
+    if (isGuestMode && isConversationsLoaded && conversations.length > 0) {
       localStorage.setItem("guest_conversations", JSON.stringify(conversations));
     }
   }, [conversations, isGuestMode]);  
