@@ -86,7 +86,7 @@ export default function Home() {
     if (isGuestMode && isConversationsLoaded && conversations.length > 0) {
       localStorage.setItem("guest_conversations", JSON.stringify(conversations));
     }
-  }, [conversations, isGuestMode]);  
+  }, [conversations, isGuestMode, isConversationsLoaded]);  
 
   // 💡 대화방 목록을 서버에서 불러오는 함수 (부모가 관리)
   const fetchConversations = useCallback(async () => {

@@ -36,6 +36,7 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
   const streamingChatIdRef = useRef<string | null>(null);
   const lastFetchedChatIdRef = useRef<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+    const loadedChatIdRef = useRef<string | null>(null); // 현재 성공적으로 불러온 방 ID를 기억합니다.
 
 // 💡 현재 인스턴스가 프라이빗 모드방에 속해있는지 확인
   const isPrivate = initialConversationId === "private-chat";
@@ -64,8 +65,8 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
   };
 
   // 💡 DB에서 대화 내역을 불러오는 로직, 부모의 ID가 변경(새채팅 클릭 혹은 사이드바 클릭)될 때 호출되는 동기화 로직
-  useEffect(() => {
-    if (!isPrivate && !isPrivate && (!session || !session.user)) {
+    useEffect(() => {
+        if (!isPrivate && !isGuestMode && (!session || !session.user)) {
         return;
     }
 
@@ -82,7 +83,9 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
       // 💡 방이 바뀌거나 새로고침될 때 우선 저장 락을 걸기 위해 false로 초기화
       setIsMessagesLoaded(false);
 
-      if (initialConversationId) {
+        if (initialConversationId) {
+            loadedChatIdRef.current = initialConversationId; // 로드 성공한 방 ID 도장 찍기!
+
         // 방 ID와 모델 ID를 조합하여 멀티 패널 및 다중 대화방 완벽 격리
         const storageKey = `guest_messages_${initialConversationId}_${modelId}`;
         const savedMessages = localStorage.getItem(storageKey);
@@ -197,9 +200,11 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
   
   // 💡 [여기에 새로 추가해 주세요!] 게스트 모드 메시지 자동 저장 로직
   useEffect(() => {
-    if (isGuestMode && initialConversationId && isMessagesLoaded && messages.length > 0) {
-      const storageKey = `guest_messages_${initialConversationId}_${modelId}`;
-      localStorage.setItem(storageKey, JSON.stringify(messages));
+      if (isGuestMode && initialConversationId && isMessagesLoaded && messages.length > 0) {
+          if (loadedChatIdRef.current === initialConversationId) {
+              const storageKey = `guest_messages_${initialConversationId}_${modelId}`;
+              localStorage.setItem(storageKey, JSON.stringify(messages));
+          }
     }
   }, [messages, isGuestMode, initialConversationId, modelId, isMessagesLoaded]);
 
