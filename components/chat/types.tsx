@@ -28,6 +28,7 @@ export type AiProvider =
     | "mistral"
     | "perplexity"
     | "cohere"
+    | "Alibaba"
     | "bedrock";
 
 export type ModelTier = "Free" | "Pro" | "Max";
@@ -61,9 +62,16 @@ export const AVAILABLE_MODELS: AiModel[] = [
     { id: "gemini-2-5-pro", name: "Gemini 2.5 Pro", apiModel: "gemini-2.5-pro", provider: "google", icon: "✨", tier: "Pro" },
     { id: "gemini-2-5-flash", name: "Gemini 2.5 Flash", apiModel: "gemini-2.5-flash", provider: "google", icon: "✨", tier: "Free" },
 
-    { id: "llama-4", name: "Llama 4", apiModel: "meta-llama/llama-4-scout-17b-16e-instruct", provider: "groq", icon: "L4", tier: "Pro" },
+    { id: "llama-3-1", name: "Llama 3.1", apiModel: "llama-3.1-8b-instant", provider: "groq", icon: "∞", tier: "Free" },
+    { id: "llama-3-3", name: "Llama 3.3", apiModel: "llama-3.3-70b-versatile", provider: "groq", icon: "∞", tier: "Pro" },
 
-    { id: "grok-4-3", name: "Grok 4.3", apiModel: "grok-4-3", provider: "xai", icon: "𝕏", tier: "Max", status: "coming-soon" },
-    { id: "deepseek-v4-pro", name: "DeepSeek-V4 Pro", apiModel: "deepseek-v4-pro", provider: "deepseek", icon: "DS", tier: "Pro", status: "coming-soon" },
-    { id: "kimi-k2-7-code", name: "Kimi K2.7 Code", apiModel: "kimi-k2-7-code", provider: "moonshot", icon: "KM", tier: "Pro", status: "coming-soon" },
+    { id: "grok-4-3", name: "Grok 4.3", apiModel: "grok-4-3", provider: "xai", icon: "𝕏", tier: "Max"},
+    { id: "deepseek-v4-flash", name: "DeepSeek-V4 Flash", apiModel: "deepseek-v4-flash", provider: "deepseek", icon: "DS", tier: "Free"},
+    { id: "deepseek-v4-pro", name: "DeepSeek-V4 Pro", apiModel: "deepseek-v4-pro", provider: "deepseek", icon: "DS", tier: "Pro"},
+    { id: "kimi-k2.7-code", name: "Kimi K2.7", apiModel: "kimi-k2-7-code", provider: "moonshot", icon: "KM", tier: "Pro"},
+    { id: "qwen3.7-max", name: "Qwen 3.7 Max", apiModel: "qwen3.7-max", provider: "Alibaba", icon: "QW", tier: "Max" },
+    { id: "qwen3.7-plus", name: "Qwen 3.7 Plus", apiModel: "qwen3.7-plus", provider: "Alibaba", icon: "QW", tier: "Pro" },
+    { id: "qwen3.6-flash", name: "Qwen 3.6", apiModel: "qwen3.6-flash", provider: "Alibaba", icon: "QW", tier: "Free" },
+    { id: "glm-5.2", name: "GLM 5.2", apiModel: "glm-5.2", provider: "Alibaba", icon: "Z", tier: "Free" },
+    { id: "perplexity/sonar", name: "Perplexity Sonar", apiModel: "perplexity/sonar", provider: "perplexity", icon: "P", tier: "Pro" },
 ];

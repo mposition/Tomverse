@@ -9,6 +9,31 @@ const groq = createOpenAI({
     apiKey: process.env.GROQ_API_KEY,
 });
 
+const deepseek = createOpenAI({
+    baseURL: "https://api.deepseek.com",
+    apiKey: process.env.DEEPSEEK_API_KEY,
+});
+
+const xai = createOpenAI({
+    baseURL: "https://api.x.ai/v1",
+    apiKey: process.env.XAI_API_KEY,
+});
+
+const moonshot = createOpenAI({
+    baseURL: "https://api.moonshot.ai/v1",
+    apiKey: process.env.MOONSHOT_API_KEY,
+});
+
+const qwen = createOpenAI({
+    baseURL: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+    apiKey: process.env.DASHSCOPE_API_KEY,
+});
+
+const perplexity = createOpenAI({
+    baseURL: "https://api.perplexity.ai",
+    apiKey: process.env.PERPLEXITY_API_KEY,
+});
+
 const getActiveModel = (modelId: string) => {
     switch (modelId) {
         case "gpt-4o-mini":
@@ -29,8 +54,38 @@ const getActiveModel = (modelId: string) => {
         case "gemini-1-5":
             return google("gemini-1.5-flash");
 
-        case "llama-3-3-70b":
+        case "llama-3-1":
+            return groq("llama-3.1-8b-instant");
+
+        case "llama-3-3":
             return groq("llama-3.3-70b-versatile");
+
+        case "deepseek-v4-flash":
+            return deepseek("deepseek-v4-flash");
+
+        case "deepseek-v4-pro":
+            return deepseek("deepseek-v4-pro");
+
+        case "grok-4-3":
+            return xai("grok-4-3");
+
+        case "kimi-k2.7-code":
+            return moonshot("kimi-k2.7-code");
+
+        case "qwen3.7-max":
+            return qwen("qwen3.7-max");
+
+        case "qwen3.7-plus":
+            return qwen("qwen3.7-plus");
+
+        case "qwen3.6-flash":
+            return qwen("qwen3.6-flash");
+
+        case "glm-5.2":
+            return qwen("glm-5.2");
+
+        case "perplexity/sonar":
+            return perplexity("perplexity/sonar");
 
         default:
             return openai("gpt-4o");
