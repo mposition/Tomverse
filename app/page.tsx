@@ -101,7 +101,7 @@ useEffect(() => {
     setIsInitialSelected(true); // ✅ 최초 1회 자동 선택 완료 마킹
   }
 }, [conversations, currentChatId, isGuestMode, isInitialSelected]);
-  
+
   // 💡 대화방 목록을 서버에서 불러오는 함수 (부모가 관리)
   const fetchConversations = useCallback(async () => {
     // 세션이 없으면(로그인 안 했으면) 굳이 안 불러옵니다.
@@ -570,6 +570,51 @@ useEffect(() => {
       ? [{ id: "private-chat", title: "🔒 " + t("sidebar.privateChat") }, ...conversations]
     : conversations;  
   
+    const handleDownloadConversation = async (convId: string, title: string) => {
+    let targetMessages: any[] = [];
+
+      try {
+        const res = await fetch(`/api/conversations/${convId}`);
+        if (res.ok) {
+          const data = await res.json();
+          targetMessages = data.messages || [];
+        }
+      } catch (e) {
+        console.error("다운로드용 데이터 조회 실패:", e);
+      }
+
+    if (targetMessages.length === 0) {
+      alert("다운로드할 대화 내용이 없습니다.");
+      return;
+    }
+
+    const textContent = targetMessages
+      .map((msg) => {
+        const roleName = msg.role === "user" ? "User" : `AI Assistant`;
+        return `========================================\n[${roleName}]\n========================================\n${msg.content}\n`;
+      })
+      .join("\n");
+
+    // 4. Blob을 활용해 브라우저 단에서 즉시 다운로드를 실행합니다.
+    const blob = new Blob([textContent], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${title.replace(/[/\\?%*:|"<>]/g, "-")}.txt`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+
+  // 💡 공유하기 링크 생성 로직 (뼈대)
+  const handleShareConversation = async (convId: string, title: string) => {
+    // 여기에 공유 링크 발급 백엔드 API (예: POST /api/share) 호출 코드를 작성합니다.
+    // 게스트 모드일 경우 위 다운로드처럼 로컬 스토리지 데이터를 읽어서 POST body에 실어 보내면 됩니다.
+    
+    // 임시 UI 피드백
+    alert("공유 기능 백엔드 연결 대기중입니다.");
+  };
+
   return (
       <main className="flex h-screen overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
       <ChatSidebar 
@@ -583,8 +628,10 @@ useEffect(() => {
         isGuestMode={isGuestMode} 
         guestMessageCount={guestMessageCount} 
               maxGuestMessages={MAX_GUEST_MESSAGES}        
-              onLock={handleLock}      // 💡 연결 완료
-              onUnlock={handleUnlock}  // 💡 연결 완료
+              onLock={handleLock}     
+              onUnlock={handleUnlock} 
+onShare={handleShareConversation}
+       onDownload={handleDownloadConversation}              
       />
 
       <section className="flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">        

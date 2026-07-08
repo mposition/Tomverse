@@ -88,6 +88,10 @@ model Conversation {
   selectedModels String    @default("[\"gpt-4o\"]")
   disabledPanels String    @default("[]")
   
+  shareToken     String?   @unique
+  shareEnabled   Boolean   @default(false)
+  sharedAt       DateTime?
+    
   messages       Message[]
   user           User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt      DateTime  @default(now())

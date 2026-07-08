@@ -18,6 +18,8 @@ type ChatSidebarProps = {
     onDelete: (id: string) => void;
     onLock?: (id: string, password: string) => void;
     onUnlock?: (id: string) => void;
+    onShare: (id: string, title: string) => void;
+    onDownload: (id: string, title: string) => void;    
 };
 
 export function ChatSidebar({
@@ -33,6 +35,8 @@ export function ChatSidebar({
     onDelete,
     onLock,
     onUnlock,
+    onShare,
+    onDownload,    
 }: ChatSidebarProps) {
     const [openMenuId, setOpenMenuId] = useState<string | null>(null);
     const menuRef = useRef<HTMLDivElement | null>(null);
@@ -133,6 +137,56 @@ export function ChatSidebar({
                                         >
                                             {t("sidebar.rename")}
                                         </button>
+
+            {/* 대화 공유 버튼 */}
+            <button
+                onClick={(e) => {
+                    e.stopPropagation();
+                    if (!isGuestMode) { // 게스트가 아닐 때만 작동
+                        onShare(conv.id, conv.title);
+                        setOpenMenuId(null);
+                    }
+                }}
+                disabled={isGuestMode}
+                className={`flex items-center justify-between w-full text-left px-3 py-2 text-sm rounded transition-colors ${
+                    isGuestMode 
+                        ? "cursor-not-allowed text-zinc-600 bg-zinc-900/50" // 잠금 상태 스타일
+                        : "cursor-pointer text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100" // 정상 상태 스타일
+                }`}
+                title={isGuestMode ? "로그인 후 이용할 수 있습니다." : ""}
+            >
+                <div className="flex items-center gap-2">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+                    <span>공유하기</span>
+                </div>
+                {/* 💡 게스트 모드일 때만 예쁜 황금색 왕관 아이콘 표시 */}
+                {isGuestMode && (<span>👑</span>)}
+            </button>
+
+            {/* TXT 다운로드 버튼 */}
+<button
+                onClick={(e) => {
+                    e.stopPropagation();
+                    if (!isGuestMode) { // 게스트가 아닐 때만 작동
+                        onDownload(conv.id, conv.title);
+                        setOpenMenuId(null);
+                    }
+                }}
+                disabled={isGuestMode}
+                className={`flex items-center justify-between w-full text-left px-3 py-2 text-sm rounded transition-colors ${
+                    isGuestMode 
+                        ? "cursor-not-allowed text-zinc-600 bg-zinc-900/50"
+                        : "cursor-pointer text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                }`}
+                title={isGuestMode ? "로그인 후 이용할 수 있습니다." : ""}
+            >
+                <div className="flex items-center gap-2">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    <span>다운로드 (.txt)</span>
+                </div>
+                {/* 💡 게스트 모드일 때만 예쁜 황금색 왕관 아이콘 표시 */}
+                {isGuestMode && (<span>👑</span>)}
+            </button>
                                         <button
                                             type="button"
                                             onClick={(e) => {
