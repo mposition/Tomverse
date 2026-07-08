@@ -117,10 +117,10 @@ export function ChatInput({
 
           {/* 모델 선택 팝업 메뉴 레이어 */}
           {isMenuOpen && (
-                      <div className="absolute bottom-12 left-0 z-50 w-80 rounded-xl border border-zinc-200 bg-white p-2 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900">
+                      <div className="absolute bottom-12 left-0 z-50 flex max-h-[calc(100dvh-8rem)] w-[min(20rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white p-2 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900">
                           <div className="mb-2 px-2 text-xs font-semibold text-zinc-500 dark:text-zinc-400">{t("chat.modelSelect")}</div>
-              <div className="space-y-1">
-                {AVAILABLE_MODELS.map((model) => {
+                          <div className="min-h-0 space-y-1 overflow-y-auto overscroll-contain pr-1">
+                              {AVAILABLE_MODELS.map((model) => {
                   const isSelected = selectedModels.includes(model.id);
                   return (
                     <button
