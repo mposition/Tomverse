@@ -65,7 +65,9 @@ export const AVAILABLE_MODELS: AiModel[] = [
     { id: "llama-3-1", name: "Llama 3.1", apiModel: "llama-3.1-8b-instant", provider: "groq", icon: "∞", tier: "Free" },
     { id: "llama-3-3", name: "Llama 3.3", apiModel: "llama-3.3-70b-versatile", provider: "groq", icon: "∞", tier: "Pro" },
 
-    { id: "grok-4-3", name: "Grok 4.3", apiModel: "grok-4-3", provider: "xai", icon: "𝕏", tier: "Max"},
+    { id: "grok-4", name: "Grok 4", apiModel: "grok-4", provider: "xai", icon: "𝕏", tier: "Max"},
+    { id: "grok-3", name: "Grok 3", apiModel: "grok-3", provider: "xai", icon: "𝕏", tier: "Pro" },
+    { id: "grok-3-mini", name: "Grok 3 Mini", apiModel: "grok-3-mini", provider: "xai", icon: "𝕏", tier: "Free" },
     { id: "deepseek-v4-flash", name: "DeepSeek-V4 Flash", apiModel: "deepseek-v4-flash", provider: "deepseek", icon: "DS", tier: "Free"},
     { id: "deepseek-v4-pro", name: "DeepSeek-V4 Pro", apiModel: "deepseek-v4-pro", provider: "deepseek", icon: "DS", tier: "Pro"},
     { id: "kimi-k2.7-code", name: "Kimi K2.7", apiModel: "kimi-k2-7-code", provider: "moonshot", icon: "KM", tier: "Pro"},

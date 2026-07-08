@@ -66,8 +66,14 @@ const getActiveModel = (modelId: string) => {
         case "deepseek-v4-pro":
             return deepseek.chat("deepseek-v4-pro");
 
-        case "grok-4-3":
-            return xai.chat("grok-4-3");
+        case "grok-4":
+            return xai.chat("grok-4");
+
+        case "grok-3":
+            return xai.chat("grok-3");
+
+        case "grok-3-mini":
+            return xai.chat("grok-3");
 
         case "kimi-k2.7-code":
             return moonshot.chat("kimi-k2.7-code");
