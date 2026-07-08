@@ -35,7 +35,10 @@ export async function POST(req: Request, context: any) {
     select: { shareToken: true },
   });
 
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || new URL(req.url).origin;
+  const baseUrl =
+    process.env.NEXT_PUBLIC_SHARE_BASE_URL ||
+    process.env.NEXT_PUBLIC_APP_URL ||
+    new URL(req.url).origin;
 
   return NextResponse.json({
     url: `${baseUrl}/share/${updated.shareToken}`,

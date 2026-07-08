@@ -4,6 +4,7 @@ import { Conversation } from "./types";
 import { AuthButton } from "@/components/auth/AuthButton";
 import { useState, useEffect, useRef } from "react";
 import { useLanguage } from "@/components/LanguageProvider"; // 💡 훅 임포트
+import { Crown, Download, Lock, MoreVertical, Pencil, Share2, Trash2, Unlock } from "lucide-react";
 
 type ChatSidebarProps = {
     userEmail: string;
@@ -20,6 +21,8 @@ type ChatSidebarProps = {
     onUnlock?: (id: string) => void;
     onShare: (id: string, title: string) => void;
     onDownload: (id: string, title: string) => void;    
+    isPrivateMode?: boolean;
+    onTogglePrivateMode: () => void;
 };
 
 export function ChatSidebar({
@@ -37,10 +40,23 @@ export function ChatSidebar({
     onUnlock,
     onShare,
     onDownload,    
+    isPrivateMode = false,
+    onTogglePrivateMode,
 }: ChatSidebarProps) {
     const [openMenuId, setOpenMenuId] = useState<string | null>(null);
     const menuRef = useRef<HTMLDivElement | null>(null);
     const { t, lang, setLang } = useLanguage(); // 💡 t 함수 꺼내기
+    const menuItemBase =
+        "flex w-full items-center justify-between whitespace-nowrap rounded px-3 py-2 text-sm transition-colors";
+
+    const menuItemEnabled =
+        "cursor-pointer text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100";
+
+    const menuItemDisabled =
+        "cursor-not-allowed bg-zinc-900/50 text-zinc-600";
+
+    const menuIconClass = "h-3.5 w-3.5 shrink-0";
+    const crownClass = "h-3.5 w-3.5 shrink-0 text-amber-400";
 
     // 메뉴 바깥 클릭 시 컨텍스트 메뉴가 자동으로 닫히도록 관리
     useEffect(() => {
@@ -73,6 +89,21 @@ export function ChatSidebar({
                 >
                     <span className="text-sm">+</span> {t("sidebar.newChat")}
                 </button>
+
+                <button
+                    onClick={onTogglePrivateMode}
+                    disabled={isGuestMode}
+                    className={`mt-2 w-full flex items-center justify-center gap-2 rounded-xl border px-4 py-2 text-xs font-semibold transition-all ${isGuestMode
+                            ? "cursor-not-allowed opacity-50 border-zinc-200 bg-white text-zinc-400 dark:border-zinc-700/50 dark:bg-zinc-800/50 dark:text-zinc-500"
+                            : isPrivateMode
+                                ? "cursor-pointer border-purple-700/70 bg-purple-950/40 text-purple-200 hover:bg-purple-900/50"
+                                : "cursor-pointer border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700/50 dark:bg-zinc-800/50 dark:text-zinc-300 dark:hover:bg-zinc-700/60 dark:hover:text-white"
+                        }`}
+                    title={isGuestMode ? t("sidebar.loginRequired") : ""}
+                >
+                    {isPrivateMode ? t("sidebar.privateModeStop") : t("sidebar.privateModeStart")}
+                    {isGuestMode && <span>👑</span>}
+                </button>
             </div>
 
             {/* 2. 대화방 목록 영역 (중간 스크롤 영역) */}
@@ -94,6 +125,7 @@ export function ChatSidebar({
                                     ? "bg-zinc-200 border-zinc-300 text-zinc-900 font-semibold dark:bg-zinc-800 dark:border-zinc-700/80 dark:text-zinc-100"
                                     : "bg-transparent border-transparent text-zinc-600 hover:bg-zinc-200/50 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800/40 dark:hover:text-zinc-200"
                                 }`}
+                            title={isGuestMode ? "로그인 후 이용할 수 있습니다." : ""}
                         >
                             <div className="cursor-pointer flex items-center gap-2 min-w-0 flex-1 pr-6">
                                 <span className="shrink-0 text-zinc-500 text-[10px]">
@@ -113,90 +145,86 @@ export function ChatSidebar({
                                     className="cursor-pointer p-1 text-zinc-500 hover:text-zinc-200 transition-colors"
                                     title="메뉴"
                                 >
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                        <circle cx="12" cy="12" r="1"></circle>
-                                        <circle cx="12" cy="5" r="1"></circle>
-                                        <circle cx="12" cy="19" r="1"></circle>
-                                    </svg>
+                                    <MoreVertical className="h-4 w-4" />
                                 </button>
 
                                 {/* 컨텍스트 팝업 메뉴 레이어 */}
                                 {isMenuOpen && (
-                                    <div className="absolute right-0 top-6 z-50 w-28 rounded-lg border border-zinc-800 bg-zinc-900 p-1 shadow-xl flex flex-col text-xs text-zinc-300 animate-fadeIn">
+                                    <div className="absolute right-0 top-6 z-50 w-48 rounded-lg border border-zinc-800 bg-zinc-900 p-1 shadow-xl flex flex-col text-xs text-zinc-300 animate-fadeIn">
                                         <button
                                             type="button"
                                             onClick={(e) => {
                                                 e.stopPropagation();
                                                 setOpenMenuId(null);
-                                                const newTitle = prompt(t("sidebar.newChatRoom"), conv.title); 
+                                                const newTitle = prompt(t("sidebar.newChatRoom"), conv.title);
                                                 if (newTitle && newTitle.trim()) {
-                                                    onRename(conv.id, newTitle.trim()); 
+                                                    onRename(conv.id, newTitle.trim());
                                                 }
                                             }}
-                                            className="cursor-pointer w-full text-left px-2 py-1.5 rounded hover:bg-zinc-800 hover:text-zinc-100 transition-colors"
+                                            className={`${menuItemBase} ${menuItemEnabled}`}
                                         >
-                                            {t("sidebar.rename")}
+                                            <span className="flex items-center gap-2">
+                                                <Pencil className={menuIconClass} />
+                                                <span>{t("sidebar.rename")}</span>
+                                            </span>
                                         </button>
 
             {/* 대화 공유 버튼 */}
-            <button
-                onClick={(e) => {
-                    e.stopPropagation();
-                    if (!isGuestMode) { // 게스트가 아닐 때만 작동
-                        onShare(conv.id, conv.title);
-                        setOpenMenuId(null);
-                    }
-                }}
-                disabled={isGuestMode}
-                className={`flex items-center justify-between w-full text-left px-3 py-2 text-sm rounded transition-colors ${
-                    isGuestMode 
-                        ? "cursor-not-allowed text-zinc-600 bg-zinc-900/50" // 잠금 상태 스타일
-                        : "cursor-pointer text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100" // 정상 상태 스타일
-                }`}
-                title={isGuestMode ? "로그인 후 이용할 수 있습니다." : ""}
-            >
-                <div className="flex items-center gap-2">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
-                    <span>공유하기</span>
-                </div>
-                {/* 💡 게스트 모드일 때만 예쁜 황금색 왕관 아이콘 표시 */}
-                {isGuestMode && (<span>👑</span>)}
-            </button>
+                                        <button
+                                            type="button"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                if (!isGuestMode) {
+                                                    onShare(conv.id, conv.title);
+                                                    setOpenMenuId(null);
+                                                }
+                                            }}
+                                            disabled={isGuestMode}
+                                            className={`${menuItemBase} ${isGuestMode ? menuItemDisabled : menuItemEnabled}`}
+                                            title={isGuestMode ? t("sidebar.loginRequired") : ""}
+                                        >
+                                            <span className="flex items-center gap-2">
+                                                <Share2 className={menuIconClass} />
+                                                <span>{t("sidebar.share")}</span>
+                                            </span>
+                                            {isGuestMode && <Crown className={crownClass} />}
+                                        </button>
 
             {/* TXT 다운로드 버튼 */}
-<button
-                onClick={(e) => {
-                    e.stopPropagation();
-                    if (!isGuestMode) { // 게스트가 아닐 때만 작동
-                        onDownload(conv.id, conv.title);
-                        setOpenMenuId(null);
-                    }
-                }}
-                disabled={isGuestMode}
-                className={`flex items-center justify-between w-full text-left px-3 py-2 text-sm rounded transition-colors ${
-                    isGuestMode 
-                        ? "cursor-not-allowed text-zinc-600 bg-zinc-900/50"
-                        : "cursor-pointer text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
-                }`}
-                title={isGuestMode ? "로그인 후 이용할 수 있습니다." : ""}
-            >
-                <div className="flex items-center gap-2">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                    <span>다운로드 (.txt)</span>
-                </div>
-                {/* 💡 게스트 모드일 때만 예쁜 황금색 왕관 아이콘 표시 */}
-                {isGuestMode && (<span>👑</span>)}
-            </button>
+                                        <button
+                                            type="button"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                if (!isGuestMode) {
+                                                    onDownload(conv.id, conv.title);
+                                                    setOpenMenuId(null);
+                                                }
+                                            }}
+                                            disabled={isGuestMode}
+                                            className={`${menuItemBase} ${isGuestMode ? menuItemDisabled : menuItemEnabled}`}
+                                            title={isGuestMode ? t("sidebar.loginRequired") : ""}
+                                        >
+                                            <span className="flex items-center gap-2">
+                                                <Download className={menuIconClass} />
+                                                <span>{t("sidebar.downloadTxt")}</span>
+                                            </span>
+                                            {isGuestMode && <Crown className={crownClass} />}
+                                        </button>
+
+
                                         <button
                                             type="button"
                                             onClick={(e) => {
                                                 e.stopPropagation();
                                                 setOpenMenuId(null);
-                                                onDelete(conv.id); 
+                                                onDelete(conv.id);
                                             }}
-                                            className="cursor-pointer w-full text-left px-2 py-1.5 rounded hover:bg-zinc-800 text-red-400 hover:text-red-300 transition-colors"
+                                            className={`${menuItemBase} cursor-pointer text-red-400 hover:bg-zinc-800 hover:text-red-300`}
                                         >
-                                            {t("sidebar.delete")}
+                                            <span className="flex items-center gap-2">
+                                                <Trash2 className={menuIconClass} />
+                                                <span>{t("sidebar.delete")}</span>
+                                            </span>
                                         </button>
 
                                         {/* 💡 잠금 기능 권한 분기 세팅 */}
@@ -204,22 +232,29 @@ export function ChatSidebar({
                                             <button
                                                 type="button"
                                                 disabled
-                                                className="w-full text-left px-2 py-1.5 rounded opacity-50 cursor-not-allowed text-zinc-600 flex items-center justify-between font-medium"
+                                                className={`${menuItemBase} ${menuItemDisabled}`}
+                                                title={t("sidebar.loginRequired")}
                                             >
-                                                <span>{t("sidebar.lock")}</span>
-                                                <span>👑</span>
+                                                <span className="flex items-center gap-2">
+                                                    <Lock className={menuIconClass} />
+                                                    <span>{t("sidebar.lock")}</span>
+                                                </span>
+                                                <Crown className={crownClass} />
                                             </button>
-                                        ) : conv.isLocked ? ( 
+                                        ) : conv.isLocked ? (
                                             <button
                                                 type="button"
                                                 onClick={(e) => {
                                                     e.stopPropagation();
                                                     setOpenMenuId(null);
-                                                    if (onUnlock) onUnlock(conv.id); 
+                                                    if (onUnlock) onUnlock(conv.id);
                                                 }}
-                                                    className="cursor-pointer w-full text-left px-2 py-1.5 rounded hover:bg-zinc-800 hover:text-zinc-100 transition-colors"
+                                                className={`${menuItemBase} ${menuItemEnabled}`}
                                             >
-                                                    {t("sidebar.unlock")}
+                                                <span className="flex items-center gap-2">
+                                                    <Unlock className={menuIconClass} />
+                                                    <span>{t("sidebar.unlock")}</span>
+                                                </span>
                                             </button>
                                         ) : (
                                             <button
@@ -232,9 +267,12 @@ export function ChatSidebar({
                                                         if (onLock) onLock(conv.id, pwd.trim());
                                                     }
                                                 }}
-                                                        className="cursor-pointer w-full text-left px-2 py-1.5 rounded hover:bg-zinc-800 hover:text-zinc-100 transition-colors"
+                                                className={`${menuItemBase} ${menuItemEnabled}`}
                                             >
-                                                        {t("sidebar.lock")}
+                                                <span className="flex items-center gap-2">
+                                                    <Lock className={menuIconClass} />
+                                                    <span>{t("sidebar.lock")}</span>
+                                                </span>
                                             </button>
                                         )}
                                     </div>

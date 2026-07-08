@@ -46,7 +46,10 @@ export async function POST(req: Request, context: any) {
           : crypto.randomUUID()
       );
 	  
-	  const isAssistant = msg.role === "assistant";
+        const isAssistant = msg.role === "assistant";
+        const scopedModelId = typeof msg.modelId === "string" && msg.modelId.trim()
+            ? msg.modelId
+            : null;
 	  
       // 💡 유저 질문 중복 생성을 막고, 모델 ID를 꼬리표로 저장하기 위해 upsert 사용
       await prisma.message.upsert({
@@ -54,15 +57,15 @@ export async function POST(req: Request, context: any) {
         update: {
           content: msg.content,
           status: msg.status || "normal",
-          modelId: isAssistant ? (msg.modelId || null) : null, // 업데이트 시에도 꼬리표 유지
-        },
+              modelId: isAssistant ? scopedModelId : scopedModelId,
+          },
         create: {
           id: msgId,
           conversationId,
           role: msg.role,
           content: msg.content,
           status: msg.status || "normal",
-          modelId: isAssistant ? (msg.modelId || null) : null, // 💡 꼬리표 달아서 생성!
+            modelId: isAssistant ? scopedModelId : scopedModelId,
         }
       });
     }

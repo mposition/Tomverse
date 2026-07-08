@@ -117,8 +117,8 @@ export function ChatInput({
 
           {/* 모델 선택 팝업 메뉴 레이어 */}
           {isMenuOpen && (
-            <div className="absolute bottom-12 left-0 z-50 w-64 rounded-xl border border-zinc-200 bg-white p-2 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900">
-              <div className="mb-2 px-2 text-xs font-semibold text-zinc-500 dark:text-zinc-400">모델 선택</div>
+                      <div className="absolute bottom-12 left-0 z-50 w-80 rounded-xl border border-zinc-200 bg-white p-2 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900">
+                          <div className="mb-2 px-2 text-xs font-semibold text-zinc-500 dark:text-zinc-400">{t("chat.modelSelect")}</div>
               <div className="space-y-1">
                 {AVAILABLE_MODELS.map((model) => {
                   const isSelected = selectedModels.includes(model.id);
@@ -130,10 +130,23 @@ export function ChatInput({
                       >
                       <span className="flex items-center gap-2">
                         <span>{model.icon}</span>
-                        <span className={isSelected ? "text-zinc-900 dark:text-white font-medium" : "text-zinc-500 dark:text-zinc-400"}>
-                          {model.name}
-                        </span>
-                      </span>
+                              <span className="flex min-w-0 flex-col items-start">
+                                  <span className={isSelected ? "text-zinc-900 dark:text-white font-medium" : "text-zinc-500 dark:text-zinc-400"}>
+                                      {model.name}
+                                  </span>
+                                  <span className="text-[10px] text-zinc-400 dark:text-zinc-500">
+                                      {model.provider}
+                                  </span>
+                              </span>
+                              <span className={`ml-auto rounded-full px-2 py-0.5 text-[10px] font-semibold ${model.tier === "Free"
+                                      ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+                                      : model.tier === "Pro"
+                                          ? "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
+                                          : "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300"
+                                  }`}>
+                                  {model.tier}
+                              </span>
+                          </span>
                       {/* 토글 스위치 디자인 */}
                       <div className={`h-4 w-8 rounded-full p-0.5 transition-colors ${isSelected ? "bg-blue-500" : "bg-zinc-300 dark:bg-zinc-700"}`}>
                         <div className={`h-3 w-3 rounded-full bg-white transition-transform ${isSelected ? "translate-x-4" : "translate-x-0"}`} />

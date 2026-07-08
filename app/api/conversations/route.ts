@@ -4,16 +4,20 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next"; // 💡 1. 세션 조회를 위한 임포트 추가
 import { authOptions } from "@/lib/auth"; // 💡 2. NextAuth 설정 옵션 임포트
+import { APP_DEFAULTS } from "@/lib/appDefaults";
 
 // 💡 파싱 에러를 완벽하게 막아주는 방어 함수
 const safeParse = (data: any, fallback: any) => {
   if (!data) return fallback;
-  if (typeof data !== "string") return data;
-  try {
-    return JSON.parse(data);
-  } catch (e) {
-    return fallback;
+  let parsed = data;
+  for (let i = 0; i < 2 && typeof parsed === "string"; i++) {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return fallback;
+    }
   }
+  return Array.isArray(parsed) ? parsed : fallback;
 };
 
 // 💡 대화방 목록을 최신순으로 불러옵니다.
@@ -29,7 +33,7 @@ export async function GET() {
       const userSettings = await prisma.userSettings.findUnique({
           where: { userId }
       });
-      const defaultEngine = userSettings?.defaultModel || "gpt-4o";
+      const defaultEngine = userSettings?.defaultModel || APP_DEFAULTS.defaultModelId;
 
     const conversations = await prisma.conversation.findMany({
       where: { userId },
@@ -72,7 +76,7 @@ export async function POST(req: Request) {
       const userSettings = await prisma.userSettings.findUnique({
           where: { userId }
       });
-      const defaultEngine = userSettings?.defaultModel || "gpt-4o";
+      const defaultEngine = userSettings?.defaultModel || APP_DEFAULTS.defaultModelId;
 
 	// 💡 프론트엔드에서 넘겨준 모델 세팅값을 받아옵니다 (없으면 기본값)
 	// 💡 배열 데이터를 DB 저장을 위해 JSON 문자열로 변환합니다.
@@ -89,8 +93,8 @@ export async function POST(req: Request) {
       data: {
         userId: (session.user as any).id,
         title: title || "새 대화",
-        selectedModels: selectedModels ? JSON.stringify(selectedModels) : JSON.stringify(["gpt-4o"]),
-        disabledPanels: JSON.stringify([]),
+        selectedModels,
+        disabledPanels,
       },
     });
 

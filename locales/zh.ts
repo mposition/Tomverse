@@ -15,7 +15,16 @@ export const zh = {
         askPassword: "🔒 此对话已锁定。请输入密码：",
         wrongPassword: "❌ 密码错误。",
         closePanel: "您确定要关闭面板吗？\n与该模型相关的对话记录将从数据库中永久删除。",
-        privateChat: "私密对话"
+        privateChat: "私密对话",
+        privateModeStart: "开始私密模式",
+        privateModeStop: "结束私密模式",
+        loginRequired: "登录后可用。",
+        share: "分享",
+        downloadTxt: "下载 (.txt)",
+        shareFailed: "创建分享链接失败。",
+        shareCopied: "分享链接已复制到剪贴板。",
+        downloadAllTxt: "下载所有聊天为 .txt",
+        defaultModel: "默认 AI 引擎模型",
     },
     chat: {
         welcome: "您好！有什么我可以帮您的吗？",
@@ -34,7 +43,12 @@ export const zh = {
         send: "发送",
         cancel: "取消",
         sendSingMessage: "发送消息给...",
-        sendMultipleMessages: "同时发送消息给..."
+        sendMultipleMessages: "同时发送消息给...",
+        modelSelect: "选择模型",
+        maxModelCompare: "最多只能比较 3 个模型。",
+        modelOnlyPlaceholder: "只向此模型追问",
+        modelOnlySendTitle: "只发送给此模型",
+        comingSoonModel: "该模型即将支持。",
     },
     auth: {
         saveMessage: "设置已成功保存。",
@@ -51,6 +65,16 @@ export const zh = {
         microsoft: "使用 Microsoft 继续",
         naver: "使用 Naver 继续",
         description: "登录您的专属 AI 聊天中心",
-        privacy: "登录即表示您同意 Tomverse 的服务条款和隐私政策。"
+        privacy: "登录即表示您同意 Tomverse 的服务条款和隐私政策。",
+        signedAs: "登录账号",
+        profileImage: "个人资料图片",
+        userSettings: "用户设置",
+        theme: "主题",
+        language: "语言",
+        languageEnglish: "英语",
+        languageChinese: "中文",
+        languageKorean: "韩语",
+        defaultModel: "默认 AI 引擎模型",
+        downloadAllTxt: "下载所有聊天为 .txt",
     }
 };

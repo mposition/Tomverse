@@ -6,6 +6,8 @@ import { Message } from "@/components/chat/types";
 import { useSession } from "next-auth/react";
 import { useLanguage } from "@/components/LanguageProvider";
 
+const processedPromptKeys = new Set<string>();
+
 type ChatAppProps = {
   modelId: string; // 💡 부모가 내려준 정체성(modelId)을 받습니다.
   initialConversationId?: string | null;
@@ -17,7 +19,7 @@ type ChatAppProps = {
 
 export function ChatApp({ modelId, initialConversationId = null, onConversationCreated, promptPayload, isPanelDisabled = false, isGuestMode = false }: ChatAppProps) {
   const [isMessagesLoaded, setIsMessagesLoaded] = useState(false);
-  const { data: session } = useSession();
+  const { data: session, status } = useSession();
     const { t, lang, setLang } = useLanguage(); // 💡 t 함수 꺼내기
 
   const [messages, setMessages] = useState<Message[]>([
@@ -29,9 +31,8 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
     },
   ]);
   
-  const [isSending, setIsSending] = useState(false);
-  // 💡 컴포넌트가 태어날 때 들고 온 기존 payload.id를 이미 '처리 완료'된 것으로 간주합니다!
-  const [lastProcessedPromptId, setLastProcessedPromptId] = useState<string>(promptPayload?.id || "");
+    const [isSending, setIsSending] = useState(false);
+    const [modelInput, setModelInput] = useState("");
   
   // 💡 화면 덮어씌움(리셋) 방지를 위한 똑똑한 Ref 추가
   const isSendingRef = useRef(false);
@@ -44,19 +45,22 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
   const isPrivate = initialConversationId === "private-chat";
 
   // 💡 부모로부터 새로운 질문 신호가 들어오면 감지해서 전송 로직을 실행합니다.
-  useEffect(() => {
-    if (!isGuestMode && !session?.user) return;
+    useEffect(() => {
+        if (!isGuestMode && status === "loading") return;
+        if (!isGuestMode && !session?.user) return;
 
-    if (promptPayload && promptPayload.id !== lastProcessedPromptId) {
-      setLastProcessedPromptId(promptPayload.id);
-      
-	  if (!isPanelDisabled) {
-		// 💡 부모가 이미 저장해 둔 고유 유저 메시지 ID를 바인딩해서 넘깁니다.
-        handleSendPrompt(promptPayload.text, promptPayload.chatId, promptPayload.userMessageId);
-      }
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [promptPayload, lastProcessedPromptId, isPanelDisabled]);
+        if (promptPayload && promptPayload.chatId === initialConversationId) {
+            const promptKey = `${promptPayload.id}:${promptPayload.chatId}:${modelId}`;
+            if (processedPromptKeys.has(promptKey)) return;
+
+            processedPromptKeys.add(promptKey);
+
+            if (!isPanelDisabled) {
+                handleSendPrompt(promptPayload.text, promptPayload.chatId, promptPayload.userMessageId);
+            }
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [promptPayload, initialConversationId, modelId, isPanelDisabled, isGuestMode, status, session?.user?.email]);
 
   const setAssistantMessage = (id: string, content: string, status?: Message["status"]) => {
     setMessages((prev) =>
@@ -154,10 +158,10 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
             } else {				
               for (const msg of data.messages) {
                 if (msg.role === "user") {
-                  if (!seenUserIds.has(msg.id)) {
-                    seenUserIds.add(msg.id);
-                    filteredMessages.push(msg);
-                  }
+                    if ((!msg.modelId || msg.modelId === modelId) && !seenUserIds.has(msg.id)) {
+                        seenUserIds.add(msg.id);
+                        filteredMessages.push(msg);
+                    }
                 } 
                 // 💡 AI 답변일 경우, 내 modelId와 일치하는 것만 통과시킵니다.
                 else if (msg.role === "assistant" && msg.modelId === modelId) {
@@ -333,6 +337,30 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
     }
   };
 
+    const handleModelOnlySubmit = async () => {
+        const trimmed = modelInput.trim();
+        if (!trimmed || isSendingRef.current || isPanelDisabled || !initialConversationId) return;
+
+        const userMsgId = crypto.randomUUID();
+        setModelInput("");
+
+        if (!isPrivate && !isGuestMode) {
+            try {
+                await fetch(`/api/conversations/${initialConversationId}/messages`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        messages: [{ id: userMsgId, role: "user", content: trimmed, modelId }],
+                    }),
+                });
+            } catch (error) {
+                console.error("model-only user message save failed:", error);
+            }
+        }
+
+        await handleSendPrompt(trimmed, initialConversationId, userMsgId);
+    };
+
   const handleCancel = () => {
     abortControllerRef.current?.abort();
   };
@@ -341,10 +369,41 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
       <div className="flex flex-1 min-h-0 flex-col overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
       {/* 💡 패널이 켜져있을 때만 채팅 내역을 보여주고, 꺼지면 최소화 UI를 보여줍니다 */}
       {!isPanelDisabled ? (
-        <div className="flex-1 min-h-0 overflow-hidden">
-		  {/* 💡 isPrivate 플래그를 전달하여 상단 경고 문구 활성화 */}
-          <ChatMessageList messages={messages} isPrivate={isPrivate} isGuestMode={isGuestMode}/>
-	    </div>
+              <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
+                  <div className="min-h-0 flex-1 overflow-hidden">
+                      <ChatMessageList messages={messages} isPrivate={isPrivate} isGuestMode={isGuestMode} />
+                  </div>
+
+                  <form
+                      onSubmit={(event) => {
+                          event.preventDefault();
+                          handleModelOnlySubmit();
+                      }}
+                      className="flex shrink-0 items-end gap-2 border-t border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950"
+                  >
+                      <textarea
+                          value={modelInput}
+                          onChange={(event) => setModelInput(event.target.value)}
+                          onKeyDown={(event) => {
+                              if (event.key === "Enter" && !event.shiftKey) {
+                                  event.preventDefault();
+                                  handleModelOnlySubmit();
+                              }
+                          }}
+                          disabled={isSending || !initialConversationId}
+                          rows={1}
+                          placeholder={t("chat.modelOnlyPlaceholder")}
+                          className="max-h-28 min-h-10 flex-1 resize-none rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-900 outline-none transition-colors placeholder:text-zinc-400 focus:border-blue-500 focus:bg-white dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-blue-500 dark:focus:bg-zinc-900"                      />
+                      <button
+                          type="submit"
+                          disabled={!modelInput.trim() || isSending || !initialConversationId}
+                          className="h-10 shrink-0 rounded-lg bg-blue-600 px-3 text-xs font-semibold text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500 dark:disabled:bg-zinc-800 dark:disabled:text-zinc-500"
+                          title={t("chat.modelOnlySendTitle")}
+                      >
+                          {t("chat.send")}
+                      </button>
+                  </form>
+              </div>
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center p-4 select-none">
           <div className="text-4xl mb-3 opacity-20 text-zinc-500">💤</div>

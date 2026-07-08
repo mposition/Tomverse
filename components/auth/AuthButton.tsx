@@ -5,6 +5,7 @@ import { signIn, signOut, useSession } from "next-auth/react";
 import { useState, useEffect } from "react";
 import { AVAILABLE_MODELS } from "@/components/chat/types"; // 💡 AVAILABLE_MODELS 임포트
 import { useLanguage } from "@/components/LanguageProvider";
+import { APP_DEFAULTS } from "@/lib/appDefaults";
 
 export function AuthButton() {
   // 💡 현재 로그인 상태(session)를 가져옵니다.
@@ -13,9 +14,9 @@ export function AuthButton() {
 
     const { t, lang: globalLang, setLang: setGlobalLang } = useLanguage();
 
-    const [theme, setTheme] = useState("dark");
-    const [language, setLanguage] = useState("en");
-    const [defaultModel, setDefaultModel] = useState("gpt-4o");
+    const [theme, setTheme] = useState(APP_DEFAULTS.defaultTheme);
+    const [language, setLanguage] = useState(APP_DEFAULTS.defaultLanguage);
+    const [defaultModel, setDefaultModel] = useState(APP_DEFAULTS.defaultModelId);
 
     // 모달이 열릴 때 DB에서 최신 설정을 받아옴
     useEffect(() => {
@@ -24,9 +25,9 @@ export function AuthButton() {
                 .then((res) => res.json())
                 .then((data) => {
                     if (!data.error) {
-                        setTheme(data.theme || "dark");
+                        setTheme(data.theme || APP_DEFAULTS.defaultTheme);
                         setLanguage(data.language || globalLang);
-                        setDefaultModel(data.defaultModel || "gpt-4o");
+                        setDefaultModel(data.defaultModel || APP_DEFAULTS.defaultModelId);
                     }
                 });
         }
@@ -127,15 +128,25 @@ export function AuthButton() {
 
                         {/* 💡 AVAILABLE_MODELS 드롭다운 연동 추가 피처 */}
                         <div className="mb-4">
-                            <label className="text-xs text-zinc-400 block mb-1">기본 AI 엔진 모델</label>
+                            <label className="text-xs text-zinc-400 block mb-1">{t("sidebar.defaultModel")}</label>
                             <select value={defaultModel} onChange={(e) => setDefaultModel(e.target.value)} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-1.5 text-xs outline-none text-zinc-200 cursor-pointer">
                                 {AVAILABLE_MODELS.map((model) => (
                                     <option key={model.id} value={model.id}>
-                                        {model.icon} {model.name}
+                                        {model.icon} {model.name} · {model.tier}
                                     </option>
                                 ))}
                             </select>
                         </div>
+
+                        <button
+                            type="button"
+                            onClick={() => {
+                                window.location.href = "/api/conversations/export-all";
+                            }}
+                            className="w-full rounded-lg bg-zinc-800 px-3 py-2 text-xs text-zinc-200 hover:bg-zinc-700"
+                        >
+                            {t("sidebar.downloadAllTxt")}
+                        </button>
 
                         {/* 하단 제어 버튼 (서버 새로고침 없는 안전한 방식) */}
                         <div className="flex justify-end gap-2 mt-5">

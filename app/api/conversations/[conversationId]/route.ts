@@ -4,16 +4,20 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next"; // 💡 세션 조회를 위한 임포트 추가
 import { authOptions } from "@/lib/auth"; // 💡 NextAuth 설정 옵션 임포트
+import { APP_DEFAULTS } from "@/lib/appDefaults";
 
 // 💡 방어 함수 추가
 const safeParse = (data: any, fallback: any) => {
   if (!data) return fallback;
-  if (typeof data !== "string") return data;
-  try {
-    return JSON.parse(data);
-  } catch (e) {
-    return fallback;
+  let parsed = data;
+  for (let i = 0; i < 2 && typeof parsed === "string"; i++) {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return fallback;
+    }
   }
+  return Array.isArray(parsed) ? parsed : fallback;
 };
 
 type Params = {
@@ -53,7 +57,7 @@ export async function GET(req: Request, context: any) {
     const userSettings = await prisma.userSettings.findUnique({
         where: { userId }
     });
-    const defaultEngine = userSettings?.defaultModel || "gpt-4o";
+        const defaultEngine = userSettings?.defaultModel || APP_DEFAULTS.defaultModelId;
 	
     // Prisma의 include 기능을 사용해 대화방을 찾으면서 내부에 연결된 메시지까지 한 번에 쿼리합니다.
     const conversation = await prisma.conversation.findUnique({
@@ -140,7 +144,7 @@ export async function PATCH(req: Request, context: any) {
         const userSettings = await prisma.userSettings.findUnique({
             where: { userId }
         });
-        const defaultEngine = userSettings?.defaultModel || "gpt-4o";
+        const defaultEngine = userSettings?.defaultModel || APP_DEFAULTS.defaultModelId;
 
 	const updateData: any = {};
       const { title, password, unlock } = body;

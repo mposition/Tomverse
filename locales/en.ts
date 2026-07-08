@@ -15,7 +15,16 @@ export const en = {
         askPassword: "🔒 This chat is locked. Please enter the password:",
         wrongPassword: "❌ Incorrect password.",
         closePanel: "Are you sure you want to close the panel?\nThe chat history with this model will be permanently deleted from the database.",
-        privateChat: "Private Chat"
+        privateChat: "Private Chat",
+        privateModeStart: "Start Private Mode",
+        privateModeStop: "Stop Private Mode",
+        loginRequired: "Available after login.",
+        share: "Share",
+        downloadTxt: "Download (.txt)",
+        shareFailed: "Failed to create share link.",
+        shareCopied: "Share link copied to clipboard.",
+        downloadAllTxt: "Download all chats as .txt",
+        defaultModel: "Default AI engine model",
     },
     chat: {
         welcome: "Hello! How can I help you today?",
@@ -34,7 +43,12 @@ export const en = {
         send: "Send",
         cancel: "Cancel",
         sendSingMessage: "Send a message to...",
-        sendMultipleMessages: "Send messages simultaneously to..."
+        sendMultipleMessages: "Send messages simultaneously to...",
+        modelSelect: "Select model",
+        maxModelCompare: "You can compare up to 3 models.",
+        modelOnlyPlaceholder: "Ask only this model",
+        modelOnlySendTitle: "Send only to this model",
+        comingSoonModel: "This model is coming soon.",
     },
     auth: {
         saveMessage: "Settings saved successfully.",
@@ -51,6 +65,16 @@ export const en = {
         microsoft: "Continue with Microsoft",
         naver: "Continue with Naver",
         description: "Log in to your personal AI chat hub",
-        privacy: "By logging in, you agree to Tomverse's Terms of Service and Privacy Policy."
+        privacy: "By logging in, you agree to Tomverse's Terms of Service and Privacy Policy.",
+        signedAs: "Signed as",
+        profileImage: "Profile image",
+        userSettings: "User Settings",
+        theme: "Theme",
+        language: "Language",
+        languageEnglish: "English",
+        languageChinese: "Chinese",
+        languageKorean: "Korean",
+        defaultModel: "Default AI engine model",
+        downloadAllTxt: "Download all chats as .txt",
     }
 };

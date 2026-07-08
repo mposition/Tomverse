@@ -15,7 +15,16 @@ export const ko = {
 		askPassword: "🔒 이 대화방은 잠겨 있습니다. 비밀번호를 입력하세요:",
 		wrongPassword: "❌ 비밀번호가 일치하지 않습니다.",
 		closePanel: "패널을 닫으시겠습니까?\n해당 모델과 나눈 대화 기록이 DB에서 영구 삭제됩니다.",
-		privateChat: "프라이빗 대화방"
+		privateChat: "프라이빗 대화방",
+		privateModeStart: "Private Mode 시작하기",
+		privateModeStop: "Private Mode 종료하기",
+		loginRequired: "로그인 후 이용할 수 있습니다.",
+		share: "공유하기",
+		downloadTxt: "다운로드 (.txt)",
+		shareFailed: "공유 링크 생성에 실패했습니다.",
+		shareCopied: "공유 링크가 클립보드에 복사되었습니다.",
+		downloadAllTxt: "모든 채팅창 .txt 다운로드",
+		defaultModel: "기본 AI 엔진 모델",
 	},
 	chat: {
 		welcome: "안녕하세요! 무엇을 도와드릴까요?",
@@ -34,7 +43,12 @@ export const ko = {
 		send: "전송",
 		cancel: "취소",
 		sendSingMessage: "에게 메시지 보내기...",
-		sendMultipleMessages: "에게 동시에 메시지 보내기..."
+		sendMultipleMessages: "에게 동시에 메시지 보내기...",
+		modelSelect: "모델 선택",
+		maxModelCompare: "최대 3개까지만 비교할 수 있습니다",
+		modelOnlyPlaceholder: "이 모델에게만 추가 질문",
+		modelOnlySendTitle: "이 모델에게만 보내기",
+		comingSoonModel: "해당 모델은 곧 지원 예정입니다",
 	},
 	auth: {
 		saveMessage: "설정이 성공적으로 저장되었습니다.",
@@ -51,6 +65,16 @@ export const ko = {
 		microsoft: "Microsoft로 계속하기",
 		naver: "Naver로 계속하기",
 		description: "당신만의 AI 챗 허브에 로그인하세요",
-		privacy: "로그인 시 Tomverse의 서비스 이용약관 및 개인정보 처리방침에 동의하게 됩니다."		
+		privacy: "로그인 시 Tomverse의 서비스 이용약관 및 개인정보 처리방침에 동의하게 됩니다.",
+		signedAs: "로그인 계정",
+		profileImage: "프로필 이미지",
+		userSettings: "사용자 설정",
+		theme: "테마",
+		language: "언어",
+		languageEnglish: "영어",
+		languageChinese: "중국어",
+		languageKorean: "한국어",
+		defaultModel: "기본 AI 엔진 모델",
+		downloadAllTxt: "모든 채팅창 .txt 다운로드",		
 	}
 };

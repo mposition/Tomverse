@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
+import { APP_DEFAULTS } from "@/lib/appDefaults";
 
 // 💡 1. 사용자 설정 불러오기 (GET)
 export async function GET() {
@@ -17,7 +18,7 @@ export async function GET() {
         let settings = await prisma.userSettings.findUnique({ where: { userId } });
         if (!settings) {
             settings = await prisma.userSettings.create({
-                data: { userId, defaultModel: "gpt-4o" }
+                data: { userId, defaultModel: APP_DEFAULTS.defaultModelId }
             });
         }
 
@@ -47,15 +48,15 @@ export async function POST(req: Request) {
         const updatedSettings = await prisma.userSettings.upsert({
             where: { userId },
             update: {
-                theme: theme || "dark",
-                language: language || "en",
-                defaultModel: defaultModel || "gpt-4o",
+                theme: theme || APP_DEFAULTS.defaultTheme,
+                language: language || APP_DEFAULTS.defaultLanguage,
+                defaultModel: defaultModel || APP_DEFAULTS.defaultModelId,
             },
             create: {
                 userId,
-                theme: theme || "dark",
-                language: language || "en",
-                defaultModel: defaultModel || "gpt-4o",
+                theme: theme || APP_DEFAULTS.defaultTheme,
+                language: language || APP_DEFAULTS.defaultLanguage,
+                defaultModel: defaultModel || APP_DEFAULTS.defaultModelId,
             },
         });
 

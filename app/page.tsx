@@ -4,9 +4,24 @@ import React, { useState, useEffect, useCallback } from "react";
 import { ChatApp } from "@/components/chat/ChatApp";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { ChatInput } from "@/components/chat/ChatInput";
-import { Conversation, AVAILABLE_MODELS } from "@/components/chat/types";
+import { Conversation, AVAILABLE_MODELS, MAX_SELECTED_MODELS } from "@/components/chat/types";
 import { useSession } from "next-auth/react";
 import { useLanguage } from "@/components/LanguageProvider";
+import { APP_DEFAULTS } from "@/lib/appDefaults";
+
+const normalizeStringArray = (value: unknown, fallback: string[]) => {
+  let parsed = value;
+  for (let i = 0; i < 2 && typeof parsed === "string"; i++) {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return fallback;
+    }
+  }
+  return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : fallback;
+};
+
+const uniqueStrings = (values: string[]) => Array.from(new Set(values));
 
 export default function Home() {
     const { t, lang, setLang } = useLanguage(); // 💡 t 함수 꺼내기
@@ -18,13 +33,13 @@ export default function Home() {
   const [isSending, setIsSending] = useState(false);
   const [focusToken, setFocusToken] = useState(0);
 
-  const [userDefaultEngine, setUserDefaultEngine] = useState<string>("gpt-4o");
+    const [userDefaultEngine, setUserDefaultEngine] = useState<string>(APP_DEFAULTS.defaultModelId);
 
   const [inputValue, setInputValue] = useState("");
   const [promptPayload, setPromptPayload] = useState<{ id: string; text: string; chatId: string; userMessageId: string } | null>(null);
   
   // 💡 핵심: 어떤 모델들이 선택되었는지 추적하는 상태 (기본값: GPT)
-  const [selectedModels, setSelectedModels] = useState<string[]>(["gpt-4o"]);
+    const [selectedModels, setSelectedModels] = useState<string[]>([APP_DEFAULTS.defaultModelId]);
   
   // 💡 현재 '일시정지(OFF)' 상태인 모델들을 추적하는 배열
   const [disabledPanels, setDisabledPanels] = useState<string[]>([]);
@@ -38,6 +53,29 @@ export default function Home() {
   const MAX_GUEST_MESSAGES = 20;
 
   const [isInitialSelected, setIsInitialSelected] = useState(false);
+
+    const applyConversationSettings = (data: {
+        selectedModels?: unknown;
+        disabledPanels?: unknown;
+        messages?: Array<{ role?: string; modelId?: string | null }>;
+    }) => {
+        const savedModels = normalizeStringArray(data.selectedModels, [userDefaultEngine]);
+        const messageModels = Array.isArray(data.messages)
+            ? data.messages
+                .map((message) => (message.role === "assistant" ? message.modelId : null))
+                .filter((modelId): modelId is string => !!modelId)
+            : [];
+
+        const nextModels = uniqueStrings([...savedModels, ...messageModels]);
+        const recoveredModels = messageModels.filter((modelId) => !savedModels.includes(modelId));
+
+        setSelectedModels(nextModels.length > 0 ? nextModels : [userDefaultEngine]);
+        setDisabledPanels(
+            normalizeStringArray(data.disabledPanels, []).filter(
+                (modelId) => !recoveredModels.includes(modelId)
+            )
+        );
+    };
 
 // 💡 컴포넌트 마운트 시 오늘 날짜 기준으로 게스트 카운트 초기화 및 로드
   useEffect(() => {
@@ -74,7 +112,7 @@ export default function Home() {
         const initialChat = {
           id: initialChatId,
           title: "새 대화 (게스트)",
-          selectedModels: "userDefaultEngine" in localStorage ? [localStorage.getItem("userDefaultEngine")!] : ["gpt-4o"],
+            selectedModels: "userDefaultEngine" in localStorage ? [localStorage.getItem("userDefaultEngine")!] : [APP_DEFAULTS.defaultModelId],
           disabledPanels: []
         };
         setConversations([initialChat]);
@@ -94,13 +132,48 @@ export default function Home() {
     }
   }, [conversations, isGuestMode, isConversationsLoaded]);  
 
-useEffect(() => {
-  // 사용자가 직접 새 대화를 눌러 null을 만들었을 때는 가로채지 않도록 !isInitialSelected 조건 추가
-  if (!isGuestMode && conversations.length > 0 && !currentChatId && !isInitialSelected) {
-    setCurrentChatId(conversations[0].id);
-    setIsInitialSelected(true); // ✅ 최초 1회 자동 선택 완료 마킹
-  }
-}, [conversations, currentChatId, isGuestMode, isInitialSelected]);
+    useEffect(() => {
+        if (isGuestMode || conversations.length === 0 || currentChatId || isInitialSelected) return;
+
+        const firstConversation = conversations[0];
+        setIsInitialSelected(true);
+
+        if (firstConversation.isLocked) {
+            setCurrentChatId(null);
+            setSelectedModels([userDefaultEngine]);
+            setDisabledPanels([]);
+            setPromptPayload(null);
+            return;
+        }
+
+        let cancelled = false;
+
+        const openInitialConversation = async () => {
+            try {
+                const res = await fetch(`/api/conversations/${firstConversation.id}`, {
+                    cache: "no-store",
+                });
+
+                if (!res.ok || cancelled) return;
+
+                const data = await res.json();
+                applyConversationSettings(data);
+                setCurrentChatId(firstConversation.id);
+            } catch (error) {
+                if (!cancelled) {
+                    console.error("Failed to open initial conversation:", error);
+                    applyConversationSettings(firstConversation);
+                    setCurrentChatId(firstConversation.id);
+                }
+            }
+        };
+
+        openInitialConversation();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [conversations, currentChatId, isGuestMode, isInitialSelected, userDefaultEngine]);
 
   // 💡 대화방 목록을 서버에서 불러오는 함수 (부모가 관리)
   const fetchConversations = useCallback(async () => {
@@ -152,14 +225,15 @@ useEffect(() => {
     }, [session?.user?.email, fetchConversations]);
 
   // + 새 채팅 버튼 클릭 시 호출
-  const handleNewChat = () => {
+    const handleNewChat = () => {
+        setIsPrivateMode(false);
   	// 💡 새 채팅을 누르면 패널 상태를 기본 1개 창으로 완벽하게 리셋합니다.
     // 게스트용 독립 방 생성 (handleNewChat)
     if (isGuestMode) {
       const newGuestChat = {
         id: `guest_${Date.now()}`, // 👈 고유 타임스탬프 ID 부여로 다중 방 지원
           title: t("sidebar.autoGeneratedNewRoom"),
-        selectedModels: ["gpt-4o"],
+          selectedModels: [APP_DEFAULTS.defaultModelId],
         disabledPanels: []
       };
       // 최신 방이 위로 오도록 사이드바 목록 앞에 추가
@@ -227,8 +301,8 @@ useEffect(() => {
       const targetConv = conversations.find((c) => c.id === id);
       if (targetConv) {
         // types.tsx에 없는 속성이므로 as any로 캐스팅하여 안전하게 가져옵니다.
-        setSelectedModels(Array.isArray((targetConv as any).selectedModels) ? (targetConv as any).selectedModels : ["gpt-4o"]);
-        setDisabledPanels(Array.isArray((targetConv as any).disabledPanels) ? (targetConv as any).disabledPanels : []);
+          setSelectedModels(normalizeStringArray((targetConv as any).selectedModels, [APP_DEFAULTS.defaultModelId]));
+        setDisabledPanels(normalizeStringArray((targetConv as any).disabledPanels, []));
         }
       return; // 서버 API 호출을 막고 즉시 종료
     }
@@ -242,8 +316,7 @@ useEffect(() => {
 		console.log("✅ [DB Load] 불러온 설정:", data.selectedModels);
 
 		// 데이터가 유효하면 덮어씌우고, 혹시라도 깨져있으면 안전하게 빈 배열로 처리합니다.
-        setSelectedModels(Array.isArray(data.selectedModels) ? data.selectedModels : ["gpt-4o"]);
-        setDisabledPanels(Array.isArray(data.disabledPanels) ? data.disabledPanels : []);
+          applyConversationSettings(data);
 	  }
     } catch (error) {
       console.error("대화방 정보 로드 실패:", error);
@@ -378,7 +451,7 @@ useEffect(() => {
     if (!targetChatId || targetChatId === "private-chat") return; // 새 채팅 상태일 때는 생성 전이므로 패스, 프라이빗 저장 금지
     if (!session || !session.user) return;
     try {
-      await fetch(`/api/conversations/${currentChatId}`, {
+      await fetch(`/api/conversations/${targetChatId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -504,9 +577,14 @@ useEffect(() => {
       nextModels = nextModels.filter((id) => id !== modelId);
       nextDisabled = nextDisabled.filter((id) => id !== modelId); // 삭제된 모델은 OFF 목록에서도 깔끔히 치워줍니다
     } else {
-      nextModels.push(modelId);
-    }
-	
+        if (nextModels.length >= MAX_SELECTED_MODELS) {
+            alert(t("chat.maxModelCompare"));
+            return;
+        }
+
+        nextModels.push(modelId);
+      }
+    
 	setSelectedModels(nextModels);
     setDisabledPanels(nextDisabled);
     // 💡 현재 열려있는 방(currentChatId)이 있을 때만 서버에 동기화하도록 안전하게 묶어줍니다!
@@ -566,54 +644,30 @@ useEffect(() => {
   };  
   
   // 💡 사이드바 리스트 믹싱: 프라이빗 모드가 활성화되어 있다면 임시 룸을 최상단에 강제 주입합니다.
-  const blendedConversations = isPrivateMode
-      ? [{ id: "private-chat", title: "🔒 " + t("sidebar.privateChat") }, ...conversations]
-    : conversations;  
+    const blendedConversations = conversations; 
   
-    const handleDownloadConversation = async (convId: string, title: string) => {
-    let targetMessages: any[] = [];
+    const handleDownloadConversation = (convId: string) => {
+        if (isGuestMode) return;
+        window.location.href = `/api/conversations/${convId}/export`;
+    };
 
-      try {
-        const res = await fetch(`/api/conversations/${convId}`);
-        if (res.ok) {
-          const data = await res.json();
-          targetMessages = data.messages || [];
+  // 💡 공유하기 링크 생성 로직
+    const handleShareConversation = async (convId: string) => {
+        if (isGuestMode) return;
+
+        const res = await fetch(`/api/conversations/${convId}/share`, {
+            method: "POST",
+        });
+
+        if (!res.ok) {
+            alert(t("sidebar.shareFailed"));
+            return;
         }
-      } catch (e) {
-        console.error("다운로드용 데이터 조회 실패:", e);
-      }
 
-    if (targetMessages.length === 0) {
-      alert("다운로드할 대화 내용이 없습니다.");
-      return;
-    }
-
-    const textContent = targetMessages
-      .map((msg) => {
-        const roleName = msg.role === "user" ? "User" : `AI Assistant`;
-        return `========================================\n[${roleName}]\n========================================\n${msg.content}\n`;
-      })
-      .join("\n");
-
-    // 4. Blob을 활용해 브라우저 단에서 즉시 다운로드를 실행합니다.
-    const blob = new Blob([textContent], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${title.replace(/[/\\?%*:|"<>]/g, "-")}.txt`;
-    link.click();
-    URL.revokeObjectURL(url);
-  };
-
-
-  // 💡 공유하기 링크 생성 로직 (뼈대)
-  const handleShareConversation = async (convId: string, title: string) => {
-    // 여기에 공유 링크 발급 백엔드 API (예: POST /api/share) 호출 코드를 작성합니다.
-    // 게스트 모드일 경우 위 다운로드처럼 로컬 스토리지 데이터를 읽어서 POST body에 실어 보내면 됩니다.
-    
-    // 임시 UI 피드백
-    alert("공유 기능 백엔드 연결 대기중입니다.");
-  };
+        const data = await res.json();
+        await navigator.clipboard.writeText(data.url);
+        alert(t("sidebar.shareCopied"));
+    };
 
   return (
       <main className="flex h-screen overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
@@ -631,7 +685,9 @@ useEffect(() => {
               onLock={handleLock}     
               onUnlock={handleUnlock} 
 onShare={handleShareConversation}
-       onDownload={handleDownloadConversation}              
+              onDownload={handleDownloadConversation}              
+              isPrivateMode={isPrivateMode}
+              onTogglePrivateMode={togglePrivateModeGlobal}
       />
 
       <section className="flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">        
@@ -652,7 +708,7 @@ onShare={handleShareConversation}
 			const isPanelDisabled = disabledPanels.includes(modelId);
             
 			return (
-                <React.Fragment key={`${currentChatId || "new"}-${modelId}`}>               
+                <React.Fragment key={modelId}>               
                     {/* 💡 패널이 OFF일 때 너비를 w-44(약 176px)으로 축소시킵니다 */}
                 <div className={`flex flex-col bg-white border border-zinc-200 dark:bg-zinc-900/40 dark:border-zinc-800 rounded-2xl overflow-hidden relative transition-all duration-300 ease-in-out shadow-sm ${isPanelDisabled ? "w-44 shrink-0" : "flex-1 min-w-0"
                 }`}>
@@ -694,17 +750,6 @@ onShare={handleShareConversation}
                       </div>
 
 					  <div className="flex items-center gap-2 shrink-0">
-                      {/* 💡 Context 메뉴에 프라이빗 토글 스위치 탑재 */}
-                      <button
-                        onClick={togglePrivateModeGlobal}
-                        className={`cursor-pointer text-[10px] font-bold px-2 py-0.5 rounded transition-all border ${
-                          isPrivateMode 
-                            ? "bg-purple-950 text-purple-300 border-purple-800" 
-                            : "bg-transparent text-zinc-500 border-transparent hover:bg-zinc-800"
-                        }`}
-                      >
-                        {isPrivateMode ? "🔒 PRIVATE" : "🔓 PUBLIC"}
-                      </button>
 
 					{/* 💡 [패널 제어 버튼 조건부 렌더링]: 패널이 2개 이상일 때만 ON/OFF 및 X 버튼 노출 */}
                     {selectedModels.length > 1 && (
