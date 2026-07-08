@@ -55,34 +55,34 @@ const getActiveModel = (modelId: string) => {
             return google("gemini-1.5-flash");
 
         case "llama-3-1":
-            return groq("llama-3.1-8b-instant");
+            return groq.chat("llama-3.1-8b-instant");
 
         case "llama-3-3":
-            return groq("llama-3.3-70b-versatile");
+            return groq.chat("llama-3.3-70b-versatile");
 
         case "deepseek-v4-flash":
-            return deepseek("deepseek-v4-flash");
+            return deepseek.chat("deepseek-v4-flash");
 
         case "deepseek-v4-pro":
-            return deepseek("deepseek-v4-pro");
+            return deepseek.chat("deepseek-v4-pro");
 
         case "grok-4-3":
-            return xai("grok-4-3");
+            return xai.chat("grok-4-3");
 
         case "kimi-k2.7-code":
-            return moonshot("kimi-k2.7-code");
+            return moonshot.chat("kimi-k2.7-code");
 
         case "qwen3.7-max":
-            return qwen("qwen3.7-max");
+            return qwen.chat("qwen3.7-max");
 
         case "qwen3.7-plus":
-            return qwen("qwen3.7-plus");
+            return qwen.chat("qwen3.7-plus");
 
         case "qwen3.6-flash":
-            return qwen("qwen3.6-flash");
+            return qwen.chat("qwen3.6-flash");
 
         case "glm-5.2":
-            return qwen("glm-5.2");
+            return qwen.chat("glm-5.2");
 
         case "perplexity/sonar":
             return perplexity("perplexity/sonar");
