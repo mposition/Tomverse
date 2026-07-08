@@ -16,7 +16,7 @@ export function AuthButton() {
 
     const [theme, setTheme] = useState<"dark" | "light">(APP_DEFAULTS.defaultTheme);
     const [language, setLanguage] = useState<"en" | "zh" | "ko">(APP_DEFAULTS.defaultLanguage);
-    const [defaultModel, setDefaultModel] = useState(APP_DEFAULTS.defaultModelId);
+    const [defaultModel, setDefaultModel] = useState<string>(APP_DEFAULTS.defaultModelId);
 
     // 모달이 열릴 때 DB에서 최신 설정을 받아옴
     useEffect(() => {
