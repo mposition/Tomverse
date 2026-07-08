@@ -85,7 +85,7 @@ const getActiveModel = (modelId: string) => {
             return qwen.chat("glm-5.2");
 
         case "perplexity/sonar":
-            return perplexity.chat("perplexity/sonar");
+            return perplexity.chat("sonar");
 
         default:
             return openai("gpt-4o");
