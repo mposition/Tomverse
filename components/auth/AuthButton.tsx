@@ -14,8 +14,8 @@ export function AuthButton() {
 
     const { t, lang: globalLang, setLang: setGlobalLang } = useLanguage();
 
-    const [theme, setTheme] = useState(APP_DEFAULTS.defaultTheme);
-    const [language, setLanguage] = useState(APP_DEFAULTS.defaultLanguage);
+    const [theme, setTheme] = useState<"dark" | "light">(APP_DEFAULTS.defaultTheme);
+    const [language, setLanguage] = useState<"en" | "zh" | "ko">(APP_DEFAULTS.defaultLanguage);
     const [defaultModel, setDefaultModel] = useState(APP_DEFAULTS.defaultModelId);
 
     // 모달이 열릴 때 DB에서 최신 설정을 받아옴
@@ -110,7 +110,7 @@ export function AuthButton() {
                         {/* 테마 선택 */}
                         <div className="mb-3">
                             <label className="text-xs text-zinc-400 block mb-1">테마</label>
-                            <select value={theme} onChange={(e) => setTheme(e.target.value)} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-1.5 text-xs outline-none text-zinc-200">
+                            <select value={theme} onChange={(e) => setTheme(e.target.value as "dark" | "light")} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-1.5 text-xs outline-none text-zinc-200">
                                 <option value="dark">어두운 테마 (Dark)</option>
                                 <option value="light">밝은 테마 (Light)</option>
                             </select>
@@ -119,7 +119,7 @@ export function AuthButton() {
                         {/* 언어 선택 */}
                         <div className="mb-4">
                             <label className="text-xs text-zinc-400 block mb-1">언어</label>
-                            <select value={language} onChange={(e) => setLanguage(e.target.value)} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-1.5 text-xs outline-none text-zinc-200">
+                            <select value={language} onChange={(e) => setLanguage(e.target.value as "en" | "zh" | "ko")} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-1.5 text-xs outline-none text-zinc-200">
                                 <option value="en">English</option>
                                 <option value="zh">中文</option>
                                 <option value="ko">한국어</option>
