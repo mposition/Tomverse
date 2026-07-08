@@ -37,6 +37,8 @@ export default function Home() {
   const [guestMessageCount, setGuestMessageCount] = useState(0);
   const MAX_GUEST_MESSAGES = 20;
 
+  const [isInitialSelected, setIsInitialSelected] = useState(false);
+
 // 💡 컴포넌트 마운트 시 오늘 날짜 기준으로 게스트 카운트 초기화 및 로드
   useEffect(() => {
     if (isGuestMode) {
@@ -92,6 +94,14 @@ export default function Home() {
     }
   }, [conversations, isGuestMode, isConversationsLoaded]);  
 
+useEffect(() => {
+  // 사용자가 직접 새 대화를 눌러 null을 만들었을 때는 가로채지 않도록 !isInitialSelected 조건 추가
+  if (!isGuestMode && conversations.length > 0 && !currentChatId && !isInitialSelected) {
+    setCurrentChatId(conversations[0].id);
+    setIsInitialSelected(true); // ✅ 최초 1회 자동 선택 완료 마킹
+  }
+}, [conversations, currentChatId, isGuestMode, isInitialSelected]);
+  
   // 💡 대화방 목록을 서버에서 불러오는 함수 (부모가 관리)
   const fetchConversations = useCallback(async () => {
     // 세션이 없으면(로그인 안 했으면) 굳이 안 불러옵니다.

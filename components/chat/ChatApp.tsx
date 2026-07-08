@@ -179,11 +179,10 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
       fetchPastMessages();
   } 
     // 부모가 '새 채팅' 상태(null)로 명령을 내린 경우 내부 상태 완전 초기화
-    else if (!initialConversationId) {
+    else {
 	    lastFetchedChatIdRef.current = null;
 	  
 	    // 새로운 채팅일 경우에만 화면 리셋 (단, 전송 중이 아닐 때만)
-      if (!isSendingRef.current) {
         setMessages([
         {
           id: "welcome",
@@ -192,7 +191,6 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
           status: "normal",
         },
         ]);
-	    }
     }
 	
 	  return () => {
