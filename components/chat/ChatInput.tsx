@@ -153,6 +153,7 @@ type ChatInputProps = {
   attachments: ChatAttachment[];
   onAttachmentsChange: (attachments: ChatAttachment[]) => void;
   canAttach?: boolean;
+  isGuestMode?: boolean;
 };
 
 export function ChatInput({
@@ -169,6 +170,7 @@ export function ChatInput({
   attachments,
   onAttachmentsChange,
   canAttach = true,
+  isGuestMode = false,
 }: ChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -642,11 +644,13 @@ export function ChatInput({
                   <div className="min-h-0 space-y-1 overflow-y-auto overscroll-contain pr-1">
                     {AVAILABLE_MODELS.map((model) => {
                       const isSelected = selectedModels.includes(model.id);
+                      const isTierLocked =
+                        isGuestMode && model.tier !== "Free";
                       return (
                         <button
                           key={model.id}
                           type="button"
-                          disabled={!model.enabled}
+                          disabled={!model.enabled || isTierLocked}
                           onClick={() => onToggleModel(model.id)}
                           className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-45 dark:hover:bg-zinc-800"
                         >

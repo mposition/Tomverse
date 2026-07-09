@@ -88,6 +88,60 @@ export const getEnabledModel = (modelId: string) => {
     return model?.enabled ? model : undefined;
 };
 
+export type ModelBillingProfile = {
+    maxOutputTokens: number;
+    inputUsdPerMillionTokens: number;
+    outputUsdPerMillionTokens: number;
+};
+
+const BILLING_DEFAULTS: Record<ModelTier, ModelBillingProfile> = {
+    Free: {
+        maxOutputTokens: 2_048,
+        inputUsdPerMillionTokens: 0.5,
+        outputUsdPerMillionTokens: 1,
+    },
+    Pro: {
+        maxOutputTokens: 4_096,
+        inputUsdPerMillionTokens: 3,
+        outputUsdPerMillionTokens: 12,
+    },
+    Max: {
+        maxOutputTokens: 8_192,
+        inputUsdPerMillionTokens: 15,
+        outputUsdPerMillionTokens: 60,
+    },
+};
+
+const modelEnvKey = (modelId: string, suffix: string) =>
+    `CHAT_MODEL_${modelId.replace(/[^A-Za-z0-9]/g, "_").toUpperCase()}_${suffix}`;
+
+const positiveNumber = (value: string | undefined, fallback: number) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+export const getModelBillingProfile = (
+    model: Pick<AiModel, "id" | "tier">
+): ModelBillingProfile => {
+    const defaults = BILLING_DEFAULTS[model.tier];
+    return {
+        maxOutputTokens: Math.floor(
+            positiveNumber(
+                process.env[modelEnvKey(model.id, "MAX_OUTPUT_TOKENS")],
+                defaults.maxOutputTokens
+            )
+        ),
+        inputUsdPerMillionTokens: positiveNumber(
+            process.env[modelEnvKey(model.id, "INPUT_USD_PER_MILLION")],
+            defaults.inputUsdPerMillionTokens
+        ),
+        outputUsdPerMillionTokens: positiveNumber(
+            process.env[modelEnvKey(model.id, "OUTPUT_USD_PER_MILLION")],
+            defaults.outputUsdPerMillionTokens
+        ),
+    };
+};
+
 export const isEnabledModelId = (modelId: string) =>
     getEnabledModel(modelId) !== undefined;
 

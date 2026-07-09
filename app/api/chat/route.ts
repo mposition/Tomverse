@@ -21,11 +21,14 @@ import {
 } from "@/lib/boundedBuffer";
 import {
     acquireChatAccess,
+    assertModelAccess,
     assertChatRequestSize,
     chatErrorResponse,
+    createChatBudget,
     identifyChatCaller,
     readChatJsonBody,
     releaseChatAccess,
+    settleChatUsage,
     validateChatPayload,
 } from "@/lib/chatSecurity";
 import {
@@ -422,6 +425,7 @@ export async function POST(req: Request) {
             );
         }
         const access = identifyChatCaller(req, session?.user?.id);
+        assertModelAccess(access.kind, modelConfig);
         if (conversationId && assistantMessageId) {
             if (!session?.user?.id) {
                 return tracedJsonError(
@@ -454,8 +458,6 @@ export async function POST(req: Request) {
                 return conversationLockedResponse();
             }
         }
-        const accessGrant = await acquireChatAccess(access);
-        leaseId = accessGrant.leaseId;
         const userObjectPrefix = session?.user?.email
             ? `attachments/${createHash("sha256")
                 .update(session.user.email.toLowerCase())
@@ -464,10 +466,15 @@ export async function POST(req: Request) {
             : null;
 
         const activeModel = getActiveModel(modelConfig);
+        let estimatedInputTokens = 0;
+        const estimateTextTokens = (text: string) =>
+            Math.max(1, Buffer.byteLength(text, "utf8"));
 
         const formattedMessages: ModelMessage[] = await Promise.all(messages.map(async (msg) => {
             if (msg.role === "assistant") {
-                return { role: "assistant", content: String(msg.content ?? "") };
+                const content = String(msg.content ?? "");
+                estimatedInputTokens += estimateTextTokens(content);
+                return { role: "assistant", content };
             }
 
             const attachments = (
@@ -564,12 +571,16 @@ export async function POST(req: Request) {
             }
 
             if (textAttachments.length === 0 && fileParts.length === 0) {
-                return { role: "user", content: String(msg.content ?? "") };
+                const content = String(msg.content ?? "");
+                estimatedInputTokens += estimateTextTokens(content);
+                return { role: "user", content };
             }
 
             const text = [String(msg.content ?? ""), ...textAttachments]
                 .filter(Boolean)
                 .join("\n\n");
+            estimatedInputTokens +=
+                estimateTextTokens(text) + fileParts.length * 16_000;
 
             return {
                 role: "user",
@@ -579,10 +590,18 @@ export async function POST(req: Request) {
                 ],
             };
         }));
+        const budget = createChatBudget(
+            access.kind,
+            modelConfig,
+            estimatedInputTokens
+        );
+        const accessGrant = await acquireChatAccess(access, budget);
+        leaseId = accessGrant.leaseId;
 
         const result = await streamText({
             model: activeModel,
             messages: formattedMessages,
+            maxOutputTokens: budget.maxOutputTokens,
         });
 
         const sourceReader = result.textStream.getReader();
@@ -600,6 +619,23 @@ export async function POST(req: Request) {
                 try {
                     const { done, value } = await sourceReader.read();
                     if (done) {
+                        try {
+                            const usage = await result.usage;
+                            await settleChatUsage(
+                                accessGrant.usageReservation,
+                                {
+                                    inputTokens: usage.inputTokens,
+                                    outputTokens: usage.outputTokens,
+                                }
+                            );
+                        } catch (error) {
+                            logRequestError(
+                                "chat_usage_settlement_failed",
+                                traceId,
+                                error,
+                                requestedModelId
+                            );
+                        }
                         if (
                             conversationId &&
                             assistantMessageId &&
