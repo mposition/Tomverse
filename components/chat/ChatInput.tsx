@@ -1,8 +1,25 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { AVAILABLE_MODELS } from "@/components/chat/types";
+import { Paperclip, X } from "lucide-react";
+import { AVAILABLE_MODELS, type ChatAttachment } from "@/components/chat/types";
 import { useLanguage } from "@/components/LanguageProvider";
+
+const MAX_ATTACHMENTS = 5;
+const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
+const TEXT_FILE_TYPES = new Set([
+  "text/plain",
+  "text/markdown",
+  "text/csv",
+  "application/json",
+]);
+const ACCEPTED_FILE_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "application/pdf",
+  ...TEXT_FILE_TYPES,
+].join(",");
 
 type ChatInputProps = {
   value: string;
@@ -15,6 +32,9 @@ type ChatInputProps = {
   selectedModels: string[];
   isGuestLimitReached?: boolean;
   onToggleModel: (modelId: string) => void;
+  attachments: ChatAttachment[];
+  onAttachmentsChange: (attachments: ChatAttachment[]) => void;
+  canAttach?: boolean;
 };
 
 export function ChatInput({
@@ -28,8 +48,13 @@ export function ChatInput({
   selectedModels,
   isGuestLimitReached = false,
   onToggleModel,
+  attachments,
+  onAttachmentsChange,
+  canAttach = true,
 }: ChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
     const { t, lang, setLang } = useLanguage(); // 💡 t 함수 꺼내기
 
   // 💡 선택된 모델의 이름들을 가져와서 플레이스홀더 문구를 동적으로 만듭니다.
@@ -47,7 +72,7 @@ export function ChatInput({
   }
   
   // 💡 최종 비활성화 조건 계산
-  const isDisabled = disabled || isSending || isGuestLimitReached;
+  const isDisabled = disabled || isSending || isUploading || isGuestLimitReached;
   
   // 팝업 메뉴 열림/닫힘 상태
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -92,9 +117,121 @@ export function ChatInput({
     }
   };
 
+  const handleFilesSelected = async (files: FileList | null) => {
+    if (!files?.length) return;
+
+    const availableSlots = MAX_ATTACHMENTS - attachments.length;
+    if (availableSlots <= 0) {
+      alert(t("chat.attachmentCountError"));
+      return;
+    }
+
+    const selectedFiles = Array.from(files).slice(0, availableSlots);
+    const nextAttachments: ChatAttachment[] = [];
+    setIsUploading(true);
+
+    try {
+      for (const file of selectedFiles) {
+        const mediaType = file.type || "application/octet-stream";
+        if (!ACCEPTED_FILE_TYPES.split(",").includes(mediaType)) {
+          alert(t("chat.attachmentTypeError"));
+          continue;
+        }
+        if (file.size > MAX_ATTACHMENT_SIZE) {
+          alert(t("chat.attachmentSizeError"));
+          continue;
+        }
+
+        const prepareResponse = await fetch("/api/chat", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: file.name,
+            mediaType,
+            size: file.size,
+          }),
+        });
+        if (!prepareResponse.ok) {
+          throw new Error("Failed to prepare upload.");
+        }
+
+        const { key, uploadUrl } = await prepareResponse.json();
+        const uploadResponse = await fetch(uploadUrl, {
+          method: "PUT",
+          headers: { "Content-Type": mediaType },
+          body: file,
+        });
+        if (!uploadResponse.ok) {
+          throw new Error(`R2 upload failed: ${uploadResponse.status}`);
+        }
+
+        nextAttachments.push({
+          id: crypto.randomUUID(),
+          name: file.name,
+          mediaType,
+          size: file.size,
+          objectKey: key,
+          kind: TEXT_FILE_TYPES.has(mediaType) ? "text" : "file",
+        });
+      }
+
+      onAttachmentsChange([...attachments, ...nextAttachments]);
+    } catch (error) {
+      console.error("Attachment upload failed:", error);
+      alert(t("chat.attachmentUploadError"));
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const handleRemoveAttachment = async (attachment: ChatAttachment) => {
+    onAttachmentsChange(
+      attachments.filter((item) => item.id !== attachment.id)
+    );
+
+    if (!attachment.objectKey) return;
+
+    try {
+      const response = await fetch("/api/chat", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: attachment.objectKey }),
+      });
+      if (!response.ok) {
+        throw new Error(`R2 deletion failed: ${response.status}`);
+      }
+    } catch (error) {
+      console.error("Attachment deletion failed:", error);
+    }
+  };
+
   return (
       <div className="shrink-0 border-t border-zinc-200 bg-white px-4 py-4 dark:border-zinc-800 dark:bg-zinc-950 md:px-8 transition-colors">
-          <div className="mx-auto flex max-w-3xl items-end gap-3">
+          <div className="mx-auto max-w-3xl">
+          {attachments.length > 0 && (
+            <div className="mb-3 flex flex-wrap gap-2">
+              {attachments.map((attachment) => (
+                <div
+                  key={attachment.id}
+                  className="flex max-w-56 items-center gap-2 rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1.5 text-xs text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
+                >
+                  <Paperclip className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <span className="truncate">{attachment.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveAttachment(attachment)}
+                    className="shrink-0 text-zinc-400 hover:text-zinc-900 dark:hover:text-white"
+                    title={t("chat.removeAttachment")}
+                    aria-label={t("chat.removeAttachment")}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex items-end gap-3">
 		{/* 💡 모델 선택 UI 영역 */}
         <div className="relative flex items-center gap-1 pl-2 mb-1" ref={menuRef}>
           {/* 선택된 모델 아이콘 표시 */}
@@ -159,6 +296,34 @@ export function ChatInput({
           )}
         </div>
 
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept={ACCEPTED_FILE_TYPES}
+          onChange={(event) => handleFilesSelected(event.target.files)}
+          className="hidden"
+        />
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={
+            isDisabled ||
+            isUploading ||
+            !canAttach ||
+            attachments.length >= MAX_ATTACHMENTS
+          }
+          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-zinc-300 text-zinc-600 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
+          title={canAttach ? t("chat.attachFile") : t("chat.loginToAttach")}
+          aria-label={canAttach ? t("chat.attachFile") : t("chat.loginToAttach")}
+        >
+          {isUploading ? (
+            <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+          ) : (
+            <Paperclip className="h-5 w-5" />
+          )}
+        </button>
+
 		{/* 💡 텍스트 입력 영역 */}	  
         <textarea
           ref={textareaRef}
@@ -183,13 +348,14 @@ export function ChatInput({
           <button
             type="button"
             onClick={onSubmit}
-            disabled={isDisabled || !value.trim()}
+            disabled={isDisabled || (!value.trim() && attachments.length === 0)}
             className="cursor-pointer rounded-2xl bg-blue-600 px-5 py-3 text-sm font-medium text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {t("chat.send")}
           </button>
         )}
 		
+      </div>
       </div>
     </div>
   );

@@ -1,8 +1,19 @@
+export type ChatAttachment = {
+  id: string;
+  name: string;
+  mediaType: string;
+  size: number;
+  data?: string;
+  objectKey?: string;
+  kind: "file" | "text";
+};
+
 export type Message = {
   id: string;
   role: "user" | "assistant";
   content: string;
   status?: "normal" | "error" | "cancelled";
+  attachments?: ChatAttachment[];
   modelId?: string; // 💡 모델 ID 추가
 };
 

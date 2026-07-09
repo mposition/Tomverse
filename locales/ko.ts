@@ -49,6 +49,13 @@ export const ko = {
 		modelOnlyPlaceholder: "이 모델에게만 추가 질문",
 		modelOnlySendTitle: "이 모델에게만 보내기",
 		comingSoonModel: "해당 모델은 곧 지원 예정입니다",
+		attachFile: "파일 첨부",
+		removeAttachment: "첨부파일 삭제",
+		attachmentCountError: "파일은 최대 5개까지 첨부할 수 있습니다.",
+		attachmentSizeError: "파일 하나의 크기는 10MB 이하여야 합니다.",
+		attachmentTypeError: "지원하지 않는 파일 형식입니다.",
+		attachmentUploadError: "파일을 업로드하지 못했습니다. 다시 시도해 주세요.",
+		loginToAttach: "파일 첨부는 로그인 후 사용할 수 있습니다.",
 	},
 	auth: {
 		saveMessage: "설정이 성공적으로 저장되었습니다.",

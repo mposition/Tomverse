@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { ChatApp } from "@/components/chat/ChatApp";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { ChatInput } from "@/components/chat/ChatInput";
-import { Conversation, AVAILABLE_MODELS, MAX_SELECTED_MODELS } from "@/components/chat/types";
+import { Conversation, AVAILABLE_MODELS, MAX_SELECTED_MODELS, type ChatAttachment } from "@/components/chat/types";
 import { useSession } from "next-auth/react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
@@ -36,7 +36,8 @@ export default function Home() {
     const [userDefaultEngine, setUserDefaultEngine] = useState<string>(APP_DEFAULTS.defaultModelId);
 
   const [inputValue, setInputValue] = useState("");
-  const [promptPayload, setPromptPayload] = useState<{ id: string; text: string; chatId: string; userMessageId: string } | null>(null);
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const [promptPayload, setPromptPayload] = useState<{ id: string; text: string; chatId: string; userMessageId: string; attachments: ChatAttachment[] } | null>(null);
   
   // 💡 핵심: 어떤 모델들이 선택되었는지 추적하는 상태 (기본값: GPT)
     const [selectedModels, setSelectedModels] = useState<string[]>([APP_DEFAULTS.defaultModelId]);
@@ -467,7 +468,7 @@ export default function Home() {
   // 💡 메시지 전송 함수
   const handleGlobalSubmit = async () => {
     const trimmed = inputValue.trim();
-    if (!trimmed || selectedModels.length === 0) return;
+    if ((!trimmed && attachments.length === 0) || selectedModels.length === 0) return;
 	
     if (isGuestMode) {
       if (guestMessageCount >= MAX_GUEST_MESSAGES) {
@@ -487,9 +488,11 @@ export default function Home() {
         id: Date.now().toString(), 
         text: trimmed, 
         chatId: "private-chat",
-        userMessageId: crypto.randomUUID() 
+        userMessageId: crypto.randomUUID(),
+        attachments,
       });
       setInputValue("");
+      setAttachments([]);
       return;
     }	
 	
@@ -507,7 +510,7 @@ export default function Home() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ 
-            title: trimmed.slice(0, 30),
+            title: (trimmed || attachments[0]?.name || t("chat.newChat")).slice(0, 30),
             selectedModels,
             disabledPanels
           }),
@@ -538,7 +541,11 @@ export default function Home() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ 
-            messages: [{ id: userMsgId, role: "user", content: trimmed }] 
+            messages: [{
+              id: userMsgId,
+              role: "user",
+              content: trimmed || attachments.map((item) => item.name).join(", "),
+            }]
           }),
         });
       } catch (e) {
@@ -551,9 +558,11 @@ export default function Home() {
         id: Date.now().toString(), 
         text: trimmed, 
         chatId: activeChatId,
-        userMessageId: userMsgId 
+        userMessageId: userMsgId,
+        attachments,
       });
       setInputValue("");
+      setAttachments([]);
     }
   };
 
@@ -810,6 +819,9 @@ onShare={handleShareConversation}
 		      focusToken={focusToken}		  
           selectedModels={selectedModels}
           onToggleModel={toggleModel}
+          attachments={attachments}
+          onAttachmentsChange={setAttachments}
+          canAttach={!isGuestMode}
           isGuestLimitReached={isGuestMode && guestMessageCount >= MAX_GUEST_MESSAGES}          
         />
       </section>

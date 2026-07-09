@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
+import { Paperclip } from "lucide-react";
 import { Message, AVAILABLE_MODELS } from "@/components/chat/types";
 import { useLanguage } from "@/components/LanguageProvider";
 
@@ -147,6 +148,20 @@ export function ChatMessageList({ messages, isPrivate = false, isGuestMode = fal
                     isUser ? `${userBoxClass} rounded-br-sm` : `${assistantBoxClass} rounded-bl-sm`
                   }`}
                 >
+                  {isUser && msg.attachments && msg.attachments.length > 0 && (
+                    <div className={`flex flex-wrap gap-1.5 ${msg.content ? "mb-2" : ""}`}>
+                      {msg.attachments.map((attachment) => (
+                        <span
+                          key={attachment.id}
+                          className="flex max-w-52 items-center gap-1 rounded-md bg-white/15 px-2 py-1 text-xs"
+                          title={attachment.name}
+                        >
+                          <Paperclip className="h-3 w-3 shrink-0" aria-hidden="true" />
+                          <span className="truncate">{attachment.name}</span>
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   {msg.role === "assistant" && !msg.content ? (
                     <TypingIndicator />
                   ) : msg.role === "assistant" ? (

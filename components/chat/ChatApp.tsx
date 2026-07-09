@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ChatMessageList } from "@/components/chat/ChatMessageList";
-import { Message } from "@/components/chat/types";
+import { Message, type ChatAttachment } from "@/components/chat/types";
 import { useSession } from "next-auth/react";
 import { useLanguage } from "@/components/LanguageProvider";
 
@@ -12,7 +12,7 @@ type ChatAppProps = {
   modelId: string; // 💡 부모가 내려준 정체성(modelId)을 받습니다.
   initialConversationId?: string | null;
   onConversationCreated?: (id: string) => void; // 💡 새 방이 파졌을 때 부모에게 일러바칠 함수
-  promptPayload?: { id: string; text: string; chatId: string; userMessageId: string } | null; // 💡 부모로부터 전달받을 공통 프롬프트 페이로드 (중복 방지를 위해 id 포함)
+  promptPayload?: { id: string; text: string; chatId: string; userMessageId: string; attachments: ChatAttachment[] } | null; // 💡 부모로부터 전달받을 공통 프롬프트 페이로드 (중복 방지를 위해 id 포함)
   isPanelDisabled?: boolean; // 💡 현재 패널이 비활성화(OFF) 상태인지 여부
   isGuestMode?: boolean; // 💡 게스트 모드 여부 추가  
 };
@@ -56,7 +56,12 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
             processedPromptKeys.add(promptKey);
 
             if (!isPanelDisabled) {
-                handleSendPrompt(promptPayload.text, promptPayload.chatId, promptPayload.userMessageId);
+                handleSendPrompt(
+                  promptPayload.text,
+                  promptPayload.chatId,
+                  promptPayload.userMessageId,
+                  promptPayload.attachments
+                );
             }
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -224,8 +229,13 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
     });
   };
   
-  const handleSendPrompt = async (text: string, targetChatId: string, userMsgId: string) => {
-  	if (!text || isSendingRef.current) return; // 💡 isSending 대신 즉각적인 Ref 사용
+  const handleSendPrompt = async (
+    text: string,
+    targetChatId: string,
+    userMsgId: string,
+    attachments: ChatAttachment[] = []
+  ) => {
+  	if ((!text && attachments.length === 0) || isSendingRef.current) return; // 💡 isSending 대신 즉각적인 Ref 사용
 
     // 💡 전송 시작 상태를 즉시 기록합니다.
     setIsSending(true);
@@ -236,6 +246,7 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
       id: userMsgId,
       role: "user",
       content: text,
+      attachments,
 	  status: "normal",
     };
 

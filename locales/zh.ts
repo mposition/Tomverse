@@ -49,6 +49,13 @@ export const zh = {
         modelOnlyPlaceholder: "只向此模型追问",
         modelOnlySendTitle: "只发送给此模型",
         comingSoonModel: "该模型即将支持。",
+        attachFile: "添加附件",
+        removeAttachment: "移除附件",
+        attachmentCountError: "最多可添加 5 个文件。",
+        attachmentSizeError: "每个文件不得超过 10MB。",
+        attachmentTypeError: "不支持此文件类型。",
+        attachmentUploadError: "文件上传失败，请重试。",
+        loginToAttach: "登录后可添加附件",
     },
     auth: {
         saveMessage: "设置已成功保存。",

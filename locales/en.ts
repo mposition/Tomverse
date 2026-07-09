@@ -49,6 +49,13 @@ export const en = {
         modelOnlyPlaceholder: "Ask only this model",
         modelOnlySendTitle: "Send only to this model",
         comingSoonModel: "This model is coming soon.",
+        attachFile: "Attach files",
+        removeAttachment: "Remove attachment",
+        attachmentCountError: "You can attach up to 5 files.",
+        attachmentSizeError: "Each file must be 10 MB or smaller.",
+        attachmentTypeError: "This file type is not supported.",
+        attachmentUploadError: "The file could not be uploaded. Please try again.",
+        loginToAttach: "Log in to attach files",
     },
     auth: {
         saveMessage: "Settings saved successfully.",
