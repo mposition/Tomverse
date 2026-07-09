@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { isValidShareTokenFormat } from "@/lib/shareTokens";
 
 const modelNames: Record<string, string> = {
   "gpt-4o": "GPT-4o",
@@ -31,6 +32,9 @@ export default async function SharedConversationPage({
   params: Promise<{ shareToken: string }>;
 }) {
   const { shareToken } = await params;
+  if (!isValidShareTokenFormat(shareToken)) {
+    notFound();
+  }
 
   const conversation = await prisma.conversation.findFirst({
     where: {

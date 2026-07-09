@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { randomBytes } from "crypto";
 import { getServerSession } from "next-auth/next";
 import { prisma } from "@/lib/prisma";
 import { authOptions } from "@/lib/auth";
+import { createShareToken, isStrongShareToken } from "@/lib/shareTokens";
 
 export async function POST(req: Request, context: any) {
   const session = await getServerSession(authOptions);
@@ -23,7 +23,9 @@ export async function POST(req: Request, context: any) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const shareToken = conversation.shareToken || randomBytes(9).toString("base64url");
+  const shareToken = isStrongShareToken(conversation.shareToken)
+    ? conversation.shareToken
+    : createShareToken();
 
   const updated = await prisma.conversation.update({
     where: { id: conversationId },
