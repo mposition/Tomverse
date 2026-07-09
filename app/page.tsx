@@ -8,6 +8,11 @@ import { Conversation, AVAILABLE_MODELS, ENABLED_MODELS, MAX_SELECTED_MODELS, ty
 import { useSession } from "next-auth/react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { APP_DEFAULTS, clampSelectedModels } from "@/lib/appDefaults";
+import { isEnabledModelId } from "@/lib/models";
+import {
+  USER_SETTINGS_UPDATED_EVENT,
+  type UserSettingsUpdatedDetail,
+} from "@/lib/userSettingsEvents";
 
 const normalizeStringArray = (value: unknown, fallback: string[]) => {
   let parsed = value;
@@ -34,6 +39,7 @@ export default function Home() {
   const [focusToken, setFocusToken] = useState(0);
 
     const [userDefaultEngine, setUserDefaultEngine] = useState<string>(APP_DEFAULTS.defaultModelId);
+  const [isUserSettingsLoaded, setIsUserSettingsLoaded] = useState(false);
 
   const [inputValue, setInputValue] = useState("");
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
@@ -140,7 +146,13 @@ export default function Home() {
   }, [conversations, isGuestMode, isConversationsLoaded]);  
 
     useEffect(() => {
-        if (isGuestMode || conversations.length === 0 || currentChatId || isInitialSelected) return;
+        if (
+            isGuestMode ||
+            !isUserSettingsLoaded ||
+            conversations.length === 0 ||
+            currentChatId ||
+            isInitialSelected
+        ) return;
 
         const firstConversation = conversations[0];
         setIsInitialSelected(true);
@@ -180,7 +192,31 @@ export default function Home() {
         return () => {
             cancelled = true;
         };
-    }, [conversations, currentChatId, isGuestMode, isInitialSelected, userDefaultEngine]);
+    }, [conversations, currentChatId, isGuestMode, isInitialSelected, isUserSettingsLoaded, userDefaultEngine]);
+
+    useEffect(() => {
+        const handleSettingsUpdated = (event: Event) => {
+            const detail = (event as CustomEvent<UserSettingsUpdatedDetail>).detail;
+            if (!detail || !isEnabledModelId(detail.defaultModel)) return;
+
+            setUserDefaultEngine(detail.defaultModel);
+            if (!currentChatId) {
+                setSelectedModels([detail.defaultModel]);
+                setDisabledPanels([]);
+            }
+        };
+
+        window.addEventListener(
+            USER_SETTINGS_UPDATED_EVENT,
+            handleSettingsUpdated
+        );
+        return () => {
+            window.removeEventListener(
+                USER_SETTINGS_UPDATED_EVENT,
+                handleSettingsUpdated
+            );
+        };
+    }, [currentChatId]);
 
   // 💡 대화방 목록을 서버에서 불러오는 함수 (부모가 관리)
   const fetchConversations = useCallback(async () => {
@@ -199,13 +235,17 @@ export default function Home() {
     // 최초 페이지 로드 시 목록 가져오기
     useEffect(() => {
         if (session?.user) {
+            setIsUserSettingsLoaded(false);
             fetchConversations();
 
             // 💡 사용자 데이터베이스 설정 로드 파이프라인
             fetch("/api/user/settings")
-                .then((res) => res.json())
+                .then((res) => {
+                    if (!res.ok) throw new Error(`Settings load failed: ${res.status}`);
+                    return res.json();
+                })
                 .then((data) => {
-                    if (data && data.defaultModel) {
+                    if (data && isEnabledModelId(data.defaultModel)) {
                         setUserDefaultEngine(data.defaultModel);
                         // 현재 활성화된 채팅방이 전혀 없을 때만 기본 엔진으로 패널 초기 스위칭
                         if (!currentChatId) {
@@ -227,8 +267,17 @@ export default function Home() {
                         setLang(data.language as any);
                     }
                 })
-                .catch((err) => console.error("사용자 선호 엔진 조회 실패:", err));
-        } 
+                .catch((err) => {
+                    console.error("사용자 선호 엔진 조회 실패:", err);
+                    setUserDefaultEngine(APP_DEFAULTS.defaultModelId);
+                    if (!currentChatId) {
+                        setSelectedModels([APP_DEFAULTS.defaultModelId]);
+                    }
+                })
+                .finally(() => setIsUserSettingsLoaded(true));
+        } else if (status !== "loading") {
+            setIsUserSettingsLoaded(true);
+        }
     }, [session?.user?.email, fetchConversations]);
 
   // + 새 채팅 버튼 클릭 시 호출

@@ -6,6 +6,7 @@ import { useState, useEffect } from "react";
 import { ENABLED_MODELS } from "@/components/chat/types";
 import { useLanguage } from "@/components/LanguageProvider";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
+import { notifyUserSettingsUpdated } from "@/lib/userSettingsEvents";
 
 export function AuthButton() {
   // 💡 현재 로그인 상태(session)를 가져옵니다.
@@ -56,7 +57,7 @@ export function AuthButton() {
                     document.documentElement.classList.add("dark");
                 }
 
-                setDefaultModel(defaultModel);
+                notifyUserSettingsUpdated({ defaultModel });
             } else {
                 alert(t("auth.failedMessage"));
             }
