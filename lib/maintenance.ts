@@ -3,6 +3,10 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 
 export async function cleanupExpiredData() {
+  const sessions = await prisma.session.deleteMany({
+    where: { expires: { lte: new Date() } },
+  });
+
   const usageBuckets = await prisma.$executeRaw`
     DELETE FROM "ChatUsageBucket"
     WHERE
@@ -54,6 +58,7 @@ export async function cleanupExpiredData() {
   `;
 
   return {
+    sessions: sessions.count,
     usageBuckets: Number(usageBuckets),
     requestLeases: Number(requestLeases),
     shareSnapshots: Number(shareSnapshots),
