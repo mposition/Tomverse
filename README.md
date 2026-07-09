@@ -86,6 +86,19 @@ clients cannot bypass Cloudflare and supply that header themselves. If Railway
 is the only trusted edge, keep the default `x-forwarded-for`; the application
 uses the final address in that proxy chain.
 
+## Content Security Policy
+
+Nonce CSP starts in report-only mode. Review `CSP violation` entries in Railway
+logs, exercise sign-in, Google Drive, Turnstile, attachments, and shared pages,
+then enable enforcement:
+
+```text
+CSP_MODE=enforce
+```
+
+Do not enable full-page CDN caching for HTML routes while nonce CSP is active.
+API responses may still use their own cache policies.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
