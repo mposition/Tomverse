@@ -5,6 +5,13 @@ import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next"; // 💡 세션 조회를 위한 임포트 추가
 import { authOptions } from "@/lib/auth"; // 💡 NextAuth 설정 옵션 임포트
 import { APP_DEFAULTS, clampSelectedModels } from "@/lib/appDefaults";
+import {
+    clearLockVerificationAttempts,
+    consumeLockVerificationAttempt,
+    hashConversationPassword,
+    lockErrorResponse,
+    verifyConversationPassword,
+} from "@/lib/conversationLock";
 
 // 💡 방어 함수 추가
 const safeParse = (data: any, fallback: any) => {
@@ -137,7 +144,7 @@ export async function PATCH(req: Request, context: any) {
         // 실제 DB 통신 전, 대화방 소유권 선행 검증!
         const existingConv = await prisma.conversation.findUnique({
             where: { id: conversationId },
-            select: { userId: true, selectedModels: true }
+            select: { userId: true, selectedModels: true, password: true }
         });
 
         if (!existingConv) {
@@ -154,7 +161,7 @@ export async function PATCH(req: Request, context: any) {
         const defaultEngine = userSettings?.defaultModel || APP_DEFAULTS.defaultModelId;
 
 	const updateData: any = {};
-      const { title, password, unlock } = body;
+      const { title, password, currentPassword, unlock } = body;
 
 	// 💡 제목 변경 요청이 있을 때
     if (title && title.trim()) {
@@ -163,7 +170,53 @@ export async function PATCH(req: Request, context: any) {
 
       // 💡 잠금 설정
       if (password !== undefined) {
-          updateData.password = password;
+          if (password === null) {
+              if (existingConv.password) {
+                  const attempt = await consumeLockVerificationAttempt(
+                      req,
+                      userId,
+                      conversationId
+                  );
+                  const verification = await verifyConversationPassword(
+                      currentPassword,
+                      existingConv.password
+                  );
+                  if (!verification.matches) {
+                      return NextResponse.json(
+                          {
+                              success: false,
+                              error: "비밀번호가 일치하지 않습니다.",
+                          },
+                          { status: 403 }
+                      );
+                  }
+                  await clearLockVerificationAttempts(attempt);
+              }
+              updateData.password = null;
+          } else {
+              if (existingConv.password) {
+                  const attempt = await consumeLockVerificationAttempt(
+                      req,
+                      userId,
+                      conversationId
+                  );
+                  const verification = await verifyConversationPassword(
+                      currentPassword,
+                      existingConv.password
+                  );
+                  if (!verification.matches) {
+                      return NextResponse.json(
+                          {
+                              success: false,
+                              error: "비밀번호가 일치하지 않습니다.",
+                          },
+                          { status: 403 }
+                      );
+                  }
+                  await clearLockVerificationAttempts(attempt);
+              }
+              updateData.password = await hashConversationPassword(password);
+          }
       }
 
       // 💡 잠금 해제
@@ -235,6 +288,9 @@ export async function PATCH(req: Request, context: any) {
         password: undefined // 원본 암호는 절대 흘리지 않음
     });
   } catch (error) {
+    const lockError = lockErrorResponse(error);
+    if (lockError) return lockError;
+
 	console.error("❌ [백엔드] 수정 API 에러:", error);	  
     return NextResponse.json({ error: "수정 실패" }, { status: 500 });
   }

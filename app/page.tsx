@@ -282,7 +282,11 @@ export default function Home() {
                     const verifyData = await verifyRes.json();
 
                     if (!verifyData.success) {
-                        alert(t("sidebar.wrongPassword"));
+                        alert(
+                            verifyData.code === "LOCK_RATE_LIMITED"
+                                ? t("sidebar.lockRateLimited")
+                                : t("sidebar.wrongPassword")
+                        );
                         return; // 패널 로딩 절차 전면 무력화 및 차단
                     }
                 } catch (e) {
@@ -345,15 +349,24 @@ export default function Home() {
 
     // 대화방 잠금 등록 핸들러
     const handleLock = async (id: string, password: string) => {
-        setConversations((prev) =>
-            prev.map((c) => (c.id === id ? { ...c, isLocked: true } : c))
-        );
         try {
-            await fetch(`/api/conversations/${id}`, {
+            const response = await fetch(`/api/conversations/${id}`, {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ password }),
             });
+            if (!response.ok) {
+                const data = await response.json().catch(() => null);
+                alert(
+                    data?.code === "INVALID_LOCK_PASSWORD"
+                        ? t("sidebar.passwordLength")
+                        : t("sidebar.wrongPassword")
+                );
+                return;
+            }
+            setConversations((prev) =>
+                prev.map((c) => (c.id === id ? { ...c, isLocked: true } : c))
+            );
         } catch (e) {
             console.error("잠금 설정 에러:", e);
         }
@@ -361,43 +374,30 @@ export default function Home() {
 
     // 대화방 잠금 해제 핸들러
     const handleUnlock = async (id: string) => {
-        // 잠금 해제 전 기존 비밀번호 일치성 검증
         const targetConv = conversations.find((c) => c.id === id);
-        if (targetConv && targetConv.isLocked) {
-            const inputPwd = prompt(t("sidebar.askPassword"));
+        if (!targetConv?.isLocked) return;
 
-            // 취소를 누르거나 비밀번호가 틀린 경우 절차 차단
-            if (inputPwd === null) return; // 취소 버튼 클릭 시 종료
+        const currentPassword = prompt(t("sidebar.askPassword"));
+        if (currentPassword === null) return;
 
-            // 프론트엔드가 비밀번호를 모르므로 백엔드 검증 API를 반드시 거칩니다.
-            try {
-                const verifyRes = await fetch(`/api/conversations/${id}/verify`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ password: inputPwd }),
-                });
-                const verifyData = await verifyRes.json();
-
-                if (!verifyData.success) {
-                    alert(t("sidebar.wrongPassword"));
-                    return;
-                }
-            } catch (e) {
-                console.error("검증 통신 실패:", e);
-                return;
-            }
-        }
-
-        // 비밀번호가 일치하는 경우에만 기존 해제 및 API 동기화 로직 실행
-        setConversations((prev) =>
-            prev.map((c) => (c.id === id ? { ...c, isLocked: false } : c))
-        );
         try {
-            await fetch(`/api/conversations/${id}`, {
+            const response = await fetch(`/api/conversations/${id}`, {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ password: null }),
+                body: JSON.stringify({ password: null, currentPassword }),
             });
+            if (!response.ok) {
+                const data = await response.json().catch(() => null);
+                alert(
+                    data?.code === "LOCK_RATE_LIMITED"
+                        ? t("sidebar.lockRateLimited")
+                        : t("sidebar.wrongPassword")
+                );
+                return;
+            }
+            setConversations((prev) =>
+                prev.map((c) => (c.id === id ? { ...c, isLocked: false } : c))
+            );
         } catch (e) {
             console.error("잠금 해제 에러:", e);
         }

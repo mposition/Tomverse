@@ -263,6 +263,14 @@ export function ChatSidebar({
                                                     e.stopPropagation();
                                                     setOpenMenuId(null);
                                                     const pwd = prompt(t("sidebar.enterPassword"));
+                                                    if (
+                                                        pwd &&
+                                                        (pwd.trim().length < 4 ||
+                                                            pwd.trim().length > 128)
+                                                    ) {
+                                                        alert(t("sidebar.passwordLength"));
+                                                        return;
+                                                    }
                                                     if (pwd && pwd.trim()) {
                                                         if (onLock) onLock(conv.id, pwd.trim());
                                                     }
