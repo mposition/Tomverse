@@ -5,6 +5,13 @@ import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next"; // 💡 세션 조회를 위한 임포트 추가
 import { authOptions } from "@/lib/auth"; // 💡 NextAuth 설정 옵션 임포트
 import { APP_DEFAULTS, clampSelectedModels } from "@/lib/appDefaults";
+import { isEnabledModelId } from "@/lib/models";
+import { z } from "zod";
+import {
+    apiSecurityResponse,
+    consumeApiRateLimit,
+    readLimitedJson,
+} from "@/lib/apiSecurity";
 import {
     clearConversationUnlockCookie,
     clearLockVerificationAttempts,
@@ -15,6 +22,31 @@ import {
     lockErrorResponse,
     verifyConversationPassword,
 } from "@/lib/conversationLock";
+
+const modelSchema = z.string().max(100).refine(isEnabledModelId);
+const updateConversationSchema = z
+  .object({
+    title: z.string().trim().min(1).max(120).optional(),
+    password: z.union([z.string().min(4).max(128), z.null()]).optional(),
+    currentPassword: z.string().min(1).max(128).optional(),
+    selectedModels: z
+      .array(modelSchema)
+      .max(APP_DEFAULTS.maxSelectedModels)
+      .optional(),
+    disabledPanels: z
+      .array(modelSchema)
+      .max(APP_DEFAULTS.maxSelectedModels)
+      .optional(),
+  })
+  .strict()
+  .refine(
+    (body) =>
+      body.title !== undefined ||
+      body.password !== undefined ||
+      body.selectedModels !== undefined ||
+      body.disabledPanels !== undefined,
+    { message: "At least one update is required." }
+  );
 
 // 💡 방어 함수 추가
 const safeParse = (data: any, fallback: any) => {
@@ -145,15 +177,16 @@ export async function PATCH(req: Request, context: any) {
         }
 
         // 바디 파싱 에러 방어
-        let body;
-        try {
-            body = await req.json();
-        } catch (err) {
-            console.error("❌ [백엔드 PATCH] JSON 파싱 에러:", err);
-            return NextResponse.json({ error: "잘못된 JSON 형식" }, { status: 400 });
-        }
-
         const userId = (session.user as any).id;
+        await consumeApiRateLimit(req, userId, "conversation-update", {
+            minute: 30,
+            day: 1000,
+        });
+        const body = await readLimitedJson(
+            req,
+            16 * 1024,
+            updateConversationSchema
+        );
         const params = await context.params;
         const conversationId = params.conversationId || params.id; // 폴더명이 [id]일 경우도 방어
 
@@ -182,17 +215,7 @@ export async function PATCH(req: Request, context: any) {
         const defaultEngine = userSettings?.defaultModel || APP_DEFAULTS.defaultModelId;
 
 	const updateData: any = {};
-      const { title, password, currentPassword, unlock } = body;
-
-      if (unlock !== undefined) {
-          return NextResponse.json(
-              {
-                  error: "Unsupported unlock request.",
-                  code: "INVALID_UNLOCK_REQUEST",
-              },
-              { status: 400 }
-          );
-      }
+      const { title, password, currentPassword } = body;
       if (
           existingConv.password &&
           password === undefined &&
@@ -207,8 +230,8 @@ export async function PATCH(req: Request, context: any) {
       }
 
 	// 💡 제목 변경 요청이 있을 때
-    if (title && title.trim()) {
-      updateData.title = title.trim();
+    if (title !== undefined) {
+      updateData.title = title;
       } 
 
       // 💡 잠금 설정
@@ -267,14 +290,7 @@ export async function PATCH(req: Request, context: any) {
 	// 💡 업데이트 요청이 오면 다시 문자열로 압축하여 DB에 찌릅니다.
     const normalizedModels =
       body.selectedModels !== undefined
-        ? clampSelectedModels(
-            Array.isArray(body.selectedModels)
-              ? body.selectedModels.filter(
-                  (modelId: unknown): modelId is string =>
-                    typeof modelId === "string"
-                )
-              : []
-          )
+        ? clampSelectedModels(body.selectedModels)
         : clampSelectedModels(
             safeParse(existingConv.selectedModels, [defaultEngine])
           );
@@ -287,17 +303,13 @@ export async function PATCH(req: Request, context: any) {
     if (body.disabledPanels !== undefined) {
       const activeModels =
         normalizedModels.length > 0 ? normalizedModels : [defaultEngine];
-      const disabledPanels = Array.isArray(body.disabledPanels)
-        ? Array.from(
-            new Set(
-              body.disabledPanels.filter(
-                (modelId: unknown): modelId is string =>
-                  typeof modelId === "string" &&
-                  activeModels.includes(modelId)
-              )
-            )
+      const disabledPanels = Array.from(
+        new Set(
+          body.disabledPanels.filter((modelId) =>
+            activeModels.includes(modelId)
           )
-        : [];
+        )
+      );
       updateData.disabledPanels = JSON.stringify(disabledPanels);
     }	
 	
@@ -342,6 +354,9 @@ export async function PATCH(req: Request, context: any) {
     }
     return response;
   } catch (error) {
+    const securityResponse = apiSecurityResponse(error);
+    if (securityResponse) return securityResponse;
+
     const lockError = lockErrorResponse(error);
     if (lockError) return lockError;
 

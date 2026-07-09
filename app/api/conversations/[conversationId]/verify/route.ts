@@ -2,6 +2,12 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { z } from "zod";
+import {
+    apiSecurityResponse,
+    consumeApiRateLimit,
+    readLimitedJson,
+} from "@/lib/apiSecurity";
 import {
     clearLockVerificationAttempts,
     consumeLockVerificationAttempt,
@@ -11,6 +17,12 @@ import {
     verifyConversationPassword,
 } from "@/lib/conversationLock";
 
+const verifyConversationSchema = z
+    .object({
+        password: z.string().min(1).max(128),
+    })
+    .strict();
+
 export async function POST(req: Request, context: any) {
     try {
         const session = await getServerSession(authOptions);
@@ -18,10 +30,18 @@ export async function POST(req: Request, context: any) {
             return NextResponse.json({ error: "권한 없음" }, { status: 401 });
         }
 
-        const { password } = await req.json();
+        const userId = (session.user as any).id;
+        await consumeApiRateLimit(req, userId, "conversation-lock-verify", {
+            minute: 10,
+            day: 100,
+        });
+        const { password } = await readLimitedJson(
+            req,
+            2 * 1024,
+            verifyConversationSchema
+        );
         const params = await context.params;
         const conversationId = params.conversationId;
-        const userId = (session.user as any).id;
 
         const conversation = await prisma.conversation.findUnique({
             where: { id: conversationId },
@@ -82,6 +102,9 @@ export async function POST(req: Request, context: any) {
         );
         return response;
     } catch (error) {
+        const securityResponse = apiSecurityResponse(error);
+        if (securityResponse) return securityResponse;
+
         const lockError = lockErrorResponse(error);
         if (lockError) return lockError;
 

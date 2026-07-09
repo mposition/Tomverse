@@ -215,6 +215,11 @@ const uploadPreparationSchema = z.union([
         })
         .strict(),
 ]);
+const deleteAttachmentSchema = z
+    .object({
+        key: z.string().min(1).max(512),
+    })
+    .strict();
 
 const sanitizeFilename = (filename: string) => {
     const safe = filename
@@ -389,13 +394,21 @@ export async function PUT(req: Request) {
 
 export async function DELETE(req: Request) {
     const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
+    const userId = (session?.user as { id?: string } | undefined)?.id;
+    if (!session?.user?.email || !userId) {
         return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     try {
-        const body = await req.json();
-        const key = typeof body.key === "string" ? body.key : "";
+        await consumeApiRateLimit(req, userId, "attachment-delete", {
+            minute: 30,
+            day: 500,
+        });
+        const { key } = await readLimitedJson(
+            req,
+            4 * 1024,
+            deleteAttachmentSchema
+        );
         const userPrefix = `attachments/${createHash("sha256")
             .update(session.user.email.toLowerCase())
             .digest("hex")
@@ -408,6 +421,9 @@ export async function DELETE(req: Request) {
         await deleteR2Object(key);
         return new Response(null, { status: 204 });
     } catch (error) {
+        const securityResponse = apiSecurityResponse(error);
+        if (securityResponse) return securityResponse;
+
         console.error("R2 attachment deletion failed:", error);
         return Response.json(
             { error: "Failed to delete attachment." },

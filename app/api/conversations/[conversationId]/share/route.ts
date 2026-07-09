@@ -15,12 +15,32 @@ import {
   conversationLockedResponse,
   hasConversationUnlockGrant,
 } from "@/lib/conversationLock";
+import {
+  apiSecurityResponse,
+  consumeApiRateLimit,
+} from "@/lib/apiSecurity";
 
 const getShareTtlDays = () => {
   const configured = Number(process.env.SHARE_LINK_TTL_DAYS);
   return Number.isInteger(configured) && configured >= 1 && configured <= 365
     ? configured
     : 30;
+};
+
+const applyShareRateLimit = async (
+  req: Request,
+  userId: string,
+  scope: "conversation-share-create" | "conversation-share-revoke",
+  limits: { minute: number; day: number }
+) => {
+  try {
+    await consumeApiRateLimit(req, userId, scope, limits);
+    return null;
+  } catch (error) {
+    const response = apiSecurityResponse(error);
+    if (response) return response;
+    throw error;
+  }
 };
 
 export async function POST(req: Request, context: any) {
@@ -32,6 +52,13 @@ export async function POST(req: Request, context: any) {
   const params = await context.params;
   const conversationId = params.conversationId;
   const userId = (session.user as any).id;
+  const rateLimitResponse = await applyShareRateLimit(
+    req,
+    userId,
+    "conversation-share-create",
+    { minute: 10, day: 100 }
+  );
+  if (rateLimitResponse) return rateLimitResponse;
 
   const accessConversation = await prisma.conversation.findUnique({
     where: { id: conversationId },
@@ -143,6 +170,14 @@ export async function DELETE(req: Request, context: any) {
   const params = await context.params;
   const conversationId = params.conversationId;
   const userId = (session.user as any).id;
+  const rateLimitResponse = await applyShareRateLimit(
+    req,
+    userId,
+    "conversation-share-revoke",
+    { minute: 20, day: 200 }
+  );
+  if (rateLimitResponse) return rateLimitResponse;
+
   const conversation = await prisma.conversation.findUnique({
     where: { id: conversationId },
     select: { userId: true, password: true },
