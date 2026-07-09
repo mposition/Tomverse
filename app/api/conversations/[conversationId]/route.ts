@@ -22,6 +22,10 @@ import {
     lockErrorResponse,
     verifyConversationPassword,
 } from "@/lib/conversationLock";
+import {
+    logSecurityAuditEvent,
+    type SecurityAuditEvent,
+} from "@/lib/securityAudit";
 
 const modelSchema = z.string().max(100).refine(isEnabledModelId);
 const updateConversationSchema = z
@@ -277,6 +281,22 @@ export async function PATCH(req: Request, context: any) {
 
 	const updateData: any = {};
       const { title, password, currentPassword } = body;
+      const lockAuditEvent: SecurityAuditEvent | null =
+          password === undefined
+              ? null
+              : password === null
+                ? "conversation.lock.remove"
+                : existingConv.password
+                  ? "conversation.lock.change"
+                  : "conversation.lock.set";
+      if (lockAuditEvent) {
+          logSecurityAuditEvent(lockAuditEvent, {
+              userId,
+              resourceId: conversationId,
+              request: req,
+              outcome: "attempt",
+          });
+      }
       if (
           existingConv.password &&
           password === undefined &&
@@ -309,6 +329,13 @@ export async function PATCH(req: Request, context: any) {
                       existingConv.password
                   );
                   if (!verification.matches) {
+                      logSecurityAuditEvent("conversation.lock.remove", {
+                          userId,
+                          resourceId: conversationId,
+                          request: req,
+                          outcome: "denied",
+                          reason: "INVALID_LOCK_PASSWORD",
+                      });
                       return NextResponse.json(
                           {
                               success: false,
@@ -332,6 +359,13 @@ export async function PATCH(req: Request, context: any) {
                       existingConv.password
                   );
                   if (!verification.matches) {
+                      logSecurityAuditEvent("conversation.lock.change", {
+                          userId,
+                          resourceId: conversationId,
+                          request: req,
+                          outcome: "denied",
+                          reason: "INVALID_LOCK_PASSWORD",
+                      });
                       return NextResponse.json(
                           {
                               success: false,
@@ -384,6 +418,14 @@ export async function PATCH(req: Request, context: any) {
       where: { id: conversationId },
       data: updateData,
     });
+    if (lockAuditEvent) {
+      logSecurityAuditEvent(lockAuditEvent, {
+        userId,
+        resourceId: conversationId,
+        request: req,
+        outcome: "success",
+      });
+    }
 
 	const response = NextResponse.json({
       ...updatedConversation,
@@ -453,6 +495,12 @@ export async function DELETE(req: Request, { params }: Params) {
       if (existingConv.userId !== userId) {
           return NextResponse.json({ error: "접근 권한이 없는 타인의 대화방입니다." }, { status: 403 });
       }
+    logSecurityAuditEvent("conversation.delete", {
+      userId,
+      resourceId: conversationId,
+      request: req,
+      outcome: "attempt",
+    });
 
     if (
       !hasConversationUnlockGrant(
@@ -462,11 +510,24 @@ export async function DELETE(req: Request, { params }: Params) {
         existingConv.password
       )
     ) {
+      logSecurityAuditEvent("conversation.delete", {
+        userId,
+        resourceId: conversationId,
+        request: req,
+        outcome: "denied",
+        reason: "CONVERSATION_LOCKED",
+      });
       return conversationLockedResponse();
     }
 
     await prisma.conversation.delete({
       where: { id: conversationId },
+    });
+    logSecurityAuditEvent("conversation.delete", {
+      userId,
+      resourceId: conversationId,
+      request: req,
+      outcome: "success",
     });
 
     const response = NextResponse.json({ success: true });

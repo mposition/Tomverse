@@ -16,6 +16,7 @@ import {
     lockErrorResponse,
     verifyConversationPassword,
 } from "@/lib/conversationLock";
+import { logSecurityAuditEvent } from "@/lib/securityAudit";
 
 const verifyConversationSchema = z
     .object({
@@ -60,6 +61,12 @@ export async function POST(req: Request, context: any) {
                 { status: 400 }
             );
         }
+        logSecurityAuditEvent("conversation.lock.verify", {
+            userId,
+            resourceId: conversationId,
+            request: req,
+            outcome: "attempt",
+        });
 
         const attempt = await consumeLockVerificationAttempt(
             req,
@@ -72,6 +79,13 @@ export async function POST(req: Request, context: any) {
         );
 
         if (!verification.matches) {
+            logSecurityAuditEvent("conversation.lock.verify", {
+                userId,
+                resourceId: conversationId,
+                request: req,
+                outcome: "denied",
+                reason: "INVALID_LOCK_PASSWORD",
+            });
             return NextResponse.json(
                 { success: false, error: "비밀번호가 일치하지 않습니다." },
                 { status: 403 }
@@ -91,6 +105,12 @@ export async function POST(req: Request, context: any) {
             effectivePassword = upgradedPassword;
         }
         await clearLockVerificationAttempts(attempt);
+        logSecurityAuditEvent("conversation.lock.verify", {
+            userId,
+            resourceId: conversationId,
+            request: req,
+            outcome: "success",
+        });
         const response = NextResponse.json({ success: true });
         response.headers.append(
             "Set-Cookie",

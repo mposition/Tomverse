@@ -10,6 +10,7 @@ import {
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getTrustedClientIp } from "@/lib/clientIp";
+import { logSecurityAuditEvent } from "@/lib/securityAudit";
 
 const HASH_PREFIX = "scrypt";
 const HASH_VERSION = "1";
@@ -307,6 +308,13 @@ export const consumeLockVerificationAttempt = async (
             IP_ATTEMPT_LIMIT
         );
         if (!userAllowed || !ipAllowed) {
+            logSecurityAuditEvent("conversation.lock.verify", {
+                userId,
+                resourceId: conversationId,
+                request,
+                outcome: "rate_limited",
+                reason: "LOCK_RATE_LIMITED",
+            });
             throw new ConversationLockError(
                 429,
                 "LOCK_RATE_LIMITED",

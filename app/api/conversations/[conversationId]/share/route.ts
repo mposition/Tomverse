@@ -19,6 +19,7 @@ import {
   apiSecurityResponse,
   consumeApiRateLimit,
 } from "@/lib/apiSecurity";
+import { logSecurityAuditEvent } from "@/lib/securityAudit";
 
 const getShareTtlDays = () => {
   const configured = Number(process.env.SHARE_LINK_TTL_DAYS);
@@ -59,7 +60,15 @@ export async function POST(req: Request, context: any) {
     "conversation-share-create",
     { minute: 10, day: 100 }
   );
-  if (rateLimitResponse) return rateLimitResponse;
+  if (rateLimitResponse) {
+    logSecurityAuditEvent("conversation.share.create", {
+      userId,
+      resourceId: conversationId,
+      request: req,
+      outcome: "rate_limited",
+    });
+    return rateLimitResponse;
+  }
 
   const accessConversation = await prisma.conversation.findUnique({
     where: { id: conversationId },
@@ -72,6 +81,12 @@ export async function POST(req: Request, context: any) {
   if (!accessConversation || accessConversation.userId !== userId) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+  logSecurityAuditEvent("conversation.share.create", {
+    userId,
+    resourceId: conversationId,
+    request: req,
+    outcome: "attempt",
+  });
   if (
     !hasConversationUnlockGrant(
       req,
@@ -80,6 +95,13 @@ export async function POST(req: Request, context: any) {
       accessConversation.password
     )
   ) {
+    logSecurityAuditEvent("conversation.share.create", {
+      userId,
+      resourceId: conversationId,
+      request: req,
+      outcome: "denied",
+      reason: "CONVERSATION_LOCKED",
+    });
     return conversationLockedResponse();
   }
 
@@ -189,6 +211,12 @@ export async function POST(req: Request, context: any) {
   });
 
   const baseUrl = getPublicAppOrigin(req);
+  logSecurityAuditEvent("conversation.share.create", {
+    userId,
+    resourceId: conversationId,
+    request: req,
+    outcome: "success",
+  });
 
   return NextResponse.json({
     url: `${baseUrl}/share/${updated.shareToken}`,
@@ -211,7 +239,15 @@ export async function DELETE(req: Request, context: any) {
     "conversation-share-revoke",
     { minute: 20, day: 200 }
   );
-  if (rateLimitResponse) return rateLimitResponse;
+  if (rateLimitResponse) {
+    logSecurityAuditEvent("conversation.share.revoke", {
+      userId,
+      resourceId: conversationId,
+      request: req,
+      outcome: "rate_limited",
+    });
+    return rateLimitResponse;
+  }
 
   const conversation = await prisma.conversation.findUnique({
     where: { id: conversationId },
@@ -221,6 +257,12 @@ export async function DELETE(req: Request, context: any) {
   if (!conversation || conversation.userId !== userId) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+  logSecurityAuditEvent("conversation.share.revoke", {
+    userId,
+    resourceId: conversationId,
+    request: req,
+    outcome: "attempt",
+  });
 
   if (
     !hasConversationUnlockGrant(
@@ -230,6 +272,13 @@ export async function DELETE(req: Request, context: any) {
       conversation.password
     )
   ) {
+    logSecurityAuditEvent("conversation.share.revoke", {
+      userId,
+      resourceId: conversationId,
+      request: req,
+      outcome: "denied",
+      reason: "CONVERSATION_LOCKED",
+    });
     return conversationLockedResponse();
   }
 
@@ -242,6 +291,12 @@ export async function DELETE(req: Request, context: any) {
       shareExpiresAt: null,
       shareRevokedAt: new Date(),
     },
+  });
+  logSecurityAuditEvent("conversation.share.revoke", {
+    userId,
+    resourceId: conversationId,
+    request: req,
+    outcome: "success",
   });
 
   return NextResponse.json({ success: true });
