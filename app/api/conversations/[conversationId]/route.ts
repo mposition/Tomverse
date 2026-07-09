@@ -47,6 +47,7 @@ const updateConversationSchema = z
       body.disabledPanels !== undefined,
     { message: "At least one update is required." }
   );
+const MESSAGE_PAGE_SIZE = 50;
 
 // 💡 방어 함수 추가
 const safeParse = (data: any, fallback: any) => {
@@ -112,16 +113,27 @@ export async function GET(req: Request, context: any) {
     });
         const defaultEngine = userSettings?.defaultModel || APP_DEFAULTS.defaultModelId;
 	
-    // Prisma의 include 기능을 사용해 대화방을 찾으면서 내부에 연결된 메시지까지 한 번에 쿼리합니다.
+    const cursor = new URL(req.url).searchParams.get("cursor");
+    if (cursor && (cursor.length > 100 || !/^[A-Za-z0-9_-]+$/.test(cursor))) {
+      return NextResponse.json(
+        { error: "Invalid message cursor." },
+        { status: 400 }
+      );
+    }
+
     const conversation = await prisma.conversation.findUnique({
       where: { id: conversationId },
-      include: {
-        messages: {
-          orderBy: {
-            createdAt: "asc", // 💡 중요: 대화 흐름이 깨지지 않도록 과거 메시지부터 순서대로 정렬합니다.						
-          },
-		  select: { id: true, role: true, content: true, status: true, modelId: true },
-        },
+      select: {
+        id: true,
+        userId: true,
+        title: true,
+        selectedModels: true,
+        disabledPanels: true,
+        shareEnabled: true,
+        shareExpiresAt: true,
+        createdAt: true,
+        updatedAt: true,
+        password: true,
       },
     });
 
@@ -136,10 +148,33 @@ export async function GET(req: Request, context: any) {
         return NextResponse.json({ error: "접근 권한이 없는 타인의 대화방입니다." }, { status: 403 });
     }
 
-    // 대화방 정보와 메시지 배열({ id, title, messages: [...] })을 프론트엔드로 응답합니다.
+    const messagePage = await prisma.message.findMany({
+      where: { conversationId },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      take: MESSAGE_PAGE_SIZE + 1,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      select: {
+        id: true,
+        role: true,
+        content: true,
+        status: true,
+        modelId: true,
+      },
+    });
+    const hasMoreMessages = messagePage.length > MESSAGE_PAGE_SIZE;
+    const messages = hasMoreMessages
+      ? messagePage.slice(0, MESSAGE_PAGE_SIZE)
+      : messagePage;
+
+    // 대화방 정보와 제한된 메시지 페이지를 프론트엔드로 응답합니다.
 	// 💡 프론트엔드 싱크용 파싱
     return NextResponse.json({
       ...conversation,
+        messages,
+        messagePage: {
+          hasMore: hasMoreMessages,
+          nextCursor: hasMoreMessages ? messages.at(-1)?.id || null : null,
+        },
         selectedModels: clampSelectedModels(
           safeParse(conversation.selectedModels, [defaultEngine])
         ),

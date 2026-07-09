@@ -140,6 +140,23 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
           });			
           if (response.ok) {
             const data = await response.json();
+            let nextCursor = data.messagePage?.nextCursor;
+            while (data.messagePage?.hasMore && nextCursor && isMounted) {
+              const pageResponse = await fetch(
+                `/api/conversations/${initialConversationId}?cursor=${encodeURIComponent(nextCursor)}`,
+                {
+                  cache: "no-store",
+                  headers: { "Cache-Control": "no-cache" },
+                }
+              );
+              if (!pageResponse.ok) break;
+              const pageData = await pageResponse.json();
+              if (Array.isArray(pageData.messages)) {
+                data.messages.push(...pageData.messages);
+              }
+              data.messagePage = pageData.messagePage;
+              nextCursor = pageData.messagePage?.nextCursor;
+            }
 			    if (isMounted) {              
               // 방금 새로 만든 방이어서 현재 답변을 전송(스트리밍) 중이라면, 
               // 아직 DB 저장이 안 된 빈 데이터를 가져와서 화면을 덮어씌우지 않고 무시합니다!

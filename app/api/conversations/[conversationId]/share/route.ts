@@ -26,6 +26,7 @@ const getShareTtlDays = () => {
     ? configured
     : 30;
 };
+const SHARE_MESSAGE_PAGE_SIZE = 50;
 
 const applyShareRateLimit = async (
   req: Request,
@@ -87,16 +88,6 @@ export async function POST(req: Request, context: any) {
     select: {
       title: true,
       createdAt: true,
-      messages: {
-        orderBy: { createdAt: "asc" },
-        select: {
-          id: true,
-          role: true,
-          content: true,
-          modelId: true,
-          createdAt: true,
-        },
-      },
     },
   });
 
@@ -113,21 +104,65 @@ export async function POST(req: Request, context: any) {
     title: conversation.title,
     conversationCreatedAt: conversation.createdAt.toISOString(),
     sharedAt: sharedAt.toISOString(),
-    messages: conversation.messages
-      .filter(
-        (
-          message
-        ): message is typeof message & { role: "user" | "assistant" } =>
-          message.role === "user" || message.role === "assistant"
-      )
-      .map((message) => ({
+    messages: [],
+  };
+  let snapshotBytes = Buffer.byteLength(JSON.stringify(snapshot), "utf8");
+  let messageCursor: string | undefined;
+
+  while (true) {
+    const messages = await prisma.message.findMany({
+      where: {
+        conversationId,
+        role: { in: ["user", "assistant"] },
+      },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      take: SHARE_MESSAGE_PAGE_SIZE,
+      ...(messageCursor
+        ? { cursor: { id: messageCursor }, skip: 1 }
+        : {}),
+      select: {
+        id: true,
+        role: true,
+        content: true,
+        modelId: true,
+        createdAt: true,
+      },
+    });
+
+    for (const message of messages) {
+      if (message.role !== "user" && message.role !== "assistant") continue;
+      const snapshotMessage: ShareSnapshot["messages"][number] = {
         id: message.id,
         role: message.role,
         content: message.content,
         modelId: message.modelId,
         createdAt: message.createdAt.toISOString(),
-      })),
-  };
+      };
+      const separatorBytes = snapshot.messages.length > 0 ? 1 : 0;
+      const messageBytes =
+        Buffer.byteLength(JSON.stringify(snapshotMessage), "utf8") +
+        separatorBytes;
+      if (
+        snapshot.messages.length >= 10_000 ||
+        snapshotBytes + messageBytes > MAX_SHARE_SNAPSHOT_BYTES
+      ) {
+        return NextResponse.json(
+          {
+            error: "Conversation is too large to share.",
+            code: "SHARE_TOO_LARGE",
+          },
+          { status: 413 }
+        );
+      }
+      snapshot.messages.push(snapshotMessage);
+      snapshotBytes += messageBytes;
+    }
+
+    if (messages.length < SHARE_MESSAGE_PAGE_SIZE) break;
+    messageCursor = messages.at(-1)?.id;
+    if (!messageCursor) break;
+  }
+
   const parsedSnapshot = shareSnapshotSchema.safeParse(snapshot);
   if (
     !parsedSnapshot.success ||
