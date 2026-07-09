@@ -4,7 +4,8 @@ import { Conversation } from "./types";
 import { AuthButton } from "@/components/auth/AuthButton";
 import { useState, useEffect, useRef } from "react";
 import { useLanguage } from "@/components/LanguageProvider"; // 💡 훅 임포트
-import { Crown, Download, Lock, MoreVertical, Pencil, Share2, Trash2, Unlock } from "lucide-react";
+import Link from "next/link";
+import { AlertTriangle, CloudUpload, Crown, Database, Download, Lock, MoreVertical, Pencil, Send, Share2, ShieldCheck, Trash2, Unlock, X } from "lucide-react";
 
 type ChatSidebarProps = {
     userEmail: string;
@@ -44,6 +45,7 @@ export function ChatSidebar({
     onTogglePrivateMode,
 }: ChatSidebarProps) {
     const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+    const [showPrivateNotice, setShowPrivateNotice] = useState(false);
     const menuRef = useRef<HTMLDivElement | null>(null);
     const { t, lang, setLang } = useLanguage(); // 💡 t 함수 꺼내기
     const menuItemBase =
@@ -70,7 +72,17 @@ export function ChatSidebar({
         return () => document.removeEventListener("mousedown", handleClickOutside);
     }, []);
 
+    useEffect(() => {
+        if (!showPrivateNotice) return;
+        const handleEscape = (event: KeyboardEvent) => {
+            if (event.key === "Escape") setShowPrivateNotice(false);
+        };
+        document.addEventListener("keydown", handleEscape);
+        return () => document.removeEventListener("keydown", handleEscape);
+    }, [showPrivateNotice]);
+
     return (
+        <>
         <aside className="w-64 shrink-0 bg-zinc-50 border-r border-zinc-200 dark:bg-zinc-900 dark:border-zinc-800 flex flex-col h-full select-none">
 
             {/* 💡 1. 상단 시스템 이름 배너 복구 */}
@@ -91,7 +103,13 @@ export function ChatSidebar({
                 </button>
 
                 <button
-                    onClick={onTogglePrivateMode}
+                    onClick={() => {
+                        if (isPrivateMode) {
+                            onTogglePrivateMode();
+                        } else {
+                            setShowPrivateNotice(true);
+                        }
+                    }}
                     disabled={isGuestMode}
                     className={`mt-2 w-full flex items-center justify-center gap-2 rounded-xl border px-4 py-2 text-xs font-semibold transition-all ${isGuestMode
                             ? "cursor-not-allowed opacity-50 border-zinc-200 bg-white text-zinc-400 dark:border-zinc-700/50 dark:bg-zinc-800/50 dark:text-zinc-500"
@@ -323,5 +341,94 @@ export function ChatSidebar({
                 </div>
             </div>
         </aside>
+        {showPrivateNotice && (
+            <div
+                className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+                role="presentation"
+                onMouseDown={(event) => {
+                    if (event.target === event.currentTarget) {
+                        setShowPrivateNotice(false);
+                    }
+                }}
+            >
+                <div
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="private-mode-notice-title"
+                    className="w-full max-w-lg rounded-lg border border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900"
+                >
+                    <div className="flex items-start justify-between gap-4 border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
+                        <div className="flex min-w-0 items-center gap-3">
+                            <ShieldCheck className="h-5 w-5 shrink-0 text-purple-500" />
+                            <div>
+                                <h2
+                                    id="private-mode-notice-title"
+                                    className="text-base font-semibold text-zinc-900 dark:text-zinc-100"
+                                >
+                                    {t("sidebar.privateNoticeTitle")}
+                                </h2>
+                                <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                                    {t("sidebar.privateNoticeIntro")}
+                                </p>
+                            </div>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setShowPrivateNotice(false)}
+                            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                            aria-label={t("auth.cancel")}
+                        >
+                            <X className="h-4 w-4" />
+                        </button>
+                    </div>
+
+                    <div className="space-y-4 px-5 py-4 text-sm text-zinc-700 dark:text-zinc-300">
+                        <div className="flex gap-3">
+                            <Database className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
+                            <p className="leading-6">{t("sidebar.privateNoticeNoSave")}</p>
+                        </div>
+                        <div className="flex gap-3">
+                            <Send className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
+                            <p className="leading-6">{t("sidebar.privateNoticeProvider")}</p>
+                        </div>
+                        <div className="flex gap-3">
+                            <CloudUpload className="mt-0.5 h-4 w-4 shrink-0 text-cyan-500" />
+                            <p className="leading-6">{t("sidebar.privateNoticeAttachment")}</p>
+                        </div>
+                        <div className="flex gap-3 rounded-md bg-amber-50 px-3 py-2.5 text-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
+                            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                            <p className="text-xs leading-5">{t("sidebar.privateNoticeCaution")}</p>
+                        </div>
+                        <Link
+                            href="/privacy"
+                            className="inline-flex text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
+                        >
+                            {t("sidebar.privateNoticePolicy")}
+                        </Link>
+                    </div>
+
+                    <div className="flex justify-end gap-2 border-t border-zinc-200 px-5 py-4 dark:border-zinc-800">
+                        <button
+                            type="button"
+                            onClick={() => setShowPrivateNotice(false)}
+                            className="rounded-md px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                        >
+                            {t("auth.cancel")}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setShowPrivateNotice(false);
+                                onTogglePrivateMode();
+                            }}
+                            className="rounded-md bg-purple-600 px-4 py-2 text-sm font-semibold text-white hover:bg-purple-500"
+                        >
+                            {t("sidebar.privateNoticeContinue")}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
+        </>
     );
 }

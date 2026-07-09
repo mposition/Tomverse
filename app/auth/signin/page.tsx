@@ -4,6 +4,7 @@ import { signIn } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react"; // 💡 React에서 Suspense를 불러옵니다.
 import { useLanguage } from "@/components/LanguageProvider";
+import Link from "next/link";
 
 // 💡 1. useSearchParams를 사용하는 버튼 영역을 별도의 컴포넌트로 분리합니다.
 function SignInButtons() {
@@ -82,6 +83,14 @@ export default function SignInPage() {
                 <p className="mt-6 text-center text-xs text-zinc-400 dark:text-zinc-500">
                     {t("auth.privacy") }
                 </p>
+                <div className="text-center">
+                    <Link
+                        href="/privacy"
+                        className="text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
+                    >
+                        {t("auth.privacyPolicyLink")}
+                    </Link>
+                </div>
             </div>
         </div>
     );
