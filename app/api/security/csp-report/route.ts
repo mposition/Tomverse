@@ -1,6 +1,94 @@
+import { randomInt } from "node:crypto";
+import { getTrustedClientIp } from "@/lib/clientIp";
+
 const MAX_REPORT_BYTES = 16 * 1024;
+const MAX_IP_BUCKETS = 10_000;
+const BUCKET_RETENTION_MS = 2 * 60_000;
+
+type ReportBucket = {
+  minute: number;
+  count: number;
+  lastSeen: number;
+};
+
+const reportBuckets = new Map<string, ReportBucket>();
+
+const positiveInteger = (value: string | undefined, fallback: number) => {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const sampleRate = () => {
+  const parsed = Number(process.env.CSP_REPORT_SAMPLE_RATE);
+  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 1
+    ? parsed
+    : 0.25;
+};
+
+const noContent = () =>
+  new Response(null, {
+    status: 204,
+    headers: { "Cache-Control": "no-store" },
+  });
+
+const allowReportFromIp = (ip: string, now = Date.now()) => {
+  const minute = Math.floor(now / 60_000);
+  const limit = positiveInteger(process.env.CSP_REPORTS_PER_IP_PER_MINUTE, 20);
+  const current = reportBuckets.get(ip);
+
+  if (!current && reportBuckets.size >= MAX_IP_BUCKETS) {
+    for (const [key, bucket] of reportBuckets) {
+      if (now - bucket.lastSeen > BUCKET_RETENTION_MS) {
+        reportBuckets.delete(key);
+      }
+    }
+    if (reportBuckets.size >= MAX_IP_BUCKETS) return false;
+  }
+
+  if (!current || current.minute !== minute) {
+    reportBuckets.set(ip, { minute, count: 1, lastSeen: now });
+    return true;
+  }
+
+  current.lastSeen = now;
+  if (current.count >= limit) return false;
+  current.count += 1;
+  return true;
+};
+
+const removeControlCharacters = (value: unknown, maxLength: number) =>
+  String(value || "")
+    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .slice(0, maxLength);
+
+const sanitizeReportedUrl = (value: unknown) => {
+  const raw = removeControlCharacters(value, 2_048).trim();
+  if (!raw) return "";
+
+  const scheme = raw.match(/^([a-z][a-z0-9+.-]*):/i)?.[1]?.toLowerCase();
+  if (scheme && !["http", "https"].includes(scheme)) {
+    return `${scheme}:`;
+  }
+
+  try {
+    const url = new URL(raw);
+    return `${url.origin}${url.pathname}`.slice(0, 500);
+  } catch {
+    return raw.split(/[?#]/, 1)[0].slice(0, 500);
+  }
+};
+
+const shouldSample = () => {
+  const rate = sampleRate();
+  if (rate <= 0) return false;
+  if (rate >= 1) return true;
+  return randomInt(0, 1_000_000) < rate * 1_000_000;
+};
 
 export async function POST(req: Request) {
+  const clientIp = getTrustedClientIp(req);
+  if (!allowReportFromIp(clientIp)) return noContent();
+
   const declaredLength = Number(req.headers.get("content-length"));
   if (
     Number.isFinite(declaredLength) &&
@@ -36,24 +124,24 @@ export async function POST(req: Request) {
       payload["csp-report"] && typeof payload["csp-report"] === "object"
         ? (payload["csp-report"] as Record<string, unknown>)
         : payload;
+    if (!shouldSample()) return noContent();
+
     console.warn("CSP violation", {
-      documentUri: String(
+      documentUri: sanitizeReportedUrl(
         report["document-uri"] || report.documentURL || ""
-      ).slice(0, 500),
-      violatedDirective: String(
-        report["violated-directive"] || report.effectiveDirective || ""
-      ).slice(0, 120),
-      blockedUri: String(
+      ),
+      violatedDirective: removeControlCharacters(
+        report["violated-directive"] || report.effectiveDirective || "",
+        120
+      ),
+      blockedUri: sanitizeReportedUrl(
         report["blocked-uri"] || report.blockedURL || ""
-      ).slice(0, 500),
-      disposition: String(report.disposition || "").slice(0, 30),
+      ),
+      disposition: removeControlCharacters(report.disposition, 30),
     });
   } catch {
     return new Response(null, { status: 400 });
   }
 
-  return new Response(null, {
-    status: 204,
-    headers: { "Cache-Control": "no-store" },
-  });
+  return noContent();
 }
