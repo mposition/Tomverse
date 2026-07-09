@@ -16,6 +16,10 @@ import { prisma } from "@/lib/prisma";
 import { getEnabledModel, type AiModel } from "@/lib/models";
 import { parseOfficeSafely } from "@/lib/officeSecurity";
 import {
+    normalizeImageSafely,
+    validatePdfSafely,
+} from "@/lib/mediaSecurity";
+import {
     BoundedBufferError,
     readResponseToBuffer,
 } from "@/lib/boundedBuffer";
@@ -161,6 +165,20 @@ const OFFICE_ATTACHMENT_TYPES = new Set([
     "application/vnd.oasis.opendocument.spreadsheet",
     "application/vnd.oasis.opendocument.presentation",
 ]);
+const IMAGE_ATTACHMENT_TYPES = new Set([
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+]);
+const BINARY_ATTACHMENT_TYPES = new Set([
+    ...IMAGE_ATTACHMENT_TYPES,
+    "application/pdf",
+    ...OFFICE_ATTACHMENT_TYPES,
+]);
+const isImageAttachmentType = (
+    mediaType: string
+): mediaType is "image/png" | "image/jpeg" | "image/webp" =>
+    IMAGE_ATTACHMENT_TYPES.has(mediaType);
 const GOOGLE_EXPORT_TYPES: Record<
     string,
     { mediaType: string; extension: string; kind: "file" | "text" }
@@ -605,6 +623,18 @@ export async function POST(req: Request) {
                 ) {
                     throw new Error("Unsupported attachment.");
                 }
+                if (
+                    (BINARY_ATTACHMENT_TYPES.has(attachment.mediaType) &&
+                        attachment.kind !== "file") ||
+                    (!BINARY_ATTACHMENT_TYPES.has(attachment.mediaType) &&
+                        attachment.kind !== "text")
+                ) {
+                    throw new ChatAccessError(
+                        400,
+                        "INVALID_ATTACHMENT_KIND",
+                        "The attachment kind does not match its media type."
+                    );
+                }
 
                 let attachmentData: string;
                 let attachmentBytes: number;
@@ -655,6 +685,39 @@ export async function POST(req: Request) {
                         "An attachment exceeds the per-file size limit."
                     );
                 }
+
+                if (isImageAttachmentType(attachment.mediaType)) {
+                    try {
+                        attachmentBuffer = await normalizeImageSafely(
+                            attachmentBuffer ||
+                                Buffer.from(attachmentData, "base64"),
+                            attachment.mediaType,
+                            MAX_ATTACHMENT_SIZE
+                        );
+                    } catch {
+                        throw new ChatAccessError(
+                            400,
+                            "INVALID_IMAGE_ATTACHMENT",
+                            "The attached image is invalid or unsupported."
+                        );
+                    }
+                    attachmentBytes = attachmentBuffer.byteLength;
+                    attachmentData = attachmentBuffer.toString("base64");
+                } else if (attachment.mediaType === "application/pdf") {
+                    try {
+                        await validatePdfSafely(
+                            attachmentBuffer ||
+                                Buffer.from(attachmentData, "base64")
+                        );
+                    } catch {
+                        throw new ChatAccessError(
+                            400,
+                            "INVALID_PDF_ATTACHMENT",
+                            "The attached PDF is invalid or unsupported."
+                        );
+                    }
+                }
+
                 totalAttachmentBytes += attachmentBytes;
                 if (totalAttachmentBytes > MAX_TOTAL_ATTACHMENT_SIZE) {
                     throw new ChatAccessError(
