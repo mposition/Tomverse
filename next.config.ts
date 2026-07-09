@@ -86,6 +86,11 @@ const nextConfig: NextConfig = {
             key: "X-Robots-Tag",
             value: "noindex, nofollow, noarchive",
           },
+          {
+            key: "Cache-Control",
+            value:
+              "public, max-age=0, s-maxage=300, stale-while-revalidate=60",
+          },
         ],
       },
     ];
