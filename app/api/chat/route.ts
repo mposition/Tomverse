@@ -36,6 +36,14 @@ import {
     conversationLockedResponse,
     hasConversationUnlockGrant,
 } from "@/lib/conversationLock";
+import { z } from "zod";
+import {
+    apiSecurityResponse,
+    assertMessageCapacity,
+    consumeApiRateLimit,
+    readLimitedJson,
+    reserveDailyUploadBytes,
+} from "@/lib/apiSecurity";
 
 const groq = createOpenAI({
     baseURL: "https://api.groq.com/openai/v1",
@@ -185,6 +193,27 @@ const ALLOWED_ATTACHMENT_TYPES = new Set([
     "application/json",
     ...OFFICE_ATTACHMENT_TYPES,
 ]);
+const uploadPreparationSchema = z.union([
+    z
+        .object({
+            action: z.literal("google-drive-import"),
+            fileId: z.string().regex(/^[A-Za-z0-9_-]+$/).max(256),
+            name: z.string().trim().min(1).max(120),
+            mediaType: z.string().refine((value) => !!GOOGLE_EXPORT_TYPES[value]),
+            accessToken: z.string().min(1).max(4096),
+        })
+        .strict(),
+    z
+        .object({
+            action: z.undefined().optional(),
+            name: z.string().trim().min(1).max(120),
+            mediaType: z
+                .string()
+                .refine((value) => ALLOWED_ATTACHMENT_TYPES.has(value)),
+            size: z.number().int().positive().max(MAX_ATTACHMENT_SIZE),
+        })
+        .strict(),
+]);
 
 const sanitizeFilename = (filename: string) => {
     const safe = filename
@@ -226,19 +255,26 @@ export async function GET() {
 
 export async function PUT(req: Request) {
     const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
+    const userId = session?.user?.id;
+    if (!session?.user?.email || !userId) {
         return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     try {
-        const body = await req.json();
+        await consumeApiRateLimit(req, userId, "upload-prepare", {
+            minute: 10,
+            day: 200,
+        });
+        const body = await readLimitedJson(
+            req,
+            16 * 1024,
+            uploadPreparationSchema
+        );
         if (body.action === "google-drive-import") {
-            const fileId = typeof body.fileId === "string" ? body.fileId : "";
-            const name = typeof body.name === "string" ? body.name : "";
-            const sourceMediaType =
-                typeof body.mediaType === "string" ? body.mediaType : "";
-            const accessToken =
-                typeof body.accessToken === "string" ? body.accessToken : "";
+            const fileId = body.fileId;
+            const name = body.name;
+            const sourceMediaType = body.mediaType;
+            const accessToken = body.accessToken;
             const exportType = GOOGLE_EXPORT_TYPES[sourceMediaType];
 
             if (
@@ -301,6 +337,7 @@ export async function PUT(req: Request) {
                 session.user.email,
                 exportedName
             );
+            await reserveDailyUploadBytes(userId, exportedFile.byteLength);
             await writeR2Object(
                 key,
                 exportedFile,
@@ -316,10 +353,9 @@ export async function PUT(req: Request) {
             });
         }
 
-        const name = typeof body.name === "string" ? body.name : "";
-        const mediaType =
-            typeof body.mediaType === "string" ? body.mediaType : "";
-        const size = Number(body.size);
+        const name = body.name;
+        const mediaType = body.mediaType;
+        const size = body.size;
 
         if (!name || !ALLOWED_ATTACHMENT_TYPES.has(mediaType)) {
             return Response.json(
@@ -335,10 +371,13 @@ export async function PUT(req: Request) {
         }
 
         const key = createAttachmentKey(session.user.email, name);
+        await reserveDailyUploadBytes(userId, size);
         const uploadUrl = await createR2UploadUrl(key, mediaType, size);
 
         return Response.json({ key, uploadUrl });
     } catch (error) {
+        const securityResponse = apiSecurityResponse(error);
+        if (securityResponse) return securityResponse;
         console.error("R2 upload URL creation failed:", error);
         return Response.json(
             { error: "Failed to prepare attachment upload." },
@@ -747,15 +786,24 @@ export async function POST(req: Request) {
                                               MAX_STORED_MESSAGE_CHARACTERS
                                           )}\n\n[Response truncated for storage]`
                                         : generatedText;
-                                await prisma.message.create({
-                                    data: {
-                                        id: assistantMessageId,
+                                await prisma.$transaction(async (tx) => {
+                                    await assertMessageCapacity(
+                                        tx,
+                                        session!.user!.id,
                                         conversationId,
-                                        role: "assistant",
-                                        content: storedContent,
-                                        status: "normal",
-                                        modelId: requestedModelId,
-                                    },
+                                        1,
+                                        Buffer.byteLength(storedContent, "utf8")
+                                    );
+                                    await tx.message.create({
+                                        data: {
+                                            id: assistantMessageId,
+                                            conversationId,
+                                            role: "assistant",
+                                            content: storedContent,
+                                            status: "normal",
+                                            modelId: requestedModelId,
+                                        },
+                                    });
                                 });
                             } catch (error) {
                                 logRequestError(

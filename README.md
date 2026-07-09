@@ -52,6 +52,23 @@ CHAT_MODEL_GPT_5_5_MAX_OUTPUT_TOKENS=8192
 Application limits are a second line of defense. Configure billing alerts and
 hard spending limits in each AI provider dashboard as well.
 
+## API Storage Limits
+
+General write APIs use per-user and per-IP rate limits, bounded JSON parsing,
+and transactional storage quotas. These optional variables override the
+defaults:
+
+```text
+API_MAX_CONVERSATIONS_PER_USER=500
+API_MAX_MESSAGES_PER_CONVERSATION=10000
+API_MAX_MESSAGES_PER_USER=100000
+API_MAX_MESSAGE_BYTES_PER_USER=52428800
+API_UPLOAD_BYTES_PER_USER_PER_DAY=262144000
+```
+
+Attachment byte reservations work together with the R2 lifecycle rule. Keep
+the temporary `attachments/` deletion rule enabled.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.

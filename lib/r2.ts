@@ -154,6 +154,9 @@ export async function writeR2Object(
       Key: key,
       Body: body,
       ContentType: contentType,
+      Metadata: {
+        "upload-size": String(body.byteLength),
+      },
     })
   );
 }

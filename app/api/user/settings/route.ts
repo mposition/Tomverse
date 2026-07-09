@@ -6,6 +6,21 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { isEnabledModelId } from "@/lib/models";
+import { z } from "zod";
+import {
+    apiSecurityResponse,
+    consumeApiRateLimit,
+    readLimitedJson,
+} from "@/lib/apiSecurity";
+
+const settingsSchema = z
+    .object({
+        theme: z.enum(["dark", "light", "system"]).optional(),
+        language: z.enum(["en", "ko", "zh"]).optional(),
+        defaultModel: z.string().max(100).refine(isEnabledModelId).optional(),
+    })
+    .strict()
+    .refine((value) => Object.keys(value).length > 0);
 
 // 💡 1. 사용자 설정 불러오기 (GET)
 export async function GET() {
@@ -47,26 +62,22 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
         }
         const userId = (session.user as any).id;
-        const body = await req.json();
-
-        const { theme, language, defaultModel } = body;
-        if (
-            defaultModel !== undefined &&
-            (typeof defaultModel !== "string" ||
-                !isEnabledModelId(defaultModel))
-        ) {
-            return NextResponse.json(
-                { error: "지원하지 않는 기본 모델입니다." },
-                { status: 400 }
-            );
-        }
+        await consumeApiRateLimit(req, userId, "settings-save", {
+            minute: 10,
+            day: 100,
+        });
+        const { theme, language, defaultModel } = await readLimitedJson(
+            req,
+            4 * 1024,
+            settingsSchema
+        );
 
         const updatedSettings = await prisma.userSettings.upsert({
             where: { userId },
             update: {
-                theme: theme || APP_DEFAULTS.defaultTheme,
-                language: language || APP_DEFAULTS.defaultLanguage,
-                defaultModel: defaultModel || APP_DEFAULTS.defaultModelId,
+                ...(theme !== undefined ? { theme } : {}),
+                ...(language !== undefined ? { language } : {}),
+                ...(defaultModel !== undefined ? { defaultModel } : {}),
             },
             create: {
                 userId,
@@ -78,6 +89,8 @@ export async function POST(req: Request) {
 
         return NextResponse.json({ success: true, settings: updatedSettings });
     } catch (error) {
+        const securityResponse = apiSecurityResponse(error);
+        if (securityResponse) return securityResponse;
         console.error("설정 저장 에러:", error);
         return NextResponse.json({ error: "설정 저장 실패" }, { status: 500 });
     }

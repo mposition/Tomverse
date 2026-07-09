@@ -8,6 +8,12 @@ import {
   conversationLockedResponse,
   hasConversationUnlockGrant,
 } from "@/lib/conversationLock";
+import {
+  apiSecurityResponse,
+  assertMessageCapacity,
+  consumeApiRateLimit,
+  readLimitedJson,
+} from "@/lib/apiSecurity";
 
 const modelIdSchema = z
   .string()
@@ -53,6 +59,10 @@ export async function POST(req: Request, context: any) {
       }
 
       const userId = (session.user as any).id;
+      await consumeApiRateLimit(req, userId, "message-save", {
+        minute: 30,
+        day: 1_000,
+      });
       const existingConv = await prisma.conversation.findUnique({
           where: { id: conversationId },
           select: { userId: true, password: true }
@@ -72,40 +82,36 @@ export async function POST(req: Request, context: any) {
         return conversationLockedResponse();
       }
 
-    let body: unknown;
-    try {
-      body = await req.json();
-    } catch {
-      return NextResponse.json(
-        { error: "잘못된 JSON 형식입니다.", code: "INVALID_JSON" },
-        { status: 400 }
-      );
-    }
-    const parsed = saveMessagesSchema.safeParse(body);
-    if (!parsed.success) {
-      return NextResponse.json(
-        {
-          error: "잘못된 메시지 형식입니다.",
-          code: "INVALID_MESSAGE_PAYLOAD",
-        },
-        { status: 400 }
-      );
-    }
-
-    const created = await prisma.message.createMany({
-      data: parsed.data.messages.map((message) => ({
-        id: message.id,
+    const body = await readLimitedJson(req, 160 * 1024, saveMessagesSchema);
+    const contentBytes = body.messages.reduce(
+      (total, message) => total + Buffer.byteLength(message.content, "utf8"),
+      0
+    );
+    const created = await prisma.$transaction(async (tx) => {
+      await assertMessageCapacity(
+        tx,
+        userId,
         conversationId,
-        role: "user",
-        content: message.content,
-        status: "normal",
-        modelId: message.modelId || null,
-      })),
-      skipDuplicates: true,
+        body.messages.length,
+        contentBytes
+      );
+      return tx.message.createMany({
+        data: body.messages.map((message) => ({
+          id: message.id,
+          conversationId,
+          role: "user",
+          content: message.content,
+          status: "normal",
+          modelId: message.modelId || null,
+        })),
+        skipDuplicates: true,
+      });
     });
 
     return NextResponse.json({ success: true, created: created.count });
   } catch (error) {
+    const securityResponse = apiSecurityResponse(error);
+    if (securityResponse) return securityResponse;
     console.error("❌ 메시지 저장 에러:", error);
     return NextResponse.json(
       { error: "메시지 저장 실패" },

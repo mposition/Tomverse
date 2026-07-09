@@ -4,7 +4,24 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next"; // 💡 1. 세션 조회를 위한 임포트 추가
 import { authOptions } from "@/lib/auth"; // 💡 2. NextAuth 설정 옵션 임포트
-import { APP_DEFAULTS } from "@/lib/appDefaults";
+import { APP_DEFAULTS, clampSelectedModels } from "@/lib/appDefaults";
+import { isEnabledModelId } from "@/lib/models";
+import { z } from "zod";
+import {
+  apiSecurityResponse,
+  assertConversationCapacity,
+  consumeApiRateLimit,
+  readLimitedJson,
+} from "@/lib/apiSecurity";
+
+const modelSchema = z.string().max(100).refine(isEnabledModelId);
+const createConversationSchema = z
+  .object({
+    title: z.string().trim().min(1).max(120).optional(),
+    selectedModels: z.array(modelSchema).max(APP_DEFAULTS.maxSelectedModels).optional(),
+    disabledPanels: z.array(modelSchema).max(APP_DEFAULTS.maxSelectedModels).optional(),
+  })
+  .strict();
 
 // 💡 파싱 에러를 완벽하게 막아주는 방어 함수
 const safeParse = (data: any, fallback: any) => {
@@ -74,9 +91,13 @@ export async function POST(req: Request) {
     }
 
       const userId = (session.user as any).id; // 💡 로그인된 유저의 고유 DB ID 추출
+    await consumeApiRateLimit(req, userId, "conversation-create", {
+      minute: 10,
+      day: 100,
+    });
     // 요청 바디 데이터 파싱 (page.tsx에서 전송하는 구조와 일치)
-    const body = await req.json();
-    const title = typeof body?.title === "string" && body.title.trim() ? body.title.trim() : "새 대화";
+    const body = await readLimitedJson(req, 8 * 1024, createConversationSchema);
+    const title = body.title || "새 대화";
 
       const userSettings = await prisma.userSettings.findUnique({
           where: { userId }
@@ -85,22 +106,28 @@ export async function POST(req: Request) {
 
 	// 💡 프론트엔드에서 넘겨준 모델 세팅값을 받아옵니다 (없으면 기본값)
 	// 💡 배열 데이터를 DB 저장을 위해 JSON 문자열로 변환합니다.
-    const selectedModels = Array.isArray(body?.selectedModels) 
-      ? JSON.stringify(body.selectedModels) 
-        : JSON.stringify([defaultEngine]);
-      
-    const disabledPanels = Array.isArray(body?.disabledPanels) 
-      ? JSON.stringify(body.disabledPanels) 
-      : JSON.stringify([]);
+    const normalizedModels = clampSelectedModels(
+      body.selectedModels || [defaultEngine]
+    );
+    const activeModels =
+      normalizedModels.length > 0 ? normalizedModels : [defaultEngine];
+    const normalizedDisabled = Array.from(
+      new Set(body.disabledPanels || [])
+    ).filter((modelId) => activeModels.includes(modelId));
+    const selectedModels = JSON.stringify(activeModels);
+    const disabledPanels = JSON.stringify(normalizedDisabled);
 
     // Prisma를 사용하여 DB에 새로운 대화방 레코드 생성
-    const newConversation = await prisma.conversation.create({
-      data: {
-        userId: (session.user as any).id,
-        title: title || "새 대화",
-        selectedModels,
-        disabledPanels,
-      },
+    const newConversation = await prisma.$transaction(async (tx) => {
+      await assertConversationCapacity(tx, userId);
+      return tx.conversation.create({
+        data: {
+          userId,
+          title,
+          selectedModels,
+          disabledPanels,
+        },
+      });
     });
 
       const formattedConversation = {
@@ -114,6 +141,8 @@ export async function POST(req: Request) {
 	  // 💡 프론트엔드에게 응답할 때는 다시 깔끔한 배열로 변환해서 리턴합니다.
       return NextResponse.json(formattedConversation);      
   } catch (error) {
+    const securityResponse = apiSecurityResponse(error);
+    if (securityResponse) return securityResponse;
     console.error("❌ [백엔드] 대화방 생성 에러:", error);
     return NextResponse.json(
       { error: "대화방 생성 실패" },

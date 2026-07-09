@@ -24,27 +24,40 @@ function formatDate(value?: Date | string) {
 }
 
 export function formatConversationAsText(conversation: ExportConversation) {
-    const lines: string[] = [];
+    return [
+        formatConversationHeader(conversation),
+        ...conversation.messages.map(formatExportMessage),
+    ].join("\n");
+}
 
-    lines.push("Tomverse AI Export");
-    lines.push(`Conversation: ${conversation.title}`);
-    lines.push(`Created: ${formatDate(conversation.createdAt)}`);
-    lines.push("");
+export function formatConversationHeader(
+    conversation: Pick<ExportConversation, "title" | "createdAt">
+) {
+    return [
+        "Tomverse AI Export",
+        `Conversation: ${conversation.title}`,
+        `Created: ${formatDate(conversation.createdAt)}`,
+        "",
+    ].join("\n");
+}
 
-    for (const message of conversation.messages) {
-        const label =
-            message.role === "user"
-                ? "User"
-                : modelNames[message.modelId || ""] || message.modelId || "Assistant";
+export function formatExportMessage(message: ExportMessage) {
+    const label =
+        message.role === "user"
+            ? "User"
+            : modelNames[message.modelId || ""] ||
+              message.modelId ||
+              "Assistant";
 
-        lines.push("==================================================");
-        lines.push(`[${label}]${message.createdAt ? ` ${formatDate(message.createdAt)}` : ""}`);
-        lines.push("--------------------------------------------------");
-        lines.push(message.content);
-        lines.push("");
-    }
-
-    return lines.join("\n");
+    return [
+        "==================================================",
+        `[${label}]${
+            message.createdAt ? ` ${formatDate(message.createdAt)}` : ""
+        }`,
+        "--------------------------------------------------",
+        message.content,
+        "",
+    ].join("\n");
 }
 
 export function sanitizeFileName(name: string) {
