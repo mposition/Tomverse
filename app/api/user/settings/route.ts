@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
+import { isEnabledModelId } from "@/lib/models";
 
 // 💡 1. 사용자 설정 불러오기 (GET)
 export async function GET() {
@@ -19,6 +20,11 @@ export async function GET() {
         if (!settings) {
             settings = await prisma.userSettings.create({
                 data: { userId, defaultModel: APP_DEFAULTS.defaultModelId }
+            });
+        } else if (!isEnabledModelId(settings.defaultModel)) {
+            settings = await prisma.userSettings.update({
+                where: { userId },
+                data: { defaultModel: APP_DEFAULTS.defaultModelId },
             });
         }
 
@@ -44,6 +50,16 @@ export async function POST(req: Request) {
         const body = await req.json();
 
         const { theme, language, defaultModel } = body;
+        if (
+            defaultModel !== undefined &&
+            (typeof defaultModel !== "string" ||
+                !isEnabledModelId(defaultModel))
+        ) {
+            return NextResponse.json(
+                { error: "지원하지 않는 기본 모델입니다." },
+                { status: 400 }
+            );
+        }
 
         const updatedSettings = await prisma.userSettings.upsert({
             where: { userId },

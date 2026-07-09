@@ -343,7 +343,12 @@ export const validateChatPayload = (body: unknown) => {
         throw new ChatAccessError(400, "INVALID_CHAT_REQUEST", "Invalid request.");
     }
 
-    const payload = body as { messages?: unknown; modelId?: unknown };
+    const payload = body as {
+        messages?: unknown;
+        modelId?: unknown;
+        conversationId?: unknown;
+        assistantMessageId?: unknown;
+    };
     if (
         !Array.isArray(payload.messages) ||
         payload.messages.length === 0 ||
@@ -360,6 +365,41 @@ export const validateChatPayload = (body: unknown) => {
         (typeof payload.modelId !== "string" || payload.modelId.length > 100)
     ) {
         throw new ChatAccessError(400, "INVALID_MODEL", "Invalid model.");
+    }
+    if (
+        payload.conversationId !== undefined &&
+        (typeof payload.conversationId !== "string" ||
+            payload.conversationId.length < 1 ||
+            payload.conversationId.length > 64 ||
+            !/^[A-Za-z0-9_-]+$/.test(payload.conversationId))
+    ) {
+        throw new ChatAccessError(
+            400,
+            "INVALID_CONVERSATION",
+            "Invalid conversation."
+        );
+    }
+    if (
+        payload.assistantMessageId !== undefined &&
+        (typeof payload.assistantMessageId !== "string" ||
+            !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+                payload.assistantMessageId
+            ))
+    ) {
+        throw new ChatAccessError(
+            400,
+            "INVALID_MESSAGE_ID",
+            "Invalid message ID."
+        );
+    }
+    if (
+        Boolean(payload.conversationId) !== Boolean(payload.assistantMessageId)
+    ) {
+        throw new ChatAccessError(
+            400,
+            "INVALID_PERSISTENCE_TARGET",
+            "Incomplete persistence target."
+        );
     }
 
     let totalCharacters = 0;
@@ -416,6 +456,8 @@ export const validateChatPayload = (body: unknown) => {
             attachments?: unknown[];
         }>;
         modelId?: string;
+        conversationId?: string;
+        assistantMessageId?: string;
     };
 };
 

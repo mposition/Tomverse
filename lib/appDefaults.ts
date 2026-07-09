@@ -1,5 +1,7 @@
+import { DEFAULT_MODEL_ID, isEnabledModelId } from "@/lib/models";
+
 export const APP_DEFAULTS = {
-  defaultModelId: "gpt-5-4-mini",
+  defaultModelId: DEFAULT_MODEL_ID,
   defaultTheme: "dark",
   defaultLanguage: "en",
 
@@ -16,4 +18,6 @@ export const APP_DEFAULTS = {
 export const getDefaultSelectedModels = () => [APP_DEFAULTS.defaultModelId];
 
 export const clampSelectedModels = (models: string[]) =>
-  Array.from(new Set(models)).slice(0, APP_DEFAULTS.maxSelectedModels);
+  Array.from(new Set(models))
+    .filter(isEnabledModelId)
+    .slice(0, APP_DEFAULTS.maxSelectedModels);

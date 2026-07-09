@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { ChatApp } from "@/components/chat/ChatApp";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { ChatInput } from "@/components/chat/ChatInput";
-import { Conversation, AVAILABLE_MODELS, MAX_SELECTED_MODELS, type ChatAttachment } from "@/components/chat/types";
+import { Conversation, AVAILABLE_MODELS, ENABLED_MODELS, MAX_SELECTED_MODELS, type ChatAttachment } from "@/components/chat/types";
 import { useSession } from "next-auth/react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { APP_DEFAULTS, clampSelectedModels } from "@/lib/appDefaults";
@@ -786,7 +786,7 @@ onShare={handleShareConversation}
                           disabled={isPanelDisabled} // 패널이 OFF일 때는 모델 변경 막기
                           className="cursor-pointer bg-transparent text-sm font-medium text-zinc-200 outline-none hover:text-white truncate min-w-0"
                         >
-                          {AVAILABLE_MODELS.map((m) => {
+                          {ENABLED_MODELS.map((m) => {
                             // 이미 다른 패널에 켜져 있는 모델인지 확인
                             const isAlreadyUsed = selectedModels.includes(m.id) && m.id !== modelId;
                             return (

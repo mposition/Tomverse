@@ -13,6 +13,8 @@ import {
     writeR2Object,
 } from "@/lib/r2";
 import { OfficeParser } from "officeparser";
+import { prisma } from "@/lib/prisma";
+import { getEnabledModel, type AiModel } from "@/lib/models";
 import {
     acquireChatAccess,
     assertChatRequestSize,
@@ -56,6 +58,7 @@ const perplexity = createOpenAI({
 const MAX_ATTACHMENTS = 5;
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
 const MAX_EXTRACTED_TEXT_LENGTH = 1_000_000;
+const MAX_STORED_MESSAGE_CHARACTERS = 100_000;
 type IncomingAttachment = {
     name?: unknown;
     mediaType?: unknown;
@@ -281,67 +284,28 @@ export async function DELETE(req: Request) {
     }
 }
 
-const getActiveModel = (modelId: string) => {
-    switch (modelId) {
-        case "gpt-4o-mini":
-            return openai("gpt-4o-mini");
-        case "gpt-4.1":
-            return openai("gpt-4.1");
-        case "gpt-4o":
-            return openai("gpt-4o");
-
-        case "claude-sonnet-4-5":
-            return anthropic("claude-sonnet-4-5-20250929");
-        case "claude-haiku-4-5":
-            return anthropic("claude-haiku-4-5-20251001");
-
-        case "gemini-1-5-pro":
-            return google("gemini-1.5-pro");
-        case "gemini-1-5-flash":
-        case "gemini-1-5":
-            return google("gemini-1.5-flash");
-
-        case "llama-3-1":
-            return groq.chat("llama-3.1-8b-instant");
-
-        case "llama-3-3":
-            return groq.chat("llama-3.3-70b-versatile");
-
-        case "deepseek-v4-flash":
-            return deepseek.chat("deepseek-v4-flash");
-
-        case "deepseek-v4-pro":
-            return deepseek.chat("deepseek-v4-pro");
-
-        case "grok-4":
-            return xai.chat("grok-4");
-
-        case "grok-3":
-            return xai.chat("grok-3");
-
-        case "grok-3-mini":
-            return xai.chat("grok-3");
-
-        case "kimi-k2.7-code":
-            return moonshot.chat("kimi-k2.7-code");
-
-        case "qwen3.7-max":
-            return qwen.chat("qwen3.7-max");
-
-        case "qwen3.7-plus":
-            return qwen.chat("qwen3.7-plus");
-
-        case "qwen3.6-flash":
-            return qwen.chat("qwen3.6-flash");
-
-        case "glm-5.2":
-            return qwen.chat("glm-5.2");
-
-        case "perplexity/sonar":
-            return perplexity.chat("sonar");
-
-        default:
-            return openai("gpt-4o");
+const getActiveModel = (model: AiModel) => {
+    switch (model.provider) {
+        case "openai":
+            return openai(model.apiModel);
+        case "anthropic":
+            return anthropic(model.apiModel);
+        case "google":
+            return google(model.apiModel);
+        case "groq":
+            return groq.chat(model.apiModel);
+        case "deepseek":
+            return deepseek.chat(model.apiModel);
+        case "xai":
+            return xai.chat(model.apiModel);
+        case "moonshot":
+            return moonshot.chat(model.apiModel);
+        case "qwen":
+            return qwen.chat(model.apiModel);
+        case "perplexity":
+            return perplexity.chat(model.apiModel);
+        case "zhipu":
+            throw new Error(`Provider "${model.provider}" is not configured.`);
     }
 };
 
@@ -351,8 +315,42 @@ export async function POST(req: Request) {
         assertChatRequestSize(req);
         const session = await getServerSession(authOptions);
         const body = await readChatJsonBody(req);
-        const { messages, modelId } = validateChatPayload(body);
+        const {
+            messages,
+            modelId,
+            conversationId,
+            assistantMessageId,
+        } = validateChatPayload(body);
+        const requestedModelId = modelId || APP_DEFAULTS.defaultModelId;
+        const modelConfig = getEnabledModel(requestedModelId);
+        if (!modelConfig) {
+            return Response.json(
+                {
+                    error: "Unknown or disabled model.",
+                    code: "MODEL_NOT_AVAILABLE",
+                },
+                { status: 400 }
+            );
+        }
         const access = identifyChatCaller(req, session?.user?.id);
+        if (conversationId && assistantMessageId) {
+            if (!session?.user?.id) {
+                return Response.json(
+                    { error: "Authentication required." },
+                    { status: 401 }
+                );
+            }
+            const conversation = await prisma.conversation.findUnique({
+                where: { id: conversationId },
+                select: { userId: true },
+            });
+            if (!conversation || conversation.userId !== session.user.id) {
+                return Response.json(
+                    { error: "Conversation access denied." },
+                    { status: 403 }
+                );
+            }
+        }
         const accessGrant = await acquireChatAccess(access);
         leaseId = accessGrant.leaseId;
         const userObjectPrefix = session?.user?.email
@@ -369,7 +367,7 @@ export async function POST(req: Request) {
             );
         }
 
-        const activeModel = getActiveModel(modelId || APP_DEFAULTS.defaultModelId);
+        const activeModel = getActiveModel(modelConfig);
 
         const formattedMessages: ModelMessage[] = await Promise.all(messages.map(async (msg) => {
             if (msg.role === "assistant") {
@@ -492,6 +490,7 @@ export async function POST(req: Request) {
         const sourceReader = result.textStream.getReader();
         const activeLeaseId = leaseId;
         leaseId = null;
+        let generatedText = "";
         let released = false;
         const release = async () => {
             if (released) return;
@@ -503,10 +502,42 @@ export async function POST(req: Request) {
                 try {
                     const { done, value } = await sourceReader.read();
                     if (done) {
+                        if (
+                            conversationId &&
+                            assistantMessageId &&
+                            generatedText.trim()
+                        ) {
+                            try {
+                                const storedContent =
+                                    generatedText.length >
+                                    MAX_STORED_MESSAGE_CHARACTERS
+                                        ? `${generatedText.slice(
+                                              0,
+                                              MAX_STORED_MESSAGE_CHARACTERS
+                                          )}\n\n[Response truncated for storage]`
+                                        : generatedText;
+                                await prisma.message.create({
+                                    data: {
+                                        id: assistantMessageId,
+                                        conversationId,
+                                        role: "assistant",
+                                        content: storedContent,
+                                        status: "normal",
+                                        modelId: requestedModelId,
+                                    },
+                                });
+                            } catch (error) {
+                                console.error(
+                                    "Failed to persist generated assistant message:",
+                                    error
+                                );
+                            }
+                        }
                         controller.close();
                         await release();
                         return;
                     }
+                    generatedText += value;
                     controller.enqueue(value);
                 } catch (error) {
                     controller.error(error);

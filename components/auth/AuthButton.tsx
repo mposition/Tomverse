@@ -3,7 +3,7 @@
 
 import { signIn, signOut, useSession } from "next-auth/react";
 import { useState, useEffect } from "react";
-import { AVAILABLE_MODELS } from "@/components/chat/types"; // 💡 AVAILABLE_MODELS 임포트
+import { ENABLED_MODELS } from "@/components/chat/types";
 import { useLanguage } from "@/components/LanguageProvider";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 
@@ -130,7 +130,7 @@ export function AuthButton() {
                         <div className="mb-4">
                             <label className="text-xs text-zinc-400 block mb-1">{t("sidebar.defaultModel")}</label>
                             <select value={defaultModel} onChange={(e) => setDefaultModel(e.target.value)} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-1.5 text-xs outline-none text-zinc-200 cursor-pointer">
-                                {AVAILABLE_MODELS.map((model) => (
+                                {ENABLED_MODELS.map((model) => (
                                     <option key={model.id} value={model.id}>
                                         {model.icon} {model.name} · {model.tier}
                                     </option>

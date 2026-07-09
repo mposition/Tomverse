@@ -217,18 +217,6 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
     }
   }, [messages, isGuestMode, initialConversationId, modelId, isMessagesLoaded]);
 
-  // 메시지를 DB에 저장하는 함수
-  const saveMessages = async (convId: string, assistantMsg: Message) => {
-    // 💡 프라이빗 모드일 시 서버 DB 저장을 원천 차단합니다!
-    if (convId === "private-chat"|| isGuestMode) return;
-	
-    await fetch(`/api/conversations/${convId}/messages`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: [assistantMsg] }),
-    });
-  };
-  
   const handleSendPrompt = async (
     text: string,
     targetChatId: string,
@@ -283,7 +271,13 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
         },
         body: JSON.stringify({
           messages: [...messages, userMessage],
-		  modelId: modelId
+          modelId: modelId,
+          ...(!isPrivate && !isGuestMode
+            ? {
+                conversationId: targetChatId,
+                assistantMessageId,
+              }
+            : {}),
         }),
         signal: controller.signal,
       });
@@ -314,14 +308,7 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
           "응답은 왔지만 내용이 비어 있습니다.",
           "error"
         );
-      }	else {
-        // 응답이 정상적으로 끝난 후 DB에 저장
-        await saveMessages(targetChatId, {
-		  ...assistantMessage,
-          content: assistantText,
-          modelId: modelId
-        });
-      }  
+      }
     } catch (error: any) {
       if (error?.name === "AbortError") {
         setAssistantMessage(

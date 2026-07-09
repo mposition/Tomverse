@@ -33,7 +33,7 @@ model UserSettings {
   
   theme          String   @default("dark")      // "dark", "light", "system"
   language       String   @default("en")        // "ko", "en"
-  defaultModel  String   @default("gpt-4o") // JSON 스트링 배열 형태로 기본 선호 모델 저장
+  defaultModel  String   @default("gpt-5-4-mini") // 중앙 모델 레지스트리의 기본 모델
 
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -85,7 +85,7 @@ model Conversation {
   
   // 💡 대화방별 패널 상태를 기억하기 위한 필드 추가
   // 💡 String[] 대신 일반 String으로 변경 (SQLite 호환성 확보)
-  selectedModels String    @default("[\"gpt-4o\"]")
+  selectedModels String    @default("[\"gpt-5-4-mini\"]")
   disabledPanels String    @default("[]")
   
   shareToken     String?   @unique

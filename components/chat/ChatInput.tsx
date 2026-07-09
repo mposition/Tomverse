@@ -646,12 +646,18 @@ export function ChatInput({
                         <button
                           key={model.id}
                           type="button"
+                          disabled={!model.enabled}
                           onClick={() => onToggleModel(model.id)}
-                          className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                          className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-45 dark:hover:bg-zinc-800"
                         >
                           <span>{model.icon}</span>
                           <span className="min-w-0 flex-1 truncate text-left text-zinc-700 dark:text-zinc-200">{model.name}</span>
                           <span className="text-[10px] font-semibold text-zinc-400">{model.tier}</span>
+                          {!model.enabled ? (
+                            <span className="text-[10px] font-medium text-zinc-400">
+                              {model.status}
+                            </span>
+                          ) : null}
                           <span className={`h-4 w-8 rounded-full p-0.5 transition-colors ${isSelected ? "bg-blue-500" : "bg-zinc-300 dark:bg-zinc-700"}`}>
                             <span className={`block h-3 w-3 rounded-full bg-white transition-transform ${isSelected ? "translate-x-4" : ""}`} />
                           </span>

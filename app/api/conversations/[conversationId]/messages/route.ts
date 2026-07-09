@@ -2,6 +2,30 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next"; // 💡 세션 검증 임포트 추가
 import { authOptions } from "@/lib/auth";           // 💡 authOptions 임포트 추가
+import { z } from "zod";
+import { isEnabledModelId } from "@/lib/models";
+
+const modelIdSchema = z
+  .string()
+  .min(1)
+  .max(100)
+  .refine(isEnabledModelId, {
+    message: "지원하지 않는 모델입니다.",
+  });
+const userMessageSchema = z
+  .object({
+    id: z.string().uuid(),
+    role: z.literal("user"),
+    content: z.string().trim().min(1).max(50_000),
+    status: z.literal("normal").optional().default("normal"),
+    modelId: modelIdSchema.optional(),
+  })
+  .strict();
+const saveMessagesSchema = z
+  .object({
+    messages: z.array(userMessageSchema).min(1).max(3),
+  })
+  .strict();
 
 type Params = {
   params: Promise<{
@@ -14,9 +38,8 @@ export async function POST(req: Request, context: any) {
 	const params = await context.params;
       const conversationId = params.conversationId || params.id;
 
-      // 게스트 모드는 즉시 통과
-      if (conversationId && conversationId.startsWith("guest")) {
-          return NextResponse.json({ success: true });
+      if (!conversationId) {
+          return NextResponse.json({ error: "대화방 ID가 누락되었습니다." }, { status: 400 });
       }
 
       // 🔒 [보안 강화] 일반 유저방일 경우 유효한 유저 세션이 있는지 검증합니다.
@@ -35,42 +58,39 @@ export async function POST(req: Request, context: any) {
           return NextResponse.json({ error: "타인의 대화방에 메시지를 조작할 수 없습니다." }, { status: 403 });
       }
 
-    const body = await req.json();
-    const messages = Array.isArray(body?.messages) ? body.messages : [];
-
-	for (const msg of messages) {
-	  // 유저의 질문은 중복 저장을 막기 위해 방 ID와 내용을 섞어 고유 ID를 생성합니다.
-      const msgId = msg.id || (
-        msg.role === "user" 
-          ? `user-${conversationId}-${msg.content.slice(0, 20)}` 
-          : crypto.randomUUID()
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json(
+        { error: "잘못된 JSON 형식입니다.", code: "INVALID_JSON" },
+        { status: 400 }
       );
-	  
-        const isAssistant = msg.role === "assistant";
-        const scopedModelId = typeof msg.modelId === "string" && msg.modelId.trim()
-            ? msg.modelId
-            : null;
-	  
-      // 💡 유저 질문 중복 생성을 막고, 모델 ID를 꼬리표로 저장하기 위해 upsert 사용
-      await prisma.message.upsert({
-        where: { id: msgId },
-        update: {
-          content: msg.content,
-          status: msg.status || "normal",
-              modelId: isAssistant ? scopedModelId : scopedModelId,
-          },
-        create: {
-          id: msgId,
-          conversationId,
-          role: msg.role,
-          content: msg.content,
-          status: msg.status || "normal",
-            modelId: isAssistant ? scopedModelId : scopedModelId,
-        }
-      });
+    }
+    const parsed = saveMessagesSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        {
+          error: "잘못된 메시지 형식입니다.",
+          code: "INVALID_MESSAGE_PAYLOAD",
+        },
+        { status: 400 }
+      );
     }
 
-    return NextResponse.json({ success: true });
+    const created = await prisma.message.createMany({
+      data: parsed.data.messages.map((message) => ({
+        id: message.id,
+        conversationId,
+        role: "user",
+        content: message.content,
+        status: "normal",
+        modelId: message.modelId || null,
+      })),
+      skipDuplicates: true,
+    });
+
+    return NextResponse.json({ success: true, created: created.count });
   } catch (error) {
     console.error("❌ 메시지 저장 에러:", error);
     return NextResponse.json(
@@ -109,12 +129,16 @@ export async function DELETE(req: Request, context: any) {
         if (!conversationId || !modelId) {
             return NextResponse.json({ error: "파라미터 누락" }, { status: 400 });
         }
+        const parsedModelId = modelIdSchema.safeParse(modelId);
+        if (!parsedModelId.success) {
+            return NextResponse.json({ error: "지원하지 않는 모델입니다." }, { status: 400 });
+        }
 
         // 해당 대화방에서 특정 모델이 작성한 'assistant' 메시지만 전부 삭제합니다.
         await prisma.message.deleteMany({
             where: {
                 conversationId: conversationId,
-                modelId: modelId,
+                modelId: parsedModelId.data,
                 role: "assistant"
             }
         });
