@@ -42,9 +42,13 @@ export async function GET() {
   try {
     // 현재 로그인한 실제 유저 세션을 가져옵니다.
     const session = await getServerSession(authOptions);
-
-    // 💡 로그인된 유저의 고유 DB ID 추출, 세션이 없으면 'guest'로 취급하여 통과시켜 줍니다.
-    const userId = session?.user ? (session.user as any).id : "guest";
+    const userId = (session?.user as { id?: string } | undefined)?.id;
+    if (!userId) {
+      return NextResponse.json(
+        { error: "Login required" },
+        { status: 401 }
+      );
+    }
 
       // 사용자의 설정 정보(UserSettings)를 조회하여 설정된 기본 AI 엔진 모델을 가져옵니다.
       const userSettings = await prisma.userSettings.findUnique({
