@@ -1,25 +1,143 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Paperclip, X } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowUp,
+  Boxes,
+  Braces,
+  ChevronDown,
+  File as FileIcon,
+  FileText,
+  HardDrive,
+  Paperclip,
+  Plus,
+  Presentation,
+  Sheet,
+  Square,
+  X,
+} from "lucide-react";
 import { AVAILABLE_MODELS, type ChatAttachment } from "@/components/chat/types";
 import { useLanguage } from "@/components/LanguageProvider";
 
 const MAX_ATTACHMENTS = 5;
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
+const GOOGLE_DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+const GOOGLE_WORKSPACE_TYPES = [
+  "application/vnd.google-apps.document",
+  "application/vnd.google-apps.spreadsheet",
+  "application/vnd.google-apps.presentation",
+].join(",");
 const TEXT_FILE_TYPES = new Set([
   "text/plain",
   "text/markdown",
   "text/csv",
   "application/json",
 ]);
+const OFFICE_FILE_TYPES = new Set([
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/vnd.oasis.opendocument.text",
+  "application/vnd.oasis.opendocument.spreadsheet",
+  "application/vnd.oasis.opendocument.presentation",
+]);
+const OFFICE_EXTENSION_TYPES: Record<string, string> = {
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  odt: "application/vnd.oasis.opendocument.text",
+  ods: "application/vnd.oasis.opendocument.spreadsheet",
+  odp: "application/vnd.oasis.opendocument.presentation",
+};
 const ACCEPTED_FILE_TYPES = [
   "image/png",
   "image/jpeg",
   "image/webp",
   "application/pdf",
   ...TEXT_FILE_TYPES,
+  ...OFFICE_FILE_TYPES,
+  ...Object.keys(OFFICE_EXTENSION_TYPES).map((extension) => `.${extension}`),
 ].join(",");
+
+const getFileMediaType = (file: File) => {
+  if (TEXT_FILE_TYPES.has(file.type) || OFFICE_FILE_TYPES.has(file.type)) {
+    return file.type;
+  }
+  if (["image/png", "image/jpeg", "image/webp", "application/pdf"].includes(file.type)) {
+    return file.type;
+  }
+
+  const extension = file.name.split(".").pop()?.toLowerCase() || "";
+  return OFFICE_EXTENSION_TYPES[extension] || file.type || "application/octet-stream";
+};
+
+const getAttachmentLabel = (attachment: ChatAttachment) => {
+  const extension = attachment.name.split(".").pop();
+  return extension && extension !== attachment.name
+    ? extension.toUpperCase()
+    : attachment.mediaType.split("/").pop()?.toUpperCase() || "FILE";
+};
+
+const getAttachmentIcon = (attachment: ChatAttachment) => {
+  if (attachment.mediaType === "application/json") {
+    return <Braces className="h-5 w-5" />;
+  }
+  if (attachment.mediaType === "text/csv") {
+    return <Sheet className="h-5 w-5" />;
+  }
+  if (
+    attachment.mediaType.includes("spreadsheet") ||
+    attachment.mediaType.includes("opendocument.spreadsheet")
+  ) {
+    return <Sheet className="h-5 w-5" />;
+  }
+  if (
+    attachment.mediaType.includes("presentation") ||
+    attachment.mediaType.includes("opendocument.presentation")
+  ) {
+    return <Presentation className="h-5 w-5" />;
+  }
+  if (
+    attachment.mediaType === "application/pdf" ||
+    attachment.mediaType.startsWith("text/")
+  ) {
+    return <FileText className="h-5 w-5" />;
+  }
+  return <FileIcon className="h-5 w-5" />;
+};
+
+const loadExternalScript = (src: string) =>
+  new Promise<void>((resolve, reject) => {
+    const existing = document.querySelector<HTMLScriptElement>(
+      `script[src="${src}"]`
+    );
+    if (existing?.dataset.loaded === "true") {
+      resolve();
+      return;
+    }
+
+    const script = existing || document.createElement("script");
+    script.addEventListener(
+      "load",
+      () => {
+        script.dataset.loaded = "true";
+        resolve();
+      },
+      { once: true }
+    );
+    script.addEventListener(
+      "error",
+      () => reject(new Error(`Failed to load ${src}`)),
+      { once: true }
+    );
+
+    if (!existing) {
+      script.src = src;
+      script.async = true;
+      document.head.appendChild(script);
+    }
+  });
 
 type ChatInputProps = {
   value: string;
@@ -54,6 +172,7 @@ export function ChatInput({
 }: ChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const previousAttachmentsRef = useRef<ChatAttachment[]>([]);
   const [isUploading, setIsUploading] = useState(false);
     const { t, lang, setLang } = useLanguage(); // 💡 t 함수 꺼내기
 
@@ -76,6 +195,7 @@ export function ChatInput({
   
   // 팝업 메뉴 열림/닫힘 상태
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [menuView, setMenuView] = useState<"actions" | "models">("actions");
   const menuRef = useRef<HTMLDivElement>(null);
 
 // 화면 바깥 클릭 시 팝업 닫기
@@ -83,6 +203,7 @@ export function ChatInput({
     const handleClickOutside = (event: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
         setIsMenuOpen(false);
+        setMenuView("actions");
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
@@ -107,6 +228,18 @@ export function ChatInput({
     return () => cancelAnimationFrame(id);
   }, [focusToken]);
 
+  useEffect(() => {
+    const currentIds = new Set(attachments.map((attachment) => attachment.id));
+
+    previousAttachmentsRef.current.forEach((attachment) => {
+      if (!currentIds.has(attachment.id) && attachment.data) {
+        URL.revokeObjectURL(attachment.data);
+      }
+    });
+
+    previousAttachmentsRef.current = attachments;
+  }, [attachments]);
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -117,7 +250,7 @@ export function ChatInput({
     }
   };
 
-  const handleFilesSelected = async (files: FileList | null) => {
+  const handleFilesSelected = async (files: FileList | File[] | null) => {
     if (!files?.length) return;
 
     const availableSlots = MAX_ATTACHMENTS - attachments.length;
@@ -132,8 +265,11 @@ export function ChatInput({
 
     try {
       for (const file of selectedFiles) {
-        const mediaType = file.type || "application/octet-stream";
-        if (!ACCEPTED_FILE_TYPES.split(",").includes(mediaType)) {
+        const mediaType = getFileMediaType(file);
+        if (
+          !ACCEPTED_FILE_TYPES.split(",").includes(mediaType) &&
+          !OFFICE_FILE_TYPES.has(mediaType)
+        ) {
           alert(t("chat.attachmentTypeError"));
           continue;
         }
@@ -171,6 +307,9 @@ export function ChatInput({
           mediaType,
           size: file.size,
           objectKey: key,
+          data: mediaType.startsWith("image/")
+            ? URL.createObjectURL(file)
+            : undefined,
           kind: TEXT_FILE_TYPES.has(mediaType) ? "text" : "file",
         });
       }
@@ -182,6 +321,139 @@ export function ChatInput({
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+    const handlePaste = (
+        event: React.ClipboardEvent<HTMLTextAreaElement>
+    ) => {
+        const pastedFiles = Array.from(event.clipboardData.files);
+
+        if (pastedFiles.length === 0) return;
+
+        event.preventDefault();
+
+        if (!canAttach) {
+            alert(t("chat.loginToAttach"));
+            return;
+        }
+
+        void handleFilesSelected(pastedFiles);
+    };
+
+  const handleGoogleDriveSelect = async () => {
+    if (!canAttach || isUploading) return;
+
+    const availableSlots = MAX_ATTACHMENTS - attachments.length;
+    if (availableSlots <= 0) {
+      alert(t("chat.attachmentCountError"));
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      const configResponse = await fetch("/api/chat");
+      if (!configResponse.ok) {
+        throw new Error("Google Picker configuration is unavailable.");
+      }
+      const config = await configResponse.json();
+
+      await Promise.all([
+        loadExternalScript("https://accounts.google.com/gsi/client"),
+        loadExternalScript("https://apis.google.com/js/api.js"),
+      ]);
+
+      const browserWindow = window as any;
+      await new Promise<void>((resolve, reject) => {
+        browserWindow.gapi.load("picker", {
+          callback: resolve,
+          onerror: () => reject(new Error("Google Picker failed to load.")),
+        });
+      });
+
+      const accessToken = await new Promise<string>((resolve, reject) => {
+        const tokenClient = browserWindow.google.accounts.oauth2.initTokenClient({
+          client_id: config.clientId,
+          scope: GOOGLE_DRIVE_SCOPE,
+          callback: (response: { access_token?: string; error?: string }) => {
+            if (response.error || !response.access_token) {
+              reject(new Error(response.error || "Google authorization failed."));
+              return;
+            }
+            resolve(response.access_token);
+          },
+        });
+        tokenClient.requestAccessToken({ prompt: "" });
+      });
+
+      const selectedFiles = await new Promise<
+        Array<{ id: string; name: string; mimeType: string }>
+      >((resolve) => {
+        const google = browserWindow.google;
+        const view = new google.picker.DocsView(google.picker.ViewId.DOCS)
+          .setIncludeFolders(false)
+          .setMimeTypes(GOOGLE_WORKSPACE_TYPES);
+        const picker = new google.picker.PickerBuilder()
+          .setAppId(config.appId)
+          .setOAuthToken(accessToken)
+          .setDeveloperKey(config.apiKey)
+          .addView(view)
+          .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
+          .setCallback((data: any) => {
+            const action = data[google.picker.Response.ACTION];
+            if (action === google.picker.Action.PICKED) {
+              const documents = data[google.picker.Response.DOCUMENTS] || [];
+              resolve(
+                documents.map((document: any) => ({
+                  id: document[google.picker.Document.ID],
+                  name: document[google.picker.Document.NAME],
+                  mimeType: document[google.picker.Document.MIME_TYPE],
+                }))
+              );
+            } else if (action === google.picker.Action.CANCEL) {
+              resolve([]);
+            }
+          })
+          .build();
+        picker.setVisible(true);
+      });
+
+      const importedAttachments: ChatAttachment[] = [];
+      for (const file of selectedFiles.slice(0, availableSlots)) {
+        const response = await fetch("/api/chat", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "google-drive-import",
+            fileId: file.id,
+            name: file.name,
+            mediaType: file.mimeType,
+            accessToken,
+          }),
+        });
+        if (!response.ok) {
+          throw new Error(`Google Drive import failed: ${response.status}`);
+        }
+
+        const imported = await response.json();
+        importedAttachments.push({
+          id: crypto.randomUUID(),
+          name: imported.name,
+          mediaType: imported.mediaType,
+          size: imported.size,
+          objectKey: imported.key,
+          kind: imported.kind,
+        });
+      }
+
+      if (importedAttachments.length > 0) {
+        onAttachmentsChange([...attachments, ...importedAttachments]);
+      }
+    } catch (error) {
+      console.error("Google Drive attachment failed:", error);
+      alert(t("chat.googleDriveError"));
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -207,21 +479,48 @@ export function ChatInput({
   };
 
   return (
-      <div className="shrink-0 border-t border-zinc-200 bg-white px-4 py-4 dark:border-zinc-800 dark:bg-zinc-950 md:px-8 transition-colors">
-          <div className="mx-auto max-w-3xl">
+      <div className="shrink-0 border-t border-zinc-200 bg-white px-3 py-3 transition-colors dark:border-zinc-800 dark:bg-zinc-950 md:px-6">
+          <div className="mx-auto max-w-4xl rounded-xl border border-zinc-200 bg-white p-3 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
           {attachments.length > 0 && (
             <div className="mb-3 flex flex-wrap gap-2">
               {attachments.map((attachment) => (
                 <div
                   key={attachment.id}
-                  className="flex max-w-56 items-center gap-2 rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1.5 text-xs text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
+                  className={
+                    attachment.data
+                      ? "relative h-16 w-16 overflow-hidden rounded-md border border-zinc-200 bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900"
+                      : "relative flex h-16 min-w-48 max-w-60 items-center gap-3 rounded-md border border-zinc-200 bg-zinc-50 py-2 pl-2 pr-8 text-zinc-700 shadow-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
+                  }
                 >
-                  <Paperclip className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                  <span className="truncate">{attachment.name}</span>
+                  {attachment.data ? (
+                    <img
+                      src={attachment.data}
+                      alt={attachment.name}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <>
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-white text-zinc-500 ring-1 ring-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:ring-zinc-700">
+                        {getAttachmentIcon(attachment)}
+                      </span>
+                      <span className="flex min-w-0 flex-col">
+                        <span className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                          {attachment.name}
+                        </span>
+                        <span className="text-[11px] font-medium text-zinc-400 dark:text-zinc-500">
+                          {getAttachmentLabel(attachment)}
+                        </span>
+                      </span>
+                    </>
+                  )}
                   <button
                     type="button"
                     onClick={() => handleRemoveAttachment(attachment)}
-                    className="shrink-0 text-zinc-400 hover:text-zinc-900 dark:hover:text-white"
+                    className={
+                      attachment.data
+                        ? "absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-zinc-950/80 text-white hover:bg-zinc-950"
+                        : "absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-200 hover:text-zinc-900 dark:hover:bg-zinc-700 dark:hover:text-white"
+                    }
                     title={t("chat.removeAttachment")}
                     aria-label={t("chat.removeAttachment")}
                   >
@@ -231,67 +530,137 @@ export function ChatInput({
               ))}
             </div>
           )}
-          <div className="flex items-end gap-3">
-		{/* 💡 모델 선택 UI 영역 */}
-        <div className="relative flex items-center gap-1 pl-2 mb-1" ref={menuRef}>
-          {/* 선택된 모델 아이콘 표시 */}
-          {selectedModels.map((id) => {
-            const model = AVAILABLE_MODELS.find((m) => m.id === id);
-            return model ? (
-              <div key={id} className="text-xl" title={model.name}>
-                {model.icon}
-              </div>
-            ) : null;
-          })}
-          
-          {/* + 버튼 */}
+          <div className="flex flex-wrap items-end gap-2">
+        <div className="relative flex items-center gap-2" ref={menuRef}>
           <button
-            onClick={() => setIsMenuOpen(!isMenuOpen)}
-            className="cursor-pointer ml-1 flex h-8 w-8 items-center justify-center rounded-full bg-zinc-200 text-zinc-700 hover:bg-zinc-300 hover:text-zinc-900 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700 dark:hover:text-white transition"
+            type="button"
+            onClick={() => {
+              setMenuView("actions");
+              setIsMenuOpen((open) => !open || menuView !== "actions");
+            }}
+            className="flex h-9 w-9 items-center justify-center rounded-full border border-zinc-300 text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white"
+            title={t("chat.moreActions")}
+            aria-label={t("chat.moreActions")}
+            aria-expanded={isMenuOpen && menuView === "actions"}
           >
-            +
+            {isUploading ? (
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+            ) : (
+              <Plus className="h-5 w-5" />
+            )}
           </button>
 
-          {/* 모델 선택 팝업 메뉴 레이어 */}
+          <button
+            type="button"
+            onClick={() => {
+              const shouldClose = isMenuOpen && menuView === "models";
+              setMenuView("models");
+              setIsMenuOpen(!shouldClose);
+            }}
+            className="flex h-9 min-w-0 items-center gap-2 rounded-full border border-zinc-300 px-3 text-xs font-medium text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            title={activeModelNames.join(", ")}
+          >
+            <span className="flex -space-x-1">
+              {selectedModels.slice(0, 3).map((id) => {
+                const model = AVAILABLE_MODELS.find((item) => item.id === id);
+                return model ? (
+                  <span
+                    key={id}
+                    className="flex h-5 w-5 items-center justify-center rounded-full bg-white text-xs ring-1 ring-zinc-200 dark:bg-zinc-950 dark:ring-zinc-700"
+                  >
+                    {model.icon}
+                  </span>
+                ) : null;
+              })}
+            </span>
+            <span className="whitespace-nowrap">
+              {selectedModels.length} {t("chat.modelsSelected")}
+            </span>
+            <ChevronDown className="h-3.5 w-3.5 text-zinc-400" />
+          </button>
+
           {isMenuOpen && (
-                      <div className="absolute bottom-12 left-0 z-50 flex max-h-[calc(100dvh-8rem)] w-[min(20rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white p-2 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900">
-                          <div className="mb-2 px-2 text-xs font-semibold text-zinc-500 dark:text-zinc-400">{t("chat.modelSelect")}</div>
-                          <div className="min-h-0 space-y-1 overflow-y-auto overscroll-contain pr-1">
-                              {AVAILABLE_MODELS.map((model) => {
-                  const isSelected = selectedModels.includes(model.id);
-                  return (
+            <div className="absolute bottom-12 left-0 z-50 flex max-h-[calc(100dvh-8rem)] w-[min(20rem,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-lg border border-zinc-200 bg-white p-2 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900">
+              {menuView === "actions" ? (
+                <div className="space-y-1">
+                  <button
+                    type="button"
+                    disabled={!canAttach || attachments.length >= MAX_ATTACHMENTS}
+                    onClick={() => {
+                      setIsMenuOpen(false);
+                      fileInputRef.current?.click();
+                    }}
+                    className="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-zinc-800"
+                  >
+                    <Paperclip className="h-5 w-5 text-zinc-500 dark:text-zinc-300" />
+                    <span className="flex min-w-0 flex-col">
+                      <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t("chat.attachFile")}</span>
+                      <span className="text-xs text-zinc-500">{t("chat.uploadFromComputer")}</span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!canAttach || attachments.length >= MAX_ATTACHMENTS}
+                    onClick={() => {
+                      setIsMenuOpen(false);
+                      void handleGoogleDriveSelect();
+                    }}
+                    className="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-zinc-800"
+                  >
+                    <HardDrive className="h-5 w-5 text-zinc-500 dark:text-zinc-300" />
+                    <span className="flex min-w-0 flex-col">
+                      <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">Google Drive</span>
+                      <span className="text-xs text-zinc-500">Docs, Sheets, Slides</span>
+                    </span>
+                  </button>
+                  <div className="my-1 border-t border-zinc-200 dark:border-zinc-700" />
+                  <button
+                    type="button"
+                    onClick={() => setMenuView("models")}
+                    className="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                  >
+                    <Boxes className="h-5 w-5 text-zinc-500 dark:text-zinc-300" />
+                    <span className="flex min-w-0 flex-col">
+                      <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t("chat.modelSelect")}</span>
+                      <span className="text-xs text-zinc-500">{t("chat.maxModelsDescription")}</span>
+                    </span>
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="mb-1 flex items-center gap-2 px-1 py-1">
                     <button
-                      key={model.id}
-                      onClick={() => onToggleModel(model.id)}
-                          className="cursor-pointer flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                      >
-                      <span className="flex items-center gap-2">
-                        <span>{model.icon}</span>
-                              <span className="flex min-w-0 flex-col items-start">
-                                  <span className={isSelected ? "text-zinc-900 dark:text-white font-medium" : "text-zinc-500 dark:text-zinc-400"}>
-                                      {model.name}
-                                  </span>
-                                  <span className="text-[10px] text-zinc-400 dark:text-zinc-500">
-                                      {model.provider}
-                                  </span>
-                              </span>
-                              <span className={`ml-auto rounded-full px-2 py-0.5 text-[10px] font-semibold ${model.tier === "Free"
-                                      ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
-                                      : model.tier === "Pro"
-                                          ? "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
-                                          : "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300"
-                                  }`}>
-                                  {model.tier}
-                              </span>
-                          </span>
-                      {/* 토글 스위치 디자인 */}
-                      <div className={`h-4 w-8 rounded-full p-0.5 transition-colors ${isSelected ? "bg-blue-500" : "bg-zinc-300 dark:bg-zinc-700"}`}>
-                        <div className={`h-3 w-3 rounded-full bg-white transition-transform ${isSelected ? "translate-x-4" : "translate-x-0"}`} />
-                      </div>
+                      type="button"
+                      onClick={() => setMenuView("actions")}
+                      className="flex h-8 w-8 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-white"
+                      aria-label={t("auth.cancel")}
+                    >
+                      <ArrowLeft className="h-4 w-4" />
                     </button>
-                  );
-                })}
-              </div>
+                    <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{t("chat.modelSelect")}</span>
+                  </div>
+                  <div className="min-h-0 space-y-1 overflow-y-auto overscroll-contain pr-1">
+                    {AVAILABLE_MODELS.map((model) => {
+                      const isSelected = selectedModels.includes(model.id);
+                      return (
+                        <button
+                          key={model.id}
+                          type="button"
+                          onClick={() => onToggleModel(model.id)}
+                          className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                        >
+                          <span>{model.icon}</span>
+                          <span className="min-w-0 flex-1 truncate text-left text-zinc-700 dark:text-zinc-200">{model.name}</span>
+                          <span className="text-[10px] font-semibold text-zinc-400">{model.tier}</span>
+                          <span className={`h-4 w-8 rounded-full p-0.5 transition-colors ${isSelected ? "bg-blue-500" : "bg-zinc-300 dark:bg-zinc-700"}`}>
+                            <span className={`block h-3 w-3 rounded-full bg-white transition-transform ${isSelected ? "translate-x-4" : ""}`} />
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -304,25 +673,6 @@ export function ChatInput({
           onChange={(event) => handleFilesSelected(event.target.files)}
           className="hidden"
         />
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={
-            isDisabled ||
-            isUploading ||
-            !canAttach ||
-            attachments.length >= MAX_ATTACHMENTS
-          }
-          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-zinc-300 text-zinc-600 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
-          title={canAttach ? t("chat.attachFile") : t("chat.loginToAttach")}
-          aria-label={canAttach ? t("chat.attachFile") : t("chat.loginToAttach")}
-        >
-          {isUploading ? (
-            <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-          ) : (
-            <Paperclip className="h-5 w-5" />
-          )}
-        </button>
 
 		{/* 💡 텍스트 입력 영역 */}	  
         <textarea
@@ -330,28 +680,33 @@ export function ChatInput({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           placeholder={placeholderText}
           disabled={isDisabled}
           rows={1}
-                  className="max-h-[160px] min-h-[48px] flex-1 resize-none overflow-y-auto rounded-2xl border border-zinc-300 bg-zinc-50 px-4 py-3 text-sm text-zinc-900 outline-none transition-colors placeholder:text-zinc-400 focus:border-blue-500 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-zinc-500"
+                  className="order-first max-h-[160px] min-h-[52px] w-full flex-none resize-none overflow-y-auto border-0 bg-transparent px-1 py-2 text-sm text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-500"
               />
 
         {isSending ? (
           <button
             type="button"
             onClick={onCancel}
-            className="cursor-pointer rounded-2xl bg-red-600 px-5 py-3 text-sm font-medium text-white hover:bg-red-500"
+            className="ml-auto flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-red-600 text-white hover:bg-red-500"
+            title={t("chat.cancel")}
+            aria-label={t("chat.cancel")}
           >
-            {t("chat.cancel")}
+            <Square className="h-3.5 w-3.5 fill-current" />
           </button>
         ) : (
           <button
             type="button"
             onClick={onSubmit}
             disabled={isDisabled || (!value.trim() && attachments.length === 0)}
-            className="cursor-pointer rounded-2xl bg-blue-600 px-5 py-3 text-sm font-medium text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+            className="ml-auto flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-blue-600 text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500 dark:disabled:bg-zinc-700 dark:disabled:text-zinc-400"
+            title={t("chat.send")}
+            aria-label={t("chat.send")}
           >
-            {t("chat.send")}
+            <ArrowUp className="h-5 w-5" />
           </button>
         )}
 		

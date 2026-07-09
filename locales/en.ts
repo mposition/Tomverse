@@ -56,6 +56,12 @@ export const en = {
         attachmentTypeError: "This file type is not supported.",
         attachmentUploadError: "The file could not be uploaded. Please try again.",
         loginToAttach: "Log in to attach files",
+        attachGoogleDrive: "Attach from Google Drive",
+        googleDriveError: "The Google Drive file could not be attached. Please try again.",
+        moreActions: "More actions",
+        uploadFromComputer: "Choose from your computer",
+        modelsSelected: "models",
+        maxModelsDescription: "Compare up to 3 models",
     },
     auth: {
         saveMessage: "Settings saved successfully.",

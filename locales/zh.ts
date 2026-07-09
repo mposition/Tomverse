@@ -56,6 +56,12 @@ export const zh = {
         attachmentTypeError: "不支持此文件类型。",
         attachmentUploadError: "文件上传失败，请重试。",
         loginToAttach: "登录后可添加附件",
+        attachGoogleDrive: "从 Google Drive 添加",
+        googleDriveError: "无法添加 Google Drive 文件，请重试。",
+        moreActions: "更多操作",
+        uploadFromComputer: "从电脑中选择",
+        modelsSelected: "个模型",
+        maxModelsDescription: "最多比较 3 个模型",
     },
     auth: {
         saveMessage: "设置已成功保存。",

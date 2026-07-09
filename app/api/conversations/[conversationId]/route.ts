@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next"; // 💡 세션 조회를 위한 임포트 추가
 import { authOptions } from "@/lib/auth"; // 💡 NextAuth 설정 옵션 임포트
-import { APP_DEFAULTS } from "@/lib/appDefaults";
+import { APP_DEFAULTS, clampSelectedModels } from "@/lib/appDefaults";
 
 // 💡 방어 함수 추가
 const safeParse = (data: any, fallback: any) => {
@@ -87,8 +87,15 @@ export async function GET(req: Request, context: any) {
 	// 💡 프론트엔드 싱크용 파싱
     return NextResponse.json({
       ...conversation,
-        selectedModels: safeParse(conversation.selectedModels, [defaultEngine]),
-        disabledPanels: safeParse(conversation.disabledPanels, []),
+        selectedModels: clampSelectedModels(
+          safeParse(conversation.selectedModels, [defaultEngine])
+        ),
+        disabledPanels: safeParse(conversation.disabledPanels, []).filter(
+          (modelId: string) =>
+            clampSelectedModels(
+              safeParse(conversation.selectedModels, [defaultEngine])
+            ).includes(modelId)
+        ),
         isLocked: !!conversation.password,
         password: undefined // 원본 암호는 절대 흘리지 않음
     });
@@ -130,7 +137,7 @@ export async function PATCH(req: Request, context: any) {
         // 실제 DB 통신 전, 대화방 소유권 선행 검증!
         const existingConv = await prisma.conversation.findUnique({
             where: { id: conversationId },
-            select: { userId: true } // 검증용이므로 가볍게 userId만 가져옵니다.
+            select: { userId: true, selectedModels: true }
         });
 
         if (!existingConv) {
@@ -166,11 +173,40 @@ export async function PATCH(req: Request, context: any) {
 
 	// 💡 모델 변경이나 ON/OFF 변경 요청이 있을 때
 	// 💡 업데이트 요청이 오면 다시 문자열로 압축하여 DB에 찌릅니다.
+    const normalizedModels =
+      body.selectedModels !== undefined
+        ? clampSelectedModels(
+            Array.isArray(body.selectedModels)
+              ? body.selectedModels.filter(
+                  (modelId: unknown): modelId is string =>
+                    typeof modelId === "string"
+                )
+              : []
+          )
+        : clampSelectedModels(
+            safeParse(existingConv.selectedModels, [defaultEngine])
+          );
+
 	if (body.selectedModels !== undefined) {
-      updateData.selectedModels = JSON.stringify(body.selectedModels);
+      updateData.selectedModels = JSON.stringify(
+        normalizedModels.length > 0 ? normalizedModels : [defaultEngine]
+      );
     }
     if (body.disabledPanels !== undefined) {
-      updateData.disabledPanels = JSON.stringify(body.disabledPanels);
+      const activeModels =
+        normalizedModels.length > 0 ? normalizedModels : [defaultEngine];
+      const disabledPanels = Array.isArray(body.disabledPanels)
+        ? Array.from(
+            new Set(
+              body.disabledPanels.filter(
+                (modelId: unknown): modelId is string =>
+                  typeof modelId === "string" &&
+                  activeModels.includes(modelId)
+              )
+            )
+          )
+        : [];
+      updateData.disabledPanels = JSON.stringify(disabledPanels);
     }	
 	
 	// 만약 업데이트할 데이터가 없다면 그냥 기존 데이터 반환
@@ -186,8 +222,15 @@ export async function PATCH(req: Request, context: any) {
 
 	return NextResponse.json({
       ...updatedConversation,
-        selectedModels: safeParse(updatedConversation.selectedModels, [defaultEngine]),
-      disabledPanels: safeParse(updatedConversation.disabledPanels, []),
+        selectedModels: clampSelectedModels(
+          safeParse(updatedConversation.selectedModels, [defaultEngine])
+        ),
+      disabledPanels: safeParse(updatedConversation.disabledPanels, []).filter(
+        (modelId: string) =>
+          clampSelectedModels(
+            safeParse(updatedConversation.selectedModels, [defaultEngine])
+          ).includes(modelId)
+      ),
         isLocked: !!updatedConversation.password,
         password: undefined // 원본 암호는 절대 흘리지 않음
     });

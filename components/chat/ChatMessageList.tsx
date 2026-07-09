@@ -123,7 +123,7 @@ export function ChatMessageList({ messages, isPrivate = false, isGuestMode = fal
             return (
               <div
                 key={msg.id || idx}
-                className={`flex w-full flex-col ${isUser ? "items-end" : "items-start"}`}
+                className={`flex w-full flex-col [content-visibility:auto] [contain-intrinsic-size:auto_160px] ${isUser ? "items-end" : "items-start"}`}
               >
                 {/* AI 뱃지 */}
                 {!isUser && modelInfo && (

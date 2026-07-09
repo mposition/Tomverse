@@ -56,6 +56,12 @@ export const ko = {
 		attachmentTypeError: "지원하지 않는 파일 형식입니다.",
 		attachmentUploadError: "파일을 업로드하지 못했습니다. 다시 시도해 주세요.",
 		loginToAttach: "파일 첨부는 로그인 후 사용할 수 있습니다.",
+		attachGoogleDrive: "Google Drive에서 첨부",
+		googleDriveError: "Google Drive 파일을 첨부하지 못했습니다. 다시 시도해 주세요.",
+		moreActions: "더 많은 작업",
+		uploadFromComputer: "컴퓨터에서 선택",
+		modelsSelected: "개 모델",
+		maxModelsDescription: "최대 3개 모델 비교",
 	},
 	auth: {
 		saveMessage: "설정이 성공적으로 저장되었습니다.",

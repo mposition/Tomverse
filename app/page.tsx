@@ -1,13 +1,13 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { ChatApp } from "@/components/chat/ChatApp";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { Conversation, AVAILABLE_MODELS, MAX_SELECTED_MODELS, type ChatAttachment } from "@/components/chat/types";
 import { useSession } from "next-auth/react";
 import { useLanguage } from "@/components/LanguageProvider";
-import { APP_DEFAULTS } from "@/lib/appDefaults";
+import { APP_DEFAULTS, clampSelectedModels } from "@/lib/appDefaults";
 
 const normalizeStringArray = (value: unknown, fallback: string[]) => {
   let parsed = value;
@@ -44,6 +44,8 @@ export default function Home() {
   
   // 💡 현재 '일시정지(OFF)' 상태인 모델들을 추적하는 배열
   const [disabledPanels, setDisabledPanels] = useState<string[]>([]);
+  const modelSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const modelSyncAbortRef = useRef<AbortController | null>(null);
 
   // 💡 프라이빗 모드 전역 상태 관리
   const [isPrivateMode, setIsPrivateMode] = useState(false);
@@ -67,13 +69,17 @@ export default function Home() {
                 .filter((modelId): modelId is string => !!modelId)
             : [];
 
-        const nextModels = uniqueStrings([...savedModels, ...messageModels]);
+        const nextModels = clampSelectedModels(
+            uniqueStrings([...savedModels, ...messageModels])
+        );
         const recoveredModels = messageModels.filter((modelId) => !savedModels.includes(modelId));
 
         setSelectedModels(nextModels.length > 0 ? nextModels : [userDefaultEngine]);
         setDisabledPanels(
             normalizeStringArray(data.disabledPanels, []).filter(
-                (modelId) => !recoveredModels.includes(modelId)
+                (modelId) =>
+                    nextModels.includes(modelId) &&
+                    !recoveredModels.includes(modelId)
             )
         );
     };
@@ -302,8 +308,18 @@ export default function Home() {
       const targetConv = conversations.find((c) => c.id === id);
       if (targetConv) {
         // types.tsx에 없는 속성이므로 as any로 캐스팅하여 안전하게 가져옵니다.
-          setSelectedModels(normalizeStringArray((targetConv as any).selectedModels, [APP_DEFAULTS.defaultModelId]));
-        setDisabledPanels(normalizeStringArray((targetConv as any).disabledPanels, []));
+          const restoredModels = clampSelectedModels(
+            normalizeStringArray(
+              (targetConv as any).selectedModels,
+              [APP_DEFAULTS.defaultModelId]
+            )
+          );
+          setSelectedModels(restoredModels);
+          setDisabledPanels(
+            normalizeStringArray((targetConv as any).disabledPanels, []).filter(
+              (modelId) => restoredModels.includes(modelId)
+            )
+          );
         }
       return; // 서버 API 호출을 막고 즉시 종료
     }
@@ -448,21 +464,41 @@ export default function Home() {
   };
   
   // 💡 모델 세팅 상태가 변경되면 서버 DB에 실시간 동기화 요청 (PATCH)
-  const syncModelSettingsToServer = async (targetChatId: string, updatedModels: string[], updatedDisabled: string[]) => {
+  const syncModelSettingsToServer = (targetChatId: string, updatedModels: string[], updatedDisabled: string[]) => {
     if (!targetChatId || targetChatId === "private-chat") return; // 새 채팅 상태일 때는 생성 전이므로 패스, 프라이빗 저장 금지
     if (!session || !session.user) return;
-    try {
-      await fetch(`/api/conversations/${targetChatId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          selectedModels: updatedModels,
-          disabledPanels: updatedDisabled
-        }),
-      });
-    } catch (error) {
-      console.error("모델 세팅 동기화 실패:", error);
+
+    if (modelSyncTimerRef.current) {
+      clearTimeout(modelSyncTimerRef.current);
     }
+    modelSyncAbortRef.current?.abort();
+
+    modelSyncTimerRef.current = setTimeout(async () => {
+      const controller = new AbortController();
+      modelSyncAbortRef.current = controller;
+      try {
+        const models = clampSelectedModels(updatedModels);
+        const disabled = uniqueStrings(updatedDisabled).filter((modelId) =>
+          models.includes(modelId)
+        );
+        const response = await fetch(`/api/conversations/${targetChatId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            selectedModels: models,
+            disabledPanels: disabled,
+          }),
+          signal: controller.signal,
+        });
+        if (!response.ok) {
+          throw new Error(`Model settings sync failed: ${response.status}`);
+        }
+      } catch (error: any) {
+        if (error?.name !== "AbortError") {
+          console.error("모델 세팅 동기화 실패:", error);
+        }
+      }
+    }, 250);
   };  
   
   // 💡 메시지 전송 함수
@@ -594,6 +630,7 @@ export default function Home() {
         nextModels.push(modelId);
       }
     
+    nextModels = clampSelectedModels(nextModels);
 	setSelectedModels(nextModels);
     setDisabledPanels(nextDisabled);
     // 💡 현재 열려있는 방(currentChatId)이 있을 때만 서버에 동기화하도록 안전하게 묶어줍니다!
@@ -628,18 +665,27 @@ export default function Home() {
 
   // 💡 패널의 상태(ON/OFF)를 전환하는 함수
   const togglePanelDisable = (modelId: string) => {
-	const nextDisabled = disabledPanels.includes(modelId)
-      ? disabledPanels.filter((id) => id !== modelId) // 이미 꺼져있으면 켬
-      : [...disabledPanels, modelId]; // 안 꺼져있으면 배열에 넣어 끔
-      
-    setDisabledPanels(nextDisabled);
-	if (currentChatId) syncModelSettingsToServer(currentChatId, selectedModels, nextDisabled);	
+    setDisabledPanels((currentDisabled) => {
+      const nextDisabled = currentDisabled.includes(modelId)
+        ? currentDisabled.filter((id) => id !== modelId)
+        : [...currentDisabled, modelId];
+
+      if (currentChatId) {
+        syncModelSettingsToServer(currentChatId, selectedModels, nextDisabled);
+      }
+      return nextDisabled;
+    });
   };
   
   // 💡 특정 패널의 모델을 다른 모델로 스위칭하는 함수
   const changePanelModel = (oldModelId: string, newModelId: string) => {
+    if (newModelId !== oldModelId && selectedModels.includes(newModelId)) {
+      return;
+    }
     // 1. 선택된 모델 배열에서 옛날 ID를 새 ID로 교체합니다.
-	const nextModels = selectedModels.map((id) => (id === oldModelId ? newModelId : id));
+	const nextModels = clampSelectedModels(
+      selectedModels.map((id) => (id === oldModelId ? newModelId : id))
+    );
     let nextDisabled = [...disabledPanels];
     
     // 2. 만약 해당 패널이 일시정지(OFF) 상태였다면, 바뀐 모델도 일시정지 상태를 유지해줍니다.

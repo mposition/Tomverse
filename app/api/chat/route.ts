@@ -6,7 +6,13 @@ import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { createHash, randomUUID } from "node:crypto";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { createR2UploadUrl, deleteR2Object, readR2Object } from "@/lib/r2";
+import {
+    createR2UploadUrl,
+    deleteR2Object,
+    readR2Object,
+    writeR2Object,
+} from "@/lib/r2";
+import { OfficeParser } from "officeparser";
 
 const groq = createOpenAI({
     baseURL: "https://api.groq.com/openai/v1",
@@ -40,6 +46,37 @@ const perplexity = createOpenAI({
 
 const MAX_ATTACHMENTS = 5;
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
+const MAX_EXTRACTED_TEXT_LENGTH = 1_000_000;
+const OFFICE_ATTACHMENT_TYPES = new Set([
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/vnd.oasis.opendocument.text",
+    "application/vnd.oasis.opendocument.spreadsheet",
+    "application/vnd.oasis.opendocument.presentation",
+]);
+const GOOGLE_EXPORT_TYPES: Record<
+    string,
+    { mediaType: string; extension: string; kind: "file" | "text" }
+> = {
+    "application/vnd.google-apps.document": {
+        mediaType: "text/plain",
+        extension: "txt",
+        kind: "text",
+    },
+    "application/vnd.google-apps.spreadsheet": {
+        mediaType:
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        extension: "xlsx",
+        kind: "file",
+    },
+    "application/vnd.google-apps.presentation": {
+        mediaType:
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        extension: "pptx",
+        kind: "file",
+    },
+};
 const ALLOWED_ATTACHMENT_TYPES = new Set([
     "image/png",
     "image/jpeg",
@@ -49,6 +86,7 @@ const ALLOWED_ATTACHMENT_TYPES = new Set([
     "text/markdown",
     "text/csv",
     "application/json",
+    ...OFFICE_ATTACHMENT_TYPES,
 ]);
 
 const sanitizeFilename = (filename: string) => {
@@ -61,6 +99,34 @@ const sanitizeFilename = (filename: string) => {
     return safe || "attachment";
 };
 
+const createAttachmentKey = (email: string, name: string) => {
+    const userHash = createHash("sha256")
+        .update(email.toLowerCase())
+        .digest("hex")
+        .slice(0, 20);
+    const date = new Date().toISOString().slice(0, 10);
+    return `attachments/${userHash}/${date}/${randomUUID()}-${sanitizeFilename(name)}`;
+};
+
+export async function GET() {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.email) {
+        return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const clientId = process.env.GOOGLE_ID;
+    const apiKey = process.env.NEXT_PUBLIC_GOOGLE_API_KEY;
+    const appId = process.env.NEXT_PUBLIC_GOOGLE_CLOUD_PROJECT_NUMBER;
+    if (!clientId || !apiKey || !appId) {
+        return Response.json(
+            { error: "Google Picker is not configured." },
+            { status: 503 }
+        );
+    }
+
+    return Response.json({ clientId, apiKey, appId });
+}
+
 export async function PUT(req: Request) {
     const session = await getServerSession(authOptions);
     if (!session?.user?.email) {
@@ -69,6 +135,76 @@ export async function PUT(req: Request) {
 
     try {
         const body = await req.json();
+        if (body.action === "google-drive-import") {
+            const fileId = typeof body.fileId === "string" ? body.fileId : "";
+            const name = typeof body.name === "string" ? body.name : "";
+            const sourceMediaType =
+                typeof body.mediaType === "string" ? body.mediaType : "";
+            const accessToken =
+                typeof body.accessToken === "string" ? body.accessToken : "";
+            const exportType = GOOGLE_EXPORT_TYPES[sourceMediaType];
+
+            if (
+                !exportType ||
+                !name ||
+                !/^[A-Za-z0-9_-]+$/.test(fileId) ||
+                !accessToken ||
+                accessToken.length > 4096
+            ) {
+                return Response.json(
+                    { error: "Invalid Google Drive file." },
+                    { status: 400 }
+                );
+            }
+
+            const exportUrl = new URL(
+                `https://www.googleapis.com/drive/v3/files/${fileId}/export`
+            );
+            exportUrl.searchParams.set("mimeType", exportType.mediaType);
+            const exportResponse = await fetch(exportUrl, {
+                headers: { Authorization: `Bearer ${accessToken}` },
+                cache: "no-store",
+            });
+            if (!exportResponse.ok) {
+                return Response.json(
+                    { error: "Google Drive export failed." },
+                    { status: exportResponse.status === 401 ? 401 : 502 }
+                );
+            }
+
+            const exportedFile = Buffer.from(await exportResponse.arrayBuffer());
+            if (
+                exportedFile.byteLength === 0 ||
+                exportedFile.byteLength > MAX_ATTACHMENT_SIZE
+            ) {
+                return Response.json(
+                    { error: "Exported file is empty or too large." },
+                    { status: 400 }
+                );
+            }
+
+            const baseName =
+                name.replace(/\.(gdoc|gsheet|gslides)$/i, "") || "google-file";
+            const exportedName = `${baseName}.${exportType.extension}`;
+            const key = createAttachmentKey(
+                session.user.email,
+                exportedName
+            );
+            await writeR2Object(
+                key,
+                exportedFile,
+                exportType.mediaType
+            );
+
+            return Response.json({
+                key,
+                name: exportedName,
+                mediaType: exportType.mediaType,
+                size: exportedFile.byteLength,
+                kind: exportType.kind,
+            });
+        }
+
         const name = typeof body.name === "string" ? body.name : "";
         const mediaType =
             typeof body.mediaType === "string" ? body.mediaType : "";
@@ -87,12 +223,7 @@ export async function PUT(req: Request) {
             );
         }
 
-        const userHash = createHash("sha256")
-            .update(session.user.email.toLowerCase())
-            .digest("hex")
-            .slice(0, 20);
-        const date = new Date().toISOString().slice(0, 10);
-        const key = `attachments/${userHash}/${date}/${randomUUID()}-${sanitizeFilename(name)}`;
+        const key = createAttachmentKey(session.user.email, name);
         const uploadUrl = await createR2UploadUrl(key, mediaType);
 
         return Response.json({ key, uploadUrl });
@@ -249,6 +380,7 @@ export async function POST(req: Request) {
 
                 let attachmentData: string;
                 let attachmentBytes: number;
+                let attachmentBuffer: Buffer | undefined;
 
                 if (typeof attachment.objectKey === "string") {
                     if (
@@ -258,12 +390,12 @@ export async function POST(req: Request) {
                         throw new Error("Attachment access denied.");
                     }
 
-                    const object = await readR2Object(attachment.objectKey);
-                    attachmentBytes = object.byteLength;
+                    attachmentBuffer = await readR2Object(attachment.objectKey);
+                    attachmentBytes = attachmentBuffer.byteLength;
                     attachmentData =
                         attachment.kind === "text"
-                            ? object.toString("utf8")
-                            : object.toString("base64");
+                            ? attachmentBuffer.toString("utf8")
+                            : attachmentBuffer.toString("base64");
                 } else if (typeof attachment.data === "string") {
                     attachmentData = attachment.data;
                     attachmentBytes =
@@ -278,7 +410,27 @@ export async function POST(req: Request) {
                     throw new Error("Attachment is too large.");
                 }
 
-                if (attachment.kind === "text") {
+                if (OFFICE_ATTACHMENT_TYPES.has(attachment.mediaType)) {
+                    const officeBuffer =
+                        attachmentBuffer || Buffer.from(attachmentData, "base64");
+                    const document = await OfficeParser.parseOffice(officeBuffer, {
+                        extractAttachments: false,
+                        ocr: false,
+                    });
+                    const extractedText = document.toText().trim();
+
+                    if (!extractedText) {
+                        throw new Error(`No readable text found in ${attachment.name}.`);
+                    }
+
+                    const limitedText =
+                        extractedText.length > MAX_EXTRACTED_TEXT_LENGTH
+                            ? `${extractedText.slice(0, MAX_EXTRACTED_TEXT_LENGTH)}\n\n[Document truncated]`
+                            : extractedText;
+                    textAttachments.push(
+                        `[Attached office file: ${attachment.name}]\n${limitedText}`
+                    );
+                } else if (attachment.kind === "text") {
                     textAttachments.push(
                         `[Attached file: ${attachment.name}]\n${attachmentData}`
                     );

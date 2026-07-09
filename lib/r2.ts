@@ -68,8 +68,23 @@ export async function readR2Object(key: string) {
   return Buffer.from(await response.Body.transformToByteArray());
 }
 
+export async function writeR2Object(
+  key: string,
+  body: Buffer,
+  contentType: string
+) {
+  const { client, bucket } = getR2Client();
+  await client.send(
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Body: body,
+      ContentType: contentType,
+    })
+  );
+}
+
 export async function deleteR2Object(key: string) {
   const { client, bucket } = getR2Client();
   await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
 }
-
