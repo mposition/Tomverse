@@ -33,11 +33,31 @@ export async function POST(req: Request, context: any) {
   const conversationId = params.conversationId;
   const userId = (session.user as any).id;
 
-  const conversation = await prisma.conversation.findUnique({
+  const accessConversation = await prisma.conversation.findUnique({
     where: { id: conversationId },
     select: {
       userId: true,
       password: true,
+    },
+  });
+
+  if (!accessConversation || accessConversation.userId !== userId) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  if (
+    !hasConversationUnlockGrant(
+      req,
+      userId,
+      conversationId,
+      accessConversation.password
+    )
+  ) {
+    return conversationLockedResponse();
+  }
+
+  const conversation = await prisma.conversation.findUnique({
+    where: { id: conversationId },
+    select: {
       title: true,
       createdAt: true,
       messages: {
@@ -53,8 +73,8 @@ export async function POST(req: Request, context: any) {
     },
   });
 
-  if (!conversation || conversation.userId !== userId) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!conversation) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
   const sharedAt = new Date();
@@ -132,16 +152,6 @@ export async function DELETE(req: Request, context: any) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  if (
-    !hasConversationUnlockGrant(
-      req,
-      userId,
-      conversationId,
-      conversation.password
-    )
-  ) {
-    return conversationLockedResponse();
-  }
   if (
     !hasConversationUnlockGrant(
       req,
