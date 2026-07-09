@@ -37,6 +37,7 @@ export const en = {
         shareRevokeFailed: "Failed to stop sharing.",
         downloadTxt: "Download (.txt)",
         shareFailed: "Failed to create share link.",
+        shareLocked: "Unlock this chat with its password before sharing.",
         shareCopied: "Share link copied to clipboard.",
         downloadAllTxt: "Download all chats as .txt",
         defaultModel: "Default AI engine model",

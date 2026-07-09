@@ -775,29 +775,38 @@ export default function Home() {
     const handleShareConversation = async (convId: string) => {
         if (isGuestMode) return;
 
-        const res = await fetch(`/api/conversations/${convId}/share`, {
-            method: "POST",
-        });
+        try {
+            const res = await fetch(`/api/conversations/${convId}/share`, {
+                method: "POST",
+            });
+            const data = await res.json().catch(() => null);
 
-        if (!res.ok) {
+            if (!res.ok) {
+                alert(
+                    res.status === 423 ||
+                        data?.code === "CONVERSATION_LOCKED"
+                        ? t("sidebar.shareLocked")
+                        : t("sidebar.shareFailed")
+                );
+                return;
+            }
+
+            setConversations((prev) =>
+                prev.map((conversation) =>
+                    conversation.id === convId
+                        ? {
+                            ...conversation,
+                            shareEnabled: true,
+                            shareExpiresAt: data.expiresAt || null,
+                        }
+                        : conversation
+                )
+            );
+            await navigator.clipboard.writeText(data.url);
+            alert(t("sidebar.shareCopied"));
+        } catch {
             alert(t("sidebar.shareFailed"));
-            return;
         }
-
-        const data = await res.json();
-        setConversations((prev) =>
-            prev.map((conversation) =>
-                conversation.id === convId
-                    ? {
-                        ...conversation,
-                        shareEnabled: true,
-                        shareExpiresAt: data.expiresAt || null,
-                    }
-                    : conversation
-            )
-        );
-        await navigator.clipboard.writeText(data.url);
-        alert(t("sidebar.shareCopied"));
     };
 
     const handleRevokeShare = async (convId: string) => {

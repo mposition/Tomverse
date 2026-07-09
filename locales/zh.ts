@@ -37,6 +37,7 @@ export const zh = {
         shareRevokeFailed: "停止分享失败。",
         downloadTxt: "下载 (.txt)",
         shareFailed: "创建分享链接失败。",
+        shareLocked: "请先输入密码解锁对话，然后再分享。",
         shareCopied: "分享链接已复制到剪贴板。",
         downloadAllTxt: "下载所有聊天为 .txt",
         defaultModel: "默认 AI 引擎模型",

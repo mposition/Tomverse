@@ -37,6 +37,7 @@ export const ko = {
 		shareRevokeFailed: "공유 취소에 실패했습니다.",
 		downloadTxt: "다운로드 (.txt)",
 		shareFailed: "공유 링크 생성에 실패했습니다.",
+		shareLocked: "비밀번호 입력 후 공유해주세요.",
 		shareCopied: "공유 링크가 클립보드에 복사되었습니다.",
 		downloadAllTxt: "모든 채팅창 .txt 다운로드",
 		defaultModel: "기본 AI 엔진 모델",
