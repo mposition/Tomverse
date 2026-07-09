@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { SharedConversationView } from "@/components/share/SharedConversationView";
-import { isValidShareTokenFormat } from "@/lib/shareTokens";
+import { isStrongShareToken } from "@/lib/shareTokens";
 
 export const metadata: Metadata = {
   robots: {
@@ -22,7 +22,7 @@ export default async function SharedConversationPage({
   params: Promise<{ shareToken: string }>;
 }) {
   const { shareToken } = await params;
-  if (!isValidShareTokenFormat(shareToken)) notFound();
+  if (!isStrongShareToken(shareToken)) notFound();
 
   return <SharedConversationView shareToken={shareToken} />;
 }

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { shareSnapshotSchema } from "@/lib/shareSnapshot";
-import { isValidShareTokenFormat } from "@/lib/shareTokens";
+import { isStrongShareToken } from "@/lib/shareTokens";
 import {
   apiSecurityResponse,
   consumeApiRateLimit,
@@ -13,7 +13,7 @@ export async function GET(
 ) {
   try {
     const { shareToken } = await context.params;
-    if (!isValidShareTokenFormat(shareToken)) {
+    if (!isStrongShareToken(shareToken)) {
       return NextResponse.json(
         { error: "Shared conversation not found." },
         {
