@@ -112,3 +112,23 @@ model Message {
 
   @@index([conversationId])
 }
+
+model ChatUsageBucket {
+  key         String
+  period      String
+  periodStart DateTime
+  count       Int      @default(0)
+  updatedAt   DateTime @updatedAt
+
+  @@id([key, period, periodStart])
+  @@index([updatedAt])
+}
+
+model ChatRequestLease {
+  id         String   @id
+  subjectKey String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  @@index([subjectKey, expiresAt])
+}

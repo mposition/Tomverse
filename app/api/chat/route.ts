@@ -13,6 +13,15 @@ import {
     writeR2Object,
 } from "@/lib/r2";
 import { OfficeParser } from "officeparser";
+import {
+    acquireChatAccess,
+    assertChatRequestSize,
+    chatErrorResponse,
+    identifyChatCaller,
+    readChatJsonBody,
+    releaseChatAccess,
+    validateChatPayload,
+} from "@/lib/chatSecurity";
 
 const groq = createOpenAI({
     baseURL: "https://api.groq.com/openai/v1",
@@ -47,6 +56,13 @@ const perplexity = createOpenAI({
 const MAX_ATTACHMENTS = 5;
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
 const MAX_EXTRACTED_TEXT_LENGTH = 1_000_000;
+type IncomingAttachment = {
+    name?: unknown;
+    mediaType?: unknown;
+    objectKey?: unknown;
+    data?: unknown;
+    kind?: unknown;
+};
 const OFFICE_ATTACHMENT_TYPES = new Set([
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -330,10 +346,15 @@ const getActiveModel = (modelId: string) => {
 };
 
 export async function POST(req: Request) {
+    let leaseId: string | null = null;
     try {
-        const body = await req.json();
-        const { messages, modelId } = body;
+        assertChatRequestSize(req);
         const session = await getServerSession(authOptions);
+        const body = await readChatJsonBody(req);
+        const { messages, modelId } = validateChatPayload(body);
+        const access = identifyChatCaller(req, session?.user?.id);
+        const accessGrant = await acquireChatAccess(access);
+        leaseId = accessGrant.leaseId;
         const userObjectPrefix = session?.user?.email
             ? `attachments/${createHash("sha256")
                 .update(session.user.email.toLowerCase())
@@ -350,12 +371,14 @@ export async function POST(req: Request) {
 
         const activeModel = getActiveModel(modelId || APP_DEFAULTS.defaultModelId);
 
-        const formattedMessages: ModelMessage[] = await Promise.all(messages.map(async (msg: any) => {
+        const formattedMessages: ModelMessage[] = await Promise.all(messages.map(async (msg) => {
             if (msg.role === "assistant") {
                 return { role: "assistant", content: String(msg.content ?? "") };
             }
 
-            const attachments = Array.isArray(msg.attachments) ? msg.attachments : [];
+            const attachments = (
+                Array.isArray(msg.attachments) ? msg.attachments : []
+            ) as IncomingAttachment[];
             if (attachments.length > MAX_ATTACHMENTS) {
                 throw new Error("Too many attachments.");
             }
@@ -466,19 +489,59 @@ export async function POST(req: Request) {
             messages: formattedMessages,
         });
 
-        return new Response(result.textStream, {
-            headers: {
-                "Content-Type": "text/plain; charset=utf-8",
-                "Connection": "keep-alive",
-                "Cache-Control": "no-cache, no-transform",
+        const sourceReader = result.textStream.getReader();
+        const activeLeaseId = leaseId;
+        leaseId = null;
+        let released = false;
+        const release = async () => {
+            if (released) return;
+            released = true;
+            await releaseChatAccess(activeLeaseId);
+        };
+        const protectedStream = new ReadableStream<string>({
+            async pull(controller) {
+                try {
+                    const { done, value } = await sourceReader.read();
+                    if (done) {
+                        controller.close();
+                        await release();
+                        return;
+                    }
+                    controller.enqueue(value);
+                } catch (error) {
+                    controller.error(error);
+                    await release();
+                }
+            },
+            async cancel(reason) {
+                await sourceReader.cancel(reason);
+                await release();
             },
         });
+
+        const headers = new Headers({
+            "Content-Type": "text/plain; charset=utf-8",
+            "Cache-Control": "no-cache, no-transform",
+        });
+        if (accessGrant.setCookie) {
+            headers.set("Set-Cookie", accessGrant.setCookie);
+        }
+
+        return new Response(protectedStream.pipeThrough(new TextEncoderStream()), {
+            headers,
+        });
     } catch (error: any) {
+        if (leaseId) {
+            await releaseChatAccess(leaseId);
+        }
+        const accessError = chatErrorResponse(error);
+        if (accessError) return accessError;
+
         console.error("AI SDK API request failed:");
         console.error(error?.message || error);
 
         return new Response(
-            JSON.stringify({ error: "AI 응답 생성 실패", details: error?.message }),
+            JSON.stringify({ error: "AI 응답 생성 실패" }),
             { status: 500, headers: { "Content-Type": "application/json" } }
         );
     }
