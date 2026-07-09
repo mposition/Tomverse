@@ -16,6 +16,10 @@ import { prisma } from "@/lib/prisma";
 import { getEnabledModel, type AiModel } from "@/lib/models";
 import { parseOfficeSafely } from "@/lib/officeSecurity";
 import {
+    BoundedBufferError,
+    readResponseToBuffer,
+} from "@/lib/boundedBuffer";
+import {
     acquireChatAccess,
     assertChatRequestSize,
     chatErrorResponse,
@@ -260,7 +264,21 @@ export async function PUT(req: Request) {
                 );
             }
 
-            const exportedFile = Buffer.from(await exportResponse.arrayBuffer());
+            let exportedFile: Buffer;
+            try {
+                exportedFile = await readResponseToBuffer(
+                    exportResponse,
+                    MAX_ATTACHMENT_SIZE
+                );
+            } catch (error) {
+                if (error instanceof BoundedBufferError) {
+                    return Response.json(
+                        { error: "Exported file is too large." },
+                        { status: 400 }
+                    );
+                }
+                throw error;
+            }
             if (
                 exportedFile.byteLength === 0 ||
                 exportedFile.byteLength > MAX_ATTACHMENT_SIZE
@@ -312,7 +330,7 @@ export async function PUT(req: Request) {
         }
 
         const key = createAttachmentKey(session.user.email, name);
-        const uploadUrl = await createR2UploadUrl(key, mediaType);
+        const uploadUrl = await createR2UploadUrl(key, mediaType, size);
 
         return Response.json({ key, uploadUrl });
     } catch (error) {
@@ -489,7 +507,13 @@ export async function POST(req: Request) {
                         throw new Error("Attachment access denied.");
                     }
 
-                    attachmentBuffer = await readR2Object(attachment.objectKey);
+                    attachmentBuffer = await readR2Object(
+                        attachment.objectKey,
+                        {
+                            maxBytes: MAX_ATTACHMENT_SIZE,
+                            expectedContentType: attachment.mediaType,
+                        }
+                    );
                     attachmentBytes = attachmentBuffer.byteLength;
                     attachmentData =
                         attachment.kind === "text"
