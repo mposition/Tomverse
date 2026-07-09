@@ -244,7 +244,7 @@ export const acquireChatAccess = async (access: ChatAccess) => {
             );
         }
 
-        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${access.subjectKey}))`;
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${access.subjectKey}))`;
         await tx.$executeRaw`
             DELETE FROM "ChatRequestLease"
             WHERE "subjectKey" = ${access.subjectKey} AND "expiresAt" <= NOW()
