@@ -5,6 +5,7 @@ import { authOptions } from "@/lib/auth";
 import {
     clearLockVerificationAttempts,
     consumeLockVerificationAttempt,
+    createConversationUnlockCookie,
     hashConversationPassword,
     lockErrorResponse,
     verifyConversationPassword,
@@ -57,6 +58,7 @@ export async function POST(req: Request, context: any) {
             );
         }
 
+        let effectivePassword = conversation.password;
         if (verification.needsUpgrade) {
             const upgradedPassword = await hashConversationPassword(password);
             await prisma.conversation.updateMany({
@@ -66,9 +68,19 @@ export async function POST(req: Request, context: any) {
                 },
                 data: { password: upgradedPassword },
             });
+            effectivePassword = upgradedPassword;
         }
         await clearLockVerificationAttempts(attempt);
-        return NextResponse.json({ success: true });
+        const response = NextResponse.json({ success: true });
+        response.headers.append(
+            "Set-Cookie",
+            createConversationUnlockCookie(
+                userId,
+                conversationId,
+                effectivePassword
+            )
+        );
+        return response;
     } catch (error) {
         const lockError = lockErrorResponse(error);
         if (lockError) return lockError;

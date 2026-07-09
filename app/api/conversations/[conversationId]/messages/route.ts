@@ -4,6 +4,10 @@ import { getServerSession } from "next-auth/next"; // 💡 세션 검증 임포�
 import { authOptions } from "@/lib/auth";           // 💡 authOptions 임포트 추가
 import { z } from "zod";
 import { isEnabledModelId } from "@/lib/models";
+import {
+  conversationLockedResponse,
+  hasConversationUnlockGrant,
+} from "@/lib/conversationLock";
 
 const modelIdSchema = z
   .string()
@@ -51,11 +55,21 @@ export async function POST(req: Request, context: any) {
       const userId = (session.user as any).id;
       const existingConv = await prisma.conversation.findUnique({
           where: { id: conversationId },
-          select: { userId: true }
+          select: { userId: true, password: true }
       });
 
       if (!existingConv || existingConv.userId !== userId) {
           return NextResponse.json({ error: "타인의 대화방에 메시지를 조작할 수 없습니다." }, { status: 403 });
+      }
+      if (
+        !hasConversationUnlockGrant(
+          req,
+          userId,
+          conversationId,
+          existingConv.password
+        )
+      ) {
+        return conversationLockedResponse();
       }
 
     let body: unknown;
@@ -115,11 +129,21 @@ export async function DELETE(req: Request, context: any) {
         const userId = (session.user as any).id;
         const existingConv = await prisma.conversation.findUnique({
             where: { id: conversationId },
-            select: { userId: true }
+            select: { userId: true, password: true }
         });
 
         if (!existingConv || existingConv.userId !== userId) {
             return NextResponse.json({ error: "타인의 대화방에 메시지를 조작할 수 없습니다." }, { status: 403 });
+        }
+        if (
+          !hasConversationUnlockGrant(
+            req,
+            userId,
+            conversationId,
+            existingConv.password
+          )
+        ) {
+          return conversationLockedResponse();
         }
 
         // URL에서 modelId를 파싱해옵니다. (예: ?modelId=gpt-4o)

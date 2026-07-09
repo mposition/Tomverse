@@ -24,6 +24,10 @@ import {
     releaseChatAccess,
     validateChatPayload,
 } from "@/lib/chatSecurity";
+import {
+    conversationLockedResponse,
+    hasConversationUnlockGrant,
+} from "@/lib/conversationLock";
 
 const groq = createOpenAI({
     baseURL: "https://api.groq.com/openai/v1",
@@ -411,7 +415,7 @@ export async function POST(req: Request) {
             }
             const conversation = await prisma.conversation.findUnique({
                 where: { id: conversationId },
-                select: { userId: true },
+                select: { userId: true, password: true },
             });
             if (!conversation || conversation.userId !== session.user.id) {
                 return tracedJsonError(
@@ -420,6 +424,16 @@ export async function POST(req: Request) {
                     403,
                     traceId
                 );
+            }
+            if (
+                !hasConversationUnlockGrant(
+                    req,
+                    session.user.id,
+                    conversationId,
+                    conversation.password
+                )
+            ) {
+                return conversationLockedResponse();
             }
         }
         const accessGrant = await acquireChatAccess(access);

@@ -2,6 +2,7 @@ import "server-only";
 
 import {
     createHash,
+    createHmac,
     randomBytes,
     scrypt,
     timingSafeEqual,
@@ -19,6 +20,8 @@ const KEY_BYTES = 64;
 const ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
 const USER_ATTEMPT_LIMIT = 5;
 const IP_ATTEMPT_LIMIT = 20;
+const UNLOCK_GRANT_TTL_SECONDS = 30 * 60;
+const UNLOCK_COOKIE_PREFIX = "tomverse_unlock_";
 
 export class ConversationLockError extends Error {
     constructor(
@@ -144,6 +147,107 @@ const getSecret = () => {
     }
     return process.env.NEXTAUTH_SECRET;
 };
+
+const unlockCookieName = (conversationId: string) =>
+    `${UNLOCK_COOKIE_PREFIX}${conversationId}`;
+
+const passwordFingerprint = (storedPassword: string) =>
+    createHash("sha256").update(storedPassword).digest("base64url");
+
+const signUnlockGrant = (
+    userId: string,
+    conversationId: string,
+    expiresAt: number,
+    fingerprint: string
+) =>
+    createHmac("sha256", getSecret())
+        .update(`${userId}:${conversationId}:${expiresAt}:${fingerprint}`)
+        .digest("base64url");
+
+const readCookie = (request: Request, name: string) => {
+    const header = request.headers.get("cookie") || "";
+    for (const part of header.split(";")) {
+        const separator = part.indexOf("=");
+        if (separator < 0) continue;
+        if (part.slice(0, separator).trim() === name) {
+            return part.slice(separator + 1).trim();
+        }
+    }
+    return null;
+};
+
+export const createConversationUnlockCookie = (
+    userId: string,
+    conversationId: string,
+    storedPassword: string
+) => {
+    const expiresAt = Math.floor(Date.now() / 1000) + UNLOCK_GRANT_TTL_SECONDS;
+    const fingerprint = passwordFingerprint(storedPassword);
+    const signature = signUnlockGrant(
+        userId,
+        conversationId,
+        expiresAt,
+        fingerprint
+    );
+    const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+    return `${unlockCookieName(conversationId)}=${expiresAt}.${fingerprint}.${signature}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${UNLOCK_GRANT_TTL_SECONDS}; Priority=High${secure}`;
+};
+
+export const clearConversationUnlockCookie = (conversationId: string) => {
+    const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+    return `${unlockCookieName(conversationId)}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; Priority=High${secure}`;
+};
+
+export const hasConversationUnlockGrant = (
+    request: Request,
+    userId: string,
+    conversationId: string,
+    storedPassword: string | null
+) => {
+    if (!storedPassword) return true;
+
+    const token = readCookie(request, unlockCookieName(conversationId));
+    if (!token) return false;
+
+    const [expiresValue, fingerprint, signature, ...extra] = token.split(".");
+    const expiresAt = Number(expiresValue);
+    if (
+        extra.length > 0 ||
+        !Number.isSafeInteger(expiresAt) ||
+        expiresAt <= Math.floor(Date.now() / 1000) ||
+        fingerprint !== passwordFingerprint(storedPassword)
+    ) {
+        return false;
+    }
+
+    const expected = signUnlockGrant(
+        userId,
+        conversationId,
+        expiresAt,
+        fingerprint
+    );
+    const actualBuffer = Buffer.from(signature || "");
+    const expectedBuffer = Buffer.from(expected);
+    return (
+        actualBuffer.length === expectedBuffer.length &&
+        timingSafeEqual(actualBuffer, expectedBuffer)
+    );
+};
+
+export const conversationLockedResponse = () =>
+    new Response(
+        JSON.stringify({
+            error: "Conversation is locked.",
+            code: "CONVERSATION_LOCKED",
+        }),
+        {
+            status: 423,
+            headers: {
+                "Content-Type": "application/json",
+                "Cache-Control": "no-store",
+            },
+        }
+    );
 
 const getClientIp = (request: Request) => {
     const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();

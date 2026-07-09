@@ -3,9 +3,13 @@ import { getServerSession } from "next-auth/next";
 import { prisma } from "@/lib/prisma";
 import { authOptions } from "@/lib/auth";
 import { formatConversationAsText, sanitizeFileName } from "@/lib/exportConversation";
+import {
+    conversationLockedResponse,
+    hasConversationUnlockGrant,
+} from "@/lib/conversationLock";
 
 export async function GET(
-    _req: Request,
+    req: Request,
     context: { params: Promise<{ conversationId: string }> }
 ) {
     const session = await getServerSession(authOptions);
@@ -34,6 +38,17 @@ export async function GET(
 
     if (!conversation) {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+
+    if (
+        !hasConversationUnlockGrant(
+            req,
+            userId,
+            conversationId,
+            conversation.password
+        )
+    ) {
+        return conversationLockedResponse();
     }
 
     const text = formatConversationAsText(conversation);

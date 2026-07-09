@@ -3,8 +3,9 @@ import { getServerSession } from "next-auth/next";
 import { prisma } from "@/lib/prisma";
 import { authOptions } from "@/lib/auth";
 import { formatConversationAsText } from "@/lib/exportConversation";
+import { hasConversationUnlockGrant } from "@/lib/conversationLock";
 
-export async function GET() {
+export async function GET(req: Request) {
     const session = await getServerSession(authOptions);
     const userId = (session?.user as { id?: string } | undefined)?.id;
 
@@ -28,11 +29,23 @@ export async function GET() {
         },
     });
 
-    const text = conversations.length
-        ? conversations
+    const exportableConversations = conversations.filter((conversation) =>
+        hasConversationUnlockGrant(
+            req,
+            userId,
+            conversation.id,
+            conversation.password
+        )
+    );
+    const lockedCount = conversations.length - exportableConversations.length;
+    const lockedNotice = lockedCount
+        ? `Tomverse AI Export\n\n${lockedCount} locked conversation(s) were excluded. Unlock them before exporting to include their contents.\n\n`
+        : "";
+    const text = exportableConversations.length
+        ? lockedNotice + exportableConversations
             .map((conversation) => formatConversationAsText(conversation))
             .join("\n\n\n##################################################\n\n\n")
-        : "Tomverse AI Export\n\nNo conversations found.\n";
+        : lockedNotice || "Tomverse AI Export\n\nNo conversations found.\n";
 
     return new Response(text, {
         headers: {

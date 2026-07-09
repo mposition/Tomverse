@@ -11,6 +11,10 @@ import {
   type ShareSnapshot,
 } from "@/lib/shareSnapshot";
 import { getPublicAppOrigin } from "@/lib/publicUrl";
+import {
+  conversationLockedResponse,
+  hasConversationUnlockGrant,
+} from "@/lib/conversationLock";
 
 const getShareTtlDays = () => {
   const configured = Number(process.env.SHARE_LINK_TTL_DAYS);
@@ -33,6 +37,7 @@ export async function POST(req: Request, context: any) {
     where: { id: conversationId },
     select: {
       userId: true,
+      password: true,
       title: true,
       createdAt: true,
       messages: {
@@ -109,7 +114,7 @@ export async function POST(req: Request, context: any) {
   });
 }
 
-export async function DELETE(_req: Request, context: any) {
+export async function DELETE(req: Request, context: any) {
   const session = await getServerSession(authOptions);
   if (!session?.user || !(session.user as any).id) {
     return NextResponse.json({ error: "Login required" }, { status: 401 });
@@ -120,11 +125,32 @@ export async function DELETE(_req: Request, context: any) {
   const userId = (session.user as any).id;
   const conversation = await prisma.conversation.findUnique({
     where: { id: conversationId },
-    select: { userId: true },
+    select: { userId: true, password: true },
   });
 
   if (!conversation || conversation.userId !== userId) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  if (
+    !hasConversationUnlockGrant(
+      req,
+      userId,
+      conversationId,
+      conversation.password
+    )
+  ) {
+    return conversationLockedResponse();
+  }
+  if (
+    !hasConversationUnlockGrant(
+      req,
+      userId,
+      conversationId,
+      conversation.password
+    )
+  ) {
+    return conversationLockedResponse();
   }
 
   await prisma.conversation.update({
