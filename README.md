@@ -99,6 +99,24 @@ CSP_MODE=enforce
 Do not enable full-page CDN caching for HTML routes while nonce CSP is active.
 API responses may still use their own cache policies.
 
+## Scheduled Maintenance
+
+Set the same secret on the web service and the Railway Cron service:
+
+```text
+MAINTENANCE_SECRET=<random value with at least 32 characters>
+MAINTENANCE_URL=https://tomverse.app
+```
+
+Create a Railway Cron service with this command:
+
+```text
+npm run maintenance:cleanup
+```
+
+Run it once per day. It deletes expired usage buckets and request leases, and
+removes expired or revoked share tokens and snapshots.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
