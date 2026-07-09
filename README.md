@@ -77,14 +77,23 @@ Production guest chat requires Cloudflare Turnstile:
 NEXT_PUBLIC_TURNSTILE_SITE_KEY=your-site-key
 TURNSTILE_SECRET_KEY=your-secret-key
 TURNSTILE_EXPECTED_HOSTNAME=tomverse.app
-TRUSTED_PROXY_IP_HEADER=cf-connecting-ip
+TRUSTED_PROXY_IP_HEADER=x-real-ip
 ```
 
-Only one configured proxy header is trusted. When using
-`cf-connecting-ip`, prevent direct public access to the Railway origin so that
-clients cannot bypass Cloudflare and supply that header themselves. If Railway
-is the only trusted edge, keep the default `x-forwarded-for`; the application
-uses the final address in that proxy chain.
+Railway sets `X-Real-IP` at its trusted edge, so `x-real-ip` is the secure
+default. Do not trust `X-Forwarded-For` directly.
+
+When Cloudflare proxying is enabled, remove the public Railway-generated domain
+and configure a secret request header at Cloudflare:
+
+```text
+TRUSTED_PROXY_IP_HEADER=cf-connecting-ip
+CLOUDFLARE_ORIGIN_SECRET=<random value with at least 32 characters>
+```
+
+Cloudflare must overwrite `X-Tomverse-Origin-Verify` with that secret before
+forwarding requests. Without a valid origin secret, the application ignores
+`CF-Connecting-IP` and safely falls back to Railway's `X-Real-IP`.
 
 ## Content Security Policy
 
