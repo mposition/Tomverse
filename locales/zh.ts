@@ -55,6 +55,8 @@ export const zh = {
         guestModeLimitMessage: "（每日最多限制 20 次）",
         aiAssistant: "AI 助手",
         exceedDailyLimit: "访客每日额度已耗尽。请登录后继续使用。",
+        responseError: "无法生成回复，请稍后重试。",
+        traceId: "追踪 ID",
         send: "发送",
         cancel: "取消",
         sendSingMessage: "发送消息给...",

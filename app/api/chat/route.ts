@@ -66,6 +66,71 @@ type IncomingAttachment = {
     data?: unknown;
     kind?: unknown;
 };
+
+const safeErrorMetadata = (error: unknown) => {
+    if (!error || typeof error !== "object") {
+        return { name: "UnknownError" };
+    }
+
+    const candidate = error as {
+        name?: unknown;
+        code?: unknown;
+        status?: unknown;
+        statusCode?: unknown;
+        isRetryable?: unknown;
+    };
+    return {
+        name:
+            typeof candidate.name === "string"
+                ? candidate.name.slice(0, 80)
+                : "Error",
+        code:
+            typeof candidate.code === "string" &&
+            /^[A-Za-z0-9_.-]{1,80}$/.test(candidate.code)
+                ? candidate.code
+                : undefined,
+        statusCode:
+            typeof candidate.statusCode === "number"
+                ? candidate.statusCode
+                : typeof candidate.status === "number"
+                  ? candidate.status
+                  : undefined,
+        isRetryable:
+            typeof candidate.isRetryable === "boolean"
+                ? candidate.isRetryable
+                : undefined,
+    };
+};
+
+const logRequestError = (
+    event: string,
+    traceId: string,
+    error: unknown,
+    modelId?: string
+) => {
+    console.error(
+        JSON.stringify({
+            event,
+            traceId,
+            modelId,
+            ...safeErrorMetadata(error),
+        })
+    );
+};
+
+const tracedJsonError = (
+    error: string,
+    code: string,
+    status: number,
+    traceId: string
+) =>
+    new Response(JSON.stringify({ error, code, traceId }), {
+        status,
+        headers: {
+            "Content-Type": "application/json",
+            "X-Request-ID": traceId,
+        },
+    });
 const OFFICE_ATTACHMENT_TYPES = new Set([
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -310,7 +375,9 @@ const getActiveModel = (model: AiModel) => {
 };
 
 export async function POST(req: Request) {
+    const traceId = randomUUID();
     let leaseId: string | null = null;
+    let requestedModelIdForLog: string | undefined;
     try {
         assertChatRequestSize(req);
         const session = await getServerSession(authOptions);
@@ -322,22 +389,24 @@ export async function POST(req: Request) {
             assistantMessageId,
         } = validateChatPayload(body);
         const requestedModelId = modelId || APP_DEFAULTS.defaultModelId;
+        requestedModelIdForLog = requestedModelId;
         const modelConfig = getEnabledModel(requestedModelId);
         if (!modelConfig) {
-            return Response.json(
-                {
-                    error: "Unknown or disabled model.",
-                    code: "MODEL_NOT_AVAILABLE",
-                },
-                { status: 400 }
+            return tracedJsonError(
+                "Unknown or disabled model.",
+                "MODEL_NOT_AVAILABLE",
+                400,
+                traceId
             );
         }
         const access = identifyChatCaller(req, session?.user?.id);
         if (conversationId && assistantMessageId) {
             if (!session?.user?.id) {
-                return Response.json(
-                    { error: "Authentication required." },
-                    { status: 401 }
+                return tracedJsonError(
+                    "Authentication required.",
+                    "AUTHENTICATION_REQUIRED",
+                    401,
+                    traceId
                 );
             }
             const conversation = await prisma.conversation.findUnique({
@@ -345,9 +414,11 @@ export async function POST(req: Request) {
                 select: { userId: true },
             });
             if (!conversation || conversation.userId !== session.user.id) {
-                return Response.json(
-                    { error: "Conversation access denied." },
-                    { status: 403 }
+                return tracedJsonError(
+                    "Conversation access denied.",
+                    "CONVERSATION_FORBIDDEN",
+                    403,
+                    traceId
                 );
             }
         }
@@ -359,13 +430,6 @@ export async function POST(req: Request) {
                 .digest("hex")
                 .slice(0, 20)}/`
             : null;
-
-        if (modelId === "llama-3-3-70b" && !process.env.GROQ_API_KEY) {
-            return new Response(
-                JSON.stringify({ error: "GROQ_API_KEY가 설정되어 있지 않습니다." }),
-                { status: 500, headers: { "Content-Type": "application/json" } }
-            );
-        }
 
         const activeModel = getActiveModel(modelConfig);
 
@@ -527,9 +591,11 @@ export async function POST(req: Request) {
                                     },
                                 });
                             } catch (error) {
-                                console.error(
-                                    "Failed to persist generated assistant message:",
-                                    error
+                                logRequestError(
+                                    "assistant_message_persist_failed",
+                                    traceId,
+                                    error,
+                                    requestedModelId
                                 );
                             }
                         }
@@ -540,6 +606,12 @@ export async function POST(req: Request) {
                     generatedText += value;
                     controller.enqueue(value);
                 } catch (error) {
+                    logRequestError(
+                        "ai_stream_failed",
+                        traceId,
+                        error,
+                        requestedModelId
+                    );
                     controller.error(error);
                     await release();
                 }
@@ -553,6 +625,7 @@ export async function POST(req: Request) {
         const headers = new Headers({
             "Content-Type": "text/plain; charset=utf-8",
             "Cache-Control": "no-cache, no-transform",
+            "X-Request-ID": traceId,
         });
         if (accessGrant.setCookie) {
             headers.set("Set-Cookie", accessGrant.setCookie);
@@ -566,14 +639,23 @@ export async function POST(req: Request) {
             await releaseChatAccess(leaseId);
         }
         const accessError = chatErrorResponse(error);
-        if (accessError) return accessError;
+        if (accessError) {
+            accessError.headers.set("X-Request-ID", traceId);
+            return accessError;
+        }
 
-        console.error("AI SDK API request failed:");
-        console.error(error?.message || error);
+        logRequestError(
+            "ai_request_failed",
+            traceId,
+            error,
+            requestedModelIdForLog
+        );
 
-        return new Response(
-            JSON.stringify({ error: "AI 응답 생성 실패" }),
-            { status: 500, headers: { "Content-Type": "application/json" } }
+        return tracedJsonError(
+            "AI 응답 생성에 실패했습니다.",
+            "AI_PROVIDER_ERROR",
+            500,
+            traceId
         );
     }
 }

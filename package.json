@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "db:migrate": "prisma migrate deploy",
+    "db:migrate": "node scripts/require-direct-database-url.mjs && prisma migrate deploy",
     "postinstall": "prisma generate"
   },
   "dependencies": {

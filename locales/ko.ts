@@ -55,6 +55,8 @@ export const ko = {
 		guestModeLimitMessage: "(일일 최대 20회 제한)",
 		aiAssistant: "AI 어시스턴트",
 		exceedDailyLimit: "일일 게스트 사용량을 모두 소진했습니다. 로그인 후 이용해 주세요.",
+		responseError: "응답을 생성하지 못했습니다. 잠시 후 다시 시도해주세요.",
+		traceId: "추적 ID",
 		send: "전송",
 		cancel: "취소",
 		sendSingMessage: "에게 메시지 보내기...",

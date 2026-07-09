@@ -262,6 +262,7 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
     const timeoutId = window.setTimeout(() => {
       controller.abort();
     }, 30000);
+    let requestTraceId: string | null = null;
 	
     try {
       const response = await fetch("/api/chat", {
@@ -281,9 +282,18 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
         }),
         signal: controller.signal,
       });
+      requestTraceId = response.headers.get("X-Request-ID");
 
       if (!response.ok) {
-        throw new Error(`서버 오류: ${response.status}`);
+        const errorBody = await response.json().catch(() => null);
+        requestTraceId =
+          typeof errorBody?.traceId === "string"
+            ? errorBody.traceId
+            : requestTraceId;
+        const requestError = new Error(`Chat request failed: ${response.status}`);
+        (requestError as Error & { traceId?: string }).traceId =
+          requestTraceId || undefined;
+        throw requestError;
       }
 
       if (!response.body) {
@@ -317,10 +327,18 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
           "cancelled"
         );
       } else {
-        console.error(error);
+        const traceId =
+          typeof error?.traceId === "string"
+            ? error.traceId
+            : requestTraceId;
+        console.error("Chat request failed", {
+          traceId: traceId || undefined,
+        });
         setAssistantMessage(
           assistantMessageId,
-          "오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
+          `${t("chat.responseError")}${
+            traceId ? `\n${t("chat.traceId")}: ${traceId}` : ""
+          }`,
           "error"
         );
       }	

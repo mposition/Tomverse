@@ -55,6 +55,8 @@ export const en = {
         guestModeLimitMessage: "(Maximum limit of 20 per day)",
         aiAssistant: "AI Assistant",
         exceedDailyLimit: "You have exhausted your daily guest limit. Please log in to continue.",
+        responseError: "The response could not be generated. Please try again shortly.",
+        traceId: "Trace ID",
         send: "Send",
         cancel: "Cancel",
         sendSingMessage: "Send a message to...",
