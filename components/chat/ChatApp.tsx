@@ -346,8 +346,12 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
           "error"
         );
       }
-    } catch (error: any) {
-      if (error?.name === "AbortError") {
+    } catch (error: unknown) {
+      const requestError =
+        error && typeof error === "object"
+          ? (error as { name?: unknown; traceId?: unknown })
+          : {};
+      if (requestError.name === "AbortError") {
         setAssistantMessage(
           assistantMessageId,
           "답변 생성이 중단되었습니다.",
@@ -355,8 +359,8 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
         );
       } else {
         const traceId =
-          typeof error?.traceId === "string"
-            ? error.traceId
+          typeof requestError.traceId === "string"
+            ? requestError.traceId
             : requestTraceId;
         console.error("Chat request failed", {
           traceId: traceId || undefined,

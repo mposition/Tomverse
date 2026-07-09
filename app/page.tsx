@@ -6,7 +6,10 @@ import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { Conversation, AVAILABLE_MODELS, ENABLED_MODELS, MAX_SELECTED_MODELS, type ChatAttachment } from "@/components/chat/types";
 import { useSession } from "next-auth/react";
-import { useLanguage } from "@/components/LanguageProvider";
+import {
+  useLanguage,
+  type Language,
+} from "@/components/LanguageProvider";
 import {
   APP_DEFAULTS,
   clampGuestSelectedModels,
@@ -31,6 +34,8 @@ const normalizeStringArray = (value: unknown, fallback: string[]) => {
 };
 
 const uniqueStrings = (values: string[]) => Array.from(new Set(values));
+const isLanguage = (value: unknown): value is Language =>
+  value === "en" || value === "ko" || value === "zh";
 
 export default function Home() {
     const { t, lang, setLang } = useLanguage(); // 💡 t 함수 꺼내기
@@ -269,8 +274,8 @@ export default function Home() {
                         }
                     }
 
-                    if (data && data.language) {
-                        setLang(data.language as any);
+                    if (data && isLanguage(data.language)) {
+                        setLang(data.language);
                     }
                 })
                 .catch((err) => {
@@ -369,7 +374,7 @@ export default function Home() {
         // types.tsx에 없는 속성이므로 as any로 캐스팅하여 안전하게 가져옵니다.
           const restoredModels = clampGuestSelectedModels(
             normalizeStringArray(
-              (targetConv as any).selectedModels,
+              targetConv.selectedModels,
               [APP_DEFAULTS.guestDefaultModelId]
             )
           );
@@ -379,7 +384,7 @@ export default function Home() {
               : [APP_DEFAULTS.guestDefaultModelId]
           );
           setDisabledPanels(
-            normalizeStringArray((targetConv as any).disabledPanels, []).filter(
+            normalizeStringArray(targetConv.disabledPanels, []).filter(
               (modelId) => restoredModels.includes(modelId)
             )
           );
@@ -552,8 +557,8 @@ export default function Home() {
         if (!response.ok) {
           throw new Error(`Model settings sync failed: ${response.status}`);
         }
-      } catch (error: any) {
-        if (error?.name !== "AbortError") {
+      } catch (error: unknown) {
+        if (!(error instanceof Error) || error.name !== "AbortError") {
           console.error("모델 세팅 동기화 실패:", error);
         }
       }

@@ -24,14 +24,17 @@ const verifyConversationSchema = z
     })
     .strict();
 
-export async function POST(req: Request, context: any) {
+export async function POST(
+    req: Request,
+    context: RouteContext<"/api/conversations/[conversationId]/verify">
+) {
     try {
         const session = await getServerSession(authOptions);
         if (!session?.user) {
             return NextResponse.json({ error: "권한 없음" }, { status: 401 });
         }
 
-        const userId = (session.user as any).id;
+        const userId = session.user.id;
         await consumeApiRateLimit(req, userId, "conversation-lock-verify", {
             minute: 10,
             day: 100,

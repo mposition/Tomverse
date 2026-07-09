@@ -1,13 +1,12 @@
 // components/LanguageProvider.tsx
 "use client";
 
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState } from "react";
 import { ko } from "@/locales/ko";
 import { en } from "@/locales/en";
 import { zh } from "@/locales/zh";
 
-type Language = "ko" | "en" | "zh";
-type Translations = typeof ko;
+export type Language = "ko" | "en" | "zh";
 
 interface LanguageContextType {
     lang: Language;
@@ -25,12 +24,12 @@ export function LanguageProvider({ children, initialLang = "en" }: { children: R
     // 💡 중첩된 키(예: "sidebar.newChat")를 해석해서 문자열을 반환하는 함수
     const t = (key: string) => {
         const keys = key.split(".");
-        let value: any = dictionaries[lang];
+        let value: unknown = dictionaries[lang];
         for (const k of keys) {
-            if (value === undefined) break;
-            value = value[k];
+            if (!value || typeof value !== "object") return key;
+            value = (value as Record<string, unknown>)[k];
         }
-        return (value as string) || key; // 번역이 없으면 키값 자체를 반환
+        return typeof value === "string" ? value : key; // 번역이 없으면 키값 자체를 반환
     };
 
     return (

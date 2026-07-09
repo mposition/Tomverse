@@ -26,10 +26,10 @@ const settingsSchema = z
 export async function GET(req: Request) {
     try {
         const session = await getServerSession(authOptions);
-        if (!session?.user || !(session.user as any).id) {
+        if (!session?.user?.id) {
             return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
         }
-        const userId = (session.user as any).id;
+        const userId = session.user.id;
         await consumeApiRateLimit(req, userId, "settings-read", {
             minute: 60,
             day: 5_000,
@@ -65,10 +65,10 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
     try {
         const session = await getServerSession(authOptions);
-        if (!session?.user || !(session.user as any).id) {
+        if (!session?.user?.id) {
             return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
         }
-        const userId = (session.user as any).id;
+        const userId = session.user.id;
         await consumeApiRateLimit(req, userId, "settings-save", {
             minute: 10,
             day: 100,

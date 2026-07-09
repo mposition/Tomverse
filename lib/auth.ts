@@ -1,4 +1,5 @@
 import { NextAuthOptions } from "next-auth";
+import type { Adapter } from "next-auth/adapters";
 import GoogleProvider from "next-auth/providers/google";
 import NaverProvider from "next-auth/providers/naver";
 import AzureADProvider from "next-auth/providers/azure-ad";
@@ -11,7 +12,7 @@ const SESSION_UPDATE_AGE_SECONDS = 24 * 60 * 60;
 
 export const authOptions: NextAuthOptions = {
     secret: process.env.NEXTAUTH_SECRET,
-    adapter: PrismaAdapter(prisma as any),
+    adapter: PrismaAdapter(prisma) as Adapter,
     providers: [
         GoogleProvider({
             clientId: process.env.GOOGLE_ID as string,

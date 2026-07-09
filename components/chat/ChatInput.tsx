@@ -156,6 +156,79 @@ type ChatInputProps = {
   isGuestMode?: boolean;
 };
 
+type GooglePickerConfig = {
+  clientId: string;
+  apiKey: string;
+  appId: string;
+};
+
+type GoogleTokenResponse = {
+  access_token?: string;
+  error?: string;
+};
+
+interface GooglePickerView {
+  setIncludeFolders(value: boolean): GooglePickerView;
+  setMimeTypes(value: string): GooglePickerView;
+}
+
+interface GooglePickerInstance {
+  setVisible(value: boolean): void;
+}
+
+interface GooglePickerBuilder {
+  setAppId(value: string): GooglePickerBuilder;
+  setOAuthToken(value: string): GooglePickerBuilder;
+  setDeveloperKey(value: string): GooglePickerBuilder;
+  addView(value: GooglePickerView): GooglePickerBuilder;
+  enableFeature(value: unknown): GooglePickerBuilder;
+  setCallback(
+    callback: (data: Record<string, unknown>) => void
+  ): GooglePickerBuilder;
+  build(): GooglePickerInstance;
+}
+
+interface GooglePickerWindow extends Window {
+  gapi: {
+    load(
+      name: string,
+      options: { callback: () => void; onerror: () => void }
+    ): void;
+  };
+  google: {
+    accounts: {
+      oauth2: {
+        initTokenClient(config: {
+          client_id: string;
+          scope: string;
+          callback: (response: GoogleTokenResponse) => void;
+        }): {
+          requestAccessToken(options: { prompt: string }): void;
+        };
+      };
+    };
+    picker: {
+      DocsView: new (viewId: unknown) => GooglePickerView;
+      PickerBuilder: new () => GooglePickerBuilder;
+      ViewId: { DOCS: unknown };
+      Feature: { MULTISELECT_ENABLED: unknown };
+      Response: { ACTION: string; DOCUMENTS: string };
+      Action: { PICKED: unknown; CANCEL: unknown };
+      Document: { ID: string; NAME: string; MIME_TYPE: string };
+    };
+  };
+}
+
+const isGooglePickerConfig = (value: unknown): value is GooglePickerConfig => {
+  if (!value || typeof value !== "object") return false;
+  const config = value as Record<string, unknown>;
+  return (
+    typeof config.clientId === "string" &&
+    typeof config.apiKey === "string" &&
+    typeof config.appId === "string"
+  );
+};
+
 export function ChatInput({
   value,
   onChange,
@@ -358,14 +431,17 @@ export function ChatInput({
       if (!configResponse.ok) {
         throw new Error("Google Picker configuration is unavailable.");
       }
-      const config = await configResponse.json();
+      const config: unknown = await configResponse.json();
+      if (!isGooglePickerConfig(config)) {
+        throw new Error("Google Picker configuration is invalid.");
+      }
 
       await Promise.all([
         loadExternalScript("https://accounts.google.com/gsi/client"),
         loadExternalScript("https://apis.google.com/js/api.js"),
       ]);
 
-      const browserWindow = window as any;
+      const browserWindow = window as unknown as GooglePickerWindow;
       await new Promise<void>((resolve, reject) => {
         browserWindow.gapi.load("picker", {
           callback: resolve,
@@ -377,7 +453,7 @@ export function ChatInput({
         const tokenClient = browserWindow.google.accounts.oauth2.initTokenClient({
           client_id: config.clientId,
           scope: GOOGLE_DRIVE_SCOPE,
-          callback: (response: { access_token?: string; error?: string }) => {
+          callback: (response: GoogleTokenResponse) => {
             if (response.error || !response.access_token) {
               reject(new Error(response.error || "Google authorization failed."));
               return;
@@ -401,16 +477,30 @@ export function ChatInput({
           .setDeveloperKey(config.apiKey)
           .addView(view)
           .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
-          .setCallback((data: any) => {
+          .setCallback((data: Record<string, unknown>) => {
             const action = data[google.picker.Response.ACTION];
             if (action === google.picker.Action.PICKED) {
-              const documents = data[google.picker.Response.DOCUMENTS] || [];
+              const documents = data[google.picker.Response.DOCUMENTS];
               resolve(
-                documents.map((document: any) => ({
-                  id: document[google.picker.Document.ID],
-                  name: document[google.picker.Document.NAME],
-                  mimeType: document[google.picker.Document.MIME_TYPE],
-                }))
+                (Array.isArray(documents) ? documents : []).flatMap(
+                  (document): Array<{
+                    id: string;
+                    name: string;
+                    mimeType: string;
+                  }> => {
+                    if (!document || typeof document !== "object") return [];
+                    const record = document as Record<string, unknown>;
+                    const id = record[google.picker.Document.ID];
+                    const name = record[google.picker.Document.NAME];
+                    const mimeType =
+                      record[google.picker.Document.MIME_TYPE];
+                    return typeof id === "string" &&
+                      typeof name === "string" &&
+                      typeof mimeType === "string"
+                      ? [{ id, name, mimeType }]
+                      : [];
+                  }
+                )
               );
             } else if (action === google.picker.Action.CANCEL) {
               resolve([]);

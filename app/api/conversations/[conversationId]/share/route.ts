@@ -45,15 +45,18 @@ const applyShareRateLimit = async (
   }
 };
 
-export async function POST(req: Request, context: any) {
+export async function POST(
+  req: Request,
+  context: RouteContext<"/api/conversations/[conversationId]/share">
+) {
   const session = await getServerSession(authOptions);
-  if (!session?.user || !(session.user as any).id) {
+  if (!session?.user?.id) {
     return NextResponse.json({ error: "Login required" }, { status: 401 });
   }
 
   const params = await context.params;
   const conversationId = params.conversationId;
-  const userId = (session.user as any).id;
+  const userId = session.user.id;
   const rateLimitResponse = await applyShareRateLimit(
     req,
     userId,
@@ -224,15 +227,18 @@ export async function POST(req: Request, context: any) {
   });
 }
 
-export async function DELETE(req: Request, context: any) {
+export async function DELETE(
+  req: Request,
+  context: RouteContext<"/api/conversations/[conversationId]/share">
+) {
   const session = await getServerSession(authOptions);
-  if (!session?.user || !(session.user as any).id) {
+  if (!session?.user?.id) {
     return NextResponse.json({ error: "Login required" }, { status: 401 });
   }
 
   const params = await context.params;
   const conversationId = params.conversationId;
-  const userId = (session.user as any).id;
+  const userId = session.user.id;
   const rateLimitResponse = await applyShareRateLimit(
     req,
     userId,

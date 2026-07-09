@@ -1,6 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next"; // 💡 세션 조회를 위한 임포트 추가
 import { authOptions } from "@/lib/auth"; // 💡 NextAuth 설정 옵션 임포트
@@ -54,9 +55,9 @@ const updateConversationSchema = z
 const MESSAGE_PAGE_SIZE = 50;
 
 // 💡 방어 함수 추가
-const safeParse = (data: any, fallback: any) => {
+const safeParse = (data: unknown, fallback: string[]) => {
   if (!data) return fallback;
-  let parsed = data;
+  let parsed: unknown = data;
   for (let i = 0; i < 2 && typeof parsed === "string"; i++) {
     try {
       parsed = JSON.parse(parsed);
@@ -64,7 +65,9 @@ const safeParse = (data: any, fallback: any) => {
       return fallback;
     }
   }
-  return Array.isArray(parsed) ? parsed : fallback;
+  return Array.isArray(parsed)
+    ? parsed.filter((value): value is string => typeof value === "string")
+    : fallback;
 };
 
 type Params = {
@@ -74,14 +77,17 @@ type Params = {
 };
 
 // 💡 특정 대화방의 상세 정보와 그 방에 쌓인 모든 메시지를 가져오는 GET 메서드
-export async function GET(req: Request, context: any) {
+export async function GET(
+  req: Request,
+  context: RouteContext<"/api/conversations/[conversationId]">
+) {
     try {
     // 현재 로그인한 사용자의 세션을 확인합니다.
     const session = await getServerSession(authOptions);
-    if (!session || !session.user || !(session.user as any).id) {
+    if (!session?.user?.id) {
         return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
     }
-    const userId = (session.user as any).id;
+    const userId = session.user.id;
     await consumeApiRateLimit(req, userId, "conversation-detail", {
       minute: 300,
       day: 20_000,
@@ -89,7 +95,7 @@ export async function GET(req: Request, context: any) {
 
     // params 추출 (Next 15의 비동기 params 대응)
     const params = await context.params;
-    const conversationId = params.conversationId || params.id;
+    const conversationId = params.conversationId;
 
     if (!conversationId) {
         return NextResponse.json({ error: "대화방 ID가 누락되었습니다." }, { status: 400 });
@@ -234,15 +240,18 @@ export async function GET(req: Request, context: any) {
 }
 
 // 💡 대화방 정보 수정 (PATCH)
-export async function PATCH(req: Request, context: any) {
+export async function PATCH(
+  req: Request,
+  context: RouteContext<"/api/conversations/[conversationId]">
+) {
     try {
         const session = await getServerSession(authOptions);
-        if (!session || !session.user || !(session.user as any).id) {
+        if (!session?.user?.id) {
             return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
         }
 
         // 바디 파싱 에러 방어
-        const userId = (session.user as any).id;
+        const userId = session.user.id;
         await consumeApiRateLimit(req, userId, "conversation-update", {
             minute: 30,
             day: 1000,
@@ -253,7 +262,7 @@ export async function PATCH(req: Request, context: any) {
             updateConversationSchema
         );
         const params = await context.params;
-        const conversationId = params.conversationId || params.id; // 폴더명이 [id]일 경우도 방어
+        const conversationId = params.conversationId;
 
         if (!conversationId) {
             console.error("❌ [백엔드 PATCH] 대화방 ID를 찾을 수 없습니다. (폴더명을 확인하세요)");
@@ -279,7 +288,7 @@ export async function PATCH(req: Request, context: any) {
         });
         const defaultEngine = userSettings?.defaultModel || APP_DEFAULTS.defaultModelId;
 
-	const updateData: any = {};
+	const updateData: Prisma.ConversationUpdateInput = {};
       const { title, password, currentPassword } = body;
       const lockAuditEvent: SecurityAuditEvent | null =
           password === undefined
@@ -472,12 +481,12 @@ export async function PATCH(req: Request, context: any) {
 export async function DELETE(req: Request, { params }: Params) {
     try {
         const session = await getServerSession(authOptions);
-        if (!session || !session.user || !(session.user as any).id) {
+        if (!session?.user?.id) {
             return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
         }
 
     const { conversationId } = await params;
-      const userId = (session.user as any).id;
+      const userId = session.user.id;
       await consumeApiRateLimit(req, userId, "conversation-delete", {
         minute: 10,
         day: 100,

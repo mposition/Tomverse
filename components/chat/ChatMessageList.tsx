@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import type { ExtraProps } from "react-markdown";
+import type { ComponentPropsWithoutRef } from "react";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { Paperclip } from "lucide-react";
@@ -13,6 +15,8 @@ type ChatMessageListProps = {
   isPrivate?: boolean;
   isGuestMode?: boolean; // 💡 게스트 모드 여부 추가  
 };
+type MarkdownCodeProps = ComponentPropsWithoutRef<"code"> &
+  ExtraProps & { inline?: boolean };
 
 function TypingIndicator() {
   return (
@@ -178,7 +182,7 @@ export function ChatMessageList({ messages, isPrivate = false, isGuestMode = fal
                             {children}
                           </pre>
                         ),
-                        code: ({ inline, children, ...props }: any) =>
+                        code: ({ inline, children, ...props }: MarkdownCodeProps) =>
                           inline ? (
                             <code className="rounded bg-zinc-200 text-zinc-800 px-1 py-0.5 text-[0.9em] dark:bg-zinc-800 dark:text-zinc-100" {...props}>
                               {children}

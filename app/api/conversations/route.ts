@@ -24,9 +24,9 @@ const createConversationSchema = z
   .strict();
 
 // 💡 파싱 에러를 완벽하게 막아주는 방어 함수
-const safeParse = (data: any, fallback: any) => {
+const safeParse = (data: unknown, fallback: string[]) => {
   if (!data) return fallback;
-  let parsed = data;
+  let parsed: unknown = data;
   for (let i = 0; i < 2 && typeof parsed === "string"; i++) {
     try {
       parsed = JSON.parse(parsed);
@@ -34,7 +34,9 @@ const safeParse = (data: any, fallback: any) => {
       return fallback;
     }
   }
-  return Array.isArray(parsed) ? parsed : fallback;
+  return Array.isArray(parsed)
+    ? parsed.filter((value): value is string => typeof value === "string")
+    : fallback;
 };
 
 // 💡 대화방 목록을 최신순으로 불러옵니다.
@@ -97,11 +99,11 @@ export async function POST(req: Request) {
   try {
     // 세션 식별 및 유저 인증 확인
     const session = await getServerSession(authOptions);
-    if (!session || !session.user || !(session.user as any).id) {
+    if (!session?.user?.id) {
       return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
     }
 
-      const userId = (session.user as any).id; // 💡 로그인된 유저의 고유 DB ID 추출
+      const userId = session.user.id; // 💡 로그인된 유저의 고유 DB ID 추출
     await consumeApiRateLimit(req, userId, "conversation-create", {
       minute: 10,
       day: 100,

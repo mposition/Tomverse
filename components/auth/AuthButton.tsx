@@ -4,7 +4,10 @@
 import { signIn, signOut, useSession } from "next-auth/react";
 import { useState, useEffect } from "react";
 import { ENABLED_MODELS } from "@/components/chat/types";
-import { useLanguage } from "@/components/LanguageProvider";
+import {
+    useLanguage,
+    type Language,
+} from "@/components/LanguageProvider";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { notifyUserSettingsUpdated } from "@/lib/userSettingsEvents";
 
@@ -16,7 +19,7 @@ export function AuthButton() {
     const { t, lang: globalLang, setLang: setGlobalLang } = useLanguage();
 
     const [theme, setTheme] = useState<"dark" | "light">(APP_DEFAULTS.defaultTheme);
-    const [language, setLanguage] = useState<"en" | "zh" | "ko">(APP_DEFAULTS.defaultLanguage);
+    const [language, setLanguage] = useState<Language>(APP_DEFAULTS.defaultLanguage);
     const [defaultModel, setDefaultModel] = useState<string>(APP_DEFAULTS.defaultModelId);
 
     // 모달이 열릴 때 DB에서 최신 설정을 받아옴
@@ -49,7 +52,7 @@ export function AuthButton() {
                 setIsModalOpen(false);
                 alert(t("auth.saveMessage"));
 
-                setGlobalLang(language as any);
+                setGlobalLang(language);
 
                 if (theme === "light") {
                     document.documentElement.classList.remove("dark");

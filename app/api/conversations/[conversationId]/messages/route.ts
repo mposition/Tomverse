@@ -43,10 +43,13 @@ type Params = {
   }>;
 };
 
-export async function POST(req: Request, context: any) {
+export async function POST(
+  req: Request,
+  context: RouteContext<"/api/conversations/[conversationId]/messages">
+) {
   try {
 	const params = await context.params;
-      const conversationId = params.conversationId || params.id;
+      const conversationId = params.conversationId;
 
       if (!conversationId) {
           return NextResponse.json({ error: "대화방 ID가 누락되었습니다." }, { status: 400 });
@@ -58,7 +61,7 @@ export async function POST(req: Request, context: any) {
           return NextResponse.json({ error: "권한이 없습니다." }, { status: 401 });
       }
 
-      const userId = (session.user as any).id;
+      const userId = session.user.id;
       await consumeApiRateLimit(req, userId, "message-save", {
         minute: 30,
         day: 1_000,
@@ -121,7 +124,10 @@ export async function POST(req: Request, context: any) {
 }
 
 // 모델 전용 기록 삭제 API
-export async function DELETE(req: Request, context: any) {
+export async function DELETE(
+    req: Request,
+    context: RouteContext<"/api/conversations/[conversationId]/messages">
+) {
     try {
         const session = await getServerSession(authOptions);
 
@@ -130,9 +136,9 @@ export async function DELETE(req: Request, context: any) {
         }
 
         const params = await context.params;
-        const conversationId = params.conversationId || params.id;
+        const conversationId = params.conversationId;
 
-        const userId = (session.user as any).id;
+        const userId = session.user.id;
         await consumeApiRateLimit(req, userId, "message-delete", {
           minute: 20,
           day: 200,

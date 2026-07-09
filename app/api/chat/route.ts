@@ -933,7 +933,7 @@ export async function POST(req: Request) {
         return new Response(protectedStream.pipeThrough(new TextEncoderStream()), {
             headers,
         });
-    } catch (error: any) {
+    } catch (error: unknown) {
         if (leaseId) {
             await releaseChatAccess(leaseId);
         }
