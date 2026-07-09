@@ -23,6 +23,7 @@ import {
     acquireChatAccess,
     assertModelAccess,
     assertChatRequestSize,
+    ChatAccessError,
     chatErrorResponse,
     createChatBudget,
     identifyChatCaller,
@@ -68,7 +69,8 @@ const perplexity = createOpenAI({
 
 const MAX_ATTACHMENTS = 5;
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
-const MAX_EXTRACTED_TEXT_LENGTH = 1_000_000;
+const MAX_TOTAL_ATTACHMENT_SIZE = 25 * 1024 * 1024;
+const MAX_EXTRACTED_ATTACHMENT_CHARACTERS = 300_000;
 const MAX_STORED_MESSAGE_CHARACTERS = 100_000;
 type IncomingAttachment = {
     name?: unknown;
@@ -424,6 +426,48 @@ export async function POST(req: Request) {
                 traceId
             );
         }
+        const requestAttachments = messages.flatMap((message) =>
+            Array.isArray(message.attachments)
+                ? (message.attachments as IncomingAttachment[])
+                : []
+        );
+        if (requestAttachments.length > MAX_ATTACHMENTS) {
+            throw new ChatAccessError(
+                413,
+                "TOO_MANY_ATTACHMENTS",
+                "A chat request can contain at most 5 attachments."
+            );
+        }
+        const objectKeys = new Set<string>();
+        for (const attachment of requestAttachments) {
+            const hasObjectKey = typeof attachment?.objectKey === "string";
+            const hasInlineData = typeof attachment?.data === "string";
+            if (hasObjectKey && hasInlineData) {
+                throw new ChatAccessError(
+                    400,
+                    "AMBIGUOUS_ATTACHMENT_SOURCE",
+                    "An attachment must have only one data source."
+                );
+            }
+            if (hasObjectKey) {
+                const objectKey = attachment.objectKey as string;
+                if (objectKeys.has(objectKey)) {
+                    throw new ChatAccessError(
+                        400,
+                        "DUPLICATE_ATTACHMENT_OBJECT",
+                        "Duplicate attachment objects are not allowed."
+                    );
+                }
+                objectKeys.add(objectKey);
+            }
+        }
+        if (objectKeys.size > MAX_ATTACHMENTS) {
+            throw new ChatAccessError(
+                413,
+                "TOO_MANY_ATTACHMENT_OBJECTS",
+                "A chat request can reference at most 5 attachment objects."
+            );
+        }
         const access = identifyChatCaller(req, session?.user?.id);
         assertModelAccess(access.kind, modelConfig);
         if (conversationId && assistantMessageId) {
@@ -467,23 +511,23 @@ export async function POST(req: Request) {
 
         const activeModel = getActiveModel(modelConfig);
         let estimatedInputTokens = 0;
+        let totalAttachmentBytes = 0;
+        let totalExtractedCharacters = 0;
         const estimateTextTokens = (text: string) =>
             Math.max(1, Buffer.byteLength(text, "utf8"));
 
-        const formattedMessages: ModelMessage[] = await Promise.all(messages.map(async (msg) => {
+        const formattedMessages: ModelMessage[] = [];
+        for (const msg of messages) {
             if (msg.role === "assistant") {
                 const content = String(msg.content ?? "");
                 estimatedInputTokens += estimateTextTokens(content);
-                return { role: "assistant", content };
+                formattedMessages.push({ role: "assistant", content });
+                continue;
             }
 
             const attachments = (
                 Array.isArray(msg.attachments) ? msg.attachments : []
             ) as IncomingAttachment[];
-            if (attachments.length > MAX_ATTACHMENTS) {
-                throw new Error("Too many attachments.");
-            }
-
             const textAttachments: string[] = [];
             const fileParts: Array<{
                 type: "file";
@@ -528,35 +572,87 @@ export async function POST(req: Request) {
                             : attachmentBuffer.toString("base64");
                 } else if (typeof attachment.data === "string") {
                     attachmentData = attachment.data;
-                    attachmentBytes =
-                        attachment.kind === "text"
-                            ? Buffer.byteLength(attachment.data, "utf8")
-                            : Math.ceil((attachment.data.length * 3) / 4);
+                    if (attachment.kind === "text") {
+                        attachmentBytes = Buffer.byteLength(
+                            attachment.data,
+                            "utf8"
+                        );
+                    } else {
+                        attachmentBuffer = Buffer.from(
+                            attachment.data,
+                            "base64"
+                        );
+                        attachmentBytes = attachmentBuffer.byteLength;
+                    }
                 } else {
                     throw new Error("Attachment data is missing.");
                 }
 
                 if (attachmentBytes > MAX_ATTACHMENT_SIZE) {
-                    throw new Error("Attachment is too large.");
+                    throw new ChatAccessError(
+                        413,
+                        "ATTACHMENT_TOO_LARGE",
+                        "An attachment exceeds the per-file size limit."
+                    );
+                }
+                totalAttachmentBytes += attachmentBytes;
+                if (totalAttachmentBytes > MAX_TOTAL_ATTACHMENT_SIZE) {
+                    throw new ChatAccessError(
+                        413,
+                        "ATTACHMENT_TOTAL_TOO_LARGE",
+                        "Attachments exceed the total request size limit."
+                    );
                 }
 
                 if (OFFICE_ATTACHMENT_TYPES.has(attachment.mediaType)) {
                     const officeBuffer =
                         attachmentBuffer || Buffer.from(attachmentData, "base64");
+                    const remainingCharacters =
+                        MAX_EXTRACTED_ATTACHMENT_CHARACTERS -
+                        totalExtractedCharacters;
+                    if (remainingCharacters <= 64) {
+                        throw new ChatAccessError(
+                            413,
+                            "ATTACHMENT_TEXT_TOO_LARGE",
+                            "Extracted attachment text exceeds the request limit."
+                        );
+                    }
                     const extractedText = await parseOfficeSafely(
                         officeBuffer,
                         attachment.mediaType,
-                        MAX_EXTRACTED_TEXT_LENGTH
+                        remainingCharacters - 64
                     );
 
                     if (!extractedText) {
                         throw new Error(`No readable text found in ${attachment.name}.`);
+                    }
+                    totalExtractedCharacters += extractedText.length;
+                    if (
+                        totalExtractedCharacters >
+                        MAX_EXTRACTED_ATTACHMENT_CHARACTERS
+                    ) {
+                        throw new ChatAccessError(
+                            413,
+                            "ATTACHMENT_TEXT_TOO_LARGE",
+                            "Extracted attachment text exceeds the request limit."
+                        );
                     }
 
                     textAttachments.push(
                         `[Attached office file: ${attachment.name}]\n${extractedText}`
                     );
                 } else if (attachment.kind === "text") {
+                    totalExtractedCharacters += attachmentData.length;
+                    if (
+                        totalExtractedCharacters >
+                        MAX_EXTRACTED_ATTACHMENT_CHARACTERS
+                    ) {
+                        throw new ChatAccessError(
+                            413,
+                            "ATTACHMENT_TEXT_TOO_LARGE",
+                            "Extracted attachment text exceeds the request limit."
+                        );
+                    }
                     textAttachments.push(
                         `[Attached file: ${attachment.name}]\n${attachmentData}`
                     );
@@ -573,7 +669,8 @@ export async function POST(req: Request) {
             if (textAttachments.length === 0 && fileParts.length === 0) {
                 const content = String(msg.content ?? "");
                 estimatedInputTokens += estimateTextTokens(content);
-                return { role: "user", content };
+                formattedMessages.push({ role: "user", content });
+                continue;
             }
 
             const text = [String(msg.content ?? ""), ...textAttachments]
@@ -582,14 +679,14 @@ export async function POST(req: Request) {
             estimatedInputTokens +=
                 estimateTextTokens(text) + fileParts.length * 16_000;
 
-            return {
+            formattedMessages.push({
                 role: "user",
                 content: [
                     { type: "text", text: text || "Please analyze the attached file." },
                     ...fileParts,
                 ],
-            };
-        }));
+            });
+        }
         const budget = createChatBudget(
             access.kind,
             modelConfig,
