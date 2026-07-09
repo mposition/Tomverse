@@ -133,6 +133,10 @@ export async function DELETE(req: Request, context: any) {
         const conversationId = params.conversationId || params.id;
 
         const userId = (session.user as any).id;
+        await consumeApiRateLimit(req, userId, "message-delete", {
+          minute: 20,
+          day: 200,
+        });
         const existingConv = await prisma.conversation.findUnique({
             where: { id: conversationId },
             select: { userId: true, password: true }
@@ -175,6 +179,9 @@ export async function DELETE(req: Request, context: any) {
 
         return NextResponse.json({ success: true });
     } catch (error) {
+    const securityResponse = apiSecurityResponse(error);
+    if (securityResponse) return securityResponse;
+
     console.error("❌ 메시지 삭제 에러:", error);
     return NextResponse.json({ error: "삭제 실패" }, { status: 500 });
   }

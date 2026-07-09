@@ -38,7 +38,7 @@ const safeParse = (data: any, fallback: any) => {
 };
 
 // 💡 대화방 목록을 최신순으로 불러옵니다.
-export async function GET() {
+export async function GET(req: Request) {
   try {
     // 현재 로그인한 실제 유저 세션을 가져옵니다.
     const session = await getServerSession(authOptions);
@@ -49,6 +49,10 @@ export async function GET() {
         { status: 401 }
       );
     }
+    await consumeApiRateLimit(req, userId, "conversation-list", {
+      minute: 60,
+      day: 5_000,
+    });
 
       // 사용자의 설정 정보(UserSettings)를 조회하여 설정된 기본 AI 엔진 모델을 가져옵니다.
       const userSettings = await prisma.userSettings.findUnique({
@@ -78,6 +82,9 @@ export async function GET() {
 
       return NextResponse.json(formattedConversations);
   } catch (error) {
+    const securityResponse = apiSecurityResponse(error);
+    if (securityResponse) return securityResponse;
+
     console.error("❌ [백엔드] 목록 조회 에러:", error);
     return NextResponse.json(
       { error: "대화방 목록을 불러오는데 실패했습니다." },

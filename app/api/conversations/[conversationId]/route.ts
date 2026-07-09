@@ -78,6 +78,10 @@ export async function GET(req: Request, context: any) {
         return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
     }
     const userId = (session.user as any).id;
+    await consumeApiRateLimit(req, userId, "conversation-detail", {
+      minute: 300,
+      day: 20_000,
+    });
 
     // params 추출 (Next 15의 비동기 params 대응)
     const params = await context.params;
@@ -113,10 +117,18 @@ export async function GET(req: Request, context: any) {
     });
         const defaultEngine = userSettings?.defaultModel || APP_DEFAULTS.defaultModelId;
 	
-    const cursor = new URL(req.url).searchParams.get("cursor");
+    const searchParams = new URL(req.url).searchParams;
+    const cursor = searchParams.get("cursor");
+    const requestedModelId = searchParams.get("modelId");
     if (cursor && (cursor.length > 100 || !/^[A-Za-z0-9_-]+$/.test(cursor))) {
       return NextResponse.json(
         { error: "Invalid message cursor." },
+        { status: 400 }
+      );
+    }
+    if (requestedModelId && !isEnabledModelId(requestedModelId)) {
+      return NextResponse.json(
+        { error: "Invalid model ID." },
         { status: 400 }
       );
     }
@@ -149,7 +161,18 @@ export async function GET(req: Request, context: any) {
     }
 
     const messagePage = await prisma.message.findMany({
-      where: { conversationId },
+      where: {
+        conversationId,
+        ...(requestedModelId
+          ? {
+              OR: [
+                { role: "user", modelId: null },
+                { role: "user", modelId: requestedModelId },
+                { role: "assistant", modelId: requestedModelId },
+              ],
+            }
+          : {}),
+      },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       take: MESSAGE_PAGE_SIZE + 1,
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
@@ -195,6 +218,9 @@ export async function GET(req: Request, context: any) {
         password: undefined // 원본 암호는 절대 흘리지 않음
     });
   } catch (error) {
+    const securityResponse = apiSecurityResponse(error);
+    if (securityResponse) return securityResponse;
+
     console.error("❌ [백엔드] 상세조회 에러:", error);
     return NextResponse.json(
       { error: "대화 내역을 불러오는데 실패했습니다." },
@@ -410,6 +436,10 @@ export async function DELETE(req: Request, { params }: Params) {
 
     const { conversationId } = await params;
       const userId = (session.user as any).id;
+      await consumeApiRateLimit(req, userId, "conversation-delete", {
+        minute: 10,
+        day: 100,
+      });
 
       // 실제 DB 통신 전, 대화방 소유권 선행 검증!
       const existingConv = await prisma.conversation.findUnique({
@@ -446,6 +476,9 @@ export async function DELETE(req: Request, { params }: Params) {
     );
     return response;
   } catch (error) {
+    const securityResponse = apiSecurityResponse(error);
+    if (securityResponse) return securityResponse;
+
     console.error("❌ [백엔드] 삭제 API 에러:", error);
     return NextResponse.json({ error: "삭제 실패" }, { status: 500 });
   }

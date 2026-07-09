@@ -134,7 +134,8 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
 	  
       const fetchPastMessages = async () => {
         try {
-		      const response = await fetch(`/api/conversations/${initialConversationId}`, { 
+          const modelQuery = `modelId=${encodeURIComponent(modelId)}`;
+		      const response = await fetch(`/api/conversations/${initialConversationId}?${modelQuery}`, {
             cache: "no-store",
             headers: { 'Cache-Control': 'no-cache' }
           });			
@@ -143,7 +144,7 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
             let nextCursor = data.messagePage?.nextCursor;
             while (data.messagePage?.hasMore && nextCursor && isMounted) {
               const pageResponse = await fetch(
-                `/api/conversations/${initialConversationId}?cursor=${encodeURIComponent(nextCursor)}`,
+                `/api/conversations/${initialConversationId}?${modelQuery}&cursor=${encodeURIComponent(nextCursor)}`,
                 {
                   cache: "no-store",
                   headers: { "Cache-Control": "no-cache" },

@@ -23,13 +23,17 @@ const settingsSchema = z
     .refine((value) => Object.keys(value).length > 0);
 
 // 💡 1. 사용자 설정 불러오기 (GET)
-export async function GET() {
+export async function GET(req: Request) {
     try {
         const session = await getServerSession(authOptions);
         if (!session?.user || !(session.user as any).id) {
             return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
         }
         const userId = (session.user as any).id;
+        await consumeApiRateLimit(req, userId, "settings-read", {
+            minute: 60,
+            day: 5_000,
+        });
 
         let settings = await prisma.userSettings.findUnique({ where: { userId } });
         if (!settings) {
@@ -49,6 +53,9 @@ export async function GET() {
             defaultModel: settings.defaultModel, // 💡 전달
         });
     } catch (error) {
+        const securityResponse = apiSecurityResponse(error);
+        if (securityResponse) return securityResponse;
+
         console.error("설정 조회 에러:", error);
         return NextResponse.json({ error: "설정 조회 실패" }, { status: 500 });
     }
