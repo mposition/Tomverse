@@ -8,6 +8,7 @@ import {
     type AiModel,
     type ModelTier,
 } from "@/lib/models";
+import { getTrustedClientIp } from "@/lib/clientIp";
 
 const GUEST_COOKIE_NAME = "tomverse_guest";
 const GUEST_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
@@ -203,16 +204,6 @@ const createGuestCookie = (guestId: string) => {
     return `${GUEST_COOKIE_NAME}=${guestId}.${signGuestId(guestId)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${GUEST_COOKIE_MAX_AGE}${secure}`;
 };
 
-const getClientIp = (request: Request) => {
-    const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-    return (
-        request.headers.get("cf-connecting-ip")?.trim() ||
-        request.headers.get("x-real-ip")?.trim() ||
-        forwarded ||
-        "unknown"
-    );
-};
-
 const hashKey = (scope: string, value: string) =>
     createHash("sha256")
         .update(`${scope}:${value}:${getSecret()}`)
@@ -222,7 +213,7 @@ export const identifyChatCaller = (
     request: Request,
     userId?: string | null
 ): ChatAccess => {
-    const ipKey = `ip:${hashKey("ip", getClientIp(request))}`;
+    const ipKey = `ip:${hashKey("ip", getTrustedClientIp(request))}`;
     if (userId) {
         return {
             kind: "user",
@@ -435,6 +426,27 @@ export const acquireChatAccess = async (
                 retryAfterFor("minute", now)
             );
         }
+        if (access.kind === "guest") {
+            for (const rule of limitsFor("guest").filter(
+                (rule) => rule.period !== "minute"
+            )) {
+                const allowed = await incrementUsage(
+                    tx,
+                    access.ipKey,
+                    `guest-ip-${rule.period}`,
+                    periodStart(rule.period, now),
+                    rule.limit * 3
+                );
+                if (!allowed) {
+                    throw new ChatAccessError(
+                        429,
+                        "CHAT_IP_QUOTA_EXCEEDED",
+                        "Guest usage limit exceeded.",
+                        retryAfterFor(rule.period, now)
+                    );
+                }
+            }
+        }
 
         for (const rule of tokenLimits) {
             const allowed = await incrementUsage(
@@ -463,6 +475,35 @@ export const acquireChatAccess = async (
                 amount: reservedTokens,
                 metric: "tokens",
             });
+            if (access.kind === "guest") {
+                const ipPeriod = `ip-${rule.period}`;
+                const ipAllowed = await incrementUsage(
+                    tx,
+                    access.ipKey,
+                    ipPeriod,
+                    rule.start,
+                    rule.limit * 3,
+                    reservedTokens
+                );
+                if (!ipAllowed) {
+                    throw new ChatAccessError(
+                        429,
+                        "CHAT_IP_TOKEN_QUOTA_EXCEEDED",
+                        "Guest token quota exceeded.",
+                        retryAfterFor(
+                            rule.period === "tokens-day" ? "day" : "month",
+                            now
+                        )
+                    );
+                }
+                reservationEntries.push({
+                    key: access.ipKey,
+                    period: ipPeriod,
+                    periodStart: rule.start,
+                    amount: reservedTokens,
+                    metric: "tokens",
+                });
+            }
         }
 
         for (const rule of costLimits) {
@@ -492,6 +533,35 @@ export const acquireChatAccess = async (
                 amount: reservedCost,
                 metric: "cost",
             });
+            if (access.kind === "guest") {
+                const ipPeriod = `ip-${rule.period}`;
+                const ipAllowed = await incrementUsage(
+                    tx,
+                    access.ipKey,
+                    ipPeriod,
+                    rule.start,
+                    rule.limit * 3,
+                    reservedCost
+                );
+                if (!ipAllowed) {
+                    throw new ChatAccessError(
+                        429,
+                        "CHAT_IP_COST_QUOTA_EXCEEDED",
+                        "Guest cost quota exceeded.",
+                        retryAfterFor(
+                            rule.period === "cost-day" ? "day" : "month",
+                            now
+                        )
+                    );
+                }
+                reservationEntries.push({
+                    key: access.ipKey,
+                    period: ipPeriod,
+                    periodStart: rule.start,
+                    amount: reservedCost,
+                    metric: "cost",
+                });
+            }
         }
 
         const providerKey = `provider:${budget.provider}`;
@@ -519,15 +589,17 @@ export const acquireChatAccess = async (
             metric: "cost",
         });
 
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${access.subjectKey}))`;
+        const leaseSubjectKey =
+            access.kind === "guest" ? access.ipKey : access.subjectKey;
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${leaseSubjectKey}))`;
         await tx.$executeRaw`
             DELETE FROM "ChatRequestLease"
-            WHERE "subjectKey" = ${access.subjectKey} AND "expiresAt" <= NOW()
+            WHERE "subjectKey" = ${leaseSubjectKey} AND "expiresAt" <= NOW()
         `;
         const activeRows = await tx.$queryRaw<Array<{ count: bigint }>>`
             SELECT COUNT(*)::bigint AS "count"
             FROM "ChatRequestLease"
-            WHERE "subjectKey" = ${access.subjectKey}
+            WHERE "subjectKey" = ${leaseSubjectKey}
         `;
         if (Number(activeRows[0]?.count || 0) >= concurrentLimit) {
             throw new ChatAccessError(
@@ -540,7 +612,7 @@ export const acquireChatAccess = async (
 
         await tx.$executeRaw`
             INSERT INTO "ChatRequestLease" ("id", "subjectKey", "expiresAt", "createdAt")
-            VALUES (${leaseId}, ${access.subjectKey}, ${new Date(now.getTime() + 120_000)}, NOW())
+            VALUES (${leaseId}, ${leaseSubjectKey}, ${new Date(now.getTime() + 120_000)}, NOW())
         `;
     });
 
@@ -675,6 +747,7 @@ export const validateChatPayload = (body: unknown) => {
         modelId?: unknown;
         conversationId?: unknown;
         assistantMessageId?: unknown;
+        turnstileToken?: unknown;
     };
     if (
         !Array.isArray(payload.messages) ||
@@ -726,6 +799,18 @@ export const validateChatPayload = (body: unknown) => {
             400,
             "INVALID_PERSISTENCE_TARGET",
             "Incomplete persistence target."
+        );
+    }
+    if (
+        payload.turnstileToken !== undefined &&
+        (typeof payload.turnstileToken !== "string" ||
+            payload.turnstileToken.length < 1 ||
+            payload.turnstileToken.length > 2_048)
+    ) {
+        throw new ChatAccessError(
+            400,
+            "INVALID_TURNSTILE_TOKEN",
+            "Invalid guest verification token."
         );
     }
 
@@ -785,6 +870,7 @@ export const validateChatPayload = (body: unknown) => {
         modelId?: string;
         conversationId?: string;
         assistantMessageId?: string;
+        turnstileToken?: string;
     };
 };
 

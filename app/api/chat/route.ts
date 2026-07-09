@@ -44,6 +44,7 @@ import {
     readLimitedJson,
     reserveDailyUploadBytes,
 } from "@/lib/apiSecurity";
+import { verifyGuestTurnstile } from "@/lib/turnstile";
 
 const groq = createOpenAI({
     baseURL: "https://api.groq.com/openai/v1",
@@ -453,6 +454,7 @@ export async function POST(req: Request) {
             modelId,
             conversationId,
             assistantMessageId,
+            turnstileToken,
         } = validateChatPayload(body);
         const requestedModelId = modelId || APP_DEFAULTS.defaultModelId;
         requestedModelIdForLog = requestedModelId;
@@ -509,6 +511,9 @@ export async function POST(req: Request) {
         }
         const access = identifyChatCaller(req, session?.user?.id);
         assertModelAccess(access.kind, modelConfig);
+        if (access.kind === "guest") {
+            await verifyGuestTurnstile(req, turnstileToken);
+        }
         if (conversationId && assistantMessageId) {
             if (!session?.user?.id) {
                 return tracedJsonError(

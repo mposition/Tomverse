@@ -69,6 +69,23 @@ API_UPLOAD_BYTES_PER_USER_PER_DAY=262144000
 Attachment byte reservations work together with the R2 lifecycle rule. Keep
 the temporary `attachments/` deletion rule enabled.
 
+## Guest Bot Protection
+
+Production guest chat requires Cloudflare Turnstile:
+
+```text
+NEXT_PUBLIC_TURNSTILE_SITE_KEY=your-site-key
+TURNSTILE_SECRET_KEY=your-secret-key
+TURNSTILE_EXPECTED_HOSTNAME=tomverse.app
+TRUSTED_PROXY_IP_HEADER=cf-connecting-ip
+```
+
+Only one configured proxy header is trusted. When using
+`cf-connecting-ip`, prevent direct public access to the Railway origin so that
+clients cannot bypass Cloudflare and supply that header themselves. If Railway
+is the only trusted edge, keep the default `x-forwarded-for`; the application
+uses the final address in that proxy chain.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.

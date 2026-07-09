@@ -9,6 +9,7 @@ import {
 } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { getTrustedClientIp } from "@/lib/clientIp";
 
 const HASH_PREFIX = "scrypt";
 const HASH_VERSION = "1";
@@ -249,16 +250,6 @@ export const conversationLockedResponse = () =>
         }
     );
 
-const getClientIp = (request: Request) => {
-    const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-    return (
-        request.headers.get("cf-connecting-ip")?.trim() ||
-        request.headers.get("x-real-ip")?.trim() ||
-        forwarded ||
-        "unknown"
-    );
-};
-
 const rateKey = (...values: string[]) =>
     `lock:${createHash("sha256")
         .update(`${values.join(":")}:${getSecret()}`)
@@ -296,7 +287,11 @@ export const consumeLockVerificationAttempt = async (
     const now = new Date();
     const start = attemptWindowStart(now);
     const userKey = rateKey("user", userId, conversationId);
-    const ipKey = rateKey("ip", getClientIp(request), conversationId);
+    const ipKey = rateKey(
+        "ip",
+        getTrustedClientIp(request),
+        conversationId
+    );
 
     await prisma.$transaction(async (tx) => {
         const userAllowed = await incrementAttempt(

@@ -5,6 +5,7 @@ import { ChatMessageList } from "@/components/chat/ChatMessageList";
 import { Message, type ChatAttachment } from "@/components/chat/types";
 import { useSession } from "next-auth/react";
 import { useLanguage } from "@/components/LanguageProvider";
+import { useTurnstile } from "@/components/chat/useTurnstile";
 
 const processedPromptKeys = new Set<string>();
 
@@ -21,6 +22,10 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
   const [isMessagesLoaded, setIsMessagesLoaded] = useState(false);
   const { data: session, status } = useSession();
     const { t, lang, setLang } = useLanguage(); // 💡 t 함수 꺼내기
+  const {
+    containerRef: turnstileContainerRef,
+    getToken: getTurnstileToken,
+  } = useTurnstile(isGuestMode && !isPanelDisabled);
 
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -265,6 +270,9 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
     let requestTraceId: string | null = null;
 	
     try {
+      const turnstileToken = isGuestMode
+        ? await getTurnstileToken()
+        : undefined;
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: {
@@ -273,6 +281,7 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
         body: JSON.stringify({
           messages: [...messages, userMessage],
           modelId: modelId,
+          ...(turnstileToken ? { turnstileToken } : {}),
           ...(!isPrivate && !isGuestMode
             ? {
                 conversationId: targetChatId,
@@ -389,6 +398,12 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
                   <div className="min-h-0 flex-1 overflow-hidden">
                       <ChatMessageList messages={messages} isPrivate={isPrivate} isGuestMode={isGuestMode} />
                   </div>
+                  {isGuestMode ? (
+                    <div
+                      ref={turnstileContainerRef}
+                      className="shrink-0 px-3 pb-2"
+                    />
+                  ) : null}
 
                   <form
                       onSubmit={(event) => {

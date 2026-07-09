@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { getTrustedClientIp } from "@/lib/clientIp";
 
 type ApiPeriod = "minute" | "day";
 
@@ -38,12 +39,6 @@ const hashKey = (...parts: string[]) =>
   createHash("sha256")
     .update(`${parts.join(":")}:${secret()}`)
     .digest("hex");
-
-const clientIp = (request: Request) =>
-  request.headers.get("cf-connecting-ip")?.trim() ||
-  request.headers.get("x-real-ip")?.trim() ||
-  request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-  "unknown";
 
 const periodStart = (period: ApiPeriod, now: Date) =>
   period === "minute"
@@ -98,7 +93,7 @@ export async function consumeApiRateLimit(
 ) {
   const now = new Date();
   const userKey = `api:${hashKey(scope, "user", userId)}`;
-  const ipKey = `api:${hashKey(scope, "ip", clientIp(request))}`;
+  const ipKey = `api:${hashKey(scope, "ip", getTrustedClientIp(request))}`;
 
   await prisma.$transaction(async (tx) => {
     for (const period of ["minute", "day"] as const) {
