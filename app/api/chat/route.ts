@@ -12,9 +12,9 @@ import {
     readR2Object,
     writeR2Object,
 } from "@/lib/r2";
-import { OfficeParser } from "officeparser";
 import { prisma } from "@/lib/prisma";
 import { getEnabledModel, type AiModel } from "@/lib/models";
+import { parseOfficeSafely } from "@/lib/officeSecurity";
 import {
     acquireChatAccess,
     assertChatRequestSize,
@@ -498,22 +498,18 @@ export async function POST(req: Request) {
                 if (OFFICE_ATTACHMENT_TYPES.has(attachment.mediaType)) {
                     const officeBuffer =
                         attachmentBuffer || Buffer.from(attachmentData, "base64");
-                    const document = await OfficeParser.parseOffice(officeBuffer, {
-                        extractAttachments: false,
-                        ocr: false,
-                    });
-                    const extractedText = document.toText().trim();
+                    const extractedText = await parseOfficeSafely(
+                        officeBuffer,
+                        attachment.mediaType,
+                        MAX_EXTRACTED_TEXT_LENGTH
+                    );
 
                     if (!extractedText) {
                         throw new Error(`No readable text found in ${attachment.name}.`);
                     }
 
-                    const limitedText =
-                        extractedText.length > MAX_EXTRACTED_TEXT_LENGTH
-                            ? `${extractedText.slice(0, MAX_EXTRACTED_TEXT_LENGTH)}\n\n[Document truncated]`
-                            : extractedText;
                     textAttachments.push(
-                        `[Attached office file: ${attachment.name}]\n${limitedText}`
+                        `[Attached office file: ${attachment.name}]\n${extractedText}`
                     );
                 } else if (attachment.kind === "text") {
                     textAttachments.push(
