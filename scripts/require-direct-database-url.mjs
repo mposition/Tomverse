@@ -2,6 +2,12 @@ import pg from "pg";
 
 const { Client } = pg;
 const directUrl = process.env.DIRECT_DATABASE_URL;
+const PRISMA_MIGRATION_LOCK_ID = 72707369;
+const LOCK_RETRY_COUNT = 12;
+const LOCK_RETRY_DELAY_MS = 5_000;
+
+const sleep = (milliseconds) =>
+    new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 const fail = (message, details = {}) => {
     console.error(
@@ -71,21 +77,72 @@ try {
     await client.query("SELECT 1");
 
     console.log("[migration-check 3/3] Testing PostgreSQL advisory locks");
-    const result = await client.query(`
-        WITH lock_attempt AS MATERIALIZED (
-            SELECT pg_try_advisory_lock(72707369) AS acquired
-        )
-        SELECT
-            acquired,
-            CASE
-                WHEN acquired THEN pg_advisory_unlock(72707369)
-                ELSE false
-            END AS released
-        FROM lock_attempt
-    `);
+    let lockAvailable = false;
 
-    if (!result.rows[0]?.acquired || !result.rows[0]?.released) {
-        fail("The database connection could not acquire and release an advisory lock.");
+    for (let attempt = 1; attempt <= LOCK_RETRY_COUNT; attempt += 1) {
+        const result = await client.query(
+            `
+                WITH lock_attempt AS MATERIALIZED (
+                    SELECT pg_try_advisory_lock($1) AS acquired
+                )
+                SELECT
+                    acquired,
+                    CASE
+                        WHEN acquired THEN pg_advisory_unlock($1)
+                        ELSE false
+                    END AS released
+                FROM lock_attempt
+            `,
+            [PRISMA_MIGRATION_LOCK_ID]
+        );
+
+        lockAvailable =
+            result.rows[0]?.acquired === true &&
+            result.rows[0]?.released === true;
+
+        if (lockAvailable) {
+            break;
+        }
+
+        if (attempt < LOCK_RETRY_COUNT) {
+            console.warn(
+                `Prisma migration lock is busy; retrying in ${
+                    LOCK_RETRY_DELAY_MS / 1_000
+                }s (${attempt}/${LOCK_RETRY_COUNT}).`
+            );
+            await sleep(LOCK_RETRY_DELAY_MS);
+        }
+    }
+
+    if (!lockAvailable) {
+        let holders = [];
+        try {
+            const holderResult = await client.query(
+                `
+                    SELECT
+                        activity.pid,
+                        COALESCE(NULLIF(activity.application_name, ''), 'unknown') AS application_name,
+                        activity.state,
+                        activity.query_start
+                    FROM pg_locks AS locks
+                    JOIN pg_stat_activity AS activity
+                        ON activity.pid = locks.pid
+                    WHERE locks.locktype = 'advisory'
+                        AND locks.granted = true
+                        AND locks.classid = 0
+                        AND locks.objid = $1
+                `,
+                [PRISMA_MIGRATION_LOCK_ID]
+            );
+            holders = holderResult.rows;
+        } catch {
+            // Some managed databases do not allow inspecting other sessions.
+        }
+
+        fail(
+            "Prisma migration advisory lock remained busy after 60 seconds.",
+            { lockId: PRISMA_MIGRATION_LOCK_ID, holders }
+        );
     }
 
     console.log("Direct PostgreSQL connection and advisory locks are available.");
