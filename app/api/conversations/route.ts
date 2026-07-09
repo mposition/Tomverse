@@ -47,6 +47,11 @@ export async function GET() {
         selectedModels: safeParse(conv.selectedModels, [defaultEngine]),
         disabledPanels: safeParse(conv.disabledPanels, []),
         isLocked: !!conv.password, // 💡 비밀번호가 존재하면 true
+        shareEnabled:
+          conv.shareEnabled &&
+          !!conv.shareExpiresAt &&
+          conv.shareExpiresAt > new Date(),
+        shareExpiresAt: conv.shareExpiresAt?.toISOString() || null,
         password: undefined // 프론트로는 비밀번호를 절대 보내지 않음
     }));
 

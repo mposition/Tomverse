@@ -91,6 +91,9 @@ model Conversation {
   shareToken     String?   @unique
   shareEnabled   Boolean   @default(false)
   sharedAt       DateTime?
+  shareSnapshot  Json?
+  shareExpiresAt DateTime?
+  shareRevokedAt DateTime?
     
   messages       Message[]
   user           User?    @relation(fields: [userId], references: [id], onDelete: Cascade)

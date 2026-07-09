@@ -1,8 +1,23 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { getServerSession } from "next-auth/next";
 import { prisma } from "@/lib/prisma";
 import { authOptions } from "@/lib/auth";
-import { createShareToken, isStrongShareToken } from "@/lib/shareTokens";
+import { createShareToken } from "@/lib/shareTokens";
+import {
+  MAX_SHARE_SNAPSHOT_BYTES,
+  SHARE_SNAPSHOT_VERSION,
+  shareSnapshotSchema,
+  type ShareSnapshot,
+} from "@/lib/shareSnapshot";
+import { getPublicAppOrigin } from "@/lib/publicUrl";
+
+const getShareTtlDays = () => {
+  const configured = Number(process.env.SHARE_LINK_TTL_DAYS);
+  return Number.isInteger(configured) && configured >= 1 && configured <= 365
+    ? configured
+    : 30;
+};
 
 export async function POST(req: Request, context: any) {
   const session = await getServerSession(authOptions);
@@ -16,33 +31,112 @@ export async function POST(req: Request, context: any) {
 
   const conversation = await prisma.conversation.findUnique({
     where: { id: conversationId },
-    select: { userId: true, shareToken: true },
+    select: {
+      userId: true,
+      title: true,
+      createdAt: true,
+      messages: {
+        orderBy: { createdAt: "asc" },
+        select: {
+          id: true,
+          role: true,
+          content: true,
+          modelId: true,
+          createdAt: true,
+        },
+      },
+    },
   });
 
   if (!conversation || conversation.userId !== userId) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const shareToken = isStrongShareToken(conversation.shareToken)
-    ? conversation.shareToken
-    : createShareToken();
+  const sharedAt = new Date();
+  const expiresAt = new Date(
+    sharedAt.getTime() + getShareTtlDays() * 24 * 60 * 60 * 1000
+  );
+  const snapshot: ShareSnapshot = {
+    version: SHARE_SNAPSHOT_VERSION,
+    title: conversation.title,
+    conversationCreatedAt: conversation.createdAt.toISOString(),
+    sharedAt: sharedAt.toISOString(),
+    messages: conversation.messages
+      .filter(
+        (
+          message
+        ): message is typeof message & { role: "user" | "assistant" } =>
+          message.role === "user" || message.role === "assistant"
+      )
+      .map((message) => ({
+        id: message.id,
+        role: message.role,
+        content: message.content,
+        modelId: message.modelId,
+        createdAt: message.createdAt.toISOString(),
+      })),
+  };
+  const parsedSnapshot = shareSnapshotSchema.safeParse(snapshot);
+  if (
+    !parsedSnapshot.success ||
+    Buffer.byteLength(JSON.stringify(parsedSnapshot.data), "utf8") >
+      MAX_SHARE_SNAPSHOT_BYTES
+  ) {
+    return NextResponse.json(
+      { error: "Conversation is too large to share.", code: "SHARE_TOO_LARGE" },
+      { status: 413 }
+    );
+  }
 
   const updated = await prisma.conversation.update({
     where: { id: conversationId },
     data: {
-      shareToken,
+      shareToken: createShareToken(),
       shareEnabled: true,
-      sharedAt: new Date(),
+      sharedAt,
+      shareExpiresAt: expiresAt,
+      shareRevokedAt: null,
+      shareSnapshot: parsedSnapshot.data,
     },
-    select: { shareToken: true },
+    select: { shareToken: true, shareExpiresAt: true },
   });
 
-  const baseUrl =
-    process.env.NEXT_PUBLIC_SHARE_BASE_URL ||
-    process.env.NEXT_PUBLIC_APP_URL ||
-    new URL(req.url).origin;
+  const baseUrl = getPublicAppOrigin(req);
 
   return NextResponse.json({
     url: `${baseUrl}/share/${updated.shareToken}`,
+    expiresAt: updated.shareExpiresAt?.toISOString(),
   });
+}
+
+export async function DELETE(_req: Request, context: any) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user || !(session.user as any).id) {
+    return NextResponse.json({ error: "Login required" }, { status: 401 });
+  }
+
+  const params = await context.params;
+  const conversationId = params.conversationId;
+  const userId = (session.user as any).id;
+  const conversation = await prisma.conversation.findUnique({
+    where: { id: conversationId },
+    select: { userId: true },
+  });
+
+  if (!conversation || conversation.userId !== userId) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  await prisma.conversation.update({
+    where: { id: conversationId },
+    data: {
+      shareEnabled: false,
+      shareToken: null,
+      shareSnapshot: Prisma.DbNull,
+      shareExpiresAt: null,
+      shareRevokedAt: new Date(),
+    },
+  });
+
+  return NextResponse.json({ success: true });
 }

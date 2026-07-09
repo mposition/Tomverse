@@ -104,6 +104,13 @@ export async function GET(req: Request, context: any) {
             ).includes(modelId)
         ),
         isLocked: !!conversation.password,
+        shareEnabled:
+          conversation.shareEnabled &&
+          !!conversation.shareExpiresAt &&
+          conversation.shareExpiresAt > new Date(),
+        shareExpiresAt: conversation.shareExpiresAt?.toISOString() || null,
+        shareToken: undefined,
+        shareSnapshot: undefined,
         password: undefined // 원본 암호는 절대 흘리지 않음
     });
   } catch (error) {
@@ -285,6 +292,14 @@ export async function PATCH(req: Request, context: any) {
           ).includes(modelId)
       ),
         isLocked: !!updatedConversation.password,
+        shareEnabled:
+          updatedConversation.shareEnabled &&
+          !!updatedConversation.shareExpiresAt &&
+          updatedConversation.shareExpiresAt > new Date(),
+        shareExpiresAt:
+          updatedConversation.shareExpiresAt?.toISOString() || null,
+        shareToken: undefined,
+        shareSnapshot: undefined,
         password: undefined // 원본 암호는 절대 흘리지 않음
     });
   } catch (error) {

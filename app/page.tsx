@@ -769,8 +769,50 @@ export default function Home() {
         }
 
         const data = await res.json();
+        setConversations((prev) =>
+            prev.map((conversation) =>
+                conversation.id === convId
+                    ? {
+                        ...conversation,
+                        shareEnabled: true,
+                        shareExpiresAt: data.expiresAt || null,
+                    }
+                    : conversation
+            )
+        );
         await navigator.clipboard.writeText(data.url);
         alert(t("sidebar.shareCopied"));
+    };
+
+    const handleRevokeShare = async (convId: string) => {
+        if (
+            isGuestMode ||
+            !confirm(t("sidebar.revokeShareConfirm"))
+        ) {
+            return;
+        }
+
+        const response = await fetch(
+            `/api/conversations/${convId}/share`,
+            { method: "DELETE" }
+        );
+        if (!response.ok) {
+            alert(t("sidebar.shareRevokeFailed"));
+            return;
+        }
+
+        setConversations((prev) =>
+            prev.map((conversation) =>
+                conversation.id === convId
+                    ? {
+                        ...conversation,
+                        shareEnabled: false,
+                        shareExpiresAt: null,
+                    }
+                    : conversation
+            )
+        );
+        alert(t("sidebar.shareRevoked"));
     };
 
   return (
@@ -789,6 +831,7 @@ export default function Home() {
               onLock={handleLock}     
               onUnlock={handleUnlock} 
 onShare={handleShareConversation}
+              onRevokeShare={handleRevokeShare}
               onDownload={handleDownloadConversation}              
               isPrivateMode={isPrivateMode}
               onTogglePrivateMode={togglePrivateModeGlobal}

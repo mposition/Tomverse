@@ -23,6 +23,8 @@ export type Conversation = {
     selectedModels?: string[];
     disabledPanels?: string[];
     isLocked?: boolean; // 💡 잠금 여부 (백엔드에서 password 존재 여부로 true/false 반환)
+    shareEnabled?: boolean;
+    shareExpiresAt?: string | null;
 };
 
 export const MAX_SELECTED_MODELS = 3;

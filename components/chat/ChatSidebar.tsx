@@ -5,7 +5,7 @@ import { AuthButton } from "@/components/auth/AuthButton";
 import { useState, useEffect, useRef } from "react";
 import { useLanguage } from "@/components/LanguageProvider"; // 💡 훅 임포트
 import Link from "next/link";
-import { AlertTriangle, CloudUpload, Crown, Database, Download, Lock, MoreVertical, Pencil, Send, Share2, ShieldCheck, Trash2, Unlock, X } from "lucide-react";
+import { AlertTriangle, CloudUpload, Crown, Database, Download, Link2Off, Lock, MoreVertical, Pencil, Send, Share2, ShieldCheck, Trash2, Unlock, X } from "lucide-react";
 
 type ChatSidebarProps = {
     userEmail: string;
@@ -21,6 +21,7 @@ type ChatSidebarProps = {
     onLock?: (id: string, password: string) => void;
     onUnlock?: (id: string) => void;
     onShare: (id: string, title: string) => void;
+    onRevokeShare: (id: string) => void;
     onDownload: (id: string, title: string) => void;    
     isPrivateMode?: boolean;
     onTogglePrivateMode: () => void;
@@ -40,6 +41,7 @@ export function ChatSidebar({
     onLock,
     onUnlock,
     onShare,
+    onRevokeShare,
     onDownload,    
     isPrivateMode = false,
     onTogglePrivateMode,
@@ -203,10 +205,31 @@ export function ChatSidebar({
                                         >
                                             <span className="flex items-center gap-2">
                                                 <Share2 className={menuIconClass} />
-                                                <span>{t("sidebar.share")}</span>
+                                                <span>
+                                                    {conv.shareEnabled
+                                                        ? t("sidebar.refreshShare")
+                                                        : t("sidebar.share")}
+                                                </span>
                                             </span>
                                             {isGuestMode && <Crown className={crownClass} />}
                                         </button>
+
+                                        {conv.shareEnabled && !isGuestMode && (
+                                            <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setOpenMenuId(null);
+                                                    onRevokeShare(conv.id);
+                                                }}
+                                                className={`${menuItemBase} ${menuItemEnabled}`}
+                                            >
+                                                <span className="flex items-center gap-2">
+                                                    <Link2Off className={menuIconClass} />
+                                                    <span>{t("sidebar.revokeShare")}</span>
+                                                </span>
+                                            </button>
+                                        )}
 
             {/* TXT 다운로드 버튼 */}
                                         <button
