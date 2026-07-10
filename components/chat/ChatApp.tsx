@@ -96,7 +96,7 @@ export function ChatApp({ modelId, initialConversationId = null, promptPayload, 
           try {
             setMessages(JSON.parse(savedMessages));
           } catch (e) {
-            console.error("ë©”ì‹œì§€ ë¡œë“œ ì‹¤íŒ¨:", e);
+            console.error("Failed to load guest messages:", e);
             setMessages([]);
           }
         } else {
@@ -181,7 +181,7 @@ export function ChatApp({ modelId, initialConversationId = null, promptPayload, 
           }
         }
       } catch (error) {
-        console.error("ë©”ì‹œì§€ë¥¼ ë¶ˆëŸ¬ì˜¤ëŠ” ì¤‘ ì˜¤ë¥˜ ë°œìƒ:", error);
+        console.error("Failed to load conversation messages:", error);
       }
     };
 
@@ -306,7 +306,7 @@ export function ChatApp({ modelId, initialConversationId = null, promptPayload, 
       }
 
       if (!response.body) {
-        throw new Error("ì‘ë‹µ ë³¸ë¬¸ì´ ì—†ìŠµë‹ˆë‹¤.");
+        throw new Error(t("chat.responseBodyMissing"));
       }
 
       const reader = response.body.getReader();
@@ -324,7 +324,7 @@ export function ChatApp({ modelId, initialConversationId = null, promptPayload, 
 	  if (!assistantText.trim()) {
         setAssistantMessage(
           assistantMessageId,
-          "ì‘ë‹µì€ ì™”ì§€ë§Œ ë‚´ìš©ì´ ë¹„ì–´ ìžˆìŠµë‹ˆë‹¤.",
+          t("chat.responseEmpty"),
           "error"
         );
       }
@@ -336,7 +336,7 @@ export function ChatApp({ modelId, initialConversationId = null, promptPayload, 
       if (requestError.name === "AbortError") {
         setAssistantMessage(
           assistantMessageId,
-          "ë‹µë³€ ìƒì„±ì´ ì¤‘ë‹¨ë˜ì—ˆìŠµë‹ˆë‹¤.",
+          t("chat.responseCancelled"),
           "cancelled"
         );
       } else {

@@ -808,8 +808,8 @@ export function ChatInput({
                       <HardDrive className="h-5 w-5" />
                     </span>
                     <span className="flex min-w-0 flex-col">
-                      <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">Google Drive</span>
-                      <span className="text-xs text-zinc-500">Docs, Sheets, Slides</span>
+                      <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t("chat.attachGoogleDrive")}</span>
+                      <span className="text-xs text-zinc-500">{t("chat.googleDriveDescription")}</span>
                     </span>
                   </button>
                   <div className="my-1 border-t border-zinc-200 dark:border-zinc-700" />

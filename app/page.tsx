@@ -261,7 +261,7 @@ export default function Home() {
             setCurrentChatId((currentId) => currentId || parsed[0].id);
           }
         } catch (e) {
-          console.error("ê²ŒìŠ¤íŠ¸ ëŒ€í™”ë°© íŒŒì‹± ì—ëŸ¬:", e);
+          console.error("Failed to parse guest conversations:", e);
         }
       } else {
         const initialChatId = `guest_${Date.now()}`;
@@ -379,7 +379,7 @@ export default function Home() {
 	  const res = await fetch(`/api/conversations`, { cache: "no-store" });
       if (res.ok) setConversations(await res.json());
     } catch (error) {
-      console.error("ëŒ€í™” ëª©ë¡ì„ ë¶ˆëŸ¬ì˜¤ëŠ” ì¤‘ ì˜¤ë¥˜ ë°œìƒ:", error);
+      console.error("Failed to load conversations:", error);
     }
     }, [session?.user]);
 
@@ -416,7 +416,7 @@ export default function Home() {
                     }
                 })
                 .catch((err) => {
-                    console.error("ì‚¬ìš©ìž ì„ í˜¸ ì—”ì§„ ì¡°íšŒ ì‹¤íŒ¨:", err);
+                    console.error("Failed to load user settings:", err);
                     setUserDefaultEngine(APP_DEFAULTS.defaultModelId);
                     if (!currentChatId) {
                         setSelectedModels([APP_DEFAULTS.defaultModelId]);
@@ -503,12 +503,10 @@ export default function Home() {
 	  const res = await fetch(`/api/conversations/${id}`, { cache: "no-store" });
       if (res.ok) {
         const data = await res.json();
-		console.log("âœ… [DB Load] ë¶ˆëŸ¬ì˜¨ ì„¤ì •:", data.selectedModels);
-
           applyConversationSettings(data);
 	  }
     } catch (error) {
-      console.error("ëŒ€í™”ë°© ì •ë³´ ë¡œë“œ ì‹¤íŒ¨:", error);
+      console.error("Failed to load conversation settings:", error);
     }	
 
         setFocusToken((prev) => prev + 1);
@@ -536,7 +534,7 @@ export default function Home() {
                 prev.map((c) => (c.id === id ? { ...c, isLocked: true } : c))
             );
         } catch (e) {
-            console.error("ìž ê¸ˆ ì„¤ì • ì—ëŸ¬:", e);
+            console.error("Failed to lock conversation:", e);
         }
     };
 
@@ -566,7 +564,7 @@ export default function Home() {
             );
             setUnlockDialog(null);
         } catch (e) {
-            console.error("ìž ê¸ˆ í•´ì œ ì—ëŸ¬:", e);
+            console.error("Failed to unlock conversation:", e);
         }
     };
 
@@ -590,7 +588,7 @@ export default function Home() {
         });
         fetchConversations();
       } catch (error) {
-        console.error("ì´ë¦„ ë³€ê²½ ì¤‘ ì˜¤ë¥˜:", error);
+        console.error("Failed to rename conversation:", error);
       }
     }
   };
@@ -618,7 +616,7 @@ export default function Home() {
         }
         fetchConversations();
       } catch (error) {
-        console.error("ëŒ€í™”ë°© ì‚­ì œ ì—ëŸ¬:", error);
+        console.error("Failed to delete conversation:", error);
       }
     }
   };
@@ -658,7 +656,7 @@ export default function Home() {
         }
       } catch (error: unknown) {
         if (!(error instanceof Error) || error.name !== "AbortError") {
-          console.error("ëª¨ë¸ ì„¸íŒ… ë™ê¸°í™” ì‹¤íŒ¨:", error);
+          console.error("Failed to sync model settings:", error);
         }
       }
     }, 250);
@@ -705,7 +703,7 @@ export default function Home() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ 
-            title: (trimmed || attachments[0]?.name || t("chat.newChat")).slice(0, 30),
+            title: (trimmed || attachments[0]?.name || t("sidebar.newChat")).slice(0, 30),
             selectedModels,
             disabledPanels
           }),
@@ -718,7 +716,7 @@ export default function Home() {
           fetchConversations();
         }
       } catch (error) {
-        console.error("ëŒ€í™”ë°© ìƒì„± ì¤‘ ì˜¤ë¥˜:", error);
+        console.error("Failed to create conversation:", error);
         return;
       }
     }
@@ -741,7 +739,7 @@ export default function Home() {
           }),
         });
       } catch (e) {
-        console.error("ìœ ì € ë©”ì‹œì§€ ì„ ì €ìž¥ ì—ëŸ¬:", e);
+        console.error("Failed to pre-save user message:", e);
       }
     }
 
@@ -815,7 +813,7 @@ export default function Home() {
           method: "DELETE"
         });
       } catch (error) {
-        console.error("ê¸°ë¡ ì‚­ì œ ì‹¤íŒ¨:", error);
+        console.error("Failed to delete model history:", error);
       }
     }
   };

@@ -223,7 +223,7 @@ export function ChatSidebar({
                                         setOpenMenuId(openMenuId === conv.id ? null : conv.id);
                                     }}
                                     className="cursor-pointer p-1 text-zinc-500 hover:text-zinc-200 transition-colors"
-                                    title="ë©”ë‰´"
+                                    title={t("chat.moreActions")}
                                 >
                                     <MoreVertical className="h-4 w-4" />
                                 </button>
