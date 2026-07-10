@@ -52,7 +52,7 @@ export const zh = {
     chat: {
         welcome: "您好！有什么我可以帮您的吗？",
         guestWelcome: "您好！您正以访客模式访问。请输入您的问题。",
-        inputPlaceholder: "请输入消息...",
+        inputPlaceholder: "有什么可以帮你？",
         inactivePanel: "没有激活的 AI 面板。",
         chooseModel: "请在底部输入框右侧开启所需的模型。",
         inUsed: " (使用中)",

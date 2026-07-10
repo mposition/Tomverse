@@ -19,6 +19,7 @@ import { parseOfficeSafely } from "@/lib/officeSecurity";
 import {
     extractPdfTextSafely,
     normalizeImageSafely,
+    validatePdfSafely,
 } from "@/lib/mediaSecurity";
 import {
     BoundedBufferError,
@@ -716,6 +717,7 @@ export async function POST(req: Request) {
                 let attachmentBytes: number;
                 let attachmentBuffer: Buffer | undefined;
                 let extractedPdfText: string | undefined;
+                let pdfFilePartBuffer: Buffer | undefined;
 
                 if (typeof attachment.objectKey === "string") {
                     if (
@@ -784,19 +786,36 @@ export async function POST(req: Request) {
                             pdfBuffer,
                             remainingCharacters - 64
                         );
-                    } catch {
-                        throw new ChatAccessError(
-                            400,
-                            "INVALID_PDF_ATTACHMENT",
-                            "The attached PDF is invalid or unsupported."
+                    } catch (error) {
+                        logRequestError(
+                            "pdf_text_extraction_failed",
+                            traceId,
+                            error,
+                            requestedModelId
                         );
+                        try {
+                            await validatePdfSafely(pdfBuffer);
+                        } catch {
+                            throw new ChatAccessError(
+                                400,
+                                "INVALID_PDF_ATTACHMENT",
+                                "The attached PDF is invalid or unsupported."
+                            );
+                        }
+                        if (modelSupportsBinaryAttachments(modelConfig)) {
+                            pdfFilePartBuffer = pdfBuffer;
+                        }
                     }
-                    if (!extractedPdfText) {
-                        throw new ChatAccessError(
-                            400,
-                            "PDF_TEXT_UNREADABLE",
-                            "The attached PDF does not contain readable text."
-                        );
+                    if (!extractedPdfText && !pdfFilePartBuffer) {
+                        if (modelSupportsBinaryAttachments(modelConfig)) {
+                            pdfFilePartBuffer = pdfBuffer;
+                        } else {
+                            throw new ChatAccessError(
+                                400,
+                                "PDF_TEXT_UNREADABLE",
+                                "The attached PDF does not contain readable text."
+                            );
+                        }
                     }
                 }
 
@@ -810,22 +829,34 @@ export async function POST(req: Request) {
                 }
 
                 if (attachment.mediaType === "application/pdf") {
-                    const pdfText = extractedPdfText || "";
-                    totalExtractedCharacters += pdfText.length;
-                    if (
-                        totalExtractedCharacters >
-                        MAX_EXTRACTED_ATTACHMENT_CHARACTERS
-                    ) {
-                        throw new ChatAccessError(
-                            413,
-                            "ATTACHMENT_TEXT_TOO_LARGE",
-                            "Extracted attachment text exceeds the request limit."
+                    if (pdfFilePartBuffer) {
+                        fileParts.push({
+                            type: "file",
+                            data: {
+                                type: "data",
+                                data: new Uint8Array(pdfFilePartBuffer),
+                            },
+                            mediaType: attachment.mediaType,
+                            filename: attachment.name,
+                        });
+                    } else {
+                        const pdfText = extractedPdfText || "";
+                        totalExtractedCharacters += pdfText.length;
+                        if (
+                            totalExtractedCharacters >
+                            MAX_EXTRACTED_ATTACHMENT_CHARACTERS
+                        ) {
+                            throw new ChatAccessError(
+                                413,
+                                "ATTACHMENT_TEXT_TOO_LARGE",
+                                "Extracted attachment text exceeds the request limit."
+                            );
+                        }
+
+                        textAttachments.push(
+                            `[Attached PDF file: ${attachment.name}]\n${pdfText}`
                         );
                     }
-
-                    textAttachments.push(
-                        `[Attached PDF file: ${attachment.name}]\n${pdfText}`
-                    );
                 } else if (OFFICE_ATTACHMENT_TYPES.has(attachment.mediaType)) {
                     const officeBuffer =
                         attachmentBuffer || Buffer.from(attachmentData, "base64");

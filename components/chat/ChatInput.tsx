@@ -284,14 +284,9 @@ export function ChatInput({
     .map(id => AVAILABLE_MODELS.find(m => m.id === id)?.name)
     .filter(Boolean);
 
-    let placeholderText = t("chat.inputPlaceholder");
-  if (isGuestLimitReached) {
-      placeholderText = t("chat.exceedDailyLimit");
-  } else if (activeModelNames.length === 1) {
-      placeholderText = `[${activeModelNames[0]}]` + t("chat.sendSingMessage");
-  } else if (activeModelNames.length > 1) {
-      placeholderText = `[${activeModelNames.join(", ")}]` + t("chat.sendMultipleMessages");
-  }
+  const placeholderText = isGuestLimitReached
+    ? t("chat.exceedDailyLimit")
+    : t("chat.inputPlaceholder");
   
   const isDisabled = disabled || isSending || isUploading || isGuestLimitReached;
   

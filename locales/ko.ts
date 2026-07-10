@@ -52,7 +52,7 @@ export const ko = {
     chat: {
         welcome: "안녕하세요! 무엇을 도와드릴까요?",
         guestWelcome: "안녕하세요! 현재 게스트 모드로 접속 중입니다. 질문을 입력해주세요.",
-        inputPlaceholder: "메시지를 입력하세요...",
+        inputPlaceholder: "무엇을 도와드릴까요?",
         inactivePanel: "활성화된 AI 패널이 없습니다.",
         chooseModel: "하단 입력창 오른쪽에서 원하는 모델을 선택해주세요.",
         inUsed: " (사용 중)",
