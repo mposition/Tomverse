@@ -804,7 +804,7 @@ export function ChatInput({
 
   return (
       <div className="shrink-0 border-t border-zinc-200 bg-zinc-50/95 px-2 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] transition-colors dark:border-zinc-800 dark:bg-zinc-950 md:px-6 md:py-3 md:pb-3">
-          <div className="mx-auto max-w-4xl rounded-2xl border border-zinc-200 bg-white p-2 shadow-lg shadow-zinc-200/50 dark:border-zinc-800 dark:bg-zinc-900 dark:shadow-black/20 md:p-3">
+          <div className="mx-auto max-w-4xl rounded-3xl border border-zinc-200 bg-white p-2.5 shadow-lg shadow-zinc-200/50 dark:border-zinc-800 dark:bg-zinc-900 dark:shadow-black/20 md:rounded-2xl md:p-3">
           {attachments.length > 0 && (
             <div className="mb-2 flex gap-2 overflow-x-auto pb-1 md:mb-3 md:flex-wrap md:overflow-visible md:pb-0">
               {attachments.map((attachment) => (
@@ -855,8 +855,8 @@ export function ChatInput({
               ))}
             </div>
           )}
-          <div className="flex flex-wrap items-end gap-2">
-        <div className="relative flex items-center gap-2" ref={menuRef}>
+          <div className="flex flex-wrap items-center gap-2">
+        <div className="relative order-2 flex min-w-0 flex-1 items-center gap-2 md:order-none md:flex-none" ref={menuRef}>
           <button
             ref={actionMenuButtonRef}
             type="button"
@@ -870,7 +870,7 @@ export function ChatInput({
               setMenuView("actions");
               setIsMenuOpen(true);
             }}
-            className="flex h-10 w-10 items-center justify-center rounded-full border border-zinc-300 bg-zinc-50 text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white"
+            className="flex h-10 w-10 shrink-0 touch-manipulation items-center justify-center rounded-full border border-zinc-300 bg-zinc-50 text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white"
             title={t("chat.moreActions")}
             aria-label={t("chat.moreActions")}
             aria-expanded={isMenuOpen && menuView === "actions"}
@@ -897,7 +897,7 @@ export function ChatInput({
               setMenuView("models");
               setIsMenuOpen(true);
             }}
-            className="flex h-10 min-w-0 max-w-[11rem] items-center gap-2 rounded-full border border-zinc-300 bg-zinc-50 px-3 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-800 md:max-w-none"
+            className="flex h-10 min-w-0 max-w-[calc(100vw-8.25rem)] flex-1 touch-manipulation items-center gap-2 rounded-full border border-zinc-300 bg-zinc-50 px-3 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-800 md:max-w-none md:flex-none"
             title={activeModelNames.join(", ")}
             aria-label={t("chat.modelSelect")}
             aria-expanded={isMenuOpen && menuView === "models"}
@@ -937,7 +937,7 @@ export function ChatInput({
               role="dialog"
               aria-modal="false"
               aria-label={menuView === "models" ? t("chat.modelSelect") : t("chat.moreActions")}
-              className="fixed inset-x-2 bottom-[calc(5.25rem+env(safe-area-inset-bottom))] z-50 flex max-h-[min(32rem,calc(100dvh-8rem))] flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white p-2 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900 md:absolute md:inset-x-auto md:bottom-12 md:left-0 md:max-h-[calc(100dvh-8rem)] md:w-[min(24rem,calc(100vw-1.5rem))]"
+              className="fixed inset-x-2 bottom-[calc(6.5rem+env(safe-area-inset-bottom))] z-50 flex max-h-[min(32rem,calc(100dvh-9rem))] flex-col overflow-hidden rounded-3xl border border-zinc-200 bg-white p-2 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900 md:absolute md:inset-x-auto md:bottom-12 md:left-0 md:max-h-[calc(100dvh-8rem)] md:w-[min(24rem,calc(100vw-1.5rem))] md:rounded-2xl"
             >
               <div className="mb-2 flex items-center justify-between border-b border-zinc-200 px-2 pb-2 pt-1 dark:border-zinc-800 md:hidden">
                 <div>
@@ -1145,14 +1145,14 @@ export function ChatInput({
           placeholder={placeholderText}
           disabled={isDisabled}
           rows={1}
-                  className="order-first max-h-[128px] min-h-11 w-full flex-none resize-none overflow-y-auto border-0 bg-transparent px-1 py-1.5 text-sm leading-6 text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-500 md:max-h-[160px] md:min-h-[56px] md:py-2"
+                  className="order-1 max-h-[128px] min-h-11 w-full flex-none resize-none overflow-y-auto border-0 bg-transparent px-1 py-1.5 text-sm leading-6 text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-500 md:order-first md:max-h-[160px] md:min-h-[56px] md:py-2"
               />
 
         {isSending ? (
           <button
             type="button"
             onClick={onCancel}
-            className="ml-auto flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-red-600 text-white hover:bg-red-500"
+            className="order-3 ml-auto flex h-10 w-10 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-red-600 text-white hover:bg-red-500 md:h-9 md:w-9"
             title={t("chat.cancel")}
             aria-label={t("chat.cancel")}
           >
@@ -1163,7 +1163,7 @@ export function ChatInput({
             type="button"
             onClick={onSubmit}
             disabled={isDisabled || (!value.trim() && attachments.length === 0)}
-            className="ml-auto flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-blue-600 text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500 dark:disabled:bg-zinc-700 dark:disabled:text-zinc-400"
+            className="order-3 ml-auto flex h-10 w-10 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-blue-600 text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500 dark:disabled:bg-zinc-700 dark:disabled:text-zinc-400 md:h-9 md:w-9"
             title={t("chat.send")}
             aria-label={t("chat.send")}
           >
