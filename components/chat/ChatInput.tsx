@@ -906,7 +906,7 @@ export function ChatInput({
             </div>
           )}
           <div className="flex flex-wrap items-center gap-2">
-        <div className="relative order-2 flex min-w-0 flex-1 items-center gap-2 md:order-none md:flex-none" ref={menuRef}>
+        <div className="relative order-1 flex min-w-0 flex-1 items-center gap-2 md:order-none md:flex-none" ref={menuRef}>
           <button
             ref={actionMenuButtonRef}
             type="button"
@@ -987,7 +987,7 @@ export function ChatInput({
               role="dialog"
               aria-modal="false"
               aria-label={menuView === "models" ? t("chat.modelSelect") : t("chat.moreActions")}
-              className="fixed inset-x-2 bottom-[calc(6.5rem+env(safe-area-inset-bottom))] z-50 flex max-h-[min(34rem,calc(100dvh-8rem))] flex-col overflow-hidden rounded-3xl border border-zinc-200 bg-white p-2 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900 md:absolute md:inset-x-auto md:bottom-12 md:left-0 md:max-h-[calc(100dvh-8rem)] md:w-[min(24rem,calc(100vw-1.5rem))] md:rounded-2xl"
+              className="fixed inset-x-2 bottom-[calc(9rem+env(safe-area-inset-bottom))] z-50 flex max-h-[min(34rem,calc(100dvh-10.5rem))] flex-col overflow-hidden rounded-3xl border border-zinc-200 bg-white p-2 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900 md:absolute md:inset-x-auto md:bottom-12 md:left-0 md:max-h-[calc(100dvh-8rem)] md:w-[min(24rem,calc(100vw-1.5rem))] md:rounded-2xl"
             >
               <div className="mx-auto mb-2 mt-0.5 h-1 w-10 rounded-full bg-zinc-300 dark:bg-zinc-700 md:hidden" aria-hidden="true" />
               <div className="mb-2 flex items-center justify-between border-b border-zinc-200 px-2 pb-2 pt-1 dark:border-zinc-800 md:hidden">
@@ -1198,8 +1198,8 @@ export function ChatInput({
           onPaste={handlePaste}
           placeholder={placeholderText}
           disabled={isDisabled}
-          rows={1}
-                  className="order-1 max-h-[128px] min-h-11 w-full flex-none resize-none overflow-y-auto border-0 bg-transparent px-1 py-1.5 text-sm leading-6 text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-500 md:order-first md:max-h-[160px] md:min-h-[56px] md:py-2"
+          rows={2}
+                  className="order-2 max-h-[144px] min-h-[72px] w-full flex-none resize-none overflow-y-auto border-0 bg-transparent px-1 py-2.5 text-sm leading-6 text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-500 md:order-first md:max-h-[160px] md:min-h-[56px] md:py-2"
               />
 
         {isSending ? (
