@@ -2,10 +2,9 @@
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { AlertCircle, CheckCircle2, Info } from "lucide-react";
-import { ChatApp } from "@/components/chat/ChatApp";
-import { ChatSidebar } from "@/components/chat/ChatSidebar";
-import { ChatInput } from "@/components/chat/ChatInput";
-import { Conversation, AVAILABLE_MODELS, ENABLED_MODELS, MAX_SELECTED_MODELS, type ChatAttachment } from "@/components/chat/types";
+import { DesktopChatShell } from "@/components/chat/DesktopChatShell";
+import { MobileChatShell } from "@/components/chat/MobileChatShell";
+import { Conversation, AVAILABLE_MODELS, MAX_SELECTED_MODELS, type ChatAttachment } from "@/components/chat/types";
 import { useSession } from "next-auth/react";
 import {
   useLanguage,
@@ -943,153 +942,68 @@ export default function Home() {
 
   return (
     <>
-      <main className="flex h-screen overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
-      <ChatSidebar 
+      <DesktopChatShell
         conversations={blendedConversations}
         currentChatId={currentChatId}
+        selectedModels={selectedModels}
+        disabledPanels={disabledPanels}
+        promptPayload={promptPayload}
+        inputValue={inputValue}
+        setInputValue={setInputValue}
+        attachments={attachments}
+        setAttachments={setAttachments}
+        isSending={isSending}
+        focusToken={focusToken}
+        isGuestMode={isGuestMode}
+        guestMessageCount={guestMessageCount}
+        maxGuestMessages={MAX_GUEST_MESSAGES}
+        isPrivateMode={isPrivateMode}
         onNewChat={handleNewChat}
         onSelectConversation={handleSelectConversation}
-		    onRename={handleRename}
-        onDelete={handleDelete}		
-        isGuestMode={isGuestMode} 
-        guestMessageCount={guestMessageCount} 
-              maxGuestMessages={MAX_GUEST_MESSAGES}        
-              onLock={handleLock}     
-              onUnlock={handleUnlock} 
-onShare={handleShareConversation}
-              onRevokeShare={handleRevokeShare}
-              onDownload={handleDownloadConversation}              
-              isPrivateMode={isPrivateMode}
-              onTogglePrivateMode={togglePrivateModeGlobal}
+        onRename={handleRename}
+        onDelete={handleDelete}
+        onLock={handleLock}
+        onUnlock={handleUnlock}
+        onShare={handleShareConversation}
+        onRevokeShare={handleRevokeShare}
+        onDownload={handleDownloadConversation}
+        onTogglePrivateMode={togglePrivateModeGlobal}
+        onToggleModel={toggleModel}
+        onSubmit={handleGlobalSubmit}
+        onChangePanelModel={changePanelModel}
+        onTogglePanelDisable={togglePanelDisable}
+        onRemoveModel={handleRemoveModel}
       />
 
-      <section className="flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">        
-              <div className="flex flex-1 min-h-0 overflow-hidden gap-4 bg-zinc-100/80 px-4 pb-4 pt-4 dark:bg-zinc-950">
-
-          {selectedModels.length === 0 && (
-            <div className="flex flex-1 flex-col items-center justify-center text-zinc-500 select-none">
-              <div className="text-4xl mb-4 opacity-50">AI</div>
-                          <p className="text-sm font-medium">{t("chat.inactivePanel")}</p>
-                          <p className="text-xs mt-1 opacity-70">{t("chat.chooseModel")}</p>
-            </div>
-          )}
-		  
-		{selectedModels.map((modelId) => {
-            const modelInfo = AVAILABLE_MODELS.find(m => m.id === modelId);
-			const isPanelDisabled = disabledPanels.includes(modelId);
-            
-			return (
-                <React.Fragment key={modelId}>               
-                <div className={`flex flex-col bg-white border border-zinc-200 dark:bg-zinc-950 dark:border-zinc-800 rounded-2xl overflow-hidden relative transition-all duration-300 ease-in-out shadow-sm shadow-zinc-200/60 dark:shadow-black/20 ${isPanelDisabled ? "w-44 shrink-0" : "flex-1 min-w-0"
-                }`}>
-                  {(
-                      <div className="flex min-h-12 items-center justify-between shrink-0 border-b border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-400">
-                      <div className={`flex flex-1 min-w-0 items-center gap-2 transition-opacity ${isPanelDisabled ? 'opacity-50' : ''}`}>
-                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-zinc-100 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200 dark:bg-zinc-800 dark:text-zinc-200 dark:ring-zinc-700">
-                          {modelInfo?.icon}
-                        </span>
-                        
-                        {isPanelDisabled ? (
-                          <span className="min-w-0 flex flex-col truncate select-none">
-                            <span className="truncate text-sm font-semibold text-zinc-600 dark:text-zinc-300">{modelInfo?.name}</span>
-                            <span className="truncate text-[10px] font-medium text-zinc-400">{modelInfo?.provider}</span>
-                          </span>
-                        ) : (
-                        <span className="min-w-0 flex flex-col">
-                          <select
-                            value={modelId}
-                            onChange={(e) => changePanelModel(modelId, e.target.value)}
-                            disabled={isPanelDisabled}
-                            className="min-w-0 cursor-pointer truncate bg-transparent text-sm font-semibold text-zinc-800 outline-none hover:text-zinc-950 dark:text-zinc-100 dark:hover:text-white"
-                          >
-                            {ENABLED_MODELS.map((m) => {
-                              const isAlreadyUsed = selectedModels.includes(m.id) && m.id !== modelId;
-                              return (
-                                <option 
-                                  key={m.id} 
-                                  value={m.id}
-                                  disabled={isAlreadyUsed}
-                                  className="bg-zinc-900 text-zinc-100"
-                                >
-                                      {m.name} {isAlreadyUsed ? t("chat.inUsed") : ""}
-                                </option>
-                              );
-                            })}
-                          </select>
-                          <span className="truncate text-[10px] font-medium text-zinc-400">
-                            {modelInfo?.provider} - {modelInfo?.tier}
-                          </span>
-                        </span>
-						)}
-                      </div>
-
-					  <div className="flex items-center gap-2 shrink-0">
-
-                    {selectedModels.length > 1 && (
-                      <>                      
-                      <button
-                        onClick={() => togglePanelDisable(modelId)}
-                        className="cursor-pointer flex items-center gap-2 rounded-full px-2 py-1 hover:bg-zinc-100 transition-colors dark:hover:bg-zinc-800"
-                        title={isPanelDisabled ? t("chat.resumePanel") : t("chat.pausePanel")}
-                        aria-pressed={!isPanelDisabled}
-                      >
-                        <span className="text-[10px] font-bold text-zinc-500">
-                          {isPanelDisabled ? "OFF" : "ON"}
-                        </span>
-                        <div className={`h-4 w-8 rounded-full p-0.5 transition-colors ${!isPanelDisabled ? "bg-blue-500" : "bg-zinc-700"}`}>
-                          <div className={`h-3 w-3 rounded-full bg-white transition-transform ${!isPanelDisabled ? "translate-x-4" : "translate-x-0"}`} />
-                        </div>
-                      </button>
-					  
-					  <div className="w-[1px] h-4 bg-zinc-200 dark:bg-zinc-700/50"></div>
-                      
-                      <button
-                        onClick={() => handleRemoveModel(modelId)}
-                        className="cursor-pointer flex items-center justify-center p-1.5 rounded-full text-zinc-500 hover:bg-red-500/10 hover:text-red-500 transition-colors"
-                        title={t("chat.closeModelPanel")}
-                      >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                          <line x1="18" y1="6" x2="6" y2="18"></line>
-                          <line x1="6" y1="6" x2="18" y2="18"></line>
-                        </svg>
-                      </button>	
-					  </>
-                    )}					  
-                    </div>
-					</div>
-                  )}
-                  
-                  <ChatApp 
-                    key={`${modelId}:${currentChatId || "new"}`}
-				            modelId={modelId}
-                    initialConversationId={currentChatId} 
-                    promptPayload={promptPayload}
-					          isPanelDisabled={isPanelDisabled}
-                    isGuestMode={isGuestMode}
-                  />
-                </div>
-              </React.Fragment>
-            );
-          })}
-        </div>
-
-        <ChatInput
-          value={inputValue}
-          onChange={setInputValue}
-          onSubmit={handleGlobalSubmit}
-          onCancel={() => {}} 
-          isSending={isSending}
-		      focusToken={focusToken}		  
-          selectedModels={selectedModels}
-          onToggleModel={toggleModel}
-          attachments={attachments}
-          onAttachmentsChange={setAttachments}
-          canAttach={!isGuestMode}
-          isGuestMode={isGuestMode}
-          isGuestLimitReached={isGuestMode && guestMessageCount >= MAX_GUEST_MESSAGES}          
-        />
-      </section>
-    </main>
+      <MobileChatShell
+        conversations={blendedConversations}
+        currentChatId={currentChatId}
+        selectedModels={selectedModels}
+        disabledPanels={disabledPanels}
+        promptPayload={promptPayload}
+        inputValue={inputValue}
+        setInputValue={setInputValue}
+        attachments={attachments}
+        setAttachments={setAttachments}
+        isSending={isSending}
+        focusToken={focusToken}
+        isGuestMode={isGuestMode}
+        guestMessageCount={guestMessageCount}
+        maxGuestMessages={MAX_GUEST_MESSAGES}
+        isPrivateMode={isPrivateMode}
+        onNewChat={handleNewChat}
+        onSelectConversation={handleSelectConversation}
+        onRename={handleRename}
+        onDelete={handleDelete}
+        onLock={handleLock}
+        onUnlock={handleUnlock}
+        onShare={handleShareConversation}
+        onRevokeShare={handleRevokeShare}
+        onDownload={handleDownloadConversation}
+        onTogglePrivateMode={togglePrivateModeGlobal}
+        onToggleModel={toggleModel}
+        onSubmit={handleGlobalSubmit}
+      />
     {toast && (
       <div
         key={toast.id}
