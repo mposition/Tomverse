@@ -80,6 +80,8 @@ export const en = {
         comingSoonModel: "This model is coming soon.",
         attachFile: "Attach files",
         removeAttachment: "Remove attachment",
+        dropFilesHere: "Drop files to attach",
+        dropFilesDescription: "Images, PDFs, text, and office files are supported.",
         attachmentCountError: "You can attach up to 5 files.",
         attachmentSizeError: "Each file must be 10 MB or smaller.",
         attachmentTypeError: "This file type is not supported.",

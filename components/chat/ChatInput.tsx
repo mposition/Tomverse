@@ -97,6 +97,9 @@ const fileToDataUrl = (file: File) =>
     reader.readAsDataURL(file);
   });
 
+const hasDraggedFiles = (dataTransfer: DataTransfer | null) =>
+  Boolean(dataTransfer && Array.from(dataTransfer.types).includes("Files"));
+
 const getAttachmentLabel = (attachment: ChatAttachment) => {
   const extension = attachment.name.split(".").pop();
   return extension && extension !== attachment.name
@@ -274,6 +277,7 @@ export function ChatInput({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const previousAttachmentsRef = useRef<ChatAttachment[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [isDragActive, setIsDragActive] = useState(false);
     const { t } = useLanguage();
 
   const activeModelNames = selectedModels
@@ -665,6 +669,55 @@ export function ChatInput({
     }
   };
 
+  useEffect(() => {
+    const preventFileNavigation = (event: DragEvent) => {
+      if (!hasDraggedFiles(event.dataTransfer)) return;
+      event.preventDefault();
+    };
+
+    window.addEventListener("dragover", preventFileNavigation);
+    window.addEventListener("drop", preventFileNavigation);
+    return () => {
+      window.removeEventListener("dragover", preventFileNavigation);
+      window.removeEventListener("drop", preventFileNavigation);
+    };
+  }, []);
+
+  const handleDropZoneDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!hasDraggedFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDragActive(true);
+  };
+
+  const handleDropZoneDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!hasDraggedFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = canAttach ? "copy" : "none";
+    setIsDragActive(true);
+  };
+
+  const handleDropZoneDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      setIsDragActive(false);
+    }
+  };
+
+  const handleDropZoneDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!hasDraggedFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDragActive(false);
+
+    if (!canAttach) {
+      dispatchAppToast(t("chat.loginToAttach"), "info");
+      return;
+    }
+
+    void handleFilesSelected(event.dataTransfer.files);
+  };
+
     const handlePaste = (
         event: React.ClipboardEvent<HTMLTextAreaElement>
     ) => {
@@ -838,7 +891,34 @@ export function ChatInput({
 
   return (
       <div className="w-full max-w-full shrink-0 overflow-hidden border-t border-zinc-200 bg-zinc-50/95 px-2 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] transition-colors dark:border-zinc-800 dark:bg-zinc-950 md:overflow-visible md:px-6 md:py-3 md:pb-3">
-          <div className="mx-auto w-full max-w-4xl overflow-hidden rounded-3xl border border-zinc-200 bg-white p-2.5 shadow-lg shadow-zinc-200/50 dark:border-zinc-800 dark:bg-zinc-900 dark:shadow-black/20 md:overflow-visible md:rounded-2xl md:p-3">
+          <div
+            onDragEnter={handleDropZoneDragEnter}
+            onDragOver={handleDropZoneDragOver}
+            onDragLeave={handleDropZoneDragLeave}
+            onDrop={handleDropZoneDrop}
+            className={`relative mx-auto w-full max-w-4xl overflow-hidden rounded-3xl border bg-white p-2.5 shadow-lg shadow-zinc-200/50 transition-colors dark:bg-zinc-900 dark:shadow-black/20 md:overflow-visible md:rounded-2xl md:p-3 ${
+              isDragActive
+                ? "border-blue-500 bg-blue-50/70 dark:border-blue-400 dark:bg-blue-950/30"
+                : "border-zinc-200 dark:border-zinc-800"
+            }`}
+          >
+          {isDragActive && (
+            <div className="pointer-events-none absolute inset-2 z-20 flex items-center justify-center rounded-2xl border border-dashed border-blue-400 bg-white/85 text-center shadow-sm backdrop-blur-sm dark:bg-zinc-950/85">
+              <div className="flex flex-col items-center gap-2 px-4">
+                <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-sm shadow-blue-950/20">
+                  <Paperclip className="h-5 w-5" />
+                </span>
+                <span className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
+                  {canAttach ? t("chat.dropFilesHere") : t("chat.loginToAttach")}
+                </span>
+                {canAttach && (
+                  <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                    {t("chat.dropFilesDescription")}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
           {!value.trim() && attachments.length === 0 && (
             <div className="mb-2 flex max-w-full gap-2 overflow-x-auto overscroll-x-contain pb-1 md:hidden">
               {PROMPT_SUGGESTIONS.map((suggestion) => (

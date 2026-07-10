@@ -80,6 +80,8 @@ export const ko = {
         comingSoonModel: "해당 모델은 곧 지원될 예정입니다.",
         attachFile: "파일 첨부",
         removeAttachment: "첨부파일 제거",
+        dropFilesHere: "파일을 놓으면 첨부됩니다",
+        dropFilesDescription: "이미지, PDF, 텍스트, 오피스 파일을 지원합니다.",
         attachmentCountError: "파일은 최대 5개까지 첨부할 수 있습니다.",
         attachmentSizeError: "파일 하나의 크기는 10MB 이하여야 합니다.",
         attachmentTypeError: "지원하지 않는 파일 형식입니다.",

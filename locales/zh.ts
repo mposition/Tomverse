@@ -80,6 +80,8 @@ export const zh = {
         comingSoonModel: "该模型即将支持。",
         attachFile: "添加附件",
         removeAttachment: "移除附件",
+        dropFilesHere: "拖放文件以添加附件",
+        dropFilesDescription: "支持图片、PDF、文本和 Office 文件。",
         attachmentCountError: "最多可添加 5 个文件。",
         attachmentSizeError: "每个文件不得超过 10MB。",
         attachmentTypeError: "不支持此文件类型。",
