@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowUp,
@@ -302,6 +302,40 @@ export function ChatInput({
     }
   });
   const menuRef = useRef<HTMLDivElement>(null);
+  const menuPopoverRef = useRef<HTMLDivElement>(null);
+  const actionMenuButtonRef = useRef<HTMLButtonElement | null>(null);
+  const modelMenuButtonRef = useRef<HTMLButtonElement | null>(null);
+  const modelSearchInputRef = useRef<HTMLInputElement | null>(null);
+  const lastMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
+
+  const getMenuFocusableElements = useCallback(() => {
+    const popover = menuPopoverRef.current;
+    if (!popover) return [];
+
+    return Array.from(
+      popover.querySelectorAll<HTMLElement>(
+        [
+          "button:not([disabled])",
+          "input:not([disabled])",
+          "select:not([disabled])",
+          "textarea:not([disabled])",
+          "a[href]",
+          '[tabindex]:not([tabindex="-1"])',
+        ].join(",")
+      )
+    ).filter((element) => element.offsetParent !== null);
+  }, []);
+
+  const closeMenu = useCallback((restoreFocus = true) => {
+    setIsMenuOpen(false);
+    setMenuView("actions");
+
+    if (restoreFocus) {
+      requestAnimationFrame(() => {
+        lastMenuTriggerRef.current?.focus();
+      });
+    }
+  }, []);
 
   const modelProviders = useMemo(
     () => Array.from(new Set(AVAILABLE_MODELS.map((model) => model.provider))),
@@ -351,13 +385,109 @@ export function ChatInput({
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setIsMenuOpen(false);
-        setMenuView("actions");
+        closeMenu(false);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+  }, [closeMenu]);
+
+  useEffect(() => {
+    if (!isMenuOpen) return;
+
+    const animationFrame = requestAnimationFrame(() => {
+      if (menuView === "models") {
+        modelSearchInputRef.current?.focus();
+        return;
+      }
+
+      getMenuFocusableElements()[0]?.focus();
+    });
+
+    return () => cancelAnimationFrame(animationFrame);
+  }, [getMenuFocusableElements, isMenuOpen, menuView]);
+
+  useEffect(() => {
+    if (!isMenuOpen) return;
+
+    const handleMenuKeyDown = (event: KeyboardEvent) => {
+      const focusableElements = getMenuFocusableElements();
+      const activeElement = document.activeElement as HTMLElement | null;
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        closeMenu(true);
+        return;
+      }
+
+      if (event.key === "Tab") {
+        if (focusableElements.length === 0) {
+          event.preventDefault();
+          return;
+        }
+
+        const firstElement = focusableElements[0];
+        const lastElement = focusableElements[focusableElements.length - 1];
+
+        if (!activeElement || !menuPopoverRef.current?.contains(activeElement)) {
+          event.preventDefault();
+          firstElement.focus();
+          return;
+        }
+
+        if (event.shiftKey && activeElement === firstElement) {
+          event.preventDefault();
+          lastElement.focus();
+          return;
+        }
+
+        if (!event.shiftKey && activeElement === lastElement) {
+          event.preventDefault();
+          firstElement.focus();
+        }
+        return;
+      }
+
+      if (
+        event.key !== "ArrowDown" &&
+        event.key !== "ArrowUp" &&
+        event.key !== "Home" &&
+        event.key !== "End"
+      ) {
+        return;
+      }
+
+      if (activeElement instanceof HTMLSelectElement) return;
+      if (focusableElements.length === 0) return;
+
+      event.preventDefault();
+
+      const currentIndex = Math.max(
+        0,
+        focusableElements.indexOf(activeElement as HTMLElement)
+      );
+
+      if (event.key === "Home") {
+        focusableElements[0].focus();
+        return;
+      }
+
+      if (event.key === "End") {
+        focusableElements[focusableElements.length - 1].focus();
+        return;
+      }
+
+      const direction = event.key === "ArrowDown" ? 1 : -1;
+      const nextIndex =
+        (currentIndex + direction + focusableElements.length) %
+        focusableElements.length;
+      focusableElements[nextIndex].focus();
+    };
+
+    document.addEventListener("keydown", handleMenuKeyDown, true);
+    return () => document.removeEventListener("keydown", handleMenuKeyDown, true);
+  }, [closeMenu, getMenuFocusableElements, isMenuOpen]);
 
   const toggleFavoriteModel = (modelId: string) => {
     setFavoriteModelIds((current) => {
@@ -728,15 +858,24 @@ export function ChatInput({
           <div className="flex flex-wrap items-end gap-2">
         <div className="relative flex items-center gap-2" ref={menuRef}>
           <button
+            ref={actionMenuButtonRef}
             type="button"
             onClick={() => {
+              lastMenuTriggerRef.current = actionMenuButtonRef.current;
+              const shouldClose = isMenuOpen && menuView === "actions";
+              if (shouldClose) {
+                closeMenu(true);
+                return;
+              }
               setMenuView("actions");
-              setIsMenuOpen((open) => !open || menuView !== "actions");
+              setIsMenuOpen(true);
             }}
             className="flex h-10 w-10 items-center justify-center rounded-full border border-zinc-300 bg-zinc-50 text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white"
             title={t("chat.moreActions")}
             aria-label={t("chat.moreActions")}
             aria-expanded={isMenuOpen && menuView === "actions"}
+            aria-controls="chat-input-popover"
+            aria-haspopup="dialog"
           >
             {isUploading ? (
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
@@ -746,14 +885,24 @@ export function ChatInput({
           </button>
 
           <button
+            ref={modelMenuButtonRef}
             type="button"
             onClick={() => {
+              lastMenuTriggerRef.current = modelMenuButtonRef.current;
               const shouldClose = isMenuOpen && menuView === "models";
+              if (shouldClose) {
+                closeMenu(true);
+                return;
+              }
               setMenuView("models");
-              setIsMenuOpen(!shouldClose);
+              setIsMenuOpen(true);
             }}
             className="flex h-10 min-w-0 items-center gap-2 rounded-full border border-zinc-300 bg-zinc-50 px-3 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-800"
             title={activeModelNames.join(", ")}
+            aria-label={t("chat.modelSelect")}
+            aria-expanded={isMenuOpen && menuView === "models"}
+            aria-controls="chat-input-popover"
+            aria-haspopup="dialog"
           >
             <span className="flex -space-x-1">
               {selectedModels.slice(0, 3).map((id) => {
@@ -775,14 +924,21 @@ export function ChatInput({
           </button>
 
           {isMenuOpen && (
-            <div className="absolute bottom-12 left-0 z-50 flex max-h-[calc(100dvh-8rem)] w-[min(24rem,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white p-2 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900">
+            <div
+              ref={menuPopoverRef}
+              id="chat-input-popover"
+              role="dialog"
+              aria-modal="false"
+              aria-label={menuView === "models" ? t("chat.modelSelect") : t("chat.moreActions")}
+              className="absolute bottom-12 left-0 z-50 flex max-h-[calc(100dvh-8rem)] w-[min(24rem,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white p-2 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900"
+            >
               {menuView === "actions" ? (
                 <div className="space-y-1">
                   <button
                     type="button"
                     disabled={!canAttach || attachments.length >= MAX_ATTACHMENTS}
                     onClick={() => {
-                      setIsMenuOpen(false);
+                      closeMenu(false);
                       fileInputRef.current?.click();
                     }}
                     className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-zinc-800"
@@ -799,7 +955,7 @@ export function ChatInput({
                     type="button"
                     disabled={!canAttach || attachments.length >= MAX_ATTACHMENTS}
                     onClick={() => {
-                      setIsMenuOpen(false);
+                      closeMenu(false);
                       void handleGoogleDriveSelect();
                     }}
                     className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-zinc-800"
@@ -849,6 +1005,7 @@ export function ChatInput({
                     <div className="relative">
                       <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
                       <input
+                        ref={modelSearchInputRef}
                         value={modelSearchQuery}
                         onChange={(event) => setModelSearchQuery(event.target.value)}
                         placeholder={t("chat.searchModels")}
