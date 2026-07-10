@@ -31,9 +31,17 @@ type ChatAppProps = {
   promptPayload?: { id: string; text: string; chatId: string; userMessageId: string; attachments: ChatAttachment[] } | null;
   isPanelDisabled?: boolean;
   isGuestMode?: boolean;
+  hideModelOnlyInput?: boolean;
 };
 
-export function ChatApp({ modelId, initialConversationId = null, promptPayload, isPanelDisabled = false, isGuestMode = false }: ChatAppProps) {
+export function ChatApp({
+  modelId,
+  initialConversationId = null,
+  promptPayload,
+  isPanelDisabled = false,
+  isGuestMode = false,
+  hideModelOnlyInput = false,
+}: ChatAppProps) {
   const [isMessagesLoaded, setIsMessagesLoaded] = useState(false);
   const { data: session, status } = useSession();
     const { t } = useLanguage();
@@ -445,6 +453,7 @@ export function ChatApp({ modelId, initialConversationId = null, promptPayload, 
                     />
                   ) : null}
 
+                  {!hideModelOnlyInput && (
                   <form
                       onSubmit={(event) => {
                           event.preventDefault();
@@ -478,6 +487,7 @@ export function ChatApp({ modelId, initialConversationId = null, promptPayload, 
                           <ArrowUp className="h-5 w-5" />
                       </button>
                   </form>
+                  )}
               </div>
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center p-4 select-none">

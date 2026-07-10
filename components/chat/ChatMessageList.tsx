@@ -123,7 +123,7 @@ export function ChatMessageList({ messages, isPrivate = false, isGuestMode = fal
       <div
         ref={containerRef}
         onScroll={handleScroll}
-        className="flex-1 min-h-0 overflow-y-auto px-4 py-6 md:px-6"
+        className="min-h-0 flex-1 overflow-y-auto px-3 py-4 md:px-6 md:py-6"
       >
         <div className="mx-auto flex w-full max-w-4xl flex-col gap-5 pb-4">
           
@@ -198,7 +198,7 @@ export function ChatMessageList({ messages, isPrivate = false, isGuestMode = fal
                 )}
 
                 <div
-                  className={`relative max-w-[92%] break-words rounded-2xl px-4 py-3 text-[15px] leading-relaxed shadow-sm md:max-w-[88%] ${
+                  className={`relative max-w-[94%] break-words rounded-2xl px-3.5 py-2.5 text-[14px] leading-relaxed shadow-sm md:max-w-[88%] md:px-4 md:py-3 md:text-[15px] ${
                     isUser ? `${userBoxClass} rounded-br-md` : `${assistantBoxClass} rounded-bl-md`
                   }`}
                 >

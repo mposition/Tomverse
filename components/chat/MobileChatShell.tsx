@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChatApp } from "@/components/chat/ChatApp";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
@@ -81,6 +81,7 @@ export function MobileChatShell({
 }: MobileChatShellProps) {
   const { t } = useLanguage();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const drawerCloseButtonRef = useRef<HTMLButtonElement | null>(null);
   const [activeModelId, setActiveModelId] = useState<string | null>(
     selectedModels[0] || null
   );
@@ -99,12 +100,21 @@ export function MobileChatShell({
   useEffect(() => {
     if (!isDrawerOpen) return;
 
+    document.body.style.overflow = "hidden";
+    const focusFrame = requestAnimationFrame(() => {
+      drawerCloseButtonRef.current?.focus();
+    });
+
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") setIsDrawerOpen(false);
     };
 
     document.addEventListener("keydown", handleEscape);
-    return () => document.removeEventListener("keydown", handleEscape);
+    return () => {
+      cancelAnimationFrame(focusFrame);
+      document.body.style.overflow = "";
+      document.removeEventListener("keydown", handleEscape);
+    };
   }, [isDrawerOpen]);
 
   const activeModel = useMemo(
@@ -117,11 +127,11 @@ export function MobileChatShell({
 
   return (
     <main className="flex h-[100dvh] flex-col overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100 md:hidden">
-      <header className="flex h-14 shrink-0 items-center gap-2 border-b border-zinc-200 bg-white px-3 dark:border-zinc-800 dark:bg-zinc-950">
+      <header className="flex min-h-14 shrink-0 items-center gap-2 border-b border-zinc-200 bg-white px-3 pt-[env(safe-area-inset-top)] dark:border-zinc-800 dark:bg-zinc-950">
         <button
           type="button"
           onClick={() => setIsDrawerOpen(true)}
-          className="flex h-10 w-10 items-center justify-center rounded-xl border border-zinc-200 text-zinc-600 dark:border-zinc-800 dark:text-zinc-300"
+          className="flex h-10 w-10 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-50 text-zinc-600 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
           aria-label={t("chat.moreActions")}
         >
           <Menu className="h-5 w-5" />
@@ -137,7 +147,7 @@ export function MobileChatShell({
         <button
           type="button"
           onClick={onNewChat}
-          className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white"
+          className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm shadow-blue-950/20"
           aria-label={t("sidebar.newChat")}
         >
           <Plus className="h-5 w-5" />
@@ -158,7 +168,7 @@ export function MobileChatShell({
                   type="button"
                   onClick={() => setActiveModelId(modelId)}
                   aria-pressed={isActive}
-                  className={`flex h-9 items-center gap-2 rounded-full border px-3 text-xs font-semibold transition-colors ${
+                  className={`flex h-9 items-center gap-2 rounded-full border px-3 text-xs font-semibold shadow-sm transition-colors ${
                     isActive
                       ? "border-blue-500 bg-blue-600 text-white"
                       : "border-zinc-200 bg-white text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300"
@@ -183,6 +193,7 @@ export function MobileChatShell({
             promptPayload={promptPayload}
             isPanelDisabled={disabledPanels.includes(activeModelId)}
             isGuestMode={isGuestMode}
+            hideModelOnlyInput
           />
         ) : (
           <div className="flex h-full flex-col items-center justify-center px-6 text-center text-zinc-500">
@@ -210,7 +221,12 @@ export function MobileChatShell({
       />
 
       {isDrawerOpen && (
-        <div className="fixed inset-0 z-[80] bg-black/50" role="presentation">
+        <div
+          className="fixed inset-0 z-[80] bg-black/50 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t("sidebar.title")}
+        >
           <button
             type="button"
             className="absolute inset-0 h-full w-full cursor-default"
@@ -243,6 +259,7 @@ export function MobileChatShell({
               onTogglePrivateMode={onTogglePrivateMode}
             />
             <button
+              ref={drawerCloseButtonRef}
               type="button"
               onClick={() => setIsDrawerOpen(false)}
               className="absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-xl bg-zinc-900/80 text-white"

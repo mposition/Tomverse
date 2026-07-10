@@ -803,17 +803,17 @@ export function ChatInput({
   };
 
   return (
-      <div className="shrink-0 border-t border-zinc-200 bg-zinc-50/95 px-3 py-3 transition-colors dark:border-zinc-800 dark:bg-zinc-950 md:px-6">
-          <div className="mx-auto max-w-4xl rounded-2xl border border-zinc-200 bg-white p-3 shadow-lg shadow-zinc-200/50 dark:border-zinc-800 dark:bg-zinc-900 dark:shadow-black/20">
+      <div className="shrink-0 border-t border-zinc-200 bg-zinc-50/95 px-2 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] transition-colors dark:border-zinc-800 dark:bg-zinc-950 md:px-6 md:py-3 md:pb-3">
+          <div className="mx-auto max-w-4xl rounded-2xl border border-zinc-200 bg-white p-2 shadow-lg shadow-zinc-200/50 dark:border-zinc-800 dark:bg-zinc-900 dark:shadow-black/20 md:p-3">
           {attachments.length > 0 && (
-            <div className="mb-3 flex flex-wrap gap-2">
+            <div className="mb-2 flex gap-2 overflow-x-auto pb-1 md:mb-3 md:flex-wrap md:overflow-visible md:pb-0">
               {attachments.map((attachment) => (
                 <div
                   key={attachment.id}
                   className={
                     attachment.data
-                      ? "relative h-20 w-20 overflow-hidden rounded-xl border border-zinc-200 bg-zinc-100 shadow-sm dark:border-zinc-700 dark:bg-zinc-900"
-                      : "relative flex h-16 min-w-52 max-w-64 items-center gap-3 rounded-xl border border-zinc-200 bg-zinc-50 py-2 pl-2 pr-8 text-zinc-700 shadow-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
+                      ? "relative h-16 w-16 shrink-0 overflow-hidden rounded-xl border border-zinc-200 bg-zinc-100 shadow-sm dark:border-zinc-700 dark:bg-zinc-900 md:h-20 md:w-20"
+                      : "relative flex h-14 min-w-48 max-w-60 shrink-0 items-center gap-3 rounded-xl border border-zinc-200 bg-zinc-50 py-2 pl-2 pr-8 text-zinc-700 shadow-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 md:h-16 md:min-w-52 md:max-w-64"
                   }
                 >
                   {attachment.data ? (
@@ -897,7 +897,7 @@ export function ChatInput({
               setMenuView("models");
               setIsMenuOpen(true);
             }}
-            className="flex h-10 min-w-0 items-center gap-2 rounded-full border border-zinc-300 bg-zinc-50 px-3 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            className="flex h-10 min-w-0 max-w-[11rem] items-center gap-2 rounded-full border border-zinc-300 bg-zinc-50 px-3 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-800 md:max-w-none"
             title={activeModelNames.join(", ")}
             aria-label={t("chat.modelSelect")}
             aria-expanded={isMenuOpen && menuView === "models"}
@@ -930,7 +930,7 @@ export function ChatInput({
               role="dialog"
               aria-modal="false"
               aria-label={menuView === "models" ? t("chat.modelSelect") : t("chat.moreActions")}
-              className="absolute bottom-12 left-0 z-50 flex max-h-[calc(100dvh-8rem)] w-[min(24rem,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white p-2 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900"
+              className="fixed inset-x-2 bottom-[calc(5.25rem+env(safe-area-inset-bottom))] z-50 flex max-h-[min(32rem,calc(100dvh-8rem))] flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white p-2 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900 md:absolute md:inset-x-auto md:bottom-12 md:left-0 md:max-h-[calc(100dvh-8rem)] md:w-[min(24rem,calc(100vw-1.5rem))]"
             >
               {menuView === "actions" ? (
                 <div className="space-y-1">
@@ -1117,7 +1117,7 @@ export function ChatInput({
           placeholder={placeholderText}
           disabled={isDisabled}
           rows={1}
-                  className="order-first max-h-[160px] min-h-[56px] w-full flex-none resize-none overflow-y-auto border-0 bg-transparent px-1 py-2 text-sm leading-6 text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-500"
+                  className="order-first max-h-[128px] min-h-11 w-full flex-none resize-none overflow-y-auto border-0 bg-transparent px-1 py-1.5 text-sm leading-6 text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-500 md:max-h-[160px] md:min-h-[56px] md:py-2"
               />
 
         {isSending ? (
