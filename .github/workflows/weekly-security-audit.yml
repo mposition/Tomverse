@@ -1,0 +1,56 @@
+name: Weekly Security Audit
+
+on:
+  schedule:
+    # Mondays at 09:00 Australia/Brisbane (23:00 UTC Sunday, no DST in Brisbane).
+    - cron: "0 23 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: weekly-security-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: Security audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Dependency vulnerability audit
+        run: npm audit --omit=dev
+
+      - name: Security regression checks
+        run: npm run security:regression
+
+      - name: Type, lint, and production build
+        run: npm run check
+
+      - name: Security audit summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Tomverse Weekly Security Audit"
+            echo ""
+            echo "- Dependency audit: see job logs"
+            echo "- Security regression script: see job logs"
+            echo "- Lint/type/build gate: see job logs"
+            echo ""
+            echo "Review this workflow if any prior step failed."
+          } >> "$GITHUB_STEP_SUMMARY"
