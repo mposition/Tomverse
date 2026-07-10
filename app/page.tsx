@@ -259,7 +259,7 @@ export default function Home() {
         const initialChatId = `guest_${Date.now()}`;
         const initialChat = {
           id: initialChatId,
-          title: "ìƒˆ ëŒ€í™” (ê²ŒìŠ¤íŠ¸)",
+          title: t("sidebar.newChat"),
             selectedModels: [APP_DEFAULTS.guestDefaultModelId],
           disabledPanels: []
         };
@@ -962,7 +962,7 @@ onShare={handleShareConversation}
 
           {selectedModels.length === 0 && (
             <div className="flex flex-1 flex-col items-center justify-center text-zinc-500 select-none">
-              <div className="text-4xl mb-4 opacity-50">ðŸ¤–</div>
+              <div className="text-4xl mb-4 opacity-50">AI</div>
                           <p className="text-sm font-medium">{t("chat.inactivePanel")}</p>
                           <p className="text-xs mt-1 opacity-70">{t("chat.chooseModel")}</p>
             </div>
@@ -1011,7 +1011,7 @@ onShare={handleShareConversation}
                             })}
                           </select>
                           <span className="truncate text-[10px] font-medium text-zinc-400">
-                            {modelInfo?.provider} Â· {modelInfo?.tier}
+                            {modelInfo?.provider} - {modelInfo?.tier}
                           </span>
                         </span>
 						)}

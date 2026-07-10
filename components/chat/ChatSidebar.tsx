@@ -146,7 +146,7 @@ export function ChatSidebar({
                     title={isGuestMode ? t("sidebar.loginRequired") : ""}
                 >
                     {isPrivateMode ? t("sidebar.privateModeStop") : t("sidebar.privateModeStart")}
-                    {isGuestMode && <span>ðŸ‘‘</span>}
+                    {isGuestMode && <Crown className="h-3.5 w-3.5" aria-hidden="true" />}
                 </button>
             </div>
 
@@ -186,7 +186,7 @@ export function ChatSidebar({
                                     ? "bg-zinc-200 border-zinc-300 text-zinc-900 font-semibold dark:bg-zinc-800 dark:border-zinc-700/80 dark:text-zinc-100"
                                     : "bg-transparent border-transparent text-zinc-600 hover:bg-zinc-200/50 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800/40 dark:hover:text-zinc-200"
                                 }`}
-                            title={isGuestMode ? "ë¡œê·¸ì¸ í›„ ì´ìš©í•  ìˆ˜ ìžˆìŠµë‹ˆë‹¤." : ""}
+                            title={isGuestMode ? t("sidebar.loginRequired") : ""}
                         >
                             <div className="cursor-pointer flex min-w-0 flex-1 items-center gap-2.5 pr-6">
                                 <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${isPrivate ? "bg-purple-500/10 text-purple-500" : conv.isLocked ? "bg-amber-500/10 text-amber-500" : "bg-blue-500/10 text-blue-500"}`}>

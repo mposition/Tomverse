@@ -900,7 +900,7 @@ export function ChatInput({
                                 <span className="min-w-0 flex-1 text-left">
                                   <span className="block truncate text-zinc-800 dark:text-zinc-100">{model.name}</span>
                                   <span className="block truncate text-[10px] font-medium text-zinc-400">
-                                    {model.provider} Â· {unavailable ? t("chat.unavailableModel") : t("chat.availableModel")}
+                                    {model.provider} - {unavailable ? t("chat.unavailableModel") : t("chat.availableModel")}
                                   </span>
                                 </span>
                                 <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${model.tier === "Free" ? "bg-emerald-500/10 text-emerald-500" : model.tier === "Pro" ? "bg-blue-500/10 text-blue-500" : "bg-purple-500/10 text-purple-500"}`}>{model.tier}</span>
