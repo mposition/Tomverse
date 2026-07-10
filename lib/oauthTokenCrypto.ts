@@ -18,6 +18,10 @@ const getEncryptionKey = () => {
     return createHash("sha256").update(secret).digest();
 };
 
+export const assertOAuthTokenEncryptionConfigured = () => {
+    getEncryptionKey();
+};
+
 const encryptString = (value: string) => {
     if (value.startsWith(ENCRYPTED_PREFIX)) return value;
 

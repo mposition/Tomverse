@@ -52,6 +52,26 @@ CHAT_MODEL_GPT_5_5_MAX_OUTPUT_TOKENS=8192
 Application limits are a second line of defense. Configure billing alerts and
 hard spending limits in each AI provider dashboard as well.
 
+## Authentication Secrets
+
+Production OAuth account linking encrypts provider tokens before storing them.
+Set both secrets in Railway Variables and keep them stable across deployments:
+
+```text
+NEXTAUTH_SECRET=<random value with at least 32 characters>
+OAUTH_TOKEN_ENCRYPTION_KEY=<random value with at least 32 characters>
+```
+
+Generate a strong value with:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+```
+
+Do not rotate `OAUTH_TOKEN_ENCRYPTION_KEY` without re-encrypting existing
+`enc:v1:` OAuth tokens, because old encrypted account tokens cannot be
+decrypted with a new key.
+
 ## API Storage Limits
 
 General write APIs use per-user and per-IP rate limits, bounded JSON parsing,
