@@ -49,15 +49,23 @@ const cloneAttachmentPreviews = async (
   Promise.all(
     items.map(async (attachment) => {
       if (!attachment.data) return attachment;
+      if (attachment.data.startsWith("data:")) return { ...attachment };
 
       try {
         const blob = await fetch(attachment.data).then((response) =>
           response.blob()
         );
-        return {
-          ...attachment,
-          data: URL.createObjectURL(blob),
-        };
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () =>
+            typeof reader.result === "string"
+              ? resolve(reader.result)
+              : reject(new Error("Attachment preview is not readable."));
+          reader.onerror = () =>
+            reject(reader.error || new Error("Attachment preview failed."));
+          reader.readAsDataURL(blob);
+        });
+        return { ...attachment, data: dataUrl };
       } catch {
         return attachment;
       }

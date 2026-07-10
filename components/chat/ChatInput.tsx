@@ -75,6 +75,20 @@ const getFileMediaType = (file: File) => {
   return OFFICE_EXTENSION_TYPES[extension] || file.type || "application/octet-stream";
 };
 
+const fileToDataUrl = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result);
+      } else {
+        reject(new Error("File preview is not readable."));
+      }
+    };
+    reader.onerror = () => reject(reader.error || new Error("File preview failed."));
+    reader.readAsDataURL(file);
+  });
+
 const getAttachmentLabel = (attachment: ChatAttachment) => {
   const extension = attachment.name.split(".").pop();
   return extension && extension !== attachment.name
@@ -377,7 +391,10 @@ export function ChatInput({
     const currentIds = new Set(attachments.map((attachment) => attachment.id));
 
     previousAttachmentsRef.current.forEach((attachment) => {
-      if (!currentIds.has(attachment.id) && attachment.data) {
+      if (
+        !currentIds.has(attachment.id) &&
+        attachment.data?.startsWith("blob:")
+      ) {
         URL.revokeObjectURL(attachment.data);
       }
     });
@@ -468,7 +485,7 @@ export function ChatInput({
           size: finalized.size || file.size,
           objectKey: key,
           data: mediaType.startsWith("image/")
-            ? URL.createObjectURL(file)
+            ? await fileToDataUrl(file)
             : undefined,
           kind: TEXT_FILE_TYPES.has(mediaType) ? "text" : "file",
         });

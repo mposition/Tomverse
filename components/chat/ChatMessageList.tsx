@@ -65,6 +65,11 @@ const getAttachmentIcon = (attachment: ChatAttachment) => {
   return <FileIcon className="h-5 w-5" />;
 };
 
+const hasImagePreview = (attachment: ChatAttachment) =>
+  attachment.mediaType.startsWith("image/") &&
+  typeof attachment.data === "string" &&
+  (attachment.data.startsWith("data:image/") || attachment.data.startsWith("blob:"));
+
 function TypingIndicator() {
   return (
     <div className="flex items-center gap-1 py-1">
@@ -200,16 +205,19 @@ export function ChatMessageList({ messages, isPrivate = false, isGuestMode = fal
                   {isUser && msg.attachments && msg.attachments.length > 0 && (
                     <div className={`flex flex-wrap gap-2 ${msg.content ? "mb-3" : ""}`}>
                       {msg.attachments.map((attachment) => (
+                        (() => {
+                          const showImagePreview = hasImagePreview(attachment);
+                          return (
                         <div
                           key={attachment.id}
                           className={
-                            attachment.data
+                            showImagePreview
                               ? "relative h-20 w-20 overflow-hidden rounded-xl border border-white/20 bg-white/10 shadow-sm"
                               : "flex h-16 min-w-52 max-w-64 items-center gap-3 rounded-xl border border-white/15 bg-white/10 py-2 pl-2 pr-3 shadow-sm backdrop-blur"
                           }
                           title={attachment.name}
                         >
-                          {attachment.data ? (
+                          {showImagePreview ? (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img
                               src={attachment.data}
@@ -232,6 +240,8 @@ export function ChatMessageList({ messages, isPrivate = false, isGuestMode = fal
                             </>
                           )}
                         </div>
+                          );
+                        })()
                       ))}
                     </div>
                   )}
