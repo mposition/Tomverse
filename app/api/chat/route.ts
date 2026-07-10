@@ -10,6 +10,7 @@ import {
     createR2UploadUrl,
     deleteR2Object,
     readR2Object,
+    validateR2ObjectMetadata,
     writeR2Object,
 } from "@/lib/r2";
 import { prisma } from "@/lib/prisma";
@@ -238,6 +239,13 @@ const deleteAttachmentSchema = z
         key: z.string().min(1).max(512),
     })
     .strict();
+const finalizeAttachmentSchema = z
+    .object({
+        key: z.string().min(1).max(512),
+        mediaType: z.string().refine((value) => ALLOWED_ATTACHMENT_TYPES.has(value)),
+        size: z.number().int().positive().max(MAX_ATTACHMENT_SIZE),
+    })
+    .strict();
 
 const sanitizeFilename = (filename: string) => {
     const safe = filename
@@ -367,6 +375,11 @@ export async function PUT(req: Request) {
                 exportedFile,
                 exportType.mediaType
             );
+            await validateR2ObjectMetadata(key, {
+                maxBytes: MAX_ATTACHMENT_SIZE,
+                expectedContentType: exportType.mediaType,
+                expectedSize: exportedFile.byteLength,
+            });
 
             return Response.json({
                 key,
@@ -405,6 +418,61 @@ export async function PUT(req: Request) {
         console.error("R2 upload URL creation failed:", error);
         return Response.json(
             { error: "Failed to prepare attachment upload." },
+            { status: 500 }
+        );
+    }
+}
+
+export async function PATCH(req: Request) {
+    const session = await getServerSession(authOptions);
+    const userId = session?.user?.id;
+    if (!session?.user?.email || !userId) {
+        return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    try {
+        await consumeApiRateLimit(req, userId, "upload-finalize", {
+            minute: 20,
+            day: 300,
+        });
+        const { key, mediaType, size } = await readLimitedJson(
+            req,
+            8 * 1024,
+            finalizeAttachmentSchema
+        );
+        const userPrefix = `attachments/${createHash("sha256")
+            .update(session.user.email.toLowerCase())
+            .digest("hex")
+            .slice(0, 20)}/`;
+
+        if (!key.startsWith(userPrefix)) {
+            return Response.json({ error: "Forbidden" }, { status: 403 });
+        }
+
+        const validated = await validateR2ObjectMetadata(key, {
+            maxBytes: MAX_ATTACHMENT_SIZE,
+            expectedContentType: mediaType,
+            expectedSize: size,
+        });
+
+        return Response.json({
+            key,
+            mediaType,
+            size: validated.size,
+        });
+    } catch (error) {
+        const securityResponse = apiSecurityResponse(error);
+        if (securityResponse) return securityResponse;
+        if (error instanceof BoundedBufferError) {
+            return Response.json(
+                { error: "Uploaded attachment failed validation." },
+                { status: 400 }
+            );
+        }
+
+        console.error("R2 attachment finalization failed:", error);
+        return Response.json(
+            { error: "Failed to finalize attachment upload." },
             { status: 500 }
         );
     }

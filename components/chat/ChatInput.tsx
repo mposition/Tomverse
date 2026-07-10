@@ -375,12 +375,25 @@ export function ChatInput({
         if (!uploadResponse.ok) {
           throw new Error(`R2 upload failed: ${uploadResponse.status}`);
         }
+        const finalizeResponse = await fetch("/api/chat", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            key,
+            mediaType,
+            size: file.size,
+          }),
+        });
+        if (!finalizeResponse.ok) {
+          throw new Error(`R2 validation failed: ${finalizeResponse.status}`);
+        }
+        const finalized = await finalizeResponse.json();
 
         nextAttachments.push({
           id: crypto.randomUUID(),
           name: file.name,
           mediaType,
-          size: file.size,
+          size: finalized.size || file.size,
           objectKey: key,
           data: mediaType.startsWith("image/")
             ? URL.createObjectURL(file)

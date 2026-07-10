@@ -142,6 +142,43 @@ export async function readR2Object(
   return Buffer.concat(chunks, totalBytes);
 }
 
+export async function validateR2ObjectMetadata(
+  key: string,
+  options: {
+    maxBytes: number;
+    expectedContentType: string;
+    expectedSize?: number;
+  }
+) {
+  const { client, bucket } = getR2Client();
+  const head = await client.send(
+    new HeadObjectCommand({ Bucket: bucket, Key: key })
+  );
+  const actualSize = head.ContentLength;
+  const expectedUploadSize = Number(head.Metadata?.["upload-size"]);
+  const contentType = normalizeContentType(head.ContentType);
+  const expectedContentType = normalizeContentType(options.expectedContentType);
+  const sizeMatches =
+    Number.isSafeInteger(actualSize) &&
+    actualSize! > 0 &&
+    actualSize! <= options.maxBytes &&
+    Number.isSafeInteger(expectedUploadSize) &&
+    expectedUploadSize === actualSize &&
+    (options.expectedSize === undefined || actualSize === options.expectedSize);
+  const contentTypeMatches = contentType === expectedContentType;
+
+  if (!sizeMatches || !contentTypeMatches) {
+    await deleteInvalidObject(client, bucket, key);
+    throw new BoundedBufferError("R2 object metadata is invalid.");
+  }
+
+  return {
+    size: actualSize!,
+    contentType,
+    etag: head.ETag || null,
+  };
+}
+
 export async function writeR2Object(
   key: string,
   body: Buffer,

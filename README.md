@@ -67,7 +67,9 @@ API_UPLOAD_BYTES_PER_USER_PER_DAY=262144000
 ```
 
 Attachment byte reservations work together with the R2 lifecycle rule. Keep
-the temporary `attachments/` deletion rule enabled.
+the temporary `attachments/` deletion rule enabled. Browser uploads are
+finalized with a server-side R2 `HeadObject` validation immediately after the
+presigned `PUT`; invalid objects are deleted during finalization.
 
 ## Guest Bot Protection
 
