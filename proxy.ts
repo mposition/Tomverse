@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createStrictCsp } from "@/lib/csp";
 import {
+  getPublicReportOrigin,
   hasRequiredOriginSecret,
   isAllowedRequestHost,
 } from "@/lib/originProtection";
@@ -35,6 +36,10 @@ export function proxy(request: NextRequest) {
   const response = NextResponse.next({
     request: { headers: requestHeaders },
   });
+  const reportUrl = new URL(
+    "/api/security/csp-report",
+    getPublicReportOrigin()
+  ).toString();
   response.headers.set(policyHeader, strictCsp);
   response.headers.set(
     "Report-To",
@@ -43,7 +48,7 @@ export function proxy(request: NextRequest) {
       max_age: 10886400,
       endpoints: [
         {
-          url: new URL("/api/security/csp-report", request.url).toString(),
+          url: reportUrl,
         },
       ],
     })

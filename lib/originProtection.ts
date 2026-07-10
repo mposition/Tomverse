@@ -1,4 +1,5 @@
 const CANONICAL_HOST = "tomverse.app";
+const CANONICAL_ORIGIN = "https://tomverse.app";
 const ORIGIN_VERIFY_HEADER = "x-tomverse-origin-verify";
 
 const splitCsv = (value: string | undefined) =>
@@ -11,6 +12,24 @@ const hostFromOrigin = (value: string | undefined) => {
   if (!value) return null;
   try {
     return new URL(value).host.toLowerCase();
+  } catch {
+    return null;
+  }
+};
+
+const originFromValue = (value: string | undefined) => {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if (
+      url.protocol !== "https:" ||
+      url.username ||
+      url.password ||
+      isLocalHost(url.host.toLowerCase())
+    ) {
+      return null;
+    }
+    return url.origin;
   } catch {
     return null;
   }
@@ -69,4 +88,18 @@ export const hasRequiredOriginSecret = (headers: Headers) => {
     provided &&
     safeEqual(provided, expected)
   );
+};
+
+export const getPublicReportOrigin = () => {
+  for (const value of [
+    process.env.NEXT_PUBLIC_SHARE_BASE_URL,
+    process.env.PUBLIC_APP_URL,
+    process.env.NEXT_PUBLIC_APP_URL,
+    process.env.NEXTAUTH_URL,
+  ]) {
+    const origin = originFromValue(value);
+    if (origin) return origin;
+  }
+
+  return CANONICAL_ORIGIN;
 };

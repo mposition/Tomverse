@@ -91,6 +91,9 @@ PUBLIC_APP_URL=https://tomverse.app
 ALLOWED_REQUEST_HOSTS=tomverse.app
 ```
 
+`PUBLIC_APP_URL` is also used for security report endpoints such as CSP
+`Report-To`, so keep it on the public production origin.
+
 When Cloudflare proxying is enabled, remove the public Railway-generated domain
 and configure a secret request header at Cloudflare:
 
