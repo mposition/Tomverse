@@ -54,9 +54,6 @@ export async function createR2UploadUrl(
       Key: key,
       ContentType: contentType,
       ContentLength: contentLength,
-      Metadata: {
-        "upload-size": String(contentLength),
-      },
     }),
     { expiresIn: Number(process.env.R2_SIGNED_URL_TTL || 900) }
   );
@@ -86,16 +83,13 @@ export async function readR2Object(
     new HeadObjectCommand({ Bucket: bucket, Key: key })
   );
   const actualSize = head.ContentLength;
-  const expectedSize = Number(head.Metadata?.["upload-size"]);
   const contentTypeMatches =
     normalizeContentType(head.ContentType) ===
     normalizeContentType(options.expectedContentType);
   const sizeIsValid =
     Number.isSafeInteger(actualSize) &&
     actualSize! > 0 &&
-    actualSize! <= options.maxBytes &&
-    Number.isSafeInteger(expectedSize) &&
-    expectedSize === actualSize;
+    actualSize! <= options.maxBytes;
 
   if (!sizeIsValid || !contentTypeMatches) {
     await deleteInvalidObject(client, bucket, key);
@@ -155,15 +149,12 @@ export async function validateR2ObjectMetadata(
     new HeadObjectCommand({ Bucket: bucket, Key: key })
   );
   const actualSize = head.ContentLength;
-  const expectedUploadSize = Number(head.Metadata?.["upload-size"]);
   const contentType = normalizeContentType(head.ContentType);
   const expectedContentType = normalizeContentType(options.expectedContentType);
   const sizeMatches =
     Number.isSafeInteger(actualSize) &&
     actualSize! > 0 &&
     actualSize! <= options.maxBytes &&
-    Number.isSafeInteger(expectedUploadSize) &&
-    expectedUploadSize === actualSize &&
     (options.expectedSize === undefined || actualSize === options.expectedSize);
   const contentTypeMatches = contentType === expectedContentType;
 

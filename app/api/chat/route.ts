@@ -416,7 +416,6 @@ export async function PUT(req: Request) {
             uploadUrl,
             uploadHeaders: {
                 "Content-Type": mediaType,
-                "x-amz-meta-upload-size": String(size),
             },
         });
     } catch (error) {
