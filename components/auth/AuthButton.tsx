@@ -23,6 +23,7 @@ import {
     type Language,
 } from "@/components/LanguageProvider";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
+import { dispatchAppToast } from "@/lib/appToast";
 import { notifyUserSettingsUpdated } from "@/lib/userSettingsEvents";
 
 export function AuthButton() {
@@ -60,7 +61,7 @@ export function AuthButton() {
 
             if (res.ok) {
                 setIsModalOpen(false);
-                alert(t("auth.saveMessage"));
+                dispatchAppToast(t("auth.saveMessage"), "success");
 
                 setGlobalLang(language);
 
@@ -72,7 +73,7 @@ export function AuthButton() {
 
                 notifyUserSettingsUpdated({ defaultModel });
             } else {
-                alert(t("auth.failedMessage"));
+                dispatchAppToast(t("auth.failedMessage"), "error");
             }
         } catch (e) {
             console.error(e);

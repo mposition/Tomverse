@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import { AlertCircle, CheckCircle2, Info } from "lucide-react";
 import { ChatApp } from "@/components/chat/ChatApp";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { ChatInput } from "@/components/chat/ChatInput";
@@ -20,6 +21,11 @@ import {
   USER_SETTINGS_UPDATED_EVENT,
   type UserSettingsUpdatedDetail,
 } from "@/lib/userSettingsEvents";
+import {
+  APP_TOAST_EVENT,
+  type AppToastEventDetail,
+  type AppToastTone,
+} from "@/lib/appToast";
 
 const normalizeStringArray = (value: unknown, fallback: string[]) => {
   let parsed = value;
@@ -57,6 +63,12 @@ const cloneAttachmentPreviews = async (
       }
     })
   );
+
+type AppToast = {
+  id: string;
+  message: string;
+  tone: AppToastTone;
+};
 
 function ConfirmDialog({
   title,
@@ -133,6 +145,8 @@ export default function Home() {
   const [pendingRevokeShareId, setPendingRevokeShareId] = useState<string | null>(null);
   const [unlockDialog, setUnlockDialog] = useState<{ id: string; password: string; error: string } | null>(null);
   const [lockedSelectDialog, setLockedSelectDialog] = useState<{ id: string; password: string; error: string } | null>(null);
+  const [toast, setToast] = useState<AppToast | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   const [selectedModels, setSelectedModels] = useState<string[]>([APP_DEFAULTS.defaultModelId]);
   
@@ -147,6 +161,42 @@ export default function Home() {
   const MAX_GUEST_MESSAGES = 20;
 
   const isInitialSelectedRef = useRef(false);
+
+  const showToast = useCallback((message: string, tone: AppToast["tone"] = "info") => {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
+
+    setToast({
+      id: crypto.randomUUID(),
+      message,
+      tone,
+    });
+
+    toastTimerRef.current = setTimeout(() => {
+      setToast(null);
+      toastTimerRef.current = null;
+    }, 3200);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleToast = (event: Event) => {
+      const detail = (event as CustomEvent<AppToastEventDetail>).detail;
+      if (!detail?.message) return;
+      showToast(detail.message, detail.tone ?? "info");
+    };
+
+    window.addEventListener(APP_TOAST_EVENT, handleToast);
+    return () => window.removeEventListener(APP_TOAST_EVENT, handleToast);
+  }, [showToast]);
 
     const applyConversationSettings = useCallback((data: {
         selectedModels?: unknown;
@@ -466,10 +516,11 @@ export default function Home() {
             });
             if (!response.ok) {
                 const data = await response.json().catch(() => null);
-                alert(
+                showToast(
                     data?.code === "INVALID_LOCK_PASSWORD"
                         ? t("sidebar.passwordLength")
-                        : t("sidebar.wrongPassword")
+                        : t("sidebar.wrongPassword"),
+                    "error"
                 );
                 return;
             }
@@ -612,7 +663,7 @@ export default function Home() {
 	
     if (isGuestMode) {
       if (guestMessageCount >= MAX_GUEST_MESSAGES) {
-          alert(t("sidebar.exceedDailyLimit"));
+          showToast(t("sidebar.exceedDailyLimit"), "error");
         return;
       }
       
@@ -723,7 +774,7 @@ export default function Home() {
       nextDisabled = nextDisabled.filter((id) => id !== modelId);
     } else {
         if (nextModels.length >= MAX_SELECTED_MODELS) {
-            alert(t("chat.maxModelCompare"));
+            showToast(t("chat.maxModelCompare"), "info");
             return;
         }
 
@@ -809,11 +860,12 @@ export default function Home() {
             const data = await res.json().catch(() => null);
 
             if (!res.ok) {
-                alert(
+                showToast(
                     res.status === 423 ||
                         data?.code === "CONVERSATION_LOCKED"
                         ? t("sidebar.shareLocked")
-                        : t("sidebar.shareFailed")
+                        : t("sidebar.shareFailed"),
+                    "error"
                 );
                 return;
             }
@@ -830,9 +882,9 @@ export default function Home() {
                 )
             );
             await navigator.clipboard.writeText(data.url);
-            alert(t("sidebar.shareCopied"));
+            showToast(t("sidebar.shareCopied"), "success");
         } catch {
-            alert(t("sidebar.shareFailed"));
+            showToast(t("sidebar.shareFailed"), "error");
         }
     };
 
@@ -849,7 +901,7 @@ export default function Home() {
             { method: "DELETE" }
         );
         if (!response.ok) {
-            alert(t("sidebar.shareRevokeFailed"));
+            showToast(t("sidebar.shareRevokeFailed"), "error");
             return;
         }
 
@@ -864,7 +916,7 @@ export default function Home() {
                     : conversation
             )
         );
-        alert(t("sidebar.shareRevoked"));
+        showToast(t("sidebar.shareRevoked"), "success");
     };
 
   const pendingRemoveModel = pendingRemoveModelId
@@ -876,6 +928,12 @@ export default function Home() {
   const pendingRevokeConversation = pendingRevokeShareId
     ? conversations.find((conversation) => conversation.id === pendingRevokeShareId)
     : null;
+  const ToastIcon =
+    toast?.tone === "success"
+      ? CheckCircle2
+      : toast?.tone === "error"
+        ? AlertCircle
+        : Info;
 
   return (
     <>
@@ -1026,6 +1084,27 @@ onShare={handleShareConversation}
         />
       </section>
     </main>
+    {toast && (
+      <div
+        key={toast.id}
+        role="status"
+        aria-live="polite"
+        className="fixed bottom-5 left-1/2 z-[70] flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-3 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-900 shadow-2xl shadow-zinc-900/15 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
+      >
+        <span
+          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${
+            toast.tone === "success"
+              ? "bg-emerald-500/10 text-emerald-500"
+              : toast.tone === "error"
+                ? "bg-red-500/10 text-red-500"
+                : "bg-blue-500/10 text-blue-500"
+          }`}
+        >
+          <ToastIcon className="h-4 w-4" aria-hidden="true" />
+        </span>
+        <span className="min-w-0 whitespace-pre-line break-words">{toast.message}</span>
+      </div>
+    )}
     {pendingDeleteId && (
       <ConfirmDialog
         title={t("sidebar.delete")}

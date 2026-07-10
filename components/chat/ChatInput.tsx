@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { AVAILABLE_MODELS, MAX_SELECTED_MODELS, type ChatAttachment } from "@/components/chat/types";
 import { useLanguage } from "@/components/LanguageProvider";
+import { dispatchAppToast } from "@/lib/appToast";
 
 const MAX_ATTACHMENTS = 5;
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
@@ -398,7 +399,7 @@ export function ChatInput({
 
     const availableSlots = MAX_ATTACHMENTS - attachments.length;
     if (availableSlots <= 0) {
-      alert(t("chat.attachmentCountError"));
+      dispatchAppToast(t("chat.attachmentCountError"), "error");
       return;
     }
 
@@ -413,11 +414,11 @@ export function ChatInput({
           !ACCEPTED_FILE_TYPES.split(",").includes(mediaType) &&
           !OFFICE_FILE_TYPES.has(mediaType)
         ) {
-          alert(t("chat.attachmentTypeError"));
+          dispatchAppToast(t("chat.attachmentTypeError"), "error");
           continue;
         }
         if (file.size > MAX_ATTACHMENT_SIZE) {
-          alert(t("chat.attachmentSizeError"));
+          dispatchAppToast(t("chat.attachmentSizeError"), "error");
           continue;
         }
 
@@ -476,7 +477,7 @@ export function ChatInput({
       onAttachmentsChange([...attachments, ...nextAttachments]);
     } catch (error) {
       console.error("Attachment upload failed:", error);
-      alert(t("chat.attachmentUploadError"));
+      dispatchAppToast(t("chat.attachmentUploadError"), "error");
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -493,7 +494,7 @@ export function ChatInput({
         event.preventDefault();
 
         if (!canAttach) {
-            alert(t("chat.loginToAttach"));
+            dispatchAppToast(t("chat.loginToAttach"), "info");
             return;
         }
 
@@ -505,7 +506,7 @@ export function ChatInput({
 
     const availableSlots = MAX_ATTACHMENTS - attachments.length;
     if (availableSlots <= 0) {
-      alert(t("chat.attachmentCountError"));
+      dispatchAppToast(t("chat.attachmentCountError"), "error");
       return;
     }
 
@@ -627,7 +628,7 @@ export function ChatInput({
       }
     } catch (error) {
       console.error("Google Drive attachment failed:", error);
-      alert(t("chat.googleDriveError"));
+      dispatchAppToast(t("chat.googleDriveError"), "error");
     } finally {
       setIsUploading(false);
     }
