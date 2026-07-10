@@ -7,7 +7,6 @@ const MAX_IMAGE_PIXELS = 40_000_000;
 const MAX_IMAGE_DIMENSION = 16_384;
 const MAX_PDF_PAGES = 500;
 const PDF_HEADER_SCAN_BYTES = 1_024;
-const PDF_TRAILER_SCAN_BYTES = 16_384;
 
 const IMAGE_SIGNATURES: Record<string, (buffer: Buffer) => boolean> = {
     "image/png": (buffer) =>
@@ -115,6 +114,75 @@ const { parentPort, workerData } = require("node:worker_threads");
 })();
 `;
 
+const pdfTextWorkerSource = `
+const { parentPort, workerData } = require("node:worker_threads");
+
+(async () => {
+    let document;
+    try {
+        const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+        const loadingTask = pdfjs.getDocument({
+            data: new Uint8Array(workerData.buffer),
+            disableWorker: true,
+            isEvalSupported: false,
+            useSystemFonts: false,
+            stopAtErrors: false,
+        });
+        document = await loadingTask.promise;
+        if (
+            !Number.isInteger(document.numPages) ||
+            document.numPages < 1 ||
+            document.numPages > workerData.maxPages
+        ) {
+            throw new Error("PDF page count is invalid.");
+        }
+
+        let text = "";
+        const maxCharacters = Math.max(0, Number(workerData.maxCharacters) || 0);
+        for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+            if (text.length >= maxCharacters) break;
+            const page = await document.getPage(pageNumber);
+            const content = await page.getTextContent({
+                includeMarkedContent: false,
+                disableNormalization: false,
+            });
+            const pageText = content.items
+                .map((item) => typeof item.str === "string" ? item.str : "")
+                .filter(Boolean)
+                .join(" ")
+                .replace(/\\s+/g, " ")
+                .trim();
+            if (pageText) {
+                text += (text ? "\\n\\n" : "") + "[Page " + pageNumber + "]\\n" + pageText;
+                if (text.length > maxCharacters) {
+                    text = text.slice(0, maxCharacters);
+                    break;
+                }
+            }
+            page.cleanup();
+        }
+        await document.destroy();
+        parentPort.postMessage({ ok: true, text });
+    } catch {
+        if (document) {
+            try {
+                await document.destroy();
+            } catch {}
+        }
+        parentPort.postMessage({ ok: false });
+    }
+})();
+`;
+
+const assertPdfSignature = (buffer: Buffer) => {
+    const headerWindow = buffer
+        .subarray(0, Math.min(buffer.length, PDF_HEADER_SCAN_BYTES))
+        .toString("latin1");
+    if (!/%PDF-(1\.[0-7]|2\.0)/.test(headerWindow)) {
+        throw new Error("The PDF signature is invalid.");
+    }
+};
+
 const runWorker = <T>(
     source: string,
     workerData: Record<string, unknown>,
@@ -188,18 +256,7 @@ export async function normalizeImageSafely(
 }
 
 export async function validatePdfSafely(buffer: Buffer) {
-    const headerWindow = buffer
-        .subarray(0, Math.min(buffer.length, PDF_HEADER_SCAN_BYTES))
-        .toString("latin1");
-    const tail = buffer.subarray(
-        Math.max(0, buffer.length - PDF_TRAILER_SCAN_BYTES)
-    );
-    if (
-        !/%PDF-(1\.[0-7]|2\.0)/.test(headerWindow) ||
-        !tail.includes(Buffer.from("%%EOF"))
-    ) {
-        throw new Error("The PDF signature or trailer is invalid.");
-    }
+    assertPdfSignature(buffer);
 
     const transferableBuffer = Uint8Array.from(buffer).buffer;
     await runWorker<{ ok: true }>(
@@ -210,4 +267,24 @@ export async function validatePdfSafely(buffer: Buffer) {
         },
         [transferableBuffer]
     );
+}
+
+export async function extractPdfTextSafely(
+    buffer: Buffer,
+    maxCharacters: number
+) {
+    assertPdfSignature(buffer);
+
+    const transferableBuffer = Uint8Array.from(buffer).buffer;
+    const result = await runWorker<{ ok: true; text: string }>(
+        pdfTextWorkerSource,
+        {
+            buffer: transferableBuffer,
+            maxPages: MAX_PDF_PAGES,
+            maxCharacters,
+        },
+        [transferableBuffer]
+    );
+
+    return result.text.trim();
 }

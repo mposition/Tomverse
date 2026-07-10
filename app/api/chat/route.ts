@@ -17,8 +17,8 @@ import { prisma } from "@/lib/prisma";
 import { getEnabledModel, type AiModel } from "@/lib/models";
 import { parseOfficeSafely } from "@/lib/officeSecurity";
 import {
+    extractPdfTextSafely,
     normalizeImageSafely,
-    validatePdfSafely,
 } from "@/lib/mediaSecurity";
 import {
     BoundedBufferError,
@@ -715,6 +715,7 @@ export async function POST(req: Request) {
                 let attachmentData: string;
                 let attachmentBytes: number;
                 let attachmentBuffer: Buffer | undefined;
+                let extractedPdfText: string | undefined;
 
                 if (typeof attachment.objectKey === "string") {
                     if (
@@ -780,16 +781,35 @@ export async function POST(req: Request) {
                     attachmentBytes = attachmentBuffer.byteLength;
                     attachmentData = attachmentBuffer.toString("base64");
                 } else if (attachment.mediaType === "application/pdf") {
+                    const pdfBuffer =
+                        attachmentBuffer || Buffer.from(attachmentData, "base64");
+                    const remainingCharacters =
+                        MAX_EXTRACTED_ATTACHMENT_CHARACTERS -
+                        totalExtractedCharacters;
+                    if (remainingCharacters <= 64) {
+                        throw new ChatAccessError(
+                            413,
+                            "ATTACHMENT_TEXT_TOO_LARGE",
+                            "Extracted attachment text exceeds the request limit."
+                        );
+                    }
                     try {
-                        await validatePdfSafely(
-                            attachmentBuffer ||
-                                Buffer.from(attachmentData, "base64")
+                        extractedPdfText = await extractPdfTextSafely(
+                            pdfBuffer,
+                            remainingCharacters - 64
                         );
                     } catch {
                         throw new ChatAccessError(
                             400,
                             "INVALID_PDF_ATTACHMENT",
                             "The attached PDF is invalid or unsupported."
+                        );
+                    }
+                    if (!extractedPdfText) {
+                        throw new ChatAccessError(
+                            400,
+                            "PDF_TEXT_UNREADABLE",
+                            "The attached PDF does not contain readable text."
                         );
                     }
                 }
@@ -803,7 +823,24 @@ export async function POST(req: Request) {
                     );
                 }
 
-                if (OFFICE_ATTACHMENT_TYPES.has(attachment.mediaType)) {
+                if (attachment.mediaType === "application/pdf") {
+                    const pdfText = extractedPdfText || "";
+                    totalExtractedCharacters += pdfText.length;
+                    if (
+                        totalExtractedCharacters >
+                        MAX_EXTRACTED_ATTACHMENT_CHARACTERS
+                    ) {
+                        throw new ChatAccessError(
+                            413,
+                            "ATTACHMENT_TEXT_TOO_LARGE",
+                            "Extracted attachment text exceeds the request limit."
+                        );
+                    }
+
+                    textAttachments.push(
+                        `[Attached PDF file: ${attachment.name}]\n${pdfText}`
+                    );
+                } else if (OFFICE_ATTACHMENT_TYPES.has(attachment.mediaType)) {
                     const officeBuffer =
                         attachmentBuffer || Buffer.from(attachmentData, "base64");
                     const remainingCharacters =
