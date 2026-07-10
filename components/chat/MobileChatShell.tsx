@@ -236,16 +236,29 @@ export function MobileChatShell({
       )}
 
       <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-zinc-50 dark:bg-zinc-950">
-        {activeModelId ? (
-          <ChatApp
-            key={`${activeModelId}:${currentChatId || "new"}`}
-            modelId={activeModelId}
-            initialConversationId={currentChatId}
-            promptPayload={promptPayload}
-            isPanelDisabled={disabledPanels.includes(activeModelId)}
-            isGuestMode={isGuestMode}
-            hideModelOnlyInput
-          />
+        {selectedModels.length > 0 ? (
+          selectedModels.map((modelId) => {
+            const isActive = activeModelId === modelId;
+
+            return (
+              <div
+                key={`${modelId}:${currentChatId || "new"}`}
+                className={`min-h-0 flex-1 flex-col overflow-hidden ${
+                  isActive ? "flex" : "hidden"
+                }`}
+                aria-hidden={!isActive}
+              >
+                <ChatApp
+                  modelId={modelId}
+                  initialConversationId={currentChatId}
+                  promptPayload={promptPayload}
+                  isPanelDisabled={disabledPanels.includes(modelId)}
+                  isGuestMode={isGuestMode}
+                  hideModelOnlyInput
+                />
+              </div>
+            );
+          })
         ) : (
           <div className="flex h-full flex-col items-center justify-center px-6 text-center text-zinc-500">
             <div className="mb-4 text-4xl opacity-50">AI</div>
