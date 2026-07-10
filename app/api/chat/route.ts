@@ -1026,7 +1026,10 @@ export async function POST(req: Request) {
                         error,
                         requestedModelId
                     );
-                    controller.error(error);
+                    controller.enqueue(
+                        `AI 응답 생성에 실패했습니다. 잠시 후 다시 시도하거나 다른 모델을 선택해주세요.\n추적 ID: ${traceId}`
+                    );
+                    controller.close();
                     await release();
                 }
             },
