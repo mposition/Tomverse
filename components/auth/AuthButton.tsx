@@ -7,10 +7,13 @@ import { ENABLED_MODELS } from "@/components/chat/types";
 import {
     Bot,
     Check,
+    CreditCard,
+    Database,
     Download,
     Languages,
     LogOut,
     Palette,
+    ShieldCheck,
     Settings,
     UserRound,
     X,
@@ -25,6 +28,7 @@ import { notifyUserSettingsUpdated } from "@/lib/userSettingsEvents";
 export function AuthButton() {
   const { data: session, status } = useSession();
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [activeSettingsTab, setActiveSettingsTab] = useState<"account" | "preferences" | "data" | "plan">("account");
 
     const { t, lang: globalLang, setLang: setGlobalLang } = useLanguage();
 
@@ -127,14 +131,19 @@ export function AuthButton() {
 
             {isModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-                    <div className="w-full max-w-md overflow-hidden rounded-2xl border border-zinc-200 bg-white text-zinc-900 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100">
+                    <div
+                        className="flex max-h-[calc(100dvh-2rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white text-zinc-900 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="user-settings-title"
+                    >
                         <div className="flex items-start justify-between gap-4 border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
                             <div className="flex min-w-0 items-center gap-3">
                                 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-500/10 text-blue-500">
                                     <Settings className="h-5 w-5" />
                                 </span>
                                 <div>
-                                    <h3 className="text-base font-bold">{t("auth.userSettings")}</h3>
+                                    <h3 id="user-settings-title" className="text-base font-bold">{t("auth.userSettings")}</h3>
                                     <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
                                         {session.user.email}
                                     </p>
@@ -150,66 +159,165 @@ export function AuthButton() {
                             </button>
                         </div>
 
-                        <div className="space-y-3 px-5 py-5">
-                            <label className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950/60">
-                                <Palette className="h-4 w-4 shrink-0 text-zinc-500" />
-                                <span className="min-w-0 flex-1">
-                                    <span className="block text-xs font-semibold text-zinc-500">{t("auth.theme")}</span>
-                                    <select
-                                        value={theme}
-                                        onChange={(e) => setTheme(e.target.value as "dark" | "light")}
-                                        className="mt-1 w-full cursor-pointer bg-transparent text-sm font-semibold text-zinc-900 outline-none dark:text-zinc-100"
-                                    >
-                                        <option className="bg-white text-zinc-900" value="dark">{t("auth.darkTheme")}</option>
-                                        <option className="bg-white text-zinc-900" value="light">{t("auth.lightTheme")}</option>
-                                    </select>
-                                </span>
-                            </label>
+                        <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[13rem_1fr]">
+                            <nav className="flex gap-2 overflow-x-auto border-b border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950/50 md:flex-col md:overflow-visible md:border-b-0 md:border-r">
+                                {[
+                                    { id: "account", label: t("auth.accountTab"), icon: UserRound },
+                                    { id: "preferences", label: t("auth.preferencesTab"), icon: Palette },
+                                    { id: "data", label: t("auth.dataTab"), icon: Database },
+                                    { id: "plan", label: t("auth.planTab"), icon: CreditCard },
+                                ].map((item) => {
+                                    const Icon = item.icon;
+                                    const isActive = activeSettingsTab === item.id;
+                                    return (
+                                        <button
+                                            key={item.id}
+                                            type="button"
+                                            onClick={() => setActiveSettingsTab(item.id as typeof activeSettingsTab)}
+                                            aria-pressed={isActive}
+                                            className={`flex shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold transition-colors ${
+                                                isActive
+                                                    ? "bg-white text-blue-600 shadow-sm ring-1 ring-zinc-200 dark:bg-zinc-900 dark:text-blue-400 dark:ring-zinc-800"
+                                                    : "text-zinc-500 hover:bg-white hover:text-zinc-900 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
+                                            }`}
+                                        >
+                                            <Icon className="h-4 w-4" />
+                                            {item.label}
+                                        </button>
+                                    );
+                                })}
+                            </nav>
 
-                            <label className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950/60">
-                                <Languages className="h-4 w-4 shrink-0 text-zinc-500" />
-                                <span className="min-w-0 flex-1">
-                                    <span className="block text-xs font-semibold text-zinc-500">{t("auth.language")}</span>
-                                    <select
-                                        value={language}
-                                        onChange={(e) => setLanguage(e.target.value as "en" | "zh" | "ko")}
-                                        className="mt-1 w-full cursor-pointer bg-transparent text-sm font-semibold text-zinc-900 outline-none dark:text-zinc-100"
-                                    >
-                                        <option className="bg-white text-zinc-900" value="en">{t("auth.languageEnglish")}</option>
-                                        <option className="bg-white text-zinc-900" value="zh">{t("auth.languageChinese")}</option>
-                                        <option className="bg-white text-zinc-900" value="ko">{t("auth.languageKorean")}</option>
-                                    </select>
-                                </span>
-                            </label>
+                            <div className="min-h-0 overflow-y-auto px-5 py-5">
+                                {activeSettingsTab === "account" && (
+                                    <div className="space-y-4">
+                                        <section className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950/60">
+                                            <div className="flex items-center gap-3">
+                                                <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white text-zinc-500 ring-1 ring-zinc-200 dark:bg-zinc-800 dark:ring-zinc-700">
+                                                    {session.user.image ? (
+                                                        // eslint-disable-next-line @next/next/no-img-element
+                                                        <img
+                                                            src={session.user.image}
+                                                            alt={t("auth.profileImage")}
+                                                            className="h-full w-full object-cover"
+                                                        />
+                                                    ) : (
+                                                        <UserRound className="h-5 w-5" />
+                                                    )}
+                                                </span>
+                                                <div className="min-w-0">
+                                                    <p className="text-xs font-bold uppercase tracking-wide text-zinc-400">{t("auth.signedAs")}</p>
+                                                    <p className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">{session.user.email}</p>
+                                                </div>
+                                            </div>
+                                        </section>
+                                        <section className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60">
+                                            <div className="flex items-start gap-3">
+                                                <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-500" />
+                                                <div>
+                                                    <h4 className="text-sm font-bold">{t("auth.securityStatus")}</h4>
+                                                    <p className="mt-1 text-sm leading-6 text-zinc-500">{t("auth.securityStatusDescription")}</p>
+                                                </div>
+                                            </div>
+                                        </section>
+                                    </div>
+                                )}
 
-                            <label className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950/60">
-                                <Bot className="h-4 w-4 shrink-0 text-zinc-500" />
-                                <span className="min-w-0 flex-1">
-                                    <span className="block text-xs font-semibold text-zinc-500">{t("auth.defaultModel")}</span>
-                                    <select
-                                        value={defaultModel}
-                                        onChange={(e) => setDefaultModel(e.target.value)}
-                                        className="mt-1 w-full cursor-pointer bg-transparent text-sm font-semibold text-zinc-900 outline-none dark:text-zinc-100"
-                                    >
-                                        {ENABLED_MODELS.map((model) => (
-                                            <option className="bg-white text-zinc-900" key={model.id} value={model.id}>
-                                                {model.icon} {model.name} Â· {model.tier}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </span>
-                            </label>
+                                {activeSettingsTab === "preferences" && (
+                                    <div className="space-y-3">
+                                        <label className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950/60">
+                                            <Palette className="h-4 w-4 shrink-0 text-zinc-500" />
+                                            <span className="min-w-0 flex-1">
+                                                <span className="block text-xs font-semibold text-zinc-500">{t("auth.theme")}</span>
+                                                <select
+                                                    value={theme}
+                                                    onChange={(e) => setTheme(e.target.value as "dark" | "light")}
+                                                    className="mt-1 w-full cursor-pointer bg-transparent text-sm font-semibold text-zinc-900 outline-none dark:text-zinc-100"
+                                                >
+                                                    <option className="bg-white text-zinc-900" value="dark">{t("auth.darkTheme")}</option>
+                                                    <option className="bg-white text-zinc-900" value="light">{t("auth.lightTheme")}</option>
+                                                </select>
+                                            </span>
+                                        </label>
 
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    window.location.href = "/api/conversations/export-all";
-                                }}
-                                className="flex w-full items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-3 text-sm font-semibold text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950/60 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                            >
-                                <Download className="h-4 w-4" />
-                                {t("auth.downloadAllTxt")}
-                            </button>
+                                        <label className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950/60">
+                                            <Languages className="h-4 w-4 shrink-0 text-zinc-500" />
+                                            <span className="min-w-0 flex-1">
+                                                <span className="block text-xs font-semibold text-zinc-500">{t("auth.language")}</span>
+                                                <select
+                                                    value={language}
+                                                    onChange={(e) => setLanguage(e.target.value as "en" | "zh" | "ko")}
+                                                    className="mt-1 w-full cursor-pointer bg-transparent text-sm font-semibold text-zinc-900 outline-none dark:text-zinc-100"
+                                                >
+                                                    <option className="bg-white text-zinc-900" value="en">{t("auth.languageEnglish")}</option>
+                                                    <option className="bg-white text-zinc-900" value="zh">{t("auth.languageChinese")}</option>
+                                                    <option className="bg-white text-zinc-900" value="ko">{t("auth.languageKorean")}</option>
+                                                </select>
+                                            </span>
+                                        </label>
+
+                                        <label className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950/60">
+                                            <Bot className="h-4 w-4 shrink-0 text-zinc-500" />
+                                            <span className="min-w-0 flex-1">
+                                                <span className="block text-xs font-semibold text-zinc-500">{t("auth.defaultModel")}</span>
+                                                <select
+                                                    value={defaultModel}
+                                                    onChange={(e) => setDefaultModel(e.target.value)}
+                                                    className="mt-1 w-full cursor-pointer bg-transparent text-sm font-semibold text-zinc-900 outline-none dark:text-zinc-100"
+                                                >
+                                                    {ENABLED_MODELS.map((model) => (
+                                                        <option className="bg-white text-zinc-900" key={model.id} value={model.id}>
+                                                            {model.icon} {model.name} · {model.tier}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </span>
+                                        </label>
+                                    </div>
+                                )}
+
+                                {activeSettingsTab === "data" && (
+                                    <div className="space-y-4">
+                                        <section className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950/60">
+                                            <h4 className="text-sm font-bold">{t("auth.dataExportTitle")}</h4>
+                                            <p className="mt-1 text-sm leading-6 text-zinc-500">{t("auth.dataExportDescription")}</p>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    window.location.href = "/api/conversations/export-all";
+                                                }}
+                                                className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-3 text-sm font-semibold text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                                            >
+                                                <Download className="h-4 w-4" />
+                                                {t("auth.downloadAllTxt")}
+                                            </button>
+                                        </section>
+                                    </div>
+                                )}
+
+                                {activeSettingsTab === "plan" && (
+                                    <div className="space-y-4">
+                                        <section className="rounded-2xl border border-blue-200 bg-blue-50 p-4 dark:border-blue-900/60 dark:bg-blue-950/20">
+                                            <div className="flex items-center justify-between gap-3">
+                                                <div>
+                                                    <p className="text-xs font-bold uppercase tracking-wide text-blue-500">{t("auth.currentPlan")}</p>
+                                                    <h4 className="mt-1 text-lg font-bold text-zinc-900 dark:text-zinc-100">{t("auth.proPlan")}</h4>
+                                                </div>
+                                                <span className="rounded-full bg-blue-600 px-3 py-1 text-xs font-bold text-white">Pro</span>
+                                            </div>
+                                            <p className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-400">{t("auth.planDescription")}</p>
+                                        </section>
+                                        <button
+                                            type="button"
+                                            disabled
+                                            className="flex w-full cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-zinc-100 px-3 py-3 text-sm font-semibold text-zinc-400 dark:border-zinc-800 dark:bg-zinc-950"
+                                        >
+                                            <CreditCard className="h-4 w-4" />
+                                            {t("auth.billingComingSoon")}
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
                         </div>
 
                         <div className="flex justify-end gap-2 border-t border-zinc-200 px-5 py-4 dark:border-zinc-800">
