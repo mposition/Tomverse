@@ -104,8 +104,13 @@ export function ChatSidebar({
 
             {/* 💡 1. 상단 시스템 이름 배너 복구 */}
             <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-2.5">
-                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 text-sm font-bold text-white shadow-sm shadow-blue-900/30">
-                    T
+                <span className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl bg-white ring-1 ring-zinc-200 shadow-sm dark:ring-zinc-800">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                        src="/tomverse-logo.png"
+                        alt="Tomverse AI"
+                        className="h-full w-full object-cover"
+                    />
                 </span>
                 <h1 className="text-base font-bold tracking-tight text-zinc-800 dark:text-zinc-100">
                     Tomverse AI
