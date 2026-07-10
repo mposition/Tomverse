@@ -346,11 +346,32 @@ export function AuthButton() {
   }
 
   return (
-    <button
-      onClick={() => signIn()} 
-      className="cursor-pointer w-full rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-blue-950/20 transition-all hover:bg-blue-500"
-    >
-      {t("auth.login")}
-    </button>
+    <div className="flex w-full flex-col gap-2">
+      <label className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-zinc-600 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/80 dark:text-zinc-300">
+        <Languages className="h-4 w-4 shrink-0 text-zinc-400" />
+        <span className="sr-only">{t("auth.language")}</span>
+        <select
+          value={globalLang}
+          onChange={(event) => setGlobalLang(event.target.value as Language)}
+          className="min-w-0 flex-1 cursor-pointer bg-transparent text-xs font-semibold outline-none"
+        >
+          <option className="bg-white text-zinc-900" value="en">
+            {t("auth.languageEnglish")}
+          </option>
+          <option className="bg-white text-zinc-900" value="zh">
+            {t("auth.languageChinese")}
+          </option>
+          <option className="bg-white text-zinc-900" value="ko">
+            {t("auth.languageKorean")}
+          </option>
+        </select>
+      </label>
+      <button
+        onClick={() => signIn()}
+        className="cursor-pointer w-full rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-blue-950/20 transition-all hover:bg-blue-500"
+      >
+        {t("auth.login")}
+      </button>
+    </div>
   );
 }

@@ -1,7 +1,7 @@
 ﻿// components/LanguageProvider.tsx
 "use client";
 
-import React, { createContext, useContext, useState } from "react";
+import React, { createContext, useCallback, useContext, useState } from "react";
 import { ko } from "@/locales/ko";
 import { en } from "@/locales/en";
 import { zh } from "@/locales/zh";
@@ -17,9 +17,25 @@ interface LanguageContextType {
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
 
 const dictionaries = { ko, en, zh };
+const LANGUAGE_STORAGE_KEY = "tomverse_language";
+
+const isLanguage = (value: unknown): value is Language =>
+    value === "ko" || value === "en" || value === "zh";
 
 export function LanguageProvider({ children, initialLang = "en" }: { children: React.ReactNode, initialLang?: Language }) {
-    const [lang, setLang] = useState<Language>(initialLang);
+    const [lang, setLangState] = useState<Language>(() => {
+        if (typeof window === "undefined") return initialLang;
+
+        const savedLanguage = window.localStorage.getItem(LANGUAGE_STORAGE_KEY);
+        return isLanguage(savedLanguage) ? savedLanguage : initialLang;
+    });
+
+    const setLang = useCallback((nextLang: Language) => {
+        setLangState(nextLang);
+        if (typeof window !== "undefined") {
+            window.localStorage.setItem(LANGUAGE_STORAGE_KEY, nextLang);
+        }
+    }, []);
 
     const t = (key: string) => {
         const keys = key.split(".");
@@ -40,6 +56,6 @@ export function LanguageProvider({ children, initialLang = "en" }: { children: R
 
 export const useLanguage = () => {
     const context = useContext(LanguageContext);
-    if (!context) throw new Error("LanguageProvider ì•ˆì—ì„œ ì‚¬ìš©í•´ì•¼ í•©ë‹ˆë‹¤.");
+    if (!context) throw new Error("useLanguage must be used inside LanguageProvider.");
     return context;
 };
