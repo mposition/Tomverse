@@ -366,10 +366,13 @@ export function ChatInput({
           throw new Error("Failed to prepare upload.");
         }
 
-        const { key, uploadUrl } = await prepareResponse.json();
+        const { key, uploadUrl, uploadHeaders } = await prepareResponse.json();
         const uploadResponse = await fetch(uploadUrl, {
           method: "PUT",
-          headers: { "Content-Type": mediaType },
+          headers:
+            uploadHeaders && typeof uploadHeaders === "object"
+              ? (uploadHeaders as Record<string, string>)
+              : { "Content-Type": mediaType },
           body: file,
         });
         if (!uploadResponse.ok) {

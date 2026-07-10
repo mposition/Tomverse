@@ -411,7 +411,14 @@ export async function PUT(req: Request) {
         await reserveDailyUploadBytes(userId, size);
         const uploadUrl = await createR2UploadUrl(key, mediaType, size);
 
-        return Response.json({ key, uploadUrl });
+        return Response.json({
+            key,
+            uploadUrl,
+            uploadHeaders: {
+                "Content-Type": mediaType,
+                "x-amz-meta-upload-size": String(size),
+            },
+        });
     } catch (error) {
         const securityResponse = apiSecurityResponse(error);
         if (securityResponse) return securityResponse;
