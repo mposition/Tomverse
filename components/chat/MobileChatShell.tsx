@@ -232,8 +232,8 @@ export function MobileChatShell({
   ) || isAnyError;
 
   return (
-    <main className="flex h-[100dvh] flex-col overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
-      <header className="shrink-0 border-b border-zinc-200 bg-white px-3 pb-2 pt-[calc(0.5rem+env(safe-area-inset-top))] dark:border-zinc-800 dark:bg-zinc-950">
+    <main className="flex h-[100dvh] w-full max-w-full flex-col overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
+      <header className="min-w-0 shrink-0 overflow-hidden border-b border-zinc-200 bg-white px-3 pb-2 pt-[calc(0.5rem+env(safe-area-inset-top))] dark:border-zinc-800 dark:bg-zinc-950">
         <div className="flex items-center gap-2">
         <button
           type="button"
@@ -260,7 +260,7 @@ export function MobileChatShell({
           <Plus className="h-5 w-5" />
         </button>
         </div>
-        <div className="mt-2 flex min-h-6 gap-1.5 overflow-x-auto">
+        <div className="mt-2 flex min-h-6 max-w-full gap-1.5 overflow-x-auto overscroll-x-contain">
           {isPrivateMode && (
             <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-purple-500/10 px-2 py-1 text-[11px] font-bold text-purple-600 dark:text-purple-300">
               <Shield className="h-3 w-3" />
@@ -315,7 +315,7 @@ export function MobileChatShell({
       </header>
 
       {selectedModels.length > 0 && (
-        <div className="shrink-0 overflow-x-auto border-b border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900/60">
+        <div className="min-w-0 shrink-0 overflow-x-auto overscroll-x-contain border-b border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900/60">
           <div className="flex min-w-max gap-2" role="tablist" aria-label={t("chat.modelSelect")}>
             {selectedModels.map((modelId) => {
               const model = AVAILABLE_MODELS.find((item) => item.id === modelId);
@@ -332,14 +332,14 @@ export function MobileChatShell({
                   role="tab"
                   aria-selected={isActive}
                   aria-label={`${model?.name || modelId} ${status}`}
-                  className={`relative flex h-10 touch-manipulation items-center gap-2 rounded-full border px-3 text-xs font-semibold shadow-sm transition-colors ${
+                  className={`relative flex h-10 max-w-[72vw] touch-manipulation items-center gap-2 rounded-full border px-3 text-xs font-semibold shadow-sm transition-colors ${
                     isActive
                       ? "border-blue-500 bg-blue-600 text-white"
                       : "border-zinc-200 bg-white text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300"
                   } ${isDisabled ? "opacity-50" : ""}`}
                 >
                   <span>{model?.icon}</span>
-                  <span>{model?.name || modelId}</span>
+                  <span className="truncate">{model?.name || modelId}</span>
                   {status === "responding" || status === "loading" ? (
                     <span className={`h-2 w-2 animate-pulse rounded-full ${isActive ? "bg-white" : "bg-blue-500"}`} />
                   ) : status === "error" ? (

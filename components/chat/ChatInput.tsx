@@ -837,10 +837,10 @@ export function ChatInput({
   };
 
   return (
-      <div className="shrink-0 border-t border-zinc-200 bg-zinc-50/95 px-2 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] transition-colors dark:border-zinc-800 dark:bg-zinc-950 md:px-6 md:py-3 md:pb-3">
-          <div className="mx-auto max-w-4xl rounded-3xl border border-zinc-200 bg-white p-2.5 shadow-lg shadow-zinc-200/50 dark:border-zinc-800 dark:bg-zinc-900 dark:shadow-black/20 md:rounded-2xl md:p-3">
+      <div className="w-full max-w-full shrink-0 overflow-hidden border-t border-zinc-200 bg-zinc-50/95 px-2 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] transition-colors dark:border-zinc-800 dark:bg-zinc-950 md:px-6 md:py-3 md:pb-3">
+          <div className="mx-auto w-full max-w-4xl overflow-hidden rounded-3xl border border-zinc-200 bg-white p-2.5 shadow-lg shadow-zinc-200/50 dark:border-zinc-800 dark:bg-zinc-900 dark:shadow-black/20 md:rounded-2xl md:p-3">
           {!value.trim() && attachments.length === 0 && (
-            <div className="mb-2 flex gap-2 overflow-x-auto pb-1 md:hidden">
+            <div className="mb-2 flex max-w-full gap-2 overflow-x-auto overscroll-x-contain pb-1 md:hidden">
               {PROMPT_SUGGESTIONS.map((suggestion) => (
                 <button
                   key={suggestion}
@@ -855,7 +855,7 @@ export function ChatInput({
           )}
           {attachments.length > 0 && (
             <div className="mb-2 rounded-2xl bg-zinc-50 p-1.5 dark:bg-zinc-950/70 md:mb-3 md:bg-transparent md:p-0">
-            <div className="flex gap-2 overflow-x-auto pb-1 md:flex-wrap md:overflow-visible md:pb-0">
+            <div className="flex max-w-full gap-2 overflow-x-auto overscroll-x-contain pb-1 md:flex-wrap md:overflow-visible md:pb-0">
               {attachments.map((attachment) => (
                 <div
                   key={attachment.id}
@@ -905,8 +905,8 @@ export function ChatInput({
             </div>
             </div>
           )}
-          <div className="flex flex-wrap items-center gap-2">
-        <div className="relative order-1 flex min-w-0 flex-1 items-center gap-2 md:order-none md:flex-none" ref={menuRef}>
+          <div className="flex max-w-full flex-wrap items-center gap-2">
+        <div className="relative order-1 flex min-w-0 max-w-full flex-1 items-center gap-2 md:order-none md:flex-none" ref={menuRef}>
           <button
             ref={actionMenuButtonRef}
             type="button"
@@ -947,7 +947,7 @@ export function ChatInput({
               setMenuView("models");
               setIsMenuOpen(true);
             }}
-            className="flex h-10 min-w-0 max-w-[calc(100vw-8.25rem)] flex-1 touch-manipulation items-center gap-2 rounded-full border border-zinc-300 bg-zinc-50 px-3 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-800 md:max-w-none md:flex-none"
+            className="flex h-10 min-w-0 max-w-full flex-1 touch-manipulation items-center gap-2 rounded-full border border-zinc-300 bg-zinc-50 px-3 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-800 md:max-w-none md:flex-none"
             title={activeModelNames.join(", ")}
             aria-label={t("chat.modelSelect")}
             aria-expanded={isMenuOpen && menuView === "models"}
@@ -967,7 +967,7 @@ export function ChatInput({
                 ) : null;
               })}
             </span>
-            <span className="whitespace-nowrap">
+            <span className="min-w-0 truncate whitespace-nowrap">
               {selectedModels.length} {t("chat.modelsSelected")}
             </span>
             <ChevronDown className="h-3.5 w-3.5 text-zinc-400" />
@@ -987,7 +987,7 @@ export function ChatInput({
               role="dialog"
               aria-modal="false"
               aria-label={menuView === "models" ? t("chat.modelSelect") : t("chat.moreActions")}
-              className="fixed inset-x-2 bottom-[calc(9rem+env(safe-area-inset-bottom))] z-50 flex max-h-[min(34rem,calc(100dvh-10.5rem))] flex-col overflow-hidden rounded-3xl border border-zinc-200 bg-white p-2 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900 md:absolute md:inset-x-auto md:bottom-12 md:left-0 md:max-h-[calc(100dvh-8rem)] md:w-[min(24rem,calc(100vw-1.5rem))] md:rounded-2xl"
+              className="fixed inset-x-2 bottom-[calc(9rem+env(safe-area-inset-bottom))] z-50 flex max-h-[min(34rem,calc(100dvh-10.5rem))] max-w-[calc(100%_-_1rem)] flex-col overflow-hidden rounded-3xl border border-zinc-200 bg-white p-2 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900 md:absolute md:inset-x-auto md:bottom-12 md:left-0 md:max-h-[calc(100dvh-8rem)] md:w-[min(24rem,calc(100vw-1.5rem))] md:rounded-2xl"
             >
               <div className="mx-auto mb-2 mt-0.5 h-1 w-10 rounded-full bg-zinc-300 dark:bg-zinc-700 md:hidden" aria-hidden="true" />
               <div className="mb-2 flex items-center justify-between border-b border-zinc-200 px-2 pb-2 pt-1 dark:border-zinc-800 md:hidden">
