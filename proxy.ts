@@ -16,6 +16,10 @@ const blockedOriginResponse = () =>
   });
 
 export function proxy(request: NextRequest) {
+  if (request.nextUrl.pathname === "/api/health") {
+    return NextResponse.next();
+  }
+
   if (
     !isAllowedRequestHost(request.headers.get("host")) ||
     !hasRequiredOriginSecret(request.headers)

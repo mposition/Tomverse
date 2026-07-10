@@ -140,6 +140,17 @@ npm run maintenance:cleanup
 Run it once per day. It deletes expired usage buckets and request leases, and
 removes expired or revoked share tokens and snapshots.
 
+## Railway Healthcheck
+
+When host protection is enabled, set Railway's Healthcheck Path to:
+
+```text
+/api/health
+```
+
+This endpoint intentionally bypasses canonical host checks so Railway can verify
+the container without using the public production hostname.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
