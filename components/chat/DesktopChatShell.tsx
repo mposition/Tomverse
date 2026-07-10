@@ -88,7 +88,7 @@ export function DesktopChatShell({
   const { t } = useLanguage();
 
   return (
-    <main className="hidden h-screen overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100 md:flex">
+    <main className="flex h-screen overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
       <ChatSidebar
         conversations={conversations}
         currentChatId={currentChatId}

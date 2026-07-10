@@ -137,6 +137,7 @@ export default function Home() {
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const { data: session, status } = useSession();
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
 
   const isSending = false;
   const [focusToken, setFocusToken] = useState(0);
@@ -168,6 +169,15 @@ export default function Home() {
   const MAX_GUEST_MESSAGES = 20;
 
   const isInitialSelectedRef = useRef(false);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 767px)");
+    const updateViewport = () => setIsMobileViewport(mediaQuery.matches);
+
+    updateViewport();
+    mediaQuery.addEventListener("change", updateViewport);
+    return () => mediaQuery.removeEventListener("change", updateViewport);
+  }, []);
 
   const showToast = useCallback((message: string, tone: AppToast["tone"] = "info") => {
     if (toastTimerRef.current) {
@@ -942,68 +952,70 @@ export default function Home() {
 
   return (
     <>
-      <DesktopChatShell
-        conversations={blendedConversations}
-        currentChatId={currentChatId}
-        selectedModels={selectedModels}
-        disabledPanels={disabledPanels}
-        promptPayload={promptPayload}
-        inputValue={inputValue}
-        setInputValue={setInputValue}
-        attachments={attachments}
-        setAttachments={setAttachments}
-        isSending={isSending}
-        focusToken={focusToken}
-        isGuestMode={isGuestMode}
-        guestMessageCount={guestMessageCount}
-        maxGuestMessages={MAX_GUEST_MESSAGES}
-        isPrivateMode={isPrivateMode}
-        onNewChat={handleNewChat}
-        onSelectConversation={handleSelectConversation}
-        onRename={handleRename}
-        onDelete={handleDelete}
-        onLock={handleLock}
-        onUnlock={handleUnlock}
-        onShare={handleShareConversation}
-        onRevokeShare={handleRevokeShare}
-        onDownload={handleDownloadConversation}
-        onTogglePrivateMode={togglePrivateModeGlobal}
-        onToggleModel={toggleModel}
-        onSubmit={handleGlobalSubmit}
-        onChangePanelModel={changePanelModel}
-        onTogglePanelDisable={togglePanelDisable}
-        onRemoveModel={handleRemoveModel}
-      />
-
-      <MobileChatShell
-        conversations={blendedConversations}
-        currentChatId={currentChatId}
-        selectedModels={selectedModels}
-        disabledPanels={disabledPanels}
-        promptPayload={promptPayload}
-        inputValue={inputValue}
-        setInputValue={setInputValue}
-        attachments={attachments}
-        setAttachments={setAttachments}
-        isSending={isSending}
-        focusToken={focusToken}
-        isGuestMode={isGuestMode}
-        guestMessageCount={guestMessageCount}
-        maxGuestMessages={MAX_GUEST_MESSAGES}
-        isPrivateMode={isPrivateMode}
-        onNewChat={handleNewChat}
-        onSelectConversation={handleSelectConversation}
-        onRename={handleRename}
-        onDelete={handleDelete}
-        onLock={handleLock}
-        onUnlock={handleUnlock}
-        onShare={handleShareConversation}
-        onRevokeShare={handleRevokeShare}
-        onDownload={handleDownloadConversation}
-        onTogglePrivateMode={togglePrivateModeGlobal}
-        onToggleModel={toggleModel}
-        onSubmit={handleGlobalSubmit}
-      />
+      {isMobileViewport ? (
+        <MobileChatShell
+          conversations={blendedConversations}
+          currentChatId={currentChatId}
+          selectedModels={selectedModels}
+          disabledPanels={disabledPanels}
+          promptPayload={promptPayload}
+          inputValue={inputValue}
+          setInputValue={setInputValue}
+          attachments={attachments}
+          setAttachments={setAttachments}
+          isSending={isSending}
+          focusToken={focusToken}
+          isGuestMode={isGuestMode}
+          guestMessageCount={guestMessageCount}
+          maxGuestMessages={MAX_GUEST_MESSAGES}
+          isPrivateMode={isPrivateMode}
+          onNewChat={handleNewChat}
+          onSelectConversation={handleSelectConversation}
+          onRename={handleRename}
+          onDelete={handleDelete}
+          onLock={handleLock}
+          onUnlock={handleUnlock}
+          onShare={handleShareConversation}
+          onRevokeShare={handleRevokeShare}
+          onDownload={handleDownloadConversation}
+          onTogglePrivateMode={togglePrivateModeGlobal}
+          onToggleModel={toggleModel}
+          onSubmit={handleGlobalSubmit}
+        />
+      ) : (
+        <DesktopChatShell
+          conversations={blendedConversations}
+          currentChatId={currentChatId}
+          selectedModels={selectedModels}
+          disabledPanels={disabledPanels}
+          promptPayload={promptPayload}
+          inputValue={inputValue}
+          setInputValue={setInputValue}
+          attachments={attachments}
+          setAttachments={setAttachments}
+          isSending={isSending}
+          focusToken={focusToken}
+          isGuestMode={isGuestMode}
+          guestMessageCount={guestMessageCount}
+          maxGuestMessages={MAX_GUEST_MESSAGES}
+          isPrivateMode={isPrivateMode}
+          onNewChat={handleNewChat}
+          onSelectConversation={handleSelectConversation}
+          onRename={handleRename}
+          onDelete={handleDelete}
+          onLock={handleLock}
+          onUnlock={handleUnlock}
+          onShare={handleShareConversation}
+          onRevokeShare={handleRevokeShare}
+          onDownload={handleDownloadConversation}
+          onTogglePrivateMode={togglePrivateModeGlobal}
+          onToggleModel={toggleModel}
+          onSubmit={handleGlobalSubmit}
+          onChangePanelModel={changePanelModel}
+          onTogglePanelDisable={togglePanelDisable}
+          onRemoveModel={handleRemoveModel}
+        />
+      )}
     {toast && (
       <div
         key={toast.id}

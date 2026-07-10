@@ -924,6 +924,13 @@ export function ChatInput({
           </button>
 
           {isMenuOpen && (
+            <>
+            <button
+              type="button"
+              className="fixed inset-0 z-40 bg-black/25 backdrop-blur-[1px] md:hidden"
+              onClick={() => closeMenu(true)}
+              aria-label={t("auth.cancel")}
+            />
             <div
               ref={menuPopoverRef}
               id="chat-input-popover"
@@ -932,6 +939,26 @@ export function ChatInput({
               aria-label={menuView === "models" ? t("chat.modelSelect") : t("chat.moreActions")}
               className="fixed inset-x-2 bottom-[calc(5.25rem+env(safe-area-inset-bottom))] z-50 flex max-h-[min(32rem,calc(100dvh-8rem))] flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white p-2 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900 md:absolute md:inset-x-auto md:bottom-12 md:left-0 md:max-h-[calc(100dvh-8rem)] md:w-[min(24rem,calc(100vw-1.5rem))]"
             >
+              <div className="mb-2 flex items-center justify-between border-b border-zinc-200 px-2 pb-2 pt-1 dark:border-zinc-800 md:hidden">
+                <div>
+                  <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
+                    {menuView === "models" ? t("chat.modelSelect") : t("chat.moreActions")}
+                  </p>
+                  <p className="text-xs text-zinc-500">
+                    {menuView === "models"
+                      ? `${selectedModels.length}/${MAX_SELECTED_MODELS} ${t("chat.modelsSelected")}`
+                      : t("chat.uploadFromComputer")}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => closeMenu(true)}
+                  className="flex h-9 w-9 items-center justify-center rounded-xl bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+                  aria-label={t("auth.cancel")}
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
               {menuView === "actions" ? (
                 <div className="space-y-1">
                   <button
@@ -1096,6 +1123,7 @@ export function ChatInput({
                 </>
               )}
             </div>
+            </>
           )}
         </div>
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChatApp } from "@/components/chat/ChatApp";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
@@ -81,6 +81,7 @@ export function MobileChatShell({
 }: MobileChatShellProps) {
   const { t } = useLanguage();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const drawerPanelRef = useRef<HTMLDivElement | null>(null);
   const drawerCloseButtonRef = useRef<HTMLButtonElement | null>(null);
   const [activeModelId, setActiveModelId] = useState<string | null>(
     selectedModels[0] || null
@@ -117,6 +118,56 @@ export function MobileChatShell({
     };
   }, [isDrawerOpen]);
 
+  const getDrawerFocusableElements = useCallback(() => {
+    const panel = drawerPanelRef.current;
+    if (!panel) return [];
+
+    return Array.from(
+      panel.querySelectorAll<HTMLElement>(
+        [
+          "button:not([disabled])",
+          "input:not([disabled])",
+          "select:not([disabled])",
+          "textarea:not([disabled])",
+          "a[href]",
+          '[tabindex]:not([tabindex="-1"])',
+        ].join(",")
+      )
+    ).filter((element) => element.offsetParent !== null);
+  }, []);
+
+  useEffect(() => {
+    if (!isDrawerOpen) return;
+
+    const handleDrawerKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Tab") return;
+
+      const focusableElements = getDrawerFocusableElements();
+      if (focusableElements.length === 0) {
+        event.preventDefault();
+        return;
+      }
+
+      const firstElement = focusableElements[0];
+      const lastElement = focusableElements[focusableElements.length - 1];
+      const activeElement = document.activeElement;
+
+      if (event.shiftKey && activeElement === firstElement) {
+        event.preventDefault();
+        lastElement.focus();
+        return;
+      }
+
+      if (!event.shiftKey && activeElement === lastElement) {
+        event.preventDefault();
+        firstElement.focus();
+      }
+    };
+
+    document.addEventListener("keydown", handleDrawerKeyDown, true);
+    return () => document.removeEventListener("keydown", handleDrawerKeyDown, true);
+  }, [getDrawerFocusableElements, isDrawerOpen]);
+
   const activeModel = useMemo(
     () => AVAILABLE_MODELS.find((model) => model.id === activeModelId),
     [activeModelId]
@@ -126,7 +177,7 @@ export function MobileChatShell({
   );
 
   return (
-    <main className="flex h-[100dvh] flex-col overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100 md:hidden">
+    <main className="flex h-[100dvh] flex-col overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
       <header className="flex min-h-14 shrink-0 items-center gap-2 border-b border-zinc-200 bg-white px-3 pt-[env(safe-area-inset-top)] dark:border-zinc-800 dark:bg-zinc-950">
         <button
           type="button"
@@ -233,7 +284,10 @@ export function MobileChatShell({
             onClick={() => setIsDrawerOpen(false)}
             aria-label={t("auth.cancel")}
           />
-          <div className="absolute inset-y-0 left-0 z-10 flex w-[min(20rem,88vw)] max-w-full bg-zinc-50 shadow-2xl dark:bg-zinc-950">
+          <div
+            ref={drawerPanelRef}
+            className="absolute inset-y-0 left-0 z-10 flex w-[min(20rem,88vw)] max-w-full bg-zinc-50 shadow-2xl dark:bg-zinc-950"
+          >
             <ChatSidebar
               conversations={conversations}
               currentChatId={currentChatId}
