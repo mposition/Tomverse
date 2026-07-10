@@ -1,7 +1,7 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getServerSession } from "next-auth/next"; // 💡 세션 검증 임포트 추가
-import { authOptions } from "@/lib/auth";           // 💡 authOptions 임포트 추가
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "@/lib/auth";
 import { z } from "zod";
 import { isEnabledModelId } from "@/lib/models";
 import {
@@ -20,7 +20,7 @@ const modelIdSchema = z
   .min(1)
   .max(100)
   .refine(isEnabledModelId, {
-    message: "지원하지 않는 모델입니다.",
+    message: "ì§€ì›í•˜ì§€ ì•ŠëŠ” ëª¨ë¸ìž…ë‹ˆë‹¤.",
   });
 const userMessageSchema = z
   .object({
@@ -46,13 +46,12 @@ export async function POST(
       const conversationId = params.conversationId;
 
       if (!conversationId) {
-          return NextResponse.json({ error: "대화방 ID가 누락되었습니다." }, { status: 400 });
+          return NextResponse.json({ error: "ëŒ€í™”ë°© IDê°€ ëˆ„ë½ë˜ì—ˆìŠµë‹ˆë‹¤." }, { status: 400 });
       }
 
-      // 🔒 [보안 강화] 일반 유저방일 경우 유효한 유저 세션이 있는지 검증합니다.
       const session = await getServerSession(authOptions);
       if (!session || !session.user) {
-          return NextResponse.json({ error: "권한이 없습니다." }, { status: 401 });
+          return NextResponse.json({ error: "ê¶Œí•œì´ ì—†ìŠµë‹ˆë‹¤." }, { status: 401 });
       }
 
       const userId = session.user.id;
@@ -66,7 +65,7 @@ export async function POST(
       });
 
       if (!existingConv || existingConv.userId !== userId) {
-          return NextResponse.json({ error: "타인의 대화방에 메시지를 조작할 수 없습니다." }, { status: 403 });
+          return NextResponse.json({ error: "íƒ€ì¸ì˜ ëŒ€í™”ë°©ì— ë©”ì‹œì§€ë¥¼ ì¡°ìž‘í•  ìˆ˜ ì—†ìŠµë‹ˆë‹¤." }, { status: 403 });
       }
       if (
         !hasConversationUnlockGrant(
@@ -109,15 +108,14 @@ export async function POST(
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
-    console.error("❌ 메시지 저장 에러:", error);
+    console.error("âŒ ë©”ì‹œì§€ ì €ìž¥ ì—ëŸ¬:", error);
     return NextResponse.json(
-      { error: "메시지 저장 실패" },
+      { error: "ë©”ì‹œì§€ ì €ìž¥ ì‹¤íŒ¨" },
       { status: 500 }
     );
   }
 }
 
-// 모델 전용 기록 삭제 API
 export async function DELETE(
     req: Request,
     context: RouteContext<"/api/conversations/[conversationId]/messages">
@@ -126,7 +124,7 @@ export async function DELETE(
         const session = await getServerSession(authOptions);
 
         if (!session || !session.user) {
-            return NextResponse.json({ error: "권한이 없습니다." }, { status: 401 });
+            return NextResponse.json({ error: "ê¶Œí•œì´ ì—†ìŠµë‹ˆë‹¤." }, { status: 401 });
         }
 
         const params = await context.params;
@@ -143,7 +141,7 @@ export async function DELETE(
         });
 
         if (!existingConv || existingConv.userId !== userId) {
-            return NextResponse.json({ error: "타인의 대화방에 메시지를 조작할 수 없습니다." }, { status: 403 });
+            return NextResponse.json({ error: "íƒ€ì¸ì˜ ëŒ€í™”ë°©ì— ë©”ì‹œì§€ë¥¼ ì¡°ìž‘í•  ìˆ˜ ì—†ìŠµë‹ˆë‹¤." }, { status: 403 });
         }
         if (
           !hasConversationUnlockGrant(
@@ -156,19 +154,17 @@ export async function DELETE(
           return conversationLockedResponse();
         }
 
-        // URL에서 modelId를 파싱해옵니다. (예: ?modelId=gpt-4o)
         const { searchParams } = new URL(req.url);
         const modelId = searchParams.get("modelId");
 
         if (!conversationId || !modelId) {
-            return NextResponse.json({ error: "파라미터 누락" }, { status: 400 });
+            return NextResponse.json({ error: "íŒŒë¼ë¯¸í„° ëˆ„ë½" }, { status: 400 });
         }
         const parsedModelId = modelIdSchema.safeParse(modelId);
         if (!parsedModelId.success) {
-            return NextResponse.json({ error: "지원하지 않는 모델입니다." }, { status: 400 });
+            return NextResponse.json({ error: "ì§€ì›í•˜ì§€ ì•ŠëŠ” ëª¨ë¸ìž…ë‹ˆë‹¤." }, { status: 400 });
         }
 
-        // 해당 대화방에서 특정 모델이 작성한 'assistant' 메시지만 전부 삭제합니다.
         await prisma.message.deleteMany({
             where: {
                 conversationId: conversationId,
@@ -182,7 +178,7 @@ export async function DELETE(
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
 
-    console.error("❌ 메시지 삭제 에러:", error);
-    return NextResponse.json({ error: "삭제 실패" }, { status: 500 });
+    console.error("âŒ ë©”ì‹œì§€ ì‚­ì œ ì—ëŸ¬:", error);
+    return NextResponse.json({ error: "ì‚­ì œ ì‹¤íŒ¨" }, { status: 500 });
   }
 }

@@ -1,10 +1,10 @@
-"use client";
+﻿"use client";
 
 import { Conversation } from "./types";
 import { getModel } from "@/components/chat/types";
 import { AuthButton } from "@/components/auth/AuthButton";
 import { useState, useEffect } from "react";
-import { useLanguage } from "@/components/LanguageProvider"; // 💡 훅 임포트
+import { useLanguage } from "@/components/LanguageProvider";
 import Link from "next/link";
 import { AlertTriangle, CloudUpload, Crown, Database, Download, Link2Off, Lock, MessageSquare, MoreVertical, Pencil, Search, Send, Share2, ShieldCheck, Sparkles, Trash2, Unlock, X } from "lucide-react";
 
@@ -48,7 +48,12 @@ export function ChatSidebar({
     const [openMenuId, setOpenMenuId] = useState<string | null>(null);
     const [showPrivateNotice, setShowPrivateNotice] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
-    const { t } = useLanguage(); // 💡 t 함수 꺼내기
+    const [renameTarget, setRenameTarget] = useState<Conversation | null>(null);
+    const [renameValue, setRenameValue] = useState("");
+    const [lockTarget, setLockTarget] = useState<Conversation | null>(null);
+    const [lockPassword, setLockPassword] = useState("");
+    const [lockError, setLockError] = useState("");
+    const { t } = useLanguage();
     const menuItemBase =
         "flex w-full items-center justify-between whitespace-nowrap rounded px-3 py-2 text-sm transition-colors";
 
@@ -77,7 +82,6 @@ export function ChatSidebar({
         return `${models[0]} +${models.length - 1}`;
     };
 
-    // 메뉴 바깥 클릭 시 컨텍스트 메뉴가 자동으로 닫히도록 관리
     useEffect(() => {
         function handleClickOutside(event: MouseEvent) {
             const target = event.target as HTMLElement;
@@ -102,7 +106,6 @@ export function ChatSidebar({
         <>
         <aside className="w-72 shrink-0 bg-zinc-50 border-r border-zinc-200 dark:bg-zinc-950 dark:border-zinc-800 flex flex-col h-full select-none">
 
-            {/* 💡 1. 상단 시스템 이름 배너 복구 */}
             <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-2.5">
                 <span className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl bg-white ring-1 ring-zinc-200 shadow-sm dark:ring-zinc-800">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -117,7 +120,6 @@ export function ChatSidebar({
                 </h1>
             </div>
 
-            {/* 새 대화 시작 버튼 */}
             <div className="p-3 border-b border-zinc-200/60 dark:border-zinc-800/40">
                 <button
                     onClick={onNewChat}
@@ -144,11 +146,10 @@ export function ChatSidebar({
                     title={isGuestMode ? t("sidebar.loginRequired") : ""}
                 >
                     {isPrivateMode ? t("sidebar.privateModeStop") : t("sidebar.privateModeStart")}
-                    {isGuestMode && <span>👑</span>}
+                    {isGuestMode && <span>ðŸ‘‘</span>}
                 </button>
             </div>
 
-            {/* 2. 대화방 목록 영역 (중간 스크롤 영역) */}
             <div className="border-b border-zinc-200/60 px-3 py-3 dark:border-zinc-800/40">
                 <div className="relative">
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
@@ -161,7 +162,6 @@ export function ChatSidebar({
                 </div>
             </div>
 
-            {/* 2. 대화방 목록 영역 (중간 스크롤 영역) */}
             <div className="flex-1 overflow-y-auto p-2 space-y-1 min-h-0">
                 {filteredConversations.length === 0 && (
                     <div className="flex h-32 flex-col items-center justify-center rounded-lg border border-dashed border-zinc-200 px-4 text-center text-xs text-zinc-400 dark:border-zinc-800">
@@ -186,7 +186,7 @@ export function ChatSidebar({
                                     ? "bg-zinc-200 border-zinc-300 text-zinc-900 font-semibold dark:bg-zinc-800 dark:border-zinc-700/80 dark:text-zinc-100"
                                     : "bg-transparent border-transparent text-zinc-600 hover:bg-zinc-200/50 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800/40 dark:hover:text-zinc-200"
                                 }`}
-                            title={isGuestMode ? "로그인 후 이용할 수 있습니다." : ""}
+                            title={isGuestMode ? "ë¡œê·¸ì¸ í›„ ì´ìš©í•  ìˆ˜ ìžˆìŠµë‹ˆë‹¤." : ""}
                         >
                             <div className="cursor-pointer flex min-w-0 flex-1 items-center gap-2.5 pr-6">
                                 <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${isPrivate ? "bg-purple-500/10 text-purple-500" : conv.isLocked ? "bg-amber-500/10 text-amber-500" : "bg-blue-500/10 text-blue-500"}`}>
@@ -215,7 +215,6 @@ export function ChatSidebar({
                                 </span>
                             </div>
 
-                            {/* 💡 세 개의 점(⋮) 컨텍스트 메뉴 버튼 */}
                             <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center context-menu-wrapper">
                                 <button
                                     type="button"
@@ -224,12 +223,11 @@ export function ChatSidebar({
                                         setOpenMenuId(openMenuId === conv.id ? null : conv.id);
                                     }}
                                     className="cursor-pointer p-1 text-zinc-500 hover:text-zinc-200 transition-colors"
-                                    title="메뉴"
+                                    title="ë©”ë‰´"
                                 >
                                     <MoreVertical className="h-4 w-4" />
                                 </button>
 
-                                {/* 컨텍스트 팝업 메뉴 레이어 */}
                                 {isMenuOpen && (
                                     <div className="absolute right-0 top-6 z-50 w-56 rounded-lg border border-zinc-800 bg-zinc-900 p-1.5 shadow-xl flex flex-col text-xs text-zinc-300 animate-fadeIn">
                                         <button
@@ -237,10 +235,8 @@ export function ChatSidebar({
                                             onClick={(e) => {
                                                 e.stopPropagation();
                                                 setOpenMenuId(null);
-                                                const newTitle = prompt(t("sidebar.newChatRoom"), conv.title);
-                                                if (newTitle && newTitle.trim()) {
-                                                    onRename(conv.id, newTitle.trim());
-                                                }
+                                                setRenameTarget(conv);
+                                                setRenameValue(conv.title);
                                             }}
                                             className={`${menuItemBase} ${menuItemEnabled}`}
                                         >
@@ -250,7 +246,6 @@ export function ChatSidebar({
                                             </span>
                                         </button>
 
-            {/* 대화 공유 버튼 */}
                                         <button
                                             type="button"
                                             onClick={(e) => {
@@ -292,7 +287,6 @@ export function ChatSidebar({
                                             </button>
                                         )}
 
-            {/* TXT 다운로드 버튼 */}
                                         <button
                                             type="button"
                                             onClick={(e) => {
@@ -329,7 +323,6 @@ export function ChatSidebar({
                                             </span>
                                         </button>
 
-                                        {/* 💡 잠금 기능 권한 분기 세팅 */}
                                         {isGuestMode ? (
                                             <button
                                                 type="button"
@@ -364,18 +357,9 @@ export function ChatSidebar({
                                                 onClick={(e) => {
                                                     e.stopPropagation();
                                                     setOpenMenuId(null);
-                                                    const pwd = prompt(t("sidebar.enterPassword"));
-                                                    if (
-                                                        pwd &&
-                                                        (pwd.trim().length < 4 ||
-                                                            pwd.trim().length > 128)
-                                                    ) {
-                                                        alert(t("sidebar.passwordLength"));
-                                                        return;
-                                                    }
-                                                    if (pwd && pwd.trim()) {
-                                                        if (onLock) onLock(conv.id, pwd.trim());
-                                                    }
+                                                    setLockTarget(conv);
+                                                    setLockPassword("");
+                                                    setLockError("");
                                                 }}
                                                 className={`${menuItemBase} ${menuItemEnabled}`}
                                             >
@@ -388,14 +372,12 @@ export function ChatSidebar({
                                     </div>
                                 )}
                             </div>
-                        </div> // 💡 누락되었던 가장 바깥쪽의 닫는 div 태그 추가 완료!
+                        </div>
                     );
                 })}
             </div>
 
-            {/* 💡 3. 하단 사용자 정보 및 설정 관리 영역 복구 */}
             <div className="p-4 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-100/40 dark:bg-zinc-900/50 flex flex-col gap-2 shrink-0">
-                {/* 💡 게스트 모드일 때만 렌더링되는 일일 사용량 게이지 */}
                 {isGuestMode && guestMessageCount !== undefined && maxGuestMessages !== undefined && (
                     <div className="px-1">
                         <div className="flex justify-between items-center mb-1.5 text-xs text-zinc-500 dark:text-zinc-400">
@@ -404,9 +386,7 @@ export function ChatSidebar({
                                 {guestMessageCount} <span className="opacity-50">/ {maxGuestMessages}</span>
                             </span>
                         </div>
-                        {/* 프로그레스 바 배경 */}
                         <div className="h-1.5 w-full bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
-                            {/* 실제 채워지는 게이지 */}
                             <div
                                 className={`h-full transition-all duration-500 ease-out ${guestMessageCount >= maxGuestMessages ? 'bg-red-500' : 'bg-blue-500'
                                     }`}
@@ -511,6 +491,100 @@ export function ChatSidebar({
                         </button>
                     </div>
                 </div>
+            </div>
+        )}
+        {renameTarget && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+                <form
+                    onSubmit={(event) => {
+                        event.preventDefault();
+                        const nextTitle = renameValue.trim();
+                        if (!nextTitle) return;
+                        onRename(renameTarget.id, nextTitle);
+                        setRenameTarget(null);
+                    }}
+                    className="w-full max-w-sm rounded-2xl border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900"
+                >
+                    <h2 className="text-base font-bold text-zinc-900 dark:text-zinc-100">
+                        {t("sidebar.rename")}
+                    </h2>
+                    <label className="mt-4 block text-xs font-semibold text-zinc-500">
+                        {t("sidebar.chatTitle")}
+                    </label>
+                    <input
+                        autoFocus
+                        value={renameValue}
+                        onChange={(event) => setRenameValue(event.target.value)}
+                        maxLength={80}
+                        className="mt-2 h-11 w-full rounded-xl border border-zinc-200 bg-zinc-50 px-3 text-sm font-medium text-zinc-900 outline-none focus:border-blue-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100"
+                    />
+                    <div className="mt-5 flex justify-end gap-2">
+                        <button
+                            type="button"
+                            onClick={() => setRenameTarget(null)}
+                            className="rounded-lg px-4 py-2 text-sm font-semibold text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                        >
+                            {t("auth.cancel")}
+                        </button>
+                        <button
+                            type="submit"
+                            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500"
+                        >
+                            {t("auth.ok")}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        )}
+        {lockTarget && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+                <form
+                    onSubmit={(event) => {
+                        event.preventDefault();
+                        const password = lockPassword.trim();
+                        if (password.length < 4 || password.length > 128) {
+                            setLockError(t("sidebar.passwordLength"));
+                            return;
+                        }
+                        if (onLock) onLock(lockTarget.id, password);
+                        setLockTarget(null);
+                    }}
+                    className="w-full max-w-sm rounded-2xl border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900"
+                >
+                    <h2 className="text-base font-bold text-zinc-900 dark:text-zinc-100">
+                        {t("sidebar.lock")}
+                    </h2>
+                    <p className="mt-2 text-sm text-zinc-500">{lockTarget.title}</p>
+                    <label className="mt-4 block text-xs font-semibold text-zinc-500">
+                        {t("sidebar.password")}
+                    </label>
+                    <input
+                        autoFocus
+                        type="password"
+                        value={lockPassword}
+                        onChange={(event) => {
+                            setLockPassword(event.target.value);
+                            setLockError("");
+                        }}
+                        className="mt-2 h-11 w-full rounded-xl border border-zinc-200 bg-zinc-50 px-3 text-sm font-medium text-zinc-900 outline-none focus:border-blue-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100"
+                    />
+                    {lockError && <p className="mt-2 text-xs font-medium text-red-500">{lockError}</p>}
+                    <div className="mt-5 flex justify-end gap-2">
+                        <button
+                            type="button"
+                            onClick={() => setLockTarget(null)}
+                            className="rounded-lg px-4 py-2 text-sm font-semibold text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                        >
+                            {t("auth.cancel")}
+                        </button>
+                        <button
+                            type="submit"
+                            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500"
+                        >
+                            {t("auth.ok")}
+                        </button>
+                    </div>
+                </form>
             </div>
         )}
         </>

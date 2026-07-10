@@ -1,4 +1,4 @@
-// components/auth/AuthButton.tsx
+﻿// components/auth/AuthButton.tsx
 "use client";
 
 import { signIn, signOut, useSession } from "next-auth/react";
@@ -23,7 +23,6 @@ import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { notifyUserSettingsUpdated } from "@/lib/userSettingsEvents";
 
 export function AuthButton() {
-  // 💡 현재 로그인 상태(session)를 가져옵니다.
   const { data: session, status } = useSession();
     const [isModalOpen, setIsModalOpen] = useState(false);
 
@@ -33,7 +32,6 @@ export function AuthButton() {
     const [language, setLanguage] = useState<Language>(APP_DEFAULTS.defaultLanguage);
     const [defaultModel, setDefaultModel] = useState<string>(APP_DEFAULTS.defaultModelId);
 
-    // 모달이 열릴 때 DB에서 최신 설정을 받아옴
     useEffect(() => {
         if (isModalOpen && session) {
             fetch("/api/user/settings")
@@ -48,7 +46,6 @@ export function AuthButton() {
         }
     }, [isModalOpen, session, globalLang]);
 
-    // 확인 버튼을 눌렀을 때 실행될 저장 함수
     const handleSaveSettings = async () => {
         try {
             const res = await fetch("/api/user/settings", {
@@ -58,8 +55,6 @@ export function AuthButton() {
             });
 
             if (res.ok) {
-                // 💡 중요: 새로고침(window.location.reload()) 대신 모달만 닫고 
-                // 렌더링에 필요한 스타일이나 전역 상태만 바꾸어 500 파싱 에러를 완벽 차단합니다.
                 setIsModalOpen(false);
                 alert(t("auth.saveMessage"));
 
@@ -88,7 +83,6 @@ export function AuthButton() {
       );
   }
 
-// 1️⃣ 로그인 세션이 있는 경우 (Signed as 이메일 표시)
   if (session && session.user) {
     return (
       <div className="flex w-full flex-col gap-2 rounded-2xl border border-zinc-200 bg-white p-3 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/80">
@@ -131,7 +125,6 @@ export function AuthButton() {
             </button>
         </div>
 
-            {/* 💡 신규 추가되는 안전한 클라이언트 사이드 설정 모달 */}
             {isModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
                     <div className="w-full max-w-md overflow-hidden rounded-2xl border border-zinc-200 bg-white text-zinc-900 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100">
@@ -200,7 +193,7 @@ export function AuthButton() {
                                     >
                                         {ENABLED_MODELS.map((model) => (
                                             <option className="bg-white text-zinc-900" key={model.id} value={model.id}>
-                                                {model.icon} {model.name} · {model.tier}
+                                                {model.icon} {model.name} Â· {model.tier}
                                             </option>
                                         ))}
                                     </select>
@@ -243,7 +236,6 @@ export function AuthButton() {
     );
   }
 
-  // 2️⃣ 로그인 세션이 없는 경우 (로그인/가입 버튼만 표시)
   return (
     <button
       onClick={() => signIn()} 

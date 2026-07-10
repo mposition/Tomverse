@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -16,6 +16,7 @@ import {
   Search,
   Sheet,
   Square,
+  Star,
   X,
 } from "lucide-react";
 import { AVAILABLE_MODELS, MAX_SELECTED_MODELS, type ChatAttachment } from "@/components/chat/types";
@@ -250,9 +251,8 @@ export function ChatInput({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const previousAttachmentsRef = useRef<ChatAttachment[]>([]);
   const [isUploading, setIsUploading] = useState(false);
-    const { t } = useLanguage(); // 💡 t 함수 꺼내기
+    const { t } = useLanguage();
 
-  // 💡 선택된 모델의 이름들을 가져와서 플레이스홀더 문구를 동적으로 만듭니다.
   const activeModelNames = selectedModels
     .map(id => AVAILABLE_MODELS.find(m => m.id === id)?.name)
     .filter(Boolean);
@@ -266,15 +266,26 @@ export function ChatInput({
       placeholderText = `[${activeModelNames.join(", ")}]` + t("chat.sendMultipleMessages");
   }
   
-  // 💡 최종 비활성화 조건 계산
   const isDisabled = disabled || isSending || isUploading || isGuestLimitReached;
   
-  // 팝업 메뉴 열림/닫힘 상태
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [menuView, setMenuView] = useState<"actions" | "models">("actions");
   const [modelSearchQuery, setModelSearchQuery] = useState("");
   const [providerFilter, setProviderFilter] = useState("all");
   const [tierFilter, setTierFilter] = useState("all");
+  const [favoriteModelIds, setFavoriteModelIds] = useState<string[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const saved = localStorage.getItem("favorite_model_ids");
+      if (!saved) return [];
+      const parsed: unknown = JSON.parse(saved);
+      return Array.isArray(parsed)
+        ? parsed.filter((item): item is string => typeof item === "string")
+        : [];
+    } catch {
+      return [];
+    }
+  });
   const menuRef = useRef<HTMLDivElement>(null);
 
   const modelProviders = useMemo(
@@ -299,7 +310,29 @@ export function ChatInput({
     });
   }, [modelSearchQuery, providerFilter, tierFilter]);
 
-// 화면 바깥 클릭 시 팝업 닫기
+  const groupedModels = useMemo(() => {
+    const favoriteSet = new Set(favoriteModelIds);
+    const sortedModels = [...filteredModels].sort((a, b) => {
+      const favoriteDelta =
+        Number(favoriteSet.has(b.id)) - Number(favoriteSet.has(a.id));
+      if (favoriteDelta !== 0) return favoriteDelta;
+      return a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name);
+    });
+
+    return sortedModels.reduce<Array<{ provider: string; models: typeof filteredModels }>>(
+      (groups, model) => {
+        const provider = favoriteSet.has(model.id)
+          ? t("chat.favoriteModels")
+          : model.provider;
+        const group = groups.find((item) => item.provider === provider);
+        if (group) group.models.push(model);
+        else groups.push({ provider, models: [model] });
+        return groups;
+      },
+      []
+    );
+  }, [favoriteModelIds, filteredModels, t]);
+
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
@@ -310,6 +343,16 @@ export function ChatInput({
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  const toggleFavoriteModel = (modelId: string) => {
+    setFavoriteModelIds((current) => {
+      const next = current.includes(modelId)
+        ? current.filter((id) => id !== modelId)
+        : [...current, modelId];
+      localStorage.setItem("favorite_model_ids", JSON.stringify(next));
+      return next;
+    });
+  };
   
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -344,7 +387,6 @@ export function ChatInput({
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      // isDisabled로 검사하도록 변경
       if (!isDisabled) {
         onSubmit();
       }
@@ -820,36 +862,56 @@ export function ChatInput({
                       </select>
                     </div>
                   </div>
-                  <div className="min-h-0 space-y-1 overflow-y-auto overscroll-contain pr-1">
-                    {filteredModels.map((model) => {
-                      const isSelected = selectedModels.includes(model.id);
-                      const isTierLocked =
-                        isGuestMode && model.tier !== "Free";
-                      return (
-                        <button
-                          key={model.id}
-                          type="button"
-                          disabled={!model.enabled || isTierLocked}
-                          onClick={() => onToggleModel(model.id)}
-                          className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-45 dark:hover:bg-zinc-800"
-                        >
-                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-zinc-100 text-xs font-semibold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">{model.icon}</span>
-                          <span className="min-w-0 flex-1 text-left">
-                            <span className="block truncate text-zinc-800 dark:text-zinc-100">{model.name}</span>
-                            <span className="block truncate text-[10px] font-medium text-zinc-400">{model.provider}</span>
-                          </span>
-                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${model.tier === "Free" ? "bg-emerald-500/10 text-emerald-500" : model.tier === "Pro" ? "bg-blue-500/10 text-blue-500" : "bg-purple-500/10 text-purple-500"}`}>{model.tier}</span>
-                          {!model.enabled ? (
-                            <span className="text-[10px] font-medium text-zinc-400">
-                              {model.status}
-                            </span>
-                          ) : null}
-                          <span className={`h-4 w-8 rounded-full p-0.5 transition-colors ${isSelected ? "bg-blue-500" : "bg-zinc-300 dark:bg-zinc-700"}`}>
-                            <span className={`block h-3 w-3 rounded-full bg-white transition-transform ${isSelected ? "translate-x-4" : ""}`} />
-                          </span>
-                        </button>
-                      );
-                    })}
+                  <div className="min-h-0 space-y-3 overflow-y-auto overscroll-contain pr-1">
+                    {groupedModels.map((group) => (
+                      <div key={group.provider} className="space-y-1">
+                        <div className="px-2 text-[10px] font-bold uppercase tracking-wide text-zinc-400">
+                          {group.provider}
+                        </div>
+                        {group.models.map((model) => {
+                          const isSelected = selectedModels.includes(model.id);
+                          const isFavorite = favoriteModelIds.includes(model.id);
+                          const isTierLocked =
+                            isGuestMode && model.tier !== "Free";
+                          const unavailable = !model.enabled || isTierLocked;
+                          return (
+                            <div
+                              key={model.id}
+                              className="flex w-full items-center gap-2 rounded-xl px-2 py-1.5 transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                            >
+                              <button
+                                type="button"
+                                onClick={() => toggleFavoriteModel(model.id)}
+                                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition ${isFavorite ? "text-amber-400" : "text-zinc-400 hover:text-amber-400"}`}
+                                aria-pressed={isFavorite}
+                                aria-label={t("chat.favoriteModels")}
+                              >
+                                <Star className={`h-4 w-4 ${isFavorite ? "fill-current" : ""}`} />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={unavailable}
+                                onClick={() => onToggleModel(model.id)}
+                                aria-pressed={isSelected}
+                                className="flex min-w-0 flex-1 items-center gap-2 rounded-lg py-1 text-sm disabled:cursor-not-allowed disabled:opacity-45"
+                              >
+                                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-zinc-100 text-xs font-semibold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">{model.icon}</span>
+                                <span className="min-w-0 flex-1 text-left">
+                                  <span className="block truncate text-zinc-800 dark:text-zinc-100">{model.name}</span>
+                                  <span className="block truncate text-[10px] font-medium text-zinc-400">
+                                    {model.provider} Â· {unavailable ? t("chat.unavailableModel") : t("chat.availableModel")}
+                                  </span>
+                                </span>
+                                <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${model.tier === "Free" ? "bg-emerald-500/10 text-emerald-500" : model.tier === "Pro" ? "bg-blue-500/10 text-blue-500" : "bg-purple-500/10 text-purple-500"}`}>{model.tier}</span>
+                                <span className={`h-4 w-8 rounded-full p-0.5 transition-colors ${isSelected ? "bg-blue-500" : "bg-zinc-300 dark:bg-zinc-700"}`}>
+                                  <span className={`block h-3 w-3 rounded-full bg-white transition-transform ${isSelected ? "translate-x-4" : ""}`} />
+                                </span>
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ))}
                     {filteredModels.length === 0 && (
                       <div className="rounded-xl border border-dashed border-zinc-200 px-4 py-8 text-center text-xs text-zinc-400 dark:border-zinc-700">
                         {t("chat.noModelsFound")}
@@ -871,7 +933,6 @@ export function ChatInput({
           className="hidden"
         />
 
-		{/* 💡 텍스트 입력 영역 */}	  
         <textarea
           ref={textareaRef}
           value={value}

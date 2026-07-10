@@ -4,21 +4,22 @@ import { useEffect, useState } from "react";
 import { Bot, CalendarClock, Clock, Eye, LockKeyhole, Share2, UserRound } from "lucide-react";
 import { getModel } from "@/lib/models";
 import type { ShareSnapshot } from "@/lib/shareSnapshot";
+import { useLanguage } from "@/components/LanguageProvider";
 
 type SharedConversationData = {
   snapshot: ShareSnapshot;
   expiresAt: string;
 };
 
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat("en", {
+function formatDate(value: string, locale: string) {
+  return new Intl.DateTimeFormat(locale, {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
 }
 
-function getAssistantLabel(modelId?: string | null) {
-  if (!modelId) return "Assistant";
+function getAssistantLabel(modelId: string | null | undefined, fallback: string) {
+  if (!modelId) return fallback;
   return getModel(modelId)?.name || modelId;
 }
 
@@ -29,6 +30,7 @@ export function SharedConversationView({
 }) {
   const [data, setData] = useState<SharedConversationData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { t, lang } = useLanguage();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -40,8 +42,8 @@ export function SharedConversationView({
         if (!response.ok) {
           throw new Error(
             response.status === 429
-              ? "Too many requests. Please try again shortly."
-              : "This shared conversation is unavailable."
+              ? t("share.tooManyRequests")
+              : t("share.unavailable")
           );
         }
         return (await response.json()) as SharedConversationData;
@@ -54,11 +56,11 @@ export function SharedConversationView({
         setError(
           requestError instanceof Error
             ? requestError.message
-            : "This shared conversation is unavailable."
+            : t("share.unavailable")
         );
       });
     return () => controller.abort();
-  }, [shareToken]);
+  }, [shareToken, t]);
 
   if (error) {
     return (
@@ -67,7 +69,7 @@ export function SharedConversationView({
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-red-500/10 text-red-500">
             <LockKeyhole className="h-6 w-6" />
           </div>
-          <h1 className="mt-5 text-xl font-semibold">Shared conversation unavailable</h1>
+          <h1 className="mt-5 text-xl font-semibold">{t("share.unavailableTitle")}</h1>
           <p className="mt-2 text-sm leading-6 text-zinc-500">{error}</p>
         </div>
       </main>
@@ -79,7 +81,7 @@ export function SharedConversationView({
       <main className="flex min-h-screen items-center justify-center bg-zinc-100 text-sm text-zinc-500 dark:bg-zinc-950">
         <div className="flex items-center gap-3 rounded-2xl border border-zinc-200 bg-white px-5 py-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
           <span className="h-4 w-4 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
-          Loading shared conversation...
+          {t("share.loading")}
         </div>
       </main>
     );
@@ -99,7 +101,7 @@ export function SharedConversationView({
               <div className="min-w-0">
                 <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-zinc-500">
                   <Share2 className="h-3.5 w-3.5" />
-                  Tomverse shared conversation
+                  {t("share.eyebrow")}
                 </p>
                 <h1 className="mt-2 truncate text-2xl font-bold tracking-tight text-zinc-950 dark:text-white md:text-3xl">
                   {snapshot.title}
@@ -108,21 +110,21 @@ export function SharedConversationView({
             </div>
             <div className="flex shrink-0 items-center gap-1.5 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs font-semibold text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
               <Eye className="h-3.5 w-3.5" />
-              Read only
+              {t("share.readOnly")}
             </div>
           </div>
           <div className="grid gap-2 text-xs text-zinc-500 sm:grid-cols-3">
             <span className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900">
               <CalendarClock className="h-3.5 w-3.5" />
-              Created {formatDate(snapshot.conversationCreatedAt)}
+              {t("share.created")} {formatDate(snapshot.conversationCreatedAt, lang)}
             </span>
             <span className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900">
               <Share2 className="h-3.5 w-3.5" />
-              Snapshot {formatDate(snapshot.sharedAt)}
+              {t("share.snapshot")} {formatDate(snapshot.sharedAt, lang)}
             </span>
             <span className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900">
               <Clock className="h-3.5 w-3.5" />
-              Expires {formatDate(expiresAt)}
+              {t("share.expires")} {formatDate(expiresAt, lang)}
             </span>
           </div>
         </div>
@@ -131,12 +133,12 @@ export function SharedConversationView({
       <section className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-5 py-8 md:px-8">
         {snapshot.messages.length === 0 ? (
           <div className="rounded-2xl border border-zinc-200 bg-white p-6 text-center text-sm text-zinc-500 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-            No messages were shared.
+            {t("share.noMessages")}
           </div>
         ) : (
           snapshot.messages.map((message) => {
             const isUser = message.role === "user";
-            const label = isUser ? "User" : getAssistantLabel(message.modelId);
+            const label = isUser ? t("share.user") : getAssistantLabel(message.modelId, t("share.assistant"));
             return (
               <article
                 key={message.id}
@@ -164,7 +166,7 @@ export function SharedConversationView({
                   {message.content}
                 </div>
                 <time className="mt-1 px-1 text-[11px] text-zinc-400">
-                  {formatDate(message.createdAt)}
+                  {formatDate(message.createdAt, lang)}
                 </time>
               </article>
             );

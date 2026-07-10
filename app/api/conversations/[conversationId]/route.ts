@@ -1,10 +1,10 @@
-export const dynamic = "force-dynamic";
+﻿export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { getServerSession } from "next-auth/next"; // 💡 세션 조회를 위한 임포트 추가
-import { authOptions } from "@/lib/auth"; // 💡 NextAuth 설정 옵션 임포트
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "@/lib/auth";
 import { APP_DEFAULTS, clampSelectedModels } from "@/lib/appDefaults";
 import { isEnabledModelId } from "@/lib/models";
 import { z } from "zod";
@@ -54,7 +54,6 @@ const updateConversationSchema = z
   );
 const MESSAGE_PAGE_SIZE = 50;
 
-// 💡 방어 함수 추가
 const safeParse = (data: unknown, fallback: string[]) => {
   if (!data) return fallback;
   let parsed: unknown = data;
@@ -76,16 +75,14 @@ type Params = {
   }>;
 };
 
-// 💡 특정 대화방의 상세 정보와 그 방에 쌓인 모든 메시지를 가져오는 GET 메서드
 export async function GET(
   req: Request,
   context: RouteContext<"/api/conversations/[conversationId]">
 ) {
     try {
-    // 현재 로그인한 사용자의 세션을 확인합니다.
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) {
-        return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
+        return NextResponse.json({ error: "ë¡œê·¸ì¸ì´ í•„ìš”í•©ë‹ˆë‹¤." }, { status: 401 });
     }
     const userId = session.user.id;
     await consumeApiRateLimit(req, userId, "conversation-detail", {
@@ -93,12 +90,11 @@ export async function GET(
       day: 20_000,
     });
 
-    // params 추출 (Next 15의 비동기 params 대응)
     const params = await context.params;
     const conversationId = params.conversationId;
 
     if (!conversationId) {
-        return NextResponse.json({ error: "대화방 ID가 누락되었습니다." }, { status: 400 });
+        return NextResponse.json({ error: "ëŒ€í™”ë°© IDê°€ ëˆ„ë½ë˜ì—ˆìŠµë‹ˆë‹¤." }, { status: 400 });
     }
 
     const existingConv = await prisma.conversation.findUnique({
@@ -107,10 +103,9 @@ export async function GET(
     });
 
     if (!existingConv || existingConv.userId !== userId) {
-        return NextResponse.json({ error: "접근 권한이 없습니다." }, { status: 403 });
+        return NextResponse.json({ error: "ì ‘ê·¼ ê¶Œí•œì´ ì—†ìŠµë‹ˆë‹¤." }, { status: 403 });
     }
 
-    // 사용자의 설정 정보(UserSettings)를 조회하여 설정된 기본 AI 엔진 모델을 확보합니다.
     if (
         !hasConversationUnlockGrant(
             req,
@@ -159,15 +154,14 @@ export async function GET(
       },
     });
 
-    // 만약 데이터베이스에 해당 방 ID가 없다면 404 에러를 반환합니다.
     if (!conversation) {
       return NextResponse.json(
-        { error: "존재하지 않는 대화방입니다." },
+        { error: "ì¡´ìž¬í•˜ì§€ ì•ŠëŠ” ëŒ€í™”ë°©ìž…ë‹ˆë‹¤." },
         { status: 404 }
       );
     }
         if (conversation.userId !== userId) {
-        return NextResponse.json({ error: "접근 권한이 없는 타인의 대화방입니다." }, { status: 403 });
+        return NextResponse.json({ error: "ì ‘ê·¼ ê¶Œí•œì´ ì—†ëŠ” íƒ€ì¸ì˜ ëŒ€í™”ë°©ìž…ë‹ˆë‹¤." }, { status: 403 });
     }
 
     const messagePage = await prisma.message.findMany({
@@ -199,8 +193,6 @@ export async function GET(
       ? messagePage.slice(0, MESSAGE_PAGE_SIZE)
       : messagePage;
 
-    // 대화방 정보와 제한된 메시지 페이지를 프론트엔드로 응답합니다.
-	// 💡 프론트엔드 싱크용 파싱
     return NextResponse.json({
       ...conversation,
         messages,
@@ -225,21 +217,20 @@ export async function GET(
         shareExpiresAt: conversation.shareExpiresAt?.toISOString() || null,
         shareToken: undefined,
         shareSnapshot: undefined,
-        password: undefined // 원본 암호는 절대 흘리지 않음
+        password: undefined
     });
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
 
-    console.error("❌ [백엔드] 상세조회 에러:", error);
+    console.error("âŒ [ë°±ì—”ë“œ] ìƒì„¸ì¡°íšŒ ì—ëŸ¬:", error);
     return NextResponse.json(
-      { error: "대화 내역을 불러오는데 실패했습니다." },
+      { error: "ëŒ€í™” ë‚´ì—­ì„ ë¶ˆëŸ¬ì˜¤ëŠ”ë° ì‹¤íŒ¨í–ˆìŠµë‹ˆë‹¤." },
       { status: 500 }
     );
   }
 }
 
-// 💡 대화방 정보 수정 (PATCH)
 export async function PATCH(
   req: Request,
   context: RouteContext<"/api/conversations/[conversationId]">
@@ -247,10 +238,9 @@ export async function PATCH(
     try {
         const session = await getServerSession(authOptions);
         if (!session?.user?.id) {
-            return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
+            return NextResponse.json({ error: "ë¡œê·¸ì¸ì´ í•„ìš”í•©ë‹ˆë‹¤." }, { status: 401 });
         }
 
-        // 바디 파싱 에러 방어
         const userId = session.user.id;
         await consumeApiRateLimit(req, userId, "conversation-update", {
             minute: 30,
@@ -265,24 +255,22 @@ export async function PATCH(
         const conversationId = params.conversationId;
 
         if (!conversationId) {
-            console.error("❌ [백엔드 PATCH] 대화방 ID를 찾을 수 없습니다. (폴더명을 확인하세요)");
-            return NextResponse.json({ error: "대화방 ID 누락" }, { status: 400 });
+            console.error("âŒ [ë°±ì—”ë“œ PATCH] ëŒ€í™”ë°© IDë¥¼ ì°¾ì„ ìˆ˜ ì—†ìŠµë‹ˆë‹¤. (í´ë”ëª…ì„ í™•ì¸í•˜ì„¸ìš”)");
+            return NextResponse.json({ error: "ëŒ€í™”ë°© ID ëˆ„ë½" }, { status: 400 });
         }
 
-        // 실제 DB 통신 전, 대화방 소유권 선행 검증!
         const existingConv = await prisma.conversation.findUnique({
             where: { id: conversationId },
             select: { userId: true, selectedModels: true, password: true }
         });
 
         if (!existingConv) {
-            return NextResponse.json({ error: "존재하지 않는 대화방입니다." }, { status: 404 });
+            return NextResponse.json({ error: "ì¡´ìž¬í•˜ì§€ ì•ŠëŠ” ëŒ€í™”ë°©ìž…ë‹ˆë‹¤." }, { status: 404 });
         }
         if (existingConv.userId !== userId) {
-            return NextResponse.json({ error: "접근 권한이 없는 타인의 대화방입니다." }, { status: 403 });
+            return NextResponse.json({ error: "ì ‘ê·¼ ê¶Œí•œì´ ì—†ëŠ” íƒ€ì¸ì˜ ëŒ€í™”ë°©ìž…ë‹ˆë‹¤." }, { status: 403 });
         }
 
-        // 사용자의 기본 설정을 미리 조회합니다.
         const userSettings = await prisma.userSettings.findUnique({
             where: { userId }
         });
@@ -319,12 +307,10 @@ export async function PATCH(
           return conversationLockedResponse();
       }
 
-	// 💡 제목 변경 요청이 있을 때
     if (title !== undefined) {
       updateData.title = title;
       } 
 
-      // 💡 잠금 설정
       if (password !== undefined) {
           if (password === null) {
               if (existingConv.password) {
@@ -348,7 +334,7 @@ export async function PATCH(
                       return NextResponse.json(
                           {
                               success: false,
-                              error: "비밀번호가 일치하지 않습니다.",
+                              error: "ë¹„ë°€ë²ˆí˜¸ê°€ ì¼ì¹˜í•˜ì§€ ì•ŠìŠµë‹ˆë‹¤.",
                           },
                           { status: 403 }
                       );
@@ -378,7 +364,7 @@ export async function PATCH(
                       return NextResponse.json(
                           {
                               success: false,
-                              error: "비밀번호가 일치하지 않습니다.",
+                              error: "ë¹„ë°€ë²ˆí˜¸ê°€ ì¼ì¹˜í•˜ì§€ ì•ŠìŠµë‹ˆë‹¤.",
                           },
                           { status: 403 }
                       );
@@ -389,9 +375,6 @@ export async function PATCH(
           }
       }
 
-      // 💡 잠금 해제
-	// 💡 모델 변경이나 ON/OFF 변경 요청이 있을 때
-	// 💡 업데이트 요청이 오면 다시 문자열로 압축하여 DB에 찌릅니다.
     const normalizedModels =
       body.selectedModels !== undefined
         ? clampSelectedModels(body.selectedModels)
@@ -417,12 +400,10 @@ export async function PATCH(
       updateData.disabledPanels = JSON.stringify(disabledPanels);
     }	
 	
-	// 만약 업데이트할 데이터가 없다면 그냥 기존 데이터 반환
     if (Object.keys(updateData).length === 0) {
-      return NextResponse.json({ success: true, message: "변경사항 없음" });
+      return NextResponse.json({ success: true, message: "ë³€ê²½ì‚¬í•­ ì—†ìŒ" });
     }	
 	
-    // Prisma를 통해 데이터베이스 업데이트 수행
     const updatedConversation = await prisma.conversation.update({
       where: { id: conversationId },
       data: updateData,
@@ -456,7 +437,7 @@ export async function PATCH(
           updatedConversation.shareExpiresAt?.toISOString() || null,
         shareToken: undefined,
         shareSnapshot: undefined,
-        password: undefined // 원본 암호는 절대 흘리지 않음
+        password: undefined
     });
     if (password !== undefined) {
       response.headers.append(
@@ -472,17 +453,16 @@ export async function PATCH(
     const lockError = lockErrorResponse(error);
     if (lockError) return lockError;
 
-	console.error("❌ [백엔드] 수정 API 에러:", error);	  
-    return NextResponse.json({ error: "수정 실패" }, { status: 500 });
+	console.error("âŒ [ë°±ì—”ë“œ] ìˆ˜ì • API ì—ëŸ¬:", error);	  
+    return NextResponse.json({ error: "ìˆ˜ì • ì‹¤íŒ¨" }, { status: 500 });
   }
 }
 
-// 💡 대화방 삭제 (DELETE)
 export async function DELETE(req: Request, { params }: Params) {
     try {
         const session = await getServerSession(authOptions);
         if (!session?.user?.id) {
-            return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
+            return NextResponse.json({ error: "ë¡œê·¸ì¸ì´ í•„ìš”í•©ë‹ˆë‹¤." }, { status: 401 });
         }
 
     const { conversationId } = await params;
@@ -492,17 +472,16 @@ export async function DELETE(req: Request, { params }: Params) {
         day: 100,
       });
 
-      // 실제 DB 통신 전, 대화방 소유권 선행 검증!
       const existingConv = await prisma.conversation.findUnique({
           where: { id: conversationId },
           select: { userId: true, password: true }
       });
 
       if (!existingConv) {
-          return NextResponse.json({ error: "존재하지 않는 대화방입니다." }, { status: 404 });
+          return NextResponse.json({ error: "ì¡´ìž¬í•˜ì§€ ì•ŠëŠ” ëŒ€í™”ë°©ìž…ë‹ˆë‹¤." }, { status: 404 });
       }
       if (existingConv.userId !== userId) {
-          return NextResponse.json({ error: "접근 권한이 없는 타인의 대화방입니다." }, { status: 403 });
+          return NextResponse.json({ error: "ì ‘ê·¼ ê¶Œí•œì´ ì—†ëŠ” íƒ€ì¸ì˜ ëŒ€í™”ë°©ìž…ë‹ˆë‹¤." }, { status: 403 });
       }
     logSecurityAuditEvent("conversation.delete", {
       userId,
@@ -549,7 +528,7 @@ export async function DELETE(req: Request, { params }: Params) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
 
-    console.error("❌ [백엔드] 삭제 API 에러:", error);
-    return NextResponse.json({ error: "삭제 실패" }, { status: 500 });
+    console.error("âŒ [ë°±ì—”ë“œ] ì‚­ì œ API ì—ëŸ¬:", error);
+    return NextResponse.json({ error: "ì‚­ì œ ì‹¤íŒ¨" }, { status: 500 });
   }
 }

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
@@ -24,7 +24,7 @@ import { useLanguage } from "@/components/LanguageProvider";
 type ChatMessageListProps = {
   messages: Message[];
   isPrivate?: boolean;
-  isGuestMode?: boolean; // 💡 게스트 모드 여부 추가  
+  isGuestMode?: boolean;
 };
 type MarkdownCodeProps = ComponentPropsWithoutRef<"code"> &
   ExtraProps & { inline?: boolean };
@@ -75,12 +75,11 @@ function TypingIndicator() {
   );
 }
 
-// 💡 Named Export 형태 유지로 이전의 모듈 엇박자 에러 재발을 차단합니다.
 export function ChatMessageList({ messages, isPrivate = false, isGuestMode = false }: ChatMessageListProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [isNearBottom, setIsNearBottom] = useState(true);
   const showScrollButton = !isNearBottom;
-    const { t } = useLanguage(); // 💡 t 함수 꺼내기
+    const { t } = useLanguage();
 
   const scrollToBottom = (behavior: ScrollBehavior = "smooth") => {
     const container = containerRef.current;
@@ -123,7 +122,6 @@ export function ChatMessageList({ messages, isPrivate = false, isGuestMode = fal
       >
         <div className="mx-auto flex w-full max-w-4xl flex-col gap-5 pb-4">
           
-          {/* 프라이빗 배너 (하단 여백 mb-6 추가로 첫 인사글과 시원하게 띄움) */}
           {isPrivate && (
             <div className="mb-4 rounded-2xl border border-purple-200 bg-purple-50/80 p-4 text-center text-sm text-purple-700 shadow-sm animate-fadeIn dark:border-purple-800/50 dark:bg-purple-950/30 dark:text-purple-300">
                 <p className="mb-1.5 flex items-center justify-center gap-2 font-bold text-purple-800 dark:text-purple-200">
@@ -135,7 +133,6 @@ export function ChatMessageList({ messages, isPrivate = false, isGuestMode = fal
             </div>
           )}
 
-          {/* 💡 게스트 모드 안내 배너 추가 */}
           {isGuestMode && (
             <div className="mb-4 rounded-2xl border border-blue-200 bg-blue-50/80 p-4 text-center text-sm text-blue-700 shadow-sm animate-fadeIn dark:border-blue-800/50 dark:bg-blue-950/30 dark:text-blue-300">
               <p className="mb-1.5 flex items-center justify-center gap-2 font-bold text-blue-800 dark:text-blue-200">
@@ -148,7 +145,6 @@ export function ChatMessageList({ messages, isPrivate = false, isGuestMode = fal
             </div>
           )}          
 
-          {/* 💡 2. message -> msg 변수명 완벽 통일 */}
           {messages.map((msg, idx) => {
             const isUser = msg.role === "user";
 
@@ -169,7 +165,6 @@ export function ChatMessageList({ messages, isPrivate = false, isGuestMode = fal
                 key={msg.id || idx}
                 className={`flex w-full flex-col [content-visibility:auto] [contain-intrinsic-size:auto_160px] ${isUser ? "items-end" : "items-start"}`}
               >
-                {/* AI 뱃지 */}
                 {!isUser && modelInfo && (
                   <div className="mb-1.5 ml-1 flex select-none items-center gap-2">
                     <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-zinc-100 text-xs ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800">{modelInfo.icon}</span>
@@ -179,7 +174,6 @@ export function ChatMessageList({ messages, isPrivate = false, isGuestMode = fal
                   </div>
                 )}
                 
-                {/* 웰컴 메시지 뱃지 */}
                 {!isUser && !modelInfo && msg.id === "welcome" && (
                   <div className="mb-1.5 ml-1 flex select-none items-center gap-2">
                     <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-blue-500/10 text-blue-500">

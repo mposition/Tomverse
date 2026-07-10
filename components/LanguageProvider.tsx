@@ -1,4 +1,4 @@
-// components/LanguageProvider.tsx
+﻿// components/LanguageProvider.tsx
 "use client";
 
 import React, { createContext, useContext, useState } from "react";
@@ -11,7 +11,7 @@ export type Language = "ko" | "en" | "zh";
 interface LanguageContextType {
     lang: Language;
     setLang: (lang: Language) => void;
-    t: (key: string) => string; // 💡 번역본을 꺼내주는 핵심 함수
+    t: (key: string) => string;
 }
 
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
@@ -21,7 +21,6 @@ const dictionaries = { ko, en, zh };
 export function LanguageProvider({ children, initialLang = "en" }: { children: React.ReactNode, initialLang?: Language }) {
     const [lang, setLang] = useState<Language>(initialLang);
 
-    // 💡 중첩된 키(예: "sidebar.newChat")를 해석해서 문자열을 반환하는 함수
     const t = (key: string) => {
         const keys = key.split(".");
         let value: unknown = dictionaries[lang];
@@ -29,7 +28,7 @@ export function LanguageProvider({ children, initialLang = "en" }: { children: R
             if (!value || typeof value !== "object") return key;
             value = (value as Record<string, unknown>)[k];
         }
-        return typeof value === "string" ? value : key; // 번역이 없으면 키값 자체를 반환
+        return typeof value === "string" ? value : key;
     };
 
     return (
@@ -41,6 +40,6 @@ export function LanguageProvider({ children, initialLang = "en" }: { children: R
 
 export const useLanguage = () => {
     const context = useContext(LanguageContext);
-    if (!context) throw new Error("LanguageProvider 안에서 사용해야 합니다.");
+    if (!context) throw new Error("LanguageProvider ì•ˆì—ì„œ ì‚¬ìš©í•´ì•¼ í•©ë‹ˆë‹¤.");
     return context;
 };

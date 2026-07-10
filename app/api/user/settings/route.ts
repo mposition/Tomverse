@@ -1,4 +1,4 @@
-export const dynamic = "force-dynamic";
+﻿export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -22,12 +22,11 @@ const settingsSchema = z
     .strict()
     .refine((value) => Object.keys(value).length > 0);
 
-// 💡 1. 사용자 설정 불러오기 (GET)
 export async function GET(req: Request) {
     try {
         const session = await getServerSession(authOptions);
         if (!session?.user?.id) {
-            return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
+            return NextResponse.json({ error: "ë¡œê·¸ì¸ì´ í•„ìš”í•©ë‹ˆë‹¤." }, { status: 401 });
         }
         const userId = session.user.id;
         await consumeApiRateLimit(req, userId, "settings-read", {
@@ -50,23 +49,22 @@ export async function GET(req: Request) {
         return NextResponse.json({
             theme: settings.theme,
             language: settings.language,
-            defaultModel: settings.defaultModel, // 💡 전달
+            defaultModel: settings.defaultModel,
         });
     } catch (error) {
         const securityResponse = apiSecurityResponse(error);
         if (securityResponse) return securityResponse;
 
-        console.error("설정 조회 에러:", error);
-        return NextResponse.json({ error: "설정 조회 실패" }, { status: 500 });
+        console.error("ì„¤ì • ì¡°íšŒ ì—ëŸ¬:", error);
+        return NextResponse.json({ error: "ì„¤ì • ì¡°íšŒ ì‹¤íŒ¨" }, { status: 500 });
     }
 }
 
-// 💡 2. 사용자 설정 저장하기 (POST)
 export async function POST(req: Request) {
     try {
         const session = await getServerSession(authOptions);
         if (!session?.user?.id) {
-            return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
+            return NextResponse.json({ error: "ë¡œê·¸ì¸ì´ í•„ìš”í•©ë‹ˆë‹¤." }, { status: 401 });
         }
         const userId = session.user.id;
         await consumeApiRateLimit(req, userId, "settings-save", {
@@ -98,7 +96,7 @@ export async function POST(req: Request) {
     } catch (error) {
         const securityResponse = apiSecurityResponse(error);
         if (securityResponse) return securityResponse;
-        console.error("설정 저장 에러:", error);
-        return NextResponse.json({ error: "설정 저장 실패" }, { status: 500 });
+        console.error("ì„¤ì • ì €ìž¥ ì—ëŸ¬:", error);
+        return NextResponse.json({ error: "ì„¤ì • ì €ìž¥ ì‹¤íŒ¨" }, { status: 500 });
     }
 }

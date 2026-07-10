@@ -1,4 +1,4 @@
-export type ChatAttachment = {
+﻿export type ChatAttachment = {
   id: string;
   name: string;
   mediaType: string;
@@ -14,7 +14,7 @@ export type Message = {
   content: string;
   status?: "normal" | "error" | "cancelled";
   attachments?: ChatAttachment[];
-  modelId?: string; // 💡 모델 ID 추가
+  modelId?: string;
 };
 
 export type Conversation = {
@@ -22,7 +22,7 @@ export type Conversation = {
     title: string;
     selectedModels?: string[];
     disabledPanels?: string[];
-    isLocked?: boolean; // 💡 잠금 여부 (백엔드에서 password 존재 여부로 true/false 반환)
+    isLocked?: boolean;
     shareEnabled?: boolean;
     shareExpiresAt?: string | null;
 };
