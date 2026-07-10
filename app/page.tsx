@@ -37,6 +37,27 @@ const uniqueStrings = (values: string[]) => Array.from(new Set(values));
 const isLanguage = (value: unknown): value is Language =>
   value === "en" || value === "ko" || value === "zh";
 
+const cloneAttachmentPreviews = async (
+  items: ChatAttachment[]
+): Promise<ChatAttachment[]> =>
+  Promise.all(
+    items.map(async (attachment) => {
+      if (!attachment.data) return attachment;
+
+      try {
+        const blob = await fetch(attachment.data).then((response) =>
+          response.blob()
+        );
+        return {
+          ...attachment,
+          data: URL.createObjectURL(blob),
+        };
+      } catch {
+        return attachment;
+      }
+    })
+  );
+
 export default function Home() {
     const { t, setLang } = useLanguage(); // 💡 t 함수 꺼내기
   const [isConversationsLoaded, setIsConversationsLoaded] = useState(false);  
@@ -581,6 +602,7 @@ export default function Home() {
   const handleGlobalSubmit = async () => {
     const trimmed = inputValue.trim();
     if ((!trimmed && attachments.length === 0) || selectedModels.length === 0) return;
+    const promptAttachments = await cloneAttachmentPreviews(attachments);
 	
     if (isGuestMode) {
       if (guestMessageCount >= MAX_GUEST_MESSAGES) {
@@ -601,7 +623,7 @@ export default function Home() {
         text: trimmed, 
         chatId: "private-chat",
         userMessageId: crypto.randomUUID(),
-        attachments,
+        attachments: promptAttachments,
       });
       setInputValue("");
       setAttachments([]);
@@ -671,7 +693,7 @@ export default function Home() {
         text: trimmed, 
         chatId: activeChatId,
         userMessageId: userMsgId,
-        attachments,
+        attachments: promptAttachments,
       });
       setInputValue("");
       setAttachments([]);
