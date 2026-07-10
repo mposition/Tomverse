@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ChatMessageList } from "@/components/chat/ChatMessageList";
 import { Message, type ChatAttachment } from "@/components/chat/types";
 import { useSession } from "next-auth/react";
@@ -50,35 +50,13 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
   const isPrivate = initialConversationId === "private-chat";
 
   // 💡 부모로부터 새로운 질문 신호가 들어오면 감지해서 전송 로직을 실행합니다.
-    useEffect(() => {
-        if (!isGuestMode && status === "loading") return;
-        if (!isGuestMode && !session?.user) return;
-
-        if (promptPayload && promptPayload.chatId === initialConversationId) {
-            const promptKey = `${promptPayload.id}:${promptPayload.chatId}:${modelId}`;
-            if (processedPromptKeys.has(promptKey)) return;
-
-            processedPromptKeys.add(promptKey);
-
-            if (!isPanelDisabled) {
-                handleSendPrompt(
-                  promptPayload.text,
-                  promptPayload.chatId,
-                  promptPayload.userMessageId,
-                  promptPayload.attachments
-                );
-            }
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [promptPayload, initialConversationId, modelId, isPanelDisabled, isGuestMode, status, session?.user?.email]);
-
-  const setAssistantMessage = (id: string, content: string, status?: Message["status"]) => {
+  const setAssistantMessage = useCallback((id: string, content: string, status?: Message["status"]) => {
     setMessages((prev) =>
       prev.map((message) =>
         message.id === id ? { ...message, content, status } : message
       )
     );
-  };
+  }, []);
 
   // 💡 DB에서 대화 내역을 불러오는 로직, 부모의 ID가 변경(새채팅 클릭 혹은 사이드바 클릭)될 때 호출되는 동기화 로직
     useEffect(() => {
@@ -87,11 +65,12 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
     }
 
 	  let isMounted = true;
+    queueMicrotask(() => {
+    if (!isMounted) return;
 
     // 💡 프라이빗 모드방일 경우: 서버 API 호출을 차단하고 웰컴 메시지만 상시 유지
     if (isPrivate) {
       lastFetchedChatIdRef.current = "private-chat";
-        setMessages([{ id: "welcome", role: "assistant", content: t("chat.welcome"), status: "normal" }]);
       return;
     }
 
@@ -224,6 +203,7 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
         },
         ]);
     }
+    });
 	
 	  return () => {
       isMounted = false;
@@ -240,7 +220,7 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
     }
   }, [messages, isGuestMode, initialConversationId, modelId, isMessagesLoaded]);
 
-  const handleSendPrompt = async (
+  const handleSendPrompt = useCallback(async (
     text: string,
     targetChatId: string,
     userMsgId: string,
@@ -382,7 +362,49 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
       streamingChatIdRef.current = null;
       abortControllerRef.current = null;
     }
-  };
+  }, [
+    getTurnstileToken,
+    isGuestMode,
+    isPrivate,
+    messages,
+    modelId,
+    setAssistantMessage,
+    t,
+  ]);
+
+  useEffect(() => {
+    if (!isGuestMode && status === "loading") return;
+    if (!isGuestMode && !session?.user) return;
+    if (!promptPayload || promptPayload.chatId !== initialConversationId) return;
+
+    const promptKey = `${promptPayload.id}:${promptPayload.chatId}:${modelId}`;
+    if (processedPromptKeys.has(promptKey)) return;
+
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled || isPanelDisabled) return;
+      if (processedPromptKeys.has(promptKey)) return;
+      processedPromptKeys.add(promptKey);
+      void handleSendPrompt(
+          promptPayload.text,
+          promptPayload.chatId,
+          promptPayload.userMessageId,
+          promptPayload.attachments
+        );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    handleSendPrompt,
+    initialConversationId,
+    isGuestMode,
+    isPanelDisabled,
+    modelId,
+    promptPayload,
+    session?.user,
+    status,
+  ]);
 
     const handleModelOnlySubmit = async () => {
         const trimmed = modelInput.trim();

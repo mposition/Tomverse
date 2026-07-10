@@ -70,7 +70,7 @@ export default function Home() {
   const [guestMessageCount, setGuestMessageCount] = useState(0);
   const MAX_GUEST_MESSAGES = 20;
 
-  const [isInitialSelected, setIsInitialSelected] = useState(false);
+  const isInitialSelectedRef = useRef(false);
 
     const applyConversationSettings = (data: {
         selectedModels?: unknown;
@@ -102,6 +102,9 @@ export default function Home() {
 // 💡 컴포넌트 마운트 시 오늘 날짜 기준으로 게스트 카운트 초기화 및 로드
   useEffect(() => {
     if (isGuestMode) {
+      let cancelled = false;
+      queueMicrotask(() => {
+      if (cancelled) return;
       setUserDefaultEngine(APP_DEFAULTS.guestDefaultModelId);
       setSelectedModels([APP_DEFAULTS.guestDefaultModelId]);
       const today = new Date().toDateString();
@@ -146,6 +149,10 @@ export default function Home() {
 
       // 로컬 스토리지 조회가 완벽히 끝난 시점에 true로 변경합니다.
       setIsConversationsLoaded(true);      
+      });
+      return () => {
+        cancelled = true;
+      };
     }
   }, [isGuestMode]);  
 
@@ -162,17 +169,19 @@ export default function Home() {
             !isUserSettingsLoaded ||
             conversations.length === 0 ||
             currentChatId ||
-            isInitialSelected
+            isInitialSelectedRef.current
         ) return;
 
         const firstConversation = conversations[0];
-        setIsInitialSelected(true);
+        isInitialSelectedRef.current = true;
 
         if (firstConversation.isLocked) {
-            setCurrentChatId(null);
-            setSelectedModels([userDefaultEngine]);
-            setDisabledPanels([]);
-            setPromptPayload(null);
+            queueMicrotask(() => {
+                setCurrentChatId(null);
+                setSelectedModels([userDefaultEngine]);
+                setDisabledPanels([]);
+                setPromptPayload(null);
+            });
             return;
         }
 
@@ -203,7 +212,7 @@ export default function Home() {
         return () => {
             cancelled = true;
         };
-    }, [conversations, currentChatId, isGuestMode, isInitialSelected, isUserSettingsLoaded, userDefaultEngine]);
+    }, [conversations, currentChatId, isGuestMode, isUserSettingsLoaded, userDefaultEngine]);
 
     useEffect(() => {
         const handleSettingsUpdated = (event: Event) => {
@@ -246,8 +255,10 @@ export default function Home() {
     // 최초 페이지 로드 시 목록 가져오기
     useEffect(() => {
         if (session?.user) {
-            setIsUserSettingsLoaded(false);
-            fetchConversations();
+            queueMicrotask(() => setIsUserSettingsLoaded(false));
+            queueMicrotask(() => {
+                void fetchConversations();
+            });
 
             // 💡 사용자 데이터베이스 설정 로드 파이프라인
             fetch("/api/user/settings")
@@ -287,7 +298,7 @@ export default function Home() {
                 })
                 .finally(() => setIsUserSettingsLoaded(true));
         } else if (status !== "loading") {
-            setIsUserSettingsLoaded(true);
+            queueMicrotask(() => setIsUserSettingsLoaded(true));
         }
     }, [session?.user?.email, fetchConversations]);
 
@@ -964,6 +975,7 @@ onShare={handleShareConversation}
                   )}
                   
                   <ChatApp 
+                    key={`${modelId}:${currentChatId || "new"}`}
 				            modelId={modelId}
                     initialConversationId={currentChatId} 
                     onConversationCreated={handleConversationCreated}

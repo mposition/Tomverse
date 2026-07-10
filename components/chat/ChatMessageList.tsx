@@ -32,7 +32,7 @@ function TypingIndicator() {
 export function ChatMessageList({ messages, isPrivate = false, isGuestMode = false }: ChatMessageListProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [isNearBottom, setIsNearBottom] = useState(true);
-  const [showScrollButton, setShowScrollButton] = useState(false);
+  const showScrollButton = !isNearBottom;
     const { t, lang, setLang } = useLanguage(); // 💡 t 함수 꺼내기
 
   const scrollToBottom = (behavior: ScrollBehavior = "smooth") => {
@@ -59,18 +59,11 @@ export function ChatMessageList({ messages, isPrivate = false, isGuestMode = fal
   const handleScroll = () => {
     const nearBottom = checkIsNearBottom();
     setIsNearBottom(nearBottom);
-
-    if (nearBottom) {
-      setShowScrollButton(false);
-    }
   };
 
   useEffect(() => {
     if (isNearBottom) {
       scrollToBottom("smooth");
-      setShowScrollButton(false);
-    } else {
-      setShowScrollButton(true);
     }
   }, [messages, isNearBottom]);
 
@@ -215,7 +208,6 @@ export function ChatMessageList({ messages, isPrivate = false, isGuestMode = fal
           onClick={() => {
             scrollToBottom("smooth");
             setIsNearBottom(true);
-            setShowScrollButton(false);
           }}
           className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm text-zinc-100 shadow-lg hover:bg-zinc-800"
         >
