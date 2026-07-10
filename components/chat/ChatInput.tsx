@@ -31,6 +31,7 @@ const GOOGLE_WORKSPACE_TYPES = [
   "application/vnd.google-apps.spreadsheet",
   "application/vnd.google-apps.presentation",
 ].join(",");
+const RECENT_MODEL_STORAGE_KEY = "recent_model_ids";
 const TEXT_FILE_TYPES = new Set([
   "text/plain",
   "text/markdown",
@@ -62,6 +63,13 @@ const ACCEPTED_FILE_TYPES = [
   ...OFFICE_FILE_TYPES,
   ...Object.keys(OFFICE_EXTENSION_TYPES).map((extension) => `.${extension}`),
 ].join(",");
+
+const PROMPT_SUGGESTIONS = [
+  "Summarize this document",
+  "Compare these models",
+  "Review this code",
+  "Analyze this image",
+];
 
 const getFileMediaType = (file: File) => {
   if (TEXT_FILE_TYPES.has(file.type) || OFFICE_FILE_TYPES.has(file.type)) {
@@ -301,6 +309,19 @@ export function ChatInput({
       return [];
     }
   });
+  const [recentModelIds, setRecentModelIds] = useState<string[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const saved = localStorage.getItem(RECENT_MODEL_STORAGE_KEY);
+      if (!saved) return [];
+      const parsed: unknown = JSON.parse(saved);
+      return Array.isArray(parsed)
+        ? parsed.filter((item): item is string => typeof item === "string")
+        : [];
+    } catch {
+      return [];
+    }
+  });
   const menuRef = useRef<HTMLDivElement>(null);
   const menuPopoverRef = useRef<HTMLDivElement>(null);
   const actionMenuButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -361,10 +382,13 @@ export function ChatInput({
 
   const groupedModels = useMemo(() => {
     const favoriteSet = new Set(favoriteModelIds);
+    const recentSet = new Set(recentModelIds);
     const sortedModels = [...filteredModels].sort((a, b) => {
       const favoriteDelta =
         Number(favoriteSet.has(b.id)) - Number(favoriteSet.has(a.id));
       if (favoriteDelta !== 0) return favoriteDelta;
+      const recentDelta = Number(recentSet.has(b.id)) - Number(recentSet.has(a.id));
+      if (recentDelta !== 0) return recentDelta;
       return a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name);
     });
 
@@ -372,6 +396,8 @@ export function ChatInput({
       (groups, model) => {
         const provider = favoriteSet.has(model.id)
           ? t("chat.favoriteModels")
+          : recentSet.has(model.id)
+            ? "Recent"
           : model.provider;
         const group = groups.find((item) => item.provider === provider);
         if (group) group.models.push(model);
@@ -380,7 +406,15 @@ export function ChatInput({
       },
       []
     );
-  }, [favoriteModelIds, filteredModels, t]);
+  }, [favoriteModelIds, filteredModels, recentModelIds, t]);
+
+  const rememberRecentModel = (modelId: string) => {
+    setRecentModelIds((current) => {
+      const next = [modelId, ...current.filter((id) => id !== modelId)].slice(0, 6);
+      localStorage.setItem(RECENT_MODEL_STORAGE_KEY, JSON.stringify(next));
+      return next;
+    });
+  };
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -805,6 +839,20 @@ export function ChatInput({
   return (
       <div className="shrink-0 border-t border-zinc-200 bg-zinc-50/95 px-2 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] transition-colors dark:border-zinc-800 dark:bg-zinc-950 md:px-6 md:py-3 md:pb-3">
           <div className="mx-auto max-w-4xl rounded-3xl border border-zinc-200 bg-white p-2.5 shadow-lg shadow-zinc-200/50 dark:border-zinc-800 dark:bg-zinc-900 dark:shadow-black/20 md:rounded-2xl md:p-3">
+          {!value.trim() && attachments.length === 0 && (
+            <div className="mb-2 flex gap-2 overflow-x-auto pb-1 md:hidden">
+              {PROMPT_SUGGESTIONS.map((suggestion) => (
+                <button
+                  key={suggestion}
+                  type="button"
+                  onClick={() => onChange(suggestion)}
+                  className="shrink-0 touch-manipulation rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs font-semibold text-zinc-600 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
+          )}
           {attachments.length > 0 && (
             <div className="mb-2 rounded-2xl bg-zinc-50 p-1.5 dark:bg-zinc-950/70 md:mb-3 md:bg-transparent md:p-0">
             <div className="flex gap-2 overflow-x-auto pb-1 md:flex-wrap md:overflow-visible md:pb-0">
@@ -1096,7 +1144,10 @@ export function ChatInput({
                               <button
                                 type="button"
                                 disabled={unavailable}
-                                onClick={() => onToggleModel(model.id)}
+                                onClick={() => {
+                                  rememberRecentModel(model.id);
+                                  onToggleModel(model.id);
+                                }}
                                 aria-pressed={isSelected}
                                 className="flex min-w-0 flex-1 items-center gap-2 rounded-lg py-1 text-sm disabled:cursor-not-allowed disabled:opacity-45"
                               >

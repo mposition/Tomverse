@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { ChatMessageList } from "@/components/chat/ChatMessageList";
 import { Message, type ChatAttachment } from "@/components/chat/types";
 import { useSession } from "next-auth/react";
@@ -38,7 +38,7 @@ type ChatAppProps = {
   ) => void;
 };
 
-export function ChatApp({
+function ChatAppComponent({
   modelId,
   initialConversationId = null,
   promptPayload,
@@ -72,6 +72,11 @@ export function ChatApp({
   const lastFetchedChatIdRef = useRef<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
     const loadedChatIdRef = useRef<string | null>(null);
+  const lastPromptRef = useRef<{
+    text: string;
+    targetChatId: string;
+    attachments: ChatAttachment[];
+  } | null>(null);
 
   const isPrivate = initialConversationId === "private-chat";
 
@@ -260,6 +265,7 @@ export function ChatApp({
   ) => {
   	if ((!text && attachments.length === 0) || isSendingRef.current) return;
 
+    lastPromptRef.current = { text, targetChatId, attachments };
     setIsSending(true);
 	isSendingRef.current = true;
     streamingChatIdRef.current = targetChatId;
@@ -403,6 +409,19 @@ export function ChatApp({
     t,
   ]);
 
+  const handleRetryLast = useCallback(() => {
+    const lastPrompt = lastPromptRef.current;
+    if (!lastPrompt || isSendingRef.current) return;
+
+    const retryUserMessageId = crypto.randomUUID();
+    void handleSendPrompt(
+      lastPrompt.text,
+      lastPrompt.targetChatId,
+      retryUserMessageId,
+      lastPrompt.attachments
+    );
+  }, [handleSendPrompt]);
+
   useEffect(() => {
     if (!isGuestMode && status === "loading") return;
     if (!isGuestMode && !session?.user) return;
@@ -466,7 +485,12 @@ export function ChatApp({
       {!isPanelDisabled ? (
               <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
                   <div className="min-h-0 flex-1 overflow-hidden">
-                      <ChatMessageList messages={messages} isPrivate={isPrivate} isGuestMode={isGuestMode} />
+                      <ChatMessageList
+                        messages={messages}
+                        isPrivate={isPrivate}
+                        isGuestMode={isGuestMode}
+                        onRetryLast={handleRetryLast}
+                      />
                   </div>
                   {isGuestMode ? (
                     <div
@@ -524,3 +548,5 @@ export function ChatApp({
     </div>
   );
 }
+
+export const ChatApp = memo(ChatAppComponent);

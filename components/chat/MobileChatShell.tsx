@@ -218,9 +218,18 @@ export function MobileChatShell({
   const isCurrentLocked = Boolean(currentConversation?.isLocked);
   const isCurrentShared = Boolean(currentConversation?.shareEnabled);
   const activeStatus = activeModelId ? modelStatuses[activeModelId] : "idle";
-  const isAnyResponding = Object.values(modelStatuses).some(
+  const respondingCount = selectedModels.filter((modelId) => {
+    const status = modelStatuses[modelId];
+    return status === "responding" || status === "loading";
+  }).length;
+  const errorCount = selectedModels.filter(
+    (modelId) => modelStatuses[modelId] === "error"
+  ).length;
+  const isAnyResponding = respondingCount > 0;
+  const isAnyError = errorCount > 0;
+  const isAnyWorkingOrError = Object.values(modelStatuses).some(
     (status) => status === "responding" || status === "loading"
-  );
+  ) || isAnyError;
 
   return (
     <main className="flex h-[100dvh] flex-col overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
@@ -288,6 +297,20 @@ export function MobileChatShell({
               {activeModel?.name || t("chat.modelSelect")}
             </span>
           )}
+          {isAnyWorkingOrError && selectedModels.length > 1 && (
+            <span
+              className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-[11px] font-bold ${
+                isAnyError
+                  ? "bg-red-500/10 text-red-600 dark:text-red-300"
+                  : "bg-blue-500/10 text-blue-600 dark:text-blue-300"
+              }`}
+              aria-live="polite"
+            >
+              {isAnyError
+                ? `${errorCount}/${selectedModels.length} error`
+                : `${respondingCount}/${selectedModels.length} responding`}
+            </span>
+          )}
         </div>
       </header>
 
@@ -308,6 +331,7 @@ export function MobileChatShell({
                   aria-pressed={isActive}
                   role="tab"
                   aria-selected={isActive}
+                  aria-label={`${model?.name || modelId} ${status}`}
                   className={`relative flex h-10 touch-manipulation items-center gap-2 rounded-full border px-3 text-xs font-semibold shadow-sm transition-colors ${
                     isActive
                       ? "border-blue-500 bg-blue-600 text-white"
@@ -361,6 +385,7 @@ export function MobileChatShell({
                 className={`min-h-0 flex-1 flex-col overflow-hidden ${
                   isActive ? "flex" : "hidden"
                 }`}
+                style={isActive ? undefined : { contentVisibility: "hidden" }}
                 aria-hidden={!isActive}
               >
                 <ChatApp

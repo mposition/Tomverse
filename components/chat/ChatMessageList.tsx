@@ -15,6 +15,7 @@ import {
   Image as ImageIcon,
   Lock,
   Presentation,
+  RotateCcw,
   Sheet,
   UserRound,
 } from "lucide-react";
@@ -25,6 +26,7 @@ type ChatMessageListProps = {
   messages: Message[];
   isPrivate?: boolean;
   isGuestMode?: boolean;
+  onRetryLast?: () => void;
 };
 type MarkdownCodeProps = ComponentPropsWithoutRef<"code"> &
   ExtraProps & { inline?: boolean };
@@ -80,7 +82,12 @@ function TypingIndicator() {
   );
 }
 
-export function ChatMessageList({ messages, isPrivate = false, isGuestMode = false }: ChatMessageListProps) {
+export function ChatMessageList({
+  messages,
+  isPrivate = false,
+  isGuestMode = false,
+  onRetryLast,
+}: ChatMessageListProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [isNearBottom, setIsNearBottom] = useState(true);
   const showScrollButton = !isNearBottom;
@@ -280,6 +287,18 @@ export function ChatMessageList({ messages, isPrivate = false, isGuestMode = fal
                     </ReactMarkdown>
                   ) : (
                     <p className="whitespace-pre-wrap">{msg.content}</p>
+                  )}
+                  {!isUser && msg.status === "error" && onRetryLast && (
+                    <div className="mt-3 border-t border-red-200 pt-3 dark:border-red-800">
+                      <button
+                        type="button"
+                        onClick={onRetryLast}
+                        className="inline-flex items-center gap-2 rounded-full bg-red-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition-colors hover:bg-red-500"
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" />
+                        Retry
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>

@@ -48,6 +48,7 @@ export function ChatSidebar({
     const [openMenuId, setOpenMenuId] = useState<string | null>(null);
     const [showPrivateNotice, setShowPrivateNotice] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
+    const [conversationFilter, setConversationFilter] = useState<"all" | "locked" | "shared">("all");
     const [renameTarget, setRenameTarget] = useState<Conversation | null>(null);
     const [renameValue, setRenameValue] = useState("");
     const [lockTarget, setLockTarget] = useState<Conversation | null>(null);
@@ -68,11 +69,17 @@ export function ChatSidebar({
     const menuIconClass = "h-3.5 w-3.5 shrink-0";
     const crownClass = "h-3.5 w-3.5 shrink-0 text-amber-400";
     const normalizedSearch = searchQuery.trim().toLowerCase();
-    const filteredConversations = normalizedSearch
-        ? conversations.filter((conversation) =>
-            conversation.title.toLowerCase().includes(normalizedSearch)
-        )
-        : conversations;
+    const filteredConversations = conversations.filter((conversation) => {
+        const matchesSearch =
+            !normalizedSearch ||
+            conversation.title.toLowerCase().includes(normalizedSearch);
+        const matchesFilter =
+            conversationFilter === "all" ||
+            (conversationFilter === "locked" && conversation.isLocked) ||
+            (conversationFilter === "shared" && conversation.shareEnabled);
+
+        return matchesSearch && matchesFilter;
+    });
 
     const getConversationModelSummary = (conversation: Conversation) => {
         const models = conversation.selectedModels
@@ -222,6 +229,27 @@ export function ChatSidebar({
                         placeholder={t("sidebar.searchPlaceholder")}
                         className="h-9 w-full rounded-lg border border-zinc-200 bg-white pl-9 pr-3 text-xs text-zinc-800 outline-none transition placeholder:text-zinc-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-blue-500"
                     />
+                </div>
+                <div className="mt-2 grid grid-cols-3 gap-1 rounded-xl bg-zinc-100 p-1 dark:bg-zinc-900">
+                    {[
+                        ["all", t("chat.allTiers")],
+                        ["locked", t("sidebar.lockedBadge")],
+                        ["shared", t("sidebar.sharedBadge")],
+                    ].map(([value, label]) => (
+                        <button
+                            key={value}
+                            type="button"
+                            onClick={() => setConversationFilter(value as "all" | "locked" | "shared")}
+                            className={`rounded-lg px-2 py-1.5 text-[11px] font-bold transition-colors ${
+                                conversationFilter === value
+                                    ? "bg-white text-zinc-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-100"
+                                    : "text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
+                            }`}
+                            aria-pressed={conversationFilter === value}
+                        >
+                            {label}
+                        </button>
+                    ))}
                 </div>
             </div>
 
@@ -440,7 +468,7 @@ export function ChatSidebar({
                 })}
             </div>
 
-            <div className="p-4 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-100/40 dark:bg-zinc-900/50 flex flex-col gap-2 shrink-0">
+            <div className="p-3 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-100/40 dark:bg-zinc-900/50 flex flex-col gap-2 shrink-0">
                 {isGuestMode && guestMessageCount !== undefined && maxGuestMessages !== undefined && (
                     <div className="px-1">
                         <div className="flex justify-between items-center mb-1.5 text-xs text-zinc-500 dark:text-zinc-400">
@@ -463,7 +491,7 @@ export function ChatSidebar({
                         )}
                     </div>
                 )}
-                <div className="flex items-center justify-between gap-2">
+                <div className="rounded-2xl border border-zinc-200 bg-white p-2 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
                     <AuthButton />
                 </div>
             </div>
