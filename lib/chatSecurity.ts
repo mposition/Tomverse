@@ -826,8 +826,7 @@ export const validateChatPayload = (body: unknown) => {
         };
         if (
             candidate.role !== "user" &&
-            candidate.role !== "assistant" &&
-            candidate.role !== "system"
+            candidate.role !== "assistant"
         ) {
             throw new ChatAccessError(400, "INVALID_CHAT_ROLE", "Invalid role.");
         }
@@ -863,7 +862,7 @@ export const validateChatPayload = (body: unknown) => {
 
     return payload as {
         messages: Array<{
-            role: "user" | "assistant" | "system";
+            role: "user" | "assistant";
             content: string;
             attachments?: unknown[];
         }>;
