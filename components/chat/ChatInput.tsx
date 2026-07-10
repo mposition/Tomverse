@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowUp,
@@ -13,11 +13,12 @@ import {
   Paperclip,
   Plus,
   Presentation,
+  Search,
   Sheet,
   Square,
   X,
 } from "lucide-react";
-import { AVAILABLE_MODELS, type ChatAttachment } from "@/components/chat/types";
+import { AVAILABLE_MODELS, MAX_SELECTED_MODELS, type ChatAttachment } from "@/components/chat/types";
 import { useLanguage } from "@/components/LanguageProvider";
 
 const MAX_ATTACHMENTS = 5;
@@ -271,7 +272,32 @@ export function ChatInput({
   // 팝업 메뉴 열림/닫힘 상태
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [menuView, setMenuView] = useState<"actions" | "models">("actions");
+  const [modelSearchQuery, setModelSearchQuery] = useState("");
+  const [providerFilter, setProviderFilter] = useState("all");
+  const [tierFilter, setTierFilter] = useState("all");
   const menuRef = useRef<HTMLDivElement>(null);
+
+  const modelProviders = useMemo(
+    () => Array.from(new Set(AVAILABLE_MODELS.map((model) => model.provider))),
+    []
+  );
+
+  const filteredModels = useMemo(() => {
+    const normalizedQuery = modelSearchQuery.trim().toLowerCase();
+
+    return AVAILABLE_MODELS.filter((model) => {
+      const matchesQuery =
+        !normalizedQuery ||
+        model.name.toLowerCase().includes(normalizedQuery) ||
+        model.provider.toLowerCase().includes(normalizedQuery) ||
+        model.tier.toLowerCase().includes(normalizedQuery);
+      const matchesProvider =
+        providerFilter === "all" || model.provider === providerFilter;
+      const matchesTier = tierFilter === "all" || model.tier === tierFilter;
+
+      return matchesQuery && matchesProvider && matchesTier;
+    });
+  }, [modelSearchQuery, providerFilter, tierFilter]);
 
 // 화면 바깥 클릭 시 팝업 닫기
   useEffect(() => {
@@ -587,8 +613,8 @@ export function ChatInput({
   };
 
   return (
-      <div className="shrink-0 border-t border-zinc-200 bg-white px-3 py-3 transition-colors dark:border-zinc-800 dark:bg-zinc-950 md:px-6">
-          <div className="mx-auto max-w-4xl rounded-xl border border-zinc-200 bg-white p-3 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
+      <div className="shrink-0 border-t border-zinc-200 bg-zinc-50/95 px-3 py-3 transition-colors dark:border-zinc-800 dark:bg-zinc-950 md:px-6">
+          <div className="mx-auto max-w-4xl rounded-2xl border border-zinc-200 bg-white p-3 shadow-lg shadow-zinc-200/50 dark:border-zinc-800 dark:bg-zinc-900 dark:shadow-black/20">
           {attachments.length > 0 && (
             <div className="mb-3 flex flex-wrap gap-2">
               {attachments.map((attachment) => (
@@ -596,8 +622,8 @@ export function ChatInput({
                   key={attachment.id}
                   className={
                     attachment.data
-                      ? "relative h-16 w-16 overflow-hidden rounded-md border border-zinc-200 bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900"
-                      : "relative flex h-16 min-w-48 max-w-60 items-center gap-3 rounded-md border border-zinc-200 bg-zinc-50 py-2 pl-2 pr-8 text-zinc-700 shadow-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
+                      ? "relative h-20 w-20 overflow-hidden rounded-xl border border-zinc-200 bg-zinc-100 shadow-sm dark:border-zinc-700 dark:bg-zinc-900"
+                      : "relative flex h-16 min-w-52 max-w-64 items-center gap-3 rounded-xl border border-zinc-200 bg-zinc-50 py-2 pl-2 pr-8 text-zinc-700 shadow-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
                   }
                 >
                   {attachment.data ? (
@@ -609,7 +635,7 @@ export function ChatInput({
                     />
                   ) : (
                     <>
-                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-white text-zinc-500 ring-1 ring-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:ring-zinc-700">
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white text-zinc-500 ring-1 ring-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:ring-zinc-700">
                         {getAttachmentIcon(attachment)}
                       </span>
                       <span className="flex min-w-0 flex-col">
@@ -627,7 +653,7 @@ export function ChatInput({
                     onClick={() => handleRemoveAttachment(attachment)}
                     className={
                       attachment.data
-                        ? "absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-zinc-950/80 text-white hover:bg-zinc-950"
+                        ? "absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-zinc-950/80 text-white hover:bg-zinc-950"
                         : "absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-200 hover:text-zinc-900 dark:hover:bg-zinc-700 dark:hover:text-white"
                     }
                     title={t("chat.removeAttachment")}
@@ -647,7 +673,7 @@ export function ChatInput({
               setMenuView("actions");
               setIsMenuOpen((open) => !open || menuView !== "actions");
             }}
-            className="flex h-9 w-9 items-center justify-center rounded-full border border-zinc-300 text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white"
+            className="flex h-10 w-10 items-center justify-center rounded-full border border-zinc-300 bg-zinc-50 text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white"
             title={t("chat.moreActions")}
             aria-label={t("chat.moreActions")}
             aria-expanded={isMenuOpen && menuView === "actions"}
@@ -666,7 +692,7 @@ export function ChatInput({
               setMenuView("models");
               setIsMenuOpen(!shouldClose);
             }}
-            className="flex h-9 min-w-0 items-center gap-2 rounded-full border border-zinc-300 px-3 text-xs font-medium text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            className="flex h-10 min-w-0 items-center gap-2 rounded-full border border-zinc-300 bg-zinc-50 px-3 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-800"
             title={activeModelNames.join(", ")}
           >
             <span className="flex -space-x-1">
@@ -689,7 +715,7 @@ export function ChatInput({
           </button>
 
           {isMenuOpen && (
-            <div className="absolute bottom-12 left-0 z-50 flex max-h-[calc(100dvh-8rem)] w-[min(20rem,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-lg border border-zinc-200 bg-white p-2 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900">
+            <div className="absolute bottom-12 left-0 z-50 flex max-h-[calc(100dvh-8rem)] w-[min(24rem,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white p-2 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900">
               {menuView === "actions" ? (
                 <div className="space-y-1">
                   <button
@@ -699,9 +725,11 @@ export function ChatInput({
                       setIsMenuOpen(false);
                       fileInputRef.current?.click();
                     }}
-                    className="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-zinc-800"
+                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-zinc-800"
                   >
-                    <Paperclip className="h-5 w-5 text-zinc-500 dark:text-zinc-300" />
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                      <Paperclip className="h-5 w-5" />
+                    </span>
                     <span className="flex min-w-0 flex-col">
                       <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t("chat.attachFile")}</span>
                       <span className="text-xs text-zinc-500">{t("chat.uploadFromComputer")}</span>
@@ -714,9 +742,11 @@ export function ChatInput({
                       setIsMenuOpen(false);
                       void handleGoogleDriveSelect();
                     }}
-                    className="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-zinc-800"
+                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-zinc-800"
                   >
-                    <HardDrive className="h-5 w-5 text-zinc-500 dark:text-zinc-300" />
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-500/10 text-blue-500">
+                      <HardDrive className="h-5 w-5" />
+                    </span>
                     <span className="flex min-w-0 flex-col">
                       <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">Google Drive</span>
                       <span className="text-xs text-zinc-500">Docs, Sheets, Slides</span>
@@ -726,9 +756,11 @@ export function ChatInput({
                   <button
                     type="button"
                     onClick={() => setMenuView("models")}
-                    className="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
                   >
-                    <Boxes className="h-5 w-5 text-zinc-500 dark:text-zinc-300" />
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-purple-500/10 text-purple-500">
+                      <Boxes className="h-5 w-5" />
+                    </span>
                     <span className="flex min-w-0 flex-col">
                       <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t("chat.modelSelect")}</span>
                       <span className="text-xs text-zinc-500">{t("chat.maxModelsDescription")}</span>
@@ -737,19 +769,59 @@ export function ChatInput({
                 </div>
               ) : (
                 <>
-                  <div className="mb-1 flex items-center gap-2 px-1 py-1">
+                  <div className="mb-2 flex items-center gap-2 px-1 py-1">
                     <button
                       type="button"
                       onClick={() => setMenuView("actions")}
-                      className="flex h-8 w-8 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-white"
+                      className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-white"
                       aria-label={t("auth.cancel")}
                     >
                       <ArrowLeft className="h-4 w-4" />
                     </button>
-                    <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{t("chat.modelSelect")}</span>
+                    <div className="min-w-0 flex-1">
+                      <span className="block text-sm font-semibold text-zinc-900 dark:text-zinc-100">{t("chat.modelSelect")}</span>
+                      <span className="block text-xs text-zinc-500">
+                        {selectedModels.length}/{MAX_SELECTED_MODELS} {t("chat.modelsSelected")}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="mb-2 space-y-2 px-1">
+                    <div className="relative">
+                      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                      <input
+                        value={modelSearchQuery}
+                        onChange={(event) => setModelSearchQuery(event.target.value)}
+                        placeholder={t("chat.searchModels")}
+                        className="h-9 w-full rounded-lg border border-zinc-200 bg-zinc-50 pl-9 pr-3 text-xs text-zinc-800 outline-none transition placeholder:text-zinc-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:focus:border-blue-500"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <select
+                        value={providerFilter}
+                        onChange={(event) => setProviderFilter(event.target.value)}
+                        className="h-9 rounded-lg border border-zinc-200 bg-zinc-50 px-2 text-xs font-medium text-zinc-700 outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
+                      >
+                        <option value="all">{t("chat.allProviders")}</option>
+                        {modelProviders.map((provider) => (
+                          <option key={provider} value={provider}>
+                            {provider}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={tierFilter}
+                        onChange={(event) => setTierFilter(event.target.value)}
+                        className="h-9 rounded-lg border border-zinc-200 bg-zinc-50 px-2 text-xs font-medium text-zinc-700 outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
+                      >
+                        <option value="all">{t("chat.allTiers")}</option>
+                        <option value="Free">Free</option>
+                        <option value="Pro">Pro</option>
+                        <option value="Max">Max</option>
+                      </select>
+                    </div>
                   </div>
                   <div className="min-h-0 space-y-1 overflow-y-auto overscroll-contain pr-1">
-                    {AVAILABLE_MODELS.map((model) => {
+                    {filteredModels.map((model) => {
                       const isSelected = selectedModels.includes(model.id);
                       const isTierLocked =
                         isGuestMode && model.tier !== "Free";
@@ -759,11 +831,14 @@ export function ChatInput({
                           type="button"
                           disabled={!model.enabled || isTierLocked}
                           onClick={() => onToggleModel(model.id)}
-                          className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-45 dark:hover:bg-zinc-800"
+                          className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-45 dark:hover:bg-zinc-800"
                         >
-                          <span>{model.icon}</span>
-                          <span className="min-w-0 flex-1 truncate text-left text-zinc-700 dark:text-zinc-200">{model.name}</span>
-                          <span className="text-[10px] font-semibold text-zinc-400">{model.tier}</span>
+                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-zinc-100 text-xs font-semibold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">{model.icon}</span>
+                          <span className="min-w-0 flex-1 text-left">
+                            <span className="block truncate text-zinc-800 dark:text-zinc-100">{model.name}</span>
+                            <span className="block truncate text-[10px] font-medium text-zinc-400">{model.provider}</span>
+                          </span>
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${model.tier === "Free" ? "bg-emerald-500/10 text-emerald-500" : model.tier === "Pro" ? "bg-blue-500/10 text-blue-500" : "bg-purple-500/10 text-purple-500"}`}>{model.tier}</span>
                           {!model.enabled ? (
                             <span className="text-[10px] font-medium text-zinc-400">
                               {model.status}
@@ -775,6 +850,11 @@ export function ChatInput({
                         </button>
                       );
                     })}
+                    {filteredModels.length === 0 && (
+                      <div className="rounded-xl border border-dashed border-zinc-200 px-4 py-8 text-center text-xs text-zinc-400 dark:border-zinc-700">
+                        {t("chat.noModelsFound")}
+                      </div>
+                    )}
                   </div>
                 </>
               )}
@@ -801,7 +881,7 @@ export function ChatInput({
           placeholder={placeholderText}
           disabled={isDisabled}
           rows={1}
-                  className="order-first max-h-[160px] min-h-[52px] w-full flex-none resize-none overflow-y-auto border-0 bg-transparent px-1 py-2 text-sm text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-500"
+                  className="order-first max-h-[160px] min-h-[56px] w-full flex-none resize-none overflow-y-auto border-0 bg-transparent px-1 py-2 text-sm leading-6 text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-500"
               />
 
         {isSending ? (

@@ -1,11 +1,12 @@
 "use client";
 
 import { Conversation } from "./types";
+import { getModel } from "@/components/chat/types";
 import { AuthButton } from "@/components/auth/AuthButton";
 import { useState, useEffect } from "react";
 import { useLanguage } from "@/components/LanguageProvider"; // 💡 훅 임포트
 import Link from "next/link";
-import { AlertTriangle, CloudUpload, Crown, Database, Download, Link2Off, Lock, MoreVertical, Pencil, Send, Share2, ShieldCheck, Trash2, Unlock, X } from "lucide-react";
+import { AlertTriangle, CloudUpload, Crown, Database, Download, Link2Off, Lock, MessageSquare, MoreVertical, Pencil, Search, Send, Share2, ShieldCheck, Sparkles, Trash2, Unlock, X } from "lucide-react";
 
 type ChatSidebarProps = {
     conversations: Conversation[];
@@ -46,6 +47,7 @@ export function ChatSidebar({
 }: ChatSidebarProps) {
     const [openMenuId, setOpenMenuId] = useState<string | null>(null);
     const [showPrivateNotice, setShowPrivateNotice] = useState(false);
+    const [searchQuery, setSearchQuery] = useState("");
     const { t } = useLanguage(); // 💡 t 함수 꺼내기
     const menuItemBase =
         "flex w-full items-center justify-between whitespace-nowrap rounded px-3 py-2 text-sm transition-colors";
@@ -58,6 +60,22 @@ export function ChatSidebar({
 
     const menuIconClass = "h-3.5 w-3.5 shrink-0";
     const crownClass = "h-3.5 w-3.5 shrink-0 text-amber-400";
+    const normalizedSearch = searchQuery.trim().toLowerCase();
+    const filteredConversations = normalizedSearch
+        ? conversations.filter((conversation) =>
+            conversation.title.toLowerCase().includes(normalizedSearch)
+        )
+        : conversations;
+
+    const getConversationModelSummary = (conversation: Conversation) => {
+        const models = conversation.selectedModels
+            ?.map((modelId) => getModel(modelId)?.name)
+            .filter(Boolean);
+
+        if (!models?.length) return t("sidebar.noModelInfo");
+        if (models.length === 1) return models[0];
+        return `${models[0]} +${models.length - 1}`;
+    };
 
     // 메뉴 바깥 클릭 시 컨텍스트 메뉴가 자동으로 닫히도록 관리
     useEffect(() => {
@@ -82,12 +100,14 @@ export function ChatSidebar({
 
     return (
         <>
-        <aside className="w-64 shrink-0 bg-zinc-50 border-r border-zinc-200 dark:bg-zinc-900 dark:border-zinc-800 flex flex-col h-full select-none">
+        <aside className="w-72 shrink-0 bg-zinc-50 border-r border-zinc-200 dark:bg-zinc-950 dark:border-zinc-800 flex flex-col h-full select-none">
 
             {/* 💡 1. 상단 시스템 이름 배너 복구 */}
-            <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-2">
-                <span className="text-xl">🌌</span>
-                <h1 className="text-md font-bold tracking-wider text-zinc-800 dark:text-zinc-100">
+            <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-2.5">
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 text-sm font-bold text-white shadow-sm shadow-blue-900/30">
+                    T
+                </span>
+                <h1 className="text-base font-bold tracking-tight text-zinc-800 dark:text-zinc-100">
                     Tomverse AI
                 </h1>
             </div>
@@ -96,7 +116,7 @@ export function ChatSidebar({
             <div className="p-3 border-b border-zinc-200/60 dark:border-zinc-800/40">
                 <button
                     onClick={onNewChat}
-                    className="w-full cursor-pointer flex items-center justify-center gap-2 rounded-xl bg-white border border-zinc-200 dark:bg-zinc-800/50 dark:border-zinc-700/50 px-4 py-2 text-xs font-medium text-zinc-600 dark:text-zinc-300 transition-all hover:bg-zinc-100 dark:hover:bg-zinc-700/60 hover:text-zinc-900 dark:hover:text-white"
+                    className="w-full cursor-pointer flex items-center justify-center gap-2 rounded-lg bg-zinc-900 px-4 py-2.5 text-xs font-semibold text-white transition-all hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200"
                 >
                     <span className="text-sm">+</span> {t("sidebar.newChat")}
                 </button>
@@ -110,7 +130,7 @@ export function ChatSidebar({
                         }
                     }}
                     disabled={isGuestMode}
-                    className={`mt-2 w-full flex items-center justify-center gap-2 rounded-xl border px-4 py-2 text-xs font-semibold transition-all ${isGuestMode
+                    className={`mt-2 w-full flex items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-xs font-semibold transition-all ${isGuestMode
                             ? "cursor-not-allowed opacity-50 border-zinc-200 bg-white text-zinc-400 dark:border-zinc-700/50 dark:bg-zinc-800/50 dark:text-zinc-500"
                             : isPrivateMode
                                 ? "cursor-pointer border-purple-700/70 bg-purple-950/40 text-purple-200 hover:bg-purple-900/50"
@@ -124,8 +144,27 @@ export function ChatSidebar({
             </div>
 
             {/* 2. 대화방 목록 영역 (중간 스크롤 영역) */}
+            <div className="border-b border-zinc-200/60 px-3 py-3 dark:border-zinc-800/40">
+                <div className="relative">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                    <input
+                        value={searchQuery}
+                        onChange={(event) => setSearchQuery(event.target.value)}
+                        placeholder={t("sidebar.searchPlaceholder")}
+                        className="h-9 w-full rounded-lg border border-zinc-200 bg-white pl-9 pr-3 text-xs text-zinc-800 outline-none transition placeholder:text-zinc-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-blue-500"
+                    />
+                </div>
+            </div>
+
+            {/* 2. 대화방 목록 영역 (중간 스크롤 영역) */}
             <div className="flex-1 overflow-y-auto p-2 space-y-1 min-h-0">
-                {conversations.map((conv) => {
+                {filteredConversations.length === 0 && (
+                    <div className="flex h-32 flex-col items-center justify-center rounded-lg border border-dashed border-zinc-200 px-4 text-center text-xs text-zinc-400 dark:border-zinc-800">
+                        <MessageSquare className="mb-2 h-5 w-5" />
+                        {t("sidebar.noConversations")}
+                    </div>
+                )}
+                {filteredConversations.map((conv) => {
                     const isActive = currentChatId === conv.id;
                     const isPrivate = conv.id === "private-chat";
                     const isMenuOpen = openMenuId === conv.id;
@@ -134,7 +173,7 @@ export function ChatSidebar({
                         <div
                             key={conv.id}
                             onClick={() => onSelectConversation(conv.id)}
-                            className={`relative group flex items-center justify-between rounded-xl px-3 py-2 text-xs cursor-pointer transition-all border ${isMenuOpen ? "z-20" : "z-10"} ${isPrivate
+                            className={`relative group flex items-center justify-between rounded-xl px-3 py-2.5 text-xs cursor-pointer transition-all border ${isMenuOpen ? "z-20" : "z-10"} ${isPrivate
                                     ? isActive
                                     ? "bg-purple-100 border-purple-300 text-purple-700 font-semibold dark:bg-purple-900/30 dark:border-purple-700/60 dark:text-purple-200"
                                     : "bg-purple-50/50 border-purple-100 text-purple-500 hover:bg-purple-100 dark:bg-purple-950/15 dark:border-purple-900/20 dark:text-purple-400/80 dark:hover:bg-purple-900/20 dark:hover:text-purple-300"
@@ -144,11 +183,31 @@ export function ChatSidebar({
                                 }`}
                             title={isGuestMode ? "로그인 후 이용할 수 있습니다." : ""}
                         >
-                            <div className="cursor-pointer flex items-center gap-2 min-w-0 flex-1 pr-6">
-                                <span className="shrink-0 text-zinc-500 text-[10px]">
-                                    {isPrivate || conv.isLocked ? "🔒" : "💬"}
+                            <div className="cursor-pointer flex min-w-0 flex-1 items-center gap-2.5 pr-6">
+                                <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${isPrivate ? "bg-purple-500/10 text-purple-500" : conv.isLocked ? "bg-amber-500/10 text-amber-500" : "bg-blue-500/10 text-blue-500"}`}>
+                                    {isPrivate || conv.isLocked ? (
+                                        <Lock className="h-3.5 w-3.5" />
+                                    ) : (
+                                        <MessageSquare className="h-3.5 w-3.5" />
+                                    )}
                                 </span>
-                                <span className="truncate">{conv.title}</span>
+                                <span className="min-w-0 flex flex-col gap-1">
+                                    <span className="truncate text-[13px] leading-4">{conv.title}</span>
+                                    <span className="flex items-center gap-1.5 truncate text-[10px] font-medium text-zinc-400 dark:text-zinc-500">
+                                        <Sparkles className="h-3 w-3 shrink-0" />
+                                        <span className="truncate">{getConversationModelSummary(conv)}</span>
+                                        {conv.shareEnabled && (
+                                            <span className="shrink-0 rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[9px] font-bold text-blue-500">
+                                                {t("sidebar.sharedBadge")}
+                                            </span>
+                                        )}
+                                        {conv.isLocked && (
+                                            <span className="shrink-0 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-bold text-amber-500">
+                                                {t("sidebar.lockedBadge")}
+                                            </span>
+                                        )}
+                                    </span>
+                                </span>
                             </div>
 
                             {/* 💡 세 개의 점(⋮) 컨텍스트 메뉴 버튼 */}
@@ -167,7 +226,7 @@ export function ChatSidebar({
 
                                 {/* 컨텍스트 팝업 메뉴 레이어 */}
                                 {isMenuOpen && (
-                                    <div className="absolute right-0 top-6 z-50 w-48 rounded-lg border border-zinc-800 bg-zinc-900 p-1 shadow-xl flex flex-col text-xs text-zinc-300 animate-fadeIn">
+                                    <div className="absolute right-0 top-6 z-50 w-56 rounded-lg border border-zinc-800 bg-zinc-900 p-1.5 shadow-xl flex flex-col text-xs text-zinc-300 animate-fadeIn">
                                         <button
                                             type="button"
                                             onClick={(e) => {

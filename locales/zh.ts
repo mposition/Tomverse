@@ -41,6 +41,11 @@ export const zh = {
         shareCopied: "分享链接已复制到剪贴板。",
         downloadAllTxt: "下载所有聊天为 .txt",
         defaultModel: "默认 AI 引擎模型",
+        searchPlaceholder: "搜索对话",
+        noConversations: "没有可显示的对话。",
+        noModelInfo: "无模型信息",
+        sharedBadge: "已分享",
+        lockedBadge: "已锁定",
     },
     chat: {
         welcome: "您好！有什么我可以帮您的吗？",
@@ -80,6 +85,10 @@ export const zh = {
         uploadFromComputer: "从电脑中选择",
         modelsSelected: "个模型",
         maxModelsDescription: "最多比较 3 个模型",
+        searchModels: "搜索模型",
+        allProviders: "所有提供商",
+        allTiers: "所有等级",
+        noModelsFound: "没有符合条件的模型。",
     },
     auth: {
         saveMessage: "设置已成功保存。",

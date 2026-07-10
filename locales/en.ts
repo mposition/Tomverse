@@ -41,6 +41,11 @@ export const en = {
         shareCopied: "Share link copied to clipboard.",
         downloadAllTxt: "Download all chats as .txt",
         defaultModel: "Default AI engine model",
+        searchPlaceholder: "Search chats",
+        noConversations: "No chats to show.",
+        noModelInfo: "No model info",
+        sharedBadge: "Shared",
+        lockedBadge: "Locked",
     },
     chat: {
         welcome: "Hello! How can I help you today?",
@@ -80,6 +85,10 @@ export const en = {
         uploadFromComputer: "Choose from your computer",
         modelsSelected: "models",
         maxModelsDescription: "Compare up to 3 models",
+        searchModels: "Search models",
+        allProviders: "All providers",
+        allTiers: "All tiers",
+        noModelsFound: "No models match these filters.",
     },
     auth: {
         saveMessage: "Settings saved successfully.",

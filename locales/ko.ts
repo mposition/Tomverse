@@ -41,6 +41,11 @@ export const ko = {
 		shareCopied: "공유 링크가 클립보드에 복사되었습니다.",
 		downloadAllTxt: "모든 채팅창 .txt 다운로드",
 		defaultModel: "기본 AI 엔진 모델",
+		searchPlaceholder: "대화 검색",
+		noConversations: "표시할 대화가 없습니다.",
+		noModelInfo: "모델 정보 없음",
+		sharedBadge: "공유",
+		lockedBadge: "잠금",
 	},
 	chat: {
 		welcome: "안녕하세요! 무엇을 도와드릴까요?",
@@ -80,6 +85,10 @@ export const ko = {
 		uploadFromComputer: "컴퓨터에서 선택",
 		modelsSelected: "개 모델",
 		maxModelsDescription: "최대 3개 모델 비교",
+		searchModels: "모델 검색",
+		allProviders: "모든 공급자",
+		allTiers: "모든 티어",
+		noModelsFound: "조건에 맞는 모델이 없습니다.",
 	},
 	auth: {
 		saveMessage: "설정이 성공적으로 저장되었습니다.",
