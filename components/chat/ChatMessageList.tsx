@@ -6,8 +6,19 @@ import type { ExtraProps } from "react-markdown";
 import type { ComponentPropsWithoutRef } from "react";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
-import { ArrowDown, Bot, Lock, Paperclip, UserRound } from "lucide-react";
-import { Message, AVAILABLE_MODELS } from "@/components/chat/types";
+import {
+  ArrowDown,
+  Bot,
+  Braces,
+  File as FileIcon,
+  FileText,
+  Image as ImageIcon,
+  Lock,
+  Presentation,
+  Sheet,
+  UserRound,
+} from "lucide-react";
+import { Message, AVAILABLE_MODELS, type ChatAttachment } from "@/components/chat/types";
 import { useLanguage } from "@/components/LanguageProvider";
 
 type ChatMessageListProps = {
@@ -17,6 +28,42 @@ type ChatMessageListProps = {
 };
 type MarkdownCodeProps = ComponentPropsWithoutRef<"code"> &
   ExtraProps & { inline?: boolean };
+
+const getAttachmentLabel = (attachment: ChatAttachment) => {
+  const extension = attachment.name.split(".").pop();
+  return extension && extension !== attachment.name
+    ? extension.toUpperCase()
+    : attachment.mediaType.split("/").pop()?.toUpperCase() || "FILE";
+};
+
+const getAttachmentIcon = (attachment: ChatAttachment) => {
+  if (attachment.mediaType.startsWith("image/")) {
+    return <ImageIcon className="h-5 w-5" />;
+  }
+  if (attachment.mediaType === "application/json") {
+    return <Braces className="h-5 w-5" />;
+  }
+  if (
+    attachment.mediaType === "text/csv" ||
+    attachment.mediaType.includes("spreadsheet") ||
+    attachment.mediaType.includes("opendocument.spreadsheet")
+  ) {
+    return <Sheet className="h-5 w-5" />;
+  }
+  if (
+    attachment.mediaType.includes("presentation") ||
+    attachment.mediaType.includes("opendocument.presentation")
+  ) {
+    return <Presentation className="h-5 w-5" />;
+  }
+  if (
+    attachment.mediaType === "application/pdf" ||
+    attachment.mediaType.startsWith("text/")
+  ) {
+    return <FileText className="h-5 w-5" />;
+  }
+  return <FileIcon className="h-5 w-5" />;
+};
 
 function TypingIndicator() {
   return (
@@ -157,16 +204,40 @@ export function ChatMessageList({ messages, isPrivate = false, isGuestMode = fal
                   }`}
                 >
                   {isUser && msg.attachments && msg.attachments.length > 0 && (
-                    <div className={`flex flex-wrap gap-1.5 ${msg.content ? "mb-2" : ""}`}>
+                    <div className={`flex flex-wrap gap-2 ${msg.content ? "mb-3" : ""}`}>
                       {msg.attachments.map((attachment) => (
-                        <span
+                        <div
                           key={attachment.id}
-                          className="flex max-w-52 items-center gap-1 rounded-md bg-white/15 px-2 py-1 text-xs"
+                          className={
+                            attachment.data
+                              ? "relative h-20 w-20 overflow-hidden rounded-xl border border-white/20 bg-white/10 shadow-sm"
+                              : "flex h-16 min-w-52 max-w-64 items-center gap-3 rounded-xl border border-white/15 bg-white/10 py-2 pl-2 pr-3 shadow-sm backdrop-blur"
+                          }
                           title={attachment.name}
                         >
-                          <Paperclip className="h-3 w-3 shrink-0" aria-hidden="true" />
-                          <span className="truncate">{attachment.name}</span>
-                        </span>
+                          {attachment.data ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={attachment.data}
+                              alt={attachment.name}
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <>
+                              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white/15 text-white ring-1 ring-white/10">
+                                {getAttachmentIcon(attachment)}
+                              </span>
+                              <span className="flex min-w-0 flex-col text-left">
+                                <span className="truncate text-sm font-semibold text-white">
+                                  {attachment.name}
+                                </span>
+                                <span className="text-[11px] font-semibold text-blue-100/80">
+                                  {getAttachmentLabel(attachment)}
+                                </span>
+                              </span>
+                            </>
+                          )}
+                        </div>
                       ))}
                     </div>
                   )}
