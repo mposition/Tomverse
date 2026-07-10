@@ -60,6 +60,7 @@ export const ko = {
 		guestModeMessage: "게스트 모드이므로 모든 대화 정보는 웹 브라우저에 저장되며 서버에는 기록되지 않습니다.",
 		guestModeLimitMessage: "(일일 최대 20회 제한)",
 		aiAssistant: "AI 어시스턴트",
+		you: "나",
 		exceedDailyLimit: "일일 게스트 사용량을 모두 소진했습니다. 로그인 후 이용해 주세요.",
 		responseError: "응답을 생성하지 못했습니다. 잠시 후 다시 시도해주세요.",
 		traceId: "추적 ID",
@@ -89,6 +90,8 @@ export const ko = {
 		allProviders: "모든 공급자",
 		allTiers: "모든 티어",
 		noModelsFound: "조건에 맞는 모델이 없습니다.",
+		scrollToLatest: "최신 메시지로 이동",
+		panelPaused: "일시정지됨",
 	},
 	auth: {
 		saveMessage: "설정이 성공적으로 저장되었습니다.",

@@ -60,6 +60,7 @@ export const zh = {
         guestModeMessage: "处于访客模式，所有对话信息均保存在网页浏览器中，不会记录在服务器上。",
         guestModeLimitMessage: "（每日最多限制 20 次）",
         aiAssistant: "AI 助手",
+        you: "我",
         exceedDailyLimit: "访客每日额度已耗尽。请登录后继续使用。",
         responseError: "无法生成回复，请稍后重试。",
         traceId: "追踪 ID",
@@ -89,6 +90,8 @@ export const zh = {
         allProviders: "所有提供商",
         allTiers: "所有等级",
         noModelsFound: "没有符合条件的模型。",
+        scrollToLatest: "跳转到最新消息",
+        panelPaused: "已暂停",
     },
     auth: {
         saveMessage: "设置已成功保存。",

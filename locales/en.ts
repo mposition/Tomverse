@@ -60,6 +60,7 @@ export const en = {
         guestModeMessage: "As you are in guest mode, all chat information is saved in your web browser and is not recorded on the server.",
         guestModeLimitMessage: "(Maximum limit of 20 per day)",
         aiAssistant: "AI Assistant",
+        you: "You",
         exceedDailyLimit: "You have exhausted your daily guest limit. Please log in to continue.",
         responseError: "The response could not be generated. Please try again shortly.",
         traceId: "Trace ID",
@@ -89,6 +90,8 @@ export const en = {
         allProviders: "All providers",
         allTiers: "All tiers",
         noModelsFound: "No models match these filters.",
+        scrollToLatest: "Jump to latest",
+        panelPaused: "Paused",
     },
     auth: {
         saveMessage: "Settings saved successfully.",

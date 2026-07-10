@@ -880,7 +880,7 @@ onShare={handleShareConversation}
 
       <section className="flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">        
         {/* 💡 동적 화면 분할 영역 */}
-              <div className="flex flex-1 min-h-0 overflow-hidden px-4 pb-4 pt-4 gap-4 bg-zinc-50 dark:bg-zinc-950">
+              <div className="flex flex-1 min-h-0 overflow-hidden gap-4 bg-zinc-100/80 px-4 pb-4 pt-4 dark:bg-zinc-950">
 
 		{/* 켜진 패널이 하나도 없을 때 보여줄 예쁜 안내 문구 */}
           {selectedModels.length === 0 && (
@@ -898,42 +898,50 @@ onShare={handleShareConversation}
 			return (
                 <React.Fragment key={modelId}>               
                     {/* 💡 패널이 OFF일 때 너비를 w-44(약 176px)으로 축소시킵니다 */}
-                <div className={`flex flex-col bg-white border border-zinc-200 dark:bg-zinc-900/40 dark:border-zinc-800 rounded-2xl overflow-hidden relative transition-all duration-300 ease-in-out shadow-sm ${isPanelDisabled ? "w-44 shrink-0" : "flex-1 min-w-0"
+                <div className={`flex flex-col bg-white border border-zinc-200 dark:bg-zinc-950 dark:border-zinc-800 rounded-2xl overflow-hidden relative transition-all duration-300 ease-in-out shadow-sm shadow-zinc-200/60 dark:shadow-black/20 ${isPanelDisabled ? "w-44 shrink-0" : "flex-1 min-w-0"
                 }`}>
 				  {/* 💡 모델 이름과 ON/OFF 토글 버튼이 있는 헤더 */}
                   {(
-                      <div className="flex items-center justify-between shrink-0 border-b border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/50 px-3 py-1.5 text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+                      <div className="flex min-h-12 items-center justify-between shrink-0 border-b border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-400">
                       <div className={`flex flex-1 min-w-0 items-center gap-2 transition-opacity ${isPanelDisabled ? 'opacity-50' : ''}`}>
-                        <span className="text-sm">{modelInfo?.icon}</span>
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-zinc-100 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200 dark:bg-zinc-800 dark:text-zinc-200 dark:ring-zinc-700">
+                          {modelInfo?.icon}
+                        </span>
                         
 						{/* 💡 2. OFF 상태일 때는 일반 텍스트로 렌더링하고, 넘치는 글자는 말줄임표 처리 */}
                         {isPanelDisabled ? (
-                          <span className="text-sm font-medium text-zinc-200 truncate select-none">
-                            {modelInfo?.name}
+                          <span className="min-w-0 flex flex-col truncate select-none">
+                            <span className="truncate text-sm font-semibold text-zinc-600 dark:text-zinc-300">{modelInfo?.name}</span>
+                            <span className="truncate text-[10px] font-medium text-zinc-400">{modelInfo?.provider}</span>
                           </span>
                         ) : (
                         // ON 상태일 때는 기존처럼 드롭다운 렌더링
-                        <select
-                          value={modelId}
-                          onChange={(e) => changePanelModel(modelId, e.target.value)}
-                          disabled={isPanelDisabled} // 패널이 OFF일 때는 모델 변경 막기
-                          className="cursor-pointer bg-transparent text-sm font-medium text-zinc-200 outline-none hover:text-white truncate min-w-0"
-                        >
-                          {ENABLED_MODELS.map((m) => {
-                            // 이미 다른 패널에 켜져 있는 모델인지 확인
-                            const isAlreadyUsed = selectedModels.includes(m.id) && m.id !== modelId;
-                            return (
-                              <option 
-                                key={m.id} 
-                                value={m.id}
-                                disabled={isAlreadyUsed}
-                                className="bg-zinc-800 text-zinc-100"
-                              >
-                                    {m.name} {isAlreadyUsed ? t("chat.inUsed") : ""}
-                              </option>
-                            );
-                          })}
-                        </select>
+                        <span className="min-w-0 flex flex-col">
+                          <select
+                            value={modelId}
+                            onChange={(e) => changePanelModel(modelId, e.target.value)}
+                            disabled={isPanelDisabled} // 패널이 OFF일 때는 모델 변경 막기
+                            className="min-w-0 cursor-pointer truncate bg-transparent text-sm font-semibold text-zinc-800 outline-none hover:text-zinc-950 dark:text-zinc-100 dark:hover:text-white"
+                          >
+                            {ENABLED_MODELS.map((m) => {
+                              // 이미 다른 패널에 켜져 있는 모델인지 확인
+                              const isAlreadyUsed = selectedModels.includes(m.id) && m.id !== modelId;
+                              return (
+                                <option 
+                                  key={m.id} 
+                                  value={m.id}
+                                  disabled={isAlreadyUsed}
+                                  className="bg-zinc-900 text-zinc-100"
+                                >
+                                      {m.name} {isAlreadyUsed ? t("chat.inUsed") : ""}
+                                </option>
+                              );
+                            })}
+                          </select>
+                          <span className="truncate text-[10px] font-medium text-zinc-400">
+                            {modelInfo?.provider} · {modelInfo?.tier}
+                          </span>
+                        </span>
 						)}
                       </div>
 
@@ -945,7 +953,7 @@ onShare={handleShareConversation}
 					  {/* ON/OFF 버튼과 닫기(X) 버튼 그룹화 */}
                       <button
                         onClick={() => togglePanelDisable(modelId)}
-                        className="cursor-pointer flex items-center gap-2 rounded px-2 py-0.5 hover:bg-zinc-800 transition-colors"
+                        className="cursor-pointer flex items-center gap-2 rounded-full px-2 py-1 hover:bg-zinc-100 transition-colors dark:hover:bg-zinc-800"
                         title={isPanelDisabled ? "대화 다시 켜기" : "대화 일시정지"}
                       >
                         <span className="text-[10px] font-bold text-zinc-500">
@@ -956,11 +964,11 @@ onShare={handleShareConversation}
                         </div>
                       </button>
 					  
-					  <div className="w-[1px] h-4 bg-zinc-700/50"></div>
+					  <div className="w-[1px] h-4 bg-zinc-200 dark:bg-zinc-700/50"></div>
                       
                       <button
                         onClick={() => handleRemoveModel(modelId)}
-                        className="cursor-pointer flex items-center justify-center p-1 rounded text-zinc-500 hover:bg-zinc-800 hover:text-red-400 transition-colors"
+                        className="cursor-pointer flex items-center justify-center p-1.5 rounded-full text-zinc-500 hover:bg-red-500/10 hover:text-red-500 transition-colors"
                         title="창 닫기 (기록 삭제)"
                       >
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

@@ -6,7 +6,7 @@ import type { ExtraProps } from "react-markdown";
 import type { ComponentPropsWithoutRef } from "react";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
-import { Paperclip } from "lucide-react";
+import { ArrowDown, Bot, Lock, Paperclip, UserRound } from "lucide-react";
 import { Message, AVAILABLE_MODELS } from "@/components/chat/types";
 import { useLanguage } from "@/components/LanguageProvider";
 
@@ -72,15 +72,15 @@ export function ChatMessageList({ messages, isPrivate = false, isGuestMode = fal
       <div
         ref={containerRef}
         onScroll={handleScroll}
-        className="flex-1 min-h-0 overflow-y-auto px-4 py-6 md:px-8"
+        className="flex-1 min-h-0 overflow-y-auto px-4 py-6 md:px-6"
       >
-        <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 pb-4">
+        <div className="mx-auto flex w-full max-w-4xl flex-col gap-5 pb-4">
           
           {/* 프라이빗 배너 (하단 여백 mb-6 추가로 첫 인사글과 시원하게 띄움) */}
           {isPrivate && (
-            <div className="mb-6 rounded-xl border border-purple-200 bg-purple-50 p-4 text-center text-sm text-purple-700 shadow-sm animate-fadeIn dark:border-purple-800/50 dark:bg-purple-950/30 dark:text-purple-300">
+            <div className="mb-4 rounded-2xl border border-purple-200 bg-purple-50/80 p-4 text-center text-sm text-purple-700 shadow-sm animate-fadeIn dark:border-purple-800/50 dark:bg-purple-950/30 dark:text-purple-300">
                 <p className="mb-1.5 flex items-center justify-center gap-2 font-bold text-purple-800 dark:text-purple-200">
-                              <span className="text-lg">🔒</span> {t("chat.onPrivateMode")}
+                              <Lock className="h-4 w-4" /> {t("chat.onPrivateMode")}
               </p>
               <p className="break-keep text-xs opacity-90 dark:opacity-80">
                               {t("chat.privateModeMessage")}
@@ -90,9 +90,9 @@ export function ChatMessageList({ messages, isPrivate = false, isGuestMode = fal
 
           {/* 💡 게스트 모드 안내 배너 추가 */}
           {isGuestMode && (
-            <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 p-4 text-center text-sm text-blue-700 shadow-sm animate-fadeIn dark:border-blue-800/50 dark:bg-blue-950/30 dark:text-blue-300">
+            <div className="mb-4 rounded-2xl border border-blue-200 bg-blue-50/80 p-4 text-center text-sm text-blue-700 shadow-sm animate-fadeIn dark:border-blue-800/50 dark:bg-blue-950/30 dark:text-blue-300">
               <p className="mb-1.5 flex items-center justify-center gap-2 font-bold text-blue-800 dark:text-blue-200">
-                              <span className="text-lg">👤</span> {t("chat.onGuestMode")}
+                              <UserRound className="h-4 w-4" /> {t("chat.onGuestMode")}
               </p>
               <p className="break-keep text-xs opacity-90 dark:opacity-80">
                               {t("chat.guestModeMessage")}<br/>
@@ -124,8 +124,8 @@ export function ChatMessageList({ messages, isPrivate = false, isGuestMode = fal
               >
                 {/* AI 뱃지 */}
                 {!isUser && modelInfo && (
-                  <div className="mb-1.5 ml-1 flex select-none items-center gap-1.5">
-                    <span className="text-sm">{modelInfo.icon}</span>
+                  <div className="mb-1.5 ml-1 flex select-none items-center gap-2">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-zinc-100 text-xs ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800">{modelInfo.icon}</span>
                     <span className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
                       {modelInfo.name}
                     </span>
@@ -134,15 +134,26 @@ export function ChatMessageList({ messages, isPrivate = false, isGuestMode = fal
                 
                 {/* 웰컴 메시지 뱃지 */}
                 {!isUser && !modelInfo && msg.id === "welcome" && (
-                  <div className="mb-1.5 ml-1 flex select-none items-center gap-1.5">
-                    <span className="text-sm">🤖</span>
+                  <div className="mb-1.5 ml-1 flex select-none items-center gap-2">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-blue-500/10 text-blue-500">
+                      <Bot className="h-3.5 w-3.5" />
+                    </span>
                             <span className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">{t("chat.aiAssistant")}</span>
                   </div>
                 )}
 
+                {isUser && (
+                  <div className="mb-1.5 mr-1 flex select-none items-center gap-2">
+                    <span className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">{t("chat.you")}</span>
+                    <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-blue-600 text-white">
+                      <UserRound className="h-3.5 w-3.5" />
+                    </span>
+                  </div>
+                )}
+
                 <div
-                  className={`relative max-w-[90%] md:max-w-[85%] break-words rounded-2xl px-4 py-3 text-[15px] leading-relaxed shadow-sm ${
-                    isUser ? `${userBoxClass} rounded-br-sm` : `${assistantBoxClass} rounded-bl-sm`
+                  className={`relative max-w-[92%] break-words rounded-2xl px-4 py-3 text-[15px] leading-relaxed shadow-sm md:max-w-[88%] ${
+                    isUser ? `${userBoxClass} rounded-br-md` : `${assistantBoxClass} rounded-bl-md`
                   }`}
                 >
                   {isUser && msg.attachments && msg.attachments.length > 0 && (
@@ -211,7 +222,10 @@ export function ChatMessageList({ messages, isPrivate = false, isGuestMode = fal
           }}
           className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm text-zinc-100 shadow-lg hover:bg-zinc-800"
         >
-          최신 메시지로 이동
+          <span className="flex items-center gap-2">
+            <ArrowDown className="h-4 w-4" />
+            {t("chat.scrollToLatest")}
+          </span>
         </button>
       )}
     </div>

@@ -6,6 +6,7 @@ import { Message, type ChatAttachment } from "@/components/chat/types";
 import { useSession } from "next-auth/react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { useTurnstile } from "@/components/chat/useTurnstile";
+import { ArrowUp, PauseCircle } from "lucide-react";
 
 const processedPromptKeys = new Set<string>();
 
@@ -473,36 +474,42 @@ export function ChatApp({ modelId, initialConversationId = null, promptPayload, 
                           event.preventDefault();
                           handleModelOnlySubmit();
                       }}
-                      className="flex shrink-0 items-end gap-2 border-t border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950"
+                      className="flex shrink-0 items-end gap-2 border-t border-zinc-200 bg-zinc-50/80 p-3 dark:border-zinc-800 dark:bg-zinc-950/95"
                   >
-                      <textarea
-                          value={modelInput}
-                          onChange={(event) => setModelInput(event.target.value)}
-                          onKeyDown={(event) => {
-                              if (event.key === "Enter" && !event.shiftKey) {
-                                  event.preventDefault();
-                                  handleModelOnlySubmit();
-                              }
-                          }}
-                          disabled={isSending || !initialConversationId}
-                          rows={1}
-                          placeholder={t("chat.modelOnlyPlaceholder")}
-                          className="max-h-28 min-h-10 flex-1 resize-none rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-900 outline-none transition-colors placeholder:text-zinc-400 focus:border-blue-500 focus:bg-white dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-blue-500 dark:focus:bg-zinc-900"                      />
+                      <div className="flex min-w-0 flex-1 items-end gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-2 shadow-sm focus-within:border-blue-500 dark:border-zinc-800 dark:bg-zinc-900">
+                          <textarea
+                              value={modelInput}
+                              onChange={(event) => setModelInput(event.target.value)}
+                              onKeyDown={(event) => {
+                                  if (event.key === "Enter" && !event.shiftKey) {
+                                      event.preventDefault();
+                                      handleModelOnlySubmit();
+                                  }
+                              }}
+                              disabled={isSending || !initialConversationId}
+                              rows={1}
+                              placeholder={t("chat.modelOnlyPlaceholder")}
+                              className="max-h-28 min-h-7 flex-1 resize-none border-0 bg-transparent py-1 text-sm leading-5 text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-500"
+                          />
+                      </div>
                       <button
                           type="submit"
                           disabled={!modelInput.trim() || isSending || !initialConversationId}
-                          className="h-10 shrink-0 rounded-lg bg-blue-600 px-3 text-xs font-semibold text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500 dark:disabled:bg-zinc-800 dark:disabled:text-zinc-500"
+                          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500 dark:disabled:bg-zinc-800 dark:disabled:text-zinc-500"
                           title={t("chat.modelOnlySendTitle")}
+                          aria-label={t("chat.modelOnlySendTitle")}
                       >
-                          {t("chat.send")}
+                          <ArrowUp className="h-5 w-5" />
                       </button>
                   </form>
               </div>
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center p-4 select-none">
-          <div className="text-4xl mb-3 opacity-20 text-zinc-500">💤</div>
-          <div className="text-xs text-zinc-600 font-medium text-center break-keep">
-            일시정지됨
+          <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-100 text-zinc-400 dark:bg-zinc-900 dark:text-zinc-600">
+            <PauseCircle className="h-6 w-6" />
+          </div>
+          <div className="text-xs text-zinc-600 font-medium text-center break-keep dark:text-zinc-400">
+            {t("chat.panelPaused")}
           </div>
         </div>
       )}
