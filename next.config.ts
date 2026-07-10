@@ -33,6 +33,7 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  poweredByHeader: false,
   serverExternalPackages: ["officeparser"],
   async headers() {
     return [
