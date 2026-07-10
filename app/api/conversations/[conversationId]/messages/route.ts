@@ -37,12 +37,6 @@ const saveMessagesSchema = z
   })
   .strict();
 
-type Params = {
-  params: Promise<{
-    conversationId: string;
-  }>;
-};
-
 export async function POST(
   req: Request,
   context: RouteContext<"/api/conversations/[conversationId]/messages">

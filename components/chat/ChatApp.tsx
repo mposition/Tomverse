@@ -12,16 +12,15 @@ const processedPromptKeys = new Set<string>();
 type ChatAppProps = {
   modelId: string; // 💡 부모가 내려준 정체성(modelId)을 받습니다.
   initialConversationId?: string | null;
-  onConversationCreated?: (id: string) => void; // 💡 새 방이 파졌을 때 부모에게 일러바칠 함수
   promptPayload?: { id: string; text: string; chatId: string; userMessageId: string; attachments: ChatAttachment[] } | null; // 💡 부모로부터 전달받을 공통 프롬프트 페이로드 (중복 방지를 위해 id 포함)
   isPanelDisabled?: boolean; // 💡 현재 패널이 비활성화(OFF) 상태인지 여부
   isGuestMode?: boolean; // 💡 게스트 모드 여부 추가  
 };
 
-export function ChatApp({ modelId, initialConversationId = null, onConversationCreated, promptPayload, isPanelDisabled = false, isGuestMode = false }: ChatAppProps) {
+export function ChatApp({ modelId, initialConversationId = null, promptPayload, isPanelDisabled = false, isGuestMode = false }: ChatAppProps) {
   const [isMessagesLoaded, setIsMessagesLoaded] = useState(false);
   const { data: session, status } = useSession();
-    const { t, lang, setLang } = useLanguage(); // 💡 t 함수 꺼내기
+    const { t } = useLanguage(); // 💡 t 함수 꺼내기
   const {
     containerRef: turnstileContainerRef,
     getToken: getTurnstileToken,
@@ -208,7 +207,14 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
 	  return () => {
       isMounted = false;
     };	
-  }, [initialConversationId, isPrivate, isGuestMode, session?.user?.email]);
+  }, [
+    initialConversationId,
+    isPrivate,
+    isGuestMode,
+    modelId,
+    session,
+    t,
+  ]);
   
   // 💡 [여기에 새로 추가해 주세요!] 게스트 모드 메시지 자동 저장 로직
   useEffect(() => {
@@ -429,10 +435,6 @@ export function ChatApp({ modelId, initialConversationId = null, onConversationC
 
         await handleSendPrompt(trimmed, initialConversationId, userMsgId);
     };
-
-  const handleCancel = () => {
-    abortControllerRef.current?.abort();
-  };
 
   return (
       <div className="flex flex-1 min-h-0 flex-col overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">

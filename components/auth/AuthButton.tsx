@@ -79,6 +79,7 @@ export function AuthButton() {
       <div className="flex flex-col gap-2 w-full p-3 rounded-xl bg-zinc-900 border border-zinc-800">
         <div className="flex items-center gap-2.5 min-w-0">
           {session.user.image && (
+            // eslint-disable-next-line @next/next/no-img-element
             <img 
               src={session.user.image} 
               alt="Profile" 

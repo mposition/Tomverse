@@ -33,7 +33,7 @@ export function ChatMessageList({ messages, isPrivate = false, isGuestMode = fal
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [isNearBottom, setIsNearBottom] = useState(true);
   const showScrollButton = !isNearBottom;
-    const { t, lang, setLang } = useLanguage(); // 💡 t 함수 꺼내기
+    const { t } = useLanguage(); // 💡 t 함수 꺼내기
 
   const scrollToBottom = (behavior: ScrollBehavior = "smooth") => {
     const container = containerRef.current;

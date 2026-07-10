@@ -2,13 +2,12 @@
 
 import { Conversation } from "./types";
 import { AuthButton } from "@/components/auth/AuthButton";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useLanguage } from "@/components/LanguageProvider"; // 💡 훅 임포트
 import Link from "next/link";
 import { AlertTriangle, CloudUpload, Crown, Database, Download, Link2Off, Lock, MoreVertical, Pencil, Send, Share2, ShieldCheck, Trash2, Unlock, X } from "lucide-react";
 
 type ChatSidebarProps = {
-    userEmail: string;
     conversations: Conversation[];
     currentChatId: string | null;
     isGuestMode?: boolean;
@@ -28,7 +27,6 @@ type ChatSidebarProps = {
 };
 
 export function ChatSidebar({
-    userEmail,
     conversations,
     currentChatId,
     isGuestMode,
@@ -48,8 +46,7 @@ export function ChatSidebar({
 }: ChatSidebarProps) {
     const [openMenuId, setOpenMenuId] = useState<string | null>(null);
     const [showPrivateNotice, setShowPrivateNotice] = useState(false);
-    const menuRef = useRef<HTMLDivElement | null>(null);
-    const { t, lang, setLang } = useLanguage(); // 💡 t 함수 꺼내기
+    const { t } = useLanguage(); // 💡 t 함수 꺼내기
     const menuItemBase =
         "flex w-full items-center justify-between whitespace-nowrap rounded px-3 py-2 text-sm transition-colors";
 

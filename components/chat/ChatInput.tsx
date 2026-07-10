@@ -249,7 +249,7 @@ export function ChatInput({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const previousAttachmentsRef = useRef<ChatAttachment[]>([]);
   const [isUploading, setIsUploading] = useState(false);
-    const { t, lang, setLang } = useLanguage(); // 💡 t 함수 꺼내기
+    const { t } = useLanguage(); // 💡 t 함수 꺼내기
 
   // 💡 선택된 모델의 이름들을 가져와서 플레이스홀더 문구를 동적으로 만듭니다.
   const activeModelNames = selectedModels
@@ -585,6 +585,7 @@ export function ChatInput({
                   }
                 >
                   {attachment.data ? (
+                    // eslint-disable-next-line @next/next/no-img-element
                     <img
                       src={attachment.data}
                       alt={attachment.name}

@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "check": "eslint . --max-warnings=0 && tsc --noEmit && next build",
     "db:migrate": "node scripts/require-direct-database-url.mjs && prisma migrate deploy",
     "maintenance:cleanup": "node scripts/run-maintenance.mjs",
     "postinstall": "prisma generate"

@@ -38,13 +38,13 @@ const isLanguage = (value: unknown): value is Language =>
   value === "en" || value === "ko" || value === "zh";
 
 export default function Home() {
-    const { t, lang, setLang } = useLanguage(); // 💡 t 함수 꺼내기
+    const { t, setLang } = useLanguage(); // 💡 t 함수 꺼내기
   const [isConversationsLoaded, setIsConversationsLoaded] = useState(false);  
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const { data: session, status } = useSession();
 
-  const [isSending, setIsSending] = useState(false);
+  const isSending = false;
   const [focusToken, setFocusToken] = useState(0);
 
     const [userDefaultEngine, setUserDefaultEngine] = useState<string>(APP_DEFAULTS.defaultModelId);
@@ -72,7 +72,7 @@ export default function Home() {
 
   const isInitialSelectedRef = useRef(false);
 
-    const applyConversationSettings = (data: {
+    const applyConversationSettings = useCallback((data: {
         selectedModels?: unknown;
         disabledPanels?: unknown;
         messages?: Array<{ role?: string; modelId?: string | null }>;
@@ -97,7 +97,7 @@ export default function Home() {
                     !recoveredModels.includes(modelId)
             )
         );
-    };
+    }, [userDefaultEngine]);
 
 // 💡 컴포넌트 마운트 시 오늘 날짜 기준으로 게스트 카운트 초기화 및 로드
   useEffect(() => {
@@ -127,8 +127,8 @@ export default function Home() {
           const parsed = JSON.parse(savedConversations);
           setConversations(parsed);
           // 저장된 방이 있다면 가장 최근 방을 기본 활성화
-          if (parsed.length > 0 && !currentChatId) {
-            setCurrentChatId(parsed[0].id);
+          if (parsed.length > 0) {
+            setCurrentChatId((currentId) => currentId || parsed[0].id);
           }
         } catch (e) {
           console.error("게스트 대화방 파싱 에러:", e);
@@ -212,7 +212,14 @@ export default function Home() {
         return () => {
             cancelled = true;
         };
-    }, [conversations, currentChatId, isGuestMode, isUserSettingsLoaded, userDefaultEngine]);
+    }, [
+        applyConversationSettings,
+        conversations,
+        currentChatId,
+        isGuestMode,
+        isUserSettingsLoaded,
+        userDefaultEngine,
+    ]);
 
     useEffect(() => {
         const handleSettingsUpdated = (event: Event) => {
@@ -241,7 +248,7 @@ export default function Home() {
   // 💡 대화방 목록을 서버에서 불러오는 함수 (부모가 관리)
   const fetchConversations = useCallback(async () => {
     // 세션이 없으면(로그인 안 했으면) 굳이 안 불러옵니다.
-    if (!session || !session?.user) return;
+    if (!session?.user) return;
 
     try {
 	  // 💡 캐시 무효화 옵션 추가
@@ -250,7 +257,7 @@ export default function Home() {
     } catch (error) {
       console.error("대화 목록을 불러오는 중 오류 발생:", error);
     }
-    }, [session?.user?.email]);
+    }, [session?.user]);
 
     // 최초 페이지 로드 시 목록 가져오기
     useEffect(() => {
@@ -300,7 +307,7 @@ export default function Home() {
         } else if (status !== "loading") {
             queueMicrotask(() => setIsUserSettingsLoaded(true));
         }
-    }, [session?.user?.email, fetchConversations]);
+    }, [currentChatId, fetchConversations, session?.user, setLang, status]);
 
   // + 새 채팅 버튼 클릭 시 호출
     const handleNewChat = () => {
@@ -477,12 +484,6 @@ export default function Home() {
             console.error("잠금 해제 에러:", e);
         }
     };
-
-  // 💡 대화방이 생성되면 부모 상태를 동기화하고 리스트를 새로고침합니다.
-  const handleConversationCreated = (id: string) => {
-    setCurrentChatId(id);
-    fetchConversations(); 
-  };
 
   // 💡 대화방 이름 변경 요청
   const handleRename = async (id: string, newTitle: string) => {
@@ -723,7 +724,7 @@ export default function Home() {
   // 💡 완전히 창을 닫고 데이터베이스 기록을 날려버리는 기능 추가
   const handleRemoveModel = async (modelId: string) => {
     const modelName = AVAILABLE_MODELS.find(m => m.id === modelId)?.name || modelId;
-      if (!confirm("[${modelName}] " + t("sidebar.closePanel"))) return;
+      if (!confirm(`[${modelName}] ${t("sidebar.closePanel")}`)) return;
 
     const nextModels = selectedModels.filter((id) => id !== modelId);
     const nextDisabled = disabledPanels.filter((id) => id !== modelId);
@@ -859,7 +860,6 @@ export default function Home() {
   return (
       <main className="flex h-screen overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
       <ChatSidebar 
-              userEmail={session?.user?.email || "Guest"} 
         conversations={blendedConversations} // 동기화된 리스트 전달
         currentChatId={currentChatId}  // 현재 활성화된 방 ID 전달 (UI 하이라이트용)
         onNewChat={handleNewChat}
@@ -891,7 +891,7 @@ onShare={handleShareConversation}
             </div>
           )}
 		  
-		{selectedModels.map((modelId, index) => {
+		{selectedModels.map((modelId) => {
             const modelInfo = AVAILABLE_MODELS.find(m => m.id === modelId);
 			const isPanelDisabled = disabledPanels.includes(modelId);
             
@@ -978,7 +978,6 @@ onShare={handleShareConversation}
                     key={`${modelId}:${currentChatId || "new"}`}
 				            modelId={modelId}
                     initialConversationId={currentChatId} 
-                    onConversationCreated={handleConversationCreated}
                     promptPayload={promptPayload}
 					          isPanelDisabled={isPanelDisabled}
                     isGuestMode={isGuestMode}
