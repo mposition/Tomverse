@@ -167,8 +167,8 @@ export function AuthButton() {
                                         onChange={(e) => setTheme(e.target.value as "dark" | "light")}
                                         className="mt-1 w-full cursor-pointer bg-transparent text-sm font-semibold text-zinc-900 outline-none dark:text-zinc-100"
                                     >
-                                        <option value="dark">{t("auth.darkTheme")}</option>
-                                        <option value="light">{t("auth.lightTheme")}</option>
+                                        <option className="bg-white text-zinc-900" value="dark">{t("auth.darkTheme")}</option>
+                                        <option className="bg-white text-zinc-900" value="light">{t("auth.lightTheme")}</option>
                                     </select>
                                 </span>
                             </label>
@@ -182,9 +182,9 @@ export function AuthButton() {
                                         onChange={(e) => setLanguage(e.target.value as "en" | "zh" | "ko")}
                                         className="mt-1 w-full cursor-pointer bg-transparent text-sm font-semibold text-zinc-900 outline-none dark:text-zinc-100"
                                     >
-                                        <option value="en">{t("auth.languageEnglish")}</option>
-                                        <option value="zh">{t("auth.languageChinese")}</option>
-                                        <option value="ko">{t("auth.languageKorean")}</option>
+                                        <option className="bg-white text-zinc-900" value="en">{t("auth.languageEnglish")}</option>
+                                        <option className="bg-white text-zinc-900" value="zh">{t("auth.languageChinese")}</option>
+                                        <option className="bg-white text-zinc-900" value="ko">{t("auth.languageKorean")}</option>
                                     </select>
                                 </span>
                             </label>
@@ -199,7 +199,7 @@ export function AuthButton() {
                                         className="mt-1 w-full cursor-pointer bg-transparent text-sm font-semibold text-zinc-900 outline-none dark:text-zinc-100"
                                     >
                                         {ENABLED_MODELS.map((model) => (
-                                            <option key={model.id} value={model.id}>
+                                            <option className="bg-white text-zinc-900" key={model.id} value={model.id}>
                                                 {model.icon} {model.name} · {model.tier}
                                             </option>
                                         ))}
