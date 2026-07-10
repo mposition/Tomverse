@@ -20,7 +20,7 @@ const modelIdSchema = z
   .min(1)
   .max(100)
   .refine(isEnabledModelId, {
-    message: "ì§€ì›í•˜ì§€ ì•ŠëŠ” ëª¨ë¸ìž…ë‹ˆë‹¤.",
+    message: "Unsupported model.",
   });
 const userMessageSchema = z
   .object({
@@ -46,12 +46,12 @@ export async function POST(
       const conversationId = params.conversationId;
 
       if (!conversationId) {
-          return NextResponse.json({ error: "ëŒ€í™”ë°© IDê°€ ëˆ„ë½ë˜ì—ˆìŠµë‹ˆë‹¤." }, { status: 400 });
+          return NextResponse.json({ error: "Conversation ID is required." }, { status: 400 });
       }
 
       const session = await getServerSession(authOptions);
       if (!session || !session.user) {
-          return NextResponse.json({ error: "ê¶Œí•œì´ ì—†ìŠµë‹ˆë‹¤." }, { status: 401 });
+          return NextResponse.json({ error: "Authentication required." }, { status: 401 });
       }
 
       const userId = session.user.id;
@@ -65,7 +65,7 @@ export async function POST(
       });
 
       if (!existingConv || existingConv.userId !== userId) {
-          return NextResponse.json({ error: "íƒ€ì¸ì˜ ëŒ€í™”ë°©ì— ë©”ì‹œì§€ë¥¼ ì¡°ìž‘í•  ìˆ˜ ì—†ìŠµë‹ˆë‹¤." }, { status: 403 });
+          return NextResponse.json({ error: "You do not have access to this conversation." }, { status: 403 });
       }
       if (
         !hasConversationUnlockGrant(
@@ -108,9 +108,9 @@ export async function POST(
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
-    console.error("âŒ ë©”ì‹œì§€ ì €ìž¥ ì—ëŸ¬:", error);
+    console.error("Failed to save messages:", error);
     return NextResponse.json(
-      { error: "ë©”ì‹œì§€ ì €ìž¥ ì‹¤íŒ¨" },
+      { error: "Failed to save messages." },
       { status: 500 }
     );
   }
@@ -124,7 +124,7 @@ export async function DELETE(
         const session = await getServerSession(authOptions);
 
         if (!session || !session.user) {
-            return NextResponse.json({ error: "ê¶Œí•œì´ ì—†ìŠµë‹ˆë‹¤." }, { status: 401 });
+            return NextResponse.json({ error: "Authentication required." }, { status: 401 });
         }
 
         const params = await context.params;
@@ -141,7 +141,7 @@ export async function DELETE(
         });
 
         if (!existingConv || existingConv.userId !== userId) {
-            return NextResponse.json({ error: "íƒ€ì¸ì˜ ëŒ€í™”ë°©ì— ë©”ì‹œì§€ë¥¼ ì¡°ìž‘í•  ìˆ˜ ì—†ìŠµë‹ˆë‹¤." }, { status: 403 });
+            return NextResponse.json({ error: "You do not have access to this conversation." }, { status: 403 });
         }
         if (
           !hasConversationUnlockGrant(
@@ -158,11 +158,11 @@ export async function DELETE(
         const modelId = searchParams.get("modelId");
 
         if (!conversationId || !modelId) {
-            return NextResponse.json({ error: "íŒŒë¼ë¯¸í„° ëˆ„ë½" }, { status: 400 });
+            return NextResponse.json({ error: "Missing required parameter." }, { status: 400 });
         }
         const parsedModelId = modelIdSchema.safeParse(modelId);
         if (!parsedModelId.success) {
-            return NextResponse.json({ error: "ì§€ì›í•˜ì§€ ì•ŠëŠ” ëª¨ë¸ìž…ë‹ˆë‹¤." }, { status: 400 });
+            return NextResponse.json({ error: "Unsupported model." }, { status: 400 });
         }
 
         await prisma.message.deleteMany({
@@ -178,7 +178,7 @@ export async function DELETE(
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
 
-    console.error("âŒ ë©”ì‹œì§€ ì‚­ì œ ì—ëŸ¬:", error);
-    return NextResponse.json({ error: "ì‚­ì œ ì‹¤íŒ¨" }, { status: 500 });
+    console.error("Failed to delete messages:", error);
+    return NextResponse.json({ error: "Failed to delete messages." }, { status: 500 });
   }
 }

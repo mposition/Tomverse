@@ -82,9 +82,9 @@ export async function GET(req: Request) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
 
-    console.error("âŒ [ë°±ì—”ë“œ] ëª©ë¡ ì¡°íšŒ ì—ëŸ¬:", error);
+    console.error("Failed to list conversations:", error);
     return NextResponse.json(
-      { error: "ëŒ€í™”ë°© ëª©ë¡ì„ ë¶ˆëŸ¬ì˜¤ëŠ”ë° ì‹¤íŒ¨í–ˆìŠµë‹ˆë‹¤." },
+      { error: "Failed to load conversations." },
       { status: 500 }
     );
   }
@@ -94,7 +94,7 @@ export async function POST(req: Request) {
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) {
-      return NextResponse.json({ error: "ë¡œê·¸ì¸ì´ í•„ìš”í•©ë‹ˆë‹¤." }, { status: 401 });
+      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
     }
 
       const userId = session.user.id;
@@ -103,7 +103,7 @@ export async function POST(req: Request) {
       day: 100,
     });
     const body = await readLimitedJson(req, 8 * 1024, createConversationSchema);
-    const title = body.title || "ìƒˆ ëŒ€í™”";
+    const title = body.title || "New chat";
 
       const userSettings = await prisma.userSettings.findUnique({
           where: { userId }
@@ -145,9 +145,9 @@ export async function POST(req: Request) {
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
-    console.error("âŒ [ë°±ì—”ë“œ] ëŒ€í™”ë°© ìƒì„± ì—ëŸ¬:", error);
+    console.error("Failed to create conversation:", error);
     return NextResponse.json(
-      { error: "ëŒ€í™”ë°© ìƒì„± ì‹¤íŒ¨" },
+      { error: "Failed to create conversation." },
       { status: 500 }
     );
   }

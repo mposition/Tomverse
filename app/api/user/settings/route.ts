@@ -26,7 +26,7 @@ export async function GET(req: Request) {
     try {
         const session = await getServerSession(authOptions);
         if (!session?.user?.id) {
-            return NextResponse.json({ error: "ë¡œê·¸ì¸ì´ í•„ìš”í•©ë‹ˆë‹¤." }, { status: 401 });
+            return NextResponse.json({ error: "Authentication required." }, { status: 401 });
         }
         const userId = session.user.id;
         await consumeApiRateLimit(req, userId, "settings-read", {
@@ -55,8 +55,8 @@ export async function GET(req: Request) {
         const securityResponse = apiSecurityResponse(error);
         if (securityResponse) return securityResponse;
 
-        console.error("ì„¤ì • ì¡°íšŒ ì—ëŸ¬:", error);
-        return NextResponse.json({ error: "ì„¤ì • ì¡°íšŒ ì‹¤íŒ¨" }, { status: 500 });
+        console.error("Failed to load user settings:", error);
+        return NextResponse.json({ error: "Failed to load settings." }, { status: 500 });
     }
 }
 
@@ -64,7 +64,7 @@ export async function POST(req: Request) {
     try {
         const session = await getServerSession(authOptions);
         if (!session?.user?.id) {
-            return NextResponse.json({ error: "ë¡œê·¸ì¸ì´ í•„ìš”í•©ë‹ˆë‹¤." }, { status: 401 });
+            return NextResponse.json({ error: "Authentication required." }, { status: 401 });
         }
         const userId = session.user.id;
         await consumeApiRateLimit(req, userId, "settings-save", {
@@ -96,7 +96,7 @@ export async function POST(req: Request) {
     } catch (error) {
         const securityResponse = apiSecurityResponse(error);
         if (securityResponse) return securityResponse;
-        console.error("ì„¤ì • ì €ìž¥ ì—ëŸ¬:", error);
-        return NextResponse.json({ error: "ì„¤ì • ì €ìž¥ ì‹¤íŒ¨" }, { status: 500 });
+        console.error("Failed to save user settings:", error);
+        return NextResponse.json({ error: "Failed to save settings." }, { status: 500 });
     }
 }

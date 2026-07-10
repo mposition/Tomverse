@@ -82,7 +82,7 @@ export async function GET(
     try {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) {
-        return NextResponse.json({ error: "ë¡œê·¸ì¸ì´ í•„ìš”í•©ë‹ˆë‹¤." }, { status: 401 });
+        return NextResponse.json({ error: "Authentication required." }, { status: 401 });
     }
     const userId = session.user.id;
     await consumeApiRateLimit(req, userId, "conversation-detail", {
@@ -94,7 +94,7 @@ export async function GET(
     const conversationId = params.conversationId;
 
     if (!conversationId) {
-        return NextResponse.json({ error: "ëŒ€í™”ë°© IDê°€ ëˆ„ë½ë˜ì—ˆìŠµë‹ˆë‹¤." }, { status: 400 });
+        return NextResponse.json({ error: "Conversation ID is required." }, { status: 400 });
     }
 
     const existingConv = await prisma.conversation.findUnique({
@@ -103,7 +103,7 @@ export async function GET(
     });
 
     if (!existingConv || existingConv.userId !== userId) {
-        return NextResponse.json({ error: "ì ‘ê·¼ ê¶Œí•œì´ ì—†ìŠµë‹ˆë‹¤." }, { status: 403 });
+        return NextResponse.json({ error: "You do not have access to this conversation." }, { status: 403 });
     }
 
     if (
@@ -156,12 +156,12 @@ export async function GET(
 
     if (!conversation) {
       return NextResponse.json(
-        { error: "ì¡´ìž¬í•˜ì§€ ì•ŠëŠ” ëŒ€í™”ë°©ìž…ë‹ˆë‹¤." },
+        { error: "Conversation not found." },
         { status: 404 }
       );
     }
         if (conversation.userId !== userId) {
-        return NextResponse.json({ error: "ì ‘ê·¼ ê¶Œí•œì´ ì—†ëŠ” íƒ€ì¸ì˜ ëŒ€í™”ë°©ìž…ë‹ˆë‹¤." }, { status: 403 });
+        return NextResponse.json({ error: "You do not have access to this conversation." }, { status: 403 });
     }
 
     const messagePage = await prisma.message.findMany({
@@ -223,9 +223,9 @@ export async function GET(
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
 
-    console.error("âŒ [ë°±ì—”ë“œ] ìƒì„¸ì¡°íšŒ ì—ëŸ¬:", error);
+    console.error("Failed to load conversation details:", error);
     return NextResponse.json(
-      { error: "ëŒ€í™” ë‚´ì—­ì„ ë¶ˆëŸ¬ì˜¤ëŠ”ë° ì‹¤íŒ¨í–ˆìŠµë‹ˆë‹¤." },
+      { error: "Failed to load conversation." },
       { status: 500 }
     );
   }
@@ -238,7 +238,7 @@ export async function PATCH(
     try {
         const session = await getServerSession(authOptions);
         if (!session?.user?.id) {
-            return NextResponse.json({ error: "ë¡œê·¸ì¸ì´ í•„ìš”í•©ë‹ˆë‹¤." }, { status: 401 });
+            return NextResponse.json({ error: "Authentication required." }, { status: 401 });
         }
 
         const userId = session.user.id;
@@ -255,8 +255,8 @@ export async function PATCH(
         const conversationId = params.conversationId;
 
         if (!conversationId) {
-            console.error("âŒ [ë°±ì—”ë“œ PATCH] ëŒ€í™”ë°© IDë¥¼ ì°¾ì„ ìˆ˜ ì—†ìŠµë‹ˆë‹¤. (í´ë”ëª…ì„ í™•ì¸í•˜ì„¸ìš”)");
-            return NextResponse.json({ error: "ëŒ€í™”ë°© ID ëˆ„ë½" }, { status: 400 });
+            console.error("Conversation ID is missing in PATCH route params.");
+            return NextResponse.json({ error: "Conversation ID is required." }, { status: 400 });
         }
 
         const existingConv = await prisma.conversation.findUnique({
@@ -265,10 +265,10 @@ export async function PATCH(
         });
 
         if (!existingConv) {
-            return NextResponse.json({ error: "ì¡´ìž¬í•˜ì§€ ì•ŠëŠ” ëŒ€í™”ë°©ìž…ë‹ˆë‹¤." }, { status: 404 });
+            return NextResponse.json({ error: "Conversation not found." }, { status: 404 });
         }
         if (existingConv.userId !== userId) {
-            return NextResponse.json({ error: "ì ‘ê·¼ ê¶Œí•œì´ ì—†ëŠ” íƒ€ì¸ì˜ ëŒ€í™”ë°©ìž…ë‹ˆë‹¤." }, { status: 403 });
+            return NextResponse.json({ error: "You do not have access to this conversation." }, { status: 403 });
         }
 
         const userSettings = await prisma.userSettings.findUnique({
@@ -334,7 +334,7 @@ export async function PATCH(
                       return NextResponse.json(
                           {
                               success: false,
-                              error: "ë¹„ë°€ë²ˆí˜¸ê°€ ì¼ì¹˜í•˜ì§€ ì•ŠìŠµë‹ˆë‹¤.",
+                              error: "Invalid password.",
                           },
                           { status: 403 }
                       );
@@ -364,7 +364,7 @@ export async function PATCH(
                       return NextResponse.json(
                           {
                               success: false,
-                              error: "ë¹„ë°€ë²ˆí˜¸ê°€ ì¼ì¹˜í•˜ì§€ ì•ŠìŠµë‹ˆë‹¤.",
+                              error: "Invalid password.",
                           },
                           { status: 403 }
                       );
@@ -401,7 +401,7 @@ export async function PATCH(
     }	
 	
     if (Object.keys(updateData).length === 0) {
-      return NextResponse.json({ success: true, message: "ë³€ê²½ì‚¬í•­ ì—†ìŒ" });
+      return NextResponse.json({ success: true, message: "No changes." });
     }	
 	
     const updatedConversation = await prisma.conversation.update({
@@ -453,8 +453,8 @@ export async function PATCH(
     const lockError = lockErrorResponse(error);
     if (lockError) return lockError;
 
-	console.error("âŒ [ë°±ì—”ë“œ] ìˆ˜ì • API ì—ëŸ¬:", error);	  
-    return NextResponse.json({ error: "ìˆ˜ì • ì‹¤íŒ¨" }, { status: 500 });
+	console.error("Failed to update conversation:", error);	  
+    return NextResponse.json({ error: "Failed to update conversation." }, { status: 500 });
   }
 }
 
@@ -462,7 +462,7 @@ export async function DELETE(req: Request, { params }: Params) {
     try {
         const session = await getServerSession(authOptions);
         if (!session?.user?.id) {
-            return NextResponse.json({ error: "ë¡œê·¸ì¸ì´ í•„ìš”í•©ë‹ˆë‹¤." }, { status: 401 });
+            return NextResponse.json({ error: "Authentication required." }, { status: 401 });
         }
 
     const { conversationId } = await params;
@@ -478,10 +478,10 @@ export async function DELETE(req: Request, { params }: Params) {
       });
 
       if (!existingConv) {
-          return NextResponse.json({ error: "ì¡´ìž¬í•˜ì§€ ì•ŠëŠ” ëŒ€í™”ë°©ìž…ë‹ˆë‹¤." }, { status: 404 });
+          return NextResponse.json({ error: "Conversation not found." }, { status: 404 });
       }
       if (existingConv.userId !== userId) {
-          return NextResponse.json({ error: "ì ‘ê·¼ ê¶Œí•œì´ ì—†ëŠ” íƒ€ì¸ì˜ ëŒ€í™”ë°©ìž…ë‹ˆë‹¤." }, { status: 403 });
+          return NextResponse.json({ error: "You do not have access to this conversation." }, { status: 403 });
       }
     logSecurityAuditEvent("conversation.delete", {
       userId,
@@ -528,7 +528,7 @@ export async function DELETE(req: Request, { params }: Params) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
 
-    console.error("âŒ [ë°±ì—”ë“œ] ì‚­ì œ API ì—ëŸ¬:", error);
-    return NextResponse.json({ error: "ì‚­ì œ ì‹¤íŒ¨" }, { status: 500 });
+    console.error("Failed to delete conversation:", error);
+    return NextResponse.json({ error: "Failed to delete conversation." }, { status: 500 });
   }
 }

@@ -3,7 +3,7 @@
 import { Conversation } from "./types";
 import { getModel } from "@/components/chat/types";
 import { AuthButton } from "@/components/auth/AuthButton";
-import { useState, useEffect } from "react";
+import { useCallback, useState, useEffect, useRef } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
 import Link from "next/link";
 import { AlertTriangle, CloudUpload, Crown, Database, Download, Link2Off, Lock, MessageSquare, MoreVertical, Pencil, Search, Send, Share2, ShieldCheck, Sparkles, Trash2, Unlock, X } from "lucide-react";
@@ -53,6 +53,8 @@ export function ChatSidebar({
     const [lockTarget, setLockTarget] = useState<Conversation | null>(null);
     const [lockPassword, setLockPassword] = useState("");
     const [lockError, setLockError] = useState("");
+    const privateModeButtonRef = useRef<HTMLButtonElement | null>(null);
+    const privateNoticeDialogRef = useRef<HTMLDivElement | null>(null);
     const { t } = useLanguage();
     const menuItemBase =
         "flex w-full items-center justify-between whitespace-nowrap rounded px-3 py-2 text-sm transition-colors";
@@ -82,6 +84,31 @@ export function ChatSidebar({
         return `${models[0]} +${models.length - 1}`;
     };
 
+    const closePrivateNotice = useCallback((restoreFocus = true) => {
+        setShowPrivateNotice(false);
+        if (restoreFocus) {
+            requestAnimationFrame(() => privateModeButtonRef.current?.focus());
+        }
+    }, []);
+
+    const getPrivateNoticeFocusableElements = useCallback(() => {
+        const dialog = privateNoticeDialogRef.current;
+        if (!dialog) return [];
+
+        return Array.from(
+            dialog.querySelectorAll<HTMLElement>(
+                [
+                    "button:not([disabled])",
+                    "input:not([disabled])",
+                    "select:not([disabled])",
+                    "textarea:not([disabled])",
+                    "a[href]",
+                    '[tabindex]:not([tabindex="-1"])',
+                ].join(",")
+            )
+        ).filter((element) => element.offsetParent !== null);
+    }, []);
+
     useEffect(() => {
         function handleClickOutside(event: MouseEvent) {
             const target = event.target as HTMLElement;
@@ -95,12 +122,47 @@ export function ChatSidebar({
 
     useEffect(() => {
         if (!showPrivateNotice) return;
-        const handleEscape = (event: KeyboardEvent) => {
-            if (event.key === "Escape") setShowPrivateNotice(false);
+        const animationFrame = requestAnimationFrame(() => {
+            getPrivateNoticeFocusableElements()[0]?.focus();
+        });
+        return () => cancelAnimationFrame(animationFrame);
+    }, [getPrivateNoticeFocusableElements, showPrivateNotice]);
+
+    useEffect(() => {
+        if (!showPrivateNotice) return;
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === "Escape") {
+                event.preventDefault();
+                closePrivateNotice(true);
+                return;
+            }
+
+            if (event.key !== "Tab") return;
+
+            const focusableElements = getPrivateNoticeFocusableElements();
+            if (focusableElements.length === 0) {
+                event.preventDefault();
+                return;
+            }
+
+            const firstElement = focusableElements[0];
+            const lastElement = focusableElements[focusableElements.length - 1];
+            const activeElement = document.activeElement;
+
+            if (event.shiftKey && activeElement === firstElement) {
+                event.preventDefault();
+                lastElement.focus();
+                return;
+            }
+
+            if (!event.shiftKey && activeElement === lastElement) {
+                event.preventDefault();
+                firstElement.focus();
+            }
         };
-        document.addEventListener("keydown", handleEscape);
-        return () => document.removeEventListener("keydown", handleEscape);
-    }, [showPrivateNotice]);
+        document.addEventListener("keydown", handleKeyDown, true);
+        return () => document.removeEventListener("keydown", handleKeyDown, true);
+    }, [closePrivateNotice, getPrivateNoticeFocusableElements, showPrivateNotice]);
 
     return (
         <>
@@ -129,6 +191,7 @@ export function ChatSidebar({
                 </button>
 
                 <button
+                    ref={privateModeButtonRef}
                     onClick={() => {
                         if (isPrivateMode) {
                             onTogglePrivateMode();
@@ -411,11 +474,12 @@ export function ChatSidebar({
                 role="presentation"
                 onMouseDown={(event) => {
                     if (event.target === event.currentTarget) {
-                        setShowPrivateNotice(false);
+                        closePrivateNotice(true);
                     }
                 }}
             >
                 <div
+                    ref={privateNoticeDialogRef}
                     role="dialog"
                     aria-modal="true"
                     aria-labelledby="private-mode-notice-title"
@@ -438,7 +502,7 @@ export function ChatSidebar({
                         </div>
                         <button
                             type="button"
-                            onClick={() => setShowPrivateNotice(false)}
+                            onClick={() => closePrivateNotice(true)}
                             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
                             aria-label={t("auth.cancel")}
                         >
@@ -474,7 +538,7 @@ export function ChatSidebar({
                     <div className="flex justify-end gap-2 border-t border-zinc-200 px-5 py-4 dark:border-zinc-800">
                         <button
                             type="button"
-                            onClick={() => setShowPrivateNotice(false)}
+                            onClick={() => closePrivateNotice(true)}
                             className="rounded-md px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
                         >
                             {t("auth.cancel")}
@@ -482,7 +546,7 @@ export function ChatSidebar({
                         <button
                             type="button"
                             onClick={() => {
-                                setShowPrivateNotice(false);
+                                closePrivateNotice(false);
                                 onTogglePrivateMode();
                             }}
                             className="rounded-md bg-purple-600 px-4 py-2 text-sm font-semibold text-white hover:bg-purple-500"

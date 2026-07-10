@@ -2,7 +2,7 @@
 "use client";
 
 import { signIn, signOut, useSession } from "next-auth/react";
-import { useState, useEffect } from "react";
+import { useCallback, useState, useEffect, useRef } from "react";
 import { ENABLED_MODELS } from "@/components/chat/types";
 import {
     Bot,
@@ -30,12 +30,37 @@ export function AuthButton() {
   const { data: session, status } = useSession();
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [activeSettingsTab, setActiveSettingsTab] = useState<"account" | "preferences" | "data" | "plan">("account");
+    const settingsButtonRef = useRef<HTMLButtonElement | null>(null);
+    const settingsDialogRef = useRef<HTMLDivElement | null>(null);
 
     const { t, lang: globalLang, setLang: setGlobalLang } = useLanguage();
 
     const [theme, setTheme] = useState<"dark" | "light">(APP_DEFAULTS.defaultTheme);
     const [language, setLanguage] = useState<Language>(APP_DEFAULTS.defaultLanguage);
     const [defaultModel, setDefaultModel] = useState<string>(APP_DEFAULTS.defaultModelId);
+
+    const closeSettingsModal = useCallback(() => {
+        setIsModalOpen(false);
+        requestAnimationFrame(() => settingsButtonRef.current?.focus());
+    }, []);
+
+    const getSettingsFocusableElements = useCallback(() => {
+        const dialog = settingsDialogRef.current;
+        if (!dialog) return [];
+
+        return Array.from(
+            dialog.querySelectorAll<HTMLElement>(
+                [
+                    "button:not([disabled])",
+                    "input:not([disabled])",
+                    "select:not([disabled])",
+                    "textarea:not([disabled])",
+                    "a[href]",
+                    '[tabindex]:not([tabindex="-1"])',
+                ].join(",")
+            )
+        ).filter((element) => element.offsetParent !== null);
+    }, []);
 
     useEffect(() => {
         if (isModalOpen && session) {
@@ -51,6 +76,54 @@ export function AuthButton() {
         }
     }, [isModalOpen, session, globalLang]);
 
+    useEffect(() => {
+        if (!isModalOpen) return;
+
+        const animationFrame = requestAnimationFrame(() => {
+            getSettingsFocusableElements()[0]?.focus();
+        });
+
+        return () => cancelAnimationFrame(animationFrame);
+    }, [getSettingsFocusableElements, isModalOpen]);
+
+    useEffect(() => {
+        if (!isModalOpen) return;
+
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === "Escape") {
+                event.preventDefault();
+                closeSettingsModal();
+                return;
+            }
+
+            if (event.key !== "Tab") return;
+
+            const focusableElements = getSettingsFocusableElements();
+            if (focusableElements.length === 0) {
+                event.preventDefault();
+                return;
+            }
+
+            const firstElement = focusableElements[0];
+            const lastElement = focusableElements[focusableElements.length - 1];
+            const activeElement = document.activeElement;
+
+            if (event.shiftKey && activeElement === firstElement) {
+                event.preventDefault();
+                lastElement.focus();
+                return;
+            }
+
+            if (!event.shiftKey && activeElement === lastElement) {
+                event.preventDefault();
+                firstElement.focus();
+            }
+        };
+
+        document.addEventListener("keydown", handleKeyDown, true);
+        return () => document.removeEventListener("keydown", handleKeyDown, true);
+    }, [closeSettingsModal, getSettingsFocusableElements, isModalOpen]);
+
     const handleSaveSettings = async () => {
         try {
             const res = await fetch("/api/user/settings", {
@@ -60,7 +133,7 @@ export function AuthButton() {
             });
 
             if (res.ok) {
-                setIsModalOpen(false);
+                closeSettingsModal();
                 dispatchAppToast(t("auth.saveMessage"), "success");
 
                 setGlobalLang(language);
@@ -113,6 +186,7 @@ export function AuthButton() {
         </div>
         <div className="grid grid-cols-2 gap-2 pt-1">
             <button
+                ref={settingsButtonRef}
                 type="button"
                 onClick={() => setIsModalOpen(true)}
                 className="flex h-9 cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-zinc-200 bg-zinc-50 text-xs font-semibold text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-800 dark:bg-zinc-800/70 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white"
@@ -133,6 +207,7 @@ export function AuthButton() {
             {isModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
                     <div
+                        ref={settingsDialogRef}
                         className="flex max-h-[calc(100dvh-2rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white text-zinc-900 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
                         role="dialog"
                         aria-modal="true"
@@ -152,7 +227,7 @@ export function AuthButton() {
                             </div>
                             <button
                                 type="button"
-                                onClick={() => setIsModalOpen(false)}
+                                onClick={closeSettingsModal}
                                 className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-white"
                                 aria-label={t("auth.cancel")}
                             >
@@ -324,7 +399,7 @@ export function AuthButton() {
                         <div className="flex justify-end gap-2 border-t border-zinc-200 px-5 py-4 dark:border-zinc-800">
                             <button
                                 type="button"
-                                onClick={() => setIsModalOpen(false)}
+                                onClick={closeSettingsModal}
                                 className="rounded-lg px-4 py-2 text-sm font-semibold text-zinc-600 transition-colors hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
                             >
                                 {t("auth.cancel")}
