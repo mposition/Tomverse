@@ -5,6 +5,17 @@ import { signIn, signOut, useSession } from "next-auth/react";
 import { useState, useEffect } from "react";
 import { ENABLED_MODELS } from "@/components/chat/types";
 import {
+    Bot,
+    Check,
+    Download,
+    Languages,
+    LogOut,
+    Palette,
+    Settings,
+    UserRound,
+    X,
+} from "lucide-react";
+import {
     useLanguage,
     type Language,
 } from "@/components/LanguageProvider";
@@ -70,95 +81,158 @@ export function AuthButton() {
     };
 
   if (status === "loading") {
-      return <div className="text-sm text-zinc-400">{ t("auth.loading") }</div>;
+      return (
+          <div className="w-full rounded-xl border border-zinc-200 bg-white p-3 text-sm text-zinc-400 dark:border-zinc-800 dark:bg-zinc-900">
+              {t("auth.loading")}
+          </div>
+      );
   }
 
 // 1️⃣ 로그인 세션이 있는 경우 (Signed as 이메일 표시)
   if (session && session.user) {
     return (
-      <div className="flex flex-col gap-2 w-full p-3 rounded-xl bg-zinc-900 border border-zinc-800">
-        <div className="flex items-center gap-2.5 min-w-0">
-          {session.user.image && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img 
-              src={session.user.image} 
-              alt="Profile" 
-              className="w-7 h-7 rounded-full border border-zinc-700 flex-shrink-0" 
-            />
-          )}
+      <div className="flex w-full flex-col gap-2 rounded-2xl border border-zinc-200 bg-white p-3 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/80">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-zinc-100 text-zinc-500 ring-1 ring-zinc-200 dark:bg-zinc-800 dark:ring-zinc-700">
+            {session.user.image ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={session.user.image}
+                alt={t("auth.profileImage")}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <UserRound className="h-4 w-4" />
+            )}
+          </span>
           <div className="flex flex-col min-w-0 flex-1">
-            <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">Signed as</span>
-            <span className="text-xs font-semibold text-zinc-200 truncate">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">{t("auth.signedAs")}</span>
+            <span className="truncate text-xs font-semibold text-zinc-800 dark:text-zinc-100">
               {session.user.email}
             </span>
           </div>
         </div>
-        <button
-          onClick={() => signOut()}
-          className="cursor-pointer w-full mt-1 py-1.5 text-xs font-medium text-zinc-400 bg-zinc-800 hover:bg-zinc-700 hover:text-zinc-200 rounded-lg transition-colors"
-        >
-                {t("auth.singedOut")}
-        </button>
-          {/* 추후 설정 모달이나 관리 페이지 라우팅용 버튼 */}
-          <button 
+        <div className="grid grid-cols-2 gap-2 pt-1">
+            <button
+                type="button"
                 onClick={() => setIsModalOpen(true)}
-                className=" w-full mt-1 py-1.5 text-xs font-medium text-zinc-400 bg-zinc-800 hover:bg-zinc-700 hover:text-zinc-200 rounded-lg transition-colors"
+                className="flex h-9 cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-zinc-200 bg-zinc-50 text-xs font-semibold text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-800 dark:bg-zinc-800/70 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white"
             >
-          ⚙️ {t("auth.setting")}
-            </button>		
+                <Settings className="h-3.5 w-3.5" />
+                {t("auth.setting")}
+            </button>
+            <button
+                type="button"
+                onClick={() => signOut()}
+                className="flex h-9 cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-zinc-200 bg-zinc-50 text-xs font-semibold text-zinc-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:border-zinc-800 dark:bg-zinc-800/70 dark:text-zinc-400 dark:hover:bg-red-950/30 dark:hover:text-red-300"
+            >
+                <LogOut className="h-3.5 w-3.5" />
+                {t("auth.singedOut")}
+            </button>
+        </div>
 
             {/* 💡 신규 추가되는 안전한 클라이언트 사이드 설정 모달 */}
             {isModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-                    <div className="w-80 rounded-2xl bg-zinc-900 border border-zinc-800 p-5 text-zinc-100 shadow-xl">
-                        <h3 className="text-sm font-bold mb-4">🔧 사용자 설정</h3>
-                        {/* 테마 선택 */}
-                        <div className="mb-3">
-                            <label className="text-xs text-zinc-400 block mb-1">테마</label>
-                            <select value={theme} onChange={(e) => setTheme(e.target.value as "dark" | "light")} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-1.5 text-xs outline-none text-zinc-200">
-                                <option value="dark">어두운 테마 (Dark)</option>
-                                <option value="light">밝은 테마 (Light)</option>
-                            </select>
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+                    <div className="w-full max-w-md overflow-hidden rounded-2xl border border-zinc-200 bg-white text-zinc-900 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100">
+                        <div className="flex items-start justify-between gap-4 border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
+                            <div className="flex min-w-0 items-center gap-3">
+                                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-500/10 text-blue-500">
+                                    <Settings className="h-5 w-5" />
+                                </span>
+                                <div>
+                                    <h3 className="text-base font-bold">{t("auth.userSettings")}</h3>
+                                    <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                                        {session.user.email}
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setIsModalOpen(false)}
+                                className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-white"
+                                aria-label={t("auth.cancel")}
+                            >
+                                <X className="h-4 w-4" />
+                            </button>
                         </div>
 
-                        {/* 언어 선택 */}
-                        <div className="mb-4">
-                            <label className="text-xs text-zinc-400 block mb-1">언어</label>
-                            <select value={language} onChange={(e) => setLanguage(e.target.value as "en" | "zh" | "ko")} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-1.5 text-xs outline-none text-zinc-200">
-                                <option value="en">English</option>
-                                <option value="zh">中文</option>
-                                <option value="ko">한국어</option>
-                            </select>
+                        <div className="space-y-3 px-5 py-5">
+                            <label className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950/60">
+                                <Palette className="h-4 w-4 shrink-0 text-zinc-500" />
+                                <span className="min-w-0 flex-1">
+                                    <span className="block text-xs font-semibold text-zinc-500">{t("auth.theme")}</span>
+                                    <select
+                                        value={theme}
+                                        onChange={(e) => setTheme(e.target.value as "dark" | "light")}
+                                        className="mt-1 w-full cursor-pointer bg-transparent text-sm font-semibold text-zinc-900 outline-none dark:text-zinc-100"
+                                    >
+                                        <option value="dark">{t("auth.darkTheme")}</option>
+                                        <option value="light">{t("auth.lightTheme")}</option>
+                                    </select>
+                                </span>
+                            </label>
+
+                            <label className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950/60">
+                                <Languages className="h-4 w-4 shrink-0 text-zinc-500" />
+                                <span className="min-w-0 flex-1">
+                                    <span className="block text-xs font-semibold text-zinc-500">{t("auth.language")}</span>
+                                    <select
+                                        value={language}
+                                        onChange={(e) => setLanguage(e.target.value as "en" | "zh" | "ko")}
+                                        className="mt-1 w-full cursor-pointer bg-transparent text-sm font-semibold text-zinc-900 outline-none dark:text-zinc-100"
+                                    >
+                                        <option value="en">{t("auth.languageEnglish")}</option>
+                                        <option value="zh">{t("auth.languageChinese")}</option>
+                                        <option value="ko">{t("auth.languageKorean")}</option>
+                                    </select>
+                                </span>
+                            </label>
+
+                            <label className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950/60">
+                                <Bot className="h-4 w-4 shrink-0 text-zinc-500" />
+                                <span className="min-w-0 flex-1">
+                                    <span className="block text-xs font-semibold text-zinc-500">{t("auth.defaultModel")}</span>
+                                    <select
+                                        value={defaultModel}
+                                        onChange={(e) => setDefaultModel(e.target.value)}
+                                        className="mt-1 w-full cursor-pointer bg-transparent text-sm font-semibold text-zinc-900 outline-none dark:text-zinc-100"
+                                    >
+                                        {ENABLED_MODELS.map((model) => (
+                                            <option key={model.id} value={model.id}>
+                                                {model.icon} {model.name} · {model.tier}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </span>
+                            </label>
+
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    window.location.href = "/api/conversations/export-all";
+                                }}
+                                className="flex w-full items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-3 text-sm font-semibold text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950/60 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                            >
+                                <Download className="h-4 w-4" />
+                                {t("auth.downloadAllTxt")}
+                            </button>
                         </div>
 
-                        {/* 💡 AVAILABLE_MODELS 드롭다운 연동 추가 피처 */}
-                        <div className="mb-4">
-                            <label className="text-xs text-zinc-400 block mb-1">{t("sidebar.defaultModel")}</label>
-                            <select value={defaultModel} onChange={(e) => setDefaultModel(e.target.value)} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-1.5 text-xs outline-none text-zinc-200 cursor-pointer">
-                                {ENABLED_MODELS.map((model) => (
-                                    <option key={model.id} value={model.id}>
-                                        {model.icon} {model.name} · {model.tier}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-
-                        <button
-                            type="button"
-                            onClick={() => {
-                                window.location.href = "/api/conversations/export-all";
-                            }}
-                            className="w-full rounded-lg bg-zinc-800 px-3 py-2 text-xs text-zinc-200 hover:bg-zinc-700"
-                        >
-                            {t("sidebar.downloadAllTxt")}
-                        </button>
-
-                        {/* 하단 제어 버튼 (서버 새로고침 없는 안전한 방식) */}
-                        <div className="flex justify-end gap-2 mt-5">
-                            <button onClick={() => setIsModalOpen(false)} className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-medium transition-colors">
+                        <div className="flex justify-end gap-2 border-t border-zinc-200 px-5 py-4 dark:border-zinc-800">
+                            <button
+                                type="button"
+                                onClick={() => setIsModalOpen(false)}
+                                className="rounded-lg px-4 py-2 text-sm font-semibold text-zinc-600 transition-colors hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                            >
                                 {t("auth.cancel")}
                             </button>
-                            <button onClick={handleSaveSettings} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-medium transition-colors">
+                            <button
+                                type="button"
+                                onClick={handleSaveSettings}
+                                className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-500"
+                            >
+                                <Check className="h-4 w-4" />
                                 {t("auth.ok")}
                             </button>
                         </div>
@@ -173,7 +247,7 @@ export function AuthButton() {
   return (
     <button
       onClick={() => signIn()} 
-      className="cursor-pointer w-full px-4 py-2.5 text-sm font-bold text-white bg-gradient-to-r from-indigo-600 to-blue-600 rounded-xl hover:from-indigo-500 hover:to-blue-500 transition-all shadow-lg"
+      className="cursor-pointer w-full rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-blue-950/20 transition-all hover:bg-blue-500"
     >
       {t("auth.login")}
     </button>
