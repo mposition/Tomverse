@@ -306,6 +306,8 @@ export function ChatApp({ modelId, initialConversationId = null, promptPayload, 
         const requestError = new Error(`Chat request failed: ${response.status}`);
         (requestError as Error & { traceId?: string }).traceId =
           requestTraceId || undefined;
+        (requestError as Error & { publicMessage?: string }).publicMessage =
+          typeof errorBody?.error === "string" ? errorBody.error : undefined;
         throw requestError;
       }
 
@@ -335,7 +337,7 @@ export function ChatApp({ modelId, initialConversationId = null, promptPayload, 
     } catch (error: unknown) {
       const requestError =
         error && typeof error === "object"
-          ? (error as { name?: unknown; traceId?: unknown })
+          ? (error as { name?: unknown; traceId?: unknown; publicMessage?: unknown })
           : {};
       if (requestError.name === "AbortError") {
         setAssistantMessage(
@@ -353,7 +355,7 @@ export function ChatApp({ modelId, initialConversationId = null, promptPayload, 
         });
         setAssistantMessage(
           assistantMessageId,
-          `${t("chat.responseError")}${
+          `${typeof requestError.publicMessage === "string" ? requestError.publicMessage : t("chat.responseError")}${
             traceId ? `\n${t("chat.traceId")}: ${traceId}` : ""
           }`,
           "error"

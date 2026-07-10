@@ -1,4 +1,4 @@
-import { streamText, type ModelMessage } from "ai";
+import { streamText, type FilePart, type ModelMessage } from "ai";
 import { openai, createOpenAI } from "@ai-sdk/openai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { google } from "@ai-sdk/google";
@@ -180,6 +180,13 @@ const isImageAttachmentType = (
     mediaType: string
 ): mediaType is "image/png" | "image/jpeg" | "image/webp" =>
     IMAGE_ATTACHMENT_TYPES.has(mediaType);
+const PROVIDERS_WITH_BINARY_ATTACHMENT_SUPPORT = new Set<AiModel["provider"]>([
+    "openai",
+    "anthropic",
+    "google",
+]);
+const modelSupportsBinaryAttachments = (model: AiModel) =>
+    PROVIDERS_WITH_BINARY_ATTACHMENT_SUPPORT.has(model.provider);
 const GOOGLE_EXPORT_TYPES: Record<
     string,
     { mediaType: string; extension: string; kind: "file" | "text" }
@@ -681,12 +688,7 @@ export async function POST(req: Request) {
                 Array.isArray(msg.attachments) ? msg.attachments : []
             ) as IncomingAttachment[];
             const textAttachments: string[] = [];
-            const fileParts: Array<{
-                type: "file";
-                data: string;
-                mediaType: string;
-                filename: string;
-            }> = [];
+            const fileParts: FilePart[] = [];
 
             for (const attachment of attachments) {
                 if (
@@ -854,13 +856,29 @@ export async function POST(req: Request) {
                         `[Attached file: ${attachment.name}]\n${attachmentData}`
                     );
                 } else {
+                    const binaryData =
+                        attachmentBuffer || Buffer.from(attachmentData, "base64");
                     fileParts.push({
                         type: "file",
-                        data: attachmentData,
+                        data: {
+                            type: "data",
+                            data: new Uint8Array(binaryData),
+                        },
                         mediaType: attachment.mediaType,
                         filename: attachment.name,
                     });
                 }
+            }
+
+            if (
+                fileParts.length > 0 &&
+                !modelSupportsBinaryAttachments(modelConfig)
+            ) {
+                throw new ChatAccessError(
+                    400,
+                    "ATTACHMENT_MODEL_UNSUPPORTED",
+                    "선택한 모델은 이미지/PDF 첨부파일을 지원하지 않습니다. GPT, Claude, Gemini 계열 모델을 선택하거나 첨부파일 없이 다시 시도해주세요."
+                );
             }
 
             if (textAttachments.length === 0 && fileParts.length === 0) {
