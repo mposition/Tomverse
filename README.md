@@ -83,12 +83,21 @@ TRUSTED_PROXY_IP_HEADER=x-real-ip
 Railway sets `X-Real-IP` at its trusted edge, so `x-real-ip` is the secure
 default. Do not trust `X-Forwarded-For` directly.
 
+Production requests are restricted to the canonical host by default. Add extra
+hosts only when you intentionally serve the same deployment from another domain:
+
+```text
+PUBLIC_APP_URL=https://tomverse.app
+ALLOWED_REQUEST_HOSTS=tomverse.app
+```
+
 When Cloudflare proxying is enabled, remove the public Railway-generated domain
 and configure a secret request header at Cloudflare:
 
 ```text
 TRUSTED_PROXY_IP_HEADER=cf-connecting-ip
 CLOUDFLARE_ORIGIN_SECRET=<random value with at least 32 characters>
+REQUIRE_CLOUDFLARE_ORIGIN_SECRET=true
 ```
 
 Cloudflare must overwrite `X-Tomverse-Origin-Verify` with that secret before

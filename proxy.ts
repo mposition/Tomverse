@@ -1,7 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createStrictCsp } from "@/lib/csp";
+import {
+  hasRequiredOriginSecret,
+  isAllowedRequestHost,
+} from "@/lib/originProtection";
+
+const blockedOriginResponse = () =>
+  new NextResponse("Misdirected Request", {
+    status: 421,
+    headers: {
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
 
 export function proxy(request: NextRequest) {
+  if (
+    !isAllowedRequestHost(request.headers.get("host")) ||
+    !hasRequiredOriginSecret(request.headers)
+  ) {
+    return blockedOriginResponse();
+  }
+
   const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
   const strictCsp = createStrictCsp(nonce);
   const enforce = process.env.CSP_MODE === "enforce";
@@ -35,7 +55,7 @@ export const config = {
   matcher: [
     {
       source:
-        "/((?!api|_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml).*)",
+        "/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml).*)",
       missing: [
         { type: "header", key: "next-router-prefetch" },
         { type: "header", key: "purpose", value: "prefetch" },
