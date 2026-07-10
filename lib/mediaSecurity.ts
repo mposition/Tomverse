@@ -6,6 +6,8 @@ const MEDIA_PARSE_TIMEOUT_MS = 12_000;
 const MAX_IMAGE_PIXELS = 40_000_000;
 const MAX_IMAGE_DIMENSION = 16_384;
 const MAX_PDF_PAGES = 500;
+const PDF_HEADER_SCAN_BYTES = 1_024;
+const PDF_TRAILER_SCAN_BYTES = 16_384;
 
 const IMAGE_SIGNATURES: Record<string, (buffer: Buffer) => boolean> = {
     "image/png": (buffer) =>
@@ -87,7 +89,7 @@ const { parentPort, workerData } = require("node:worker_threads");
             disableWorker: true,
             isEvalSupported: false,
             useSystemFonts: false,
-            stopAtErrors: true,
+            stopAtErrors: false,
         });
         document = await loadingTask.promise;
         if (
@@ -98,11 +100,8 @@ const { parentPort, workerData } = require("node:worker_threads");
             throw new Error("PDF page count is invalid.");
         }
 
-        for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
-            const page = await document.getPage(pageNumber);
-            await page.getOperatorList();
-            page.cleanup();
-        }
+        const firstPage = await document.getPage(1);
+        firstPage.cleanup();
         await document.destroy();
         parentPort.postMessage({ ok: true });
     } catch {
@@ -189,11 +188,14 @@ export async function normalizeImageSafely(
 }
 
 export async function validatePdfSafely(buffer: Buffer) {
-    const header = buffer.subarray(0, 8).toString("ascii");
-    const tail = buffer.subarray(Math.max(0, buffer.length - 2_048));
+    const headerWindow = buffer
+        .subarray(0, Math.min(buffer.length, PDF_HEADER_SCAN_BYTES))
+        .toString("latin1");
+    const tail = buffer.subarray(
+        Math.max(0, buffer.length - PDF_TRAILER_SCAN_BYTES)
+    );
     if (
-        !/^%PDF-(1\.[0-7]|2\.0)/.test(header) ||
-        !tail.includes(Buffer.from("startxref")) ||
+        !/%PDF-(1\.[0-7]|2\.0)/.test(headerWindow) ||
         !tail.includes(Buffer.from("%%EOF"))
     ) {
         throw new Error("The PDF signature or trailer is invalid.");
