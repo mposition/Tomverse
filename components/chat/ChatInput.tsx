@@ -806,14 +806,15 @@ export function ChatInput({
       <div className="shrink-0 border-t border-zinc-200 bg-zinc-50/95 px-2 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] transition-colors dark:border-zinc-800 dark:bg-zinc-950 md:px-6 md:py-3 md:pb-3">
           <div className="mx-auto max-w-4xl rounded-3xl border border-zinc-200 bg-white p-2.5 shadow-lg shadow-zinc-200/50 dark:border-zinc-800 dark:bg-zinc-900 dark:shadow-black/20 md:rounded-2xl md:p-3">
           {attachments.length > 0 && (
-            <div className="mb-2 flex gap-2 overflow-x-auto pb-1 md:mb-3 md:flex-wrap md:overflow-visible md:pb-0">
+            <div className="mb-2 rounded-2xl bg-zinc-50 p-1.5 dark:bg-zinc-950/70 md:mb-3 md:bg-transparent md:p-0">
+            <div className="flex gap-2 overflow-x-auto pb-1 md:flex-wrap md:overflow-visible md:pb-0">
               {attachments.map((attachment) => (
                 <div
                   key={attachment.id}
                   className={
                     attachment.data
-                      ? "relative h-16 w-16 shrink-0 overflow-hidden rounded-xl border border-zinc-200 bg-zinc-100 shadow-sm dark:border-zinc-700 dark:bg-zinc-900 md:h-20 md:w-20"
-                      : "relative flex h-14 min-w-48 max-w-60 shrink-0 items-center gap-3 rounded-xl border border-zinc-200 bg-zinc-50 py-2 pl-2 pr-8 text-zinc-700 shadow-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 md:h-16 md:min-w-52 md:max-w-64"
+                      ? "relative h-14 w-14 shrink-0 overflow-hidden rounded-xl border border-zinc-200 bg-zinc-100 shadow-sm dark:border-zinc-700 dark:bg-zinc-900 md:h-20 md:w-20"
+                      : "relative flex h-14 min-w-44 max-w-56 shrink-0 items-center gap-2.5 rounded-xl border border-zinc-200 bg-white py-2 pl-2 pr-8 text-zinc-700 shadow-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 md:h-16 md:min-w-52 md:max-w-64"
                   }
                 >
                   {attachment.data ? (
@@ -853,6 +854,7 @@ export function ChatInput({
                   </button>
                 </div>
               ))}
+            </div>
             </div>
           )}
           <div className="flex flex-wrap items-center gap-2">
@@ -937,8 +939,9 @@ export function ChatInput({
               role="dialog"
               aria-modal="false"
               aria-label={menuView === "models" ? t("chat.modelSelect") : t("chat.moreActions")}
-              className="fixed inset-x-2 bottom-[calc(6.5rem+env(safe-area-inset-bottom))] z-50 flex max-h-[min(32rem,calc(100dvh-9rem))] flex-col overflow-hidden rounded-3xl border border-zinc-200 bg-white p-2 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900 md:absolute md:inset-x-auto md:bottom-12 md:left-0 md:max-h-[calc(100dvh-8rem)] md:w-[min(24rem,calc(100vw-1.5rem))] md:rounded-2xl"
+              className="fixed inset-x-2 bottom-[calc(6.5rem+env(safe-area-inset-bottom))] z-50 flex max-h-[min(34rem,calc(100dvh-8rem))] flex-col overflow-hidden rounded-3xl border border-zinc-200 bg-white p-2 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900 md:absolute md:inset-x-auto md:bottom-12 md:left-0 md:max-h-[calc(100dvh-8rem)] md:w-[min(24rem,calc(100vw-1.5rem))] md:rounded-2xl"
             >
+              <div className="mx-auto mb-2 mt-0.5 h-1 w-10 rounded-full bg-zinc-300 dark:bg-zinc-700 md:hidden" aria-hidden="true" />
               <div className="mb-2 flex items-center justify-between border-b border-zinc-200 px-2 pb-2 pt-1 dark:border-zinc-800 md:hidden">
                 <div>
                   <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">

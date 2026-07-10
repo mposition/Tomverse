@@ -138,6 +138,7 @@ export default function Home() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const { data: session, status } = useSession();
   const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const [isViewportReady, setIsViewportReady] = useState(false);
 
   const isSending = false;
   const [focusToken, setFocusToken] = useState(0);
@@ -172,7 +173,10 @@ export default function Home() {
 
   useEffect(() => {
     const mediaQuery = window.matchMedia("(max-width: 767px)");
-    const updateViewport = () => setIsMobileViewport(mediaQuery.matches);
+    const updateViewport = () => {
+      setIsMobileViewport(mediaQuery.matches);
+      setIsViewportReady(true);
+    };
 
     updateViewport();
     mediaQuery.addEventListener("change", updateViewport);
@@ -952,7 +956,11 @@ export default function Home() {
 
   return (
     <>
-      {isMobileViewport ? (
+      {!isViewportReady ? (
+        <main className="flex h-screen items-center justify-center bg-white text-zinc-500 dark:bg-zinc-950 dark:text-zinc-400">
+          <span className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+        </main>
+      ) : isMobileViewport ? (
         <MobileChatShell
           conversations={blendedConversations}
           currentChatId={currentChatId}

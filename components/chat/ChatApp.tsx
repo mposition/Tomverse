@@ -32,6 +32,10 @@ type ChatAppProps = {
   isPanelDisabled?: boolean;
   isGuestMode?: boolean;
   hideModelOnlyInput?: boolean;
+  onStatusChange?: (
+    modelId: string,
+    status: "idle" | "loading" | "responding" | "error" | "paused"
+  ) => void;
 };
 
 export function ChatApp({
@@ -41,6 +45,7 @@ export function ChatApp({
   isPanelDisabled = false,
   isGuestMode = false,
   hideModelOnlyInput = false,
+  onStatusChange,
 }: ChatAppProps) {
   const [isMessagesLoaded, setIsMessagesLoaded] = useState(false);
   const { data: session, status } = useSession();
@@ -69,6 +74,23 @@ export function ChatApp({
     const loadedChatIdRef = useRef<string | null>(null);
 
   const isPrivate = initialConversationId === "private-chat";
+
+  useEffect(() => {
+    if (isPanelDisabled) {
+      onStatusChange?.(modelId, "paused");
+      return;
+    }
+
+    if (isSending) {
+      onStatusChange?.(modelId, "responding");
+      return;
+    }
+
+    const hasError = messages.some(
+      (message) => message.role === "assistant" && message.status === "error"
+    );
+    onStatusChange?.(modelId, hasError ? "error" : "idle");
+  }, [isPanelDisabled, isSending, messages, modelId, onStatusChange]);
 
   const setAssistantMessage = useCallback((id: string, content: string, status?: Message["status"]) => {
     setMessages((prev) =>
