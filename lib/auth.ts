@@ -1,18 +1,26 @@
 import { NextAuthOptions } from "next-auth";
-import type { Adapter } from "next-auth/adapters";
+import type { Adapter, AdapterAccount } from "next-auth/adapters";
 import GoogleProvider from "next-auth/providers/google";
 import NaverProvider from "next-auth/providers/naver";
 import AzureADProvider from "next-auth/providers/azure-ad";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/prisma";
+import { encryptOAuthAccountTokens } from "@/lib/oauthTokenCrypto";
 import { logAuthAuditEvent } from "@/lib/securityAudit";
 
 const SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
 const SESSION_UPDATE_AGE_SECONDS = 24 * 60 * 60;
+const baseAdapter = PrismaAdapter(prisma) as Adapter;
+const encryptedTokenAdapter: Adapter = {
+    ...baseAdapter,
+    async linkAccount(account: AdapterAccount) {
+        return baseAdapter.linkAccount?.(encryptOAuthAccountTokens(account));
+    },
+};
 
 export const authOptions: NextAuthOptions = {
     secret: process.env.NEXTAUTH_SECRET,
-    adapter: PrismaAdapter(prisma) as Adapter,
+    adapter: encryptedTokenAdapter,
     providers: [
         GoogleProvider({
             clientId: process.env.GOOGLE_ID as string,

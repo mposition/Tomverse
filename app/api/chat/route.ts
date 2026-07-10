@@ -598,11 +598,11 @@ export async function POST(req: Request) {
         for (const attachment of requestAttachments) {
             const hasObjectKey = typeof attachment?.objectKey === "string";
             const hasInlineData = typeof attachment?.data === "string";
-            if (hasObjectKey && hasInlineData) {
+            if (hasInlineData) {
                 throw new ChatAccessError(
                     400,
-                    "AMBIGUOUS_ATTACHMENT_SOURCE",
-                    "An attachment must have only one data source."
+                    "INLINE_ATTACHMENT_FORBIDDEN",
+                    "Attachments must be uploaded before sending."
                 );
             }
             if (hasObjectKey) {
@@ -737,20 +737,6 @@ export async function POST(req: Request) {
                         attachment.kind === "text"
                             ? attachmentBuffer.toString("utf8")
                             : attachmentBuffer.toString("base64");
-                } else if (typeof attachment.data === "string") {
-                    attachmentData = attachment.data;
-                    if (attachment.kind === "text") {
-                        attachmentBytes = Buffer.byteLength(
-                            attachment.data,
-                            "utf8"
-                        );
-                    } else {
-                        attachmentBuffer = Buffer.from(
-                            attachment.data,
-                            "base64"
-                        );
-                        attachmentBytes = attachmentBuffer.byteLength;
-                    }
                 } else {
                     throw new Error("Attachment data is missing.");
                 }
