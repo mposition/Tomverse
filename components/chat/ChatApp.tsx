@@ -9,6 +9,21 @@ import { useTurnstile } from "@/components/chat/useTurnstile";
 
 const processedPromptKeys = new Set<string>();
 
+const toChatRequestMessage = (message: Message): Message => {
+  if (!message.attachments?.length) return message;
+
+  return {
+    ...message,
+    attachments: message.attachments.map((attachment) => {
+      if (!attachment.objectKey) return attachment;
+
+      const requestAttachment = { ...attachment };
+      delete requestAttachment.data;
+      return requestAttachment;
+    }),
+  };
+};
+
 type ChatAppProps = {
   modelId: string; // 💡 부모가 내려준 정체성(modelId)을 받습니다.
   initialConversationId?: string | null;
@@ -283,7 +298,7 @@ export function ChatApp({ modelId, initialConversationId = null, promptPayload, 
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          messages: [...messages, userMessage],
+          messages: [...messages, userMessage].map(toChatRequestMessage),
           modelId: modelId,
           ...(turnstileToken ? { turnstileToken } : {}),
           ...(!isPrivate && !isGuestMode
