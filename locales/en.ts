@@ -122,6 +122,7 @@ export const en = {
         panelPaused: "Paused",
         availableModel: "Available",
         unavailableModel: "Unavailable",
+        trySimilarModel: "Try similar:",
         favoriteModels: "Favorites",
         recentModels: "Recent",
         attachmentGuideTitle: "Supported attachments",
@@ -137,6 +138,7 @@ export const en = {
         promptSummarizeDocument: "Summarize this document",
         promptCompareModels: "Compare these models",
         promptReviewCode: "Review this code",
+        promptDraftEmail: "Draft an email",
         promptAnalyzeImage: "Analyze this image",
     },
     share: {
@@ -178,6 +180,7 @@ export const en = {
         placeholder: "What happened?",
         tracePlaceholder: "Trace ID, if shown",
         autoContext: "Auto included:",
+        attachments: "attachments",
         send: "Send",
         sent: "Feedback sent. Thank you.",
         failed: "Feedback could not be sent.",

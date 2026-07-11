@@ -113,6 +113,7 @@ export function DesktopChatShell({
         isPrivateMode={isPrivateMode}
         onTogglePrivateMode={onTogglePrivateMode}
         currentModelId={selectedModels[0]}
+        attachmentCount={attachments.length}
       />
 
       <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">

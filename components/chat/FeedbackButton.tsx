@@ -8,9 +8,11 @@ import { useLanguage } from "@/components/LanguageProvider";
 export function FeedbackButton({
   currentModelId,
   currentPlan,
+  attachmentCount = 0,
 }: {
   currentModelId?: string | null;
   currentPlan?: string | null;
+  attachmentCount?: number;
 }) {
   const { t } = useLanguage();
   const [open, setOpen] = useState(false);
@@ -32,6 +34,8 @@ export function FeedbackButton({
           traceId: traceId || undefined,
           modelId: currentModelId || undefined,
           plan: currentPlan || undefined,
+          hasAttachments: attachmentCount > 0,
+          attachmentCount,
           path: window.location.pathname,
           userAgent: navigator.userAgent,
         }),
@@ -66,7 +70,11 @@ export function FeedbackButton({
                 <h2 className="text-lg font-black text-zinc-950 dark:text-white">{t("feedback.title")}</h2>
                 <p className="mt-1 text-sm text-zinc-500">{t("feedback.description")}</p>
               </div>
-              <button type="button" onClick={() => setOpen(false)} className="rounded-lg p-2 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-900">
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="rounded-lg p-2 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-900"
+              >
                 <X className="h-4 w-4" />
               </button>
             </div>
@@ -94,7 +102,7 @@ export function FeedbackButton({
               className="mt-3 h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm outline-none focus:border-blue-500 dark:border-zinc-800 dark:bg-zinc-900"
             />
             <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-400">
-              {t("feedback.autoContext")} {currentModelId || "-"} · {currentPlan || "-"} · {typeof window !== "undefined" ? window.location.pathname : "-"}
+              {t("feedback.autoContext")} {currentModelId || "-"} / {currentPlan || "-"} / {t("feedback.attachments")} {attachmentCount} / {typeof window !== "undefined" ? window.location.pathname : "-"}
             </div>
             <button
               type="button"

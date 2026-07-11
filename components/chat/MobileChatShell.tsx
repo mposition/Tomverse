@@ -490,6 +490,7 @@ export function MobileChatShell({
               isPrivateMode={isPrivateMode}
               onTogglePrivateMode={onTogglePrivateMode}
               currentModelId={resolvedActiveModelId}
+              attachmentCount={attachments.length}
             />
             <button
               ref={drawerCloseButtonRef}

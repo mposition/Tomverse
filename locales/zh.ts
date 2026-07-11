@@ -122,6 +122,7 @@ export const zh = {
         panelPaused: "已暂停",
         availableModel: "可用",
         unavailableModel: "不可用",
+        trySimilarModel: "可尝试类似模型：",
         favoriteModels: "收藏",
         recentModels: "最近使用",
         attachmentGuideTitle: "支持的附件",
@@ -137,6 +138,7 @@ export const zh = {
         promptSummarizeDocument: "总结这份文档",
         promptCompareModels: "比较这些模型",
         promptReviewCode: "审查这段代码",
+        promptDraftEmail: "撰写邮件",
         promptAnalyzeImage: "分析这张图片",
     },
     share: {
@@ -178,6 +180,7 @@ export const zh = {
         placeholder: "发生了什么？",
         tracePlaceholder: "如有追踪 ID，请输入",
         autoContext: "自动包含：",
+        attachments: "附件",
         send: "发送",
         sent: "反馈已发送，谢谢。",
         failed: "反馈发送失败。",

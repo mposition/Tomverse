@@ -122,6 +122,7 @@ export const ko = {
         panelPaused: "일시정지됨",
         availableModel: "사용 가능",
         unavailableModel: "사용 불가",
+        trySimilarModel: "추천 대체 모델:",
         favoriteModels: "즐겨찾기",
         recentModels: "최근 사용",
         attachmentGuideTitle: "지원하는 첨부파일",
@@ -137,6 +138,7 @@ export const ko = {
         promptSummarizeDocument: "이 문서 요약하기",
         promptCompareModels: "모델 답변 비교하기",
         promptReviewCode: "이 코드 검토하기",
+        promptDraftEmail: "이메일 작성하기",
         promptAnalyzeImage: "이 이미지 분석하기",
     },
     share: {
@@ -178,6 +180,7 @@ export const ko = {
         placeholder: "어떤 문제가 있었나요?",
         tracePlaceholder: "표시된 추적 ID가 있다면 입력",
         autoContext: "자동 포함:",
+        attachments: "첨부파일",
         send: "보내기",
         sent: "피드백이 전송되었습니다. 감사합니다.",
         failed: "피드백을 전송하지 못했습니다.",

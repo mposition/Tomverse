@@ -178,6 +178,7 @@ export const infoPages = {
       description: "Get help with accounts, model access, files, sharing, billing preparation, and product feedback.",
       sections: [
         { title: "Help Centre", body: "Start with the Help Centre for common setup and troubleshooting guidance.", bullets: ["Login and OAuth issues", "File upload troubleshooting", "Model access and limits"] },
+        { title: "PDF and Office troubleshooting", body: "If a PDF or Office file fails, check that it is not password-protected, corrupted, too large, or a scanned image without extractable text. Re-exporting the document as PDF, reducing the file size, or pasting the key text directly often resolves the issue.", bullets: ["Images, PDFs, Office files, text files, and Google Drive files are supported after login.", "Guest mode does not support attachments.", "Attach up to 5 files, 10 MB each."] },
         { title: "Contact support", body: "For account-specific issues, include your account email, approximate time, browser, and any trace ID shown in the product." },
       ],
       cta: { label: "Open Help Centre", href: "/support/help-centre" },

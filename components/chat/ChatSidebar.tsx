@@ -28,6 +28,7 @@ type ChatSidebarProps = {
     isPrivateMode?: boolean;
     onTogglePrivateMode: () => void;
     currentModelId?: string | null;
+    attachmentCount?: number;
 };
 
 export function ChatSidebar({
@@ -48,6 +49,7 @@ export function ChatSidebar({
     isPrivateMode = false,
     onTogglePrivateMode,
     currentModelId,
+    attachmentCount = 0,
 }: ChatSidebarProps) {
     const [openMenuId, setOpenMenuId] = useState<string | null>(null);
     const [showPrivateNotice, setShowPrivateNotice] = useState(false);
@@ -723,7 +725,11 @@ export function ChatSidebar({
                         </div>
                     )}
                 </div>
-                <FeedbackButton currentModelId={currentModelId} currentPlan={displayedPlan} />
+                <FeedbackButton
+                    currentModelId={currentModelId}
+                    currentPlan={displayedPlan}
+                    attachmentCount={attachmentCount}
+                />
                 <div className="rounded-2xl border border-zinc-200 bg-white p-2 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
                     <AuthButton />
                 </div>

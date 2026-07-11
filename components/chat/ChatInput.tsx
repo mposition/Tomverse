@@ -28,6 +28,10 @@ import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { useUserUsage } from "@/components/chat/useUserUsage";
 
 type PublicModelStatus = "available" | "limited" | "unavailable";
+type PublicModelStatusRecord = {
+  status: PublicModelStatus;
+  fallbackModelIds: string[];
+};
 
 const MAX_ATTACHMENTS = 5;
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
@@ -75,6 +79,7 @@ const PROMPT_SUGGESTIONS = [
   "chat.promptSummarizeDocument",
   "chat.promptCompareModels",
   "chat.promptReviewCode",
+  "chat.promptDraftEmail",
   "chat.promptAnalyzeImage",
 ];
 
@@ -311,7 +316,7 @@ export function ChatInput({
   const [modelSearchQuery, setModelSearchQuery] = useState("");
   const [providerFilter, setProviderFilter] = useState("all");
   const [tierFilter, setTierFilter] = useState("all");
-  const [liveModelStatuses, setLiveModelStatuses] = useState<Record<string, PublicModelStatus>>({});
+  const [liveModelStatuses, setLiveModelStatuses] = useState<Record<string, PublicModelStatusRecord>>({});
   const [favoriteModelIds, setFavoriteModelIds] = useState<string[]>(() => {
     if (typeof window === "undefined") return [];
     try {
@@ -443,17 +448,26 @@ export function ChatInput({
         if (!data || typeof data !== "object") return;
         const records = (data as { models?: unknown }).models;
         if (!Array.isArray(records)) return;
-        const next: Record<string, PublicModelStatus> = {};
+        const next: Record<string, PublicModelStatusRecord> = {};
         for (const item of records) {
           if (!item || typeof item !== "object") continue;
-          const record = item as { id?: unknown; status?: unknown };
+          const record = item as {
+            id?: unknown;
+            status?: unknown;
+            fallbackModelIds?: unknown;
+          };
           if (
             typeof record.id === "string" &&
             (record.status === "available" ||
               record.status === "limited" ||
               record.status === "unavailable")
           ) {
-            next[record.id] = record.status;
+            next[record.id] = {
+              status: record.status,
+              fallbackModelIds: Array.isArray(record.fallbackModelIds)
+                ? record.fallbackModelIds.filter((id): id is string => typeof id === "string").slice(0, 3)
+                : [],
+            };
           }
         }
         setLiveModelStatuses(next);
@@ -1261,7 +1275,13 @@ export function ChatInput({
                           const isSelected = selectedModels.includes(model.id);
                           const isFavorite = favoriteModelIds.includes(model.id);
                           const modelTags = getModelExperienceTags(model);
-                          const modelStatus = liveModelStatuses[model.id] || getModelExperienceStatus(model);
+                          const liveStatus = liveModelStatuses[model.id];
+                          const modelStatus = liveStatus?.status || getModelExperienceStatus(model);
+                          const fallbackModels = (liveStatus?.fallbackModelIds || [])
+                            .map((id) => AVAILABLE_MODELS.find((item) => item.id === id))
+                            .filter((item): item is (typeof AVAILABLE_MODELS)[number] => Boolean(item))
+                            .filter((item) => item.enabled && item.id !== model.id)
+                            .slice(0, 2);
                           const isTierLocked =
                             isGuestMode
                               ? model.tier !== "Free"
@@ -1334,6 +1354,19 @@ export function ChatInput({
                                     ))}
                                   </span>
                                   <span className="sr-only">{t(getModelBestFor(model))}</span>
+                                  {(modelStatus === "limited" || modelStatus === "unavailable") && fallbackModels.length > 0 && (
+                                    <span className="mt-1 flex flex-wrap items-center gap-1 text-[10px] text-zinc-500">
+                                      <span>{t("chat.trySimilarModel")}</span>
+                                      {fallbackModels.map((fallback) => (
+                                        <span
+                                          key={fallback.id}
+                                          className="rounded-full bg-blue-500/10 px-1.5 py-0.5 font-bold text-blue-500"
+                                        >
+                                          {fallback.name}
+                                        </span>
+                                      ))}
+                                    </span>
+                                  )}
                                 </span>
                                 <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${model.tier === "Free" ? "bg-emerald-500/10 text-emerald-500" : model.tier === "Pro" ? "bg-blue-500/10 text-blue-500" : "bg-purple-500/10 text-purple-500"}`}>
                                   {t(`modelTiers.${model.tier.toLowerCase()}`)}
