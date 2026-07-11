@@ -466,7 +466,7 @@ export function MobileChatShell({
           />
           <div
             ref={drawerPanelRef}
-            className="absolute inset-y-0 left-0 z-10 flex w-[min(21rem,90vw)] max-w-full bg-zinc-50 pt-[env(safe-area-inset-top)] shadow-2xl dark:bg-zinc-950"
+            className="absolute inset-y-0 left-0 z-10 flex w-[min(24rem,92vw)] max-w-full bg-zinc-50 pt-[env(safe-area-inset-top)] shadow-2xl dark:bg-zinc-950"
           >
             <div className="absolute right-[-0.45rem] top-1/2 h-12 w-1.5 -translate-y-1/2 rounded-full bg-white/70 shadow dark:bg-zinc-700/80" aria-hidden="true" />
             <ChatSidebar
@@ -494,6 +494,7 @@ export function MobileChatShell({
               onTogglePrivateMode={onTogglePrivateMode}
               currentModelId={resolvedActiveModelId}
               attachmentCount={attachments.length}
+              isMobileDrawer
             />
             <button
               ref={drawerCloseButtonRef}

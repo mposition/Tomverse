@@ -30,6 +30,7 @@ type ChatSidebarProps = {
     onTogglePrivateMode: () => void;
     currentModelId?: string | null;
     attachmentCount?: number;
+    isMobileDrawer?: boolean;
 };
 
 type ConversationFilter = "all" | "locked" | "shared" | "work" | "research" | "personal" | `project:${string}`;
@@ -59,6 +60,7 @@ export function ChatSidebar({
     onTogglePrivateMode,
     currentModelId,
     attachmentCount = 0,
+    isMobileDrawer = false,
 }: ChatSidebarProps) {
     const [openMenuId, setOpenMenuId] = useState<string | null>(null);
     const [showPrivateNotice, setShowPrivateNotice] = useState(false);
@@ -499,10 +501,10 @@ export function ChatSidebar({
 
     return (
         <>
-        <aside className="flex h-full w-full shrink-0 select-none flex-col border-r border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 md:w-80">
+        <aside className={`flex h-full w-full shrink-0 select-none flex-col border-r border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 ${isMobileDrawer ? "" : "md:w-80"}`}>
 
-            <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-2.5">
-                <span className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl bg-white ring-1 ring-zinc-200 shadow-sm dark:ring-zinc-800">
+            <div className={`${isMobileDrawer ? "p-3" : "p-4"} border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-2.5`}>
+                <span className={`flex items-center justify-center overflow-hidden rounded-xl bg-white ring-1 ring-zinc-200 shadow-sm dark:ring-zinc-800 ${isMobileDrawer ? "h-8 w-8" : "h-9 w-9"}`}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                         src="/tomverse-logo.png"
@@ -510,15 +512,15 @@ export function ChatSidebar({
                         className="h-full w-full object-cover"
                     />
                 </span>
-                <h1 className="text-base font-bold tracking-tight text-zinc-800 dark:text-zinc-100">
+                <h1 className={`${isMobileDrawer ? "text-sm" : "text-base"} font-bold tracking-tight text-zinc-800 dark:text-zinc-100`}>
                     Tomverse AI
                 </h1>
             </div>
 
-            <div className="p-3 border-b border-zinc-200/60 dark:border-zinc-800/40">
+            <div className={`${isMobileDrawer ? "p-2.5" : "p-3"} border-b border-zinc-200/60 dark:border-zinc-800/40`}>
                 <button
                     onClick={onNewChat}
-                    className="w-full cursor-pointer flex items-center justify-center gap-2 rounded-lg bg-zinc-900 px-4 py-2.5 text-xs font-semibold text-white transition-all hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200"
+                    className={`w-full cursor-pointer flex items-center justify-center gap-2 rounded-lg bg-zinc-900 px-4 text-xs font-semibold text-white transition-all hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200 ${isMobileDrawer ? "py-2" : "py-2.5"}`}
                 >
                     <span className="text-sm">+</span> {t("sidebar.newChat")}
                 </button>
@@ -533,7 +535,7 @@ export function ChatSidebar({
                         }
                     }}
                     disabled={isGuestMode}
-                    className={`mt-2 w-full flex items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-xs font-semibold transition-all ${isGuestMode
+                    className={`mt-2 w-full flex items-center justify-center gap-2 rounded-lg border px-4 text-xs font-semibold transition-all ${isMobileDrawer ? "py-2" : "py-2.5"} ${isGuestMode
                             ? "cursor-not-allowed opacity-50 border-zinc-200 bg-white text-zinc-400 dark:border-zinc-700/50 dark:bg-zinc-800/50 dark:text-zinc-500"
                             : isPrivateMode
                                 ? "cursor-pointer border-purple-700/70 bg-purple-950/40 text-purple-200 hover:bg-purple-900/50"
@@ -546,7 +548,7 @@ export function ChatSidebar({
                 </button>
             </div>
 
-            <div className="border-b border-zinc-200/60 px-3 py-3 dark:border-zinc-800/40">
+            <div className={`border-b border-zinc-200/60 px-3 dark:border-zinc-800/40 ${isMobileDrawer ? "py-2" : "py-3"}`}>
                 <div className="relative">
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
                     <input
@@ -580,7 +582,8 @@ export function ChatSidebar({
                         </button>
                     ))}
                 </div>
-                <div className="mt-3 rounded-xl border border-zinc-200 bg-white p-2 dark:border-zinc-800 dark:bg-zinc-950">
+                {(!isMobileDrawer || projects.length > 0 || showProjectForm) && (
+                <div className={`${isMobileDrawer ? "mt-2" : "mt-3"} rounded-xl border border-zinc-200 bg-white p-2 dark:border-zinc-800 dark:bg-zinc-950`}>
                     <div className="flex items-center justify-between gap-2">
                         <span className="inline-flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wide text-zinc-500">
                             <Folder className="h-3.5 w-3.5" />
@@ -735,9 +738,10 @@ export function ChatSidebar({
                         )}
                     </div>
                 </div>
+                )}
             </div>
 
-            <div className="min-h-[10rem] flex-1 overflow-y-auto overscroll-contain p-2 space-y-1 md:min-h-0">
+            <div className={`${isMobileDrawer ? "min-h-0 p-2" : "min-h-[10rem] p-2"} flex-1 overflow-y-auto overscroll-contain space-y-1 md:min-h-0`}>
                 {messageSearchResults.length > 0 && (
                     <div className="mb-2 rounded-xl border border-blue-200 bg-blue-50 p-2 text-xs dark:border-blue-900/50 dark:bg-blue-950/20">
                         <p className="px-1 pb-1 font-black text-blue-700 dark:text-blue-300">
@@ -1090,7 +1094,8 @@ export function ChatSidebar({
                 })}
             </div>
 
-            <div className="max-h-[28dvh] shrink-0 overflow-y-auto overscroll-contain border-t border-zinc-200 bg-zinc-100/40 p-3 flex flex-col gap-2 dark:border-zinc-800 dark:bg-zinc-900/50 md:max-h-none md:overflow-visible">
+            <div className={`${isMobileDrawer ? "max-h-[24dvh] shrink-0 overflow-y-auto overscroll-contain border-t border-zinc-200 bg-zinc-100/40 p-2 dark:border-zinc-800 dark:bg-zinc-900/50" : "max-h-[28dvh] shrink-0 overflow-y-auto overscroll-contain border-t border-zinc-200 bg-zinc-100/40 p-3 dark:border-zinc-800 dark:bg-zinc-900/50 md:max-h-none md:overflow-visible"} flex flex-col gap-2`}>
+                {!isMobileDrawer && (
                 <div className="rounded-3xl border border-zinc-200 bg-white p-3 text-xs shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
                     <div className="mb-2 flex items-center justify-between gap-2">
                         <span className="font-black text-zinc-900 dark:text-zinc-100">{t("sidebar.currentUsage")}</span>
@@ -1117,6 +1122,7 @@ export function ChatSidebar({
                         </div>
                     )}
                 </div>
+                )}
                 <FeedbackButton
                     currentModelId={currentModelId}
                     currentPlan={displayedPlan}
