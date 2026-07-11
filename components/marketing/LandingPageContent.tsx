@@ -385,9 +385,9 @@ export function LandingPageContent() {
           </div>
 
           <div className="relative">
-            <div className="overflow-hidden rounded-[2rem] border border-zinc-200 bg-zinc-950 p-3 shadow-2xl shadow-zinc-300/60 dark:border-zinc-800 dark:shadow-black/50">
-              <div className="rounded-[1.5rem] border border-zinc-800 bg-zinc-950">
-                <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
+            <div className="overflow-hidden rounded-3xl border border-zinc-200 bg-zinc-950 p-2 shadow-2xl shadow-zinc-300/60 dark:border-zinc-800 dark:shadow-black/50 md:rounded-[2rem] md:p-3">
+              <div className="rounded-2xl border border-zinc-800 bg-zinc-950 md:rounded-[1.5rem]">
+                <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2.5 md:px-4 md:py-3">
                   <div className="flex items-center gap-2">
                     <Bot className="h-4 w-4 text-blue-400" />
                     <span className="text-xs font-bold text-zinc-300">{content.previewTitle}</span>
@@ -396,18 +396,18 @@ export function LandingPageContent() {
                     {content.previewCount}
                   </span>
                 </div>
-                <div className="grid gap-3 p-4 md:grid-cols-3">
+                <div className="grid gap-2 p-3 md:grid-cols-3 md:gap-3 md:p-4">
                   {["GPT", "Claude", "Gemini"].map((model, index) => (
-                    <div key={model} className="min-h-72 rounded-2xl border border-zinc-800 bg-zinc-900/80 p-4">
-                      <div className="mb-5 flex items-center justify-between">
+                    <div key={model} className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-3 md:min-h-72 md:p-4">
+                      <div className="mb-3 flex items-center justify-between md:mb-5">
                         <span className="text-sm font-black text-white">{model}</span>
                         <span className="h-2 w-2 rounded-full bg-blue-400" />
                       </div>
-                      <div className="space-y-3">
-                        <div className="h-3 w-3/4 rounded-full bg-zinc-700" />
-                        <div className="h-3 w-full rounded-full bg-zinc-800" />
-                        <div className="h-3 w-5/6 rounded-full bg-zinc-800" />
-                        <div className="mt-5 rounded-xl bg-blue-600 p-3 text-xs font-bold leading-5 text-white">
+                      <div className="space-y-2 md:space-y-3">
+                        <div className="h-2.5 w-3/4 rounded-full bg-zinc-700 md:h-3" />
+                        <div className="h-2.5 w-full rounded-full bg-zinc-800 md:h-3" />
+                        <div className="hidden h-3 w-5/6 rounded-full bg-zinc-800 md:block" />
+                        <div className="mt-3 rounded-xl bg-blue-600 p-2.5 text-xs font-bold leading-5 text-white md:mt-5 md:p-3">
                           {content.previewAnswers[index]}
                         </div>
                       </div>
