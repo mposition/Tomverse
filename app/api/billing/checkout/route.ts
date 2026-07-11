@@ -291,7 +291,7 @@ export async function POST(req: Request) {
       success_url: `${origin}/chat?billing=success`,
       cancel_url: `${origin}/pricing?billing=cancelled`,
       client_reference_id: user.id,
-      allow_promotion_codes: !promotion,
+      allow_promotion_codes: discount ? undefined : true,
       discounts: discount ? [discount] : undefined,
       subscription_data: {
         metadata: {
