@@ -137,8 +137,8 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     pricingDescription: "Plans are built around usage allowance, file workflows, sharing, and access to the available model catalogue.",
     pricingPlans: [
       { title: "Free", price: "$0", description: "For trying Tomverse and light daily work.", bullets: ["Free and Pro model tiers", "Usage-limited daily work", "Files, sharing, and downloads after login"] },
-      { title: "Pro", price: "Coming soon", description: "For everyday multi-model comparison.", bullets: ["All available models", "Higher usage limits", "Files, sharing, downloads"] },
-      { title: "Max", price: "Coming soon", description: "For heavier AI workflows.", bullets: ["Largest allowance", "Higher file limits", "Priority room for advanced models"] },
+      { title: "Pro", price: "Paid plan", description: "For everyday multi-model comparison.", bullets: ["All available models", "Higher usage limits", "Files, sharing, downloads"] },
+      { title: "Max", price: "Advanced plan", description: "For heavier AI workflows.", bullets: ["Largest allowance", "Higher file limits", "Priority room for advanced models"] },
     ],
     faqTitle: "Quick questions",
     faqs: [
@@ -201,8 +201,8 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     pricingDescription: "요금제는 사용량 한도, 파일 워크플로, 공유 기능, 사용 가능한 모델 카탈로그 접근을 기준으로 설계했습니다.",
     pricingPlans: [
       { title: "Free", price: "$0", description: "Tomverse 체험과 가벼운 일상 작업용입니다.", bullets: ["Free 및 Pro 모델 등급", "사용량 한도 기반 일상 작업", "로그인 후 파일, 공유, 다운로드"] },
-      { title: "Pro", price: "준비 중", description: "일상적인 멀티 모델 비교용입니다.", bullets: ["사용 가능한 전체 모델", "더 높은 사용량 한도", "파일, 공유, 다운로드"] },
-      { title: "Max", price: "준비 중", description: "고강도 AI 워크플로용입니다.", bullets: ["가장 큰 사용량 한도", "더 높은 파일 한도", "고급 모델을 위한 우선 여유"] },
+      { title: "Pro", price: "유료 플랜", description: "일상적인 멀티 모델 비교용입니다.", bullets: ["사용 가능한 전체 모델", "더 높은 사용량 한도", "파일, 공유, 다운로드"] },
+      { title: "Max", price: "고급 플랜", description: "고강도 AI 워크플로용입니다.", bullets: ["가장 큰 사용량 한도", "더 높은 파일 한도", "고급 모델을 위한 우선 여유"] },
     ],
     faqTitle: "빠른 질문",
     faqs: [
@@ -282,30 +282,30 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
 
 const launchCopy: { en: LaunchCopy } & Partial<Record<Language, LaunchCopy>> = {
   en: {
-    eyebrow: "Product-ready workspace",
+    eyebrow: "AI workspace for daily work",
     title: "More than a model picker.",
     description:
-      "Tomverse now includes the day-to-day controls users expect before relying on an AI workspace for real work.",
+      "Tomverse brings the controls, organization, sharing, and support context users need to rely on one AI workspace every day.",
     items: [
       { title: "Project organization", description: "Group chats into projects, rename them, and keep growing workspaces easier to scan." },
       { title: "Plan and usage clarity", description: "Users can see current plan, daily and monthly usage, remaining limits, and why a feature is locked." },
       { title: "Provider status awareness", description: "When a model provider is limited, Tomverse shows status and suggests nearby alternatives." },
-      { title: "File-ready workflows", description: "Images, PDFs, Office files, text files, and Google Drive imports are supported with validation and guidance." },
-      { title: "Support-ready feedback", description: "Feedback can include trace ID, model, plan, browser, and attachment context for faster support." },
+      { title: "File workflows", description: "Images, PDFs, Office files, text files, and Google Drive imports are supported with validation and guidance." },
+      { title: "Support context", description: "Feedback can include trace ID, model, plan, browser, and attachment context for faster support." },
       { title: "Public share documents", description: "Shared conversations are read-only snapshots with model filters, copy actions, expiry, and app CTA." },
     ],
   },
   ko: {
-    eyebrow: "상업용 출시 준비",
+    eyebrow: "일상 업무를 위한 AI 워크스페이스",
     title: "단순한 모델 선택기가 아닙니다.",
     description:
-      "Tomverse는 실제 업무용 AI 워크스페이스로 쓰기 위해 필요한 사용량, 정리, 공유, 지원, 운영 상태 기능을 갖추고 있습니다.",
+      "Tomverse는 사용자가 매일 하나의 AI 워크스페이스에 의지할 수 있도록 사용량 안내, 대화 정리, 공유, 지원 정보, 모델 상태 확인을 한 흐름 안에 제공합니다.",
     items: [
       { title: "프로젝트 정리", description: "대화를 프로젝트별로 묶고, 이름 변경과 삭제를 통해 커지는 워크스페이스를 더 쉽게 관리합니다." },
       { title: "플랜과 사용량 안내", description: "현재 플랜, 일일/월간 사용량, 남은 한도, 기능 제한 이유를 사용자에게 명확히 보여줍니다." },
       { title: "Provider 상태 표시", description: "모델 공급자가 제한되거나 장애가 있을 때 상태와 대체 모델을 함께 안내합니다." },
       { title: "파일 기반 작업", description: "이미지, PDF, Office, 텍스트, Google Drive 파일을 검증과 안내 흐름 안에서 사용할 수 있습니다." },
-      { title: "지원 가능한 피드백", description: "피드백에 추적 ID, 모델, 플랜, 브라우저, 첨부 여부가 포함되어 문제 재현이 쉬워집니다." },
+      { title: "지원 정보가 포함된 피드백", description: "피드백에 추적 ID, 모델, 플랜, 브라우저, 첨부 여부가 포함되어 문제 재현이 쉬워집니다." },
       { title: "공개 공유 문서", description: "공유 대화는 읽기 전용 스냅샷으로 제공되며 모델 필터, 복사, 만료일, 앱 열기 CTA를 포함합니다." },
     ],
   },
