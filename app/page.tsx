@@ -295,7 +295,7 @@ export default function Home() {
         cancelled = true;
       };
     }
-  }, [isGuestMode]);  
+  }, [isGuestMode, t]);  
 
   useEffect(() => {
     if (isGuestMode && isConversationsLoaded && conversations.length > 0) {

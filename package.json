@@ -6,6 +6,10 @@
     "dev": "next dev --webpack",
     "build": "next build",
     "start": "next start",
+    "start:e2e": "next start -H 127.0.0.1 -p 3100",
+    "test:e2e": "npm run build && playwright test",
+    "test:e2e:quick": "npm run build && playwright test --project=desktop-chromium",
+    "test:e2e:ui": "npm run build && playwright test --ui",
     "lint": "eslint",
     "check": "eslint . --max-warnings=0 && tsc --noEmit && next build",
     "security:regression": "node scripts/security-regression-check.mjs",
@@ -42,6 +46,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/pg": "^8.20.0",

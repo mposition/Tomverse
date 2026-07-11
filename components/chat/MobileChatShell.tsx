@@ -100,17 +100,10 @@ export function MobileChatShell({
     selectedModels[0] || null
   );
   const [modelStatuses, setModelStatuses] = useState<Record<string, ModelRuntimeStatus>>({});
-
-  useEffect(() => {
-    if (!selectedModels.length) {
-      setActiveModelId(null);
-      return;
-    }
-
-    setActiveModelId((current) =>
-      current && selectedModels.includes(current) ? current : selectedModels[0]
-    );
-  }, [selectedModels]);
+  const resolvedActiveModelId =
+    activeModelId && selectedModels.includes(activeModelId)
+      ? activeModelId
+      : selectedModels[0] || null;
 
   const handleModelStatusChange = useCallback(
     (modelId: string, nextStatus: ModelRuntimeStatus) => {
@@ -123,8 +116,8 @@ export function MobileChatShell({
     []
   );
 
-  const activeModelIndex = activeModelId
-    ? selectedModels.indexOf(activeModelId)
+  const activeModelIndex = resolvedActiveModelId
+    ? selectedModels.indexOf(resolvedActiveModelId)
     : -1;
 
   const switchModelByOffset = useCallback(
@@ -209,15 +202,17 @@ export function MobileChatShell({
   }, [getDrawerFocusableElements, isDrawerOpen]);
 
   const activeModel = useMemo(
-    () => AVAILABLE_MODELS.find((model) => model.id === activeModelId),
-    [activeModelId]
+    () => AVAILABLE_MODELS.find((model) => model.id === resolvedActiveModelId),
+    [resolvedActiveModelId]
   );
   const currentConversation = conversations.find(
     (conversation) => conversation.id === currentChatId
   );
   const isCurrentLocked = Boolean(currentConversation?.isLocked);
   const isCurrentShared = Boolean(currentConversation?.shareEnabled);
-  const activeStatus = activeModelId ? modelStatuses[activeModelId] : "idle";
+  const activeStatus = resolvedActiveModelId
+    ? modelStatuses[resolvedActiveModelId]
+    : "idle";
   const respondingCount = selectedModels.filter((modelId) => {
     const status = modelStatuses[modelId];
     return status === "responding" || status === "loading";
@@ -285,7 +280,7 @@ export function MobileChatShell({
               {t("sidebar.sharedBadge")}
             </span>
           )}
-          {activeModelId && (
+          {resolvedActiveModelId && (
             <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-zinc-100 px-2 py-1 text-[11px] font-bold text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
               {isAnyResponding ? (
                 <span className="h-2 w-2 animate-pulse rounded-full bg-blue-500" />
@@ -319,7 +314,7 @@ export function MobileChatShell({
           <div className="flex min-w-max gap-2" role="tablist" aria-label={t("chat.modelSelect")}>
             {selectedModels.map((modelId) => {
               const model = AVAILABLE_MODELS.find((item) => item.id === modelId);
-              const isActive = activeModelId === modelId;
+              const isActive = resolvedActiveModelId === modelId;
               const isDisabled = disabledPanels.includes(modelId);
               const status = isDisabled ? "paused" : modelStatuses[modelId] || "idle";
 
@@ -328,7 +323,6 @@ export function MobileChatShell({
                   key={modelId}
                   type="button"
                   onClick={() => setActiveModelId(modelId)}
-                  aria-pressed={isActive}
                   role="tab"
                   aria-selected={isActive}
                   aria-label={`${model?.name || modelId} ${status}`}
@@ -377,7 +371,7 @@ export function MobileChatShell({
       >
         {selectedModels.length > 0 ? (
           selectedModels.map((modelId) => {
-            const isActive = activeModelId === modelId;
+            const isActive = resolvedActiveModelId === modelId;
 
             return (
               <div

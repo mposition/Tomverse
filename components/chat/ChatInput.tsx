@@ -355,7 +355,7 @@ export function ChatInput({
         lastMenuTriggerRef.current?.focus();
       });
     }
-  }, []);
+  }, [setMenuView]);
 
   const modelProviders = useMemo(
     () => Array.from(new Set(AVAILABLE_MODELS.map((model) => model.provider))),
