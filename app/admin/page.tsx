@@ -9,6 +9,8 @@ import { authOptions } from "@/lib/auth";
 import { isAdminSession } from "@/lib/adminAuth";
 import { getEnabledModel } from "@/lib/models";
 import { ModelLogo } from "@/components/chat/ModelLogo";
+import { BillingAdminPanel } from "@/components/admin/BillingAdminPanel";
+import { getBillingPlans, getBillingPromotions } from "@/lib/billingConfig";
 import {
     getProviderHealthDashboard,
     type ProviderHealthRow,
@@ -236,7 +238,11 @@ export default async function AdminPage() {
         notFound();
     }
 
-    const dashboard = await getProviderHealthDashboard();
+    const [dashboard, billingPlans, billingPromotions] = await Promise.all([
+        getProviderHealthDashboard(),
+        getBillingPlans(),
+        getBillingPromotions(),
+    ]);
     const availableCount = dashboard.providers.filter(
         (provider) => provider.status === "available"
     ).length;
@@ -336,9 +342,20 @@ export default async function AdminPage() {
                             <span className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2">
                                 SLACK_WEBHOOK_URL
                             </span>
+                            <span className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2">
+                                STRIPE_SECRET_KEY
+                            </span>
+                            <span className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2">
+                                STRIPE_WEBHOOK_SECRET
+                            </span>
                         </div>
                     </div>
                 </section>
+
+                <BillingAdminPanel
+                    plans={billingPlans}
+                    promotions={billingPromotions}
+                />
 
                 <section className="flex flex-col gap-4">
                     <div className="flex flex-wrap items-center justify-between gap-3">

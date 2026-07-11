@@ -28,6 +28,10 @@ export type ChatAccess = {
     subjectKey: string;
     ipKey: string;
     plan?: ModelTier;
+    planLimits?: {
+        dailyMessageLimit: number;
+        monthlyMessageLimit: number;
+    };
     setCookie?: string;
 };
 
@@ -141,7 +145,7 @@ export const createChatBudget = (
     };
 };
 
-const limitsFor = (access: Pick<ChatAccess, "kind" | "plan">): LimitRule[] => {
+const limitsFor = (access: Pick<ChatAccess, "kind" | "plan" | "planLimits">): LimitRule[] => {
     if (access.kind !== "user") {
         return [
             { period: "minute", limit: positiveInteger(process.env.CHAT_GUEST_PER_MINUTE, 5) },
@@ -153,23 +157,25 @@ const limitsFor = (access: Pick<ChatAccess, "kind" | "plan">): LimitRule[] => {
     const plan = access.plan || "Free";
     const minuteLimit = positiveInteger(process.env.CHAT_USER_PER_MINUTE, 20);
     const monthLimit =
-        plan === "Max"
+        access.planLimits?.monthlyMessageLimit ?? (plan === "Max"
             ? positiveInteger(process.env.CHAT_MAX_PER_MONTH, 50_000)
             : plan === "Pro"
               ? positiveInteger(process.env.CHAT_PRO_PER_MONTH, positiveInteger(process.env.CHAT_USER_PER_MONTH, 10_000))
-              : positiveInteger(process.env.CHAT_FREE_PER_MONTH, 2_000);
-    const limits: LimitRule[] = [
-        { period: "minute", limit: minuteLimit },
-        { period: "month", limit: monthLimit },
-    ];
+              : positiveInteger(process.env.CHAT_FREE_PER_MONTH, 2_000));
+    const limits: LimitRule[] = [{ period: "minute", limit: minuteLimit }];
+    if (monthLimit > 0) {
+        limits.push({ period: "month", limit: monthLimit });
+    }
 
-    if (plan !== "Max") {
+    const dayLimit =
+        access.planLimits?.dailyMessageLimit ?? (plan === "Pro"
+            ? positiveInteger(process.env.CHAT_PRO_PER_DAY, positiveInteger(process.env.CHAT_USER_PER_DAY, 500))
+            : positiveInteger(process.env.CHAT_FREE_PER_DAY, 100));
+
+    if (dayLimit > 0) {
         limits.push({
             period: "day",
-            limit:
-                plan === "Pro"
-                    ? positiveInteger(process.env.CHAT_PRO_PER_DAY, positiveInteger(process.env.CHAT_USER_PER_DAY, 500))
-                    : positiveInteger(process.env.CHAT_FREE_PER_DAY, 100),
+            limit: dayLimit,
         });
     }
 
@@ -244,7 +250,8 @@ export const getUserChatUsageKey = (userId: string) =>
 export const identifyChatCaller = (
     request: Request,
     userId?: string | null,
-    plan?: ModelTier
+    plan?: ModelTier,
+    planLimits?: ChatAccess["planLimits"]
 ): ChatAccess => {
     const ipKey = `ip:${hashKey("ip", getTrustedClientIp(request))}`;
     if (userId) {
@@ -253,6 +260,7 @@ export const identifyChatCaller = (
             subjectKey: `user:${hashKey("user", userId)}`,
             ipKey,
             plan,
+            planLimits,
         };
     }
 

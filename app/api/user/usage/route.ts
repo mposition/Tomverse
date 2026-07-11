@@ -9,6 +9,7 @@ import {
   apiSecurityResponse,
   consumeApiRateLimit,
 } from "@/lib/apiSecurity";
+import { getBillingPlanByTier } from "@/lib/billingConfig";
 
 const positiveInteger = (value: string | undefined, fallback: number) => {
   const parsed = Number(value);
@@ -17,21 +18,6 @@ const positiveInteger = (value: string | undefined, fallback: number) => {
 
 const normalizePlan = (value: unknown) =>
   value === "Pro" || value === "Max" || value === "Free" ? value : "Free";
-
-const messageLimitsForPlan = (plan: "Free" | "Pro" | "Max") => ({
-  messagesDay:
-    plan === "Max"
-      ? 0
-      : plan === "Pro"
-        ? positiveInteger(process.env.CHAT_PRO_PER_DAY, positiveInteger(process.env.CHAT_USER_PER_DAY, 500))
-        : positiveInteger(process.env.CHAT_FREE_PER_DAY, 100),
-  messagesMonth:
-    plan === "Max"
-      ? positiveInteger(process.env.CHAT_MAX_PER_MONTH, 50_000)
-      : plan === "Pro"
-        ? positiveInteger(process.env.CHAT_PRO_PER_MONTH, positiveInteger(process.env.CHAT_USER_PER_MONTH, 10_000))
-        : positiveInteger(process.env.CHAT_FREE_PER_MONTH, 2_000),
-});
 
 const periodStart = (period: "day" | "month", now = new Date()) =>
   period === "day"
@@ -76,10 +62,10 @@ export async function GET(req: Request) {
       rows.find((row) => row.period === period)?.count || 0;
 
     const plan = normalizePlan(user?.plan);
-    const messageLimits = messageLimitsForPlan(plan);
+    const billingPlan = await getBillingPlanByTier(plan);
     const limits = {
-      messagesDay: messageLimits.messagesDay,
-      messagesMonth: messageLimits.messagesMonth,
+      messagesDay: billingPlan.dailyMessageLimit,
+      messagesMonth: billingPlan.monthlyMessageLimit,
       tokensDay: positiveInteger(process.env.CHAT_USER_TOKENS_PER_DAY, 1_000_000),
       tokensMonth: positiveInteger(process.env.CHAT_USER_TOKENS_PER_MONTH, 20_000_000),
       costDay: positiveInteger(process.env.CHAT_USER_COST_MICROUSD_PER_DAY, 2_000_000),

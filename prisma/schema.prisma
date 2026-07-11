@@ -18,6 +18,11 @@ model User {
   emailVerified DateTime?
   image         String?
   plan          String    @default("Free") // "Free", "Pro", "Max"
+  stripeCustomerId     String?   @unique
+  stripeSubscriptionId String?   @unique
+  stripePriceId        String?
+  subscriptionStatus   String?
+  subscriptionCurrentPeriodEnd DateTime?
   
   // 💡 커스텀 설정 필드 (테마, 언어 등)
   settings      UserSettings?
@@ -155,4 +160,46 @@ model ChatRequestLease {
   createdAt  DateTime @default(now())
 
   @@index([subjectKey, expiresAt])
+}
+
+model BillingPlan {
+  id                 String   @id
+  name               String
+  tier               String
+  monthlyPriceCents  Int
+  currency           String   @default("USD")
+  stripeProductId    String?
+  stripePriceId      String?
+  dailyMessageLimit  Int      @default(0)
+  monthlyMessageLimit Int     @default(0)
+  maxModels          Int      @default(3)
+  allowAttachments   Boolean  @default(true)
+  allowSharing       Boolean  @default(true)
+  allowDownloads     Boolean  @default(true)
+  isActive           Boolean  @default(true)
+  sortOrder          Int      @default(0)
+  metadata           Json?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([tier])
+  @@index([isActive, sortOrder])
+}
+
+model BillingPromotion {
+  id                    String   @id @default(cuid())
+  code                  String   @unique
+  discountPercent       Int
+  durationMonths        Int
+  appliesToPlanIds      String   @default("[]")
+  stripeCouponId        String?
+  stripePromotionCodeId String?
+  startsAt              DateTime?
+  endsAt                DateTime?
+  isActive              Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([isActive])
+  @@index([startsAt, endsAt])
 }

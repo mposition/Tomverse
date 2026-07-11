@@ -5,6 +5,7 @@ import { CheckCircle2, Minus } from "lucide-react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
 import { UpgradeInterestButton } from "@/components/marketing/UpgradeInterestButton";
+import { usePublicBilling } from "@/components/marketing/usePublicBilling";
 
 type PlanCopy = {
   name: string;
@@ -339,6 +340,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
 export function PricingPageContent() {
   const { lang, t } = useLanguage();
   const content = copy[lang] ?? copy.en;
+  const billing = usePublicBilling();
 
   return (
     <main className="min-h-screen bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">
@@ -355,7 +357,10 @@ export function PricingPageContent() {
         </div>
 
         <div className="mt-14 grid gap-5 lg:grid-cols-3">
-          {content.plans.map((plan) => (
+          {content.plans.map((plan) => {
+            const planId = plan.name === "Max" ? "max" : plan.name === "Pro" ? "pro" : "free";
+            const displayPrice = billing.formatPlanPrice(planId) || plan.price;
+            return (
             <article
               key={plan.name}
               className={`relative flex min-h-full flex-col rounded-[1.75rem] border p-6 shadow-sm ${
@@ -379,7 +384,7 @@ export function PricingPageContent() {
                 {plan.description}
               </p>
               <div className="mt-8">
-                <span className="text-4xl font-black">{plan.price}</span>
+                <span className="text-4xl font-black">{displayPrice}</span>
                 <span className={`ml-2 text-sm font-bold ${plan.highlighted ? "text-blue-100" : "text-zinc-500 dark:text-zinc-400"}`}>
                   {plan.period}
                 </span>
@@ -387,7 +392,7 @@ export function PricingPageContent() {
               <p className={`mt-3 text-sm font-black ${plan.highlighted ? "text-blue-50" : "text-zinc-700 dark:text-zinc-200"}`}>
                 {plan.usage}
               </p>
-              {plan.price === "$0" ? (
+              {planId === "free" ? (
                 <Link
                   href={plan.href}
                   className={`mt-8 inline-flex h-12 w-full items-center justify-center rounded-xl text-sm font-black transition ${
@@ -419,7 +424,8 @@ export function PricingPageContent() {
                 ))}
               </ul>
             </article>
-          ))}
+            );
+          })}
         </div>
 
         <section className="mt-16 rounded-[2rem] border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40 sm:p-6">

@@ -56,6 +56,7 @@ import {
     reserveDailyUploadBytes,
 } from "@/lib/apiSecurity";
 import { verifyGuestTurnstile } from "@/lib/turnstile";
+import { getBillingPlanByTier } from "@/lib/billingConfig";
 
 const groq = createOpenAI({
     baseURL: "https://api.groq.com/openai/v1",
@@ -652,7 +653,18 @@ export async function POST(req: Request) {
                   )?.plan
               )
             : undefined;
-        const access = identifyChatCaller(req, session?.user?.id, userPlan);
+        const billingPlan = userPlan ? await getBillingPlanByTier(userPlan) : null;
+        const access = identifyChatCaller(
+            req,
+            session?.user?.id,
+            userPlan,
+            billingPlan
+                ? {
+                      dailyMessageLimit: billingPlan.dailyMessageLimit,
+                      monthlyMessageLimit: billingPlan.monthlyMessageLimit,
+                  }
+                : undefined
+        );
         assertModelAccess(access, modelConfig);
         if (access.kind === "guest") {
             await verifyGuestTurnstile(req, turnstileToken);

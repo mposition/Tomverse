@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
+import { usePublicBilling } from "@/components/marketing/usePublicBilling";
 
 const supportedModels = [
   { name: "GPT", mark: "◎", detail: "OpenAI", className: "from-white to-zinc-100", image: "/model-icons/chatgpt.png" },
@@ -433,6 +434,7 @@ export function LandingPageContent() {
   const { lang } = useLanguage();
   const content = copy[lang] ?? copy.en;
   const launch = launchCopy[lang] ?? launchCopy.en;
+  const billing = usePublicBilling();
 
   return (
     <main className="min-h-screen overflow-x-hidden bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">
@@ -643,10 +645,13 @@ export function LandingPageContent() {
             </Link>
           </div>
           <div className="mt-10 grid gap-4 lg:grid-cols-3">
-            {content.pricingPlans.map((plan, index) => (
+            {content.pricingPlans.map((plan, index) => {
+              const planId = index === 2 ? "max" : index === 1 ? "pro" : "free";
+              const displayPrice = billing.formatPlanPrice(planId) || plan.price;
+              return (
               <article key={plan.title} className={`rounded-2xl border p-6 ${index === 1 ? "border-blue-500 bg-blue-600 text-white" : "border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/40"}`}>
                 <h3 className="text-2xl font-black">{plan.title}</h3>
-                <p className={`mt-2 text-3xl font-black ${index === 1 ? "text-white" : "text-zinc-950 dark:text-white"}`}>{plan.price}</p>
+                <p className={`mt-2 text-3xl font-black ${index === 1 ? "text-white" : "text-zinc-950 dark:text-white"}`}>{displayPrice}</p>
                 <p className={`mt-3 text-sm leading-6 ${index === 1 ? "text-blue-50" : "text-zinc-600 dark:text-zinc-300"}`}>{plan.description}</p>
                 <ul className="mt-5 space-y-3">
                   {plan.bullets.map((bullet) => (
@@ -657,7 +662,8 @@ export function LandingPageContent() {
                   ))}
                 </ul>
               </article>
-            ))}
+              );
+            })}
           </div>
         </div>
       </section>

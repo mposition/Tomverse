@@ -5,6 +5,34 @@ import { useEffect, useId, useState } from "react";
 import { dispatchAppToast } from "@/lib/appToast";
 import { useLanguage } from "@/components/LanguageProvider";
 
+type BillingPlan = {
+  id: "free" | "pro" | "max";
+  name: string;
+  monthlyPriceCents: number;
+  currency: string;
+};
+
+type BillingPromotion = {
+  code: string;
+  discountPercent: number;
+  durationMonths: number;
+  appliesToPlanIds: Array<"pro" | "max">;
+};
+
+type BillingConfig = {
+  plans: BillingPlan[];
+  promotions: BillingPromotion[];
+};
+
+const formatPrice = (planConfig: BillingPlan | undefined) => {
+  if (!planConfig) return null;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: planConfig.currency || "USD",
+    maximumFractionDigits: planConfig.monthlyPriceCents % 100 === 0 ? 0 : 2,
+  }).format(planConfig.monthlyPriceCents / 100);
+};
+
 export function UpgradeInterestButton({
   plan,
   className,
@@ -18,7 +46,14 @@ export function UpgradeInterestButton({
   const [isSending, setIsSending] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
   const [promoCode, setPromoCode] = useState("TOMVERSE50");
+  const [billingConfig, setBillingConfig] = useState<BillingConfig | null>(null);
   const inputId = useId();
+  const planId = plan === "Max" ? "max" : "pro";
+  const planConfig = billingConfig?.plans.find((item) => item.id === planId);
+  const activePromo = billingConfig?.promotions.find((item) =>
+    item.appliesToPlanIds.includes(planId)
+  );
+  const priceLabel = formatPrice(planConfig);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -29,23 +64,48 @@ export function UpgradeInterestButton({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isOpen]);
 
+  useEffect(() => {
+    if (!isOpen || billingConfig) return;
+    fetch("/api/billing/config")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: BillingConfig | null) => {
+        if (data) setBillingConfig(data);
+      })
+      .catch(() => undefined);
+  }, [billingConfig, isOpen]);
+
   const submit = async () => {
     if (isSending) return;
     const normalizedCode = promoCode.trim().toUpperCase();
-    if (normalizedCode !== "TOMVERSE50") {
+    if (
+      normalizedCode &&
+      activePromo &&
+      normalizedCode !== activePromo.code.toUpperCase()
+    ) {
       dispatchAppToast(t("billing.promoInvalid"), "error");
       return;
     }
     setIsSending(true);
     try {
-      const response = await fetch("/api/waitlist", {
+      const response = await fetch("/api/billing/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan, promoCode: normalizedCode }),
+        body: JSON.stringify({
+          planId,
+          promoCode: normalizedCode || undefined,
+        }),
       });
-      if (!response.ok) throw new Error("Waitlist failed");
-      dispatchAppToast(t("billing.promoApplied"), "success");
-      setIsOpen(false);
+      if (response.status === 401) {
+        window.location.href = `/auth/signin?callbackUrl=${encodeURIComponent(window.location.pathname)}`;
+        return;
+      }
+      const data = (await response.json().catch(() => null)) as
+        | { url?: string; error?: string }
+        | null;
+      if (!response.ok || !data?.url) {
+        throw new Error(data?.error || "Checkout failed");
+      }
+      window.location.href = data.url;
     } catch {
       dispatchAppToast(t("billing.waitlistFailed"), "error");
     } finally {
@@ -55,7 +115,12 @@ export function UpgradeInterestButton({
 
   return (
     <>
-      <button type="button" onClick={() => setIsOpen(true)} disabled={isSending} className={className}>
+      <button
+        type="button"
+        onClick={() => setIsOpen(true)}
+        disabled={isSending}
+        className={className}
+      >
         {isSending ? t("billing.sending") : children}
       </button>
       {isOpen ? (
@@ -74,12 +139,25 @@ export function UpgradeInterestButton({
           >
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 id={`${inputId}-title`} className="text-lg font-black text-zinc-950 dark:text-white">
+                <h2
+                  id={`${inputId}-title`}
+                  className="text-lg font-black text-zinc-950 dark:text-white"
+                >
                   {t("billing.promoTitle")}
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-                  {plan === "Pro" ? t("billing.promoProDescription") : t("billing.promoMaxDescription")}
+                  {priceLabel
+                    ? `${plan} is ${priceLabel}/month.`
+                    : plan === "Pro"
+                      ? t("billing.promoProDescription")
+                      : t("billing.promoMaxDescription")}
                 </p>
+                {activePromo ? (
+                  <p className="mt-2 text-xs font-bold text-blue-600 dark:text-blue-300">
+                    {activePromo.code}: {activePromo.discountPercent}% off for{" "}
+                    {activePromo.durationMonths} months.
+                  </p>
+                ) : null}
               </div>
               <button
                 type="button"
@@ -87,10 +165,13 @@ export function UpgradeInterestButton({
                 className="rounded-full border border-zinc-200 px-3 py-1 text-sm font-bold text-zinc-500 hover:text-zinc-950 dark:border-zinc-800 dark:text-zinc-400 dark:hover:text-white"
                 aria-label={t("billing.close")}
               >
-                ×
+                x
               </button>
             </div>
-            <label htmlFor={inputId} className="mt-5 block text-xs font-black uppercase tracking-[0.16em] text-zinc-500 dark:text-zinc-400">
+            <label
+              htmlFor={inputId}
+              className="mt-5 block text-xs font-black uppercase tracking-[0.16em] text-zinc-500 dark:text-zinc-400"
+            >
               {t("billing.promoLabel")}
             </label>
             <input
@@ -98,7 +179,7 @@ export function UpgradeInterestButton({
               value={promoCode}
               onChange={(event) => setPromoCode(event.target.value)}
               className="mt-2 w-full rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-base font-black uppercase text-zinc-950 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/15 dark:border-zinc-800 dark:bg-zinc-900 dark:text-white"
-              placeholder="TOMVERSE50"
+              placeholder={activePromo?.code || "TOMVERSE50"}
               autoComplete="off"
             />
             <p className="mt-2 text-xs font-semibold text-zinc-500 dark:text-zinc-400">
