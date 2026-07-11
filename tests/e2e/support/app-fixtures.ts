@@ -195,14 +195,27 @@ export async function mockAuthenticatedApi(page: Page): Promise<AuthenticatedQaS
   return state;
 }
 
-export async function mockAttachmentUpload(page: Page) {
+export type AttachmentUploadQaState = {
+  finalizeCount: number;
+  prepareCount: number;
+  uploadCount: number;
+};
+
+export async function mockAttachmentUpload(page: Page): Promise<AttachmentUploadQaState> {
+  const state: AttachmentUploadQaState = {
+    finalizeCount: 0,
+    prepareCount: 0,
+    uploadCount: 0,
+  };
+
   await page.route("**/api/chat", async (route) => {
     const method = route.request().method();
 
     if (method === "PUT") {
+      state.prepareCount += 1;
       await route.fulfill(
         json({
-          key: "attachments/qa-file",
+          key: `attachments/qa-file-${state.prepareCount}`,
           uploadUrl: "http://127.0.0.1:3100/__qa_upload__",
           uploadHeaders: { "Content-Type": "application/octet-stream" },
         })
@@ -211,6 +224,7 @@ export async function mockAttachmentUpload(page: Page) {
     }
 
     if (method === "PATCH") {
+      state.finalizeCount += 1;
       const body = route.request().postDataJSON() as { size?: number };
       await route.fulfill(json({ size: body.size || 1 }));
       return;
@@ -219,9 +233,12 @@ export async function mockAttachmentUpload(page: Page) {
     await route.fallback();
   });
 
-  await page.route("**/__qa_upload__", (route) =>
-    route.fulfill({ status: 200, body: "" })
-  );
+  await page.route("**/__qa_upload__", (route) => {
+    state.uploadCount += 1;
+    return route.fulfill({ status: 200, body: "" });
+  });
+
+  return state;
 }
 
 export function createQaPngBuffer() {
