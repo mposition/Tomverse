@@ -3,18 +3,23 @@
 import Link from "next/link";
 import {
   ArrowRight,
+  BarChart3,
   Bot,
   BriefcaseBusiness,
   CheckCircle2,
   Code2,
   FileText,
+  FolderKanban,
+  HeartHandshake,
   HelpCircle,
   Layers3,
   LockKeyhole,
   Search,
+  ServerCog,
   Share2,
   ShieldCheck,
   Sparkles,
+  UploadCloud,
   Workflow,
 } from "lucide-react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
@@ -31,11 +36,16 @@ const supportedModels = [
   { name: "Kimi", mark: "KM", detail: "Moonshot", className: "from-white to-blue-50", image: "/model-icons/kimi.png" },
   { name: "Qwen", mark: "QW", detail: "Alibaba", className: "from-white to-indigo-50", image: "/model-icons/qwen.png" },
   { name: "Perplexity", mark: "P", detail: "Sonar", className: "from-white to-cyan-50", image: "/model-icons/perplexity.png" },
-  { name: "Mistral", mark: "M", detail: "Coming soon", className: "from-amber-400 to-red-500" },
 ];
 
 type CardCopy = { title: string; description: string };
 type PricingPreviewCopy = CardCopy & { price: string; bullets: string[] };
+type LaunchCopy = {
+  eyebrow: string;
+  title: string;
+  description: string;
+  items: CardCopy[];
+};
 
 type LandingCopy = {
   app: string;
@@ -270,9 +280,41 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
   },
 };
 
+const launchCopy: { en: LaunchCopy } & Partial<Record<Language, LaunchCopy>> = {
+  en: {
+    eyebrow: "Product-ready workspace",
+    title: "More than a model picker.",
+    description:
+      "Tomverse now includes the day-to-day controls users expect before relying on an AI workspace for real work.",
+    items: [
+      { title: "Project organization", description: "Group chats into projects, rename them, and keep growing workspaces easier to scan." },
+      { title: "Plan and usage clarity", description: "Users can see current plan, daily and monthly usage, remaining limits, and why a feature is locked." },
+      { title: "Provider status awareness", description: "When a model provider is limited, Tomverse shows status and suggests nearby alternatives." },
+      { title: "File-ready workflows", description: "Images, PDFs, Office files, text files, and Google Drive imports are supported with validation and guidance." },
+      { title: "Support-ready feedback", description: "Feedback can include trace ID, model, plan, browser, and attachment context for faster support." },
+      { title: "Public share documents", description: "Shared conversations are read-only snapshots with model filters, copy actions, expiry, and app CTA." },
+    ],
+  },
+  ko: {
+    eyebrow: "상업용 출시 준비",
+    title: "단순한 모델 선택기가 아닙니다.",
+    description:
+      "Tomverse는 실제 업무용 AI 워크스페이스로 쓰기 위해 필요한 사용량, 정리, 공유, 지원, 운영 상태 기능을 갖추고 있습니다.",
+    items: [
+      { title: "프로젝트 정리", description: "대화를 프로젝트별로 묶고, 이름 변경과 삭제를 통해 커지는 워크스페이스를 더 쉽게 관리합니다." },
+      { title: "플랜과 사용량 안내", description: "현재 플랜, 일일/월간 사용량, 남은 한도, 기능 제한 이유를 사용자에게 명확히 보여줍니다." },
+      { title: "Provider 상태 표시", description: "모델 공급자가 제한되거나 장애가 있을 때 상태와 대체 모델을 함께 안내합니다." },
+      { title: "파일 기반 작업", description: "이미지, PDF, Office, 텍스트, Google Drive 파일을 검증과 안내 흐름 안에서 사용할 수 있습니다." },
+      { title: "지원 가능한 피드백", description: "피드백에 추적 ID, 모델, 플랜, 브라우저, 첨부 여부가 포함되어 문제 재현이 쉬워집니다." },
+      { title: "공개 공유 문서", description: "공유 대화는 읽기 전용 스냅샷으로 제공되며 모델 필터, 복사, 만료일, 앱 열기 CTA를 포함합니다." },
+    ],
+  },
+};
+
 const featureIcons = [Layers3, FileText, Share2, LockKeyhole];
 const useCaseIcons = [Search, Code2, BriefcaseBusiness, FileText];
 const trustIcons = [ShieldCheck, Share2, LockKeyhole, FileText];
+const launchIcons = [FolderKanban, BarChart3, ServerCog, UploadCloud, HeartHandshake, Share2];
 
 const CardGrid = ({
   items,
@@ -298,6 +340,7 @@ const CardGrid = ({
 export function LandingPageContent() {
   const { lang } = useLanguage();
   const content = copy[lang] ?? copy.en;
+  const launch = launchCopy[lang] ?? launchCopy.en;
 
   return (
     <main className="min-h-screen overflow-x-hidden bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">
@@ -388,6 +431,44 @@ export function LandingPageContent() {
       </section>
 
       <section className="py-20">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div className="max-w-3xl">
+              <p className="text-xs font-black uppercase tracking-[0.22em] text-blue-600 dark:text-blue-400">
+                {launch.eyebrow}
+              </p>
+              <h2 className="mt-3 text-3xl font-black sm:text-4xl">{launch.title}</h2>
+              <p className="mt-4 text-base leading-7 text-zinc-600 dark:text-zinc-300">{launch.description}</p>
+            </div>
+            <Link
+              href="/support/help-centre"
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-zinc-300 px-4 text-sm font-black text-zinc-800 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-zinc-900"
+            >
+              Help Centre
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          </div>
+          <div className="mt-10 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {launch.items.map((item, index) => {
+              const Icon = launchIcons[index] ?? Layers3;
+              return (
+                <article
+                  key={item.title}
+                  className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
+                >
+                  <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-300">
+                    <Icon className="h-5 w-5" />
+                  </span>
+                  <h3 className="mt-4 text-base font-black">{item.title}</h3>
+                  <p className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-400">{item.description}</p>
+                </article>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      <section className="border-y border-zinc-200 bg-zinc-50 py-20 dark:border-zinc-800 dark:bg-zinc-900/30">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="max-w-2xl">
             <h2 className="text-3xl font-black sm:text-4xl">{content.useCasesTitle}</h2>
