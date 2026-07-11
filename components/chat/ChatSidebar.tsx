@@ -6,7 +6,8 @@ import { AuthButton } from "@/components/auth/AuthButton";
 import { useCallback, useState, useEffect, useRef } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
 import Link from "next/link";
-import { AlertTriangle, CloudUpload, Crown, Database, Download, Link2Off, Lock, MessageSquare, MoreVertical, Pencil, Search, Send, Share2, ShieldCheck, Sparkles, Trash2, Unlock, X } from "lucide-react";
+import { AlertTriangle, CloudUpload, Crown, Database, Download, Link2Off, Lock, MessageSquare, MoreVertical, Pencil, Pin, Search, Send, Share2, ShieldCheck, Sparkles, Star, Trash2, Unlock, X } from "lucide-react";
+import { UserUsageSummary } from "@/components/chat/UserUsageSummary";
 
 type ChatSidebarProps = {
     conversations: Conversation[];
@@ -49,6 +50,30 @@ export function ChatSidebar({
     const [showPrivateNotice, setShowPrivateNotice] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
     const [conversationFilter, setConversationFilter] = useState<"all" | "locked" | "shared">("all");
+    const [pinnedConversationIds, setPinnedConversationIds] = useState<string[]>(() => {
+        if (typeof window === "undefined") return [];
+        try {
+            const saved = JSON.parse(localStorage.getItem("tomverse_pinned_conversations") || "[]");
+            return Array.isArray(saved) ? saved.filter((item): item is string => typeof item === "string") : [];
+        } catch {
+            return [];
+        }
+    });
+    const [favoriteConversationIds, setFavoriteConversationIds] = useState<string[]>(() => {
+        if (typeof window === "undefined") return [];
+        try {
+            const saved = JSON.parse(localStorage.getItem("tomverse_favorite_conversations") || "[]");
+            return Array.isArray(saved) ? saved.filter((item): item is string => typeof item === "string") : [];
+        } catch {
+            return [];
+        }
+    });
+    const [messageSearchResults, setMessageSearchResults] = useState<Array<{
+        id: string;
+        conversationId: string;
+        conversationTitle: string;
+        snippet: string;
+    }>>([]);
     const [renameTarget, setRenameTarget] = useState<Conversation | null>(null);
     const [renameValue, setRenameValue] = useState("");
     const [lockTarget, setLockTarget] = useState<Conversation | null>(null);
@@ -69,17 +94,68 @@ export function ChatSidebar({
     const menuIconClass = "h-3.5 w-3.5 shrink-0";
     const crownClass = "h-3.5 w-3.5 shrink-0 text-amber-400";
     const normalizedSearch = searchQuery.trim().toLowerCase();
+    const messageMatchedIds = new Set(messageSearchResults.map((result) => result.conversationId));
     const filteredConversations = conversations.filter((conversation) => {
         const matchesSearch =
             !normalizedSearch ||
-            conversation.title.toLowerCase().includes(normalizedSearch);
+            conversation.title.toLowerCase().includes(normalizedSearch) ||
+            messageMatchedIds.has(conversation.id);
         const matchesFilter =
             conversationFilter === "all" ||
             (conversationFilter === "locked" && conversation.isLocked) ||
             (conversationFilter === "shared" && conversation.shareEnabled);
 
         return matchesSearch && matchesFilter;
+    }).sort((a, b) => {
+        const pinnedDelta =
+            Number(pinnedConversationIds.includes(b.id)) -
+            Number(pinnedConversationIds.includes(a.id));
+        if (pinnedDelta !== 0) return pinnedDelta;
+        const favoriteDelta =
+            Number(favoriteConversationIds.includes(b.id)) -
+            Number(favoriteConversationIds.includes(a.id));
+        return favoriteDelta;
     });
+
+    useEffect(() => {
+        if (isGuestMode || normalizedSearch.length < 2) {
+            const timer = window.setTimeout(() => setMessageSearchResults([]), 0);
+            return () => window.clearTimeout(timer);
+        }
+        const controller = new AbortController();
+        const timer = window.setTimeout(() => {
+            void fetch(`/api/conversations/search?q=${encodeURIComponent(searchQuery.trim())}`, {
+                signal: controller.signal,
+                cache: "no-store",
+            })
+                .then((response) => (response.ok ? response.json() : { results: [] }))
+                .then((data) => setMessageSearchResults(Array.isArray(data.results) ? data.results : []))
+                .catch(() => {});
+        }, 250);
+        return () => {
+            window.clearTimeout(timer);
+            controller.abort();
+        };
+    }, [isGuestMode, normalizedSearch.length, searchQuery]);
+
+    const toggleStoredId = (storageKey: string, id: string, setter: (ids: string[]) => void) => {
+        let next: string[] = [];
+        try {
+            const current = JSON.parse(localStorage.getItem(storageKey) || "[]");
+            const values = Array.isArray(current) ? current.filter((item): item is string => typeof item === "string") : [];
+            next = values.includes(id) ? values.filter((item) => item !== id) : [id, ...values];
+            localStorage.setItem(storageKey, JSON.stringify(next));
+        } catch {
+            next = [id];
+            localStorage.setItem(storageKey, JSON.stringify(next));
+        }
+        setter(next);
+    };
+
+    const togglePinned = (id: string) =>
+        toggleStoredId("tomverse_pinned_conversations", id, setPinnedConversationIds);
+    const toggleFavorite = (id: string) =>
+        toggleStoredId("tomverse_favorite_conversations", id, setFavoriteConversationIds);
 
     const getConversationModelSummary = (conversation: Conversation) => {
         const models = conversation.selectedModels
@@ -254,6 +330,24 @@ export function ChatSidebar({
             </div>
 
             <div className="flex-1 overflow-y-auto p-2 space-y-1 min-h-0">
+                {messageSearchResults.length > 0 && (
+                    <div className="mb-2 rounded-xl border border-blue-200 bg-blue-50 p-2 text-xs dark:border-blue-900/50 dark:bg-blue-950/20">
+                        <p className="px-1 pb-1 font-black text-blue-700 dark:text-blue-300">
+                            Message matches
+                        </p>
+                        {messageSearchResults.slice(0, 4).map((result) => (
+                            <button
+                                key={result.id}
+                                type="button"
+                                onClick={() => onSelectConversation(result.conversationId)}
+                                className="block w-full rounded-lg px-2 py-1.5 text-left text-zinc-600 hover:bg-white dark:text-zinc-300 dark:hover:bg-zinc-900"
+                            >
+                                <span className="block truncate font-bold">{result.conversationTitle}</span>
+                                <span className="block truncate text-[11px] text-zinc-400">{result.snippet}</span>
+                            </button>
+                        ))}
+                    </div>
+                )}
                 {filteredConversations.length === 0 && (
                     <div className="flex h-32 flex-col items-center justify-center rounded-lg border border-dashed border-zinc-200 px-4 text-center text-xs text-zinc-400 dark:border-zinc-800">
                         <MessageSquare className="mb-2 h-5 w-5" />
@@ -290,6 +384,8 @@ export function ChatSidebar({
                                 <span className="min-w-0 flex flex-col gap-1">
                                     <span className="truncate text-[13px] leading-4">{conv.title}</span>
                                     <span className="flex items-center gap-1.5 truncate text-[10px] font-medium text-zinc-400 dark:text-zinc-500">
+                                        {pinnedConversationIds.includes(conv.id) && <Pin className="h-3 w-3 shrink-0 text-blue-500" />}
+                                        {favoriteConversationIds.includes(conv.id) && <Star className="h-3 w-3 shrink-0 fill-amber-400 text-amber-400" />}
                                         <Sparkles className="h-3 w-3 shrink-0" />
                                         <span className="truncate">{getConversationModelSummary(conv)}</span>
                                         {conv.shareEnabled && (
@@ -340,6 +436,36 @@ export function ChatSidebar({
                                             <span className="flex items-center gap-2">
                                                 <Pencil className={menuIconClass} />
                                                 <span>{t("sidebar.rename")}</span>
+                                            </span>
+                                        </button>
+
+                                        <button
+                                            type="button"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                togglePinned(conv.id);
+                                                setOpenMenuId(null);
+                                            }}
+                                            className={`${menuItemBase} ${menuItemEnabled}`}
+                                        >
+                                            <span className="flex items-center gap-2">
+                                                <Pin className={menuIconClass} />
+                                                <span>{pinnedConversationIds.includes(conv.id) ? "Unpin chat" : "Pin chat"}</span>
+                                            </span>
+                                        </button>
+
+                                        <button
+                                            type="button"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                toggleFavorite(conv.id);
+                                                setOpenMenuId(null);
+                                            }}
+                                            className={`${menuItemBase} ${menuItemEnabled}`}
+                                        >
+                                            <span className="flex items-center gap-2">
+                                                <Star className={menuIconClass} />
+                                                <span>{favoriteConversationIds.includes(conv.id) ? "Remove favorite" : "Favorite chat"}</span>
                                             </span>
                                         </button>
 
@@ -473,6 +599,12 @@ export function ChatSidebar({
                     );
                 })}
             </div>
+
+            <UserUsageSummary
+                isGuestMode={isGuestMode}
+                guestMessageCount={guestMessageCount}
+                maxGuestMessages={maxGuestMessages}
+            />
 
             <div className="p-3 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-100/40 dark:bg-zinc-900/50 flex flex-col gap-2 shrink-0">
                 <div className="rounded-2xl border border-zinc-200 bg-white p-3 text-xs shadow-sm dark:border-zinc-800 dark:bg-zinc-950">

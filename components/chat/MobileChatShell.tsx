@@ -5,6 +5,7 @@ import { ChatApp } from "@/components/chat/ChatApp";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
+import { FeedbackButton } from "@/components/chat/FeedbackButton";
 import {
   AVAILABLE_MODELS,
   type ChatAttachment,
@@ -60,6 +61,7 @@ type MobileChatShellProps = {
   onTogglePrivateMode: () => void;
   onToggleModel: (modelId: string) => void;
   onSubmit: () => void;
+  onCompareSummary: () => void;
 };
 
 export function MobileChatShell({
@@ -90,6 +92,7 @@ export function MobileChatShell({
   onTogglePrivateMode,
   onToggleModel,
   onSubmit,
+  onCompareSummary,
 }: MobileChatShellProps) {
   const { t } = useLanguage();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -354,6 +357,18 @@ export function MobileChatShell({
         </div>
       )}
 
+      {selectedModels.length > 1 && currentChatId && !isGuestMode && (
+        <div className="shrink-0 border-b border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950">
+          <button
+            type="button"
+            onClick={onCompareSummary}
+            className="h-9 w-full rounded-xl border border-blue-200 bg-blue-50 text-xs font-black text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200"
+          >
+            Summarize model differences
+          </button>
+        </div>
+      )}
+
       <section
         className="flex min-h-0 flex-1 flex-col overflow-hidden bg-zinc-50 dark:bg-zinc-950"
         onTouchStart={(event) => {
@@ -488,6 +503,7 @@ export function MobileChatShell({
           </div>
         </div>
       )}
+      <FeedbackButton currentModelId={resolvedActiveModelId} />
     </main>
   );
 }

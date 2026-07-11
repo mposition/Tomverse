@@ -5,6 +5,7 @@ import { ChatApp } from "@/components/chat/ChatApp";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
+import { FeedbackButton } from "@/components/chat/FeedbackButton";
 import {
   AVAILABLE_MODELS,
   ENABLED_MODELS,
@@ -52,6 +53,7 @@ type DesktopChatShellProps = {
   onChangePanelModel: (oldModelId: string, newModelId: string) => void;
   onTogglePanelDisable: (modelId: string) => void;
   onRemoveModel: (modelId: string) => void;
+  onCompareSummary: () => void;
 };
 
 export function DesktopChatShell({
@@ -85,6 +87,7 @@ export function DesktopChatShell({
   onChangePanelModel,
   onTogglePanelDisable,
   onRemoveModel,
+  onCompareSummary,
 }: DesktopChatShellProps) {
   const { t } = useLanguage();
 
@@ -222,6 +225,18 @@ export function DesktopChatShell({
           })}
         </div>
 
+        {selectedModels.length > 1 && currentChatId && !isGuestMode && (
+          <div className="border-t border-zinc-200 bg-white px-4 py-2 dark:border-zinc-800 dark:bg-zinc-950">
+            <button
+              type="button"
+              onClick={onCompareSummary}
+              className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-xs font-black text-blue-700 hover:bg-blue-100 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200 dark:hover:bg-blue-950"
+            >
+              Summarize model differences
+            </button>
+          </div>
+        )}
+
         <ChatInput
           value={inputValue}
           onChange={setInputValue}
@@ -238,6 +253,7 @@ export function DesktopChatShell({
           isGuestLimitReached={isGuestMode && guestMessageCount >= maxGuestMessages}
         />
       </section>
+      <FeedbackButton currentModelId={selectedModels[0]} />
     </main>
   );
 }

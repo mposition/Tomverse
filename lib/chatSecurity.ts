@@ -209,6 +209,9 @@ const hashKey = (scope: string, value: string) =>
         .update(`${scope}:${value}:${getSecret()}`)
         .digest("hex");
 
+export const getUserChatUsageKey = (userId: string) =>
+    `user:${hashKey("user", userId)}`;
+
 export const identifyChatCaller = (
     request: Request,
     userId?: string | null

@@ -422,6 +422,18 @@ function ChatAppComponent({
     );
   }, [handleSendPrompt]);
 
+  const handleRetryWithoutAttachments = useCallback(() => {
+    const lastPrompt = lastPromptRef.current;
+    if (!lastPrompt || isSendingRef.current) return;
+
+    void handleSendPrompt(
+      lastPrompt.text,
+      lastPrompt.targetChatId,
+      crypto.randomUUID(),
+      []
+    );
+  }, [handleSendPrompt]);
+
   useEffect(() => {
     if (!isGuestMode && status === "loading") return;
     if (!isGuestMode && !session?.user) return;
@@ -485,12 +497,13 @@ function ChatAppComponent({
       {!isPanelDisabled ? (
               <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
                   <div className="min-h-0 flex-1 overflow-hidden">
-                      <ChatMessageList
-                        messages={messages}
-                        isPrivate={isPrivate}
-                        isGuestMode={isGuestMode}
-                        onRetryLast={handleRetryLast}
-                      />
+      <ChatMessageList
+        messages={messages}
+        isPrivate={isPrivate}
+        isGuestMode={isGuestMode}
+        onRetryLast={handleRetryLast}
+        onRetryWithoutAttachments={handleRetryWithoutAttachments}
+      />
                   </div>
                   {isGuestMode ? (
                     <div

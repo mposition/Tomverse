@@ -1216,6 +1216,13 @@ export function ChatInput({
                           const isTierLocked =
                             isGuestMode && model.tier !== "Free";
                           const unavailable = !model.enabled || isTierLocked;
+                          const statusReason = isTierLocked
+                            ? "Login required for Pro and Max models"
+                            : !model.enabled
+                              ? "Temporarily unavailable"
+                              : model.status !== "enabled"
+                                ? "Limited by provider availability"
+                                : getModelBestFor(model);
                           return (
                             <div
                               key={model.id}
@@ -1259,6 +1266,9 @@ export function ChatInput({
                                   </span>
                                   <span className="block truncate text-[10px] font-medium text-zinc-400">
                                     {model.provider} - {unavailable ? t("chat.unavailableModel") : t("chat.availableModel")}
+                                  </span>
+                                  <span className="block truncate text-[10px] text-zinc-500 dark:text-zinc-400">
+                                    {statusReason}
                                   </span>
                                   <span className="mt-1 flex max-w-full flex-wrap gap-1">
                                     {modelTags.map((tag) => (

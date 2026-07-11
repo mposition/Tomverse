@@ -158,6 +158,11 @@ export default function Home() {
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [pendingRemoveModelId, setPendingRemoveModelId] = useState<string | null>(null);
   const [pendingRevokeShareId, setPendingRevokeShareId] = useState<string | null>(null);
+  const [compareSummary, setCompareSummary] = useState<{
+    title: string;
+    note: string;
+    items: Array<{ modelId: string; modelName: string; summary: string }>;
+  } | null>(null);
   const [unlockDialog, setUnlockDialog] = useState<{ id: string; password: string; error: string } | null>(null);
   const [lockedSelectDialog, setLockedSelectDialog] = useState<{ id: string; password: string; error: string } | null>(null);
   const [toast, setToast] = useState<AppToast | null>(null);
@@ -944,6 +949,23 @@ export default function Home() {
         showToast(t("sidebar.shareRevoked"), "success");
     };
 
+    const handleCompareSummary = async () => {
+      if (!currentChatId || isGuestMode || currentChatId === "private-chat") return;
+      try {
+        const response = await fetch(
+          `/api/conversations/${currentChatId}/compare-summary`,
+          { cache: "no-store" }
+        );
+        if (!response.ok) {
+          showToast("Comparison summary is unavailable.", "error");
+          return;
+        }
+        setCompareSummary(await response.json());
+      } catch {
+        showToast("Comparison summary is unavailable.", "error");
+      }
+    };
+
   const pendingRemoveModel = pendingRemoveModelId
     ? AVAILABLE_MODELS.find((model) => model.id === pendingRemoveModelId)
     : null;
@@ -995,6 +1017,7 @@ export default function Home() {
           onTogglePrivateMode={togglePrivateModeGlobal}
           onToggleModel={toggleModel}
           onSubmit={handleGlobalSubmit}
+          onCompareSummary={handleCompareSummary}
         />
       ) : (
         <DesktopChatShell
@@ -1028,6 +1051,7 @@ export default function Home() {
           onChangePanelModel={changePanelModel}
           onTogglePanelDisable={togglePanelDisable}
           onRemoveModel={handleRemoveModel}
+          onCompareSummary={handleCompareSummary}
         />
       )}
     {isViewportReady && <GoLiveOnboarding />}
@@ -1067,6 +1091,42 @@ export default function Home() {
           await executeDelete(id);
         }}
       />
+    )}
+    {compareSummary && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+        <div className="w-full max-w-2xl rounded-2xl border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">
+                Model comparison
+              </h2>
+              <p className="mt-1 text-sm text-zinc-500">{compareSummary.note}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setCompareSummary(null)}
+              className="rounded-lg px-3 py-2 text-sm font-bold text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            >
+              {t("auth.cancel")}
+            </button>
+          </div>
+          <div className="mt-5 grid gap-3">
+            {compareSummary.items.map((item) => (
+              <article
+                key={item.modelId}
+                className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950"
+              >
+                <h3 className="text-sm font-black text-zinc-900 dark:text-zinc-100">
+                  {item.modelName}
+                </h3>
+                <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+                  {item.summary || "No response content found."}
+                </p>
+              </article>
+            ))}
+          </div>
+        </div>
+      </div>
     )}
     {pendingRemoveModelId && (
       <ConfirmDialog

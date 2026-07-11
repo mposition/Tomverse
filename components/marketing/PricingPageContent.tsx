@@ -4,6 +4,7 @@ import Link from "next/link";
 import { CheckCircle2, Minus } from "lucide-react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
+import { UpgradeInterestButton } from "@/components/marketing/UpgradeInterestButton";
 
 type PlanCopy = {
   name: string;
@@ -378,16 +379,29 @@ export function PricingPageContent() {
               <p className={`mt-3 text-sm font-black ${plan.highlighted ? "text-blue-50" : "text-zinc-700 dark:text-zinc-200"}`}>
                 {plan.usage}
               </p>
-              <Link
-                href={plan.href}
-                className={`mt-8 inline-flex h-12 w-full items-center justify-center rounded-xl text-sm font-black transition ${
-                  plan.highlighted
-                    ? "bg-white text-blue-700 hover:bg-blue-50"
-                    : "border border-zinc-300 text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-zinc-800"
-                }`}
-              >
-                {plan.cta}
-              </Link>
+              {plan.name === "Free" ? (
+                <Link
+                  href={plan.href}
+                  className={`mt-8 inline-flex h-12 w-full items-center justify-center rounded-xl text-sm font-black transition ${
+                    plan.highlighted
+                      ? "bg-white text-blue-700 hover:bg-blue-50"
+                      : "border border-zinc-300 text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-zinc-800"
+                  }`}
+                >
+                  {plan.cta}
+                </Link>
+              ) : (
+                <UpgradeInterestButton
+                  plan={plan.name === "Max" ? "Max" : "Pro"}
+                  className={`mt-8 inline-flex h-12 w-full items-center justify-center rounded-xl text-sm font-black transition ${
+                    plan.highlighted
+                      ? "bg-white text-blue-700 hover:bg-blue-50"
+                      : "border border-zinc-300 text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-zinc-800"
+                  }`}
+                >
+                  Join waitlist
+                </UpgradeInterestButton>
+              )}
               <ul className="mt-8 space-y-3">
                 {plan.features.map((feature) => (
                   <li key={feature} className={`flex gap-3 text-sm font-semibold leading-6 ${plan.highlighted ? "text-white" : "text-zinc-700 dark:text-zinc-300"}`}>
