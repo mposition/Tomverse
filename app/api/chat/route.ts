@@ -42,6 +42,11 @@ import {
     conversationLockedResponse,
     hasConversationUnlockGrant,
 } from "@/lib/conversationLock";
+import {
+    notifyProviderBudgetIfNeeded,
+    recordProviderFailure,
+    recordProviderSuccess,
+} from "@/lib/providerMonitoring";
 import { z } from "zod";
 import {
     apiSecurityResponse,
@@ -568,6 +573,7 @@ export async function POST(req: Request) {
     const traceId = randomUUID();
     let leaseId: string | null = null;
     let requestedModelIdForLog: string | undefined;
+    let requestedProviderForLog: AiModel["provider"] | undefined;
     try {
         assertChatRequestSize(req);
         const session = await getServerSession(authOptions);
@@ -590,6 +596,7 @@ export async function POST(req: Request) {
                 traceId
             );
         }
+        requestedProviderForLog = modelConfig.provider;
         const requestAttachments = messages.flatMap((message) =>
             Array.isArray(message.attachments)
                 ? (message.attachments as IncomingAttachment[])
@@ -970,6 +977,16 @@ export async function POST(req: Request) {
         );
         const accessGrant = await acquireChatAccess(access, budget);
         leaseId = accessGrant.leaseId;
+        try {
+            await notifyProviderBudgetIfNeeded(modelConfig.provider);
+        } catch (error) {
+            logRequestError(
+                "provider_budget_alert_failed",
+                traceId,
+                error,
+                requestedModelId
+            );
+        }
 
         const result = await streamText({
             model: activeModel,
@@ -1051,6 +1068,16 @@ export async function POST(req: Request) {
                                 );
                             }
                         }
+                        try {
+                            await recordProviderSuccess(modelConfig.provider);
+                        } catch (error) {
+                            logRequestError(
+                                "provider_success_record_failed",
+                                traceId,
+                                error,
+                                requestedModelId
+                            );
+                        }
                         controller.close();
                         await release();
                         return;
@@ -1064,6 +1091,19 @@ export async function POST(req: Request) {
                         error,
                         requestedModelId
                     );
+                    try {
+                        await recordProviderFailure(
+                            modelConfig.provider,
+                            "AI_STREAM_FAILED"
+                        );
+                    } catch (recordError) {
+                        logRequestError(
+                            "provider_failure_record_failed",
+                            traceId,
+                            recordError,
+                            requestedModelId
+                        );
+                    }
                     controller.enqueue(
                         `AI 응답 생성에 실패했습니다. 잠시 후 다시 시도하거나 다른 모델을 선택해주세요.\n추적 ID: ${traceId}`
                     );
@@ -1105,6 +1145,21 @@ export async function POST(req: Request) {
             error,
             requestedModelIdForLog
         );
+        try {
+            await recordProviderFailure(
+                requestedProviderForLog,
+                error instanceof ChatAccessError
+                    ? error.code
+                    : safeErrorMetadata(error).code || "AI_REQUEST_FAILED"
+            );
+        } catch (recordError) {
+            logRequestError(
+                "provider_failure_record_failed",
+                traceId,
+                recordError,
+                requestedModelIdForLog
+            );
+        }
 
         return tracedJsonError(
             "AI 응답 생성에 실패했습니다.",

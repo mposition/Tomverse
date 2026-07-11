@@ -386,10 +386,15 @@ export const acquireChatAccess = async (
                       ),
                   },
               ];
-    const providerEnvKey = `CHAT_PROVIDER_${budget.provider.toUpperCase()}_COST_MICROUSD_PER_MONTH`;
-    const providerLimit = positiveInteger(
-        process.env[providerEnvKey],
+    const providerMonthlyEnvKey = `CHAT_PROVIDER_${budget.provider.toUpperCase()}_COST_MICROUSD_PER_MONTH`;
+    const providerMonthlyLimit = positiveInteger(
+        process.env[providerMonthlyEnvKey],
         100_000_000
+    );
+    const providerDailyEnvKey = `CHAT_PROVIDER_${budget.provider.toUpperCase()}_COST_MICROUSD_PER_DAY`;
+    const providerDailyLimit = positiveInteger(
+        process.env[providerDailyEnvKey],
+        10_000_000
     );
 
     await prisma.$transaction(async (tx) => {
@@ -565,13 +570,37 @@ export const acquireChatAccess = async (
         }
 
         const providerKey = `provider:${budget.provider}`;
+        const providerDayStart = periodStart("day", now);
+        const providerDayAllowed = await incrementUsage(
+            tx,
+            providerKey,
+            "provider-cost-day",
+            providerDayStart,
+            providerDailyLimit,
+            reservedCost
+        );
+        if (!providerDayAllowed) {
+            throw new ChatAccessError(
+                503,
+                "PROVIDER_DAILY_SPEND_LIMIT_REACHED",
+                "This AI provider is temporarily unavailable."
+            );
+        }
+        reservationEntries.push({
+            key: providerKey,
+            period: "provider-cost-day",
+            periodStart: providerDayStart,
+            amount: reservedCost,
+            metric: "cost",
+        });
+
         const providerStart = periodStart("month", now);
         const providerAllowed = await incrementUsage(
             tx,
             providerKey,
             "provider-cost-month",
             providerStart,
-            providerLimit,
+            providerMonthlyLimit,
             reservedCost
         );
         if (!providerAllowed) {

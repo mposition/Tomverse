@@ -141,6 +141,7 @@ export const zh = {
         shareTitle: "分享整理好的结果",
         shareBody: "创建只读分享链接，或将对话下载为文本。",
         cta: "开始使用 Tomverse",
+        dontShowAgain: "不再显示",
     },
     auth: {
         saveMessage: "设置已成功保存。",

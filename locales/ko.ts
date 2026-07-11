@@ -141,6 +141,7 @@ export const ko = {
         shareTitle: "결과 공유",
         shareBody: "읽기 전용 공유 링크를 만들거나 대화를 텍스트로 다운로드할 수 있습니다.",
         cta: "Tomverse 시작하기",
+        dontShowAgain: "다시 보지 않기",
     },
     auth: {
         saveMessage: "설정이 성공적으로 저장되었습니다.",

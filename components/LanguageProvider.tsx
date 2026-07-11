@@ -59,14 +59,18 @@ export function LanguageProvider({ children, initialLang = "en" }: { children: R
         return () => window.clearTimeout(restoreSavedLanguage);
     }, []);
 
-    const t = (key: string) => {
-        const keys = key.split(".");
-        let value: unknown = dictionaries[lang];
+    const lookup = (dictionary: unknown, keys: string[]) => {
+        let value = dictionary;
         for (const k of keys) {
-            if (!value || typeof value !== "object") return key;
+            if (!value || typeof value !== "object") return undefined;
             value = (value as Record<string, unknown>)[k];
         }
-        return typeof value === "string" ? value : key;
+        return typeof value === "string" ? value : undefined;
+    };
+
+    const t = (key: string) => {
+        const keys = key.split(".");
+        return lookup(dictionaries[lang], keys) ?? lookup(en, keys) ?? key;
     };
 
     return (

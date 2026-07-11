@@ -141,6 +141,7 @@ export const en = {
         shareTitle: "Share polished results",
         shareBody: "Create read-only share links or download conversations as text.",
         cta: "Start using Tomverse",
+        dontShowAgain: "Don't show this again",
     },
     auth: {
         saveMessage: "Settings saved successfully.",
