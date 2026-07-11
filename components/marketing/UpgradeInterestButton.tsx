@@ -275,19 +275,19 @@ export function UpgradeInterestButton({
       </button>
       {isOpen ? (
         <div
-          className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 px-3 py-6 backdrop-blur-sm"
+          className="fixed inset-0 z-[90] flex items-end justify-center bg-black/60 px-3 py-3 backdrop-blur-sm sm:items-center sm:py-6"
           role="dialog"
           aria-modal="true"
           aria-labelledby={`${inputId}-title`}
         >
           <form
-            className="grid max-h-[92vh] w-full max-w-4xl overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-950 md:grid-cols-[1.1fr_0.9fr]"
+            className="grid max-h-[calc(100dvh-1.5rem)] w-full max-w-4xl overflow-y-auto rounded-3xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-950 md:max-h-[92vh] md:grid-cols-[1.1fr_0.9fr] md:overflow-hidden"
             onSubmit={(event) => {
               event.preventDefault();
               submit();
             }}
           >
-            <div className="overflow-y-auto p-5 sm:p-6">
+            <div className="p-5 pb-3 sm:p-6 md:overflow-y-auto">
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-600 dark:text-blue-300">
@@ -367,7 +367,7 @@ export function UpgradeInterestButton({
                     </span>
                   ))}
                 </div>
-                <p className="text-xs font-semibold leading-5 text-zinc-500 dark:text-zinc-400">
+                <p className="hidden text-xs font-semibold leading-5 text-zinc-500 dark:text-zinc-400 sm:block">
                   Stripe shows wallets and PayPal when available for your device, browser, region, and Stripe account settings.
                 </p>
               </div>
@@ -406,7 +406,7 @@ export function UpgradeInterestButton({
               </p>
             </div>
 
-            <aside className="flex flex-col border-t border-zinc-200 bg-zinc-50 p-5 dark:border-zinc-800 dark:bg-zinc-900/70 md:border-l md:border-t-0 sm:p-6">
+            <aside className="flex flex-col border-t border-zinc-200 bg-zinc-50 p-5 pb-3 dark:border-zinc-800 dark:bg-zinc-900/70 md:border-l md:border-t-0 sm:p-6">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500 dark:text-zinc-400">
@@ -486,7 +486,7 @@ export function UpgradeInterestButton({
                   : `Monthly checkout renews every month. Base USD price: ${usdMonthlyPriceLabel || "-"} per month.`}
               </div>
 
-              <div className="mt-auto flex flex-col gap-2 pt-6">
+              <div className="mt-auto hidden flex-col gap-2 pt-6 md:flex">
                 <button
                   type="submit"
                   disabled={isSending}
@@ -503,6 +503,23 @@ export function UpgradeInterestButton({
                 </button>
               </div>
             </aside>
+            <div className="sticky bottom-0 z-20 border-t border-zinc-200 bg-white/95 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/95 md:hidden">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <span className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500 dark:text-zinc-400">
+                  Due today
+                </span>
+                <span className="text-xl font-black text-zinc-950 dark:text-white">
+                  {dueLabel || priceLabel || "-"}
+                </span>
+              </div>
+              <button
+                type="submit"
+                disabled={isSending}
+                className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-black text-white shadow-lg shadow-blue-950/20 hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isSending ? t("billing.sending") : "Continue to checkout"}
+              </button>
+            </div>
           </form>
         </div>
       ) : null}

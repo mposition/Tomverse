@@ -293,6 +293,7 @@ export function ChatInput({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const previousAttachmentsRef = useRef<ChatAttachment[]>([]);
+  const hasHandledFocusTokenRef = useRef(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isDragActive, setIsDragActive] = useState(false);
     const { t } = useLanguage();
@@ -633,6 +634,17 @@ export function ChatInput({
 
   useEffect(() => {
     if (focusToken === undefined) return;
+    if (!hasHandledFocusTokenRef.current) {
+      hasHandledFocusTokenRef.current = true;
+      return;
+    }
+
+    const shouldAutoFocus =
+      typeof window !== "undefined" &&
+      window.matchMedia("(min-width: 768px)").matches &&
+      !window.matchMedia("(pointer: coarse)").matches;
+
+    if (!shouldAutoFocus) return;
 
     const id = requestAnimationFrame(() => {
       textareaRef.current?.focus();

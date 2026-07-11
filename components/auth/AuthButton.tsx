@@ -313,7 +313,7 @@ export function AuthButton() {
                         </div>
 
                         <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[13rem_1fr]">
-                            <nav className="flex gap-2 overflow-x-auto border-b border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950/50 md:flex-col md:overflow-visible md:border-b-0 md:border-r">
+                            <nav className="grid grid-cols-2 gap-2 border-b border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950/50 sm:grid-cols-4 md:flex md:flex-col md:overflow-visible md:border-b-0 md:border-r">
                                 {[
                                     { id: "account", label: t("auth.accountTab"), icon: UserRound },
                                     { id: "preferences", label: t("auth.preferencesTab"), icon: Palette },
@@ -328,14 +328,14 @@ export function AuthButton() {
                                             type="button"
                                             onClick={() => setActiveSettingsTab(item.id as typeof activeSettingsTab)}
                                             aria-pressed={isActive}
-                                            className={`flex shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold transition-colors ${
+                                            className={`flex min-w-0 items-center justify-center gap-2 rounded-xl px-3 py-2 text-center text-sm font-semibold transition-colors md:justify-start md:text-left ${
                                                 isActive
                                                     ? "bg-white text-blue-600 shadow-sm ring-1 ring-zinc-200 dark:bg-zinc-900 dark:text-blue-400 dark:ring-zinc-800"
                                                     : "text-zinc-500 hover:bg-white hover:text-zinc-900 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
                                             }`}
                                         >
-                                            <Icon className="h-4 w-4" />
-                                            {item.label}
+                                            <Icon className="h-4 w-4 shrink-0" />
+                                            <span className="truncate">{item.label}</span>
                                         </button>
                                     );
                                 })}
