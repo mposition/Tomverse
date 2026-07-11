@@ -1,7 +1,7 @@
 ﻿// components/LanguageProvider.tsx
 "use client";
 
-import React, { createContext, useCallback, useContext, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { ko } from "@/locales/ko";
 import { en } from "@/locales/en";
 import { zh } from "@/locales/zh";
@@ -23,18 +23,30 @@ const isLanguage = (value: unknown): value is Language =>
     value === "ko" || value === "en" || value === "zh";
 
 export function LanguageProvider({ children, initialLang = "en" }: { children: React.ReactNode, initialLang?: Language }) {
-    const [lang, setLangState] = useState<Language>(() => {
-        if (typeof window === "undefined") return initialLang;
-
-        const savedLanguage = window.localStorage.getItem(LANGUAGE_STORAGE_KEY);
-        return isLanguage(savedLanguage) ? savedLanguage : initialLang;
-    });
+    const [lang, setLangState] = useState<Language>(initialLang);
 
     const setLang = useCallback((nextLang: Language) => {
         setLangState(nextLang);
         if (typeof window !== "undefined") {
             window.localStorage.setItem(LANGUAGE_STORAGE_KEY, nextLang);
+            document.documentElement.lang = nextLang;
         }
+    }, []);
+
+    useEffect(() => {
+        document.documentElement.lang = lang;
+    }, [lang]);
+
+    useEffect(() => {
+        const restoreSavedLanguage = window.setTimeout(() => {
+            const savedLanguage = window.localStorage.getItem(LANGUAGE_STORAGE_KEY);
+            if (isLanguage(savedLanguage)) {
+                setLangState(savedLanguage);
+                document.documentElement.lang = savedLanguage;
+            }
+        }, 0);
+
+        return () => window.clearTimeout(restoreSavedLanguage);
     }, []);
 
     const t = (key: string) => {

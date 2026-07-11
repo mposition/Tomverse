@@ -46,7 +46,7 @@ test.beforeEach(async ({ page }) => {
   await prepareGuestPage(page, "ko");
   await installClipboardMock(page);
   await mockAuthenticatedApi(page);
-  await page.goto("/");
+  await page.goto("/chat");
   await expect(page.getByTestId("chat-input")).toBeVisible();
 });
 

@@ -442,7 +442,7 @@ export function AuthButton() {
         </select>
       </label>
       <button
-        onClick={() => signIn()}
+        onClick={() => signIn(undefined, { callbackUrl: "/chat" })}
         className="cursor-pointer w-full rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-blue-950/20 transition-all hover:bg-blue-500"
       >
         {t("auth.login")}

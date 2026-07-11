@@ -9,7 +9,7 @@ import { ShieldCheck } from "lucide-react";
 
 function SignInButtons() {
     const searchParams = useSearchParams();
-    const callbackUrl = searchParams.get("callbackUrl") || "/";
+    const callbackUrl = searchParams.get("callbackUrl") || "/chat";
     const { t } = useLanguage();
 
     return (

@@ -11,7 +11,7 @@
     "test:e2e:quick": "npm run build && playwright test --project=desktop-chromium",
     "test:e2e:ui": "npm run build && playwright test --ui",
     "lint": "eslint",
-    "check": "eslint . --max-warnings=0 && tsc --noEmit && next build",
+    "check": "eslint . --max-warnings=0 && tsc --noEmit --incremental false && next build",
     "security:regression": "node scripts/security-regression-check.mjs",
     "db:migrate": "node scripts/require-direct-database-url.mjs && prisma migrate deploy",
     "maintenance:cleanup": "node scripts/run-maintenance.mjs",

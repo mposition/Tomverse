@@ -27,7 +27,7 @@ test.beforeEach(async ({ page }, testInfo) => {
 
   await prepareGuestPage(page, "ko");
   await mockChatStream(page, "Mobile QA response");
-  await page.goto("/");
+  await page.goto("/chat");
 });
 
 test("mobile shell and drawer stay inside viewport", async ({ page }) => {

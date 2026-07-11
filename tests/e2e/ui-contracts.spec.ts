@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test("desktop exposes stable QA contracts", async ({ page }) => {
   await page.setViewportSize({ width: 1366, height: 768 });
-  await page.goto("/");
+  await page.goto("/chat");
 
   await expect(page.getByTestId("desktop-chat-shell")).toBeVisible();
   await expect(page.getByTestId("chat-input")).toBeVisible();
@@ -12,7 +12,7 @@ test("desktop exposes stable QA contracts", async ({ page }) => {
 
 test("mobile exposes stable QA contracts", async ({ page }) => {
   await page.setViewportSize({ width: 412, height: 915 });
-  await page.goto("/");
+  await page.goto("/chat");
 
   await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
   await expect(page.getByTestId("chat-input")).toBeVisible();

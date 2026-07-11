@@ -11,10 +11,15 @@ const r2Origin = (() => {
   }
 })();
 
-const directives = (scriptDirective: string, styleDirective: string) => [
+const directives = (
+  scriptDirective: string,
+  styleDirective: string,
+  styleAttributeDirective: string
+) => [
   "default-src 'self'",
   scriptDirective,
   styleDirective,
+  styleAttributeDirective,
   "img-src 'self' blob: data: https:",
   "font-src 'self' data:",
   `connect-src 'self'${
@@ -41,7 +46,8 @@ export const createStrictCsp = (nonce: string) =>
       } https://accounts.google.com https://apis.google.com https://challenges.cloudflare.com`,
       `style-src 'self' 'nonce-${nonce}'${
         isDevelopment ? " 'unsafe-inline'" : ""
-      } https://accounts.google.com https://challenges.cloudflare.com`
+      } https://accounts.google.com https://challenges.cloudflare.com`,
+      "style-src-attr 'unsafe-inline'"
     ),
     "report-uri /api/security/csp-report",
     "report-to csp-endpoint",

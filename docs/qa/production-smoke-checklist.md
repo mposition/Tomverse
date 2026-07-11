@@ -13,7 +13,7 @@ Run this checklist only after the full local release gate passes.
 ## Smoke Checks
 
 - [ ] Use only the dedicated QA account.
-- [ ] Confirm OAuth callback remains on `https://tomverse.app`.
+- [ ] Confirm OAuth callback returns users to `https://tomverse.app/chat`.
 - [ ] Upload one image and one small valid PDF through R2.
 - [ ] Send one short prompt to every enabled production model.
 - [ ] Confirm provider errors show only a safe message and trace ID.

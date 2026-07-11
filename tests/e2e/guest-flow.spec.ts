@@ -27,7 +27,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("guest can change and persist language", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/chat");
   await openMobileDrawerIfNeeded(page);
 
   await languageSelect(page).selectOption("en");
@@ -50,7 +50,7 @@ test("guest can change and persist language", async ({ page }) => {
 });
 
 test("guest message appears immediately with mocked response", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/chat");
 
   await page.getByTestId("chat-textarea").fill("First QA message");
   await page.getByTestId("chat-textarea").press("Enter");
@@ -62,7 +62,7 @@ test("guest message appears immediately with mocked response", async ({ page }) 
 });
 
 test("guest cannot activate a paid model", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/chat");
 
   await modelSelectorTrigger(page).click();
   const paidModel = page

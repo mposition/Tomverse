@@ -10,7 +10,7 @@ test("mock chat returns deterministic text", async ({ page }) => {
   await prepareGuestPage(page, "ko");
   await mockChatStream(page, "QA mock response");
 
-  await page.goto("/");
+  await page.goto("/chat");
   await page.getByTestId("chat-textarea").fill("QA message");
   await page.getByTestId("chat-textarea").press("Enter");
 
