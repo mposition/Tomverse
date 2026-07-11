@@ -51,6 +51,7 @@ export const de = {
         chatTitle: "Chat-Titel",
         password: "Passwort",
         currentPlan: "Aktueller Tarif",
+        currentUsage: "Aktuelle Nutzung",
         guestPlanDescription: "Der Gastmodus kann kostenlose Modelle mit einem täglichen Browser-Limit nutzen. Dateianhänge sind nach dem Login verfügbar.",
         freePlanDescription: "Free-Arbeitsbereich mit Zugriff auf Free/Pro-Modelle, Dateianhängen, Teilen und Downloads innerhalb der Nutzungslimits.",
         proPlanDescription: "Pro-Arbeitsbereich mit allen verfügbaren Modellen und höheren täglichen sowie monatlichen Nutzungslimits.",

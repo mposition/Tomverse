@@ -134,12 +134,6 @@ export function ChatSidebar({
             ? `${Math.min((displayedUsage.used / displayedUsage.limit) * 100, 100)}%`
             : "0%";
     const isDailyUnlimited = !isGuestMode && displayedUsage.limit <= 0 && accountUsage?.plan === "Max";
-    const planDescriptionKey =
-        displayedPlan === null
-            ? null
-            : displayedPlan === "Guest"
-            ? "sidebar.guestPlanDescription"
-            : `sidebar.${displayedPlan.toLowerCase()}PlanDescription`;
     const menuItemBase =
         "flex w-full items-center justify-between whitespace-nowrap rounded px-3 py-2 text-sm transition-colors";
 
@@ -202,6 +196,20 @@ export function ChatSidebar({
             controller.abort();
         };
     }, [isGuestMode, normalizedSearch.length, searchQuery]);
+
+    useEffect(() => {
+        if (!showProjectForm) return;
+
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key !== "Escape") return;
+            event.preventDefault();
+            setShowProjectForm(false);
+            setProjectName("");
+        };
+
+        document.addEventListener("keydown", handleKeyDown);
+        return () => document.removeEventListener("keydown", handleKeyDown);
+    }, [showProjectForm]);
 
     const toggleStoredId = (storageKey: string, id: string, setter: (ids: string[]) => void) => {
         let next: string[] = [];
@@ -510,7 +518,10 @@ export function ChatSidebar({
                         </span>
                         <button
                             type="button"
-                            onClick={() => setShowProjectForm((value) => !value)}
+                            onClick={() => {
+                                setShowProjectForm((value) => !value);
+                                setProjectName("");
+                            }}
                             className="inline-flex h-7 items-center gap-1 rounded-lg bg-zinc-100 px-2 text-[11px] font-bold text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
                         >
                             <FolderPlus className="h-3.5 w-3.5" />
@@ -539,6 +550,16 @@ export function ChatSidebar({
                                 className="h-8 rounded-lg bg-blue-600 px-2 text-[11px] font-black text-white disabled:cursor-not-allowed disabled:opacity-50"
                             >
                                 {t("auth.ok")}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setShowProjectForm(false);
+                                    setProjectName("");
+                                }}
+                                className="h-8 rounded-lg border border-zinc-200 px-2 text-[11px] font-black text-zinc-500 hover:bg-zinc-100 dark:border-zinc-800 dark:hover:bg-zinc-900"
+                            >
+                                {t("auth.cancel")}
                             </button>
                         </form>
                     )}
@@ -921,21 +942,18 @@ export function ChatSidebar({
                 })}
             </div>
 
-            <div className="max-h-[32dvh] shrink-0 overflow-y-auto overscroll-contain border-t border-zinc-200 bg-zinc-100/40 p-3 flex flex-col gap-2 dark:border-zinc-800 dark:bg-zinc-900/50 md:max-h-none md:overflow-visible">
-                <div className="rounded-2xl border border-zinc-200 bg-white p-3 text-xs shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-                    <div className="flex items-center justify-between gap-2">
-                        <span className="font-bold text-zinc-500 dark:text-zinc-400">{t("sidebar.currentPlan")}</span>
-                        <span className={`rounded-full px-2 py-0.5 font-black ${displayedPlan === "Guest" || displayedPlan === null ? "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300" : displayedPlan === "Free" ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : displayedPlan === "Pro" ? "bg-blue-500/10 text-blue-600 dark:text-blue-300" : "bg-purple-500/10 text-purple-600 dark:text-purple-300"}`}>
-                            {displayedPlan ? t(`modelTiers.${displayedPlan.toLowerCase()}`) : t("auth.loading")}
-                        </span>
+            <div className="max-h-[28dvh] shrink-0 overflow-y-auto overscroll-contain border-t border-zinc-200 bg-zinc-100/40 p-3 flex flex-col gap-2 dark:border-zinc-800 dark:bg-zinc-900/50 md:max-h-none md:overflow-visible">
+                <div className="rounded-3xl border border-zinc-200 bg-white p-3 text-xs shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                        <span className="font-black text-zinc-900 dark:text-zinc-100">{t("sidebar.currentUsage")}</span>
+                        {displayedPlan && (
+                            <span className="text-[10px] font-black text-zinc-400">
+                                {t(`modelTiers.${displayedPlan.toLowerCase()}`)}
+                            </span>
+                        )}
                     </div>
-                    {planDescriptionKey && (
-                        <p className="mt-2 hidden leading-5 text-zinc-500 dark:text-zinc-400 md:block">
-                            {t(planDescriptionKey)}
-                        </p>
-                    )}
                     {(displayedUsage.limit > 0 || isDailyUnlimited) && (
-                        <div className="mt-3">
+                        <div>
                             <div className="mb-1 flex items-center justify-between font-semibold text-zinc-500 dark:text-zinc-400">
                                 <span>{t("sidebar.todayUsage")}</span>
                                 <span>{isDailyUnlimited ? t("usage.unlimited") : `${displayedRemaining} ${t("sidebar.remaining")}`}</span>
@@ -956,9 +974,7 @@ export function ChatSidebar({
                     currentPlan={displayedPlan}
                     attachmentCount={attachmentCount}
                 />
-                <div className="rounded-2xl border border-zinc-200 bg-white p-2 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-                    <AuthButton />
-                </div>
+                <AuthButton />
             </div>
         </aside>
         {showPrivateNotice && (

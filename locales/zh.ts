@@ -49,6 +49,7 @@ export const zh = {
         chatTitle: "对话标题",
         password: "密码",
         currentPlan: "当前方案",
+        currentUsage: "当前用量",
         guestPlanDescription: "访客模式可在浏览器本地每日限制内使用免费模型。文件附件需登录后使用。",
         freePlanDescription: "Free 工作区可在使用量限制内访问 Free/Pro 模型、上传附件、分享和下载。",
         proPlanDescription: "Pro 工作区可使用所有可用模型，并提供更高的每日和每月额度。",

@@ -49,6 +49,7 @@ export const en = {
         chatTitle: "Chat title",
         password: "Password",
         currentPlan: "Current plan",
+        currentUsage: "Current usage",
         guestPlanDescription: "Guest mode can use free models with a browser-based daily limit. File attachments are available after login.",
         freePlanDescription: "Free workspace with Free and Pro model access, file attachments, sharing, and downloads within usage limits.",
         proPlanDescription: "Pro workspace with all available models and higher daily and monthly usage limits.",

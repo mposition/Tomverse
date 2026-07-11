@@ -51,6 +51,7 @@ export const es = {
         chatTitle: "Título del chat",
         password: "Contraseña",
         currentPlan: "Plan actual",
+        currentUsage: "Uso actual",
         guestPlanDescription: "El modo invitado puede usar modelos gratuitos con un límite diario en el navegador. Los adjuntos están disponibles después de iniciar sesión.",
         freePlanDescription: "Espacio Free con acceso a modelos Free/Pro, adjuntos, uso compartido y descargas dentro de los límites de uso.",
         proPlanDescription: "Espacio Pro con todos los modelos disponibles y límites diarios y mensuales más altos.",

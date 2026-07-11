@@ -49,6 +49,7 @@ export const ko = {
         chatTitle: "대화 제목",
         password: "비밀번호",
         currentPlan: "현재 플랜",
+        currentUsage: "현재 사용량",
         guestPlanDescription: "게스트 모드는 무료 모델을 브라우저 기반 일일 한도 안에서 사용할 수 있습니다. 파일 첨부는 로그인 후 사용할 수 있습니다.",
         freePlanDescription: "Free 워크스페이스는 사용량 한도 안에서 Free/Pro 모델 접근, 파일 첨부, 공유, 다운로드를 제공합니다.",
         proPlanDescription: "사용 가능한 전체 모델과 더 높은 일일/월간 사용량 한도를 제공하는 Pro 워크스페이스입니다.",
