@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { ArrowRight, Bot, CalendarClock, Clipboard, Clock, Eye, LockKeyhole, Share2, UserRound } from "lucide-react";
@@ -24,13 +24,13 @@ function getAssistantLabel(modelId: string | null | undefined, fallback: string)
 }
 
 const languageOptions: Array<{ value: Language; label: string }> = [
-  { value: "ko", label: "한국어" },
+  { value: "ko", label: "Korean" },
   { value: "en", label: "English" },
-  { value: "zh", label: "中文" },
-  { value: "fr", label: "Français" },
+  { value: "zh", label: "Chinese" },
+  { value: "fr", label: "Francais" },
   { value: "de", label: "Deutsch" },
-  { value: "es", label: "Español" },
-  { value: "pt", label: "Português" },
+  { value: "es", label: "Espanol" },
+  { value: "pt", label: "Portugues" },
 ];
 
 export function SharedConversationView({
@@ -147,6 +147,9 @@ export function SharedConversationView({
                 <h1 className="mt-2 truncate text-2xl font-bold tracking-tight text-zinc-950 dark:text-white md:text-3xl">
                   {loadedSnapshot.title}
                 </h1>
+                <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-500 dark:text-zinc-400">
+                  {t("share.publicDocumentDescription")}
+                </p>
               </div>
             </div>
             <div className="flex shrink-0 flex-col items-end gap-2 sm:flex-row sm:items-center">
