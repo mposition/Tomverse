@@ -1,4 +1,4 @@
-﻿CREATE TABLE "BillingPlan" (
+CREATE TABLE "BillingPlan" (
   "id" TEXT NOT NULL,
   "name" TEXT NOT NULL,
   "tier" TEXT NOT NULL,
