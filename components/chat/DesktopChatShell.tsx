@@ -118,7 +118,7 @@ export function DesktopChatShell({
       />
 
       <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        <ProviderStatusBanner selectedModels={selectedModels} compact />
+        <ProviderStatusBanner selectedModels={selectedModels} compact onToggleModel={onToggleModel} />
         <div className="flex min-h-0 flex-1 gap-4 overflow-hidden bg-zinc-100/80 px-4 pb-4 pt-3 dark:bg-zinc-950">
           {selectedModels.length === 0 && (
             <div className="flex flex-1 select-none flex-col items-center justify-center text-zinc-500">

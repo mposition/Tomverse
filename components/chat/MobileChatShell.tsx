@@ -316,7 +316,7 @@ export function MobileChatShell({
         </div>
       </header>
 
-      <ProviderStatusBanner selectedModels={selectedModels} compact />
+      <ProviderStatusBanner selectedModels={selectedModels} compact onToggleModel={onToggleModel} />
 
       {selectedModels.length > 0 && (
         <div className="min-w-0 shrink-0 overflow-x-auto overscroll-x-contain border-b border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900/60">

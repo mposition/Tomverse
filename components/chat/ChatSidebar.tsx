@@ -9,6 +9,7 @@ import Link from "next/link";
 import { AlertTriangle, CloudUpload, Crown, Database, Download, Folder, FolderPlus, Link2Off, Lock, MessageSquare, MoreVertical, Pencil, Pin, Search, Send, Share2, ShieldCheck, Sparkles, Star, Tag, Trash2, Unlock, X } from "lucide-react";
 import { FeedbackButton } from "@/components/chat/FeedbackButton";
 import { useUserUsage, type UserPlan } from "@/components/chat/useUserUsage";
+import { dispatchAppToast } from "@/lib/appToast";
 
 type ChatSidebarProps = {
     conversations: Conversation[];
@@ -65,6 +66,9 @@ export function ChatSidebar({
     const [conversationFilter, setConversationFilter] = useState<ConversationFilter>("all");
     const [showProjectForm, setShowProjectForm] = useState(false);
     const [projectName, setProjectName] = useState("");
+    const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+    const [editingProjectName, setEditingProjectName] = useState("");
+    const [deleteProjectArmedId, setDeleteProjectArmedId] = useState<string | null>(null);
     const [conversationProjectOverrides, setConversationProjectOverrides] = useState<Record<string, string | null>>({});
     const [projects, setProjects] = useState<ConversationProject[]>([]);
     const [conversationLabels, setConversationLabels] = useState<Record<string, string>>(() => {
@@ -198,18 +202,21 @@ export function ChatSidebar({
     }, [isGuestMode, normalizedSearch.length, searchQuery]);
 
     useEffect(() => {
-        if (!showProjectForm) return;
+        if (!showProjectForm && !editingProjectId && !deleteProjectArmedId) return;
 
         const handleKeyDown = (event: KeyboardEvent) => {
             if (event.key !== "Escape") return;
             event.preventDefault();
             setShowProjectForm(false);
             setProjectName("");
+            setEditingProjectId(null);
+            setEditingProjectName("");
+            setDeleteProjectArmedId(null);
         };
 
         document.addEventListener("keydown", handleKeyDown);
         return () => document.removeEventListener("keydown", handleKeyDown);
-    }, [showProjectForm]);
+    }, [deleteProjectArmedId, editingProjectId, showProjectForm]);
 
     const toggleStoredId = (storageKey: string, id: string, setter: (ids: string[]) => void) => {
         let next: string[] = [];
@@ -289,6 +296,69 @@ export function ChatSidebar({
         setProjectName("");
         setShowProjectForm(false);
         setConversationFilter(`project:${project.id}`);
+    };
+
+    const startProjectRename = (project: ConversationProject) => {
+        setEditingProjectId(project.id);
+        setEditingProjectName(project.name);
+        setDeleteProjectArmedId(null);
+    };
+
+    const renameProject = async (projectId: string) => {
+        const name = editingProjectName.trim().slice(0, 32);
+        if (!name) return;
+        const previousProjects = projects;
+        setProjects((current) =>
+            current.map((project) =>
+                project.id === projectId ? { ...project, name } : project
+            )
+        );
+        setEditingProjectId(null);
+        setEditingProjectName("");
+        const response = await fetch(`/api/projects/${projectId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name }),
+        });
+        if (!response.ok) {
+            setProjects(previousProjects);
+            dispatchAppToast(t("sidebar.projectRenameFailed"), "error");
+            return;
+        }
+        const project = (await response.json()) as ConversationProject;
+        setProjects((current) =>
+            current.map((item) => (item.id === project.id ? { ...item, ...project } : item))
+        );
+    };
+
+    const deleteProject = async (projectId: string) => {
+        if (deleteProjectArmedId !== projectId) {
+            setDeleteProjectArmedId(projectId);
+            dispatchAppToast(t("sidebar.projectDeleteConfirm"), "info");
+            return;
+        }
+        const previousProjects = projects;
+        setProjects((current) => current.filter((project) => project.id !== projectId));
+        setConversationProjectOverrides((current) => {
+            const next = { ...current };
+            conversations.forEach((conversation) => {
+                if (getConversationProjectId(conversation) === projectId) {
+                    next[conversation.id] = null;
+                }
+            });
+            return next;
+        });
+        if (conversationFilter === `project:${projectId}`) {
+            setConversationFilter("all");
+        }
+        setDeleteProjectArmedId(null);
+        const response = await fetch(`/api/projects/${projectId}`, {
+            method: "DELETE",
+        });
+        if (!response.ok) {
+            setProjects(previousProjects);
+            dispatchAppToast(t("sidebar.projectDeleteFailed"), "error");
+        }
     };
 
     const setConversationProject = async (conversationId: string, projectId: string | null) => {
@@ -563,27 +633,105 @@ export function ChatSidebar({
                             </button>
                         </form>
                     )}
-                    <div className="mt-2 flex flex-wrap gap-1">
+                    <div className="mt-2 space-y-1">
                         {projects.length === 0 ? (
                             <span className="px-1 text-[11px] font-medium text-zinc-400">
                                 {t("sidebar.noProjects")}
                             </span>
                         ) : (
-                            projects.map((project) => (
-                                <button
-                                    key={project.id}
-                                    type="button"
-                                    onClick={() => setConversationFilter(`project:${project.id}`)}
-                                    className={`max-w-full truncate rounded-lg px-2 py-1 text-[11px] font-bold transition-colors ${
-                                        conversationFilter === `project:${project.id}`
-                                            ? "bg-blue-600 text-white"
-                                            : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                                    }`}
-                                    aria-pressed={conversationFilter === `project:${project.id}`}
-                                >
-                                    {project.name}
-                                </button>
-                            ))
+                            projects.map((project) => {
+                                const isEditingProject = editingProjectId === project.id;
+                                const isDeleteArmed = deleteProjectArmedId === project.id;
+                                const isProjectActive = conversationFilter === `project:${project.id}`;
+                                return (
+                                    <div
+                                        key={project.id}
+                                        className={`group flex items-center gap-1 rounded-lg px-1 py-1 transition-colors ${
+                                            isProjectActive
+                                                ? "bg-blue-600 text-white"
+                                                : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                                        }`}
+                                    >
+                                        {isEditingProject ? (
+                                            <form
+                                                className="flex min-w-0 flex-1 gap-1"
+                                                onSubmit={(event) => {
+                                                    event.preventDefault();
+                                                    void renameProject(project.id);
+                                                }}
+                                            >
+                                                <input
+                                                    autoFocus
+                                                    value={editingProjectName}
+                                                    onChange={(event) => setEditingProjectName(event.target.value)}
+                                                    maxLength={32}
+                                                    className="h-7 min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-2 text-[11px] font-bold text-zinc-900 outline-none focus:border-blue-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+                                                />
+                                                <button
+                                                    type="submit"
+                                                    className="h-7 rounded-md bg-blue-500 px-2 text-[10px] font-black text-white"
+                                                >
+                                                    {t("auth.ok")}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setEditingProjectId(null);
+                                                        setEditingProjectName("");
+                                                    }}
+                                                    className="h-7 rounded-md px-2 text-[10px] font-black text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-800"
+                                                >
+                                                    {t("auth.cancel")}
+                                                </button>
+                                            </form>
+                                        ) : (
+                                            <>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setConversationFilter(`project:${project.id}`)}
+                                                    className="flex min-w-0 flex-1 items-center justify-between gap-2 rounded-md px-1.5 py-1 text-left"
+                                                    aria-pressed={isProjectActive}
+                                                >
+                                                    <span className="truncate text-[11px] font-black">{project.name}</span>
+                                                    <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-black ${
+                                                        isProjectActive
+                                                            ? "bg-white/15 text-white"
+                                                            : "bg-white text-zinc-500 dark:bg-zinc-800 dark:text-zinc-300"
+                                                    }`}>
+                                                        {project.conversationCount ?? 0}
+                                                    </span>
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => startProjectRename(project)}
+                                                    className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${
+                                                        isProjectActive
+                                                            ? "text-white/80 hover:bg-white/10"
+                                                            : "text-zinc-400 hover:bg-white hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                                                    }`}
+                                                    aria-label={t("sidebar.renameProject")}
+                                                >
+                                                    <Pencil className="h-3.5 w-3.5" />
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => void deleteProject(project.id)}
+                                                    className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${
+                                                        isDeleteArmed
+                                                            ? "bg-red-500 text-white"
+                                                            : isProjectActive
+                                                                ? "text-white/80 hover:bg-white/10"
+                                                                : "text-zinc-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/30 dark:hover:text-red-300"
+                                                    }`}
+                                                    aria-label={t("sidebar.deleteProject")}
+                                                >
+                                                    <Trash2 className="h-3.5 w-3.5" />
+                                                </button>
+                                            </>
+                                        )}
+                                    </div>
+                                );
+                            })
                         )}
                     </div>
                 </div>

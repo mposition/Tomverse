@@ -1,4 +1,4 @@
-export const dynamic = "force-dynamic";
+﻿export const dynamic = "force-dynamic";
 
 import Link from "next/link";
 import type { ReactNode } from "react";
@@ -179,8 +179,48 @@ function ProviderRow({ provider }: { provider: ProviderHealthRow }) {
                         {provider.fallback.reason}
                     </p>
                     <p className="mt-1 text-xs text-zinc-500">
-                        {fallbackModels.join(" · ") || "No fallback model configured"}
+                        {fallbackModels.join(" / ") || "No fallback model configured"}
                     </p>
+                </div>
+            </div>
+            <div className="mt-5 grid gap-4 border-t border-zinc-800 pt-5 lg:grid-cols-2">
+                <div>
+                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                        Recent error log
+                    </div>
+                    {provider.recentErrors.length === 0 ? (
+                        <p className="mt-2 text-sm text-zinc-500">No provider errors recorded today.</p>
+                    ) : (
+                        <div className="mt-2 space-y-2">
+                            {provider.recentErrors.map((error) => (
+                                <div
+                                    key={`${error.code}-${error.updatedAt}`}
+                                    className="flex items-center justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-900/60 px-3 py-2 text-xs"
+                                >
+                                    <span className="min-w-0 truncate font-semibold text-zinc-200">{error.code}</span>
+                                    <span className="shrink-0 text-zinc-500">
+                                        {error.count} / {dateLabel(error.updatedAt)}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+                <div>
+                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                        Manual override
+                    </div>
+                    <p className="mt-2 text-sm leading-6 text-zinc-300">
+                        Set provider balance and budget variables in Railway, then redeploy or restart the service.
+                    </p>
+                    <div className="mt-2 grid gap-2 text-xs text-zinc-500">
+                        <code className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2">
+                            PROVIDER_{provider.provider.toUpperCase()}_BALANCE_USD
+                        </code>
+                        <code className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2">
+                            CHAT_PROVIDER_{provider.provider.toUpperCase()}_COST_MICROUSD_PER_DAY
+                        </code>
+                    </div>
                 </div>
             </div>
         </section>
@@ -255,7 +295,7 @@ export default async function AdminPage() {
                     <MetricCard
                         label="Tier limits"
                         value="Free / Pro / Max"
-                        detail={`${dashboard.tierLimits.Free} · ${dashboard.tierLimits.Pro} · ${dashboard.tierLimits.Max}`}
+                        detail={`${dashboard.tierLimits.Free} Â· ${dashboard.tierLimits.Pro} Â· ${dashboard.tierLimits.Max}`}
                         icon={<Gauge className="h-4 w-4" />}
                     />
                     <MetricCard

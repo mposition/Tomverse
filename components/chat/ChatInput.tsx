@@ -305,11 +305,24 @@ export function ChatInput({
     .map(id => AVAILABLE_MODELS.find(m => m.id === id)?.name)
     .filter(Boolean);
 
-  const placeholderText = isGuestLimitReached
+  const dailyMessageLimit = accountUsage?.limits.messagesDay || 0;
+  const monthlyMessageLimit = accountUsage?.limits.messagesMonth || 0;
+  const isAccountDailyLimitReached =
+    !isGuestMode &&
+    dailyMessageLimit > 0 &&
+    (accountUsage?.usage.messagesDay || 0) >= dailyMessageLimit;
+  const isAccountMonthlyLimitReached =
+    !isGuestMode &&
+    monthlyMessageLimit > 0 &&
+    (accountUsage?.usage.messagesMonth || 0) >= monthlyMessageLimit;
+  const isUsageLimitReached =
+    isGuestLimitReached || isAccountDailyLimitReached || isAccountMonthlyLimitReached;
+
+  const placeholderText = isUsageLimitReached
     ? t("chat.exceedDailyLimit")
     : t("chat.inputPlaceholder");
   
-  const isDisabled = disabled || isSending || isUploading || isGuestLimitReached;
+  const isDisabled = disabled || isSending || isUploading || isUsageLimitReached;
   
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [menuView, setMenuView] = useState<"actions" | "models">("actions");
@@ -982,6 +995,28 @@ export function ChatInput({
                   </span>
                 )}
               </div>
+            </div>
+          )}
+          {isUsageLimitReached && (
+            <div className="mb-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                <span className="font-black">
+                  {isGuestMode ? t("chat.guestLimitReachedTitle") : t("chat.accountLimitReachedTitle")}
+                </span>
+                <a
+                  href={isGuestMode ? "/auth/signin?callbackUrl=/chat" : "/pricing"}
+                  className="font-black text-amber-900 underline underline-offset-2 dark:text-amber-100"
+                >
+                  {isGuestMode ? t("auth.signIn") : t("billing.joinWaitlist")}
+                </a>
+              </div>
+              <p className="mt-1 leading-5 opacity-90">
+                {isGuestMode
+                  ? t("chat.guestLimitReachedBody")
+                  : isAccountMonthlyLimitReached
+                    ? t("chat.monthlyLimitReachedBody")
+                    : t("chat.dailyLimitReachedBody")}
+              </p>
             </div>
           )}
           {!value.trim() && attachments.length === 0 && (

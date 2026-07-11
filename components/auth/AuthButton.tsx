@@ -28,6 +28,7 @@ import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { dispatchAppToast } from "@/lib/appToast";
 import { notifyUserSettingsUpdated } from "@/lib/userSettingsEvents";
 import { useUserUsage } from "@/components/chat/useUserUsage";
+import { UpgradeInterestButton } from "@/components/marketing/UpgradeInterestButton";
 
 export function AuthButton() {
   const { data: session, status } = useSession();
@@ -44,6 +45,10 @@ export function AuthButton() {
     const [isDeletingChats, setIsDeletingChats] = useState(false);
     const [isDeleteAllArmed, setIsDeleteAllArmed] = useState(false);
     const [isRequestingDeletion, setIsRequestingDeletion] = useState(false);
+    const [accountDeletionRequestedAt, setAccountDeletionRequestedAt] = useState<string | null>(() => {
+        if (typeof window === "undefined") return null;
+        return localStorage.getItem("tomverse_account_deletion_requested_at");
+    });
     const accountUsage = useUserUsage(Boolean(session?.user));
     const accountPlan = accountUsage?.plan || null;
 
@@ -197,6 +202,9 @@ export function AuthButton() {
                 }),
             });
             if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+            const requestedAt = new Date().toISOString();
+            localStorage.setItem("tomverse_account_deletion_requested_at", requestedAt);
+            setAccountDeletionRequestedAt(requestedAt);
             dispatchAppToast(t("auth.accountDeletionRequested"), "success");
         } catch {
             dispatchAppToast(t("feedback.failed"), "error");
@@ -430,6 +438,9 @@ export function AuthButton() {
                                         <section className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60">
                                             <h4 className="text-sm font-bold">{t("auth.dataRetentionTitle")}</h4>
                                             <p className="mt-1 text-sm leading-6 text-zinc-500">{t("auth.dataRetentionDescription")}</p>
+                                            <p className="mt-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs leading-5 text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/20 dark:text-blue-200">
+                                                {t("auth.attachmentRetentionNotice")}
+                                            </p>
                                         </section>
                                         <section className="rounded-2xl border border-red-200 bg-red-50 p-4 dark:border-red-950/70 dark:bg-red-950/20">
                                             <h4 className="text-sm font-bold text-red-700 dark:text-red-300">{t("auth.dangerZone")}</h4>
@@ -458,6 +469,11 @@ export function AuthButton() {
                                                     {isRequestingDeletion ? t("feedback.sending") : t("auth.requestAccountDeletion")}
                                                 </button>
                                             </div>
+                                            {accountDeletionRequestedAt && (
+                                                <p className="mt-3 rounded-xl border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-100">
+                                                    {t("auth.accountDeletionPending")} {new Date(accountDeletionRequestedAt).toLocaleDateString()}
+                                                </p>
+                                            )}
                                         </section>
                                     </div>
                                 )}
@@ -507,14 +523,22 @@ export function AuthButton() {
                                                 <li>{t("auth.planPolicyMax")}</li>
                                             </ul>
                                         </section>
-                                        <button
-                                            type="button"
-                                            disabled
-                                            className="flex w-full cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-zinc-100 px-3 py-3 text-sm font-semibold text-zinc-400 dark:border-zinc-800 dark:bg-zinc-950"
-                                        >
-                                            <CreditCard className="h-4 w-4" />
-                                            {t("auth.billingComingSoon")}
-                                        </button>
+                                        <div className="grid gap-2 sm:grid-cols-2">
+                                            <UpgradeInterestButton
+                                                plan="Pro"
+                                                className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-3 text-sm font-black text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-70"
+                                            >
+                                                <CreditCard className="h-4 w-4" />
+                                                {t("billing.joinProWaitlist")}
+                                            </UpgradeInterestButton>
+                                            <UpgradeInterestButton
+                                                plan="Max"
+                                                className="flex w-full items-center justify-center gap-2 rounded-xl border border-purple-300 bg-purple-50 px-3 py-3 text-sm font-black text-purple-700 transition-colors hover:bg-purple-100 disabled:cursor-not-allowed disabled:opacity-70 dark:border-purple-900/60 dark:bg-purple-950/30 dark:text-purple-200 dark:hover:bg-purple-950/50"
+                                            >
+                                                <CreditCard className="h-4 w-4" />
+                                                {t("billing.joinMaxWaitlist")}
+                                            </UpgradeInterestButton>
+                                        </div>
                                     </div>
                                 )}
                             </div>

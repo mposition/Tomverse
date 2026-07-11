@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle2, Info, RefreshCw } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Info, RefreshCw, Shuffle } from "lucide-react";
 import { AVAILABLE_MODELS } from "@/components/chat/types";
 import { useLanguage } from "@/components/LanguageProvider";
 
@@ -17,6 +17,7 @@ type PublicModelStatusRecord = {
 type ProviderStatusBannerProps = {
   selectedModels?: string[];
   compact?: boolean;
+  onToggleModel?: (modelId: string) => void;
 };
 
 const modelName = (id: string) =>
@@ -25,6 +26,7 @@ const modelName = (id: string) =>
 export function ProviderStatusBanner({
   selectedModels = [],
   compact = false,
+  onToggleModel,
 }: ProviderStatusBannerProps) {
   const { t } = useLanguage();
   const [models, setModels] = useState<PublicModelStatusRecord[]>([]);
@@ -97,17 +99,18 @@ export function ProviderStatusBanner({
       (model) => model.status === "unavailable"
     );
     const limited = visibleImpacted.filter((model) => model.status === "limited");
-    const fallbackNames = Array.from(
+    const fallbackIds = Array.from(
       new Set(visibleImpacted.flatMap((model) => model.fallbackModelIds))
     )
       .filter((id) => !selectedSet.has(id))
-      .slice(0, 3)
-      .map(modelName);
+      .slice(0, 3);
+    const fallbackNames = fallbackIds.map(modelName);
 
     return {
       impacted: visibleImpacted,
       unavailable,
       limited,
+      fallbackIds,
       fallbackNames,
       isSelectedOnly: selectedImpacted.length > 0,
     };
@@ -158,12 +161,29 @@ export function ProviderStatusBanner({
             )}
           </div>
           {hasImpact ? (
-            <p className="mt-1 leading-5 opacity-90">
-              {bannerState.impacted.slice(0, 3).map((model) => modelName(model.id)).join(", ")}
-              {bannerState.fallbackNames.length > 0
-                ? ` ${t("providerStatus.tryFallback")} ${bannerState.fallbackNames.join(", ")}`
-                : ` ${t("providerStatus.tryLater")}`}
-            </p>
+            <>
+              <p className="mt-1 leading-5 opacity-90">
+                {bannerState.impacted.slice(0, 3).map((model) => modelName(model.id)).join(", ")}
+                {bannerState.fallbackNames.length > 0
+                  ? ` ${t("providerStatus.tryFallback")} ${bannerState.fallbackNames.join(", ")}`
+                  : ` ${t("providerStatus.tryLater")}`}
+              </p>
+              {onToggleModel && bannerState.fallbackIds.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {bannerState.fallbackIds.map((modelId) => (
+                    <button
+                      key={modelId}
+                      type="button"
+                      onClick={() => onToggleModel(modelId)}
+                      className="inline-flex items-center gap-1 rounded-full bg-black/5 px-2.5 py-1 text-[11px] font-black transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
+                    >
+                      <Shuffle className="h-3 w-3" />
+                      {t("providerStatus.switchTo")} {modelName(modelId)}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
           ) : (
             <p className="mt-1 leading-5 opacity-90">{t("providerStatus.allAvailableBody")}</p>
           )}

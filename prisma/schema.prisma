@@ -107,6 +107,7 @@ model Conversation {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   password       String?   // 💡 잠금 비밀번호 (null이면 잠금 해제 상태)
+  @@index([userId, projectId])
 }
 
 model ConversationProject {

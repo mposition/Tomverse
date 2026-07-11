@@ -19,6 +19,7 @@ export type ProviderHealthRow = {
   failureCount24h: number;
   successRate24h: number | null;
   recentErrorCode: string | null;
+  recentErrors: Array<{ code: string; count: number; updatedAt: string }>;
   lastSuccessAt: string | null;
   lastFailureAt: string | null;
   monthCostMicroUsd: number;
@@ -311,6 +312,15 @@ export const getProviderHealthDashboard = async () => {
     const successRate24h = total > 0 ? Math.round((successCount24h / total) * 1000) / 10 : null;
     const recentError = latestFor(rows, `provider:${provider}:error:`);
     const recentErrorCode = recentError?.key.split(":error:")[1] || null;
+    const recentErrors = rows
+      .filter((row) => row.key.startsWith(`provider:${provider}:error:`))
+      .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
+      .slice(0, 4)
+      .map((row) => ({
+        code: row.key.split(":error:")[1] || "UNKNOWN",
+        count: row.count,
+        updatedAt: row.updatedAt.toISOString(),
+      }));
     const monthCostMicroUsd = countFor(rows, `provider:${provider}`, "provider-cost-month");
     const monthBudgetMicroUsd = providerMonthlyBudgetMicroUsd(provider);
     const dayBudgetMicroUsd = providerDailyBudgetMicroUsd(provider);
@@ -344,6 +354,7 @@ export const getProviderHealthDashboard = async () => {
       failureCount24h,
       successRate24h,
       recentErrorCode,
+      recentErrors,
       lastSuccessAt: latestFor(rows, successKey)?.updatedAt.toISOString() || null,
       lastFailureAt: latestFor(rows, failureKey)?.updatedAt.toISOString() || null,
       monthCostMicroUsd,

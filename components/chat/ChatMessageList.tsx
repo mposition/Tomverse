@@ -75,6 +75,16 @@ const hasImagePreview = (attachment: ChatAttachment) =>
   typeof attachment.data === "string" &&
   (attachment.data.startsWith("data:image/") || attachment.data.startsWith("blob:"));
 
+const isFileParsingError = (content: string) => {
+  const normalized = content.toLowerCase();
+  return (
+    normalized.includes("pdf") ||
+    normalized.includes("office") ||
+    normalized.includes("unsupported") ||
+    normalized.includes("invalid")
+  );
+};
+
 function TypingIndicator() {
   return (
     <div className="flex items-center gap-1 py-1">
@@ -305,7 +315,18 @@ export function ChatMessageList({
                     <p className="whitespace-pre-wrap">{msg.content}</p>
                   )}
                   {!isUser && msg.status === "error" && (
-                    <div className="mt-3 flex flex-wrap gap-2 border-t border-red-200 pt-3 dark:border-red-800">
+                    <div className="mt-3 border-t border-red-200 pt-3 dark:border-red-800">
+                      {isFileParsingError(msg.content) && (
+                        <div className="mb-3 rounded-xl border border-red-200 bg-white/80 p-3 text-xs leading-5 text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-100">
+                          <p className="font-black">{t("chat.fileErrorHelpTitle")}</p>
+                          <ul className="mt-1 list-disc space-y-1 pl-4">
+                            <li>{t("chat.fileErrorHelpResave")}</li>
+                            <li>{t("chat.fileErrorHelpLimit")}</li>
+                            <li>{t("chat.fileErrorHelpRetry")}</li>
+                          </ul>
+                        </div>
+                      )}
+                      <div className="flex flex-wrap gap-2">
                       {onRetryLast && (
                         <button
                           type="button"
@@ -337,6 +358,7 @@ export function ChatMessageList({
                       <span className="flex items-center text-xs font-semibold text-red-600/80 dark:text-red-200/80">
                         {t("chat.tryAnotherModelHint")}
                       </span>
+                      </div>
                     </div>
                   )}
                 </div>
