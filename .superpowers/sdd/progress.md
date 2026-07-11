@@ -10,3 +10,4 @@ Baseline: `npm run check` passed after resolving pre-existing Hook lint failures
 - Task 6: complete. Mobile drawer, immediate-render, reduced-height input, tab switching, swipe switching, and overflow flows were added and verified in both mobile projects plus `npm run check`.
 - Task 7: complete. Authenticated settings, Private Mode, model-limit, share, lock, and delete confirmation flows were added and verified in desktop Chromium and mobile Safari plus `npm run check`.
 - Task 8: complete. Attachment selection, PDF cards, clipboard paste, drag/drop, post-send rendering, and upload counter flows were added and verified in desktop Chromium and mobile Safari plus `npm run check`.
+- Task 9: complete. Manual real-device QA and production smoke runbooks were added under `docs/qa` with launch sign-off criteria.
