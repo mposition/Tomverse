@@ -17,6 +17,7 @@ model User {
   email         String?   @unique
   emailVerified DateTime?
   image         String?
+  plan          String    @default("Free") // "Free", "Pro", "Max"
   
   // 💡 커스텀 설정 필드 (테마, 언어 등)
   settings      UserSettings?

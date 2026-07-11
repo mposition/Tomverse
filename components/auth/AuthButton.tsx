@@ -25,6 +25,7 @@ import {
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { dispatchAppToast } from "@/lib/appToast";
 import { notifyUserSettingsUpdated } from "@/lib/userSettingsEvents";
+import { useUserUsage } from "@/components/chat/useUserUsage";
 
 export function AuthButton() {
   const { data: session, status } = useSession();
@@ -38,6 +39,8 @@ export function AuthButton() {
     const [theme, setTheme] = useState<"dark" | "light">(APP_DEFAULTS.defaultTheme);
     const [language, setLanguage] = useState<Language>(APP_DEFAULTS.defaultLanguage);
     const [defaultModel, setDefaultModel] = useState<string>(APP_DEFAULTS.defaultModelId);
+    const accountUsage = useUserUsage(Boolean(session?.user));
+    const accountPlan = accountUsage?.plan || null;
 
     const closeSettingsModal = useCallback(() => {
         setIsModalOpen(false);
@@ -381,11 +384,17 @@ export function AuthButton() {
                                             <div className="flex items-center justify-between gap-3">
                                                 <div>
                                                     <p className="text-xs font-bold uppercase tracking-wide text-blue-500">{t("auth.currentPlan")}</p>
-                                                    <h4 className="mt-1 text-lg font-bold text-zinc-900 dark:text-zinc-100">{t("auth.proPlan")}</h4>
+                                                    <h4 className="mt-1 text-lg font-bold text-zinc-900 dark:text-zinc-100">
+                                                        {accountPlan ? t(`auth.${accountPlan.toLowerCase()}Plan`) : t("auth.loading")}
+                                                    </h4>
                                                 </div>
-                                                <span className="rounded-full bg-blue-600 px-3 py-1 text-xs font-bold text-white">Pro</span>
+                                                <span className={`rounded-full px-3 py-1 text-xs font-bold text-white ${accountPlan === "Free" ? "bg-emerald-600" : accountPlan === "Pro" ? "bg-blue-600" : accountPlan === "Max" ? "bg-purple-600" : "bg-zinc-600"}`}>
+                                                    {accountPlan ? t(`modelTiers.${accountPlan.toLowerCase()}`) : t("auth.loading")}
+                                                </span>
                                             </div>
-                                            <p className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-400">{t("auth.planDescription")}</p>
+                                            <p className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+                                                {accountPlan ? t(`sidebar.${accountPlan.toLowerCase()}PlanDescription`) : t("auth.loading")}
+                                            </p>
                                         </section>
                                         <button
                                             type="button"

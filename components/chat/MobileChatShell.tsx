@@ -5,7 +5,6 @@ import { ChatApp } from "@/components/chat/ChatApp";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
-import { FeedbackButton } from "@/components/chat/FeedbackButton";
 import {
   AVAILABLE_MODELS,
   type ChatAttachment,
@@ -490,6 +489,7 @@ export function MobileChatShell({
               onDownload={onDownload}
               isPrivateMode={isPrivateMode}
               onTogglePrivateMode={onTogglePrivateMode}
+              currentModelId={resolvedActiveModelId}
             />
             <button
               ref={drawerCloseButtonRef}
@@ -503,7 +503,6 @@ export function MobileChatShell({
           </div>
         </div>
       )}
-      <FeedbackButton currentModelId={resolvedActiveModelId} />
     </main>
   );
 }

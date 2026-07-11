@@ -1,28 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { BarChart3 } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
-
-type UsageResponse = {
-  plan: string;
-  usage: {
-    messagesDay: number;
-    messagesMonth: number;
-    tokensDay: number;
-    tokensMonth: number;
-    costDay: number;
-    costMonth: number;
-  };
-  limits: {
-    messagesDay: number;
-    messagesMonth: number;
-    tokensDay: number;
-    tokensMonth: number;
-    costDay: number;
-    costMonth: number;
-  };
-};
+import { useUserUsage } from "@/components/chat/useUserUsage";
 
 const percent = (used: number, limit: number) =>
   limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
@@ -61,20 +41,7 @@ export function UserUsageSummary({
   maxGuestMessages?: number;
 }) {
   const { t } = useLanguage();
-  const [usage, setUsage] = useState<UsageResponse | null>(null);
-
-  useEffect(() => {
-    if (isGuestMode) return;
-    const controller = new AbortController();
-    void fetch("/api/user/usage", {
-      signal: controller.signal,
-      cache: "no-store",
-    })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data) => setUsage(data))
-      .catch(() => {});
-    return () => controller.abort();
-  }, [isGuestMode]);
+  const usage = useUserUsage(!isGuestMode);
 
   if (isGuestMode) {
     const used = guestMessageCount || 0;

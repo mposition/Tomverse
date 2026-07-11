@@ -15,6 +15,9 @@ const positiveInteger = (value: string | undefined, fallback: number) => {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 };
 
+const normalizePlan = (value: unknown) =>
+  value === "Pro" || value === "Max" || value === "Free" ? value : "Free";
+
 const periodStart = (period: "day" | "month", now = new Date()) =>
   period === "day"
     ? new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
@@ -32,6 +35,10 @@ export async function GET(req: Request) {
       day: 2_000,
     });
 
+    const user = await prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { plan: true },
+    });
     const key = getUserChatUsageKey(session.user.id);
     const now = new Date();
     const dayStart = periodStart("day", now);
@@ -63,7 +70,7 @@ export async function GET(req: Request) {
     };
 
     return NextResponse.json({
-      plan: process.env.DEFAULT_USER_PLAN || "Free",
+      plan: normalizePlan(user?.plan),
       generatedAt: now.toISOString(),
       usage: {
         messagesDay: count("day"),

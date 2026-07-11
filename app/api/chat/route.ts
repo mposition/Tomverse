@@ -14,7 +14,7 @@ import {
     writeR2Object,
 } from "@/lib/r2";
 import { prisma } from "@/lib/prisma";
-import { getEnabledModel, type AiModel } from "@/lib/models";
+import { getEnabledModel, type AiModel, type ModelTier } from "@/lib/models";
 import { parseOfficeSafely } from "@/lib/officeSecurity";
 import {
     extractPdfTextSafely,
@@ -97,6 +97,9 @@ const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
 const MAX_TOTAL_ATTACHMENT_SIZE = 25 * 1024 * 1024;
 const MAX_EXTRACTED_ATTACHMENT_CHARACTERS = 300_000;
 const MAX_STORED_MESSAGE_CHARACTERS = 100_000;
+const normalizeUserPlan = (value: unknown): ModelTier =>
+    value === "Pro" || value === "Max" || value === "Free" ? value : "Free";
+
 type IncomingAttachment = {
     name?: unknown;
     mediaType?: unknown;
@@ -639,8 +642,18 @@ export async function POST(req: Request) {
                 "A chat request can reference at most 5 attachment objects."
             );
         }
-        const access = identifyChatCaller(req, session?.user?.id);
-        assertModelAccess(access.kind, modelConfig);
+        const userPlan = session?.user?.id
+            ? normalizeUserPlan(
+                  (
+                      await prisma.user.findUnique({
+                          where: { id: session.user.id },
+                          select: { plan: true },
+                      })
+                  )?.plan
+              )
+            : undefined;
+        const access = identifyChatCaller(req, session?.user?.id, userPlan);
+        assertModelAccess(access, modelConfig);
         if (access.kind === "guest") {
             await verifyGuestTurnstile(req, turnstileToken);
         }

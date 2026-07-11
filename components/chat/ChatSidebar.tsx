@@ -7,7 +7,8 @@ import { useCallback, useState, useEffect, useRef } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
 import Link from "next/link";
 import { AlertTriangle, CloudUpload, Crown, Database, Download, Link2Off, Lock, MessageSquare, MoreVertical, Pencil, Pin, Search, Send, Share2, ShieldCheck, Sparkles, Star, Trash2, Unlock, X } from "lucide-react";
-import { UserUsageSummary } from "@/components/chat/UserUsageSummary";
+import { FeedbackButton } from "@/components/chat/FeedbackButton";
+import { useUserUsage, type UserPlan } from "@/components/chat/useUserUsage";
 
 type ChatSidebarProps = {
     conversations: Conversation[];
@@ -26,6 +27,7 @@ type ChatSidebarProps = {
     onDownload: (id: string, title: string) => void;    
     isPrivateMode?: boolean;
     onTogglePrivateMode: () => void;
+    currentModelId?: string | null;
 };
 
 export function ChatSidebar({
@@ -45,6 +47,7 @@ export function ChatSidebar({
     onDownload,    
     isPrivateMode = false,
     onTogglePrivateMode,
+    currentModelId,
 }: ChatSidebarProps) {
     const [openMenuId, setOpenMenuId] = useState<string | null>(null);
     const [showPrivateNotice, setShowPrivateNotice] = useState(false);
@@ -82,6 +85,31 @@ export function ChatSidebar({
     const privateModeButtonRef = useRef<HTMLButtonElement | null>(null);
     const privateNoticeDialogRef = useRef<HTMLDivElement | null>(null);
     const { t } = useLanguage();
+    const accountUsage = useUserUsage(!isGuestMode);
+    const displayedPlan: UserPlan | "Guest" | null = isGuestMode ? "Guest" : accountUsage?.plan || null;
+    const displayedUsage = isGuestMode
+        ? {
+            used: guestMessageCount || 0,
+            limit: maxGuestMessages || 20,
+        }
+        : {
+            used: accountUsage?.usage.messagesDay || 0,
+            limit: accountUsage?.limits.messagesDay || 0,
+        };
+    const displayedRemaining =
+        displayedUsage.limit > 0
+            ? Math.max(displayedUsage.limit - displayedUsage.used, 0)
+            : 0;
+    const displayedUsageWidth =
+        displayedUsage.limit > 0
+            ? `${Math.min((displayedUsage.used / displayedUsage.limit) * 100, 100)}%`
+            : "0%";
+    const planDescriptionKey =
+        displayedPlan === null
+            ? null
+            : displayedPlan === "Guest"
+            ? "sidebar.guestPlanDescription"
+            : `sidebar.${displayedPlan.toLowerCase()}PlanDescription`;
     const menuItemBase =
         "flex w-full items-center justify-between whitespace-nowrap rounded px-3 py-2 text-sm transition-colors";
 
@@ -329,7 +357,7 @@ export function ChatSidebar({
                 </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-2 space-y-1 min-h-0">
+            <div className="min-h-[10rem] flex-1 overflow-y-auto overscroll-contain p-2 space-y-1 md:min-h-0">
                 {messageSearchResults.length > 0 && (
                     <div className="mb-2 rounded-xl border border-blue-200 bg-blue-50 p-2 text-xs dark:border-blue-900/50 dark:bg-blue-950/20">
                         <p className="px-1 pb-1 font-black text-blue-700 dark:text-blue-300">
@@ -600,60 +628,35 @@ export function ChatSidebar({
                 })}
             </div>
 
-            <UserUsageSummary
-                isGuestMode={isGuestMode}
-                guestMessageCount={guestMessageCount}
-                maxGuestMessages={maxGuestMessages}
-            />
-
-            <div className="p-3 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-100/40 dark:bg-zinc-900/50 flex flex-col gap-2 shrink-0">
+            <div className="max-h-[32dvh] shrink-0 overflow-y-auto overscroll-contain border-t border-zinc-200 bg-zinc-100/40 p-3 flex flex-col gap-2 dark:border-zinc-800 dark:bg-zinc-900/50 md:max-h-none md:overflow-visible">
                 <div className="rounded-2xl border border-zinc-200 bg-white p-3 text-xs shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
                     <div className="flex items-center justify-between gap-2">
                         <span className="font-bold text-zinc-500 dark:text-zinc-400">{t("sidebar.currentPlan")}</span>
-                        <span className={`rounded-full px-2 py-0.5 font-black ${isGuestMode ? "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300" : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"}`}>
-                            {isGuestMode ? t("modelTiers.guest") : t("modelTiers.free")}
+                        <span className={`rounded-full px-2 py-0.5 font-black ${displayedPlan === "Guest" || displayedPlan === null ? "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300" : displayedPlan === "Free" ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : displayedPlan === "Pro" ? "bg-blue-500/10 text-blue-600 dark:text-blue-300" : "bg-purple-500/10 text-purple-600 dark:text-purple-300"}`}>
+                            {displayedPlan ? t(`modelTiers.${displayedPlan.toLowerCase()}`) : t("auth.loading")}
                         </span>
                     </div>
-                    <p className="mt-2 leading-5 text-zinc-500 dark:text-zinc-400">
-                        {isGuestMode ? t("sidebar.guestPlanDescription") : t("sidebar.freePlanDescription")}
-                    </p>
-                    {isGuestMode && guestMessageCount !== undefined && maxGuestMessages !== undefined && (
+                    {planDescriptionKey && (
+                        <p className="mt-2 hidden leading-5 text-zinc-500 dark:text-zinc-400 md:block">
+                            {t(planDescriptionKey)}
+                        </p>
+                    )}
+                    {displayedUsage.limit > 0 && (
                         <div className="mt-3">
                             <div className="mb-1 flex items-center justify-between font-semibold text-zinc-500 dark:text-zinc-400">
                                 <span>{t("sidebar.todayUsage")}</span>
-                                <span>{Math.max(maxGuestMessages - guestMessageCount, 0)} {t("sidebar.remaining")}</span>
+                                <span>{displayedRemaining} {t("sidebar.remaining")}</span>
                             </div>
                             <div className="h-1.5 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
                                 <div
-                                    className={`h-full transition-all duration-500 ${guestMessageCount >= maxGuestMessages ? "bg-red-500" : "bg-blue-500"}`}
-                                    style={{ width: `${Math.min((guestMessageCount / maxGuestMessages) * 100, 100)}%` }}
+                                    className={`h-full transition-all duration-500 ${displayedUsage.used >= displayedUsage.limit ? "bg-red-500" : "bg-blue-500"}`}
+                                    style={{ width: displayedUsageWidth }}
                                 />
                             </div>
                         </div>
                     )}
                 </div>
-                {isGuestMode && guestMessageCount !== undefined && maxGuestMessages !== undefined && (
-                    <div className="px-1">
-                        <div className="flex justify-between items-center mb-1.5 text-xs text-zinc-500 dark:text-zinc-400">
-                            <span className="font-medium">{t("sidebar.guestLimit")}</span>
-                            <span className="font-bold text-zinc-700 dark:text-zinc-300">
-                                {guestMessageCount} <span className="opacity-50">/ {maxGuestMessages}</span>
-                            </span>
-                        </div>
-                        <div className="h-1.5 w-full bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
-                            <div
-                                className={`h-full transition-all duration-500 ease-out ${guestMessageCount >= maxGuestMessages ? 'bg-red-500' : 'bg-blue-500'
-                                    }`}
-                                style={{ width: `${Math.min((guestMessageCount / maxGuestMessages) * 100, 100)}%` }}
-                            />
-                        </div>
-                        {guestMessageCount >= maxGuestMessages && (
-                            <p className="text-[10px] text-red-500 mt-1.5 text-center font-medium animate-pulse">
-                                {t("sidebar.exceedDailyLimit")}
-                            </p>
-                        )}
-                    </div>
-                )}
+                <FeedbackButton currentModelId={currentModelId} />
                 <div className="rounded-2xl border border-zinc-200 bg-white p-2 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
                     <AuthButton />
                 </div>

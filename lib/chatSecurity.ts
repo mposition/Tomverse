@@ -27,6 +27,7 @@ export type ChatAccess = {
     kind: AccessKind;
     subjectKey: string;
     ipKey: string;
+    plan?: ModelTier;
     setCookie?: string;
 };
 
@@ -84,11 +85,11 @@ const configuredTier = (
         ? value
         : fallback;
 
-export const assertModelAccess = (kind: AccessKind, model: AiModel) => {
+export const assertModelAccess = (access: Pick<ChatAccess, "kind" | "plan">, model: AiModel) => {
     const maximumTier =
-        kind === "guest"
+        access.kind === "guest"
             ? configuredTier(process.env.CHAT_GUEST_MAX_TIER, "Free")
-            : configuredTier(process.env.CHAT_USER_MAX_TIER, "Max");
+            : configuredTier(access.plan || process.env.CHAT_USER_MAX_TIER, "Max");
 
     if (TIER_RANK[model.tier] > TIER_RANK[maximumTier]) {
         throw new ChatAccessError(
@@ -214,7 +215,8 @@ export const getUserChatUsageKey = (userId: string) =>
 
 export const identifyChatCaller = (
     request: Request,
-    userId?: string | null
+    userId?: string | null,
+    plan?: ModelTier
 ): ChatAccess => {
     const ipKey = `ip:${hashKey("ip", getTrustedClientIp(request))}`;
     if (userId) {
@@ -222,6 +224,7 @@ export const identifyChatCaller = (
             kind: "user",
             subjectKey: `user:${hashKey("user", userId)}`,
             ipKey,
+            plan,
         };
     }
 

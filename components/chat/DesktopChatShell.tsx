@@ -5,7 +5,6 @@ import { ChatApp } from "@/components/chat/ChatApp";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
-import { FeedbackButton } from "@/components/chat/FeedbackButton";
 import {
   AVAILABLE_MODELS,
   ENABLED_MODELS,
@@ -113,6 +112,7 @@ export function DesktopChatShell({
         onDownload={onDownload}
         isPrivateMode={isPrivateMode}
         onTogglePrivateMode={onTogglePrivateMode}
+        currentModelId={selectedModels[0]}
       />
 
       <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
@@ -253,7 +253,6 @@ export function DesktopChatShell({
           isGuestLimitReached={isGuestMode && guestMessageCount >= maxGuestMessages}
         />
       </section>
-      <FeedbackButton currentModelId={selectedModels[0]} />
     </main>
   );
 }

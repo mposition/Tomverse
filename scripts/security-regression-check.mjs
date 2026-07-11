@@ -57,7 +57,8 @@ const checks = [
     name: "/api/chat has guest verification and model tier checks",
     file: "app/api/chat/route.ts",
     test: (source) =>
-      source.includes("assertModelAccess(access.kind, modelConfig)") &&
+      source.includes("assertModelAccess(access, modelConfig)") &&
+      source.includes("select: { plan: true }") &&
       source.includes("verifyGuestTurnstile"),
   },
   {
