@@ -55,9 +55,6 @@ async function ensureStripeDiscount(
   promotion: CheckoutPromotion,
   planId: BillingPlanId
 ): Promise<Stripe.Checkout.SessionCreateParams.Discount> {
-  if (promotion.stripePromotionCodeId) {
-    return { promotion_code: promotion.stripePromotionCodeId };
-  }
   if (promotion.stripeCouponId) {
     return { coupon: promotion.stripeCouponId };
   }
@@ -81,29 +78,36 @@ async function ensureStripeDiscount(
       planId,
     },
   });
-  const promotionCode = await stripe.promotionCodes.create({
-    promotion: { type: "coupon", coupon: coupon.id },
-    code: promotion.code,
-    active: promotion.isActive,
-    max_redemptions: promotion.maxRedemptions || undefined,
-    expires_at: promotion.endsAt
-      ? Math.floor(new Date(promotion.endsAt).getTime() / 1000)
-      : undefined,
-    metadata: {
-      tomversePromotionId: promotion.id,
-      planId,
-    },
-  });
+
+  let promotionCodeId: string | null = null;
+  try {
+    const promotionCode = await stripe.promotionCodes.create({
+      promotion: { type: "coupon", coupon: coupon.id },
+      code: promotion.code,
+      active: promotion.isActive,
+      max_redemptions: promotion.maxRedemptions || undefined,
+      expires_at: promotion.endsAt
+        ? Math.floor(new Date(promotion.endsAt).getTime() / 1000)
+        : undefined,
+      metadata: {
+        tomversePromotionId: promotion.id,
+        planId,
+      },
+    });
+    promotionCodeId = promotionCode.id;
+  } catch {
+    promotionCodeId = null;
+  }
 
   await prisma.billingPromotion.update({
     where: { id: promotion.id },
     data: {
       stripeCouponId: coupon.id,
-      stripePromotionCodeId: promotionCode.id,
+      stripePromotionCodeId: promotionCodeId,
     },
   });
 
-  return { promotion_code: promotionCode.id };
+  return { coupon: coupon.id };
 }
 
 async function createCheckoutSessionWithPaymentFallback(
@@ -134,10 +138,32 @@ function buildCheckoutLineItem(
   billingInterval: "monthly" | "annual"
 ): Stripe.Checkout.SessionCreateParams.LineItem {
   if (billingInterval === "monthly") {
-    if (!plan.stripePriceId) {
-      throw new Error("Monthly Stripe Price ID is not configured.");
+    if (plan.stripePriceId) {
+      return { price: plan.stripePriceId, quantity: 1 };
     }
-    return { price: plan.stripePriceId, quantity: 1 };
+    if (plan.monthlyPriceCents <= 0) {
+      throw new Error("Monthly price is not configured.");
+    }
+    return {
+      quantity: 1,
+      price_data: {
+        currency: "usd",
+        unit_amount: plan.monthlyPriceCents,
+        product: plan.stripeProductId || undefined,
+        product_data: plan.stripeProductId
+          ? undefined
+          : {
+              name: `Tomverse AI ${plan.name}`,
+              metadata: {
+                planId: plan.id,
+                tier: plan.tier,
+              },
+            },
+        recurring: {
+          interval: "month",
+        },
+      },
+    };
   }
 
   if (plan.stripeAnnualPriceId) {
@@ -192,7 +218,7 @@ export async function POST(req: Request) {
     );
     const plans = await getBillingPlans();
     const plan = plans.find((item) => item.id === planId && item.isActive);
-    if (!plan || (billingInterval === "monthly" && !plan.stripePriceId)) {
+    if (!plan) {
       return NextResponse.json(
         { error: "This plan is not ready for checkout yet." },
         { status: 503 }

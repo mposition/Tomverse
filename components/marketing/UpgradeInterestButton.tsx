@@ -17,6 +17,7 @@ type BillingPlan = {
   displayCurrency?: string;
   displayMonthlyPriceAmount?: number;
   displayAnnualPriceAmount?: number;
+  displayExchangeRate?: number;
 };
 
 type BillingPromotion = {
@@ -53,6 +54,32 @@ const formatUsdCents = (cents: number) =>
     maximumFractionDigits: 0,
     minimumFractionDigits: 0,
   }).format(cents / 100);
+
+const calculateDiscountedCents = (
+  cents: number,
+  promotion: BillingPromotion | undefined
+) => {
+  if (!promotion) return cents;
+  if (promotion.discountPercent > 0) {
+    return Math.max(0, Math.round(cents * (1 - promotion.discountPercent / 100)));
+  }
+  return Math.max(0, cents - (promotion.discountAmountCents || 0));
+};
+
+const calculateDiscountedDisplayAmount = (
+  amount: number,
+  planConfig: BillingPlan | undefined,
+  promotion: BillingPromotion | undefined
+) => {
+  if (!promotion) return amount;
+  if (promotion.discountPercent > 0) {
+    return Math.max(0, Math.round(amount * (1 - promotion.discountPercent / 100)));
+  }
+  const fixedDiscount =
+    ((promotion.discountAmountCents || 0) / 100) *
+    (planConfig?.displayExchangeRate || 1);
+  return Math.max(0, Math.round(amount - fixedDiscount));
+};
 
 const formatPrice = (
   planConfig: BillingPlan | undefined,
@@ -114,7 +141,8 @@ export function UpgradeInterestButton({
   const { t } = useLanguage();
   const [isSending, setIsSending] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
-  const [promoCode, setPromoCode] = useState("TOMVERSE50");
+  const [promoCode, setPromoCode] = useState("");
+  const [appliedPromoCode, setAppliedPromoCode] = useState<string | null>(null);
   const [billingInterval, setBillingInterval] =
     useState<BillingInterval>("monthly");
   const [billingConfig, setBillingConfig] = useState<BillingConfig | null>(null);
@@ -124,13 +152,37 @@ export function UpgradeInterestButton({
   const activePromo = billingConfig?.promotions.find((item) =>
     item.appliesToPlanIds.includes(planId)
   );
+  const appliedPromotion =
+    appliedPromoCode && billingConfig
+      ? billingConfig.promotions.find(
+          (item) =>
+            item.code === appliedPromoCode && item.appliesToPlanIds.includes(planId)
+        )
+      : undefined;
   const priceLabel = formatPrice(planConfig, billingInterval);
   const monthlyPriceLabel = formatPrice(planConfig, "monthly");
   const annualPriceLabel = formatPrice(planConfig, "annual");
   const usdPriceLabel = formatUsdPrice(planConfig, billingInterval);
   const usdMonthlyPriceLabel = formatUsdPrice(planConfig, "monthly");
   const usdAnnualPriceLabel = formatUsdPrice(planConfig, "annual");
-  const discountLabel = formatDiscount(activePromo);
+  const discountLabel = formatDiscount(appliedPromotion);
+  const baseCents =
+    billingInterval === "annual"
+      ? planConfig?.baseAnnualPriceCents ?? planConfig?.annualPriceCents ?? 0
+      : planConfig?.baseMonthlyPriceCents ?? planConfig?.monthlyPriceCents ?? 0;
+  const dueUsdCents = calculateDiscountedCents(baseCents, appliedPromotion);
+  const dueUsdLabel = formatUsdCents(dueUsdCents);
+  const displayAmount =
+    billingInterval === "annual"
+      ? planConfig?.displayAnnualPriceAmount
+      : planConfig?.displayMonthlyPriceAmount;
+  const dueLabel =
+    planConfig?.displayCurrency && typeof displayAmount === "number"
+      ? formatMoney(
+          calculateDiscountedDisplayAmount(displayAmount, planConfig, appliedPromotion),
+          planConfig.displayCurrency
+        )
+      : dueUsdLabel;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -153,7 +205,7 @@ export function UpgradeInterestButton({
 
   const submit = async () => {
     if (isSending) return;
-    const normalizedCode = promoCode.trim().toUpperCase();
+    const normalizedCode = appliedPromoCode;
     setIsSending(true);
     try {
       const response = await fetch("/api/billing/checkout", {
@@ -181,6 +233,25 @@ export function UpgradeInterestButton({
     } finally {
       setIsSending(false);
     }
+  };
+
+  const applyPromotion = () => {
+    const normalizedCode = promoCode.trim().toUpperCase();
+    if (!normalizedCode) {
+      setAppliedPromoCode(null);
+      return;
+    }
+    const promotion = billingConfig?.promotions.find(
+      (item) =>
+        item.code === normalizedCode && item.appliesToPlanIds.includes(planId)
+    );
+    if (!promotion) {
+      setAppliedPromoCode(null);
+      dispatchAppToast("Invalid promotion code.", "error");
+      return;
+    }
+    setAppliedPromoCode(normalizedCode);
+    dispatchAppToast("Promotion code applied.", "success");
   };
 
   return (
@@ -302,14 +373,20 @@ export function UpgradeInterestButton({
                 <input
                   id={inputId}
                   value={promoCode}
-                  onChange={(event) => setPromoCode(event.target.value)}
+                  onChange={(event) => {
+                    const nextValue = event.target.value;
+                    setPromoCode(nextValue);
+                    if (appliedPromoCode !== nextValue.trim().toUpperCase()) {
+                      setAppliedPromoCode(null);
+                    }
+                  }}
                   className="min-w-0 flex-1 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-base font-black uppercase text-zinc-950 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/15 dark:border-zinc-800 dark:bg-zinc-900 dark:text-white"
-                  placeholder={activePromo?.code || "TOMVERSE50"}
+                  placeholder="Optional promotion code"
                   autoComplete="off"
                 />
                 <button
                   type="button"
-                  onClick={() => setPromoCode(activePromo?.code || "")}
+                  onClick={applyPromotion}
                   className="rounded-xl border border-zinc-200 px-4 py-3 text-sm font-black text-zinc-700 hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-900"
                 >
                   Apply
@@ -367,8 +444,13 @@ export function UpgradeInterestButton({
                   </div>
                 ) : null}
                 {activePromo ? (
+                  <p className="mt-2 text-xs font-semibold text-blue-600 dark:text-blue-300">
+                    Available offer: {activePromo.code}
+                  </p>
+                ) : null}
+                {appliedPromotion ? (
                   <div className="flex justify-between gap-4 text-sm text-blue-600 dark:text-blue-300">
-                    <span className="font-semibold">{activePromo.code}</span>
+                    <span className="font-semibold">{appliedPromotion.code}</span>
                     <span className="font-black">{discountLabel || "Applied at checkout"}</span>
                   </div>
                 ) : null}
@@ -378,12 +460,12 @@ export function UpgradeInterestButton({
                       Due today
                     </span>
                     <span className="text-2xl font-black text-zinc-950 dark:text-white">
-                      {priceLabel || "-"}
+                      {dueLabel || priceLabel || "-"}
                     </span>
                   </div>
                   {usdPriceLabel ? (
                     <p className="mt-2 text-xs font-semibold leading-5 text-zinc-500 dark:text-zinc-400">
-                      Displayed local price is converted from {usdPriceLabel}. Checkout is charged in USD.
+                      Displayed local price is converted from {dueUsdLabel || usdPriceLabel}. Checkout is charged in USD.
                     </p>
                   ) : null}
                 </div>
