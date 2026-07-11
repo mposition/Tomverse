@@ -1,6 +1,5 @@
 export const dynamic = "force-dynamic";
 
-import Image from "next/image";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { notFound, redirect } from "next/navigation";
@@ -8,8 +7,8 @@ import { getServerSession } from "next-auth/next";
 import { Activity, AlertTriangle, ArrowRight, Bell, CheckCircle2, Gauge, KeyRound, ShieldCheck, WalletCards, XCircle } from "lucide-react";
 import { authOptions } from "@/lib/auth";
 import { isAdminSession } from "@/lib/adminAuth";
-import { getModelBrand } from "@/lib/modelBranding";
 import { getEnabledModel } from "@/lib/models";
+import { ModelLogo } from "@/components/chat/ModelLogo";
 import {
     getProviderHealthDashboard,
     type ProviderHealthRow,
@@ -75,22 +74,7 @@ function MetricCard({
 }
 
 function ProviderLogo({ provider }: { provider: ProviderHealthRow["provider"] }) {
-    const brand = getModelBrand(provider);
-    return (
-        <span className="flex h-11 w-11 items-center justify-center rounded-xl border border-zinc-800 bg-white">
-            {brand.image ? (
-                <Image
-                    src={brand.image}
-                    alt=""
-                    width={28}
-                    height={28}
-                    className="h-7 w-7 object-contain"
-                />
-            ) : (
-                <span className="text-xs font-bold text-zinc-900">{brand.mark}</span>
-            )}
-        </span>
-    );
+    return <ModelLogo provider={provider} size="lg" className="ring-zinc-800" />;
 }
 
 function ProviderRow({ provider }: { provider: ProviderHealthRow }) {

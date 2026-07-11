@@ -1,7 +1,7 @@
 import type { AiModel, AiProvider } from "@/lib/models";
 import { getModelBrand } from "@/lib/modelBranding";
 
-type ModelLogoSize = "xs" | "sm" | "md";
+type ModelLogoSize = "xs" | "sm" | "md" | "lg";
 
 type ModelLogoProps = {
   model?: Pick<AiModel, "name" | "provider" | "icon"> | null;
@@ -14,12 +14,14 @@ const frameSize: Record<ModelLogoSize, string> = {
   xs: "h-5 w-5 rounded-full",
   sm: "h-6 w-6 rounded-lg",
   md: "h-8 w-8 rounded-lg",
+  lg: "h-11 w-11 rounded-xl",
 };
 
 const imageSize: Record<ModelLogoSize, string> = {
   xs: "h-3.5 w-3.5",
   sm: "h-4 w-4",
   md: "h-5 w-5",
+  lg: "h-7 w-7",
 };
 
 export function ModelLogo({
