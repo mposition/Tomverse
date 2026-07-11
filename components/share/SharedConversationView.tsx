@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Bot, CalendarClock, Clipboard, Clock, Eye, LockKeyhole, Share2, UserRound } from "lucide-react";
 import { getModel } from "@/lib/models";
 import type { ShareSnapshot } from "@/lib/shareSnapshot";
-import { useLanguage } from "@/components/LanguageProvider";
+import { useLanguage, type Language } from "@/components/LanguageProvider";
 
 type SharedConversationData = {
   snapshot: ShareSnapshot;
@@ -23,6 +23,16 @@ function getAssistantLabel(modelId: string | null | undefined, fallback: string)
   return getModel(modelId)?.name || modelId;
 }
 
+const languageOptions: Array<{ value: Language; label: string }> = [
+  { value: "ko", label: "한국어" },
+  { value: "en", label: "English" },
+  { value: "zh", label: "中文" },
+  { value: "fr", label: "Français" },
+  { value: "de", label: "Deutsch" },
+  { value: "es", label: "Español" },
+  { value: "pt", label: "Português" },
+];
+
 export function SharedConversationView({
   shareToken,
 }: {
@@ -31,7 +41,7 @@ export function SharedConversationView({
   const [data, setData] = useState<SharedConversationData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [modelFilter, setModelFilter] = useState("all");
-  const { t, lang } = useLanguage();
+  const { t, lang, setLang } = useLanguage();
   const snapshot = data?.snapshot;
   const modelOptions = useMemo(() => {
     if (!snapshot) return [];
@@ -139,9 +149,26 @@ export function SharedConversationView({
                 </h1>
               </div>
             </div>
-            <div className="flex shrink-0 items-center gap-1.5 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs font-semibold text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
-              <Eye className="h-3.5 w-3.5" />
-              {t("share.readOnly")}
+            <div className="flex shrink-0 flex-col items-end gap-2 sm:flex-row sm:items-center">
+              <label className="sr-only" htmlFor="share-language-select">
+                {t("auth.language")}
+              </label>
+              <select
+                id="share-language-select"
+                value={lang}
+                onChange={(event) => setLang(event.target.value as Language)}
+                className="h-8 rounded-full border border-zinc-200 bg-zinc-50 px-3 text-xs font-semibold text-zinc-600 outline-none transition hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              >
+                {languageOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <div className="flex items-center gap-1.5 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs font-semibold text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
+                <Eye className="h-3.5 w-3.5" />
+                {t("share.readOnly")}
+              </div>
             </div>
           </div>
           <div className="grid gap-2 text-xs text-zinc-500 sm:grid-cols-3">
