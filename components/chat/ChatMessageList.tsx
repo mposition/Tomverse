@@ -323,7 +323,7 @@ export function ChatMessageList({
                           className="inline-flex items-center gap-2 rounded-full border border-red-200 bg-white px-3 py-1.5 text-xs font-bold text-red-700 transition-colors hover:bg-red-50 dark:border-red-800 dark:bg-red-950 dark:text-red-100 dark:hover:bg-red-900"
                         >
                           <RotateCcw className="h-3.5 w-3.5" />
-                          Retry without files
+                          {t("chat.retryWithoutFiles")}
                         </button>
                       )}
                       <button

@@ -272,7 +272,7 @@ export function MobileChatShell({
           {isGuestMode && (
             <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-blue-500/10 px-2 py-1 text-[11px] font-bold text-blue-600 dark:text-blue-300">
               <Sparkles className="h-3 w-3" />
-              Guest {guestMessageCount}/{maxGuestMessages}
+              {t("modelTiers.guest")} {guestMessageCount}/{maxGuestMessages}
             </span>
           )}
           {isCurrentLocked && (
@@ -364,7 +364,7 @@ export function MobileChatShell({
             onClick={onCompareSummary}
             className="h-9 w-full rounded-xl border border-blue-200 bg-blue-50 text-xs font-black text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200"
           >
-            Summarize model differences
+            {t("chat.summarizeModelDifferences")}
           </button>
         </div>
       )}

@@ -68,10 +68,10 @@ const ACCEPTED_FILE_TYPES = [
 ].join(",");
 
 const PROMPT_SUGGESTIONS = [
-  "Summarize this document",
-  "Compare these models",
-  "Review this code",
-  "Analyze this image",
+  "chat.promptSummarizeDocument",
+  "chat.promptCompareModels",
+  "chat.promptReviewCode",
+  "chat.promptAnalyzeImage",
 ];
 
 const getProviderSortRank = (provider: string) => {
@@ -937,10 +937,10 @@ export function ChatInput({
                 <button
                   key={suggestion}
                   type="button"
-                  onClick={() => onChange(suggestion)}
+                  onClick={() => onChange(t(suggestion))}
                   className="shrink-0 touch-manipulation rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs font-semibold text-zinc-600 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800"
                 >
-                  {suggestion}
+                  {t(suggestion)}
                 </button>
               ))}
             </div>
@@ -1196,9 +1196,9 @@ export function ChatInput({
                         className="h-9 rounded-lg border border-zinc-200 bg-zinc-50 px-2 text-xs font-medium text-zinc-700 outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
                       >
                         <option value="all">{t("chat.allTiers")}</option>
-                        <option value="Free">Free</option>
-                        <option value="Pro">Pro</option>
-                        <option value="Max">Max</option>
+                        <option value="Free">{t("modelTiers.free")}</option>
+                        <option value="Pro">{t("modelTiers.pro")}</option>
+                        <option value="Max">{t("modelTiers.max")}</option>
                       </select>
                     </div>
                   </div>
@@ -1217,12 +1217,12 @@ export function ChatInput({
                             isGuestMode && model.tier !== "Free";
                           const unavailable = !model.enabled || isTierLocked;
                           const statusReason = isTierLocked
-                            ? "Login required for Pro and Max models"
+                            ? t("modelStatusReasons.loginRequired")
                             : !model.enabled
-                              ? "Temporarily unavailable"
+                              ? t("modelStatusReasons.unavailable")
                               : model.status !== "enabled"
-                                ? "Limited by provider availability"
-                                : getModelBestFor(model);
+                                ? t("modelStatusReasons.limited")
+                                : t(getModelBestFor(model));
                           return (
                             <div
                               key={model.id}
@@ -1276,13 +1276,15 @@ export function ChatInput({
                                         key={tag}
                                         className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[9px] font-bold text-zinc-500 dark:bg-zinc-800 dark:text-zinc-300"
                                       >
-                                        {tag}
+                                        {t(`modelTags.${tag}`)}
                                       </span>
                                     ))}
                                   </span>
-                                  <span className="sr-only">{getModelBestFor(model)}</span>
+                                  <span className="sr-only">{t(getModelBestFor(model))}</span>
                                 </span>
-                                <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${model.tier === "Free" ? "bg-emerald-500/10 text-emerald-500" : model.tier === "Pro" ? "bg-blue-500/10 text-blue-500" : "bg-purple-500/10 text-purple-500"}`}>{model.tier}</span>
+                                <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${model.tier === "Free" ? "bg-emerald-500/10 text-emerald-500" : model.tier === "Pro" ? "bg-blue-500/10 text-blue-500" : "bg-purple-500/10 text-purple-500"}`}>
+                                  {t(`modelTiers.${model.tier.toLowerCase()}`)}
+                                </span>
                                 <span className={`h-4 w-8 rounded-full p-0.5 transition-colors ${isSelected ? "bg-blue-500" : "bg-zinc-300 dark:bg-zinc-700"}`}>
                                   <span className={`block h-3 w-3 rounded-full bg-white transition-transform ${isSelected ? "translate-x-4" : ""}`} />
                                 </span>

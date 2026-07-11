@@ -957,12 +957,12 @@ export default function Home() {
           { cache: "no-store" }
         );
         if (!response.ok) {
-          showToast("Comparison summary is unavailable.", "error");
+          showToast(t("chat.compareUnavailable"), "error");
           return;
         }
         setCompareSummary(await response.json());
       } catch {
-        showToast("Comparison summary is unavailable.", "error");
+        showToast(t("chat.compareUnavailable"), "error");
       }
     };
 
@@ -1098,7 +1098,7 @@ export default function Home() {
           <div className="flex items-start justify-between gap-4">
             <div>
               <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">
-                Model comparison
+                {t("chat.modelComparison")}
               </h2>
               <p className="mt-1 text-sm text-zinc-500">{compareSummary.note}</p>
             </div>
@@ -1120,7 +1120,7 @@ export default function Home() {
                   {item.modelName}
                 </h3>
                 <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-                  {item.summary || "No response content found."}
+                  {item.summary || t("chat.noResponseContent")}
                 </p>
               </article>
             ))}

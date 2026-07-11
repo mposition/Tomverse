@@ -161,10 +161,10 @@ export function SharedConversationView({
           <div className="flex flex-col gap-3 rounded-2xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
               <p className="text-xs font-bold uppercase tracking-wide text-zinc-500">
-                Document controls
+                {t("share.documentControls")}
               </p>
               <p className="mt-1 text-xs text-zinc-400">
-                Filter by model, jump through the outline, or copy useful messages.
+                {t("share.documentControlsDescription")}
               </p>
             </div>
             <select
@@ -172,7 +172,7 @@ export function SharedConversationView({
               onChange={(event) => setModelFilter(event.target.value)}
               className="h-10 rounded-xl border border-zinc-200 bg-white px-3 text-sm font-semibold text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100"
             >
-              <option value="all">All models</option>
+              <option value="all">{t("share.allModels")}</option>
               {modelOptions.map((model) => (
                 <option key={model.id} value={model.id}>
                   {model.name}
@@ -242,7 +242,7 @@ export function SharedConversationView({
                     className="inline-flex items-center gap-1 text-[11px] font-semibold text-zinc-400 hover:text-blue-500"
                   >
                     <Clipboard className="h-3 w-3" />
-                    Copy
+                    {t("share.copy")}
                   </button>
                 </div>
               </article>

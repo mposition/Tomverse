@@ -333,7 +333,7 @@ export function ChatSidebar({
                 {messageSearchResults.length > 0 && (
                     <div className="mb-2 rounded-xl border border-blue-200 bg-blue-50 p-2 text-xs dark:border-blue-900/50 dark:bg-blue-950/20">
                         <p className="px-1 pb-1 font-black text-blue-700 dark:text-blue-300">
-                            Message matches
+                            {t("sidebar.messageMatches")}
                         </p>
                         {messageSearchResults.slice(0, 4).map((result) => (
                             <button
@@ -450,7 +450,7 @@ export function ChatSidebar({
                                         >
                                             <span className="flex items-center gap-2">
                                                 <Pin className={menuIconClass} />
-                                                <span>{pinnedConversationIds.includes(conv.id) ? "Unpin chat" : "Pin chat"}</span>
+                                                <span>{pinnedConversationIds.includes(conv.id) ? t("sidebar.unpinChat") : t("sidebar.pinChat")}</span>
                                             </span>
                                         </button>
 
@@ -465,7 +465,7 @@ export function ChatSidebar({
                                         >
                                             <span className="flex items-center gap-2">
                                                 <Star className={menuIconClass} />
-                                                <span>{favoriteConversationIds.includes(conv.id) ? "Remove favorite" : "Favorite chat"}</span>
+                                                <span>{favoriteConversationIds.includes(conv.id) ? t("sidebar.removeFavorite") : t("sidebar.favoriteChat")}</span>
                                             </span>
                                         </button>
 
@@ -611,7 +611,7 @@ export function ChatSidebar({
                     <div className="flex items-center justify-between gap-2">
                         <span className="font-bold text-zinc-500 dark:text-zinc-400">{t("sidebar.currentPlan")}</span>
                         <span className={`rounded-full px-2 py-0.5 font-black ${isGuestMode ? "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300" : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"}`}>
-                            {isGuestMode ? "Guest" : "Free"}
+                            {isGuestMode ? t("modelTiers.guest") : t("modelTiers.free")}
                         </span>
                     </div>
                     <p className="mt-2 leading-5 text-zinc-500 dark:text-zinc-400">

@@ -170,7 +170,7 @@ export function DesktopChatShell({
                           })}
                         </select>
                         <span className="truncate text-[10px] font-medium text-zinc-400">
-                          {modelInfo?.provider} - {modelInfo?.tier}
+                          {modelInfo?.provider} - {modelInfo ? t(`modelTiers.${modelInfo.tier.toLowerCase()}`) : ""}
                         </span>
                       </span>
                     )}
@@ -232,7 +232,7 @@ export function DesktopChatShell({
               onClick={onCompareSummary}
               className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-xs font-black text-blue-700 hover:bg-blue-100 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200 dark:hover:bg-blue-950"
             >
-              Summarize model differences
+              {t("chat.summarizeModelDifferences")}
             </button>
           </div>
         )}

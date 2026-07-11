@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { BarChart3 } from "lucide-react";
+import { useLanguage } from "@/components/LanguageProvider";
 
 type UsageResponse = {
   plan: string;
@@ -59,6 +60,7 @@ export function UserUsageSummary({
   guestMessageCount?: number;
   maxGuestMessages?: number;
 }) {
+  const { t } = useLanguage();
   const [usage, setUsage] = useState<UsageResponse | null>(null);
 
   useEffect(() => {
@@ -81,11 +83,11 @@ export function UserUsageSummary({
       <section className="mx-3 mb-3 rounded-2xl border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-100">
         <div className="flex items-center gap-2 font-black">
           <BarChart3 className="h-4 w-4" />
-          Guest usage
+          {t("usage.guestUsage")}
         </div>
         <div className="mt-2 flex items-center justify-between font-semibold">
-          <span>Today</span>
-          <span>{Math.max(0, limit - used)} left</span>
+          <span>{t("usage.today")}</span>
+          <span>{Math.max(0, limit - used)} {t("usage.left")}</span>
         </div>
         <UsageBar used={used} limit={limit} />
       </section>
@@ -93,21 +95,22 @@ export function UserUsageSummary({
   }
 
   if (!usage) return null;
+  const planLabel = t(`modelTiers.${usage.plan.toLowerCase()}`);
 
   return (
     <section className="mx-3 mb-3 rounded-2xl border border-zinc-200 bg-white p-3 text-xs text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-200">
       <div className="flex items-center justify-between gap-2">
         <span className="flex items-center gap-2 font-black">
           <BarChart3 className="h-4 w-4 text-blue-500" />
-          Plan: {usage.plan}
+          {t("usage.plan")}: {planLabel}
         </span>
         <span className="text-zinc-400">
-          {Math.max(0, usage.limits.messagesDay - usage.usage.messagesDay)} left
+          {Math.max(0, usage.limits.messagesDay - usage.usage.messagesDay)} {t("usage.left")}
         </span>
       </div>
       <div className="mt-2">
         <div className="flex justify-between font-semibold">
-          <span>Today messages</span>
+          <span>{t("usage.todayMessages")}</span>
           <span>
             {usage.usage.messagesDay}/{usage.limits.messagesDay}
           </span>
@@ -116,7 +119,7 @@ export function UserUsageSummary({
       </div>
       <div className="mt-2">
         <div className="flex justify-between font-semibold">
-          <span>Month messages</span>
+          <span>{t("usage.monthMessages")}</span>
           <span>
             {usage.usage.messagesMonth}/{usage.limits.messagesMonth}
           </span>

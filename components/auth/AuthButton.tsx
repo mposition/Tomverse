@@ -347,7 +347,7 @@ export function AuthButton() {
                                                 >
                                                     {ENABLED_MODELS.map((model) => (
                                                         <option className="bg-white text-zinc-900" key={model.id} value={model.id}>
-                                                            {model.icon} {model.name} · {model.tier}
+                                                            {model.icon} {model.name} · {t(`modelTiers.${model.tier.toLowerCase()}`)}
                                                         </option>
                                                     ))}
                                                 </select>

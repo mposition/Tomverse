@@ -73,7 +73,7 @@ const copy = {
 } satisfies Record<Language, Record<string, string>>;
 
 export function ModelsPageContent() {
-  const { lang } = useLanguage();
+  const { lang, t } = useLanguage();
   const content = copy[lang];
 
   return (
@@ -113,12 +113,12 @@ export function ModelsPageContent() {
                 </div>
               </div>
               <p className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-                {getModelBestFor(model)}
+                {t(getModelBestFor(model))}
               </p>
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {tags.map((tag) => (
                   <span key={tag} className="rounded-full bg-white px-2 py-1 text-[10px] font-black text-zinc-500 ring-1 ring-zinc-200 dark:bg-zinc-950 dark:ring-zinc-800">
-                    {tag}
+                    {t(`modelTags.${tag}`)}
                   </span>
                 ))}
               </div>
@@ -129,7 +129,7 @@ export function ModelsPageContent() {
                 </div>
                 <div>
                   <p className="text-[10px] font-bold uppercase text-zinc-500">{content.tier}</p>
-                  <p className="mt-1 text-sm font-black">{model.tier}</p>
+                  <p className="mt-1 text-sm font-black">{t(`modelTiers.${model.tier.toLowerCase()}`)}</p>
                 </div>
                 <div>
                   <p className="text-[10px] font-bold uppercase text-zinc-500">{content.status}</p>

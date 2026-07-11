@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { dispatchAppToast } from "@/lib/appToast";
+import { useLanguage } from "@/components/LanguageProvider";
 
 export function UpgradeInterestButton({
   plan,
@@ -13,6 +14,7 @@ export function UpgradeInterestButton({
   className: string;
   children: ReactNode;
 }) {
+  const { t } = useLanguage();
   const [isSending, setIsSending] = useState(false);
 
   const submit = async () => {
@@ -25,9 +27,9 @@ export function UpgradeInterestButton({
         body: JSON.stringify({ plan }),
       });
       if (!response.ok) throw new Error("Waitlist failed");
-      dispatchAppToast(`${plan} waitlist request received.`, "success");
+      dispatchAppToast(t("billing.waitlistSent"), "success");
     } catch {
-      dispatchAppToast("Could not join the waitlist.", "error");
+      dispatchAppToast(t("billing.waitlistFailed"), "error");
     } finally {
       setIsSending(false);
     }
@@ -35,7 +37,7 @@ export function UpgradeInterestButton({
 
   return (
     <button type="button" onClick={submit} disabled={isSending} className={className}>
-      {isSending ? "Sending..." : children}
+      {isSending ? t("billing.sending") : children}
     </button>
   );
 }

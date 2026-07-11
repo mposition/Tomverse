@@ -52,7 +52,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       "Tomverse plans are designed around model access, usage allowance, file workflows, and sharing controls.",
     table: {
       feature: "Feature",
-      free: "Free",
+      free: "무료",
       pro: "Pro",
       max: "Max",
       rows: [
@@ -151,7 +151,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       pro: "Pro",
       max: "Max",
       rows: [
-        { label: "모델 접근", free: "Free 모델", pro: "전체 모델 접근, Pro 사용량 한도", max: "전체 모델 접근, 최대 사용량 한도" },
+        { label: "모델 접근", free: "무료 모델", pro: "전체 모델 접근, Pro 사용량 한도", max: "전체 모델 접근, 최대 사용량 한도" },
         { label: "멀티 모델 비교", free: "1개 모델", pro: "최대 3개 모델", max: "최대 3개 모델" },
         { label: "파일 첨부", free: "기본 이미지", pro: "이미지, PDF, Office, Drive", max: "더 높은 파일/컨텍스트 한도" },
         { label: "대화 공유", free: "-", pro: "공유 및 다운로드", max: "공유, 다운로드, 우선 한도" },
@@ -162,7 +162,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     faqs: [
       {
         question: "무료로 계속 사용할 수 있나요?",
-        answer: "네. Free 요금제는 가벼운 일상 사용과 선택된 무료 모델 접근을 위해 제공될 예정입니다.",
+        answer: "네. 무료 요금제는 가벼운 일상 사용과 선택된 무료 모델 접근을 위해 제공될 예정입니다.",
       },
       {
         question: "결제가 시작되면 어떻게 되나요?",
@@ -177,7 +177,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       "최종 가격, 세금 처리, 지역별 제공 여부, 환불 조건은 유료 구독 출시 전에 확정해 안내하겠습니다.",
     plans: [
       {
-        name: "Free",
+        name: "무료",
         eyebrow: "처음 시작하는 사용자",
         price: "$0",
         period: "월",
@@ -186,7 +186,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
         href: "/chat",
         usage: "기본 일일 사용량",
         features: [
-          "Free 모델 등급 접근",
+          "무료 모델 등급 접근",
           "단일 모델 채팅 워크스페이스",
           "기본 대화 기록",
           "게스트 및 로그인 모드",
@@ -203,7 +203,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
         href: "/chat",
         highlighted: true,
         badge: "추천",
-        usage: "Free보다 높은 사용량",
+        usage: "무료보다 높은 사용량",
         features: [
           "사용 가능한 전체 모델 등급 접근",
           "최대 3개 모델 동시 비교",
@@ -222,7 +222,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
         href: "/chat",
         usage: "가장 큰 사용량 한도",
         features: [
-          "Free, Pro, Max 전체 모델 등급 접근",
+          "무료, Pro, Max 전체 모델 등급 접근",
           "가장 높은 사용량 한도",
           "더 높은 첨부파일 및 컨텍스트 한도",
           "고급 모델 등급 우선 접근",
@@ -329,7 +329,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
 };
 
 export function PricingPageContent() {
-  const { lang } = useLanguage();
+  const { lang, t } = useLanguage();
   const content = copy[lang] ?? copy.en;
 
   return (
@@ -379,7 +379,7 @@ export function PricingPageContent() {
               <p className={`mt-3 text-sm font-black ${plan.highlighted ? "text-blue-50" : "text-zinc-700 dark:text-zinc-200"}`}>
                 {plan.usage}
               </p>
-              {plan.name === "Free" ? (
+              {plan.price === "$0" ? (
                 <Link
                   href={plan.href}
                   className={`mt-8 inline-flex h-12 w-full items-center justify-center rounded-xl text-sm font-black transition ${
@@ -399,7 +399,7 @@ export function PricingPageContent() {
                       : "border border-zinc-300 text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-zinc-800"
                   }`}
                 >
-                  Join waitlist
+                  {t("billing.joinWaitlist")}
                 </UpgradeInterestButton>
               )}
               <ul className="mt-8 space-y-3">
