@@ -177,27 +177,8 @@ async function ensureStripeDiscount(
   return { coupon: coupon.id };
 }
 
-async function createCheckoutSessionWithPaymentFallback(
-  params: Stripe.Checkout.SessionCreateParams
-) {
-  const stripe = getStripe();
-  const paypalEnabled = process.env.STRIPE_ENABLE_PAYPAL !== "false";
-  const preferredPaymentMethods: Stripe.Checkout.SessionCreateParams.PaymentMethodType[] =
-    paypalEnabled ? ["card", "paypal"] : ["card"];
-
-  try {
-    return await stripe.checkout.sessions.create({
-      ...params,
-      payment_method_types: preferredPaymentMethods,
-    });
-  } catch (error) {
-    if (!paypalEnabled) throw error;
-    console.warn("Stripe PayPal checkout failed; retrying with card only.");
-    return stripe.checkout.sessions.create({
-      ...params,
-      payment_method_types: ["card"],
-    });
-  }
+async function createCheckoutSession(params: Stripe.Checkout.SessionCreateParams) {
+  return getStripe().checkout.sessions.create(params);
 }
 
 function buildCheckoutLineItem(
@@ -372,7 +353,7 @@ export async function POST(req: Request) {
       ? await ensureStripeDiscount(appliedPromotion, planId as BillingPlanId)
       : null;
 
-    const checkoutSession = await createCheckoutSessionWithPaymentFallback({
+    const checkoutSession = await createCheckoutSession({
       mode: "subscription",
       customer: stripeCustomerId,
       line_items: [buildCheckoutLineItem(plan, billingInterval)],
