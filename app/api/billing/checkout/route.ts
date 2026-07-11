@@ -51,6 +51,73 @@ const isPromotionCurrentlyRedeemable = (
   return promotion.discountPercent > 0 || Boolean(promotion.discountAmountCents);
 };
 
+const calculateDiscountedCents = (
+  cents: number,
+  promotion: CheckoutPromotion | null
+) => {
+  if (!promotion) return cents;
+  if (promotion.discountPercent > 0) {
+    return Math.max(0, Math.round(cents * (1 - promotion.discountPercent / 100)));
+  }
+  return Math.max(0, cents - (promotion.discountAmountCents || 0));
+};
+
+const priceCentsForInterval = (
+  plan: CheckoutPlan,
+  billingInterval: "monthly" | "annual"
+) =>
+  billingInterval === "annual" ? plan.annualPriceCents : plan.monthlyPriceCents;
+
+const addBillingPeriod = (
+  date: Date,
+  billingInterval: "monthly" | "annual"
+) => {
+  const next = new Date(date);
+  if (billingInterval === "annual") {
+    next.setUTCFullYear(next.getUTCFullYear() + 1);
+  } else {
+    next.setUTCMonth(next.getUTCMonth() + 1);
+  }
+  return next;
+};
+
+async function activateZeroDollarPlan({
+  userId,
+  planId,
+  billingInterval,
+  promotion,
+}: {
+  userId: string;
+  planId: BillingPlanId;
+  billingInterval: "monthly" | "annual";
+  promotion: CheckoutPromotion | null;
+}) {
+  const periodEnd = addBillingPeriod(new Date(), billingInterval);
+  await prisma.$transaction([
+    prisma.user.update({
+      where: { id: userId },
+      data: {
+        plan: tierForPlanId(planId),
+        stripeSubscriptionId: null,
+        stripePriceId: null,
+        subscriptionStatus: "active",
+        subscriptionCurrentPeriodEnd: periodEnd,
+        subscriptionBillingInterval: billingInterval,
+      },
+    }),
+    ...(promotion
+      ? [
+          prisma.billingPromotion.update({
+            where: { id: promotion.id },
+            data: { redeemedCount: { increment: 1 } },
+          }),
+        ]
+      : []),
+  ]);
+
+  return periodEnd;
+}
+
 async function ensureStripeDiscount(
   promotion: CheckoutPromotion,
   planId: BillingPlanId
@@ -250,6 +317,42 @@ export async function POST(req: Request) {
       );
     }
 
+    const promotions = await getBillingPromotions();
+    const promotion = promoCode
+      ? promotions.find(
+          (item) =>
+            item.code === promoCode &&
+            isPromotionCurrentlyRedeemable(item, planId as BillingPlanId)
+        )
+      : null;
+    if (promoCode && !promotion) {
+      return NextResponse.json(
+        { error: "Invalid promotion code." },
+        { status: 400 }
+      );
+    }
+    const appliedPromotion = promotion || null;
+
+    const finalPriceCents = calculateDiscountedCents(
+      priceCentsForInterval(plan, billingInterval),
+      appliedPromotion
+    );
+    const origin = getPublicAppOrigin(req);
+    if (finalPriceCents <= 0) {
+      const periodEnd = await activateZeroDollarPlan({
+        userId: user.id,
+        planId: planId as BillingPlanId,
+        billingInterval,
+        promotion: appliedPromotion,
+      });
+
+      return NextResponse.json({
+        success: true,
+        redirectUrl: `${origin}/chat?billing=success`,
+        periodEnd: periodEnd.toISOString(),
+      });
+    }
+
     const stripe = getStripe();
     let stripeCustomerId = user.stripeCustomerId;
     if (!stripeCustomerId) {
@@ -265,25 +368,10 @@ export async function POST(req: Request) {
       });
     }
 
-    const promotions = await getBillingPromotions();
-    const promotion = promoCode
-      ? promotions.find(
-          (item) =>
-            item.code === promoCode &&
-            isPromotionCurrentlyRedeemable(item, planId as BillingPlanId)
-        )
-      : null;
-    if (promoCode && !promotion) {
-      return NextResponse.json(
-        { error: "Invalid promotion code." },
-        { status: 400 }
-      );
-    }
-    const discount = promotion
-      ? await ensureStripeDiscount(promotion, planId as BillingPlanId)
+    const discount = appliedPromotion
+      ? await ensureStripeDiscount(appliedPromotion, planId as BillingPlanId)
       : null;
 
-    const origin = getPublicAppOrigin(req);
     const checkoutSession = await createCheckoutSessionWithPaymentFallback({
       mode: "subscription",
       customer: stripeCustomerId,
@@ -299,16 +387,16 @@ export async function POST(req: Request) {
           planId,
           tier: tierForPlanId(planId),
           billingInterval,
-          promoCode: promotion?.code || "",
-          promotionId: promotion?.id || "",
+          promoCode: appliedPromotion?.code || "",
+          promotionId: appliedPromotion?.id || "",
         },
       },
       metadata: {
         userId: user.id,
         planId,
         billingInterval,
-        promoCode: promotion?.code || "",
-        promotionId: promotion?.id || "",
+        promoCode: appliedPromotion?.code || "",
+        promotionId: appliedPromotion?.id || "",
       },
     });
 

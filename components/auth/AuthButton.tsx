@@ -51,6 +51,20 @@ export function AuthButton() {
     });
     const accountUsage = useUserUsage(Boolean(session?.user));
     const accountPlan = accountUsage?.plan || null;
+    const planPeriodEnd = accountUsage?.subscription?.currentPeriodEnd;
+    const planPeriodEndLabel = planPeriodEnd
+        ? new Intl.DateTimeFormat(globalLang, {
+            year: "numeric",
+            month: "short",
+            day: "numeric",
+        }).format(new Date(planPeriodEnd))
+        : null;
+    const billingIntervalLabel =
+        accountUsage?.subscription?.billingInterval === "annual"
+            ? "Annual"
+            : accountUsage?.subscription?.billingInterval === "monthly"
+                ? "Monthly"
+                : null;
 
     const closeSettingsModal = useCallback(() => {
         setIsModalOpen(false);
@@ -498,6 +512,26 @@ export function AuthButton() {
                                             <p className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
                                                 {accountPlan ? t(`sidebar.${accountPlan.toLowerCase()}PlanDescription`) : t("auth.loading")}
                                             </p>
+                                            {(planPeriodEndLabel || billingIntervalLabel) && (
+                                                <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                                                    {billingIntervalLabel && (
+                                                        <div className="rounded-xl border border-blue-200 bg-white/70 px-3 py-2 text-xs font-semibold text-blue-700 dark:border-blue-900/60 dark:bg-zinc-950/50 dark:text-blue-200">
+                                                            <span className="block text-[11px] uppercase tracking-wide opacity-70">
+                                                                Billing
+                                                            </span>
+                                                            {billingIntervalLabel}
+                                                        </div>
+                                                    )}
+                                                    {planPeriodEndLabel && (
+                                                        <div className="rounded-xl border border-blue-200 bg-white/70 px-3 py-2 text-xs font-semibold text-blue-700 dark:border-blue-900/60 dark:bg-zinc-950/50 dark:text-blue-200">
+                                                            <span className="block text-[11px] uppercase tracking-wide opacity-70">
+                                                                {t("share.expires")}
+                                                            </span>
+                                                            {planPeriodEndLabel}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
                                         </section>
                                         {accountUsage && (
                                             <section className="grid gap-3 sm:grid-cols-2">

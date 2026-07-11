@@ -6,6 +6,11 @@ export type UserPlan = "Free" | "Pro" | "Max";
 
 export type UserUsageResponse = {
   plan: UserPlan;
+  subscription?: {
+    status: string | null;
+    billingInterval: string | null;
+    currentPeriodEnd: string | null;
+  };
   usage: {
     messagesDay: number;
     messagesMonth: number;

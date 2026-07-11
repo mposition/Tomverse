@@ -39,20 +39,24 @@ type BillingConfig = {
 
 type BillingInterval = "monthly" | "annual";
 
-const formatMoney = (amount: number, currency = "USD") =>
+const formatMoney = (
+  amount: number,
+  currency = "USD",
+  fractionDigits = 0
+) =>
   new Intl.NumberFormat(undefined, {
     style: "currency",
     currency,
-    maximumFractionDigits: 0,
-    minimumFractionDigits: 0,
+    maximumFractionDigits: fractionDigits,
+    minimumFractionDigits: fractionDigits,
   }).format(amount);
 
-const formatUsdCents = (cents: number) =>
+const formatUsdCents = (cents: number, fractionDigits = 0) =>
   new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
-    maximumFractionDigits: 0,
-    minimumFractionDigits: 0,
+    maximumFractionDigits: fractionDigits,
+    minimumFractionDigits: fractionDigits,
   }).format(cents / 100);
 
 const calculateDiscountedCents = (
@@ -171,7 +175,7 @@ export function UpgradeInterestButton({
       ? planConfig?.baseAnnualPriceCents ?? planConfig?.annualPriceCents ?? 0
       : planConfig?.baseMonthlyPriceCents ?? planConfig?.monthlyPriceCents ?? 0;
   const dueUsdCents = calculateDiscountedCents(baseCents, appliedPromotion);
-  const dueUsdLabel = formatUsdCents(dueUsdCents);
+  const dueUsdLabel = formatUsdCents(dueUsdCents, 1);
   const displayAmount =
     billingInterval === "annual"
       ? planConfig?.displayAnnualPriceAmount
@@ -180,7 +184,8 @@ export function UpgradeInterestButton({
     planConfig?.displayCurrency && typeof displayAmount === "number"
       ? formatMoney(
           calculateDiscountedDisplayAmount(displayAmount, planConfig, appliedPromotion),
-          planConfig.displayCurrency
+          planConfig.displayCurrency,
+          1
         )
       : dueUsdLabel;
 
@@ -222,8 +227,12 @@ export function UpgradeInterestButton({
         return;
       }
       const data = (await response.json().catch(() => null)) as
-        | { url?: string; error?: string }
+        | { url?: string; redirectUrl?: string; success?: boolean; error?: string }
         | null;
+      if (response.ok && data?.success && data.redirectUrl) {
+        window.location.href = data.redirectUrl;
+        return;
+      }
       if (!response.ok || !data?.url) {
         throw new Error(data?.error || "Checkout failed");
       }

@@ -38,7 +38,12 @@ export async function GET(req: Request) {
 
     const user = await prisma.user.findUnique({
       where: { id: session.user.id },
-      select: { plan: true },
+      select: {
+        plan: true,
+        subscriptionCurrentPeriodEnd: true,
+        subscriptionBillingInterval: true,
+        subscriptionStatus: true,
+      },
     });
     const key = getUserChatUsageKey(session.user.id);
     const now = new Date();
@@ -74,6 +79,11 @@ export async function GET(req: Request) {
 
     return NextResponse.json({
       plan,
+      subscription: {
+        status: user?.subscriptionStatus || null,
+        billingInterval: user?.subscriptionBillingInterval || null,
+        currentPeriodEnd: user?.subscriptionCurrentPeriodEnd?.toISOString() || null,
+      },
       generatedAt: now.toISOString(),
       usage: {
         messagesDay: count("day"),
