@@ -79,6 +79,14 @@ export type AuthenticatedQaState = {
 };
 
 export async function mockAuthenticatedApi(page: Page): Promise<AuthenticatedQaState> {
+  await page.context().addCookies([
+    {
+      name: "__tomverse_e2e_auth",
+      value: "1",
+      url: "http://127.0.0.1:3100",
+    },
+  ]);
+
   const state: AuthenticatedQaState = {
     deleted: false,
     locked: false,

@@ -22,7 +22,9 @@ async function addSecondFreeModel(page: Page) {
   await page.keyboard.press("Escape");
 }
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page }, testInfo) => {
+  test.skip(!testInfo.project.name.startsWith("mobile"), "Mobile flow only runs in mobile projects.");
+
   await prepareGuestPage(page, "ko");
   await mockChatStream(page, "Mobile QA response");
   await page.goto("/");

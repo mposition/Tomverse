@@ -9,6 +9,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { LanguageProvider } from "@/components/LanguageProvider";
 import type { Session } from "next-auth";
+import { cookies } from "next/headers";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -32,7 +33,12 @@ export default async function RootLayout({
 }>) {
     let session: Session | null = null;
     try {
-        if (process.env.E2E_AUTH_BYPASS === "true") {
+        const e2eAuthCookie =
+            process.env.E2E_AUTH_BYPASS === "true"
+                ? (await cookies()).get("__tomverse_e2e_auth")?.value
+                : null;
+
+        if (process.env.E2E_AUTH_BYPASS === "true" && e2eAuthCookie === "1") {
             session = {
                 user: {
                     id: "qa-user",
