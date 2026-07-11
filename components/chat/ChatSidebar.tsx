@@ -323,7 +323,10 @@ export function ChatSidebar({
                                 </button>
 
                                 {isMenuOpen && (
-                                    <div className="absolute right-0 top-6 z-50 w-56 rounded-lg border border-zinc-800 bg-zinc-900 p-1.5 shadow-xl flex flex-col text-xs text-zinc-300 animate-fadeIn">
+                                    <div
+                                        data-testid="conversation-menu-panel"
+                                        className="absolute right-0 top-6 z-50 w-56 rounded-lg border border-zinc-800 bg-zinc-900 p-1.5 shadow-xl flex flex-col text-xs text-zinc-300 animate-fadeIn"
+                                    >
                                         <button
                                             type="button"
                                             onClick={(e) => {

@@ -35,6 +35,7 @@ export default defineConfig({
     env: {
       ALLOWED_REQUEST_HOSTS: allowedRequestHosts.join(","),
       DISABLE_CSP_UPGRADE_INSECURE_REQUESTS: "true",
+      E2E_AUTH_BYPASS: "true",
       NODE_OPTIONS: nodeOptions,
       REQUIRE_CLOUDFLARE_ORIGIN_SECRET: "false",
     },

@@ -17,15 +17,11 @@ const json = (body: JsonValue, status = 200) => ({
 });
 
 export async function prepareGuestPage(page: Page, language: QaLanguage = "ko") {
-  await page.route("**/api/auth/session", (route) =>
+  await page.route("**/api/auth/session**", (route) =>
     route.fulfill(json({ user: null, expires: null }))
   );
 
   await page.addInitScript((lang) => {
-    if (sessionStorage.getItem("__tomverse_qa_guest_ready") === "true") {
-      return;
-    }
-
     const callbacks = new Map<string, (token: string) => void>();
     window.turnstile = {
       render: (_container, options) => {
@@ -46,6 +42,11 @@ export async function prepareGuestPage(page: Page, language: QaLanguage = "ko") 
         callbacks.delete(widgetId);
       },
     };
+
+    if (sessionStorage.getItem("__tomverse_qa_guest_ready") === "true") {
+      return;
+    }
+
     localStorage.clear();
     localStorage.setItem("tomverse_language", lang);
     localStorage.setItem("guest_count", "0");
@@ -70,18 +71,33 @@ export async function mockChatStream(page: Page, responseText: string) {
   });
 }
 
-export async function mockAuthenticatedApi(page: Page) {
-  const conversation = {
-    id: "qa-conversation",
+export type AuthenticatedQaState = {
+  deleted: boolean;
+  locked: boolean;
+  shared: boolean;
+  title: string;
+};
+
+export async function mockAuthenticatedApi(page: Page): Promise<AuthenticatedQaState> {
+  const state: AuthenticatedQaState = {
+    deleted: false,
+    locked: false,
+    shared: false,
     title: "QA conversation",
-    selectedModels: ["gpt-5-4-mini"],
-    disabledPanels: [],
-    isLocked: false,
-    shareEnabled: false,
-    shareExpiresAt: null,
   };
 
-  await page.route("**/api/auth/session", (route) =>
+  const conversation = () => ({
+    id: "qa-conversation",
+    title: state.title,
+    selectedModels: ["gpt-5-4-mini"],
+    disabledPanels: [],
+    isLocked: state.locked,
+    shareEnabled: state.shared,
+    shareExpiresAt: state.shared ? "2099-01-01T00:00:00.000Z" : null,
+  });
+
+  await page.unroute("**/api/auth/session**");
+  await page.route("**/api/auth/session**", (route) =>
     route.fulfill(
       json({
         user: {
@@ -103,22 +119,80 @@ export async function mockAuthenticatedApi(page: Page) {
 
   await page.route("**/api/conversations", async (route) => {
     if (route.request().method() === "GET") {
-      await route.fulfill(json([conversation]));
+      await route.fulfill(json(state.deleted ? [] : [conversation()]));
       return;
     }
 
-    await route.fulfill(json(conversation, 201));
+    state.deleted = false;
+    state.locked = false;
+    state.shared = false;
+    state.title = "New QA conversation";
+    await route.fulfill(json(conversation(), 201));
   });
 
-  await page.route("**/api/conversations/qa-conversation**", async (route) => {
-    const url = new URL(route.request().url());
-    if (url.pathname.endsWith("/messages")) {
-      await route.fulfill(json({}, route.request().method() === "POST" ? 201 : 200));
+  await page.route("**/api/conversations/qa-conversation/messages**", async (route) => {
+    await route.fulfill(json({}, route.request().method() === "POST" ? 201 : 200));
+  });
+
+  await page.route("**/api/conversations/qa-conversation/verify", async (route) => {
+    await route.fulfill(json({ success: true }));
+  });
+
+  await page.route("**/api/conversations/qa-conversation/share", async (route) => {
+    if (route.request().method() === "POST") {
+      state.shared = true;
+      await route.fulfill(
+        json({
+          url: "https://tomverse.app/share/qa-share-token-1234567890",
+          expiresAt: "2099-01-01T00:00:00.000Z",
+        })
+      );
       return;
     }
 
-    await route.fulfill(json({ ...conversation, messages: [] }));
+    if (route.request().method() === "DELETE") {
+      state.shared = false;
+      await route.fulfill({ status: 204, body: "" });
+      return;
+    }
+
+    await route.fulfill(json({ ...conversation(), url: null }));
   });
+
+  await page.route(/.*\/api\/conversations\/qa-conversation(\?.*)?$/, async (route) => {
+    const method = route.request().method();
+
+    if (method === "PATCH") {
+      const body = route.request().postDataJSON() as {
+        password?: string | null;
+        title?: string;
+        unlock?: boolean;
+      };
+
+      if (typeof body.password === "string") {
+        state.locked = true;
+      }
+      if (body.unlock === true) {
+        state.locked = false;
+      }
+      if (typeof body.title === "string") {
+        state.title = body.title;
+      }
+
+      await route.fulfill(json(conversation()));
+      return;
+    }
+
+    if (method === "DELETE") {
+      state.deleted = true;
+      await route.fulfill({ status: 204, body: "" });
+      return;
+    }
+
+    await route.fulfill(json({ ...conversation(), messages: [], nextCursor: null }));
+  });
+
+  return state;
 }
 
 export async function mockAttachmentUpload(page: Page) {

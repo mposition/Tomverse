@@ -8,6 +8,7 @@ import SessionProviderWrapper from "@/components/auth/SessionProviderWrapper";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { LanguageProvider } from "@/components/LanguageProvider";
+import type { Session } from "next-auth";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -29,9 +30,21 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-    let session = null;
+    let session: Session | null = null;
     try {
-        session = await getServerSession(authOptions);
+        if (process.env.E2E_AUTH_BYPASS === "true") {
+            session = {
+                user: {
+                    id: "qa-user",
+                    name: "QA User",
+                    email: "qa@tomverse.app",
+                    image: null,
+                },
+                expires: "2099-01-01T00:00:00.000Z",
+            } as Session;
+        } else {
+            session = await getServerSession(authOptions);
+        }
     } catch (e) {
         console.error("Layout session fetch error:", e);
     }
