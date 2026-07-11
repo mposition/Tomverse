@@ -23,6 +23,7 @@ import { AVAILABLE_MODELS, MAX_SELECTED_MODELS, type ChatAttachment } from "@/co
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { useLanguage } from "@/components/LanguageProvider";
 import { dispatchAppToast } from "@/lib/appToast";
+import { getModelBestFor, getModelExperienceStatus, getModelExperienceTags } from "@/lib/modelExperience";
 
 const MAX_ATTACHMENTS = 5;
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
@@ -1210,6 +1211,8 @@ export function ChatInput({
                         {group.models.map((model) => {
                           const isSelected = selectedModels.includes(model.id);
                           const isFavorite = favoriteModelIds.includes(model.id);
+                          const modelTags = getModelExperienceTags(model);
+                          const modelStatus = getModelExperienceStatus(model);
                           const isTierLocked =
                             isGuestMode && model.tier !== "Free";
                           const unavailable = !model.enabled || isTierLocked;
@@ -1241,10 +1244,33 @@ export function ChatInput({
                               >
                                 <ModelLogo model={model} size="md" />
                                 <span className="min-w-0 flex-1 text-left">
-                                  <span className="block truncate text-zinc-800 dark:text-zinc-100">{model.name}</span>
+                                  <span className="flex min-w-0 items-center gap-1.5">
+                                    <span className="truncate text-zinc-800 dark:text-zinc-100">{model.name}</span>
+                                    <span
+                                      className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                                        modelStatus === "available"
+                                          ? "bg-emerald-500"
+                                          : modelStatus === "limited"
+                                            ? "bg-amber-500"
+                                            : "bg-zinc-400"
+                                      }`}
+                                      title={modelStatus}
+                                    />
+                                  </span>
                                   <span className="block truncate text-[10px] font-medium text-zinc-400">
                                     {model.provider} - {unavailable ? t("chat.unavailableModel") : t("chat.availableModel")}
                                   </span>
+                                  <span className="mt-1 flex max-w-full flex-wrap gap-1">
+                                    {modelTags.map((tag) => (
+                                      <span
+                                        key={tag}
+                                        className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[9px] font-bold text-zinc-500 dark:bg-zinc-800 dark:text-zinc-300"
+                                      >
+                                        {tag}
+                                      </span>
+                                    ))}
+                                  </span>
+                                  <span className="sr-only">{getModelBestFor(model)}</span>
                                 </span>
                                 <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${model.tier === "Free" ? "bg-emerald-500/10 text-emerald-500" : model.tier === "Pro" ? "bg-blue-500/10 text-blue-500" : "bg-purple-500/10 text-purple-500"}`}>{model.tier}</span>
                                 <span className={`h-4 w-8 rounded-full p-0.5 transition-colors ${isSelected ? "bg-blue-500" : "bg-zinc-300 dark:bg-zinc-700"}`}>

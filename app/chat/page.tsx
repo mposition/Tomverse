@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { AlertCircle, CheckCircle2, Info } from "lucide-react";
 import { DesktopChatShell } from "@/components/chat/DesktopChatShell";
+import { GoLiveOnboarding } from "@/components/chat/GoLiveOnboarding";
 import { MobileChatShell } from "@/components/chat/MobileChatShell";
 import { Conversation, AVAILABLE_MODELS, MAX_SELECTED_MODELS, type ChatAttachment } from "@/components/chat/types";
 import { useSession } from "next-auth/react";
@@ -1029,6 +1030,7 @@ export default function Home() {
           onRemoveModel={handleRemoveModel}
         />
       )}
+    {isViewportReady && <GoLiveOnboarding />}
     {toast && (
       <div
         key={toast.id}

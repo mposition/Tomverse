@@ -65,6 +65,11 @@ export const de = {
         downloadAllTxt: "Alle Chats als .txt herunterladen",
         searchPlaceholder: "Chats suchen",
         noConversations: "Keine Chats vorhanden.",
+        currentPlan: "Aktueller Tarif",
+        guestPlanDescription: "Der Gastmodus kann ausgewählte kostenlose Modelle mit einem täglichen Browser-Limit nutzen.",
+        freePlanDescription: "Free-Arbeitsbereich mit ausgewählten kostenlosen Modellen. Upgrade-Optionen folgen bald.",
+        todayUsage: "Heute",
+        remaining: "übrig",
     },
     share: {
         ...en.share,

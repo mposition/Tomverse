@@ -65,6 +65,11 @@ export const es = {
         downloadAllTxt: "Descargar todos los chats como .txt",
         searchPlaceholder: "Buscar chats",
         noConversations: "No hay chats para mostrar.",
+        currentPlan: "Plan actual",
+        guestPlanDescription: "El modo invitado puede usar modelos gratuitos seleccionados con un límite diario en el navegador.",
+        freePlanDescription: "Espacio Free con modelos gratuitos seleccionados. Las opciones de actualización llegarán pronto.",
+        todayUsage: "Hoy",
+        remaining: "restantes",
     },
     share: {
         ...en.share,

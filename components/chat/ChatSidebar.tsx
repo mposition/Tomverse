@@ -475,6 +475,31 @@ export function ChatSidebar({
             </div>
 
             <div className="p-3 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-100/40 dark:bg-zinc-900/50 flex flex-col gap-2 shrink-0">
+                <div className="rounded-2xl border border-zinc-200 bg-white p-3 text-xs shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+                    <div className="flex items-center justify-between gap-2">
+                        <span className="font-bold text-zinc-500 dark:text-zinc-400">{t("sidebar.currentPlan")}</span>
+                        <span className={`rounded-full px-2 py-0.5 font-black ${isGuestMode ? "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300" : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"}`}>
+                            {isGuestMode ? "Guest" : "Free"}
+                        </span>
+                    </div>
+                    <p className="mt-2 leading-5 text-zinc-500 dark:text-zinc-400">
+                        {isGuestMode ? t("sidebar.guestPlanDescription") : t("sidebar.freePlanDescription")}
+                    </p>
+                    {isGuestMode && guestMessageCount !== undefined && maxGuestMessages !== undefined && (
+                        <div className="mt-3">
+                            <div className="mb-1 flex items-center justify-between font-semibold text-zinc-500 dark:text-zinc-400">
+                                <span>{t("sidebar.todayUsage")}</span>
+                                <span>{Math.max(maxGuestMessages - guestMessageCount, 0)} {t("sidebar.remaining")}</span>
+                            </div>
+                            <div className="h-1.5 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+                                <div
+                                    className={`h-full transition-all duration-500 ${guestMessageCount >= maxGuestMessages ? "bg-red-500" : "bg-blue-500"}`}
+                                    style={{ width: `${Math.min((guestMessageCount / maxGuestMessages) * 100, 100)}%` }}
+                                />
+                            </div>
+                        </div>
+                    )}
+                </div>
                 {isGuestMode && guestMessageCount !== undefined && maxGuestMessages !== undefined && (
                     <div className="px-1">
                         <div className="flex justify-between items-center mb-1.5 text-xs text-zinc-500 dark:text-zinc-400">

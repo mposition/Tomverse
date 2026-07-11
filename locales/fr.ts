@@ -65,6 +65,11 @@ export const fr = {
         downloadAllTxt: "Télécharger tous les chats en .txt",
         searchPlaceholder: "Rechercher des chats",
         noConversations: "Aucun chat à afficher.",
+        currentPlan: "Offre actuelle",
+        guestPlanDescription: "Le mode invité permet d'utiliser certains modèles gratuits avec une limite quotidienne dans le navigateur.",
+        freePlanDescription: "Espace Free avec certains modèles gratuits. Les options de mise à niveau arrivent bientôt.",
+        todayUsage: "Aujourd'hui",
+        remaining: "restants",
     },
     share: {
         ...en.share,

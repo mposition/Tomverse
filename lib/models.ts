@@ -53,6 +53,7 @@ export const AVAILABLE_MODELS = [
     { id: "deepseek-v4-flash", name: "DeepSeek-V4 Flash", apiModel: "deepseek-v4-flash", provider: "deepseek", icon: "DS", tier: "Free", enabled: true, status: "enabled" },
     { id: "deepseek-v4-pro", name: "DeepSeek-V4 Pro", apiModel: "deepseek-v4-pro", provider: "deepseek", icon: "DS", tier: "Pro", enabled: true, status: "enabled" },
     { id: "deepseek-r1", name: "DeepSeek R1 Reasoning", apiModel: "deepseek-reasoner", provider: "deepseek", icon: "DS", tier: "Pro", enabled: true, status: "enabled", reasoning: "high" },
+    { id: "mistral-small-4", name: "Mistral Small 4", apiModel: "mistral-small-latest", provider: "mistral", icon: "M", tier: "Free", enabled: true, status: "enabled" },
     { id: "mistral-large-3", name: "Mistral Large 3", apiModel: "mistral-large-latest", provider: "mistral", icon: "M", tier: "Max", enabled: true, status: "enabled" },
     { id: "mistral-medium-3-1", name: "Mistral Medium 3.1", apiModel: "mistral-medium-latest", provider: "mistral", icon: "M", tier: "Pro", enabled: true, status: "enabled" },
     { id: "codestral", name: "Codestral", apiModel: "codestral-latest", provider: "mistral", icon: "M", tier: "Pro", enabled: true, status: "enabled" },

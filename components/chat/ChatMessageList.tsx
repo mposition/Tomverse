@@ -10,6 +10,7 @@ import {
   ArrowDown,
   Bot,
   Braces,
+  Clipboard,
   File as FileIcon,
   FileText,
   Image as ImageIcon,
@@ -93,6 +94,14 @@ export function ChatMessageList({
   const [isNearBottom, setIsNearBottom] = useState(true);
   const showScrollButton = !isNearBottom;
     const { t } = useLanguage();
+
+  const copyErrorDetails = async (content: string) => {
+    try {
+      await navigator.clipboard.writeText(content);
+    } catch (error) {
+      console.error("Failed to copy error details:", error);
+    }
+  };
 
   const scrollToBottom = (behavior: ScrollBehavior = "smooth") => {
     const container = containerRef.current;
@@ -293,16 +302,29 @@ export function ChatMessageList({
                   ) : (
                     <p className="whitespace-pre-wrap">{msg.content}</p>
                   )}
-                  {!isUser && msg.status === "error" && onRetryLast && (
-                    <div className="mt-3 border-t border-red-200 pt-3 dark:border-red-800">
+                  {!isUser && msg.status === "error" && (
+                    <div className="mt-3 flex flex-wrap gap-2 border-t border-red-200 pt-3 dark:border-red-800">
+                      {onRetryLast && (
+                        <button
+                          type="button"
+                          onClick={onRetryLast}
+                          className="inline-flex items-center gap-2 rounded-full bg-red-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition-colors hover:bg-red-500"
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" />
+                          {t("chat.retry")}
+                        </button>
+                      )}
                       <button
                         type="button"
-                        onClick={onRetryLast}
-                        className="inline-flex items-center gap-2 rounded-full bg-red-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition-colors hover:bg-red-500"
+                        onClick={() => void copyErrorDetails(msg.content)}
+                        className="inline-flex items-center gap-2 rounded-full border border-red-200 bg-white px-3 py-1.5 text-xs font-bold text-red-700 transition-colors hover:bg-red-50 dark:border-red-800 dark:bg-red-950 dark:text-red-100 dark:hover:bg-red-900"
                       >
-                        <RotateCcw className="h-3.5 w-3.5" />
-                        Retry
+                        <Clipboard className="h-3.5 w-3.5" />
+                        {t("chat.copyErrorDetails")}
                       </button>
+                      <span className="flex items-center text-xs font-semibold text-red-600/80 dark:text-red-200/80">
+                        {t("chat.tryAnotherModelHint")}
+                      </span>
                     </div>
                   )}
                 </div>

@@ -3,6 +3,7 @@
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { ENABLED_MODELS } from "@/lib/models";
 import { getModelBrand } from "@/lib/modelBranding";
+import { getModelBestFor, getModelExperienceStatus, getModelExperienceTags } from "@/lib/modelExperience";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
 
 const copy = {
@@ -89,6 +90,8 @@ export function ModelsPageContent() {
         <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {ENABLED_MODELS.map((model) => {
             const brand = getModelBrand(model.provider);
+            const tags = getModelExperienceTags(model);
+            const status = getModelExperienceStatus(model);
 
             return (
             <article
@@ -109,6 +112,16 @@ export function ModelsPageContent() {
                   <p className="text-xs font-semibold text-zinc-500">{model.id}</p>
                 </div>
               </div>
+              <p className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+                {getModelBestFor(model)}
+              </p>
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {tags.map((tag) => (
+                  <span key={tag} className="rounded-full bg-white px-2 py-1 text-[10px] font-black text-zinc-500 ring-1 ring-zinc-200 dark:bg-zinc-950 dark:ring-zinc-800">
+                    {tag}
+                  </span>
+                ))}
+              </div>
               <div className="mt-5 grid grid-cols-3 gap-3">
                 <div>
                   <p className="text-[10px] font-bold uppercase text-zinc-500">{content.provider}</p>
@@ -120,7 +133,7 @@ export function ModelsPageContent() {
                 </div>
                 <div>
                   <p className="text-[10px] font-bold uppercase text-zinc-500">{content.status}</p>
-                  <p className="mt-1 text-sm font-black text-emerald-600 dark:text-emerald-400">{content.enabled}</p>
+                  <p className={`mt-1 text-sm font-black ${status === "available" ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}`}>{content.enabled}</p>
                 </div>
               </div>
             </article>
