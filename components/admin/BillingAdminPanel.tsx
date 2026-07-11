@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CreditCard, Loader2, Save, TicketPercent } from "lucide-react";
+import { CreditCard, Loader2, Plus, Save, TicketPercent, Trash2 } from "lucide-react";
 import type {
   BillingPlanConfig,
   BillingPromotionConfig,
@@ -22,6 +22,32 @@ const toCents = (value: string) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed * 100) : 0;
 };
+
+const toDateInputValue = (value: string | null) => {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toISOString().slice(0, 10);
+};
+
+const fromDateInputValue = (value: string) =>
+  value ? new Date(`${value}T00:00:00.000Z`).toISOString() : null;
+
+const newPromotion = (): EditablePromotion => ({
+  id: `promo_${Date.now()}`,
+  code: "NEWCODE",
+  discountPercent: 10,
+  discountAmountCents: null,
+  maxRedemptions: null,
+  redeemedCount: 0,
+  durationMonths: 1,
+  appliesToPlanIds: ["pro", "max"],
+  stripeCouponId: null,
+  stripePromotionCodeId: null,
+  startsAt: null,
+  endsAt: null,
+  isActive: true,
+});
 
 function PlanEditor({
   plan,
@@ -148,26 +174,47 @@ function PlanEditor({
 function PromotionEditor({
   promotion,
   onChange,
+  onDelete,
 }: {
   promotion: EditablePromotion;
   onChange: (promotion: EditablePromotion) => void;
+  onDelete: () => void;
 }) {
+  const amountDollars =
+    promotion.discountAmountCents === null ||
+    promotion.discountAmountCents === undefined
+      ? ""
+      : dollars(promotion.discountAmountCents);
+
   return (
     <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
       <div className="flex items-center justify-between gap-3">
         <div>
           <h3 className="text-lg font-semibold text-white">{promotion.code}</h3>
-          <p className="text-xs text-zinc-500">{promotion.discountPercent}% for {promotion.durationMonths} months</p>
+          <p className="text-xs text-zinc-500">
+            Redeemed {promotion.redeemedCount || 0}
+            {promotion.maxRedemptions ? ` / ${promotion.maxRedemptions}` : ""}
+          </p>
         </div>
-        <label className="flex items-center gap-2 text-xs font-semibold text-zinc-300">
-          Active
-          <input
-            type="checkbox"
-            checked={promotion.isActive}
-            onChange={(event) => onChange({ ...promotion, isActive: event.target.checked })}
-            className="h-4 w-4 accent-blue-500"
-          />
-        </label>
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-2 text-xs font-semibold text-zinc-300">
+            Active
+            <input
+              type="checkbox"
+              checked={promotion.isActive}
+              onChange={(event) => onChange({ ...promotion, isActive: event.target.checked })}
+              className="h-4 w-4 accent-blue-500"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={onDelete}
+            className="rounded-lg border border-red-500/30 p-2 text-red-300 hover:bg-red-500/10"
+            aria-label="Delete promotion"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </div>
       </div>
       <div className="mt-4 grid gap-3 sm:grid-cols-3">
         <label className="text-xs font-semibold text-zinc-400">
@@ -182,13 +229,34 @@ function PromotionEditor({
           Discount %
           <input
             type="number"
-            min="1"
+            min="0"
             max="100"
             value={promotion.discountPercent}
-            onChange={(event) => onChange({ ...promotion, discountPercent: Number(event.target.value) || 1 })}
+            onChange={(event) => onChange({ ...promotion, discountPercent: Number(event.target.value) || 0 })}
             className="mt-1 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
           />
         </label>
+        <label className="text-xs font-semibold text-zinc-400">
+          Fixed discount USD
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={amountDollars}
+            onChange={(event) =>
+              onChange({
+                ...promotion,
+                discountAmountCents:
+                  event.target.value.trim().length > 0
+                    ? toCents(event.target.value)
+                    : null,
+              })
+            }
+            className="mt-1 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
+          />
+        </label>
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-4">
         <label className="text-xs font-semibold text-zinc-400">
           Duration months
           <input
@@ -200,6 +268,66 @@ function PromotionEditor({
             className="mt-1 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
           />
         </label>
+        <label className="text-xs font-semibold text-zinc-400">
+          Max redeems
+          <input
+            type="number"
+            min="1"
+            value={promotion.maxRedemptions || ""}
+            onChange={(event) =>
+              onChange({
+                ...promotion,
+                maxRedemptions:
+                  event.target.value.trim().length > 0
+                    ? Number(event.target.value) || 1
+                    : null,
+              })
+            }
+            className="mt-1 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
+          />
+        </label>
+        <label className="text-xs font-semibold text-zinc-400">
+          Starts
+          <input
+            type="date"
+            value={toDateInputValue(promotion.startsAt)}
+            onChange={(event) =>
+              onChange({ ...promotion, startsAt: fromDateInputValue(event.target.value) })
+            }
+            className="mt-1 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
+          />
+        </label>
+        <label className="text-xs font-semibold text-zinc-400">
+          Ends
+          <input
+            type="date"
+            value={toDateInputValue(promotion.endsAt)}
+            onChange={(event) =>
+              onChange({ ...promotion, endsAt: fromDateInputValue(event.target.value) })
+            }
+            className="mt-1 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
+          />
+        </label>
+      </div>
+      <div className="mt-4 flex flex-wrap gap-3 text-xs font-semibold text-zinc-300">
+        {(["pro", "max"] as const).map((planId) => (
+          <label key={planId} className="flex items-center gap-2 rounded-xl border border-zinc-800 px-3 py-2 uppercase">
+            <input
+              type="checkbox"
+              checked={promotion.appliesToPlanIds.includes(planId)}
+              onChange={(event) =>
+                onChange({
+                  ...promotion,
+                  appliesToPlanIds: event.target.checked
+                    ? Array.from(new Set([...promotion.appliesToPlanIds, planId]))
+                    : promotion.appliesToPlanIds.filter((item) => item !== planId),
+                })
+              }
+              className="h-4 w-4 accent-blue-500"
+            />
+            {planId}
+          </label>
+        ))}
       </div>
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         <label className="text-xs font-semibold text-zinc-400">
@@ -293,15 +421,30 @@ export function BillingAdminPanel({ plans, promotions }: Props) {
       </div>
 
       <div className="mt-5">
-        <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-zinc-300">
-          <TicketPercent className="h-4 w-4 text-blue-300" />
-          Promotion codes
+        <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2 text-sm font-semibold text-zinc-300">
+            <TicketPercent className="h-4 w-4 text-blue-300" />
+            Promotion codes
+          </div>
+          <button
+            type="button"
+            onClick={() => setDraftPromotions((current) => [...current, newPromotion()])}
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-900"
+          >
+            <Plus className="h-4 w-4" />
+            Add code
+          </button>
         </div>
         <div className="grid gap-4 lg:grid-cols-2">
           {draftPromotions.map((promotion, index) => (
             <PromotionEditor
               key={promotion.id}
               promotion={promotion}
+              onDelete={() =>
+                setDraftPromotions((current) =>
+                  current.filter((_, itemIndex) => itemIndex !== index)
+                )
+              }
               onChange={(nextPromotion) =>
                 setDraftPromotions((current) =>
                   current.map((item, itemIndex) =>

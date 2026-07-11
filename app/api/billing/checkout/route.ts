@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
+import type Stripe from "stripe";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import {
@@ -27,6 +28,104 @@ const checkoutSchema = z
   .strict();
 
 const activeSubscriptionStatuses = new Set(["active", "trialing", "past_due"]);
+
+type CheckoutPromotion = Awaited<ReturnType<typeof getBillingPromotions>>[number];
+
+const isPromotionCurrentlyRedeemable = (
+  promotion: CheckoutPromotion,
+  planId: BillingPlanId,
+  now = new Date()
+) => {
+  if (!promotion.isActive) return false;
+  if (!promotion.appliesToPlanIds.includes(planId)) return false;
+  if (promotion.startsAt && new Date(promotion.startsAt) > now) return false;
+  if (promotion.endsAt && new Date(promotion.endsAt) < now) return false;
+  if (
+    promotion.maxRedemptions &&
+    promotion.redeemedCount >= promotion.maxRedemptions
+  ) {
+    return false;
+  }
+  return promotion.discountPercent > 0 || Boolean(promotion.discountAmountCents);
+};
+
+async function ensureStripeDiscount(
+  promotion: CheckoutPromotion,
+  planId: BillingPlanId
+): Promise<Stripe.Checkout.SessionCreateParams.Discount> {
+  if (promotion.stripePromotionCodeId) {
+    return { promotion_code: promotion.stripePromotionCodeId };
+  }
+  if (promotion.stripeCouponId) {
+    return { coupon: promotion.stripeCouponId };
+  }
+
+  const stripe = getStripe();
+  const coupon = await stripe.coupons.create({
+    name: `${promotion.code} ${planId.toUpperCase()}`,
+    duration: "repeating",
+    duration_in_months: promotion.durationMonths,
+    percent_off:
+      promotion.discountPercent > 0 ? promotion.discountPercent : undefined,
+    amount_off:
+      promotion.discountPercent > 0
+        ? undefined
+        : promotion.discountAmountCents || undefined,
+    currency:
+      promotion.discountPercent > 0 ? undefined : "usd",
+    metadata: {
+      tomversePromotionId: promotion.id,
+      tomverseCode: promotion.code,
+      planId,
+    },
+  });
+  const promotionCode = await stripe.promotionCodes.create({
+    promotion: { type: "coupon", coupon: coupon.id },
+    code: promotion.code,
+    active: promotion.isActive,
+    max_redemptions: promotion.maxRedemptions || undefined,
+    expires_at: promotion.endsAt
+      ? Math.floor(new Date(promotion.endsAt).getTime() / 1000)
+      : undefined,
+    metadata: {
+      tomversePromotionId: promotion.id,
+      planId,
+    },
+  });
+
+  await prisma.billingPromotion.update({
+    where: { id: promotion.id },
+    data: {
+      stripeCouponId: coupon.id,
+      stripePromotionCodeId: promotionCode.id,
+    },
+  });
+
+  return { promotion_code: promotionCode.id };
+}
+
+async function createCheckoutSessionWithPaymentFallback(
+  params: Stripe.Checkout.SessionCreateParams
+) {
+  const stripe = getStripe();
+  const paypalEnabled = process.env.STRIPE_ENABLE_PAYPAL !== "false";
+  const preferredPaymentMethods: Stripe.Checkout.SessionCreateParams.PaymentMethodType[] =
+    paypalEnabled ? ["card", "paypal"] : ["card"];
+
+  try {
+    return await stripe.checkout.sessions.create({
+      ...params,
+      payment_method_types: preferredPaymentMethods,
+    });
+  } catch (error) {
+    if (!paypalEnabled) throw error;
+    console.warn("Stripe PayPal checkout failed; retrying with card only.");
+    return stripe.checkout.sessions.create({
+      ...params,
+      payment_method_types: ["card"],
+    });
+  }
+}
 
 export async function POST(req: Request) {
   try {
@@ -97,9 +196,8 @@ export async function POST(req: Request) {
     const promotion = promoCode
       ? promotions.find(
           (item) =>
-            item.isActive &&
             item.code === promoCode &&
-            item.appliesToPlanIds.includes(planId as BillingPlanId)
+            isPromotionCurrentlyRedeemable(item, planId as BillingPlanId)
         )
       : null;
     if (promoCode && !promotion) {
@@ -108,15 +206,12 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
-    if (promotion && !promotion.stripePromotionCodeId && !promotion.stripeCouponId) {
-      return NextResponse.json(
-        { error: "Promotion code is not configured in Stripe yet." },
-        { status: 503 }
-      );
-    }
+    const discount = promotion
+      ? await ensureStripeDiscount(promotion, planId as BillingPlanId)
+      : null;
 
     const origin = getPublicAppOrigin(req);
-    const checkoutSession = await stripe.checkout.sessions.create({
+    const checkoutSession = await createCheckoutSessionWithPaymentFallback({
       mode: "subscription",
       customer: stripeCustomerId,
       line_items: [{ price: plan.stripePriceId, quantity: 1 }],
@@ -124,24 +219,21 @@ export async function POST(req: Request) {
       cancel_url: `${origin}/pricing?billing=cancelled`,
       client_reference_id: user.id,
       allow_promotion_codes: !promotion,
-      discounts: promotion
-        ? [
-            promotion.stripePromotionCodeId
-              ? { promotion_code: promotion.stripePromotionCodeId }
-              : { coupon: promotion.stripeCouponId as string },
-          ]
-        : undefined,
+      discounts: discount ? [discount] : undefined,
       subscription_data: {
         metadata: {
           userId: user.id,
           planId,
           tier: tierForPlanId(planId),
+          promoCode: promotion?.code || "",
+          promotionId: promotion?.id || "",
         },
       },
       metadata: {
         userId: user.id,
         planId,
         promoCode: promotion?.code || "",
+        promotionId: promotion?.id || "",
       },
     });
 

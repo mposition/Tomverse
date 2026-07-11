@@ -27,6 +27,9 @@ export type BillingPromotionConfig = {
   id: string;
   code: string;
   discountPercent: number;
+  discountAmountCents: number | null;
+  maxRedemptions: number | null;
+  redeemedCount: number;
   durationMonths: number;
   appliesToPlanIds: BillingPlanId[];
   stripeCouponId: string | null;
@@ -94,6 +97,9 @@ const DEFAULT_PROMOTION: BillingPromotionConfig = {
   id: "promo_tomverse50",
   code: "TOMVERSE50",
   discountPercent: 50,
+  discountAmountCents: null,
+  maxRedemptions: null,
+  redeemedCount: 0,
   durationMonths: 3,
   appliesToPlanIds: ["pro", "max"],
   stripeCouponId: null,
@@ -171,6 +177,9 @@ export async function getBillingPromotions(): Promise<BillingPromotionConfig[]> 
     id: row.id,
     code: row.code,
     discountPercent: row.discountPercent,
+    discountAmountCents: row.discountAmountCents,
+    maxRedemptions: row.maxRedemptions,
+    redeemedCount: row.redeemedCount,
     durationMonths: row.durationMonths,
     appliesToPlanIds: parsePlanIds(row.appliesToPlanIds),
     stripeCouponId: row.stripeCouponId,
@@ -181,6 +190,22 @@ export async function getBillingPromotions(): Promise<BillingPromotionConfig[]> 
   }));
 }
 
+export function isBillingPromotionRedeemable(
+  promotion: BillingPromotionConfig,
+  now = new Date()
+) {
+  if (!promotion.isActive) return false;
+  if (promotion.startsAt && new Date(promotion.startsAt) > now) return false;
+  if (promotion.endsAt && new Date(promotion.endsAt) < now) return false;
+  if (
+    promotion.maxRedemptions &&
+    promotion.redeemedCount >= promotion.maxRedemptions
+  ) {
+    return false;
+  }
+  return promotion.discountPercent > 0 || Boolean(promotion.discountAmountCents);
+}
+
 export async function getPublicBillingConfig() {
   const [plans, promotions] = await Promise.all([
     getBillingPlans(),
@@ -188,6 +213,8 @@ export async function getPublicBillingConfig() {
   ]);
   return {
     plans: plans.filter((plan) => plan.isActive),
-    promotions: promotions.filter((promotion) => promotion.isActive),
+    promotions: promotions.filter((promotion) =>
+      isBillingPromotionRedeemable(promotion)
+    ),
   };
 }

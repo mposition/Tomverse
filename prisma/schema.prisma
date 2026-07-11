@@ -189,7 +189,10 @@ model BillingPlan {
 model BillingPromotion {
   id                    String   @id @default(cuid())
   code                  String   @unique
-  discountPercent       Int
+  discountPercent       Int      @default(0)
+  discountAmountCents   Int?
+  maxRedemptions        Int?
+  redeemedCount         Int      @default(0)
   durationMonths        Int
   appliesToPlanIds      String   @default("[]")
   stripeCouponId        String?

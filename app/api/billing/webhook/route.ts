@@ -47,6 +47,15 @@ async function syncSubscription(subscription: Stripe.Subscription) {
 
 async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
   if (!session.subscription) return;
+  const promotionId = session.metadata?.promotionId || null;
+  if (promotionId) {
+    await prisma.billingPromotion
+      .update({
+        where: { id: promotionId },
+        data: { redeemedCount: { increment: 1 } },
+      })
+      .catch(() => undefined);
+  }
   const subscriptionId =
     typeof session.subscription === "string"
       ? session.subscription

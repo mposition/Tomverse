@@ -41,13 +41,24 @@ const promotionSchema = z
   .object({
     id: z.string().trim().min(1).max(120).optional(),
     code: z.string().trim().toUpperCase().min(2).max(32),
-    discountPercent: z.number().int().min(1).max(100),
+    discountPercent: z.number().int().min(0).max(100),
+    discountAmountCents: z.number().int().min(0).max(1_000_000).nullable().optional(),
+    maxRedemptions: z.number().int().min(1).max(1_000_000).nullable().optional(),
+    redeemedCount: z.number().int().min(0).max(1_000_000).optional(),
     durationMonths: z.number().int().min(1).max(36),
     appliesToPlanIds: z.array(z.enum(["pro", "max"])).min(1).max(2),
     stripeCouponId: optionalText,
     stripePromotionCodeId: optionalText,
+    startsAt: z.string().datetime().nullable().optional(),
+    endsAt: z.string().datetime().nullable().optional(),
     isActive: z.boolean(),
   })
+  .refine(
+    (promotion) =>
+      promotion.discountPercent > 0 ||
+      Boolean(promotion.discountAmountCents && promotion.discountAmountCents > 0),
+    { message: "Promotion must have a percent or amount discount." }
+  )
   .strict();
 
 const updateBillingSchema = z
@@ -133,29 +144,71 @@ export async function PATCH(req: Request) {
       });
     }
 
+    const savedPromotionIds: string[] = [];
     for (const promotion of body.promotions || []) {
       const id = promotion.id || `promo_${promotion.code.toLowerCase()}`;
+      savedPromotionIds.push(id);
+      const existingPromotion = await prisma.billingPromotion.findUnique({
+        where: { id },
+      });
+      const startsAt = promotion.startsAt ? new Date(promotion.startsAt) : null;
+      const endsAt = promotion.endsAt ? new Date(promotion.endsAt) : null;
+      const policyChanged =
+        existingPromotion &&
+        (existingPromotion.code !== promotion.code ||
+          existingPromotion.discountPercent !== promotion.discountPercent ||
+          existingPromotion.discountAmountCents !==
+            (promotion.discountAmountCents || null) ||
+          existingPromotion.maxRedemptions !==
+            (promotion.maxRedemptions || null) ||
+          existingPromotion.durationMonths !== promotion.durationMonths ||
+          existingPromotion.appliesToPlanIds !==
+            JSON.stringify(promotion.appliesToPlanIds) ||
+          existingPromotion.startsAt?.toISOString() !==
+            startsAt?.toISOString() ||
+          existingPromotion.endsAt?.toISOString() !== endsAt?.toISOString());
+      const stripeCouponId = policyChanged
+        ? null
+        : promotion.stripeCouponId;
+      const stripePromotionCodeId = policyChanged
+        ? null
+        : promotion.stripePromotionCodeId;
       await prisma.billingPromotion.upsert({
         where: { id },
         create: {
           id,
           code: promotion.code,
           discountPercent: promotion.discountPercent,
+          discountAmountCents: promotion.discountAmountCents || null,
+          maxRedemptions: promotion.maxRedemptions || null,
+          redeemedCount: promotion.redeemedCount || 0,
           durationMonths: promotion.durationMonths,
           appliesToPlanIds: JSON.stringify(promotion.appliesToPlanIds),
-          stripeCouponId: promotion.stripeCouponId,
-          stripePromotionCodeId: promotion.stripePromotionCodeId,
+          stripeCouponId,
+          stripePromotionCodeId,
+          startsAt,
+          endsAt,
           isActive: promotion.isActive,
         },
         update: {
           code: promotion.code,
           discountPercent: promotion.discountPercent,
+          discountAmountCents: promotion.discountAmountCents || null,
+          maxRedemptions: promotion.maxRedemptions || null,
           durationMonths: promotion.durationMonths,
           appliesToPlanIds: JSON.stringify(promotion.appliesToPlanIds),
-          stripeCouponId: promotion.stripeCouponId,
-          stripePromotionCodeId: promotion.stripePromotionCodeId,
+          stripeCouponId,
+          stripePromotionCodeId,
+          startsAt,
+          endsAt,
           isActive: promotion.isActive,
         },
+      });
+    }
+
+    if (body.promotions) {
+      await prisma.billingPromotion.deleteMany({
+        where: { id: { notIn: savedPromotionIds } },
       });
     }
 

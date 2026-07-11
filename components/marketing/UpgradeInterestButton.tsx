@@ -19,6 +19,9 @@ type BillingPlan = {
 type BillingPromotion = {
   code: string;
   discountPercent: number;
+  discountAmountCents?: number | null;
+  maxRedemptions?: number | null;
+  redeemedCount?: number;
   durationMonths: number;
   appliesToPlanIds: Array<"pro" | "max">;
 };
@@ -61,6 +64,23 @@ const formatUsdPrice = (planConfig: BillingPlan | undefined) => {
   }).format((planConfig.baseMonthlyPriceCents ?? planConfig.monthlyPriceCents) / 100);
 };
 
+const formatDiscount = (promotion: BillingPromotion | undefined) => {
+  if (!promotion) return null;
+  if (promotion.discountPercent > 0) {
+    return `${promotion.discountPercent}% off for ${promotion.durationMonths} months.`;
+  }
+  if (promotion.discountAmountCents && promotion.discountAmountCents > 0) {
+    const amount = new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+      maximumFractionDigits: 0,
+      minimumFractionDigits: 0,
+    }).format(promotion.discountAmountCents / 100);
+    return `${amount} off for ${promotion.durationMonths} months.`;
+  }
+  return null;
+};
+
 export function UpgradeInterestButton({
   plan,
   className,
@@ -83,6 +103,7 @@ export function UpgradeInterestButton({
   );
   const priceLabel = formatPrice(planConfig);
   const usdPriceLabel = formatUsdPrice(planConfig);
+  const discountLabel = formatDiscount(activePromo);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -106,14 +127,6 @@ export function UpgradeInterestButton({
   const submit = async () => {
     if (isSending) return;
     const normalizedCode = promoCode.trim().toUpperCase();
-    if (
-      normalizedCode &&
-      activePromo &&
-      normalizedCode !== activePromo.code.toUpperCase()
-    ) {
-      dispatchAppToast(t("billing.promoInvalid"), "error");
-      return;
-    }
     setIsSending(true);
     try {
       const response = await fetch("/api/billing/checkout", {
@@ -160,7 +173,7 @@ export function UpgradeInterestButton({
           aria-labelledby={`${inputId}-title`}
         >
           <form
-            className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-800 dark:bg-zinc-950"
+            className="w-full max-w-lg rounded-2xl border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-800 dark:bg-zinc-950"
             onSubmit={(event) => {
               event.preventDefault();
               submit();
@@ -188,8 +201,7 @@ export function UpgradeInterestButton({
                 ) : null}
                 {activePromo ? (
                   <p className="mt-2 text-xs font-bold text-blue-600 dark:text-blue-300">
-                    {activePromo.code}: {activePromo.discountPercent}% off for{" "}
-                    {activePromo.durationMonths} months.
+                    {activePromo.code}: {discountLabel}
                   </p>
                 ) : null}
               </div>
@@ -201,6 +213,24 @@ export function UpgradeInterestButton({
               >
                 x
               </button>
+            </div>
+            <div className="mt-5 grid gap-2 rounded-2xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
+              <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500 dark:text-zinc-400">
+                Payment methods
+              </p>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {["PayPal", "GPay", "Apple Pay", "Card"].map((method) => (
+                  <span
+                    key={method}
+                    className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-center text-xs font-black text-zinc-700 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
+                  >
+                    {method}
+                  </span>
+                ))}
+              </div>
+              <p className="text-xs font-semibold leading-5 text-zinc-500 dark:text-zinc-400">
+                Secure checkout is handled by Stripe. Wallets and PayPal appear when available for your device, browser, region, and Stripe account settings.
+              </p>
             </div>
             <label
               htmlFor={inputId}
