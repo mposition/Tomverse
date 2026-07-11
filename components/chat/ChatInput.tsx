@@ -33,7 +33,7 @@ const GOOGLE_WORKSPACE_TYPES = [
   "application/vnd.google-apps.presentation",
 ].join(",");
 const RECENT_MODEL_STORAGE_KEY = "recent_model_ids";
-const PROVIDER_DISPLAY_ORDER = ["openai", "google", "anthropic", "deepseek"];
+const PROVIDER_DISPLAY_ORDER = ["openai", "google", "anthropic", "deepseek", "mistral"];
 const TEXT_FILE_TYPES = new Set([
   "text/plain",
   "text/markdown",

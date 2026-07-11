@@ -5,6 +5,7 @@ export type AiProvider =
     | "groq"
     | "xai"
     | "deepseek"
+    | "mistral"
     | "moonshot"
     | "qwen"
     | "zhipu"
@@ -35,7 +36,7 @@ export const AVAILABLE_MODELS = [
     { id: "claude-fable-5", name: "Claude Fable 5", apiModel: "claude-fable-5", provider: "anthropic", icon: "🧠", tier: "Max", enabled: true, status: "enabled" },
     { id: "claude-opus-4-8", name: "Claude Opus 4.8", apiModel: "claude-opus-4-8", provider: "anthropic", icon: "🧠", tier: "Max", enabled: true, status: "enabled" },
     { id: "claude-sonnet-5", name: "Claude Sonnet 5", apiModel: "claude-sonnet-5", provider: "anthropic", icon: "🧠", tier: "Pro", enabled: true, status: "enabled" },
-    { id: "claude-haiku-4-5", name: "Claude Haiku 4.5", apiModel: "claude-haiku-4-5-20251001", provider: "anthropic", icon: "🧠", tier: "Pro", enabled: true, status: "enabled" },
+    { id: "claude-haiku-4-5", name: "Claude Haiku 4.5", apiModel: "claude-haiku-4-5-20251001", provider: "anthropic", icon: "🧠", tier: "Free", enabled: true, status: "enabled" },
 
     { id: "gemini-3-5-flash", name: "Gemini 3.5 Flash", apiModel: "gemini-3.5-flash", provider: "google", icon: "✨", tier: "Pro", enabled: true, status: "enabled" },
     { id: "gemini-3-1-pro", name: "Gemini 3.1 Pro", apiModel: "gemini-3.1-pro-preview", provider: "google", icon: "✨", tier: "Max", enabled: true, status: "enabled" },
@@ -46,16 +47,24 @@ export const AVAILABLE_MODELS = [
     { id: "llama-3-3", name: "Llama 3.3", apiModel: "llama-3.3-70b-versatile", provider: "groq", icon: "∞", tier: "Pro", enabled: true, status: "enabled" },
 
     { id: "grok-4", name: "Grok 4", apiModel: "grok-4", provider: "xai", icon: "𝕏", tier: "Max", enabled: true, status: "enabled" },
+    { id: "grok-4-5", name: "Grok 4.5", apiModel: "grok-4.5", provider: "xai", icon: "𝕏", tier: "Max", enabled: true, status: "enabled", reasoning: "high" },
     { id: "grok-3", name: "Grok 3", apiModel: "grok-3", provider: "xai", icon: "𝕏", tier: "Pro", enabled: true, status: "enabled" },
     { id: "grok-3-mini", name: "Grok 3 Mini", apiModel: "grok-3-mini", provider: "xai", icon: "𝕏", tier: "Free", enabled: true, status: "enabled" },
     { id: "deepseek-v4-flash", name: "DeepSeek-V4 Flash", apiModel: "deepseek-v4-flash", provider: "deepseek", icon: "DS", tier: "Free", enabled: true, status: "enabled" },
     { id: "deepseek-v4-pro", name: "DeepSeek-V4 Pro", apiModel: "deepseek-v4-pro", provider: "deepseek", icon: "DS", tier: "Pro", enabled: true, status: "enabled" },
+    { id: "deepseek-r1", name: "DeepSeek R1 Reasoning", apiModel: "deepseek-reasoner", provider: "deepseek", icon: "DS", tier: "Pro", enabled: true, status: "enabled", reasoning: "high" },
+    { id: "mistral-large-3", name: "Mistral Large 3", apiModel: "mistral-large-latest", provider: "mistral", icon: "M", tier: "Max", enabled: true, status: "enabled" },
+    { id: "mistral-medium-3-1", name: "Mistral Medium 3.1", apiModel: "mistral-medium-latest", provider: "mistral", icon: "M", tier: "Pro", enabled: true, status: "enabled" },
+    { id: "codestral", name: "Codestral", apiModel: "codestral-latest", provider: "mistral", icon: "M", tier: "Pro", enabled: true, status: "enabled" },
     { id: "kimi-k2.7-code", name: "Kimi K2.7", apiModel: "kimi-k2.7-code", provider: "moonshot", icon: "KM", tier: "Pro", enabled: true, status: "enabled" },
     { id: "qwen3.7-max", name: "Qwen 3.7 Max", apiModel: "qwen3.7-max", provider: "qwen", icon: "QW", tier: "Max", enabled: true, status: "enabled" },
     { id: "qwen3.7-plus", name: "Qwen 3.7 Plus", apiModel: "qwen3.7-plus", provider: "qwen", icon: "QW", tier: "Pro", enabled: true, status: "enabled" },
     { id: "qwen3.6-flash", name: "Qwen 3.6", apiModel: "qwen3.6-flash", provider: "qwen", icon: "QW", tier: "Free", enabled: true, status: "enabled" },
     { id: "glm-5.2", name: "GLM 5.2", apiModel: "glm-5.2", provider: "zhipu", icon: "Z", tier: "Free", enabled: false, status: "disabled" },
     { id: "perplexity/sonar", name: "Perplexity Sonar", apiModel: "sonar", provider: "perplexity", icon: "P", tier: "Pro", enabled: true, status: "enabled" },
+    { id: "perplexity/sonar-pro", name: "Perplexity Sonar Pro", apiModel: "sonar-pro", provider: "perplexity", icon: "P", tier: "Pro", enabled: true, status: "enabled" },
+    { id: "perplexity/sonar-reasoning-pro", name: "Perplexity Sonar Reasoning Pro", apiModel: "sonar-reasoning-pro", provider: "perplexity", icon: "P", tier: "Max", enabled: true, status: "enabled", reasoning: "high" },
+    { id: "perplexity/sonar-deep-research", name: "Perplexity Sonar Deep Research", apiModel: "sonar-deep-research", provider: "perplexity", icon: "P", tier: "Max", enabled: true, status: "enabled", reasoning: "high" },
 ] as const satisfies readonly AiModel[];
 
 export type ModelId = (typeof AVAILABLE_MODELS)[number]["id"];

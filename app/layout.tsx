@@ -39,6 +39,8 @@ const detectInitialLanguage = (acceptLanguage: string | null): Language => {
   for (const candidate of candidates) {
     if (candidate === "ko" || candidate.startsWith("ko-")) return "ko";
     if (candidate === "zh" || candidate.startsWith("zh-")) return "zh";
+    if (candidate === "fr" || candidate.startsWith("fr-")) return "fr";
+    if (candidate === "de" || candidate.startsWith("de-")) return "de";
     if (candidate === "en" || candidate.startsWith("en-")) return "en";
   }
 

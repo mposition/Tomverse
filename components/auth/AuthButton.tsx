@@ -322,12 +322,14 @@ export function AuthButton() {
                                                 <span className="block text-xs font-semibold text-zinc-500">{t("auth.language")}</span>
                                                 <select
                                                     value={language}
-                                                    onChange={(e) => setLanguage(e.target.value as "en" | "zh" | "ko")}
+                                                    onChange={(e) => setLanguage(e.target.value as Language)}
                                                     className="mt-1 w-full cursor-pointer bg-transparent text-sm font-semibold text-zinc-900 outline-none dark:text-zinc-100"
                                                 >
                                                     <option className="bg-white text-zinc-900" value="en">{t("auth.languageEnglish")}</option>
                                                     <option className="bg-white text-zinc-900" value="zh">{t("auth.languageChinese")}</option>
                                                     <option className="bg-white text-zinc-900" value="ko">{t("auth.languageKorean")}</option>
+                                                    <option className="bg-white text-zinc-900" value="fr">{t("auth.languageFrench")}</option>
+                                                    <option className="bg-white text-zinc-900" value="de">{t("auth.languageGerman")}</option>
                                                 </select>
                                             </span>
                                         </label>
@@ -438,6 +440,12 @@ export function AuthButton() {
           </option>
           <option className="bg-white text-zinc-900" value="ko">
             {t("auth.languageKorean")}
+          </option>
+          <option className="bg-white text-zinc-900" value="fr">
+            {t("auth.languageFrench")}
+          </option>
+          <option className="bg-white text-zinc-900" value="de">
+            {t("auth.languageGerman")}
           </option>
         </select>
       </label>

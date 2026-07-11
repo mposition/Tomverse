@@ -203,7 +203,10 @@ export const infoPages = {
       cta: { label: "打开 Help Centre", href: "/support/help-centre" },
     },
   },
-} satisfies Record<string, Record<Language, MarketingInfoCopy>>;
+} satisfies Record<
+  string,
+  { en: MarketingInfoCopy } & Partial<Record<Language, MarketingInfoCopy>>
+>;
 
 export const focusedSafetyPages = {
   approach: {
@@ -221,4 +224,7 @@ export const focusedSafetyPages = {
     ko: { ...infoPages.safety.ko, eyebrow: "안전", title: "Trust & Transparency", description: "Tomverse가 AI 한계, 공급자 관여, 제품 동작을 설명하는 방식입니다.", sections: [infoPages.safety.ko.sections[2]] },
     zh: { ...infoPages.safety.zh, eyebrow: "安全", title: "Trust & Transparency", description: "Tomverse 如何说明 AI 限制、供应商参与和产品行为。", sections: [infoPages.safety.zh.sections[2]] },
   },
-} satisfies Record<string, Record<Language, MarketingInfoCopy>>;
+} satisfies Record<
+  string,
+  { en: MarketingInfoCopy } & Partial<Record<Language, MarketingInfoCopy>>
+>;

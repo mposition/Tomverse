@@ -146,6 +146,8 @@ export const zh = {
         languageEnglish: "英语",
         languageChinese: "中文",
         languageKorean: "韩语",
+        languageFrench: "法语",
+        languageGerman: "德语",
         defaultModel: "默认 AI 引擎模型",
         downloadAllTxt: "下载所有聊天为 .txt",
         accountTab: "账号",

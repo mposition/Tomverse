@@ -16,7 +16,7 @@ import {
 const settingsSchema = z
     .object({
         theme: z.enum(["dark", "light", "system"]).optional(),
-        language: z.enum(["en", "ko", "zh"]).optional(),
+        language: z.enum(["en", "ko", "zh", "fr", "de"]).optional(),
         defaultModel: z.string().max(100).refine(isEnabledModelId).optional(),
     })
     .strict()

@@ -18,6 +18,8 @@ export const getModelBrand = (provider: AiProvider | string): ModelBrand => {
       return { mark: "Llama", className: "from-white to-blue-50", image: "/model-icons/llama.png" };
     case "deepseek":
       return { mark: "DS", className: "from-white to-blue-50", image: "/model-icons/deepseek.png" };
+    case "mistral":
+      return { mark: "M", className: "from-white to-orange-50", image: "/model-icons/mistral.png" };
     case "xai":
       return { mark: "Grok", className: "from-white to-zinc-100", image: "/model-icons/grok.png" };
     case "qwen":

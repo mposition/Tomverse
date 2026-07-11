@@ -5,8 +5,10 @@ import React, { createContext, useCallback, useContext, useEffect, useState } fr
 import { ko } from "@/locales/ko";
 import { en } from "@/locales/en";
 import { zh } from "@/locales/zh";
+import { fr } from "@/locales/fr";
+import { de } from "@/locales/de";
 
-export type Language = "ko" | "en" | "zh";
+export type Language = "ko" | "en" | "zh" | "fr" | "de";
 
 interface LanguageContextType {
     lang: Language;
@@ -16,11 +18,15 @@ interface LanguageContextType {
 
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
 
-const dictionaries = { ko, en, zh };
+const dictionaries = { ko, en, zh, fr, de };
 const LANGUAGE_STORAGE_KEY = "tomverse_language";
 
 const isLanguage = (value: unknown): value is Language =>
-    value === "ko" || value === "en" || value === "zh";
+    value === "ko" ||
+    value === "en" ||
+    value === "zh" ||
+    value === "fr" ||
+    value === "de";
 
 export function LanguageProvider({ children, initialLang = "en" }: { children: React.ReactNode, initialLang?: Language }) {
     const [lang, setLangState] = useState<Language>(initialLang);

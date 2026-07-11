@@ -62,6 +62,11 @@ const deepseek = createOpenAI({
     apiKey: process.env.DEEPSEEK_API_KEY,
 });
 
+const mistral = createOpenAI({
+    baseURL: "https://api.mistral.ai/v1",
+    apiKey: process.env.MISTRAL_API_KEY,
+});
+
 const xai = createOpenAI({
     baseURL: "https://api.x.ai/v1",
     apiKey: process.env.XAI_API_KEY,
@@ -544,6 +549,8 @@ const getActiveModel = (model: AiModel) => {
             return groq.chat(model.apiModel);
         case "deepseek":
             return deepseek.chat(model.apiModel);
+        case "mistral":
+            return mistral.chat(model.apiModel);
         case "xai":
             return xai.chat(model.apiModel);
         case "moonshot":

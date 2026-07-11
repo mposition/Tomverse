@@ -26,6 +26,7 @@ const supportedModels = [
   { name: "Gemini", mark: "✦", detail: "Google", className: "from-white to-sky-50", image: "/model-icons/gemini.png" },
   { name: "Llama", mark: "∞", detail: "Groq", className: "from-white to-blue-50", image: "/model-icons/llama.png" },
   { name: "DeepSeek", mark: "DS", detail: "DeepSeek", className: "from-white to-blue-50", image: "/model-icons/deepseek.png" },
+  { name: "Mistral", mark: "M", detail: "Mistral AI", className: "from-white to-orange-50", image: "/model-icons/mistral.png" },
   { name: "Grok", mark: "/", detail: "xAI", className: "from-white to-zinc-100", image: "/model-icons/grok.png" },
   { name: "Kimi", mark: "KM", detail: "Moonshot", className: "from-purple-500 to-fuchsia-500" },
   { name: "Qwen", mark: "QW", detail: "Alibaba", className: "from-white to-indigo-50", image: "/model-icons/qwen.png" },
@@ -70,7 +71,7 @@ type LandingCopy = {
   ctaDescription: string;
 };
 
-const copy = {
+const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
   en: {
     app: "Open app",
     badge: "Multi-model AI workspace",
@@ -267,7 +268,7 @@ const copy = {
     ctaTitle: "准备更聪明地比较了吗？",
     ctaDescription: "先从免费工作区开始，需要更强能力时再升级。",
   },
-} satisfies Record<Language, LandingCopy>;
+};
 
 const featureIcons = [Layers3, FileText, Share2, LockKeyhole];
 const useCaseIcons = [Search, Code2, BriefcaseBusiness, FileText];
@@ -296,7 +297,7 @@ const CardGrid = ({
 
 export function LandingPageContent() {
   const { lang } = useLanguage();
-  const content = copy[lang];
+  const content = copy[lang] ?? copy.en;
 
   return (
     <main className="min-h-screen overflow-x-hidden bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">

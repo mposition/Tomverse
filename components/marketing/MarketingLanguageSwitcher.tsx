@@ -7,6 +7,8 @@ const languageOptions: Array<{ value: Language; label: string }> = [
   { value: "ko", label: "한국어" },
   { value: "en", label: "English" },
   { value: "zh", label: "中文" },
+  { value: "fr", label: "Français" },
+  { value: "de", label: "Deutsch" },
 ];
 
 export function MarketingLanguageSwitcher() {

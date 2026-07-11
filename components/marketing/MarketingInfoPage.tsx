@@ -23,9 +23,13 @@ export type MarketingInfoCopy = {
   };
 };
 
-export function MarketingInfoPage({ content }: { content: Record<Language, MarketingInfoCopy> }) {
+export function MarketingInfoPage({
+  content,
+}: {
+  content: { en: MarketingInfoCopy } & Partial<Record<Language, MarketingInfoCopy>>;
+}) {
   const { lang } = useLanguage();
-  const page = content[lang];
+  const page = content[lang] ?? content.en;
 
   return (
     <main className="min-h-screen bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">

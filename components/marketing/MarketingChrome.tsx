@@ -67,6 +67,46 @@ const chrome = {
       { label: "支持", href: "/support" },
     ],
   },
+  fr: {
+    app: "Ouvrir l'app",
+    menu: "Menu",
+    close: "Fermer le menu",
+    topMenu: [
+      { label: "À propos", href: "/about" },
+      { label: "Fonctionnalités", href: "/#features" },
+      { label: "Modèles", href: "/models" },
+      { label: "Tarifs", href: "/pricing" },
+      { label: "Sécurité", href: "/safety" },
+      { label: "FAQ", href: "/faq" },
+      { label: "Support", href: "/support" },
+    ],
+    footerMenu: [
+      { label: "Conditions", href: "/terms" },
+      { label: "Remboursement", href: "/refund" },
+      { label: "Confidentialité", href: "/privacy" },
+      { label: "Support", href: "/support" },
+    ],
+  },
+  de: {
+    app: "App öffnen",
+    menu: "Menü",
+    close: "Menü schließen",
+    topMenu: [
+      { label: "Über uns", href: "/about" },
+      { label: "Funktionen", href: "/#features" },
+      { label: "Modelle", href: "/models" },
+      { label: "Preise", href: "/pricing" },
+      { label: "Sicherheit", href: "/safety" },
+      { label: "FAQ", href: "/faq" },
+      { label: "Support", href: "/support" },
+    ],
+    footerMenu: [
+      { label: "Bedingungen", href: "/terms" },
+      { label: "Rückerstattung", href: "/refund" },
+      { label: "Datenschutz", href: "/privacy" },
+      { label: "Support", href: "/support" },
+    ],
+  },
 } satisfies Record<
   Language,
   {
@@ -80,7 +120,7 @@ const chrome = {
 
 export function MarketingHeader({ maxWidth = "max-w-7xl" }: { maxWidth?: string }) {
   const { lang } = useLanguage();
-  const labels = chrome[lang];
+  const labels = chrome[lang] ?? chrome.en;
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   return (
@@ -161,7 +201,7 @@ export function MarketingHeader({ maxWidth = "max-w-7xl" }: { maxWidth?: string 
 
 export function MarketingFooter({ maxWidth = "max-w-7xl" }: { maxWidth?: string }) {
   const { lang } = useLanguage();
-  const labels = chrome[lang];
+  const labels = chrome[lang] ?? chrome.en;
 
   return (
     <footer className="border-t border-zinc-200 py-8 dark:border-zinc-800">

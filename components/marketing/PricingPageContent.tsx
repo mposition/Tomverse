@@ -39,7 +39,7 @@ type PricingCopy = {
   plans: PlanCopy[];
 };
 
-const copy = {
+const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
   en: {
     eyebrow: "Pricing",
     title: "Choose the right level of AI power.",
@@ -325,11 +325,11 @@ const copy = {
       },
     ],
   },
-} satisfies Record<Language, PricingCopy>;
+};
 
 export function PricingPageContent() {
   const { lang } = useLanguage();
-  const content = copy[lang];
+  const content = copy[lang] ?? copy.en;
 
   return (
     <main className="min-h-screen bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">

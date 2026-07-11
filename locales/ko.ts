@@ -146,6 +146,8 @@ export const ko = {
         languageEnglish: "영어",
         languageChinese: "중국어",
         languageKorean: "한국어",
+        languageFrench: "프랑스어",
+        languageGerman: "독일어",
         defaultModel: "기본 AI 엔진 모델",
         downloadAllTxt: "모든 채팅을 .txt로 다운로드",
         accountTab: "계정",
