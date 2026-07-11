@@ -24,6 +24,7 @@ model User {
   
   accounts      Account[]
   sessions      Session[]
+  projects      ConversationProject[]
   conversations Conversation[] // 사용자가 가진 대화방들
 }
 
@@ -86,6 +87,7 @@ model Conversation {
   id             String    @id @default(cuid())
   userId         String
   title          String
+  projectId      String?
   
   // 💡 대화방별 패널 상태를 기억하기 위한 필드 추가
   // 💡 String[] 대신 일반 String으로 변경 (SQLite 호환성 확보)
@@ -101,9 +103,23 @@ model Conversation {
     
   messages       Message[]
   user           User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project        ConversationProject? @relation(fields: [projectId], references: [id], onDelete: SetNull)
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   password       String?   // 💡 잠금 비밀번호 (null이면 잠금 해제 상태)
+}
+
+model ConversationProject {
+  id            String         @id @default(cuid())
+  userId        String
+  name          String
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@unique([userId, name])
+  @@index([userId, updatedAt])
 }
 
 model Message {

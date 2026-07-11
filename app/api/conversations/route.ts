@@ -20,6 +20,7 @@ const createConversationSchema = z
     title: z.string().trim().min(1).max(120).optional(),
     selectedModels: z.array(modelSchema).max(APP_DEFAULTS.maxSelectedModels).optional(),
     disabledPanels: z.array(modelSchema).max(APP_DEFAULTS.maxSelectedModels).optional(),
+    projectId: z.string().trim().min(1).max(100).optional(),
   })
   .strict();
 
@@ -66,6 +67,7 @@ export async function GET(req: Request) {
     const formattedConversations = conversations.map((conv) => ({
       id: conv.id,
       title: conv.title,
+        projectId: conv.projectId || null,
         selectedModels: safeParse(conv.selectedModels, [defaultEngine]),
         disabledPanels: safeParse(conv.disabledPanels, []),
         isLocked: !!conv.password,
@@ -120,6 +122,18 @@ export async function POST(req: Request) {
     ).filter((modelId) => activeModels.includes(modelId));
     const selectedModels = JSON.stringify(activeModels);
     const disabledPanels = JSON.stringify(normalizedDisabled);
+    if (body.projectId) {
+      const project = await prisma.conversationProject.findFirst({
+        where: { id: body.projectId, userId },
+        select: { id: true },
+      });
+      if (!project) {
+        return NextResponse.json(
+          { error: "Project not found." },
+          { status: 404 }
+        );
+      }
+    }
 
     const newConversation = await prisma.$transaction(async (tx) => {
       await assertConversationCapacity(tx, userId);
@@ -129,12 +143,14 @@ export async function POST(req: Request) {
           title,
           selectedModels,
           disabledPanels,
+          projectId: body.projectId || null,
         },
       });
     });
 
       const formattedConversation = {
           ...newConversation,
+          projectId: newConversation.projectId || null,
           selectedModels: safeParse(newConversation.selectedModels, [defaultEngine]),
           disabledPanels: safeParse(newConversation.disabledPanels, []),
           isLocked: !!newConversation.password,

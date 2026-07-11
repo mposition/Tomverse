@@ -42,6 +42,7 @@ const updateConversationSchema = z
       .array(modelSchema)
       .max(APP_DEFAULTS.maxSelectedModels)
       .optional(),
+    projectId: z.union([z.string().trim().min(1).max(100), z.null()]).optional(),
   })
   .strict()
   .refine(
@@ -49,7 +50,8 @@ const updateConversationSchema = z
       body.title !== undefined ||
       body.password !== undefined ||
       body.selectedModels !== undefined ||
-      body.disabledPanels !== undefined,
+      body.disabledPanels !== undefined ||
+      body.projectId !== undefined,
     { message: "At least one update is required." }
   );
 const MESSAGE_PAGE_SIZE = 50;
@@ -146,6 +148,7 @@ export async function GET(
         title: true,
         selectedModels: true,
         disabledPanels: true,
+        projectId: true,
         shareEnabled: true,
         shareExpiresAt: true,
         createdAt: true,
@@ -196,6 +199,7 @@ export async function GET(
     return NextResponse.json({
       ...conversation,
         messages,
+        projectId: conversation.projectId || null,
         messagePage: {
           hasMore: hasMoreMessages,
           nextCursor: hasMoreMessages ? messages.at(-1)?.id || null : null,
@@ -399,6 +403,24 @@ export async function PATCH(
       );
       updateData.disabledPanels = JSON.stringify(disabledPanels);
     }	
+
+    if (body.projectId !== undefined) {
+      if (body.projectId === null) {
+        updateData.project = { disconnect: true };
+      } else {
+        const project = await prisma.conversationProject.findFirst({
+          where: { id: body.projectId, userId },
+          select: { id: true },
+        });
+        if (!project) {
+          return NextResponse.json(
+            { error: "Project not found." },
+            { status: 404 }
+          );
+        }
+        updateData.project = { connect: { id: project.id } };
+      }
+    }
 	
     if (Object.keys(updateData).length === 0) {
       return NextResponse.json({ success: true, message: "No changes." });
@@ -419,6 +441,7 @@ export async function PATCH(
 
 	const response = NextResponse.json({
       ...updatedConversation,
+        projectId: updatedConversation.projectId || null,
         selectedModels: clampSelectedModels(
           safeParse(updatedConversation.selectedModels, [defaultEngine])
         ),

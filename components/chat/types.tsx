@@ -20,6 +20,7 @@ export type Message = {
 export type Conversation = {
   id: string;
     title: string;
+    projectId?: string | null;
     selectedModels?: string[];
     disabledPanels?: string[];
     isLocked?: boolean;

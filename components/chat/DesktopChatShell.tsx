@@ -5,6 +5,7 @@ import { ChatApp } from "@/components/chat/ChatApp";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
+import { ProviderStatusBanner } from "@/components/chat/ProviderStatusBanner";
 import {
   AVAILABLE_MODELS,
   ENABLED_MODELS,
@@ -117,7 +118,8 @@ export function DesktopChatShell({
       />
 
       <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        <div className="flex min-h-0 flex-1 gap-4 overflow-hidden bg-zinc-100/80 px-4 pb-4 pt-4 dark:bg-zinc-950">
+        <ProviderStatusBanner selectedModels={selectedModels} compact />
+        <div className="flex min-h-0 flex-1 gap-4 overflow-hidden bg-zinc-100/80 px-4 pb-4 pt-3 dark:bg-zinc-950">
           {selectedModels.length === 0 && (
             <div className="flex flex-1 select-none flex-col items-center justify-center text-zinc-500">
               <div className="mb-4 text-4xl opacity-50">AI</div>

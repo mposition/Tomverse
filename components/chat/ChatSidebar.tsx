@@ -6,7 +6,7 @@ import { AuthButton } from "@/components/auth/AuthButton";
 import { useCallback, useState, useEffect, useRef } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
 import Link from "next/link";
-import { AlertTriangle, CloudUpload, Crown, Database, Download, Link2Off, Lock, MessageSquare, MoreVertical, Pencil, Pin, Search, Send, Share2, ShieldCheck, Sparkles, Star, Tag, Trash2, Unlock, X } from "lucide-react";
+import { AlertTriangle, CloudUpload, Crown, Database, Download, Folder, FolderPlus, Link2Off, Lock, MessageSquare, MoreVertical, Pencil, Pin, Search, Send, Share2, ShieldCheck, Sparkles, Star, Tag, Trash2, Unlock, X } from "lucide-react";
 import { FeedbackButton } from "@/components/chat/FeedbackButton";
 import { useUserUsage, type UserPlan } from "@/components/chat/useUserUsage";
 
@@ -29,6 +29,14 @@ type ChatSidebarProps = {
     onTogglePrivateMode: () => void;
     currentModelId?: string | null;
     attachmentCount?: number;
+};
+
+type ConversationFilter = "all" | "locked" | "shared" | "work" | "research" | "personal" | `project:${string}`;
+
+type ConversationProject = {
+    id: string;
+    name: string;
+    conversationCount?: number;
 };
 
 export function ChatSidebar({
@@ -54,7 +62,11 @@ export function ChatSidebar({
     const [openMenuId, setOpenMenuId] = useState<string | null>(null);
     const [showPrivateNotice, setShowPrivateNotice] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
-    const [conversationFilter, setConversationFilter] = useState<"all" | "locked" | "shared" | "work" | "research" | "personal">("all");
+    const [conversationFilter, setConversationFilter] = useState<ConversationFilter>("all");
+    const [showProjectForm, setShowProjectForm] = useState(false);
+    const [projectName, setProjectName] = useState("");
+    const [conversationProjectOverrides, setConversationProjectOverrides] = useState<Record<string, string | null>>({});
+    const [projects, setProjects] = useState<ConversationProject[]>([]);
     const [conversationLabels, setConversationLabels] = useState<Record<string, string>>(() => {
         if (typeof window === "undefined") return {};
         try {
@@ -141,6 +153,10 @@ export function ChatSidebar({
     const crownClass = "h-3.5 w-3.5 shrink-0 text-amber-400";
     const normalizedSearch = searchQuery.trim().toLowerCase();
     const messageMatchedIds = new Set(messageSearchResults.map((result) => result.conversationId));
+    const getConversationProjectId = (conversation: Conversation) =>
+        Object.prototype.hasOwnProperty.call(conversationProjectOverrides, conversation.id)
+            ? conversationProjectOverrides[conversation.id]
+            : conversation.projectId || null;
     const filteredConversations = conversations.filter((conversation) => {
         const matchesSearch =
             !normalizedSearch ||
@@ -150,7 +166,9 @@ export function ChatSidebar({
             conversationFilter === "all" ||
             (conversationFilter === "locked" && conversation.isLocked) ||
             (conversationFilter === "shared" && conversation.shareEnabled) ||
-            conversationLabels[conversation.id] === conversationFilter;
+            (conversationFilter.startsWith("project:")
+                ? getConversationProjectId(conversation) === conversationFilter.slice("project:".length)
+                : conversationLabels[conversation.id] === conversationFilter);
 
         return matchesSearch && matchesFilter;
     }).sort((a, b) => {
@@ -214,12 +232,102 @@ export function ChatSidebar({
         });
     };
 
+    useEffect(() => {
+        if (isGuestMode) {
+            const timer = window.setTimeout(() => setProjects([]), 0);
+            return () => window.clearTimeout(timer);
+        }
+        const controller = new AbortController();
+        void fetch("/api/projects", {
+            cache: "no-store",
+            signal: controller.signal,
+        })
+            .then((response) => (response.ok ? response.json() : { projects: [] }))
+            .then((data) => {
+                const nextProjects = Array.isArray(data.projects)
+                    ? data.projects
+                        .map((item: unknown) => {
+                            const project = item as { id?: unknown; name?: unknown; conversationCount?: unknown };
+                            return typeof project.id === "string" && typeof project.name === "string"
+                                ? {
+                                    id: project.id,
+                                    name: project.name.slice(0, 32),
+                                    conversationCount:
+                                        typeof project.conversationCount === "number"
+                                            ? project.conversationCount
+                                            : undefined,
+                                }
+                                : null;
+                        })
+                        .filter((item: ConversationProject | null): item is ConversationProject => Boolean(item))
+                    : [];
+                setProjects(nextProjects);
+            })
+            .catch(() => {});
+        return () => controller.abort();
+    }, [isGuestMode]);
+
+    const createProject = async () => {
+        const name = projectName.trim().slice(0, 32);
+        if (!name) return;
+        const response = await fetch("/api/projects", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name }),
+        });
+        if (!response.ok) return;
+        const project = (await response.json()) as ConversationProject;
+        setProjects((current) => [project, ...current.filter((item) => item.id !== project.id)]);
+        setProjectName("");
+        setShowProjectForm(false);
+        setConversationFilter(`project:${project.id}`);
+    };
+
+    const setConversationProject = async (conversationId: string, projectId: string | null) => {
+        const previousProjectId =
+            conversations.find((conversation) => conversation.id === conversationId)?.projectId || null;
+        setConversationProjectOverrides((current) => ({
+            ...current,
+            [conversationId]: projectId,
+        }));
+        const response = await fetch(`/api/conversations/${conversationId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ projectId }),
+        });
+        if (!response.ok) {
+            setConversationProjectOverrides((current) => ({
+                ...current,
+                [conversationId]: previousProjectId,
+            }));
+            return;
+        }
+        setProjects((current) =>
+            current.map((project) => {
+                const wasPrevious = previousProjectId === project.id;
+                const isNext = projectId === project.id;
+                if (!wasPrevious && !isNext) return project;
+                const delta = Number(isNext) - Number(wasPrevious);
+                return {
+                    ...project,
+                    conversationCount:
+                        typeof project.conversationCount === "number"
+                            ? Math.max(project.conversationCount + delta, 0)
+                            : project.conversationCount,
+                };
+            })
+        );
+    };
+
     const labelText = (label: string) => {
         if (label === "work") return t("sidebar.labelWork");
         if (label === "research") return t("sidebar.labelResearch");
         if (label === "personal") return t("sidebar.labelPersonal");
         return label;
     };
+
+    const projectText = (projectId: string) =>
+        projects.find((project) => project.id === projectId)?.name || t("sidebar.uncategorizedProject");
 
     const getConversationModelSummary = (conversation: Conversation) => {
         const models = conversation.selectedModels
@@ -313,7 +421,7 @@ export function ChatSidebar({
 
     return (
         <>
-        <aside className="w-72 shrink-0 bg-zinc-50 border-r border-zinc-200 dark:bg-zinc-950 dark:border-zinc-800 flex flex-col h-full select-none">
+        <aside className="flex h-full w-full shrink-0 select-none flex-col border-r border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 md:w-80">
 
             <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-2.5">
                 <span className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl bg-white ring-1 ring-zinc-200 shadow-sm dark:ring-zinc-800">
@@ -370,7 +478,7 @@ export function ChatSidebar({
                         className="h-9 w-full rounded-lg border border-zinc-200 bg-white pl-9 pr-3 text-xs text-zinc-800 outline-none transition placeholder:text-zinc-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-blue-500"
                     />
                 </div>
-                <div className="mt-2 flex gap-1 overflow-x-auto rounded-xl bg-zinc-100 p-1 dark:bg-zinc-900">
+                <div className="mt-2 flex flex-wrap gap-1 rounded-xl bg-zinc-100 p-1 dark:bg-zinc-900">
                     {[
                         ["all", t("chat.allTiers")],
                         ["locked", t("sidebar.lockedBadge")],
@@ -393,6 +501,70 @@ export function ChatSidebar({
                             {label}
                         </button>
                     ))}
+                </div>
+                <div className="mt-3 rounded-xl border border-zinc-200 bg-white p-2 dark:border-zinc-800 dark:bg-zinc-950">
+                    <div className="flex items-center justify-between gap-2">
+                        <span className="inline-flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wide text-zinc-500">
+                            <Folder className="h-3.5 w-3.5" />
+                            {t("sidebar.projects")}
+                        </span>
+                        <button
+                            type="button"
+                            onClick={() => setShowProjectForm((value) => !value)}
+                            className="inline-flex h-7 items-center gap-1 rounded-lg bg-zinc-100 px-2 text-[11px] font-bold text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                        >
+                            <FolderPlus className="h-3.5 w-3.5" />
+                            {t("sidebar.newProject")}
+                        </button>
+                    </div>
+                    {showProjectForm && (
+                        <form
+                            className="mt-2 flex gap-1"
+                            onSubmit={(event) => {
+                                event.preventDefault();
+                                void createProject();
+                            }}
+                        >
+                            <input
+                                autoFocus
+                                value={projectName}
+                                onChange={(event) => setProjectName(event.target.value)}
+                                maxLength={32}
+                                placeholder={t("sidebar.projectNamePlaceholder")}
+                                className="h-8 min-w-0 flex-1 rounded-lg border border-zinc-200 bg-zinc-50 px-2 text-xs font-medium text-zinc-900 outline-none focus:border-blue-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
+                            />
+                            <button
+                                type="submit"
+                                disabled={!projectName.trim()}
+                                className="h-8 rounded-lg bg-blue-600 px-2 text-[11px] font-black text-white disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                {t("auth.ok")}
+                            </button>
+                        </form>
+                    )}
+                    <div className="mt-2 flex flex-wrap gap-1">
+                        {projects.length === 0 ? (
+                            <span className="px-1 text-[11px] font-medium text-zinc-400">
+                                {t("sidebar.noProjects")}
+                            </span>
+                        ) : (
+                            projects.map((project) => (
+                                <button
+                                    key={project.id}
+                                    type="button"
+                                    onClick={() => setConversationFilter(`project:${project.id}`)}
+                                    className={`max-w-full truncate rounded-lg px-2 py-1 text-[11px] font-bold transition-colors ${
+                                        conversationFilter === `project:${project.id}`
+                                            ? "bg-blue-600 text-white"
+                                            : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                                    }`}
+                                    aria-pressed={conversationFilter === `project:${project.id}`}
+                                >
+                                    {project.name}
+                                </button>
+                            ))
+                        )}
+                    </div>
                 </div>
             </div>
 
@@ -454,6 +626,12 @@ export function ChatSidebar({
                                         <span className="inline-flex w-fit items-center gap-1 rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-bold text-blue-500">
                                             <Tag className="h-2.5 w-2.5" />
                                             {labelText(conversationLabels[conv.id])}
+                                        </span>
+                                    )}
+                                    {getConversationProjectId(conv) && (
+                                        <span className="inline-flex w-fit max-w-full items-center gap-1 rounded-full bg-purple-500/10 px-1.5 py-0.5 text-[10px] font-bold text-purple-500">
+                                            <Folder className="h-2.5 w-2.5 shrink-0" />
+                                            <span className="truncate">{projectText(getConversationProjectId(conv) || "")}</span>
                                         </span>
                                     )}
                                     <span className="flex items-center gap-1.5 truncate text-[10px] font-medium text-zinc-400 dark:text-zinc-500">
@@ -563,6 +741,54 @@ export function ChatSidebar({
                                                 </span>
                                             </button>
                                         ))}
+                                        <div className="my-1 border-t border-zinc-800" />
+                                        <div className="px-3 py-1 text-[10px] font-black uppercase tracking-wide text-zinc-500">
+                                            {t("sidebar.moveToProject")}
+                                        </div>
+                                        {projects.length === 0 ? (
+                                            <div className="px-3 py-2 text-xs text-zinc-500">
+                                                {t("sidebar.noProjects")}
+                                            </div>
+                                        ) : (
+                                            <>
+                                                {projects.slice(0, 6).map((project) => (
+                                                    <button
+                                                        key={project.id}
+                                                        type="button"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            void setConversationProject(
+                                                                conv.id,
+                                                                getConversationProjectId(conv) === project.id ? null : project.id
+                                                            );
+                                                            setOpenMenuId(null);
+                                                        }}
+                                                        className={`${menuItemBase} ${menuItemEnabled}`}
+                                                    >
+                                                        <span className="flex min-w-0 items-center gap-2">
+                                                            <Folder className={menuIconClass} />
+                                                            <span className="truncate">{project.name}</span>
+                                                        </span>
+                                                    </button>
+                                                ))}
+                                                {getConversationProjectId(conv) && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            void setConversationProject(conv.id, null);
+                                                            setOpenMenuId(null);
+                                                        }}
+                                                        className={`${menuItemBase} ${menuItemEnabled}`}
+                                                    >
+                                                        <span className="flex items-center gap-2">
+                                                            <X className={menuIconClass} />
+                                                            <span>{t("sidebar.removeProject")}</span>
+                                                        </span>
+                                                    </button>
+                                                )}
+                                            </>
+                                        )}
 
                                         <button
                                             type="button"
