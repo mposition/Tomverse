@@ -102,14 +102,14 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       {
         name: "Pro",
         eyebrow: "For everyday productivity",
-        price: "$19",
+        price: "$15",
         period: "per month",
         description: "For people who compare models, attach files, and reuse conversations throughout the week.",
         cta: "Upgrade to Pro",
         href: "/chat",
         highlighted: true,
         badge: "Recommended",
-        usage: "Promo TOMVERSE50: $9.50/month for first 3 months",
+        usage: "Promo TOMVERSE50: $7.50/month for first 3 months",
         features: [
           "Access to all available model tiers",
           "Compare up to 3 models side by side",
@@ -121,12 +121,12 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       {
         name: "Max",
         eyebrow: "For heavier AI workflows",
-        price: "$35",
+        price: "$25",
         period: "per month",
         description: "For power users who need premium model tiers, larger allowances, and priority room to work.",
         cta: "Upgrade to Max",
         href: "/chat",
-        usage: "Promo TOMVERSE50: $17.50/month for first 3 months",
+        usage: "Promo TOMVERSE50: $12.50/month for first 3 months",
         features: [
           "Access to Free, Pro, and Max model tiers",
           "No daily message limit with monthly fair-use protection",
@@ -166,8 +166,8 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     note: "가격은 세금 전 USD 기준입니다. Max는 일일 메시지 한도를 제거하지만, 월간 fair-use, 남용 방지, 공급자 비용 보호 한도는 적용됩니다.",
     plans: [
       { name: "Free", eyebrow: "처음 시작하는 사용자", price: "$0", period: "월", description: "Tomverse를 체험하고 선택된 AI 모델로 가벼운 일상 작업을 하기 위한 플랜입니다.", cta: "무료로 시작", href: "/chat", usage: "기본 일일 사용량", features: ["Free 및 Pro 모델 등급 접근", "최대 3개 모델 비교", "기본 대화 기록", "로그인 후 파일 첨부, 공유, 다운로드", "가벼운 개인 사용에 적합"] },
-      { name: "Pro", eyebrow: "일상 생산성", price: "$19", period: "월", description: "모델을 비교하고, 파일을 첨부하고, 대화를 주중 업무에 재사용하는 사용자에게 적합합니다.", cta: "Pro로 업그레이드", href: "/chat", highlighted: true, badge: "추천", usage: "프로모션 TOMVERSE50: 첫 3개월 월 $9.50", features: ["모든 사용 가능 모델 등급 접근", "최대 3개 모델 나란히 비교", "파일 첨부 및 Google Drive 파일", "대화 공유 및 다운로드", "더 높은 일일 및 월간 한도"] },
-      { name: "Max", eyebrow: "고강도 AI 워크플로", price: "$35", period: "월", description: "프리미엄 모델 등급, 더 큰 사용량, 우선 사용 여유가 필요한 파워 유저를 위한 플랜입니다.", cta: "Max로 업그레이드", href: "/chat", usage: "프로모션 TOMVERSE50: 첫 3개월 월 $17.50", features: ["Free, Pro, Max 모델 등급 접근", "일일 메시지 무제한 및 월간 fair-use 보호", "더 높은 첨부파일 및 맥락 한도", "고급 모델 등급 우선 접근", "고강도 일상 AI 작업에 적합"] },
+      { name: "Pro", eyebrow: "일상 생산성", price: "$15", period: "월", description: "모델을 비교하고, 파일을 첨부하고, 대화를 주중 업무에 재사용하는 사용자에게 적합합니다.", cta: "Pro로 업그레이드", href: "/chat", highlighted: true, badge: "추천", usage: "프로모션 TOMVERSE50: 첫 3개월 월 $7.50", features: ["모든 사용 가능 모델 등급 접근", "최대 3개 모델 나란히 비교", "파일 첨부 및 Google Drive 파일", "대화 공유 및 다운로드", "더 높은 일일 및 월간 한도"] },
+      { name: "Max", eyebrow: "고강도 AI 워크플로", price: "$25", period: "월", description: "프리미엄 모델 등급, 더 큰 사용량, 우선 사용 여유가 필요한 파워 유저를 위한 플랜입니다.", cta: "Max로 업그레이드", href: "/chat", usage: "프로모션 TOMVERSE50: 첫 3개월 월 $12.50", features: ["Free, Pro, Max 모델 등급 접근", "일일 메시지 무제한 및 월간 fair-use 보호", "더 높은 첨부파일 및 맥락 한도", "고급 모델 등급 우선 접근", "고강도 일상 AI 작업에 적합"] },
     ],
   },
   zh: {
@@ -199,8 +199,8 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     note: "价格为税前 USD。Max 取消每日消息限制，但仍适用月度 fair-use、防滥用和提供商成本保护限制。",
     plans: [
       { name: "Free", eyebrow: "适合开始使用", price: "$0", period: "每月", description: "用于体验 Tomverse，并使用部分 AI 模型完成轻量日常工作。", cta: "免费开始", href: "/chat", usage: "基础每日用量", features: ["访问 Free 和 Pro 模型等级", "最多比较 3 个模型", "基础聊天记录", "登录后可使用文件附件、分享和下载", "适合轻量个人使用"] },
-      { name: "Pro", eyebrow: "日常生产力", price: "$19", period: "每月", description: "适合经常比较模型、添加文件并在一周内重复使用对话的用户。", cta: "升级到 Pro", href: "/chat", highlighted: true, badge: "推荐", usage: "优惠 TOMVERSE50：前 3 个月每月 $9.50", features: ["访问所有可用模型等级", "最多并排比较 3 个模型", "文件附件和 Google Drive 文件", "分享和下载对话", "更高的每日和每月限制"] },
-      { name: "Max", eyebrow: "高强度 AI 工作流", price: "$35", period: "每月", description: "适合需要高级模型、更大额度和优先使用空间的高频用户。", cta: "升级到 Max", href: "/chat", usage: "优惠 TOMVERSE50：前 3 个月每月 $17.50", features: ["访问 Free、Pro 和 Max 模型等级", "每日消息无限制，并有月度 fair-use 保护", "更高的附件和上下文限制", "优先访问高级模型等级", "为高强度日常 AI 工作流设计"] },
+      { name: "Pro", eyebrow: "日常生产力", price: "$15", period: "每月", description: "适合经常比较模型、添加文件并在一周内重复使用对话的用户。", cta: "升级到 Pro", href: "/chat", highlighted: true, badge: "推荐", usage: "优惠 TOMVERSE50：前 3 个月每月 $7.50", features: ["访问所有可用模型等级", "最多并排比较 3 个模型", "文件附件和 Google Drive 文件", "分享和下载对话", "更高的每日和每月限制"] },
+      { name: "Max", eyebrow: "高强度 AI 工作流", price: "$25", period: "每月", description: "适合需要高级模型、更大额度和优先使用空间的高频用户。", cta: "升级到 Max", href: "/chat", usage: "优惠 TOMVERSE50：前 3 个月每月 $12.50", features: ["访问 Free、Pro 和 Max 模型等级", "每日消息无限制，并有月度 fair-use 保护", "更高的附件和上下文限制", "优先访问高级模型等级", "为高强度日常 AI 工作流设计"] },
     ],
   },
   fr: {
@@ -232,8 +232,8 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     note: "Les prix sont en USD hors taxes. Max supprime la limite quotidienne de messages, mais les protections mensuelles fair-use, anti-abus et de co?ts Provider s?appliquent.",
     plans: [
       { name: "Free", eyebrow: "Pour commencer", price: "$0", period: "par mois", description: "Une fa?on simple d?essayer Tomverse et d?utiliser certains mod?les IA pour un travail quotidien l?ger.", cta: "Commencer gratuitement", href: "/chat", usage: "Usage quotidien de base", features: ["Acc?s aux niveaux de mod?les Free et Pro", "Comparer jusqu?? 3 mod?les", "Historique de conversation de base", "Pi?ces jointes, partage et t?l?chargements apr?s connexion", "Adapt? ? un usage personnel l?ger"] },
-      { name: "Pro", eyebrow: "Productivit? quotidienne", price: "$19", period: "par mois", description: "Pour les personnes qui comparent des mod?les, joignent des fichiers et r?utilisent leurs conversations chaque semaine.", cta: "Passer ? Pro", href: "/chat", highlighted: true, badge: "Recommand?", usage: "Promo TOMVERSE50 : 9,50 $/mois pendant 3 mois", features: ["Acc?s ? tous les niveaux de mod?les disponibles", "Comparer jusqu?? 3 mod?les c?te ? c?te", "Pi?ces jointes et fichiers Google Drive", "Partager et t?l?charger les conversations", "Limites quotidiennes et mensuelles plus ?lev?es"] },
-      { name: "Max", eyebrow: "Workflows IA intensifs", price: "$35", period: "par mois", description: "Pour les utilisateurs intensifs qui ont besoin de mod?les avanc?s, de volumes plus importants et d?une marge prioritaire.", cta: "Passer ? Max", href: "/chat", usage: "Promo TOMVERSE50 : 17,50 $/mois pendant 3 mois", features: ["Acc?s aux niveaux Free, Pro et Max", "Aucune limite quotidienne de messages avec protection mensuelle fair-use", "Limites de pi?ces jointes et de contexte plus ?lev?es", "Acc?s prioritaire aux mod?les avanc?s", "Con?u pour les workflows IA quotidiens intensifs"] },
+      { name: "Pro", eyebrow: "Productivit? quotidienne", price: "$15", period: "par mois", description: "Pour les personnes qui comparent des mod?les, joignent des fichiers et r?utilisent leurs conversations chaque semaine.", cta: "Passer ? Pro", href: "/chat", highlighted: true, badge: "Recommand?", usage: "Promo TOMVERSE50 : 9,50 $/mois pendant 3 mois", features: ["Acc?s ? tous les niveaux de mod?les disponibles", "Comparer jusqu?? 3 mod?les c?te ? c?te", "Pi?ces jointes et fichiers Google Drive", "Partager et t?l?charger les conversations", "Limites quotidiennes et mensuelles plus ?lev?es"] },
+      { name: "Max", eyebrow: "Workflows IA intensifs", price: "$25", period: "par mois", description: "Pour les utilisateurs intensifs qui ont besoin de mod?les avanc?s, de volumes plus importants et d?une marge prioritaire.", cta: "Passer ? Max", href: "/chat", usage: "Promo TOMVERSE50 : 17,50 $/mois pendant 3 mois", features: ["Acc?s aux niveaux Free, Pro et Max", "Aucune limite quotidienne de messages avec protection mensuelle fair-use", "Limites de pi?ces jointes et de contexte plus ?lev?es", "Acc?s prioritaire aux mod?les avanc?s", "Con?u pour les workflows IA quotidiens intensifs"] },
     ],
   },
   de: {
@@ -265,8 +265,8 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     note: "Preise verstehen sich in USD vor Steuern. Max entfernt das t?gliche Nachrichtenlimit, aber monatlicher Fair-Use-, Missbrauchs- und Provider-Kostenschutz gelten weiterhin.",
     plans: [
       { name: "Free", eyebrow: "F?r den Einstieg", price: "$0", period: "pro Monat", description: "Ein einfacher Weg, Tomverse auszuprobieren und ausgew?hlte KI-Modelle f?r leichte t?gliche Arbeit zu nutzen.", cta: "Kostenlos starten", href: "/chat", usage: "Grundlegende t?gliche Nutzung", features: ["Zugriff auf Free- und Pro-Modellstufen", "Bis zu 3 Modelle vergleichen", "Grundlegender Chatverlauf", "Dateianh?nge, Teilen und Downloads nach Anmeldung", "Gut f?r leichte pers?nliche Nutzung"] },
-      { name: "Pro", eyebrow: "T?gliche Produktivit?t", price: "$19", period: "pro Monat", description: "F?r Nutzer, die Modelle vergleichen, Dateien anh?ngen und Unterhaltungen regelm??ig wiederverwenden.", cta: "Auf Pro upgraden", href: "/chat", highlighted: true, badge: "Empfohlen", usage: "Promo TOMVERSE50: 9,50 $/Monat f?r 3 Monate", features: ["Zugriff auf alle verf?gbaren Modellstufen", "Bis zu 3 Modelle nebeneinander vergleichen", "Dateianh?nge und Google-Drive-Dateien", "Unterhaltungen teilen und herunterladen", "H?here t?gliche und monatliche Limits"] },
-      { name: "Max", eyebrow: "Intensive KI-Workflows", price: "$35", period: "pro Monat", description: "F?r Power-User, die Premium-Modelle, gr??ere Kontingente und priorisierten Spielraum ben?tigen.", cta: "Auf Max upgraden", href: "/chat", usage: "Promo TOMVERSE50: 17,50 $/Monat f?r 3 Monate", features: ["Zugriff auf Free-, Pro- und Max-Modellstufen", "Kein t?gliches Nachrichtenlimit mit monatlichem Fair-Use-Schutz", "H?here Anhang- und Kontextlimits", "Priorisierter Zugriff auf fortgeschrittene Modelle", "F?r intensive t?gliche KI-Workflows entwickelt"] },
+      { name: "Pro", eyebrow: "T?gliche Produktivit?t", price: "$15", period: "pro Monat", description: "F?r Nutzer, die Modelle vergleichen, Dateien anh?ngen und Unterhaltungen regelm??ig wiederverwenden.", cta: "Auf Pro upgraden", href: "/chat", highlighted: true, badge: "Empfohlen", usage: "Promo TOMVERSE50: 9,50 $/Monat f?r 3 Monate", features: ["Zugriff auf alle verf?gbaren Modellstufen", "Bis zu 3 Modelle nebeneinander vergleichen", "Dateianh?nge und Google-Drive-Dateien", "Unterhaltungen teilen und herunterladen", "H?here t?gliche und monatliche Limits"] },
+      { name: "Max", eyebrow: "Intensive KI-Workflows", price: "$25", period: "pro Monat", description: "F?r Power-User, die Premium-Modelle, gr??ere Kontingente und priorisierten Spielraum ben?tigen.", cta: "Auf Max upgraden", href: "/chat", usage: "Promo TOMVERSE50: 17,50 $/Monat f?r 3 Monate", features: ["Zugriff auf Free-, Pro- und Max-Modellstufen", "Kein t?gliches Nachrichtenlimit mit monatlichem Fair-Use-Schutz", "H?here Anhang- und Kontextlimits", "Priorisierter Zugriff auf fortgeschrittene Modelle", "F?r intensive t?gliche KI-Workflows entwickelt"] },
     ],
   },
   es: {
@@ -298,8 +298,8 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     note: "Los precios est?n en USD antes de impuestos. Max elimina el l?mite diario de mensajes, pero siguen aplicando protecciones mensuales fair-use, antiabuso y de coste Provider.",
     plans: [
       { name: "Free", eyebrow: "Para empezar", price: "$0", period: "al mes", description: "Una forma sencilla de probar Tomverse y usar modelos de IA seleccionados para trabajo diario ligero.", cta: "Empezar gratis", href: "/chat", usage: "Uso diario b?sico", features: ["Acceso a niveles de modelos Free y Pro", "Comparar hasta 3 modelos", "Historial b?sico de chat", "Archivos, compartir y descargas tras iniciar sesi?n", "Adecuado para uso personal ligero"] },
-      { name: "Pro", eyebrow: "Productividad diaria", price: "$19", period: "al mes", description: "Para quienes comparan modelos, adjuntan archivos y reutilizan conversaciones durante la semana.", cta: "Actualizar a Pro", href: "/chat", highlighted: true, badge: "Recomendado", usage: "Promo TOMVERSE50: $9.50/mes durante 3 meses", features: ["Acceso a todos los niveles de modelos disponibles", "Comparar hasta 3 modelos lado a lado", "Archivos adjuntos y Google Drive", "Compartir y descargar conversaciones", "L?mites diarios y mensuales superiores"] },
-      { name: "Max", eyebrow: "Flujos intensivos de IA", price: "$35", period: "al mes", description: "Para usuarios avanzados que necesitan modelos premium, mayores asignaciones y margen prioritario.", cta: "Actualizar a Max", href: "/chat", usage: "Promo TOMVERSE50: $17.50/mes durante 3 meses", features: ["Acceso a niveles Free, Pro y Max", "Sin l?mite diario de mensajes con protecci?n mensual fair-use", "L?mites superiores de adjuntos y contexto", "Acceso prioritario a modelos avanzados", "Dise?ado para flujos diarios intensivos de IA"] },
+      { name: "Pro", eyebrow: "Productividad diaria", price: "$15", period: "al mes", description: "Para quienes comparan modelos, adjuntan archivos y reutilizan conversaciones durante la semana.", cta: "Actualizar a Pro", href: "/chat", highlighted: true, badge: "Recomendado", usage: "Promo TOMVERSE50: $7.50/mes durante 3 meses", features: ["Acceso a todos los niveles de modelos disponibles", "Comparar hasta 3 modelos lado a lado", "Archivos adjuntos y Google Drive", "Compartir y descargar conversaciones", "L?mites diarios y mensuales superiores"] },
+      { name: "Max", eyebrow: "Flujos intensivos de IA", price: "$25", period: "al mes", description: "Para usuarios avanzados que necesitan modelos premium, mayores asignaciones y margen prioritario.", cta: "Actualizar a Max", href: "/chat", usage: "Promo TOMVERSE50: $12.50/mes durante 3 meses", features: ["Acceso a niveles Free, Pro y Max", "Sin l?mite diario de mensajes con protecci?n mensual fair-use", "L?mites superiores de adjuntos y contexto", "Acceso prioritario a modelos avanzados", "Dise?ado para flujos diarios intensivos de IA"] },
     ],
   },
   pt: {
@@ -331,8 +331,8 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     note: "Os pre?os s?o em USD antes de impostos. O Max remove o limite di?rio de mensagens, mas prote??es mensais fair-use, antiabuso e de custo Provider continuam aplic?veis.",
     plans: [
       { name: "Free", eyebrow: "Para come?ar", price: "$0", period: "por m?s", description: "Uma forma simples de testar o Tomverse e usar modelos de IA selecionados para trabalho di?rio leve.", cta: "Come?ar gr?tis", href: "/chat", usage: "Uso di?rio b?sico", features: ["Acesso aos n?veis de modelos Free e Pro", "Comparar at? 3 modelos", "Hist?rico b?sico de chat", "Anexos, compartilhamento e downloads ap?s login", "Bom para uso pessoal leve"] },
-      { name: "Pro", eyebrow: "Produtividade di?ria", price: "$19", period: "por m?s", description: "Para pessoas que comparam modelos, anexam arquivos e reutilizam conversas durante a semana.", cta: "Atualizar para Pro", href: "/chat", highlighted: true, badge: "Recomendado", usage: "Promo TOMVERSE50: US$9.50/m?s por 3 meses", features: ["Acesso a todos os n?veis de modelos dispon?veis", "Comparar at? 3 modelos lado a lado", "Anexos e arquivos do Google Drive", "Compartilhar e baixar conversas", "Limites di?rios e mensais maiores"] },
-      { name: "Max", eyebrow: "Fluxos intensivos de IA", price: "$35", period: "por m?s", description: "Para usu?rios avan?ados que precisam de modelos premium, franquias maiores e prioridade de uso.", cta: "Atualizar para Max", href: "/chat", usage: "Promo TOMVERSE50: US$17.50/m?s por 3 meses", features: ["Acesso aos n?veis Free, Pro e Max", "Sem limite di?rio de mensagens com prote??o mensal fair-use", "Limites maiores de anexos e contexto", "Acesso priorit?rio a modelos avan?ados", "Feito para fluxos di?rios intensivos de IA"] },
+      { name: "Pro", eyebrow: "Produtividade di?ria", price: "$15", period: "por m?s", description: "Para pessoas que comparam modelos, anexam arquivos e reutilizam conversas durante a semana.", cta: "Atualizar para Pro", href: "/chat", highlighted: true, badge: "Recomendado", usage: "Promo TOMVERSE50: US$7.50/m?s por 3 meses", features: ["Acesso a todos os n?veis de modelos dispon?veis", "Comparar at? 3 modelos lado a lado", "Anexos e arquivos do Google Drive", "Compartilhar e baixar conversas", "Limites di?rios e mensais maiores"] },
+      { name: "Max", eyebrow: "Fluxos intensivos de IA", price: "$25", period: "por m?s", description: "Para usu?rios avan?ados que precisam de modelos premium, franquias maiores e prioridade de uso.", cta: "Atualizar para Max", href: "/chat", usage: "Promo TOMVERSE50: US$12.50/m?s por 3 meses", features: ["Acesso aos n?veis Free, Pro e Max", "Sem limite di?rio de mensagens com prote??o mensal fair-use", "Limites maiores de anexos e contexto", "Acesso priorit?rio a modelos avan?ados", "Feito para fluxos di?rios intensivos de IA"] },
     ],
   },
 };
@@ -360,6 +360,7 @@ export function PricingPageContent() {
           {content.plans.map((plan) => {
             const planId = plan.name === "Max" ? "max" : plan.name === "Pro" ? "pro" : "free";
             const displayPrice = billing.formatPlanPrice(planId) || plan.price;
+            const usdPrice = billing.formatUsdPlanPrice(planId) || plan.price;
             return (
             <article
               key={plan.name}
@@ -389,6 +390,11 @@ export function PricingPageContent() {
                   {plan.period}
                 </span>
               </div>
+              {planId !== "free" ? (
+                <p className={`mt-2 text-xs font-semibold leading-5 ${plan.highlighted ? "text-blue-100" : "text-zinc-500 dark:text-zinc-400"}`}>
+                  Estimated local price converted from {usdPrice}. Checkout is charged in USD.
+                </p>
+              ) : null}
               <p className={`mt-3 text-sm font-black ${plan.highlighted ? "text-blue-50" : "text-zinc-700 dark:text-zinc-200"}`}>
                 {plan.usage}
               </p>
@@ -480,3 +486,4 @@ export function PricingPageContent() {
     </main>
   );
 }
+

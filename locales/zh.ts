@@ -217,8 +217,8 @@ export const zh = {
         joinProWaitlist: "升级到 Pro",
         joinMaxWaitlist: "升级到 Max",
         promoTitle: "应用发布优惠码",
-        promoProDescription: "Pro 为每月 $19。输入 TOMVERSE50，前 3 个月可享 50% 折扣。",
-        promoMaxDescription: "Max 为每月 $35。输入 TOMVERSE50，前 3 个月可享 50% 折扣。",
+        promoProDescription: "Pro 为每月 $15。输入 TOMVERSE50，前 3 个月可享 50% 折扣。",
+        promoMaxDescription: "Max 为每月 $25。输入 TOMVERSE50，前 3 个月可享 50% 折扣。",
         promoLabel: "优惠码",
         promoFinePrint: "折扣适用于 Pro 和 Max 的前 3 个月，之后将按标准月费续订。",
         applyPromo: "应用优惠码",
@@ -358,8 +358,8 @@ export const zh = {
         planPolicyTitle: "方案政策",
         planPolicyGuest: "访客：仅免费模型，最多比较 2 个模型，不能添加附件。",
         planPolicyFree: "Free：可在使用量限制内使用 Free 和 Pro 模型等级。",
-        planPolicyPro: "Pro：所有模型等级和更高使用量限制。标准价格每月 $19。",
-        planPolicyMax: "Max：所有模型等级、每日消息无限制，并包含月度公平使用和提供商成本保护。标准价格每月 $35。",
+        planPolicyPro: "Pro：所有模型等级和更高使用量限制。标准价格每月 $15。",
+        planPolicyMax: "Max：所有模型等级、每日消息无限制，并包含月度公平使用和提供商成本保护。标准价格每月 $25。",
     },
     privacyPolicy: {
         title: "隐私政策",
@@ -388,3 +388,4 @@ export const zh = {
         back: "返回 Tomverse",
     }
 };
+

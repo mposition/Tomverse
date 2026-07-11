@@ -217,8 +217,8 @@ export const ko = {
         joinProWaitlist: "Pro로 업그레이드",
         joinMaxWaitlist: "Max로 업그레이드",
         promoTitle: "출시 프로모션 코드 적용",
-        promoProDescription: "Pro는 월 $19입니다. TOMVERSE50을 입력하면 첫 3개월 동안 50% 할인이 적용됩니다.",
-        promoMaxDescription: "Max는 월 $35입니다. TOMVERSE50을 입력하면 첫 3개월 동안 50% 할인이 적용됩니다.",
+        promoProDescription: "Pro는 월 $15입니다. TOMVERSE50을 입력하면 첫 3개월 동안 50% 할인이 적용됩니다.",
+        promoMaxDescription: "Max는 월 $25입니다. TOMVERSE50을 입력하면 첫 3개월 동안 50% 할인이 적용됩니다.",
         promoLabel: "프로모션 코드",
         promoFinePrint: "할인은 Pro와 Max의 첫 3개월에 적용되며, 이후에는 정가 월간 요금으로 갱신됩니다.",
         applyPromo: "프로모션 코드 적용",
@@ -358,8 +358,8 @@ export const ko = {
         planPolicyTitle: "플랜 정책",
         planPolicyGuest: "게스트: 무료 모델만 사용 가능, 최대 2개 모델 비교, 첨부파일 불가.",
         planPolicyFree: "Free: Free 및 Pro 모델 등급을 사용량 한도 안에서 이용.",
-        planPolicyPro: "Pro: 모든 모델 등급과 더 높은 사용량 한도. 정가 월 $19.",
-        planPolicyMax: "Max: 모든 모델 등급, 일일 메시지 무제한, 월간 공정 사용 및 공급자 비용 보호 한도. 정가 월 $35.",
+        planPolicyPro: "Pro: 모든 모델 등급과 더 높은 사용량 한도. 정가 월 $15.",
+        planPolicyMax: "Max: 모든 모델 등급, 일일 메시지 무제한, 월간 공정 사용 및 공급자 비용 보호 한도. 정가 월 $25.",
     },
     privacyPolicy: {
         title: "개인정보 처리방침",
@@ -388,3 +388,4 @@ export const ko = {
         back: "Tomverse로 돌아가기",
     }
 };
+

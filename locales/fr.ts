@@ -390,3 +390,4 @@ export const fr = {
         back: "Retour à Tomverse",
     },
 } satisfies typeof en;
+

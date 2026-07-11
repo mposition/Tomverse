@@ -138,8 +138,8 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     pricingDescription: "Plans are built around usage allowance, file workflows, sharing, and access to the available model catalogue.",
     pricingPlans: [
       { title: "Free", price: "$0", description: "For trying Tomverse and light daily work.", bullets: ["Free and Pro model tiers", "Usage-limited daily work", "Files, sharing, and downloads after login"] },
-      { title: "Pro", price: "$19/mo", description: "For everyday multi-model comparison.", bullets: ["Use TOMVERSE50 for 50% off 3 months", "All available models", "Files, sharing, downloads"] },
-      { title: "Max", price: "$35/mo", description: "For heavier AI workflows.", bullets: ["Use TOMVERSE50 for 50% off 3 months", "No daily message limit", "Monthly fair-use protection"] },
+      { title: "Pro", price: "$15/mo", description: "For everyday multi-model comparison.", bullets: ["Use TOMVERSE50 for 50% off 3 months", "All available models", "Files, sharing, downloads"] },
+      { title: "Max", price: "$25/mo", description: "For heavier AI workflows.", bullets: ["Use TOMVERSE50 for 50% off 3 months", "No daily message limit", "Monthly fair-use protection"] },
     ],
     faqTitle: "Quick questions",
     faqs: [
@@ -199,8 +199,8 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     pricingDescription: "플랜은 사용량, 파일 워크플로, 공유 기능, 사용 가능한 모델 카탈로그 접근을 기준으로 구성됩니다.",
     pricingPlans: [
       { title: "Free", price: "$0", description: "Tomverse를 체험하고 가벼운 일상 작업을 하기 위한 플랜입니다.", bullets: ["Free 및 Pro 모델 등급", "사용량 제한이 있는 일상 작업", "로그인 후 파일, 공유, 다운로드"] },
-      { title: "Pro", price: "$19/월", description: "매일 여러 모델을 비교하는 사용자에게 적합합니다.", bullets: ["TOMVERSE50으로 3개월 50% 할인", "모든 사용 가능 모델", "파일, 공유, 다운로드"] },
-      { title: "Max", price: "$35/월", description: "더 많은 AI 작업을 수행하는 사용자에게 적합합니다.", bullets: ["TOMVERSE50으로 3개월 50% 할인", "일일 메시지 무제한", "월간 fair-use 보호"] },
+      { title: "Pro", price: "$15/월", description: "매일 여러 모델을 비교하는 사용자에게 적합합니다.", bullets: ["TOMVERSE50으로 3개월 50% 할인", "모든 사용 가능 모델", "파일, 공유, 다운로드"] },
+      { title: "Max", price: "$25/월", description: "더 많은 AI 작업을 수행하는 사용자에게 적합합니다.", bullets: ["TOMVERSE50으로 3개월 50% 할인", "일일 메시지 무제한", "월간 fair-use 보호"] },
     ],
     faqTitle: "자주 묻는 질문",
     faqs: [
@@ -260,8 +260,8 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     pricingDescription: "方案围绕使用额度、文件工作流、分享功能和可用模型目录访问来设计。",
     pricingPlans: [
       { title: "Free", price: "$0", description: "用于体验 Tomverse 和轻量日常工作。", bullets: ["Free 和 Pro 模型等级", "受限的日常使用量", "登录后可使用文件、分享和下载"] },
-      { title: "Pro", price: "$19/月", description: "适合每天进行多模型比较的用户。", bullets: ["使用 TOMVERSE50，前 3 个月 50% 折扣", "所有可用模型", "文件、分享、下载"] },
-      { title: "Max", price: "$35/月", description: "适合更高强度的 AI 工作流。", bullets: ["使用 TOMVERSE50，前 3 个月 50% 折扣", "每日消息无限制", "月度 fair-use 保护"] },
+      { title: "Pro", price: "$15/月", description: "适合每天进行多模型比较的用户。", bullets: ["使用 TOMVERSE50，前 3 个月 50% 折扣", "所有可用模型", "文件、分享、下载"] },
+      { title: "Max", price: "$25/月", description: "适合更高强度的 AI 工作流。", bullets: ["使用 TOMVERSE50，前 3 个月 50% 折扣", "每日消息无限制", "月度 fair-use 保护"] },
     ],
     faqTitle: "常见问题",
     faqs: [
@@ -300,7 +300,7 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     modelsDescription: "Tomverse centralise le choix des mod?les pour comparer les bonnes options sans changer de flux de travail.",
     pricingTitle: "Commencez gratuitement, passez au niveau sup?rieur quand l?usage augmente.",
     pricingDescription: "Les plans reposent sur les quotas, les fichiers, le partage et l?acc?s au catalogue de mod?les.",
-    pricingPlans: [{ title: "Free", price: "$0", description: "Pour essayer Tomverse et travailler l?g?rement au quotidien.", bullets: ["Niveaux Free et Pro","Usage quotidien limit?","Fichiers, partage et t?l?chargements apr?s connexion"] }, { title: "Pro", price: "$19/mois", description: "Pour la comparaison multi-mod?les quotidienne.", bullets: ["TOMVERSE50 : -50 % pendant 3 mois","Tous les mod?les disponibles","Fichiers, partage, t?l?chargements"] }, { title: "Max", price: "$35/mois", description: "Pour les workflows IA plus intensifs.", bullets: ["TOMVERSE50 : -50 % pendant 3 mois","Aucune limite quotidienne de messages","Protection mensuelle fair-use"] }],
+    pricingPlans: [{ title: "Free", price: "$0", description: "Pour essayer Tomverse et travailler l?g?rement au quotidien.", bullets: ["Niveaux Free et Pro","Usage quotidien limit?","Fichiers, partage et t?l?chargements apr?s connexion"] }, { title: "Pro", price: "$15/mois", description: "Pour la comparaison multi-mod?les quotidienne.", bullets: ["TOMVERSE50 : -50 % pendant 3 mois","Tous les mod?les disponibles","Fichiers, partage, t?l?chargements"] }, { title: "Max", price: "$25/mois", description: "Pour les workflows IA plus intensifs.", bullets: ["TOMVERSE50 : -50 % pendant 3 mois","Aucune limite quotidienne de messages","Protection mensuelle fair-use"] }],
     faqTitle: "Questions rapides",
     faqs: [{ question: "Puis-je utiliser Tomverse gratuitement ?", answer: "Oui. Free est pr?vu pour un usage l?ger avec acc?s aux niveaux Free et Pro dans les limites." }, { question: "Quels mod?les sont pris en charge ?", answer: "Tomverse prend en charge OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Moonshot, Qwen, Perplexity et d?autres." }, { question: "Qu?est-ce que Private Mode ?", answer: "Private Mode signifie que Tomverse ne sauvegarde pas la conversation dans sa base de donn?es. Les fournisseurs IA peuvent toujours recevoir les prompts." }, { question: "Puis-je joindre des fichiers ?", answer: "Oui. Images, PDF, documents Office, fichiers Google Drive et autres types autoris?s selon le fournisseur." }],
     ctaTitle: "Pr?t ? comparer plus intelligemment ?",
@@ -333,7 +333,7 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     modelsDescription: "Neue Modelle erscheinen st?ndig. Tomverse zentralisiert die Modellauswahl, damit Nutzer passende Optionen vergleichen k?nnen, ohne ihren Workflow umzubauen.",
     pricingTitle: "Kostenlos starten, upgraden wenn die Nutzung w?chst.",
     pricingDescription: "Pl?ne richten sich nach Nutzungskontingent, Datei-Workflows, Teilen und Zugriff auf den verf?gbaren Modellkatalog.",
-    pricingPlans: [{ title: "Free", price: "$0", description: "Zum Ausprobieren von Tomverse und f?r leichte t?gliche Arbeit.", bullets: ["Free- und Pro-Modellstufen","Begrenzte t?gliche Nutzung","Dateien, Teilen und Downloads nach Anmeldung"] }, { title: "Pro", price: "$19/Monat", description: "F?r t?glichen Multi-Modell-Vergleich.", bullets: ["TOMVERSE50: 50 % Rabatt f?r 3 Monate","Alle verf?gbaren Modelle","Dateien, Teilen, Downloads"] }, { title: "Max", price: "$35/Monat", description: "F?r intensivere KI-Workflows.", bullets: ["TOMVERSE50: 50 % Rabatt f?r 3 Monate","Kein t?gliches Nachrichtenlimit","Monatlicher Fair-Use-Schutz"] }],
+    pricingPlans: [{ title: "Free", price: "$0", description: "Zum Ausprobieren von Tomverse und f?r leichte t?gliche Arbeit.", bullets: ["Free- und Pro-Modellstufen","Begrenzte t?gliche Nutzung","Dateien, Teilen und Downloads nach Anmeldung"] }, { title: "Pro", price: "$15/Monat", description: "F?r t?glichen Multi-Modell-Vergleich.", bullets: ["TOMVERSE50: 50 % Rabatt f?r 3 Monate","Alle verf?gbaren Modelle","Dateien, Teilen, Downloads"] }, { title: "Max", price: "$25/Monat", description: "F?r intensivere KI-Workflows.", bullets: ["TOMVERSE50: 50 % Rabatt f?r 3 Monate","Kein t?gliches Nachrichtenlimit","Monatlicher Fair-Use-Schutz"] }],
     faqTitle: "Kurze Fragen",
     faqs: [{ question: "Kann ich Tomverse kostenlos nutzen?", answer: "Ja. Free ist f?r leichte Nutzung mit Zugriff auf Free- und Pro-Modellstufen innerhalb der Limits gedacht." }, { question: "Welche Modelle werden unterst?tzt?", answer: "Tomverse unterst?tzt Modelle von OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Moonshot, Qwen, Perplexity und weiteren Anbietern." }, { question: "Was ist Private Mode?", answer: "Private Mode bedeutet, dass Tomverse die Unterhaltung nicht in der Tomverse-Datenbank speichert. KI-Anbieter k?nnen Prompts weiterhin zur Antworterzeugung erhalten." }, { question: "Kann ich Dateien anh?ngen?", answer: "Ja. Tomverse unterst?tzt Bilder, PDFs, Office-Dokumente, Google-Drive-Dateien und weitere erlaubte Anh?nge je nach Anbieter." }],
     ctaTitle: "Bereit, smarter zu vergleichen?",
@@ -366,7 +366,7 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     modelsDescription: "Aparecen modelos nuevos constantemente. Tomverse centraliza la elecci?n para comparar opciones adecuadas sin rehacer el flujo de trabajo.",
     pricingTitle: "Empieza gratis y actualiza cuando crezca el uso.",
     pricingDescription: "Los planes se basan en l?mites de uso, flujos con archivos, compartici?n y acceso al cat?logo de modelos.",
-    pricingPlans: [{ title: "Free", price: "$0", description: "Para probar Tomverse y trabajo diario ligero.", bullets: ["Niveles Free y Pro","Trabajo diario con l?mite de uso","Archivos, compartir y descargas tras iniciar sesi?n"] }, { title: "Pro", price: "$19/mes", description: "Para comparaci?n multimodelo diaria.", bullets: ["TOMVERSE50: 50 % de descuento por 3 meses","Todos los modelos disponibles","Archivos, compartir, descargas"] }, { title: "Max", price: "$35/mes", description: "Para flujos de IA m?s intensivos.", bullets: ["TOMVERSE50: 50 % de descuento por 3 meses","Sin l?mite diario de mensajes","Protecci?n mensual fair-use"] }],
+    pricingPlans: [{ title: "Free", price: "$0", description: "Para probar Tomverse y trabajo diario ligero.", bullets: ["Niveles Free y Pro","Trabajo diario con l?mite de uso","Archivos, compartir y descargas tras iniciar sesi?n"] }, { title: "Pro", price: "$15/mes", description: "Para comparaci?n multimodelo diaria.", bullets: ["TOMVERSE50: 50 % de descuento por 3 meses","Todos los modelos disponibles","Archivos, compartir, descargas"] }, { title: "Max", price: "$25/mes", description: "Para flujos de IA m?s intensivos.", bullets: ["TOMVERSE50: 50 % de descuento por 3 meses","Sin l?mite diario de mensajes","Protecci?n mensual fair-use"] }],
     faqTitle: "Preguntas r?pidas",
     faqs: [{ question: "?Puedo usar Tomverse gratis?", answer: "S?. Free est? pensado para uso ligero con acceso a niveles Free y Pro dentro de los l?mites." }, { question: "?Qu? modelos se admiten?", answer: "Tomverse admite modelos de OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Moonshot, Qwen, Perplexity y otros proveedores." }, { question: "?Qu? es Private Mode?", answer: "Private Mode significa que Tomverse no guarda la conversaci?n en su base de datos. Los proveedores de IA a?n pueden recibir prompts para generar respuestas." }, { question: "?Puedo adjuntar archivos?", answer: "S?. Tomverse admite im?genes, PDF, documentos Office, archivos de Google Drive y otros tipos permitidos seg?n el proveedor." }],
     ctaTitle: "?Listo para comparar mejor?",
@@ -399,7 +399,7 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     modelsDescription: "Novos modelos surgem o tempo todo. O Tomverse centraliza a escolha para comparar op??es certas sem refazer o fluxo de trabalho.",
     pricingTitle: "Comece gr?tis e fa?a upgrade quando o uso crescer.",
     pricingDescription: "Os planos s?o baseados em limites de uso, fluxos com arquivos, compartilhamento e acesso ao cat?logo de modelos.",
-    pricingPlans: [{ title: "Free", price: "$0", description: "Para testar o Tomverse e uso di?rio leve.", bullets: ["N?veis Free e Pro","Uso di?rio com limite","Arquivos, compartilhamento e downloads ap?s login"] }, { title: "Pro", price: "US$19/m?s", description: "Para compara??o multimodelo di?ria.", bullets: ["TOMVERSE50: 50% de desconto por 3 meses","Todos os modelos dispon?veis","Arquivos, compartilhamento, downloads"] }, { title: "Max", price: "US$35/m?s", description: "Para fluxos de IA mais intensos.", bullets: ["TOMVERSE50: 50% de desconto por 3 meses","Sem limite di?rio de mensagens","Prote??o mensal fair-use"] }],
+    pricingPlans: [{ title: "Free", price: "$0", description: "Para testar o Tomverse e uso di?rio leve.", bullets: ["N?veis Free e Pro","Uso di?rio com limite","Arquivos, compartilhamento e downloads ap?s login"] }, { title: "Pro", price: "US$15/m?s", description: "Para compara??o multimodelo di?ria.", bullets: ["TOMVERSE50: 50% de desconto por 3 meses","Todos os modelos dispon?veis","Arquivos, compartilhamento, downloads"] }, { title: "Max", price: "US$25/m?s", description: "Para fluxos de IA mais intensos.", bullets: ["TOMVERSE50: 50% de desconto por 3 meses","Sem limite di?rio de mensagens","Prote??o mensal fair-use"] }],
     faqTitle: "Perguntas r?pidas",
     faqs: [{ question: "Posso usar o Tomverse gr?tis?", answer: "Sim. O Free ? pensado para uso leve com acesso aos n?veis Free e Pro dentro dos limites." }, { question: "Quais modelos s?o compat?veis?", answer: "O Tomverse oferece modelos de OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Moonshot, Qwen, Perplexity e outros provedores." }, { question: "O que ? Private Mode?", answer: "Private Mode significa que o Tomverse n?o salva a conversa no banco de dados. Provedores de IA ainda podem receber prompts para gerar respostas." }, { question: "Posso anexar arquivos?", answer: "Sim. O Tomverse aceita imagens, PDFs, documentos Office, arquivos do Google Drive e outros tipos permitidos conforme o provedor." }],
     ctaTitle: "Pronto para comparar melhor?",
@@ -718,10 +718,16 @@ export function LandingPageContent() {
             {content.pricingPlans.map((plan, index) => {
               const planId = index === 2 ? "max" : index === 1 ? "pro" : "free";
               const displayPrice = billing.formatPlanPrice(planId) || plan.price;
+              const usdPrice = billing.formatUsdPlanPrice(planId) || plan.price;
               return (
               <article key={plan.title} className={`rounded-2xl border p-6 ${index === 1 ? "border-blue-500 bg-blue-600 text-white" : "border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/40"}`}>
                 <h3 className="text-2xl font-black">{plan.title}</h3>
                 <p className={`mt-2 text-3xl font-black ${index === 1 ? "text-white" : "text-zinc-950 dark:text-white"}`}>{displayPrice}</p>
+                {planId !== "free" ? (
+                  <p className={`mt-2 text-xs font-semibold leading-5 ${index === 1 ? "text-blue-100" : "text-zinc-500 dark:text-zinc-400"}`}>
+                    Estimated local price converted from {usdPrice}. Checkout is charged in USD.
+                  </p>
+                ) : null}
                 <p className={`mt-3 text-sm leading-6 ${index === 1 ? "text-blue-50" : "text-zinc-600 dark:text-zinc-300"}`}>{plan.description}</p>
                 <ul className="mt-5 space-y-3">
                   {plan.bullets.map((bullet) => (
@@ -775,3 +781,4 @@ export function LandingPageContent() {
     </main>
   );
 }
+

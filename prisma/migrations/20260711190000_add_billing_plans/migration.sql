@@ -50,9 +50,9 @@ INSERT INTO "BillingPlan" (
 VALUES
   ('free', 'Free', 'Free', 0, 'USD', 100, 2000, 3, true, true, true, true, 10,
    '{"description":"Light daily usage for signed-in users."}'::jsonb, CURRENT_TIMESTAMP),
-  ('pro', 'Pro', 'Pro', 1900, 'USD', 500, 10000, 3, true, true, true, true, 20,
+  ('pro', 'Pro', 'Pro', 1500, 'USD', 500, 10000, 3, true, true, true, true, 20,
    '{"description":"Everyday multi-model comparison."}'::jsonb, CURRENT_TIMESTAMP),
-  ('max', 'Max', 'Max', 3500, 'USD', 0, 50000, 3, true, true, true, true, 30,
+  ('max', 'Max', 'Max', 2500, 'USD', 0, 50000, 3, true, true, true, true, 30,
    '{"description":"No daily message limit with monthly fair-use protection."}'::jsonb, CURRENT_TIMESTAMP)
 ON CONFLICT ("id") DO NOTHING;
 

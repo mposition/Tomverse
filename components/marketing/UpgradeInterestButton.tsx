@@ -10,6 +10,10 @@ type BillingPlan = {
   name: string;
   monthlyPriceCents: number;
   currency: string;
+  baseCurrency?: string;
+  baseMonthlyPriceCents?: number;
+  displayCurrency?: string;
+  displayMonthlyPriceAmount?: number;
 };
 
 type BillingPromotion = {
@@ -22,15 +26,39 @@ type BillingPromotion = {
 type BillingConfig = {
   plans: BillingPlan[];
   promotions: BillingPromotion[];
+  displayCurrency?: string;
+  baseCurrency?: "USD";
 };
 
 const formatPrice = (planConfig: BillingPlan | undefined) => {
   if (!planConfig) return null;
+  if (
+    planConfig.displayCurrency &&
+    typeof planConfig.displayMonthlyPriceAmount === "number"
+  ) {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: planConfig.displayCurrency,
+      maximumFractionDigits: 0,
+      minimumFractionDigits: 0,
+    }).format(planConfig.displayMonthlyPriceAmount);
+  }
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: planConfig.currency || "USD",
-    maximumFractionDigits: planConfig.monthlyPriceCents % 100 === 0 ? 0 : 2,
+    maximumFractionDigits: 0,
+    minimumFractionDigits: 0,
   }).format(planConfig.monthlyPriceCents / 100);
+};
+
+const formatUsdPrice = (planConfig: BillingPlan | undefined) => {
+  if (!planConfig) return null;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+    minimumFractionDigits: 0,
+  }).format((planConfig.baseMonthlyPriceCents ?? planConfig.monthlyPriceCents) / 100);
 };
 
 export function UpgradeInterestButton({
@@ -54,6 +82,7 @@ export function UpgradeInterestButton({
     item.appliesToPlanIds.includes(planId)
   );
   const priceLabel = formatPrice(planConfig);
+  const usdPriceLabel = formatUsdPrice(planConfig);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -152,6 +181,11 @@ export function UpgradeInterestButton({
                       ? t("billing.promoProDescription")
                       : t("billing.promoMaxDescription")}
                 </p>
+                {priceLabel && usdPriceLabel ? (
+                  <p className="mt-2 text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+                    Local display is converted from {usdPriceLabel}. Checkout is charged in USD.
+                  </p>
+                ) : null}
                 {activePromo ? (
                   <p className="mt-2 text-xs font-bold text-blue-600 dark:text-blue-300">
                     {activePromo.code}: {activePromo.discountPercent}% off for{" "}

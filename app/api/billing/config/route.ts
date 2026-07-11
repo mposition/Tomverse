@@ -8,6 +8,7 @@ import {
   consumeApiRateLimit,
 } from "@/lib/apiSecurity";
 import { getPublicBillingConfig } from "@/lib/billingConfig";
+import { withDisplayCurrency } from "@/lib/billingCurrency";
 
 export async function GET(req: Request) {
   try {
@@ -16,7 +17,8 @@ export async function GET(req: Request) {
       minute: 60,
       day: 2_000,
     });
-    return NextResponse.json(await getPublicBillingConfig());
+    const config = await getPublicBillingConfig();
+    return NextResponse.json(await withDisplayCurrency(config, req));
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;

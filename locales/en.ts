@@ -217,8 +217,8 @@ export const en = {
         joinProWaitlist: "Upgrade to Pro",
         joinMaxWaitlist: "Upgrade to Max",
         promoTitle: "Apply launch promo code",
-        promoProDescription: "Pro is $19/month. Enter TOMVERSE50 to get 50% off for your first 3 months.",
-        promoMaxDescription: "Max is $35/month. Enter TOMVERSE50 to get 50% off for your first 3 months.",
+        promoProDescription: "Pro is $15/month. Enter TOMVERSE50 to get 50% off for your first 3 months.",
+        promoMaxDescription: "Max is $25/month. Enter TOMVERSE50 to get 50% off for your first 3 months.",
         promoLabel: "Promo code",
         promoFinePrint: "The discount applies to Pro and Max for the first 3 months, then renews at the regular monthly price.",
         applyPromo: "Apply promo code",
@@ -358,8 +358,8 @@ export const en = {
         planPolicyTitle: "Plan policy",
         planPolicyGuest: "Guest: free models only, up to 2 models, no attachments.",
         planPolicyFree: "Free: Free and Pro model tiers with usage limits.",
-        planPolicyPro: "Pro: all model tiers with higher usage limits. Regular price $19/month.",
-        planPolicyMax: "Max: all model tiers with no daily message limit, plus monthly fair-use and provider cost protection. Regular price $35/month.",
+        planPolicyPro: "Pro: all model tiers with higher usage limits. Regular price $15/month.",
+        planPolicyMax: "Max: all model tiers with no daily message limit, plus monthly fair-use and provider cost protection. Regular price $25/month.",
     },
     privacyPolicy: {
         title: "Privacy Policy",
@@ -388,3 +388,4 @@ export const en = {
         back: "Back to Tomverse",
     }
 };
+
