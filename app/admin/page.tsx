@@ -301,7 +301,7 @@ export default async function AdminPage() {
                     <MetricCard
                         label="Tier limits"
                         value="Free / Pro / Max"
-                        detail={`${dashboard.tierLimits.Free} Â· ${dashboard.tierLimits.Pro} Â· ${dashboard.tierLimits.Max}`}
+                        detail={`${dashboard.tierLimits.Free} / ${dashboard.tierLimits.Pro} / ${dashboard.tierLimits.Max}`}
                         icon={<Gauge className="h-4 w-4" />}
                     />
                     <MetricCard

@@ -52,7 +52,7 @@ const chrome = {
     menu: "菜单",
     close: "关闭菜单",
     topMenu: [
-      { label: "关于", href: "/about" },
+      { label: "介绍", href: "/about" },
       { label: "功能", href: "/#features" },
       { label: "模型", href: "/models" },
       { label: "价格", href: "/pricing" },
@@ -72,27 +72,27 @@ const chrome = {
     menu: "Menu",
     close: "Fermer le menu",
     topMenu: [
-      { label: "À propos", href: "/about" },
-      { label: "Fonctionnalités", href: "/#features" },
-      { label: "Modèles", href: "/models" },
+      { label: "A propos", href: "/about" },
+      { label: "Fonctionnalites", href: "/#features" },
+      { label: "Modeles", href: "/models" },
       { label: "Tarifs", href: "/pricing" },
-      { label: "Sécurité", href: "/safety" },
+      { label: "Securite", href: "/safety" },
       { label: "FAQ", href: "/faq" },
       { label: "Support", href: "/support" },
     ],
     footerMenu: [
       { label: "Conditions", href: "/terms" },
       { label: "Remboursement", href: "/refund" },
-      { label: "Confidentialité", href: "/privacy" },
+      { label: "Confidentialite", href: "/privacy" },
       { label: "Support", href: "/support" },
     ],
   },
   de: {
-    app: "App öffnen",
-    menu: "Menü",
-    close: "Menü schließen",
+    app: "App offnen",
+    menu: "Menu",
+    close: "Menu schliessen",
     topMenu: [
-      { label: "Über uns", href: "/about" },
+      { label: "Uber uns", href: "/about" },
       { label: "Funktionen", href: "/#features" },
       { label: "Modelle", href: "/models" },
       { label: "Preise", href: "/pricing" },
@@ -102,15 +102,15 @@ const chrome = {
     ],
     footerMenu: [
       { label: "Bedingungen", href: "/terms" },
-      { label: "Rückerstattung", href: "/refund" },
+      { label: "Ruckerstattung", href: "/refund" },
       { label: "Datenschutz", href: "/privacy" },
       { label: "Support", href: "/support" },
     ],
   },
   es: {
     app: "Abrir app",
-    menu: "Menú",
-    close: "Cerrar menú",
+    menu: "Menu",
+    close: "Cerrar menu",
     topMenu: [
       { label: "Acerca de", href: "/about" },
       { label: "Funciones", href: "/#features" },
@@ -121,7 +121,7 @@ const chrome = {
       { label: "Soporte", href: "/support" },
     ],
     footerMenu: [
-      { label: "Términos", href: "/terms" },
+      { label: "Terminos", href: "/terms" },
       { label: "Reembolso", href: "/refund" },
       { label: "Privacidad", href: "/privacy" },
       { label: "Soporte", href: "/support" },
@@ -135,8 +135,8 @@ const chrome = {
       { label: "Sobre", href: "/about" },
       { label: "Recursos", href: "/#features" },
       { label: "Modelos", href: "/models" },
-      { label: "Preços", href: "/pricing" },
-      { label: "Segurança", href: "/safety" },
+      { label: "Precos", href: "/pricing" },
+      { label: "Seguranca", href: "/safety" },
       { label: "FAQ", href: "/faq" },
       { label: "Suporte", href: "/support" },
     ],
@@ -244,16 +244,23 @@ export function MarketingFooter({ maxWidth = "max-w-7xl" }: { maxWidth?: string 
   const labels = chrome[lang] ?? chrome.en;
 
   return (
-    <footer className="border-t border-zinc-200 py-8 dark:border-zinc-800">
-      <div className={`mx-auto flex ${maxWidth} flex-col gap-4 px-4 text-sm text-zinc-500 sm:px-6 md:flex-row md:items-center md:justify-between lg:px-8`}>
-        <span className="font-semibold">Tomverse AI</span>
-        <div className="flex flex-wrap gap-5">
+    <footer className="border-t border-zinc-200 bg-white py-10 dark:border-zinc-800 dark:bg-zinc-950">
+      <div className={`mx-auto flex ${maxWidth} flex-col gap-5 px-4 text-sm text-zinc-500 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8`}>
+        <div className="flex items-center gap-3">
+          <span className="flex h-8 w-8 overflow-hidden rounded-lg bg-white ring-1 ring-zinc-200 dark:ring-zinc-800">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/tomverse-logo.png" alt="Tomverse" className="h-full w-full object-cover" />
+          </span>
+          <span className="font-bold text-zinc-700 dark:text-zinc-300">Tomverse AI</span>
+          <span>© 2026</span>
+        </div>
+        <nav className="flex flex-wrap gap-4">
           {labels.footerMenu.map((item) => (
-            <Link key={item.href} href={item.href} className="hover:text-zinc-900 dark:hover:text-white">
+            <Link key={item.href} href={item.href} className="hover:text-zinc-950 dark:hover:text-white">
               {item.label}
             </Link>
           ))}
-        </div>
+        </nav>
       </div>
     </footer>
   );
