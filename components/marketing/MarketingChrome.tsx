@@ -107,6 +107,46 @@ const chrome = {
       { label: "Support", href: "/support" },
     ],
   },
+  es: {
+    app: "Abrir app",
+    menu: "Menú",
+    close: "Cerrar menú",
+    topMenu: [
+      { label: "Acerca de", href: "/about" },
+      { label: "Funciones", href: "/#features" },
+      { label: "Modelos", href: "/models" },
+      { label: "Precios", href: "/pricing" },
+      { label: "Seguridad", href: "/safety" },
+      { label: "FAQ", href: "/faq" },
+      { label: "Soporte", href: "/support" },
+    ],
+    footerMenu: [
+      { label: "Términos", href: "/terms" },
+      { label: "Reembolso", href: "/refund" },
+      { label: "Privacidad", href: "/privacy" },
+      { label: "Soporte", href: "/support" },
+    ],
+  },
+  pt: {
+    app: "Abrir app",
+    menu: "Menu",
+    close: "Fechar menu",
+    topMenu: [
+      { label: "Sobre", href: "/about" },
+      { label: "Recursos", href: "/#features" },
+      { label: "Modelos", href: "/models" },
+      { label: "Preços", href: "/pricing" },
+      { label: "Segurança", href: "/safety" },
+      { label: "FAQ", href: "/faq" },
+      { label: "Suporte", href: "/support" },
+    ],
+    footerMenu: [
+      { label: "Termos", href: "/terms" },
+      { label: "Reembolso", href: "/refund" },
+      { label: "Privacidade", href: "/privacy" },
+      { label: "Suporte", href: "/support" },
+    ],
+  },
 } satisfies Record<
   Language,
   {

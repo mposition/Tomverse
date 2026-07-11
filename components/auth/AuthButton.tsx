@@ -330,6 +330,8 @@ export function AuthButton() {
                                                     <option className="bg-white text-zinc-900" value="ko">{t("auth.languageKorean")}</option>
                                                     <option className="bg-white text-zinc-900" value="fr">{t("auth.languageFrench")}</option>
                                                     <option className="bg-white text-zinc-900" value="de">{t("auth.languageGerman")}</option>
+                                                    <option className="bg-white text-zinc-900" value="es">{t("auth.languageSpanish")}</option>
+                                                    <option className="bg-white text-zinc-900" value="pt">{t("auth.languagePortuguese")}</option>
                                                 </select>
                                             </span>
                                         </label>
@@ -446,6 +448,12 @@ export function AuthButton() {
           </option>
           <option className="bg-white text-zinc-900" value="de">
             {t("auth.languageGerman")}
+          </option>
+          <option className="bg-white text-zinc-900" value="es">
+            {t("auth.languageSpanish")}
+          </option>
+          <option className="bg-white text-zinc-900" value="pt">
+            {t("auth.languagePortuguese")}
           </option>
         </select>
       </label>

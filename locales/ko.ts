@@ -148,6 +148,8 @@ export const ko = {
         languageKorean: "한국어",
         languageFrench: "프랑스어",
         languageGerman: "독일어",
+        languageSpanish: "스페인어",
+        languagePortuguese: "포르투갈어",
         defaultModel: "기본 AI 엔진 모델",
         downloadAllTxt: "모든 채팅을 .txt로 다운로드",
         accountTab: "계정",

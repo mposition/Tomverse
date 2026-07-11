@@ -7,8 +7,10 @@ import { en } from "@/locales/en";
 import { zh } from "@/locales/zh";
 import { fr } from "@/locales/fr";
 import { de } from "@/locales/de";
+import { es } from "@/locales/es";
+import { pt } from "@/locales/pt";
 
-export type Language = "ko" | "en" | "zh" | "fr" | "de";
+export type Language = "ko" | "en" | "zh" | "fr" | "de" | "es" | "pt";
 
 interface LanguageContextType {
     lang: Language;
@@ -18,7 +20,7 @@ interface LanguageContextType {
 
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
 
-const dictionaries = { ko, en, zh, fr, de };
+const dictionaries = { ko, en, zh, fr, de, es, pt };
 const LANGUAGE_STORAGE_KEY = "tomverse_language";
 
 const isLanguage = (value: unknown): value is Language =>
@@ -26,7 +28,9 @@ const isLanguage = (value: unknown): value is Language =>
     value === "en" ||
     value === "zh" ||
     value === "fr" ||
-    value === "de";
+    value === "de" ||
+    value === "es" ||
+    value === "pt";
 
 export function LanguageProvider({ children, initialLang = "en" }: { children: React.ReactNode, initialLang?: Language }) {
     const [lang, setLangState] = useState<Language>(initialLang);

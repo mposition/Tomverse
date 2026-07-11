@@ -148,6 +148,8 @@ export const en = {
         languageKorean: "Korean",
         languageFrench: "French",
         languageGerman: "German",
+        languageSpanish: "Spanish",
+        languagePortuguese: "Portuguese",
         defaultModel: "Default AI engine model",
         downloadAllTxt: "Download all chats as .txt",
         accountTab: "Account",

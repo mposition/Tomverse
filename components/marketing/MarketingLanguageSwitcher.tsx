@@ -9,6 +9,8 @@ const languageOptions: Array<{ value: Language; label: string }> = [
   { value: "zh", label: "中文" },
   { value: "fr", label: "Français" },
   { value: "de", label: "Deutsch" },
+  { value: "es", label: "Español" },
+  { value: "pt", label: "Português" },
 ];
 
 export function MarketingLanguageSwitcher() {

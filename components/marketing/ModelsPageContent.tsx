@@ -51,6 +51,24 @@ const copy = {
     status: "Status",
     enabled: "Verfügbar",
   },
+  es: {
+    eyebrow: "Modelos",
+    title: "Modelos disponibles actualmente",
+    description: "El catálogo de modelos activos disponible en Tomverse AI. La disponibilidad puede cambiar según el acceso, los precios y los nombres de modelos de cada proveedor.",
+    provider: "Proveedor",
+    tier: "Nivel",
+    status: "Estado",
+    enabled: "Disponible",
+  },
+  pt: {
+    eyebrow: "Modelos",
+    title: "Modelos disponíveis atualmente",
+    description: "O catálogo de modelos ativos disponível no Tomverse AI. A disponibilidade pode mudar conforme acesso, preços e nomes de modelos de cada provedor.",
+    provider: "Provedor",
+    tier: "Nível",
+    status: "Status",
+    enabled: "Disponível",
+  },
 } satisfies Record<Language, Record<string, string>>;
 
 export function ModelsPageContent() {

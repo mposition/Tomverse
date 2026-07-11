@@ -27,6 +27,8 @@ export const de = {
         languageKorean: "Koreanisch",
         languageFrench: "Französisch",
         languageGerman: "Deutsch",
+        languageSpanish: "Spanisch",
+        languagePortuguese: "Portugiesisch",
         defaultModel: "Standard-KI-Modell",
         accountTab: "Konto",
         preferencesTab: "Einstellungen",
