@@ -174,6 +174,65 @@ export async function getBillingPlans(): Promise<BillingPlanConfig[]> {
   return Array.from(merged.values()).sort((a, b) => a.sortOrder - b.sortOrder);
 }
 
+export async function syncBillingDefaultsToDatabase() {
+  const existingPlans = await prisma.billingPlan.findMany({
+    select: { id: true },
+  });
+  const existingPlanIds = new Set(existingPlans.map((plan) => plan.id));
+
+  for (const plan of Object.values(DEFAULT_PLANS)) {
+    if (existingPlanIds.has(plan.id)) continue;
+    await prisma.billingPlan.create({
+      data: {
+        id: plan.id,
+        name: plan.name,
+        tier: plan.tier,
+        monthlyPriceCents: plan.monthlyPriceCents,
+        annualPriceCents: plan.annualPriceCents,
+        currency: plan.currency,
+        stripeProductId: plan.stripeProductId,
+        stripePriceId: plan.stripePriceId,
+        stripeAnnualPriceId: plan.stripeAnnualPriceId,
+        dailyMessageLimit: plan.dailyMessageLimit,
+        monthlyMessageLimit: plan.monthlyMessageLimit,
+        maxModels: plan.maxModels,
+        allowAttachments: plan.allowAttachments,
+        allowSharing: plan.allowSharing,
+        allowDownloads: plan.allowDownloads,
+        isActive: plan.isActive,
+        sortOrder: plan.sortOrder,
+      },
+    });
+  }
+
+  const existingPromotion = await prisma.billingPromotion.findFirst({
+    where: {
+      OR: [{ id: DEFAULT_PROMOTION.id }, { code: DEFAULT_PROMOTION.code }],
+    },
+    select: { id: true },
+  });
+
+  if (!existingPromotion) {
+    await prisma.billingPromotion.create({
+      data: {
+        id: DEFAULT_PROMOTION.id,
+        code: DEFAULT_PROMOTION.code,
+        discountPercent: DEFAULT_PROMOTION.discountPercent,
+        discountAmountCents: DEFAULT_PROMOTION.discountAmountCents,
+        maxRedemptions: DEFAULT_PROMOTION.maxRedemptions,
+        redeemedCount: DEFAULT_PROMOTION.redeemedCount,
+        durationMonths: DEFAULT_PROMOTION.durationMonths,
+        appliesToPlanIds: JSON.stringify(DEFAULT_PROMOTION.appliesToPlanIds),
+        stripeCouponId: DEFAULT_PROMOTION.stripeCouponId,
+        stripePromotionCodeId: DEFAULT_PROMOTION.stripePromotionCodeId,
+        startsAt: DEFAULT_PROMOTION.startsAt,
+        endsAt: DEFAULT_PROMOTION.endsAt,
+        isActive: DEFAULT_PROMOTION.isActive,
+      },
+    });
+  }
+}
+
 export async function getBillingPlanByTier(tier: ModelTier) {
   const plans = await getBillingPlans();
   return plans.find((plan) => plan.id === planIdForTier(tier)) || DEFAULT_PLANS.free;

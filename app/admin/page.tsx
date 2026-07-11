@@ -10,7 +10,11 @@ import { isAdminSession } from "@/lib/adminAuth";
 import { getEnabledModel } from "@/lib/models";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { BillingAdminPanel } from "@/components/admin/BillingAdminPanel";
-import { getBillingPlans, getBillingPromotions } from "@/lib/billingConfig";
+import {
+    getBillingPlans,
+    getBillingPromotions,
+    syncBillingDefaultsToDatabase,
+} from "@/lib/billingConfig";
 import {
     getProviderHealthDashboard,
     type ProviderHealthRow,
@@ -237,6 +241,8 @@ export default async function AdminPage() {
     if (!isAdminSession(session)) {
         notFound();
     }
+
+    await syncBillingDefaultsToDatabase();
 
     const [dashboard, billingPlans, billingPromotions] = await Promise.all([
         getProviderHealthDashboard(),

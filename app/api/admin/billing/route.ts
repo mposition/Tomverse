@@ -10,7 +10,11 @@ import {
   consumeApiRateLimit,
   readLimitedJson,
 } from "@/lib/apiSecurity";
-import { getBillingPlans, getBillingPromotions } from "@/lib/billingConfig";
+import {
+  getBillingPlans,
+  getBillingPromotions,
+  syncBillingDefaultsToDatabase,
+} from "@/lib/billingConfig";
 import { prisma } from "@/lib/prisma";
 
 const optionalText = z
@@ -83,6 +87,7 @@ export async function GET(req: Request) {
       minute: 30,
       day: 500,
     });
+    await syncBillingDefaultsToDatabase();
     const [plans, promotions] = await Promise.all([
       getBillingPlans(),
       getBillingPromotions(),
@@ -110,6 +115,7 @@ export async function PATCH(req: Request) {
       day: 100,
     });
     const body = await readLimitedJson(req, 32 * 1024, updateBillingSchema);
+    await syncBillingDefaultsToDatabase();
 
     for (const plan of body.plans || []) {
       await prisma.billingPlan.upsert({
