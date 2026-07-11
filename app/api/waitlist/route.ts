@@ -14,6 +14,7 @@ const waitlistSchema = z
   .object({
     plan: z.enum(["Pro", "Max"]),
     email: z.string().email().max(254).optional(),
+    promoCode: z.string().trim().toUpperCase().max(32).optional(),
   })
   .strict();
 
@@ -32,6 +33,7 @@ export async function POST(req: Request) {
         userId: session?.user?.id || null,
         email: session?.user?.email || body.email || null,
         plan: body.plan,
+        promoCode: body.promoCode || null,
       })
     );
     return NextResponse.json({ success: true });
