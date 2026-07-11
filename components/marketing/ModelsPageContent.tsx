@@ -2,6 +2,7 @@
 
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { ENABLED_MODELS } from "@/lib/models";
+import { getModelBrand } from "@/lib/modelBranding";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
 
 const copy = {
@@ -49,35 +50,46 @@ export function ModelsPageContent() {
           <p className="mt-5 text-lg leading-8 text-zinc-600 dark:text-zinc-300">{content.description}</p>
         </div>
 
-        <div className="mt-12 grid gap-3">
-          {ENABLED_MODELS.map((model) => (
+        <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {ENABLED_MODELS.map((model) => {
+            const brand = getModelBrand(model.provider);
+
+            return (
             <article
               key={model.id}
-              className="grid gap-4 rounded-2xl border border-zinc-200 bg-zinc-50 p-5 dark:border-zinc-800 dark:bg-zinc-900/40 md:grid-cols-[1fr_160px_120px_120px] md:items-center"
+              className="rounded-2xl border border-zinc-200 bg-zinc-50 p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900/40"
             >
-              <div className="flex items-center gap-3">
-                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-sm font-black shadow-sm ring-1 ring-zinc-200 dark:bg-zinc-950 dark:ring-zinc-800">
-                  {model.icon}
+              <div className="flex items-start gap-3">
+                <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${brand.className} text-base font-black text-white shadow-sm ring-1 ring-zinc-200/70 dark:ring-zinc-800`}>
+                  {brand.image ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={brand.image} alt={`${model.name} logo`} className="h-8 w-8 object-contain" />
+                  ) : (
+                    brand.mark
+                  )}
                 </span>
                 <div>
                   <h2 className="font-black">{model.name}</h2>
                   <p className="text-xs font-semibold text-zinc-500">{model.id}</p>
                 </div>
               </div>
-              <div>
-                <p className="text-xs font-bold uppercase text-zinc-500">{content.provider}</p>
-                <p className="mt-1 text-sm font-black capitalize">{model.provider}</p>
-              </div>
-              <div>
-                <p className="text-xs font-bold uppercase text-zinc-500">{content.tier}</p>
-                <p className="mt-1 text-sm font-black">{model.tier}</p>
-              </div>
-              <div>
-                <p className="text-xs font-bold uppercase text-zinc-500">{content.status}</p>
-                <p className="mt-1 text-sm font-black text-emerald-600 dark:text-emerald-400">{content.enabled}</p>
+              <div className="mt-5 grid grid-cols-3 gap-3">
+                <div>
+                  <p className="text-[10px] font-bold uppercase text-zinc-500">{content.provider}</p>
+                  <p className="mt-1 truncate text-sm font-black capitalize">{model.provider}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold uppercase text-zinc-500">{content.tier}</p>
+                  <p className="mt-1 text-sm font-black">{model.tier}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold uppercase text-zinc-500">{content.status}</p>
+                  <p className="mt-1 text-sm font-black text-emerald-600 dark:text-emerald-400">{content.enabled}</p>
+                </div>
               </div>
             </article>
-          ))}
+            );
+          })}
         </div>
       </section>
       <MarketingFooter maxWidth="max-w-6xl" />

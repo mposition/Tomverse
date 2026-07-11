@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChatApp } from "@/components/chat/ChatApp";
 import { ChatInput } from "@/components/chat/ChatInput";
+import { ModelLogo } from "@/components/chat/ModelLogo";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import {
   AVAILABLE_MODELS,
@@ -337,7 +338,7 @@ export function MobileChatShell({
                       : "border-zinc-200 bg-white text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300"
                   } ${isDisabled ? "opacity-50" : ""}`}
                 >
-                  <span>{model?.icon}</span>
+                  <ModelLogo model={model} size="xs" />
                   <span className="truncate">{model?.name || modelId}</span>
                   {status === "responding" || status === "loading" ? (
                     <span className={`h-2 w-2 animate-pulse rounded-full ${isActive ? "bg-white" : "bg-blue-500"}`} />

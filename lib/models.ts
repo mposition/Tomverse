@@ -30,7 +30,7 @@ export const DEFAULT_MODEL_ID = "gpt-5-4-mini";
 export const AVAILABLE_MODELS = [
     { id: "gpt-5-5", name: "GPT-5.5", apiModel: "gpt-5.5", provider: "openai", icon: "🤖", tier: "Max", enabled: true, status: "enabled" },
     { id: "gpt-5-5-thinking", name: "GPT-5.5 Thinking", apiModel: "gpt-5.5", provider: "openai", icon: "🤖", tier: "Max", enabled: true, status: "enabled", reasoning: "high" },
-    { id: "gpt-5-4-mini", name: "GPT-5.4 mini", apiModel: "gpt-5.4-mini", provider: "openai", icon: "🤖", tier: "Pro", enabled: true, status: "enabled" },
+    { id: "gpt-5-4-mini", name: "GPT-5.4 mini", apiModel: "gpt-5.4-mini", provider: "openai", icon: "🤖", tier: "Free", enabled: true, status: "enabled" },
 
     { id: "claude-fable-5", name: "Claude Fable 5", apiModel: "claude-fable-5", provider: "anthropic", icon: "🧠", tier: "Max", enabled: true, status: "enabled" },
     { id: "claude-opus-4-8", name: "Claude Opus 4.8", apiModel: "claude-opus-4-8", provider: "anthropic", icon: "🧠", tier: "Max", enabled: true, status: "enabled" },

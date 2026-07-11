@@ -10,10 +10,24 @@ type SiteverifyResponse = {
   action?: string;
 };
 
+const isLocalDevelopmentRequest = (request: Request) => {
+  if (process.env.NODE_ENV === "production") return false;
+  const host = request.headers.get("host");
+  if (!host) return false;
+  try {
+    const hostname = new URL(`http://${host}`).hostname;
+    return ["localhost", "127.0.0.1", "::1"].includes(hostname);
+  } catch {
+    return false;
+  }
+};
+
 export async function verifyGuestTurnstile(
   request: Request,
   token: string | undefined
 ) {
+  if (isLocalDevelopmentRequest(request)) return;
+
   const secret = process.env.TURNSTILE_SECRET_KEY;
   if (!secret) {
     if (process.env.NODE_ENV !== "production") return;

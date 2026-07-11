@@ -3,6 +3,7 @@
 import React from "react";
 import { ChatApp } from "@/components/chat/ChatApp";
 import { ChatInput } from "@/components/chat/ChatInput";
+import { ModelLogo } from "@/components/chat/ModelLogo";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import {
   AVAILABLE_MODELS,
@@ -136,9 +137,7 @@ export function DesktopChatShell({
               >
                 <div className="flex min-h-12 shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-400">
                   <div className={`flex min-w-0 flex-1 items-center gap-2 transition-opacity ${isPanelDisabled ? "opacity-50" : ""}`}>
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-zinc-100 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200 dark:bg-zinc-800 dark:text-zinc-200 dark:ring-zinc-700">
-                      {modelInfo?.icon}
-                    </span>
+                    <ModelLogo model={modelInfo} size="md" />
 
                     {isPanelDisabled ? (
                       <span className="flex min-w-0 select-none flex-col truncate">

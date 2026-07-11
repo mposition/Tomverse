@@ -19,6 +19,12 @@ const SCRIPT_ID = "cloudflare-turnstile-script";
 const SCRIPT_URL =
   "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
 
+const isLocalDevelopmentHost = () => {
+  if (process.env.NODE_ENV === "production") return false;
+  if (typeof window === "undefined") return false;
+  return ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
+};
+
 const loadTurnstile = () =>
   new Promise<void>((resolve, reject) => {
     if (window.turnstile) {
@@ -62,7 +68,7 @@ export function useTurnstile(enabled: boolean) {
 
   useEffect(() => {
     const sitekey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
-    if (!enabled || !sitekey) return;
+    if (!enabled || !sitekey || isLocalDevelopmentHost()) return;
     let cancelled = false;
 
     void loadTurnstile()
@@ -120,6 +126,7 @@ export function useTurnstile(enabled: boolean) {
 
   const getToken = useCallback(async () => {
     if (!enabled) return undefined;
+    if (isLocalDevelopmentHost()) return undefined;
     if (!process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY) {
       if (process.env.NODE_ENV !== "production") return undefined;
       throw new Error("Guest verification is not configured.");

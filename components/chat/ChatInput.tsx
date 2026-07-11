@@ -20,6 +20,7 @@ import {
   X,
 } from "lucide-react";
 import { AVAILABLE_MODELS, MAX_SELECTED_MODELS, type ChatAttachment } from "@/components/chat/types";
+import { ModelLogo } from "@/components/chat/ModelLogo";
 import { useLanguage } from "@/components/LanguageProvider";
 import { dispatchAppToast } from "@/lib/appToast";
 
@@ -32,6 +33,7 @@ const GOOGLE_WORKSPACE_TYPES = [
   "application/vnd.google-apps.presentation",
 ].join(",");
 const RECENT_MODEL_STORAGE_KEY = "recent_model_ids";
+const PROVIDER_DISPLAY_ORDER = ["openai", "google", "anthropic", "deepseek"];
 const TEXT_FILE_TYPES = new Set([
   "text/plain",
   "text/markdown",
@@ -70,6 +72,11 @@ const PROMPT_SUGGESTIONS = [
   "Review this code",
   "Analyze this image",
 ];
+
+const getProviderSortRank = (provider: string) => {
+  const priorityIndex = PROVIDER_DISPLAY_ORDER.indexOf(provider);
+  return priorityIndex === -1 ? PROVIDER_DISPLAY_ORDER.length : priorityIndex;
+};
 
 const getFileMediaType = (file: File) => {
   if (TEXT_FILE_TYPES.has(file.type) || OFFICE_FILE_TYPES.has(file.type)) {
@@ -358,7 +365,12 @@ export function ChatInput({
   }, [setMenuView]);
 
   const modelProviders = useMemo(
-    () => Array.from(new Set(AVAILABLE_MODELS.map((model) => model.provider))),
+    () =>
+      Array.from(new Set(AVAILABLE_MODELS.map((model) => model.provider))).sort(
+        (a, b) =>
+          getProviderSortRank(a) - getProviderSortRank(b) ||
+          a.localeCompare(b)
+      ),
     []
   );
 
@@ -388,6 +400,9 @@ export function ChatInput({
       if (favoriteDelta !== 0) return favoriteDelta;
       const recentDelta = Number(recentSet.has(b.id)) - Number(recentSet.has(a.id));
       if (recentDelta !== 0) return recentDelta;
+      const providerDelta =
+        getProviderSortRank(a.provider) - getProviderSortRank(b.provider);
+      if (providerDelta !== 0) return providerDelta;
       return a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name);
     });
 
@@ -1034,12 +1049,7 @@ export function ChatInput({
               {selectedModels.slice(0, 3).map((id) => {
                 const model = AVAILABLE_MODELS.find((item) => item.id === id);
                 return model ? (
-                  <span
-                    key={id}
-                    className="flex h-5 w-5 items-center justify-center rounded-full bg-white text-xs ring-1 ring-zinc-200 dark:bg-zinc-950 dark:ring-zinc-700"
-                  >
-                    {model.icon}
-                  </span>
+                  <ModelLogo key={id} model={model} size="xs" />
                 ) : null;
               })}
             </span>
@@ -1229,7 +1239,7 @@ export function ChatInput({
                                 aria-pressed={isSelected}
                                 className="flex min-w-0 flex-1 items-center gap-2 rounded-lg py-1 text-sm disabled:cursor-not-allowed disabled:opacity-45"
                               >
-                                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-zinc-100 text-xs font-semibold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">{model.icon}</span>
+                                <ModelLogo model={model} size="md" />
                                 <span className="min-w-0 flex-1 text-left">
                                   <span className="block truncate text-zinc-800 dark:text-zinc-100">{model.name}</span>
                                   <span className="block truncate text-[10px] font-medium text-zinc-400">

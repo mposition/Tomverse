@@ -20,6 +20,7 @@ import {
   UserRound,
 } from "lucide-react";
 import { Message, AVAILABLE_MODELS, type ChatAttachment } from "@/components/chat/types";
+import { ModelLogo } from "@/components/chat/ModelLogo";
 import { useLanguage } from "@/components/LanguageProvider";
 
 type ChatMessageListProps = {
@@ -183,7 +184,7 @@ export function ChatMessageList({
               >
                 {!isUser && modelInfo && (
                   <div className="mb-1.5 ml-1 flex select-none items-center gap-2">
-                    <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-zinc-100 text-xs ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800">{modelInfo.icon}</span>
+                    <ModelLogo model={modelInfo} size="sm" />
                     <span className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
                       {modelInfo.name}
                     </span>
