@@ -28,7 +28,7 @@ const supportedModels = [
   { name: "DeepSeek", mark: "DS", detail: "DeepSeek", className: "from-white to-blue-50", image: "/model-icons/deepseek.png" },
   { name: "Mistral", mark: "M", detail: "Mistral AI", className: "from-white to-orange-50", image: "/model-icons/mistral.png" },
   { name: "Grok", mark: "/", detail: "xAI", className: "from-white to-zinc-100", image: "/model-icons/grok.png" },
-  { name: "Kimi", mark: "KM", detail: "Moonshot", className: "from-purple-500 to-fuchsia-500" },
+  { name: "Kimi", mark: "KM", detail: "Moonshot", className: "from-white to-blue-50", image: "/model-icons/kimi.png" },
   { name: "Qwen", mark: "QW", detail: "Alibaba", className: "from-white to-indigo-50", image: "/model-icons/qwen.png" },
   { name: "Perplexity", mark: "P", detail: "Sonar", className: "from-white to-cyan-50", image: "/model-icons/perplexity.png" },
   { name: "Mistral", mark: "M", detail: "Coming soon", className: "from-amber-400 to-red-500" },

@@ -29,7 +29,7 @@ export const getModelBrand = (provider: AiProvider | string): ModelBrand => {
     case "zhipu":
       return { mark: "Z", className: "from-white to-zinc-100", image: "/model-icons/zhipu.png" };
     case "moonshot":
-      return { mark: "KM", className: "from-purple-500 to-fuchsia-500" };
+      return { mark: "KM", className: "from-white to-blue-50", image: "/model-icons/kimi.png" };
     default:
       return { mark: provider.slice(0, 2).toUpperCase(), className: "from-zinc-500 to-zinc-700" };
   }
