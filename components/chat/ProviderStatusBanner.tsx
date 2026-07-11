@@ -123,6 +123,70 @@ export function ProviderStatusBanner({
 
   if (!hasImpact && compact) return null;
 
+  if (compact) {
+    return (
+      <div
+        className={`mx-3 mt-2 rounded-2xl border px-2.5 py-2 text-xs shadow-sm ${
+          tone === "danger"
+            ? "border-red-200 bg-red-50 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
+            : "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200"
+        }`}
+        role="status"
+        aria-live="polite"
+      >
+        <div className="flex items-center gap-2">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 items-center gap-2 font-black">
+              <span className="truncate">
+                {bannerState.isSelectedOnly
+                  ? t("providerStatus.selectedIssue")
+                  : t("providerStatus.globalIssue")}
+              </span>
+              <span className="shrink-0 rounded-full bg-black/5 px-2 py-0.5 text-[10px] dark:bg-white/10">
+                {bannerState.unavailable.length > 0
+                  ? `${bannerState.unavailable.length} ${t("providerStatus.unavailable")}`
+                  : `${bannerState.limited.length} ${t("providerStatus.limited")}`}
+              </span>
+            </div>
+            <p className="mt-0.5 truncate text-[11px] font-medium opacity-80">
+              {bannerState.fallbackNames.length > 0
+                ? `${t("providerStatus.tryFallback")} ${bannerState.fallbackNames.join(", ")}`
+                : t("providerStatus.tryLater")}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void loadStatus()}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-black/5 transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
+            aria-label={t("providerStatus.refresh")}
+          >
+            {isLoading ? (
+              <Info className="h-4 w-4 animate-pulse" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+          </button>
+        </div>
+        {onToggleModel && bannerState.fallbackIds.length > 0 && (
+          <div className="mt-1.5 flex gap-1.5 overflow-x-auto overscroll-x-contain pb-0.5">
+            {bannerState.fallbackIds.map((modelId) => (
+              <button
+                key={modelId}
+                type="button"
+                onClick={() => onToggleModel(modelId)}
+                className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full bg-black/5 px-2 text-[11px] font-black transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
+              >
+                <Shuffle className="h-3 w-3" />
+                {modelName(modelId)}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div
       className={`mx-3 mt-3 rounded-2xl border px-3 py-2 text-xs shadow-sm md:mx-4 ${

@@ -976,14 +976,14 @@ export function ChatInput({
   };
 
   return (
-      <div className="w-full max-w-full shrink-0 overflow-hidden border-t border-zinc-200 bg-zinc-50/95 px-2 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] transition-colors dark:border-zinc-800 dark:bg-zinc-950 md:overflow-visible md:px-6 md:py-3 md:pb-3">
+      <div className="w-full max-w-full shrink-0 overflow-hidden border-t border-zinc-200 bg-zinc-50/95 px-2 py-1.5 pb-[calc(0.4rem+env(safe-area-inset-bottom))] transition-colors dark:border-zinc-800 dark:bg-zinc-950 md:overflow-visible md:px-6 md:py-3 md:pb-3">
           <div
             data-testid="chat-input"
             onDragEnter={handleDropZoneDragEnter}
             onDragOver={handleDropZoneDragOver}
             onDragLeave={handleDropZoneDragLeave}
             onDrop={handleDropZoneDrop}
-            className={`relative mx-auto w-full max-w-4xl overflow-hidden rounded-3xl border bg-white p-2.5 shadow-lg shadow-zinc-200/50 transition-colors dark:bg-zinc-900 dark:shadow-black/20 md:overflow-visible md:rounded-2xl md:p-3 ${
+            className={`relative mx-auto w-full max-w-4xl overflow-hidden rounded-3xl border bg-white p-2 shadow-lg shadow-zinc-200/50 transition-colors dark:bg-zinc-900 dark:shadow-black/20 md:overflow-visible md:rounded-2xl md:p-3 ${
               isDragActive
                 ? "border-blue-500 bg-blue-50/70 dark:border-blue-400 dark:bg-blue-950/30"
                 : "border-zinc-200 dark:border-zinc-800"
@@ -1029,7 +1029,7 @@ export function ChatInput({
             </div>
           )}
           {!value.trim() && attachments.length === 0 && (
-            <div className="mb-2 flex max-w-full gap-2 overflow-x-auto overscroll-x-contain pb-1 md:flex-wrap md:overflow-visible md:pb-0">
+            <div className="mb-2 hidden max-w-full gap-2 overflow-x-auto overscroll-x-contain pb-1 md:flex md:flex-wrap md:overflow-visible md:pb-0">
               {PROMPT_SUGGESTIONS.map((suggestion) => (
                 <button
                   key={suggestion}
@@ -1458,7 +1458,7 @@ export function ChatInput({
           placeholder={placeholderText}
           disabled={isDisabled}
           rows={2}
-                  className="order-2 max-h-[144px] min-h-[72px] w-full flex-none resize-none overflow-y-auto border-0 bg-transparent px-1 py-2.5 text-sm leading-6 text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-500 md:order-first md:max-h-[160px] md:min-h-[56px] md:py-2"
+                  className="order-2 max-h-[120px] min-h-[58px] w-full flex-none resize-none overflow-y-auto border-0 bg-transparent px-1 py-2 text-sm leading-6 text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-500 md:order-first md:max-h-[160px] md:min-h-[56px] md:py-2"
               />
 
         {isSending ? (
