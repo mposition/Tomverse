@@ -61,3 +61,17 @@ The root cause was confirmed in production-mode `next start`: origin protection 
 The stale server on port `3100` was stopped before verification. A fresh run of `npx playwright test tests/e2e/smoke.spec.ts --project=desktop-chromium` started its own server and completed with exit code `0`: `1 passed (4.9s)`. Port `3100` was clear after the run.
 
 Updated status: `DONE`.
+
+## Second Follow-Up Amendment
+
+Review found two additional E2E hardening gaps:
+
+- `mobile-safari` now explicitly uses a `390x844` viewport instead of relying on the iPhone 13 browser viewport descriptor.
+- The Playwright-managed server now preloads `tests/e2e/block-external-network.cjs` through `NODE_OPTIONS`, blocking non-loopback outbound network access during E2E runs so live AI, OAuth, R2, Drive, or database-adjacent HTTP calls cannot accidentally run from browser tests.
+
+The network guard was verified with:
+
+- `node --require .\tests\e2e\block-external-network.cjs -e "...fetch('https://example.com')..."`
+- Exit code `0`; printed `QA_EXTERNAL_NETWORK_BLOCKED`.
+
+WebKit also exposed that production CSP `upgrade-insecure-requests` upgrades local `_next/static` assets to `https://127.0.0.1`. `lib/csp.ts` now supports `DISABLE_CSP_UPGRADE_INSECURE_REQUESTS=true`, and `playwright.config.ts` sets it only for the Playwright web server. Production behavior is unchanged unless that explicit test flag is set.

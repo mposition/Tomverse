@@ -227,7 +227,10 @@ export function MobileChatShell({
   ) || isAnyError;
 
   return (
-    <main className="flex h-[100dvh] w-full max-w-full flex-col overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
+    <main
+      data-testid="mobile-chat-shell"
+      className="flex h-[100dvh] w-full max-w-full flex-col overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100"
+    >
       <header className="min-w-0 shrink-0 overflow-hidden border-b border-zinc-200 bg-white px-3 pb-2 pt-[calc(0.5rem+env(safe-area-inset-top))] dark:border-zinc-800 dark:bg-zinc-950">
         <div className="flex items-center gap-2">
         <button
@@ -322,6 +325,8 @@ export function MobileChatShell({
                 <button
                   key={modelId}
                   type="button"
+                  data-testid="mobile-model-tab"
+                  data-model-id={modelId}
                   onClick={() => setActiveModelId(modelId)}
                   role="tab"
                   aria-selected={isActive}

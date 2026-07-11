@@ -128,6 +128,7 @@ export function ChatMessageList({
   return (
     <div className="relative flex h-full min-h-0 flex-col">
       <div
+        data-testid="chat-message-list"
         ref={containerRef}
         onScroll={handleScroll}
         className="min-h-0 flex-1 overflow-y-auto px-3 py-4 md:px-6 md:py-6"
@@ -175,6 +176,9 @@ export function ChatMessageList({
             return (
               <div
                 key={msg.id || idx}
+                data-testid="chat-message"
+                data-message-role={msg.role}
+                data-model-id={msg.modelId || ""}
                 className={`flex w-full flex-col [content-visibility:auto] [contain-intrinsic-size:auto_160px] ${isUser ? "items-end" : "items-start"}`}
               >
                 {!isUser && modelInfo && (

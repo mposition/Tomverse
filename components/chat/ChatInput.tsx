@@ -887,6 +887,7 @@ export function ChatInput({
   return (
       <div className="w-full max-w-full shrink-0 overflow-hidden border-t border-zinc-200 bg-zinc-50/95 px-2 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] transition-colors dark:border-zinc-800 dark:bg-zinc-950 md:overflow-visible md:px-6 md:py-3 md:pb-3">
           <div
+            data-testid="chat-input"
             onDragEnter={handleDropZoneDragEnter}
             onDragOver={handleDropZoneDragOver}
             onDragLeave={handleDropZoneDragLeave}
@@ -1218,6 +1219,8 @@ export function ChatInput({
                               </button>
                               <button
                                 type="button"
+                                data-testid="model-option"
+                                data-model-id={model.id}
                                 disabled={unavailable}
                                 onClick={() => {
                                   rememberRecentModel(model.id);
@@ -1266,11 +1269,13 @@ export function ChatInput({
         />
 
         <textarea
+          data-testid="chat-textarea"
           ref={textareaRef}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
+          aria-label={placeholderText}
           placeholder={placeholderText}
           disabled={isDisabled}
           rows={2}

@@ -1,5 +1,7 @@
 "use strict";
 
+/* eslint-disable @typescript-eslint/no-require-imports */
+
 const http = require("node:http");
 const http2 = require("node:http2");
 const https = require("node:https");

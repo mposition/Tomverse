@@ -1,4 +1,6 @@
 const isDevelopment = process.env.NODE_ENV === "development";
+const shouldUpgradeInsecureRequests =
+  process.env.DISABLE_CSP_UPGRADE_INSECURE_REQUESTS !== "true";
 
 const r2Origin = (() => {
   try {
@@ -28,7 +30,7 @@ const directives = (scriptDirective: string, styleDirective: string) => [
   "base-uri 'self'",
   "form-action 'self'",
   "frame-ancestors 'none'",
-  "upgrade-insecure-requests",
+  ...(shouldUpgradeInsecureRequests ? ["upgrade-insecure-requests"] : []),
 ];
 
 export const createStrictCsp = (nonce: string) =>

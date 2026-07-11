@@ -88,7 +88,10 @@ export function DesktopChatShell({
   const { t } = useLanguage();
 
   return (
-    <main className="flex h-screen overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
+    <main
+      data-testid="desktop-chat-shell"
+      className="flex h-screen overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100"
+    >
       <ChatSidebar
         conversations={conversations}
         currentChatId={currentChatId}
@@ -125,6 +128,8 @@ export function DesktopChatShell({
             return (
               <div
                 key={modelId}
+                data-testid="desktop-model-panel"
+                data-model-id={modelId}
                 className={`relative flex flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm shadow-zinc-200/60 transition-all duration-300 ease-in-out dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/20 ${
                   isPanelDisabled ? "w-44 shrink-0" : "min-w-0 flex-1"
                 }`}

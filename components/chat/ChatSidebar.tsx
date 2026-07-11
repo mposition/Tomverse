@@ -309,12 +309,15 @@ export function ChatSidebar({
                             <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center context-menu-wrapper">
                                 <button
                                     type="button"
+                                    data-testid="conversation-menu"
+                                    data-conversation-id={conv.id}
                                     onClick={(e) => {
                                         e.stopPropagation();
                                         setOpenMenuId(openMenuId === conv.id ? null : conv.id);
                                     }}
                                     className="cursor-pointer p-1 text-zinc-500 hover:text-zinc-200 transition-colors"
                                     title={t("chat.moreActions")}
+                                    aria-label={`${t("chat.moreActions")}: ${conv.title}`}
                                 >
                                     <MoreVertical className="h-4 w-4" />
                                 </button>
@@ -631,6 +634,9 @@ export function ChatSidebar({
         {lockTarget && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
                 <form
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="conversation-lock-title"
                     onSubmit={(event) => {
                         event.preventDefault();
                         const password = lockPassword.trim();
@@ -643,14 +649,21 @@ export function ChatSidebar({
                     }}
                     className="w-full max-w-sm rounded-2xl border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900"
                 >
-                    <h2 className="text-base font-bold text-zinc-900 dark:text-zinc-100">
+                    <h2
+                        id="conversation-lock-title"
+                        className="text-base font-bold text-zinc-900 dark:text-zinc-100"
+                    >
                         {t("sidebar.lock")}
                     </h2>
                     <p className="mt-2 text-sm text-zinc-500">{lockTarget.title}</p>
-                    <label className="mt-4 block text-xs font-semibold text-zinc-500">
+                    <label
+                        htmlFor="conversation-lock-password"
+                        className="mt-4 block text-xs font-semibold text-zinc-500"
+                    >
                         {t("sidebar.password")}
                     </label>
                     <input
+                        id="conversation-lock-password"
                         autoFocus
                         type="password"
                         value={lockPassword}
