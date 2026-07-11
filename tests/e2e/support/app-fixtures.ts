@@ -22,6 +22,10 @@ export async function prepareGuestPage(page: Page, language: QaLanguage = "ko") 
   );
 
   await page.addInitScript((lang) => {
+    if (sessionStorage.getItem("__tomverse_qa_guest_ready") === "true") {
+      return;
+    }
+
     const callbacks = new Map<string, (token: string) => void>();
     window.turnstile = {
       render: (_container, options) => {
@@ -46,6 +50,7 @@ export async function prepareGuestPage(page: Page, language: QaLanguage = "ko") 
     localStorage.setItem("tomverse_language", lang);
     localStorage.setItem("guest_count", "0");
     localStorage.setItem("guest_date", new Date().toDateString());
+    sessionStorage.setItem("__tomverse_qa_guest_ready", "true");
   }, language);
 }
 
