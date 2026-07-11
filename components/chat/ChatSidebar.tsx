@@ -6,7 +6,7 @@ import { AuthButton } from "@/components/auth/AuthButton";
 import { useCallback, useState, useEffect, useRef } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
 import Link from "next/link";
-import { AlertTriangle, CloudUpload, Crown, Database, Download, Link2Off, Lock, MessageSquare, MoreVertical, Pencil, Pin, Search, Send, Share2, ShieldCheck, Sparkles, Star, Trash2, Unlock, X } from "lucide-react";
+import { AlertTriangle, CloudUpload, Crown, Database, Download, Link2Off, Lock, MessageSquare, MoreVertical, Pencil, Pin, Search, Send, Share2, ShieldCheck, Sparkles, Star, Tag, Trash2, Unlock, X } from "lucide-react";
 import { FeedbackButton } from "@/components/chat/FeedbackButton";
 import { useUserUsage, type UserPlan } from "@/components/chat/useUserUsage";
 
@@ -52,7 +52,22 @@ export function ChatSidebar({
     const [openMenuId, setOpenMenuId] = useState<string | null>(null);
     const [showPrivateNotice, setShowPrivateNotice] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
-    const [conversationFilter, setConversationFilter] = useState<"all" | "locked" | "shared">("all");
+    const [conversationFilter, setConversationFilter] = useState<"all" | "locked" | "shared" | "work" | "research" | "personal">("all");
+    const [conversationLabels, setConversationLabels] = useState<Record<string, string>>(() => {
+        if (typeof window === "undefined") return {};
+        try {
+            const saved = JSON.parse(localStorage.getItem("tomverse_conversation_labels") || "{}");
+            if (!saved || typeof saved !== "object" || Array.isArray(saved)) return {};
+            return Object.fromEntries(
+                Object.entries(saved).filter(
+                    (entry): entry is [string, string] =>
+                        typeof entry[0] === "string" && typeof entry[1] === "string"
+                )
+            );
+        } catch {
+            return {};
+        }
+    });
     const [pinnedConversationIds, setPinnedConversationIds] = useState<string[]>(() => {
         if (typeof window === "undefined") return [];
         try {
@@ -132,7 +147,8 @@ export function ChatSidebar({
         const matchesFilter =
             conversationFilter === "all" ||
             (conversationFilter === "locked" && conversation.isLocked) ||
-            (conversationFilter === "shared" && conversation.shareEnabled);
+            (conversationFilter === "shared" && conversation.shareEnabled) ||
+            conversationLabels[conversation.id] === conversationFilter;
 
         return matchesSearch && matchesFilter;
     }).sort((a, b) => {
@@ -185,6 +201,23 @@ export function ChatSidebar({
         toggleStoredId("tomverse_pinned_conversations", id, setPinnedConversationIds);
     const toggleFavorite = (id: string) =>
         toggleStoredId("tomverse_favorite_conversations", id, setFavoriteConversationIds);
+
+    const setConversationLabel = (id: string, label: "work" | "research" | "personal" | null) => {
+        setConversationLabels((current) => {
+            const next = { ...current };
+            if (label) next[id] = label;
+            else delete next[id];
+            localStorage.setItem("tomverse_conversation_labels", JSON.stringify(next));
+            return next;
+        });
+    };
+
+    const labelText = (label: string) => {
+        if (label === "work") return t("sidebar.labelWork");
+        if (label === "research") return t("sidebar.labelResearch");
+        if (label === "personal") return t("sidebar.labelPersonal");
+        return label;
+    };
 
     const getConversationModelSummary = (conversation: Conversation) => {
         const models = conversation.selectedModels
@@ -335,17 +368,20 @@ export function ChatSidebar({
                         className="h-9 w-full rounded-lg border border-zinc-200 bg-white pl-9 pr-3 text-xs text-zinc-800 outline-none transition placeholder:text-zinc-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-blue-500"
                     />
                 </div>
-                <div className="mt-2 grid grid-cols-3 gap-1 rounded-xl bg-zinc-100 p-1 dark:bg-zinc-900">
+                <div className="mt-2 flex gap-1 overflow-x-auto rounded-xl bg-zinc-100 p-1 dark:bg-zinc-900">
                     {[
                         ["all", t("chat.allTiers")],
                         ["locked", t("sidebar.lockedBadge")],
                         ["shared", t("sidebar.sharedBadge")],
+                        ["work", t("sidebar.labelWork")],
+                        ["research", t("sidebar.labelResearch")],
+                        ["personal", t("sidebar.labelPersonal")],
                     ].map(([value, label]) => (
                         <button
                             key={value}
                             type="button"
-                            onClick={() => setConversationFilter(value as "all" | "locked" | "shared")}
-                            className={`rounded-lg px-2 py-1.5 text-[11px] font-bold transition-colors ${
+                            onClick={() => setConversationFilter(value as typeof conversationFilter)}
+                            className={`shrink-0 rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition-colors ${
                                 conversationFilter === value
                                     ? "bg-white text-zinc-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-100"
                                     : "text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
@@ -412,6 +448,12 @@ export function ChatSidebar({
                                 </span>
                                 <span className="min-w-0 flex flex-col gap-1">
                                     <span className="truncate text-[13px] leading-4">{conv.title}</span>
+                                    {conversationLabels[conv.id] && (
+                                        <span className="inline-flex w-fit items-center gap-1 rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-bold text-blue-500">
+                                            <Tag className="h-2.5 w-2.5" />
+                                            {labelText(conversationLabels[conv.id])}
+                                        </span>
+                                    )}
                                     <span className="flex items-center gap-1.5 truncate text-[10px] font-medium text-zinc-400 dark:text-zinc-500">
                                         {pinnedConversationIds.includes(conv.id) && <Pin className="h-3 w-3 shrink-0 text-blue-500" />}
                                         {favoriteConversationIds.includes(conv.id) && <Star className="h-3 w-3 shrink-0 fill-amber-400 text-amber-400" />}
@@ -497,6 +539,28 @@ export function ChatSidebar({
                                                 <span>{favoriteConversationIds.includes(conv.id) ? t("sidebar.removeFavorite") : t("sidebar.favoriteChat")}</span>
                                             </span>
                                         </button>
+
+                                        <div className="my-1 border-t border-zinc-800" />
+                                        {(["work", "research", "personal"] as const).map((label) => (
+                                            <button
+                                                key={label}
+                                                type="button"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setConversationLabel(
+                                                        conv.id,
+                                                        conversationLabels[conv.id] === label ? null : label
+                                                    );
+                                                    setOpenMenuId(null);
+                                                }}
+                                                className={`${menuItemBase} ${menuItemEnabled}`}
+                                            >
+                                                <span className="flex items-center gap-2">
+                                                    <Tag className={menuIconClass} />
+                                                    <span>{labelText(label)}</span>
+                                                </span>
+                                            </button>
+                                        ))}
 
                                         <button
                                             type="button"
@@ -659,7 +723,7 @@ export function ChatSidebar({
                         </div>
                     )}
                 </div>
-                <FeedbackButton currentModelId={currentModelId} />
+                <FeedbackButton currentModelId={currentModelId} currentPlan={displayedPlan} />
                 <div className="rounded-2xl border border-zinc-200 bg-white p-2 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
                     <AuthButton />
                 </div>

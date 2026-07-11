@@ -152,3 +152,32 @@ export async function POST(req: Request) {
     );
   }
 }
+
+export async function DELETE(req: Request) {
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+    }
+
+    const userId = session.user.id;
+    await consumeApiRateLimit(req, userId, "conversation-delete-all", {
+      minute: 2,
+      day: 5,
+    });
+
+    const result = await prisma.conversation.deleteMany({
+      where: { userId },
+    });
+
+    return NextResponse.json({ success: true, deleted: result.count });
+  } catch (error) {
+    const securityResponse = apiSecurityResponse(error);
+    if (securityResponse) return securityResponse;
+    console.error("Failed to delete all conversations:", error);
+    return NextResponse.json(
+      { error: "Failed to delete conversations." },
+      { status: 500 }
+    );
+  }
+}

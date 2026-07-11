@@ -27,6 +27,8 @@ import { getModelBestFor, getModelExperienceStatus, getModelExperienceTags } fro
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { useUserUsage } from "@/components/chat/useUserUsage";
 
+type PublicModelStatus = "available" | "limited" | "unavailable";
+
 const MAX_ATTACHMENTS = 5;
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
 const GOOGLE_DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
@@ -309,6 +311,7 @@ export function ChatInput({
   const [modelSearchQuery, setModelSearchQuery] = useState("");
   const [providerFilter, setProviderFilter] = useState("all");
   const [tierFilter, setTierFilter] = useState("all");
+  const [liveModelStatuses, setLiveModelStatuses] = useState<Record<string, PublicModelStatus>>({});
   const [favoriteModelIds, setFavoriteModelIds] = useState<string[]>(() => {
     if (typeof window === "undefined") return [];
     try {
@@ -418,7 +421,7 @@ export function ChatInput({
         const provider = favoriteSet.has(model.id)
           ? t("chat.favoriteModels")
           : recentSet.has(model.id)
-            ? "Recent"
+            ? t("chat.recentModels")
           : model.provider;
         const group = groups.find((item) => item.provider === provider);
         if (group) group.models.push(model);
@@ -428,6 +431,36 @@ export function ChatInput({
       []
     );
   }, [favoriteModelIds, filteredModels, recentModelIds, t]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch("/api/models/status", {
+      signal: controller.signal,
+      cache: "no-store",
+    })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: unknown) => {
+        if (!data || typeof data !== "object") return;
+        const records = (data as { models?: unknown }).models;
+        if (!Array.isArray(records)) return;
+        const next: Record<string, PublicModelStatus> = {};
+        for (const item of records) {
+          if (!item || typeof item !== "object") continue;
+          const record = item as { id?: unknown; status?: unknown };
+          if (
+            typeof record.id === "string" &&
+            (record.status === "available" ||
+              record.status === "limited" ||
+              record.status === "unavailable")
+          ) {
+            next[record.id] = record.status;
+          }
+        }
+        setLiveModelStatuses(next);
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, []);
 
   const rememberRecentModel = (modelId: string) => {
     setRecentModelIds((current) => {
@@ -1139,6 +1172,14 @@ export function ChatInput({
                       <span className="text-xs text-zinc-500">{t("chat.googleDriveDescription")}</span>
                     </span>
                   </button>
+                  <div className="mx-1 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950/70 dark:text-zinc-400">
+                    <p className="font-semibold text-zinc-700 dark:text-zinc-200">
+                      {canAttach ? t("chat.attachmentGuideTitle") : t("chat.loginToAttach")}
+                    </p>
+                    <p className="mt-0.5">
+                      {t("chat.attachmentGuideBody")}
+                    </p>
+                  </div>
                   <div className="my-1 border-t border-zinc-200 dark:border-zinc-700" />
                   <button
                     type="button"
@@ -1220,19 +1261,19 @@ export function ChatInput({
                           const isSelected = selectedModels.includes(model.id);
                           const isFavorite = favoriteModelIds.includes(model.id);
                           const modelTags = getModelExperienceTags(model);
-                          const modelStatus = getModelExperienceStatus(model);
+                          const modelStatus = liveModelStatuses[model.id] || getModelExperienceStatus(model);
                           const isTierLocked =
                             isGuestMode
                               ? model.tier !== "Free"
                               : accountUsage?.plan === "Free" && model.tier === "Max";
-                          const unavailable = !model.enabled || isTierLocked;
+                          const unavailable = !model.enabled || modelStatus === "unavailable" || isTierLocked;
                           const statusReason = isTierLocked
                             ? isGuestMode
                               ? t("modelStatusReasons.loginRequired")
                               : t("modelStatusReasons.upgradeRequired")
-                            : !model.enabled
+                            : !model.enabled || modelStatus === "unavailable"
                               ? t("modelStatusReasons.unavailable")
-                              : model.status !== "enabled"
+                              : model.status !== "enabled" || modelStatus === "limited"
                                 ? t("modelStatusReasons.limited")
                                 : t(getModelBestFor(model));
                           return (

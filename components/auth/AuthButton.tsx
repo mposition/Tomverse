@@ -10,11 +10,13 @@ import {
     CreditCard,
     Database,
     Download,
+    LifeBuoy,
     Languages,
     LogOut,
     Palette,
     ShieldCheck,
     Settings,
+    Trash2,
     UserRound,
     X,
 } from "lucide-react";
@@ -39,6 +41,9 @@ export function AuthButton() {
     const [theme, setTheme] = useState<"dark" | "light">(APP_DEFAULTS.defaultTheme);
     const [language, setLanguage] = useState<Language>(APP_DEFAULTS.defaultLanguage);
     const [defaultModel, setDefaultModel] = useState<string>(APP_DEFAULTS.defaultModelId);
+    const [isDeletingChats, setIsDeletingChats] = useState(false);
+    const [isDeleteAllArmed, setIsDeleteAllArmed] = useState(false);
+    const [isRequestingDeletion, setIsRequestingDeletion] = useState(false);
     const accountUsage = useUserUsage(Boolean(session?.user));
     const accountPlan = accountUsage?.plan || null;
 
@@ -153,6 +158,50 @@ export function AuthButton() {
             }
         } catch (e) {
             console.error(e);
+        }
+    };
+
+    const handleDeleteAllConversations = async () => {
+        if (isDeletingChats) return;
+        if (!isDeleteAllArmed) {
+            setIsDeleteAllArmed(true);
+            dispatchAppToast(t("auth.deleteAllChatsConfirm"), "info");
+            return;
+        }
+        setIsDeletingChats(true);
+        try {
+            const response = await fetch("/api/conversations", { method: "DELETE" });
+            if (!response.ok) throw new Error(`Delete failed: ${response.status}`);
+            dispatchAppToast(t("auth.deleteAllChatsSuccess"), "success");
+            window.location.href = "/chat";
+        } catch {
+            dispatchAppToast(t("auth.deleteAllChatsFailed"), "error");
+        } finally {
+            setIsDeletingChats(false);
+            setIsDeleteAllArmed(false);
+        }
+    };
+
+    const handleRequestAccountDeletion = async () => {
+        if (isRequestingDeletion) return;
+        setIsRequestingDeletion(true);
+        try {
+            const response = await fetch("/api/feedback", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    type: "other",
+                    message: t("auth.accountDeletionRequestMessage"),
+                    path: window.location.pathname,
+                    userAgent: navigator.userAgent,
+                }),
+            });
+            if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+            dispatchAppToast(t("auth.accountDeletionRequested"), "success");
+        } catch {
+            dispatchAppToast(t("feedback.failed"), "error");
+        } finally {
+            setIsRequestingDeletion(false);
         }
     };
 
@@ -375,6 +424,38 @@ export function AuthButton() {
                                                 {t("auth.downloadAllTxt")}
                                             </button>
                                         </section>
+                                        <section className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60">
+                                            <h4 className="text-sm font-bold">{t("auth.dataRetentionTitle")}</h4>
+                                            <p className="mt-1 text-sm leading-6 text-zinc-500">{t("auth.dataRetentionDescription")}</p>
+                                        </section>
+                                        <section className="rounded-2xl border border-red-200 bg-red-50 p-4 dark:border-red-950/70 dark:bg-red-950/20">
+                                            <h4 className="text-sm font-bold text-red-700 dark:text-red-300">{t("auth.dangerZone")}</h4>
+                                            <p className="mt-1 text-sm leading-6 text-red-700/80 dark:text-red-200/80">{t("auth.dangerZoneDescription")}</p>
+                                            <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={handleDeleteAllConversations}
+                                                    disabled={isDeletingChats}
+                                                    className="flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-white px-3 py-3 text-sm font-semibold text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200 dark:hover:bg-red-950/70"
+                                                >
+                                                    <Trash2 className="h-4 w-4" />
+                                                    {isDeletingChats
+                                                        ? t("auth.deleting")
+                                                        : isDeleteAllArmed
+                                                            ? t("auth.confirmDeleteAllChats")
+                                                            : t("auth.deleteAllChats")}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={handleRequestAccountDeletion}
+                                                    disabled={isRequestingDeletion}
+                                                    className="flex items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-3 text-sm font-semibold text-zinc-700 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                                                >
+                                                    <LifeBuoy className="h-4 w-4" />
+                                                    {isRequestingDeletion ? t("feedback.sending") : t("auth.requestAccountDeletion")}
+                                                </button>
+                                            </div>
+                                        </section>
                                     </div>
                                 )}
 
@@ -395,6 +476,33 @@ export function AuthButton() {
                                             <p className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
                                                 {accountPlan ? t(`sidebar.${accountPlan.toLowerCase()}PlanDescription`) : t("auth.loading")}
                                             </p>
+                                        </section>
+                                        {accountUsage && (
+                                            <section className="grid gap-3 sm:grid-cols-2">
+                                                <div className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60">
+                                                    <p className="text-xs font-bold uppercase tracking-wide text-zinc-400">{t("usage.todayMessages")}</p>
+                                                    <p className="mt-2 text-lg font-black text-zinc-900 dark:text-zinc-100">
+                                                        {accountUsage.limits.messagesDay <= 0
+                                                            ? t("usage.unlimited")
+                                                            : `${accountUsage.usage.messagesDay}/${accountUsage.limits.messagesDay}`}
+                                                    </p>
+                                                </div>
+                                                <div className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60">
+                                                    <p className="text-xs font-bold uppercase tracking-wide text-zinc-400">{t("usage.monthMessages")}</p>
+                                                    <p className="mt-2 text-lg font-black text-zinc-900 dark:text-zinc-100">
+                                                        {accountUsage.usage.messagesMonth}/{accountUsage.limits.messagesMonth}
+                                                    </p>
+                                                </div>
+                                            </section>
+                                        )}
+                                        <section className="rounded-2xl border border-zinc-200 bg-white p-4 text-sm leading-6 text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950/60">
+                                            <h4 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{t("auth.planPolicyTitle")}</h4>
+                                            <ul className="mt-2 list-disc space-y-1 pl-5">
+                                                <li>{t("auth.planPolicyGuest")}</li>
+                                                <li>{t("auth.planPolicyFree")}</li>
+                                                <li>{t("auth.planPolicyPro")}</li>
+                                                <li>{t("auth.planPolicyMax")}</li>
+                                            </ul>
                                         </section>
                                         <button
                                             type="button"

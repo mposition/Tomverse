@@ -16,6 +16,7 @@ const feedbackSchema = z
     message: z.string().trim().min(5).max(2_000),
     traceId: z.string().trim().max(120).optional(),
     modelId: z.string().trim().max(120).optional(),
+    plan: z.string().trim().max(40).optional(),
     path: z.string().trim().max(300).optional(),
     userAgent: z.string().trim().max(500).optional(),
   })

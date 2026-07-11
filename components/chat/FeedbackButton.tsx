@@ -7,8 +7,10 @@ import { useLanguage } from "@/components/LanguageProvider";
 
 export function FeedbackButton({
   currentModelId,
+  currentPlan,
 }: {
   currentModelId?: string | null;
+  currentPlan?: string | null;
 }) {
   const { t } = useLanguage();
   const [open, setOpen] = useState(false);
@@ -29,6 +31,7 @@ export function FeedbackButton({
           message,
           traceId: traceId || undefined,
           modelId: currentModelId || undefined,
+          plan: currentPlan || undefined,
           path: window.location.pathname,
           userAgent: navigator.userAgent,
         }),
@@ -90,6 +93,9 @@ export function FeedbackButton({
               placeholder={t("feedback.tracePlaceholder")}
               className="mt-3 h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm outline-none focus:border-blue-500 dark:border-zinc-800 dark:bg-zinc-900"
             />
+            <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-400">
+              {t("feedback.autoContext")} {currentModelId || "-"} · {currentPlan || "-"} · {typeof window !== "undefined" ? window.location.pathname : "-"}
+            </div>
             <button
               type="button"
               onClick={submit}
