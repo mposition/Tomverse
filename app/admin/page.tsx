@@ -156,6 +156,9 @@ function ProviderRow({ provider }: { provider: ProviderHealthRow }) {
                             : `$${provider.balanceUsd.toFixed(2)} balance`}
                     </p>
                     <p className="mt-1 text-xs text-zinc-500">
+                        Source: {provider.balanceSource}
+                    </p>
+                    <p className="mt-1 text-xs text-zinc-500">
                         Month usage {money(provider.monthCostMicroUsd)} of{" "}
                         {money(provider.monthBudgetMicroUsd)}
                     </p>
@@ -214,17 +217,70 @@ function ProviderRow({ provider }: { provider: ProviderHealthRow }) {
                 </div>
                 <div>
                     <div className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                        Model 5-minute incidents
+                    </div>
+                    {provider.modelIncidents.length === 0 ? (
+                        <p className="mt-2 text-sm text-zinc-500">No model-specific incidents in the current 5-minute window.</p>
+                    ) : (
+                        <div className="mt-2 space-y-2">
+                            {provider.modelIncidents.map((incident) => (
+                                <div
+                                    key={incident.modelId}
+                                    className="rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs"
+                                >
+                                    <div className="flex items-center justify-between gap-3">
+                                        <span className="min-w-0 truncate font-semibold text-red-100">
+                                            {incident.modelName}
+                                        </span>
+                                        <span className="shrink-0 text-red-200">
+                                            {incident.failureCount5m} failures
+                                        </span>
+                                    </div>
+                                    <p className="mt-1 truncate text-red-200/70">
+                                        {incident.recentErrorCode || "UNKNOWN"} / {dateLabel(incident.updatedAt)}
+                                    </p>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </div>
+            <div className="mt-5 grid gap-4 border-t border-zinc-800 pt-5 lg:grid-cols-2">
+                <div>
+                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
                         Manual override
                     </div>
                     <p className="mt-2 text-sm leading-6 text-zinc-300">
-                        Set provider balance and budget variables in Railway, then redeploy or restart the service.
+                        Set provider balance, budget, or automatic balance lookup variables in Railway, then redeploy or restart the service.
                     </p>
                     <div className="mt-2 grid gap-2 text-xs text-zinc-500">
                         <code className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2">
                             PROVIDER_{provider.provider.toUpperCase()}_BALANCE_USD
                         </code>
                         <code className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2">
+                            PROVIDER_{provider.provider.toUpperCase()}_BALANCE_URL
+                        </code>
+                        <code className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2">
+                            PROVIDER_{provider.provider.toUpperCase()}_BALANCE_JSON_PATH
+                        </code>
+                        <code className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2">
                             CHAT_PROVIDER_{provider.provider.toUpperCase()}_COST_MICROUSD_PER_DAY
+                        </code>
+                    </div>
+                </div>
+                <div>
+                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                        Email alert setup
+                    </div>
+                    <p className="mt-2 text-sm leading-6 text-zinc-300">
+                        Enable email alerts with ADMIN_ALERT_EMAIL and either RESEND_API_KEY or SENDGRID_API_KEY.
+                    </p>
+                    <div className="mt-2 grid gap-2 text-xs text-zinc-500">
+                        <code className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2">
+                            ADMIN_ALERT_EMAIL
+                        </code>
+                        <code className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2">
+                            RESEND_API_KEY or SENDGRID_API_KEY
                         </code>
                     </div>
                 </div>

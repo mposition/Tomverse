@@ -44,6 +44,8 @@ import {
 } from "@/lib/conversationLock";
 import {
     notifyProviderBudgetIfNeeded,
+    recordModelFailure,
+    recordModelSuccess,
     recordProviderFailure,
     recordProviderSuccess,
 } from "@/lib/providerMonitoring";
@@ -1095,6 +1097,7 @@ export async function POST(req: Request) {
                         }
                         try {
                             await recordProviderSuccess(modelConfig.provider);
+                            await recordModelSuccess(requestedModelId);
                         } catch (error) {
                             logRequestError(
                                 "provider_success_record_failed",
@@ -1118,6 +1121,11 @@ export async function POST(req: Request) {
                     );
                     try {
                         await recordProviderFailure(
+                            modelConfig.provider,
+                            "AI_STREAM_FAILED"
+                        );
+                        await recordModelFailure(
+                            requestedModelId,
                             modelConfig.provider,
                             "AI_STREAM_FAILED"
                         );
@@ -1172,6 +1180,13 @@ export async function POST(req: Request) {
         );
         try {
             await recordProviderFailure(
+                requestedProviderForLog,
+                error instanceof ChatAccessError
+                    ? error.code
+                    : safeErrorMetadata(error).code || "AI_REQUEST_FAILED"
+            );
+            await recordModelFailure(
+                requestedModelIdForLog,
                 requestedProviderForLog,
                 error instanceof ChatAccessError
                     ? error.code

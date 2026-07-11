@@ -21,23 +21,35 @@ export async function GET(req: Request) {
     const providerStatus = new Map(
       dashboard.providers.map((provider) => [provider.provider, provider])
     );
+    const modelIncidents = new Map(
+      dashboard.providers.flatMap((provider) =>
+        provider.modelIncidents.map((incident) => [incident.modelId, incident])
+      )
+    );
 
     const models = AVAILABLE_MODELS.map((model) => {
       const provider = providerStatus.get(model.provider);
-      const status =
-        !model.enabled || model.status !== "enabled"
-          ? "unavailable"
-          : provider?.status === "outage"
-            ? "unavailable"
-            : provider?.status === "limited"
-              ? "limited"
-              : "available";
+      const incident = modelIncidents.get(model.id);
+      let status: "available" | "limited" | "unavailable" = "available";
+      if (!model.enabled || model.status !== "enabled") {
+        status = "unavailable";
+      } else if (incident && incident.failureCount5m >= 3) {
+        status = "unavailable";
+      } else if (incident) {
+        status = "limited";
+      } else if (provider?.status === "outage") {
+        status = "unavailable";
+      } else if (provider?.status === "limited") {
+        status = "limited";
+      }
 
       return {
         id: model.id,
         provider: model.provider,
         status,
         fallbackModelIds: provider?.fallback.recommendedModelIds || [],
+        recentFailureCount5m: incident?.failureCount5m || 0,
+        recentErrorCode: incident?.recentErrorCode || null,
       };
     });
 

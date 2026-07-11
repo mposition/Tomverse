@@ -27,9 +27,16 @@ export type ProviderHealthRow = {
   dayBudgetMicroUsd: number;
   budgetUsagePercent: number;
   balanceUsd: number | null;
-  balanceSource: "manual" | "estimated" | "unavailable";
+  balanceSource: "api" | "manual" | "estimated" | "unavailable";
   alertLevel: "none" | "50" | "80" | "95";
   fallback: ProviderFallback;
+  modelIncidents: Array<{
+    modelId: string;
+    modelName: string;
+    failureCount5m: number;
+    recentErrorCode: string | null;
+    updatedAt: string;
+  }>;
 };
 
 const PROVIDER_DISPLAY_NAMES: Record<AiProvider, string> = {
@@ -94,6 +101,9 @@ const positiveNumber = (value: string | undefined) => {
 
 const envProvider = (provider: AiProvider) => provider.toUpperCase();
 
+const envModel = (modelId: string) =>
+  modelId.replace(/[^A-Za-z0-9]/g, "_").toUpperCase();
+
 const providerMonthlyBudgetMicroUsd = (provider: AiProvider) =>
   positiveInteger(
     process.env[`CHAT_PROVIDER_${envProvider(provider)}_COST_MICROUSD_PER_MONTH`],
@@ -109,15 +119,32 @@ const providerDailyBudgetMicroUsd = (provider: AiProvider) =>
 const balanceUsdFor = (provider: AiProvider) =>
   positiveNumber(process.env[`PROVIDER_${envProvider(provider)}_BALANCE_USD`]);
 
-const periodStart = (period: "day" | "month", now = new Date()) =>
-  period === "day"
+const periodStart = (period: "day" | "month" | "five-minute", now = new Date()) => {
+  if (period === "five-minute") {
+    return new Date(
+      Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate(),
+        now.getUTCHours(),
+        Math.floor(now.getUTCMinutes() / 5) * 5
+      )
+    );
+  }
+  return period === "day"
     ? new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
     : new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+};
 
-const incrementBucket = async (key: string, period: string, amount = 1) => {
+const incrementBucket = async (
+  key: string,
+  period: string,
+  amount = 1,
+  start = periodStart("day")
+) => {
   await prisma.$executeRaw`
     INSERT INTO "ChatUsageBucket" ("key", "period", "periodStart", "count", "updatedAt")
-    VALUES (${key}, ${period}, ${periodStart("day")}, ${amount}, NOW())
+    VALUES (${key}, ${period}, ${start}, ${amount}, NOW())
     ON CONFLICT ("key", "period", "periodStart")
     DO UPDATE SET
       "count" = "ChatUsageBucket"."count" + ${amount},
@@ -149,6 +176,60 @@ const sendWebhook = async (url: string | undefined, payload: unknown) => {
   }
 };
 
+const sendEmailAlert = async (title: string, detail: string) => {
+  const to = process.env.ADMIN_ALERT_EMAIL;
+  if (!to) return;
+
+  const from = process.env.ADMIN_ALERT_FROM || "Tomverse Admin <alerts@tomverse.app>";
+  const text = `${title}\n\n${detail}`;
+
+  if (process.env.RESEND_API_KEY) {
+    await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from,
+        to: [to],
+        subject: `[Tomverse Admin] ${title}`,
+        text,
+      }),
+    }).catch((error) => {
+      console.error("Resend provider alert failed:", error);
+    });
+    return;
+  }
+
+  if (process.env.SENDGRID_API_KEY) {
+    await fetch("https://api.sendgrid.com/v3/mail/send", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.SENDGRID_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        personalizations: [{ to: [{ email: to }] }],
+        from: { email: from.includes("<") ? "alerts@tomverse.app" : from },
+        subject: `[Tomverse Admin] ${title}`,
+        content: [{ type: "text/plain", value: text }],
+      }),
+    }).catch((error) => {
+      console.error("SendGrid provider alert failed:", error);
+    });
+    return;
+  }
+
+  console.warn(
+    JSON.stringify({
+      event: "provider_email_alert_not_configured",
+      title,
+      email: to,
+    })
+  );
+};
+
 const sendProviderAlert = async (
   provider: AiProvider,
   title: string,
@@ -171,19 +252,12 @@ const sendProviderAlert = async (
     sendWebhook(process.env.DISCORD_WEBHOOK_URL, {
       content: `**${title}**\nProvider: ${displayName}\n${detail}`,
     }),
+    sendEmailAlert(title, `Provider: ${displayName}\n${detail}`),
   ]);
-
-  if (process.env.ADMIN_ALERT_EMAIL) {
-    console.warn(
-      JSON.stringify({
-        event: "provider_email_alert_pending",
-        provider,
-        title,
-        email: process.env.ADMIN_ALERT_EMAIL,
-      })
-    );
-  }
 };
+
+const modelFailureThreshold = () =>
+  positiveInteger(process.env.CHAT_MODEL_FAILURES_PER_5_MIN_ALERT, 3);
 
 const maybeNotifyProviderFailure = async (
   provider: AiProvider,
@@ -247,6 +321,58 @@ export const recordProviderSuccess = async (provider: AiProvider) => {
   await incrementBucket(`provider:${provider}:success`, "provider-health-day");
 };
 
+export const recordModelSuccess = async (modelId: string) => {
+  const windowStart = periodStart("five-minute");
+  await incrementBucket(
+    `model:${modelId}:success`,
+    "model-health-5m",
+    1,
+    windowStart
+  );
+};
+
+export const recordModelFailure = async (
+  modelId: string | undefined,
+  provider: AiProvider | undefined,
+  code: string
+) => {
+  if (!modelId) return;
+  const model = AVAILABLE_MODELS.find((item) => item.id === modelId);
+  const resolvedProvider = provider || model?.provider;
+  const sanitizedCode = code.replace(/[^A-Za-z0-9_.-]/g, "_").slice(0, 80) || "UNKNOWN";
+  const windowStart = periodStart("five-minute");
+  await Promise.all([
+    incrementBucket(`model:${modelId}:failure`, "model-health-5m", 1, windowStart),
+    incrementBucket(`model:${modelId}:error:${sanitizedCode}`, "model-error-5m", 1, windowStart),
+  ]);
+
+  if (!resolvedProvider) return;
+
+  const failure = await prisma.chatUsageBucket.findUnique({
+    where: {
+      key_period_periodStart: {
+        key: `model:${modelId}:failure`,
+        period: "model-health-5m",
+        periodStart: windowStart,
+      },
+    },
+    select: { count: true },
+  });
+  const failureCount = failure?.count || 0;
+  if (failureCount < modelFailureThreshold()) return;
+
+  const reserved = await reserveDailyAlert(
+    `model-alert:${modelId}:${windowStart.toISOString()}`
+  );
+  if (!reserved) return;
+
+  await sendProviderAlert(
+    resolvedProvider,
+    "Model failure for 5 minutes",
+    `Model: ${model?.name || modelId}\nRecent 5-minute failures: ${failureCount}\nLast error: ${sanitizedCode}`
+  );
+};
+
 export const recordProviderFailure = async (
   provider: AiProvider | undefined,
   code: string
@@ -258,6 +384,71 @@ export const recordProviderFailure = async (
     incrementBucket(`provider:${provider}:error:${sanitizedCode}`, "provider-error-day"),
   ]);
   await maybeNotifyProviderFailure(provider, sanitizedCode);
+};
+
+const valueAtPath = (data: unknown, path: string) => {
+  const parts = path.split(".").filter(Boolean);
+  let value = data;
+  for (const part of parts) {
+    if (!value || typeof value !== "object") return undefined;
+    value = (value as Record<string, unknown>)[part];
+  }
+  return value;
+};
+
+const firstNumericValue = (data: unknown, paths: string[]) => {
+  for (const path of paths) {
+    const value = valueAtPath(data, path);
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string") {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return null;
+};
+
+const automaticBalanceFor = async (provider: AiProvider) => {
+  const providerKey = envProvider(provider);
+  const url = process.env[`PROVIDER_${providerKey}_BALANCE_URL`];
+  if (!url) return null;
+
+  const apiKey = PROVIDER_API_KEY_ENV[provider].map((key) => process.env[key]).find(Boolean);
+  const authHeader =
+    process.env[`PROVIDER_${providerKey}_BALANCE_AUTH_HEADER`] ||
+    (apiKey ? `Bearer ${apiKey}` : undefined);
+  const jsonPath = process.env[`PROVIDER_${providerKey}_BALANCE_JSON_PATH`];
+
+  try {
+    const response = await fetch(url, {
+      cache: "no-store",
+      headers: {
+        Accept: "application/json",
+        ...(authHeader ? { Authorization: authHeader } : {}),
+      },
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    const value = firstNumericValue(
+      data,
+      jsonPath
+        ? [jsonPath]
+        : [
+            "balance_usd",
+            "balanceUsd",
+            "balance",
+            "credit",
+            "credits",
+            "data.balance_usd",
+            "data.balance",
+            "data.credit",
+          ]
+    );
+    return value === null ? null : value;
+  } catch (error) {
+    console.error(`Provider balance lookup failed for ${provider}:`, error);
+    return null;
+  }
 };
 
 type BucketRow = {
@@ -293,6 +484,8 @@ export const getProviderHealthDashboard = async () => {
         { period: "provider-error-day", periodStart: dayStart },
         { period: "provider-cost-month", periodStart: monthStart },
         { period: "provider-cost-day", periodStart: dayStart },
+        { period: "model-health-5m", periodStart: periodStart("five-minute", now) },
+        { period: "model-error-5m", periodStart: periodStart("five-minute", now) },
       ],
     },
     select: {
@@ -302,6 +495,15 @@ export const getProviderHealthDashboard = async () => {
       updatedAt: true,
     },
   });
+
+  const balanceByProvider = new Map(
+    await Promise.all(
+      MONITORED_PROVIDERS.map(async (provider) => [
+        provider,
+        await automaticBalanceFor(provider),
+      ] as const)
+    )
+  );
 
   const providers: ProviderHealthRow[] = MONITORED_PROVIDERS.map((provider) => {
     const successKey = `provider:${provider}:success`;
@@ -328,7 +530,28 @@ export const getProviderHealthDashboard = async () => {
       monthBudgetMicroUsd > 0
         ? Math.min(999, Math.round((monthCostMicroUsd / monthBudgetMicroUsd) * 1000) / 10)
         : 0;
-    const balanceUsd = balanceUsdFor(provider);
+    const automaticBalanceUsd = balanceByProvider.get(provider) ?? null;
+    const manualBalanceUsd = balanceUsdFor(provider);
+    const balanceUsd = automaticBalanceUsd ?? manualBalanceUsd;
+    const providerModels = AVAILABLE_MODELS.filter((model) => model.provider === provider);
+    const modelIncidents = providerModels
+      .map((model) => {
+        const failure = latestFor(rows, `model:${model.id}:failure`);
+        const recentError = latestFor(rows, `model:${model.id}:error:`);
+        const failureCount5m =
+          failure?.period === "model-health-5m" ? failure.count : 0;
+        if (failureCount5m <= 0) return null;
+        return {
+          modelId: model.id,
+          modelName: model.name,
+          failureCount5m,
+          recentErrorCode: recentError?.key.split(":error:")[1] || null,
+          updatedAt: (failure || recentError)?.updatedAt.toISOString() || now.toISOString(),
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => Boolean(item))
+      .sort((a, b) => b.failureCount5m - a.failureCount5m)
+      .slice(0, 5);
     const apiKeyConfigured = PROVIDER_API_KEY_ENV[provider].some((key) => !!process.env[key]);
     const status: ProviderHealthStatus =
       !apiKeyConfigured || budgetUsagePercent >= 100 || failureCount24h >= Math.max(5, successCount24h)
@@ -362,9 +585,15 @@ export const getProviderHealthDashboard = async () => {
       dayBudgetMicroUsd,
       budgetUsagePercent,
       balanceUsd,
-      balanceSource: balanceUsd === null ? "estimated" : "manual",
+      balanceSource:
+        automaticBalanceUsd !== null
+          ? "api"
+          : manualBalanceUsd !== null
+            ? "manual"
+            : "estimated",
       alertLevel,
       fallback: FALLBACKS[provider],
+      modelIncidents,
     };
   });
 
