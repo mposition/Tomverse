@@ -25,6 +25,7 @@ const planSchema = z
   .object({
     id: z.enum(["free", "pro", "max"]),
     monthlyPriceCents: z.number().int().min(0).max(1_000_000),
+    annualPriceCents: z.number().int().min(0).max(10_000_000),
     dailyMessageLimit: z.number().int().min(0).max(1_000_000),
     monthlyMessageLimit: z.number().int().min(0).max(10_000_000),
     maxModels: z.number().int().min(1).max(10),
@@ -34,6 +35,7 @@ const planSchema = z
     isActive: z.boolean(),
     stripeProductId: optionalText,
     stripePriceId: optionalText,
+    stripeAnnualPriceId: optionalText,
   })
   .strict();
 
@@ -117,9 +119,11 @@ export async function PATCH(req: Request) {
           name: planName(plan.id),
           tier: planName(plan.id),
           monthlyPriceCents: plan.monthlyPriceCents,
+          annualPriceCents: plan.annualPriceCents,
           currency: "USD",
           stripeProductId: plan.stripeProductId,
           stripePriceId: plan.stripePriceId,
+          stripeAnnualPriceId: plan.stripeAnnualPriceId,
           dailyMessageLimit: plan.dailyMessageLimit,
           monthlyMessageLimit: plan.monthlyMessageLimit,
           maxModels: plan.maxModels,
@@ -131,8 +135,10 @@ export async function PATCH(req: Request) {
         },
         update: {
           monthlyPriceCents: plan.monthlyPriceCents,
+          annualPriceCents: plan.annualPriceCents,
           stripeProductId: plan.stripeProductId,
           stripePriceId: plan.stripePriceId,
+          stripeAnnualPriceId: plan.stripeAnnualPriceId,
           dailyMessageLimit: plan.dailyMessageLimit,
           monthlyMessageLimit: plan.monthlyMessageLimit,
           maxModels: plan.maxModels,

@@ -17,6 +17,16 @@ const getPeriodEnd = (subscription: Stripe.Subscription) => {
   return typeof value === "number" ? new Date(value * 1000) : null;
 };
 
+const getBillingInterval = (subscription: Stripe.Subscription) => {
+  const interval = subscription.items.data[0]?.price.recurring?.interval;
+  if (interval === "year") return "annual";
+  if (interval === "month") return "monthly";
+  const metadataInterval = subscription.metadata.billingInterval;
+  return metadataInterval === "annual" || metadataInterval === "monthly"
+    ? metadataInterval
+    : null;
+};
+
 async function syncSubscription(subscription: Stripe.Subscription) {
   const customerId =
     typeof subscription.customer === "string"
@@ -25,7 +35,10 @@ async function syncSubscription(subscription: Stripe.Subscription) {
   const priceId = subscription.items.data[0]?.price.id || null;
   const plans = await getBillingPlans();
   const planByPrice = priceId
-    ? plans.find((plan) => plan.stripePriceId === priceId)
+    ? plans.find(
+        (plan) =>
+          plan.stripePriceId === priceId || plan.stripeAnnualPriceId === priceId
+      )
     : null;
   const planId =
     normalizePlanId(subscription.metadata.planId) ||
@@ -41,6 +54,7 @@ async function syncSubscription(subscription: Stripe.Subscription) {
       stripePriceId: priceId,
       subscriptionStatus: subscription.status,
       subscriptionCurrentPeriodEnd: getPeriodEnd(subscription),
+      subscriptionBillingInterval: getBillingInterval(subscription),
     },
   });
 }
@@ -77,6 +91,7 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
       stripePriceId: null,
       subscriptionStatus: subscription.status,
       subscriptionCurrentPeriodEnd: getPeriodEnd(subscription),
+      subscriptionBillingInterval: null,
     },
   });
 }

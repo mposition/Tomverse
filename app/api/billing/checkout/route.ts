@@ -23,6 +23,7 @@ import { getStripe } from "@/lib/stripe";
 const checkoutSchema = z
   .object({
     planId: z.enum(["pro", "max"]),
+    billingInterval: z.enum(["monthly", "annual"]).default("monthly"),
     promoCode: z.string().trim().toUpperCase().max(32).optional(),
   })
   .strict();
@@ -30,6 +31,7 @@ const checkoutSchema = z
 const activeSubscriptionStatuses = new Set(["active", "trialing", "past_due"]);
 
 type CheckoutPromotion = Awaited<ReturnType<typeof getBillingPromotions>>[number];
+type CheckoutPlan = Awaited<ReturnType<typeof getBillingPlans>>[number];
 
 const isPromotionCurrentlyRedeemable = (
   promotion: CheckoutPromotion,
@@ -127,6 +129,47 @@ async function createCheckoutSessionWithPaymentFallback(
   }
 }
 
+function buildCheckoutLineItem(
+  plan: CheckoutPlan,
+  billingInterval: "monthly" | "annual"
+): Stripe.Checkout.SessionCreateParams.LineItem {
+  if (billingInterval === "monthly") {
+    if (!plan.stripePriceId) {
+      throw new Error("Monthly Stripe Price ID is not configured.");
+    }
+    return { price: plan.stripePriceId, quantity: 1 };
+  }
+
+  if (plan.stripeAnnualPriceId) {
+    return { price: plan.stripeAnnualPriceId, quantity: 1 };
+  }
+
+  if (plan.annualPriceCents <= 0) {
+    throw new Error("Annual price is not configured.");
+  }
+
+  return {
+    quantity: 1,
+    price_data: {
+      currency: "usd",
+      unit_amount: plan.annualPriceCents,
+      product: plan.stripeProductId || undefined,
+      product_data: plan.stripeProductId
+        ? undefined
+        : {
+            name: `Tomverse AI ${plan.name}`,
+            metadata: {
+              planId: plan.id,
+              tier: plan.tier,
+            },
+          },
+      recurring: {
+        interval: "year",
+      },
+    },
+  };
+}
+
 export async function POST(req: Request) {
   try {
     const session = await getServerSession(authOptions);
@@ -142,10 +185,14 @@ export async function POST(req: Request) {
       day: 20,
     });
 
-    const { planId, promoCode } = await readLimitedJson(req, 4 * 1024, checkoutSchema);
+    const { planId, billingInterval, promoCode } = await readLimitedJson(
+      req,
+      4 * 1024,
+      checkoutSchema
+    );
     const plans = await getBillingPlans();
     const plan = plans.find((item) => item.id === planId && item.isActive);
-    if (!plan || !plan.stripePriceId) {
+    if (!plan || (billingInterval === "monthly" && !plan.stripePriceId)) {
       return NextResponse.json(
         { error: "This plan is not ready for checkout yet." },
         { status: 503 }
@@ -214,7 +261,7 @@ export async function POST(req: Request) {
     const checkoutSession = await createCheckoutSessionWithPaymentFallback({
       mode: "subscription",
       customer: stripeCustomerId,
-      line_items: [{ price: plan.stripePriceId, quantity: 1 }],
+      line_items: [buildCheckoutLineItem(plan, billingInterval)],
       success_url: `${origin}/chat?billing=success`,
       cancel_url: `${origin}/pricing?billing=cancelled`,
       client_reference_id: user.id,
@@ -225,6 +272,7 @@ export async function POST(req: Request) {
           userId: user.id,
           planId,
           tier: tierForPlanId(planId),
+          billingInterval,
           promoCode: promotion?.code || "",
           promotionId: promotion?.id || "",
         },
@@ -232,6 +280,7 @@ export async function POST(req: Request) {
       metadata: {
         userId: user.id,
         planId,
+        billingInterval,
         promoCode: promotion?.code || "",
         promotionId: promotion?.id || "",
       },

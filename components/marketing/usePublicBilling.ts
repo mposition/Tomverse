@@ -6,11 +6,14 @@ type BillingPlan = {
   id: "free" | "pro" | "max";
   name: string;
   monthlyPriceCents: number;
+  annualPriceCents: number;
   currency: string;
   baseCurrency?: string;
   baseMonthlyPriceCents?: number;
+  baseAnnualPriceCents?: number;
   displayCurrency?: string;
   displayMonthlyPriceAmount?: number;
+  displayAnnualPriceAmount?: number;
   displayExchangeRate?: number;
 };
 
@@ -43,36 +46,54 @@ export function usePublicBilling() {
 
   return useMemo(() => {
     const planById = new Map(config?.plans.map((plan) => [plan.id, plan]));
-    const formatPlanPrice = (planId: "free" | "pro" | "max") => {
+    const formatPlanPrice = (
+      planId: "free" | "pro" | "max",
+      billingInterval: "monthly" | "annual" = "monthly"
+    ) => {
       const plan = planById.get(planId);
       if (!plan) return null;
+      const displayAmount =
+        billingInterval === "annual"
+          ? plan.displayAnnualPriceAmount
+          : plan.displayMonthlyPriceAmount;
       if (
         plan.displayCurrency &&
-        typeof plan.displayMonthlyPriceAmount === "number"
+        typeof displayAmount === "number"
       ) {
         return new Intl.NumberFormat(undefined, {
           style: "currency",
           currency: plan.displayCurrency,
           maximumFractionDigits: 0,
           minimumFractionDigits: 0,
-        }).format(plan.displayMonthlyPriceAmount);
+        }).format(displayAmount);
       }
+      const cents =
+        billingInterval === "annual"
+          ? plan.annualPriceCents
+          : plan.monthlyPriceCents;
       return new Intl.NumberFormat("en-US", {
         style: "currency",
         currency: plan.currency || "USD",
         maximumFractionDigits: 0,
         minimumFractionDigits: 0,
-      }).format(plan.monthlyPriceCents / 100);
+      }).format(cents / 100);
     };
-    const formatUsdPlanPrice = (planId: "free" | "pro" | "max") => {
+    const formatUsdPlanPrice = (
+      planId: "free" | "pro" | "max",
+      billingInterval: "monthly" | "annual" = "monthly"
+    ) => {
       const plan = planById.get(planId);
       if (!plan) return null;
+      const cents =
+        billingInterval === "annual"
+          ? plan.baseAnnualPriceCents ?? plan.annualPriceCents
+          : plan.baseMonthlyPriceCents ?? plan.monthlyPriceCents;
       return new Intl.NumberFormat("en-US", {
         style: "currency",
         currency: "USD",
         maximumFractionDigits: 0,
         minimumFractionDigits: 0,
-      }).format((plan.baseMonthlyPriceCents ?? plan.monthlyPriceCents) / 100);
+      }).format(cents / 100);
     };
     return {
       config,

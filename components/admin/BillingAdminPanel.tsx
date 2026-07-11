@@ -89,6 +89,19 @@ function PlanEditor({
           />
         </label>
         <label className="text-xs font-semibold text-zinc-400">
+          Annual price USD
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={dollars(plan.annualPriceCents)}
+            onChange={(event) =>
+              onChange({ ...plan, annualPriceCents: toCents(event.target.value) })
+            }
+            className="mt-1 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
+          />
+        </label>
+        <label className="text-xs font-semibold text-zinc-400">
           Max compared models
           <input
             type="number"
@@ -138,10 +151,19 @@ function PlanEditor({
           />
         </label>
         <label className="text-xs font-semibold text-zinc-400">
-          Stripe Price ID
+          Stripe Monthly Price ID
           <input
             value={plan.stripePriceId || ""}
             onChange={(event) => onChange({ ...plan, stripePriceId: event.target.value || null })}
+            placeholder="price_..."
+            className="mt-1 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
+          />
+        </label>
+        <label className="text-xs font-semibold text-zinc-400">
+          Stripe Annual Price ID
+          <input
+            value={plan.stripeAnnualPriceId || ""}
+            onChange={(event) => onChange({ ...plan, stripeAnnualPriceId: event.target.value || null })}
             placeholder="price_..."
             className="mt-1 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
           />

@@ -9,8 +9,10 @@ type ExchangeRateResponse = {
 type PublicBillingPlan = BillingPlanConfig & {
   baseCurrency: string;
   baseMonthlyPriceCents: number;
+  baseAnnualPriceCents: number;
   displayCurrency: string;
   displayMonthlyPriceAmount: number;
+  displayAnnualPriceAmount: number;
   displayExchangeRate: number;
 };
 
@@ -150,12 +152,15 @@ export async function withDisplayCurrency<TPromotion>(
     exchangeRateUpdatedAt: exchangeRates.updatedAt,
     plans: config.plans.map((plan) => {
       const usdAmount = plan.monthlyPriceCents / 100;
+      const annualUsdAmount = plan.annualPriceCents / 100;
       return {
         ...plan,
         baseCurrency: plan.currency || "USD",
         baseMonthlyPriceCents: plan.monthlyPriceCents,
+        baseAnnualPriceCents: plan.annualPriceCents,
         displayCurrency,
         displayMonthlyPriceAmount: Math.round(usdAmount * rate),
+        displayAnnualPriceAmount: Math.round(annualUsdAmount * rate),
         displayExchangeRate: rate,
       };
     }),

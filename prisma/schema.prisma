@@ -1,5 +1,5 @@
 generator client {
-// 💡 Prisma 7에서는 provider가 변경되었습니다.
+// Prisma 7에서는 provider가 변경되었습니다.
   provider = "prisma-client-js"   
 }
 
@@ -8,7 +8,7 @@ datasource db {
 }
 
 // ==========================================
-// 💡 [신규 추가] NextAuth 필수 및 사용자 커스텀 모델
+// NextAuth 필수 및 사용자 커스텀 모델
 // ==========================================
 
 model User {
@@ -23,8 +23,9 @@ model User {
   stripePriceId        String?
   subscriptionStatus   String?
   subscriptionCurrentPeriodEnd DateTime?
+  subscriptionBillingInterval  String?
   
-  // 💡 커스텀 설정 필드 (테마, 언어 등)
+  // 커스텀 설정 필드 (테마, 언어 등)
   settings      UserSettings?
   
   accounts      Account[]
@@ -94,8 +95,6 @@ model Conversation {
   title          String
   projectId      String?
   
-  // 💡 대화방별 패널 상태를 기억하기 위한 필드 추가
-  // 💡 String[] 대신 일반 String으로 변경 (SQLite 호환성 확보)
   selectedModels String    @default("[\"gpt-5-4-mini\"]")
   disabledPanels String    @default("[]")
   
@@ -111,7 +110,7 @@ model Conversation {
   project        ConversationProject? @relation(fields: [projectId], references: [id], onDelete: SetNull)
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
-  password       String?   // 💡 잠금 비밀번호 (null이면 잠금 해제 상태)
+  password       String?   
   @@index([userId, projectId])
 }
 
@@ -133,7 +132,7 @@ model Message {
   role           String
   content        String
   status         String       @default("normal")
-  modelId        String?      // 💡 어떤 AI 모델이 쓴 답변인지 구분하는 꼬리표 추가
+  modelId        String?      // 어떤 AI 모델이 쓴 답변인지 구분하는 꼬리표 추가
   
   conversationId String  
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -170,6 +169,8 @@ model BillingPlan {
   currency           String   @default("USD")
   stripeProductId    String?
   stripePriceId      String?
+  annualPriceCents   Int?
+  stripeAnnualPriceId String?
   dailyMessageLimit  Int      @default(0)
   monthlyMessageLimit Int     @default(0)
   maxModels          Int      @default(3)

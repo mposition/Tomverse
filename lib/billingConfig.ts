@@ -10,9 +10,11 @@ export type BillingPlanConfig = {
   name: string;
   tier: ModelTier;
   monthlyPriceCents: number;
+  annualPriceCents: number;
   currency: string;
   stripeProductId: string | null;
   stripePriceId: string | null;
+  stripeAnnualPriceId: string | null;
   dailyMessageLimit: number;
   monthlyMessageLimit: number;
   maxModels: number;
@@ -45,9 +47,11 @@ const DEFAULT_PLANS: Record<BillingPlanId, BillingPlanConfig> = {
     name: "Free",
     tier: "Free",
     monthlyPriceCents: 0,
+    annualPriceCents: 0,
     currency: "USD",
     stripeProductId: null,
     stripePriceId: null,
+    stripeAnnualPriceId: null,
     dailyMessageLimit: 100,
     monthlyMessageLimit: 2_000,
     maxModels: 3,
@@ -62,9 +66,11 @@ const DEFAULT_PLANS: Record<BillingPlanId, BillingPlanConfig> = {
     name: "Pro",
     tier: "Pro",
     monthlyPriceCents: 1_500,
+    annualPriceCents: 14_400,
     currency: "USD",
     stripeProductId: null,
     stripePriceId: null,
+    stripeAnnualPriceId: null,
     dailyMessageLimit: 500,
     monthlyMessageLimit: 10_000,
     maxModels: 3,
@@ -79,9 +85,11 @@ const DEFAULT_PLANS: Record<BillingPlanId, BillingPlanConfig> = {
     name: "Max",
     tier: "Max",
     monthlyPriceCents: 2_500,
+    annualPriceCents: 24_000,
     currency: "USD",
     stripeProductId: null,
     stripePriceId: null,
+    stripeAnnualPriceId: null,
     dailyMessageLimit: 0,
     monthlyMessageLimit: 50_000,
     maxModels: 3,
@@ -146,9 +154,12 @@ export async function getBillingPlans(): Promise<BillingPlanConfig[]> {
       name: row.name,
       tier: tierForPlanId(id),
       monthlyPriceCents: row.monthlyPriceCents,
+      annualPriceCents:
+        row.annualPriceCents ?? Math.round(row.monthlyPriceCents * 12 * 0.8),
       currency: row.currency,
       stripeProductId: row.stripeProductId,
       stripePriceId: row.stripePriceId,
+      stripeAnnualPriceId: row.stripeAnnualPriceId,
       dailyMessageLimit: row.dailyMessageLimit,
       monthlyMessageLimit: row.monthlyMessageLimit,
       maxModels: row.maxModels,
