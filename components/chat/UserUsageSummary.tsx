@@ -42,6 +42,7 @@ export function UserUsageSummary({
 }) {
   const { t } = useLanguage();
   const usage = useUserUsage(!isGuestMode);
+  const isDailyUnlimited = Boolean(usage && usage.limits.messagesDay <= 0);
 
   if (isGuestMode) {
     const used = guestMessageCount || 0;
@@ -72,17 +73,21 @@ export function UserUsageSummary({
           {t("usage.plan")}: {planLabel}
         </span>
         <span className="text-zinc-400">
-          {Math.max(0, usage.limits.messagesDay - usage.usage.messagesDay)} {t("usage.left")}
+          {isDailyUnlimited
+            ? t("usage.unlimited")
+            : `${Math.max(0, usage.limits.messagesDay - usage.usage.messagesDay)} ${t("usage.left")}`}
         </span>
       </div>
       <div className="mt-2">
         <div className="flex justify-between font-semibold">
           <span>{t("usage.todayMessages")}</span>
           <span>
-            {usage.usage.messagesDay}/{usage.limits.messagesDay}
+            {isDailyUnlimited
+              ? t("usage.unlimited")
+              : `${usage.usage.messagesDay}/${usage.limits.messagesDay}`}
           </span>
         </div>
-        <UsageBar used={usage.usage.messagesDay} limit={usage.limits.messagesDay} />
+        {!isDailyUnlimited && <UsageBar used={usage.usage.messagesDay} limit={usage.limits.messagesDay} />}
       </div>
       <div className="mt-2">
         <div className="flex justify-between font-semibold">

@@ -24,6 +24,8 @@ import { ModelLogo } from "@/components/chat/ModelLogo";
 import { useLanguage } from "@/components/LanguageProvider";
 import { dispatchAppToast } from "@/lib/appToast";
 import { getModelBestFor, getModelExperienceStatus, getModelExperienceTags } from "@/lib/modelExperience";
+import { APP_DEFAULTS } from "@/lib/appDefaults";
+import { useUserUsage } from "@/components/chat/useUserUsage";
 
 const MAX_ATTACHMENTS = 5;
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
@@ -287,6 +289,10 @@ export function ChatInput({
   const [isUploading, setIsUploading] = useState(false);
   const [isDragActive, setIsDragActive] = useState(false);
     const { t } = useLanguage();
+    const accountUsage = useUserUsage(!isGuestMode);
+    const maxSelectableModels = isGuestMode
+      ? APP_DEFAULTS.maxGuestSelectedModels
+      : MAX_SELECTED_MODELS;
 
   const activeModelNames = selectedModels
     .map(id => AVAILABLE_MODELS.find(m => m.id === id)?.name)
@@ -1084,7 +1090,7 @@ export function ChatInput({
                   </p>
                   <p className="text-xs text-zinc-500">
                     {menuView === "models"
-                      ? `${selectedModels.length}/${MAX_SELECTED_MODELS} ${t("chat.modelsSelected")}`
+                      ? `${selectedModels.length}/${maxSelectableModels} ${t("chat.modelsSelected")}`
                       : t("chat.uploadFromComputer")}
                   </p>
                 </div>
@@ -1144,7 +1150,9 @@ export function ChatInput({
                     </span>
                     <span className="flex min-w-0 flex-col">
                       <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t("chat.modelSelect")}</span>
-                      <span className="text-xs text-zinc-500">{t("chat.maxModelsDescription")}</span>
+                      <span className="text-xs text-zinc-500">
+                        {isGuestMode ? t("chat.maxGuestModelsDescription") : t("chat.maxModelsDescription")}
+                      </span>
                     </span>
                   </button>
                 </div>
@@ -1162,7 +1170,7 @@ export function ChatInput({
                     <div className="min-w-0 flex-1">
                       <span className="block text-sm font-semibold text-zinc-900 dark:text-zinc-100">{t("chat.modelSelect")}</span>
                       <span className="block text-xs text-zinc-500">
-                        {selectedModels.length}/{MAX_SELECTED_MODELS} {t("chat.modelsSelected")}
+                        {selectedModels.length}/{maxSelectableModels} {t("chat.modelsSelected")}
                       </span>
                     </div>
                   </div>
@@ -1214,10 +1222,14 @@ export function ChatInput({
                           const modelTags = getModelExperienceTags(model);
                           const modelStatus = getModelExperienceStatus(model);
                           const isTierLocked =
-                            isGuestMode && model.tier !== "Free";
+                            isGuestMode
+                              ? model.tier !== "Free"
+                              : accountUsage?.plan === "Free" && model.tier === "Max";
                           const unavailable = !model.enabled || isTierLocked;
                           const statusReason = isTierLocked
-                            ? t("modelStatusReasons.loginRequired")
+                            ? isGuestMode
+                              ? t("modelStatusReasons.loginRequired")
+                              : t("modelStatusReasons.upgradeRequired")
                             : !model.enabled
                               ? t("modelStatusReasons.unavailable")
                               : model.status !== "enabled"

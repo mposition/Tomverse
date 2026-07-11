@@ -126,13 +126,13 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     pricingTitle: "Start free, upgrade when usage grows.",
     pricingDescription: "Plans are built around usage allowance, file workflows, sharing, and access to the available model catalogue.",
     pricingPlans: [
-      { title: "Free", price: "$0", description: "For trying Tomverse and light daily work.", bullets: ["Selected free models", "Basic daily usage", "Good for personal testing"] },
+      { title: "Free", price: "$0", description: "For trying Tomverse and light daily work.", bullets: ["Free and Pro model tiers", "Usage-limited daily work", "Files, sharing, and downloads after login"] },
       { title: "Pro", price: "Coming soon", description: "For everyday multi-model comparison.", bullets: ["All available models", "Higher usage limits", "Files, sharing, downloads"] },
       { title: "Max", price: "Coming soon", description: "For heavier AI workflows.", bullets: ["Largest allowance", "Higher file limits", "Priority room for advanced models"] },
     ],
     faqTitle: "Quick questions",
     faqs: [
-      { question: "Can I use Tomverse for free?", answer: "Yes. Free is intended for light usage and selected model access." },
+      { question: "Can I use Tomverse for free?", answer: "Yes. Free is intended for light usage with access to Free and Pro model tiers within usage limits." },
       { question: "Which models are supported?", answer: "Tomverse supports models across providers such as OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Moonshot, Qwen, and Perplexity." },
       { question: "What is Private Mode?", answer: "Private Mode means Tomverse does not save the conversation to the Tomverse database. AI providers may still receive prompts to generate responses." },
       { question: "Can I attach files?", answer: "Yes. Tomverse supports images, PDFs, Office documents, Google Drive files, and other allowed attachment types depending on provider support." },
@@ -190,13 +190,13 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     pricingTitle: "무료로 시작하고 사용량이 늘면 업그레이드하세요.",
     pricingDescription: "요금제는 사용량 한도, 파일 워크플로, 공유 기능, 사용 가능한 모델 카탈로그 접근을 기준으로 설계했습니다.",
     pricingPlans: [
-      { title: "Free", price: "$0", description: "Tomverse 체험과 가벼운 일상 작업용입니다.", bullets: ["선택된 무료 모델", "기본 일일 사용량", "개인 테스트에 적합"] },
+      { title: "Free", price: "$0", description: "Tomverse 체험과 가벼운 일상 작업용입니다.", bullets: ["Free 및 Pro 모델 등급", "사용량 한도 기반 일상 작업", "로그인 후 파일, 공유, 다운로드"] },
       { title: "Pro", price: "준비 중", description: "일상적인 멀티 모델 비교용입니다.", bullets: ["사용 가능한 전체 모델", "더 높은 사용량 한도", "파일, 공유, 다운로드"] },
       { title: "Max", price: "준비 중", description: "고강도 AI 워크플로용입니다.", bullets: ["가장 큰 사용량 한도", "더 높은 파일 한도", "고급 모델을 위한 우선 여유"] },
     ],
     faqTitle: "빠른 질문",
     faqs: [
-      { question: "무료로 사용할 수 있나요?", answer: "네. Free는 가벼운 사용량과 선택된 모델 접근을 위해 제공됩니다." },
+      { question: "무료로 사용할 수 있나요?", answer: "네. Free는 사용량 한도 안에서 Free 및 Pro 모델 등급을 가볍게 사용할 수 있도록 제공됩니다." },
       { question: "어떤 모델을 지원하나요?", answer: "OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Moonshot, Qwen, Perplexity 등 여러 공급자의 모델을 지원합니다." },
       { question: "Private Mode는 무엇인가요?", answer: "Tomverse 데이터베이스에 대화를 저장하지 않는 모드입니다. 답변 생성을 위해 AI 공급자에게 질문은 전송될 수 있습니다." },
       { question: "파일 첨부가 가능한가요?", answer: "네. 이미지, PDF, Office 문서, Google Drive 파일 등 허용된 첨부 형식을 지원합니다. 공급자별 지원 범위는 다를 수 있습니다." },

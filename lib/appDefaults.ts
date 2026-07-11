@@ -20,6 +20,7 @@ export const APP_DEFAULTS = {
   defaultLanguage: "en",
 
   maxSelectedModels: 3,
+  maxGuestSelectedModels: 2,
   maxGuestMessages: 20,
 
   guestDateStorageKey: "guest_date",
@@ -39,4 +40,4 @@ export const clampSelectedModels = (models: string[]) =>
 export const clampGuestSelectedModels = (models: string[]) =>
   clampSelectedModels(models).filter(
     (modelId) => getModel(modelId)?.tier === "Free"
-  );
+  ).slice(0, APP_DEFAULTS.maxGuestSelectedModels);

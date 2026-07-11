@@ -803,15 +803,16 @@ export default function Home() {
       nextModels = nextModels.filter((id) => id !== modelId);
       nextDisabled = nextDisabled.filter((id) => id !== modelId);
     } else {
-        if (nextModels.length >= MAX_SELECTED_MODELS) {
-            showToast(t("chat.maxModelCompare"), "info");
+        const maxModels = isGuestMode ? APP_DEFAULTS.maxGuestSelectedModels : MAX_SELECTED_MODELS;
+        if (nextModels.length >= maxModels) {
+            showToast(isGuestMode ? t("chat.maxGuestModelCompare") : t("chat.maxModelCompare"), "info");
             return;
         }
 
         nextModels.push(modelId);
       }
     
-    nextModels = clampSelectedModels(nextModels);
+    nextModels = isGuestMode ? clampGuestSelectedModels(nextModels) : clampSelectedModels(nextModels);
 	setSelectedModels(nextModels);
     setDisabledPanels(nextDisabled);
     if (currentChatId && currentChatId !== "private-chat") {

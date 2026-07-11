@@ -55,6 +55,12 @@ export type ChatUsageReservation = {
     outputUsdPerMillionTokens: number;
 };
 
+const PLAN_MODEL_TIER_LIMIT: Record<ModelTier, ModelTier> = {
+    Free: "Pro",
+    Pro: "Max",
+    Max: "Max",
+};
+
 export class ChatAccessError extends Error {
     constructor(
         public readonly status: number,
@@ -89,7 +95,7 @@ export const assertModelAccess = (access: Pick<ChatAccess, "kind" | "plan">, mod
     const maximumTier =
         access.kind === "guest"
             ? configuredTier(process.env.CHAT_GUEST_MAX_TIER, "Free")
-            : configuredTier(access.plan || process.env.CHAT_USER_MAX_TIER, "Max");
+            : PLAN_MODEL_TIER_LIMIT[access.plan || "Free"];
 
     if (TIER_RANK[model.tier] > TIER_RANK[maximumTier]) {
         throw new ChatAccessError(
@@ -135,18 +141,40 @@ export const createChatBudget = (
     };
 };
 
-const limitsFor = (kind: AccessKind): LimitRule[] =>
-    kind === "user"
-        ? [
-              { period: "minute", limit: positiveInteger(process.env.CHAT_USER_PER_MINUTE, 20) },
-              { period: "day", limit: positiveInteger(process.env.CHAT_USER_PER_DAY, 500) },
-              { period: "month", limit: positiveInteger(process.env.CHAT_USER_PER_MONTH, 10_000) },
-          ]
-        : [
-              { period: "minute", limit: positiveInteger(process.env.CHAT_GUEST_PER_MINUTE, 5) },
-              { period: "day", limit: positiveInteger(process.env.CHAT_GUEST_PER_DAY, 20) },
-              { period: "month", limit: positiveInteger(process.env.CHAT_GUEST_PER_MONTH, 100) },
-          ];
+const limitsFor = (access: Pick<ChatAccess, "kind" | "plan">): LimitRule[] => {
+    if (access.kind !== "user") {
+        return [
+            { period: "minute", limit: positiveInteger(process.env.CHAT_GUEST_PER_MINUTE, 5) },
+            { period: "day", limit: positiveInteger(process.env.CHAT_GUEST_PER_DAY, 20) },
+            { period: "month", limit: positiveInteger(process.env.CHAT_GUEST_PER_MONTH, 100) },
+        ];
+    }
+
+    const plan = access.plan || "Free";
+    const minuteLimit = positiveInteger(process.env.CHAT_USER_PER_MINUTE, 20);
+    const monthLimit =
+        plan === "Max"
+            ? positiveInteger(process.env.CHAT_MAX_PER_MONTH, 50_000)
+            : plan === "Pro"
+              ? positiveInteger(process.env.CHAT_PRO_PER_MONTH, positiveInteger(process.env.CHAT_USER_PER_MONTH, 10_000))
+              : positiveInteger(process.env.CHAT_FREE_PER_MONTH, 2_000);
+    const limits: LimitRule[] = [
+        { period: "minute", limit: minuteLimit },
+        { period: "month", limit: monthLimit },
+    ];
+
+    if (plan !== "Max") {
+        limits.push({
+            period: "day",
+            limit:
+                plan === "Pro"
+                    ? positiveInteger(process.env.CHAT_PRO_PER_DAY, positiveInteger(process.env.CHAT_USER_PER_DAY, 500))
+                    : positiveInteger(process.env.CHAT_FREE_PER_DAY, 100),
+        });
+    }
+
+    return limits;
+};
 
 const getSecret = () => {
     const secret = process.env.NEXTAUTH_SECRET;
@@ -404,7 +432,7 @@ export const acquireChatAccess = async (
     );
 
     await prisma.$transaction(async (tx) => {
-        for (const rule of limitsFor(access.kind)) {
+        for (const rule of limitsFor(access)) {
             const allowed = await incrementUsage(
                 tx,
                 access.subjectKey,
@@ -438,7 +466,7 @@ export const acquireChatAccess = async (
             );
         }
         if (access.kind === "guest") {
-            for (const rule of limitsFor("guest").filter(
+            for (const rule of limitsFor(access).filter(
                 (rule) => rule.period !== "minute"
             )) {
                 const allowed = await incrementUsage(

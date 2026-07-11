@@ -104,6 +104,7 @@ export function ChatSidebar({
         displayedUsage.limit > 0
             ? `${Math.min((displayedUsage.used / displayedUsage.limit) * 100, 100)}%`
             : "0%";
+    const isDailyUnlimited = !isGuestMode && displayedUsage.limit <= 0 && accountUsage?.plan === "Max";
     const planDescriptionKey =
         displayedPlan === null
             ? null
@@ -641,18 +642,20 @@ export function ChatSidebar({
                             {t(planDescriptionKey)}
                         </p>
                     )}
-                    {displayedUsage.limit > 0 && (
+                    {(displayedUsage.limit > 0 || isDailyUnlimited) && (
                         <div className="mt-3">
                             <div className="mb-1 flex items-center justify-between font-semibold text-zinc-500 dark:text-zinc-400">
                                 <span>{t("sidebar.todayUsage")}</span>
-                                <span>{displayedRemaining} {t("sidebar.remaining")}</span>
+                                <span>{isDailyUnlimited ? t("usage.unlimited") : `${displayedRemaining} ${t("sidebar.remaining")}`}</span>
                             </div>
-                            <div className="h-1.5 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
-                                <div
-                                    className={`h-full transition-all duration-500 ${displayedUsage.used >= displayedUsage.limit ? "bg-red-500" : "bg-blue-500"}`}
-                                    style={{ width: displayedUsageWidth }}
-                                />
-                            </div>
+                            {!isDailyUnlimited && (
+                                <div className="h-1.5 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+                                    <div
+                                        className={`h-full transition-all duration-500 ${displayedUsage.used >= displayedUsage.limit ? "bg-red-500" : "bg-blue-500"}`}
+                                        style={{ width: displayedUsageWidth }}
+                                    />
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>
