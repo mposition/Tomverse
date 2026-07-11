@@ -164,6 +164,7 @@ export const pt = {
         fileErrorHelpResave: "Salve novamente PDFs ou arquivos Office e evite documentos protegidos por senha.",
         fileErrorHelpLimit: "Mantenha os arquivos dentro dos limites de tamanho e p?ginas aceitos.",
         fileErrorHelpRetry: "Tente novamente sem anexos se a resposta for urgente.",
+        fileErrorHelpLink: "Open file upload help",
     },
     share: {
         eyebrow: "Tomverse shared conversation",
@@ -345,6 +346,7 @@ export const pt = {
         accountDeletionRequestMessage: "Solicitação de exclusão de conta enviada pelas configurações do usuário.",
         accountDeletionRequested: "A solicitação de exclusão da conta foi enviada.",
         accountDeletionPending: "Solicita??o de exclus?o recebida em",
+        accountDeletionProcessing: "Most requests are reviewed within 7 business days. Export important data before removal.",
         planPolicyTitle: "Política do plano",
         planPolicyGuest: "Convidado: apenas modelos gratuitos, até 2 modelos, sem anexos.",
         planPolicyFree: "Free: níveis Free e Pro com limites de uso.",

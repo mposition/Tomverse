@@ -56,7 +56,12 @@ export function FeedbackButton({
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          if (!traceId && typeof window !== "undefined") {
+            setTraceId(window.localStorage.getItem("tomverse_last_error_trace_id") || "");
+          }
+          setOpen(true);
+        }}
         className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 text-xs font-black text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-900"
       >
         <LifeBuoy className="h-4 w-4 text-blue-500" />

@@ -162,6 +162,7 @@ export const ko = {
         fileErrorHelpResave: "PDF \uB610\uB294 Office \uD30C\uC77C\uC744 \uB2E4\uC2DC \uC800\uC7A5\uD558\uACE0 \uBE44\uBC00\uBC88\uD638\uAC00 \uAC78\uB9B0 \uBB38\uC11C\uB294 \uD53C\uD574\uC8FC\uC138\uC694.",
         fileErrorHelpLimit: "\uC9C0\uC6D0\uB418\uB294 \uD30C\uC77C \uD06C\uAE30\uC640 \uD398\uC774\uC9C0 \uC81C\uD55C \uC548\uC5D0\uC11C \uC0AC\uC6A9\uD574\uC8FC\uC138\uC694.",
         fileErrorHelpRetry: "\uAE09\uD55C \uACBD\uC6B0 \uCCA8\uBD80\uD30C\uC77C \uC5C6\uC774 \uB2E4\uC2DC \uC2DC\uB3C4\uD574\uBCF4\uC138\uC694.",
+        fileErrorHelpLink: "\uD30C\uC77C \uC5C5\uB85C\uB4DC \uB3C4\uC6C0\uB9D0 \uBCF4\uAE30",
     },
     share: {
         eyebrow: "Tomverse 공유 대화",
@@ -343,6 +344,7 @@ export const ko = {
         accountDeletionRequestMessage: "사용자 설정에서 계정 삭제 요청이 접수되었습니다.",
         accountDeletionRequested: "계정 삭제 요청이 전송되었습니다.",
         accountDeletionPending: "\uACC4\uC815 \uC0AD\uC81C \uC694\uCCAD \uC811\uC218\uC77C:",
+        accountDeletionProcessing: "\uB300\uBD80\uBD84\uC758 \uC694\uCCAD\uC740 \uC601\uC5C5\uC77C \uAE30\uC900 7\uC77C \uC774\uB0B4\uC5D0 \uAC80\uD1A0\uB429\uB2C8\uB2E4. \uACC4\uC815 \uC0AD\uC81C \uC804 \uC911\uC694\uD55C \uB370\uC774\uD130\uB97C \uBA3C\uC800 \uB0B4\uBCF4\uB0B4\uC138\uC694.",
         planPolicyTitle: "플랜 정책",
         planPolicyGuest: "게스트: 무료 모델만, 최대 2개 모델, 첨부파일 불가",
         planPolicyFree: "Free: Free 및 Pro 모델 등급, 사용량 한도 적용",

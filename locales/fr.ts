@@ -164,6 +164,7 @@ export const fr = {
         fileErrorHelpResave: "R?enregistrez les fichiers PDF ou Office et ?vitez les documents prot?g?s par mot de passe.",
         fileErrorHelpLimit: "Respectez les limites de taille et de pages prises en charge.",
         fileErrorHelpRetry: "R?essayez sans pi?ces jointes si la r?ponse est urgente.",
+        fileErrorHelpLink: "Open file upload help",
     },
     share: {
         eyebrow: "Tomverse shared conversation",
@@ -345,6 +346,7 @@ export const fr = {
         accountDeletionRequestMessage: "Demande de suppression de compte depuis les paramètres utilisateur.",
         accountDeletionRequested: "La demande de suppression du compte a été envoyée.",
         accountDeletionPending: "Demande de suppression re?ue le",
+        accountDeletionProcessing: "Most requests are reviewed within 7 business days. Export important data before removal.",
         planPolicyTitle: "Règles de l'offre",
         planPolicyGuest: "Invité : modèles gratuits uniquement, jusqu'à 2 modèles, sans pièces jointes.",
         planPolicyFree: "Free : niveaux Free et Pro avec limites d'utilisation.",

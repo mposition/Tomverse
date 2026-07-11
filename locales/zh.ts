@@ -162,6 +162,7 @@ export const zh = {
         fileErrorHelpResave: "????? PDF ? Office ?????????????????",
         fileErrorHelpLimit: "??????????????????",
         fileErrorHelpRetry: "???????????????",
+        fileErrorHelpLink: "Open file upload help",
     },
     share: {
         eyebrow: "Tomverse 分享对话",
@@ -343,6 +344,7 @@ export const zh = {
         accountDeletionRequestMessage: "用户在设置中提交了账号删除请求。",
         accountDeletionRequested: "账号删除请求已发送。",
         accountDeletionPending: "???????????",
+        accountDeletionProcessing: "Most requests are reviewed within 7 business days. Export important data before removal.",
         planPolicyTitle: "方案政策",
         planPolicyGuest: "访客：仅免费模型，最多 2 个模型，不能上传附件。",
         planPolicyFree: "Free：Free 和 Pro 模型等级，受使用量限制。",

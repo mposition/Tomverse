@@ -383,6 +383,9 @@ function ChatAppComponent({
         console.error("Chat request failed", {
           traceId: traceId || undefined,
         });
+        if (traceId && typeof window !== "undefined") {
+          window.localStorage.setItem("tomverse_last_error_trace_id", traceId);
+        }
         setAssistantMessage(
           assistantMessageId,
           `${typeof requestError.publicMessage === "string" ? requestError.publicMessage : t("chat.responseError")}${

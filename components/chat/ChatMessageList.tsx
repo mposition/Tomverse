@@ -324,6 +324,12 @@ export function ChatMessageList({
                             <li>{t("chat.fileErrorHelpLimit")}</li>
                             <li>{t("chat.fileErrorHelpRetry")}</li>
                           </ul>
+                          <a
+                            href="/support/help-centre"
+                            className="mt-2 inline-flex font-black text-red-700 underline underline-offset-2 dark:text-red-100"
+                          >
+                            {t("chat.fileErrorHelpLink")}
+                          </a>
                         </div>
                       )}
                       <div className="flex flex-wrap gap-2">

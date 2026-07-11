@@ -162,6 +162,7 @@ export const en = {
         fileErrorHelpResave: "Re-save PDF or Office files and avoid password-protected documents.",
         fileErrorHelpLimit: "Keep files under the supported size and page limits.",
         fileErrorHelpRetry: "Retry without attachments if the model response is urgent.",
+        fileErrorHelpLink: "Open file upload help",
     },
     share: {
         eyebrow: "Tomverse shared conversation",
@@ -343,6 +344,7 @@ export const en = {
         accountDeletionRequestMessage: "Account deletion request from user settings.",
         accountDeletionRequested: "Account deletion request was sent.",
         accountDeletionPending: "Account deletion request received on",
+        accountDeletionProcessing: "Most requests are reviewed within 7 business days. Export important data before the account is removed.",
         planPolicyTitle: "Plan policy",
         planPolicyGuest: "Guest: free models only, up to 2 models, no attachments.",
         planPolicyFree: "Free: Free and Pro model tiers with usage limits.",

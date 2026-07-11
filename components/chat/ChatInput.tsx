@@ -1020,7 +1020,7 @@ export function ChatInput({
             </div>
           )}
           {!value.trim() && attachments.length === 0 && (
-            <div className="mb-2 flex max-w-full gap-2 overflow-x-auto overscroll-x-contain pb-1 md:hidden">
+            <div className="mb-2 flex max-w-full gap-2 overflow-x-auto overscroll-x-contain pb-1 md:flex-wrap md:overflow-visible md:pb-0">
               {PROMPT_SUGGESTIONS.map((suggestion) => (
                 <button
                   key={suggestion}

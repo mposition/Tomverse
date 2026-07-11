@@ -164,6 +164,7 @@ export const de = {
         fileErrorHelpResave: "Speichern Sie PDF- oder Office-Dateien erneut und vermeiden Sie passwortgesch?tzte Dokumente.",
         fileErrorHelpLimit: "Halten Sie die unterst?tzten Gr??en- und Seitenlimits ein.",
         fileErrorHelpRetry: "Versuchen Sie es ohne Anh?nge erneut, wenn die Antwort dringend ist.",
+        fileErrorHelpLink: "Open file upload help",
     },
     share: {
         eyebrow: "Tomverse shared conversation",
@@ -345,6 +346,7 @@ export const de = {
         accountDeletionRequestMessage: "Anfrage zur Kontolöschung aus den Benutzereinstellungen.",
         accountDeletionRequested: "Anfrage zur Kontolöschung wurde gesendet.",
         accountDeletionPending: "Antrag auf Kontol?schung erhalten am",
+        accountDeletionProcessing: "Most requests are reviewed within 7 business days. Export important data before removal.",
         planPolicyTitle: "Tarifregeln",
         planPolicyGuest: "Gast: nur kostenlose Modelle, bis zu 2 Modelle, keine Anhänge.",
         planPolicyFree: "Free: Free- und Pro-Modellstufen mit Nutzungslimits.",

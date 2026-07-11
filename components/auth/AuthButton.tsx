@@ -472,6 +472,9 @@ export function AuthButton() {
                                             {accountDeletionRequestedAt && (
                                                 <p className="mt-3 rounded-xl border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-100">
                                                     {t("auth.accountDeletionPending")} {new Date(accountDeletionRequestedAt).toLocaleDateString()}
+                                                    <span className="mt-1 block font-medium opacity-80">
+                                                        {t("auth.accountDeletionProcessing")}
+                                                    </span>
                                                 </p>
                                             )}
                                         </section>
