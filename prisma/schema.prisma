@@ -260,9 +260,9 @@ model Feedback {
 }
 
 model RefundRequest {
-  id                           String    @id @default(cuid())
+  id                           String                       @id @default(cuid())
   userId                       String?
-  user                         User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  user                         User?                        @relation(fields: [userId], references: [id], onDelete: SetNull)
   email                        String?
   plan                         String?
   stripeCustomerId             String?
@@ -271,16 +271,16 @@ model RefundRequest {
   subscriptionCurrentPeriodEnd DateTime?
   subscriptionBillingInterval  String?
   reason                       String?
-  status                       String    @default("pending")
+  status                       String                       @default("pending")
   adminNote                    String?
   reviewedByUserId             String?
   stripeRefundId               String?
   stripeRefundStatus           String?
   stripeChargeId               String?
   refundAmountCents            Int?
-  requestedAt                  DateTime  @default(now())
+  requestedAt                  DateTime                     @default(now())
   reviewedAt                   DateTime?
-  updatedAt                    DateTime  @updatedAt
+  updatedAt                    DateTime                     @updatedAt
   timelineEvents               RefundRequestTimelineEvent[]
 
   @@index([status, requestedAt])

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Database, Loader2, RefreshCw } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
 
@@ -28,7 +28,7 @@ export function AdminRetentionPanel() {
   const [data, setData] = useState<RetentionResponse | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const response = await fetch("/api/admin/retention");
@@ -52,11 +52,13 @@ export function AdminRetentionPanel() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    void load();
-  }, []);
+    queueMicrotask(() => {
+      void load();
+    });
+  }, [load]);
 
   return (
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">

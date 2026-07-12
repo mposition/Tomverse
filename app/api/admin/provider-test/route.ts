@@ -19,7 +19,9 @@ import {
 import { prisma } from "@/lib/prisma";
 
 const providers = Object.keys(PROVIDER_DISPLAY_NAMES) as [AiProvider, ...AiProvider[]];
-const modelIds = new Set(AVAILABLE_MODELS.map((model) => model.id));
+const modelIds: ReadonlySet<string> = new Set<string>(
+  AVAILABLE_MODELS.map((model) => model.id)
+);
 
 const providerTestSchema = z
   .object({
