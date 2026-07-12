@@ -207,3 +207,25 @@ model BillingPromotion {
   @@index([isActive])
   @@index([startsAt, endsAt])
 }
+
+model Feedback {
+  id              String   @id @default(cuid())
+  userId          String?
+  email           String?
+  type            String
+  status          String   @default("open")
+  message         String
+  traceId         String?
+  modelId         String?
+  plan            String?
+  hasAttachments  Boolean  @default(false)
+  attachmentCount Int      @default(0)
+  path            String?
+  userAgent       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([type, createdAt])
+  @@index([userId, createdAt])
+}

@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
 import {
   apiSecurityResponse,
   consumeApiRateLimit,
@@ -33,6 +34,21 @@ export async function POST(req: Request) {
       day: 30,
     });
     const body = await readLimitedJson(req, 8 * 1024, feedbackSchema);
+    await prisma.feedback.create({
+      data: {
+        userId: session?.user?.id || null,
+        email: session?.user?.email || null,
+        type: body.type,
+        message: body.message,
+        traceId: body.traceId || null,
+        modelId: body.modelId || null,
+        plan: body.plan || null,
+        hasAttachments: Boolean(body.hasAttachments),
+        attachmentCount: body.attachmentCount || 0,
+        path: body.path || null,
+        userAgent: body.userAgent || null,
+      },
+    });
     console.warn(
       JSON.stringify({
         event: "user_feedback",
