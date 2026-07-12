@@ -45,7 +45,9 @@ export const infoPages = {
       updated: "Last updated: July 11, 2026",
       sections: [
         { title: "Use of the service", body: "You are responsible for your account activity, prompts, uploaded files, and outputs you choose to use or share." },
-        { title: "AI outputs", body: "AI responses may be inaccurate or incomplete. You should review important outputs before relying on them, especially for legal, medical, financial, or safety-sensitive decisions." },
+        { title: "Third-party AI providers", body: "Tomverse is a workspace that routes your prompts and selected context to third-party AI providers and displays their responses. Except for product formatting needed to show the conversation, Tomverse does not edit, modify, approve, or verify the substance of AI-generated answers before presenting them to you." },
+        { title: "AI outputs are not professional advice", body: "AI responses may be inaccurate, incomplete, outdated, unsafe, or unsuitable for your circumstances. Outputs are provided for general informational use only and are not legal, medical, financial, moral, safety, or other professional advice. You should independently verify important outputs and consult a qualified professional before relying on them for high-impact decisions." },
+        { title: "Output responsibility and liability", body: "To the maximum extent permitted by law, Tomverse is not responsible for decisions, actions, losses, claims, or damages arising from AI-generated outputs, including legal, medical, ethical, moral, financial, or safety-related consequences. You are responsible for evaluating whether any output is appropriate for your intended use." },
         { title: "Accounts and access", body: "Some features require login or a paid tier. We may limit, suspend, or terminate access for abuse, security risk, or policy violations." },
         { title: "Acceptable use", body: "Do not use Tomverse to violate laws, abuse third-party services, bypass rate limits, upload malicious content, or process data you do not have rights to use." },
       ],

@@ -2,7 +2,7 @@
 
 import { signIn } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
-import { Suspense } from "react";
+import { Suspense, useState } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
 import Link from "next/link";
 import { ShieldCheck } from "lucide-react";
@@ -11,13 +11,49 @@ function SignInButtons() {
     const searchParams = useSearchParams();
     const callbackUrl = searchParams.get("callbackUrl") || "/chat";
     const { t } = useLanguage();
+    const [acceptedTerms, setAcceptedTerms] = useState(false);
+
+    const providerButtonClass =
+        "flex w-full items-center justify-center gap-3 rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm transition-all hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-white dark:border-zinc-700 dark:hover:bg-zinc-100 dark:disabled:hover:bg-white";
 
     return (
-        <div className="mt-8 space-y-3">
+        <div className="mt-8 space-y-4">
+            <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-left text-xs leading-5 text-zinc-600 transition hover:border-blue-300 hover:bg-blue-50/40 dark:border-zinc-800 dark:bg-zinc-950/60 dark:text-zinc-300 dark:hover:border-blue-500/60 dark:hover:bg-blue-950/20">
+                <input
+                    type="checkbox"
+                    checked={acceptedTerms}
+                    onChange={(event) => setAcceptedTerms(event.target.checked)}
+                    className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded border-zinc-300 text-blue-600 focus:ring-blue-500 dark:border-zinc-700 dark:bg-zinc-900"
+                    aria-describedby="signin-agreement-description"
+                />
+                <span id="signin-agreement-description">
+                    {t("auth.privacy")}{" "}
+                    <Link
+                        href="/terms"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-semibold text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
+                    >
+                        Terms and Conditions
+                    </Link>
+                    {" / "}
+                    <Link
+                        href="/privacy"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-semibold text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
+                    >
+                        {t("auth.privacyPolicyLink")}
+                    </Link>
+                </span>
+            </label>
+
             {/* Google */}
             <button
+                type="button"
+                disabled={!acceptedTerms}
                 onClick={() => signIn("google", { callbackUrl })}
-                className="cursor-pointer flex w-full items-center justify-center gap-3 rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm transition-all hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-100"
+                className={providerButtonClass}
             >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src="https://authjs.dev/img/providers/google.svg" className="h-5 w-5" alt="Google" />
@@ -26,8 +62,10 @@ function SignInButtons() {
 
             {/* Microsoft */}
             <button
+                type="button"
+                disabled={!acceptedTerms}
                 onClick={() => signIn("azure-ad", { callbackUrl })}
-                className="cursor-pointer flex w-full items-center justify-center gap-3 rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm transition-all hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-100"
+                className={providerButtonClass}
             >
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 21 21" className="h-5 w-5">
                     <rect x="1" y="1" width="9" height="9" fill="#f25022" />
@@ -40,8 +78,10 @@ function SignInButtons() {
 
             {/* Naver */}
             <button
+                type="button"
+                disabled={!acceptedTerms}
                 onClick={() => signIn("naver", { callbackUrl })}
-                className="cursor-pointer flex w-full items-center justify-center gap-3 rounded-xl bg-[#03C75A] px-4 py-3 text-sm font-semibold text-white transition-all hover:opacity-90"
+                className="flex w-full items-center justify-center gap-3 rounded-xl bg-[#03C75A] px-4 py-3 text-sm font-semibold text-white transition-all hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             >
                 <span className="font-black text-white">N</span>
                 {t("auth.naver")}
@@ -79,8 +119,15 @@ export default function SignInPage() {
                     <div className="mt-6 rounded-xl bg-zinc-50 px-4 py-3 text-center dark:bg-zinc-950/60">
                         <p className="flex items-center justify-center gap-1.5 text-xs font-medium text-zinc-500 dark:text-zinc-400">
                             <ShieldCheck className="h-3.5 w-3.5" />
-                            {t("auth.privacy")}
+                            Review the terms before continuing.
                         </p>
+                        <Link
+                            href="/terms"
+                            className="mt-2 inline-flex text-xs font-semibold text-blue-600 hover:underline dark:text-blue-400"
+                        >
+                            Terms and Conditions
+                        </Link>
+                        <span className="mx-2 text-xs text-zinc-400">/</span>
                         <Link
                             href="/privacy"
                             className="mt-2 inline-flex text-xs font-semibold text-blue-600 hover:underline dark:text-blue-400"
