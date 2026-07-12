@@ -479,46 +479,6 @@ function ProviderRow({ provider }: { provider: ProviderHealthRow }) {
                     )}
                 </div>
             </div>
-            <div className="mt-5 grid gap-4 border-t border-zinc-800 pt-5 lg:grid-cols-2">
-                <div>
-                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
-                        Manual override
-                    </div>
-                    <p className="mt-2 text-sm leading-6 text-zinc-300">
-                        Set provider balance, budget, or automatic balance lookup variables in Railway, then redeploy or restart the service.
-                    </p>
-                    <div className="mt-2 grid gap-2 text-xs text-zinc-500">
-                        <code className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2">
-                            PROVIDER_{provider.provider.toUpperCase()}_BALANCE_USD
-                        </code>
-                        <code className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2">
-                            PROVIDER_{provider.provider.toUpperCase()}_BALANCE_URL
-                        </code>
-                        <code className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2">
-                            PROVIDER_{provider.provider.toUpperCase()}_BALANCE_JSON_PATH
-                        </code>
-                        <code className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2">
-                            CHAT_PROVIDER_{provider.provider.toUpperCase()}_COST_MICROUSD_PER_DAY
-                        </code>
-                    </div>
-                </div>
-                <div>
-                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
-                        Email alert setup
-                    </div>
-                    <p className="mt-2 text-sm leading-6 text-zinc-300">
-                        Enable email alerts with ADMIN_ALERT_EMAIL and either RESEND_API_KEY or SENDGRID_API_KEY.
-                    </p>
-                    <div className="mt-2 grid gap-2 text-xs text-zinc-500">
-                        <code className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2">
-                            ADMIN_ALERT_EMAIL
-                        </code>
-                        <code className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2">
-                            RESEND_API_KEY or SENDGRID_API_KEY
-                        </code>
-                    </div>
-                </div>
-            </div>
         </section>
     );
 }
