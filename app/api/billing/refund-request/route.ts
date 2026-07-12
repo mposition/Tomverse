@@ -45,6 +45,9 @@ export async function POST(req: Request) {
         subscriptionStatus: true,
         subscriptionCurrentPeriodEnd: true,
         subscriptionBillingInterval: true,
+        settings: {
+          select: { language: true },
+        },
       },
     });
 
@@ -88,6 +91,7 @@ export async function POST(req: Request) {
       to: user.email,
       plan: user.plan,
       requestId: refundRequest.id,
+      language: user.settings?.language,
     }).catch((error) => {
       console.error("Refund request received email failed:", error);
     });

@@ -292,6 +292,9 @@ export async function POST(req: Request) {
         stripeCustomerId: true,
         stripeSubscriptionId: true,
         subscriptionStatus: true,
+        settings: {
+          select: { language: true },
+        },
       },
     });
     if (!user) {
@@ -341,6 +344,7 @@ export async function POST(req: Request) {
         plan: tierForPlanId(planId),
         billingInterval,
         periodEnd,
+        language: user.settings?.language,
       }).catch((emailError) => {
         console.error("Billing welcome email failed:", emailError);
       });

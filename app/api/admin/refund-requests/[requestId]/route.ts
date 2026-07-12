@@ -68,6 +68,13 @@ export async function PATCH(req: Request, context: RouteContext) {
       );
     }
 
+    const userSettings = refundRequest.userId
+      ? await prisma.userSettings.findUnique({
+          where: { userId: refundRequest.userId },
+          select: { language: true },
+        })
+      : null;
+
     if (body.action === "approve") {
       await cancelStripeSubscription(refundRequest.stripeSubscriptionId);
       const updated = await prisma.$transaction(async (tx) => {
@@ -104,6 +111,7 @@ export async function PATCH(req: Request, context: RouteContext) {
         plan: updated.plan,
         requestId: updated.id,
         adminNote: updated.adminNote,
+        language: userSettings?.language,
       }).catch((error) => {
         console.error("Refund approval email failed:", error);
       });
@@ -126,6 +134,7 @@ export async function PATCH(req: Request, context: RouteContext) {
       plan: updated.plan,
       requestId: updated.id,
       adminNote: updated.adminNote,
+      language: userSettings?.language,
     }).catch((error) => {
       console.error("Refund rejection email failed:", error);
     });

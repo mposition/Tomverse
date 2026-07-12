@@ -51,7 +51,13 @@ async function syncSubscription(subscription: Stripe.Subscription) {
 
   const user = await prisma.user.findFirst({
     where: { stripeCustomerId: customerId },
-    select: { id: true, email: true },
+    select: {
+      id: true,
+      email: true,
+      settings: {
+        select: { language: true },
+      },
+    },
   });
   if (!user) return null;
 
@@ -93,6 +99,7 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
       plan: synced.plan,
       billingInterval: synced.billingInterval,
       periodEnd: synced.periodEnd,
+      language: synced.user.settings?.language,
     }).catch((emailError) => {
       console.error("Billing welcome email failed:", emailError);
     });
