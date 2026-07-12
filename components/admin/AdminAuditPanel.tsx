@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Clipboard, Search, ShieldCheck } from "lucide-react";
+import { Clipboard, Eye, Loader2, Search, ShieldCheck, X } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
 
 export type AdminAuditRow = {
@@ -15,6 +15,7 @@ export type AdminAuditRow = {
   ipAddress: string | null;
   userAgent: string | null;
   createdAt: string;
+  metadata?: unknown;
 };
 
 type Props = {
@@ -40,6 +41,8 @@ const actionTone = (action: string) => {
 export function AdminAuditPanel({ rows }: Props) {
   const [query, setQuery] = useState("");
   const [targetFilter, setTargetFilter] = useState("all");
+  const [detail, setDetail] = useState<AdminAuditRow | null>(null);
+  const [loadingDetailId, setLoadingDetailId] = useState<string | null>(null);
 
   const targets = useMemo(
     () => ["all", ...Array.from(new Set(rows.map((row) => row.targetType))).sort()],
@@ -89,6 +92,28 @@ export function AdminAuditPanel({ rows }: Props) {
       dispatchAppToast("Audit event copied.", "success");
     } catch {
       dispatchAppToast("Could not copy audit event.", "error");
+    }
+  };
+
+  const loadDetail = async (row: AdminAuditRow) => {
+    setLoadingDetailId(row.id);
+    try {
+      const response = await fetch(`/api/admin/audit/${row.id}`);
+      const data = (await response.json().catch(() => null)) as {
+        audit?: AdminAuditRow;
+        error?: string;
+      } | null;
+      if (!response.ok || !data?.audit) {
+        throw new Error(data?.error || "Could not load audit detail.");
+      }
+      setDetail(data.audit);
+    } catch (error) {
+      dispatchAppToast(
+        error instanceof Error ? error.message : "Could not load audit detail.",
+        "error"
+      );
+    } finally {
+      setLoadingDetailId(null);
     }
   };
 
@@ -229,6 +254,19 @@ export function AdminAuditPanel({ rows }: Props) {
                     <Clipboard className="h-3.5 w-3.5" />
                     Copy
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => loadDetail(log)}
+                    disabled={loadingDetailId === log.id}
+                    className="ml-2 inline-flex cursor-pointer items-center gap-2 rounded-xl border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs font-bold text-blue-100 transition hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {loadingDetailId === log.id ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Eye className="h-3.5 w-3.5" />
+                    )}
+                    Details
+                  </button>
                 </td>
               </tr>
             ))}
@@ -246,6 +284,53 @@ export function AdminAuditPanel({ rows }: Props) {
         Keep this log reviewed after billing, refund, or user deletion changes. It is
         intended for operational investigation, not customer-facing disclosure.
       </div>
+
+      {detail ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="max-h-[86vh] w-full max-w-3xl overflow-y-auto rounded-3xl border border-zinc-800 bg-zinc-950 p-5 shadow-2xl shadow-black">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-300">
+                  Audit detail
+                </p>
+                <h3 className="mt-2 text-xl font-black text-white">{detail.action}</h3>
+                <p className="mt-1 text-sm text-zinc-500">
+                  {dateTimeLabel(detail.createdAt)} UTC / {detail.actorEmail || "Unknown admin"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDetail(null)}
+                className="inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-full border border-zinc-700 text-zinc-400 transition hover:bg-zinc-900 hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
+                <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500">Target</p>
+                <p className="mt-2 text-sm font-black text-white">{detail.targetType}</p>
+                <p className="mt-1 break-all text-xs text-zinc-400">{detail.targetId || "-"}</p>
+              </div>
+              <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
+                <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500">Request</p>
+                <p className="mt-2 break-all text-xs text-zinc-400">IP: {detail.ipAddress || "-"}</p>
+                <p className="mt-1 break-all text-xs text-zinc-400">UA: {detail.userAgent || "-"}</p>
+              </div>
+            </div>
+            <div className="mt-3 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
+              <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500">Summary</p>
+              <p className="mt-2 text-sm leading-6 text-zinc-200">{detail.summary}</p>
+            </div>
+            <div className="mt-3 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
+              <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500">Metadata</p>
+              <pre className="mt-3 max-h-96 overflow-auto rounded-xl bg-zinc-950 p-3 text-xs leading-5 text-zinc-300">
+                {JSON.stringify(detail.metadata || {}, null, 2)}
+              </pre>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

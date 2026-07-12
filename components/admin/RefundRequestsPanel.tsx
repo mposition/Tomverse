@@ -22,6 +22,13 @@ export type RefundRequestRow = {
   refundAmountCents: number | null;
   requestedAt: string;
   reviewedAt: string | null;
+  timelineEvents?: Array<{
+    id: string;
+    eventType: string;
+    message: string;
+    actorEmail: string | null;
+    createdAt: string;
+  }>;
 };
 
 type Props = {
@@ -253,6 +260,28 @@ export function RefundRequestsPanel({ rows }: Props) {
                     Admin note: {request.adminNote}
                   </p>
                 )}
+
+                {request.timelineEvents && request.timelineEvents.length > 0 ? (
+                  <div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950/70 p-3">
+                    <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500">
+                      Timeline
+                    </p>
+                    <div className="mt-3 grid gap-2">
+                      {request.timelineEvents.map((event) => (
+                        <div key={event.id} className="flex gap-3 text-xs">
+                          <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-blue-400" />
+                          <div>
+                            <p className="font-black text-zinc-200">{event.eventType}</p>
+                            <p className="mt-0.5 text-zinc-400">{event.message}</p>
+                            <p className="mt-0.5 text-zinc-600">
+                              {dateLabel(event.createdAt)} UTC / {event.actorEmail || "system"}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
 
                 {pending && (
                   <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_auto]">

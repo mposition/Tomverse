@@ -281,10 +281,26 @@ model RefundRequest {
   requestedAt                  DateTime  @default(now())
   reviewedAt                   DateTime?
   updatedAt                    DateTime  @updatedAt
+  timelineEvents               RefundRequestTimelineEvent[]
 
   @@index([status, requestedAt])
   @@index([userId, requestedAt])
   @@index([email])
+}
+
+model RefundRequestTimelineEvent {
+  id              String        @id @default(cuid())
+  refundRequestId String
+  refundRequest   RefundRequest @relation(fields: [refundRequestId], references: [id], onDelete: Cascade)
+  actorUserId     String?
+  actorEmail      String?
+  eventType       String
+  message         String
+  metadata        Json?
+  createdAt       DateTime      @default(now())
+
+  @@index([refundRequestId, createdAt])
+  @@index([eventType, createdAt])
 }
 
 model AdminAuditLog {
@@ -350,4 +366,42 @@ model AdminNotificationLog {
   @@index([channel, createdAt])
   @@index([status, createdAt])
   @@index([targetType, targetId])
+}
+
+model AdminProviderIncident {
+  id               String    @id @default(cuid())
+  provider         String?
+  modelId          String?
+  status           String    @default("limited")
+  title            String
+  message          String?
+  fallbackModelIds String    @default("[]")
+  createdById      String?
+  createdByEmail   String?
+  resolvedById     String?
+  resolvedByEmail  String?
+  startsAt         DateTime  @default(now())
+  resolvedAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([status, createdAt])
+  @@index([provider, status])
+  @@index([modelId, status])
+}
+
+model ProviderHealthCheck {
+  id             String   @id @default(cuid())
+  provider       String
+  modelId        String?
+  status         String
+  latencyMs      Int?
+  errorCode      String?
+  message        String?
+  createdById    String?
+  createdByEmail String?
+  createdAt      DateTime @default(now())
+
+  @@index([provider, createdAt])
+  @@index([status, createdAt])
 }

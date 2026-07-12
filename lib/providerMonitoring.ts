@@ -39,7 +39,7 @@ export type ProviderHealthRow = {
   }>;
 };
 
-const PROVIDER_DISPLAY_NAMES: Record<AiProvider, string> = {
+export const PROVIDER_DISPLAY_NAMES: Record<AiProvider, string> = {
   openai: "OpenAI",
   anthropic: "Anthropic",
   google: "Google Gemini",
@@ -53,7 +53,7 @@ const PROVIDER_DISPLAY_NAMES: Record<AiProvider, string> = {
   perplexity: "Perplexity",
 };
 
-const PROVIDER_API_KEY_ENV: Record<AiProvider, string[]> = {
+export const PROVIDER_API_KEY_ENV: Record<AiProvider, string[]> = {
   openai: ["OPENAI_API_KEY"],
   anthropic: ["ANTHROPIC_API_KEY"],
   google: ["GOOGLE_GENERATIVE_AI_API_KEY", "GOOGLE_API_KEY"],

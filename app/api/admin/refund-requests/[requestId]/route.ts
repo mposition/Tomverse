@@ -188,6 +188,26 @@ export async function PATCH(req: Request, context: RouteContext) {
             stripeChargeId: stripeRefund.stripeChargeId,
             refundAmountCents: stripeRefund.refundAmountCents,
           },
+          include: {
+            timelineEvents: {
+              orderBy: { createdAt: "asc" },
+            },
+          },
+        });
+
+        const event = await tx.refundRequestTimelineEvent.create({
+          data: {
+            refundRequestId: refundRequest.id,
+            actorUserId: session.user.id,
+            actorEmail: session.user.email || null,
+            eventType: "approved",
+            message: "Refund request approved. User membership was reset to Free.",
+            metadata: {
+              stripeRefundId: stripeRefund.stripeRefundId,
+              stripeRefundStatus: stripeRefund.stripeRefundStatus,
+              refundAmountCents: stripeRefund.refundAmountCents,
+            },
+          },
         });
 
         if (refundRequest.userId) {
@@ -205,7 +225,10 @@ export async function PATCH(req: Request, context: RouteContext) {
           });
         }
 
-        return request;
+        return {
+          ...request,
+          timelineEvents: [...request.timelineEvents, event],
+        };
       });
 
       await writeAdminAuditLog({
@@ -237,14 +260,37 @@ export async function PATCH(req: Request, context: RouteContext) {
       return NextResponse.json({ success: true, refundRequest: updated });
     }
 
-    const updated = await prisma.refundRequest.update({
-      where: { id: refundRequest.id },
-      data: {
-        status: "rejected",
-        adminNote: body.adminNote || null,
-        reviewedByUserId: session.user.id,
-        reviewedAt: new Date(),
-      },
+    const updated = await prisma.$transaction(async (tx) => {
+      const request = await tx.refundRequest.update({
+        where: { id: refundRequest.id },
+        data: {
+          status: "rejected",
+          adminNote: body.adminNote || null,
+          reviewedByUserId: session.user.id,
+          reviewedAt: new Date(),
+        },
+        include: {
+          timelineEvents: {
+            orderBy: { createdAt: "asc" },
+          },
+        },
+      });
+      const event = await tx.refundRequestTimelineEvent.create({
+        data: {
+          refundRequestId: refundRequest.id,
+          actorUserId: session.user.id,
+          actorEmail: session.user.email || null,
+          eventType: "rejected",
+          message: "Refund request rejected.",
+          metadata: {
+            adminNote: body.adminNote || null,
+          },
+        },
+      });
+      return {
+        ...request,
+        timelineEvents: [...request.timelineEvents, event],
+      };
     });
 
     await writeAdminAuditLog({

@@ -11,6 +11,7 @@ import {
     Bell,
     CheckCircle2,
     CreditCard,
+    Database,
     Gauge,
     KeyRound,
     LayoutDashboard,
@@ -35,6 +36,12 @@ import { AdminAuditPanel, type AdminAuditRow } from "@/components/admin/AdminAud
 import { AdminGlobalSearchPanel } from "@/components/admin/AdminGlobalSearchPanel";
 import { AdminNotificationsPanel, type AdminNotificationRow } from "@/components/admin/AdminNotificationsPanel";
 import { AdminOperationsPanel } from "@/components/admin/AdminOperationsPanel";
+import {
+    AdminProviderOpsPanel,
+    type AdminProviderIncidentRow,
+    type ProviderHealthCheckRow,
+} from "@/components/admin/AdminProviderOpsPanel";
+import { AdminRetentionPanel } from "@/components/admin/AdminRetentionPanel";
 import { AdminUsersPanel, type AdminUserRow } from "@/components/admin/AdminUsersPanel";
 import { BillingAdminPanel } from "@/components/admin/BillingAdminPanel";
 import { FeedbackInboxPanel, type FeedbackRow } from "@/components/admin/FeedbackInboxPanel";
@@ -120,6 +127,12 @@ const adminTabs = [
         label: "Alerts",
         description: "Delivery logs",
         icon: Bell,
+    },
+    {
+        id: "retention",
+        label: "Retention",
+        description: "Cleanup status",
+        icon: Database,
     },
     {
         id: "feedback",
@@ -551,6 +564,8 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         cancelAtPeriodEndCount,
         modelOverrides,
         notificationLogs,
+        providerIncidents,
+        providerChecks,
     ] = await Promise.all([
         getProviderHealthDashboard(),
         getBillingPlans(),
@@ -592,6 +607,11 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         prisma.refundRequest.findMany({
             orderBy: { requestedAt: "desc" },
             take: 20,
+            include: {
+                timelineEvents: {
+                    orderBy: { createdAt: "asc" },
+                },
+            },
         }),
         prisma.refundRequest.count({ where: { status: "pending" } }),
         prisma.chatUsageBucket.aggregate({
@@ -630,6 +650,14 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         }),
         getModelOverrides(),
         prisma.adminNotificationLog.findMany({
+            orderBy: { createdAt: "desc" },
+            take: 50,
+        }),
+        prisma.adminProviderIncident.findMany({
+            orderBy: { createdAt: "desc" },
+            take: 50,
+        }),
+        prisma.providerHealthCheck.findMany({
             orderBy: { createdAt: "desc" },
             take: 50,
         }),
@@ -701,6 +729,13 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         refundAmountCents: request.refundAmountCents,
         requestedAt: request.requestedAt.toISOString(),
         reviewedAt: request.reviewedAt?.toISOString() || null,
+        timelineEvents: request.timelineEvents.map((event) => ({
+            id: event.id,
+            eventType: event.eventType,
+            message: event.message,
+            actorEmail: event.actorEmail,
+            createdAt: event.createdAt.toISOString(),
+        })),
     }));
     const feedbackInboxRows: FeedbackRow[] = feedbackRows.map((feedback) => ({
         id: feedback.id,
@@ -726,6 +761,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         targetType: log.targetType,
         targetId: log.targetId,
         summary: log.summary,
+        metadata: log.metadata,
         ipAddress: log.ipAddress,
         userAgent: log.userAgent,
         createdAt: log.createdAt.toISOString(),
@@ -740,6 +776,31 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         targetId: log.targetId,
         error: log.error,
         createdAt: log.createdAt.toISOString(),
+    }));
+    const providerIncidentRows: AdminProviderIncidentRow[] = providerIncidents.map((incident) => ({
+        id: incident.id,
+        provider: incident.provider,
+        modelId: incident.modelId,
+        status: incident.status,
+        title: incident.title,
+        message: incident.message,
+        fallbackModelIds: incident.fallbackModelIds,
+        createdByEmail: incident.createdByEmail,
+        resolvedByEmail: incident.resolvedByEmail,
+        startsAt: incident.startsAt.toISOString(),
+        resolvedAt: incident.resolvedAt?.toISOString() || null,
+        createdAt: incident.createdAt.toISOString(),
+    }));
+    const providerCheckRows: ProviderHealthCheckRow[] = providerChecks.map((check) => ({
+        id: check.id,
+        provider: check.provider,
+        modelId: check.modelId,
+        status: check.status,
+        latencyMs: check.latencyMs,
+        errorCode: check.errorCode,
+        message: check.message,
+        createdByEmail: check.createdByEmail,
+        createdAt: check.createdAt.toISOString(),
     }));
     const activePlanCounts = new Map(
         activePlanGroups.map((group) => [group.plan || "Free", group._count._all])
@@ -1101,6 +1162,11 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                         {dashboard.providers.map((provider) => (
                             <ProviderRow key={provider.provider} provider={provider} />
                         ))}
+                        <AdminProviderOpsPanel
+                            models={AVAILABLE_MODELS}
+                            incidents={providerIncidentRows}
+                            checks={providerCheckRows}
+                        />
                         <ModelOverridesPanel
                             models={AVAILABLE_MODELS}
                             overrides={modelOverrides}
@@ -1110,6 +1176,10 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
 
                     {activeTab === "alerts" && (
                         <AdminNotificationsPanel rows={notificationRows} />
+                    )}
+
+                    {activeTab === "retention" && (
+                        <AdminRetentionPanel />
                     )}
 
                     {activeTab === "feedback" && (
