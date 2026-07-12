@@ -43,6 +43,12 @@ import {
 } from "@/components/admin/AdminProviderOpsPanel";
 import { AdminRetentionPanel } from "@/components/admin/AdminRetentionPanel";
 import { AdminReportsPanel } from "@/components/admin/AdminReportsPanel";
+import {
+    AdminRiskPanels,
+    type FunnelMetrics,
+    type PromoRiskRow,
+    type SlaRow,
+} from "@/components/admin/AdminRiskPanels";
 import { AdminUsersPanel, type AdminUserRow } from "@/components/admin/AdminUsersPanel";
 import { AdminWebhookPanel } from "@/components/admin/AdminWebhookPanel";
 import { BillingAdminPanel } from "@/components/admin/BillingAdminPanel";
@@ -568,6 +574,8 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         notificationLogs,
         providerIncidents,
         providerChecks,
+        checkoutStartedCount,
+        usersWithConversations,
     ] = await Promise.all([
         getProviderHealthDashboard(),
         getBillingPlans(),
@@ -662,6 +670,13 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         prisma.providerHealthCheck.findMany({
             orderBy: { createdAt: "desc" },
             take: 50,
+        }),
+        prisma.stripeWebhookEventLog.count({
+            where: { eventType: "checkout.session.completed" },
+        }),
+        prisma.conversation.groupBy({
+            by: ["userId"],
+            _count: { _all: true },
         }),
     ]);
     const availableCount = dashboard.providers.filter(
@@ -781,6 +796,50 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         acknowledgedByEmail: log.acknowledgedByEmail,
         createdAt: log.createdAt.toISOString(),
     }));
+    const promoRiskRows: PromoRiskRow[] = billingPromotions
+        .map((promotion) => {
+            const nearingLimit =
+                promotion.maxRedemptions &&
+                promotion.redeemedCount >= Math.floor(promotion.maxRedemptions * 0.8);
+            const highDiscount = promotion.discountPercent >= 80;
+            const exhausted =
+                promotion.maxRedemptions !== null &&
+                promotion.redeemedCount >= promotion.maxRedemptions;
+            const risk = exhausted
+                ? "exhausted"
+                : nearingLimit
+                    ? "near limit"
+                    : highDiscount
+                        ? "high discount"
+                        : "";
+            return {
+                code: promotion.code,
+                redeemedCount: promotion.redeemedCount,
+                maxRedemptions: promotion.maxRedemptions,
+                discountPercent: promotion.discountPercent,
+                risk,
+            };
+        })
+        .filter((promotion) => promotion.risk);
+    const slaRows: SlaRow[] = feedbackRows
+        .filter((feedback) => feedback.status === "open")
+        .map((feedback) => ({
+            id: feedback.id,
+            email: feedback.email,
+            type: feedback.type,
+            status: feedback.status,
+            ageHours: Math.floor((now.getTime() - feedback.createdAt.getTime()) / 3_600_000),
+            createdAt: feedback.createdAt.toISOString(),
+        }))
+        .filter((feedback) => feedback.ageHours >= 24)
+        .slice(0, 10);
+    const funnelMetrics: FunnelMetrics = {
+        totalUsers,
+        usersWithConversations: usersWithConversations.length,
+        usersWithPaidPlan: paidUsers,
+        checkoutStarted: checkoutStartedCount,
+        paidUsers,
+    };
     const providerIncidentRows: AdminProviderIncidentRow[] = providerIncidents.map((incident) => ({
         id: incident.id,
         provider: incident.provider,
@@ -1103,6 +1162,12 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                                     </div>
                                 </div>
                             </section>
+
+                            <AdminRiskPanels
+                                promoRisks={promoRiskRows}
+                                slaRows={slaRows}
+                                funnel={funnelMetrics}
+                            />
                         </>
                     )}
 

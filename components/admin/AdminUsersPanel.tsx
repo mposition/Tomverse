@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Clipboard, Download, Loader2, Search, X } from "lucide-react";
+import { Clipboard, Download, Loader2, RefreshCw, Save, Search, X } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
 import { AdminNotesBox } from "@/components/admin/AdminNotesBox";
 import { AdminUserDeleteButton } from "@/components/admin/AdminUserDeleteButton";
@@ -137,6 +137,10 @@ export function AdminUsersPanel({
   const [detailUser, setDetailUser] = useState<AdminUserDetail | null>(null);
   const [detailError, setDetailError] = useState("");
   const [loadingDetailId, setLoadingDetailId] = useState<string | null>(null);
+  const [billingAction, setBillingAction] = useState<string | null>(null);
+  const [adjustPlan, setAdjustPlan] = useState<"Free" | "Pro" | "Max">("Free");
+  const [adjustReason, setAdjustReason] = useState("");
+  const [adjustConfirm, setAdjustConfirm] = useState("");
 
   const title = useMemo(
     () => (query.trim() ? "Search results" : "Recent accounts"),
@@ -213,6 +217,70 @@ export function AdminUsersPanel({
       dispatchAppToast("User context copied.", "success");
     } catch {
       dispatchAppToast("Could not copy user context.", "error");
+    }
+  };
+
+  const resyncBilling = async (userId: string) => {
+    if (billingAction) return;
+    setBillingAction("resync");
+    try {
+      const response = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/billing-resync`, {
+        method: "POST",
+      });
+      const data = (await response.json().catch(() => null)) as
+        | { user?: Partial<AdminUserDetail>; error?: string }
+        | null;
+      if (!response.ok || !data?.user) {
+        throw new Error(data?.error || "Stripe resync failed.");
+      }
+      setDetailUser((current) => (current ? { ...current, ...data.user } : current));
+      dispatchAppToast("Stripe billing resynced.", "success");
+    } catch (error) {
+      dispatchAppToast(
+        error instanceof Error ? error.message : "Stripe resync failed.",
+        "error"
+      );
+    } finally {
+      setBillingAction(null);
+    }
+  };
+
+  const adjustUserPlan = async (userId: string) => {
+    if (billingAction) return;
+    setBillingAction("adjust");
+    try {
+      const response = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/plan-adjust`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          plan: adjustPlan,
+          reason: adjustReason,
+          confirmText: adjustConfirm,
+          subscriptionStatus: "manually_adjusted",
+          billingInterval: adjustPlan === "Free" ? null : "monthly",
+          periodEnd:
+            adjustPlan === "Free"
+              ? null
+              : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        }),
+      });
+      const data = (await response.json().catch(() => null)) as
+        | { user?: Partial<AdminUserDetail>; error?: string }
+        | null;
+      if (!response.ok || !data?.user) {
+        throw new Error(data?.error || "Plan adjustment failed.");
+      }
+      setDetailUser((current) => (current ? { ...current, ...data.user } : current));
+      setAdjustReason("");
+      setAdjustConfirm("");
+      dispatchAppToast("User plan adjusted.", "success");
+    } catch (error) {
+      dispatchAppToast(
+        error instanceof Error ? error.message : "Plan adjustment failed.",
+        "error"
+      );
+    } finally {
+      setBillingAction(null);
     }
   };
 
@@ -419,6 +487,15 @@ export function AdminUsersPanel({
                   <div>Billing: {detailUser.subscriptionBillingInterval || "-"}</div>
                   <div>Period end: {dateTimeLabel(detailUser.subscriptionCurrentPeriodEnd)}</div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => resyncBilling(detailUser.id)}
+                  disabled={Boolean(billingAction)}
+                  className="mt-4 inline-flex cursor-pointer items-center gap-2 rounded-xl border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs font-black text-blue-100 transition hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {billingAction === "resync" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                  Resync Stripe
+                </button>
               </div>
 
               <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
@@ -515,6 +592,45 @@ export function AdminUsersPanel({
                   {detailUser.promotionRedemptions.length === 0 && detailUser.refundRequests.length === 0 ? (
                     <p className="text-sm text-zinc-500">No promotion or refund history.</p>
                   ) : null}
+                </div>
+              </section>
+
+              <section className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 lg:col-span-2">
+                <h4 className="font-black text-white">Manual plan adjustment</h4>
+                <p className="mt-1 text-sm leading-6 text-zinc-500">
+                  Use only for billing support recovery. Type ADJUST PLAN to confirm.
+                </p>
+                <div className="mt-3 grid gap-3 md:grid-cols-[10rem_1fr_10rem_auto]">
+                  <select
+                    value={adjustPlan}
+                    onChange={(event) => setAdjustPlan(event.target.value as "Free" | "Pro" | "Max")}
+                    className="h-11 rounded-xl border border-zinc-800 bg-zinc-950 px-3 text-sm font-bold text-white outline-none focus:border-blue-500"
+                  >
+                    <option value="Free">Free</option>
+                    <option value="Pro">Pro</option>
+                    <option value="Max">Max</option>
+                  </select>
+                  <input
+                    value={adjustReason}
+                    onChange={(event) => setAdjustReason(event.target.value)}
+                    placeholder="Reason for audit log"
+                    className="h-11 rounded-xl border border-zinc-800 bg-zinc-950 px-3 text-sm text-white outline-none focus:border-blue-500"
+                  />
+                  <input
+                    value={adjustConfirm}
+                    onChange={(event) => setAdjustConfirm(event.target.value)}
+                    placeholder="ADJUST PLAN"
+                    className="h-11 rounded-xl border border-zinc-800 bg-zinc-950 px-3 text-sm text-white outline-none focus:border-blue-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => adjustUserPlan(detailUser.id)}
+                    disabled={Boolean(billingAction) || adjustConfirm !== "ADJUST PLAN" || adjustReason.trim().length < 5}
+                    className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-amber-600 px-3 py-2 text-sm font-black text-white transition hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {billingAction === "adjust" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                    Save
+                  </button>
                 </div>
               </section>
 
