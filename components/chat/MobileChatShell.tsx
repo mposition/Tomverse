@@ -233,7 +233,7 @@ export function MobileChatShell({
   return (
     <main
       data-testid="mobile-chat-shell"
-      className="flex h-[100dvh] w-full max-w-full flex-col overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100"
+      className="flex h-[100dvh] w-full max-w-full flex-col overflow-hidden bg-white text-[13px] text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100"
     >
       <header className="min-w-0 shrink-0 overflow-hidden border-b border-zinc-200 bg-white px-3 pb-1.5 pt-[calc(0.45rem+env(safe-area-inset-top))] dark:border-zinc-800 dark:bg-zinc-950">
         <div className="flex items-center gap-2">
@@ -246,10 +246,10 @@ export function MobileChatShell({
           <Menu className="h-5 w-5" />
         </button>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-bold">
+          <p className="truncate text-[13px] font-bold">
             {currentConversation?.title || t("sidebar.newChat")}
           </p>
-          <p className="truncate text-[11px] font-medium text-zinc-500">
+          <p className="truncate text-[10px] font-medium text-zinc-500">
             {activeModel?.name || t("chat.modelSelect")}
           </p>
         </div>
@@ -264,31 +264,31 @@ export function MobileChatShell({
         </div>
         <div className="mt-1.5 flex min-h-6 max-w-full gap-1.5 overflow-x-auto overscroll-x-contain">
           {isPrivateMode && (
-            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-purple-500/10 px-2 py-1 text-[11px] font-bold text-purple-600 dark:text-purple-300">
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-purple-500/10 px-2 py-1 text-[10px] font-bold text-purple-600 dark:text-purple-300">
               <Shield className="h-3 w-3" />
               Private
             </span>
           )}
           {isGuestMode && (
-            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-blue-500/10 px-2 py-1 text-[11px] font-bold text-blue-600 dark:text-blue-300">
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-blue-500/10 px-2 py-1 text-[10px] font-bold text-blue-600 dark:text-blue-300">
               <Sparkles className="h-3 w-3" />
               {t("modelTiers.guest")} {guestMessageCount}/{maxGuestMessages}
             </span>
           )}
           {isCurrentLocked && (
-            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/10 px-2 py-1 text-[11px] font-bold text-amber-600 dark:text-amber-300">
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/10 px-2 py-1 text-[10px] font-bold text-amber-600 dark:text-amber-300">
               <Lock className="h-3 w-3" />
               {t("sidebar.lockedBadge")}
             </span>
           )}
           {isCurrentShared && (
-            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-300">
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-1 text-[10px] font-bold text-emerald-600 dark:text-emerald-300">
               <Share2 className="h-3 w-3" />
               {t("sidebar.sharedBadge")}
             </span>
           )}
           {resolvedActiveModelId && selectedModels.length > 1 && (
-            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-zinc-100 px-2 py-1 text-[11px] font-bold text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-zinc-100 px-2 py-1 text-[10px] font-bold text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
               {isAnyResponding ? (
                 <span className="h-2 w-2 animate-pulse rounded-full bg-blue-500" />
               ) : activeStatus === "error" ? (
@@ -301,7 +301,7 @@ export function MobileChatShell({
           )}
           {isAnyWorkingOrError && selectedModels.length > 1 && (
             <span
-              className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-[11px] font-bold ${
+              className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-[10px] font-bold ${
                 isAnyError
                   ? "bg-red-500/10 text-red-600 dark:text-red-300"
                   : "bg-blue-500/10 text-blue-600 dark:text-blue-300"
@@ -337,7 +337,7 @@ export function MobileChatShell({
                   role="tab"
                   aria-selected={isActive}
                   aria-label={`${model?.name || modelId} ${status}`}
-                  className={`relative flex h-9 max-w-[72vw] touch-manipulation items-center gap-2 rounded-full border px-3 text-xs font-semibold shadow-sm transition-colors ${
+                  className={`relative flex h-8 max-w-[72vw] touch-manipulation items-center gap-2 rounded-full border px-2.5 text-[11px] font-semibold shadow-sm transition-colors ${
                     isActive
                       ? "border-blue-500 bg-blue-600 text-white"
                       : "border-zinc-200 bg-white text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300"
@@ -364,7 +364,7 @@ export function MobileChatShell({
           <button
             type="button"
             onClick={onCompareSummary}
-            className="h-9 w-full rounded-xl border border-blue-200 bg-blue-50 text-xs font-black text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200"
+            className="h-8 w-full rounded-xl border border-blue-200 bg-blue-50 text-[11px] font-black text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200"
           >
             {t("chat.summarizeModelDifferences")}
           </button>
