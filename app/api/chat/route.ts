@@ -90,6 +90,11 @@ const qwen = createOpenAI({
     apiKey: process.env.DASHSCOPE_API_KEY,
 });
 
+const zhipu = createOpenAI({
+    baseURL: process.env.ZHIPU_BASE_URL || "https://api.z.ai/api/paas/v4",
+    apiKey: process.env.ZHIPU_API_KEY,
+});
+
 const perplexity = createOpenAI({
     baseURL: "https://api.perplexity.ai",
     apiKey: process.env.PERPLEXITY_API_KEY,
@@ -571,7 +576,7 @@ const getActiveModel = (model: AiModel) => {
         case "perplexity":
             return perplexity.chat(model.apiModel);
         case "zhipu":
-            throw new Error(`Provider "${model.provider}" is not configured.`);
+            return zhipu.chat(model.apiModel);
     }
 };
 

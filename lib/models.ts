@@ -61,7 +61,7 @@ export const AVAILABLE_MODELS = [
     { id: "qwen3.7-max", name: "Qwen 3.7 Max", apiModel: "qwen3.7-max", provider: "qwen", icon: "QW", tier: "Max", enabled: true, status: "enabled" },
     { id: "qwen3.7-plus", name: "Qwen 3.7 Plus", apiModel: "qwen3.7-plus", provider: "qwen", icon: "QW", tier: "Pro", enabled: true, status: "enabled" },
     { id: "qwen3.6-flash", name: "Qwen 3.6", apiModel: "qwen3.6-flash", provider: "qwen", icon: "QW", tier: "Free", enabled: true, status: "enabled" },
-    { id: "glm-5.2", name: "GLM 5.2", apiModel: "glm-5.2", provider: "zhipu", icon: "Z", tier: "Free", enabled: false, status: "disabled" },
+    { id: "glm-5.2", name: "GLM 5.2", apiModel: "glm-5.2", provider: "zhipu", icon: "Z", tier: "Free", enabled: true, status: "enabled" },
     { id: "perplexity/sonar", name: "Perplexity Sonar", apiModel: "sonar", provider: "perplexity", icon: "P", tier: "Pro", enabled: true, status: "enabled" },
     { id: "perplexity/sonar-pro", name: "Perplexity Sonar Pro", apiModel: "sonar-pro", provider: "perplexity", icon: "P", tier: "Pro", enabled: true, status: "enabled" },
     { id: "perplexity/sonar-reasoning-pro", name: "Perplexity Sonar Reasoning Pro", apiModel: "sonar-reasoning-pro", provider: "perplexity", icon: "P", tier: "Max", enabled: true, status: "enabled", reasoning: "high" },
