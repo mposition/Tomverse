@@ -5,7 +5,7 @@ import { AlertCircle, ArrowRight, CheckCircle2, Info, Sparkles } from "lucide-re
 import { DesktopChatShell } from "@/components/chat/DesktopChatShell";
 import { GoLiveOnboarding } from "@/components/chat/GoLiveOnboarding";
 import { MobileChatShell } from "@/components/chat/MobileChatShell";
-import { Conversation, AVAILABLE_MODELS, MAX_SELECTED_MODELS, type ChatAttachment } from "@/components/chat/types";
+import { Conversation, AVAILABLE_MODELS, type ChatAttachment } from "@/components/chat/types";
 import { useSession } from "next-auth/react";
 import {
   useLanguage,
@@ -26,6 +26,7 @@ import {
   type AppToastEventDetail,
   type AppToastTone,
 } from "@/lib/appToast";
+import { useUserUsage } from "@/components/chat/useUserUsage";
 
 const normalizeStringArray = (value: unknown, fallback: string[]) => {
   let parsed = value;
@@ -206,6 +207,10 @@ export default function Home() {
   const [isPrivateMode, setIsPrivateMode] = useState(false);
 
   const isGuestMode = status !== "loading" && !session?.user;
+  const accountUsage = useUserUsage(!isGuestMode);
+  const maxSelectableModels = isGuestMode
+    ? APP_DEFAULTS.maxGuestSelectedModels
+    : accountUsage?.limits.maxModels || APP_DEFAULTS.maxSelectedModels;
   const [guestMessageCount, setGuestMessageCount] = useState(0);
   const MAX_GUEST_MESSAGES = 20;
 
@@ -912,7 +917,7 @@ export default function Home() {
       nextModels = nextModels.filter((id) => id !== modelId);
       nextDisabled = nextDisabled.filter((id) => id !== modelId);
     } else {
-        const maxModels = isGuestMode ? APP_DEFAULTS.maxGuestSelectedModels : MAX_SELECTED_MODELS;
+        const maxModels = maxSelectableModels;
         if (nextModels.length >= maxModels) {
             showToast(isGuestMode ? t("chat.maxGuestModelCompare") : t("chat.maxModelCompare"), "info");
             return;
@@ -921,7 +926,9 @@ export default function Home() {
         nextModels.push(modelId);
       }
     
-    nextModels = isGuestMode ? clampGuestSelectedModels(nextModels) : clampSelectedModels(nextModels);
+    nextModels = isGuestMode
+      ? clampGuestSelectedModels(nextModels)
+      : clampSelectedModels(nextModels).slice(0, maxSelectableModels);
 	setSelectedModels(nextModels);
     setDisabledPanels(nextDisabled);
     if (currentChatId && currentChatId !== "private-chat") {

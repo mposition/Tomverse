@@ -20,7 +20,7 @@ export const APP_DEFAULTS = {
   defaultLanguage: "en",
 
   maxSelectedModels: 3,
-  maxGuestSelectedModels: 2,
+  maxGuestSelectedModels: 3,
   maxGuestMessages: 20,
 
   guestDateStorageKey: "guest_date",

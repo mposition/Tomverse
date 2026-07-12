@@ -437,51 +437,66 @@ export function SupportPageContent() {
       <MarketingHeader maxWidth="max-w-6xl" />
 
       <section className="mx-auto max-w-6xl px-4 py-14 sm:px-6 lg:py-20">
-        <div className="grid gap-10 lg:grid-cols-[0.95fr_1.05fr] lg:items-start">
-          <div>
-            <p className="text-sm font-black uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">
-              {page.eyebrow}
-            </p>
-            <h1 className="mt-4 text-4xl font-black leading-tight sm:text-6xl">{page.title}</h1>
-            <p className="mt-5 text-lg leading-8 text-zinc-600 dark:text-zinc-300">{page.description}</p>
-            <div className="mt-8 grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
-              {[
-                [Mail, page.emailLabel, page.emailValue],
-                [Clock3, page.responseLabel, page.responseValue],
-                [MessageSquareText, page.noPhoneLabel, page.noPhoneValue],
-              ].map(([Icon, label, value]) => {
-                const IconComponent = Icon as typeof Mail;
-                return (
-                  <div key={label as string} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40">
-                    <IconComponent className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-                    <p className="mt-3 text-xs font-black uppercase tracking-[0.16em] text-zinc-500">{label as string}</p>
-                    <p className="mt-1 text-sm font-black">{value as string}</p>
-                  </div>
-                );
-              })}
-            </div>
-            <div className="mt-8 flex flex-wrap gap-3">
-              <Link href="/support/help-centre" className="inline-flex h-12 items-center gap-2 rounded-xl bg-blue-600 px-5 text-sm font-black text-white transition hover:bg-blue-500">
-                {page.helpCta}
-                <ArrowRight className="h-4 w-4" />
-              </Link>
-              <Link href="/chat" className="inline-flex h-12 items-center gap-2 rounded-xl border border-zinc-300 px-5 text-sm font-black transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900">
-                {page.appCta}
-              </Link>
-            </div>
+        <div className="max-w-3xl">
+          <p className="text-sm font-black uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">
+            {page.eyebrow}
+          </p>
+          <h1 className="mt-4 text-4xl font-black leading-tight sm:text-6xl">{page.title}</h1>
+          <p className="mt-5 text-lg leading-8 text-zinc-600 dark:text-zinc-300">{page.description}</p>
+          <div className="mt-8 flex flex-wrap gap-3">
+            <Link href="/support/help-centre" className="inline-flex h-12 items-center gap-2 rounded-xl bg-blue-600 px-5 text-sm font-black text-white transition hover:bg-blue-500">
+              {page.helpCta}
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+            <Link href="/chat" className="inline-flex h-12 items-center gap-2 rounded-xl border border-zinc-300 px-5 text-sm font-black transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900">
+              {page.appCta}
+            </Link>
+          </div>
+        </div>
+
+        <div className="mt-10 grid gap-3 sm:grid-cols-3">
+          {[
+            [Mail, page.emailLabel, page.emailValue],
+            [Clock3, page.responseLabel, page.responseValue],
+            [MessageSquareText, page.noPhoneLabel, page.noPhoneValue],
+          ].map(([Icon, label, value]) => {
+            const IconComponent = Icon as typeof Mail;
+            return (
+              <div key={label as string} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40">
+                <IconComponent className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                <p className="mt-3 text-xs font-black uppercase tracking-[0.16em] text-zinc-500">{label as string}</p>
+                <p className="mt-1 text-sm font-black">{value as string}</p>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="mt-12 grid gap-5 lg:grid-cols-3">
+          {page.cards.map((card) => (
+            <article key={card.title} className="rounded-2xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900/40">
+              <ShieldCheck className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+              <h2 className="mt-4 text-xl font-black">{card.title}</h2>
+              <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">{card.body}</p>
+              <ul className="mt-5 grid gap-3">
+                {card.bullets.map((bullet) => (
+                  <li key={bullet} className="flex gap-3 text-sm font-semibold leading-6 text-zinc-700 dark:text-zinc-200">
+                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+                    {bullet}
+                  </li>
+                ))}
+              </ul>
+            </article>
+          ))}
+        </div>
+
+        <div className="mt-12 grid gap-8 lg:grid-cols-[0.85fr_1.15fr] lg:items-start">
+          <div className="rounded-3xl border border-zinc-200 bg-zinc-50 p-6 dark:border-zinc-800 dark:bg-zinc-900/40">
+            <LifeBuoy className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+            <h2 className="mt-4 text-2xl font-black">{page.formTitle}</h2>
+            <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">{page.formDescription}</p>
           </div>
 
           <form onSubmit={submit} className="rounded-3xl border border-zinc-200 bg-zinc-50 p-5 shadow-2xl shadow-zinc-950/5 dark:border-zinc-800 dark:bg-zinc-900/50">
-            <div className="flex items-start gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-white">
-                <LifeBuoy className="h-5 w-5" />
-              </div>
-              <div>
-                <h2 className="text-2xl font-black">{page.formTitle}</h2>
-                <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">{page.formDescription}</p>
-              </div>
-            </div>
-
             <label className="mt-6 block text-sm font-black">
               {page.typeLabel}
               <select
@@ -536,24 +551,6 @@ export function SupportPageContent() {
               {busy ? page.sending : page.submit}
             </button>
           </form>
-        </div>
-
-        <div className="mt-12 grid gap-5 lg:grid-cols-3">
-          {page.cards.map((card) => (
-            <article key={card.title} className="rounded-2xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900/40">
-              <ShieldCheck className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-              <h2 className="mt-4 text-xl font-black">{card.title}</h2>
-              <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">{card.body}</p>
-              <ul className="mt-5 grid gap-3">
-                {card.bullets.map((bullet) => (
-                  <li key={bullet} className="flex gap-3 text-sm font-semibold leading-6 text-zinc-700 dark:text-zinc-200">
-                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
-                    {bullet}
-                  </li>
-                ))}
-              </ul>
-            </article>
-          ))}
         </div>
       </section>
 

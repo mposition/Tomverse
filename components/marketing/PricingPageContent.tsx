@@ -100,7 +100,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       },
     ],
     note:
-      "\uAC00\uACA9\uC740 \uC138\uAE08 \uC804 USD \uAE30\uC900\uC785\uB2C8\uB2E4. Max\uB294 \uC77C\uC77C \uBA54\uC2DC\uC9C0 \uD55C\uB3C4\uB97C \uC5C6\uC560\uC9C0\uB9CC, \uC6D4\uAC04 fair-use, \uB0A8\uC6A9 \uBC29\uC9C0, Provider \uBE44\uC6A9 \uBCF4\uD638 \uD55C\uB3C4\uB294 \uC801\uC6A9\uB429\uB2C8\uB2E4.",
+      "Prices are shown in USD before tax. Max removes the daily message limit, but monthly fair-use, abuse prevention, and provider cost protection limits still apply.",
     plans: [
       {
         name: "Free",

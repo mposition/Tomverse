@@ -76,6 +76,7 @@ export async function GET(req: Request) {
       tokensMonth: positiveInteger(process.env.CHAT_USER_TOKENS_PER_MONTH, 20_000_000),
       costDay: positiveInteger(process.env.CHAT_USER_COST_MICROUSD_PER_DAY, 2_000_000),
       costMonth: positiveInteger(process.env.CHAT_USER_COST_MICROUSD_PER_MONTH, 20_000_000),
+      maxModels: billingPlan.maxModels,
     };
 
     return NextResponse.json({

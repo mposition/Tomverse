@@ -27,6 +27,7 @@ export type UserUsageResponse = {
     tokensMonth: number;
     costDay: number;
     costMonth: number;
+    maxModels: number;
   };
 };
 

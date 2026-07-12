@@ -302,7 +302,7 @@ export function ChatInput({
     const accountUsage = useUserUsage(!isGuestMode);
     const maxSelectableModels = isGuestMode
       ? APP_DEFAULTS.maxGuestSelectedModels
-      : MAX_SELECTED_MODELS;
+      : accountUsage?.limits.maxModels || MAX_SELECTED_MODELS;
 
   const activeModelNames = selectedModels
     .map(id => AVAILABLE_MODELS.find(m => m.id === id)?.name)

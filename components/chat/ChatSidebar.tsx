@@ -73,6 +73,7 @@ export function ChatSidebar({
     const [deleteProjectArmedId, setDeleteProjectArmedId] = useState<string | null>(null);
     const [conversationProjectOverrides, setConversationProjectOverrides] = useState<Record<string, string | null>>({});
     const [projects, setProjects] = useState<ConversationProject[]>([]);
+    const [isCreatingProject, setIsCreatingProject] = useState(false);
     const [conversationLabels, setConversationLabels] = useState<Record<string, string>>(() => {
         if (typeof window === "undefined") return {};
         try {
@@ -286,18 +287,32 @@ export function ChatSidebar({
 
     const createProject = async () => {
         const name = projectName.trim().slice(0, 32);
-        if (!name) return;
-        const response = await fetch("/api/projects", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name }),
-        });
-        if (!response.ok) return;
-        const project = (await response.json()) as ConversationProject;
-        setProjects((current) => [project, ...current.filter((item) => item.id !== project.id)]);
-        setProjectName("");
-        setShowProjectForm(false);
-        setConversationFilter(`project:${project.id}`);
+        if (!name || isCreatingProject) return;
+        setIsCreatingProject(true);
+        try {
+            const response = await fetch("/api/projects", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name }),
+            });
+            if (!response.ok) {
+                dispatchAppToast(t("sidebar.projectRenameFailed"), "error");
+                return;
+            }
+            const project = (await response.json()) as ConversationProject;
+            if (!project?.id || !project?.name) {
+                dispatchAppToast(t("sidebar.projectRenameFailed"), "error");
+                return;
+            }
+            setProjects((current) => [project, ...current.filter((item) => item.id !== project.id)]);
+            setProjectName("");
+            setShowProjectForm(false);
+            setConversationFilter(`project:${project.id}`);
+        } catch {
+            dispatchAppToast(t("sidebar.projectRenameFailed"), "error");
+        } finally {
+            setIsCreatingProject(false);
+        }
     };
 
     const startProjectRename = (project: ConversationProject) => {
@@ -618,8 +633,9 @@ export function ChatSidebar({
                                 className="h-8 min-w-0 flex-1 rounded-lg border border-zinc-200 bg-zinc-50 px-2 text-xs font-medium text-zinc-900 outline-none focus:border-blue-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
                             />
                             <button
-                                type="submit"
-                                disabled={!projectName.trim()}
+                                type="button"
+                                onClick={() => void createProject()}
+                                disabled={!projectName.trim() || isCreatingProject}
                                 className="h-8 rounded-lg bg-blue-600 px-2 text-[11px] font-black text-white disabled:cursor-not-allowed disabled:opacity-50"
                             >
                                 {t("auth.ok")}
