@@ -31,6 +31,7 @@ model User {
   accounts      Account[]
   sessions      Session[]
   projects      ConversationProject[]
+  refundRequests RefundRequest[]
   conversations Conversation[] // 사용자가 가진 대화방들
 }
 
@@ -228,4 +229,28 @@ model Feedback {
   @@index([status, createdAt])
   @@index([type, createdAt])
   @@index([userId, createdAt])
+}
+
+model RefundRequest {
+  id                             String   @id @default(cuid())
+  userId                         String?
+  user                           User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  email                          String?
+  plan                           String?
+  stripeCustomerId               String?
+  stripeSubscriptionId           String?
+  subscriptionStatus             String?
+  subscriptionCurrentPeriodEnd   DateTime?
+  subscriptionBillingInterval    String?
+  reason                         String?
+  status                         String   @default("pending")
+  adminNote                      String?
+  reviewedByUserId               String?
+  requestedAt                    DateTime @default(now())
+  reviewedAt                     DateTime?
+  updatedAt                      DateTime @updatedAt
+
+  @@index([status, requestedAt])
+  @@index([userId, requestedAt])
+  @@index([email])
 }

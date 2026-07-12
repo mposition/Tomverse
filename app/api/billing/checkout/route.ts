@@ -81,6 +81,15 @@ const addBillingPeriod = (
   return next;
 };
 
+const billingSuccessUrl = (
+  origin: string,
+  planId: BillingPlanId,
+  billingInterval: "monthly" | "annual"
+) =>
+  `${origin}/chat?billing=success&plan=${encodeURIComponent(
+    planId
+  )}&interval=${encodeURIComponent(billingInterval)}`;
+
 async function activateZeroDollarPlan({
   userId,
   planId,
@@ -329,7 +338,11 @@ export async function POST(req: Request) {
 
       return NextResponse.json({
         success: true,
-        redirectUrl: `${origin}/chat?billing=success`,
+        redirectUrl: billingSuccessUrl(
+          origin,
+          planId as BillingPlanId,
+          billingInterval
+        ),
         periodEnd: periodEnd.toISOString(),
       });
     }
@@ -357,7 +370,11 @@ export async function POST(req: Request) {
       mode: "subscription",
       customer: stripeCustomerId,
       line_items: [buildCheckoutLineItem(plan, billingInterval)],
-      success_url: `${origin}/chat?billing=success`,
+      success_url: billingSuccessUrl(
+        origin,
+        planId as BillingPlanId,
+        billingInterval
+      ),
       cancel_url: `${origin}/pricing?billing=cancelled`,
       client_reference_id: user.id,
       allow_promotion_codes: discount ? undefined : true,

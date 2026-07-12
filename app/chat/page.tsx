@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { AlertCircle, CheckCircle2, Info } from "lucide-react";
+import { AlertCircle, ArrowRight, CheckCircle2, Info, Sparkles } from "lucide-react";
 import { DesktopChatShell } from "@/components/chat/DesktopChatShell";
 import { GoLiveOnboarding } from "@/components/chat/GoLiveOnboarding";
 import { MobileChatShell } from "@/components/chat/MobileChatShell";
@@ -76,6 +76,11 @@ type AppToast = {
   id: string;
   message: string;
   tone: AppToastTone;
+};
+
+type BillingSuccessState = {
+  plan: string;
+  interval: string;
 };
 
 function ConfirmDialog({
@@ -158,6 +163,7 @@ export default function Home() {
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [pendingRemoveModelId, setPendingRemoveModelId] = useState<string | null>(null);
   const [pendingRevokeShareId, setPendingRevokeShareId] = useState<string | null>(null);
+  const [billingSuccess, setBillingSuccess] = useState<BillingSuccessState | null>(null);
   const [compareSummary, setCompareSummary] = useState<{
     title: string;
     note: string;
@@ -217,6 +223,28 @@ export default function Home() {
         clearTimeout(toastTimerRef.current);
       }
     };
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("billing") !== "success") return;
+
+    const plan = params.get("plan");
+    const interval = params.get("interval");
+    setBillingSuccess({
+      plan: plan === "max" ? "Max" : plan === "pro" ? "Pro" : "Tomverse",
+      interval: interval === "annual" ? "Annual" : "Monthly",
+    });
+
+    params.delete("billing");
+    params.delete("plan");
+    params.delete("interval");
+    const nextSearch = params.toString();
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`
+    );
   }, []);
 
   useEffect(() => {
@@ -1075,6 +1103,87 @@ export default function Home() {
           <ToastIcon className="h-4 w-4" aria-hidden="true" />
         </span>
         <span className="min-w-0 whitespace-pre-line break-words">{toast.message}</span>
+      </div>
+    )}
+    {billingSuccess && (
+      <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="결제 성공"
+          className="relative w-full max-w-lg overflow-hidden rounded-3xl border border-blue-400/30 bg-zinc-950 text-white shadow-2xl shadow-blue-950/40"
+        >
+          <div className="absolute inset-x-0 top-0 h-32 bg-gradient-to-br from-blue-500/35 via-cyan-400/15 to-purple-500/25" />
+          <div className="relative p-6 sm:p-8">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-500 text-white shadow-lg shadow-blue-500/30">
+                <Sparkles className="h-7 w-7" aria-hidden="true" />
+              </div>
+              <button
+                type="button"
+                onClick={() => setBillingSuccess(null)}
+                className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm font-bold text-zinc-300 transition hover:bg-white/10 hover:text-white"
+              >
+                닫기
+              </button>
+            </div>
+
+            <div className="mt-7">
+              <p className="text-xs font-black uppercase tracking-[0.24em] text-blue-200">
+                Payment successful
+              </p>
+              <h2 className="mt-3 text-3xl font-black tracking-tight sm:text-4xl">
+                결제가 성공적으로 완료되었습니다.
+              </h2>
+              <p className="mt-4 text-base leading-7 text-zinc-300">
+                Tomverse AI의 새로운 가족이 되신 것을 진심으로 환영합니다.
+                이제 {billingSuccess.plan} 워크스페이스에서 더 넓은 사용량과
+                고급 기능을 활용하실 수 있습니다.
+              </p>
+            </div>
+
+            <div className="mt-6 grid gap-3 sm:grid-cols-3">
+              <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                <p className="text-xs font-semibold text-zinc-400">Plan</p>
+                <p className="mt-1 text-lg font-black">{billingSuccess.plan}</p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                <p className="text-xs font-semibold text-zinc-400">Billing</p>
+                <p className="mt-1 text-lg font-black">{billingSuccess.interval}</p>
+              </div>
+              <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4">
+                <p className="text-xs font-semibold text-emerald-200">Status</p>
+                <p className="mt-1 text-lg font-black text-emerald-200">Active</p>
+              </div>
+            </div>
+
+            <div className="mt-6 rounded-2xl border border-blue-400/20 bg-blue-500/10 p-4 text-sm leading-6 text-blue-100">
+              플랜 반영은 Stripe Webhook 처리 상태에 따라 잠시 걸릴 수 있습니다.
+              설정의 플랜 탭에서 현재 플랜과 만료일을 확인하실 수 있습니다.
+            </div>
+
+            <div className="mt-7 flex flex-col gap-3 sm:flex-row">
+              <button
+                type="button"
+                onClick={() => setBillingSuccess(null)}
+                className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 text-sm font-black text-white transition hover:bg-blue-500"
+              >
+                Tomverse 시작하기
+                <ArrowRight className="h-4 w-4" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setBillingSuccess(null);
+                  showToast("왼쪽 하단 계정 설정의 플랜 탭에서 현재 플랜을 확인할 수 있습니다.", "info");
+                }}
+                className="inline-flex flex-1 items-center justify-center rounded-2xl border border-white/10 px-5 py-3 text-sm font-black text-zinc-200 transition hover:bg-white/10 hover:text-white"
+              >
+                플랜 확인하기
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     )}
     {pendingDeleteId && (

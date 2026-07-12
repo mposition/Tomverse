@@ -45,6 +45,12 @@ export function AuthButton() {
     const [isDeletingChats, setIsDeletingChats] = useState(false);
     const [isDeleteAllArmed, setIsDeleteAllArmed] = useState(false);
     const [isRequestingDeletion, setIsRequestingDeletion] = useState(false);
+    const [isRequestingRefund, setIsRequestingRefund] = useState(false);
+    const [refundReason, setRefundReason] = useState("");
+    const [refundRequestedAt, setRefundRequestedAt] = useState<string | null>(() => {
+        if (typeof window === "undefined") return null;
+        return localStorage.getItem("tomverse_refund_requested_at");
+    });
     const [accountDeletionRequestedAt, setAccountDeletionRequestedAt] = useState<string | null>(() => {
         if (typeof window === "undefined") return null;
         return localStorage.getItem("tomverse_account_deletion_requested_at");
@@ -226,6 +232,34 @@ export function AuthButton() {
             dispatchAppToast(t("feedback.failed"), "error");
         } finally {
             setIsRequestingDeletion(false);
+        }
+    };
+
+    const handleRequestRefund = async () => {
+        if (isRequestingRefund) return;
+        setIsRequestingRefund(true);
+        try {
+            const response = await fetch("/api/billing/refund-request", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ reason: refundReason }),
+            });
+            const data = (await response.json().catch(() => null)) as { error?: string } | null;
+            if (!response.ok) {
+                throw new Error(data?.error || "Refund request failed");
+            }
+            const requestedAt = new Date().toISOString();
+            localStorage.setItem("tomverse_refund_requested_at", requestedAt);
+            setRefundRequestedAt(requestedAt);
+            setRefundReason("");
+            dispatchAppToast("환불 및 플랜 취소 요청이 접수되었습니다.", "success");
+        } catch (error) {
+            dispatchAppToast(
+                error instanceof Error ? error.message : "환불 요청을 접수하지 못했습니다.",
+                "error"
+            );
+        } finally {
+            setIsRequestingRefund(false);
         }
     };
 
@@ -535,6 +569,43 @@ export function AuthButton() {
                                                 </div>
                                             )}
                                         </section>
+                                        {(accountPlan === "Pro" || accountPlan === "Max") && (
+                                            <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/60 dark:bg-amber-950/20">
+                                                <h4 className="text-sm font-bold text-amber-800 dark:text-amber-200">
+                                                    환불 및 플랜 취소 요청
+                                                </h4>
+                                                <p className="mt-1 text-sm leading-6 text-amber-800/80 dark:text-amber-100/80">
+                                                    요청이 승인되면 멤버십은 Free 플랜으로 변경되고 Stripe 구독 연결 정보가 초기화됩니다.
+                                                    결제 환불 처리 시간은 결제 수단과 Stripe 정책에 따라 달라질 수 있습니다.
+                                                </p>
+                                                <textarea
+                                                    value={refundReason}
+                                                    onChange={(event) => setRefundReason(event.target.value)}
+                                                    maxLength={1000}
+                                                    rows={3}
+                                                    placeholder="요청 사유를 간단히 적어주세요. 예: 사용 목적 변경, 결제 오류, 서비스가 기대와 다름"
+                                                    className="mt-3 w-full resize-none rounded-xl border border-amber-200 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-amber-500 focus:ring-4 focus:ring-amber-500/10 dark:border-amber-900/60 dark:bg-zinc-950 dark:text-zinc-100"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={handleRequestRefund}
+                                                    disabled={isRequestingRefund || Boolean(refundRequestedAt)}
+                                                    className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-amber-300 bg-white px-3 py-3 text-sm font-black text-amber-700 transition-colors hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-100 dark:hover:bg-amber-950/70"
+                                                >
+                                                    <LifeBuoy className="h-4 w-4" />
+                                                    {refundRequestedAt
+                                                        ? "환불 요청 접수됨"
+                                                        : isRequestingRefund
+                                                            ? t("feedback.sending")
+                                                            : "환불 / 플랜 취소 요청하기"}
+                                                </button>
+                                                {refundRequestedAt && (
+                                                    <p className="mt-2 text-xs font-semibold text-amber-800 dark:text-amber-100">
+                                                        접수일: {new Date(refundRequestedAt).toLocaleDateString()}
+                                                    </p>
+                                                )}
+                                            </section>
+                                        )}
                                         {accountUsage && (
                                             <section className="grid gap-3 sm:grid-cols-2">
                                                 <div className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60">

@@ -1,0 +1,50 @@
+import "server-only";
+
+type SendEmailInput = {
+  to: string;
+  subject: string;
+  html: string;
+  text: string;
+};
+
+const fromAddress = () =>
+  process.env.BILLING_EMAIL_FROM || "Tomverse AI <billing@tomverse.app>";
+
+export async function sendTransactionalEmail(input: SendEmailInput) {
+  if (!input.to) return { sent: false, skipped: true };
+
+  const resendApiKey = process.env.RESEND_API_KEY;
+  if (!resendApiKey) {
+    console.warn(
+      JSON.stringify({
+        event: "transactional_email_skipped",
+        reason: "RESEND_API_KEY missing",
+        to: input.to,
+        subject: input.subject,
+      })
+    );
+    return { sent: false, skipped: true };
+  }
+
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${resendApiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: fromAddress(),
+      to: input.to,
+      subject: input.subject,
+      html: input.html,
+      text: input.text,
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`Email send failed: ${response.status} ${body.slice(0, 300)}`);
+  }
+
+  return { sent: true, skipped: false };
+}

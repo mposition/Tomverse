@@ -16,6 +16,7 @@ import {
     LayoutDashboard,
     LifeBuoy,
     MessageSquare,
+    RotateCcw,
     ShieldCheck,
     Users,
     WalletCards,
@@ -28,6 +29,7 @@ import { getUserChatUsageKey } from "@/lib/chatSecurity";
 import { prisma } from "@/lib/prisma";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { BillingAdminPanel } from "@/components/admin/BillingAdminPanel";
+import { RefundRequestsPanel, type RefundRequestRow } from "@/components/admin/RefundRequestsPanel";
 import {
     getBillingPlans,
     getBillingPromotions,
@@ -115,6 +117,7 @@ function AdminNav() {
         ["overview", "Overview", LayoutDashboard],
         ["users", "Users", Users],
         ["billing", "Billing", CreditCard],
+        ["refunds", "Refunds", RotateCcw],
         ["providers", "Providers", Activity],
         ["feedback", "Feedback", LifeBuoy],
     ] as const;
@@ -410,6 +413,8 @@ export default async function AdminPage() {
         recentUsers,
         feedbackRows,
         openFeedbackCount,
+        refundRows,
+        pendingRefundCount,
         todayUsage,
         monthlyUsage,
     ] = await Promise.all([
@@ -450,6 +455,11 @@ export default async function AdminPage() {
             take: 10,
         }),
         prisma.feedback.count({ where: { status: "open" } }),
+        prisma.refundRequest.findMany({
+            orderBy: { requestedAt: "desc" },
+            take: 20,
+        }),
+        prisma.refundRequest.count({ where: { status: "pending" } }),
         prisma.chatUsageBucket.aggregate({
             where: {
                 period: "day",
@@ -497,6 +507,22 @@ export default async function AdminPage() {
     const recentUsageByKey = new Map(
         recentUsageRows.map((row) => [row.key, row.count])
     );
+    const refundRequestRows: RefundRequestRow[] = refundRows.map((request) => ({
+        id: request.id,
+        email: request.email,
+        plan: request.plan,
+        status: request.status,
+        reason: request.reason,
+        adminNote: request.adminNote,
+        stripeCustomerId: request.stripeCustomerId,
+        stripeSubscriptionId: request.stripeSubscriptionId,
+        subscriptionStatus: request.subscriptionStatus,
+        subscriptionBillingInterval: request.subscriptionBillingInterval,
+        subscriptionCurrentPeriodEnd:
+            request.subscriptionCurrentPeriodEnd?.toISOString() || null,
+        requestedAt: request.requestedAt.toISOString(),
+        reviewedAt: request.reviewedAt?.toISOString() || null,
+    }));
     const needsAttention = [
         ...dashboard.providers
             .filter((provider) => provider.status !== "available")
@@ -518,6 +544,15 @@ export default async function AdminPage() {
                       title: `${openFeedbackCount} open feedback item${openFeedbackCount === 1 ? "" : "s"}`,
                       detail: "Review user-reported issues before launch traffic grows.",
                       tone: "blue",
+                  },
+              ]
+            : []),
+        ...(pendingRefundCount > 0
+            ? [
+                  {
+                      title: `${pendingRefundCount} pending refund request${pendingRefundCount === 1 ? "" : "s"}`,
+                      detail: "Review billing cancellation requests and approve or reject them before renewal disputes grow.",
+                      tone: "amber",
                   },
               ]
             : []),
@@ -697,6 +732,11 @@ export default async function AdminPage() {
                             promotions={billingPromotions}
                         />
                     </section>
+
+                    <RefundRequestsPanel
+                        rows={refundRequestRows}
+                        pendingCount={pendingRefundCount}
+                    />
 
                     <section id="providers" className="flex flex-col gap-4">
                         <div className="flex flex-wrap items-center justify-between gap-3">
