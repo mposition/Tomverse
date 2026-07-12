@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle2, Loader2, RotateCcw, XCircle } from "lucide-react";
+import { CheckCircle2, Download, Loader2, RotateCcw, XCircle } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
 
 export type RefundRequestRow = {
@@ -44,6 +44,11 @@ const dateLabel = (value: string | null) => {
 const money = (cents: number | null) =>
   typeof cents === "number" ? `$${(cents / 100).toFixed(2)}` : "-";
 
+const escapeCsv = (value: unknown) => {
+  const text = String(value ?? "");
+  return `"${text.replace(/"/g, '""')}"`;
+};
+
 export function RefundRequestsPanel({ rows }: Props) {
   const [items, setItems] = useState(rows);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -57,6 +62,34 @@ export function RefundRequestsPanel({ rows }: Props) {
       ? items
       : items.filter((item) => item.status === statusFilter);
   const pendingLabel = visiblePendingCount === 1 ? "pending" : "pending";
+
+  const exportCsv = () => {
+    const csv = [
+      ["id", "requestedAt", "email", "plan", "status", "subscriptionStatus", "billingInterval", "periodEnd", "stripeCustomerId", "refundAmountCents", "reason"],
+      ...filteredItems.map((request) => [
+        request.id,
+        request.requestedAt,
+        request.email || "",
+        request.plan || "",
+        request.status,
+        request.subscriptionStatus || "",
+        request.subscriptionBillingInterval || "",
+        request.subscriptionCurrentPeriodEnd || "",
+        request.stripeCustomerId || "",
+        request.refundAmountCents ?? "",
+        request.reason || "",
+      ]),
+    ]
+      .map((line) => line.map(escapeCsv).join(","))
+      .join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "tomverse-admin-refunds.csv";
+    link.click();
+    URL.revokeObjectURL(url);
+  };
 
   const updateRequest = async (id: string, action: "approve" | "reject") => {
     if (busyId) return;
@@ -124,6 +157,14 @@ export function RefundRequestsPanel({ rows }: Props) {
           <RotateCcw className="h-3.5 w-3.5" />
           {visiblePendingCount} {pendingLabel}
         </span>
+        <button
+          type="button"
+          onClick={exportCsv}
+          className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-black text-zinc-200 transition hover:bg-zinc-900"
+        >
+          <Download className="h-3.5 w-3.5" />
+          Export CSV
+        </button>
       </div>
 
       <div className="mt-5 grid gap-3">

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import {
+  AlertTriangle,
   CheckCircle2,
   CreditCard,
   Database,
@@ -492,8 +493,20 @@ export function BillingAdminPanel({
     useState<EditablePromotion[]>(promotions);
   const [isSaving, setIsSaving] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isValidatingStripe, setIsValidatingStripe] = useState(false);
+  const [showSaveReview, setShowSaveReview] = useState(false);
   const [activeTab, setActiveTab] = useState<"plans" | "promotions">("plans");
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const [stripeValidation, setStripeValidation] = useState<
+    Array<{
+      planId: string;
+      name: string;
+      product: string;
+      monthlyPrice: string;
+      annualPrice: string;
+      errors: string[];
+    }>
+  >([]);
 
   const dirtyPlanCount = useMemo(
     () =>
@@ -599,6 +612,7 @@ export function BillingAdminPanel({
   const save = async () => {
     if (isSaving) return;
     setIsSaving(true);
+    setShowSaveReview(false);
     try {
       const response = await fetch("/api/admin/billing", {
         method: "PATCH",
@@ -618,6 +632,57 @@ export function BillingAdminPanel({
       dispatchAppToast("Failed to save billing settings.", "error");
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const requestSave = () => {
+    if (dirtyPlanCount + dirtyPromotionCount > 0 && !showSaveReview) {
+      setShowSaveReview(true);
+      return;
+    }
+    save();
+  };
+
+  const validateStripeIds = async () => {
+    if (isValidatingStripe) return;
+    setIsValidatingStripe(true);
+    try {
+      const response = await fetch("/api/admin/stripe/validate", {
+        method: "POST",
+      });
+      const data = (await response.json().catch(() => null)) as
+        | {
+            results?: Array<{
+              planId: string;
+              name: string;
+              product: string;
+              monthlyPrice: string;
+              annualPrice: string;
+              errors: string[];
+            }>;
+            error?: string;
+          }
+        | null;
+      if (!response.ok || !data?.results) {
+        throw new Error(data?.error || "Stripe validation failed.");
+      }
+      setStripeValidation(data.results);
+      const failed = data.results.some((result) =>
+        [result.product, result.monthlyPrice, result.annualPrice].some(
+          (status) => status !== "ok"
+        )
+      );
+      dispatchAppToast(
+        failed ? "Stripe validation found issues." : "Stripe IDs validated.",
+        failed ? "error" : "success"
+      );
+    } catch (error) {
+      dispatchAppToast(
+        error instanceof Error ? error.message : "Stripe validation failed.",
+        "error"
+      );
+    } finally {
+      setIsValidatingStripe(false);
     }
   };
 
@@ -651,7 +716,7 @@ export function BillingAdminPanel({
             </button>
             <button
               type="button"
-              onClick={save}
+              onClick={requestSave}
               disabled={isSaving || isRefreshing}
               className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-black text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -727,6 +792,41 @@ export function BillingAdminPanel({
             )}
           </div>
         </div>
+        {showSaveReview ? (
+          <div className="mt-5 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-200" />
+                <div>
+                  <p className="text-sm font-black text-amber-100">
+                    Review before publishing billing changes
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-amber-100/80">
+                    Checkout uses these values immediately. Confirm that plan limits,
+                    promotion windows, redemption caps, and Stripe IDs are correct.
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowSaveReview(false)}
+                  className="cursor-pointer rounded-xl border border-zinc-700 px-3 py-2 text-xs font-black text-zinc-200 transition hover:bg-zinc-900"
+                >
+                  Keep editing
+                </button>
+                <button
+                  type="button"
+                  onClick={save}
+                  disabled={isSaving}
+                  className="cursor-pointer rounded-xl bg-amber-500 px-3 py-2 text-xs font-black text-zinc-950 transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Publish changes
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 px-5 py-4">
@@ -770,7 +870,16 @@ export function BillingAdminPanel({
           </button>
           <button
             type="button"
-            onClick={save}
+            onClick={validateStripeIds}
+            disabled={isValidatingStripe}
+            className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-purple-500/30 bg-purple-500/10 px-3 py-2 text-xs font-black text-purple-100 hover:bg-purple-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isValidatingStripe ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CreditCard className="h-3.5 w-3.5" />}
+            Validate Stripe
+          </button>
+          <button
+            type="button"
+            onClick={requestSave}
             disabled={isSaving || isRefreshing}
             className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-xs font-black text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
           >
@@ -779,6 +888,29 @@ export function BillingAdminPanel({
           </button>
         </div>
       </div>
+
+      {stripeValidation.length > 0 ? (
+        <div className="border-b border-zinc-800 px-5 py-4">
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500">
+              Stripe validation
+            </p>
+            <div className="mt-3 grid gap-2 md:grid-cols-2">
+              {stripeValidation.map((result) => (
+                <div key={result.planId} className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs">
+                  <div className="font-black text-white">{result.name}</div>
+                  <div className="mt-1 text-zinc-400">
+                    Product {result.product} · Monthly {result.monthlyPrice} · Annual {result.annualPrice}
+                  </div>
+                  {result.errors.length > 0 ? (
+                    <div className="mt-1 truncate text-red-300">{result.errors[0]}</div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="p-5">
         {activeTab === "plans" ? (

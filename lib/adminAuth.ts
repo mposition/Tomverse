@@ -21,6 +21,11 @@ export const isAdminSession = (session: Session | null | undefined) => {
 };
 
 export type AdminRole = "owner" | "billing" | "support" | "ops" | "readonly";
+export type AdminPermission =
+  | "support:write"
+  | "billing:write"
+  | "ops:write"
+  | "user:delete";
 
 const roleEnvKey: Record<AdminRole, string> = {
   owner: "ADMIN_OWNER_EMAILS",
@@ -44,4 +49,19 @@ export const getAdminRole = (
   }
 
   return "owner";
+};
+
+export const hasAdminPermission = (
+  session: Session | null | undefined,
+  permission: AdminPermission
+) => {
+  const role = getAdminRole(session);
+  if (!role) return false;
+  if (role === "owner") return true;
+  if (role === "readonly") return false;
+  if (permission === "support:write") return role === "support" || role === "billing";
+  if (permission === "billing:write") return role === "billing";
+  if (permission === "ops:write") return role === "ops";
+  if (permission === "user:delete") return false;
+  return false;
 };

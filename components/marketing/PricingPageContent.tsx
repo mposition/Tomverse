@@ -358,7 +358,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
 };
 
 export function PricingPageContent() {
-  const { lang, t } = useLanguage();
+  const { lang } = useLanguage();
   const content = copy[lang] ?? copy.en;
   const billing = usePublicBilling();
   const annualCopy = annualLabelByLanguage[lang] ?? annualLabelByLanguage.en!;
@@ -413,7 +413,6 @@ export function PricingPageContent() {
           {content.plans.map((plan) => {
             const planId = plan.name === "Max" ? "max" : plan.name === "Pro" ? "pro" : "free";
             const displayPrice = billing.formatPlanPrice(planId) || plan.price;
-            const usdPrice = billing.formatUsdPlanPrice(planId) || plan.price;
             const annualFallback = planId === "max" ? "$240" : planId === "pro" ? "$144" : "$0";
             const annualPrice = billing.formatPlanPrice(planId, "annual") || annualFallback;
             const annualUsdPrice = billing.formatUsdPlanPrice(planId, "annual") || annualFallback;

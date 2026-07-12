@@ -223,11 +223,13 @@ export default function Home() {
 
   useEffect(() => {
     if (!isGuestMode) {
-      setIsGuestSettingsLoaded(true);
+      queueMicrotask(() => setIsGuestSettingsLoaded(true));
       return;
     }
     let cancelled = false;
-    setIsGuestSettingsLoaded(false);
+    queueMicrotask(() => {
+      if (!cancelled) setIsGuestSettingsLoaded(false);
+    });
     fetch("/api/app-settings", { cache: "no-store" })
       .then((res) => {
         if (!res.ok) throw new Error(`App settings load failed: ${res.status}`);
@@ -297,9 +299,11 @@ export default function Home() {
 
     const plan = params.get("plan");
     const interval = params.get("interval");
-    setBillingSuccess({
-      plan: normalizeBillingPlanLabel(plan) || t("billing.upgradedPlanFallback"),
-      interval: interval === "annual" ? t("billing.intervalAnnual") : t("billing.intervalMonthly"),
+    queueMicrotask(() => {
+      setBillingSuccess({
+        plan: normalizeBillingPlanLabel(plan) || t("billing.upgradedPlanFallback"),
+        interval: interval === "annual" ? t("billing.intervalAnnual") : t("billing.intervalMonthly"),
+      });
     });
 
     if (!normalizeBillingPlanLabel(plan)) {

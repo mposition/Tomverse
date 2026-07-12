@@ -1,6 +1,7 @@
 ﻿"use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import type { ExtraProps } from "react-markdown";
 import type { ComponentPropsWithoutRef } from "react";
@@ -119,19 +120,19 @@ export function ChatMessageList({
     }
   };
 
-  const scrollToBottom = (behavior: ScrollBehavior = "smooth") => {
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     const container = containerRef.current;
     if (!container) return;
 
     container.scrollTo({ top: container.scrollHeight, behavior });
-  };
+  }, []);
 
-  const clearScheduledScrolls = () => {
+  const clearScheduledScrolls = useCallback(() => {
     scheduledScrollsRef.current.forEach((timer) => clearTimeout(timer));
     scheduledScrollsRef.current = [];
-  };
+  }, []);
 
-  const forceScrollToBottom = (behavior: ScrollBehavior = "auto") => {
+  const forceScrollToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
     autoStickUntilRef.current = Date.now() + 650;
     setIsNearBottom(true);
     clearScheduledScrolls();
@@ -150,7 +151,7 @@ export function ChatMessageList({
     scheduledScrollsRef.current = [60, 160, 320, 520].map((delay) =>
       setTimeout(run, delay)
     );
-  };
+  }, [clearScheduledScrolls, scrollToBottom]);
 
   const checkIsNearBottom = () => {
     const container = containerRef.current;
@@ -192,7 +193,7 @@ export function ChatMessageList({
 
     const behavior: ScrollBehavior = isInitialLoad ? "auto" : "smooth";
     forceScrollToBottom(behavior);
-  }, [messages, isNearBottom]);
+  }, [forceScrollToBottom, messages, isNearBottom]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -213,7 +214,7 @@ export function ChatMessageList({
       observer.disconnect();
       clearScheduledScrolls();
     };
-  }, []);
+  }, [clearScheduledScrolls, scrollToBottom]);
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
@@ -392,12 +393,12 @@ export function ChatMessageList({
                             <li>{t("chat.fileErrorHelpLimit")}</li>
                             <li>{t("chat.fileErrorHelpRetry")}</li>
                           </ul>
-                          <a
+                          <Link
                             href="/support/help-centre"
                             className="mt-2 inline-flex font-black text-red-700 underline underline-offset-2 dark:text-red-100"
                           >
                             {t("chat.fileErrorHelpLink")}
-                          </a>
+                          </Link>
                         </div>
                       )}
                       <div className="flex flex-wrap gap-2">

@@ -6,7 +6,7 @@ import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import { deleteTomverseAccount } from "@/lib/accountDeletion";
 import { writeAdminAuditLog } from "@/lib/adminAudit";
-import { isAdminSession } from "@/lib/adminAuth";
+import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { getUserChatUsageKey } from "@/lib/chatSecurity";
 import {
   apiSecurityResponse,
@@ -195,6 +195,9 @@ export async function DELETE(req: Request, context: RouteContext) {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id || !isAdminSession(session)) {
       return NextResponse.json({ error: "Not found." }, { status: 404 });
+    }
+    if (!hasAdminPermission(session, "user:delete")) {
+      return NextResponse.json({ error: "Forbidden." }, { status: 403 });
     }
 
     await consumeApiRateLimit(req, session.user.id, "admin-user-delete", {

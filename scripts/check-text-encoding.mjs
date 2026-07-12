@@ -21,8 +21,6 @@ function findQuestionRunsInsideStrings(text) {
   const matches = [];
   let quote = null;
   let escaped = false;
-  let start = -1;
-
   for (let index = 0; index < text.length; index += 1) {
     const char = text[index];
     if (quote) {
@@ -56,7 +54,6 @@ function findQuestionRunsInsideStrings(text) {
 
     if (char === "\"" || char === "'" || char === "`") {
       quote = char;
-      start = index;
     }
   }
 

@@ -101,9 +101,6 @@ const positiveNumber = (value: string | undefined) => {
 
 const envProvider = (provider: AiProvider) => provider.toUpperCase();
 
-const envModel = (modelId: string) =>
-  modelId.replace(/[^A-Za-z0-9]/g, "_").toUpperCase();
-
 const providerMonthlyBudgetMicroUsd = (provider: AiProvider) =>
   positiveInteger(
     process.env[`CHAT_PROVIDER_${envProvider(provider)}_COST_MICROUSD_PER_MONTH`],
@@ -163,61 +160,190 @@ const reserveDailyAlert = async (key: string) => {
   return rows.length > 0;
 };
 
-const sendWebhook = async (url: string | undefined, payload: unknown) => {
-  if (!url) return;
+const recordNotificationLog = async ({
+  channel,
+  title,
+  detail,
+  status,
+  targetType,
+  targetId,
+  error,
+}: {
+  channel: string;
+  title: string;
+  detail: string;
+  status: "sent" | "failed" | "skipped";
+  targetType?: string | null;
+  targetId?: string | null;
+  error?: string | null;
+}) => {
+  await prisma.adminNotificationLog
+    .create({
+      data: {
+        channel,
+        title,
+        detail,
+        status,
+        targetType: targetType || null,
+        targetId: targetId || null,
+        error: error?.slice(0, 1_000) || null,
+      },
+    })
+    .catch((logError) => {
+      console.error("Admin notification log write failed:", logError);
+    });
+};
+
+const sendWebhook = async (
+  channel: "slack" | "discord",
+  url: string | undefined,
+  payload: unknown,
+  log: { title: string; detail: string; targetType: string; targetId: string }
+) => {
+  if (!url) {
+    await recordNotificationLog({
+      channel,
+      title: log.title,
+      detail: log.detail,
+      status: "skipped",
+      targetType: log.targetType,
+      targetId: log.targetId,
+      error: "Webhook URL is not configured.",
+    });
+    return;
+  }
   try {
-    await fetch(url, {
+    const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
+    if (!response.ok) {
+      throw new Error(`Webhook returned ${response.status}.`);
+    }
+    await recordNotificationLog({
+      channel,
+      title: log.title,
+      detail: log.detail,
+      status: "sent",
+      targetType: log.targetType,
+      targetId: log.targetId,
+    });
   } catch (error) {
     console.error("Provider alert webhook failed:", error);
+    await recordNotificationLog({
+      channel,
+      title: log.title,
+      detail: log.detail,
+      status: "failed",
+      targetType: log.targetType,
+      targetId: log.targetId,
+      error: error instanceof Error ? error.message : "Webhook failed.",
+    });
   }
 };
 
-const sendEmailAlert = async (title: string, detail: string) => {
+const sendEmailAlert = async (
+  title: string,
+  detail: string,
+  log: { targetType: string; targetId: string }
+) => {
   const to = process.env.ADMIN_ALERT_EMAIL;
-  if (!to) return;
+  if (!to) {
+    await recordNotificationLog({
+      channel: "email",
+      title,
+      detail,
+      status: "skipped",
+      targetType: log.targetType,
+      targetId: log.targetId,
+      error: "ADMIN_ALERT_EMAIL is not configured.",
+    });
+    return;
+  }
 
   const from = process.env.ADMIN_ALERT_FROM || "Tomverse Admin <alerts@tomverse.app>";
   const text = `${title}\n\n${detail}`;
 
   if (process.env.RESEND_API_KEY) {
-    await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from,
-        to: [to],
-        subject: `[Tomverse Admin] ${title}`,
-        text,
-      }),
-    }).catch((error) => {
+    try {
+      const response = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          from,
+          to: [to],
+          subject: `[Tomverse Admin] ${title}`,
+          text,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(`Resend returned ${response.status}.`);
+      }
+      await recordNotificationLog({
+        channel: "email",
+        title,
+        detail,
+        status: "sent",
+        targetType: log.targetType,
+        targetId: log.targetId,
+      });
+    } catch (error) {
       console.error("Resend provider alert failed:", error);
-    });
+      await recordNotificationLog({
+        channel: "email",
+        title,
+        detail,
+        status: "failed",
+        targetType: log.targetType,
+        targetId: log.targetId,
+        error: error instanceof Error ? error.message : "Email failed.",
+      });
+    }
     return;
   }
 
   if (process.env.SENDGRID_API_KEY) {
-    await fetch("https://api.sendgrid.com/v3/mail/send", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.SENDGRID_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        personalizations: [{ to: [{ email: to }] }],
-        from: { email: from.includes("<") ? "alerts@tomverse.app" : from },
-        subject: `[Tomverse Admin] ${title}`,
-        content: [{ type: "text/plain", value: text }],
-      }),
-    }).catch((error) => {
+    try {
+      const response = await fetch("https://api.sendgrid.com/v3/mail/send", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.SENDGRID_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          personalizations: [{ to: [{ email: to }] }],
+          from: { email: from.includes("<") ? "alerts@tomverse.app" : from },
+          subject: `[Tomverse Admin] ${title}`,
+          content: [{ type: "text/plain", value: text }],
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(`SendGrid returned ${response.status}.`);
+      }
+      await recordNotificationLog({
+        channel: "email",
+        title,
+        detail,
+        status: "sent",
+        targetType: log.targetType,
+        targetId: log.targetId,
+      });
+    } catch (error) {
       console.error("SendGrid provider alert failed:", error);
-    });
+      await recordNotificationLog({
+        channel: "email",
+        title,
+        detail,
+        status: "failed",
+        targetType: log.targetType,
+        targetId: log.targetId,
+        error: error instanceof Error ? error.message : "Email failed.",
+      });
+    }
     return;
   }
 
@@ -228,6 +354,15 @@ const sendEmailAlert = async (title: string, detail: string) => {
       email: to,
     })
   );
+  await recordNotificationLog({
+    channel: "email",
+    title,
+    detail,
+    status: "skipped",
+    targetType: log.targetType,
+    targetId: log.targetId,
+    error: "Email provider is not configured.",
+  });
 };
 
 const sendProviderAlert = async (
@@ -236,8 +371,14 @@ const sendProviderAlert = async (
   detail: string
 ) => {
   const displayName = PROVIDER_DISPLAY_NAMES[provider];
+  const log = {
+    title,
+    detail: `Provider: ${displayName}\n${detail}`,
+    targetType: "Provider",
+    targetId: provider,
+  };
   await Promise.all([
-    sendWebhook(process.env.SLACK_WEBHOOK_URL, {
+    sendWebhook("slack", process.env.SLACK_WEBHOOK_URL, {
       text: `[Tomverse Admin] ${title}`,
       blocks: [
         {
@@ -248,11 +389,14 @@ const sendProviderAlert = async (
           },
         },
       ],
-    }),
-    sendWebhook(process.env.DISCORD_WEBHOOK_URL, {
+    }, log),
+    sendWebhook("discord", process.env.DISCORD_WEBHOOK_URL, {
       content: `**${title}**\nProvider: ${displayName}\n${detail}`,
+    }, log),
+    sendEmailAlert(title, `Provider: ${displayName}\n${detail}`, {
+      targetType: "Provider",
+      targetId: provider,
     }),
-    sendEmailAlert(title, `Provider: ${displayName}\n${detail}`),
   ]);
 };
 

@@ -1,8 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Clipboard, Loader2, Search, X } from "lucide-react";
+import { Clipboard, Download, Loader2, Search, X } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
+import { AdminNotesBox } from "@/components/admin/AdminNotesBox";
 import { AdminUserDeleteButton } from "@/components/admin/AdminUserDeleteButton";
 
 export type AdminUserRow = {
@@ -112,6 +113,11 @@ const dateTimeLabel = (value: string | null | undefined) => {
   return date.toISOString().replace("T", " ").slice(0, 16);
 };
 
+const escapeCsv = (value: unknown) => {
+  const text = String(value ?? "");
+  return `"${text.replace(/"/g, '""')}"`;
+};
+
 export function AdminUsersPanel({
   rows,
   currentUserId,
@@ -203,6 +209,32 @@ export function AdminUsersPanel({
     }
   };
 
+  const exportUsersCsv = () => {
+    const csv = [
+      ["id", "email", "name", "plan", "subscriptionStatus", "periodEnd", "stripeCustomerId", "conversations", "usageToday"],
+      ...items.map((user) => [
+        user.id,
+        user.email || "",
+        user.name || "",
+        user.plan || "Free",
+        user.subscriptionStatus || "",
+        user.subscriptionCurrentPeriodEnd || "",
+        user.stripeCustomerId || "",
+        user._count.conversations,
+        user.usageToday ?? "",
+      ]),
+    ]
+      .map((line) => line.map(escapeCsv).join(","))
+      .join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "tomverse-admin-users.csv";
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
@@ -218,6 +250,14 @@ export function AdminUsersPanel({
         <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-xs font-black text-blue-200">
           {paidUserCount} active paid users
         </span>
+        <button
+          type="button"
+          onClick={exportUsersCsv}
+          className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-black text-zinc-200 transition hover:bg-zinc-900"
+        >
+          <Download className="h-3.5 w-3.5" />
+          Export CSV
+        </button>
       </div>
 
       <form
@@ -403,6 +443,10 @@ export function AdminUsersPanel({
             </div>
 
             <div className="grid gap-4 px-5 pb-5 lg:grid-cols-2">
+              <div className="lg:col-span-2">
+                <AdminNotesBox targetType="User" targetId={detailUser.id} />
+              </div>
+
               <section className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
                 <h4 className="font-black text-white">Linked accounts</h4>
                 <div className="mt-3 grid gap-2">

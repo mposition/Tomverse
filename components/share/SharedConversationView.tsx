@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { ArrowRight, Bot, CalendarClock, Clipboard, Clock, Eye, LockKeyhole, Share2, UserRound } from "lucide-react";
 import { getModel } from "@/lib/models";
 import type { ShareSnapshot } from "@/lib/shareSnapshot";
@@ -153,13 +154,13 @@ export function SharedConversationView({
               </div>
             </div>
             <div className="flex shrink-0 flex-col items-end gap-2 sm:flex-row sm:items-center">
-              <a
+              <Link
                 href="/chat"
                 className="inline-flex h-8 items-center gap-1.5 rounded-full bg-blue-600 px-3 text-xs font-bold text-white shadow-sm transition hover:bg-blue-500"
               >
                 {t("share.openApp")}
                 <ArrowRight className="h-3.5 w-3.5" />
-              </a>
+              </Link>
               <label className="sr-only" htmlFor="share-language-select">
                 {t("auth.language")}
               </label>

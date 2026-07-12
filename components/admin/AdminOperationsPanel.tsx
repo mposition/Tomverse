@@ -39,6 +39,7 @@ type Props = {
   monthSpendLabel: string;
   needsAttention: AttentionItem[];
   envChecks: EnvCheck[];
+  healthScore: number;
 };
 
 const toneClass = (tone: string) => {
@@ -61,6 +62,7 @@ export function AdminOperationsPanel({
   monthSpendLabel,
   needsAttention,
   envChecks,
+  healthScore,
 }: Props) {
   const [isSendingTestEmail, setIsSendingTestEmail] = useState(false);
 
@@ -167,6 +169,13 @@ export function AdminOperationsPanel({
       </div>
 
       <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <div className="rounded-2xl border border-blue-500/25 bg-blue-500/10 p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-blue-200/80">
+            Health score
+          </p>
+          <p className="mt-2 text-2xl font-black text-white">{healthScore}</p>
+          <p className="mt-1 text-xs text-blue-100/70">readiness out of 100</p>
+        </div>
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
             Users

@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { AVAILABLE_MODELS } from "@/lib/models";
+import { getModelOverrideMap, resolveModelOverrideStatus } from "@/lib/modelOverrides";
 import { getProviderHealthDashboard } from "@/lib/providerMonitoring";
 import { getTrustedClientIp } from "@/lib/clientIp";
 import {
@@ -68,6 +69,7 @@ export async function GET(req: Request) {
     const providerStatus = new Map(
       dashboard.providers.map((provider) => [provider.provider, provider])
     );
+    const overrideMap = await getModelOverrideMap().catch(() => new Map());
     const modelIncidents = new Map(
       dashboard.providers.flatMap((provider) =>
         provider.modelIncidents.map((incident) => [incident.modelId, incident])
@@ -76,9 +78,11 @@ export async function GET(req: Request) {
 
     const models = AVAILABLE_MODELS.map((model) => {
       const provider = providerStatus.get(model.provider);
+      const override = overrideMap.get(model.id);
       const incident = modelIncidents.get(model.id);
-      let status: "available" | "limited" | "unavailable" = "available";
-      if (!model.enabled || model.status !== "enabled") {
+      let status: "available" | "limited" | "unavailable" =
+        resolveModelOverrideStatus(model, override);
+      if (status === "unavailable") {
         status = "unavailable";
       } else if (incident && incident.failureCount5m >= 3) {
         status = "unavailable";
@@ -94,6 +98,8 @@ export async function GET(req: Request) {
         id: model.id,
         provider: model.provider,
         status,
+        overrideStatus: override?.status || null,
+        visibleNote: override?.visibleNote || override?.reason || null,
         fallbackModelIds: provider?.fallback.recommendedModelIds || [],
         recentFailureCount5m: incident?.failureCount5m || 0,
         recentErrorCode: incident?.recentErrorCode || null,

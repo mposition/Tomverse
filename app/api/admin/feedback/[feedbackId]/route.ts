@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
-import { isAdminSession } from "@/lib/adminAuth";
+import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import {
   apiSecurityResponse,
   consumeApiRateLimit,
@@ -27,6 +27,9 @@ export async function PATCH(req: Request, context: RouteContext) {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id || !isAdminSession(session)) {
       return NextResponse.json({ error: "Not found." }, { status: 404 });
+    }
+    if (!hasAdminPermission(session, "support:write")) {
+      return NextResponse.json({ error: "Forbidden." }, { status: 403 });
     }
 
     await consumeApiRateLimit(req, session.user.id, "admin-feedback-update", {

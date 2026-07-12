@@ -8,6 +8,7 @@ import {
     Activity,
     AlertTriangle,
     ArrowRight,
+    Bell,
     CheckCircle2,
     CreditCard,
     Gauge,
@@ -17,6 +18,7 @@ import {
     MessageSquare,
     RotateCcw,
     ScrollText,
+    Search,
     ShieldCheck,
     Users,
     WalletCards,
@@ -25,15 +27,18 @@ import {
 import { authOptions } from "@/lib/auth";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { getPublicAppSettings } from "@/lib/appSettings";
-import { getEnabledModel } from "@/lib/models";
+import { AVAILABLE_MODELS, getEnabledModel } from "@/lib/models";
 import { getUserChatUsageKey } from "@/lib/chatSecurity";
 import { prisma } from "@/lib/prisma";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { AdminAuditPanel, type AdminAuditRow } from "@/components/admin/AdminAuditPanel";
+import { AdminGlobalSearchPanel } from "@/components/admin/AdminGlobalSearchPanel";
+import { AdminNotificationsPanel, type AdminNotificationRow } from "@/components/admin/AdminNotificationsPanel";
 import { AdminOperationsPanel } from "@/components/admin/AdminOperationsPanel";
 import { AdminUsersPanel, type AdminUserRow } from "@/components/admin/AdminUsersPanel";
 import { BillingAdminPanel } from "@/components/admin/BillingAdminPanel";
 import { FeedbackInboxPanel, type FeedbackRow } from "@/components/admin/FeedbackInboxPanel";
+import { ModelOverridesPanel } from "@/components/admin/ModelOverridesPanel";
 import { PlatformSettingsPanel } from "@/components/admin/PlatformSettingsPanel";
 import { RefundRequestsPanel, type RefundRequestRow } from "@/components/admin/RefundRequestsPanel";
 import {
@@ -46,6 +51,7 @@ import {
     type ProviderHealthRow,
     type ProviderHealthStatus,
 } from "@/lib/providerMonitoring";
+import { getModelOverrides } from "@/lib/modelOverrides";
 
 const money = (microUsd: number) => `$${(microUsd / 1_000_000).toFixed(2)}`;
 
@@ -72,6 +78,12 @@ const adminTabs = [
         label: "Overview",
         description: "Launch status",
         icon: LayoutDashboard,
+    },
+    {
+        id: "search",
+        label: "Search",
+        description: "Find records",
+        icon: Search,
     },
     {
         id: "platform",
@@ -104,6 +116,12 @@ const adminTabs = [
         icon: Activity,
     },
     {
+        id: "alerts",
+        label: "Alerts",
+        description: "Delivery logs",
+        icon: Bell,
+    },
+    {
         id: "feedback",
         label: "Feedback",
         description: "Support inbox",
@@ -133,19 +151,6 @@ const apiKeyClass = (configured: boolean) =>
     configured
         ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
         : "border-zinc-700 bg-zinc-900 text-zinc-400";
-
-const planClass = (plan: string | null | undefined) => {
-    if (plan === "Max") return "border-purple-500/30 bg-purple-500/10 text-purple-200";
-    if (plan === "Pro") return "border-blue-500/30 bg-blue-500/10 text-blue-200";
-    return "border-emerald-500/30 bg-emerald-500/10 text-emerald-200";
-};
-
-const dateTimeLabel = (value: Date | string | null | undefined) => {
-    if (!value) return "-";
-    const date = typeof value === "string" ? new Date(value) : value;
-    if (Number.isNaN(date.getTime())) return "-";
-    return date.toISOString().replace("T", " ").slice(0, 16);
-};
 
 const isConfigured = (value: string | undefined) =>
     typeof value === "string" && value.trim().length > 0;
@@ -544,6 +549,8 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         promotionRedemptions,
         approvedRefundCount,
         cancelAtPeriodEndCount,
+        modelOverrides,
+        notificationLogs,
     ] = await Promise.all([
         getProviderHealthDashboard(),
         getBillingPlans(),
@@ -620,6 +627,11 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                 ...activePaidWhere,
                 subscriptionCancelAtPeriodEnd: true,
             },
+        }),
+        getModelOverrides(),
+        prisma.adminNotificationLog.findMany({
+            orderBy: { createdAt: "desc" },
+            take: 50,
         }),
     ]);
     const availableCount = dashboard.providers.filter(
@@ -718,6 +730,17 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         userAgent: log.userAgent,
         createdAt: log.createdAt.toISOString(),
     }));
+    const notificationRows: AdminNotificationRow[] = notificationLogs.map((log) => ({
+        id: log.id,
+        channel: log.channel,
+        title: log.title,
+        detail: log.detail,
+        status: log.status,
+        targetType: log.targetType,
+        targetId: log.targetId,
+        error: log.error,
+        createdAt: log.createdAt.toISOString(),
+    }));
     const activePlanCounts = new Map(
         activePlanGroups.map((group) => [group.plan || "Free", group._count._all])
     );
@@ -774,6 +797,26 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         adminTabs.find((tab) => tab.id === activeTab) || adminTabs[0];
     const ActiveTabIcon = activeTabInfo.icon;
     const adminRole = getAdminRole(session) || "owner";
+    const missingEnvCount = [
+        process.env.ADMIN_EMAILS,
+        process.env.STRIPE_SECRET_KEY,
+        process.env.STRIPE_WEBHOOK_SECRET,
+        process.env.RESEND_API_KEY,
+    ].filter((value) => !isConfigured(value)).length;
+    const alertFailures = notificationRows.filter((row) => row.status === "failed").length;
+    const healthScore = Math.max(
+        0,
+        Math.min(
+            100,
+            100 -
+                outageCount * 18 -
+                limitedCount * 8 -
+                pendingRefundCount * 3 -
+                openFeedbackCount * 2 -
+                missingEnvCount * 10 -
+                alertFailures * 4
+        )
+    );
     const envChecks = [
         {
             name: "ADMIN_EMAILS",
@@ -870,6 +913,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                                 needsAttention={needsAttention}
                                 envChecks={envChecks}
                                 adminRole={adminRole}
+                                healthScore={healthScore}
                             />
 
                             <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -1006,6 +1050,10 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                         />
                     )}
 
+                    {activeTab === "search" && (
+                        <AdminGlobalSearchPanel />
+                    )}
+
                     {activeTab === "platform" && (
                         <PlatformSettingsPanel settings={appSettings} />
                     )}
@@ -1053,7 +1101,15 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                         {dashboard.providers.map((provider) => (
                             <ProviderRow key={provider.provider} provider={provider} />
                         ))}
+                        <ModelOverridesPanel
+                            models={AVAILABLE_MODELS}
+                            overrides={modelOverrides}
+                        />
                     </section>
+                    )}
+
+                    {activeTab === "alerts" && (
+                        <AdminNotificationsPanel rows={notificationRows} />
                     )}
 
                     {activeTab === "feedback" && (

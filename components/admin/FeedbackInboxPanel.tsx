@@ -4,12 +4,14 @@ import { useMemo, useState } from "react";
 import {
   CheckCircle2,
   Clipboard,
+  Download,
   Mail,
   Loader2,
   MessageSquare,
   Search,
 } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
+import { AdminNotesBox } from "@/components/admin/AdminNotesBox";
 
 export type FeedbackRow = {
   id: string;
@@ -45,6 +47,11 @@ const dateLabel = (value: string) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "-";
   return date.toISOString().replace("T", " ").slice(0, 16);
+};
+
+const escapeCsv = (value: unknown) => {
+  const text = String(value ?? "");
+  return `"${text.replace(/"/g, '""')}"`;
 };
 
 export function FeedbackInboxPanel({ rows }: Props) {
@@ -160,6 +167,33 @@ export function FeedbackInboxPanel({ rows }: Props) {
     return `mailto:${feedback.email}?subject=${subject}&body=${body}`;
   };
 
+  const exportCsv = () => {
+    const csv = [
+      ["id", "createdAt", "email", "type", "status", "traceId", "modelId", "plan", "path", "message"],
+      ...filteredItems.map((feedback) => [
+        feedback.id,
+        feedback.createdAt,
+        feedback.email || "",
+        feedback.type,
+        feedback.status,
+        feedback.traceId || "",
+        feedback.modelId || "",
+        feedback.plan || "",
+        feedback.path || "",
+        feedback.message,
+      ]),
+    ]
+      .map((line) => line.map(escapeCsv).join(","))
+      .join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "tomverse-admin-feedback.csv";
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <section id="feedback" className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
@@ -177,6 +211,14 @@ export function FeedbackInboxPanel({ rows }: Props) {
           <MessageSquare className="h-3.5 w-3.5" />
           {openCount} open
         </span>
+        <button
+          type="button"
+          onClick={exportCsv}
+          className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-black text-zinc-200 transition hover:bg-zinc-900"
+        >
+          <Download className="h-3.5 w-3.5" />
+          Export CSV
+        </button>
       </div>
 
       <div className="mt-5 grid gap-3 lg:grid-cols-[1fr_auto]">
@@ -286,6 +328,9 @@ export function FeedbackInboxPanel({ rows }: Props) {
                   <span className="truncate xl:col-span-3">
                     UA: {feedback.userAgent || "-"}
                   </span>
+                </div>
+                <div className="mt-3">
+                  <AdminNotesBox targetType="Feedback" targetId={feedback.id} />
                 </div>
               </article>
             );

@@ -15,6 +15,7 @@ import {
 } from "@/lib/r2";
 import { prisma } from "@/lib/prisma";
 import { getEnabledModel, type AiModel, type ModelTier } from "@/lib/models";
+import { assertModelNotAdminDisabled } from "@/lib/modelOverrides";
 import { parseOfficeSafely } from "@/lib/officeSecurity";
 import {
     extractPdfTextSafely,
@@ -604,6 +605,15 @@ export async function POST(req: Request) {
                 "Unknown or disabled model.",
                 "MODEL_NOT_AVAILABLE",
                 400,
+                traceId
+            );
+        }
+        const adminModelAccess = await assertModelNotAdminDisabled(requestedModelId);
+        if (!adminModelAccess.allowed) {
+            return tracedJsonError(
+                adminModelAccess.reason || "This model is temporarily unavailable.",
+                "MODEL_TEMPORARILY_UNAVAILABLE",
+                503,
                 traceId
             );
         }

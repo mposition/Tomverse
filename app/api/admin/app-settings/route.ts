@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
-import { isAdminSession } from "@/lib/adminAuth";
+import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import {
   getPublicAppSettings,
   isValidGuestDefaultModel,
@@ -59,6 +59,9 @@ export async function PATCH(req: Request) {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id || !isAdminSession(session)) {
       return NextResponse.json({ error: "Not found." }, { status: 404 });
+    }
+    if (!hasAdminPermission(session, "ops:write")) {
+      return NextResponse.json({ error: "Forbidden." }, { status: 403 });
     }
 
     await consumeApiRateLimit(req, session.user.id, "admin-app-settings-write", {

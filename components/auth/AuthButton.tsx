@@ -82,7 +82,9 @@ export function AuthButton() {
         accountPlan === "Pro" ? "Max" : accountPlan === "Max" ? null : "Pro";
 
     useEffect(() => {
-        setSubscriptionCancelAtPeriodEnd(Boolean(accountUsage?.subscription?.cancelAtPeriodEnd));
+        queueMicrotask(() => {
+            setSubscriptionCancelAtPeriodEnd(Boolean(accountUsage?.subscription?.cancelAtPeriodEnd));
+        });
     }, [accountUsage?.subscription?.cancelAtPeriodEnd]);
 
     const closeSettingsModal = useCallback(() => {

@@ -31,6 +31,8 @@ model User {
   refundRequests       RefundRequest[]
   promotionRedemptions BillingPromotionRedemption[]
   adminAuditLogs       AdminAuditLog[]
+  adminNotes           AdminNote[]
+  modelOverrides       ModelOverride[]
   conversations        Conversation[]
 }
 
@@ -303,4 +305,49 @@ model AdminAuditLog {
   @@index([action, createdAt])
   @@index([targetType, targetId])
   @@index([actorUserId, createdAt])
+}
+
+model AdminNote {
+  id             String   @id @default(cuid())
+  targetType     String
+  targetId       String
+  body           String
+  createdById    String?
+  createdBy      User?    @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdByEmail String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([targetType, targetId, createdAt])
+  @@index([createdById, createdAt])
+}
+
+model ModelOverride {
+  modelId        String   @id
+  status         String
+  reason         String?
+  visibleNote    String?
+  updatedById    String?
+  updatedBy      User?    @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+  updatedByEmail String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([status])
+}
+
+model AdminNotificationLog {
+  id         String   @id @default(cuid())
+  channel    String
+  title      String
+  detail     String
+  status     String
+  targetType String?
+  targetId   String?
+  error      String?
+  createdAt  DateTime @default(now())
+
+  @@index([channel, createdAt])
+  @@index([status, createdAt])
+  @@index([targetType, targetId])
 }
