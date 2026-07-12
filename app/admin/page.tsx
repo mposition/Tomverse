@@ -8,7 +8,6 @@ import {
     Activity,
     AlertTriangle,
     ArrowRight,
-    Bell,
     CheckCircle2,
     CreditCard,
     Gauge,
@@ -33,6 +32,7 @@ import { AdminUserDeleteButton } from "@/components/admin/AdminUserDeleteButton"
 import { AdminOperationsPanel } from "@/components/admin/AdminOperationsPanel";
 import { BillingAdminPanel } from "@/components/admin/BillingAdminPanel";
 import { FeedbackInboxPanel, type FeedbackRow } from "@/components/admin/FeedbackInboxPanel";
+import { PlatformSettingsPanel } from "@/components/admin/PlatformSettingsPanel";
 import { RefundRequestsPanel, type RefundRequestRow } from "@/components/admin/RefundRequestsPanel";
 import {
     getBillingPlans,
@@ -70,6 +70,12 @@ const adminTabs = [
         label: "Overview",
         description: "Launch status",
         icon: LayoutDashboard,
+    },
+    {
+        id: "platform",
+        label: "Platform",
+        description: "Defaults and product settings",
+        icon: Gauge,
     },
     {
         id: "users",
@@ -881,12 +887,15 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                     </section>
                     )}
 
+                    {activeTab === "platform" && (
+                        <PlatformSettingsPanel settings={appSettings} />
+                    )}
+
                     {activeTab === "billing" && (
                     <section>
                         <BillingAdminPanel
                             plans={billingPlans}
                         promotions={billingPromotions}
-                        settings={appSettings}
                         paidUserCount={paidUsers}
                         activeSubscriptionCount={activeSubscriptions}
                     />
