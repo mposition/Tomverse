@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Bell, Download } from "lucide-react";
+import { Bell, CheckCircle2, Download, Loader2 } from "lucide-react";
+import { dispatchAppToast } from "@/lib/appToast";
 
 export type AdminNotificationRow = {
   id: string;
@@ -12,6 +13,8 @@ export type AdminNotificationRow = {
   targetType: string | null;
   targetId: string | null;
   error: string | null;
+  acknowledgedAt?: string | null;
+  acknowledgedByEmail?: string | null;
   createdAt: string;
 };
 
@@ -37,13 +40,45 @@ const escapeCsv = (value: unknown) => {
 };
 
 export function AdminNotificationsPanel({ rows }: Props) {
+  const [items, setItems] = useState(rows);
   const [statusFilter, setStatusFilter] = useState("all");
+  const [busyId, setBusyId] = useState<string | null>(null);
   const filteredRows = useMemo(
-    () => rows.filter((row) => statusFilter === "all" || row.status === statusFilter),
-    [rows, statusFilter]
+    () => items.filter((row) => statusFilter === "all" || row.status === statusFilter),
+    [items, statusFilter]
   );
-  const failedCount = rows.filter((row) => row.status === "failed").length;
-  const sentCount = rows.filter((row) => row.status === "sent").length;
+  const failedCount = items.filter((row) => row.status === "failed").length;
+  const sentCount = items.filter((row) => row.status === "sent").length;
+  const unacknowledgedCount = items.filter((row) => !row.acknowledgedAt && row.status === "failed").length;
+
+  const acknowledge = async (id: string) => {
+    if (busyId) return;
+    setBusyId(id);
+    try {
+      const response = await fetch(`/api/admin/notifications/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "acknowledge" }),
+      });
+      const data = (await response.json().catch(() => null)) as
+        | { notification?: AdminNotificationRow; error?: string }
+        | null;
+      if (!response.ok || !data?.notification) {
+        throw new Error(data?.error || "Could not acknowledge alert.");
+      }
+      setItems((current) =>
+        current.map((item) => (item.id === id ? { ...item, ...data.notification } : item))
+      );
+      dispatchAppToast("Alert acknowledged.", "success");
+    } catch (error) {
+      dispatchAppToast(
+        error instanceof Error ? error.message : "Could not acknowledge alert.",
+        "error"
+      );
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   const exportCsv = () => {
     const csv = [
@@ -88,6 +123,9 @@ export function AdminNotificationsPanel({ rows }: Props) {
           </span>
           <span className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs font-black text-red-200">
             {failedCount} failed
+          </span>
+          <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-black text-amber-200">
+            {unacknowledgedCount} unacknowledged
           </span>
         </div>
       </div>
@@ -144,6 +182,18 @@ export function AdminNotificationsPanel({ rows }: Props) {
                 <div className="grid gap-1 text-xs text-zinc-500 md:min-w-64">
                   <span>Target: {row.targetType || "-"} {row.targetId || ""}</span>
                   <span>Error: {row.error || "-"}</span>
+                  <span>Ack: {row.acknowledgedAt ? `${dateLabel(row.acknowledgedAt)} / ${row.acknowledgedByEmail || "admin"}` : "-"}</span>
+                  {!row.acknowledgedAt && row.status === "failed" ? (
+                    <button
+                      type="button"
+                      onClick={() => acknowledge(row.id)}
+                      disabled={busyId === row.id}
+                      className="mt-2 inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-black text-emerald-100 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {busyId === row.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                      Acknowledge
+                    </button>
+                  ) : null}
                 </div>
               </div>
             </article>

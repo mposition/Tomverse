@@ -91,6 +91,13 @@ type AdminUserDetail = {
     today: number;
     month: number;
   };
+  timeline: Array<{
+    id: string;
+    type: string;
+    title: string;
+    detail: string;
+    at: string;
+  }>;
   _count: {
     conversations: number;
     accounts: number;
@@ -483,8 +490,8 @@ export function AdminUsersPanel({
                       <div key={conversation.id} className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-400">
                         <div className="font-bold text-zinc-200">{conversation.title}</div>
                         <div className="mt-1">
-                          {conversation._count.messages} messages · updated {dateTimeLabel(conversation.updatedAt)}
-                          {conversation.shareEnabled ? " · shared" : ""}
+                          {conversation._count.messages} messages / updated {dateTimeLabel(conversation.updatedAt)}
+                          {conversation.shareEnabled ? " / shared" : ""}
                         </div>
                       </div>
                     ))
@@ -497,17 +504,39 @@ export function AdminUsersPanel({
                 <div className="mt-3 grid gap-2">
                   {detailUser.promotionRedemptions.map((redemption) => (
                     <div key={redemption.id} className="rounded-xl border border-blue-500/20 bg-blue-500/10 px-3 py-2 text-xs text-blue-100">
-                      Promo {redemption.promotion.code} · {redemption.planId} · {dateTimeLabel(redemption.redeemedAt)}
+                      Promo {redemption.promotion.code} / {redemption.planId} / {dateTimeLabel(redemption.redeemedAt)}
                     </div>
                   ))}
                   {detailUser.refundRequests.map((request) => (
                     <div key={request.id} className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
-                      Refund {request.status} · {request.plan || "-"} · {dateTimeLabel(request.requestedAt)}
+                      Refund {request.status} / {request.plan || "-"} / {dateTimeLabel(request.requestedAt)}
                     </div>
                   ))}
                   {detailUser.promotionRedemptions.length === 0 && detailUser.refundRequests.length === 0 ? (
                     <p className="text-sm text-zinc-500">No promotion or refund history.</p>
                   ) : null}
+                </div>
+              </section>
+
+              <section className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 lg:col-span-2">
+                <h4 className="font-black text-white">Customer timeline</h4>
+                <div className="mt-3 grid gap-2">
+                  {detailUser.timeline.length === 0 ? (
+                    <p className="text-sm text-zinc-500">No customer timeline events yet.</p>
+                  ) : (
+                    detailUser.timeline.map((event) => (
+                      <div key={`${event.type}-${event.id}`} className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 font-black text-blue-200">
+                            {event.type}
+                          </span>
+                          <span className="font-black text-zinc-200">{event.title}</span>
+                          <span className="text-zinc-600">{dateTimeLabel(event.at)} UTC</span>
+                        </div>
+                        {event.detail ? <p className="mt-1 text-zinc-500">{event.detail}</p> : null}
+                      </div>
+                    ))
+                  )}
                 </div>
               </section>
             </div>

@@ -42,7 +42,9 @@ import {
     type ProviderHealthCheckRow,
 } from "@/components/admin/AdminProviderOpsPanel";
 import { AdminRetentionPanel } from "@/components/admin/AdminRetentionPanel";
+import { AdminReportsPanel } from "@/components/admin/AdminReportsPanel";
 import { AdminUsersPanel, type AdminUserRow } from "@/components/admin/AdminUsersPanel";
+import { AdminWebhookPanel } from "@/components/admin/AdminWebhookPanel";
 import { BillingAdminPanel } from "@/components/admin/BillingAdminPanel";
 import { FeedbackInboxPanel, type FeedbackRow } from "@/components/admin/FeedbackInboxPanel";
 import { ModelOverridesPanel } from "@/components/admin/ModelOverridesPanel";
@@ -775,6 +777,8 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         targetType: log.targetType,
         targetId: log.targetId,
         error: log.error,
+        acknowledgedAt: log.acknowledgedAt?.toISOString() || null,
+        acknowledgedByEmail: log.acknowledgedByEmail,
         createdAt: log.createdAt.toISOString(),
     }));
     const providerIncidentRows: AdminProviderIncidentRow[] = providerIncidents.map((incident) => ({
@@ -1175,7 +1179,11 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                     )}
 
                     {activeTab === "alerts" && (
-                        <AdminNotificationsPanel rows={notificationRows} />
+                        <section className="flex flex-col gap-4">
+                            <AdminNotificationsPanel rows={notificationRows} />
+                            <AdminWebhookPanel />
+                            <AdminReportsPanel />
+                        </section>
                     )}
 
                     {activeTab === "retention" && (

@@ -353,19 +353,23 @@ model ModelOverride {
 }
 
 model AdminNotificationLog {
-  id         String   @id @default(cuid())
-  channel    String
-  title      String
-  detail     String
-  status     String
-  targetType String?
-  targetId   String?
-  error      String?
-  createdAt  DateTime @default(now())
+  id                  String    @id @default(cuid())
+  channel             String
+  title               String
+  detail              String
+  status              String
+  targetType          String?
+  targetId            String?
+  error               String?
+  acknowledgedAt      DateTime?
+  acknowledgedById    String?
+  acknowledgedByEmail String?
+  createdAt           DateTime  @default(now())
 
   @@index([channel, createdAt])
   @@index([status, createdAt])
   @@index([targetType, targetId])
+  @@index([acknowledgedAt])
 }
 
 model AdminProviderIncident {
@@ -404,4 +408,49 @@ model ProviderHealthCheck {
 
   @@index([provider, createdAt])
   @@index([status, createdAt])
+}
+
+model StripeWebhookEventLog {
+  id              String    @id @default(cuid())
+  stripeEventId   String?   @unique
+  eventType       String
+  status          String
+  error           String?
+  receivedAt      DateTime  @default(now())
+  processedAt     DateTime?
+  replayedAt      DateTime?
+  replayedById    String?
+  replayedByEmail String?
+  payloadSummary  Json?
+
+  @@index([status, receivedAt])
+  @@index([eventType, receivedAt])
+}
+
+model AdminRetentionRun {
+  id             String   @id @default(cuid())
+  mode           String
+  status         String
+  result         Json?
+  error          String?
+  createdById    String?
+  createdByEmail String?
+  createdAt      DateTime @default(now())
+
+  @@index([mode, createdAt])
+  @@index([status, createdAt])
+}
+
+model AdminOperationReport {
+  id             String   @id @default(cuid())
+  title          String
+  body           String
+  status         String
+  recipient      String?
+  createdById    String?
+  createdByEmail String?
+  createdAt      DateTime @default(now())
+
+  @@index([status, createdAt])
+  @@index([createdById, createdAt])
 }

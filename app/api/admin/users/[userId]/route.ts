@@ -18,6 +18,7 @@ import { prisma } from "@/lib/prisma";
 const deleteUserSchema = z
   .object({
     confirm: z.literal(true),
+    confirmText: z.literal("DELETE USER"),
   })
   .strict();
 
@@ -43,7 +44,7 @@ export async function GET(req: Request, context: RouteContext) {
     const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
     const usageKey = getUserChatUsageKey(userId);
 
-    const [user, usageRows, recentConversations] = await Promise.all([
+    const [user, usageRows, recentConversations, auditEvents] = await Promise.all([
       prisma.user.findUnique({
         where: { id: userId },
         select: {
@@ -140,6 +141,23 @@ export async function GET(req: Request, context: RouteContext) {
           _count: { select: { messages: true } },
         },
       }),
+      prisma.adminAuditLog.findMany({
+        where: {
+          OR: [
+            { targetId: userId },
+            { metadata: { path: ["userId"], equals: userId } },
+          ],
+        },
+        orderBy: { createdAt: "desc" },
+        take: 10,
+        select: {
+          id: true,
+          action: true,
+          summary: true,
+          actorEmail: true,
+          createdAt: true,
+        },
+      }),
     ]);
 
     if (!user) {
@@ -171,6 +189,36 @@ export async function GET(req: Request, context: RouteContext) {
           createdAt: conversation.createdAt.toISOString(),
           updatedAt: conversation.updatedAt.toISOString(),
         })),
+        timeline: [
+          ...user.refundRequests.map((request) => ({
+            id: request.id,
+            type: "refund",
+            title: `Refund ${request.status}`,
+            detail: request.reason || request.stripeRefundStatus || "",
+            at: request.requestedAt.toISOString(),
+          })),
+          ...user.promotionRedemptions.map((redemption) => ({
+            id: redemption.id,
+            type: "promotion",
+            title: `Promotion ${redemption.promotion.code}`,
+            detail: `${redemption.planId} / ${redemption.billingInterval}`,
+            at: redemption.redeemedAt.toISOString(),
+          })),
+          ...recentConversations.map((conversation) => ({
+            id: conversation.id,
+            type: "conversation",
+            title: conversation.title,
+            detail: `${conversation._count.messages} messages`,
+            at: conversation.updatedAt.toISOString(),
+          })),
+          ...auditEvents.map((event) => ({
+            id: event.id,
+            type: "audit",
+            title: event.action,
+            detail: `${event.summary} / ${event.actorEmail || "admin"}`,
+            at: event.createdAt.toISOString(),
+          })),
+        ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()).slice(0, 20),
         usage: {
           today:
             usageRows.find((row) => row.period === "day")?.count || 0,
