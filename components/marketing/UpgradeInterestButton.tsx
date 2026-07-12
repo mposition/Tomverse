@@ -437,9 +437,6 @@ export function UpgradeInterestButton({
   const inputId = useId();
   const planId = plan === "Max" ? "max" : "pro";
   const planConfig = billingConfig?.plans.find((item) => item.id === planId);
-  const activePromo = billingConfig?.promotions.find((item) =>
-    item.appliesToPlanIds.includes(planId)
-  );
   const appliedPromotion =
     appliedPromoCode && billingConfig
       ? billingConfig.promotions.find(
@@ -742,11 +739,6 @@ export function UpgradeInterestButton({
                     <span className="font-semibold">{copy.annualSavings}</span>
                     <span className="font-black">20%</span>
                   </div>
-                ) : null}
-                {activePromo ? (
-                  <p className="mt-2 text-xs font-semibold text-blue-600 dark:text-blue-300">
-                    {copy.availableOffer(activePromo.code)}
-                  </p>
                 ) : null}
                 {appliedPromotion ? (
                   <div className="flex justify-between gap-4 text-sm text-blue-600 dark:text-blue-300">
