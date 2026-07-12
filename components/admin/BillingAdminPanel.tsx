@@ -637,9 +637,29 @@ export function BillingAdminPanel({ plans, promotions }: Props) {
             );
           })}
         </div>
-        <div className="flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-300">
-          <CheckCircle2 className="h-3.5 w-3.5" />
-          Connected to BillingPlan / BillingPromotion
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-300">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            Connected to BillingPlan / BillingPromotion
+          </div>
+          <button
+            type="button"
+            onClick={refresh}
+            disabled={isRefreshing || isSaving}
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-200 hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isRefreshing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+            Reload
+          </button>
+          <button
+            type="button"
+            onClick={save}
+            disabled={isSaving || isRefreshing}
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-xs font-black text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+            Save changes
+          </button>
         </div>
       </div>
 
@@ -670,16 +690,27 @@ export function BillingAdminPanel({ plans, promotions }: Props) {
                   and percent or fixed USD discounts.
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() =>
-                  setDraftPromotions((current) => [...current, newPromotion()])
-                }
-                className="inline-flex items-center justify-center gap-2 rounded-xl border border-zinc-700 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-900"
-              >
-                <Plus className="h-4 w-4" />
-                Add code
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setDraftPromotions((current) => [...current, newPromotion()])
+                  }
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-zinc-700 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-900"
+                >
+                  <Plus className="h-4 w-4" />
+                  Add code
+                </button>
+                <button
+                  type="button"
+                  onClick={save}
+                  disabled={isSaving || isRefreshing}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-black text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                  Save to DB
+                </button>
+              </div>
             </div>
             <div className="grid gap-4 xl:grid-cols-2">
               {draftPromotions.map((promotion, index) => (
@@ -703,6 +734,34 @@ export function BillingAdminPanel({ plans, promotions }: Props) {
             </div>
           </div>
         )}
+      </div>
+      <div className="flex flex-col gap-3 border-t border-zinc-800 bg-zinc-900/60 p-5 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-bold text-white">Ready to publish billing changes?</p>
+          <p className="mt-1 text-xs text-zinc-400">
+            Plan prices, Stripe IDs, and promotion rules are applied after saving to DB.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={refresh}
+            disabled={isRefreshing || isSaving}
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-zinc-700 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isRefreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            Reload DB
+          </button>
+          <button
+            type="button"
+            onClick={save}
+            disabled={isSaving || isRefreshing}
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2 text-sm font-black text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            Save to DB
+          </button>
+        </div>
       </div>
     </section>
   );
