@@ -30,6 +30,7 @@ import { prisma } from "@/lib/prisma";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { AdminOperationsPanel } from "@/components/admin/AdminOperationsPanel";
 import { BillingAdminPanel } from "@/components/admin/BillingAdminPanel";
+import { FeedbackInboxPanel, type FeedbackRow } from "@/components/admin/FeedbackInboxPanel";
 import { RefundRequestsPanel, type RefundRequestRow } from "@/components/admin/RefundRequestsPanel";
 import {
     getBillingPlans,
@@ -527,6 +528,22 @@ export default async function AdminPage() {
         requestedAt: request.requestedAt.toISOString(),
         reviewedAt: request.reviewedAt?.toISOString() || null,
     }));
+    const feedbackInboxRows: FeedbackRow[] = feedbackRows.map((feedback) => ({
+        id: feedback.id,
+        userId: feedback.userId,
+        email: feedback.email,
+        type: feedback.type,
+        status: feedback.status,
+        message: feedback.message,
+        traceId: feedback.traceId,
+        modelId: feedback.modelId,
+        plan: feedback.plan,
+        hasAttachments: feedback.hasAttachments,
+        attachmentCount: feedback.attachmentCount,
+        path: feedback.path,
+        userAgent: feedback.userAgent,
+        createdAt: feedback.createdAt.toISOString(),
+    }));
     const needsAttention = [
         ...dashboard.providers
             .filter((provider) => provider.status !== "available")
@@ -816,53 +833,7 @@ export default async function AdminPage() {
                         ))}
                     </section>
 
-                    <section id="feedback" className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
-                        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-                            <SectionHeader
-                                eyebrow="Feedback"
-                                title="Support inbox"
-                                description="Recent user feedback submitted from the app. Trace IDs, model, plan, attachments, path, and user agent are captured for reproduction."
-                            />
-                            <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-black text-amber-200">
-                                {openFeedbackCount} open
-                            </span>
-                        </div>
-                        <div className="mt-5 grid gap-3">
-                            {feedbackRows.length === 0 ? (
-                                <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5 text-sm text-zinc-400">
-                                    No feedback has been submitted yet.
-                                </div>
-                            ) : (
-                                feedbackRows.map((feedback) => (
-                                    <article key={feedback.id} className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
-                                        <div className="flex flex-wrap items-center justify-between gap-3">
-                                            <div className="flex flex-wrap items-center gap-2">
-                                                <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-2.5 py-1 text-xs font-black text-blue-200">
-                                                    {feedback.type}
-                                                </span>
-                                                <span className="rounded-full border border-zinc-700 bg-zinc-950 px-2.5 py-1 text-xs font-bold text-zinc-300">
-                                                    {feedback.status}
-                                                </span>
-                                                <span className="text-xs text-zinc-500">{dateTimeLabel(feedback.createdAt)}</span>
-                                            </div>
-                                            <div className="text-xs text-zinc-500">{feedback.email || "guest"}</div>
-                                        </div>
-                                        <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-zinc-200">
-                                            {feedback.message}
-                                        </p>
-                                        <div className="mt-3 grid gap-2 text-xs text-zinc-500 md:grid-cols-2 xl:grid-cols-4">
-                                            <span>Trace: {feedback.traceId || "-"}</span>
-                                            <span>Model: {feedback.modelId || "-"}</span>
-                                            <span>Plan: {feedback.plan || "-"}</span>
-                                            <span>Attachments: {feedback.attachmentCount}</span>
-                                            <span className="truncate">Path: {feedback.path || "-"}</span>
-                                            <span className="truncate xl:col-span-3">UA: {feedback.userAgent || "-"}</span>
-                                        </div>
-                                    </article>
-                                ))
-                            )}
-                        </div>
-                    </section>
+                    <FeedbackInboxPanel rows={feedbackInboxRows} />
                 </div>
             </div>
         </main>
