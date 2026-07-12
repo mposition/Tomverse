@@ -141,11 +141,26 @@ export function AdminUsersPanel({
   const [adjustPlan, setAdjustPlan] = useState<"Free" | "Pro" | "Max">("Free");
   const [adjustReason, setAdjustReason] = useState("");
   const [adjustConfirm, setAdjustConfirm] = useState("");
+  const [segment, setSegment] = useState<
+    "all" | "paid" | "free" | "canceling" | "refund" | "promo" | "highUsage"
+  >("all");
 
   const title = useMemo(
     () => (query.trim() ? "Search results" : "Recent accounts"),
     [query]
   );
+
+  const filteredItems = useMemo(() => {
+    return items.filter((user) => {
+      if (segment === "paid") return user.plan === "Pro" || user.plan === "Max";
+      if (segment === "free") return !user.plan || user.plan === "Free";
+      if (segment === "canceling") return Boolean(user.subscriptionCancelAtPeriodEnd);
+      if (segment === "refund") return Boolean(user._count.refundRequests);
+      if (segment === "promo") return Boolean(user._count.promotionRedemptions);
+      if (segment === "highUsage") return (user.usageToday || 0) >= 50;
+      return true;
+    });
+  }, [items, segment]);
 
   const searchUsers = async () => {
     const normalized = query.trim();
@@ -287,7 +302,7 @@ export function AdminUsersPanel({
   const exportUsersCsv = () => {
     const csv = [
       ["id", "email", "name", "plan", "subscriptionStatus", "periodEnd", "stripeCustomerId", "conversations", "usageToday"],
-      ...items.map((user) => [
+      ...filteredItems.map((user) => [
         user.id,
         user.email || "",
         user.name || "",
@@ -361,6 +376,31 @@ export function AdminUsersPanel({
         </button>
       </form>
 
+      <div className="mt-4 flex flex-wrap gap-2">
+        {[
+          ["all", `All ${items.length}`],
+          ["paid", `Paid ${items.filter((user) => user.plan === "Pro" || user.plan === "Max").length}`],
+          ["free", `Free ${items.filter((user) => !user.plan || user.plan === "Free").length}`],
+          ["canceling", `Canceling ${items.filter((user) => user.subscriptionCancelAtPeriodEnd).length}`],
+          ["refund", `Refund ${items.filter((user) => user._count.refundRequests).length}`],
+          ["promo", `Promo ${items.filter((user) => user._count.promotionRedemptions).length}`],
+          ["highUsage", `High usage ${items.filter((user) => (user.usageToday || 0) >= 50).length}`],
+        ].map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            onClick={() => setSegment(value as typeof segment)}
+            className={`cursor-pointer rounded-xl border px-3 py-2 text-xs font-black transition ${
+              segment === value
+                ? "border-blue-500/40 bg-blue-500/20 text-blue-100"
+                : "border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-white"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       <div className="mt-5 overflow-x-auto">
         <table className="w-full min-w-[980px] border-separate border-spacing-y-2 text-left text-sm">
           <thead className="text-xs uppercase tracking-[0.16em] text-zinc-500">
@@ -374,7 +414,7 @@ export function AdminUsersPanel({
             </tr>
           </thead>
           <tbody>
-            {items.map((user) => (
+            {filteredItems.map((user) => (
               <tr key={user.id} className="rounded-2xl bg-zinc-900/70 text-zinc-200">
                 <td className="rounded-l-2xl px-3 py-3">
                   <div className="font-bold">{user.email || user.name || "No email"}</div>
@@ -427,9 +467,9 @@ export function AdminUsersPanel({
             ))}
           </tbody>
         </table>
-        {items.length === 0 ? (
+        {filteredItems.length === 0 ? (
           <div className="mt-3 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5 text-sm text-zinc-400">
-            No users found.
+            No users match the current segment.
           </div>
         ) : null}
       </div>

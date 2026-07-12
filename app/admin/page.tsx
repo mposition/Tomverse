@@ -33,7 +33,11 @@ import { getUserChatUsageKey } from "@/lib/chatSecurity";
 import { prisma } from "@/lib/prisma";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { AdminAuditPanel, type AdminAuditRow } from "@/components/admin/AdminAuditPanel";
+import { AdminAlertPolicyPanel } from "@/components/admin/AdminAlertPolicyPanel";
+import { AdminApprovalsPanel } from "@/components/admin/AdminApprovalsPanel";
+import { AdminBillingLifecyclePanel } from "@/components/admin/AdminBillingLifecyclePanel";
 import { AdminGlobalSearchPanel } from "@/components/admin/AdminGlobalSearchPanel";
+import { AdminModelMetricsPanel, type AdminModelMetricRow } from "@/components/admin/AdminModelMetricsPanel";
 import { AdminNotificationsPanel, type AdminNotificationRow } from "@/components/admin/AdminNotificationsPanel";
 import { AdminOperationsPanel } from "@/components/admin/AdminOperationsPanel";
 import {
@@ -41,6 +45,7 @@ import {
     type AdminProviderIncidentRow,
     type ProviderHealthCheckRow,
 } from "@/components/admin/AdminProviderOpsPanel";
+import { AdminProviderTabs } from "@/components/admin/AdminProviderTabs";
 import { AdminRetentionPanel } from "@/components/admin/AdminRetentionPanel";
 import { AdminReportsPanel } from "@/components/admin/AdminReportsPanel";
 import {
@@ -49,6 +54,7 @@ import {
     type PromoRiskRow,
     type SlaRow,
 } from "@/components/admin/AdminRiskPanels";
+import { AdminSavedViewsPanel } from "@/components/admin/AdminSavedViewsPanel";
 import { AdminUsersPanel, type AdminUserRow } from "@/components/admin/AdminUsersPanel";
 import { AdminWebhookPanel } from "@/components/admin/AdminWebhookPanel";
 import { BillingAdminPanel } from "@/components/admin/BillingAdminPanel";
@@ -569,6 +575,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         activePlanGroups,
         promotionRedemptions,
         approvedRefundCount,
+        rejectedRefundCount,
         cancelAtPeriodEndCount,
         modelOverrides,
         notificationLogs,
@@ -652,6 +659,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         }),
         prisma.billingPromotionRedemption.count(),
         prisma.refundRequest.count({ where: { status: "approved" } }),
+        prisma.refundRequest.count({ where: { status: "rejected" } }),
         prisma.user.count({
             where: {
                 ...activePaidWhere,
@@ -865,6 +873,40 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         createdByEmail: check.createdByEmail,
         createdAt: check.createdAt.toISOString(),
     }));
+    const latestCheckByModel = new Map<string, ProviderHealthCheckRow>();
+    const latestCheckByProvider = new Map<string, ProviderHealthCheckRow>();
+    for (const check of providerCheckRows) {
+        if (check.modelId && !latestCheckByModel.has(check.modelId)) {
+            latestCheckByModel.set(check.modelId, check);
+        }
+        if (!latestCheckByProvider.has(check.provider)) {
+            latestCheckByProvider.set(check.provider, check);
+        }
+    }
+    const incidentByModel = new Map(
+        dashboard.providers.flatMap((provider) =>
+            provider.modelIncidents.map((incident) => [incident.modelId, incident] as const)
+        )
+    );
+    const providerStatusById = new Map(
+        dashboard.providers.map((provider) => [provider.provider, provider.status])
+    );
+    const modelMetricRows: AdminModelMetricRow[] = AVAILABLE_MODELS.map((model) => {
+        const incident = incidentByModel.get(model.id);
+        const check = latestCheckByModel.get(model.id) || latestCheckByProvider.get(model.provider);
+        return {
+            modelId: model.id,
+            modelName: model.name,
+            provider: model.provider,
+            status: incident
+                ? "outage"
+                : providerStatusById.get(model.provider) || "available",
+            failureCount5m: incident?.failureCount5m || 0,
+            recentErrorCode: incident?.recentErrorCode || check?.errorCode || null,
+            updatedAt: incident?.updatedAt || check?.createdAt || null,
+            latencyMs: check?.latencyMs || null,
+        };
+    });
     const activePlanCounts = new Map(
         activePlanGroups.map((group) => [group.plan || "Free", group._count._all])
     );
@@ -1024,6 +1066,8 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
 
                     {activeTab === "overview" && (
                         <>
+                            <AdminSavedViewsPanel activeTab={activeTab} />
+
                             <AdminOperationsPanel
                                 generatedAt={generatedAtLabel}
                                 totalUsers={totalUsers}
@@ -1168,6 +1212,8 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                                 slaRows={slaRows}
                                 funnel={funnelMetrics}
                             />
+
+                            <AdminApprovalsPanel />
                         </>
                     )}
 
@@ -1190,6 +1236,15 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
 
                     {activeTab === "billing" && (
                     <section>
+                        <AdminBillingLifecyclePanel
+                            activePaidUsers={paidUsers}
+                            activeSubscriptions={activeSubscriptions}
+                            pendingRefunds={pendingRefundCount}
+                            approvedRefunds={approvedRefundCount}
+                            rejectedRefunds={rejectedRefundCount}
+                            cancelAtPeriodEnd={cancelAtPeriodEndCount}
+                        />
+                        <div className="mt-4" />
                         <BillingAdminPanel
                             plans={billingPlans}
                         promotions={billingPromotions}
@@ -1200,51 +1255,73 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                     )}
 
                     {activeTab === "refunds" && (
-                    <RefundRequestsPanel
-                        rows={refundRequestRows}
-                    />
-                    )}
-
-                    {activeTab === "providers" && (
                     <section className="flex flex-col gap-4">
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                            <SectionHeader
-                                eyebrow="Providers"
-                                title="Provider health"
-                                description="Status, key configuration, estimated spend, fallback policy, recent errors, and alert setup."
-                            />
-                            <div className="flex flex-wrap gap-2 text-xs">
-                                <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-emerald-300">
-                                    <CheckCircle2 className="h-3.5 w-3.5" /> Available
-                                </span>
-                                <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-amber-300">
-                                    <AlertTriangle className="h-3.5 w-3.5" /> Limited
-                                </span>
-                                <span className="inline-flex items-center gap-1 rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-red-300">
-                                    <XCircle className="h-3.5 w-3.5" /> Outage
-                                </span>
-                                <span className="inline-flex items-center gap-1 rounded-full border border-zinc-700 bg-zinc-900 px-3 py-1 text-zinc-300">
-                                    <KeyRound className="h-3.5 w-3.5" /> Key
-                                </span>
-                            </div>
-                        </div>
-                        {dashboard.providers.map((provider) => (
-                            <ProviderRow key={provider.provider} provider={provider} />
-                        ))}
-                        <AdminProviderOpsPanel
-                            models={AVAILABLE_MODELS}
-                            incidents={providerIncidentRows}
-                            checks={providerCheckRows}
+                        <AdminBillingLifecyclePanel
+                            activePaidUsers={paidUsers}
+                            activeSubscriptions={activeSubscriptions}
+                            pendingRefunds={pendingRefundCount}
+                            approvedRefunds={approvedRefundCount}
+                            rejectedRefunds={rejectedRefundCount}
+                            cancelAtPeriodEnd={cancelAtPeriodEndCount}
                         />
-                        <ModelOverridesPanel
-                            models={AVAILABLE_MODELS}
-                            overrides={modelOverrides}
+                        <RefundRequestsPanel
+                            rows={refundRequestRows}
                         />
                     </section>
                     )}
 
+                    {activeTab === "providers" && (
+                    <AdminProviderTabs
+                        activeIncidentCount={providerIncidentRows.filter((incident) => incident.status !== "resolved").length}
+                        blockedModelCount={modelOverrides.filter((override) => override.status !== "available").length}
+                        healthContent={
+                            <section className="flex flex-col gap-4">
+                                <div className="flex flex-wrap items-center justify-between gap-3">
+                                    <SectionHeader
+                                        eyebrow="Providers"
+                                        title="Provider health"
+                                        description="Status, key configuration, estimated spend, fallback policy, recent errors, alert setup, and model metrics."
+                                    />
+                                    <div className="flex flex-wrap gap-2 text-xs">
+                                        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-emerald-300">
+                                            <CheckCircle2 className="h-3.5 w-3.5" /> Available
+                                        </span>
+                                        <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-amber-300">
+                                            <AlertTriangle className="h-3.5 w-3.5" /> Limited
+                                        </span>
+                                        <span className="inline-flex items-center gap-1 rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-red-300">
+                                            <XCircle className="h-3.5 w-3.5" /> Outage
+                                        </span>
+                                        <span className="inline-flex items-center gap-1 rounded-full border border-zinc-700 bg-zinc-900 px-3 py-1 text-zinc-300">
+                                            <KeyRound className="h-3.5 w-3.5" /> Key
+                                        </span>
+                                    </div>
+                                </div>
+                                {dashboard.providers.map((provider) => (
+                                    <ProviderRow key={provider.provider} provider={provider} />
+                                ))}
+                                <AdminModelMetricsPanel rows={modelMetricRows} />
+                            </section>
+                        }
+                        operationsContent={
+                            <AdminProviderOpsPanel
+                                models={AVAILABLE_MODELS}
+                                incidents={providerIncidentRows}
+                                checks={providerCheckRows}
+                            />
+                        }
+                        controlsContent={
+                            <ModelOverridesPanel
+                                models={AVAILABLE_MODELS}
+                                overrides={modelOverrides}
+                            />
+                        }
+                    />
+                    )}
+
                     {activeTab === "alerts" && (
                         <section className="flex flex-col gap-4">
+                            <AdminAlertPolicyPanel />
                             <AdminNotificationsPanel rows={notificationRows} />
                             <AdminWebhookPanel />
                             <AdminReportsPanel />

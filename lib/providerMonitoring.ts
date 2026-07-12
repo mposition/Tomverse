@@ -113,6 +113,43 @@ const providerDailyBudgetMicroUsd = (provider: AiProvider) =>
     10_000_000
   );
 
+const parseThresholds = (value: string | null | undefined) => {
+  if (!value) return [50, 80, 95];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (Array.isArray(parsed)) {
+      const thresholds = parsed
+        .map((item) => Number(item))
+        .filter((item) => Number.isInteger(item) && item > 0 && item <= 100)
+        .sort((a, b) => a - b);
+      return thresholds.length > 0 ? thresholds : [50, 80, 95];
+    }
+  } catch {
+    return [50, 80, 95];
+  }
+  return [50, 80, 95];
+};
+
+const alertPolicyFor = async (provider: AiProvider) => {
+  const policy = await prisma.adminAlertPolicy.findFirst({
+    where: {
+      isActive: true,
+      OR: [{ provider }, { provider: null }],
+    },
+    orderBy: [{ provider: "desc" }, { createdAt: "asc" }],
+    select: {
+      budgetThresholds: true,
+      providerFailureThreshold: true,
+      modelFailureThreshold: true,
+    },
+  });
+  return {
+    budgetThresholds: parseThresholds(policy?.budgetThresholds),
+    providerFailureThreshold: policy?.providerFailureThreshold || 5,
+    modelFailureThreshold: policy?.modelFailureThreshold || modelFailureThresholdFromEnv(),
+  };
+};
+
 const balanceUsdFor = (provider: AiProvider) =>
   positiveNumber(process.env[`PROVIDER_${envProvider(provider)}_BALANCE_USD`]);
 
@@ -400,7 +437,7 @@ const sendProviderAlert = async (
   ]);
 };
 
-const modelFailureThreshold = () =>
+const modelFailureThresholdFromEnv = () =>
   positiveInteger(process.env.CHAT_MODEL_FAILURES_PER_5_MIN_ALERT, 3);
 
 const maybeNotifyProviderFailure = async (
@@ -419,7 +456,8 @@ const maybeNotifyProviderFailure = async (
     select: { count: true },
   });
   const failureCount = failure?.count || 0;
-  if (failureCount < 5) return;
+  const policy = await alertPolicyFor(provider);
+  if (failureCount < policy.providerFailureThreshold) return;
 
   const reserved = await reserveDailyAlert(`provider-alert:${provider}:failure-surge`);
   if (!reserved) return;
@@ -446,7 +484,10 @@ export const notifyProviderBudgetIfNeeded = async (provider: AiProvider) => {
   const budget = providerMonthlyBudgetMicroUsd(provider);
   const used = usage?.count || 0;
   const percent = budget > 0 ? (used / budget) * 100 : 0;
-  const level = percent >= 95 ? "95" : percent >= 80 ? "80" : percent >= 50 ? "50" : null;
+  const policy = await alertPolicyFor(provider);
+  const level =
+    [...policy.budgetThresholds].reverse().find((threshold) => percent >= threshold) ||
+    null;
   if (!level) return;
 
   const reserved = await reserveDailyAlert(`provider-alert:${provider}:budget:${level}`);
@@ -503,7 +544,8 @@ export const recordModelFailure = async (
     select: { count: true },
   });
   const failureCount = failure?.count || 0;
-  if (failureCount < modelFailureThreshold()) return;
+  const policy = await alertPolicyFor(resolvedProvider);
+  if (failureCount < policy.modelFailureThreshold) return;
 
   const reserved = await reserveDailyAlert(
     `model-alert:${modelId}:${windowStart.toISOString()}`

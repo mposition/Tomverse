@@ -6,6 +6,7 @@ import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
+import { sendAdminPlanChangedEmail } from "@/lib/billingEmails";
 import {
   apiSecurityResponse,
   consumeApiRateLimit,
@@ -56,6 +57,9 @@ export async function PATCH(req: Request, context: RouteContext) {
         subscriptionCurrentPeriodEnd: true,
         subscriptionBillingInterval: true,
         subscriptionCancelAtPeriodEnd: true,
+        settings: {
+          select: { language: true },
+        },
       },
     });
     if (!before) {
@@ -91,6 +95,16 @@ export async function PATCH(req: Request, context: RouteContext) {
         stripeSubscriptionId: true,
         stripePriceId: true,
       },
+    });
+
+    await sendAdminPlanChangedEmail({
+      to: user.email,
+      plan: user.plan,
+      billingInterval: user.subscriptionBillingInterval,
+      periodEnd: user.subscriptionCurrentPeriodEnd,
+      reason: body.reason,
+    }).catch((emailError) => {
+      console.error("Admin plan changed email failed:", emailError);
     });
 
     await writeAdminAuditLog({

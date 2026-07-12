@@ -779,3 +779,42 @@ export async function sendRefundRequestRejectedEmail(input: RefundEmailInput) {
   );
   await sendTransactionalEmail({ to: input.to, subject, text, html });
 }
+
+export async function sendAdminPlanChangedEmail(input: {
+  to: string | null | undefined;
+  plan: string | null | undefined;
+  periodEnd?: Date | string | null;
+  billingInterval?: string | null;
+  reason?: string | null;
+}) {
+  if (!input.to) return;
+  const plan = escapeHtml(input.plan || "Free");
+  const periodEnd = formatDate(input.periodEnd, "en");
+  const billingInterval = escapeHtml(input.billingInterval || "manual update");
+  const reason = input.reason ? escapeHtml(input.reason) : "";
+  const subject = `Your Tomverse AI plan was updated to ${plan}`;
+  const text = [
+    `Your Tomverse AI plan was updated to ${plan}.`,
+    `Billing: ${billingInterval}`,
+    `Plan valid until: ${periodEnd}`,
+    reason ? `Reason: ${reason}` : "",
+    "You can review the current plan from Settings > Plan.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const html = shell(
+    "Your Tomverse AI plan was updated",
+    `
+      <p>Your Tomverse AI plan was updated by the Tomverse team.</p>
+      <div style="margin:20px 0;padding:18px;border:1px solid #dbeafe;border-radius:16px;background:#eff6ff;color:#1e3a8a;">
+        <div style="margin-bottom:8px;"><strong>Plan:</strong> ${plan}</div>
+        <div style="margin-bottom:8px;"><strong>Billing:</strong> ${billingInterval}</div>
+        <div><strong>Plan valid until:</strong> ${periodEnd}</div>
+      </div>
+      ${reason ? `<p><strong>Reason:</strong> ${reason}</p>` : ""}
+      <p>You can review the current plan from <strong>Settings &gt; Plan</strong>.</p>
+    `,
+    "en"
+  );
+  await sendTransactionalEmail({ to: input.to, subject, text, html });
+}

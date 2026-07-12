@@ -2,194 +2,9 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import type Stripe from "stripe";
-import { getBillingPlans, tierForPlanId, type BillingPlanId } from "@/lib/billingConfig";
-import { sendBillingWelcomeEmail } from "@/lib/billingEmails";
 import { prisma } from "@/lib/prisma";
 import { getStripe } from "@/lib/stripe";
-
-const subscriptionActiveStatuses = new Set(["active", "trialing", "past_due"]);
-
-const normalizePlanId = (value: unknown): BillingPlanId | null =>
-  value === "pro" || value === "max" || value === "free" ? value : null;
-
-const getPeriodEnd = (subscription: Stripe.Subscription) => {
-  const value = (subscription as unknown as { current_period_end?: number })
-    .current_period_end;
-  return typeof value === "number" ? new Date(value * 1000) : null;
-};
-
-const getBillingInterval = (subscription: Stripe.Subscription) => {
-  const interval = subscription.items.data[0]?.price.recurring?.interval;
-  if (interval === "year") return "annual";
-  if (interval === "month") return "monthly";
-  const metadataInterval = subscription.metadata.billingInterval;
-  return metadataInterval === "annual" || metadataInterval === "monthly"
-    ? metadataInterval
-    : null;
-};
-
-const addBillingPeriod = (
-  date: Date,
-  billingInterval: "monthly" | "annual" | null
-) => {
-  const next = new Date(date);
-  if (billingInterval === "annual") {
-    next.setUTCFullYear(next.getUTCFullYear() + 1);
-  } else {
-    next.setUTCMonth(next.getUTCMonth() + 1);
-  }
-  return next;
-};
-
-async function syncSubscription(subscription: Stripe.Subscription) {
-  const customerId =
-    typeof subscription.customer === "string"
-      ? subscription.customer
-      : subscription.customer.id;
-  const priceId = subscription.items.data[0]?.price.id || null;
-  const plans = await getBillingPlans();
-  const planByPrice = priceId
-    ? plans.find(
-        (plan) =>
-          plan.stripePriceId === priceId || plan.stripeAnnualPriceId === priceId
-      )
-    : null;
-  const planId =
-    normalizePlanId(subscription.metadata.planId) ||
-    (planByPrice?.id ?? null);
-  const active = subscriptionActiveStatuses.has(subscription.status);
-  const plan = active && planId ? tierForPlanId(planId) : "Free";
-  const billingInterval = getBillingInterval(subscription);
-  const periodEnd = getPeriodEnd(subscription) || addBillingPeriod(new Date(), billingInterval);
-
-  const user = await prisma.user.findFirst({
-    where: { stripeCustomerId: customerId },
-    select: {
-      id: true,
-      email: true,
-      settings: {
-        select: { language: true },
-      },
-    },
-  });
-  if (!user) return null;
-
-  await prisma.user.update({
-    where: { id: user.id },
-    data: {
-      plan,
-      stripeSubscriptionId: subscription.id,
-      stripePriceId: priceId,
-      subscriptionStatus: subscription.status,
-      subscriptionCurrentPeriodEnd: periodEnd,
-      subscriptionBillingInterval: billingInterval,
-      subscriptionCancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
-    },
-  });
-
-  return { user, plan, periodEnd, billingInterval };
-}
-
-async function recordPromotionRedemptionFromCheckout(
-  session: Stripe.Checkout.Session,
-  subscriptionId: string
-) {
-  const promotionId = session.metadata?.promotionId || null;
-  const planId = normalizePlanId(session.metadata?.planId);
-  const billingInterval = session.metadata?.billingInterval;
-  const userId =
-    session.client_reference_id ||
-    (typeof session.metadata?.userId === "string" ? session.metadata.userId : null);
-
-  if (
-    !promotionId ||
-    !userId ||
-    !planId ||
-    (billingInterval !== "monthly" && billingInterval !== "annual")
-  ) {
-    return;
-  }
-
-  await prisma.$transaction(async (tx) => {
-    const promotion = await tx.billingPromotion.findUnique({
-      where: { id: promotionId },
-      select: { id: true, isActive: true, maxRedemptions: true },
-    });
-
-    if (!promotion?.isActive) {
-      throw new Error("Promotion is not active.");
-    }
-
-    await tx.billingPromotionRedemption.create({
-      data: {
-        promotionId,
-        userId,
-        planId,
-        billingInterval,
-        stripeCheckoutSessionId: session.id,
-        stripeSubscriptionId: subscriptionId,
-      },
-    });
-
-    const updatedPromotion = await tx.billingPromotion.updateMany({
-      where: {
-        id: promotionId,
-        isActive: true,
-        ...(promotion.maxRedemptions
-          ? { redeemedCount: { lt: promotion.maxRedemptions } }
-          : {}),
-      },
-      data: { redeemedCount: { increment: 1 } },
-    });
-
-    if (updatedPromotion.count !== 1) {
-      throw new Error("Promotion redemption limit reached.");
-    }
-  });
-}
-
-async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
-  if (!session.subscription) return;
-  const subscriptionId =
-    typeof session.subscription === "string"
-      ? session.subscription
-      : session.subscription.id;
-  const subscription = await getStripe().subscriptions.retrieve(subscriptionId);
-  await recordPromotionRedemptionFromCheckout(session, subscriptionId).catch((error) => {
-    console.error("Promotion redemption record failed:", error);
-  });
-  const synced = await syncSubscription(subscription);
-  if (synced && synced.plan !== "Free") {
-    await sendBillingWelcomeEmail({
-      to: synced.user.email,
-      plan: synced.plan,
-      billingInterval: synced.billingInterval,
-      periodEnd: synced.periodEnd,
-      language: synced.user.settings?.language,
-    }).catch((emailError) => {
-      console.error("Billing welcome email failed:", emailError);
-    });
-  }
-}
-
-async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
-  const customerId =
-    typeof subscription.customer === "string"
-      ? subscription.customer
-      : subscription.customer.id;
-  await prisma.user.updateMany({
-    where: { stripeCustomerId: customerId },
-    data: {
-      plan: "Free",
-      stripeSubscriptionId: null,
-      stripePriceId: null,
-      subscriptionStatus: subscription.status,
-      subscriptionCurrentPeriodEnd: getPeriodEnd(subscription),
-      subscriptionBillingInterval: null,
-      subscriptionCancelAtPeriodEnd: false,
-    },
-  });
-}
+import { processStripeEvent } from "@/lib/stripeWebhookProcessing";
 
 export async function POST(req: Request) {
   const signature = req.headers.get("stripe-signature");
@@ -235,20 +50,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    switch (event.type) {
-      case "checkout.session.completed":
-        await handleCheckoutCompleted(event.data.object as Stripe.Checkout.Session);
-        break;
-      case "customer.subscription.created":
-      case "customer.subscription.updated":
-        await syncSubscription(event.data.object as Stripe.Subscription);
-        break;
-      case "customer.subscription.deleted":
-        await handleSubscriptionDeleted(event.data.object as Stripe.Subscription);
-        break;
-      default:
-        break;
-    }
+    await processStripeEvent(event);
     if (logId) {
       await prisma.stripeWebhookEventLog.update({
         where: { id: logId },
@@ -259,15 +61,20 @@ export async function POST(req: Request) {
   } catch (error) {
     console.error("Stripe webhook processing failed:", error);
     if (logId) {
-      await prisma.stripeWebhookEventLog.update({
-        where: { id: logId },
-        data: {
-          status: "failed",
-          error: error instanceof Error ? error.message.slice(0, 1_000) : "Unknown webhook processing error.",
-        },
-      }).catch((logError) => {
-        console.error("Stripe webhook log update failed:", logError);
-      });
+      await prisma.stripeWebhookEventLog
+        .update({
+          where: { id: logId },
+          data: {
+            status: "failed",
+            error:
+              error instanceof Error
+                ? error.message.slice(0, 1_000)
+                : "Unknown webhook processing error.",
+          },
+        })
+        .catch((logError) => {
+          console.error("Stripe webhook log update failed:", logError);
+        });
     }
     return NextResponse.json(
       { error: "Webhook processing failed." },

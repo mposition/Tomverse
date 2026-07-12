@@ -323,6 +323,27 @@ model AdminAuditLog {
   @@index([actorUserId, createdAt])
 }
 
+model AdminActionApproval {
+  id              String    @id @default(cuid())
+  action          String
+  targetType      String
+  targetId        String?
+  status          String    @default("pending")
+  reason          String?
+  payload         Json?
+  requestedById   String?
+  requestedByEmail String?
+  reviewedById    String?
+  reviewedByEmail String?
+  reviewedAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([status, createdAt])
+  @@index([action, createdAt])
+  @@index([targetType, targetId])
+}
+
 model AdminNote {
   id             String   @id @default(cuid())
   targetType     String
@@ -370,6 +391,28 @@ model AdminNotificationLog {
   @@index([status, createdAt])
   @@index([targetType, targetId])
   @@index([acknowledgedAt])
+}
+
+model AdminAlertPolicy {
+  id                       String   @id @default(cuid())
+  name                     String
+  provider                 String?
+  isActive                 Boolean  @default(true)
+  budgetThresholds         String   @default("[50,80,95]")
+  providerFailureThreshold Int      @default(5)
+  modelFailureThreshold    Int      @default(3)
+  notifyEmail              Boolean  @default(true)
+  notifySlack              Boolean  @default(false)
+  notifyDiscord            Boolean  @default(false)
+  createdById              String?
+  createdByEmail           String?
+  updatedById              String?
+  updatedByEmail           String?
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  @@index([isActive])
+  @@index([provider])
 }
 
 model AdminProviderIncident {
