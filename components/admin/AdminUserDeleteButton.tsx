@@ -6,14 +6,27 @@ import { dispatchAppToast } from "@/lib/appToast";
 
 type Props = {
   userId: string;
+  currentUserId?: string;
   label?: string;
 };
 
-export function AdminUserDeleteButton({ userId, label = "Delete" }: Props) {
+export function AdminUserDeleteButton({
+  userId,
+  currentUserId,
+  label = "Delete",
+}: Props) {
   const [isArmed, setIsArmed] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const isCurrentAdmin = Boolean(currentUserId && currentUserId === userId);
 
   const handleDelete = async () => {
+    if (isCurrentAdmin) {
+      dispatchAppToast(
+        "Use account settings to delete the currently signed-in admin account.",
+        "info"
+      );
+      return;
+    }
     if (isDeleting) return;
     if (!isArmed) {
       setIsArmed(true);
@@ -53,7 +66,7 @@ export function AdminUserDeleteButton({ userId, label = "Delete" }: Props) {
     <button
       type="button"
       onClick={handleDelete}
-      disabled={isDeleting}
+      disabled={isDeleting || isCurrentAdmin}
       className={`inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-lg border px-2.5 py-2 text-xs font-black transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
         isArmed
           ? "border-red-500 bg-red-600 text-white hover:bg-red-500"
@@ -61,7 +74,7 @@ export function AdminUserDeleteButton({ userId, label = "Delete" }: Props) {
       }`}
     >
       {isDeleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-      {isDeleting ? "Deleting" : isArmed ? "Confirm" : label}
+      {isCurrentAdmin ? "Current admin" : isDeleting ? "Deleting" : isArmed ? "Confirm" : label}
     </button>
   );
 }

@@ -54,7 +54,12 @@ export async function DELETE(req: Request, context: RouteContext) {
     if (securityResponse) return securityResponse;
     console.error("Admin user deletion failed:", error);
     return NextResponse.json(
-      { error: "Failed to delete user." },
+      {
+        error:
+          error instanceof Error
+            ? `Failed to delete user: ${error.message}`
+            : "Failed to delete user.",
+      },
       { status: 500 }
     );
   }

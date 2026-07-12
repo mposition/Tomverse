@@ -28,6 +28,18 @@ export async function deleteTomverseAccount(userId: string) {
   await cancelStripeSubscription(user.stripeSubscriptionId);
 
   await prisma.$transaction(async (tx) => {
+    await tx.session.deleteMany({
+      where: { userId: user.id },
+    });
+
+    await tx.account.deleteMany({
+      where: { userId: user.id },
+    });
+
+    await tx.userSettings.deleteMany({
+      where: { userId: user.id },
+    });
+
     await tx.feedback.updateMany({
       where: { userId: user.id },
       data: {
@@ -50,6 +62,10 @@ export async function deleteTomverseAccount(userId: string) {
       },
     });
 
+    await tx.billingPromotionRedemption.deleteMany({
+      where: { userId: user.id },
+    });
+
     await tx.chatUsageBucket.deleteMany({
       where: {
         key: { startsWith: getUserChatUsageKey(user.id) },
@@ -60,6 +76,14 @@ export async function deleteTomverseAccount(userId: string) {
       where: {
         subjectKey: getUserChatUsageKey(user.id),
       },
+    });
+
+    await tx.conversation.deleteMany({
+      where: { userId: user.id },
+    });
+
+    await tx.conversationProject.deleteMany({
+      where: { userId: user.id },
     });
 
     await tx.user.delete({

@@ -790,7 +790,10 @@ export default async function AdminPage() {
                                                     <div>{user.stripeCustomerId ? "Stripe linked" : "No Stripe customer"}</div>
                                                 </td>
                                                 <td className="rounded-r-2xl px-3 py-3">
-                                                    <AdminUserDeleteButton userId={user.id} />
+                                                    <AdminUserDeleteButton
+                                                        userId={user.id}
+                                                        currentUserId={session.user.id}
+                                                    />
                                                 </td>
                                             </tr>
                                         );
