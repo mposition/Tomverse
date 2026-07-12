@@ -64,6 +64,50 @@ const statusClass: Record<ProviderHealthStatus, string> = {
     outage: "border-red-500/30 bg-red-500/10 text-red-300",
 };
 
+const adminTabs = [
+    {
+        id: "overview",
+        label: "Overview",
+        description: "Launch status",
+        icon: LayoutDashboard,
+    },
+    {
+        id: "users",
+        label: "Users",
+        description: "Accounts and usage",
+        icon: Users,
+    },
+    {
+        id: "billing",
+        label: "Billing",
+        description: "Plans and promotions",
+        icon: CreditCard,
+    },
+    {
+        id: "refunds",
+        label: "Refunds",
+        description: "Cancellation queue",
+        icon: RotateCcw,
+    },
+    {
+        id: "providers",
+        label: "Providers",
+        description: "Health and budgets",
+        icon: Activity,
+    },
+    {
+        id: "feedback",
+        label: "Feedback",
+        description: "Support inbox",
+        icon: LifeBuoy,
+    },
+] as const;
+
+type AdminTab = (typeof adminTabs)[number]["id"];
+
+const isAdminTab = (value: unknown): value is AdminTab =>
+    typeof value === "string" && adminTabs.some((tab) => tab.id === value);
+
 const budgetClass = (value: number) => {
     if (value >= 95) return "text-red-300";
     if (value >= 80) return "text-amber-300";
@@ -119,16 +163,7 @@ function MetricCard({
     );
 }
 
-function AdminNav() {
-    const items = [
-        ["overview", "Overview", LayoutDashboard],
-        ["users", "Users", Users],
-        ["billing", "Billing", CreditCard],
-        ["refunds", "Refunds", RotateCcw],
-        ["providers", "Providers", Activity],
-        ["feedback", "Feedback", LifeBuoy],
-    ] as const;
-
+function AdminNav({ activeTab }: { activeTab: AdminTab }) {
     return (
         <aside className="lg:sticky lg:top-6 lg:self-start">
             <div className="rounded-3xl border border-zinc-800 bg-zinc-950/80 p-3 shadow-2xl shadow-black/20">
@@ -139,16 +174,33 @@ function AdminNav() {
                     <div className="mt-1 text-lg font-black text-white">Admin Console</div>
                 </div>
                 <nav className="mt-2 grid gap-1">
-                    {items.map(([href, label, Icon]) => (
-                        <a
-                            key={href}
-                            href={`#${href}`}
-                            className="flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-bold text-zinc-400 transition hover:bg-zinc-900 hover:text-white"
-                        >
-                            <Icon className="h-4 w-4" />
-                            {label}
-                        </a>
-                    ))}
+                    {adminTabs.map((tab) => {
+                        const Icon = tab.icon;
+                        const active = activeTab === tab.id;
+                        return (
+                            <Link
+                                key={tab.id}
+                                href={tab.id === "overview" ? "/admin" : `/admin?tab=${tab.id}`}
+                                className={`flex items-start gap-3 rounded-2xl px-3 py-3 text-sm font-bold transition ${
+                                    active
+                                        ? "border border-blue-500/30 bg-blue-600 text-white shadow-lg shadow-blue-950/30"
+                                        : "text-zinc-400 hover:bg-zinc-900 hover:text-white"
+                                }`}
+                            >
+                                <Icon className="mt-0.5 h-4 w-4 shrink-0" />
+                                <span>
+                                    <span className="block">{tab.label}</span>
+                                    <span
+                                        className={`mt-0.5 block text-xs font-semibold ${
+                                            active ? "text-blue-100/80" : "text-zinc-600"
+                                        }`}
+                                    >
+                                        {tab.description}
+                                    </span>
+                                </span>
+                            </Link>
+                        );
+                    })}
                 </nav>
                 <Link
                     href="/chat"
@@ -393,7 +445,11 @@ function ProviderRow({ provider }: { provider: ProviderHealthRow }) {
     );
 }
 
-export default async function AdminPage() {
+type AdminPageProps = {
+    searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+};
+
+export default async function AdminPage({ searchParams }: AdminPageProps) {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) {
         redirect("/auth/signin?callbackUrl=/admin");
@@ -401,6 +457,10 @@ export default async function AdminPage() {
     if (!isAdminSession(session)) {
         notFound();
     }
+
+    const query = await searchParams;
+    const rawTab = Array.isArray(query.tab) ? query.tab[0] : query.tab;
+    const activeTab = isAdminTab(rawTab) ? rawTab : "overview";
 
     await syncBillingDefaultsToDatabase();
 
@@ -584,6 +644,9 @@ export default async function AdminPage() {
     ].slice(0, 6);
     const generatedAtLabel = dashboard.generatedAt.replace("T", " ").slice(0, 16);
     const monthSpendLabel = money(monthSpend);
+    const activeTabInfo =
+        adminTabs.find((tab) => tab.id === activeTab) || adminTabs[0];
+    const ActiveTabIcon = activeTabInfo.icon;
     const envChecks = [
         {
             name: "ADMIN_EMAILS",
@@ -620,7 +683,7 @@ export default async function AdminPage() {
     return (
         <main className="min-h-screen bg-zinc-950 text-zinc-100">
             <div className="mx-auto grid w-full max-w-[96rem] gap-6 px-5 py-6 lg:grid-cols-[16rem_1fr] lg:px-8">
-                <AdminNav />
+                <AdminNav activeTab={activeTab} />
                 <div className="flex min-w-0 flex-col gap-8">
                     <header id="overview" className="rounded-3xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 p-6 shadow-2xl shadow-black/20">
                         <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
@@ -638,109 +701,120 @@ export default async function AdminPage() {
                                 </p>
                             </div>
                             <div className="text-sm text-zinc-500">
-                                Generated {generatedAtLabel} UTC
+                                <span className="inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-950 px-3 py-1.5 font-bold text-zinc-300">
+                                    <ActiveTabIcon className="h-4 w-4 text-blue-300" />
+                                    {activeTabInfo.label}
+                                </span>
+                                <div className="mt-2 text-right text-xs">
+                                    Generated {generatedAtLabel} UTC
+                                </div>
                             </div>
                         </div>
                     </header>
 
-                    <AdminOperationsPanel
-                        generatedAt={generatedAtLabel}
-                        totalUsers={totalUsers}
-                        paidUsers={paidUsers}
-                        activeSubscriptions={activeSubscriptions}
-                        openFeedbackCount={openFeedbackCount}
-                        pendingRefundCount={pendingRefundCount}
-                        providerAvailableCount={availableCount}
-                        providerTotalCount={dashboard.providers.length}
-                        monthSpendLabel={monthSpendLabel}
-                        needsAttention={needsAttention}
-                        envChecks={envChecks}
-                    />
-
-                    <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                        <MetricCard
-                            label="Users"
-                            value={String(totalUsers)}
-                            detail={`${paidUsers} paid, ${activeSubscriptions} active subscriptions`}
-                            icon={<Users className="h-4 w-4" />}
-                        />
-                        <MetricCard
-                            label="Messages"
-                            value={String(todayUsage._sum.count || 0)}
-                            detail={`${monthlyUsage._sum.count || 0} this month, ${messageCount} total`}
-                            icon={<MessageSquare className="h-4 w-4" />}
-                        />
-                        <MetricCard
-                            label="Provider status"
-                            value={`${availableCount} / ${dashboard.providers.length}`}
-                            detail={`${limitedCount} limited, ${outageCount} outage`}
-                            icon={<Activity className="h-4 w-4" />}
-                        />
-                        <MetricCard
-                            label="Monthly spend"
-                            value={monthSpendLabel}
-                            detail="Estimated from reserved token budgets"
-                            icon={<WalletCards className="h-4 w-4" />}
-                        />
-                    </section>
-
-                    <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-                        <div className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
-                            <SectionHeader
-                                eyebrow="Needs attention"
-                                title="Launch readiness queue"
-                                description="The highest-signal items an operator should review before they become user-facing incidents."
+                    {activeTab === "overview" && (
+                        <>
+                            <AdminOperationsPanel
+                                generatedAt={generatedAtLabel}
+                                totalUsers={totalUsers}
+                                paidUsers={paidUsers}
+                                activeSubscriptions={activeSubscriptions}
+                                openFeedbackCount={openFeedbackCount}
+                                pendingRefundCount={pendingRefundCount}
+                                providerAvailableCount={availableCount}
+                                providerTotalCount={dashboard.providers.length}
+                                monthSpendLabel={monthSpendLabel}
+                                needsAttention={needsAttention}
+                                envChecks={envChecks}
                             />
-                            <div className="mt-5 grid gap-3">
-                                {needsAttention.length === 0 ? (
-                                    <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4 text-sm text-emerald-200">
-                                        No immediate operational issues detected.
+
+                            <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                                <MetricCard
+                                    label="Users"
+                                    value={String(totalUsers)}
+                                    detail={`${paidUsers} paid, ${activeSubscriptions} active subscriptions`}
+                                    icon={<Users className="h-4 w-4" />}
+                                />
+                                <MetricCard
+                                    label="Messages"
+                                    value={String(todayUsage._sum.count || 0)}
+                                    detail={`${monthlyUsage._sum.count || 0} this month, ${messageCount} total`}
+                                    icon={<MessageSquare className="h-4 w-4" />}
+                                />
+                                <MetricCard
+                                    label="Provider status"
+                                    value={`${availableCount} / ${dashboard.providers.length}`}
+                                    detail={`${limitedCount} limited, ${outageCount} outage`}
+                                    icon={<Activity className="h-4 w-4" />}
+                                />
+                                <MetricCard
+                                    label="Monthly spend"
+                                    value={monthSpendLabel}
+                                    detail="Estimated from reserved token budgets"
+                                    icon={<WalletCards className="h-4 w-4" />}
+                                />
+                            </section>
+
+                            <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+                                <div className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
+                                    <SectionHeader
+                                        eyebrow="Needs attention"
+                                        title="Launch readiness queue"
+                                        description="The highest-signal items an operator should review before they become user-facing incidents."
+                                    />
+                                    <div className="mt-5 grid gap-3">
+                                        {needsAttention.length === 0 ? (
+                                            <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4 text-sm text-emerald-200">
+                                                No immediate operational issues detected.
+                                            </div>
+                                        ) : (
+                                            needsAttention.map((item) => (
+                                                <div
+                                                    key={`${item.title}-${item.detail}`}
+                                                    className={`rounded-2xl border p-4 ${
+                                                        item.tone === "red"
+                                                            ? "border-red-500/30 bg-red-500/10"
+                                                            : item.tone === "amber"
+                                                                ? "border-amber-500/30 bg-amber-500/10"
+                                                                : item.tone === "blue"
+                                                                    ? "border-blue-500/30 bg-blue-500/10"
+                                                                    : "border-zinc-800 bg-zinc-900/70"
+                                                    }`}
+                                                >
+                                                    <div className="font-black text-white">{item.title}</div>
+                                                    <p className="mt-1 text-sm leading-6 text-zinc-400">{item.detail}</p>
+                                                </div>
+                                            ))
+                                        )}
                                     </div>
-                                ) : (
-                                    needsAttention.map((item) => (
-                                        <div
-                                            key={`${item.title}-${item.detail}`}
-                                            className={`rounded-2xl border p-4 ${
-                                                item.tone === "red"
-                                                    ? "border-red-500/30 bg-red-500/10"
-                                                    : item.tone === "amber"
-                                                        ? "border-amber-500/30 bg-amber-500/10"
-                                                        : item.tone === "blue"
-                                                            ? "border-blue-500/30 bg-blue-500/10"
-                                                            : "border-zinc-800 bg-zinc-900/70"
-                                            }`}
-                                        >
-                                            <div className="font-black text-white">{item.title}</div>
-                                            <p className="mt-1 text-sm leading-6 text-zinc-400">{item.detail}</p>
-                                        </div>
-                                    ))
-                                )}
-                            </div>
-                        </div>
-                        <div className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
-                            <SectionHeader
-                                eyebrow="System setup"
-                                title="Environment health"
-                                description="Variables that control admin access, Stripe, provider balance, and alert delivery."
-                            />
-                            <div className="mt-5 grid gap-2 text-xs text-zinc-400 sm:grid-cols-2">
-                                {[
-                                    "ADMIN_EMAILS",
-                                    "STRIPE_SECRET_KEY",
-                                    "STRIPE_WEBHOOK_SECRET",
-                                    "SLACK_WEBHOOK_URL",
-                                    "PROVIDER_OPENAI_BALANCE_USD",
-                                    "CHAT_PROVIDER_OPENAI_COST_MICROUSD_PER_DAY",
-                                ].map((name) => (
-                                    <span key={name} className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2">
-                                        {name}
-                                    </span>
-                                ))}
-                            </div>
-                        </div>
-                    </section>
+                                </div>
+                                <div className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
+                                    <SectionHeader
+                                        eyebrow="System setup"
+                                        title="Environment health"
+                                        description="Variables that control admin access, Stripe, provider balance, and alert delivery."
+                                    />
+                                    <div className="mt-5 grid gap-2 text-xs text-zinc-400 sm:grid-cols-2">
+                                        {[
+                                            "ADMIN_EMAILS",
+                                            "STRIPE_SECRET_KEY",
+                                            "STRIPE_WEBHOOK_SECRET",
+                                            "SLACK_WEBHOOK_URL",
+                                            "PROVIDER_OPENAI_BALANCE_USD",
+                                            "CHAT_PROVIDER_OPENAI_COST_MICROUSD_PER_DAY",
+                                        ].map((name) => (
+                                            <span key={name} className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2">
+                                                {name}
+                                            </span>
+                                        ))}
+                                    </div>
+                                </div>
+                            </section>
+                        </>
+                    )}
 
-                    <section id="users" className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
+                    {activeTab === "users" && (
+                    <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
                         <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
                             <SectionHeader
                                 eyebrow="Users"
@@ -805,8 +879,10 @@ export default async function AdminPage() {
                             </table>
                         </div>
                     </section>
+                    )}
 
-                    <section id="billing">
+                    {activeTab === "billing" && (
+                    <section>
                         <BillingAdminPanel
                             plans={billingPlans}
                         promotions={billingPromotions}
@@ -815,12 +891,16 @@ export default async function AdminPage() {
                         activeSubscriptionCount={activeSubscriptions}
                     />
                     </section>
+                    )}
 
+                    {activeTab === "refunds" && (
                     <RefundRequestsPanel
                         rows={refundRequestRows}
                     />
+                    )}
 
-                    <section id="providers" className="flex flex-col gap-4">
+                    {activeTab === "providers" && (
+                    <section className="flex flex-col gap-4">
                         <div className="flex flex-wrap items-center justify-between gap-3">
                             <SectionHeader
                                 eyebrow="Providers"
@@ -846,8 +926,11 @@ export default async function AdminPage() {
                             <ProviderRow key={provider.provider} provider={provider} />
                         ))}
                     </section>
+                    )}
 
+                    {activeTab === "feedback" && (
                     <FeedbackInboxPanel rows={feedbackInboxRows} />
+                    )}
                 </div>
             </div>
         </main>
