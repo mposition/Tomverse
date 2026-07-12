@@ -26,6 +26,7 @@ import { dispatchAppToast } from "@/lib/appToast";
 import { getModelBestFor, getModelExperienceStatus, getModelExperienceTags } from "@/lib/modelExperience";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { useUserUsage } from "@/components/chat/useUserUsage";
+import { withChatLanguage } from "@/lib/localizedCallbackUrl";
 
 type PublicModelStatus = "available" | "limited" | "unavailable";
 type PublicModelStatusRecord = {
@@ -296,7 +297,8 @@ export function ChatInput({
   const hasHandledFocusTokenRef = useRef(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isDragActive, setIsDragActive] = useState(false);
-    const { t } = useLanguage();
+    const { t, lang } = useLanguage();
+    const signInCallbackUrl = withChatLanguage("/chat", lang);
     const accountUsage = useUserUsage(!isGuestMode);
     const maxSelectableModels = isGuestMode
       ? APP_DEFAULTS.maxGuestSelectedModels
@@ -1025,7 +1027,7 @@ export function ChatInput({
                   {isGuestMode ? t("chat.guestLimitReachedTitle") : t("chat.accountLimitReachedTitle")}
                 </span>
                 <a
-                  href={isGuestMode ? "/auth/signin?callbackUrl=/chat" : "/pricing"}
+                  href={isGuestMode ? `/auth/signin?callbackUrl=${encodeURIComponent(signInCallbackUrl)}` : "/pricing"}
                   className="font-black text-amber-900 underline underline-offset-2 dark:text-amber-100"
                 >
                   {isGuestMode ? t("auth.signIn") : t("billing.joinWaitlist")}

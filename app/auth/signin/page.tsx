@@ -6,11 +6,12 @@ import { Suspense, useState } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
 import Link from "next/link";
 import { ShieldCheck } from "lucide-react";
+import { withChatLanguage } from "@/lib/localizedCallbackUrl";
 
 function SignInButtons() {
     const searchParams = useSearchParams();
-    const callbackUrl = searchParams.get("callbackUrl") || "/chat";
-    const { t } = useLanguage();
+    const { t, lang } = useLanguage();
+    const callbackUrl = withChatLanguage(searchParams.get("callbackUrl"), lang);
     const [acceptedTerms, setAcceptedTerms] = useState(false);
 
     const providerButtonClass =

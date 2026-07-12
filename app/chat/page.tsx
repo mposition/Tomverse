@@ -513,7 +513,12 @@ export default function Home() {
                 void fetchConversations();
             });
 
-            fetch("/api/user/settings")
+            const urlLanguage = new URLSearchParams(window.location.search).get("lang");
+            const settingsUrl = isLanguage(urlLanguage)
+                ? `/api/user/settings?lang=${encodeURIComponent(urlLanguage)}`
+                : "/api/user/settings";
+
+            fetch(settingsUrl)
                 .then((res) => {
                     if (!res.ok) throw new Error(`Settings load failed: ${res.status}`);
                     return res.json();
@@ -534,7 +539,6 @@ export default function Home() {
                         }
                     }
 
-                    const urlLanguage = new URLSearchParams(window.location.search).get("lang");
                     if (!isLanguage(urlLanguage) && data && isLanguage(data.language)) {
                         setLang(data.language);
                     }

@@ -29,6 +29,7 @@ import { dispatchAppToast } from "@/lib/appToast";
 import { notifyUserSettingsUpdated } from "@/lib/userSettingsEvents";
 import { useUserUsage } from "@/components/chat/useUserUsage";
 import { UpgradeInterestButton } from "@/components/marketing/UpgradeInterestButton";
+import { withChatLanguage } from "@/lib/localizedCallbackUrl";
 
 export function AuthButton() {
   const { data: session, status } = useSession();
@@ -38,6 +39,7 @@ export function AuthButton() {
     const settingsDialogRef = useRef<HTMLDivElement | null>(null);
 
     const { t, lang: globalLang, setLang: setGlobalLang } = useLanguage();
+    const chatCallbackUrl = withChatLanguage("/chat", globalLang);
 
     const [theme, setTheme] = useState<"dark" | "light">(APP_DEFAULTS.defaultTheme);
     const [language, setLanguage] = useState<Language>(APP_DEFAULTS.defaultLanguage);
@@ -250,7 +252,7 @@ export function AuthButton() {
             if (!response.ok) throw new Error(`Delete failed: ${response.status}`);
             localStorage.removeItem("tomverse_refund_requested_at");
             dispatchAppToast("계정이 삭제되었습니다. 게스트 모드로 전환합니다.", "success");
-            await signOut({ callbackUrl: "/chat" });
+            await signOut({ callbackUrl: chatCallbackUrl });
         } catch {
             dispatchAppToast("계정을 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.", "error");
         } finally {
@@ -789,7 +791,7 @@ export function AuthButton() {
         </select>
       </label>
       <button
-        onClick={() => signIn(undefined, { callbackUrl: "/chat" })}
+        onClick={() => signIn(undefined, { callbackUrl: chatCallbackUrl })}
         className="cursor-pointer w-full rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-blue-950/20 transition-all hover:bg-blue-500"
       >
         {t("auth.login")}

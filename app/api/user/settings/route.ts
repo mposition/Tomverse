@@ -22,6 +22,8 @@ const settingsSchema = z
     .strict()
     .refine((value) => Object.keys(value).length > 0);
 
+const languageSchema = z.enum(["en", "ko", "zh", "fr", "de", "es", "pt"]);
+
 export async function GET(req: Request) {
     try {
         const session = await getServerSession(authOptions);
@@ -34,10 +36,19 @@ export async function GET(req: Request) {
             day: 5_000,
         });
 
+        const requestedLanguage = languageSchema.safeParse(new URL(req.url).searchParams.get("lang"));
+        const initialLanguage = requestedLanguage.success
+            ? requestedLanguage.data
+            : APP_DEFAULTS.defaultLanguage;
+
         let settings = await prisma.userSettings.findUnique({ where: { userId } });
         if (!settings) {
             settings = await prisma.userSettings.create({
-                data: { userId, defaultModel: APP_DEFAULTS.defaultModelId }
+                data: {
+                    userId,
+                    language: initialLanguage,
+                    defaultModel: APP_DEFAULTS.defaultModelId,
+                }
             });
         } else if (!isEnabledModelId(settings.defaultModel)) {
             settings = await prisma.userSettings.update({
