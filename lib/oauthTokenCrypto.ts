@@ -10,6 +10,21 @@ const TOKEN_FIELDS = [
     "session_state",
 ] as const;
 
+const ACCOUNT_FIELDS = new Set([
+    "id",
+    "userId",
+    "type",
+    "provider",
+    "providerAccountId",
+    "refresh_token",
+    "access_token",
+    "expires_at",
+    "token_type",
+    "scope",
+    "id_token",
+    "session_state",
+]);
+
 const getEncryptionKey = () => {
     const secret = process.env.OAUTH_TOKEN_ENCRYPTION_KEY || process.env.NEXTAUTH_SECRET;
     if (!secret || secret.length < 32) {
@@ -53,7 +68,9 @@ export const decryptOAuthToken = (value: string | null | undefined) => {
 };
 
 export const encryptOAuthAccountTokens = <T extends object>(account: T) => {
-    const encrypted = { ...account };
+    const encrypted = Object.fromEntries(
+        Object.entries(account).filter(([key]) => ACCOUNT_FIELDS.has(key))
+    );
     const writable = encrypted as Record<string, unknown>;
     for (const field of TOKEN_FIELDS) {
         const value = writable[field];
@@ -61,5 +78,5 @@ export const encryptOAuthAccountTokens = <T extends object>(account: T) => {
             writable[field] = encryptString(value);
         }
     }
-    return encrypted;
+    return encrypted as T;
 };
