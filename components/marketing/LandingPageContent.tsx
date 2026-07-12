@@ -22,6 +22,7 @@ import {
   UploadCloud,
   Workflow,
 } from "lucide-react";
+import { useSession } from "next-auth/react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
 import { usePublicBilling } from "@/components/marketing/usePublicBilling";
@@ -64,6 +65,7 @@ type LandingCopy = {
   title: string;
   description: string;
   primaryCta: string;
+  signedInCta: string;
   pricingCta: string;
   steps: string[];
   previewTitle: string;
@@ -100,6 +102,7 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     description:
       "Tomverse AI helps you ask once, compare multiple models, attach real files, and keep useful conversations organized for work that needs sharper answers.",
     primaryCta: "Start for free",
+    signedInCta: "Start Chat",
     pricingCta: "View pricing",
     steps: ["Choose up to three models", "Send one prompt or attach files", "Compare, follow up, share, or export"],
     previewTitle: "Tomverse comparison",
@@ -167,6 +170,7 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     title: "최고의 AI 답변을 한곳에서 비교하세요.",
     description: "Tomverse AI는 한 번 질문하고 여러 모델의 답변을 비교하며, 실제 파일을 첨부하고 유용한 대화를 업무 흐름 안에 정리할 수 있게 도와줍니다.",
     primaryCta: "무료로 시작하기",
+    signedInCta: "대화 시작하기",
     pricingCta: "요금 보기",
     steps: ["최대 3개 모델 선택", "질문 전송 또는 파일 첨부", "비교, 후속 질문, 공유, 내보내기"],
     previewTitle: "Tomverse 비교",
@@ -228,6 +232,7 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     title: "在一个地方比较最佳 AI 回答。",
     description: "Tomverse AI 帮你一次提问、比较多个模型、附加真实文件，并把有用的对话整理到工作流程中。",
     primaryCta: "免费开始",
+    signedInCta: "开始聊天",
     pricingCta: "查看价格",
     steps: ["最多选择 3 个模型", "发送问题或添加文件", "比较、追问、分享或导出"],
     previewTitle: "Tomverse 比较",
@@ -289,6 +294,7 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     title: "Comparez les meilleures réponses IA au même endroit.",
     description: "Tomverse AI vous permet de poser une seule question, comparer plusieurs modèles, joindre de vrais fichiers et organiser les conversations utiles pour obtenir de meilleures réponses au travail.",
     primaryCta: "Commencer gratuitement",
+    signedInCta: "Ouvrir le chat",
     pricingCta: "Voir les tarifs",
     steps: ["Choisir jusqu'à trois modèles", "Envoyer une question ou joindre des fichiers", "Comparer, relancer, partager ou exporter"],
     previewTitle: "Comparaison Tomverse",
@@ -322,6 +328,7 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     title: "Vergleichen Sie die besten KI-Antworten an einem Ort.",
     description: "Tomverse AI hilft Ihnen, einmal zu fragen, mehrere Modelle zu vergleichen, echte Dateien anzuhängen und nützliche Unterhaltungen für bessere Arbeit zu organisieren.",
     primaryCta: "Kostenlos starten",
+    signedInCta: "Chat starten",
     pricingCta: "Preise ansehen",
     steps: ["Bis zu drei Modelle wählen", "Eine Frage senden oder Dateien anhängen", "Vergleichen, nachfragen, teilen oder exportieren"],
     previewTitle: "Tomverse-Vergleich",
@@ -355,6 +362,7 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     title: "Compara las mejores respuestas de IA en un solo lugar.",
     description: "Tomverse AI te ayuda a preguntar una vez, comparar varios modelos, adjuntar archivos reales y organizar conversaciones útiles para trabajar mejor.",
     primaryCta: "Empezar gratis",
+    signedInCta: "Iniciar chat",
     pricingCta: "Ver precios",
     steps: ["Elige hasta tres modelos", "Envía una pregunta o adjunta archivos", "Compara, pregunta de nuevo, comparte o exporta"],
     previewTitle: "Comparación Tomverse",
@@ -388,6 +396,7 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     title: "Compare as melhores respostas de IA em um só lugar.",
     description: "O Tomverse AI ajuda você a perguntar uma vez, comparar vários modelos, anexar arquivos reais e organizar conversas úteis para trabalhos que precisam de respostas melhores.",
     primaryCta: "Começar grátis",
+    signedInCta: "Iniciar chat",
     pricingCta: "Ver preços",
     steps: ["Escolha até três modelos", "Envie uma pergunta ou anexe arquivos", "Compare, pergunte de novo, compartilhe ou exporte"],
     previewTitle: "Comparação Tomverse",
@@ -512,11 +521,13 @@ const CardGrid = ({
 
 export function LandingPageContent() {
   const { lang } = useLanguage();
+  const { status } = useSession();
   const content = copy[lang] ?? copy.en;
   const launch = launchCopy[lang] ?? launchCopy.en;
   const billing = usePublicBilling();
   const annualCopy = annualLabelByLanguage[lang] ?? annualLabelByLanguage.en!;
   const chatHref = `/chat?lang=${encodeURIComponent(lang)}`;
+  const primaryCtaLabel = status === "authenticated" ? content.signedInCta : content.primaryCta;
 
   return (
     <main className="min-h-screen overflow-x-hidden bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">
@@ -538,7 +549,7 @@ export function LandingPageContent() {
                 href={chatHref}
                 className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-blue-600 px-6 text-sm font-black text-white shadow-lg shadow-blue-950/20 transition hover:bg-blue-500"
               >
-                {content.primaryCta}
+                {primaryCtaLabel}
                 <ArrowRight className="h-4 w-4" />
               </Link>
               <Link
