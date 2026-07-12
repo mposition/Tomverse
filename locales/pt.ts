@@ -212,15 +212,15 @@ export const pt = {
         failed: "Não foi possível enviar o feedback.",
     },
     billing: {
-        joinWaitlist: "Oferta de lan?amento: 50% de desconto",
+        joinWaitlist: "Oferta de lançamento: 50% de desconto",
         sending: "Enviando...",
         waitlistSent: "Solicitação de upgrade recebida.",
         waitlistFailed: "Não foi possível enviar a solicitação de upgrade.",
         joinProWaitlist: "Atualizar para Pro",
         joinMaxWaitlist: "Atualizar para Max",
         promoTitle: "Digite o código promocional de lançamento",
-        promoProDescription: "Pro custa US$15/m?s. Oferta de lan?amento: 50% de desconto nos 3 primeiros meses.",
-        promoMaxDescription: "Max custa US$25/m?s. Oferta de lan?amento: 50% de desconto nos 3 primeiros meses.",
+        promoProDescription: "Pro custa US$15/mês. Oferta de lançamento: 50% de desconto nos 3 primeiros meses.",
+        promoMaxDescription: "Max custa US$25/mês. Oferta de lançamento: 50% de desconto nos 3 primeiros meses.",
         promoLabel: "Código promocional",
         promoFinePrint: "O desconto vale para Pro e Max nos 3 primeiros meses; depois renova pelo preço mensal regular.",
         applyPromo: "Aplicar código",
@@ -354,7 +354,7 @@ export const pt = {
         proPlan: "Workspace Pro",
         maxPlan: "Workspace Max",
         planDescription: "Sua conta pode usar recursos com login, como compartilhamento, exportação, modo privado e acesso a modelos superiores quando disponível.",
-        billingComingSoon: "Oferta de lan?amento: 50% de desconto nos 3 primeiros meses",
+        billingComingSoon: "Oferta de lançamento: 50% de desconto nos 3 primeiros meses",
         dataRetentionTitle: "Retenção de dados",
         dataRetentionDescription: "Chats padrão permanecem até você excluí-los. Anexos são temporários e normalmente são removidos após cerca de um dia.",
         attachmentRetentionNotice: "Arquivos temporários são usados para envio ao modelo e extração de documentos, e removidos após aproximadamente um dia.",
@@ -434,4 +434,3 @@ export const pt = {
         back: "Voltar para Tomverse",
     },
 } satisfies typeof en;
-

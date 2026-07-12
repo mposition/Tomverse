@@ -108,7 +108,7 @@ const DEFAULT_PROMOTION: BillingPromotionConfig = {
   discountAmountCents: null,
   maxRedemptions: null,
   redeemedCount: 0,
-  durationMonths: 3,
+  durationMonths: 1,
   appliesToPlanIds: ["pro", "max"],
   stripeCouponId: null,
   stripePromotionCodeId: null,

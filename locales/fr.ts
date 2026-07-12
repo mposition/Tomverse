@@ -219,8 +219,8 @@ export const fr = {
         joinProWaitlist: "Passer à Pro",
         joinMaxWaitlist: "Passer à Max",
         promoTitle: "Saisir le code promo de lancement",
-        promoProDescription: "Pro co?te 15 $/mois. Offre de lancement : -50 % pendant les 3 premiers mois.",
-        promoMaxDescription: "Max co?te 25 $/mois. Offre de lancement : -50 % pendant les 3 premiers mois.",
+        promoProDescription: "Pro coûte 15 $/mois. Offre de lancement : -50 % pendant les 3 premiers mois.",
+        promoMaxDescription: "Max coûte 25 $/mois. Offre de lancement : -50 % pendant les 3 premiers mois.",
         promoLabel: "Code promo",
         promoFinePrint: "La réduction s'applique à Pro et Max pendant les 3 premiers mois, puis le renouvellement se fait au prix mensuel standard.",
         applyPromo: "Appliquer le code promo",
@@ -434,4 +434,3 @@ export const fr = {
         back: "Retour à Tomverse",
     },
 } satisfies typeof en;
-

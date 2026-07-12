@@ -91,7 +91,7 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     promoPlaceholder: "Optional promotion code",
     apply: "Apply",
     promoFinePrint:
-      "Discounts apply to the first 3 months of Pro and Max, then renew at the regular monthly price.",
+      "Discounts apply to the first month of Pro and Max, then renew at the regular monthly price.",
     invalidPromo: "Invalid promotion code.",
     promoApplied: "Promotion code applied.",
     orderSummary: "Order summary",
@@ -129,7 +129,7 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     promoPlaceholder: "프로모션 코드 선택 입력",
     apply: "적용",
     promoFinePrint:
-      "할인은 Pro와 Max의 첫 3개월에 적용되며, 이후에는 정가 월간 요금으로 갱신됩니다.",
+      "할인은 Pro와 Max의 첫 달에 적용되며, 이후에는 정가 월간 요금으로 갱신됩니다.",
     invalidPromo: "유효하지 않은 프로모션 코드입니다.",
     promoApplied: "프로모션 코드가 적용되었습니다.",
     orderSummary: "주문 요약",
@@ -166,7 +166,7 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     promoPlaceholder: "可选促销代码",
     apply: "应用",
     promoFinePrint:
-      "折扣适用于 Pro 和 Max 的前 3 个月，之后将按标准月费续订。",
+      "折扣适用于 Pro 和 Max 的首月，之后将按标准月费续订。",
     invalidPromo: "促销代码无效。",
     promoApplied: "促销代码已应用。",
     orderSummary: "订单摘要",
@@ -204,7 +204,7 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     promoPlaceholder: "Code promotionnel facultatif",
     apply: "Appliquer",
     promoFinePrint:
-      "Les remises s'appliquent aux 3 premiers mois de Pro et Max, puis le renouvellement se fait au prix mensuel normal.",
+      "Les remises s'appliquent au premier mois de Pro et Max, puis le renouvellement se fait au prix mensuel normal.",
     invalidPromo: "Code promotionnel invalide.",
     promoApplied: "Code promotionnel appliqué.",
     orderSummary: "Résumé de commande",
@@ -242,7 +242,7 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     promoPlaceholder: "Optionaler Aktionscode",
     apply: "Anwenden",
     promoFinePrint:
-      "Rabatte gelten für die ersten 3 Monate von Pro und Max. Danach verlängert sich das Abo zum regulären Monatspreis.",
+      "Rabatte gelten für den ersten Monat von Pro und Max. Danach verlängert sich das Abo zum regulären Monatspreis.",
     invalidPromo: "Ungültiger Aktionscode.",
     promoApplied: "Aktionscode angewendet.",
     orderSummary: "Bestellübersicht",
@@ -280,7 +280,7 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     promoPlaceholder: "Código promocional opcional",
     apply: "Aplicar",
     promoFinePrint:
-      "Los descuentos se aplican a los primeros 3 meses de Pro y Max; después se renueva al precio mensual normal.",
+      "Los descuentos se aplican al primer mes de Pro y Max; después se renueva al precio mensual normal.",
     invalidPromo: "Código promocional no válido.",
     promoApplied: "Código promocional aplicado.",
     orderSummary: "Resumen del pedido",
