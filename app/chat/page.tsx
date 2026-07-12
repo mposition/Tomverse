@@ -83,6 +83,14 @@ type BillingSuccessState = {
   interval: string;
 };
 
+const normalizeBillingPlanLabel = (value: string | null) => {
+  const normalized = (value || "").trim().toLowerCase();
+  if (normalized === "max") return "Max";
+  if (normalized === "pro") return "Pro";
+  if (normalized === "free") return "Free";
+  return null;
+};
+
 function ConfirmDialog({
   title,
   description,
@@ -232,9 +240,23 @@ export default function Home() {
     const plan = params.get("plan");
     const interval = params.get("interval");
     setBillingSuccess({
-      plan: plan === "max" ? "Max" : plan === "pro" ? "Pro" : "Tomverse",
+      plan: normalizeBillingPlanLabel(plan) || "업그레이드",
       interval: interval === "annual" ? "Annual" : "Monthly",
     });
+
+    if (!normalizeBillingPlanLabel(plan)) {
+      fetch("/api/user/usage", { cache: "no-store" })
+        .then((response) => (response.ok ? response.json() : null))
+        .then((usage) => {
+          const accountPlan = normalizeBillingPlanLabel(usage?.plan);
+          if (accountPlan && accountPlan !== "Free") {
+            setBillingSuccess((current) =>
+              current ? { ...current, plan: accountPlan } : current
+            );
+          }
+        })
+        .catch(() => undefined);
+    }
 
     params.delete("billing");
     params.delete("plan");

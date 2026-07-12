@@ -16,6 +16,7 @@ import {
   tierForPlanId,
   type BillingPlanId,
 } from "@/lib/billingConfig";
+import { sendBillingWelcomeEmail } from "@/lib/billingEmails";
 import { prisma } from "@/lib/prisma";
 import { getPublicAppOrigin } from "@/lib/publicUrl";
 import { getStripe } from "@/lib/stripe";
@@ -334,6 +335,14 @@ export async function POST(req: Request) {
         planId: planId as BillingPlanId,
         billingInterval,
         promotion: appliedPromotion,
+      });
+      sendBillingWelcomeEmail({
+        to: user.email,
+        plan: tierForPlanId(planId),
+        billingInterval,
+        periodEnd,
+      }).catch((emailError) => {
+        console.error("Billing welcome email failed:", emailError);
       });
 
       return NextResponse.json({

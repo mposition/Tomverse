@@ -735,7 +735,6 @@ export default async function AdminPage() {
 
                     <RefundRequestsPanel
                         rows={refundRequestRows}
-                        pendingCount={pendingRefundCount}
                     />
 
                     <section id="providers" className="flex flex-col gap-4">

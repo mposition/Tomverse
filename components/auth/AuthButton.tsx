@@ -596,7 +596,7 @@ export function AuthButton() {
                                                     {refundRequestedAt
                                                         ? "환불 요청 접수됨"
                                                         : isRequestingRefund
-                                                            ? t("feedback.sending")
+                                                            ? "환불 요청 접수 중..."
                                                             : "환불 / 플랜 취소 요청하기"}
                                                 </button>
                                                 {refundRequestedAt && (

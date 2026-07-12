@@ -22,7 +22,6 @@ export type RefundRequestRow = {
 
 type Props = {
   rows: RefundRequestRow[];
-  pendingCount: number;
 };
 
 const statusClass = (status: string) => {
@@ -38,10 +37,12 @@ const dateLabel = (value: string | null) => {
   return date.toISOString().replace("T", " ").slice(0, 16);
 };
 
-export function RefundRequestsPanel({ rows, pendingCount }: Props) {
+export function RefundRequestsPanel({ rows }: Props) {
   const [items, setItems] = useState(rows);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
+  const visiblePendingCount = items.filter((item) => item.status === "pending").length;
+  const pendingLabel = visiblePendingCount === 1 ? "pending" : "pending";
 
   const updateRequest = async (id: string, action: "approve" | "reject") => {
     if (busyId) return;
@@ -107,7 +108,7 @@ export function RefundRequestsPanel({ rows, pendingCount }: Props) {
         </div>
         <span className="inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-black text-amber-200">
           <RotateCcw className="h-3.5 w-3.5" />
-          {pendingCount} pending
+          {visiblePendingCount} {pendingLabel}
         </span>
       </div>
 

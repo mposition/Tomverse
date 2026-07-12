@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import type Stripe from "stripe";
 import { getBillingPlans, tierForPlanId, type BillingPlanId } from "@/lib/billingConfig";
+import { sendBillingWelcomeEmail } from "@/lib/billingEmails";
 import { prisma } from "@/lib/prisma";
 import { getStripe } from "@/lib/stripe";
 
@@ -45,18 +46,28 @@ async function syncSubscription(subscription: Stripe.Subscription) {
     (planByPrice?.id ?? null);
   const active = subscriptionActiveStatuses.has(subscription.status);
   const plan = active && planId ? tierForPlanId(planId) : "Free";
+  const periodEnd = getPeriodEnd(subscription);
+  const billingInterval = getBillingInterval(subscription);
 
-  await prisma.user.updateMany({
+  const user = await prisma.user.findFirst({
     where: { stripeCustomerId: customerId },
+    select: { id: true, email: true },
+  });
+  if (!user) return null;
+
+  await prisma.user.update({
+    where: { id: user.id },
     data: {
       plan,
       stripeSubscriptionId: subscription.id,
       stripePriceId: priceId,
       subscriptionStatus: subscription.status,
-      subscriptionCurrentPeriodEnd: getPeriodEnd(subscription),
-      subscriptionBillingInterval: getBillingInterval(subscription),
+      subscriptionCurrentPeriodEnd: periodEnd,
+      subscriptionBillingInterval: billingInterval,
     },
   });
+
+  return { user, plan, periodEnd, billingInterval };
 }
 
 async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
@@ -75,7 +86,17 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
       ? session.subscription
       : session.subscription.id;
   const subscription = await getStripe().subscriptions.retrieve(subscriptionId);
-  await syncSubscription(subscription);
+  const synced = await syncSubscription(subscription);
+  if (synced && synced.plan !== "Free") {
+    sendBillingWelcomeEmail({
+      to: synced.user.email,
+      plan: synced.plan,
+      billingInterval: synced.billingInterval,
+      periodEnd: synced.periodEnd,
+    }).catch((emailError) => {
+      console.error("Billing welcome email failed:", emailError);
+    });
+  }
 }
 
 async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
