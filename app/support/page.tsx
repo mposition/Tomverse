@@ -1,6 +1,5 @@
-import { MarketingInfoPage } from "@/components/marketing/MarketingInfoPage";
-import { infoPages } from "@/components/marketing/marketingInfoContent";
+import { SupportPageContent } from "@/components/marketing/SupportPageContent";
 
 export default function SupportPage() {
-  return <MarketingInfoPage content={infoPages.support} />;
+  return <SupportPageContent />;
 }
