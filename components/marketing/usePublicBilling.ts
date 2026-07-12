@@ -53,6 +53,7 @@ const TIMEZONE_TO_CURRENCY: Array<[string, string]> = [
   ["Pacific/Auckland", "NZD"],
   ["Asia/Seoul", "KRW"],
   ["Asia/Tokyo", "JPY"],
+  ["Europe/London", "GBP"],
   ["Europe/", "EUR"],
   ["America/New_York", "USD"],
   ["America/Chicago", "USD"],
@@ -65,22 +66,24 @@ const TIMEZONE_TO_CURRENCY: Array<[string, string]> = [
 export function getBillingConfigUrl() {
   if (typeof window === "undefined") return "/api/billing/config";
 
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+  let currency = TIMEZONE_TO_CURRENCY.find(([prefix]) => timeZone.startsWith(prefix))?.[1];
+
   const locale = navigator.languages?.[0] || navigator.language || "";
-  let currency: string | undefined;
-  try {
-    const region = locale ? new Intl.Locale(locale).region?.toUpperCase() : undefined;
-    currency = region ? REGION_TO_CURRENCY[region] : undefined;
-  } catch {
-    currency = undefined;
-  }
-
   if (!currency) {
-    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
-    currency = TIMEZONE_TO_CURRENCY.find(([prefix]) => timeZone.startsWith(prefix))?.[1];
+    try {
+      const region = locale ? new Intl.Locale(locale).region?.toUpperCase() : undefined;
+      currency = region ? REGION_TO_CURRENCY[region] : undefined;
+    } catch {
+      currency = undefined;
+    }
   }
 
-  if (!currency) return "/api/billing/config";
-  return `/api/billing/config?currency=${encodeURIComponent(currency)}`;
+  const params = new URLSearchParams();
+  if (currency) params.set("currency", currency);
+  if (timeZone) params.set("tz", timeZone);
+  const query = params.toString();
+  return query ? `/api/billing/config?${query}` : "/api/billing/config";
 }
 
 export function usePublicBilling() {

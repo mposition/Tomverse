@@ -74,6 +74,7 @@ export function ChatSidebar({
     const [conversationProjectOverrides, setConversationProjectOverrides] = useState<Record<string, string | null>>({});
     const [projects, setProjects] = useState<ConversationProject[]>([]);
     const [isCreatingProject, setIsCreatingProject] = useState(false);
+    const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
     const [conversationLabels, setConversationLabels] = useState<Record<string, string>>(() => {
         if (typeof window === "undefined") return {};
         try {
@@ -322,30 +323,51 @@ export function ChatSidebar({
     };
 
     const renameProject = async (projectId: string) => {
+        if (renamingProjectId) return;
         const name = editingProjectName.trim().slice(0, 32);
         if (!name) return;
+        const currentProject = projects.find((project) => project.id === projectId);
+        if (currentProject?.name === name) {
+            setEditingProjectId(null);
+            setEditingProjectName("");
+            return;
+        }
         const previousProjects = projects;
         setProjects((current) =>
             current.map((project) =>
                 project.id === projectId ? { ...project, name } : project
             )
         );
-        setEditingProjectId(null);
-        setEditingProjectName("");
-        const response = await fetch(`/api/projects/${projectId}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name }),
-        });
-        if (!response.ok) {
+        setRenamingProjectId(projectId);
+        try {
+            const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                cache: "no-store",
+                body: JSON.stringify({ name }),
+            });
+            if (!response.ok) {
+                setProjects(previousProjects);
+                dispatchAppToast(t("sidebar.projectRenameFailed"), "error");
+                return;
+            }
+            const project = (await response.json()) as ConversationProject;
+            if (!project?.id || !project?.name) {
+                setProjects(previousProjects);
+                dispatchAppToast(t("sidebar.projectRenameFailed"), "error");
+                return;
+            }
+            setProjects((current) =>
+                current.map((item) => (item.id === project.id ? { ...item, ...project } : item))
+            );
+            setEditingProjectId(null);
+            setEditingProjectName("");
+        } catch {
             setProjects(previousProjects);
             dispatchAppToast(t("sidebar.projectRenameFailed"), "error");
-            return;
+        } finally {
+            setRenamingProjectId(null);
         }
-        const project = (await response.json()) as ConversationProject;
-        setProjects((current) =>
-            current.map((item) => (item.id === project.id ? { ...item, ...project } : item))
-        );
     };
 
     const deleteProject = async (projectId: string) => {
@@ -672,22 +694,31 @@ export function ChatSidebar({
                                         }`}
                                     >
                                         {isEditingProject ? (
-                                            <form
+                                            <div
                                                 className="flex min-w-0 flex-1 gap-1"
-                                                onSubmit={(event) => {
-                                                    event.preventDefault();
-                                                    void renameProject(project.id);
-                                                }}
                                             >
                                                 <input
                                                     autoFocus
                                                     value={editingProjectName}
                                                     onChange={(event) => setEditingProjectName(event.target.value)}
+                                                    onKeyDown={(event) => {
+                                                        if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+                                                            event.preventDefault();
+                                                            void renameProject(project.id);
+                                                        }
+                                                        if (event.key === "Escape") {
+                                                            event.preventDefault();
+                                                            setEditingProjectId(null);
+                                                            setEditingProjectName("");
+                                                        }
+                                                    }}
                                                     maxLength={32}
                                                     className="h-7 min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-2 text-[11px] font-bold text-zinc-900 outline-none focus:border-blue-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
                                                 />
                                                 <button
-                                                    type="submit"
+                                                    type="button"
+                                                    onClick={() => void renameProject(project.id)}
+                                                    disabled={!editingProjectName.trim() || renamingProjectId === project.id}
                                                     className="h-7 rounded-md bg-blue-500 px-2 text-[10px] font-black text-white"
                                                 >
                                                     {t("auth.ok")}
@@ -702,7 +733,7 @@ export function ChatSidebar({
                                                 >
                                                     {t("auth.cancel")}
                                                 </button>
-                                            </form>
+                                            </div>
                                         ) : (
                                             <>
                                                 <button

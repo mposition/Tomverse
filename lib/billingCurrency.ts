@@ -73,15 +73,20 @@ const SUPPORTED_DISPLAY_CURRENCIES = new Set([
   ...Object.values(COUNTRY_TO_CURRENCY),
 ]);
 
-const LANGUAGE_TO_COUNTRY: Record<string, string> = {
-  de: "DE",
-  en: "US",
-  es: "ES",
-  fr: "FR",
-  ko: "KR",
-  pt: "PT",
-  zh: "CN",
-};
+const TIMEZONE_TO_CURRENCY: Array<[string, string]> = [
+  ["Australia/", "AUD"],
+  ["Pacific/Auckland", "NZD"],
+  ["Asia/Seoul", "KRW"],
+  ["Asia/Tokyo", "JPY"],
+  ["Europe/London", "GBP"],
+  ["Europe/", "EUR"],
+  ["America/New_York", "USD"],
+  ["America/Chicago", "USD"],
+  ["America/Denver", "USD"],
+  ["America/Los_Angeles", "USD"],
+  ["America/Toronto", "CAD"],
+  ["America/Vancouver", "CAD"],
+];
 
 const normalizeCountry = (value: string | null) => {
   if (!value || value.length !== 2) return null;
@@ -94,26 +99,28 @@ const normalizeCurrency = (value: string | null) => {
   return SUPPORTED_DISPLAY_CURRENCIES.has(currency) ? currency : null;
 };
 
-const countryFromAcceptLanguage = (value: string | null) => {
-  if (!value) return null;
-  const firstTag = value.split(",")[0]?.trim().split(";")[0]?.trim();
-  if (!firstTag) return null;
-  const parts = firstTag.replace("_", "-").split("-");
-  const language = parts[0]?.toLowerCase();
-  const region = normalizeCountry(parts[1] || null);
-  if (region) return region;
-  return language ? LANGUAGE_TO_COUNTRY[language] || null : null;
+const normalizeTimeZone = (value: string | null) => {
+  if (!value || value.length > 80) return null;
+  return /^[A-Za-z_]+\/[A-Za-z0-9_+\-/]+$/.test(value) ? value : null;
+};
+
+const currencyFromTimeZone = (value: string | null) => {
+  const timeZone = normalizeTimeZone(value);
+  if (!timeZone) return null;
+  return TIMEZONE_TO_CURRENCY.find(([prefix]) => timeZone.startsWith(prefix))?.[1] || null;
 };
 
 export const inferCurrencyFromRequest = (req: Request) => {
   const requestedCurrency = normalizeCurrency(new URL(req.url).searchParams.get("currency"));
   if (requestedCurrency) return requestedCurrency;
 
+  const requestedTimeZoneCurrency = currencyFromTimeZone(new URL(req.url).searchParams.get("tz"));
+  if (requestedTimeZoneCurrency) return requestedTimeZoneCurrency;
+
   const country =
     normalizeCountry(req.headers.get("cf-ipcountry")) ||
     normalizeCountry(req.headers.get("x-vercel-ip-country")) ||
-    normalizeCountry(req.headers.get("x-country-code")) ||
-    countryFromAcceptLanguage(req.headers.get("accept-language"));
+    normalizeCountry(req.headers.get("x-country-code"));
 
   return country ? COUNTRY_TO_CURRENCY[country] || "USD" : "USD";
 };
