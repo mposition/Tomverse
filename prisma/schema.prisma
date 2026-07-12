@@ -32,6 +32,7 @@ model User {
   sessions      Session[]
   projects      ConversationProject[]
   refundRequests RefundRequest[]
+  promotionRedemptions BillingPromotionRedemption[]
   conversations Conversation[] // 사용자가 가진 대화방들
 }
 
@@ -204,9 +205,29 @@ model BillingPromotion {
   isActive              Boolean  @default(true)
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
+  redemptions           BillingPromotionRedemption[]
 
   @@index([isActive])
   @@index([startsAt, endsAt])
+}
+
+model BillingPromotionRedemption {
+  id                      String   @id @default(cuid())
+  promotionId             String
+  promotion               BillingPromotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  userId                  String
+  user                    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planId                  String
+  billingInterval         String
+  stripeCheckoutSessionId String?  @unique
+  stripeSubscriptionId    String?
+  redeemedAt              DateTime @default(now())
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  @@unique([promotionId, userId])
+  @@index([promotionId, redeemedAt])
+  @@index([userId, redeemedAt])
 }
 
 model Feedback {

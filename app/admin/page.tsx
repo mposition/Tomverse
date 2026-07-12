@@ -28,6 +28,7 @@ import { getEnabledModel } from "@/lib/models";
 import { getUserChatUsageKey } from "@/lib/chatSecurity";
 import { prisma } from "@/lib/prisma";
 import { ModelLogo } from "@/components/chat/ModelLogo";
+import { AdminUserDeleteButton } from "@/components/admin/AdminUserDeleteButton";
 import { AdminOperationsPanel } from "@/components/admin/AdminOperationsPanel";
 import { BillingAdminPanel } from "@/components/admin/BillingAdminPanel";
 import { FeedbackInboxPanel, type FeedbackRow } from "@/components/admin/FeedbackInboxPanel";
@@ -748,7 +749,7 @@ export default async function AdminPage() {
                             </span>
                         </div>
                         <div className="mt-5 overflow-x-auto">
-                            <table className="w-full min-w-[760px] border-separate border-spacing-y-2 text-left text-sm">
+                            <table className="w-full min-w-[860px] border-separate border-spacing-y-2 text-left text-sm">
                                 <thead className="text-xs uppercase tracking-[0.16em] text-zinc-500">
                                     <tr>
                                         <th className="px-3 py-2">User</th>
@@ -756,6 +757,7 @@ export default async function AdminPage() {
                                         <th className="px-3 py-2">Subscription</th>
                                         <th className="px-3 py-2">Usage today</th>
                                         <th className="px-3 py-2">Data</th>
+                                        <th className="px-3 py-2">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -782,10 +784,13 @@ export default async function AdminPage() {
                                                     <span className="font-bold text-zinc-200">{usageToday}</span>
                                                     <span className="ml-1">messages</span>
                                                 </td>
-                                                <td className="rounded-r-2xl px-3 py-3 text-xs text-zinc-400">
+                                                <td className="px-3 py-3 text-xs text-zinc-400">
                                                     <div>{user._count.conversations} conversations</div>
                                                     <div>{user._count.accounts} linked accounts</div>
                                                     <div>{user.stripeCustomerId ? "Stripe linked" : "No Stripe customer"}</div>
+                                                </td>
+                                                <td className="rounded-r-2xl px-3 py-3">
+                                                    <AdminUserDeleteButton userId={user.id} />
                                                 </td>
                                             </tr>
                                         );
@@ -799,6 +804,8 @@ export default async function AdminPage() {
                         <BillingAdminPanel
                             plans={billingPlans}
                             promotions={billingPromotions}
+                            paidUserCount={paidUsers}
+                            activeSubscriptionCount={activeSubscriptions}
                         />
                     </section>
 

@@ -525,8 +525,11 @@ export function UpgradeInterestButton({
         throw new Error(data?.error || "Checkout failed");
       }
       window.location.href = data.url;
-    } catch {
-      dispatchAppToast(t("billing.waitlistFailed"), "error");
+    } catch (error) {
+      dispatchAppToast(
+        error instanceof Error ? error.message : t("billing.waitlistFailed"),
+        "error"
+      );
     } finally {
       setIsSending(false);
     }

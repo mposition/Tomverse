@@ -76,25 +76,77 @@ async function syncSubscription(subscription: Stripe.Subscription) {
   return { user, plan, periodEnd, billingInterval };
 }
 
+async function recordPromotionRedemptionFromCheckout(
+  session: Stripe.Checkout.Session,
+  subscriptionId: string
+) {
+  const promotionId = session.metadata?.promotionId || null;
+  const planId = normalizePlanId(session.metadata?.planId);
+  const billingInterval = session.metadata?.billingInterval;
+  const userId =
+    session.client_reference_id ||
+    (typeof session.metadata?.userId === "string" ? session.metadata.userId : null);
+
+  if (
+    !promotionId ||
+    !userId ||
+    !planId ||
+    (billingInterval !== "monthly" && billingInterval !== "annual")
+  ) {
+    return;
+  }
+
+  await prisma.$transaction(async (tx) => {
+    const promotion = await tx.billingPromotion.findUnique({
+      where: { id: promotionId },
+      select: { id: true, isActive: true, maxRedemptions: true },
+    });
+
+    if (!promotion?.isActive) {
+      throw new Error("Promotion is not active.");
+    }
+
+    await tx.billingPromotionRedemption.create({
+      data: {
+        promotionId,
+        userId,
+        planId,
+        billingInterval,
+        stripeCheckoutSessionId: session.id,
+        stripeSubscriptionId: subscriptionId,
+      },
+    });
+
+    const updatedPromotion = await tx.billingPromotion.updateMany({
+      where: {
+        id: promotionId,
+        isActive: true,
+        ...(promotion.maxRedemptions
+          ? { redeemedCount: { lt: promotion.maxRedemptions } }
+          : {}),
+      },
+      data: { redeemedCount: { increment: 1 } },
+    });
+
+    if (updatedPromotion.count !== 1) {
+      throw new Error("Promotion redemption limit reached.");
+    }
+  });
+}
+
 async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
   if (!session.subscription) return;
-  const promotionId = session.metadata?.promotionId || null;
-  if (promotionId) {
-    await prisma.billingPromotion
-      .update({
-        where: { id: promotionId },
-        data: { redeemedCount: { increment: 1 } },
-      })
-      .catch(() => undefined);
-  }
   const subscriptionId =
     typeof session.subscription === "string"
       ? session.subscription
       : session.subscription.id;
   const subscription = await getStripe().subscriptions.retrieve(subscriptionId);
+  await recordPromotionRedemptionFromCheckout(session, subscriptionId).catch((error) => {
+    console.error("Promotion redemption record failed:", error);
+  });
   const synced = await syncSubscription(subscription);
   if (synced && synced.plan !== "Free") {
-    sendBillingWelcomeEmail({
+    await sendBillingWelcomeEmail({
       to: synced.user.email,
       plan: synced.plan,
       billingInterval: synced.billingInterval,

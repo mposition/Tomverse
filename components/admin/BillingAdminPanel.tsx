@@ -19,14 +19,19 @@ import type {
 } from "@/lib/billingConfig";
 import { dispatchAppToast } from "@/lib/appToast";
 
-type Props = {
+type BillingConfigPayload = {
   plans: BillingPlanConfig[];
   promotions: BillingPromotionConfig[];
 };
 
+type Props = BillingConfigPayload & {
+  paidUserCount: number;
+  activeSubscriptionCount: number;
+};
+
 type EditablePlan = BillingPlanConfig;
 type EditablePromotion = BillingPromotionConfig;
-type AdminBillingResponse = Props & {
+type AdminBillingResponse = BillingConfigPayload & {
   error?: string;
 };
 
@@ -473,7 +478,12 @@ function PromotionEditor({
   );
 }
 
-export function BillingAdminPanel({ plans, promotions }: Props) {
+export function BillingAdminPanel({
+  plans,
+  promotions,
+  paidUserCount,
+  activeSubscriptionCount,
+}: Props) {
   const [draftPlans, setDraftPlans] = useState<EditablePlan[]>(plans);
   const [draftPromotions, setDraftPromotions] =
     useState<EditablePromotion[]>(promotions);
@@ -486,7 +496,7 @@ export function BillingAdminPanel({ plans, promotions }: Props) {
     const paidPlans = draftPlans.filter((plan) => plan.id !== "free");
     const activePromotions = draftPromotions.filter((promotion) => promotion.isActive);
     return {
-      paidPlanCount: paidPlans.length,
+      paidPlanTypeCount: paidPlans.length,
       linkedPlanCount: paidPlans.filter(
         (plan) => plan.stripePriceId || plan.stripeAnnualPriceId
       ).length,
@@ -498,7 +508,7 @@ export function BillingAdminPanel({ plans, promotions }: Props) {
     };
   }, [draftPlans, draftPromotions]);
 
-  const applyResponse = (data: Props) => {
+  const applyResponse = (data: BillingConfigPayload) => {
     setDraftPlans(data.plans);
     setDraftPromotions(data.promotions);
     setLastSyncedAt(new Date().toLocaleTimeString());
@@ -589,13 +599,19 @@ export function BillingAdminPanel({ plans, promotions }: Props) {
 
         <div className="mt-5 grid gap-3 md:grid-cols-4">
           <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Paid plans</p>
-            <p className="mt-2 text-2xl font-black text-white">{totals.paidPlanCount}</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Paid users</p>
+            <p className="mt-2 text-2xl font-black text-white">{paidUserCount}</p>
+            <p className="mt-1 text-xs font-semibold text-zinc-500">
+              Active Stripe: {activeSubscriptionCount}
+            </p>
           </div>
           <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Stripe linked</p>
             <p className="mt-2 text-2xl font-black text-white">
-              {totals.linkedPlanCount}/{totals.paidPlanCount}
+              {totals.linkedPlanCount}/{totals.paidPlanTypeCount}
+            </p>
+            <p className="mt-1 text-xs font-semibold text-zinc-500">
+              Paid plan types
             </p>
           </div>
           <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">

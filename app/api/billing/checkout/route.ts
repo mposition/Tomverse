@@ -82,6 +82,27 @@ const addBillingPeriod = (
   return next;
 };
 
+async function assertPromotionCanBeUsedByUser(
+  promotion: CheckoutPromotion | null,
+  userId: string
+) {
+  if (!promotion) return;
+
+  const existingRedemption = await prisma.billingPromotionRedemption.findUnique({
+    where: {
+      promotionId_userId: {
+        promotionId: promotion.id,
+        userId,
+      },
+    },
+    select: { id: true },
+  });
+
+  if (existingRedemption) {
+    throw new Error("PROMOTION_ALREADY_USED");
+  }
+}
+
 const billingSuccessUrl = (
   origin: string,
   planId: BillingPlanId,
@@ -103,8 +124,35 @@ async function activateZeroDollarPlan({
   promotion: CheckoutPromotion | null;
 }) {
   const periodEnd = addBillingPeriod(new Date(), billingInterval);
-  await prisma.$transaction([
-    prisma.user.update({
+  await prisma.$transaction(async (tx) => {
+    if (promotion) {
+      await tx.billingPromotionRedemption.create({
+        data: {
+          promotionId: promotion.id,
+          userId,
+          planId,
+          billingInterval,
+        },
+      });
+
+      const updatedPromotion = await tx.billingPromotion.updateMany({
+        where: {
+          id: promotion.id,
+          isActive: true,
+          OR: [
+            { maxRedemptions: null },
+            { redeemedCount: { lt: promotion.maxRedemptions ?? 0 } },
+          ],
+        },
+        data: { redeemedCount: { increment: 1 } },
+      });
+
+      if (updatedPromotion.count !== 1) {
+        throw new Error("PROMOTION_REDEMPTION_LIMIT_REACHED");
+      }
+    }
+
+    await tx.user.update({
       where: { id: userId },
       data: {
         plan: tierForPlanId(planId),
@@ -114,16 +162,8 @@ async function activateZeroDollarPlan({
         subscriptionCurrentPeriodEnd: periodEnd,
         subscriptionBillingInterval: billingInterval,
       },
-    }),
-    ...(promotion
-      ? [
-          prisma.billingPromotion.update({
-            where: { id: promotion.id },
-            data: { redeemedCount: { increment: 1 } },
-          }),
-        ]
-      : []),
-  ]);
+    });
+  });
 
   return periodEnd;
 }
@@ -326,6 +366,17 @@ export async function POST(req: Request) {
       );
     }
     const appliedPromotion = promotion || null;
+    try {
+      await assertPromotionCanBeUsedByUser(appliedPromotion, user.id);
+    } catch (error) {
+      if (error instanceof Error && error.message === "PROMOTION_ALREADY_USED") {
+        return NextResponse.json(
+          { error: "This promotion code has already been used by this account." },
+          { status: 409 }
+        );
+      }
+      throw error;
+    }
 
     const finalPriceCents = calculateDiscountedCents(
       priceCentsForInterval(plan, billingInterval),
@@ -339,7 +390,7 @@ export async function POST(req: Request) {
         billingInterval,
         promotion: appliedPromotion,
       });
-      sendBillingWelcomeEmail({
+      await sendBillingWelcomeEmail({
         to: user.email,
         plan: tierForPlanId(planId),
         billingInterval,
@@ -415,6 +466,15 @@ export async function POST(req: Request) {
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
+    if (
+      error instanceof Error &&
+      error.message === "PROMOTION_REDEMPTION_LIMIT_REACHED"
+    ) {
+      return NextResponse.json(
+        { error: "This promotion code has reached its redemption limit." },
+        { status: 409 }
+      );
+    }
     console.error("Stripe checkout failed:", error);
     return NextResponse.json(
       { error: "Failed to start checkout." },

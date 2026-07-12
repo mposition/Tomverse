@@ -3,7 +3,11 @@ import "server-only";
 import { createHmac } from "node:crypto";
 import { getTrustedClientIp } from "@/lib/clientIp";
 
-type AuthAuditEvent = "auth.sign_in" | "auth.sign_out" | "auth.link_account";
+type AuthAuditEvent =
+    | "auth.create_user"
+    | "auth.sign_in"
+    | "auth.sign_out"
+    | "auth.link_account";
 export type SecurityAuditEvent =
     | AuthAuditEvent
     | "conversation.share.create"

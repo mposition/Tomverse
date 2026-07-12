@@ -45,15 +45,13 @@ export function AuthButton() {
     const [isDeletingChats, setIsDeletingChats] = useState(false);
     const [isDeleteAllArmed, setIsDeleteAllArmed] = useState(false);
     const [isRequestingDeletion, setIsRequestingDeletion] = useState(false);
+    const [isAccountDeleteArmed, setIsAccountDeleteArmed] = useState(false);
+    const [accountDeletionConsent, setAccountDeletionConsent] = useState(false);
     const [isRequestingRefund, setIsRequestingRefund] = useState(false);
     const [refundReason, setRefundReason] = useState("");
     const [refundRequestedAt, setRefundRequestedAt] = useState<string | null>(() => {
         if (typeof window === "undefined") return null;
         return localStorage.getItem("tomverse_refund_requested_at");
-    });
-    const [accountDeletionRequestedAt, setAccountDeletionRequestedAt] = useState<string | null>(() => {
-        if (typeof window === "undefined") return null;
-        return localStorage.getItem("tomverse_account_deletion_requested_at");
     });
     const accountUsage = useUserUsage(Boolean(session?.user));
     const accountPlan = accountUsage?.plan || null;
@@ -231,27 +229,30 @@ export function AuthButton() {
         }
     };
 
-    const handleRequestAccountDeletion = async () => {
+    const handleDeleteAccount = async () => {
         if (isRequestingDeletion) return;
+        if (!accountDeletionConsent) {
+            dispatchAppToast("계정 삭제 전 모든 대화, 설정, 계정 정보가 삭제됨에 동의해 주세요.", "error");
+            return;
+        }
+        if (!isAccountDeleteArmed) {
+            setIsAccountDeleteArmed(true);
+            dispatchAppToast("한 번 더 누르면 계정과 모든 대화 및 설정 정보가 영구 삭제됩니다.", "info");
+            return;
+        }
         setIsRequestingDeletion(true);
         try {
-            const response = await fetch("/api/feedback", {
-                method: "POST",
+            const response = await fetch("/api/user/account", {
+                method: "DELETE",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    type: "other",
-                    message: t("auth.accountDeletionRequestMessage"),
-                    path: window.location.pathname,
-                    userAgent: navigator.userAgent,
-                }),
+                body: JSON.stringify({ confirm: true }),
             });
-            if (!response.ok) throw new Error(`Request failed: ${response.status}`);
-            const requestedAt = new Date().toISOString();
-            localStorage.setItem("tomverse_account_deletion_requested_at", requestedAt);
-            setAccountDeletionRequestedAt(requestedAt);
-            dispatchAppToast(t("auth.accountDeletionRequested"), "success");
+            if (!response.ok) throw new Error(`Delete failed: ${response.status}`);
+            localStorage.removeItem("tomverse_refund_requested_at");
+            dispatchAppToast("계정이 삭제되었습니다. 게스트 모드로 전환합니다.", "success");
+            await signOut({ callbackUrl: "/chat" });
         } catch {
-            dispatchAppToast(t("feedback.failed"), "error");
+            dispatchAppToast("계정을 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.", "error");
         } finally {
             setIsRequestingDeletion(false);
         }
@@ -533,24 +534,43 @@ export function AuthButton() {
                                                             ? t("auth.confirmDeleteAllChats")
                                                             : t("auth.deleteAllChats")}
                                                 </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={handleRequestAccountDeletion}
-                                                    disabled={isRequestingDeletion}
-                                                    className="flex items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-3 text-sm font-semibold text-zinc-700 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                                                >
-                                                    <LifeBuoy className="h-4 w-4" />
-                                                    {isRequestingDeletion ? t("feedback.sending") : t("auth.requestAccountDeletion")}
-                                                </button>
+                                                <div className="rounded-xl border border-red-300 bg-white p-3 dark:border-red-900/70 dark:bg-red-950/30 sm:col-span-2">
+                                                    <p className="text-sm font-black text-red-700 dark:text-red-200">
+                                                        계정 삭제는 즉시 처리되며 되돌릴 수 없습니다.
+                                                    </p>
+                                                    <p className="mt-1 text-xs leading-5 text-red-700/80 dark:text-red-100/80">
+                                                        삭제 시 계정, 로그인 연결, 모든 대화, 프로젝트, 사용자 설정, 사용량 정보가 삭제됩니다.
+                                                        유료 구독이 연결되어 있으면 Stripe 구독 취소를 시도한 뒤 계정이 삭제됩니다.
+                                                    </p>
+                                                    <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-800 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-100">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={accountDeletionConsent}
+                                                            onChange={(event) => {
+                                                                setAccountDeletionConsent(event.target.checked);
+                                                                setIsAccountDeleteArmed(false);
+                                                            }}
+                                                            className="mt-0.5 h-4 w-4 cursor-pointer accent-red-600"
+                                                        />
+                                                        <span>
+                                                            모든 대화 및 설정 정보가 영구 삭제되며 복구할 수 없다는 점에 동의합니다.
+                                                        </span>
+                                                    </label>
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleDeleteAccount}
+                                                        disabled={isRequestingDeletion || !accountDeletionConsent}
+                                                        className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-red-300 bg-red-600 px-3 py-3 text-sm font-black text-white transition-colors hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-800"
+                                                    >
+                                                        <Trash2 className="h-4 w-4" />
+                                                        {isRequestingDeletion
+                                                            ? "계정 삭제 중..."
+                                                            : isAccountDeleteArmed
+                                                                ? "영구 삭제 확인"
+                                                                : "계정 삭제"}
+                                                    </button>
+                                                </div>
                                             </div>
-                                            {accountDeletionRequestedAt && (
-                                                <p className="mt-3 rounded-xl border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-100">
-                                                    {t("auth.accountDeletionPending")} {new Date(accountDeletionRequestedAt).toLocaleDateString()}
-                                                    <span className="mt-1 block font-medium opacity-80">
-                                                        {t("auth.accountDeletionProcessing")}
-                                                    </span>
-                                                </p>
-                                            )}
                                         </section>
                                     </div>
                                 )}
