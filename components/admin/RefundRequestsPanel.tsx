@@ -48,7 +48,14 @@ export function RefundRequestsPanel({ rows }: Props) {
   const [items, setItems] = useState(rows);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
+  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "approved" | "rejected">("pending");
   const visiblePendingCount = items.filter((item) => item.status === "pending").length;
+  const approvedCount = items.filter((item) => item.status === "approved").length;
+  const rejectedCount = items.filter((item) => item.status === "rejected").length;
+  const filteredItems =
+    statusFilter === "all"
+      ? items
+      : items.filter((item) => item.status === statusFilter);
   const pendingLabel = visiblePendingCount === 1 ? "pending" : "pending";
 
   const updateRequest = async (id: string, action: "approve" | "reject") => {
@@ -120,12 +127,49 @@ export function RefundRequestsPanel({ rows }: Props) {
       </div>
 
       <div className="mt-5 grid gap-3">
-        {items.length === 0 ? (
+        <div className="flex flex-wrap gap-2">
+          {[
+            ["pending", `Pending ${visiblePendingCount}`],
+            ["approved", `Approved ${approvedCount}`],
+            ["rejected", `Rejected ${rejectedCount}`],
+            ["all", `All ${items.length}`],
+          ].map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setStatusFilter(value as typeof statusFilter)}
+              className={`cursor-pointer rounded-xl border px-3 py-2 text-xs font-black transition ${
+                statusFilter === value
+                  ? "border-blue-500/40 bg-blue-500/20 text-blue-100"
+                  : "border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-white"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-3">
+          <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4">
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-amber-200/80">Pending</p>
+            <p className="mt-1 text-2xl font-black text-white">{visiblePendingCount}</p>
+          </div>
+          <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4">
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-emerald-200/80">Approved</p>
+            <p className="mt-1 text-2xl font-black text-white">{approvedCount}</p>
+          </div>
+          <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-4">
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-red-200/80">Rejected</p>
+            <p className="mt-1 text-2xl font-black text-white">{rejectedCount}</p>
+          </div>
+        </div>
+
+        {filteredItems.length === 0 ? (
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5 text-sm text-zinc-400">
-            No refund requests have been submitted yet.
+            No refund requests match the current filter.
           </div>
         ) : (
-          items.map((request) => {
+          filteredItems.map((request) => {
             const pending = request.status === "pending";
             const busy = busyId === request.id;
             return (

@@ -23,7 +23,7 @@ import {
     XCircle,
 } from "lucide-react";
 import { authOptions } from "@/lib/auth";
-import { isAdminSession } from "@/lib/adminAuth";
+import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { getPublicAppSettings } from "@/lib/appSettings";
 import { getEnabledModel } from "@/lib/models";
 import { getUserChatUsageKey } from "@/lib/chatSecurity";
@@ -773,6 +773,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     const activeTabInfo =
         adminTabs.find((tab) => tab.id === activeTab) || adminTabs[0];
     const ActiveTabIcon = activeTabInfo.icon;
+    const adminRole = getAdminRole(session) || "owner";
     const envChecks = [
         {
             name: "ADMIN_EMAILS",
@@ -812,6 +813,11 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             configured: isConfigured(process.env.SLACK_WEBHOOK_URL),
             description: "Optional incident notification channel.",
         },
+        {
+            name: "DISCORD_WEBHOOK_URL",
+            configured: isConfigured(process.env.DISCORD_WEBHOOK_URL),
+            description: "Optional secondary incident notification channel.",
+        },
     ];
 
     return (
@@ -839,6 +845,9 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                                     <ActiveTabIcon className="h-4 w-4 text-blue-300" />
                                     {activeTabInfo.label}
                                 </span>
+                                <span className="ml-2 inline-flex items-center gap-2 rounded-full border border-purple-500/30 bg-purple-500/10 px-3 py-1.5 font-bold capitalize text-purple-200">
+                                    {adminRole}
+                                </span>
                                 <div className="mt-2 text-right text-xs">
                                     Generated {generatedAtLabel} UTC
                                 </div>
@@ -860,6 +869,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                                 monthSpendLabel={monthSpendLabel}
                                 needsAttention={needsAttention}
                                 envChecks={envChecks}
+                                adminRole={adminRole}
                             />
 
                             <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">

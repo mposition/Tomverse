@@ -28,6 +28,7 @@ type EnvCheck = {
 
 type Props = {
   generatedAt: string;
+  adminRole: string;
   totalUsers: number;
   paidUsers: number;
   activeSubscriptions: number;
@@ -49,6 +50,7 @@ const toneClass = (tone: string) => {
 
 export function AdminOperationsPanel({
   generatedAt,
+  adminRole,
   totalUsers,
   paidUsers,
   activeSubscriptions,
@@ -200,6 +202,44 @@ export function AdminOperationsPanel({
           </p>
           <p className="mt-2 text-2xl font-black text-white">{monthSpendLabel}</p>
           <p className="mt-1 text-xs text-zinc-400">reserved token budget basis</p>
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-3 lg:grid-cols-3">
+        <div className="rounded-2xl border border-purple-500/20 bg-purple-500/10 p-4">
+          <p className="text-xs font-black uppercase tracking-[0.16em] text-purple-200/80">
+            Admin role
+          </p>
+          <p className="mt-2 text-xl font-black capitalize text-white">{adminRole}</p>
+          <p className="mt-1 text-xs leading-5 text-purple-100/70">
+            Role is resolved from environment variables. Use owner for billing and destructive operations.
+          </p>
+        </div>
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 lg:col-span-2">
+          <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500">
+            Alert channels
+          </p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-3">
+            {envChecks
+              .filter((check) =>
+                ["SLACK_WEBHOOK_URL", "DISCORD_WEBHOOK_URL", "RESEND_API_KEY"].includes(check.name)
+              )
+              .map((check) => (
+                <div
+                  key={check.name}
+                  className={`rounded-xl border px-3 py-2 text-xs font-bold ${
+                    check.configured
+                      ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-200"
+                      : "border-amber-500/20 bg-amber-500/10 text-amber-200"
+                  }`}
+                >
+                  {check.name.replace("_WEBHOOK_URL", "").replace("_API_KEY", "")}
+                  <span className="ml-2 opacity-70">
+                    {check.configured ? "ready" : "not set"}
+                  </span>
+                </div>
+              ))}
+          </div>
         </div>
       </div>
 

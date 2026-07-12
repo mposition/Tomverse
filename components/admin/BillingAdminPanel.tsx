@@ -487,10 +487,72 @@ export function BillingAdminPanel({
   const [draftPlans, setDraftPlans] = useState<EditablePlan[]>(plans);
   const [draftPromotions, setDraftPromotions] =
     useState<EditablePromotion[]>(promotions);
+  const [baselinePlans, setBaselinePlans] = useState<EditablePlan[]>(plans);
+  const [baselinePromotions, setBaselinePromotions] =
+    useState<EditablePromotion[]>(promotions);
   const [isSaving, setIsSaving] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<"plans" | "promotions">("plans");
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+
+  const dirtyPlanCount = useMemo(
+    () =>
+      draftPlans.filter((plan) => {
+        const original = plans.find((item) => item.id === plan.id);
+        const baseline = baselinePlans.find((item) => item.id === plan.id);
+        return JSON.stringify(baseline || original) !== JSON.stringify(plan);
+      }).length,
+    [baselinePlans, draftPlans, plans]
+  );
+  const dirtyPromotionCount = useMemo(
+    () =>
+      draftPromotions.filter((promotion) => {
+        const original = promotions.find((item) => item.id === promotion.id);
+        const baseline = baselinePromotions.find((item) => item.id === promotion.id);
+        return JSON.stringify(baseline || original) !== JSON.stringify(promotion);
+      }).length +
+      baselinePromotions.filter(
+        (promotion) => !draftPromotions.some((item) => item.id === promotion.id)
+      ).length,
+    [baselinePromotions, draftPromotions, promotions]
+  );
+  const stripeWarnings = useMemo(() => {
+    const warnings: string[] = [];
+    draftPlans
+      .filter((plan) => plan.id !== "free")
+      .forEach((plan) => {
+        if (!plan.stripeProductId?.startsWith("prod_")) {
+          warnings.push(`${plan.name}: Stripe product ID should start with prod_.`);
+        }
+        if (!plan.stripePriceId?.startsWith("price_")) {
+          warnings.push(`${plan.name}: monthly Stripe price ID should start with price_.`);
+        }
+        if (!plan.stripeAnnualPriceId?.startsWith("price_")) {
+          warnings.push(`${plan.name}: annual Stripe price ID should start with price_.`);
+        }
+      });
+    draftPromotions.forEach((promotion) => {
+      if (promotion.discountPercent > 100) {
+        warnings.push(`${promotion.code}: discount percent cannot exceed 100%.`);
+      }
+      if (promotion.appliesToPlanIds.length === 0) {
+        warnings.push(`${promotion.code}: choose at least one eligible plan.`);
+      }
+      if (
+        promotion.stripeCouponId &&
+        !promotion.stripeCouponId.startsWith("coupon_")
+      ) {
+        warnings.push(`${promotion.code}: Stripe coupon ID should start with coupon_.`);
+      }
+      if (
+        promotion.stripePromotionCodeId &&
+        !promotion.stripePromotionCodeId.startsWith("promo_")
+      ) {
+        warnings.push(`${promotion.code}: Stripe promotion code ID should start with promo_.`);
+      }
+    });
+    return warnings;
+  }, [draftPlans, draftPromotions]);
 
   const totals = useMemo(() => {
     const paidPlans = draftPlans.filter((plan) => plan.id !== "free");
@@ -511,6 +573,8 @@ export function BillingAdminPanel({
   const applyResponse = (data: BillingConfigPayload) => {
     setDraftPlans(data.plans);
     setDraftPromotions(data.promotions);
+    setBaselinePlans(data.plans);
+    setBaselinePromotions(data.promotions);
     setLastSyncedAt(new Date().toLocaleTimeString());
   };
 
@@ -624,6 +688,43 @@ export function BillingAdminPanel({
               <Database className="h-4 w-4" />
               {lastSyncedAt ? `Synced ${lastSyncedAt}` : "Loaded on page open"}
             </p>
+          </div>
+        </div>
+        <div className="mt-5 grid gap-3 lg:grid-cols-[0.9fr_1.1fr]">
+          <div className="rounded-2xl border border-blue-500/20 bg-blue-500/10 p-4">
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-blue-200/80">
+              Unsaved changes
+            </p>
+            <p className="mt-2 text-sm font-bold text-blue-100">
+              {dirtyPlanCount} plan change{dirtyPlanCount === 1 ? "" : "s"} ·{" "}
+              {dirtyPromotionCount} promotion change{dirtyPromotionCount === 1 ? "" : "s"}
+            </p>
+            <p className="mt-1 text-xs leading-5 text-blue-100/70">
+              Review this preview before saving. Checkout uses these DB records immediately after publish.
+            </p>
+          </div>
+          <div className={`rounded-2xl border p-4 ${
+            stripeWarnings.length > 0
+              ? "border-amber-500/30 bg-amber-500/10"
+              : "border-emerald-500/20 bg-emerald-500/10"
+          }`}>
+            <p className={`text-xs font-black uppercase tracking-[0.16em] ${
+              stripeWarnings.length > 0 ? "text-amber-200/80" : "text-emerald-200/80"
+            }`}>
+              Pre-save validation
+            </p>
+            {stripeWarnings.length > 0 ? (
+              <ul className="mt-2 space-y-1 text-xs leading-5 text-amber-100">
+                {stripeWarnings.slice(0, 5).map((warning) => (
+                  <li key={warning}>- {warning}</li>
+                ))}
+                {stripeWarnings.length > 5 ? <li>- Plus {stripeWarnings.length - 5} more.</li> : null}
+              </ul>
+            ) : (
+              <p className="mt-2 text-sm font-bold text-emerald-100">
+                Stripe ID formats and promotion rules look ready.
+              </p>
+            )}
           </div>
         </div>
       </div>

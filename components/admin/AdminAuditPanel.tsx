@@ -92,6 +92,34 @@ export function AdminAuditPanel({ rows }: Props) {
     }
   };
 
+  const exportCsv = () => {
+    const escapeCsv = (value: string | null) =>
+      `"${(value || "").replaceAll('"', '""').replaceAll("\n", " ")}"`;
+    const csv = [
+      ["time", "actor", "action", "targetType", "targetId", "summary", "ipAddress"].join(","),
+      ...filteredRows.map((row) =>
+        [
+          dateTimeLabel(row.createdAt),
+          row.actorEmail || row.actorUserId || "",
+          row.action,
+          row.targetType,
+          row.targetId || "",
+          row.summary,
+          row.ipAddress || "",
+        ]
+          .map(escapeCsv)
+          .join(",")
+      ),
+    ].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `tomverse-admin-audit-${new Date().toISOString().slice(0, 10)}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
@@ -125,6 +153,14 @@ export function AdminAuditPanel({ rows }: Props) {
             <p className="mt-1 text-xl font-black text-red-100">{highRiskCount}</p>
           </div>
         </div>
+        <button
+          type="button"
+          onClick={exportCsv}
+          className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-200 transition hover:bg-zinc-800 xl:self-start"
+        >
+          <Clipboard className="h-3.5 w-3.5" />
+          Export CSV
+        </button>
       </div>
 
       <div className="mt-5 grid gap-3 lg:grid-cols-[1fr_15rem]">

@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import {
   CheckCircle2,
   Clipboard,
+  Mail,
   Loader2,
   MessageSquare,
   Search,
@@ -140,6 +141,25 @@ export function FeedbackInboxPanel({ rows }: Props) {
     }
   };
 
+  const supportReplyHref = (feedback: FeedbackRow) => {
+    if (!feedback.email) return null;
+    const subject = encodeURIComponent(`Tomverse support: ${feedback.type} request`);
+    const body = encodeURIComponent(
+      [
+        `Hi,`,
+        "",
+        "Thanks for contacting Tomverse support. We reviewed your report and wanted to follow up.",
+        "",
+        "---",
+        `Trace ID: ${feedback.traceId || "-"}`,
+        `Model: ${feedback.modelId || "-"}`,
+        `Plan: ${feedback.plan || "-"}`,
+        `Path: ${feedback.path || "-"}`,
+      ].join("\n")
+    );
+    return `mailto:${feedback.email}?subject=${subject}&body=${body}`;
+  };
+
   return (
     <section id="feedback" className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
@@ -229,6 +249,15 @@ export function FeedbackInboxPanel({ rows }: Props) {
                       <Clipboard className="h-3.5 w-3.5" />
                       Copy context
                     </button>
+                    {supportReplyHref(feedback) ? (
+                      <a
+                        href={supportReplyHref(feedback) || undefined}
+                        className="inline-flex items-center justify-center gap-2 rounded-xl border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs font-bold text-blue-100 transition hover:bg-blue-500/20"
+                      >
+                        <Mail className="h-3.5 w-3.5" />
+                        Reply
+                      </a>
+                    ) : null}
                     {statuses.map((status) => (
                       <button
                         key={status}
