@@ -43,6 +43,7 @@ export async function GET(req: Request) {
         subscriptionCurrentPeriodEnd: true,
         subscriptionBillingInterval: true,
         subscriptionStatus: true,
+        subscriptionCancelAtPeriodEnd: true,
       },
     });
     const key = getUserChatUsageKey(session.user.id);
@@ -83,6 +84,7 @@ export async function GET(req: Request) {
         status: user?.subscriptionStatus || null,
         billingInterval: user?.subscriptionBillingInterval || null,
         currentPeriodEnd: user?.subscriptionCurrentPeriodEnd?.toISOString() || null,
+        cancelAtPeriodEnd: user?.subscriptionCancelAtPeriodEnd || false,
       },
       generatedAt: now.toISOString(),
       usage: {

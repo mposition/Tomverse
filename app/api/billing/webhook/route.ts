@@ -83,6 +83,7 @@ async function syncSubscription(subscription: Stripe.Subscription) {
       subscriptionStatus: subscription.status,
       subscriptionCurrentPeriodEnd: periodEnd,
       subscriptionBillingInterval: billingInterval,
+      subscriptionCancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
     },
   });
 
@@ -185,6 +186,7 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
       subscriptionStatus: subscription.status,
       subscriptionCurrentPeriodEnd: getPeriodEnd(subscription),
       subscriptionBillingInterval: null,
+      subscriptionCancelAtPeriodEnd: false,
     },
   });
 }

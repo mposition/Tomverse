@@ -161,6 +161,7 @@ async function activateZeroDollarPlan({
         subscriptionStatus: "active",
         subscriptionCurrentPeriodEnd: periodEnd,
         subscriptionBillingInterval: billingInterval,
+        subscriptionCancelAtPeriodEnd: false,
       },
     });
   });

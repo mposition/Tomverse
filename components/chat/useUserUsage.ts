@@ -10,6 +10,7 @@ export type UserUsageResponse = {
     status: string | null;
     billingInterval: string | null;
     currentPeriodEnd: string | null;
+    cancelAtPeriodEnd?: boolean;
   };
   usage: {
     messagesDay: number;

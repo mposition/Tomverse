@@ -102,7 +102,7 @@ export async function POST(req: Request) {
 
     if (user.plan !== "Pro" && user.plan !== "Max") {
       return NextResponse.json(
-        { error: "Only paid plans can request cancellation or refund review." },
+        { error: "Only paid plans can request refund review." },
         { status: 400 }
       );
     }

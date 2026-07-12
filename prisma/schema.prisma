@@ -24,6 +24,7 @@ model User {
   subscriptionStatus   String?
   subscriptionCurrentPeriodEnd DateTime?
   subscriptionBillingInterval  String?
+  subscriptionCancelAtPeriodEnd Boolean @default(false)
   
   // 커스텀 설정 필드 (테마, 언어 등)
   settings      UserSettings?

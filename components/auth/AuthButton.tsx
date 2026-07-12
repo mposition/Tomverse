@@ -50,6 +50,8 @@ export function AuthButton() {
     const [isAccountDeleteArmed, setIsAccountDeleteArmed] = useState(false);
     const [accountDeletionConsent, setAccountDeletionConsent] = useState(false);
     const [isRequestingRefund, setIsRequestingRefund] = useState(false);
+    const [isCancellingSubscription, setIsCancellingSubscription] = useState(false);
+    const [subscriptionCancelAtPeriodEnd, setSubscriptionCancelAtPeriodEnd] = useState(false);
     const [refundReason, setRefundReason] = useState("");
     const [refundRequestedAt, setRefundRequestedAt] = useState<string | null>(() => {
         if (typeof window === "undefined") return null;
@@ -73,6 +75,10 @@ export function AuthButton() {
                 : null;
     const mobileUpgradePlan =
         accountPlan === "Pro" ? "Max" : accountPlan === "Max" ? null : "Pro";
+
+    useEffect(() => {
+        setSubscriptionCancelAtPeriodEnd(Boolean(accountUsage?.subscription?.cancelAtPeriodEnd));
+    }, [accountUsage?.subscription?.cancelAtPeriodEnd]);
 
     const closeSettingsModal = useCallback(() => {
         setIsModalOpen(false);
@@ -279,7 +285,7 @@ export function AuthButton() {
             localStorage.setItem("tomverse_refund_requested_at", requestedAt);
             setRefundRequestedAt(requestedAt);
             setRefundReason("");
-            dispatchAppToast("환불 및 플랜 취소 요청이 접수되었습니다.", "success");
+            dispatchAppToast("환불 요청이 접수되었습니다.", "success");
         } catch (error) {
             dispatchAppToast(
                 error instanceof Error ? error.message : "환불 요청을 접수하지 못했습니다.",
@@ -287,6 +293,36 @@ export function AuthButton() {
             );
         } finally {
             setIsRequestingRefund(false);
+        }
+    };
+
+    const handleCancelSubscription = async () => {
+        if (isCancellingSubscription || subscriptionCancelAtPeriodEnd) return;
+        setIsCancellingSubscription(true);
+        try {
+            const response = await fetch("/api/billing/cancel-subscription", {
+                method: "POST",
+            });
+            const data = (await response.json().catch(() => null)) as
+                | { error?: string; currentPeriodEnd?: string | null }
+                | null;
+            if (!response.ok) {
+                throw new Error(data?.error || "Subscription cancellation failed");
+            }
+            setSubscriptionCancelAtPeriodEnd(true);
+            dispatchAppToast(
+                data?.currentPeriodEnd
+                    ? `플랜이 ${new Date(data.currentPeriodEnd).toLocaleDateString()}까지 유지되고 이후 자동 취소됩니다.`
+                    : "현재 결제 기간 종료 시 플랜이 자동 취소됩니다.",
+                "success"
+            );
+        } catch (error) {
+            dispatchAppToast(
+                error instanceof Error ? error.message : "플랜 취소를 처리하지 못했습니다.",
+                "error"
+            );
+        } finally {
+            setIsCancellingSubscription(false);
         }
     };
 
@@ -616,41 +652,71 @@ export function AuthButton() {
                                             )}
                                         </section>
                                         {(accountPlan === "Pro" || accountPlan === "Max") && (
-                                            <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/60 dark:bg-amber-950/20">
-                                                <h4 className="text-sm font-bold text-amber-800 dark:text-amber-200">
-                                                    환불 및 플랜 취소 요청
-                                                </h4>
-                                                <p className="mt-1 text-sm leading-6 text-amber-800/80 dark:text-amber-100/80">
-                                                    요청이 승인되면 멤버십은 Free 플랜으로 변경되고 Stripe 구독 연결 정보가 초기화됩니다.
-                                                    결제 환불 처리 시간은 결제 수단과 Stripe 정책에 따라 달라질 수 있습니다.
-                                                </p>
-                                                <textarea
-                                                    value={refundReason}
-                                                    onChange={(event) => setRefundReason(event.target.value)}
-                                                    maxLength={1000}
-                                                    rows={3}
-                                                    placeholder="요청 사유를 간단히 적어주세요. 예: 사용 목적 변경, 결제 오류, 서비스가 기대와 다름"
-                                                    className="mt-3 w-full resize-none rounded-xl border border-amber-200 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-amber-500 focus:ring-4 focus:ring-amber-500/10 dark:border-amber-900/60 dark:bg-zinc-950 dark:text-zinc-100"
-                                                />
-                                                <button
-                                                    type="button"
-                                                    onClick={handleRequestRefund}
-                                                    disabled={isRequestingRefund || Boolean(refundRequestedAt)}
-                                                    className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-amber-300 bg-white px-3 py-3 text-sm font-black text-amber-700 transition-colors hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-100 dark:hover:bg-amber-950/70"
-                                                >
-                                                    <LifeBuoy className="h-4 w-4" />
-                                                    {refundRequestedAt
-                                                        ? "환불 요청 접수됨"
-                                                        : isRequestingRefund
-                                                            ? "환불 요청 접수 중..."
-                                                            : "환불 / 플랜 취소 요청하기"}
-                                                </button>
-                                                {refundRequestedAt && (
-                                                    <p className="mt-2 text-xs font-semibold text-amber-800 dark:text-amber-100">
-                                                        접수일: {new Date(refundRequestedAt).toLocaleDateString()}
+                                            <div className="grid gap-4 lg:grid-cols-2">
+                                                <section className="rounded-2xl border border-blue-200 bg-blue-50 p-4 dark:border-blue-900/60 dark:bg-blue-950/20">
+                                                    <h4 className="text-sm font-bold text-blue-800 dark:text-blue-200">
+                                                        플랜 취소
+                                                    </h4>
+                                                    <p className="mt-1 text-sm leading-6 text-blue-800/80 dark:text-blue-100/80">
+                                                        구독은 현재 결제 기간이 끝날 때 취소됩니다. 멤버십과 유료 기능은
+                                                        {planPeriodEndLabel ? ` ${planPeriodEndLabel}까지` : " 현재 결제 기간 종료일까지"} 유지됩니다.
                                                     </p>
-                                                )}
-                                            </section>
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleCancelSubscription}
+                                                        disabled={isCancellingSubscription || subscriptionCancelAtPeriodEnd}
+                                                        className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-blue-300 bg-white px-3 py-3 text-sm font-black text-blue-700 transition-colors hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-900/60 dark:bg-blue-950/40 dark:text-blue-100 dark:hover:bg-blue-950/70"
+                                                    >
+                                                        <CreditCard className="h-4 w-4" />
+                                                        {subscriptionCancelAtPeriodEnd
+                                                            ? "기간 종료 시 취소 예약됨"
+                                                            : isCancellingSubscription
+                                                                ? "플랜 취소 처리 중..."
+                                                                : "기간 종료 시 플랜 취소"}
+                                                    </button>
+                                                    {subscriptionCancelAtPeriodEnd && (
+                                                        <p className="mt-2 text-xs font-semibold text-blue-800 dark:text-blue-100">
+                                                            다음 결제는 진행되지 않으며, 만료일까지 현재 플랜을 사용할 수 있습니다.
+                                                        </p>
+                                                    )}
+                                                </section>
+
+                                                <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/60 dark:bg-amber-950/20">
+                                                    <h4 className="text-sm font-bold text-amber-800 dark:text-amber-200">
+                                                        환불 요청
+                                                    </h4>
+                                                    <p className="mt-1 text-sm leading-6 text-amber-800/80 dark:text-amber-100/80">
+                                                        환불은 운영팀 검토 후 승인됩니다. 환불이 승인되는 경우 멤버십은 Free 플랜으로 변경될 수 있으며,
+                                                        처리 시간은 결제 수단과 Stripe 정책에 따라 달라질 수 있습니다.
+                                                    </p>
+                                                    <textarea
+                                                        value={refundReason}
+                                                        onChange={(event) => setRefundReason(event.target.value)}
+                                                        maxLength={1000}
+                                                        rows={3}
+                                                        placeholder="요청 사유를 간단히 적어주세요. 예: 결제 오류, 중복 결제, 서비스가 기대와 다름"
+                                                        className="mt-3 w-full resize-none rounded-xl border border-amber-200 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-amber-500 focus:ring-4 focus:ring-amber-500/10 dark:border-amber-900/60 dark:bg-zinc-950 dark:text-zinc-100"
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleRequestRefund}
+                                                        disabled={isRequestingRefund || Boolean(refundRequestedAt)}
+                                                        className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-amber-300 bg-white px-3 py-3 text-sm font-black text-amber-700 transition-colors hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-100 dark:hover:bg-amber-950/70"
+                                                    >
+                                                        <LifeBuoy className="h-4 w-4" />
+                                                        {refundRequestedAt
+                                                            ? "환불 요청 접수됨"
+                                                            : isRequestingRefund
+                                                                ? "환불 요청 접수 중..."
+                                                                : "환불 요청하기"}
+                                                    </button>
+                                                    {refundRequestedAt && (
+                                                        <p className="mt-2 text-xs font-semibold text-amber-800 dark:text-amber-100">
+                                                            접수일: {new Date(refundRequestedAt).toLocaleDateString()}
+                                                        </p>
+                                                    )}
+                                                </section>
+                                            </div>
                                         )}
                                         {accountUsage && (
                                             <section className="grid gap-3 sm:grid-cols-2">
