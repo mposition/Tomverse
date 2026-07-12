@@ -18,6 +18,51 @@ const refundRequestSchema = z
   })
   .strict();
 
+export async function GET(req: Request) {
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) {
+      return NextResponse.json(
+        { error: "Authentication required." },
+        { status: 401 }
+      );
+    }
+
+    await consumeApiRateLimit(req, session.user.id, "billing-refund-status", {
+      minute: 30,
+      day: 500,
+    });
+
+    const pendingRequest = await prisma.refundRequest.findFirst({
+      where: { userId: session.user.id, status: "pending" },
+      orderBy: { requestedAt: "desc" },
+      select: {
+        id: true,
+        status: true,
+        requestedAt: true,
+      },
+    });
+
+    return NextResponse.json({
+      pendingRequest: pendingRequest
+        ? {
+            id: pendingRequest.id,
+            status: pendingRequest.status,
+            requestedAt: pendingRequest.requestedAt.toISOString(),
+          }
+        : null,
+    });
+  } catch (error) {
+    const securityResponse = apiSecurityResponse(error);
+    if (securityResponse) return securityResponse;
+    console.error("Refund status failed:", error);
+    return NextResponse.json(
+      { error: "Failed to load refund request status." },
+      { status: 500 }
+    );
+  }
+}
+
 export async function POST(req: Request) {
   try {
     const session = await getServerSession(authOptions);
@@ -99,6 +144,7 @@ export async function POST(req: Request) {
     return NextResponse.json({
       success: true,
       requestId: refundRequest.id,
+      requestedAt: refundRequest.requestedAt.toISOString(),
     });
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);

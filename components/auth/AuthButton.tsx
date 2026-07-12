@@ -108,6 +108,28 @@ export function AuthButton() {
                         setDefaultModel(data.defaultModel || APP_DEFAULTS.defaultModelId);
                     }
                 });
+
+            fetch("/api/billing/refund-request")
+                .then((res) => (res.ok ? res.json() : null))
+                .then(
+                    (
+                        data: {
+                            pendingRequest?: {
+                                requestedAt?: string;
+                            } | null;
+                        } | null
+                    ) => {
+                        const requestedAt = data?.pendingRequest?.requestedAt || null;
+                        if (requestedAt) {
+                            localStorage.setItem("tomverse_refund_requested_at", requestedAt);
+                            setRefundRequestedAt(requestedAt);
+                            return;
+                        }
+                        localStorage.removeItem("tomverse_refund_requested_at");
+                        setRefundRequestedAt(null);
+                    }
+                )
+                .catch(() => undefined);
         }
     }, [isModalOpen, session, globalLang]);
 
@@ -244,11 +266,13 @@ export function AuthButton() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ reason: refundReason }),
             });
-            const data = (await response.json().catch(() => null)) as { error?: string } | null;
+            const data = (await response.json().catch(() => null)) as
+                | { error?: string; requestedAt?: string }
+                | null;
             if (!response.ok) {
                 throw new Error(data?.error || "Refund request failed");
             }
-            const requestedAt = new Date().toISOString();
+            const requestedAt = data?.requestedAt || new Date().toISOString();
             localStorage.setItem("tomverse_refund_requested_at", requestedAt);
             setRefundRequestedAt(requestedAt);
             setRefundReason("");
