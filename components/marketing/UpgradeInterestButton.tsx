@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { useEffect, useId, useState } from "react";
 import { dispatchAppToast } from "@/lib/appToast";
-import { useLanguage } from "@/components/LanguageProvider";
+import { useLanguage, type Language } from "@/components/LanguageProvider";
 
 type BillingPlan = {
   id: "free" | "pro" | "max";
@@ -38,6 +38,306 @@ type BillingConfig = {
 };
 
 type BillingInterval = "monthly" | "annual";
+
+type CheckoutCopy = {
+  secureCheckout: string;
+  upgradeTo: (plan: string) => string;
+  description: string;
+  billingCycle: string;
+  monthly: string;
+  annual: string;
+  yearly: string;
+  annualOff: string;
+  monthlyDescription: string;
+  annualDescription: string;
+  paymentMethods: string;
+  paymentHint: string;
+  promoLabel: string;
+  promoPlaceholder: string;
+  apply: string;
+  promoFinePrint: string;
+  invalidPromo: string;
+  promoApplied: string;
+  orderSummary: string;
+  plan: string;
+  billing: string;
+  subtotal: string;
+  annualSavings: string;
+  availableOffer: (code: string) => string;
+  appliedAtCheckout: string;
+  dueToday: string;
+  localPriceNote: (amount: string) => string;
+  renewalNote: (interval: BillingInterval, amount: string) => string;
+  continueToCheckout: string;
+};
+
+const checkoutCopy: Record<Language, CheckoutCopy> = {
+  en: {
+    secureCheckout: "Secure checkout",
+    upgradeTo: (plan) => `Upgrade to ${plan}`,
+    description:
+      "Choose your billing cycle, apply a promotion code, then continue to Stripe checkout.",
+    billingCycle: "Billing cycle",
+    monthly: "Monthly",
+    annual: "Annual",
+    yearly: "Yearly",
+    annualOff: "20% off",
+    monthlyDescription: "Pay month to month.",
+    annualDescription: "Save 20% with yearly billing.",
+    paymentMethods: "Payment methods",
+    paymentHint:
+      "Stripe shows wallets and PayPal when available for your device, browser, region, and Stripe account settings.",
+    promoLabel: "Promotion code",
+    promoPlaceholder: "Optional promotion code",
+    apply: "Apply",
+    promoFinePrint:
+      "Discounts apply to the first 3 months of Pro and Max, then renew at the regular monthly price.",
+    invalidPromo: "Invalid promotion code.",
+    promoApplied: "Promotion code applied.",
+    orderSummary: "Order summary",
+    plan: "Plan",
+    billing: "Billing",
+    subtotal: "Subtotal",
+    annualSavings: "Annual savings",
+    availableOffer: (code) => `Available offer: ${code}`,
+    appliedAtCheckout: "Applied at checkout",
+    dueToday: "Due today",
+    localPriceNote: (amount) =>
+      `Displayed local price is converted from ${amount}. Checkout is charged in USD.`,
+    renewalNote: (interval, amount) =>
+      interval === "annual"
+        ? `Annual checkout renews every year. Base USD price: ${amount} per year.`
+        : `Monthly checkout renews every month. Base USD price: ${amount} per month.`,
+    continueToCheckout: "Continue to checkout",
+  },
+  ko: {
+    secureCheckout: "보안 결제",
+    upgradeTo: (plan) => `${plan}로 업그레이드`,
+    description:
+      "결제 주기를 선택하고 프로모션 코드를 적용한 뒤 Stripe 결제로 진행하세요.",
+    billingCycle: "결제 주기",
+    monthly: "월간",
+    annual: "연간",
+    yearly: "연간",
+    annualOff: "20% 할인",
+    monthlyDescription: "매월 결제됩니다.",
+    annualDescription: "연간 결제로 20%를 절약하세요.",
+    paymentMethods: "결제 방법",
+    paymentHint:
+      "Stripe는 기기, 브라우저, 지역, 계정 설정에서 지원되는 경우 지갑 결제와 PayPal을 표시합니다.",
+    promoLabel: "프로모션 코드",
+    promoPlaceholder: "프로모션 코드 선택 입력",
+    apply: "적용",
+    promoFinePrint:
+      "할인은 Pro와 Max의 첫 3개월에 적용되며, 이후에는 정가 월간 요금으로 갱신됩니다.",
+    invalidPromo: "유효하지 않은 프로모션 코드입니다.",
+    promoApplied: "프로모션 코드가 적용되었습니다.",
+    orderSummary: "주문 요약",
+    plan: "플랜",
+    billing: "결제",
+    subtotal: "소계",
+    annualSavings: "연간 절약",
+    availableOffer: (code) => `사용 가능한 혜택: ${code}`,
+    appliedAtCheckout: "결제 시 적용",
+    dueToday: "오늘 결제 금액",
+    localPriceNote: (amount) =>
+      `표시된 현지 가격은 ${amount} 기준 환산 금액입니다. 실제 결제는 USD로 청구됩니다.`,
+    renewalNote: (interval, amount) =>
+      interval === "annual"
+        ? `연간 결제는 매년 갱신됩니다. USD 기준 가격: 연 ${amount}.`
+        : `월간 결제는 매월 갱신됩니다. USD 기준 가격: 월 ${amount}.`,
+    continueToCheckout: "결제 계속하기",
+  },
+  zh: {
+    secureCheckout: "安全结账",
+    upgradeTo: (plan) => `升级到 ${plan}`,
+    description: "选择计费周期，应用促销代码，然后继续前往 Stripe 结账。",
+    billingCycle: "计费周期",
+    monthly: "月付",
+    annual: "年付",
+    yearly: "年付",
+    annualOff: "八折优惠",
+    monthlyDescription: "按月付款。",
+    annualDescription: "选择年付可节省 20%。",
+    paymentMethods: "付款方式",
+    paymentHint:
+      "当你的设备、浏览器、地区和 Stripe 账户设置支持时，Stripe 会显示钱包付款和 PayPal。",
+    promoLabel: "促销代码",
+    promoPlaceholder: "可选促销代码",
+    apply: "应用",
+    promoFinePrint:
+      "折扣适用于 Pro 和 Max 的前 3 个月，之后将按标准月费续订。",
+    invalidPromo: "促销代码无效。",
+    promoApplied: "促销代码已应用。",
+    orderSummary: "订单摘要",
+    plan: "方案",
+    billing: "计费",
+    subtotal: "小计",
+    annualSavings: "年付节省",
+    availableOffer: (code) => `可用优惠：${code}`,
+    appliedAtCheckout: "结账时应用",
+    dueToday: "今日应付",
+    localPriceNote: (amount) =>
+      `显示的本地价格由 ${amount} 换算而来。结账时将以 USD 收费。`,
+    renewalNote: (interval, amount) =>
+      interval === "annual"
+        ? `年付结账每年续订。USD 基准价格：每年 ${amount}。`
+        : `月付结账每月续订。USD 基准价格：每月 ${amount}。`,
+    continueToCheckout: "继续结账",
+  },
+  fr: {
+    secureCheckout: "Paiement sécurisé",
+    upgradeTo: (plan) => `Passer à ${plan}`,
+    description:
+      "Choisissez votre cycle de facturation, appliquez un code promotionnel, puis continuez vers le paiement Stripe.",
+    billingCycle: "Cycle de facturation",
+    monthly: "Mensuel",
+    annual: "Annuel",
+    yearly: "Annuel",
+    annualOff: "-20 %",
+    monthlyDescription: "Payez mois par mois.",
+    annualDescription: "Économisez 20 % avec la facturation annuelle.",
+    paymentMethods: "Moyens de paiement",
+    paymentHint:
+      "Stripe affiche les portefeuilles et PayPal lorsque votre appareil, navigateur, région et compte Stripe le permettent.",
+    promoLabel: "Code promotionnel",
+    promoPlaceholder: "Code promotionnel facultatif",
+    apply: "Appliquer",
+    promoFinePrint:
+      "Les remises s'appliquent aux 3 premiers mois de Pro et Max, puis le renouvellement se fait au prix mensuel normal.",
+    invalidPromo: "Code promotionnel invalide.",
+    promoApplied: "Code promotionnel appliqué.",
+    orderSummary: "Résumé de commande",
+    plan: "Offre",
+    billing: "Facturation",
+    subtotal: "Sous-total",
+    annualSavings: "Économie annuelle",
+    availableOffer: (code) => `Offre disponible : ${code}`,
+    appliedAtCheckout: "Appliqué au paiement",
+    dueToday: "À payer aujourd'hui",
+    localPriceNote: (amount) =>
+      `Le prix local affiché est converti depuis ${amount}. Le paiement est facturé en USD.`,
+    renewalNote: (interval, amount) =>
+      interval === "annual"
+        ? `Le paiement annuel est renouvelé chaque année. Prix de base en USD : ${amount} par an.`
+        : `Le paiement mensuel est renouvelé chaque mois. Prix de base en USD : ${amount} par mois.`,
+    continueToCheckout: "Continuer vers le paiement",
+  },
+  de: {
+    secureCheckout: "Sichere Zahlung",
+    upgradeTo: (plan) => `Upgrade auf ${plan}`,
+    description:
+      "Wähle deinen Abrechnungszeitraum, wende einen Aktionscode an und fahre dann mit Stripe fort.",
+    billingCycle: "Abrechnungszeitraum",
+    monthly: "Monatlich",
+    annual: "Jährlich",
+    yearly: "Jährlich",
+    annualOff: "20 % Rabatt",
+    monthlyDescription: "Monatlich zahlen.",
+    annualDescription: "Spare 20 % mit jährlicher Abrechnung.",
+    paymentMethods: "Zahlungsmethoden",
+    paymentHint:
+      "Stripe zeigt Wallets und PayPal an, wenn sie für dein Gerät, deinen Browser, deine Region und deine Stripe-Kontoeinstellungen verfügbar sind.",
+    promoLabel: "Aktionscode",
+    promoPlaceholder: "Optionaler Aktionscode",
+    apply: "Anwenden",
+    promoFinePrint:
+      "Rabatte gelten für die ersten 3 Monate von Pro und Max. Danach verlängert sich das Abo zum regulären Monatspreis.",
+    invalidPromo: "Ungültiger Aktionscode.",
+    promoApplied: "Aktionscode angewendet.",
+    orderSummary: "Bestellübersicht",
+    plan: "Plan",
+    billing: "Abrechnung",
+    subtotal: "Zwischensumme",
+    annualSavings: "Jährliche Ersparnis",
+    availableOffer: (code) => `Verfügbares Angebot: ${code}`,
+    appliedAtCheckout: "Beim Checkout angewendet",
+    dueToday: "Heute fällig",
+    localPriceNote: (amount) =>
+      `Der angezeigte lokale Preis wird aus ${amount} umgerechnet. Die Zahlung wird in USD berechnet.`,
+    renewalNote: (interval, amount) =>
+      interval === "annual"
+        ? `Der jährliche Checkout verlängert sich jedes Jahr. Basispreis in USD: ${amount} pro Jahr.`
+        : `Der monatliche Checkout verlängert sich jeden Monat. Basispreis in USD: ${amount} pro Monat.`,
+    continueToCheckout: "Weiter zum Checkout",
+  },
+  es: {
+    secureCheckout: "Pago seguro",
+    upgradeTo: (plan) => `Actualizar a ${plan}`,
+    description:
+      "Elige tu ciclo de facturación, aplica un código promocional y continúa al pago con Stripe.",
+    billingCycle: "Ciclo de facturación",
+    monthly: "Mensual",
+    annual: "Anual",
+    yearly: "Anual",
+    annualOff: "20 % desc.",
+    monthlyDescription: "Paga mes a mes.",
+    annualDescription: "Ahorra un 20 % con la facturación anual.",
+    paymentMethods: "Métodos de pago",
+    paymentHint:
+      "Stripe muestra billeteras y PayPal cuando están disponibles para tu dispositivo, navegador, región y configuración de cuenta de Stripe.",
+    promoLabel: "Código promocional",
+    promoPlaceholder: "Código promocional opcional",
+    apply: "Aplicar",
+    promoFinePrint:
+      "Los descuentos se aplican a los primeros 3 meses de Pro y Max; después se renueva al precio mensual normal.",
+    invalidPromo: "Código promocional no válido.",
+    promoApplied: "Código promocional aplicado.",
+    orderSummary: "Resumen del pedido",
+    plan: "Plan",
+    billing: "Facturación",
+    subtotal: "Subtotal",
+    annualSavings: "Ahorro anual",
+    availableOffer: (code) => `Oferta disponible: ${code}`,
+    appliedAtCheckout: "Aplicado al pagar",
+    dueToday: "A pagar hoy",
+    localPriceNote: (amount) =>
+      `El precio local mostrado se convierte desde ${amount}. El pago se cobra en USD.`,
+    renewalNote: (interval, amount) =>
+      interval === "annual"
+        ? `El pago anual se renueva cada año. Precio base en USD: ${amount} al año.`
+        : `El pago mensual se renueva cada mes. Precio base en USD: ${amount} al mes.`,
+    continueToCheckout: "Continuar al pago",
+  },
+  pt: {
+    secureCheckout: "Checkout seguro",
+    upgradeTo: (plan) => `Fazer upgrade para ${plan}`,
+    description:
+      "Escolha o ciclo de cobrança, aplique um código promocional e continue para o checkout da Stripe.",
+    billingCycle: "Ciclo de cobrança",
+    monthly: "Mensal",
+    annual: "Anual",
+    yearly: "Anual",
+    annualOff: "20% off",
+    monthlyDescription: "Pague mês a mês.",
+    annualDescription: "Economize 20% com a cobrança anual.",
+    paymentMethods: "Métodos de pagamento",
+    paymentHint:
+      "A Stripe mostra carteiras digitais e PayPal quando disponíveis para seu dispositivo, navegador, região e configurações da conta Stripe.",
+    promoLabel: "Código promocional",
+    promoPlaceholder: "Código promocional opcional",
+    apply: "Aplicar",
+    promoFinePrint:
+      "Os descontos se aplicam aos 3 primeiros meses dos planos Pro e Max; depois a renovação ocorre pelo preço mensal normal.",
+    invalidPromo: "Código promocional inválido.",
+    promoApplied: "Código promocional aplicado.",
+    orderSummary: "Resumo do pedido",
+    plan: "Plano",
+    billing: "Cobrança",
+    subtotal: "Subtotal",
+    annualSavings: "Economia anual",
+    availableOffer: (code) => `Oferta disponível: ${code}`,
+    appliedAtCheckout: "Aplicado no checkout",
+    dueToday: "Valor hoje",
+    localPriceNote: (amount) =>
+      `O preço local exibido é convertido de ${amount}. O checkout é cobrado em USD.`,
+    renewalNote: (interval, amount) =>
+      interval === "annual"
+        ? `O checkout anual renova a cada ano. Preço base em USD: ${amount} por ano.`
+        : `O checkout mensal renova a cada mês. Preço base em USD: ${amount} por mês.`,
+    continueToCheckout: "Continuar para o checkout",
+  },
+};
 
 const formatMoney = (
   amount: number,
@@ -116,23 +416,6 @@ const formatUsdPrice = (
   return formatUsdCents(cents);
 };
 
-const formatDiscount = (promotion: BillingPromotion | undefined) => {
-  if (!promotion) return null;
-  if (promotion.discountPercent > 0) {
-    return `${promotion.discountPercent}% off for ${promotion.durationMonths} months.`;
-  }
-  if (promotion.discountAmountCents && promotion.discountAmountCents > 0) {
-    const amount = new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-      maximumFractionDigits: 0,
-      minimumFractionDigits: 0,
-    }).format(promotion.discountAmountCents / 100);
-    return `${amount} off for ${promotion.durationMonths} months.`;
-  }
-  return null;
-};
-
 export function UpgradeInterestButton({
   plan,
   className,
@@ -142,7 +425,8 @@ export function UpgradeInterestButton({
   className: string;
   children: ReactNode;
 }) {
-  const { t } = useLanguage();
+  const { lang, t } = useLanguage();
+  const copy = checkoutCopy[lang] || checkoutCopy.en;
   const [isSending, setIsSending] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
   const [promoCode, setPromoCode] = useState("");
@@ -169,7 +453,11 @@ export function UpgradeInterestButton({
   const usdPriceLabel = formatUsdPrice(planConfig, billingInterval);
   const usdMonthlyPriceLabel = formatUsdPrice(planConfig, "monthly");
   const usdAnnualPriceLabel = formatUsdPrice(planConfig, "annual");
-  const discountLabel = formatDiscount(appliedPromotion);
+  const discountLabel = appliedPromotion?.discountPercent
+    ? `-${appliedPromotion.discountPercent}%`
+    : appliedPromotion?.discountAmountCents
+      ? `-${formatUsdCents(appliedPromotion.discountAmountCents)}`
+      : null;
   const baseCents =
     billingInterval === "annual"
       ? planConfig?.baseAnnualPriceCents ?? planConfig?.annualPriceCents ?? 0
@@ -256,11 +544,11 @@ export function UpgradeInterestButton({
     );
     if (!promotion) {
       setAppliedPromoCode(null);
-      dispatchAppToast("Invalid promotion code.", "error");
+      dispatchAppToast(copy.invalidPromo, "error");
       return;
     }
     setAppliedPromoCode(normalizedCode);
-    dispatchAppToast("Promotion code applied.", "success");
+    dispatchAppToast(copy.promoApplied, "success");
   };
 
   return (
@@ -291,16 +579,16 @@ export function UpgradeInterestButton({
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-600 dark:text-blue-300">
-                    Secure checkout
+                    {copy.secureCheckout}
                   </p>
                   <h2
                     id={`${inputId}-title`}
                     className="mt-2 text-2xl font-black text-zinc-950 dark:text-white"
                   >
-                    Upgrade to {plan}
+                    {copy.upgradeTo(plan)}
                   </h2>
                   <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-                    Choose your billing cycle, apply a promotion code, then continue to Stripe checkout.
+                    {copy.description}
                   </p>
                 </div>
                 <button
@@ -315,12 +603,12 @@ export function UpgradeInterestButton({
 
               <div className="mt-6">
                 <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500 dark:text-zinc-400">
-                  Billing cycle
+                  {copy.billingCycle}
                 </p>
                 <div className="mt-2 grid gap-3 sm:grid-cols-2">
                   {([
-                    ["monthly", "Monthly", monthlyPriceLabel, "Pay month to month."],
-                    ["annual", "Annual", annualPriceLabel, "Save 20% with yearly billing."],
+                    ["monthly", copy.monthly, monthlyPriceLabel, copy.monthlyDescription],
+                    ["annual", copy.annual, annualPriceLabel, copy.annualDescription],
                   ] as const).map(([value, label, amount, description]) => (
                     <button
                       key={value}
@@ -338,7 +626,7 @@ export function UpgradeInterestButton({
                         </span>
                         {value === "annual" ? (
                           <span className="rounded-full bg-emerald-500/15 px-2 py-1 text-[11px] font-black text-emerald-600 dark:text-emerald-300">
-                            20% off
+                            {copy.annualOff}
                           </span>
                         ) : null}
                       </span>
@@ -355,7 +643,7 @@ export function UpgradeInterestButton({
 
               <div className="mt-6 grid gap-2 rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
                 <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500 dark:text-zinc-400">
-                  Payment methods
+                  {copy.paymentMethods}
                 </p>
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                   {["PayPal", "GPay", "Apple Pay", "Card"].map((method) => (
@@ -368,7 +656,7 @@ export function UpgradeInterestButton({
                   ))}
                 </div>
                 <p className="hidden text-xs font-semibold leading-5 text-zinc-500 dark:text-zinc-400 sm:block">
-                  Stripe shows wallets and PayPal when available for your device, browser, region, and Stripe account settings.
+                  {copy.paymentHint}
                 </p>
               </div>
 
@@ -376,7 +664,7 @@ export function UpgradeInterestButton({
                 htmlFor={inputId}
                 className="mt-6 block text-xs font-black uppercase tracking-[0.16em] text-zinc-500 dark:text-zinc-400"
               >
-                {t("billing.promoLabel")}
+                {copy.promoLabel}
               </label>
               <div className="mt-2 flex gap-2">
                 <input
@@ -390,7 +678,7 @@ export function UpgradeInterestButton({
                     }
                   }}
                   className="min-w-0 flex-1 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-base font-black uppercase text-zinc-950 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/15 dark:border-zinc-800 dark:bg-zinc-900 dark:text-white"
-                  placeholder="Optional promotion code"
+                  placeholder={copy.promoPlaceholder}
                   autoComplete="off"
                 />
                 <button
@@ -398,11 +686,11 @@ export function UpgradeInterestButton({
                   onClick={applyPromotion}
                   className="rounded-xl border border-zinc-200 px-4 py-3 text-sm font-black text-zinc-700 hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-900"
                 >
-                  Apply
+                  {copy.apply}
                 </button>
               </div>
               <p className="mt-2 text-xs font-semibold text-zinc-500 dark:text-zinc-400">
-                {t("billing.promoFinePrint")}
+                {copy.promoFinePrint}
               </p>
             </div>
 
@@ -410,21 +698,21 @@ export function UpgradeInterestButton({
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500 dark:text-zinc-400">
-                    Order summary
+                    {copy.orderSummary}
                   </p>
                   <h3 className="mt-2 text-xl font-black text-zinc-950 dark:text-white">
                     Tomverse AI {plan}
                   </h3>
                 </div>
                 <span className="rounded-full bg-blue-600 px-3 py-1 text-xs font-black text-white">
-                  {billingInterval === "annual" ? "Annual" : "Monthly"}
+                  {billingInterval === "annual" ? copy.annual : copy.monthly}
                 </span>
               </div>
 
               <div className="mt-6 space-y-4 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
                 <div className="flex justify-between gap-4 text-sm">
                   <span className="font-semibold text-zinc-500 dark:text-zinc-400">
-                    Plan
+                    {copy.plan}
                   </span>
                   <span className="font-black text-zinc-950 dark:text-white">
                     {plan}
@@ -432,15 +720,15 @@ export function UpgradeInterestButton({
                 </div>
                 <div className="flex justify-between gap-4 text-sm">
                   <span className="font-semibold text-zinc-500 dark:text-zinc-400">
-                    Billing
+                    {copy.billing}
                   </span>
                   <span className="font-black text-zinc-950 dark:text-white">
-                    {billingInterval === "annual" ? "Yearly" : "Monthly"}
+                    {billingInterval === "annual" ? copy.yearly : copy.monthly}
                   </span>
                 </div>
                 <div className="flex justify-between gap-4 text-sm">
                   <span className="font-semibold text-zinc-500 dark:text-zinc-400">
-                    Subtotal
+                    {copy.subtotal}
                   </span>
                   <span className="font-black text-zinc-950 dark:text-white">
                     {priceLabel || "-"}
@@ -448,25 +736,25 @@ export function UpgradeInterestButton({
                 </div>
                 {billingInterval === "annual" ? (
                   <div className="flex justify-between gap-4 text-sm text-emerald-600 dark:text-emerald-300">
-                    <span className="font-semibold">Annual savings</span>
+                    <span className="font-semibold">{copy.annualSavings}</span>
                     <span className="font-black">20%</span>
                   </div>
                 ) : null}
                 {activePromo ? (
                   <p className="mt-2 text-xs font-semibold text-blue-600 dark:text-blue-300">
-                    Available offer: {activePromo.code}
+                    {copy.availableOffer(activePromo.code)}
                   </p>
                 ) : null}
                 {appliedPromotion ? (
                   <div className="flex justify-between gap-4 text-sm text-blue-600 dark:text-blue-300">
                     <span className="font-semibold">{appliedPromotion.code}</span>
-                    <span className="font-black">{discountLabel || "Applied at checkout"}</span>
+                    <span className="font-black">{discountLabel || copy.appliedAtCheckout}</span>
                   </div>
                 ) : null}
                 <div className="border-t border-zinc-200 pt-4 dark:border-zinc-800">
                   <div className="flex justify-between gap-4">
                     <span className="font-black text-zinc-950 dark:text-white">
-                      Due today
+                      {copy.dueToday}
                     </span>
                     <span className="text-2xl font-black text-zinc-950 dark:text-white">
                       {dueLabel || priceLabel || "-"}
@@ -474,16 +762,19 @@ export function UpgradeInterestButton({
                   </div>
                   {usdPriceLabel ? (
                     <p className="mt-2 text-xs font-semibold leading-5 text-zinc-500 dark:text-zinc-400">
-                      Displayed local price is converted from {dueUsdLabel || usdPriceLabel}. Checkout is charged in USD.
+                      {copy.localPriceNote(dueUsdLabel || usdPriceLabel)}
                     </p>
                   ) : null}
                 </div>
               </div>
 
               <div className="mt-4 rounded-2xl border border-blue-500/20 bg-blue-500/10 p-4 text-xs font-semibold leading-5 text-blue-700 dark:text-blue-200">
-                {billingInterval === "annual"
-                  ? `Annual checkout renews every year. Base USD price: ${usdAnnualPriceLabel || "-"} per year.`
-                  : `Monthly checkout renews every month. Base USD price: ${usdMonthlyPriceLabel || "-"} per month.`}
+                {copy.renewalNote(
+                  billingInterval,
+                  billingInterval === "annual"
+                    ? usdAnnualPriceLabel || "-"
+                    : usdMonthlyPriceLabel || "-"
+                )}
               </div>
 
               <div className="mt-auto hidden flex-col gap-2 pt-6 md:flex">
@@ -492,7 +783,7 @@ export function UpgradeInterestButton({
                   disabled={isSending}
                   className="rounded-xl bg-blue-600 px-4 py-3 text-sm font-black text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {isSending ? t("billing.sending") : "Continue to checkout"}
+                  {isSending ? t("billing.sending") : copy.continueToCheckout}
                 </button>
                 <button
                   type="button"
@@ -506,7 +797,7 @@ export function UpgradeInterestButton({
             <div className="sticky bottom-0 z-20 border-t border-zinc-200 bg-white/95 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/95 md:hidden">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <span className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500 dark:text-zinc-400">
-                  Due today
+                  {copy.dueToday}
                 </span>
                 <span className="text-xl font-black text-zinc-950 dark:text-white">
                   {dueLabel || priceLabel || "-"}
@@ -517,7 +808,7 @@ export function UpgradeInterestButton({
                 disabled={isSending}
                 className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-black text-white shadow-lg shadow-blue-950/20 hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {isSending ? t("billing.sending") : "Continue to checkout"}
+                {isSending ? t("billing.sending") : copy.continueToCheckout}
               </button>
             </div>
           </form>
