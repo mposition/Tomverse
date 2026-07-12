@@ -32,7 +32,15 @@ const isLanguage = (value: unknown): value is Language =>
     value === "es" ||
     value === "pt";
 
-export function LanguageProvider({ children, initialLang = "en" }: { children: React.ReactNode, initialLang?: Language }) {
+export function LanguageProvider({
+    children,
+    initialLang = "en",
+    forceInitialLang = false,
+}: {
+    children: React.ReactNode;
+    initialLang?: Language;
+    forceInitialLang?: boolean;
+}) {
     const [lang, setLangState] = useState<Language>(initialLang);
 
     const setLang = useCallback((nextLang: Language) => {
@@ -48,6 +56,12 @@ export function LanguageProvider({ children, initialLang = "en" }: { children: R
     }, [lang]);
 
     useEffect(() => {
+        if (forceInitialLang) {
+            window.localStorage.setItem(LANGUAGE_STORAGE_KEY, initialLang);
+            document.documentElement.lang = initialLang;
+            return;
+        }
+
         const restoreSavedLanguage = window.setTimeout(() => {
             const savedLanguage = window.localStorage.getItem(LANGUAGE_STORAGE_KEY);
             if (isLanguage(savedLanguage)) {
@@ -57,7 +71,7 @@ export function LanguageProvider({ children, initialLang = "en" }: { children: R
         }, 0);
 
         return () => window.clearTimeout(restoreSavedLanguage);
-    }, []);
+    }, [forceInitialLang, initialLang]);
 
     const lookup = (dictionary: unknown, keys: string[]) => {
         let value = dictionary;
