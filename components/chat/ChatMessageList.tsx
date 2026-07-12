@@ -103,6 +103,8 @@ export function ChatMessageList({
   onRetryWithoutAttachments,
 }: ChatMessageListProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const previousLastMessageIdRef = useRef<string | null>(null);
+  const previousMessageCountRef = useRef(0);
   const [isNearBottom, setIsNearBottom] = useState(true);
   const showScrollButton = !isNearBottom;
     const { t } = useLanguage();
@@ -142,9 +144,29 @@ export function ChatMessageList({
   };
 
   useEffect(() => {
-    if (isNearBottom) {
-      scrollToBottom("smooth");
-    }
+    const lastMessage = messages[messages.length - 1];
+    const lastMessageId = lastMessage?.id || null;
+    const previousLastMessageId = previousLastMessageIdRef.current;
+    const previousMessageCount = previousMessageCountRef.current;
+    const isInitialLoad =
+      previousMessageCount === 0 ||
+      (messages.length > 0 && previousLastMessageId === null);
+    const didAppendMessage =
+      messages.length > previousMessageCount ||
+      (lastMessageId !== null && lastMessageId !== previousLastMessageId);
+
+    previousLastMessageIdRef.current = lastMessageId;
+    previousMessageCountRef.current = messages.length;
+
+    if (!isInitialLoad && !didAppendMessage && !isNearBottom) return;
+
+    const behavior: ScrollBehavior = isInitialLoad ? "auto" : "smooth";
+    const frame = requestAnimationFrame(() => {
+      scrollToBottom(behavior);
+      setIsNearBottom(true);
+    });
+
+    return () => cancelAnimationFrame(frame);
   }, [messages, isNearBottom]);
 
   return (
