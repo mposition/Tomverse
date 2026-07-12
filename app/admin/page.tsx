@@ -28,6 +28,7 @@ import { getEnabledModel } from "@/lib/models";
 import { getUserChatUsageKey } from "@/lib/chatSecurity";
 import { prisma } from "@/lib/prisma";
 import { ModelLogo } from "@/components/chat/ModelLogo";
+import { AdminOperationsPanel } from "@/components/admin/AdminOperationsPanel";
 import { BillingAdminPanel } from "@/components/admin/BillingAdminPanel";
 import { RefundRequestsPanel, type RefundRequestRow } from "@/components/admin/RefundRequestsPanel";
 import {
@@ -84,6 +85,9 @@ const dateTimeLabel = (value: Date | string | null | undefined) => {
     if (Number.isNaN(date.getTime())) return "-";
     return date.toISOString().replace("T", " ").slice(0, 16);
 };
+
+const isConfigured = (value: string | undefined) =>
+    typeof value === "string" && value.trim().length > 0;
 
 function MetricCard({
     label,
@@ -557,6 +561,40 @@ export default async function AdminPage() {
               ]
             : []),
     ].slice(0, 6);
+    const generatedAtLabel = dashboard.generatedAt.replace("T", " ").slice(0, 16);
+    const monthSpendLabel = money(monthSpend);
+    const envChecks = [
+        {
+            name: "ADMIN_EMAILS",
+            configured: isConfigured(process.env.ADMIN_EMAILS),
+            description: "Controls who can access this console.",
+        },
+        {
+            name: "STRIPE_SECRET_KEY",
+            configured: isConfigured(process.env.STRIPE_SECRET_KEY),
+            description: "Required for checkout, refunds, and subscription cancellation.",
+        },
+        {
+            name: "STRIPE_WEBHOOK_SECRET",
+            configured: isConfigured(process.env.STRIPE_WEBHOOK_SECRET),
+            description: "Required to trust Stripe billing events.",
+        },
+        {
+            name: "RESEND_API_KEY",
+            configured: isConfigured(process.env.RESEND_API_KEY),
+            description: "Required for Tomverse transactional email.",
+        },
+        {
+            name: "BILLING_EMAIL_FROM",
+            configured: isConfigured(process.env.BILLING_EMAIL_FROM),
+            description: "Verified sender used for billing emails.",
+        },
+        {
+            name: "SLACK_WEBHOOK_URL",
+            configured: isConfigured(process.env.SLACK_WEBHOOK_URL),
+            description: "Optional incident notification channel.",
+        },
+    ];
 
     return (
         <main className="min-h-screen bg-zinc-950 text-zinc-100">
@@ -579,10 +617,24 @@ export default async function AdminPage() {
                                 </p>
                             </div>
                             <div className="text-sm text-zinc-500">
-                                Generated {dashboard.generatedAt.replace("T", " ").slice(0, 16)} UTC
+                                Generated {generatedAtLabel} UTC
                             </div>
                         </div>
                     </header>
+
+                    <AdminOperationsPanel
+                        generatedAt={generatedAtLabel}
+                        totalUsers={totalUsers}
+                        paidUsers={paidUsers}
+                        activeSubscriptions={activeSubscriptions}
+                        openFeedbackCount={openFeedbackCount}
+                        pendingRefundCount={pendingRefundCount}
+                        providerAvailableCount={availableCount}
+                        providerTotalCount={dashboard.providers.length}
+                        monthSpendLabel={monthSpendLabel}
+                        needsAttention={needsAttention}
+                        envChecks={envChecks}
+                    />
 
                     <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                         <MetricCard
@@ -605,7 +657,7 @@ export default async function AdminPage() {
                         />
                         <MetricCard
                             label="Monthly spend"
-                            value={money(monthSpend)}
+                            value={monthSpendLabel}
                             detail="Estimated from reserved token budgets"
                             icon={<WalletCards className="h-4 w-4" />}
                         />
