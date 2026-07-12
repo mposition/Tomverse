@@ -162,6 +162,7 @@ export function MarketingHeader({ maxWidth = "max-w-7xl" }: { maxWidth?: string 
   const { lang } = useLanguage();
   const labels = chrome[lang] ?? chrome.en;
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const chatHref = `/chat?lang=${encodeURIComponent(lang)}`;
 
   return (
     <header className="sticky top-0 z-40 border-b border-zinc-200/80 bg-white/90 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/85">
@@ -183,7 +184,7 @@ export function MarketingHeader({ maxWidth = "max-w-7xl" }: { maxWidth?: string 
         <div className="flex items-center gap-2">
           <MarketingLanguageSwitcher />
           <Link
-            href="/chat"
+            href={chatHref}
             className="hidden h-10 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-bold text-white shadow-sm shadow-blue-950/20 transition hover:bg-blue-500 sm:inline-flex"
           >
             {labels.app}
@@ -225,7 +226,7 @@ export function MarketingHeader({ maxWidth = "max-w-7xl" }: { maxWidth?: string 
               </Link>
             ))}
             <Link
-              href="/chat"
+              href={chatHref}
               onClick={() => setIsMenuOpen(false)}
               className="mt-3 inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-black text-white transition hover:bg-blue-500"
             >

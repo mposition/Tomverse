@@ -63,6 +63,14 @@ export function LanguageProvider({
         }
 
         const restoreSavedLanguage = window.setTimeout(() => {
+            const urlLanguage = new URLSearchParams(window.location.search).get("lang");
+            if (isLanguage(urlLanguage)) {
+                setLangState(urlLanguage);
+                window.localStorage.setItem(LANGUAGE_STORAGE_KEY, urlLanguage);
+                document.documentElement.lang = urlLanguage;
+                return;
+            }
+
             const savedLanguage = window.localStorage.getItem(LANGUAGE_STORAGE_KEY);
             if (isLanguage(savedLanguage)) {
                 setLangState(savedLanguage);

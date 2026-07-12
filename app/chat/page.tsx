@@ -41,7 +41,13 @@ const normalizeStringArray = (value: unknown, fallback: string[]) => {
 
 const uniqueStrings = (values: string[]) => Array.from(new Set(values));
 const isLanguage = (value: unknown): value is Language =>
-  value === "en" || value === "ko" || value === "zh";
+  value === "en" ||
+  value === "ko" ||
+  value === "zh" ||
+  value === "fr" ||
+  value === "de" ||
+  value === "es" ||
+  value === "pt";
 
 const cloneAttachmentPreviews = async (
   items: ChatAttachment[]
@@ -485,7 +491,8 @@ export default function Home() {
                         }
                     }
 
-                    if (data && isLanguage(data.language)) {
+                    const urlLanguage = new URLSearchParams(window.location.search).get("lang");
+                    if (!isLanguage(urlLanguage) && data && isLanguage(data.language)) {
                         setLang(data.language);
                     }
                 })

@@ -505,6 +505,7 @@ export function LandingPageContent() {
   const content = copy[lang] ?? copy.en;
   const launch = launchCopy[lang] ?? launchCopy.en;
   const billing = usePublicBilling();
+  const chatHref = `/chat?lang=${encodeURIComponent(lang)}`;
 
   return (
     <main className="min-h-screen overflow-x-hidden bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">
@@ -523,7 +524,7 @@ export function LandingPageContent() {
             <p className="mt-6 max-w-2xl text-lg leading-8 text-zinc-600 dark:text-zinc-300">{content.description}</p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
               <Link
-                href="/chat"
+                href={chatHref}
                 className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-blue-600 px-6 text-sm font-black text-white shadow-lg shadow-blue-950/20 transition hover:bg-blue-500"
               >
                 {content.primaryCta}
@@ -768,7 +769,7 @@ export function LandingPageContent() {
             <p className="mt-2 text-sm font-medium text-blue-100">{content.ctaDescription}</p>
           </div>
           <Link
-            href="/chat"
+            href={chatHref}
             className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-white px-6 text-sm font-black text-blue-700 transition hover:bg-blue-50"
           >
             {content.app}
