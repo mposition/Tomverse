@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { useEffect, useId, useState } from "react";
 import { dispatchAppToast } from "@/lib/appToast";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
+import { getBillingConfigUrl } from "@/components/marketing/usePublicBilling";
 
 type BillingPlan = {
   id: "free" | "pro" | "max";
@@ -485,7 +486,7 @@ export function UpgradeInterestButton({
 
   useEffect(() => {
     if (!isOpen || billingConfig) return;
-    fetch("/api/billing/config")
+    fetch(getBillingConfigUrl())
       .then((response) => (response.ok ? response.json() : null))
       .then((data: BillingConfig | null) => {
         if (data) setBillingConfig(data);

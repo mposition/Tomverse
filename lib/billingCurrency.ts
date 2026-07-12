@@ -68,6 +68,11 @@ const COUNTRY_TO_CURRENCY: Record<string, string> = {
   ZA: "ZAR",
 };
 
+const SUPPORTED_DISPLAY_CURRENCIES = new Set([
+  "USD",
+  ...Object.values(COUNTRY_TO_CURRENCY),
+]);
+
 const LANGUAGE_TO_COUNTRY: Record<string, string> = {
   de: "DE",
   en: "US",
@@ -83,6 +88,12 @@ const normalizeCountry = (value: string | null) => {
   return value.toUpperCase();
 };
 
+const normalizeCurrency = (value: string | null) => {
+  if (!value || value.length !== 3) return null;
+  const currency = value.toUpperCase();
+  return SUPPORTED_DISPLAY_CURRENCIES.has(currency) ? currency : null;
+};
+
 const countryFromAcceptLanguage = (value: string | null) => {
   if (!value) return null;
   const firstTag = value.split(",")[0]?.trim().split(";")[0]?.trim();
@@ -95,6 +106,9 @@ const countryFromAcceptLanguage = (value: string | null) => {
 };
 
 export const inferCurrencyFromRequest = (req: Request) => {
+  const requestedCurrency = normalizeCurrency(new URL(req.url).searchParams.get("currency"));
+  if (requestedCurrency) return requestedCurrency;
+
   const country =
     normalizeCountry(req.headers.get("cf-ipcountry")) ||
     normalizeCountry(req.headers.get("x-vercel-ip-country")) ||

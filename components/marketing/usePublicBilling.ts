@@ -32,11 +32,62 @@ type BillingConfig = {
   exchangeRateUpdatedAt?: string | null;
 };
 
+const REGION_TO_CURRENCY: Record<string, string> = {
+  AU: "AUD",
+  BR: "BRL",
+  CA: "CAD",
+  CN: "CNY",
+  DE: "EUR",
+  ES: "EUR",
+  FR: "EUR",
+  GB: "GBP",
+  JP: "JPY",
+  KR: "KRW",
+  NZ: "NZD",
+  PT: "EUR",
+  US: "USD",
+};
+
+const TIMEZONE_TO_CURRENCY: Array<[string, string]> = [
+  ["Australia/", "AUD"],
+  ["Pacific/Auckland", "NZD"],
+  ["Asia/Seoul", "KRW"],
+  ["Asia/Tokyo", "JPY"],
+  ["Europe/", "EUR"],
+  ["America/New_York", "USD"],
+  ["America/Chicago", "USD"],
+  ["America/Denver", "USD"],
+  ["America/Los_Angeles", "USD"],
+  ["America/Toronto", "CAD"],
+  ["America/Vancouver", "CAD"],
+];
+
+export function getBillingConfigUrl() {
+  if (typeof window === "undefined") return "/api/billing/config";
+
+  const locale = navigator.languages?.[0] || navigator.language || "";
+  let currency: string | undefined;
+  try {
+    const region = locale ? new Intl.Locale(locale).region?.toUpperCase() : undefined;
+    currency = region ? REGION_TO_CURRENCY[region] : undefined;
+  } catch {
+    currency = undefined;
+  }
+
+  if (!currency) {
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+    currency = TIMEZONE_TO_CURRENCY.find(([prefix]) => timeZone.startsWith(prefix))?.[1];
+  }
+
+  if (!currency) return "/api/billing/config";
+  return `/api/billing/config?currency=${encodeURIComponent(currency)}`;
+}
+
 export function usePublicBilling() {
   const [config, setConfig] = useState<BillingConfig | null>(null);
 
   useEffect(() => {
-    fetch("/api/billing/config")
+    fetch(getBillingConfigUrl())
       .then((response) => (response.ok ? response.json() : null))
       .then((data: BillingConfig | null) => {
         if (data) setConfig(data);
