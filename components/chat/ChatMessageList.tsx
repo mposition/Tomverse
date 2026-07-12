@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import type { ExtraProps } from "react-markdown";
 import type { ComponentPropsWithoutRef } from "react";
@@ -105,6 +105,8 @@ export function ChatMessageList({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const previousLastMessageIdRef = useRef<string | null>(null);
   const previousMessageCountRef = useRef(0);
+  const autoStickUntilRef = useRef(0);
+  const scheduledScrollsRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
   const [isNearBottom, setIsNearBottom] = useState(true);
   const showScrollButton = !isNearBottom;
     const { t } = useLanguage();
@@ -121,10 +123,33 @@ export function ChatMessageList({
     const container = containerRef.current;
     if (!container) return;
 
-    container.scrollTo({
-      top: container.scrollHeight,
-      behavior,
+    container.scrollTo({ top: container.scrollHeight, behavior });
+  };
+
+  const clearScheduledScrolls = () => {
+    scheduledScrollsRef.current.forEach((timer) => clearTimeout(timer));
+    scheduledScrollsRef.current = [];
+  };
+
+  const forceScrollToBottom = (behavior: ScrollBehavior = "auto") => {
+    autoStickUntilRef.current = Date.now() + 650;
+    setIsNearBottom(true);
+    clearScheduledScrolls();
+
+    const run = () => {
+      scrollToBottom(behavior);
+      setIsNearBottom(true);
+    };
+
+    run();
+    requestAnimationFrame(() => {
+      run();
+      requestAnimationFrame(run);
     });
+
+    scheduledScrollsRef.current = [60, 160, 320, 520].map((delay) =>
+      setTimeout(run, delay)
+    );
   };
 
   const checkIsNearBottom = () => {
@@ -139,11 +164,16 @@ export function ChatMessageList({
   };
 
   const handleScroll = () => {
+    if (Date.now() < autoStickUntilRef.current) {
+      setIsNearBottom(true);
+      return;
+    }
+
     const nearBottom = checkIsNearBottom();
     setIsNearBottom(nearBottom);
   };
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const lastMessage = messages[messages.length - 1];
     const lastMessageId = lastMessage?.id || null;
     const previousLastMessageId = previousLastMessageIdRef.current;
@@ -161,13 +191,29 @@ export function ChatMessageList({
     if (!isInitialLoad && !didAppendMessage && !isNearBottom) return;
 
     const behavior: ScrollBehavior = isInitialLoad ? "auto" : "smooth";
-    const frame = requestAnimationFrame(() => {
-      scrollToBottom(behavior);
+    forceScrollToBottom(behavior);
+  }, [messages, isNearBottom]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || typeof ResizeObserver === "undefined") return;
+
+    const observer = new ResizeObserver(() => {
+      if (Date.now() >= autoStickUntilRef.current) return;
+      scrollToBottom("auto");
       setIsNearBottom(true);
     });
 
-    return () => cancelAnimationFrame(frame);
-  }, [messages, isNearBottom]);
+    observer.observe(container);
+    if (container.firstElementChild) {
+      observer.observe(container.firstElementChild);
+    }
+
+    return () => {
+      observer.disconnect();
+      clearScheduledScrolls();
+    };
+  }, []);
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
@@ -223,7 +269,7 @@ export function ChatMessageList({
                 data-testid="chat-message"
                 data-message-role={msg.role}
                 data-model-id={msg.modelId || ""}
-                className={`flex w-full flex-col [content-visibility:auto] [contain-intrinsic-size:auto_160px] ${isUser ? "items-end" : "items-start"}`}
+                className={`flex w-full flex-col ${isUser ? "items-end" : "items-start"}`}
               >
                 {!isUser && modelInfo && (
                   <div className="mb-1.5 ml-1 flex select-none items-center gap-2">
