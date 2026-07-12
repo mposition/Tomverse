@@ -641,11 +641,14 @@ export function BillingAdminPanel({
         <div className="mt-5 rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
-                Guest mode default model
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-blue-300">
+                Platform default model
               </p>
+              <h3 className="mt-2 text-lg font-black text-white">
+                게스트 모드 기본 대화 엔진
+              </h3>
               <p className="mt-1 text-sm leading-6 text-zinc-400">
-                New guest conversations start with this enabled Free model.
+                로그인하지 않은 사용자가 새 대화를 시작할 때 기본으로 선택되는 Free 모델입니다.
               </p>
             </div>
             <select
