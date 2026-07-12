@@ -6,6 +6,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { isEnabledModelId } from "@/lib/models";
+import { sendAccountWelcomeEmail } from "@/lib/accountEmails";
 import { z } from "zod";
 import {
     apiSecurityResponse,
@@ -49,6 +50,13 @@ export async function GET(req: Request) {
                     language: initialLanguage,
                     defaultModel: APP_DEFAULTS.defaultModelId,
                 }
+            });
+            await sendAccountWelcomeEmail({
+                to: session.user.email,
+                name: session.user.name,
+                language: settings.language,
+            }).catch((error) => {
+                console.error("Account welcome email failed:", error);
             });
         } else if (!isEnabledModelId(settings.defaultModel)) {
             settings = await prisma.userSettings.update({

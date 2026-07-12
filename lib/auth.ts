@@ -4,7 +4,6 @@ import GoogleProvider from "next-auth/providers/google";
 import NaverProvider from "next-auth/providers/naver";
 import AzureADProvider from "next-auth/providers/azure-ad";
 import { PrismaAdapter } from "@auth/prisma-adapter";
-import { sendAccountWelcomeEmail } from "@/lib/accountEmails";
 import { prisma } from "@/lib/prisma";
 import { encryptOAuthAccountTokens } from "@/lib/oauthTokenCrypto";
 import { logAuthAuditEvent } from "@/lib/securityAudit";
@@ -60,12 +59,6 @@ export const authOptions: NextAuthOptions = {
         async createUser({ user }) {
             logAuthAuditEvent("auth.create_user", {
                 userId: user.id,
-            });
-            await sendAccountWelcomeEmail({
-                to: user.email,
-                name: user.name,
-            }).catch((error) => {
-                console.error("Account welcome email failed:", error);
             });
         },
         async signIn({ user, account, isNewUser }) {
