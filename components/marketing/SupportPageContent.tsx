@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import Link from "next/link";
+import { useSession } from "next-auth/react";
 import {
   ArrowRight,
   CheckCircle2,
@@ -13,6 +14,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
+import { useTurnstile } from "@/components/chat/useTurnstile";
 import { dispatchAppToast } from "@/lib/appToast";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
 
@@ -385,18 +387,27 @@ const copy: Record<Language, SupportCopy> = {
 
 export function SupportPageContent() {
   const { lang } = useLanguage();
+  const { status } = useSession();
   const page = copy[lang] ?? copy.en;
   const [type, setType] = useState<keyof SupportCopy["types"]>("support");
   const [email, setEmail] = useState("");
   const [traceId, setTraceId] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const isGuestRequest = status === "unauthenticated";
+  const {
+    containerRef: turnstileContainerRef,
+    getToken: getTurnstileToken,
+  } = useTurnstile(isGuestRequest, "support_request");
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (busy || message.trim().length < 5 || !email.trim()) return;
     setBusy(true);
     try {
+      const turnstileToken = isGuestRequest
+        ? await getTurnstileToken()
+        : undefined;
       const response = await fetch("/api/feedback", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -407,6 +418,7 @@ export function SupportPageContent() {
           traceId: traceId || undefined,
           path: typeof window !== "undefined" ? window.location.pathname : "/support",
           userAgent: typeof navigator !== "undefined" ? navigator.userAgent : undefined,
+          ...(turnstileToken ? { turnstileToken } : {}),
         }),
       });
       if (!response.ok) throw new Error(`Support request failed: ${response.status}`);
@@ -513,7 +525,8 @@ export function SupportPageContent() {
                 rows={6}
                 className="mt-2 w-full resize-none rounded-xl border border-zinc-200 bg-white p-3 text-sm leading-6 outline-none transition focus:border-blue-500 dark:border-zinc-800 dark:bg-zinc-950"
               />
-            </label>
+              </label>
+            <div ref={turnstileContainerRef} className="hidden" />
             <button
               type="submit"
               disabled={busy || message.trim().length < 5 || !email.trim()}

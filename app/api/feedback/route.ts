@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
+import { chatErrorResponse } from "@/lib/chatSecurity";
 import { sendTransactionalEmail } from "@/lib/email";
 import { prisma } from "@/lib/prisma";
 import {
@@ -11,6 +12,7 @@ import {
   consumeApiRateLimit,
   readLimitedJson,
 } from "@/lib/apiSecurity";
+import { verifyGuestTurnstile } from "@/lib/turnstile";
 
 const feedbackSchema = z
   .object({
@@ -24,8 +26,28 @@ const feedbackSchema = z
     attachmentCount: z.number().int().min(0).max(5).optional(),
     path: z.string().trim().max(300).optional(),
     userAgent: z.string().trim().max(500).optional(),
+    turnstileToken: z.string().trim().min(1).max(2_048).optional(),
   })
   .strict();
+
+const escapeHtml = (value: unknown) =>
+  String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+
+const firstCsvValue = (value: string | undefined) =>
+  (value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .find(Boolean);
+
+const supportNotificationEmail = () =>
+  process.env.SUPPORT_NOTIFICATION_EMAIL ||
+  process.env.ADMIN_ALERT_EMAIL ||
+  firstCsvValue(process.env.ADMIN_EMAILS);
 
 export async function POST(req: Request) {
   try {
@@ -36,6 +58,9 @@ export async function POST(req: Request) {
       day: 30,
     });
     const body = await readLimitedJson(req, 8 * 1024, feedbackSchema);
+    if (!session?.user?.id) {
+      await verifyGuestTurnstile(req, body.turnstileToken, "support_request");
+    }
     const email = session?.user?.email || body.email || null;
     const feedback = await prisma.feedback.create({
       data: {
@@ -53,55 +78,76 @@ export async function POST(req: Request) {
       },
     });
 
-    const supportEmail = process.env.SUPPORT_NOTIFICATION_EMAIL;
+    const supportEmail = supportNotificationEmail();
     if (supportEmail) {
-      sendTransactionalEmail({
-        to: supportEmail,
-        subject: `Tomverse support request: ${body.type}`,
-        text: [
-          `Feedback ID: ${feedback.id}`,
-          `Type: ${body.type}`,
-          `Email: ${email || "guest"}`,
-          `Trace ID: ${body.traceId || "-"}`,
-          `Model: ${body.modelId || "-"}`,
-          `Plan: ${body.plan || "-"}`,
-          `Attachments: ${body.attachmentCount || 0}`,
-          `Path: ${body.path || "-"}`,
-          "",
-          body.message,
-        ].join("\n"),
-        html: `
-          <div style="font-family:Arial,sans-serif;color:#111827;line-height:1.6">
-            <h2>New Tomverse support request</h2>
-            <p><strong>Feedback ID:</strong> ${feedback.id}</p>
-            <p><strong>Type:</strong> ${body.type}</p>
-            <p><strong>Email:</strong> ${email || "guest"}</p>
-            <p><strong>Trace ID:</strong> ${body.traceId || "-"}</p>
-            <p><strong>Model:</strong> ${body.modelId || "-"}</p>
-            <p><strong>Plan:</strong> ${body.plan || "-"}</p>
-            <p><strong>Attachments:</strong> ${body.attachmentCount || 0}</p>
-            <p><strong>Path:</strong> ${body.path || "-"}</p>
-            <hr />
-            <p style="white-space:pre-wrap">${body.message}</p>
-          </div>
-        `,
-      }).catch((error) => {
-        console.warn("Support notification email failed:", error);
-      });
+      try {
+        await sendTransactionalEmail({
+          to: supportEmail,
+          subject: `Tomverse support request: ${body.type}`,
+          text: [
+            `Feedback ID: ${feedback.id}`,
+            `Type: ${body.type}`,
+            `Email: ${email || "guest"}`,
+            `Trace ID: ${body.traceId || "-"}`,
+            `Model: ${body.modelId || "-"}`,
+            `Plan: ${body.plan || "-"}`,
+            `Attachments: ${body.attachmentCount || 0}`,
+            `Path: ${body.path || "-"}`,
+            "",
+            body.message,
+          ].join("\n"),
+          html: `
+            <div style="font-family:Arial,sans-serif;color:#111827;line-height:1.6">
+              <h2>New Tomverse support request</h2>
+              <p><strong>Feedback ID:</strong> ${escapeHtml(feedback.id)}</p>
+              <p><strong>Type:</strong> ${escapeHtml(body.type)}</p>
+              <p><strong>Email:</strong> ${escapeHtml(email || "guest")}</p>
+              <p><strong>Trace ID:</strong> ${escapeHtml(body.traceId || "-")}</p>
+              <p><strong>Model:</strong> ${escapeHtml(body.modelId || "-")}</p>
+              <p><strong>Plan:</strong> ${escapeHtml(body.plan || "-")}</p>
+              <p><strong>Attachments:</strong> ${escapeHtml(body.attachmentCount || 0)}</p>
+              <p><strong>Path:</strong> ${escapeHtml(body.path || "-")}</p>
+              <hr />
+              <p style="white-space:pre-wrap">${escapeHtml(body.message)}</p>
+            </div>
+          `,
+        });
+      } catch (error) {
+        console.warn(
+          JSON.stringify({
+            event: "support_notification_failed",
+            feedbackId: feedback.id,
+            reason: error instanceof Error ? error.message : "unknown",
+          })
+        );
+      }
+    } else {
+      console.warn(
+        JSON.stringify({
+          event: "support_notification_skipped",
+          feedbackId: feedback.id,
+          reason: "recipient not configured",
+        })
+      );
     }
 
-    console.warn(
+    console.info(
       JSON.stringify({
         event: "user_feedback",
         userId: session?.user?.id || null,
-        email,
-        ...body,
+        feedbackId: feedback.id,
+        type: body.type,
+        hasTraceId: Boolean(body.traceId),
+        hasAttachments: Boolean(body.hasAttachments),
+        attachmentCount: body.attachmentCount || 0,
       })
     );
     return NextResponse.json({ success: true });
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
+    const chatSecurityResponse = chatErrorResponse(error);
+    if (chatSecurityResponse) return chatSecurityResponse;
     console.error("Feedback submit failed:", error);
     return NextResponse.json({ error: "Failed to submit feedback." }, { status: 500 });
   }

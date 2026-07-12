@@ -219,10 +219,10 @@ export const de = {
         joinProWaitlist: "Auf Pro upgraden",
         joinMaxWaitlist: "Auf Max upgraden",
         promoTitle: "Launch-Promo-Code eingeben",
-        promoProDescription: "Pro kostet 15 $/Monat. Launch-Angebot: 50 % Rabatt in den ersten 3 Monaten.",
-        promoMaxDescription: "Max kostet 25 $/Monat. Launch-Angebot: 50 % Rabatt in den ersten 3 Monaten.",
+        promoProDescription: "Pro kostet 15 $/Monat. Launch-Angebot: 50 % Rabatt im ersten Monat.",
+        promoMaxDescription: "Max kostet 25 $/Monat. Launch-Angebot: 50 % Rabatt im ersten Monat.",
         promoLabel: "Promo-Code",
-        promoFinePrint: "Der Rabatt gilt für Pro und Max in den ersten 3 Monaten; danach verlängert sich der Plan zum regulären Monatspreis.",
+        promoFinePrint: "Der Rabatt gilt für Pro und Max im ersten Monat; danach verlängert sich der Plan zum regulären Monatspreis.",
         applyPromo: "Promo-Code anwenden",
         promoApplied: "Promo-Code akzeptiert. Upgrade-Anfrage erhalten.",
         promoInvalid: "Gib einen gültigen Promo-Code ein.",
@@ -354,7 +354,7 @@ export const de = {
         proPlan: "Pro-Arbeitsbereich",
         maxPlan: "Max-Arbeitsbereich",
         planDescription: "Ihr Konto kann angemeldete Funktionen wie Teilen, Exporte, privaten Modus und freigeschalteten Zugriff auf höhere Modellstufen nutzen.",
-        billingComingSoon: "Launch-Angebot: 50 % Rabatt in den ersten 3 Monaten",
+        billingComingSoon: "Launch-Angebot: 50 % Rabatt im ersten Monat",
         dataRetentionTitle: "Datenaufbewahrung",
         dataRetentionDescription: "Standard-Chats bleiben gespeichert, bis du sie löschst. Anhänge sind temporär und werden normalerweise nach etwa einem Tag entfernt.",
         attachmentRetentionNotice: "Temporär hochgeladene Dateien werden für die Modellbereitstellung und Dokumentextraktion genutzt und nach etwa einem Tag gelöscht.",
@@ -434,4 +434,3 @@ export const de = {
         back: "Zurück zu Tomverse",
     },
 } satisfies typeof en;
-

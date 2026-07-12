@@ -24,7 +24,8 @@ const isLocalDevelopmentRequest = (request: Request) => {
 
 export async function verifyGuestTurnstile(
   request: Request,
-  token: string | undefined
+  token: string | undefined,
+  expectedAction = "guest_chat"
 ) {
   if (isLocalDevelopmentRequest(request)) return;
 
@@ -84,7 +85,7 @@ export async function verifyGuestTurnstile(
       })();
     if (
       !result.success ||
-      result.action !== "guest_chat" ||
+      result.action !== expectedAction ||
       (expectedHostname && result.hostname !== expectedHostname)
     ) {
       throw new ChatAccessError(

@@ -2,5 +2,5 @@ import { MarketingInfoPage } from "@/components/marketing/MarketingInfoPage";
 import { infoPages } from "@/components/marketing/marketingInfoContent";
 
 export default function HelpCentrePage() {
-  return <MarketingInfoPage content={infoPages.support} />;
+  return <MarketingInfoPage content={infoPages.helpCentre} />;
 }

@@ -219,10 +219,10 @@ export const es = {
         joinProWaitlist: "Actualizar a Pro",
         joinMaxWaitlist: "Actualizar a Max",
         promoTitle: "Introduce el código promocional de lanzamiento",
-        promoProDescription: "Pro cuesta $15/mes. Oferta de lanzamiento: 50 % de descuento durante los primeros 3 meses.",
-        promoMaxDescription: "Max cuesta $25/mes. Oferta de lanzamiento: 50 % de descuento durante los primeros 3 meses.",
+        promoProDescription: "Pro cuesta $15/mes. Oferta de lanzamiento: 50 % de descuento durante el primer mes.",
+        promoMaxDescription: "Max cuesta $25/mes. Oferta de lanzamiento: 50 % de descuento durante el primer mes.",
         promoLabel: "Código promocional",
-        promoFinePrint: "El descuento aplica a Pro y Max durante los primeros 3 meses; después se renueva al precio mensual regular.",
+        promoFinePrint: "El descuento aplica a Pro y Max durante el primer mes; después se renueva al precio mensual regular.",
         applyPromo: "Aplicar código",
         promoApplied: "Código promocional aceptado. Solicitud de mejora recibida.",
         promoInvalid: "Introduce un código promocional válido.",
@@ -354,7 +354,7 @@ export const es = {
         proPlan: "Espacio Pro",
         maxPlan: "Espacio Max",
         planDescription: "Tu cuenta puede usar funciones con sesión iniciada como compartir, exportar, modo privado y acceso a modelos superiores cuando esté disponible.",
-        billingComingSoon: "Oferta de lanzamiento: 50 % de descuento durante los primeros 3 meses",
+        billingComingSoon: "Oferta de lanzamiento: 50 % de descuento durante el primer mes",
         dataRetentionTitle: "Retención de datos",
         dataRetentionDescription: "Los chats estándar permanecen hasta que los eliminas. Los adjuntos son temporales y normalmente se eliminan tras aproximadamente un día.",
         attachmentRetentionNotice: "Los archivos temporales se usan para la entrega al modelo y la extracción de documentos, y se eliminan tras aproximadamente un día.",
@@ -434,4 +434,3 @@ export const es = {
         back: "Volver a Tomverse",
     },
 } satisfies typeof en;
-

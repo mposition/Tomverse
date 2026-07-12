@@ -318,7 +318,7 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     promoPlaceholder: "Código promocional opcional",
     apply: "Aplicar",
     promoFinePrint:
-      "Os descontos se aplicam aos 3 primeiros meses dos planos Pro e Max; depois a renovação ocorre pelo preço mensal normal.",
+      "Os descontos se aplicam ao primeiro mês dos planos Pro e Max; depois a renovação ocorre pelo preço mensal normal.",
     invalidPromo: "Código promocional inválido.",
     promoApplied: "Código promocional aplicado.",
     orderSummary: "Resumo do pedido",
@@ -641,23 +641,27 @@ export function UpgradeInterestButton({
                 </div>
               </div>
 
-              <div className="mt-6 grid gap-2 rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
-                <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500 dark:text-zinc-400">
-                  {copy.paymentMethods}
-                </p>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  {["PayPal", "GPay", "Apple Pay", "Card"].map((method) => (
-                    <span
-                      key={method}
-                      className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-center text-xs font-black text-zinc-700 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
-                    >
-                      {method}
-                    </span>
-                  ))}
+              <div className="mt-6 rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500 dark:text-zinc-400">
+                      {copy.paymentMethods}
+                    </p>
+                    <p className="mt-2 text-xs font-semibold leading-5 text-zinc-500 dark:text-zinc-400">
+                      {copy.paymentHint}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2 sm:justify-end">
+                    {["PayPal", "GPay", "Apple Pay", "Card"].map((method) => (
+                      <span
+                        key={method}
+                        className="rounded-full bg-zinc-200/70 px-3 py-1.5 text-[11px] font-black text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"
+                      >
+                        {method}
+                      </span>
+                    ))}
+                  </div>
                 </div>
-                <p className="hidden text-xs font-semibold leading-5 text-zinc-500 dark:text-zinc-400 sm:block">
-                  {copy.paymentHint}
-                </p>
               </div>
 
               <label

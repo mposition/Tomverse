@@ -58,7 +58,7 @@ const loadTurnstile = () =>
     document.head.appendChild(script);
   });
 
-export function useTurnstile(enabled: boolean) {
+export function useTurnstile(enabled: boolean, action = "guest_chat") {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const widgetIdRef = useRef<string | null>(null);
   const pendingRef = useRef<{
@@ -83,7 +83,7 @@ export function useTurnstile(enabled: boolean) {
         }
         widgetIdRef.current = window.turnstile.render(containerRef.current, {
           sitekey,
-          action: "guest_chat",
+          action,
           execution: "execute",
           appearance: "interaction-only",
           theme: "auto",
@@ -122,7 +122,7 @@ export function useTurnstile(enabled: boolean) {
       }
       widgetIdRef.current = null;
     };
-  }, [enabled]);
+  }, [action, enabled]);
 
   const getToken = useCallback(async () => {
     if (!enabled) return undefined;

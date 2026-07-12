@@ -675,6 +675,14 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             description: "Required for Tomverse transactional email.",
         },
         {
+            name: "SUPPORT_NOTIFICATION_EMAIL",
+            configured:
+                isConfigured(process.env.SUPPORT_NOTIFICATION_EMAIL) ||
+                isConfigured(process.env.ADMIN_ALERT_EMAIL) ||
+                isConfigured(process.env.ADMIN_EMAILS),
+            description: "Receives website support form notifications. Falls back to ADMIN_ALERT_EMAIL or ADMIN_EMAILS.",
+        },
+        {
             name: "TRANSACTIONAL_EMAIL_FROM",
             configured: true,
             description: "Verified sender used for account and billing emails. Defaults to hello@tomverse.app.",

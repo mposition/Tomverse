@@ -206,6 +206,134 @@ export const infoPages = {
       cta: { label: "打开 Help Centre", href: "/support/help-centre" },
     },
   },
+  helpCentre: {
+    en: {
+      eyebrow: "Help Centre",
+      title: "Help Centre",
+      description: "Find practical guidance for account access, plans, model selection, attachments, sharing, privacy, billing, and support requests.",
+      sections: [
+        {
+          title: "Getting started",
+          body: "Tomverse lets you ask once, compare answers from multiple AI models, attach useful context, and keep the result organized in one workspace. Start with one model for simple questions or compare up to three models when you want different perspectives.",
+          bullets: ["Use Start Chat to open the app.", "Choose models from the model picker before sending.", "Use projects, pins, and search to keep important conversations easy to find."],
+        },
+        {
+          title: "Login and account access",
+          body: "If login fails, retry from the same browser session, confirm that popups and third-party sign-in redirects are allowed, and check whether the provider account email matches an existing Tomverse account.",
+          bullets: ["Google, Microsoft, and other OAuth providers may require verified callback settings.", "If you see an account-linking error, contact support with the provider name and account email.", "Account deletion permanently removes conversations, settings, and saved account data."],
+        },
+        {
+          title: "Plans, limits, and upgrades",
+          body: "Guest mode is intended for quick trials. Free, Pro, and Max plans unlock more model access and higher usage limits. If a model or feature is unavailable, the app will show the reason in the model picker or plan area.",
+          bullets: ["Guest: limited free-model access, up to 2-model comparison, no attachments.", "Free: Free and Pro model tiers, attachments, sharing, and downloads with usage limits.", "Pro and Max: broader model access and higher limits. Max includes unlimited daily messages with fair-use protection."],
+        },
+        {
+          title: "Files and Google Drive",
+          body: "Attachments work best when files are not password-protected, corrupted, or unusually large. If a PDF or Office document fails, re-export it, reduce the file size, or paste the key text directly into the prompt.",
+          bullets: ["Supported after login: images, PDFs, Office files, text files, and Google Drive files.", "Guest mode does not support attachments.", "Attach up to 5 files, 10 MB each."],
+        },
+        {
+          title: "Model responses and provider status",
+          body: "Tomverse shows responses from external AI providers without editing the model output. Providers can temporarily limit a model, return an empty answer, or fail because of balance, rate limit, or service availability.",
+          bullets: ["Try a recommended fallback model when one provider is limited.", "Remove attachments and retry if a file-specific error appears.", "Include the trace ID when contacting support."],
+        },
+        {
+          title: "Sharing, downloads, and privacy",
+          body: "Shared conversations are read-only snapshots. Private Mode means Tomverse does not save the conversation to the Tomverse database, but your prompt is still sent to the selected AI provider to generate an answer.",
+          bullets: ["Use sharing only for content you are comfortable making available through the link.", "Locked conversations require unlock authorization before protected actions.", "Downloads export conversation content for your own records."],
+        },
+        {
+          title: "Contact support",
+          body: "If you still need help, send a written request from the support page. Include your account email, approximate time, browser, model name, whether files were attached, and any trace ID shown in the app. Phone support is not offered.",
+        },
+      ],
+      cta: { label: "Contact support", href: "/support" },
+    },
+    ko: {
+      eyebrow: "Help Centre",
+      title: "Help Centre",
+      description: "계정 접속, 플랜, 모델 선택, 첨부파일, 공유, 개인정보, 결제, 지원 요청에 필요한 실질적인 안내를 확인하세요.",
+      sections: [
+        {
+          title: "처음 시작하기",
+          body: "Tomverse는 한 번 질문하고 여러 AI 모델의 답변을 비교하며, 필요한 파일 맥락을 첨부하고, 유용한 결과를 하나의 워크스페이스에 정리할 수 있도록 돕습니다. 간단한 질문은 한 모델로 시작하고, 다양한 관점이 필요할 때는 최대 세 개 모델을 비교하세요.",
+          bullets: ["앱 열기 또는 대화 시작으로 채팅 화면을 엽니다.", "질문을 보내기 전에 모델 선택창에서 원하는 모델을 고릅니다.", "프로젝트, 고정, 검색 기능으로 중요한 대화를 쉽게 다시 찾을 수 있습니다."],
+        },
+        {
+          title: "로그인과 계정 접근",
+          body: "로그인이 실패하면 같은 브라우저 세션에서 다시 시도하고, 팝업과 외부 로그인 리다이렉트가 허용되어 있는지 확인하세요. 로그인 제공자의 이메일이 기존 Tomverse 계정과 같은지도 확인하는 것이 좋습니다.",
+          bullets: ["Google, Microsoft 등 OAuth 제공자는 올바른 callback 설정이 필요할 수 있습니다.", "계정 연결 오류가 보이면 제공자 이름과 계정 이메일을 포함해 지원팀에 문의하세요.", "계정 삭제는 대화, 설정, 저장된 계정 데이터를 영구 삭제합니다."],
+        },
+        {
+          title: "플랜, 제한, 업그레이드",
+          body: "게스트 모드는 빠른 체험용입니다. Free, Pro, Max 플랜은 더 넓은 모델 접근과 더 높은 사용량을 제공합니다. 모델이나 기능이 제한되면 모델 선택창 또는 플랜 영역에서 이유를 확인할 수 있습니다.",
+          bullets: ["Guest: 무료 모델 일부, 최대 2개 모델 비교, 첨부파일 불가.", "Free: Free 및 Pro 모델 등급, 첨부파일, 공유, 다운로드를 사용량 한도 내에서 제공.", "Pro와 Max: 더 넓은 모델 접근과 더 높은 한도. Max는 fair-use 보호 안에서 일일 메시지 무제한을 제공합니다."],
+        },
+        {
+          title: "파일과 Google Drive",
+          body: "첨부파일은 암호가 걸려 있지 않고, 손상되지 않았으며, 크기가 너무 크지 않을 때 가장 안정적으로 작동합니다. PDF나 Office 문서가 실패하면 다시 내보내기, 파일 크기 줄이기, 핵심 텍스트 직접 붙여넣기를 시도하세요.",
+          bullets: ["로그인 후 이미지, PDF, Office 파일, 텍스트 파일, Google Drive 파일을 사용할 수 있습니다.", "게스트 모드는 첨부파일을 지원하지 않습니다.", "파일은 최대 5개, 각 10MB까지 첨부할 수 있습니다."],
+        },
+        {
+          title: "모델 응답과 Provider 상태",
+          body: "Tomverse는 외부 AI 제공자의 답변을 중간 편집 없이 보여줍니다. 제공자는 일시적으로 모델을 제한하거나, 빈 답변을 반환하거나, 잔액·rate limit·서비스 상태 때문에 실패할 수 있습니다.",
+          bullets: ["특정 모델이 제한되면 추천 대체 모델로 다시 시도하세요.", "파일 관련 오류가 나오면 첨부파일 없이 다시 시도해 보세요.", "지원팀에 문의할 때는 화면에 표시된 추적 ID를 함께 보내주세요."],
+        },
+        {
+          title: "공유, 다운로드, 개인정보",
+          body: "공유된 대화는 읽기 전용 스냅샷입니다. Private Mode는 Tomverse 데이터베이스에 대화를 저장하지 않는다는 뜻이며, 답변 생성을 위해 선택한 AI 제공자에게 프롬프트는 전송됩니다.",
+          bullets: ["공유 링크는 외부에 보여도 괜찮은 내용에만 사용하세요.", "잠긴 대화는 보호된 작업 전에 잠금 해제 권한이 필요합니다.", "다운로드는 본인 보관용으로 대화 내용을 내보냅니다."],
+        },
+        {
+          title: "지원팀에 문의하기",
+          body: "도움이 더 필요하면 지원 페이지에서 문의를 보내주세요. 계정 이메일, 발생 시간, 브라우저, 모델명, 첨부파일 여부, 앱에 표시된 추적 ID를 포함하면 더 빠르게 확인할 수 있습니다. 전화 상담은 제공하지 않습니다.",
+        },
+      ],
+      cta: { label: "지원팀에 문의하기", href: "/support" },
+    },
+    zh: {
+      eyebrow: "Help Centre",
+      title: "Help Centre",
+      description: "查看账户访问、套餐、模型选择、附件、分享、隐私、账单和支持请求的实用指南。",
+      sections: [
+        {
+          title: "开始使用",
+          body: "Tomverse 可让你一次提问、比较多个 AI 模型的答案、附加必要上下文，并把有价值的结果整理在一个工作区中。简单问题可从一个模型开始；需要不同视角时，可比较最多三个模型。",
+          bullets: ["使用 Start Chat 打开应用。", "发送问题前先在模型选择器中选择模型。", "使用项目、置顶和搜索功能找回重要对话。"],
+        },
+        {
+          title: "登录和账户访问",
+          body: "如果登录失败，请在同一浏览器会话中重试，确认允许弹窗和第三方登录跳转，并检查提供商账户邮箱是否与 Tomverse 账户一致。",
+          bullets: ["Google、Microsoft 等 OAuth 提供商可能需要正确的 callback 设置。", "如果出现账户关联错误，请联系支持并提供提供商名称和账户邮箱。", "删除账户会永久删除对话、设置和已保存的账户数据。"],
+        },
+        {
+          title: "套餐、限制和升级",
+          body: "Guest 模式用于快速体验。Free、Pro 和 Max 套餐提供更广的模型访问和更高的使用量。如果某个模型或功能不可用，应用会在模型选择器或套餐区域显示原因。",
+          bullets: ["Guest：部分免费模型、最多 2 个模型比较、不可使用附件。", "Free：在额度内使用 Free 和 Pro 模型等级、附件、分享和下载。", "Pro 和 Max：更广的模型访问和更高额度。Max 在 fair-use 保护下提供每日消息无限量。"],
+        },
+        {
+          title: "文件和 Google Drive",
+          body: "文件未加密、未损坏且大小合理时最稳定。如果 PDF 或 Office 文档失败，请重新导出、减小文件大小，或直接粘贴关键文本。",
+          bullets: ["登录后支持图片、PDF、Office 文件、文本文件和 Google Drive 文件。", "Guest 模式不支持附件。", "最多可附加 5 个文件，每个 10 MB。"],
+        },
+        {
+          title: "模型响应和提供商状态",
+          body: "Tomverse 不编辑模型输出，而是展示外部 AI 提供商返回的答案。提供商可能因余额、rate limit、服务状态或模型限制而失败或返回空答案。",
+          bullets: ["某个模型受限时，可尝试推荐的替代模型。", "出现文件相关错误时，可先移除附件重试。", "联系支持时请附上 trace ID。"],
+        },
+        {
+          title: "分享、下载和隐私",
+          body: "分享的对话是只读快照。Private Mode 表示 Tomverse 不把对话保存到 Tomverse 数据库，但为了生成回答，提示仍会发送给所选 AI 提供商。",
+          bullets: ["仅分享你愿意通过链接公开查看的内容。", "锁定对话在执行受保护操作前需要解锁授权。", "下载功能用于导出对话内容供你自行保存。"],
+        },
+        {
+          title: "联系支持",
+          body: "如果仍需帮助，请通过支持页面提交书面请求。请包含账户邮箱、大致时间、浏览器、模型名称、是否附加文件，以及应用中显示的 trace ID。我们不提供电话支持。",
+        },
+      ],
+      cta: { label: "联系支持", href: "/support" },
+    },
+  },
 } satisfies Record<
   string,
   { en: MarketingInfoCopy } & Partial<Record<Language, MarketingInfoCopy>>

@@ -217,10 +217,10 @@ export const en = {
         joinProWaitlist: "Upgrade to Pro",
         joinMaxWaitlist: "Upgrade to Max",
         promoTitle: "Apply launch promo code",
-        promoProDescription: "Pro is $15/month. Launch special: 50% off for your first 3 months.",
-        promoMaxDescription: "Max is $25/month. Launch special: 50% off for your first 3 months.",
+        promoProDescription: "Pro is $15/month. Launch special: 50% off for your first month.",
+        promoMaxDescription: "Max is $25/month. Launch special: 50% off for your first month.",
         promoLabel: "Promo code",
-        promoFinePrint: "The discount applies to Pro and Max for the first 3 months, then renews at the regular monthly price.",
+        promoFinePrint: "The discount applies to Pro and Max for the first month, then renews at the regular monthly price.",
         applyPromo: "Apply promo code",
         promoApplied: "Promo code accepted. Upgrade request received.",
         promoInvalid: "Enter a valid promo code.",
@@ -352,7 +352,7 @@ export const en = {
         proPlan: "Pro workspace",
         maxPlan: "Max workspace",
         planDescription: "Your account can use logged-in features such as chat sharing, exports, private mode, and higher-tier model access where enabled.",
-        billingComingSoon: "Launch special: 50% off your first 3 months",
+        billingComingSoon: "Launch special: 50% off your first month",
         dataRetentionTitle: "Data retention",
         dataRetentionDescription: "Standard chats remain until you delete them. Attachments are temporary and are normally removed by lifecycle rules after about one day.",
         attachmentRetentionNotice: "Temporary uploaded files are used for model delivery and document extraction, then removed by lifecycle rules after approximately one day.",
@@ -432,4 +432,3 @@ export const en = {
         back: "Back to Tomverse",
     }
 };
-
