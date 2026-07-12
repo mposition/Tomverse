@@ -377,12 +377,12 @@ const calculateDiscountedDisplayAmount = (
 ) => {
   if (!promotion) return amount;
   if (promotion.discountPercent > 0) {
-    return Math.max(0, Math.round(amount * (1 - promotion.discountPercent / 100)));
+    return Math.max(0, amount * (1 - promotion.discountPercent / 100));
   }
   const fixedDiscount =
     ((promotion.discountAmountCents || 0) / 100) *
     (planConfig?.displayExchangeRate || 1);
-  return Math.max(0, Math.round(amount - fixedDiscount));
+  return Math.max(0, amount - fixedDiscount);
 };
 
 const formatPrice = (
