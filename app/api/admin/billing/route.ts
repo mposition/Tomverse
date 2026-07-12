@@ -11,6 +11,11 @@ import {
   readLimitedJson,
 } from "@/lib/apiSecurity";
 import {
+  getPublicAppSettings,
+  isValidGuestDefaultModel,
+  updateGuestDefaultModel,
+} from "@/lib/appSettings";
+import {
   getBillingPlans,
   getBillingPromotions,
   syncBillingDefaultsToDatabase,
@@ -75,6 +80,19 @@ const updateBillingSchema = z
   .object({
     plans: z.array(planSchema).min(1).max(3).optional(),
     promotions: z.array(promotionSchema).max(10).optional(),
+    settings: z
+      .object({
+        guestDefaultModelId: z
+          .string()
+          .trim()
+          .min(1)
+          .max(100)
+          .refine(isValidGuestDefaultModel, {
+            message: "Guest default model must be an enabled Free model.",
+          }),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -92,11 +110,12 @@ export async function GET(req: Request) {
       day: 500,
     });
     await syncBillingDefaultsToDatabase();
-    const [plans, promotions] = await Promise.all([
+    const [plans, promotions, settings] = await Promise.all([
       getBillingPlans(),
       getBillingPromotions(),
+      getPublicAppSettings(),
     ]);
-    return NextResponse.json({ plans, promotions });
+    return NextResponse.json({ plans, promotions, settings });
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
@@ -228,11 +247,16 @@ export async function PATCH(req: Request) {
       });
     }
 
-    const [plans, promotions] = await Promise.all([
+    if (body.settings?.guestDefaultModelId) {
+      await updateGuestDefaultModel(body.settings.guestDefaultModelId);
+    }
+
+    const [plans, promotions, settings] = await Promise.all([
       getBillingPlans(),
       getBillingPromotions(),
+      getPublicAppSettings(),
     ]);
-    return NextResponse.json({ plans, promotions });
+    return NextResponse.json({ plans, promotions, settings });
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;

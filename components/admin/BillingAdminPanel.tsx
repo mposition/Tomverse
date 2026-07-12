@@ -17,11 +17,15 @@ import type {
   BillingPlanConfig,
   BillingPromotionConfig,
 } from "@/lib/billingConfig";
+import { AVAILABLE_MODELS } from "@/lib/models";
 import { dispatchAppToast } from "@/lib/appToast";
 
 type BillingConfigPayload = {
   plans: BillingPlanConfig[];
   promotions: BillingPromotionConfig[];
+  settings: {
+    guestDefaultModelId: string;
+  };
 };
 
 type Props = BillingConfigPayload & {
@@ -481,12 +485,16 @@ function PromotionEditor({
 export function BillingAdminPanel({
   plans,
   promotions,
+  settings,
   paidUserCount,
   activeSubscriptionCount,
 }: Props) {
   const [draftPlans, setDraftPlans] = useState<EditablePlan[]>(plans);
   const [draftPromotions, setDraftPromotions] =
     useState<EditablePromotion[]>(promotions);
+  const [guestDefaultModelId, setGuestDefaultModelId] = useState(
+    settings.guestDefaultModelId
+  );
   const [isSaving, setIsSaving] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<"plans" | "promotions">("plans");
@@ -511,6 +519,7 @@ export function BillingAdminPanel({
   const applyResponse = (data: BillingConfigPayload) => {
     setDraftPlans(data.plans);
     setDraftPromotions(data.promotions);
+    setGuestDefaultModelId(data.settings.guestDefaultModelId);
     setLastSyncedAt(new Date().toLocaleTimeString());
   };
 
@@ -542,6 +551,9 @@ export function BillingAdminPanel({
         body: JSON.stringify({
           plans: draftPlans,
           promotions: draftPromotions,
+          settings: {
+            guestDefaultModelId,
+          },
         }),
       });
       const data = (await response.json().catch(() => null)) as AdminBillingResponse | null;
@@ -624,6 +636,31 @@ export function BillingAdminPanel({
               <Database className="h-4 w-4" />
               {lastSyncedAt ? `Synced ${lastSyncedAt}` : "Loaded on page open"}
             </p>
+          </div>
+        </div>
+        <div className="mt-5 rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                Guest mode default model
+              </p>
+              <p className="mt-1 text-sm leading-6 text-zinc-400">
+                New guest conversations start with this enabled Free model.
+              </p>
+            </div>
+            <select
+              value={guestDefaultModelId}
+              onChange={(event) => setGuestDefaultModelId(event.target.value)}
+              className="min-w-64 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-sm font-bold text-white outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+            >
+              {AVAILABLE_MODELS.filter(
+                (model) => model.enabled && model.tier === "Free"
+              ).map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.name} - {model.provider}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
       </div>

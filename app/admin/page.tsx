@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { authOptions } from "@/lib/auth";
 import { isAdminSession } from "@/lib/adminAuth";
+import { getPublicAppSettings } from "@/lib/appSettings";
 import { getEnabledModel } from "@/lib/models";
 import { getUserChatUsageKey } from "@/lib/chatSecurity";
 import { prisma } from "@/lib/prisma";
@@ -423,6 +424,7 @@ export default async function AdminPage() {
         pendingRefundCount,
         todayUsage,
         monthlyUsage,
+        appSettings,
     ] = await Promise.all([
         getProviderHealthDashboard(),
         getBillingPlans(),
@@ -482,6 +484,7 @@ export default async function AdminPage() {
             },
             _sum: { count: true },
         }),
+        getPublicAppSettings(),
     ]);
     const availableCount = dashboard.providers.filter(
         (provider) => provider.status === "available"
@@ -806,10 +809,11 @@ export default async function AdminPage() {
                     <section id="billing">
                         <BillingAdminPanel
                             plans={billingPlans}
-                            promotions={billingPromotions}
-                            paidUserCount={paidUsers}
-                            activeSubscriptionCount={activeSubscriptions}
-                        />
+                        promotions={billingPromotions}
+                        settings={appSettings}
+                        paidUserCount={paidUsers}
+                        activeSubscriptionCount={activeSubscriptions}
+                    />
                     </section>
 
                     <RefundRequestsPanel
