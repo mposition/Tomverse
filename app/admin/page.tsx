@@ -46,6 +46,7 @@ import {
     type ProviderHealthCheckRow,
 } from "@/components/admin/AdminProviderOpsPanel";
 import { AdminProviderTabs } from "@/components/admin/AdminProviderTabs";
+import { AdminProviderUsageSyncPanel } from "@/components/admin/AdminProviderUsageSyncPanel";
 import { AdminRetentionPanel } from "@/components/admin/AdminRetentionPanel";
 import { AdminReportsPanel } from "@/components/admin/AdminReportsPanel";
 import {
@@ -75,6 +76,9 @@ import {
 import { getModelOverrides } from "@/lib/modelOverrides";
 
 const money = (microUsd: number) => `$${(microUsd / 1_000_000).toFixed(2)}`;
+
+const optionalMoney = (microUsd: number | null) =>
+    microUsd === null ? "Not synced" : money(microUsd);
 
 const dateLabel = (value: string | null) => {
     if (!value) return "No success yet";
@@ -322,6 +326,10 @@ function ProviderRow({ provider }: { provider: ProviderHealthRow }) {
         .map((id) => getEnabledModel(id))
         .filter((model): model is NonNullable<typeof model> => Boolean(model))
         .map((model) => model.name);
+    const varianceLabel =
+        provider.usageVariancePercent === null
+            ? "No reconciliation yet"
+            : `${provider.usageVariancePercent > 0 ? "+" : ""}${provider.usageVariancePercent}%`;
 
     return (
         <section className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5">
@@ -382,22 +390,26 @@ function ProviderRow({ provider }: { provider: ProviderHealthRow }) {
             <div className="mt-5 grid gap-4 border-t border-zinc-800 pt-5 lg:grid-cols-3">
                 <div>
                     <div className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
-                        Credit / Balance
+                        Usage / Cost
                     </div>
-                    <p className="mt-2 text-sm text-zinc-300">
-                        {provider.balanceUsd === null
-                            ? "Manual balance not set"
-                            : `$${provider.balanceUsd.toFixed(2)} balance`}
+                    <p className="mt-2 text-sm font-semibold text-zinc-200">
+                        Today internal {money(provider.todayCostMicroUsd)}
                     </p>
                     <p className="mt-1 text-xs text-zinc-500">
-                        Source: {provider.balanceSource}
-                    </p>
-                    <p className="mt-1 text-xs text-zinc-500">
-                        Month usage {money(provider.monthCostMicroUsd)} of{" "}
+                        Month internal {money(provider.monthCostMicroUsd)} of{" "}
                         {money(provider.monthBudgetMicroUsd)}
                     </p>
                     <p className="mt-1 text-xs text-zinc-500">
-                        Day hard limit {money(provider.dayBudgetMicroUsd)}
+                        Provider reported {optionalMoney(provider.providerReportedMonthCostMicroUsd)}
+                    </p>
+                    <p className="mt-1 text-xs text-zinc-500">
+                        Variance {varianceLabel}
+                    </p>
+                    <p className="mt-1 text-xs text-zinc-500">
+                        Source: {provider.usageSource}
+                    </p>
+                    <p className="mt-1 text-xs text-zinc-500">
+                        Last usage sync {dateLabel(provider.lastUsageSyncAt)}
                     </p>
                 </div>
                 <div>
@@ -1240,7 +1252,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                                     <SectionHeader
                                         eyebrow="Providers"
                                         title="Provider health"
-                                        description="Status, key configuration, estimated spend, fallback policy, recent errors, alert setup, and model metrics."
+                                        description="Status, key configuration, internal usage, provider usage reconciliation, fallback policy, recent errors, alert setup, and model metrics."
                                     />
                                     <div className="flex flex-wrap gap-2 text-xs">
                                         <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-emerald-300">
@@ -1257,6 +1269,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                                         </span>
                                     </div>
                                 </div>
+                                <AdminProviderUsageSyncPanel />
                                 {dashboard.providers.map((provider) => (
                                     <ProviderRow key={provider.provider} provider={provider} />
                                 ))}

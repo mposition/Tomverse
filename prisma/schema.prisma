@@ -453,6 +453,28 @@ model ProviderHealthCheck {
   @@index([status, createdAt])
 }
 
+model ProviderDailyUsage {
+  id                           String   @id @default(cuid())
+  provider                     String
+  modelId                      String   @default("__provider__")
+  source                       String   @default("internal")
+  date                         DateTime
+  requestCount                 Int      @default(0)
+  inputTokens                  Int      @default(0)
+  outputTokens                 Int      @default(0)
+  estimatedCostMicroUsd        Int      @default(0)
+  providerReportedCostMicroUsd Int?
+  providerReportedUsageJson    Json?
+  syncedAt                     DateTime?
+  createdAt                    DateTime @default(now())
+  updatedAt                    DateTime @updatedAt
+
+  @@unique([provider, modelId, source, date])
+  @@index([provider, date])
+  @@index([date])
+  @@index([source, date])
+}
+
 model StripeWebhookEventLog {
   id              String    @id @default(cuid())
   stripeEventId   String?   @unique

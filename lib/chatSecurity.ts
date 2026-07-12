@@ -9,6 +9,7 @@ import {
     type ModelTier,
 } from "@/lib/models";
 import { getTrustedClientIp } from "@/lib/clientIp";
+import { recordInternalProviderUsage } from "@/lib/providerUsageAccounting";
 
 const GUEST_COOKIE_NAME = "tomverse_guest";
 const GUEST_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
@@ -36,6 +37,7 @@ export type ChatAccess = {
 };
 
 export type ChatBudget = {
+    modelId: string;
     inputTokens: number;
     maxOutputTokens: number;
     inputUsdPerMillionTokens: number;
@@ -52,6 +54,8 @@ type ReservationEntry = {
 };
 
 export type ChatUsageReservation = {
+    modelId: string;
+    provider: AiModel["provider"];
     entries: ReservationEntry[];
     inputTokens: number;
     maxOutputTokens: number;
@@ -137,6 +141,7 @@ export const createChatBudget = (
     }
 
     return {
+        modelId: model.id,
         inputTokens: estimatedInputTokens,
         maxOutputTokens: profile.maxOutputTokens,
         inputUsdPerMillionTokens: profile.inputUsdPerMillionTokens,
@@ -691,6 +696,8 @@ export const acquireChatAccess = async (
         leaseId,
         setCookie: access.setCookie,
         usageReservation: {
+            modelId: budget.modelId,
+            provider: budget.provider,
             entries: reservationEntries,
             inputTokens: budget.inputTokens,
             maxOutputTokens: budget.maxOutputTokens,
@@ -740,6 +747,14 @@ export const settleChatUsage = async (
             });
         })
     );
+
+    await recordInternalProviderUsage({
+        provider: reservation.provider,
+        modelId: reservation.modelId,
+        inputTokens: actualInput,
+        outputTokens: actualOutput,
+        estimatedCostMicroUsd: actualCost,
+    });
 };
 
 export const releaseChatAccess = async (leaseId: string) => {

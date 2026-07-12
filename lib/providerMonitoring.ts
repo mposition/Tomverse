@@ -22,7 +22,12 @@ export type ProviderHealthRow = {
   recentErrors: Array<{ code: string; count: number; updatedAt: string }>;
   lastSuccessAt: string | null;
   lastFailureAt: string | null;
+  todayCostMicroUsd: number;
   monthCostMicroUsd: number;
+  providerReportedMonthCostMicroUsd: number | null;
+  usageVariancePercent: number | null;
+  usageSource: "internal" | "provider_api" | "internal+provider_api" | "manual";
+  lastUsageSyncAt: string | null;
   monthBudgetMicroUsd: number;
   dayBudgetMicroUsd: number;
   budgetUsagePercent: number;
@@ -644,6 +649,18 @@ type BucketRow = {
   updatedAt: Date;
 };
 
+type ProviderDailyUsageRow = {
+  provider: string;
+  source: string;
+  date: Date;
+  requestCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  estimatedCostMicroUsd: number;
+  providerReportedCostMicroUsd: number | null;
+  syncedAt: Date | null;
+};
+
 const latestFor = (rows: BucketRow[], prefix: string) =>
   rows
     .filter((row) => row.key.startsWith(prefix))
@@ -651,6 +668,54 @@ const latestFor = (rows: BucketRow[], prefix: string) =>
 
 const countFor = (rows: BucketRow[], key: string, period: string) =>
   rows.find((row) => row.key === key && row.period === period)?.count || 0;
+
+const sumInternalCost = (
+  rows: ProviderDailyUsageRow[],
+  provider: AiProvider,
+  from: Date,
+  to?: Date
+) =>
+  rows
+    .filter(
+      (row) =>
+        row.provider === provider &&
+        row.source === "internal" &&
+        row.date.getTime() >= from.getTime() &&
+        (!to || row.date.getTime() < to.getTime())
+    )
+    .reduce((total, row) => total + row.estimatedCostMicroUsd, 0);
+
+const sumProviderReportedCost = (
+  rows: ProviderDailyUsageRow[],
+  provider: AiProvider,
+  from: Date
+) => {
+  const total = rows
+    .filter(
+      (row) =>
+        row.provider === provider &&
+        row.source === "provider_api" &&
+        row.date.getTime() >= from.getTime()
+    )
+    .reduce((sum, row) => sum + (row.providerReportedCostMicroUsd || 0), 0);
+  return total > 0 ? total : null;
+};
+
+const latestUsageSyncAt = (rows: ProviderDailyUsageRow[], provider: AiProvider) =>
+  rows
+    .filter((row) => row.provider === provider && row.source === "provider_api" && row.syncedAt)
+    .sort((a, b) => (b.syncedAt?.getTime() || 0) - (a.syncedAt?.getTime() || 0))[0]
+    ?.syncedAt?.toISOString() || null;
+
+const usageSourceFor = (
+  internalCost: number,
+  providerReportedCost: number | null
+): ProviderHealthRow["usageSource"] => {
+  if (internalCost > 0 && providerReportedCost !== null) return "internal+provider_api";
+  if (internalCost > 0) return "internal";
+  if (providerReportedCost !== null) return "provider_api";
+  return "manual";
+};
 
 const configuredTierLimit = (tier: ModelTier) =>
   ({
@@ -682,6 +747,24 @@ export const getProviderHealthDashboard = async () => {
     },
   });
 
+  const usageRows = await prisma.providerDailyUsage.findMany({
+    where: {
+      provider: { in: MONITORED_PROVIDERS },
+      date: { gte: monthStart },
+    },
+    select: {
+      provider: true,
+      source: true,
+      date: true,
+      requestCount: true,
+      inputTokens: true,
+      outputTokens: true,
+      estimatedCostMicroUsd: true,
+      providerReportedCostMicroUsd: true,
+      syncedAt: true,
+    },
+  });
+
   const balanceByProvider = new Map(
     await Promise.all(
       MONITORED_PROVIDERS.map(async (provider) => [
@@ -709,7 +792,25 @@ export const getProviderHealthDashboard = async () => {
         count: row.count,
         updatedAt: row.updatedAt.toISOString(),
       }));
-    const monthCostMicroUsd = countFor(rows, `provider:${provider}`, "provider-cost-month");
+    const internalMonthCost = sumInternalCost(usageRows, provider, monthStart);
+    const bucketMonthCost = countFor(rows, `provider:${provider}`, "provider-cost-month");
+    const monthCostMicroUsd = internalMonthCost || bucketMonthCost;
+    const todayCostMicroUsd =
+      sumInternalCost(usageRows, provider, dayStart, new Date(dayStart.getTime() + 86_400_000)) ||
+      countFor(rows, `provider:${provider}`, "provider-cost-day");
+    const providerReportedMonthCostMicroUsd = sumProviderReportedCost(
+      usageRows,
+      provider,
+      monthStart
+    );
+    const usageVariancePercent =
+      providerReportedMonthCostMicroUsd && providerReportedMonthCostMicroUsd > 0
+        ? Math.round(
+            ((monthCostMicroUsd - providerReportedMonthCostMicroUsd) /
+              providerReportedMonthCostMicroUsd) *
+              1000
+          ) / 10
+        : null;
     const monthBudgetMicroUsd = providerMonthlyBudgetMicroUsd(provider);
     const dayBudgetMicroUsd = providerDailyBudgetMicroUsd(provider);
     const budgetUsagePercent =
@@ -766,7 +867,12 @@ export const getProviderHealthDashboard = async () => {
       recentErrors,
       lastSuccessAt: latestFor(rows, successKey)?.updatedAt.toISOString() || null,
       lastFailureAt: latestFor(rows, failureKey)?.updatedAt.toISOString() || null,
+      todayCostMicroUsd,
       monthCostMicroUsd,
+      providerReportedMonthCostMicroUsd,
+      usageVariancePercent,
+      usageSource: usageSourceFor(monthCostMicroUsd, providerReportedMonthCostMicroUsd),
+      lastUsageSyncAt: latestUsageSyncAt(usageRows, provider),
       monthBudgetMicroUsd,
       dayBudgetMicroUsd,
       budgetUsagePercent,
