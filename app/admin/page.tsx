@@ -29,6 +29,7 @@ import { getEnabledModel } from "@/lib/models";
 import { getUserChatUsageKey } from "@/lib/chatSecurity";
 import { prisma } from "@/lib/prisma";
 import { ModelLogo } from "@/components/chat/ModelLogo";
+import { AdminAuditPanel, type AdminAuditRow } from "@/components/admin/AdminAuditPanel";
 import { AdminOperationsPanel } from "@/components/admin/AdminOperationsPanel";
 import { AdminUsersPanel, type AdminUserRow } from "@/components/admin/AdminUsersPanel";
 import { BillingAdminPanel } from "@/components/admin/BillingAdminPanel";
@@ -172,6 +173,38 @@ function MetricCard({
             </div>
             <div className="mt-5 text-2xl font-semibold text-white">{value}</div>
             <p className="mt-2 text-sm text-zinc-400">{detail}</p>
+        </div>
+    );
+}
+
+function CommercialKpiCard({
+    label,
+    value,
+    detail,
+    tone = "zinc",
+}: {
+    label: string;
+    value: string;
+    detail: string;
+    tone?: "zinc" | "blue" | "emerald" | "amber" | "purple";
+}) {
+    const toneClass =
+        tone === "blue"
+            ? "border-blue-500/25 bg-blue-500/10"
+            : tone === "emerald"
+                ? "border-emerald-500/25 bg-emerald-500/10"
+                : tone === "amber"
+                    ? "border-amber-500/25 bg-amber-500/10"
+                    : tone === "purple"
+                        ? "border-purple-500/25 bg-purple-500/10"
+                        : "border-zinc-800 bg-zinc-900/60";
+    return (
+        <div className={`rounded-2xl border p-4 ${toneClass}`}>
+            <p className="text-[11px] font-black uppercase tracking-[0.16em] text-zinc-500">
+                {label}
+            </p>
+            <p className="mt-2 text-2xl font-black text-white">{value}</p>
+            <p className="mt-1 text-xs leading-5 text-zinc-400">{detail}</p>
         </div>
     );
 }
@@ -507,6 +540,10 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         monthlyUsage,
         appSettings,
         auditLogs,
+        activePlanGroups,
+        promotionRedemptions,
+        approvedRefundCount,
+        cancelAtPeriodEndCount,
     ] = await Promise.all([
         getProviderHealthDashboard(),
         getBillingPlans(),
@@ -570,6 +607,19 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         prisma.adminAuditLog.findMany({
             orderBy: { createdAt: "desc" },
             take: 50,
+        }),
+        prisma.user.groupBy({
+            by: ["plan"],
+            where: activePaidWhere,
+            _count: { _all: true },
+        }),
+        prisma.billingPromotionRedemption.count(),
+        prisma.refundRequest.count({ where: { status: "approved" } }),
+        prisma.user.count({
+            where: {
+                ...activePaidWhere,
+                subscriptionCancelAtPeriodEnd: true,
+            },
         }),
     ]);
     const availableCount = dashboard.providers.filter(
@@ -656,6 +706,34 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         userAgent: feedback.userAgent,
         createdAt: feedback.createdAt.toISOString(),
     }));
+    const auditRows: AdminAuditRow[] = auditLogs.map((log) => ({
+        id: log.id,
+        actorUserId: log.actorUserId,
+        actorEmail: log.actorEmail,
+        action: log.action,
+        targetType: log.targetType,
+        targetId: log.targetId,
+        summary: log.summary,
+        ipAddress: log.ipAddress,
+        userAgent: log.userAgent,
+        createdAt: log.createdAt.toISOString(),
+    }));
+    const activePlanCounts = new Map(
+        activePlanGroups.map((group) => [group.plan || "Free", group._count._all])
+    );
+    const activeProCount = activePlanCounts.get("Pro") || 0;
+    const activeMaxCount = activePlanCounts.get("Max") || 0;
+    const billingPlanById = new Map(billingPlans.map((plan) => [plan.id, plan]));
+    const monthlyRevenueCents =
+        activeProCount * (billingPlanById.get("pro")?.monthlyPriceCents || 0) +
+        activeMaxCount * (billingPlanById.get("max")?.monthlyPriceCents || 0);
+    const estimatedMrr = `$${(monthlyRevenueCents / 100).toFixed(0)}`;
+    const paidConversion =
+        totalUsers > 0 ? `${((paidUsers / totalUsers) * 100).toFixed(1)}%` : "0.0%";
+    const refundRate =
+        promotionRedemptions > 0 || paidUsers > 0
+            ? `${((approvedRefundCount / Math.max(paidUsers + approvedRefundCount, 1)) * 100).toFixed(1)}%`
+            : "0.0%";
     const needsAttention = [
         ...dashboard.providers
             .filter((provider) => provider.status !== "available")
@@ -811,6 +889,46 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                                 />
                             </section>
 
+                            <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
+                                <SectionHeader
+                                    eyebrow="Commercial"
+                                    title="Revenue and retention snapshot"
+                                    description="A compact read on paid conversion, active plan mix, promotions, refunds, and subscriptions scheduled to cancel."
+                                />
+                                <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                                    <CommercialKpiCard
+                                        label="Estimated MRR"
+                                        value={estimatedMrr}
+                                        detail="Calculated from active Pro and Max monthly list prices."
+                                        tone="emerald"
+                                    />
+                                    <CommercialKpiCard
+                                        label="Paid conversion"
+                                        value={paidConversion}
+                                        detail={`${paidUsers} active paid users out of ${totalUsers} total accounts.`}
+                                        tone="blue"
+                                    />
+                                    <CommercialKpiCard
+                                        label="Plan mix"
+                                        value={`${activeProCount} / ${activeMaxCount}`}
+                                        detail="Active Pro / Max subscriptions."
+                                        tone="purple"
+                                    />
+                                    <CommercialKpiCard
+                                        label="Promo redemptions"
+                                        value={String(promotionRedemptions)}
+                                        detail="Total redeemed promotion records in the database."
+                                        tone="amber"
+                                    />
+                                    <CommercialKpiCard
+                                        label="Churn watch"
+                                        value={String(cancelAtPeriodEndCount)}
+                                        detail={`Cancel at period end. Approved refund rate ${refundRate}.`}
+                                        tone={cancelAtPeriodEndCount > 0 ? "amber" : "zinc"}
+                                    />
+                                </div>
+                            </section>
+
                             <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
                                 <div className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
                                     <SectionHeader
@@ -933,56 +1051,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                     )}
 
                     {activeTab === "audit" && (
-                        <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
-                            <SectionHeader
-                                eyebrow="Audit"
-                                title="Admin activity log"
-                                description="Recent operational actions that affect customers, billing, support, and launch-critical configuration."
-                            />
-                            <div className="mt-5 overflow-x-auto">
-                                <table className="w-full min-w-[920px] border-separate border-spacing-y-2 text-left text-sm">
-                                    <thead className="text-xs uppercase tracking-[0.16em] text-zinc-500">
-                                        <tr>
-                                            <th className="px-3 py-2">Time</th>
-                                            <th className="px-3 py-2">Actor</th>
-                                            <th className="px-3 py-2">Action</th>
-                                            <th className="px-3 py-2">Target</th>
-                                            <th className="px-3 py-2">Summary</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {auditLogs.map((log) => (
-                                            <tr key={log.id} className="bg-zinc-900/70 text-zinc-200">
-                                                <td className="rounded-l-2xl px-3 py-3 text-xs text-zinc-400">
-                                                    {dateTimeLabel(log.createdAt)}
-                                                </td>
-                                                <td className="px-3 py-3">
-                                                    <div className="font-bold">{log.actorEmail || "Unknown admin"}</div>
-                                                    <div className="mt-1 text-xs text-zinc-500">{log.actorUserId || "-"}</div>
-                                                </td>
-                                                <td className="px-3 py-3">
-                                                    <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-2.5 py-1 text-xs font-black text-blue-200">
-                                                        {log.action}
-                                                    </span>
-                                                </td>
-                                                <td className="px-3 py-3 text-xs text-zinc-400">
-                                                    <div>{log.targetType}</div>
-                                                    <div>{log.targetId || "-"}</div>
-                                                </td>
-                                                <td className="rounded-r-2xl px-3 py-3 text-sm text-zinc-300">
-                                                    {log.summary}
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                                {auditLogs.length === 0 ? (
-                                    <div className="mt-3 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5 text-sm text-zinc-400">
-                                        No admin audit events have been recorded yet.
-                                    </div>
-                                ) : null}
-                            </div>
-                        </section>
+                        <AdminAuditPanel rows={auditRows} />
                     )}
                 </div>
             </div>
