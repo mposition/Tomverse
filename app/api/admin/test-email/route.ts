@@ -27,13 +27,13 @@ export async function POST(req: Request) {
       subject: "Tomverse AI test email",
       text: [
         "This is a Tomverse AI transactional email test.",
-        "If you received this message, RESEND_API_KEY and BILLING_EMAIL_FROM are working.",
+        "If you received this message, RESEND_API_KEY and TRANSACTIONAL_EMAIL_FROM are working.",
       ].join("\n"),
       html: `
         <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#111827;">
           <h1 style="font-size:24px;margin:0 0 12px;">Tomverse AI test email</h1>
           <p>This is a Tomverse AI transactional email test.</p>
-          <p>If you received this message, <strong>RESEND_API_KEY</strong> and <strong>BILLING_EMAIL_FROM</strong> are working.</p>
+          <p>If you received this message, <strong>RESEND_API_KEY</strong> and <strong>TRANSACTIONAL_EMAIL_FROM</strong> are working.</p>
         </div>
       `,
     });

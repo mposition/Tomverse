@@ -603,9 +603,9 @@ export default async function AdminPage() {
             description: "Required for Tomverse transactional email.",
         },
         {
-            name: "BILLING_EMAIL_FROM",
-            configured: isConfigured(process.env.BILLING_EMAIL_FROM),
-            description: "Verified sender used for billing emails.",
+            name: "TRANSACTIONAL_EMAIL_FROM",
+            configured: true,
+            description: "Verified sender used for account and billing emails. Defaults to hello@tomverse.app.",
         },
         {
             name: "SLACK_WEBHOOK_URL",

@@ -36,6 +36,7 @@ export const authOptions: NextAuthOptions = {
             clientId: process.env.AZURE_AD_CLIENT_ID as string,
             clientSecret: process.env.AZURE_AD_CLIENT_SECRET as string,
             tenantId: process.env.AZURE_AD_TENANT_ID || "common",
+            allowDangerousEmailAccountLinking: true,
         }),
     ],
     pages: {
