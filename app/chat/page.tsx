@@ -1189,8 +1189,8 @@ export default function Home() {
           aria-label="결제 성공"
           className="relative w-full max-w-lg overflow-hidden rounded-3xl border border-blue-400/30 bg-zinc-950 text-white shadow-2xl shadow-blue-950/40"
         >
-          <div className="absolute inset-x-0 top-0 h-32 bg-gradient-to-br from-blue-500/35 via-cyan-400/15 to-purple-500/25" />
-          <div className="relative p-6 sm:p-8">
+          <div className="absolute inset-x-0 top-0 h-40 bg-gradient-to-br from-blue-500/35 via-cyan-400/15 to-purple-500/25" />
+          <div className="relative px-6 pb-7 pt-6 sm:px-8 sm:pb-8 sm:pt-8">
             <div className="flex items-start justify-between gap-4">
               <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-500 text-white shadow-lg shadow-blue-500/30">
                 <Sparkles className="h-7 w-7" aria-hidden="true" />
@@ -1204,8 +1204,8 @@ export default function Home() {
               </button>
             </div>
 
-            <div className="mt-7">
-              <p className="text-xs font-black uppercase tracking-[0.24em] text-blue-200">
+            <div className="mt-5 sm:mt-6">
+              <p className="pb-1 text-xs font-black uppercase leading-none tracking-[0.24em] text-blue-100">
                 Payment successful
               </p>
               <h2 className="mt-3 text-3xl font-black tracking-tight sm:text-4xl">

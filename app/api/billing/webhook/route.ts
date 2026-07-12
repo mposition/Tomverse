@@ -28,6 +28,19 @@ const getBillingInterval = (subscription: Stripe.Subscription) => {
     : null;
 };
 
+const addBillingPeriod = (
+  date: Date,
+  billingInterval: "monthly" | "annual" | null
+) => {
+  const next = new Date(date);
+  if (billingInterval === "annual") {
+    next.setUTCFullYear(next.getUTCFullYear() + 1);
+  } else {
+    next.setUTCMonth(next.getUTCMonth() + 1);
+  }
+  return next;
+};
+
 async function syncSubscription(subscription: Stripe.Subscription) {
   const customerId =
     typeof subscription.customer === "string"
@@ -46,8 +59,8 @@ async function syncSubscription(subscription: Stripe.Subscription) {
     (planByPrice?.id ?? null);
   const active = subscriptionActiveStatuses.has(subscription.status);
   const plan = active && planId ? tierForPlanId(planId) : "Free";
-  const periodEnd = getPeriodEnd(subscription);
   const billingInterval = getBillingInterval(subscription);
+  const periodEnd = getPeriodEnd(subscription) || addBillingPeriod(new Date(), billingInterval);
 
   const user = await prisma.user.findFirst({
     where: { stripeCustomerId: customerId },

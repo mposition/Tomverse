@@ -47,6 +47,19 @@ const escapeHtml = (value: string) =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
+const addBillingPeriod = (
+  date: Date,
+  billingInterval: string | null | undefined
+) => {
+  const next = new Date(date);
+  if (billingInterval === "annual") {
+    next.setUTCFullYear(next.getUTCFullYear() + 1);
+  } else {
+    next.setUTCMonth(next.getUTCMonth() + 1);
+  }
+  return next;
+};
+
 const localeForLanguage: Record<EmailLanguage, string> = {
   en: "en",
   ko: "ko-KR",
@@ -701,7 +714,9 @@ export async function sendBillingWelcomeEmail(input: BillingWelcomeEmailInput) {
   const copy = getCopy(input.language);
   const plan = escapeHtml(input.plan || "Tomverse AI");
   const billingInterval = formatBillingInterval(input.billingInterval, language);
-  const periodEnd = formatDate(input.periodEnd, language);
+  const resolvedPeriodEnd =
+    input.periodEnd || addBillingPeriod(new Date(), input.billingInterval);
+  const periodEnd = formatDate(resolvedPeriodEnd, language);
   const subject = copy.welcome.subject(plan);
   const text = copy.welcome.text(plan, billingInterval, periodEnd).join("\n");
   const html = shell(
