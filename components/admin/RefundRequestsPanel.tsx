@@ -16,6 +16,10 @@ export type RefundRequestRow = {
   subscriptionStatus: string | null;
   subscriptionBillingInterval: string | null;
   subscriptionCurrentPeriodEnd: string | null;
+  stripeRefundId: string | null;
+  stripeRefundStatus: string | null;
+  stripeChargeId: string | null;
+  refundAmountCents: number | null;
   requestedAt: string;
   reviewedAt: string | null;
 };
@@ -36,6 +40,9 @@ const dateLabel = (value: string | null) => {
   if (Number.isNaN(date.getTime())) return "-";
   return date.toISOString().replace("T", " ").slice(0, 16);
 };
+
+const money = (cents: number | null) =>
+  typeof cents === "number" ? `$${(cents / 100).toFixed(2)}` : "-";
 
 export function RefundRequestsPanel({ rows }: Props) {
   const [items, setItems] = useState(rows);
@@ -149,6 +156,9 @@ export function RefundRequestsPanel({ rows }: Props) {
                     <span>Status: {request.subscriptionStatus || "-"}</span>
                     <span>Billing: {request.subscriptionBillingInterval || "-"}</span>
                     <span>Period end: {dateLabel(request.subscriptionCurrentPeriodEnd)}</span>
+                    <span>Stripe refund: {request.stripeRefundId || "-"}</span>
+                    <span>Refund status: {request.stripeRefundStatus || "-"}</span>
+                    <span>Refund amount: {money(request.refundAmountCents)}</span>
                     <span>Reviewed: {dateLabel(request.reviewedAt)}</span>
                   </div>
                 </div>

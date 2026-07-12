@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
+import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { isAdminSession } from "@/lib/adminAuth";
 import {
   apiSecurityResponse,
@@ -35,6 +36,74 @@ async function cancelStripeSubscription(subscriptionId: string | null) {
   } catch (error) {
     console.error("Stripe subscription cancellation failed:", error);
   }
+}
+
+async function createStripeRefundForSubscription(subscriptionId: string | null) {
+  if (!subscriptionId || !isStripeConfigured()) {
+    return {
+      stripeRefundId: null,
+      stripeRefundStatus: null,
+      stripeChargeId: null,
+      refundAmountCents: null,
+    };
+  }
+
+  const stripe = getStripe();
+  const subscription = await stripe.subscriptions.retrieve(subscriptionId, {
+    expand: ["latest_invoice.payment_intent"],
+  });
+  const latestInvoice = subscription.latest_invoice;
+  const invoice =
+    typeof latestInvoice === "string"
+      ? await stripe.invoices.retrieve(latestInvoice, {
+          expand: ["payment_intent"],
+        })
+      : latestInvoice;
+
+  const paymentIntent = (invoice as { payment_intent?: string | { id?: string } } | null)
+    ?.payment_intent;
+  const paymentIntentId =
+    typeof paymentIntent === "string" ? paymentIntent : paymentIntent?.id;
+  if (!paymentIntentId) {
+    return {
+      stripeRefundId: null,
+      stripeRefundStatus: "no_payment_intent",
+      stripeChargeId: null,
+      refundAmountCents: null,
+    };
+  }
+
+  const charges = await stripe.charges.list({
+    payment_intent: paymentIntentId,
+    limit: 1,
+  });
+  const charge = charges.data[0];
+  if (!charge || charge.amount_refunded >= charge.amount) {
+    return {
+      stripeRefundId: null,
+      stripeRefundStatus: charge ? "already_refunded" : "no_charge",
+      stripeChargeId: charge?.id || null,
+      refundAmountCents: 0,
+    };
+  }
+
+  const amount = charge.amount - charge.amount_refunded;
+  const refund = await stripe.refunds.create({
+    charge: charge.id,
+    amount,
+    reason: "requested_by_customer",
+    metadata: {
+      tomverseRefundRequest: "true",
+      subscriptionId,
+    },
+  });
+
+  return {
+    stripeRefundId: refund.id,
+    stripeRefundStatus: refund.status || "pending",
+    stripeChargeId: charge.id,
+    refundAmountCents: amount,
+  };
 }
 
 export async function PATCH(req: Request, context: RouteContext) {
@@ -76,6 +145,32 @@ export async function PATCH(req: Request, context: RouteContext) {
       : null;
 
     if (body.action === "approve") {
+      let stripeRefund;
+      try {
+        stripeRefund = await createStripeRefundForSubscription(
+          refundRequest.stripeSubscriptionId
+        );
+      } catch (error) {
+        console.error("Stripe refund creation failed:", error);
+        await writeAdminAuditLog({
+          session,
+          request: req,
+          action: "refund.approve_failed",
+          targetType: "RefundRequest",
+          targetId: refundRequest.id,
+          summary: `Stripe refund failed for ${refundRequest.email || "unknown customer"}.`,
+          metadata: {
+            plan: refundRequest.plan,
+            stripeCustomerId: refundRequest.stripeCustomerId,
+            stripeSubscriptionId: refundRequest.stripeSubscriptionId,
+          },
+        });
+        return NextResponse.json(
+          { error: "Stripe refund failed. The request was not approved." },
+          { status: 502 }
+        );
+      }
+
       await cancelStripeSubscription(refundRequest.stripeSubscriptionId);
       const updated = await prisma.$transaction(async (tx) => {
         const request = await tx.refundRequest.update({
@@ -85,6 +180,10 @@ export async function PATCH(req: Request, context: RouteContext) {
             adminNote: body.adminNote || null,
             reviewedByUserId: session.user.id,
             reviewedAt: new Date(),
+            stripeRefundId: stripeRefund.stripeRefundId,
+            stripeRefundStatus: stripeRefund.stripeRefundStatus,
+            stripeChargeId: stripeRefund.stripeChargeId,
+            refundAmountCents: stripeRefund.refundAmountCents,
           },
         });
 
@@ -104,6 +203,22 @@ export async function PATCH(req: Request, context: RouteContext) {
         }
 
         return request;
+      });
+
+      await writeAdminAuditLog({
+        session,
+        request: req,
+        action: "refund.approved",
+        targetType: "RefundRequest",
+        targetId: updated.id,
+        summary: `Approved refund request for ${updated.email || "unknown customer"}.`,
+        metadata: {
+          plan: updated.plan,
+          stripeCustomerId: updated.stripeCustomerId,
+          stripeSubscriptionId: updated.stripeSubscriptionId,
+          stripeRefundId: updated.stripeRefundId,
+          refundAmountCents: updated.refundAmountCents,
+        },
       });
 
       await sendRefundRequestApprovedEmail({
@@ -126,6 +241,20 @@ export async function PATCH(req: Request, context: RouteContext) {
         adminNote: body.adminNote || null,
         reviewedByUserId: session.user.id,
         reviewedAt: new Date(),
+      },
+    });
+
+    await writeAdminAuditLog({
+      session,
+      request: req,
+      action: "refund.rejected",
+      targetType: "RefundRequest",
+      targetId: updated.id,
+      summary: `Rejected refund request for ${updated.email || "unknown customer"}.`,
+      metadata: {
+        plan: updated.plan,
+        stripeCustomerId: updated.stripeCustomerId,
+        stripeSubscriptionId: updated.stripeSubscriptionId,
       },
     });
 

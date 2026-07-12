@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
+import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { isAdminSession } from "@/lib/adminAuth";
 import {
   apiSecurityResponse,
@@ -49,6 +50,7 @@ const planSchema = z
     stripePriceId: optionalText,
     stripeAnnualPriceId: optionalText,
     sortOrder: z.number().int().min(0).max(1_000).optional(),
+    updatedAt: z.string().datetime().nullable().optional(),
   })
   .strict();
 
@@ -67,6 +69,7 @@ const promotionSchema = z
     startsAt: z.string().datetime().nullable().optional(),
     endsAt: z.string().datetime().nullable().optional(),
     isActive: z.boolean(),
+    updatedAt: z.string().datetime().nullable().optional(),
   })
   .refine(
     (promotion) =>
@@ -139,6 +142,46 @@ export async function PATCH(req: Request) {
     });
     const body = await readLimitedJson(req, 32 * 1024, updateBillingSchema);
     await syncBillingDefaultsToDatabase();
+
+    const existingPlans = await prisma.billingPlan.findMany({
+      select: { id: true, updatedAt: true },
+    });
+    const existingPlanUpdatedAt = new Map(
+      existingPlans.map((plan) => [plan.id, plan.updatedAt.toISOString()])
+    );
+    for (const plan of body.plans || []) {
+      const currentUpdatedAt = existingPlanUpdatedAt.get(plan.id);
+      if (currentUpdatedAt && plan.updatedAt && currentUpdatedAt !== plan.updatedAt) {
+        return NextResponse.json(
+          { error: `Billing plan ${plan.id} was changed by another admin. Reload before saving.` },
+          { status: 409 }
+        );
+      }
+    }
+
+    const existingPromotions = await prisma.billingPromotion.findMany({
+      select: { id: true, updatedAt: true },
+    });
+    const existingPromotionUpdatedAt = new Map(
+      existingPromotions.map((promotion) => [
+        promotion.id,
+        promotion.updatedAt.toISOString(),
+      ])
+    );
+    for (const promotion of body.promotions || []) {
+      const id = promotion.id || `promo_${promotion.code.toLowerCase()}`;
+      const currentUpdatedAt = existingPromotionUpdatedAt.get(id);
+      if (
+        currentUpdatedAt &&
+        promotion.updatedAt &&
+        currentUpdatedAt !== promotion.updatedAt
+      ) {
+        return NextResponse.json(
+          { error: `Promotion ${promotion.code} was changed by another admin. Reload before saving.` },
+          { status: 409 }
+        );
+      }
+    }
 
     for (const plan of body.plans || []) {
       await prisma.billingPlan.upsert({
@@ -250,6 +293,20 @@ export async function PATCH(req: Request) {
     if (body.settings?.guestDefaultModelId) {
       await updateGuestDefaultModel(body.settings.guestDefaultModelId);
     }
+
+    await writeAdminAuditLog({
+      session,
+      request: req,
+      action: "billing.updated",
+      targetType: "BillingConfig",
+      targetId: null,
+      summary: "Updated billing plans, promotions, or billing-adjacent platform settings.",
+      metadata: {
+        plans: (body.plans || []).map((plan) => plan.id),
+        promotions: (body.promotions || []).map((promotion) => promotion.code),
+        guestDefaultModelId: body.settings?.guestDefaultModelId || null,
+      },
+    });
 
     const [plans, promotions, settings] = await Promise.all([
       getBillingPlans(),

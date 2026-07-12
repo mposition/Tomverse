@@ -9,15 +9,62 @@ import {
   consumeApiRateLimit,
 } from "@/lib/apiSecurity";
 
+const cacheHeaders = {
+  "Cache-Control": "public, max-age=60, stale-while-revalidate=120",
+};
+
+const isTransientStatusDbError = (error: unknown) => {
+  const code = typeof error === "object" && error && "code" in error
+    ? (error as { code?: unknown }).code
+    : null;
+  return (
+    code === "P2028" ||
+    (error instanceof Error &&
+      error.message.includes("Unable to start a transaction"))
+  );
+};
+
+const fallbackModelStatus = () => ({
+  generatedAt: new Date().toISOString(),
+  models: AVAILABLE_MODELS.map((model) => ({
+    id: model.id,
+    provider: model.provider,
+    status:
+      model.enabled && model.status === "enabled"
+        ? ("available" as const)
+        : ("unavailable" as const),
+    fallbackModelIds: [],
+    recentFailureCount5m: 0,
+    recentErrorCode: null,
+  })),
+});
+
 export async function GET(req: Request) {
   try {
     const subject = `public:${getTrustedClientIp(req)}`;
-    await consumeApiRateLimit(req, subject, "public-model-status", {
-      minute: 30,
-      day: 1_000,
-    });
+    try {
+      await consumeApiRateLimit(req, subject, "public-model-status", {
+        minute: 30,
+        day: 1_000,
+      });
+    } catch (error) {
+      const securityResponse = apiSecurityResponse(error);
+      if (securityResponse) return securityResponse;
+      if (!isTransientStatusDbError(error)) throw error;
+      console.warn("Public model status rate limit skipped after transient DB error.");
+    }
 
-    const dashboard = await getProviderHealthDashboard();
+    const dashboard = await getProviderHealthDashboard().catch((error) => {
+      console.warn("Public model status using fallback after provider health error:", error);
+      return null;
+    });
+    if (!dashboard) {
+      return NextResponse.json(fallbackModelStatus(), {
+        headers: {
+          "Cache-Control": "public, max-age=30, stale-while-revalidate=120",
+        },
+      });
+    }
     const providerStatus = new Map(
       dashboard.providers.map((provider) => [provider.provider, provider])
     );
@@ -55,11 +102,7 @@ export async function GET(req: Request) {
 
     return NextResponse.json(
       { generatedAt: dashboard.generatedAt, models },
-      {
-        headers: {
-          "Cache-Control": "public, max-age=60, stale-while-revalidate=120",
-        },
-      }
+      { headers: cacheHeaders }
     );
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);

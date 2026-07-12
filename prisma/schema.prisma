@@ -1,6 +1,5 @@
 generator client {
-// Prisma 7에서는 provider가 변경되었습니다.
-  provider = "prisma-client-js"   
+  provider = "prisma-client-js"
 }
 
 datasource db {
@@ -8,61 +7,59 @@ datasource db {
 }
 
 // ==========================================
-// NextAuth 필수 및 사용자 커스텀 모델
 // ==========================================
 
 model User {
-  id            String    @id @default(cuid())
-  name          String?
-  email         String?   @unique
-  emailVerified DateTime?
-  image         String?
-  plan          String    @default("Free") // "Free", "Pro", "Max"
-  stripeCustomerId     String?   @unique
-  stripeSubscriptionId String?   @unique
-  stripePriceId        String?
-  subscriptionStatus   String?
-  subscriptionCurrentPeriodEnd DateTime?
-  subscriptionBillingInterval  String?
-  subscriptionCancelAtPeriodEnd Boolean @default(false)
-  
-  // 커스텀 설정 필드 (테마, 언어 등)
-  settings      UserSettings?
-  
-  accounts      Account[]
-  sessions      Session[]
-  projects      ConversationProject[]
-  refundRequests RefundRequest[]
+  id                            String        @id @default(cuid())
+  name                          String?
+  email                         String?       @unique
+  emailVerified                 DateTime?
+  image                         String?
+  plan                          String        @default("Free") // "Free", "Pro", "Max"
+  stripeCustomerId              String?       @unique
+  stripeSubscriptionId          String?       @unique
+  stripePriceId                 String?
+  subscriptionStatus            String?
+  subscriptionCurrentPeriodEnd  DateTime?
+  subscriptionBillingInterval   String?
+  subscriptionCancelAtPeriodEnd Boolean       @default(false)
+  settings                      UserSettings?
+
+  accounts             Account[]
+  sessions             Session[]
+  projects             ConversationProject[]
+  refundRequests       RefundRequest[]
   promotionRedemptions BillingPromotionRedemption[]
-  conversations Conversation[] // 사용자가 가진 대화방들
+  adminAuditLogs       AdminAuditLog[]
+  conversations        Conversation[]
 }
 
 model UserSettings {
-  id             String   @id @default(cuid())
-  userId         String   @unique
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  theme          String   @default("dark")      // "dark", "light", "system"
-  language       String   @default("en")        // "ko", "en"
-  defaultModel  String   @default("gpt-5-4-mini") // 중앙 모델 레지스트리의 기본 모델
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  theme        String @default("dark") // "dark", "light", "system"
+  language     String @default("en") // "ko", "en"
+  defaultModel String @default("gpt-5-4-mini")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Account {
-  id                 String  @id @default(cuid())
-  userId             String
-  type               String
-  provider           String
-  providerAccountId  String
-  refresh_token      String?  
-  access_token       String?  
-  expires_at         Int?
-  token_type         String?
-  scope              String?
-  id_token           String?  
-  session_state      String?
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -89,31 +86,31 @@ model VerificationToken {
 }
 
 // ==========================================
-// 대화방과 메시지
 // ==========================================
 
 model Conversation {
-  id             String    @id @default(cuid())
-  userId         String
-  title          String
-  projectId      String?
-  
-  selectedModels String    @default("[\"gpt-5-4-mini\"]")
-  disabledPanels String    @default("[]")
-  
+  id        String  @id @default(cuid())
+  userId    String
+  title     String
+  projectId String?
+
+  selectedModels String @default("[\"gpt-5-4-mini\"]")
+  disabledPanels String @default("[]")
+
   shareToken     String?   @unique
   shareEnabled   Boolean   @default(false)
   sharedAt       DateTime?
   shareSnapshot  Json?
   shareExpiresAt DateTime?
   shareRevokedAt DateTime?
-    
-  messages       Message[]
-  user           User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  project        ConversationProject? @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  password       String?   
+
+  messages  Message[]
+  user      User?                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project   ConversationProject? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+  password  String?
+
   @@index([userId, projectId])
 }
 
@@ -131,13 +128,13 @@ model ConversationProject {
 }
 
 model Message {
-  id             String       @id @default(cuid())
-  role           String
-  content        String
-  status         String       @default("normal")
-  modelId        String?      // 어떤 AI 모델이 쓴 답변인지 구분하는 꼬리표 추가
-  
-  conversationId String  
+  id      String  @id @default(cuid())
+  role    String
+  content String
+  status  String  @default("normal")
+  modelId String?
+
+  conversationId String
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   createdAt      DateTime     @default(now())
 
@@ -165,47 +162,47 @@ model ChatRequestLease {
 }
 
 model BillingPlan {
-  id                 String   @id
-  name               String
-  tier               String
-  monthlyPriceCents  Int
-  currency           String   @default("USD")
-  stripeProductId    String?
-  stripePriceId      String?
-  annualPriceCents   Int?
+  id                  String   @id
+  name                String
+  tier                String
+  monthlyPriceCents   Int
+  currency            String   @default("USD")
+  stripeProductId     String?
+  stripePriceId       String?
+  annualPriceCents    Int?
   stripeAnnualPriceId String?
-  dailyMessageLimit  Int      @default(0)
-  monthlyMessageLimit Int     @default(0)
-  maxModels          Int      @default(3)
-  allowAttachments   Boolean  @default(true)
-  allowSharing       Boolean  @default(true)
-  allowDownloads     Boolean  @default(true)
-  isActive           Boolean  @default(true)
-  sortOrder          Int      @default(0)
-  metadata           Json?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  dailyMessageLimit   Int      @default(0)
+  monthlyMessageLimit Int      @default(0)
+  maxModels           Int      @default(3)
+  allowAttachments    Boolean  @default(true)
+  allowSharing        Boolean  @default(true)
+  allowDownloads      Boolean  @default(true)
+  isActive            Boolean  @default(true)
+  sortOrder           Int      @default(0)
+  metadata            Json?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   @@index([tier])
   @@index([isActive, sortOrder])
 }
 
 model BillingPromotion {
-  id                    String   @id @default(cuid())
-  code                  String   @unique
-  discountPercent       Int      @default(0)
+  id                    String                       @id @default(cuid())
+  code                  String                       @unique
+  discountPercent       Int                          @default(0)
   discountAmountCents   Int?
   maxRedemptions        Int?
-  redeemedCount         Int      @default(0)
+  redeemedCount         Int                          @default(0)
   durationMonths        Int
-  appliesToPlanIds      String   @default("[]")
+  appliesToPlanIds      String                       @default("[]")
   stripeCouponId        String?
   stripePromotionCodeId String?
   startsAt              DateTime?
   endsAt                DateTime?
-  isActive              Boolean  @default(true)
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  isActive              Boolean                      @default(true)
+  createdAt             DateTime                     @default(now())
+  updatedAt             DateTime                     @updatedAt
   redemptions           BillingPromotionRedemption[]
 
   @@index([isActive])
@@ -213,18 +210,18 @@ model BillingPromotion {
 }
 
 model BillingPromotionRedemption {
-  id                      String   @id @default(cuid())
+  id                      String           @id @default(cuid())
   promotionId             String
   promotion               BillingPromotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
   userId                  String
-  user                    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user                    User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   planId                  String
   billingInterval         String
-  stripeCheckoutSessionId String?  @unique
+  stripeCheckoutSessionId String?          @unique
   stripeSubscriptionId    String?
-  redeemedAt              DateTime @default(now())
-  createdAt               DateTime @default(now())
-  updatedAt               DateTime @updatedAt
+  redeemedAt              DateTime         @default(now())
+  createdAt               DateTime         @default(now())
+  updatedAt               DateTime         @updatedAt
 
   @@unique([promotionId, userId])
   @@index([promotionId, redeemedAt])
@@ -261,25 +258,49 @@ model Feedback {
 }
 
 model RefundRequest {
-  id                             String   @id @default(cuid())
-  userId                         String?
-  user                           User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
-  email                          String?
-  plan                           String?
-  stripeCustomerId               String?
-  stripeSubscriptionId           String?
-  subscriptionStatus             String?
-  subscriptionCurrentPeriodEnd   DateTime?
-  subscriptionBillingInterval    String?
-  reason                         String?
-  status                         String   @default("pending")
-  adminNote                      String?
-  reviewedByUserId               String?
-  requestedAt                    DateTime @default(now())
-  reviewedAt                     DateTime?
-  updatedAt                      DateTime @updatedAt
+  id                           String    @id @default(cuid())
+  userId                       String?
+  user                         User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  email                        String?
+  plan                         String?
+  stripeCustomerId             String?
+  stripeSubscriptionId         String?
+  subscriptionStatus           String?
+  subscriptionCurrentPeriodEnd DateTime?
+  subscriptionBillingInterval  String?
+  reason                       String?
+  status                       String    @default("pending")
+  adminNote                    String?
+  reviewedByUserId             String?
+  stripeRefundId               String?
+  stripeRefundStatus           String?
+  stripeChargeId               String?
+  refundAmountCents            Int?
+  requestedAt                  DateTime  @default(now())
+  reviewedAt                   DateTime?
+  updatedAt                    DateTime  @updatedAt
 
   @@index([status, requestedAt])
   @@index([userId, requestedAt])
   @@index([email])
+}
+
+model AdminAuditLog {
+  id          String   @id @default(cuid())
+  actorUserId String?
+  actorEmail  String?
+  action      String
+  targetType  String
+  targetId    String?
+  summary     String
+  metadata    Json?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  actor User? @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([action, createdAt])
+  @@index([targetType, targetId])
+  @@index([actorUserId, createdAt])
 }

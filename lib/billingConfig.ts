@@ -23,6 +23,7 @@ export type BillingPlanConfig = {
   allowDownloads: boolean;
   isActive: boolean;
   sortOrder: number;
+  updatedAt?: string | null;
 };
 
 export type BillingPromotionConfig = {
@@ -39,6 +40,7 @@ export type BillingPromotionConfig = {
   startsAt: string | null;
   endsAt: string | null;
   isActive: boolean;
+  updatedAt?: string | null;
 };
 
 const DEFAULT_PLANS: Record<BillingPlanId, BillingPlanConfig> = {
@@ -60,6 +62,7 @@ const DEFAULT_PLANS: Record<BillingPlanId, BillingPlanConfig> = {
     allowDownloads: true,
     isActive: true,
     sortOrder: 10,
+    updatedAt: null,
   },
   pro: {
     id: "pro",
@@ -79,6 +82,7 @@ const DEFAULT_PLANS: Record<BillingPlanId, BillingPlanConfig> = {
     allowDownloads: true,
     isActive: true,
     sortOrder: 20,
+    updatedAt: null,
   },
   max: {
     id: "max",
@@ -98,6 +102,7 @@ const DEFAULT_PLANS: Record<BillingPlanId, BillingPlanConfig> = {
     allowDownloads: true,
     isActive: true,
     sortOrder: 30,
+    updatedAt: null,
   },
 };
 
@@ -115,6 +120,7 @@ const DEFAULT_PROMOTION: BillingPromotionConfig = {
   startsAt: null,
   endsAt: null,
   isActive: true,
+  updatedAt: null,
 };
 
 const normalizePlanId = (value: string): BillingPlanId | null =>
@@ -168,6 +174,7 @@ export async function getBillingPlans(): Promise<BillingPlanConfig[]> {
       allowDownloads: row.allowDownloads,
       isActive: row.isActive,
       sortOrder: row.sortOrder,
+      updatedAt: row.updatedAt.toISOString(),
     });
   }
 
@@ -257,6 +264,7 @@ export async function getBillingPromotions(): Promise<BillingPromotionConfig[]> 
     startsAt: row.startsAt?.toISOString() || null,
     endsAt: row.endsAt?.toISOString() || null,
     isActive: row.isActive,
+    updatedAt: row.updatedAt.toISOString(),
   }));
 }
 

@@ -16,6 +16,7 @@ import {
     LifeBuoy,
     MessageSquare,
     RotateCcw,
+    ScrollText,
     ShieldCheck,
     Users,
     WalletCards,
@@ -28,8 +29,8 @@ import { getEnabledModel } from "@/lib/models";
 import { getUserChatUsageKey } from "@/lib/chatSecurity";
 import { prisma } from "@/lib/prisma";
 import { ModelLogo } from "@/components/chat/ModelLogo";
-import { AdminUserDeleteButton } from "@/components/admin/AdminUserDeleteButton";
 import { AdminOperationsPanel } from "@/components/admin/AdminOperationsPanel";
+import { AdminUsersPanel, type AdminUserRow } from "@/components/admin/AdminUsersPanel";
 import { BillingAdminPanel } from "@/components/admin/BillingAdminPanel";
 import { FeedbackInboxPanel, type FeedbackRow } from "@/components/admin/FeedbackInboxPanel";
 import { PlatformSettingsPanel } from "@/components/admin/PlatformSettingsPanel";
@@ -106,6 +107,12 @@ const adminTabs = [
         label: "Feedback",
         description: "Support inbox",
         icon: LifeBuoy,
+    },
+    {
+        id: "audit",
+        label: "Audit",
+        description: "Admin activity",
+        icon: ScrollText,
     },
 ] as const;
 
@@ -473,6 +480,14 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     const now = new Date();
     const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
     const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const activePaidWhere = {
+        plan: { in: ["Pro", "Max"] },
+        subscriptionStatus: { in: ["active", "trialing"] },
+        OR: [
+            { subscriptionCurrentPeriodEnd: null },
+            { subscriptionCurrentPeriodEnd: { gt: now } },
+        ],
+    };
 
     const [
         dashboard,
@@ -491,17 +506,14 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         todayUsage,
         monthlyUsage,
         appSettings,
+        auditLogs,
     ] = await Promise.all([
         getProviderHealthDashboard(),
         getBillingPlans(),
         getBillingPromotions(),
         prisma.user.count(),
-        prisma.user.count({ where: { plan: { in: ["Pro", "Max"] } } }),
-        prisma.user.count({
-            where: {
-                subscriptionStatus: { in: ["active", "trialing"] },
-            },
-        }),
+        prisma.user.count({ where: activePaidWhere }),
+        prisma.user.count({ where: activePaidWhere }),
         prisma.conversation.count(),
         prisma.message.count(),
         prisma.user.findMany({
@@ -516,10 +528,14 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                 subscriptionCurrentPeriodEnd: true,
                 subscriptionBillingInterval: true,
                 stripeCustomerId: true,
+                stripeSubscriptionId: true,
+                subscriptionCancelAtPeriodEnd: true,
                 _count: {
                     select: {
                         conversations: true,
                         accounts: true,
+                        refundRequests: true,
+                        promotionRedemptions: true,
                     },
                 },
             },
@@ -551,6 +567,10 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             _sum: { count: true },
         }),
         getPublicAppSettings(),
+        prisma.adminAuditLog.findMany({
+            orderBy: { createdAt: "desc" },
+            take: 50,
+        }),
     ]);
     const availableCount = dashboard.providers.filter(
         (provider) => provider.status === "available"
@@ -582,6 +602,24 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     const recentUsageByKey = new Map(
         recentUsageRows.map((row) => [row.key, row.count])
     );
+    const adminUserRows: AdminUserRow[] = recentUsers.map((user) => {
+        const userKey = getUserChatUsageKey(user.id);
+        return {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            plan: user.plan,
+            subscriptionStatus: user.subscriptionStatus,
+            subscriptionCurrentPeriodEnd:
+                user.subscriptionCurrentPeriodEnd?.toISOString() || null,
+            subscriptionBillingInterval: user.subscriptionBillingInterval,
+            subscriptionCancelAtPeriodEnd: user.subscriptionCancelAtPeriodEnd,
+            stripeCustomerId: user.stripeCustomerId,
+            stripeSubscriptionId: user.stripeSubscriptionId,
+            usageToday: recentUsageByKey.get(userKey) || 0,
+            _count: user._count,
+        };
+    });
     const refundRequestRows: RefundRequestRow[] = refundRows.map((request) => ({
         id: request.id,
         email: request.email,
@@ -595,6 +633,10 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         subscriptionBillingInterval: request.subscriptionBillingInterval,
         subscriptionCurrentPeriodEnd:
             request.subscriptionCurrentPeriodEnd?.toISOString() || null,
+        stripeRefundId: request.stripeRefundId,
+        stripeRefundStatus: request.stripeRefundStatus,
+        stripeChargeId: request.stripeChargeId,
+        refundAmountCents: request.refundAmountCents,
         requestedAt: request.requestedAt.toISOString(),
         reviewedAt: request.reviewedAt?.toISOString() || null,
     }));
@@ -828,71 +870,12 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                     )}
 
                     {activeTab === "users" && (
-                    <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
-                        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-                            <SectionHeader
-                                eyebrow="Users"
-                                title="Recent accounts"
-                                description={`Showing latest ${recentUsers.length} users. ${conversationCount} conversations are stored across the workspace.`}
-                            />
-                            <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-xs font-black text-blue-200">
-                                {paidUsers} paid users
-                            </span>
-                        </div>
-                        <div className="mt-5 overflow-x-auto">
-                            <table className="w-full min-w-[860px] border-separate border-spacing-y-2 text-left text-sm">
-                                <thead className="text-xs uppercase tracking-[0.16em] text-zinc-500">
-                                    <tr>
-                                        <th className="px-3 py-2">User</th>
-                                        <th className="px-3 py-2">Plan</th>
-                                        <th className="px-3 py-2">Subscription</th>
-                                        <th className="px-3 py-2">Usage today</th>
-                                        <th className="px-3 py-2">Data</th>
-                                        <th className="px-3 py-2">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {recentUsers.map((user) => {
-                                        const userKey = getUserChatUsageKey(user.id);
-                                        const usageToday = recentUsageByKey.get(userKey) || 0;
-                                        return (
-                                            <tr key={user.id} className="rounded-2xl bg-zinc-900/70 text-zinc-200">
-                                                <td className="rounded-l-2xl px-3 py-3">
-                                                    <div className="font-bold">{user.email || user.name || "No email"}</div>
-                                                    <div className="mt-1 text-xs text-zinc-500">{user.id}</div>
-                                                </td>
-                                                <td className="px-3 py-3">
-                                                    <span className={`rounded-full border px-2.5 py-1 text-xs font-black ${planClass(user.plan)}`}>
-                                                        {user.plan || "Free"}
-                                                    </span>
-                                                </td>
-                                                <td className="px-3 py-3 text-xs text-zinc-400">
-                                                    <div>{user.subscriptionStatus || "none"}</div>
-                                                    <div>{user.subscriptionBillingInterval || "-"}</div>
-                                                    <div>{dateTimeLabel(user.subscriptionCurrentPeriodEnd)}</div>
-                                                </td>
-                                                <td className="px-3 py-3 text-xs text-zinc-400">
-                                                    <span className="font-bold text-zinc-200">{usageToday}</span>
-                                                    <span className="ml-1">messages</span>
-                                                </td>
-                                                <td className="px-3 py-3 text-xs text-zinc-400">
-                                                    <div>{user._count.conversations} conversations</div>
-                                                    <div>{user._count.accounts} linked accounts</div>
-                                                    <div>{user.stripeCustomerId ? "Stripe linked" : "No Stripe customer"}</div>
-                                                </td>
-                                                <td className="rounded-r-2xl px-3 py-3">
-                                                    <AdminUserDeleteButton
-                                                        userId={user.id}
-                                                        currentUserId={session.user.id}
-                                                    />
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
-                        </div>
-                    </section>
+                        <AdminUsersPanel
+                            rows={adminUserRows}
+                            currentUserId={session.user.id}
+                            paidUserCount={paidUsers}
+                            conversationCount={conversationCount}
+                        />
                     )}
 
                     {activeTab === "platform" && (
@@ -947,6 +930,59 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
 
                     {activeTab === "feedback" && (
                     <FeedbackInboxPanel rows={feedbackInboxRows} />
+                    )}
+
+                    {activeTab === "audit" && (
+                        <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
+                            <SectionHeader
+                                eyebrow="Audit"
+                                title="Admin activity log"
+                                description="Recent operational actions that affect customers, billing, support, and launch-critical configuration."
+                            />
+                            <div className="mt-5 overflow-x-auto">
+                                <table className="w-full min-w-[920px] border-separate border-spacing-y-2 text-left text-sm">
+                                    <thead className="text-xs uppercase tracking-[0.16em] text-zinc-500">
+                                        <tr>
+                                            <th className="px-3 py-2">Time</th>
+                                            <th className="px-3 py-2">Actor</th>
+                                            <th className="px-3 py-2">Action</th>
+                                            <th className="px-3 py-2">Target</th>
+                                            <th className="px-3 py-2">Summary</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {auditLogs.map((log) => (
+                                            <tr key={log.id} className="bg-zinc-900/70 text-zinc-200">
+                                                <td className="rounded-l-2xl px-3 py-3 text-xs text-zinc-400">
+                                                    {dateTimeLabel(log.createdAt)}
+                                                </td>
+                                                <td className="px-3 py-3">
+                                                    <div className="font-bold">{log.actorEmail || "Unknown admin"}</div>
+                                                    <div className="mt-1 text-xs text-zinc-500">{log.actorUserId || "-"}</div>
+                                                </td>
+                                                <td className="px-3 py-3">
+                                                    <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-2.5 py-1 text-xs font-black text-blue-200">
+                                                        {log.action}
+                                                    </span>
+                                                </td>
+                                                <td className="px-3 py-3 text-xs text-zinc-400">
+                                                    <div>{log.targetType}</div>
+                                                    <div>{log.targetId || "-"}</div>
+                                                </td>
+                                                <td className="rounded-r-2xl px-3 py-3 text-sm text-zinc-300">
+                                                    {log.summary}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                                {auditLogs.length === 0 ? (
+                                    <div className="mt-3 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5 text-sm text-zinc-400">
+                                        No admin audit events have been recorded yet.
+                                    </div>
+                                ) : null}
+                            </div>
+                        </section>
                     )}
                 </div>
             </div>

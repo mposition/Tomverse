@@ -5,6 +5,7 @@ import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import { deleteTomverseAccount } from "@/lib/accountDeletion";
+import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { isAdminSession } from "@/lib/adminAuth";
 import {
   apiSecurityResponse,
@@ -47,6 +48,18 @@ export async function DELETE(req: Request, context: RouteContext) {
     if (!result.deleted) {
       return NextResponse.json({ error: "User not found." }, { status: 404 });
     }
+
+    await writeAdminAuditLog({
+      session,
+      request: req,
+      action: "user.deleted",
+      targetType: "User",
+      targetId: userId,
+      summary: `Deleted user account ${result.email || userId}.`,
+      metadata: {
+        email: result.email || null,
+      },
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {
