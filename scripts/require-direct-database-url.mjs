@@ -9,6 +9,24 @@ const LOCK_RETRY_DELAY_MS = 5_000;
 const sleep = (milliseconds) =>
     new Promise((resolve) => setTimeout(resolve, milliseconds));
 
+const normalizePostgresConnectionString = (value) => {
+    if (!value) return value;
+    try {
+        const url = new URL(value);
+        const sslMode = url.searchParams.get("sslmode");
+        if (
+            ["prefer", "require", "verify-ca"].includes(sslMode) &&
+            !url.searchParams.has("uselibpqcompat")
+        ) {
+            url.searchParams.set("uselibpqcompat", "true");
+            return url.toString();
+        }
+    } catch {
+        return value;
+    }
+    return value;
+};
+
 const fail = (message, details = {}) => {
     console.error(
         JSON.stringify({
@@ -66,7 +84,7 @@ console.log(
 console.log("[migration-check 2/3] Testing PostgreSQL connectivity");
 
 const client = new Client({
-    connectionString: directUrl,
+    connectionString: normalizePostgresConnectionString(directUrl),
     connectionTimeoutMillis: 10_000,
     query_timeout: 10_000,
     application_name: "tomverse-prisma-migrate-check",

@@ -10,8 +10,28 @@ const prismaLogLevels = (process.env.PRISMA_CLIENT_LOG || "")
     .map((level) => level.trim())
     .filter((level): level is Prisma.LogLevel => validLogLevels.has(level));
 
+const normalizePostgresConnectionString = (value: string | undefined) => {
+    if (!value) return value;
+    try {
+        const url = new URL(value);
+        const sslMode = url.searchParams.get("sslmode");
+        if (
+            (sslMode === "prefer" ||
+                sslMode === "require" ||
+                sslMode === "verify-ca") &&
+            !url.searchParams.has("uselibpqcompat")
+        ) {
+            url.searchParams.set("uselibpqcompat", "true");
+            return url.toString();
+        }
+    } catch {
+        return value;
+    }
+    return value;
+};
+
 const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: normalizePostgresConnectionString(process.env.DATABASE_URL),
 });
 
 const adapter = new PrismaPg(pool);
