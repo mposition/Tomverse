@@ -1,11 +1,13 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import {
   ArrowRight,
   CheckCircle2,
   Clipboard,
   ExternalLink,
+  Mail,
   RefreshCw,
   ShieldAlert,
   XCircle,
@@ -58,6 +60,8 @@ export function AdminOperationsPanel({
   needsAttention,
   envChecks,
 }: Props) {
+  const [isSendingTestEmail, setIsSendingTestEmail] = useState(false);
+
   const copyReport = async () => {
     const missingEnv = envChecks
       .filter((check) => !check.configured)
@@ -84,6 +88,34 @@ export function AdminOperationsPanel({
       dispatchAppToast("Admin snapshot copied.", "success");
     } catch {
       dispatchAppToast("Could not copy admin snapshot.", "error");
+    }
+  };
+
+  const sendTestEmail = async () => {
+    if (isSendingTestEmail) return;
+    setIsSendingTestEmail(true);
+    try {
+      const response = await fetch("/api/admin/test-email", {
+        method: "POST",
+      });
+      const data = (await response.json().catch(() => null)) as {
+        error?: string;
+        id?: string | null;
+      } | null;
+      if (!response.ok) {
+        throw new Error(data?.error || "Could not send test email.");
+      }
+      dispatchAppToast(
+        data?.id ? `Test email sent. Resend ID: ${data.id}` : "Test email sent.",
+        "success"
+      );
+    } catch (error) {
+      dispatchAppToast(
+        error instanceof Error ? error.message : "Could not send test email.",
+        "error"
+      );
+    } finally {
+      setIsSendingTestEmail(false);
     }
   };
 
@@ -119,6 +151,15 @@ export function AdminOperationsPanel({
           >
             <Clipboard className="h-4 w-4" />
             Copy snapshot
+          </button>
+          <button
+            type="button"
+            onClick={sendTestEmail}
+            disabled={isSendingTestEmail}
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-sm font-black text-emerald-100 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <Mail className="h-4 w-4" />
+            {isSendingTestEmail ? "Sending..." : "Send test email"}
           </button>
         </div>
       </div>

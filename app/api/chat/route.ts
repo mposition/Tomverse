@@ -1024,6 +1024,7 @@ export async function POST(req: Request) {
             model: activeModel,
             messages: formattedMessages,
             maxOutputTokens: budget.maxOutputTokens,
+            maxRetries: modelConfig.provider === "zhipu" ? 0 : undefined,
         });
 
         const sourceReader = result.textStream.getReader();

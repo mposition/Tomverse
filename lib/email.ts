@@ -11,7 +11,16 @@ const fromAddress = () =>
   process.env.BILLING_EMAIL_FROM || "Tomverse AI <billing@tomverse.app>";
 
 export async function sendTransactionalEmail(input: SendEmailInput) {
-  if (!input.to) return { sent: false, skipped: true };
+  if (!input.to) {
+    console.warn(
+      JSON.stringify({
+        event: "transactional_email_skipped",
+        reason: "recipient missing",
+        subject: input.subject,
+      })
+    );
+    return { sent: false, skipped: true };
+  }
 
   const resendApiKey = process.env.RESEND_API_KEY;
   if (!resendApiKey) {
@@ -46,5 +55,19 @@ export async function sendTransactionalEmail(input: SendEmailInput) {
     throw new Error(`Email send failed: ${response.status} ${body.slice(0, 300)}`);
   }
 
-  return { sent: true, skipped: false };
+  const responseBody = (await response.json().catch(() => null)) as {
+    id?: unknown;
+  } | null;
+  console.info(
+    JSON.stringify({
+      event: "transactional_email_sent",
+      provider: "resend",
+      id: typeof responseBody?.id === "string" ? responseBody.id : null,
+      to: input.to,
+      subject: input.subject,
+      from: fromAddress(),
+    })
+  );
+
+  return { sent: true, skipped: false, id: responseBody?.id || null };
 }
