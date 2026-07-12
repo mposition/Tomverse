@@ -40,6 +40,11 @@ export function AuthButton() {
 
     const { t, lang: globalLang, setLang: setGlobalLang } = useLanguage();
     const chatCallbackUrl = withChatLanguage("/chat", globalLang);
+    const formatCopy = (key: string, values: Record<string, string>) =>
+        Object.entries(values).reduce(
+            (text, [name, value]) => text.replaceAll(`{${name}}`, value),
+            t(key)
+        );
 
     const [theme, setTheme] = useState<"dark" | "light">(APP_DEFAULTS.defaultTheme);
     const [language, setLanguage] = useState<Language>(APP_DEFAULTS.defaultLanguage);
@@ -69,9 +74,9 @@ export function AuthButton() {
         : null;
     const billingIntervalLabel =
         accountUsage?.subscription?.billingInterval === "annual"
-            ? "Annual"
+            ? t("billing.intervalAnnual")
             : accountUsage?.subscription?.billingInterval === "monthly"
-                ? "Monthly"
+                ? t("billing.intervalMonthly")
                 : null;
     const mobileUpgradePlan =
         accountPlan === "Pro" ? "Max" : accountPlan === "Max" ? null : "Pro";
@@ -240,12 +245,12 @@ export function AuthButton() {
     const handleDeleteAccount = async () => {
         if (isRequestingDeletion) return;
         if (!accountDeletionConsent) {
-            dispatchAppToast("계정 삭제 전 모든 대화, 설정, 계정 정보가 삭제됨에 동의해 주세요.", "error");
+            dispatchAppToast(t("auth.deleteAccountConsentRequired"), "error");
             return;
         }
         if (!isAccountDeleteArmed) {
             setIsAccountDeleteArmed(true);
-            dispatchAppToast("한 번 더 누르면 계정과 모든 대화 및 설정 정보가 영구 삭제됩니다.", "info");
+            dispatchAppToast(t("auth.deleteAccountSecondConfirm"), "info");
             return;
         }
         setIsRequestingDeletion(true);
@@ -257,10 +262,10 @@ export function AuthButton() {
             });
             if (!response.ok) throw new Error(`Delete failed: ${response.status}`);
             localStorage.removeItem("tomverse_refund_requested_at");
-            dispatchAppToast("계정이 삭제되었습니다. 게스트 모드로 전환합니다.", "success");
+            dispatchAppToast(t("auth.deleteAccountSuccess"), "success");
             await signOut({ callbackUrl: chatCallbackUrl });
         } catch {
-            dispatchAppToast("계정을 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.", "error");
+            dispatchAppToast(t("auth.deleteAccountFailed"), "error");
         } finally {
             setIsRequestingDeletion(false);
         }
@@ -285,10 +290,10 @@ export function AuthButton() {
             localStorage.setItem("tomverse_refund_requested_at", requestedAt);
             setRefundRequestedAt(requestedAt);
             setRefundReason("");
-            dispatchAppToast("환불 요청이 접수되었습니다.", "success");
+            dispatchAppToast(t("auth.refundRequestSuccess"), "success");
         } catch (error) {
             dispatchAppToast(
-                error instanceof Error ? error.message : "환불 요청을 접수하지 못했습니다.",
+                error instanceof Error ? error.message : t("auth.refundRequestFailed"),
                 "error"
             );
         } finally {
@@ -312,13 +317,15 @@ export function AuthButton() {
             setSubscriptionCancelAtPeriodEnd(true);
             dispatchAppToast(
                 data?.currentPeriodEnd
-                    ? `플랜이 ${new Date(data.currentPeriodEnd).toLocaleDateString()}까지 유지되고 이후 자동 취소됩니다.`
-                    : "현재 결제 기간 종료 시 플랜이 자동 취소됩니다.",
+                    ? formatCopy("auth.cancelPlanToastUntil", {
+                        date: new Date(data.currentPeriodEnd).toLocaleDateString(globalLang),
+                    })
+                    : t("auth.cancelPlanToastPeriodEnd"),
                 "success"
             );
         } catch (error) {
             dispatchAppToast(
-                error instanceof Error ? error.message : "플랜 취소를 처리하지 못했습니다.",
+                error instanceof Error ? error.message : t("auth.cancelPlanFailed"),
                 "error"
             );
         } finally {
@@ -574,11 +581,10 @@ export function AuthButton() {
                                                 </button>
                                                 <div className="rounded-xl border border-red-300 bg-white p-3 dark:border-red-900/70 dark:bg-red-950/30 sm:col-span-2">
                                                     <p className="text-sm font-black text-red-700 dark:text-red-200">
-                                                        계정 삭제는 즉시 처리되며 되돌릴 수 없습니다.
+                                                        {t("auth.deleteAccountImmediateTitle")}
                                                     </p>
                                                     <p className="mt-1 text-xs leading-5 text-red-700/80 dark:text-red-100/80">
-                                                        삭제 시 계정, 로그인 연결, 모든 대화, 프로젝트, 사용자 설정, 사용량 정보가 삭제됩니다.
-                                                        유료 구독이 연결되어 있으면 Stripe 구독 취소를 시도한 뒤 계정이 삭제됩니다.
+                                                        {t("auth.deleteAccountImmediateDescription")}
                                                     </p>
                                                     <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-800 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-100">
                                                         <input
@@ -591,7 +597,7 @@ export function AuthButton() {
                                                             className="mt-0.5 h-4 w-4 cursor-pointer accent-red-600"
                                                         />
                                                         <span>
-                                                            모든 대화 및 설정 정보가 영구 삭제되며 복구할 수 없다는 점에 동의합니다.
+                                                            {t("auth.deleteAccountConsent")}
                                                         </span>
                                                     </label>
                                                     <button
@@ -602,10 +608,10 @@ export function AuthButton() {
                                                     >
                                                         <Trash2 className="h-4 w-4" />
                                                         {isRequestingDeletion
-                                                            ? "계정 삭제 중..."
+                                                            ? t("auth.deletingAccount")
                                                             : isAccountDeleteArmed
-                                                                ? "영구 삭제 확인"
-                                                                : "계정 삭제"}
+                                                                ? t("auth.confirmPermanentDelete")
+                                                                : t("auth.deleteAccount")}
                                                     </button>
                                                 </div>
                                             </div>
@@ -635,7 +641,7 @@ export function AuthButton() {
                                                     {billingIntervalLabel && (
                                                         <div className="rounded-xl border border-blue-200 bg-white/70 px-3 py-2 text-xs font-semibold text-blue-700 dark:border-blue-900/60 dark:bg-zinc-950/50 dark:text-blue-200">
                                                             <span className="block text-[11px] uppercase tracking-wide opacity-70">
-                                                                Billing
+                                                                {t("auth.billingInterval")}
                                                             </span>
                                                             {billingIntervalLabel}
                                                         </div>
@@ -655,11 +661,12 @@ export function AuthButton() {
                                             <div className="grid gap-4 lg:grid-cols-2">
                                                 <section className="rounded-2xl border border-blue-200 bg-blue-50 p-4 dark:border-blue-900/60 dark:bg-blue-950/20">
                                                     <h4 className="text-sm font-bold text-blue-800 dark:text-blue-200">
-                                                        플랜 취소
+                                                        {t("auth.cancelPlanTitle")}
                                                     </h4>
                                                     <p className="mt-1 text-sm leading-6 text-blue-800/80 dark:text-blue-100/80">
-                                                        구독은 현재 결제 기간이 끝날 때 취소됩니다. 멤버십과 유료 기능은
-                                                        {planPeriodEndLabel ? ` ${planPeriodEndLabel}까지` : " 현재 결제 기간 종료일까지"} 유지됩니다.
+                                                        {formatCopy("auth.cancelPlanDescription", {
+                                                            date: planPeriodEndLabel || t("auth.cancelPlanFallbackDate"),
+                                                        })}
                                                     </p>
                                                     <button
                                                         type="button"
@@ -669,32 +676,31 @@ export function AuthButton() {
                                                     >
                                                         <CreditCard className="h-4 w-4" />
                                                         {subscriptionCancelAtPeriodEnd
-                                                            ? "기간 종료 시 취소 예약됨"
+                                                            ? t("auth.cancelPlanButtonScheduled")
                                                             : isCancellingSubscription
-                                                                ? "플랜 취소 처리 중..."
-                                                                : "기간 종료 시 플랜 취소"}
+                                                                ? t("auth.cancelPlanProcessing")
+                                                                : t("auth.cancelPlanButton")}
                                                     </button>
                                                     {subscriptionCancelAtPeriodEnd && (
                                                         <p className="mt-2 text-xs font-semibold text-blue-800 dark:text-blue-100">
-                                                            다음 결제는 진행되지 않으며, 만료일까지 현재 플랜을 사용할 수 있습니다.
+                                                            {t("auth.cancelPlanNotice")}
                                                         </p>
                                                     )}
                                                 </section>
 
                                                 <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/60 dark:bg-amber-950/20">
                                                     <h4 className="text-sm font-bold text-amber-800 dark:text-amber-200">
-                                                        환불 요청
+                                                        {t("auth.refundRequestTitle")}
                                                     </h4>
                                                     <p className="mt-1 text-sm leading-6 text-amber-800/80 dark:text-amber-100/80">
-                                                        환불은 운영팀 검토 후 승인됩니다. 환불이 승인되는 경우 멤버십은 Free 플랜으로 변경될 수 있으며,
-                                                        처리 시간은 결제 수단과 Stripe 정책에 따라 달라질 수 있습니다.
+                                                        {t("auth.refundRequestDescription")}
                                                     </p>
                                                     <textarea
                                                         value={refundReason}
                                                         onChange={(event) => setRefundReason(event.target.value)}
                                                         maxLength={1000}
                                                         rows={3}
-                                                        placeholder="요청 사유를 간단히 적어주세요. 예: 결제 오류, 중복 결제, 서비스가 기대와 다름"
+                                                        placeholder={t("auth.refundReasonPlaceholder")}
                                                         className="mt-3 w-full resize-none rounded-xl border border-amber-200 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-amber-500 focus:ring-4 focus:ring-amber-500/10 dark:border-amber-900/60 dark:bg-zinc-950 dark:text-zinc-100"
                                                     />
                                                     <button
@@ -705,14 +711,14 @@ export function AuthButton() {
                                                     >
                                                         <LifeBuoy className="h-4 w-4" />
                                                         {refundRequestedAt
-                                                            ? "환불 요청 접수됨"
+                                                            ? t("auth.refundRequested")
                                                             : isRequestingRefund
-                                                                ? "환불 요청 접수 중..."
-                                                                : "환불 요청하기"}
+                                                                ? t("auth.refundRequesting")
+                                                                : t("auth.requestRefund")}
                                                     </button>
                                                     {refundRequestedAt && (
                                                         <p className="mt-2 text-xs font-semibold text-amber-800 dark:text-amber-100">
-                                                            접수일: {new Date(refundRequestedAt).toLocaleDateString()}
+                                                            {t("auth.refundRequestedAt")}: {new Date(refundRequestedAt).toLocaleDateString(globalLang)}
                                                         </p>
                                                     )}
                                                 </section>
