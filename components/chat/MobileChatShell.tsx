@@ -62,6 +62,8 @@ type MobileChatShellProps = {
   onToggleModel: (modelId: string) => void;
   onSubmit: () => void;
   onCompareSummary: () => void;
+  onResponseComplete: (promptId: string | null, modelId: string) => void;
+  onFollowupSent: (modelId: string) => void;
 };
 
 export function MobileChatShell({
@@ -93,6 +95,8 @@ export function MobileChatShell({
   onToggleModel,
   onSubmit,
   onCompareSummary,
+  onResponseComplete,
+  onFollowupSent,
 }: MobileChatShellProps) {
   const { t } = useLanguage();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -413,6 +417,8 @@ export function MobileChatShell({
                   isGuestMode={isGuestMode}
                   hideModelOnlyInput
                   onStatusChange={handleModelStatusChange}
+                  onResponseComplete={onResponseComplete}
+                  onFollowupSent={onFollowupSent}
                 />
               </div>
             );

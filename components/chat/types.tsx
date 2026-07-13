@@ -26,6 +26,7 @@ export type Conversation = {
     isLocked?: boolean;
     shareEnabled?: boolean;
     shareExpiresAt?: string | null;
+    messageCount?: number;
 };
 
 export const MAX_SELECTED_MODELS = 3;

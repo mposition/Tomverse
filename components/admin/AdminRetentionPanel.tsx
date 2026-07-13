@@ -107,7 +107,7 @@ export function AdminRetentionPanel() {
             Data retention operations
           </h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-            Monitor cleanup targets for usage buckets, request leases, share snapshots, provider checks, alert logs, and audit retention.
+            Monitor cleanup targets for usage buckets, request leases, share snapshots, product analytics, provider checks, alert logs, and audit retention.
           </p>
         </div>
         <button

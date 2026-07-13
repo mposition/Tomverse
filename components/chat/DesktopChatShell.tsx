@@ -54,6 +54,8 @@ type DesktopChatShellProps = {
   onTogglePanelDisable: (modelId: string) => void;
   onRemoveModel: (modelId: string) => void;
   onCompareSummary: () => void;
+  onResponseComplete: (promptId: string | null, modelId: string) => void;
+  onFollowupSent: (modelId: string) => void;
 };
 
 export function DesktopChatShell({
@@ -88,6 +90,8 @@ export function DesktopChatShell({
   onTogglePanelDisable,
   onRemoveModel,
   onCompareSummary,
+  onResponseComplete,
+  onFollowupSent,
 }: DesktopChatShellProps) {
   const { t } = useLanguage();
 
@@ -222,6 +226,8 @@ export function DesktopChatShell({
                   promptPayload={promptPayload}
                   isPanelDisabled={isPanelDisabled}
                   isGuestMode={isGuestMode}
+                  onResponseComplete={onResponseComplete}
+                  onFollowupSent={onFollowupSent}
                 />
               </div>
             );

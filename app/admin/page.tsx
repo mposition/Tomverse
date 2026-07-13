@@ -8,6 +8,7 @@ import {
     Activity,
     AlertTriangle,
     ArrowRight,
+    BarChart3,
     Bell,
     CheckCircle2,
     Cloud,
@@ -42,6 +43,7 @@ import { AdminInfrastructurePanel } from "@/components/admin/AdminInfrastructure
 import { AdminModelMetricsPanel, type AdminModelMetricRow } from "@/components/admin/AdminModelMetricsPanel";
 import { AdminNotificationsPanel, type AdminNotificationRow } from "@/components/admin/AdminNotificationsPanel";
 import { AdminOperationsPanel } from "@/components/admin/AdminOperationsPanel";
+import { AdminProductAnalyticsPanel } from "@/components/admin/AdminProductAnalyticsPanel";
 import {
     AdminProviderOpsPanel,
     type AdminProviderIncidentRow,
@@ -75,6 +77,7 @@ import {
     type ProviderHealthStatus,
 } from "@/lib/providerMonitoring";
 import { getModelOverrides } from "@/lib/modelOverrides";
+import { getProductAnalyticsDashboard } from "@/lib/productAnalyticsDashboard";
 
 const money = (microUsd: number) => `$${(microUsd / 1_000_000).toFixed(2)}`;
 
@@ -128,6 +131,12 @@ const adminTabs = [
         icon: Activity,
     },
     {
+        id: "analytics",
+        label: "Analytics",
+        description: "Funnel and activation",
+        icon: BarChart3,
+    },
+    {
         id: "infrastructure",
         label: "Infrastructure",
         description: "Railway, R2, and database",
@@ -168,6 +177,8 @@ const isConfigured = (value: string | undefined) =>
     typeof value === "string" && value.trim().length > 0;
 const isStrongSecret = (value: string | undefined) =>
     typeof value === "string" && value.trim().length >= 32;
+const isGa4MeasurementId = (value: string | undefined) =>
+    typeof value === "string" && /^G-[A-Z0-9]+$/.test(value.trim());
 const azureOAuthRequested =
     isConfigured(process.env.AZURE_AD_CLIENT_ID) ||
     isConfigured(process.env.AZURE_AD_CLIENT_SECRET) ||
@@ -369,6 +380,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         providerChecks,
         checkoutStartedCount,
         usersWithConversations,
+        productAnalyticsDashboard,
     ] = await Promise.all([
         getProviderHealthDashboard({ includeErrorEvents: true }),
         getBillingPlans(),
@@ -472,6 +484,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             by: ["userId"],
             _count: { _all: true },
         }),
+        getProductAnalyticsDashboard(),
     ]);
     const availableCount = dashboard.providers.filter(
         (provider) => provider.status === "available"
@@ -754,12 +767,14 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         process.env.STRIPE_SECRET_KEY,
         process.env.STRIPE_WEBHOOK_SECRET,
         process.env.RESEND_API_KEY,
+        process.env.GA4_API_SECRET,
     ].filter((value) => !isConfigured(value)).length +
         [
             isStrongSecret(process.env.NEXTAUTH_SECRET),
             isStrongSecret(process.env.OAUTH_TOKEN_ENCRYPTION_KEY),
             isStrongSecret(process.env.MAINTENANCE_SECRET),
             azureOAuthConfigurationComplete,
+            isGa4MeasurementId(process.env.GA4_MEASUREMENT_ID),
         ].filter((configured) => !configured).length;
     const alertFailures = notificationRows.filter((row) => row.status === "failed").length;
     const healthScore = Math.max(
@@ -810,6 +825,16 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             name: "STRIPE_WEBHOOK_SECRET",
             configured: isConfigured(process.env.STRIPE_WEBHOOK_SECRET),
             description: "Required to trust Stripe billing events.",
+        },
+        {
+            name: "GA4_MEASUREMENT_ID",
+            configured: isGa4MeasurementId(process.env.GA4_MEASUREMENT_ID),
+            description: "Public GA4 web data-stream identifier used after analytics consent.",
+        },
+        {
+            name: "GA4_API_SECRET",
+            configured: isConfigured(process.env.GA4_API_SECRET),
+            description: "Server-only Measurement Protocol secret for purchase and cancellation events.",
         },
         {
             name: "RESEND_API_KEY",
@@ -1042,6 +1067,10 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
 
                     {activeTab === "search" && (
                         <AdminGlobalSearchPanel />
+                    )}
+
+                    {activeTab === "analytics" && (
+                        <AdminProductAnalyticsPanel dashboard={productAnalyticsDashboard} />
                     )}
 
                     {activeTab === "platform" && (

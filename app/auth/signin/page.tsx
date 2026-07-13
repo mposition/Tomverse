@@ -7,6 +7,7 @@ import { useLanguage } from "@/components/LanguageProvider";
 import Link from "next/link";
 import { ShieldCheck } from "lucide-react";
 import { withChatLanguage } from "@/lib/localizedCallbackUrl";
+import { markSignupStarted } from "@/lib/productAnalyticsClient";
 
 function SignInButtons() {
     const searchParams = useSearchParams();
@@ -53,7 +54,10 @@ function SignInButtons() {
             <button
                 type="button"
                 disabled={!acceptedTerms}
-                onClick={() => signIn("google", { callbackUrl })}
+                onClick={() => {
+                    markSignupStarted("google");
+                    void signIn("google", { callbackUrl });
+                }}
                 className={providerButtonClass}
             >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -65,7 +69,10 @@ function SignInButtons() {
             <button
                 type="button"
                 disabled={!acceptedTerms}
-                onClick={() => signIn("azure-ad", { callbackUrl })}
+                onClick={() => {
+                    markSignupStarted("azure-ad");
+                    void signIn("azure-ad", { callbackUrl });
+                }}
                 className={providerButtonClass}
             >
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 21 21" className="h-5 w-5">
@@ -81,7 +88,10 @@ function SignInButtons() {
             <button
                 type="button"
                 disabled={!acceptedTerms}
-                onClick={() => signIn("naver", { callbackUrl })}
+                onClick={() => {
+                    markSignupStarted("naver");
+                    void signIn("naver", { callbackUrl });
+                }}
                 className="flex w-full items-center justify-center gap-3 rounded-xl bg-[#03C75A] px-4 py-3 text-sm font-semibold text-white transition-all hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             >
                 <span className="font-black text-white">N</span>

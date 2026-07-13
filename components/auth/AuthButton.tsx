@@ -28,6 +28,10 @@ import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { dispatchAppToast } from "@/lib/appToast";
 import { notifyUserSettingsUpdated } from "@/lib/userSettingsEvents";
 import { useUserUsage } from "@/components/chat/useUserUsage";
+import {
+    getAnalyticsAttributionSnapshot,
+    trackProductEvent,
+} from "@/lib/productAnalyticsClient";
 import { UpgradeInterestButton } from "@/components/marketing/UpgradeInterestButton";
 import { withChatLanguage } from "@/lib/localizedCallbackUrl";
 
@@ -309,6 +313,10 @@ export function AuthButton() {
         try {
             const response = await fetch("/api/billing/cancel-subscription", {
                 method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    analytics: getAnalyticsAttributionSnapshot() || undefined,
+                }),
             });
             const data = (await response.json().catch(() => null)) as
                 | { error?: string; currentPeriodEnd?: string | null }
@@ -867,7 +875,12 @@ export function AuthButton() {
         </select>
       </label>
       <button
-        onClick={() => signIn(undefined, { callbackUrl: chatCallbackUrl })}
+        onClick={() => {
+          trackProductEvent("cta_start_click", 0, {
+            cta_location: "account_login",
+          });
+          void signIn(undefined, { callbackUrl: chatCallbackUrl });
+        }}
         className="cursor-pointer w-full rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-blue-950/20 transition-all hover:bg-blue-500"
       >
         {t("auth.login")}

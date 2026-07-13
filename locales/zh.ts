@@ -407,7 +407,7 @@ export const zh = {
     },
     privacyPolicy: {
         title: "隐私政策",
-        effective: "生效日期：2026 年 7 月 9 日",
+        effective: "生效日期：2026 年 7 月 13 日",
         intro: "Tomverse 仅在提供服务所需范围内处理个人信息和聊天数据。本政策说明标准对话与 Private Mode 的数据流差异。",
         collectedTitle: "我们处理的信息",
         collected: "我们可能处理登录提供商提供的账号标识符、邮箱和个人资料、用户设置、标准对话和消息、附件、分享设置、使用数据以及安全日志。用于防止滥用的 IP 信息会经过哈希处理后用于限流。",
@@ -419,6 +419,8 @@ export const zh = {
         private: "Private Mode 不会在 Tomverse 数据库中保存对话房间或消息。但请求仍会经过 Tomverse 服务器并发送给所选 AI 提供商。它并不是会删除安全计数、运营记录或提供商侧处理记录的完全无记录模式。",
         attachmentsTitle: "附件",
         attachments: "附件可能会临时存储在加密对象存储中，用于发送给模型和提取文档内容。当前临时附件会根据生命周期策略在约一天后删除。",
+        analyticsTitle: "产品分析与活动归因",
+        analytics: "经用户同意，Tomverse 会记录获准的产品事件，以及 UTM 来源、语言、国家、模型数量和方案等活动元数据。同样的获准元数据可能发送至 Google Analytics 4。不会包含提示词、模型回复、文件名、文件内容、邮箱地址或个人资料名称。用户可在分析开始前拒绝。",
         retentionTitle: "保留与删除",
         retention: "标准对话可能会保留到用户删除或账号数据被删除为止。Private Mode 的聊天记录不会保存到数据库。法律义务、安全调查或事件响应所需的最少记录可能会单独保留。",
         sharingTitle: "分享链接",

@@ -24,7 +24,7 @@ const directives = (
   "font-src 'self' data:",
   `connect-src 'self'${
     isDevelopment ? " ws: http:" : ""
-  } https://accounts.google.com https://oauth2.googleapis.com https://www.googleapis.com https://*.googleapis.com https://*.r2.cloudflarestorage.com https://challenges.cloudflare.com${
+  } https://accounts.google.com https://oauth2.googleapis.com https://www.googleapis.com https://*.googleapis.com https://www.google-analytics.com https://region1.google-analytics.com https://*.google-analytics.com https://*.r2.cloudflarestorage.com https://challenges.cloudflare.com${
     r2Origin ? ` ${r2Origin}` : ""
   }`,
   "frame-src https://accounts.google.com https://content.googleapis.com https://docs.google.com https://drive.google.com https://challenges.cloudflare.com",
@@ -43,7 +43,7 @@ export const createStrictCsp = (nonce: string) =>
     ...directives(
       `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${
         isDevelopment ? " 'unsafe-eval'" : ""
-      } https://accounts.google.com https://apis.google.com https://challenges.cloudflare.com`,
+      } https://accounts.google.com https://apis.google.com https://www.googletagmanager.com https://challenges.cloudflare.com`,
       `style-src 'self' 'nonce-${nonce}'${
         isDevelopment ? " 'unsafe-inline'" : ""
       } https://accounts.google.com https://challenges.cloudflare.com`,

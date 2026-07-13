@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
+import { randomUUID } from "node:crypto";
 import type Stripe from "stripe";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
@@ -20,12 +21,18 @@ import { sendBillingWelcomeEmail } from "@/lib/billingEmails";
 import { prisma } from "@/lib/prisma";
 import { getPublicAppOrigin } from "@/lib/publicUrl";
 import { getStripe } from "@/lib/stripe";
+import { analyticsAttributionSchema } from "@/lib/productAnalyticsShared";
+import {
+  analyticsCountryFromHeaders,
+  recordProductAnalyticsEvent,
+} from "@/lib/productAnalyticsServer";
 
 const checkoutSchema = z
   .object({
     planId: z.enum(["pro", "max"]),
     billingInterval: z.enum(["monthly", "annual"]).default("monthly"),
     promoCode: z.string().trim().toUpperCase().max(32).optional(),
+    analytics: analyticsAttributionSchema.optional(),
   })
   .strict();
 
@@ -310,7 +317,7 @@ export async function POST(req: Request) {
       day: 20,
     });
 
-    const { planId, billingInterval, promoCode } = await readLimitedJson(
+    const { planId, billingInterval, promoCode, analytics } = await readLimitedJson(
       req,
       4 * 1024,
       checkoutSchema
@@ -383,6 +390,25 @@ export async function POST(req: Request) {
       priceCentsForInterval(plan, billingInterval),
       appliedPromotion
     );
+    const edgeCountry = analyticsCountryFromHeaders(req.headers);
+    const trustedAnalytics = analytics
+      ? {
+          ...analytics,
+          country: edgeCountry === "ZZ" ? analytics.country : edgeCountry,
+        }
+      : null;
+    const analyticsMetadata: Record<string, string> = trustedAnalytics
+      ? {
+          analyticsClientId: trustedAnalytics.client_id,
+          analyticsSessionId: trustedAnalytics.session_id,
+          analyticsUtmSource: trustedAnalytics.utm_source,
+          analyticsUtmMedium: trustedAnalytics.utm_medium,
+          analyticsUtmCampaign: trustedAnalytics.utm_campaign,
+          analyticsLanguage: trustedAnalytics.language,
+          analyticsCountry: trustedAnalytics.country,
+          analyticsValue: String(finalPriceCents / 100),
+        }
+      : {};
     const origin = getPublicAppOrigin(req);
     if (finalPriceCents <= 0) {
       const periodEnd = await activateZeroDollarPlan({
@@ -400,6 +426,33 @@ export async function POST(req: Request) {
       }).catch((emailError) => {
         console.error("Billing welcome email failed:", emailError);
       });
+      if (trustedAnalytics) {
+        const transactionId = `zero-${randomUUID()}`;
+        await recordProductAnalyticsEvent({
+          eventName: "purchase_completed",
+          source: "server",
+          userId: user.id,
+          attribution: trustedAnalytics,
+          modelCount: 0,
+          plan: tierForPlanId(planId),
+          properties: {
+            billing_interval: billingInterval,
+            plan_id: planId,
+            value: 0,
+            currency: "USD",
+            transaction_id: transactionId,
+          },
+          dedupeKey: `zero-checkout:${transactionId}`,
+          sendToGa4: true,
+        }).catch((analyticsError) => {
+          console.warn("Zero-dollar purchase analytics failed.", {
+            errorName:
+              analyticsError instanceof Error
+                ? analyticsError.name
+                : "UnknownError",
+          });
+        });
+      }
 
       return NextResponse.json({
         success: true,
@@ -452,6 +505,7 @@ export async function POST(req: Request) {
           billingInterval,
           promoCode: appliedPromotion?.code || "",
           promotionId: appliedPromotion?.id || "",
+          ...analyticsMetadata,
         },
       },
       metadata: {
@@ -460,6 +514,7 @@ export async function POST(req: Request) {
         billingInterval,
         promoCode: appliedPromotion?.code || "",
         promotionId: appliedPromotion?.id || "",
+        ...analyticsMetadata,
       },
     });
 

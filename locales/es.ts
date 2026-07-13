@@ -409,7 +409,7 @@ export const es = {
     },
     privacyPolicy: {
         title: "Política de privacidad",
-        effective: "Vigente desde: 9 de julio de 2026",
+        effective: "Vigente desde: 13 de julio de 2026",
         intro: "Tomverse procesa información personal y datos de chat solo cuando es necesario para prestar el servicio. Este aviso explica los flujos de datos de los chats estándar y del modo privado.",
         collectedTitle: "Información que procesamos",
         collected: "Podemos procesar identificadores de cuenta, correo y datos de perfil proporcionados por proveedores de inicio de sesión, ajustes de usuario, chats y mensajes estándar, adjuntos, ajustes de compartición, datos de uso y registros de seguridad. La información IP usada contra abusos se cifra para límites de uso.",
@@ -421,6 +421,8 @@ export const es = {
         private: "El modo privado no almacena salas ni mensajes en la base de datos de Tomverse. Las solicitudes siguen pasando por servidores de Tomverse y se envían al proveedor de IA seleccionado. No es un modo sin registros que elimine contadores de seguridad, registros operativos o procesamiento del proveedor.",
         attachmentsTitle: "Adjuntos",
         attachments: "Los adjuntos pueden almacenarse temporalmente en almacenamiento cifrado para entrega al modelo y extracción de documentos. Actualmente se eliminan tras aproximadamente un día mediante la política de ciclo de vida.",
+        analyticsTitle: "Analítica de producto y atribución de campañas",
+        analytics: "Con consentimiento, Tomverse registra eventos de producto aprobados y metadatos de campaña como fuente UTM, idioma, país, número de modelos y plan. Los mismos metadatos aprobados pueden enviarse a Google Analytics 4. No se incluyen prompts, respuestas, nombres o contenidos de archivos, direcciones de correo ni nombres de perfil. El consentimiento puede rechazarse antes de iniciar la analítica.",
         retentionTitle: "Retención y eliminación",
         retention: "Los chats estándar pueden permanecer hasta que el usuario los elimine o se borren los datos de la cuenta. El historial del modo privado no se almacena en la base. Algunos registros mínimos necesarios para obligaciones legales, investigaciones de seguridad o respuesta a incidentes pueden conservarse por separado.",
         sharingTitle: "Enlaces compartidos",

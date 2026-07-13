@@ -71,6 +71,9 @@ export async function GET(req: Request) {
     const conversations = await prisma.conversation.findMany({
       where: { userId },
       orderBy: { updatedAt: "desc" },
+      include: {
+        _count: { select: { messages: true } },
+      },
     });
 
     const formattedConversations = conversations.map((conv) => ({
@@ -85,6 +88,7 @@ export async function GET(req: Request) {
           !!conv.shareExpiresAt &&
           conv.shareExpiresAt > new Date(),
         shareExpiresAt: conv.shareExpiresAt?.toISOString() || null,
+        messageCount: conv._count.messages,
         password: undefined
     }));
 
@@ -168,6 +172,7 @@ export async function POST(req: Request) {
           selectedModels: safeParse(newConversation.selectedModels, [defaultEngine]),
           disabledPanels: safeParse(newConversation.disabledPanels, []),
           isLocked: !!newConversation.password,
+          messageCount: 0,
           password: undefined
       };
 

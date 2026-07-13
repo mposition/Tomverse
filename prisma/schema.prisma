@@ -23,17 +23,19 @@ model User {
   subscriptionCurrentPeriodEnd  DateTime?
   subscriptionBillingInterval   String?
   subscriptionCancelAtPeriodEnd Boolean       @default(false)
+  createdAt                     DateTime?     @default(now())
   settings                      UserSettings?
 
-  accounts             Account[]
-  sessions             Session[]
-  projects             ConversationProject[]
-  refundRequests       RefundRequest[]
-  promotionRedemptions BillingPromotionRedemption[]
-  adminAuditLogs       AdminAuditLog[]
-  adminNotes           AdminNote[]
-  modelOverrides       ModelOverride[]
-  conversations        Conversation[]
+  accounts               Account[]
+  sessions               Session[]
+  projects               ConversationProject[]
+  refundRequests         RefundRequest[]
+  promotionRedemptions   BillingPromotionRedemption[]
+  adminAuditLogs         AdminAuditLog[]
+  adminNotes             AdminNote[]
+  modelOverrides         ModelOverride[]
+  conversations          Conversation[]
+  productAnalyticsEvents ProductAnalyticsEvent[]
 }
 
 model UserSettings {
@@ -141,6 +143,32 @@ model Message {
   createdAt      DateTime     @default(now())
 
   @@index([conversationId])
+}
+
+model ProductAnalyticsEvent {
+  id              String   @id @default(cuid())
+  dedupeKey       String   @unique
+  eventName       String
+  source          String
+  userId          String?
+  user            User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  anonymousIdHash String
+  sessionIdHash   String
+  utmSource       String
+  utmMedium       String
+  utmCampaign     String
+  language        String
+  country         String
+  modelCount      Int
+  plan            String
+  properties      Json?
+  occurredAt      DateTime @default(now())
+  createdAt       DateTime @default(now())
+
+  @@index([eventName, occurredAt])
+  @@index([userId, occurredAt])
+  @@index([anonymousIdHash, occurredAt])
+  @@index([utmSource, utmCampaign, occurredAt])
 }
 
 model ChatUsageBucket {

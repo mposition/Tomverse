@@ -36,6 +36,8 @@ type ChatAppProps = {
     modelId: string,
     status: "idle" | "loading" | "responding" | "error" | "paused"
   ) => void;
+  onResponseComplete?: (promptId: string | null, modelId: string) => void;
+  onFollowupSent?: (modelId: string) => void;
 };
 
 function ChatAppComponent({
@@ -46,6 +48,8 @@ function ChatAppComponent({
   isGuestMode = false,
   hideModelOnlyInput = false,
   onStatusChange,
+  onResponseComplete,
+  onFollowupSent,
 }: ChatAppProps) {
   const [isMessagesLoaded, setIsMessagesLoaded] = useState(false);
   const { data: session, status } = useSession();
@@ -264,7 +268,8 @@ function ChatAppComponent({
     text: string,
     targetChatId: string,
     userMsgId: string,
-    attachments: ChatAttachment[] = []
+    attachments: ChatAttachment[] = [],
+    analyticsPromptId: string | null = null
   ) => {
   	if ((!text && attachments.length === 0) || isSendingRef.current) return;
 
@@ -366,6 +371,8 @@ function ChatAppComponent({
           t("chat.responseEmpty"),
           "error"
         );
+      } else {
+        onResponseComplete?.(analyticsPromptId, modelId);
       }
     } catch (error: unknown) {
       const requestError =
@@ -411,6 +418,7 @@ function ChatAppComponent({
     isPrivate,
     messages,
     modelId,
+    onResponseComplete,
     setAssistantMessage,
     t,
   ]);
@@ -457,7 +465,8 @@ function ChatAppComponent({
           promptPayload.text,
           promptPayload.chatId,
           promptPayload.userMessageId,
-          promptPayload.attachments
+          promptPayload.attachments,
+          promptPayload.id
         );
     });
     return () => {
@@ -480,6 +489,7 @@ function ChatAppComponent({
 
         const userMsgId = crypto.randomUUID();
         setModelInput("");
+        onFollowupSent?.(modelId);
 
         if (!isPrivate && !isGuestMode) {
             try {

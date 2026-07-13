@@ -245,6 +245,36 @@ CSP_MODE=enforce
 Do not enable full-page CDN caching for HTML routes while nonce CSP is active.
 API responses may still use their own cache policies.
 
+## Privacy-safe Product Analytics
+
+Apply the product analytics migration before launch:
+
+```text
+npm run db:migrate
+```
+
+Configure the GA4 web stream and create a Measurement Protocol API secret in
+Railway. The API secret must remain server-only:
+
+```text
+GA4_MEASUREMENT_ID=G-XXXXXXXXXX
+GA4_API_SECRET=your-ga4-measurement-protocol-secret
+```
+
+Tomverse does not load Google Analytics or create its pseudonymous analytics
+identifier until the visitor accepts the analytics notice. Every accepted
+event is also written to the bounded first-party analytics ledger so the Admin
+Console Analytics tab can report the weekly active comparison-user North Star,
+the 24-hour activation definition, D1/D7 return, funnel counts, and campaign
+attribution. Prompts, responses, filenames, file contents, email, and profile
+data are rejected by the analytics schema.
+
+In GA4 Admin, register event-scoped custom dimensions for `utm_source`,
+`utm_medium`, `utm_campaign`, `language`, `country`, and `plan`, plus an
+event-scoped custom metric for numeric `model_count`. Mark at least
+`multi_model_compare_completed`, `signup_completed`, and `purchase_completed`
+as key events before paid acquisition begins.
+
 ## Scheduled Maintenance
 
 Set the same secret on the web service and the Railway Cron service:

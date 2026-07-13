@@ -120,6 +120,14 @@ export async function cleanupExpiredData() {
     },
   });
 
+  const productAnalyticsEvents = await prisma.productAnalyticsEvent.deleteMany({
+    where: {
+      occurredAt: {
+        lt: new Date(Date.now() - 400 * 24 * 60 * 60 * 1000),
+      },
+    },
+  });
+
   const shareSnapshots = await prisma.$executeRaw`
     UPDATE "Conversation"
     SET
@@ -147,6 +155,7 @@ export async function cleanupExpiredData() {
     usageBuckets: Number(usageBuckets),
     requestLeases: Number(requestLeases),
     providerErrorEvents: providerErrorEvents.count,
+    productAnalyticsEvents: productAnalyticsEvents.count,
     shareSnapshots: Number(shareSnapshots),
     oauthTokensEncrypted,
   };

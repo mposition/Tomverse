@@ -25,11 +25,13 @@ async function dryRunCleanup() {
   const now = new Date();
   const usageCutoff = new Date(Date.now() - 120 * 24 * 60 * 60 * 1000);
   const providerErrorCutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  const [sessions, usageBuckets, requestLeases, providerErrorEvents, shareSnapshots] = await Promise.all([
+  const productAnalyticsCutoff = new Date(Date.now() - 400 * 24 * 60 * 60 * 1000);
+  const [sessions, usageBuckets, requestLeases, providerErrorEvents, productAnalyticsEvents, shareSnapshots] = await Promise.all([
     prisma.session.count({ where: { expires: { lte: now } } }),
     prisma.chatUsageBucket.count({ where: { updatedAt: { lt: usageCutoff } } }),
     prisma.chatRequestLease.count({ where: { expiresAt: { lte: now } } }),
     prisma.providerErrorEvent.count({ where: { createdAt: { lt: providerErrorCutoff } } }),
+    prisma.productAnalyticsEvent.count({ where: { occurredAt: { lt: productAnalyticsCutoff } } }),
     prisma.$queryRaw<Array<{ count: bigint }>>`
       SELECT COUNT(*)::bigint AS "count"
       FROM "Conversation"
@@ -46,7 +48,7 @@ async function dryRunCleanup() {
         )
     `.then((rows) => Number(rows[0]?.count || 0)),
   ]);
-  return { sessions, usageBuckets, requestLeases, providerErrorEvents, shareSnapshots };
+  return { sessions, usageBuckets, requestLeases, providerErrorEvents, productAnalyticsEvents, shareSnapshots };
 }
 
 export async function POST(req: Request) {

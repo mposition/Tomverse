@@ -24,9 +24,11 @@ import {
   Workflow,
 } from "lucide-react";
 import { useSession } from "next-auth/react";
+import { useEffect, useRef } from "react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
 import { usePublicBilling } from "@/components/marketing/usePublicBilling";
+import { trackProductEvent } from "@/lib/productAnalyticsClient";
 
 const annualLabelByLanguage: Partial<Record<Language, { annual: string; save: string }>> = {
   en: { annual: "Annual", save: "Save 20%" },
@@ -543,6 +545,13 @@ export function LandingPageContent() {
   const modelLinks = modelLinkLabels[lang];
   const chatHref = `/chat?lang=${encodeURIComponent(lang)}`;
   const primaryCtaLabel = status === "authenticated" ? content.signedInCta : content.primaryCta;
+  const landingTrackedRef = useRef(false);
+
+  useEffect(() => {
+    if (landingTrackedRef.current) return;
+    landingTrackedRef.current = true;
+    trackProductEvent("landing_view");
+  }, []);
 
   return (
     <main className="min-h-screen overflow-x-hidden bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">
@@ -562,6 +571,11 @@ export function LandingPageContent() {
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
               <Link
                 href={chatHref}
+                onClick={() =>
+                  trackProductEvent("cta_start_click", 0, {
+                    cta_location: "landing_hero",
+                  })
+                }
                 className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-blue-600 px-6 text-sm font-black text-white shadow-lg shadow-blue-950/20 transition hover:bg-blue-500"
               >
                 {primaryCtaLabel}

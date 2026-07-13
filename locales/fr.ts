@@ -409,7 +409,7 @@ export const fr = {
     },
     privacyPolicy: {
         title: "Politique de confidentialité",
-        effective: "En vigueur : 9 juillet 2026",
+        effective: "En vigueur : 13 juillet 2026",
         intro: "Tomverse traite les informations personnelles et les données de chat uniquement lorsque cela est nécessaire pour fournir le service. Cet avis explique les flux de données des chats standard et du mode privé.",
         collectedTitle: "Informations traitées",
         collected: "Nous pouvons traiter les identifiants de compte, l'e-mail et les données de profil fournis par les fournisseurs de connexion, les paramètres utilisateur, les chats et messages standard, les pièces jointes, les paramètres de partage, les données d'utilisation et les journaux de sécurité. Les informations IP utilisées contre les abus sont hachées pour la limitation de débit.",
@@ -421,6 +421,8 @@ export const fr = {
         private: "Le mode privé ne stocke pas les salons ni les messages dans la base Tomverse. Les requêtes passent toutefois par les serveurs Tomverse et sont envoyées au fournisseur IA sélectionné. Ce n'est pas un mode zéro trace supprimant les compteurs de sécurité, journaux opérationnels ou traitements côté fournisseur.",
         attachmentsTitle: "Pièces jointes",
         attachments: "Les pièces jointes peuvent être stockées temporairement dans un stockage objet chiffré pour l'envoi au modèle et l'extraction de documents. Elles sont actuellement supprimées après environ un jour par la règle de cycle de vie.",
+        analyticsTitle: "Analyse produit et attribution des campagnes",
+        analytics: "Avec le consentement de l'utilisateur, Tomverse enregistre des événements produit approuvés et des métadonnées de campagne telles que la source UTM, la langue, le pays, le nombre de modèles et le forfait. Les mêmes métadonnées approuvées peuvent être envoyées à Google Analytics 4. Les prompts, réponses, noms et contenus de fichiers, adresses e-mail et noms de profil ne sont pas inclus. Le consentement peut être refusé avant le démarrage de l'analyse.",
         retentionTitle: "Conservation et suppression",
         retention: "Les chats standard peuvent rester jusqu'à leur suppression par l'utilisateur ou la suppression des données du compte. L'historique du mode privé n'est pas stocké dans la base. Certains enregistrements minimaux requis pour des obligations légales, enquêtes de sécurité ou réponses aux incidents peuvent être conservés séparément.",
         sharingTitle: "Liens de partage",

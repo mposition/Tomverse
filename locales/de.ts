@@ -409,7 +409,7 @@ export const de = {
     },
     privacyPolicy: {
         title: "Datenschutzerklärung",
-        effective: "Gültig ab: 9. Juli 2026",
+        effective: "Gültig ab: 13. Juli 2026",
         intro: "Tomverse verarbeitet personenbezogene Informationen und Chatdaten nur soweit erforderlich, um den Dienst bereitzustellen. Dieser Hinweis erklärt die unterschiedlichen Datenflüsse für Standard-Chats und den privaten Modus.",
         collectedTitle: "Verarbeitete Informationen",
         collected: "Wir können Konto-IDs, E-Mail- und Profildaten von Login-Anbietern, Benutzereinstellungen, Standard-Chats und Nachrichten, Anhänge, Freigabeeinstellungen, Nutzungsdaten und Sicherheitsprotokolle verarbeiten. IP-Informationen zur Missbrauchsvermeidung werden für Rate Limits gehasht.",
@@ -421,6 +421,8 @@ export const de = {
         private: "Der private Modus speichert keine Chaträume oder Nachrichten in der Tomverse-Datenbank. Anfragen laufen weiterhin über Tomverse-Server und werden an den ausgewählten KI-Anbieter gesendet. Es ist kein Null-Protokoll-Modus, der Sicherheitszähler, Betriebsaufzeichnungen oder Anbieter-Verarbeitung entfernt.",
         attachmentsTitle: "Anhänge",
         attachments: "Anhänge können vorübergehend in verschlüsseltem Objektspeicher für Modellzustellung und Dokumentextraktion gespeichert werden. Temporäre Anhänge werden derzeit nach etwa einem Tag per Lifecycle-Regel gelöscht.",
+        analyticsTitle: "Produktanalyse und Kampagnenzuordnung",
+        analytics: "Mit Zustimmung erfasst Tomverse genehmigte Produktereignisse und Kampagnenmetadaten wie UTM-Quelle, Sprache, Land, Modellanzahl und Tarif. Dieselben genehmigten Metadaten können an Google Analytics 4 gesendet werden. Prompts, Modellantworten, Dateinamen, Dateiinhalte, E-Mail-Adressen und Profilnamen werden nicht erfasst. Die Zustimmung kann vor Beginn der Analyse verweigert werden.",
         retentionTitle: "Aufbewahrung und Löschung",
         retention: "Standard-Chats können verbleiben, bis der Nutzer sie löscht oder Kontodaten entfernt werden. Der Chatverlauf im privaten Modus wird nicht in der Datenbank gespeichert. Minimale Datensätze für rechtliche Pflichten, Sicherheitsuntersuchungen oder Incident Response können getrennt aufbewahrt werden.",
         sharingTitle: "Freigabelinks",

@@ -5,6 +5,7 @@ import { useState } from "react";
 import { ArrowRight, Menu, X } from "lucide-react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { MarketingLanguageSwitcher } from "./MarketingLanguageSwitcher";
+import { trackProductEvent } from "@/lib/productAnalyticsClient";
 
 const chrome = {
   en: {
@@ -204,6 +205,11 @@ export function MarketingHeader({ maxWidth = "max-w-7xl" }: { maxWidth?: string 
           <MarketingLanguageSwitcher />
           <Link
             href={chatHref}
+            onClick={() =>
+              trackProductEvent("cta_start_click", 0, {
+                cta_location: "marketing_header",
+              })
+            }
             className="hidden h-10 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-bold text-white shadow-sm shadow-blue-950/20 transition hover:bg-blue-500 sm:inline-flex"
           >
             {labels.app}
@@ -247,7 +253,12 @@ export function MarketingHeader({ maxWidth = "max-w-7xl" }: { maxWidth?: string 
             ))}
             <Link
               href={chatHref}
-              onClick={() => setIsMenuOpen(false)}
+              onClick={() => {
+                setIsMenuOpen(false);
+                trackProductEvent("cta_start_click", 0, {
+                  cta_location: "marketing_mobile_menu",
+                });
+              }}
               className="mt-3 inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-black text-white transition hover:bg-blue-500"
             >
               {labels.app}

@@ -27,6 +27,10 @@ import {
   type AppToastTone,
 } from "@/lib/appToast";
 import { useUserUsage } from "@/components/chat/useUserUsage";
+import {
+  trackProductEvent,
+  trackProductEventOnce,
+} from "@/lib/productAnalyticsClient";
 
 const normalizeStringArray = (value: unknown, fallback: string[]) => {
   let parsed = value;
@@ -242,6 +246,9 @@ export default function Home() {
   const [disabledPanels, setDisabledPanels] = useState<string[]>([]);
   const modelSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const modelSyncAbortRef = useRef<AbortController | null>(null);
+  const comparisonCompletionsRef = useRef<Map<string, Set<string>>>(new Map());
+  const comparisonTrackedRef = useRef<Set<string>>(new Set());
+  const promptCountsRef = useRef<Map<string, number>>(new Map());
 
   const [isPrivateMode, setIsPrivateMode] = useState(false);
 
@@ -252,6 +259,9 @@ export default function Home() {
     : accountUsage?.limits.maxModels || APP_DEFAULTS.maxSelectedModels;
   const [guestMessageCount, setGuestMessageCount] = useState(0);
   const MAX_GUEST_MESSAGES = 20;
+  const activeModelCount = selectedModels.filter(
+    (modelId) => !disabledPanels.includes(modelId)
+  ).length;
 
   const isInitialSelectedRef = useRef(false);
   const currentChatIdRef = useRef(currentChatId);
@@ -865,6 +875,13 @@ export default function Home() {
     }
 
     if (isPrivateMode) {
+      const previousCount = promptCountsRef.current.get("private-chat") || 0;
+      trackProductEvent(
+        previousCount === 0 ? "chat_started" : "followup_sent",
+        activeModelCount,
+        { conversation_mode: "private" }
+      );
+      promptCountsRef.current.set("private-chat", previousCount + 1);
       setPromptPayload({ 
         id: Date.now().toString(), 
         text: trimmed, 
@@ -910,10 +927,20 @@ export default function Home() {
     
     if (activeChatId) {
 	  const userMsgId = crypto.randomUUID();
+      const conversation = conversations.find((item) => item.id === activeChatId);
+      const previousCount =
+        promptCountsRef.current.get(activeChatId) ??
+        (conversation?.messageCount ? 1 : 0);
+      trackProductEvent(
+        previousCount === 0 ? "chat_started" : "followup_sent",
+        activeModelCount,
+        { conversation_mode: isGuestMode ? "guest" : "account" }
+      );
+      promptCountsRef.current.set(activeChatId, previousCount + 1);
 
       if (!isGuestMode) {
       try {
-        await fetch(`/api/conversations/${activeChatId}/messages`, {
+        const saveResponse = await fetch(`/api/conversations/${activeChatId}/messages`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ 
@@ -924,6 +951,9 @@ export default function Home() {
             }]
           }),
         });
+        if (!saveResponse.ok) {
+          console.error("Failed to pre-save user message:", saveResponse.status);
+        }
       } catch (e) {
         console.error("Failed to pre-save user message:", e);
       }
@@ -938,8 +968,65 @@ export default function Home() {
       });
       setInputValue("");
       setAttachments([]);
+      setConversations((current) =>
+        current.map((item) =>
+          item.id === activeChatId
+            ? { ...item, messageCount: (item.messageCount || 0) + 1 }
+            : item
+        )
+      );
     }
   };
+
+  const handleAttachmentsChange = useCallback(
+    (nextAttachments: ChatAttachment[]) => {
+      const addedCount = Math.max(0, nextAttachments.length - attachments.length);
+      if (addedCount > 0) {
+        trackProductEvent("file_attached", activeModelCount, {
+          attachment_count: addedCount,
+        });
+      }
+      setAttachments(nextAttachments);
+    },
+    [activeModelCount, attachments.length]
+  );
+
+  const handleResponseComplete = useCallback(
+    (promptId: string | null, modelId: string) => {
+      trackProductEventOnce(
+        "first_response_completed",
+        "first_response_completed",
+        activeModelCount,
+        { model_id: modelId }
+      );
+      if (!promptId || activeModelCount < 2) return;
+
+      const completedModels =
+        comparisonCompletionsRef.current.get(promptId) || new Set<string>();
+      completedModels.add(modelId);
+      comparisonCompletionsRef.current.set(promptId, completedModels);
+      if (
+        completedModels.size >= activeModelCount &&
+        !comparisonTrackedRef.current.has(promptId)
+      ) {
+        comparisonTrackedRef.current.add(promptId);
+        trackProductEvent(
+          "multi_model_compare_completed",
+          activeModelCount
+        );
+      }
+    },
+    [activeModelCount]
+  );
+
+  const handleModelFollowupSent = useCallback(
+    (modelId: string) => {
+      trackProductEvent("followup_sent", activeModelCount, {
+        model_id: modelId,
+      });
+    },
+    [activeModelCount]
+  );
 
   const togglePrivateModeGlobal = () => {
     if (isPrivateMode) {
@@ -1076,6 +1163,21 @@ export default function Home() {
                         : conversation
                 )
             );
+            const sharedConversation = conversations.find(
+              (conversation) => conversation.id === convId
+            );
+            const sharedModelCount = Math.max(
+              1,
+              (sharedConversation?.selectedModels || selectedModels).filter(
+                (modelId) =>
+                  !(sharedConversation?.disabledPanels || disabledPanels).includes(
+                    modelId
+                  )
+              ).length
+            );
+            trackProductEvent("share_created", sharedModelCount, {
+              conversation_mode: "account",
+            });
             await navigator.clipboard.writeText(data.url);
             showToast(t("sidebar.shareCopied"), "success");
         } catch {
@@ -1161,7 +1263,7 @@ export default function Home() {
           inputValue={inputValue}
           setInputValue={setInputValue}
           attachments={attachments}
-          setAttachments={setAttachments}
+          setAttachments={handleAttachmentsChange}
           isSending={isSending}
           focusToken={focusToken}
           isGuestMode={isGuestMode}
@@ -1181,6 +1283,8 @@ export default function Home() {
           onToggleModel={toggleModel}
           onSubmit={handleGlobalSubmit}
           onCompareSummary={handleCompareSummary}
+          onResponseComplete={handleResponseComplete}
+          onFollowupSent={handleModelFollowupSent}
         />
       ) : (
         <DesktopChatShell
@@ -1192,7 +1296,7 @@ export default function Home() {
           inputValue={inputValue}
           setInputValue={setInputValue}
           attachments={attachments}
-          setAttachments={setAttachments}
+          setAttachments={handleAttachmentsChange}
           isSending={isSending}
           focusToken={focusToken}
           isGuestMode={isGuestMode}
@@ -1215,6 +1319,8 @@ export default function Home() {
           onTogglePanelDisable={togglePanelDisable}
           onRemoveModel={handleRemoveModel}
           onCompareSummary={handleCompareSummary}
+          onResponseComplete={handleResponseComplete}
+          onFollowupSent={handleModelFollowupSent}
         />
       )}
     {isViewportReady && <GoLiveOnboarding />}

@@ -11,6 +11,8 @@ import { LanguageProvider } from "@/components/LanguageProvider";
 import type { Language } from "@/components/LanguageProvider";
 import type { Session } from "next-auth";
 import { cookies, headers } from "next/headers";
+import { AnalyticsProvider } from "@/components/analytics/AnalyticsProvider";
+import { prisma } from "@/lib/prisma";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -57,6 +59,12 @@ export default async function RootLayout({
   let session: Session | null = null;
   const requestHeaders = await headers();
   const initialLang = detectInitialLanguage(requestHeaders.get("accept-language"));
+  const nonce = requestHeaders.get("x-nonce");
+  const countryCandidate = requestHeaders.get("cf-ipcountry")?.trim().toUpperCase();
+  const analyticsCountry =
+    countryCandidate && /^[A-Z]{2}$/.test(countryCandidate)
+      ? countryCandidate
+      : "ZZ";
 
   try {
     const e2eAuthCookie =
@@ -81,6 +89,33 @@ export default async function RootLayout({
     console.error("Layout session fetch error:", e);
   }
 
+  let initialAnalyticsPlan: "Guest" | "Free" | "Pro" | "Max" = session?.user?.id
+    ? "Free"
+    : "Guest";
+  let analyticsUserCreatedAt: string | null = null;
+  if (session?.user?.id && process.env.E2E_AUTH_BYPASS !== "true") {
+    try {
+      const analyticsUser = await prisma.user.findUnique({
+        where: { id: session.user.id },
+        select: { plan: true, createdAt: true },
+      });
+      initialAnalyticsPlan =
+        analyticsUser?.plan === "Pro" || analyticsUser?.plan === "Max"
+          ? analyticsUser.plan
+          : "Free";
+      analyticsUserCreatedAt = analyticsUser?.createdAt?.toISOString() || null;
+    } catch (error) {
+      console.error("Layout analytics context fetch error:", {
+        errorName: error instanceof Error ? error.name : "UnknownError",
+      });
+    }
+  }
+  const configuredMeasurementId = process.env.GA4_MEASUREMENT_ID?.trim();
+  const measurementId =
+    configuredMeasurementId && /^G-[A-Z0-9]+$/.test(configuredMeasurementId)
+      ? configuredMeasurementId
+      : null;
+
   return (
     <html
       lang={initialLang}
@@ -88,7 +123,18 @@ export default async function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <SessionProviderWrapper session={session}>
-          <LanguageProvider initialLang={initialLang}>{children}</LanguageProvider>
+          <LanguageProvider initialLang={initialLang}>
+            <AnalyticsProvider
+              country={analyticsCountry}
+              initialPlan={initialAnalyticsPlan}
+              measurementId={measurementId}
+              nonce={nonce}
+              userCreatedAt={analyticsUserCreatedAt}
+              disabled={process.env.E2E_AUTH_BYPASS === "true"}
+            >
+              {children}
+            </AnalyticsProvider>
+          </LanguageProvider>
         </SessionProviderWrapper>
       </body>
     </html>

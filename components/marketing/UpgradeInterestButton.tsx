@@ -5,6 +5,10 @@ import { useEffect, useId, useState } from "react";
 import { dispatchAppToast } from "@/lib/appToast";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { getBillingConfigUrl } from "@/components/marketing/usePublicBilling";
+import {
+  getAnalyticsAttributionSnapshot,
+  trackProductEvent,
+} from "@/lib/productAnalyticsClient";
 
 type BillingPlan = {
   id: "free" | "pro" | "max";
@@ -497,6 +501,13 @@ export function UpgradeInterestButton({
   const submit = async () => {
     if (isSending) return;
     const normalizedCode = appliedPromoCode;
+    const analytics = getAnalyticsAttributionSnapshot();
+    trackProductEvent("checkout_started", 0, {
+      billing_interval: billingInterval,
+      plan_id: planId,
+      value: dueUsdCents / 100,
+      currency: "USD",
+    });
     setIsSending(true);
     try {
       const response = await fetch("/api/billing/checkout", {
@@ -506,6 +517,7 @@ export function UpgradeInterestButton({
           planId,
           billingInterval,
           promoCode: normalizedCode || undefined,
+          ...(analytics ? { analytics } : {}),
         }),
       });
       if (response.status === 401) {
@@ -556,7 +568,13 @@ export function UpgradeInterestButton({
     <>
       <button
         type="button"
-        onClick={() => setIsOpen(true)}
+        onClick={() => {
+          trackProductEvent("cta_start_click", 0, {
+            cta_location: `upgrade_${planId}`,
+            plan_id: planId,
+          });
+          setIsOpen(true);
+        }}
         disabled={isSending}
         className={className}
       >

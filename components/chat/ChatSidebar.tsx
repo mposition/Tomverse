@@ -10,6 +10,7 @@ import { AlertTriangle, CloudUpload, Crown, Database, Download, Folder, FolderPl
 import { FeedbackButton } from "@/components/chat/FeedbackButton";
 import { useUserUsage, type UserPlan } from "@/components/chat/useUserUsage";
 import { dispatchAppToast } from "@/lib/appToast";
+import { trackProductEvent } from "@/lib/productAnalyticsClient";
 
 type ChatSidebarProps = {
     conversations: Conversation[];
@@ -405,8 +406,11 @@ export function ChatSidebar({
     };
 
     const setConversationProject = async (conversationId: string, projectId: string | null) => {
+        const conversation = conversations.find(
+            (item) => item.id === conversationId
+        );
         const previousProjectId =
-            conversations.find((conversation) => conversation.id === conversationId)?.projectId || null;
+            conversation?.projectId || null;
         setConversationProjectOverrides((current) => ({
             ...current,
             [conversationId]: projectId,
@@ -422,6 +426,15 @@ export function ChatSidebar({
                 [conversationId]: previousProjectId,
             }));
             return;
+        }
+        if (projectId && projectId !== previousProjectId) {
+            const enabledModelCount = (conversation?.selectedModels || []).filter(
+                (modelId) =>
+                    !(conversation?.disabledPanels || []).includes(modelId)
+            ).length;
+            trackProductEvent("conversation_saved", enabledModelCount, {
+                conversation_mode: "account",
+            });
         }
         setProjects((current) =>
             current.map((project) => {

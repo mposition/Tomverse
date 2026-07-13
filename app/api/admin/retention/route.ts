@@ -40,6 +40,7 @@ export async function GET(req: Request) {
     const notificationCutoff = daysAgo(90);
     const providerCheckCutoff = daysAgo(30);
     const providerErrorCutoff = daysAgo(30);
+    const productAnalyticsCutoff = daysAgo(400);
 
     const [
       oldUsageBuckets,
@@ -49,6 +50,7 @@ export async function GET(req: Request) {
       oldNotificationLogs,
       oldProviderChecks,
       oldProviderErrors,
+      oldProductAnalytics,
       oldestUsage,
       oldestLease,
       oldestShare,
@@ -56,6 +58,7 @@ export async function GET(req: Request) {
       oldestNotification,
       oldestProviderCheck,
       oldestProviderError,
+      oldestProductAnalytics,
     ] = await Promise.all([
       prisma.chatUsageBucket.count({ where: { updatedAt: { lt: usageCutoff } } }),
       prisma.chatRequestLease.count({ where: { expiresAt: { lt: leaseCutoff } } }),
@@ -76,6 +79,9 @@ export async function GET(req: Request) {
       }),
       prisma.providerErrorEvent.count({
         where: { createdAt: { lt: providerErrorCutoff } },
+      }),
+      prisma.productAnalyticsEvent.count({
+        where: { occurredAt: { lt: productAnalyticsCutoff } },
       }),
       oldestDate(
         () =>
@@ -134,6 +140,12 @@ export async function GET(req: Request) {
           }),
         "createdAt"
       ),
+      prisma.productAnalyticsEvent
+        .findFirst({
+          orderBy: { occurredAt: "asc" },
+          select: { occurredAt: true },
+        })
+        .then((row) => row?.occurredAt.toISOString() || null),
     ]);
 
     return NextResponse.json({
@@ -187,6 +199,13 @@ export async function GET(req: Request) {
           policy: "Delete sanitized provider error diagnostics older than 30 days.",
           staleCount: oldProviderErrors,
           oldestAt: oldestProviderError,
+        },
+        {
+          key: "productAnalytics",
+          label: "Product analytics events",
+          policy: "Delete consented, pseudonymous product events older than 400 days.",
+          staleCount: oldProductAnalytics,
+          oldestAt: oldestProductAnalytics,
         },
       ],
     });

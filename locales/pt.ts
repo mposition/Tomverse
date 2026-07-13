@@ -409,7 +409,7 @@ export const pt = {
     },
     privacyPolicy: {
         title: "Política de privacidade",
-        effective: "Em vigor: 9 de julho de 2026",
+        effective: "Em vigor: 13 de julho de 2026",
         intro: "O Tomverse processa informações pessoais e dados de chat apenas quando necessário para fornecer o serviço. Este aviso explica os fluxos de dados de chats padrão e do modo privado.",
         collectedTitle: "Informações que processamos",
         collected: "Podemos processar identificadores de conta, e-mail e dados de perfil fornecidos por provedores de login, configurações do usuário, chats e mensagens padrão, anexos, configurações de compartilhamento, dados de uso e logs de segurança. Informações de IP usadas contra abuso são criptografadas para limites de uso.",
@@ -421,6 +421,8 @@ export const pt = {
         private: "O modo privado não armazena salas ou mensagens no banco de dados do Tomverse. Solicitações ainda passam pelos servidores Tomverse e são enviadas ao provedor de IA selecionado. Não é um modo sem registros que remove contadores de segurança, registros operacionais ou processamento do provedor.",
         attachmentsTitle: "Anexos",
         attachments: "Anexos podem ser armazenados temporariamente em armazenamento de objetos criptografado para envio ao modelo e extração de documentos. Anexos temporários são atualmente excluídos após aproximadamente um dia pela política de ciclo de vida.",
+        analyticsTitle: "Análise de produto e atribuição de campanhas",
+        analytics: "Com consentimento, o Tomverse regista eventos de produto aprovados e metadados de campanha como origem UTM, idioma, país, número de modelos e plano. Os mesmos metadados aprovados podem ser enviados ao Google Analytics 4. Prompts, respostas, nomes ou conteúdos de ficheiros, endereços de e-mail e nomes de perfil não são incluídos. O consentimento pode ser recusado antes do início da análise.",
         retentionTitle: "Retenção e exclusão",
         retention: "Chats padrão podem permanecer até serem excluídos pelo usuário ou até a remoção dos dados da conta. O histórico do modo privado não é armazenado no banco. Registros mínimos necessários para obrigações legais, investigações de segurança ou resposta a incidentes podem ser retidos separadamente.",
         sharingTitle: "Links de compartilhamento",

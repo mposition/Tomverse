@@ -407,7 +407,7 @@ export const en = {
     },
     privacyPolicy: {
         title: "Privacy Policy",
-        effective: "Effective: July 9, 2026",
+        effective: "Effective: July 13, 2026",
         intro: "Tomverse processes personal information and chat data only as needed to provide the service. This notice explains the different data flows for standard chats and Private Mode.",
         collectedTitle: "Information we process",
         collected: "We may process account identifiers, email and profile data supplied by login providers, user settings, standard chats and messages, attachments, sharing settings, usage data, and security logs. IP information used for abuse prevention is hashed for rate limiting.",
@@ -419,6 +419,8 @@ export const en = {
         private: "Private Mode does not store chat rooms or messages in the Tomverse database. Requests still pass through Tomverse servers and are sent to the selected AI provider. It is not a zero-record mode that removes security counters, operational records, or provider-side processing.",
         attachmentsTitle: "Attachments",
         attachments: "Attachments may be stored temporarily in encrypted object storage for model delivery and document extraction. Temporary attachments are currently deleted after approximately one day under the lifecycle policy.",
+        analyticsTitle: "Product analytics and campaign attribution",
+        analytics: "With consent, Tomverse records approved product events and campaign parameters such as UTM source, language, country, model count, and plan. Google Analytics 4 may receive the same approved metadata. Prompts, model responses, filenames, file contents, email addresses, and profile names are not included. Consent can be declined before analytics starts.",
         retentionTitle: "Retention and deletion",
         retention: "Standard chats may remain until the user deletes them or account data is removed. Private Mode chat history is not stored in the database. Minimal records required for legal obligations, security investigations, or incident response may be retained separately.",
         sharingTitle: "Share links",

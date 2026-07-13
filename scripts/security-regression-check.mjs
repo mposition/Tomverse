@@ -338,6 +338,54 @@ const checks = [
       source.includes("Not enforced by Tomverse") &&
       source.includes("Request blocking"),
   },
+  {
+    name: "Product analytics payload is strict and content-free",
+    file: "lib/productAnalyticsShared.ts",
+    test: (source) =>
+      source.includes("analyticsPropertiesSchema") &&
+      source.includes(".strict()") &&
+      !source.includes("prompt:") &&
+      !source.includes("response:") &&
+      !source.includes("file_name:") &&
+      !source.includes("file_content:"),
+  },
+  {
+    name: "Product analytics API uses bounded input and trusted plan resolution",
+    file: "app/api/analytics/events/route.ts",
+    test: (source) =>
+      source.includes("readLimitedJson") &&
+      source.includes("8 * 1024") &&
+      source.includes("consumeApiRateLimit") &&
+      source.includes("select: { plan: true }") &&
+      source.includes("analyticsCountryFromHeaders"),
+  },
+  {
+    name: "GA4 only loads after explicit analytics consent",
+    file: "components/analytics/AnalyticsProvider.tsx",
+    test: (source) =>
+      source.includes('consent === "accepted" && measurementId') &&
+      source.includes("googletagmanager.com/gtag/js") &&
+      source.includes("disableAnalyticsClient"),
+  },
+  {
+    name: "Server purchase analytics keeps GA4 API secret server-side",
+    file: "lib/productAnalyticsServer.ts",
+    test: (source) =>
+      source.includes("process.env.GA4_API_SECRET") &&
+      source.includes("region1.google-analytics.com/mp/collect") &&
+      source.includes('ad_user_data: "DENIED"') &&
+      source.includes('ad_personalization: "DENIED"'),
+  },
+  {
+    name: "Subscription cancellation analytics is recorded after Stripe accepts it",
+    file: "app/api/billing/cancel-subscription/route.ts",
+    test: (source) =>
+      source.indexOf("subscriptions.update") <
+        source.indexOf('eventName: "subscription_cancelled"') &&
+      source.includes("analyticsAttributionSchema.optional()") &&
+      source.includes("recordProductAnalyticsEvent") &&
+      source.includes("sendToGa4: true"),
+  },
 ];
 
 const failures = [];

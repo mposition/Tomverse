@@ -5,6 +5,10 @@ import { getBillingPlans, tierForPlanId, type BillingPlanId } from "@/lib/billin
 import { sendBillingWelcomeEmail } from "@/lib/billingEmails";
 import { prisma } from "@/lib/prisma";
 import { getStripe } from "@/lib/stripe";
+import {
+  analyticsAttributionFromMetadata,
+  recordProductAnalyticsEvent,
+} from "@/lib/productAnalyticsServer";
 
 const subscriptionActiveStatuses = new Set(["active", "trialing", "past_due"]);
 
@@ -17,7 +21,9 @@ const getPeriodEnd = (subscription: Stripe.Subscription) => {
   return typeof value === "number" ? new Date(value * 1000) : null;
 };
 
-const getBillingInterval = (subscription: Stripe.Subscription) => {
+const getBillingInterval = (
+  subscription: Stripe.Subscription
+): "monthly" | "annual" | null => {
   const interval = subscription.items.data[0]?.price.recurring?.interval;
   if (interval === "year") return "annual";
   if (interval === "month") return "monthly";
@@ -174,6 +180,35 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
       language: synced.user.settings?.language,
     }).catch((emailError) => {
       console.error("Billing welcome email failed:", emailError);
+    });
+  }
+  const analytics = analyticsAttributionFromMetadata(session.metadata);
+  if (synced && analytics) {
+    const value = Number(session.metadata?.analyticsValue);
+    await recordProductAnalyticsEvent({
+      eventName: "purchase_completed",
+      source: "server",
+      userId: synced.user.id,
+      attribution: analytics,
+      modelCount: 0,
+      plan: synced.plan,
+      properties: {
+        billing_interval: synced.billingInterval || "monthly",
+        plan_id:
+          synced.plan === "Max" ? "max" : synced.plan === "Pro" ? "pro" : "free",
+        value: Number.isFinite(value) && value >= 0 ? value : 0,
+        currency: "USD",
+        transaction_id: session.id,
+      },
+      dedupeKey: `stripe-checkout:${session.id}`,
+      sendToGa4: true,
+    }).catch((analyticsError) => {
+      console.warn("Stripe purchase analytics failed.", {
+        errorName:
+          analyticsError instanceof Error
+            ? analyticsError.name
+            : "UnknownError",
+      });
     });
   }
 }

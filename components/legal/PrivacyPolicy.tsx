@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft, Database, FileUp, Scale, Send, ShieldCheck, Share2, UserRound } from "lucide-react";
+import { ArrowLeft, BarChart3, Database, FileUp, Scale, Send, ShieldCheck, Share2, UserRound } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
 
 const sections = [
@@ -10,6 +10,7 @@ const sections = [
     ["providersTitle", "providers", Send],
     ["privateTitle", "private", ShieldCheck],
     ["attachmentsTitle", "attachments", FileUp],
+    ["analyticsTitle", "analytics", BarChart3],
     ["retentionTitle", "retention", Database],
     ["sharingTitle", "sharing", Share2],
     ["rightsTitle", "rights", Scale],
