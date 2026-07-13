@@ -167,6 +167,18 @@ const safeErrorMetadata = (error: unknown) => {
     };
 };
 
+const providerDiagnosticCode = (fallback: string, error: unknown) => {
+    const metadata = safeErrorMetadata(error);
+    return [
+        fallback,
+        metadata.code || metadata.name,
+        metadata.statusCode ? `HTTP_${metadata.statusCode}` : null,
+        metadata.isRetryable === true ? "RETRYABLE" : null,
+    ]
+        .filter((value): value is string => Boolean(value))
+        .join(".");
+};
+
 const logRequestError = (
     event: string,
     traceId: string,
@@ -1187,6 +1199,10 @@ export async function POST(req: Request) {
                     generatedText += value;
                     controller.enqueue(value);
                 } catch (error) {
+                    const diagnosticCode = providerDiagnosticCode(
+                        "AI_STREAM_FAILED",
+                        error
+                    );
                     logRequestError(
                         "ai_stream_failed",
                         traceId,
@@ -1196,12 +1212,12 @@ export async function POST(req: Request) {
                     try {
                         await recordProviderFailure(
                             modelConfig.provider,
-                            "AI_STREAM_FAILED"
+                            diagnosticCode
                         );
                         await recordModelFailure(
                             requestedModelId,
                             modelConfig.provider,
-                            "AI_STREAM_FAILED"
+                            diagnosticCode
                         );
                     } catch (recordError) {
                         logRequestError(
@@ -1253,18 +1269,18 @@ export async function POST(req: Request) {
             requestedModelIdForLog
         );
         try {
-            await recordProviderFailure(
-                requestedProviderForLog,
+            const diagnosticCode =
                 error instanceof ChatAccessError
                     ? error.code
-                    : safeErrorMetadata(error).code || "AI_REQUEST_FAILED"
+                    : providerDiagnosticCode("AI_REQUEST_FAILED", error);
+            await recordProviderFailure(
+                requestedProviderForLog,
+                diagnosticCode
             );
             await recordModelFailure(
                 requestedModelIdForLog,
                 requestedProviderForLog,
-                error instanceof ChatAccessError
-                    ? error.code
-                    : safeErrorMetadata(error).code || "AI_REQUEST_FAILED"
+                diagnosticCode
             );
         } catch (recordError) {
             logRequestError(

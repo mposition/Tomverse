@@ -125,6 +125,25 @@ const checks = [
       !source.includes("azureTenantIsGeneric"),
   },
   {
+    name: "Provider credit updates require billing permission and audit logging",
+    file: "app/api/admin/provider-credits/route.ts",
+    test: (source) =>
+      source.includes('hasAdminPermission(session, "billing:write")') &&
+      source.includes("readLimitedJson") &&
+      source.includes("setProviderCreditCheckpoint") &&
+      source.includes("writeAdminAuditLog") &&
+      source.includes('action: "provider_credit.checkpoint_updated"'),
+  },
+  {
+    name: "Provider health exposes explicit status decision reasons",
+    file: "lib/providerMonitoring.ts",
+    test: (source) =>
+      source.includes("statusReasons") &&
+      source.includes("RECENT_PROVIDER_FAILURES") &&
+      source.includes("FAILURE_OUTAGE_THRESHOLD") &&
+      source.includes("MONTHLY_BUDGET_WARNING"),
+  },
+  {
     name: "Conversation share creation requires unlock grant and snapshots",
     file: "app/api/conversations/[conversationId]/share/route.ts",
     test: (source) =>

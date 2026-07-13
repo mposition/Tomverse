@@ -475,6 +475,17 @@ model ProviderDailyUsage {
   @@index([source, date])
 }
 
+model ProviderCreditConfig {
+  provider                  String   @id
+  creditMicroUsd            BigInt
+  usageBaselineMicroUsd     BigInt
+  note                      String?
+  updatedById               String?
+  updatedByEmail            String?
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+}
+
 model StripeWebhookEventLog {
   id              String    @id @default(cuid())
   stripeEventId   String?   @unique

@@ -2,6 +2,10 @@ import "server-only";
 
 import { prisma } from "@/lib/prisma";
 import { AVAILABLE_MODELS, type AiProvider, type ModelTier } from "@/lib/models";
+import {
+  getProviderCreditSummaries,
+  type ProviderCreditSummary,
+} from "@/lib/providerCredits";
 
 export type ProviderHealthStatus = "available" | "limited" | "outage";
 
@@ -10,11 +14,18 @@ export type ProviderFallback = {
   recommendedModelIds: string[];
 };
 
+export type ProviderStatusReason = {
+  code: string;
+  title: string;
+  detail: string;
+};
+
 export type ProviderHealthRow = {
   provider: AiProvider;
   displayName: string;
   apiKeyConfigured: boolean;
   status: ProviderHealthStatus;
+  statusReasons: ProviderStatusReason[];
   successCount24h: number;
   failureCount24h: number;
   successRate24h: number | null;
@@ -32,7 +43,8 @@ export type ProviderHealthRow = {
   dayBudgetMicroUsd: number;
   budgetUsagePercent: number;
   balanceUsd: number | null;
-  balanceSource: "api" | "manual" | "estimated" | "unavailable";
+  balanceSource: "api" | "db_estimate" | "env_manual" | "unavailable";
+  credit: ProviderCreditSummary;
   alertLevel: "none" | "50" | "80" | "95";
   fallback: ProviderFallback;
   modelIncidents: Array<{
@@ -168,6 +180,26 @@ const alertPolicyFor = async (provider: AiProvider) => {
 
 const balanceUsdFor = (provider: AiProvider) =>
   positiveNumber(process.env[`PROVIDER_${envProvider(provider)}_BALANCE_USD`]);
+
+const errorExplanationFor = (code: string | null) => {
+  if (!code) return "No provider error code was recorded.";
+  if (code.startsWith("AI_STREAM_FAILED")) {
+    return "The response stream ended before a complete answer was received. This commonly indicates a transient provider, timeout, network, or SDK streaming failure.";
+  }
+  if (code.startsWith("AI_REQUEST_FAILED")) {
+    return "The provider request failed before a response stream could be established.";
+  }
+  if (/429|RATE.?LIMIT/i.test(code)) {
+    return "The provider rejected the request because a rate or quota limit was reached.";
+  }
+  if (/401|403|AUTH|KEY/i.test(code)) {
+    return "The provider rejected authentication or authorization for the configured API key.";
+  }
+  if (/5\d\d|TIMEOUT|ECONN|NETWORK/i.test(code)) {
+    return "The error is consistent with a transient provider or network availability failure.";
+  }
+  return "The code was recorded from the provider request path; inspect provider logs with the matching time for additional detail.";
+};
 
 const periodStart = (period: "day" | "month" | "five-minute", now = new Date()) => {
   if (period === "five-minute") {
@@ -776,14 +808,16 @@ export const getProviderHealthDashboard = async (): Promise<ProviderHealthDashbo
     },
   });
 
-  const balanceByProvider = new Map(
-    await Promise.all(
+  const [balanceEntries, creditByProvider] = await Promise.all([
+    Promise.all(
       MONITORED_PROVIDERS.map(async (provider) => [
         provider,
         await automaticBalanceFor(provider),
       ] as const)
-    )
-  );
+    ),
+    getProviderCreditSummaries(MONITORED_PROVIDERS),
+  ]);
+  const balanceByProvider = new Map(balanceEntries);
 
   const providers: ProviderHealthRow[] = MONITORED_PROVIDERS.map((provider) => {
     const successKey = `provider:${provider}:success`;
@@ -829,8 +863,16 @@ export const getProviderHealthDashboard = async (): Promise<ProviderHealthDashbo
         ? Math.min(999, Math.round((monthCostMicroUsd / monthBudgetMicroUsd) * 1000) / 10)
         : 0;
     const automaticBalanceUsd = balanceByProvider.get(provider) ?? null;
-    const manualBalanceUsd = balanceUsdFor(provider);
-    const balanceUsd = automaticBalanceUsd ?? manualBalanceUsd;
+    const credit = creditByProvider.get(provider)!;
+    const databaseEstimatedBalanceUsd =
+      credit.estimatedBalanceMicroUsd === null
+        ? null
+        : credit.estimatedBalanceMicroUsd / 1_000_000;
+    const environmentManualBalanceUsd = balanceUsdFor(provider);
+    const balanceUsd =
+      automaticBalanceUsd ??
+      databaseEstimatedBalanceUsd ??
+      environmentManualBalanceUsd;
     const providerModels = AVAILABLE_MODELS.filter((model) => model.provider === provider);
     const modelIncidents = providerModels
       .map((model) => {
@@ -851,12 +893,58 @@ export const getProviderHealthDashboard = async (): Promise<ProviderHealthDashbo
       .sort((a, b) => b.failureCount5m - a.failureCount5m)
       .slice(0, 5);
     const apiKeyConfigured = PROVIDER_API_KEY_ENV[provider].some((key) => !!process.env[key]);
+    const failureOutageThreshold = Math.max(5, successCount24h);
     const status: ProviderHealthStatus =
-      !apiKeyConfigured || budgetUsagePercent >= 100 || failureCount24h >= Math.max(5, successCount24h)
+      !apiKeyConfigured || budgetUsagePercent >= 100 || failureCount24h >= failureOutageThreshold
         ? "outage"
         : failureCount24h > 0 || budgetUsagePercent >= 80
           ? "limited"
           : "available";
+    const statusReasons: ProviderStatusReason[] = [];
+    if (status === "outage") {
+      if (!apiKeyConfigured) {
+        statusReasons.push({
+          code: "API_KEY_MISSING",
+          title: "API key is not configured",
+          detail: "No configured provider API key was detected, so requests cannot be sent.",
+        });
+      }
+      if (budgetUsagePercent >= 100) {
+        statusReasons.push({
+          code: "MONTHLY_BUDGET_EXHAUSTED",
+          title: "Internal monthly budget reached 100%",
+          detail: `Estimated usage is ${budgetUsagePercent}% of the configured monthly budget.`,
+        });
+      }
+      if (failureCount24h >= failureOutageThreshold) {
+        statusReasons.push({
+          code: "FAILURE_OUTAGE_THRESHOLD",
+          title: "Provider failure threshold reached",
+          detail: `${failureCount24h} failures reached the outage threshold of ${failureOutageThreshold}. Latest code: ${recentErrorCode || "UNKNOWN"}. ${errorExplanationFor(recentErrorCode)}`,
+        });
+      }
+    } else if (status === "limited") {
+      if (failureCount24h > 0) {
+        statusReasons.push({
+          code: "RECENT_PROVIDER_FAILURES",
+          title: "Recent provider failures were recorded",
+          detail: `${failureCount24h} of ${total} recorded calls failed. The current policy marks any provider failure as Limited until the health bucket resets. Latest code: ${recentErrorCode || "UNKNOWN"}. ${errorExplanationFor(recentErrorCode)}`,
+        });
+      }
+      if (budgetUsagePercent >= 80) {
+        statusReasons.push({
+          code: "MONTHLY_BUDGET_WARNING",
+          title: "Internal monthly budget is above 80%",
+          detail: `Estimated usage is ${budgetUsagePercent}% of the configured monthly budget.`,
+        });
+      }
+    } else {
+      statusReasons.push({
+        code: "HEALTHY",
+        title: "No limiting condition is active",
+        detail: "The API key is configured, no provider failures are recorded, and internal budget usage is below 80%.",
+      });
+    }
     const alertLevel =
       budgetUsagePercent >= 95
         ? "95"
@@ -871,6 +959,7 @@ export const getProviderHealthDashboard = async (): Promise<ProviderHealthDashbo
       displayName: PROVIDER_DISPLAY_NAMES[provider],
       apiKeyConfigured,
       status,
+      statusReasons,
       successCount24h,
       failureCount24h,
       successRate24h,
@@ -891,9 +980,12 @@ export const getProviderHealthDashboard = async (): Promise<ProviderHealthDashbo
       balanceSource:
         automaticBalanceUsd !== null
           ? "api"
-          : manualBalanceUsd !== null
-            ? "manual"
-            : "estimated",
+          : databaseEstimatedBalanceUsd !== null
+            ? "db_estimate"
+            : environmentManualBalanceUsd !== null
+              ? "env_manual"
+              : "unavailable",
+      credit,
       alertLevel,
       fallback: FALLBACKS[provider],
       modelIncidents,

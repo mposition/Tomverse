@@ -1102,7 +1102,10 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                                     </div>
                                 </div>
                                 <AdminProviderUsageSyncPanel />
-                                <AdminProviderHealthPanel initialDashboard={dashboard} />
+                                <AdminProviderHealthPanel
+                                    initialDashboard={dashboard}
+                                    canManageCredits={adminRole === "owner" || adminRole === "billing"}
+                                />
                                 <AdminModelMetricsPanel rows={modelMetricRows} />
                             </section>
                         }
