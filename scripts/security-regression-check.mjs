@@ -317,6 +317,27 @@ const checks = [
       source.includes("Bearer ") &&
       source.includes("timingSafeEqual"),
   },
+  {
+    name: "Provider monitoring keeps DB and enforced monthly limits separate",
+    file: "lib/providerMonitoring.ts",
+    test: (source) =>
+      source.includes('internalBudgetSource: "railway_environment" | "code_default"') &&
+      source.includes("providerBillingHeadroomMicroUsd") &&
+      source.includes("internalBudgetHeadroomMicroUsd") &&
+      source.includes("Math.min(providerBillingLimitMicroUsd, monthBudgetMicroUsd)") &&
+      source.includes('"provider_not_configured"'),
+  },
+  {
+    name: "Admin provider panel labels DB reference and enforced cap explicitly",
+    file: "components/admin/AdminProviderHealthPanel.tsx",
+    test: (source) =>
+      source.includes('label="Provider billing limit (DB reference)"') &&
+      source.includes('label="Tomverse enforced monthly cap"') &&
+      source.includes('label="Expected effective ceiling (lower limit)"') &&
+      source.includes("CHAT_PROVIDER_${provider.provider.toUpperCase()}_COST_MICROUSD_PER_MONTH") &&
+      source.includes("Not enforced by Tomverse") &&
+      source.includes("Request blocking"),
+  },
 ];
 
 const failures = [];

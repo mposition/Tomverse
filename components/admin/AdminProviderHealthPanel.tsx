@@ -159,6 +159,31 @@ function ProviderRow({
     provider.billingProfile.settlementModel === "hybrid";
   const billingBasisMicroUsd =
     provider.providerReportedMonthCostMicroUsd ?? provider.monthCostMicroUsd;
+  const providerBillingLimitMicroUsd = provider.billingProfile.monthlyLimitMicroUsd;
+  const internalBudgetVariableName =
+    `CHAT_PROVIDER_${provider.provider.toUpperCase()}_COST_MICROUSD_PER_MONTH`;
+  const internalBudgetSourceDetail =
+    provider.internalBudgetSource === "railway_environment"
+      ? `Railway ${internalBudgetVariableName}`
+      : `Code default · ${internalBudgetVariableName} absent or invalid`;
+  const limitDifferenceMicroUsd =
+    providerBillingLimitMicroUsd === null
+      ? null
+      : Math.abs(providerBillingLimitMicroUsd - provider.monthBudgetMicroUsd);
+  const limitAlignmentCopy =
+    provider.limitAlignment === "provider_not_configured"
+      ? "No provider billing limit is recorded in DB. The Tomverse cap is the only known operational ceiling."
+      : provider.limitAlignment === "provider_lower"
+        ? `The provider billing limit is ${money(limitDifferenceMicroUsd!)} lower. The provider may stop service before Tomverse reaches its cap.`
+        : provider.limitAlignment === "tomverse_lower"
+          ? `The Tomverse enforced cap is ${money(limitDifferenceMicroUsd!)} lower, so Tomverse blocks new usage first.`
+          : "The provider billing limit and Tomverse enforced cap are aligned.";
+  const limitAlignmentClass =
+    provider.limitAlignment === "provider_lower"
+      ? "border-amber-500/25 bg-amber-500/5 text-amber-100/80"
+      : provider.limitAlignment === "aligned"
+        ? "border-emerald-500/20 bg-emerald-500/5 text-emerald-100/80"
+        : "border-blue-500/20 bg-blue-500/5 text-blue-100/80";
   const parsedMonthlyLimitUsd = Number(monthlyLimitUsd);
   const monthlyLimitIsValid =
     monthlyLimitUsd.trim() === "" ||
@@ -379,6 +404,10 @@ function ProviderRow({
                   ? ` · Verified ${dateLabel(provider.billingProfile.verifiedAt)}`
                   : " · Verify against your account contract"}
               </p>
+              <p className="mt-1 text-xs leading-5 text-zinc-500">
+                Provider billing limit is a DB-recorded account/contract reference.
+                Tomverse enforced cap is the application limit used to block new usage.
+              </p>
             </div>
           </div>
           {canManageCredits && (
@@ -392,7 +421,7 @@ function ProviderRow({
             </button>
           )}
         </div>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {tracksCredit && (
             <Metric
               label={provider.billingProfile.settlementModel === "hybrid" ? "Optional credit" : "Estimated balance"}
@@ -409,12 +438,40 @@ function ProviderRow({
           <Metric label="Month accrued" value={money(billingBasisMicroUsd)} />
           <Metric label="Projected month-end" value={money(provider.projectedMonthEndMicroUsd)} />
           <Metric
-            label={provider.billingLimitSource === "provider_config" ? "Provider limit" : "Internal safety budget"}
-            value={money(provider.billingLimitMicroUsd)}
-            detail={`${money(provider.billingHeadroomMicroUsd)} headroom`}
-            valueClass={provider.billingHeadroomMicroUsd < 0 ? "text-red-300" : "text-white"}
+            label="Provider billing limit (DB reference)"
+            value={
+              providerBillingLimitMicroUsd === null
+                ? "Not configured"
+                : money(providerBillingLimitMicroUsd)
+            }
+            detail={
+              provider.providerBillingHeadroomMicroUsd === null
+                ? "Reference only · Set in Edit profile"
+                : `${money(provider.providerBillingHeadroomMicroUsd)} headroom · Not enforced by Tomverse`
+            }
+            valueClass={
+              provider.providerBillingHeadroomMicroUsd !== null &&
+              provider.providerBillingHeadroomMicroUsd < 0
+                ? "text-red-300"
+                : "text-white"
+            }
+          />
+          <Metric
+            label="Tomverse enforced monthly cap"
+            value={money(provider.monthBudgetMicroUsd)}
+            detail={`${money(provider.internalBudgetHeadroomMicroUsd)} headroom · ${internalBudgetSourceDetail} · Request blocking`}
+            valueClass={provider.internalBudgetHeadroomMicroUsd < 0 ? "text-red-300" : "text-white"}
+          />
+          <Metric
+            label="Expected effective ceiling (lower limit)"
+            value={money(provider.expectedEffectiveCeilingMicroUsd)}
+            detail={`${money(provider.expectedEffectiveHeadroomMicroUsd)} expected headroom`}
+            valueClass={provider.expectedEffectiveHeadroomMicroUsd < 0 ? "text-red-300" : "text-white"}
           />
         </div>
+        <p className={`mt-3 rounded-xl border px-3 py-2 text-xs leading-5 ${limitAlignmentClass}`}>
+          {limitAlignmentCopy}
+        </p>
         {provider.billingProfile.note && (
           <p className="mt-2 text-[11px] text-zinc-500">
             Profile note · {provider.billingProfile.note}
@@ -744,7 +801,7 @@ function Metric({
     <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
       <div className="text-zinc-500">{label}</div>
       <div className={`mt-1 truncate font-semibold ${valueClass}`}>{value}</div>
-      {detail && <div className="mt-1 truncate text-[11px] text-zinc-500">{detail}</div>}
+      {detail && <div className="mt-1 text-[11px] leading-4 text-zinc-500">{detail}</div>}
     </div>
   );
 }

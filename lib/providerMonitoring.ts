@@ -70,9 +70,16 @@ export type ProviderHealthRow = {
   credit: ProviderCreditSummary;
   billingProfile: ProviderBillingProfile;
   projectedMonthEndMicroUsd: number;
-  billingLimitMicroUsd: number;
-  billingLimitSource: "provider_config" | "internal_budget";
-  billingHeadroomMicroUsd: number;
+  internalBudgetSource: "railway_environment" | "code_default";
+  providerBillingHeadroomMicroUsd: number | null;
+  internalBudgetHeadroomMicroUsd: number;
+  expectedEffectiveCeilingMicroUsd: number;
+  expectedEffectiveHeadroomMicroUsd: number;
+  limitAlignment:
+    | "provider_not_configured"
+    | "provider_lower"
+    | "tomverse_lower"
+    | "aligned";
   alertLevel: "none" | "50" | "80" | "95";
   fallback: ProviderFallback;
   modelIncidents: Array<{
@@ -157,11 +164,24 @@ const positiveNumber = (value: string | undefined) => {
 
 const envProvider = (provider: AiProvider) => provider.toUpperCase();
 
+const providerMonthlyBudgetConfig = (provider: AiProvider) => {
+  const raw = process.env[
+    `CHAT_PROVIDER_${envProvider(provider)}_COST_MICROUSD_PER_MONTH`
+  ];
+  const parsed = Number(raw);
+  const hasValidEnvironmentValue =
+    Number.isSafeInteger(parsed) && parsed > 0;
+
+  return {
+    amountMicroUsd: hasValidEnvironmentValue ? parsed : 100_000_000,
+    source: hasValidEnvironmentValue
+      ? "railway_environment" as const
+      : "code_default" as const,
+  };
+};
+
 const providerMonthlyBudgetMicroUsd = (provider: AiProvider) =>
-  positiveInteger(
-    process.env[`CHAT_PROVIDER_${envProvider(provider)}_COST_MICROUSD_PER_MONTH`],
-    100_000_000
-  );
+  providerMonthlyBudgetConfig(provider).amountMicroUsd;
 
 const providerDailyBudgetMicroUsd = (provider: AiProvider) =>
   positiveInteger(
@@ -957,7 +977,8 @@ export const getProviderHealthDashboard = async (
               1000
           ) / 10
         : null;
-    const monthBudgetMicroUsd = providerMonthlyBudgetMicroUsd(provider);
+    const monthlyBudgetConfig = providerMonthlyBudgetConfig(provider);
+    const monthBudgetMicroUsd = monthlyBudgetConfig.amountMicroUsd;
     const dayBudgetMicroUsd = providerDailyBudgetMicroUsd(provider);
     const budgetUsagePercent =
       monthBudgetMicroUsd > 0
@@ -979,13 +1000,27 @@ export const getProviderHealthDashboard = async (
     const projectedMonthEndMicroUsd = Math.round(
       billingBasisMicroUsd / elapsedMonthFraction
     );
-    const billingLimitSource = billingProfile.monthlyLimitMicroUsd === null
-      ? "internal_budget" as const
-      : "provider_config" as const;
-    const billingLimitMicroUsd =
-      billingProfile.monthlyLimitMicroUsd ?? monthBudgetMicroUsd;
-    const billingHeadroomMicroUsd =
-      billingLimitMicroUsd - billingBasisMicroUsd;
+    const providerBillingLimitMicroUsd = billingProfile.monthlyLimitMicroUsd;
+    const providerBillingHeadroomMicroUsd =
+      providerBillingLimitMicroUsd === null
+        ? null
+        : providerBillingLimitMicroUsd - billingBasisMicroUsd;
+    const internalBudgetHeadroomMicroUsd =
+      monthBudgetMicroUsd - billingBasisMicroUsd;
+    const expectedEffectiveCeilingMicroUsd =
+      providerBillingLimitMicroUsd === null
+        ? monthBudgetMicroUsd
+        : Math.min(providerBillingLimitMicroUsd, monthBudgetMicroUsd);
+    const expectedEffectiveHeadroomMicroUsd =
+      expectedEffectiveCeilingMicroUsd - billingBasisMicroUsd;
+    const limitAlignment =
+      providerBillingLimitMicroUsd === null
+        ? "provider_not_configured" as const
+        : providerBillingLimitMicroUsd < monthBudgetMicroUsd
+          ? "provider_lower" as const
+          : providerBillingLimitMicroUsd > monthBudgetMicroUsd
+            ? "tomverse_lower" as const
+            : "aligned" as const;
     const databaseEstimatedBalanceUsd =
       credit.estimatedBalanceMicroUsd === null
         ? null
@@ -1111,9 +1146,12 @@ export const getProviderHealthDashboard = async (
       credit,
       billingProfile,
       projectedMonthEndMicroUsd,
-      billingLimitMicroUsd,
-      billingLimitSource,
-      billingHeadroomMicroUsd,
+      internalBudgetSource: monthlyBudgetConfig.source,
+      providerBillingHeadroomMicroUsd,
+      internalBudgetHeadroomMicroUsd,
+      expectedEffectiveCeilingMicroUsd,
+      expectedEffectiveHeadroomMicroUsd,
+      limitAlignment,
       alertLevel,
       fallback: FALLBACKS[provider],
       modelIncidents,

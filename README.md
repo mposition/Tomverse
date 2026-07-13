@@ -72,6 +72,16 @@ cost, and remaining headroom. Provider-reported usage is preferred when it has
 been synchronized; otherwise the projection uses internal tracked cost. These
 figures are operational estimates and do not replace the provider invoice.
 
+The Admin Console always shows two separate monthly limits. **Provider billing
+limit (DB reference)** is the provider account or contract value recorded in
+`ProviderBillingConfig`; it is informational inside Tomverse. **Tomverse enforced
+monthly cap** comes from
+`CHAT_PROVIDER_<PROVIDER>_COST_MICROUSD_PER_MONTH` in Railway, or the $100 code
+default when the variable is absent or invalid, and is the value enforced by
+chat request reservation. The expected effective ceiling is displayed as the
+lower of the known provider limit and the Tomverse cap. When the provider limit
+is not recorded, the Tomverse cap is the only known operational ceiling.
+
 ## Provider Usage Reconciliation
 
 OpenAI organization costs use a dedicated server-side Admin API key. Create the
