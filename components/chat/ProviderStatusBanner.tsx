@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle2, Info, RefreshCw, Shuffle } from "lucide-react";
+import { AlertTriangle, Info, RefreshCw, Shuffle } from "lucide-react";
 import { AVAILABLE_MODELS } from "@/components/chat/types";
 import { useLanguage } from "@/components/LanguageProvider";
 
@@ -89,50 +89,40 @@ export function ProviderStatusBanner({
 
   const bannerState = useMemo(() => {
     const selectedSet = new Set(selectedModels);
-    const impacted = models.filter((model) => model.status !== "available");
-    const selectedImpacted =
+    const unavailable = models.filter((model) => model.status === "unavailable");
+    const selectedUnavailable =
       selectedSet.size > 0
-        ? impacted.filter((model) => selectedSet.has(model.id))
+        ? unavailable.filter((model) => selectedSet.has(model.id))
         : [];
-    const visibleImpacted = selectedImpacted.length > 0 ? selectedImpacted : impacted;
-    const unavailable = visibleImpacted.filter(
-      (model) => model.status === "unavailable"
-    );
-    const limited = visibleImpacted.filter((model) => model.status === "limited");
+    const visibleUnavailable =
+      selectedUnavailable.length > 0 ? selectedUnavailable : unavailable;
     const fallbackIds = Array.from(
-      new Set(visibleImpacted.flatMap((model) => model.fallbackModelIds))
+      new Set(visibleUnavailable.flatMap((model) => model.fallbackModelIds))
     )
       .filter((id) => !selectedSet.has(id))
       .slice(0, 3);
     const fallbackNames = fallbackIds.map(modelName);
 
     return {
-      impacted: visibleImpacted,
-      unavailable,
-      limited,
+      impacted: visibleUnavailable,
       fallbackIds,
       fallbackNames,
-      isSelectedOnly: selectedImpacted.length > 0,
+      isSelectedOnly: selectedUnavailable.length > 0,
     };
   }, [models, selectedModels]);
 
   if (models.length === 0) return null;
 
   const hasImpact = bannerState.impacted.length > 0;
-  const tone = bannerState.unavailable.length > 0 ? "danger" : "warning";
-
-  if (!hasImpact && compact) return null;
+  if (!hasImpact) return null;
 
   if (compact) {
     return (
       <div
-        className={`mx-3 mt-2 rounded-2xl border px-2.5 py-2 text-xs shadow-sm ${
-          tone === "danger"
-            ? "border-red-200 bg-red-50 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
-            : "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200"
-        }`}
+        className="mx-3 mt-2 rounded-2xl border border-red-200 bg-red-50 px-2.5 py-2 text-xs text-red-800 shadow-sm dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
         role="status"
         aria-live="polite"
+        data-testid="provider-outage-banner"
       >
         <div className="flex items-center gap-2">
           <AlertTriangle className="h-4 w-4 shrink-0" />
@@ -144,9 +134,7 @@ export function ProviderStatusBanner({
                   : t("providerStatus.globalIssue")}
               </span>
               <span className="shrink-0 rounded-full bg-black/5 px-2 py-0.5 text-[10px] dark:bg-white/10">
-                {bannerState.unavailable.length > 0
-                  ? `${bannerState.unavailable.length} ${t("providerStatus.unavailable")}`
-                  : `${bannerState.limited.length} ${t("providerStatus.limited")}`}
+                {bannerState.impacted.length} {t("providerStatus.unavailable")}
               </span>
             </div>
             <p className="mt-0.5 truncate text-[11px] font-medium opacity-80">
@@ -189,67 +177,44 @@ export function ProviderStatusBanner({
 
   return (
     <div
-      className={`mx-3 mt-3 rounded-2xl border px-3 py-2 text-xs shadow-sm md:mx-4 ${
-        hasImpact
-          ? tone === "danger"
-            ? "border-red-200 bg-red-50 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
-            : "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200"
-          : "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200"
-      }`}
+      className="mx-3 mt-3 rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800 shadow-sm dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200 md:mx-4"
       role="status"
       aria-live="polite"
+      data-testid="provider-outage-banner"
     >
       <div className="flex items-start gap-2">
-        <span className="mt-0.5 shrink-0">
-          {hasImpact ? (
-            <AlertTriangle className="h-4 w-4" />
-          ) : (
-            <CheckCircle2 className="h-4 w-4" />
-          )}
-        </span>
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 font-black">
             <span>
-              {hasImpact
-                ? bannerState.isSelectedOnly
-                  ? t("providerStatus.selectedIssue")
-                  : t("providerStatus.globalIssue")
-                : t("providerStatus.allAvailable")}
+              {bannerState.isSelectedOnly
+                ? t("providerStatus.selectedIssue")
+                : t("providerStatus.globalIssue")}
             </span>
-            {hasImpact && (
-              <span className="rounded-full bg-black/5 px-2 py-0.5 text-[10px] dark:bg-white/10">
-                {bannerState.unavailable.length > 0
-                  ? `${bannerState.unavailable.length} ${t("providerStatus.unavailable")}`
-                  : `${bannerState.limited.length} ${t("providerStatus.limited")}`}
-              </span>
-            )}
+            <span className="rounded-full bg-black/5 px-2 py-0.5 text-[10px] dark:bg-white/10">
+              {bannerState.impacted.length} {t("providerStatus.unavailable")}
+            </span>
           </div>
-          {hasImpact ? (
-            <>
-              <p className="mt-1 leading-5 opacity-90">
-                {bannerState.impacted.slice(0, 3).map((model) => modelName(model.id)).join(", ")}
-                {bannerState.fallbackNames.length > 0
-                  ? ` ${t("providerStatus.tryFallback")} ${bannerState.fallbackNames.join(", ")}`
-                  : ` ${t("providerStatus.tryLater")}`}
-              </p>
-              {onToggleModel && bannerState.fallbackIds.length > 0 && (
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {bannerState.fallbackIds.map((modelId) => (
-                    <button
-                      key={modelId}
-                      type="button"
-                      onClick={() => onToggleModel(modelId)}
-                      className="inline-flex items-center gap-1 rounded-full bg-black/5 px-2.5 py-1 text-[11px] font-black transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
-                    >
-                      <Shuffle className="h-3 w-3" />
-                      {t("providerStatus.switchTo")} {modelName(modelId)}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </>
-          ) : (
-            <p className="mt-1 leading-5 opacity-90">{t("providerStatus.allAvailableBody")}</p>
+          <p className="mt-1 leading-5 opacity-90">
+            {bannerState.impacted.slice(0, 3).map((model) => modelName(model.id)).join(", ")}
+            {bannerState.fallbackNames.length > 0
+              ? ` ${t("providerStatus.tryFallback")} ${bannerState.fallbackNames.join(", ")}`
+              : ` ${t("providerStatus.tryLater")}`}
+          </p>
+          {onToggleModel && bannerState.fallbackIds.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {bannerState.fallbackIds.map((modelId) => (
+                <button
+                  key={modelId}
+                  type="button"
+                  onClick={() => onToggleModel(modelId)}
+                  className="inline-flex items-center gap-1 rounded-full bg-black/5 px-2.5 py-1 text-[11px] font-black transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
+                >
+                  <Shuffle className="h-3 w-3" />
+                  {t("providerStatus.switchTo")} {modelName(modelId)}
+                </button>
+              ))}
+            </div>
           )}
         </div>
         <button

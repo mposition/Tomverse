@@ -1,44 +1,55 @@
 export const dynamic = "force-dynamic";
 
 import Link from "next/link";
-import { Activity, AlertTriangle, CheckCircle2, XCircle } from "lucide-react";
+import { Activity, CheckCircle2, XCircle } from "lucide-react";
 import {
   getProviderHealthDashboard,
-  type ProviderHealthStatus,
+  type ProviderHealthRow,
 } from "@/lib/providerMonitoring";
 
-const statusCopy: Record<ProviderHealthStatus, string> = {
-  available: "Operational",
-  limited: "Limited",
-  outage: "Incident",
+type PublicProviderStatus = "operational" | "incident";
+
+const statusCopy: Record<PublicProviderStatus, string> = {
+  operational: "Operational",
+  incident: "Incident",
 };
 
-const statusClass: Record<ProviderHealthStatus, string> = {
-  available: "border-emerald-500/30 bg-emerald-500/10 text-emerald-200",
-  limited: "border-amber-500/30 bg-amber-500/10 text-amber-200",
-  outage: "border-red-500/30 bg-red-500/10 text-red-200",
+const statusClass: Record<PublicProviderStatus, string> = {
+  operational: "border-emerald-500/30 bg-emerald-500/10 text-emerald-200",
+  incident: "border-red-500/30 bg-red-500/10 text-red-200",
 };
 
-const iconFor = (status: ProviderHealthStatus) => {
-  if (status === "available") return <CheckCircle2 className="h-4 w-4" />;
-  if (status === "limited") return <AlertTriangle className="h-4 w-4" />;
+const publicStatusFor = (provider: ProviderHealthRow): PublicProviderStatus => {
+  if (
+    provider.status === "outage" ||
+    provider.modelIncidents.some((incident) => incident.failureCount5m >= 3)
+  ) {
+    return "incident";
+  }
+  return "operational";
+};
+
+const iconFor = (status: PublicProviderStatus) => {
+  if (status === "operational") return <CheckCircle2 className="h-4 w-4" />;
   return <XCircle className="h-4 w-4" />;
 };
 
 export default async function StatusPage() {
   const dashboard = await getProviderHealthDashboard();
-  const outageCount = dashboard.providers.filter(
-    (provider) => provider.status === "outage"
-  ).length;
-  const limitedCount = dashboard.providers.filter(
-    (provider) => provider.status === "limited"
+  const providers = dashboard.providers.map((provider) => ({
+    ...provider,
+    publicStatus: publicStatusFor(provider),
+    publicIncidents: provider.modelIncidents.filter(
+      (incident) => incident.failureCount5m >= 3
+    ),
+  }));
+  const outageCount = providers.filter(
+    (provider) => provider.publicStatus === "incident"
   ).length;
   const overall =
     outageCount > 0
       ? "Some providers are currently unavailable"
-      : limitedCount > 0
-        ? "Some providers are limited"
-        : "All monitored providers are operational";
+      : "All monitored providers are operational";
 
   return (
     <main className="min-h-screen bg-zinc-950 px-5 py-8 text-zinc-100">
@@ -60,9 +71,8 @@ export default async function StatusPage() {
                 {overall}
               </h1>
               <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-400">
-                Provider status is based on Tomverse request health, configured API keys,
-                recent failures, and operator overrides. Individual upstream providers may
-                expose additional detail on their own status pages.
+                This page reports service-impacting incidents. Internal health warnings and
+                diagnostics are reviewed by Tomverse operators.
               </p>
             </div>
             <div className="rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm text-zinc-400">
@@ -71,20 +81,14 @@ export default async function StatusPage() {
           </div>
         </header>
 
-        <section className="grid gap-3 md:grid-cols-3">
+        <section className="grid gap-3 md:grid-cols-2">
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
             <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500">
               Operational
             </p>
             <p className="mt-2 text-3xl font-black text-emerald-200">
-              {dashboard.providers.filter((provider) => provider.status === "available").length}
+              {providers.length - outageCount}
             </p>
-          </div>
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
-            <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500">
-              Limited
-            </p>
-            <p className="mt-2 text-3xl font-black text-amber-200">{limitedCount}</p>
           </div>
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
             <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500">
@@ -97,7 +101,7 @@ export default async function StatusPage() {
         <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
           <h2 className="text-xl font-black text-white">Provider Status</h2>
           <div className="mt-5 grid gap-3">
-            {dashboard.providers.map((provider) => (
+            {providers.map((provider) => (
               <div
                 key={provider.provider}
                 className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4"
@@ -114,16 +118,16 @@ export default async function StatusPage() {
                     </p>
                   </div>
                   <span
-                    className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-black ${statusClass[provider.status]}`}
+                    className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-black ${statusClass[provider.publicStatus]}`}
                   >
-                    {iconFor(provider.status)}
-                    {statusCopy[provider.status]}
+                    {iconFor(provider.publicStatus)}
+                    {statusCopy[provider.publicStatus]}
                   </span>
                 </div>
-                {provider.modelIncidents.length > 0 ? (
+                {provider.publicIncidents.length > 0 ? (
                   <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-100">
-                    {provider.modelIncidents.length} model incident
-                    {provider.modelIncidents.length === 1 ? "" : "s"} in the current
+                    {provider.publicIncidents.length} model incident
+                    {provider.publicIncidents.length === 1 ? "" : "s"} in the current
                     monitoring window.
                   </div>
                 ) : null}

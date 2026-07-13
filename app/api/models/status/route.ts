@@ -80,29 +80,23 @@ export async function GET(req: Request) {
       const provider = providerStatus.get(model.provider);
       const override = overrideMap.get(model.id);
       const incident = modelIncidents.get(model.id);
-      let status: "available" | "limited" | "unavailable" =
-        resolveModelOverrideStatus(model, override);
-      if (status === "unavailable") {
+      const overrideStatus = resolveModelOverrideStatus(model, override);
+      let status: "available" | "unavailable" =
+        overrideStatus === "unavailable" ? "unavailable" : "available";
+      if (status !== "unavailable" && incident && incident.failureCount5m >= 3) {
         status = "unavailable";
-      } else if (incident && incident.failureCount5m >= 3) {
+      } else if (status !== "unavailable" && provider?.status === "outage") {
         status = "unavailable";
-      } else if (incident) {
-        status = "limited";
-      } else if (provider?.status === "outage") {
-        status = "unavailable";
-      } else if (provider?.status === "limited") {
-        status = "limited";
       }
 
       return {
         id: model.id,
         provider: model.provider,
         status,
-        overrideStatus: override?.status || null,
-        visibleNote: override?.visibleNote || override?.reason || null,
-        fallbackModelIds: provider?.fallback.recommendedModelIds || [],
-        recentFailureCount5m: incident?.failureCount5m || 0,
-        recentErrorCode: incident?.recentErrorCode || null,
+        fallbackModelIds:
+          status === "unavailable"
+            ? provider?.fallback.recommendedModelIds || []
+            : [],
       };
     });
 
