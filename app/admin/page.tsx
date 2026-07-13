@@ -10,6 +10,7 @@ import {
     ArrowRight,
     Bell,
     CheckCircle2,
+    Cloud,
     CreditCard,
     Database,
     Gauge,
@@ -37,6 +38,7 @@ import { AdminAlertPolicyPanel } from "@/components/admin/AdminAlertPolicyPanel"
 import { AdminApprovalsPanel } from "@/components/admin/AdminApprovalsPanel";
 import { AdminBillingLifecyclePanel } from "@/components/admin/AdminBillingLifecyclePanel";
 import { AdminGlobalSearchPanel } from "@/components/admin/AdminGlobalSearchPanel";
+import { AdminInfrastructurePanel } from "@/components/admin/AdminInfrastructurePanel";
 import { AdminModelMetricsPanel, type AdminModelMetricRow } from "@/components/admin/AdminModelMetricsPanel";
 import { AdminNotificationsPanel, type AdminNotificationRow } from "@/components/admin/AdminNotificationsPanel";
 import { AdminOperationsPanel } from "@/components/admin/AdminOperationsPanel";
@@ -124,6 +126,12 @@ const adminTabs = [
         label: "Providers",
         description: "Health and budgets",
         icon: Activity,
+    },
+    {
+        id: "infrastructure",
+        label: "Infrastructure",
+        description: "Railway, R2, and database",
+        icon: Cloud,
     },
     {
         id: "alerts",
@@ -362,7 +370,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         checkoutStartedCount,
         usersWithConversations,
     ] = await Promise.all([
-        getProviderHealthDashboard(),
+        getProviderHealthDashboard({ includeErrorEvents: true }),
         getBillingPlans(),
         getBillingPromotions(),
         prisma.user.count(),
@@ -1123,6 +1131,12 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                             />
                         }
                     />
+                    )}
+
+                    {activeTab === "infrastructure" && (
+                        <AdminInfrastructurePanel
+                            canManageCosts={adminRole === "owner" || adminRole === "billing"}
+                        />
                     )}
 
                     {activeTab === "alerts" && (

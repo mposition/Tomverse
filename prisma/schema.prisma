@@ -154,6 +154,26 @@ model ChatUsageBucket {
   @@index([updatedAt])
 }
 
+model ProviderErrorEvent {
+  id             String   @id @default(cuid())
+  provider       String
+  modelId        String?
+  phase          String
+  diagnosticCode String
+  traceId        String
+  errorName      String?
+  errorCode      String?
+  httpStatus     Int?
+  retryable      Boolean?
+  message        String?
+  createdAt      DateTime @default(now())
+
+  @@index([provider, createdAt])
+  @@index([provider, diagnosticCode, createdAt])
+  @@index([modelId, createdAt])
+  @@index([traceId])
+}
+
 model ChatRequestLease {
   id         String   @id
   subjectKey String
@@ -484,6 +504,16 @@ model ProviderCreditConfig {
   updatedByEmail            String?
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
+}
+
+model InfrastructureCreditConfig {
+  service        String   @id
+  creditMicroUsd BigInt
+  note           String?
+  updatedById    String?
+  updatedByEmail String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 }
 
 model StripeWebhookEventLog {

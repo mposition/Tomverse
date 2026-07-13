@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import {
+  Activity,
   ArrowRight,
   BarChart3,
   Bot,
@@ -35,6 +36,19 @@ const annualLabelByLanguage: Partial<Record<Language, { annual: string; save: st
   de: { annual: "Jährlich", save: "20 % sparen" },
   es: { annual: "Anual", save: "20 % de descuento" },
   pt: { annual: "Anual", save: "20% de desconto" },
+};
+
+const modelLinkLabels: Record<
+  Language,
+  { catalogue: string; status: string }
+> = {
+  en: { catalogue: "Explore all models", status: "Live service status" },
+  ko: { catalogue: "전체 모델 보기", status: "실시간 서비스 상태" },
+  zh: { catalogue: "查看所有模型", status: "实时服务状态" },
+  fr: { catalogue: "Voir tous les modèles", status: "État du service" },
+  de: { catalogue: "Alle Modelle ansehen", status: "Live-Servicestatus" },
+  es: { catalogue: "Ver todos los modelos", status: "Estado del servicio" },
+  pt: { catalogue: "Ver todos os modelos", status: "Status do serviço" },
 };
 
 const supportedModels = [
@@ -526,6 +540,7 @@ export function LandingPageContent() {
   const launch = launchCopy[lang] ?? launchCopy.en;
   const billing = usePublicBilling();
   const annualCopy = annualLabelByLanguage[lang] ?? annualLabelByLanguage.en!;
+  const modelLinks = modelLinkLabels[lang];
   const chatHref = `/chat?lang=${encodeURIComponent(lang)}`;
   const primaryCtaLabel = status === "authenticated" ? content.signedInCta : content.primaryCta;
 
@@ -699,6 +714,23 @@ export function LandingPageContent() {
             <div>
               <h2 className="text-3xl font-black sm:text-4xl">{content.modelsTitle}</h2>
               <p className="mt-4 text-base leading-7 text-zinc-600 dark:text-zinc-300">{content.modelsDescription}</p>
+              <div className="mt-6 flex flex-wrap gap-3">
+                <Link
+                  href="/models"
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-zinc-300 bg-white px-4 text-sm font-black text-zinc-800 transition hover:border-zinc-400 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-900"
+                >
+                  {modelLinks.catalogue}
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+                <Link
+                  href="/status"
+                  data-testid="home-model-status-link"
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 text-sm font-black text-emerald-700 transition hover:bg-emerald-500/15 dark:text-emerald-300"
+                >
+                  <Activity className="h-4 w-4" />
+                  {modelLinks.status}
+                </Link>
+              </div>
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {supportedModels.map((model) => (

@@ -15,6 +15,7 @@ const chrome = {
       { label: "About", href: "/about" },
       { label: "Features", href: "/#features" },
       { label: "Models", href: "/models" },
+      { label: "Status", href: "/status" },
       { label: "Pricing", href: "/pricing" },
       { label: "Security", href: "/safety" },
       { label: "FAQ", href: "/faq" },
@@ -25,6 +26,7 @@ const chrome = {
       { label: "Refund", href: "/refund" },
       { label: "Privacy", href: "/privacy" },
       { label: "Support", href: "/support" },
+      { label: "Status", href: "/status" },
     ],
   },
   ko: {
@@ -35,6 +37,7 @@ const chrome = {
       { label: "소개", href: "/about" },
       { label: "기능", href: "/#features" },
       { label: "모델", href: "/models" },
+      { label: "상태", href: "/status" },
       { label: "요금", href: "/pricing" },
       { label: "보안", href: "/safety" },
       { label: "FAQ", href: "/faq" },
@@ -45,6 +48,7 @@ const chrome = {
       { label: "환불", href: "/refund" },
       { label: "개인정보", href: "/privacy" },
       { label: "지원", href: "/support" },
+      { label: "상태", href: "/status" },
     ],
   },
   zh: {
@@ -55,6 +59,7 @@ const chrome = {
       { label: "介绍", href: "/about" },
       { label: "功能", href: "/#features" },
       { label: "模型", href: "/models" },
+      { label: "服务状态", href: "/status" },
       { label: "价格", href: "/pricing" },
       { label: "安全", href: "/safety" },
       { label: "FAQ", href: "/faq" },
@@ -65,6 +70,7 @@ const chrome = {
       { label: "退款", href: "/refund" },
       { label: "隐私", href: "/privacy" },
       { label: "支持", href: "/support" },
+      { label: "服务状态", href: "/status" },
     ],
   },
   fr: {
@@ -75,6 +81,7 @@ const chrome = {
       { label: "A propos", href: "/about" },
       { label: "Fonctionnalites", href: "/#features" },
       { label: "Modeles", href: "/models" },
+      { label: "Statut", href: "/status" },
       { label: "Tarifs", href: "/pricing" },
       { label: "Securite", href: "/safety" },
       { label: "FAQ", href: "/faq" },
@@ -85,6 +92,7 @@ const chrome = {
       { label: "Remboursement", href: "/refund" },
       { label: "Confidentialite", href: "/privacy" },
       { label: "Support", href: "/support" },
+      { label: "Statut", href: "/status" },
     ],
   },
   de: {
@@ -95,6 +103,7 @@ const chrome = {
       { label: "Uber uns", href: "/about" },
       { label: "Funktionen", href: "/#features" },
       { label: "Modelle", href: "/models" },
+      { label: "Status", href: "/status" },
       { label: "Preise", href: "/pricing" },
       { label: "Sicherheit", href: "/safety" },
       { label: "FAQ", href: "/faq" },
@@ -105,6 +114,7 @@ const chrome = {
       { label: "Ruckerstattung", href: "/refund" },
       { label: "Datenschutz", href: "/privacy" },
       { label: "Support", href: "/support" },
+      { label: "Status", href: "/status" },
     ],
   },
   es: {
@@ -115,6 +125,7 @@ const chrome = {
       { label: "Acerca de", href: "/about" },
       { label: "Funciones", href: "/#features" },
       { label: "Modelos", href: "/models" },
+      { label: "Estado", href: "/status" },
       { label: "Precios", href: "/pricing" },
       { label: "Seguridad", href: "/safety" },
       { label: "FAQ", href: "/faq" },
@@ -125,6 +136,7 @@ const chrome = {
       { label: "Reembolso", href: "/refund" },
       { label: "Privacidad", href: "/privacy" },
       { label: "Soporte", href: "/support" },
+      { label: "Estado", href: "/status" },
     ],
   },
   pt: {
@@ -135,6 +147,7 @@ const chrome = {
       { label: "Sobre", href: "/about" },
       { label: "Recursos", href: "/#features" },
       { label: "Modelos", href: "/models" },
+      { label: "Status", href: "/status" },
       { label: "Precos", href: "/pricing" },
       { label: "Seguranca", href: "/safety" },
       { label: "FAQ", href: "/faq" },
@@ -145,6 +158,7 @@ const chrome = {
       { label: "Reembolso", href: "/refund" },
       { label: "Privacidade", href: "/privacy" },
       { label: "Suporte", href: "/support" },
+      { label: "Status", href: "/status" },
     ],
   },
 } satisfies Record<
@@ -176,7 +190,12 @@ export function MarketingHeader({ maxWidth = "max-w-7xl" }: { maxWidth?: string 
         </Link>
         <nav className="hidden items-center gap-5 text-sm font-semibold text-zinc-600 dark:text-zinc-300 lg:flex">
           {labels.topMenu.map((item) => (
-            <Link key={item.href} href={item.href} className="hover:text-zinc-950 dark:hover:text-white">
+            <Link
+              key={item.href}
+              href={item.href}
+              data-testid={item.href === "/status" ? "header-status-link" : undefined}
+              className="hover:text-zinc-950 dark:hover:text-white"
+            >
               {item.label}
             </Link>
           ))}
@@ -208,6 +227,7 @@ export function MarketingHeader({ maxWidth = "max-w-7xl" }: { maxWidth?: string 
               <Link
                 key={item.href}
                 href={item.href}
+                data-testid={item.href === "/status" ? "mobile-status-link" : undefined}
                 onClick={() => setIsMenuOpen(false)}
                 className="rounded-xl px-3 py-3 text-base font-black text-zinc-800 transition hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-900"
               >
@@ -257,7 +277,12 @@ export function MarketingFooter({ maxWidth = "max-w-7xl" }: { maxWidth?: string 
         </div>
         <nav className="flex flex-wrap gap-4">
           {labels.footerMenu.map((item) => (
-            <Link key={item.href} href={item.href} className="hover:text-zinc-950 dark:hover:text-white">
+            <Link
+              key={item.href}
+              href={item.href}
+              data-testid={item.href === "/status" ? "footer-status-link" : undefined}
+              className="hover:text-zinc-950 dark:hover:text-white"
+            >
               {item.label}
             </Link>
           ))}

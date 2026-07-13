@@ -28,7 +28,9 @@ export async function GET(req: Request) {
             day: 1_000,
         });
 
-        const dashboard = await getProviderHealthDashboard();
+        const dashboard = await getProviderHealthDashboard({
+            includeErrorEvents: true,
+        });
         return NextResponse.json(dashboard, {
             headers: {
                 "Cache-Control": "no-store",

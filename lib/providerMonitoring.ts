@@ -20,6 +20,21 @@ export type ProviderStatusReason = {
   detail: string;
 };
 
+export type ProviderErrorEventRow = {
+  id: string;
+  provider: AiProvider;
+  modelId: string | null;
+  phase: string;
+  diagnosticCode: string;
+  traceId: string;
+  errorName: string | null;
+  errorCode: string | null;
+  httpStatus: number | null;
+  retryable: boolean | null;
+  message: string | null;
+  createdAt: string;
+};
+
 export type ProviderHealthRow = {
   provider: AiProvider;
   displayName: string;
@@ -30,7 +45,13 @@ export type ProviderHealthRow = {
   failureCount24h: number;
   successRate24h: number | null;
   recentErrorCode: string | null;
-  recentErrors: Array<{ code: string; count: number; updatedAt: string }>;
+  recentErrors: Array<{
+    code: string;
+    count: number;
+    updatedAt: string;
+    explanation: string;
+  }>;
+  recentErrorEvents: ProviderErrorEventRow[];
   lastSuccessAt: string | null;
   lastFailureAt: string | null;
   todayCostMicroUsd: number;
@@ -183,12 +204,6 @@ const balanceUsdFor = (provider: AiProvider) =>
 
 const errorExplanationFor = (code: string | null) => {
   if (!code) return "No provider error code was recorded.";
-  if (code.startsWith("AI_STREAM_FAILED")) {
-    return "The response stream ended before a complete answer was received. This commonly indicates a transient provider, timeout, network, or SDK streaming failure.";
-  }
-  if (code.startsWith("AI_REQUEST_FAILED")) {
-    return "The provider request failed before a response stream could be established.";
-  }
   if (/429|RATE.?LIMIT/i.test(code)) {
     return "The provider rejected the request because a rate or quota limit was reached.";
   }
@@ -197,6 +212,12 @@ const errorExplanationFor = (code: string | null) => {
   }
   if (/5\d\d|TIMEOUT|ECONN|NETWORK/i.test(code)) {
     return "The error is consistent with a transient provider or network availability failure.";
+  }
+  if (code.startsWith("AI_STREAM_FAILED")) {
+    return "The response stream ended before a complete answer was received. This commonly indicates a transient provider, timeout, network, or SDK streaming failure.";
+  }
+  if (code.startsWith("AI_REQUEST_FAILED")) {
+    return "The provider request failed before a response stream could be established.";
   }
   return "The code was recorded from the provider request path; inspect provider logs with the matching time for additional detail.";
 };
@@ -609,13 +630,55 @@ export const recordModelFailure = async (
 
 export const recordProviderFailure = async (
   provider: AiProvider | undefined,
-  code: string
+  code: string,
+  event?: {
+    modelId?: string;
+    phase: "request" | "stream";
+    traceId: string;
+    errorName?: string;
+    errorCode?: string;
+    httpStatus?: number;
+    retryable?: boolean;
+    message?: string;
+  }
 ) => {
   if (!provider) return;
   const sanitizedCode = code.replace(/[^A-Za-z0-9_.-]/g, "_").slice(0, 80) || "UNKNOWN";
+  const safeText = (value: string | undefined, maxLength: number) => {
+    if (!value) return null;
+    return value
+      .replace(/Bearer\s+\S+/gi, "Bearer [REDACTED]")
+      .replace(/\b(?:sk|rk|pk)-[A-Za-z0-9_-]{12,}\b/g, "[REDACTED_KEY]")
+      .replace(
+        /\b(api[_-]?key|token|secret|authorization)\s*[:=]\s*[^\s,;]+/gi,
+        "$1=[REDACTED]"
+      )
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, maxLength) || null;
+  };
   await Promise.all([
     incrementBucket(`provider:${provider}:failure`, "provider-health-day"),
     incrementBucket(`provider:${provider}:error:${sanitizedCode}`, "provider-error-day"),
+    event
+      ? prisma.providerErrorEvent.create({
+          data: {
+            provider,
+            modelId: safeText(event.modelId, 120),
+            phase: event.phase,
+            diagnosticCode: sanitizedCode,
+            traceId: safeText(event.traceId, 120) || "unknown",
+            errorName: safeText(event.errorName, 80),
+            errorCode: safeText(event.errorCode, 80),
+            httpStatus:
+              Number.isSafeInteger(event.httpStatus) && event.httpStatus! >= 100 && event.httpStatus! <= 599
+                ? event.httpStatus
+                : null,
+            retryable: typeof event.retryable === "boolean" ? event.retryable : null,
+            message: safeText(event.message, 500),
+          },
+        })
+      : Promise.resolve(null),
   ]);
   await maybeNotifyProviderFailure(provider, sanitizedCode);
 };
@@ -767,46 +830,59 @@ const configuredTierLimit = (tier: ModelTier) =>
     Max: process.env.CHAT_MAX_TIER_COST_MICROUSD_PER_DAY || "shared",
   })[tier];
 
-export const getProviderHealthDashboard = async (): Promise<ProviderHealthDashboard> => {
+export const getProviderHealthDashboard = async (
+  options: { includeErrorEvents?: boolean } = {}
+): Promise<ProviderHealthDashboard> => {
   const now = new Date();
   const dayStart = periodStart("day", now);
   const monthStart = periodStart("month", now);
-  const rows = await prisma.chatUsageBucket.findMany({
-    where: {
-      OR: [
-        { period: "provider-health-day", periodStart: dayStart },
-        { period: "provider-error-day", periodStart: dayStart },
-        { period: "provider-cost-month", periodStart: monthStart },
-        { period: "provider-cost-day", periodStart: dayStart },
-        { period: "model-health-5m", periodStart: periodStart("five-minute", now) },
-        { period: "model-error-5m", periodStart: periodStart("five-minute", now) },
-      ],
-    },
-    select: {
-      key: true,
-      period: true,
-      count: true,
-      updatedAt: true,
-    },
-  });
-
-  const usageRows = await prisma.providerDailyUsage.findMany({
-    where: {
-      provider: { in: MONITORED_PROVIDERS },
-      date: { gte: monthStart },
-    },
-    select: {
-      provider: true,
-      source: true,
-      date: true,
-      requestCount: true,
-      inputTokens: true,
-      outputTokens: true,
-      estimatedCostMicroUsd: true,
-      providerReportedCostMicroUsd: true,
-      syncedAt: true,
-    },
-  });
+  const [rows, usageRows, errorEvents] = await Promise.all([
+    prisma.chatUsageBucket.findMany({
+      where: {
+        OR: [
+          { period: "provider-health-day", periodStart: dayStart },
+          { period: "provider-error-day", periodStart: dayStart },
+          { period: "provider-cost-month", periodStart: monthStart },
+          { period: "provider-cost-day", periodStart: dayStart },
+          { period: "model-health-5m", periodStart: periodStart("five-minute", now) },
+          { period: "model-error-5m", periodStart: periodStart("five-minute", now) },
+        ],
+      },
+      select: {
+        key: true,
+        period: true,
+        count: true,
+        updatedAt: true,
+      },
+    }),
+    prisma.providerDailyUsage.findMany({
+      where: {
+        provider: { in: MONITORED_PROVIDERS },
+        date: { gte: monthStart },
+      },
+      select: {
+        provider: true,
+        source: true,
+        date: true,
+        requestCount: true,
+        inputTokens: true,
+        outputTokens: true,
+        estimatedCostMicroUsd: true,
+        providerReportedCostMicroUsd: true,
+        syncedAt: true,
+      },
+    }),
+    options.includeErrorEvents
+      ? prisma.providerErrorEvent.findMany({
+          where: {
+            provider: { in: MONITORED_PROVIDERS },
+            createdAt: { gte: dayStart },
+          },
+          orderBy: { createdAt: "desc" },
+          take: 200,
+        })
+      : Promise.resolve([]),
+  ]);
 
   const [balanceEntries, creditByProvider] = await Promise.all([
     Promise.all(
@@ -836,6 +912,23 @@ export const getProviderHealthDashboard = async (): Promise<ProviderHealthDashbo
         code: row.key.split(":error:")[1] || "UNKNOWN",
         count: row.count,
         updatedAt: row.updatedAt.toISOString(),
+        explanation: errorExplanationFor(row.key.split(":error:")[1] || "UNKNOWN"),
+      }));
+    const recentErrorEvents: ProviderErrorEventRow[] = errorEvents
+      .filter((event) => event.provider === provider)
+      .map((event) => ({
+        id: event.id,
+        provider,
+        modelId: event.modelId,
+        phase: event.phase,
+        diagnosticCode: event.diagnosticCode,
+        traceId: event.traceId,
+        errorName: event.errorName,
+        errorCode: event.errorCode,
+        httpStatus: event.httpStatus,
+        retryable: event.retryable,
+        message: event.message,
+        createdAt: event.createdAt.toISOString(),
       }));
     const internalMonthCost = sumInternalCost(usageRows, provider, monthStart);
     const bucketMonthCost = countFor(rows, `provider:${provider}`, "provider-cost-month");
@@ -965,6 +1058,7 @@ export const getProviderHealthDashboard = async (): Promise<ProviderHealthDashbo
       successRate24h,
       recentErrorCode,
       recentErrors,
+      recentErrorEvents,
       lastSuccessAt: latestFor(rows, successKey)?.updatedAt.toISOString() || null,
       lastFailureAt: latestFor(rows, failureKey)?.updatedAt.toISOString() || null,
       todayCostMicroUsd,

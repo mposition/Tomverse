@@ -74,7 +74,9 @@ export async function PATCH(req: Request) {
       },
     });
 
-    const dashboard = await getProviderHealthDashboard();
+    const dashboard = await getProviderHealthDashboard({
+      includeErrorEvents: true,
+    });
     return NextResponse.json(dashboard, {
       headers: { "Cache-Control": "no-store" },
     });

@@ -76,6 +76,7 @@ function ProviderRow({
 }) {
   const [statusOpen, setStatusOpen] = useState(false);
   const [creditEditorOpen, setCreditEditorOpen] = useState(false);
+  const [selectedErrorCode, setSelectedErrorCode] = useState<string | null>(null);
   const [creditUsd, setCreditUsd] = useState(
     provider.credit.configuredCreditMicroUsd === null
       ? ""
@@ -98,6 +99,14 @@ function ProviderRow({
     parsedCreditUsd >= 0 &&
     parsedCreditUsd <= 1_000_000;
   const estimatedBalance = provider.credit.estimatedBalanceMicroUsd;
+  const selectedError = provider.recentErrors.find(
+    (error) => error.code === selectedErrorCode
+  );
+  const selectedErrorEvents = selectedError
+    ? provider.recentErrorEvents.filter(
+        (event) => event.diagnosticCode === selectedError.code
+      )
+    : [];
 
   const toggleCreditEditor = () => {
     if (!creditEditorOpen) {
@@ -372,18 +381,100 @@ function ProviderRow({
           ) : (
             <div className="mt-2 space-y-2">
               {provider.recentErrors.map((error) => (
-                <div
+                <button
                   key={`${error.code}-${error.updatedAt}`}
-                  className="flex items-center justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-900/60 px-3 py-2 text-xs"
+                  type="button"
+                  onClick={() =>
+                    setSelectedErrorCode((current) =>
+                      current === error.code ? null : error.code
+                    )
+                  }
+                  aria-expanded={selectedErrorCode === error.code}
+                  className="flex w-full cursor-pointer items-center justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-900/60 px-3 py-2 text-left text-xs transition hover:border-zinc-700 hover:bg-zinc-900"
                 >
                   <span className="min-w-0 truncate font-semibold text-zinc-200">
                     {error.code}
                   </span>
-                  <span className="shrink-0 text-zinc-500">
+                  <span className="flex shrink-0 items-center gap-2 text-zinc-500">
                     {error.count} / {dateLabel(error.updatedAt)}
+                    <ChevronDown
+                      className={`h-3.5 w-3.5 transition-transform ${
+                        selectedErrorCode === error.code ? "rotate-180" : ""
+                      }`}
+                    />
                   </span>
-                </div>
+                </button>
               ))}
+              {selectedError ? (
+                <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-3">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-blue-300" />
+                    <div className="min-w-0">
+                      <p className="text-xs font-black text-blue-100">
+                        {selectedError.code}
+                      </p>
+                      <p className="mt-1 text-xs leading-5 text-zinc-400">
+                        {selectedError.explanation}
+                      </p>
+                    </div>
+                  </div>
+                  {selectedErrorEvents.length === 0 ? (
+                    <p className="mt-3 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-100/80">
+                      Historical aggregate only. This error was recorded before event-level
+                      diagnostics were enabled, so its original trace and provider response
+                      cannot be reconstructed.
+                    </p>
+                  ) : (
+                    <div className="mt-3 space-y-2">
+                      {selectedErrorEvents.map((event) => (
+                        <div
+                          key={event.id}
+                          className="rounded-lg border border-zinc-800 bg-zinc-950/80 px-3 py-2 text-xs"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="font-black text-zinc-200">
+                              {event.modelId || "Provider-level"} · {event.phase}
+                            </span>
+                            <span className="text-zinc-500">
+                              {dateLabel(event.createdAt)}
+                            </span>
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
+                            {event.errorName ? (
+                              <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-zinc-300">
+                                {event.errorName}
+                              </span>
+                            ) : null}
+                            {event.errorCode ? (
+                              <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-zinc-300">
+                                {event.errorCode}
+                              </span>
+                            ) : null}
+                            {event.httpStatus ? (
+                              <span className="rounded-full bg-red-500/10 px-2 py-0.5 text-red-200">
+                                HTTP {event.httpStatus}
+                              </span>
+                            ) : null}
+                            {event.retryable !== null ? (
+                              <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-zinc-300">
+                                {event.retryable ? "Retryable" : "Not retryable"}
+                              </span>
+                            ) : null}
+                          </div>
+                          {event.message ? (
+                            <p className="mt-2 break-words text-xs leading-5 text-zinc-400">
+                              {event.message}
+                            </p>
+                          ) : null}
+                          <p className="mt-2 break-all font-mono text-[10px] text-zinc-600">
+                            Trace {event.traceId}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : null}
             </div>
           )}
         </div>

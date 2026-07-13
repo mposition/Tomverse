@@ -39,6 +39,7 @@ export async function GET(req: Request) {
     const auditCutoff = daysAgo(365);
     const notificationCutoff = daysAgo(90);
     const providerCheckCutoff = daysAgo(30);
+    const providerErrorCutoff = daysAgo(30);
 
     const [
       oldUsageBuckets,
@@ -47,12 +48,14 @@ export async function GET(req: Request) {
       oldAuditLogs,
       oldNotificationLogs,
       oldProviderChecks,
+      oldProviderErrors,
       oldestUsage,
       oldestLease,
       oldestShare,
       oldestAudit,
       oldestNotification,
       oldestProviderCheck,
+      oldestProviderError,
     ] = await Promise.all([
       prisma.chatUsageBucket.count({ where: { updatedAt: { lt: usageCutoff } } }),
       prisma.chatRequestLease.count({ where: { expiresAt: { lt: leaseCutoff } } }),
@@ -70,6 +73,9 @@ export async function GET(req: Request) {
       }),
       prisma.providerHealthCheck.count({
         where: { createdAt: { lt: providerCheckCutoff } },
+      }),
+      prisma.providerErrorEvent.count({
+        where: { createdAt: { lt: providerErrorCutoff } },
       }),
       oldestDate(
         () =>
@@ -115,6 +121,14 @@ export async function GET(req: Request) {
       oldestDate(
         () =>
           prisma.providerHealthCheck.findFirst({
+            orderBy: { createdAt: "asc" },
+            select: { createdAt: true },
+          }),
+        "createdAt"
+      ),
+      oldestDate(
+        () =>
+          prisma.providerErrorEvent.findFirst({
             orderBy: { createdAt: "asc" },
             select: { createdAt: true },
           }),
@@ -166,6 +180,13 @@ export async function GET(req: Request) {
           policy: "Delete manual provider check records older than 30 days.",
           staleCount: oldProviderChecks,
           oldestAt: oldestProviderCheck,
+        },
+        {
+          key: "providerErrors",
+          label: "Provider error events",
+          policy: "Delete sanitized provider error diagnostics older than 30 days.",
+          staleCount: oldProviderErrors,
+          oldestAt: oldestProviderError,
         },
       ],
     });

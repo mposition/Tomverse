@@ -52,6 +52,35 @@ CHAT_MODEL_GPT_5_5_MAX_OUTPUT_TOKENS=8192
 Application limits are a second line of defense. Configure billing alerts and
 hard spending limits in each AI provider dashboard as well.
 
+## Admin Infrastructure Audit
+
+The Admin Console Infrastructure tab reads Railway projected usage, Cloudflare
+R2 analytics, and application database inventory without exposing API tokens to
+the browser. Add these server-side Railway Variables to enable external metrics:
+
+```text
+RAILWAY_API_TOKEN=<workspace or account token>
+RAILWAY_WORKSPACE_ID=<workspace ID>
+# RAILWAY_PROJECT_ID is used automatically when no workspace ID is set.
+
+CLOUDFLARE_API_TOKEN=<Account Analytics Read token>
+```
+
+The existing `R2_ACCOUNT_ID`, `R2_BUCKET_NAME`, `R2_ACCESS_KEY_ID`, and
+`R2_SECRET_ACCESS_KEY` configure object access, but the separate
+`CLOUDFLARE_API_TOKEN` is required for GraphQL analytics. Scope it to the
+relevant Cloudflare account with `Account Analytics: Read` only.
+
+Railway credit is an admin-maintained checkpoint stored in the database. The
+displayed balance subtracts Railway's projected end-of-cycle usage from that
+checkpoint; it is an operational estimate, not an invoice or payment action.
+Cloudflare usage percentages use the current Standard storage free-tier
+allowances as reference thresholds and are likewise not authoritative billing.
+
+Before deploying the Admin Infrastructure and provider error-detail features,
+apply the checked-in database migration with `npm run db:migrate` from a
+deployment job that has `DIRECT_DATABASE_URL`.
+
 ## Authentication Secrets
 
 Production OAuth account linking encrypts provider tokens before storing them.

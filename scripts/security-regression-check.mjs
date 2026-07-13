@@ -144,6 +144,53 @@ const checks = [
       source.includes("MONTHLY_BUDGET_WARNING"),
   },
   {
+    name: "Provider error details are sanitized, bounded, and retained temporarily",
+    file: "lib/providerMonitoring.ts",
+    test: (source) =>
+      source.includes("providerErrorEvent.create") &&
+      source.includes("options.includeErrorEvents") &&
+      source.includes('"Bearer [REDACTED]"') &&
+      source.includes("safeText(event.message, 500)") &&
+      source.includes("safeText(event.traceId, 120)"),
+  },
+  {
+    name: "Admin provider health explicitly requests detailed error events",
+    file: "app/api/admin/provider-health/route.ts",
+    test: (source) =>
+      source.includes("isAdminSession(session)") &&
+      source.includes("includeErrorEvents: true") &&
+      source.includes('"Cache-Control": "no-store"'),
+  },
+  {
+    name: "Provider error events expire through maintenance cleanup",
+    file: "lib/maintenance.ts",
+    test: (source) =>
+      source.includes("providerErrorEvent.deleteMany") &&
+      source.includes("30 * 24 * 60 * 60 * 1000") &&
+      source.includes("providerErrorEvents.count"),
+  },
+  {
+    name: "Infrastructure metrics remain admin-only with bounded external responses",
+    file: "app/api/admin/infrastructure/route.ts",
+    test: (source) =>
+      source.includes("isAdminSession(session)") &&
+      source.includes("consumeApiRateLimit") &&
+      source.includes('headers: { "Cache-Control": "no-store" }') &&
+      source.includes('hasAdminPermission(session, "billing:write")') &&
+      source.includes("readLimitedJson") &&
+      source.includes("writeAdminAuditLog"),
+  },
+  {
+    name: "External infrastructure calls use server-only tokens, timeouts, and response limits",
+    file: "lib/infrastructureMonitoring.ts",
+    test: (source) =>
+      source.includes('import "server-only"') &&
+      source.includes("RAILWAY_API_TOKEN") &&
+      source.includes("CLOUDFLARE_API_TOKEN") &&
+      source.includes("AbortSignal.timeout(EXTERNAL_TIMEOUT_MS)") &&
+      source.includes("MAX_EXTERNAL_RESPONSE_BYTES"),
+  },
+  {
     name: "Conversation share creation requires unlock grant and snapshots",
     file: "app/api/conversations/[conversationId]/share/route.ts",
     test: (source) =>

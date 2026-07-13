@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { Activity, ArrowRight } from "lucide-react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { ENABLED_MODELS } from "@/lib/models";
 import { getModelBrand } from "@/lib/modelBranding";
@@ -15,6 +17,8 @@ const copy = {
     tier: "Tier",
     status: "Status",
     enabled: "Available",
+    liveStatus: "View live service status",
+    liveStatusDescription: "Check current provider availability and service-impacting incidents.",
   },
   ko: {
     eyebrow: "모델",
@@ -24,6 +28,8 @@ const copy = {
     tier: "등급",
     status: "상태",
     enabled: "사용 가능",
+    liveStatus: "실시간 서비스 상태 보기",
+    liveStatusDescription: "현재 제공자 가용성과 서비스 영향 장애를 확인하세요.",
   },
   zh: {
     eyebrow: "模型",
@@ -33,6 +39,8 @@ const copy = {
     tier: "等级",
     status: "状态",
     enabled: "可用",
+    liveStatus: "查看实时服务状态",
+    liveStatusDescription: "查看当前供应商可用性和影响服务的事件。",
   },
   fr: {
     eyebrow: "Modèles",
@@ -42,6 +50,8 @@ const copy = {
     tier: "Niveau",
     status: "Statut",
     enabled: "Disponible",
+    liveStatus: "Voir l’état du service",
+    liveStatusDescription: "Consultez la disponibilité des fournisseurs et les incidents en cours.",
   },
   de: {
     eyebrow: "Modelle",
@@ -51,6 +61,8 @@ const copy = {
     tier: "Stufe",
     status: "Status",
     enabled: "Verfügbar",
+    liveStatus: "Live-Servicestatus ansehen",
+    liveStatusDescription: "Prüfen Sie die Verfügbarkeit der Anbieter und aktuelle Störungen.",
   },
   es: {
     eyebrow: "Modelos",
@@ -60,6 +72,8 @@ const copy = {
     tier: "Nivel",
     status: "Estado",
     enabled: "Disponible",
+    liveStatus: "Ver estado del servicio",
+    liveStatusDescription: "Consulta la disponibilidad de proveedores y los incidentes actuales.",
   },
   pt: {
     eyebrow: "Modelos",
@@ -69,6 +83,8 @@ const copy = {
     tier: "Nível",
     status: "Status",
     enabled: "Disponível",
+    liveStatus: "Ver status do serviço",
+    liveStatusDescription: "Confira a disponibilidade dos provedores e incidentes atuais.",
   },
 } satisfies Record<Language, Record<string, string>>;
 
@@ -85,6 +101,24 @@ export function ModelsPageContent() {
           <p className="text-sm font-black uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">{content.eyebrow}</p>
           <h1 className="mt-4 text-4xl font-black leading-tight sm:text-6xl">{content.title}</h1>
           <p className="mt-5 text-lg leading-8 text-zinc-600 dark:text-zinc-300">{content.description}</p>
+          <Link
+            href="/status"
+            data-testid="models-status-link"
+            className="mt-7 inline-flex items-center gap-3 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-left transition hover:bg-emerald-500/15"
+          >
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-300">
+              <Activity className="h-5 w-5" />
+            </span>
+            <span>
+              <span className="block text-sm font-black text-emerald-700 dark:text-emerald-300">
+                {content.liveStatus}
+              </span>
+              <span className="mt-0.5 block text-xs leading-5 text-zinc-600 dark:text-zinc-400">
+                {content.liveStatusDescription}
+              </span>
+            </span>
+            <ArrowRight className="ml-auto h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-300" />
+          </Link>
         </div>
 
         <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
