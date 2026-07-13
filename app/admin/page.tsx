@@ -164,13 +164,11 @@ const azureOAuthRequested =
     isConfigured(process.env.AZURE_AD_CLIENT_ID) ||
     isConfigured(process.env.AZURE_AD_CLIENT_SECRET) ||
     isConfigured(process.env.AZURE_AD_TENANT_ID);
-const azureTenantId = process.env.AZURE_AD_TENANT_ID?.trim().toLowerCase();
-const azureTenantIsSingleTenant =
+const azureOAuthConfigurationComplete =
     !azureOAuthRequested ||
     (isConfigured(process.env.AZURE_AD_CLIENT_ID) &&
         isConfigured(process.env.AZURE_AD_CLIENT_SECRET) &&
-        isConfigured(azureTenantId) &&
-        !["common", "organizations", "consumers"].includes(azureTenantId!));
+        isConfigured(process.env.AZURE_AD_TENANT_ID));
 
 function MetricCard({
     label,
@@ -753,7 +751,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             isStrongSecret(process.env.NEXTAUTH_SECRET),
             isStrongSecret(process.env.OAUTH_TOKEN_ENCRYPTION_KEY),
             isStrongSecret(process.env.MAINTENANCE_SECRET),
-            azureTenantIsSingleTenant,
+            azureOAuthConfigurationComplete,
         ].filter((configured) => !configured).length;
     const alertFailures = notificationRows.filter((row) => row.status === "failed").length;
     const healthScore = Math.max(
@@ -781,9 +779,9 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             description: "Dedicated 32+ character key required for OAuth token encryption.",
         },
         {
-            name: "AZURE_AD_TENANT_ID",
-            configured: azureTenantIsSingleTenant,
-            description: "Azure OAuth must use a specific tenant; common/organizations/consumers are rejected.",
+            name: "AZURE_AD_*",
+            configured: azureOAuthConfigurationComplete,
+            description: "Client ID, client secret, and tenant ID must be configured together; common is supported for public sign-in.",
         },
         {
             name: "MAINTENANCE_SECRET",

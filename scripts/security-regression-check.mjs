@@ -105,12 +105,24 @@ const checks = [
       !source.includes("process.env.OAUTH_TOKEN_ENCRYPTION_KEY || process.env.NEXTAUTH_SECRET"),
   },
   {
-    name: "Azure OAuth rejects generic tenants and dangerous email linking",
+    name: "Azure OAuth requires complete configuration without dangerous email linking",
     file: "lib/auth.ts",
     test: (source) =>
-      source.includes('"common", "organizations", "consumers"') &&
-      source.includes("hasSingleTenantAzureConfiguration") &&
+      source.includes("hasCompleteAzureConfiguration") &&
+      source.includes("process.env.AZURE_AD_CLIENT_ID") &&
+      source.includes("process.env.AZURE_AD_CLIENT_SECRET") &&
+      source.includes("process.env.AZURE_AD_TENANT_ID") &&
       !source.includes("allowDangerousEmailAccountLinking: true"),
+  },
+  {
+    name: "Production readiness accepts complete public Azure OAuth configuration",
+    file: "lib/securityEnvironment.ts",
+    test: (source) =>
+      source.includes("azureOAuthConfiguration") &&
+      source.includes("configured(azureClientId)") &&
+      source.includes("configured(azureClientSecret)") &&
+      source.includes("configured(azureTenant)") &&
+      !source.includes("azureTenantIsGeneric"),
   },
   {
     name: "Conversation share creation requires unlock grant and snapshots",

@@ -14,9 +14,6 @@ export const getSecurityEnvironmentStatus = () => {
     configured(azureClientId) ||
     configured(azureClientSecret) ||
     configured(azureTenant);
-  const azureTenantIsGeneric = ["common", "organizations", "consumers"].includes(
-    azureTenant?.toLowerCase() || ""
-  );
 
   const checks = {
     nextAuthSecret: strongSecret(process.env.NEXTAUTH_SECRET),
@@ -24,12 +21,11 @@ export const getSecurityEnvironmentStatus = () => {
       process.env.OAUTH_TOKEN_ENCRYPTION_KEY
     ),
     maintenanceSecret: strongSecret(process.env.MAINTENANCE_SECRET),
-    azureSingleTenant:
+    azureOAuthConfiguration:
       !azureRequested ||
       (configured(azureClientId) &&
         configured(azureClientSecret) &&
-        configured(azureTenant) &&
-        !azureTenantIsGeneric),
+        configured(azureTenant)),
   };
 
   return {

@@ -63,16 +63,23 @@ OAUTH_TOKEN_ENCRYPTION_KEY=<random value with at least 32 characters>
 ```
 
 `OAUTH_TOKEN_ENCRYPTION_KEY` is mandatory and does not fall back to
-`NEXTAUTH_SECRET`. If Microsoft OAuth is enabled, configure a specific Azure
-tenant. Generic multi-tenant values are deliberately rejected:
+`NEXTAUTH_SECRET`. If Microsoft OAuth is enabled, configure its client ID,
+client secret, and tenant ID together. Public services that accept Microsoft
+accounts from multiple directories can use the `common` tenant:
 
 ```text
-AZURE_AD_TENANT_ID=<your tenant ID or verified tenant domain>
+AZURE_AD_CLIENT_ID=<application client ID>
+AZURE_AD_CLIENT_SECRET=<application client secret>
+AZURE_AD_TENANT_ID=common
 ```
+
+Use a specific tenant GUID or verified tenant domain instead when sign-in must
+be restricted to a single Microsoft Entra directory. Dangerous cross-provider
+email account linking remains disabled for both configurations.
 
 In production, `/api/health` returns `503` until `NEXTAUTH_SECRET`,
 `OAUTH_TOKEN_ENCRYPTION_KEY`, and `MAINTENANCE_SECRET` are all at least 32
-characters and any configured Azure provider is single-tenant.
+characters and all three Azure provider variables are configured together.
 
 Generate a strong value with:
 
