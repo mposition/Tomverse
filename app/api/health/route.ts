@@ -1,21 +1,30 @@
+export const dynamic = "force-dynamic";
+
+import { getSecurityEnvironmentStatus } from "@/lib/securityEnvironment";
+
+const headers = {
+  "Cache-Control": "no-store",
+  "X-Content-Type-Options": "nosniff",
+};
+
+const isReady = () =>
+  process.env.NODE_ENV !== "production" || getSecurityEnvironmentStatus().ready;
+
 export function GET() {
+  const ready = isReady();
   return Response.json(
-    { ok: true },
+    { ok: ready },
     {
-      headers: {
-        "Cache-Control": "no-store",
-        "X-Content-Type-Options": "nosniff",
-      },
+      status: ready ? 200 : 503,
+      headers,
     }
   );
 }
 
 export function HEAD() {
+  const ready = isReady();
   return new Response(null, {
-    status: 204,
-    headers: {
-      "Cache-Control": "no-store",
-      "X-Content-Type-Options": "nosniff",
-    },
+    status: ready ? 204 : 503,
+    headers,
   });
 }

@@ -2,7 +2,7 @@ import "server-only";
 
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 
-const ENCRYPTED_PREFIX = "enc:v1:";
+export const OAUTH_TOKEN_ENCRYPTED_PREFIX = "enc:v1:";
 const TOKEN_FIELDS = [
     "access_token",
     "refresh_token",
@@ -26,9 +26,11 @@ const ACCOUNT_FIELDS = new Set([
 ]);
 
 const getEncryptionKey = () => {
-    const secret = process.env.OAUTH_TOKEN_ENCRYPTION_KEY || process.env.NEXTAUTH_SECRET;
+    const secret = process.env.OAUTH_TOKEN_ENCRYPTION_KEY;
     if (!secret || secret.length < 32) {
-        throw new Error("OAuth token encryption key is not configured.");
+        throw new Error(
+            "A dedicated OAUTH_TOKEN_ENCRYPTION_KEY of at least 32 characters is required."
+        );
     }
     return createHash("sha256").update(secret).digest();
 };
@@ -38,7 +40,7 @@ export const assertOAuthTokenEncryptionConfigured = () => {
 };
 
 const encryptString = (value: string) => {
-    if (value.startsWith(ENCRYPTED_PREFIX)) return value;
+    if (value.startsWith(OAUTH_TOKEN_ENCRYPTED_PREFIX)) return value;
 
     const iv = randomBytes(12);
     const cipher = createCipheriv("aes-256-gcm", getEncryptionKey(), iv);
@@ -47,13 +49,19 @@ const encryptString = (value: string) => {
         cipher.final(),
     ]);
     const tag = cipher.getAuthTag();
-    return `${ENCRYPTED_PREFIX}${Buffer.concat([iv, tag, ciphertext]).toString("base64url")}`;
+    return `${OAUTH_TOKEN_ENCRYPTED_PREFIX}${Buffer.concat([iv, tag, ciphertext]).toString("base64url")}`;
 };
 
-export const decryptOAuthToken = (value: string | null | undefined) => {
-    if (!value?.startsWith(ENCRYPTED_PREFIX)) return value || null;
+export const isEncryptedOAuthToken = (value: string | null | undefined) =>
+    Boolean(value?.startsWith(OAUTH_TOKEN_ENCRYPTED_PREFIX));
 
-    const payload = Buffer.from(value.slice(ENCRYPTED_PREFIX.length), "base64url");
+export const decryptOAuthToken = (value: string | null | undefined) => {
+    if (!value?.startsWith(OAUTH_TOKEN_ENCRYPTED_PREFIX)) return value || null;
+
+    const payload = Buffer.from(
+        value.slice(OAUTH_TOKEN_ENCRYPTED_PREFIX.length),
+        "base64url"
+    );
     if (payload.length <= 28) throw new Error("Invalid encrypted OAuth token.");
 
     const iv = payload.subarray(0, 12);

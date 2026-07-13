@@ -44,6 +44,17 @@ export type ProviderHealthRow = {
   }>;
 };
 
+export type ProviderHealthDashboard = {
+  generatedAt: string;
+  providers: ProviderHealthRow[];
+  tierLimits: Record<ModelTier, string>;
+  notificationChannels: {
+    email: boolean;
+    slack: boolean;
+    discord: boolean;
+  };
+};
+
 export const PROVIDER_DISPLAY_NAMES: Record<AiProvider, string> = {
   openai: "OpenAI",
   anthropic: "Anthropic",
@@ -724,7 +735,7 @@ const configuredTierLimit = (tier: ModelTier) =>
     Max: process.env.CHAT_MAX_TIER_COST_MICROUSD_PER_DAY || "shared",
   })[tier];
 
-export const getProviderHealthDashboard = async () => {
+export const getProviderHealthDashboard = async (): Promise<ProviderHealthDashboard> => {
   const now = new Date();
   const dayStart = periodStart("day", now);
   const monthStart = periodStart("month", now);

@@ -8,11 +8,20 @@ import { APP_DEFAULTS, clampSelectedModels } from "@/lib/appDefaults";
 import { isEnabledModelId } from "@/lib/models";
 import { z } from "zod";
 import {
+  conversationLockedResponse,
+  hasConversationUnlockGrant,
+} from "@/lib/conversationLock";
+import {
   apiSecurityResponse,
   assertConversationCapacity,
   consumeApiRateLimit,
   readLimitedJson,
 } from "@/lib/apiSecurity";
+import {
+  effectivePlanModelLimit,
+  getUserBillingPlan,
+  modelLimitResponse,
+} from "@/lib/billingEntitlements";
 
 const modelSchema = z.string().max(100).refine(isEnabledModelId);
 const createConversationSchema = z
@@ -111,12 +120,17 @@ export async function POST(req: Request) {
           where: { userId }
       });
       const defaultEngine = userSettings?.defaultModel || APP_DEFAULTS.defaultModelId;
+    const billingPlan = await getUserBillingPlan(userId);
+    const maxModels = effectivePlanModelLimit(billingPlan);
 
     const normalizedModels = clampSelectedModels(
       body.selectedModels || [defaultEngine]
     );
     const activeModels =
       normalizedModels.length > 0 ? normalizedModels : [defaultEngine];
+    if (activeModels.length > maxModels) {
+      return modelLimitResponse(maxModels);
+    }
     const normalizedDisabled = Array.from(
       new Set(body.disabledPanels || [])
     ).filter((modelId) => activeModels.includes(modelId));
@@ -182,8 +196,32 @@ export async function DELETE(req: Request) {
       day: 5,
     });
 
-    const result = await prisma.conversation.deleteMany({
+    const conversations = await prisma.conversation.findMany({
       where: { userId },
+      select: { id: true, password: true },
+    });
+    const inaccessibleLockedConversation = conversations.find(
+      (conversation) =>
+        conversation.password &&
+        !hasConversationUnlockGrant(
+          req,
+          userId,
+          conversation.id,
+          conversation.password
+        )
+    );
+    if (inaccessibleLockedConversation) {
+      return conversationLockedResponse();
+    }
+    if (conversations.length === 0) {
+      return NextResponse.json({ success: true, deleted: 0 });
+    }
+
+    const result = await prisma.conversation.deleteMany({
+      where: {
+        userId,
+        id: { in: conversations.map((conversation) => conversation.id) },
+      },
     });
 
     return NextResponse.json({ success: true, deleted: result.count });

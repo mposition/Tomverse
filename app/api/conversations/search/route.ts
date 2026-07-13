@@ -8,6 +8,7 @@ import {
   apiSecurityResponse,
   consumeApiRateLimit,
 } from "@/lib/apiSecurity";
+import { hasConversationUnlockGrant } from "@/lib/conversationLock";
 
 export async function GET(req: Request) {
   try {
@@ -34,19 +35,30 @@ export async function GET(req: Request) {
         content: { contains: q, mode: "insensitive" },
       },
       orderBy: { createdAt: "desc" },
-      take: 30,
+      take: 100,
       select: {
         id: true,
         conversationId: true,
         content: true,
         role: true,
         modelId: true,
-        conversation: { select: { title: true } },
+        conversation: { select: { title: true, password: true } },
       },
     });
 
+    const authorizedMessages = messages
+      .filter((message) =>
+        hasConversationUnlockGrant(
+          req,
+          session.user.id,
+          message.conversationId,
+          message.conversation.password
+        )
+      )
+      .slice(0, 30);
+
     return NextResponse.json({
-      results: messages.map((message) => ({
+      results: authorizedMessages.map((message) => ({
         id: message.id,
         conversationId: message.conversationId,
         conversationTitle: message.conversation.title,

@@ -288,7 +288,7 @@ export function ChatInput({
   onToggleModel,
   attachments,
   onAttachmentsChange,
-  canAttach = true,
+  canAttach: canAttachProp = true,
   isGuestMode = false,
 }: ChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -300,6 +300,10 @@ export function ChatInput({
     const { t, lang } = useLanguage();
     const signInCallbackUrl = withChatLanguage("/chat", lang);
     const accountUsage = useUserUsage(!isGuestMode);
+    const canAttach =
+      canAttachProp &&
+      !isGuestMode &&
+      accountUsage?.limits.allowAttachments !== false;
     const maxSelectableModels = isGuestMode
       ? APP_DEFAULTS.maxGuestSelectedModels
       : accountUsage?.limits.maxModels || MAX_SELECTED_MODELS;

@@ -59,6 +59,7 @@ export function AdminProviderUsageSyncPanel() {
         throw new Error("error" in data && data.error ? data.error : "Sync failed.");
       }
       setResponse(data as SyncResponse);
+      window.dispatchEvent(new Event("tomverse:provider-health-refresh"));
     } catch (syncError) {
       setError(syncError instanceof Error ? syncError.message : "Sync failed.");
     } finally {

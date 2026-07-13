@@ -10,6 +10,7 @@ import {
   consumeApiRateLimit,
 } from "@/lib/apiSecurity";
 import { getBillingPlanByTier } from "@/lib/billingConfig";
+import { effectivePlanModelLimit } from "@/lib/billingEntitlements";
 
 const positiveInteger = (value: string | undefined, fallback: number) => {
   const parsed = Number(value);
@@ -76,7 +77,10 @@ export async function GET(req: Request) {
       tokensMonth: positiveInteger(process.env.CHAT_USER_TOKENS_PER_MONTH, 20_000_000),
       costDay: positiveInteger(process.env.CHAT_USER_COST_MICROUSD_PER_DAY, 2_000_000),
       costMonth: positiveInteger(process.env.CHAT_USER_COST_MICROUSD_PER_MONTH, 20_000_000),
-      maxModels: billingPlan.maxModels,
+      maxModels: effectivePlanModelLimit(billingPlan),
+      allowAttachments: billingPlan.allowAttachments,
+      allowSharing: billingPlan.allowSharing,
+      allowDownloads: billingPlan.allowDownloads,
     };
 
     return NextResponse.json({

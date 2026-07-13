@@ -28,6 +28,9 @@ export type UserUsageResponse = {
     costDay: number;
     costMonth: number;
     maxModels: number;
+    allowAttachments: boolean;
+    allowSharing: boolean;
+    allowDownloads: boolean;
   };
 };
 

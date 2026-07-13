@@ -7,6 +7,14 @@ import {
   consumeApiRateLimit,
 } from "@/lib/apiSecurity";
 
+const publicShareHeaders = {
+  "Cache-Control": "private, no-store, max-age=0",
+  "CDN-Cache-Control": "no-store",
+  "Cloudflare-CDN-Cache-Control": "no-store",
+  "X-Robots-Tag": "noindex, nofollow, noarchive",
+  "X-Content-Type-Options": "nosniff",
+} as const;
+
 export async function GET(
   req: Request,
   context: { params: Promise<{ shareToken: string }> }
@@ -18,7 +26,7 @@ export async function GET(
         { error: "Shared conversation not found." },
         {
           status: 404,
-          headers: { "Cache-Control": "no-store" },
+          headers: publicShareHeaders,
         }
       );
     }
@@ -49,7 +57,7 @@ export async function GET(
         { error: "Shared conversation not found." },
         {
           status: 404,
-          headers: { "Cache-Control": "no-store" },
+          headers: publicShareHeaders,
         }
       );
     }
@@ -60,21 +68,15 @@ export async function GET(
         expiresAt: conversation.shareExpiresAt.toISOString(),
       },
       {
-        headers: {
-          "Cache-Control":
-            "public, max-age=0, s-maxage=30, stale-while-revalidate=15",
-          "CDN-Cache-Control":
-            "public, s-maxage=30, stale-while-revalidate=15",
-          "Cloudflare-CDN-Cache-Control":
-            "public, s-maxage=30, stale-while-revalidate=15",
-          "X-Content-Type-Options": "nosniff",
-        },
+        headers: publicShareHeaders,
       }
     );
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) {
-      securityResponse.headers.set("Cache-Control", "no-store");
+      for (const [name, value] of Object.entries(publicShareHeaders)) {
+        securityResponse.headers.set(name, value);
+      }
       return securityResponse;
     }
     console.error("Public shared conversation lookup failed:", error);
@@ -82,7 +84,7 @@ export async function GET(
       { error: "Failed to load shared conversation." },
       {
         status: 500,
-        headers: { "Cache-Control": "no-store" },
+        headers: publicShareHeaders,
       }
     );
   }

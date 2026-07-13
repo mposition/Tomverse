@@ -62,6 +62,18 @@ NEXTAUTH_SECRET=<random value with at least 32 characters>
 OAUTH_TOKEN_ENCRYPTION_KEY=<random value with at least 32 characters>
 ```
 
+`OAUTH_TOKEN_ENCRYPTION_KEY` is mandatory and does not fall back to
+`NEXTAUTH_SECRET`. If Microsoft OAuth is enabled, configure a specific Azure
+tenant. Generic multi-tenant values are deliberately rejected:
+
+```text
+AZURE_AD_TENANT_ID=<your tenant ID or verified tenant domain>
+```
+
+In production, `/api/health` returns `503` until `NEXTAUTH_SECRET`,
+`OAUTH_TOKEN_ENCRYPTION_KEY`, and `MAINTENANCE_SECRET` are all at least 32
+characters and any configured Azure provider is single-tenant.
+
 Generate a strong value with:
 
 ```bash
@@ -151,7 +163,9 @@ MAINTENANCE_SECRET=<random value with at least 32 characters>
 MAINTENANCE_URL=https://tomverse.app
 ```
 
-Create a Railway Cron service with this command:
+Create a separate Railway Cron service and set its Config File Path to
+`/railway.maintenance.json`. The checked-in configuration runs this command
+daily at 03:00 UTC:
 
 ```text
 npm run maintenance:cleanup

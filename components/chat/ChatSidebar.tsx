@@ -123,6 +123,10 @@ export function ChatSidebar({
     const privateNoticeDialogRef = useRef<HTMLDivElement | null>(null);
     const { t } = useLanguage();
     const accountUsage = useUserUsage(!isGuestMode);
+    const canShare =
+        !isGuestMode && accountUsage?.limits.allowSharing !== false;
+    const canDownload =
+        !isGuestMode && accountUsage?.limits.allowDownloads !== false;
     const displayedPlan: UserPlan | "Guest" | null = isGuestMode ? "Guest" : accountUsage?.plan || null;
     const displayedUsage = isGuestMode
         ? {
@@ -1014,14 +1018,14 @@ export function ChatSidebar({
                                             type="button"
                                             onClick={(e) => {
                                                 e.stopPropagation();
-                                                if (!isGuestMode) {
+                                                if (canShare) {
                                                     onShare(conv.id, conv.title);
                                                     setOpenMenuId(null);
                                                 }
                                             }}
-                                            disabled={isGuestMode}
-                                            className={`${menuItemBase} ${isGuestMode ? menuItemDisabled : menuItemEnabled}`}
-                                            title={isGuestMode ? t("sidebar.loginRequired") : ""}
+                                            disabled={!canShare}
+                                            className={`${menuItemBase} ${!canShare ? menuItemDisabled : menuItemEnabled}`}
+                                            title={isGuestMode ? t("sidebar.loginRequired") : !canShare ? t("modelStatusReasons.upgradeRequired") : ""}
                                         >
                                             <span className="flex items-center gap-2">
                                                 <Share2 className={menuIconClass} />
@@ -1031,7 +1035,7 @@ export function ChatSidebar({
                                                         : t("sidebar.share")}
                                                 </span>
                                             </span>
-                                            {isGuestMode && <Crown className={crownClass} />}
+                                            {!canShare && <Crown className={crownClass} />}
                                         </button>
 
                                         {conv.shareEnabled && !isGuestMode && (
@@ -1055,20 +1059,20 @@ export function ChatSidebar({
                                             type="button"
                                             onClick={(e) => {
                                                 e.stopPropagation();
-                                                if (!isGuestMode) {
+                                                if (canDownload) {
                                                     onDownload(conv.id, conv.title);
                                                     setOpenMenuId(null);
                                                 }
                                             }}
-                                            disabled={isGuestMode}
-                                            className={`${menuItemBase} ${isGuestMode ? menuItemDisabled : menuItemEnabled}`}
-                                            title={isGuestMode ? t("sidebar.loginRequired") : ""}
+                                            disabled={!canDownload}
+                                            className={`${menuItemBase} ${!canDownload ? menuItemDisabled : menuItemEnabled}`}
+                                            title={isGuestMode ? t("sidebar.loginRequired") : !canDownload ? t("modelStatusReasons.upgradeRequired") : ""}
                                         >
                                             <span className="flex items-center gap-2">
                                                 <Download className={menuIconClass} />
                                                 <span>{t("sidebar.downloadTxt")}</span>
                                             </span>
-                                            {isGuestMode && <Crown className={crownClass} />}
+                                            {!canDownload && <Crown className={crownClass} />}
                                         </button>
 
 
@@ -1141,7 +1145,7 @@ export function ChatSidebar({
                 })}
             </div>
 
-            <div className={`${isMobileDrawer ? "max-h-[24dvh] shrink-0 overflow-y-auto overscroll-contain border-t border-zinc-200 bg-zinc-100/40 p-2 dark:border-zinc-800 dark:bg-zinc-900/50" : "max-h-[28dvh] shrink-0 overflow-y-auto overscroll-contain border-t border-zinc-200 bg-zinc-100/40 p-3 dark:border-zinc-800 dark:bg-zinc-900/50 md:max-h-none md:overflow-visible"} flex flex-col gap-2`}>
+            <div className={`${isMobileDrawer ? "max-h-[40dvh] shrink-0 overflow-y-auto overscroll-contain border-t border-zinc-200 bg-zinc-100/40 p-2 dark:border-zinc-800 dark:bg-zinc-900/50" : "max-h-[45dvh] shrink-0 overflow-y-auto overscroll-contain border-t border-zinc-200 bg-zinc-100/40 p-3 dark:border-zinc-800 dark:bg-zinc-900/50"} flex min-h-0 flex-col gap-2`}>
                 {!isMobileDrawer && (
                 <div className="rounded-3xl border border-zinc-200 bg-white p-3 text-xs shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
                     <div className="mb-2 flex items-center justify-between gap-2">
@@ -1319,7 +1323,7 @@ export function ChatSidebar({
                     onSubmit={(event) => {
                         event.preventDefault();
                         const password = lockPassword.trim();
-                        if (password.length < 4 || password.length > 128) {
+                        if (password.length < 8 || password.length > 128) {
                             setLockError(t("sidebar.passwordLength"));
                             return;
                         }

@@ -20,6 +20,10 @@ import {
   consumeApiRateLimit,
 } from "@/lib/apiSecurity";
 import { logSecurityAuditEvent } from "@/lib/securityAudit";
+import {
+  featureNotIncludedResponse,
+  getUserBillingPlan,
+} from "@/lib/billingEntitlements";
 
 const getShareTtlDays = () => {
   const configured = Number(process.env.SHARE_LINK_TTL_DAYS);
@@ -57,6 +61,10 @@ export async function POST(
   const params = await context.params;
   const conversationId = params.conversationId;
   const userId = session.user.id;
+  const billingPlan = await getUserBillingPlan(userId);
+  if (!billingPlan.allowSharing) {
+    return featureNotIncludedResponse("sharing");
+  }
   const rateLimitResponse = await applyShareRateLimit(
     req,
     userId,

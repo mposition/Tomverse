@@ -15,6 +15,10 @@ import {
     apiSecurityResponse,
     consumeApiRateLimit,
 } from "@/lib/apiSecurity";
+import {
+    featureNotIncludedResponse,
+    getUserBillingPlan,
+} from "@/lib/billingEntitlements";
 
 const MESSAGE_PAGE_SIZE = 20;
 
@@ -28,6 +32,10 @@ export async function GET(
 
         if (!userId) {
             return NextResponse.json({ error: "Login required" }, { status: 401 });
+        }
+        const billingPlan = await getUserBillingPlan(userId);
+        if (!billingPlan.allowDownloads) {
+            return featureNotIncludedResponse("downloads");
         }
         await consumeApiRateLimit(req, userId, "conversation-export", {
             minute: 10,

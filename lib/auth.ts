@@ -10,6 +10,14 @@ import { logAuthAuditEvent } from "@/lib/securityAudit";
 
 const SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
 const SESSION_UPDATE_AGE_SECONDS = 24 * 60 * 60;
+const azureTenantId = process.env.AZURE_AD_TENANT_ID?.trim();
+const unsafeAzureTenantIds = new Set(["common", "organizations", "consumers"]);
+const hasSingleTenantAzureConfiguration =
+    Boolean(
+        process.env.AZURE_AD_CLIENT_ID &&
+        process.env.AZURE_AD_CLIENT_SECRET &&
+        azureTenantId
+    ) && !unsafeAzureTenantIds.has(azureTenantId!.toLowerCase());
 
 const baseAdapter = PrismaAdapter(prisma) as Adapter;
 const encryptedTokenAdapter: Adapter = {
@@ -31,12 +39,15 @@ export const authOptions: NextAuthOptions = {
             clientId: process.env.NAVER_ID as string,
             clientSecret: process.env.NAVER_SECRET as string,
         }),
-        AzureADProvider({
-            clientId: process.env.AZURE_AD_CLIENT_ID as string,
-            clientSecret: process.env.AZURE_AD_CLIENT_SECRET as string,
-            tenantId: process.env.AZURE_AD_TENANT_ID || "common",
-            allowDangerousEmailAccountLinking: true,
-        }),
+        ...(hasSingleTenantAzureConfiguration
+            ? [
+                  AzureADProvider({
+                      clientId: process.env.AZURE_AD_CLIENT_ID as string,
+                      clientSecret: process.env.AZURE_AD_CLIENT_SECRET as string,
+                      tenantId: azureTenantId as string,
+                  }),
+              ]
+            : []),
     ],
     pages: {
         signIn: '/auth/signin',

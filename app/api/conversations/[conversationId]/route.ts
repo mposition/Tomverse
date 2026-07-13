@@ -27,12 +27,17 @@ import {
     logSecurityAuditEvent,
     type SecurityAuditEvent,
 } from "@/lib/securityAudit";
+import {
+    effectivePlanModelLimit,
+    getUserBillingPlan,
+    modelLimitResponse,
+} from "@/lib/billingEntitlements";
 
 const modelSchema = z.string().max(100).refine(isEnabledModelId);
 const updateConversationSchema = z
   .object({
     title: z.string().trim().min(1).max(120).optional(),
-    password: z.union([z.string().min(4).max(128), z.null()]).optional(),
+    password: z.union([z.string().min(8).max(128), z.null()]).optional(),
     currentPassword: z.string().min(1).max(128).optional(),
     selectedModels: z
       .array(modelSchema)
@@ -279,6 +284,8 @@ export async function PATCH(
             where: { userId }
         });
         const defaultEngine = userSettings?.defaultModel || APP_DEFAULTS.defaultModelId;
+        const billingPlan = await getUserBillingPlan(userId);
+        const maxModels = effectivePlanModelLimit(billingPlan);
 
 	const updateData: Prisma.ConversationUpdateInput = {};
       const { title, password, currentPassword } = body;
@@ -385,6 +392,10 @@ export async function PATCH(
         : clampSelectedModels(
             safeParse(existingConv.selectedModels, [defaultEngine])
           );
+
+    if (body.selectedModels !== undefined && normalizedModels.length > maxModels) {
+      return modelLimitResponse(maxModels);
+    }
 
 	if (body.selectedModels !== undefined) {
       updateData.selectedModels = JSON.stringify(

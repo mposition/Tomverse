@@ -1,54 +1,84 @@
 import "server-only";
 
 import { prisma } from "@/lib/prisma";
-import { encryptOAuthAccountTokens } from "@/lib/oauthTokenCrypto";
+import {
+  assertOAuthTokenEncryptionConfigured,
+  encryptOAuthAccountTokens,
+  OAUTH_TOKEN_ENCRYPTED_PREFIX,
+} from "@/lib/oauthTokenCrypto";
+
+const OAUTH_ACCOUNT_BATCH_SIZE = 200;
 
 const encryptExistingOAuthTokens = async () => {
-  const accounts = await prisma.account.findMany({
-    where: {
-      OR: [
-        { access_token: { not: null } },
-        { refresh_token: { not: null } },
-        { id_token: { not: null } },
-        { session_state: { not: null } },
-      ],
-    },
-    select: {
-      id: true,
-      access_token: true,
-      refresh_token: true,
-      id_token: true,
-      session_state: true,
-    },
-    take: 500,
-  });
-
   let encryptedCount = 0;
-  for (const account of accounts) {
-    const encrypted = encryptOAuthAccountTokens(account);
-    const changed =
-      encrypted.access_token !== account.access_token ||
-      encrypted.refresh_token !== account.refresh_token ||
-      encrypted.id_token !== account.id_token ||
-      encrypted.session_state !== account.session_state;
-    if (!changed) continue;
+  let cursor: string | undefined;
 
-    await prisma.account.update({
-      where: { id: account.id },
-      data: {
-        access_token: encrypted.access_token,
-        refresh_token: encrypted.refresh_token,
-        id_token: encrypted.id_token,
-        session_state: encrypted.session_state,
+  while (true) {
+    const accounts = await prisma.account.findMany({
+      where: {
+        OR: [
+          {
+            access_token: { not: null },
+            NOT: { access_token: { startsWith: OAUTH_TOKEN_ENCRYPTED_PREFIX } },
+          },
+          {
+            refresh_token: { not: null },
+            NOT: { refresh_token: { startsWith: OAUTH_TOKEN_ENCRYPTED_PREFIX } },
+          },
+          {
+            id_token: { not: null },
+            NOT: { id_token: { startsWith: OAUTH_TOKEN_ENCRYPTED_PREFIX } },
+          },
+          {
+            session_state: { not: null },
+            NOT: { session_state: { startsWith: OAUTH_TOKEN_ENCRYPTED_PREFIX } },
+          },
+        ],
       },
+      orderBy: { id: "asc" },
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      select: {
+        id: true,
+        access_token: true,
+        refresh_token: true,
+        id_token: true,
+        session_state: true,
+      },
+      take: OAUTH_ACCOUNT_BATCH_SIZE,
     });
-    encryptedCount += 1;
+
+    for (const account of accounts) {
+      const encrypted = encryptOAuthAccountTokens(account);
+      const changed =
+        encrypted.access_token !== account.access_token ||
+        encrypted.refresh_token !== account.refresh_token ||
+        encrypted.id_token !== account.id_token ||
+        encrypted.session_state !== account.session_state;
+      if (!changed) continue;
+
+      await prisma.account.update({
+        where: { id: account.id },
+        data: {
+          access_token: encrypted.access_token,
+          refresh_token: encrypted.refresh_token,
+          id_token: encrypted.id_token,
+          session_state: encrypted.session_state,
+        },
+      });
+      encryptedCount += 1;
+    }
+
+    if (accounts.length < OAUTH_ACCOUNT_BATCH_SIZE) break;
+    cursor = accounts.at(-1)?.id;
+    if (!cursor) break;
   }
 
   return encryptedCount;
 };
 
 export async function cleanupExpiredData() {
+  assertOAuthTokenEncryptionConfigured();
+
   const sessions = await prisma.session.deleteMany({
     where: { expires: { lte: new Date() } },
   });

@@ -58,7 +58,7 @@ const checks = [
     file: "app/api/chat/route.ts",
     test: (source) =>
       source.includes("assertModelAccess(access, modelConfig)") &&
-      source.includes("select: { plan: true }") &&
+      source.includes("getUserBillingPlan") &&
       source.includes("verifyGuestTurnstile"),
   },
   {
@@ -92,7 +92,25 @@ const checks = [
     file: "lib/maintenance.ts",
     test: (source) =>
       source.includes("encryptExistingOAuthTokens") &&
-      source.includes("oauthTokensEncrypted"),
+      source.includes("oauthTokensEncrypted") &&
+      source.includes("cursor: { id: cursor }") &&
+      source.includes("OAUTH_ACCOUNT_BATCH_SIZE") &&
+      source.includes("OAUTH_TOKEN_ENCRYPTED_PREFIX"),
+  },
+  {
+    name: "OAuth token encryption requires a dedicated key",
+    file: "lib/oauthTokenCrypto.ts",
+    test: (source) =>
+      source.includes("process.env.OAUTH_TOKEN_ENCRYPTION_KEY") &&
+      !source.includes("process.env.OAUTH_TOKEN_ENCRYPTION_KEY || process.env.NEXTAUTH_SECRET"),
+  },
+  {
+    name: "Azure OAuth rejects generic tenants and dangerous email linking",
+    file: "lib/auth.ts",
+    test: (source) =>
+      source.includes('"common", "organizations", "consumers"') &&
+      source.includes("hasSingleTenantAzureConfiguration") &&
+      !source.includes("allowDangerousEmailAccountLinking: true"),
   },
   {
     name: "Conversation share creation requires unlock grant and snapshots",
@@ -104,12 +122,57 @@ const checks = [
       source.includes("MAX_SHARE_SNAPSHOT_BYTES"),
   },
   {
-    name: "Public share reads require strong tokens, rate limit, cache headers",
+    name: "Public share reads are no-store and non-indexable",
     file: "app/api/public/shares/[shareToken]/route.ts",
     test: (source) =>
       source.includes("isStrongShareToken") &&
       source.includes("public-share-read") &&
-      source.includes("Cloudflare-CDN-Cache-Control"),
+      source.includes('"Cloudflare-CDN-Cache-Control": "no-store"') &&
+      source.includes('"X-Robots-Tag": "noindex, nofollow, noarchive"') &&
+      !source.includes("s-maxage"),
+  },
+  {
+    name: "Conversation search filters locked results by unlock grant",
+    file: "app/api/conversations/search/route.ts",
+    test: (source) =>
+      source.includes("hasConversationUnlockGrant") &&
+      source.includes("conversation: { select: { title: true, password: true } }"),
+  },
+  {
+    name: "Bulk conversation deletion requires unlock grants",
+    file: "app/api/conversations/route.ts",
+    test: (source) =>
+      source.includes("inaccessibleLockedConversation") &&
+      source.includes("hasConversationUnlockGrant") &&
+      source.includes("conversationLockedResponse"),
+  },
+  {
+    name: "Billing plan feature entitlements are server enforced",
+    file: "lib/billingEntitlements.ts",
+    test: (source) =>
+      source.includes("allowAttachments") &&
+      source.includes("allowSharing") &&
+      source.includes("allowDownloads") &&
+      source.includes("PLAN_MODEL_LIMIT_EXCEEDED"),
+  },
+  {
+    name: "Conversation lock passwords require at least eight characters",
+    file: "lib/conversationLock.ts",
+    test: (source) => source.includes("assertPasswordLength(password, 8)"),
+  },
+  {
+    name: "Railway maintenance cron is represented in code",
+    file: "railway.maintenance.json",
+    test: (source) =>
+      source.includes('"startCommand": "npm run maintenance:cleanup"') &&
+      source.includes('"cronSchedule": "0 3 * * *"'),
+  },
+  {
+    name: "Production health fails closed on weak security configuration",
+    file: "app/api/health/route.ts",
+    test: (source) =>
+      source.includes("getSecurityEnvironmentStatus") &&
+      source.includes("status: ready ? 200 : 503"),
   },
   {
     name: "Locked conversations are excluded from all-conversation export",

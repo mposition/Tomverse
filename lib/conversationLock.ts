@@ -72,7 +72,7 @@ const assertPasswordLength = (password: unknown, minimum: number) => {
 };
 
 export const hashConversationPassword = async (password: unknown) => {
-    const validated = assertPasswordLength(password, 4);
+    const validated = assertPasswordLength(password, 8);
     const salt = randomBytes(SALT_BYTES);
     const key = await deriveKey(validated, salt);
     return [

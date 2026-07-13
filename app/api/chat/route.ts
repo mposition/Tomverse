@@ -2,7 +2,7 @@ import { streamText, type FilePart, type ModelMessage } from "ai";
 import { openai, createOpenAI } from "@ai-sdk/openai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { google } from "@ai-sdk/google";
-import { APP_DEFAULTS } from "@/lib/appDefaults";
+import { APP_DEFAULTS, clampSelectedModels } from "@/lib/appDefaults";
 import { createHash, randomUUID } from "node:crypto";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
@@ -14,7 +14,7 @@ import {
     writeR2Object,
 } from "@/lib/r2";
 import { prisma } from "@/lib/prisma";
-import { getEnabledModel, type AiModel, type ModelTier } from "@/lib/models";
+import { getEnabledModel, type AiModel } from "@/lib/models";
 import { assertModelNotAdminDisabled } from "@/lib/modelOverrides";
 import { parseOfficeSafely } from "@/lib/officeSecurity";
 import {
@@ -59,7 +59,11 @@ import {
     reserveDailyUploadBytes,
 } from "@/lib/apiSecurity";
 import { verifyGuestTurnstile } from "@/lib/turnstile";
-import { getBillingPlanByTier } from "@/lib/billingConfig";
+import {
+    effectivePlanModelLimit,
+    featureNotIncludedResponse,
+    getUserBillingPlan,
+} from "@/lib/billingEntitlements";
 
 const groq = createOpenAI({
     baseURL: "https://api.groq.com/openai/v1",
@@ -106,15 +110,26 @@ const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
 const MAX_TOTAL_ATTACHMENT_SIZE = 25 * 1024 * 1024;
 const MAX_EXTRACTED_ATTACHMENT_CHARACTERS = 300_000;
 const MAX_STORED_MESSAGE_CHARACTERS = 100_000;
-const normalizeUserPlan = (value: unknown): ModelTier =>
-    value === "Pro" || value === "Max" || value === "Free" ? value : "Free";
-
 type IncomingAttachment = {
     name?: unknown;
     mediaType?: unknown;
     objectKey?: unknown;
     data?: unknown;
     kind?: unknown;
+};
+
+const parseStoredModelIds = (value: unknown) => {
+    let parsed = value;
+    for (let index = 0; index < 2 && typeof parsed === "string"; index += 1) {
+        try {
+            parsed = JSON.parse(parsed);
+        } catch {
+            return [];
+        }
+    }
+    return Array.isArray(parsed)
+        ? parsed.filter((item): item is string => typeof item === "string")
+        : [];
 };
 
 const safeErrorMetadata = (error: unknown) => {
@@ -298,8 +313,12 @@ const createAttachmentKey = (email: string, name: string) => {
 
 export async function GET() {
     const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
+    if (!session?.user?.email || !session.user.id) {
         return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const billingPlan = await getUserBillingPlan(session.user.id);
+    if (!billingPlan.allowAttachments) {
+        return featureNotIncludedResponse("attachments");
     }
 
     const clientId = process.env.GOOGLE_ID;
@@ -323,6 +342,10 @@ export async function PUT(req: Request) {
     }
 
     try {
+        const billingPlan = await getUserBillingPlan(userId);
+        if (!billingPlan.allowAttachments) {
+            return featureNotIncludedResponse("attachments");
+        }
         await consumeApiRateLimit(req, userId, "upload-prepare", {
             minute: 10,
             day: 200,
@@ -467,6 +490,10 @@ export async function PATCH(req: Request) {
     }
 
     try {
+        const billingPlan = await getUserBillingPlan(userId);
+        if (!billingPlan.allowAttachments) {
+            return featureNotIncludedResponse("attachments");
+        }
         await consumeApiRateLimit(req, userId, "upload-finalize", {
             minute: 20,
             day: 300,
@@ -660,17 +687,23 @@ export async function POST(req: Request) {
                 "A chat request can reference at most 5 attachment objects."
             );
         }
-        const userPlan = session?.user?.id
-            ? normalizeUserPlan(
-                  (
-                      await prisma.user.findUnique({
-                          where: { id: session.user.id },
-                          select: { plan: true },
-                      })
-                  )?.plan
-              )
-            : undefined;
-        const billingPlan = userPlan ? await getBillingPlanByTier(userPlan) : null;
+        const billingPlan = session?.user?.id
+            ? await getUserBillingPlan(session.user.id)
+            : null;
+        const userPlan = billingPlan?.tier;
+        if (requestAttachments.length > 0) {
+            if (!session?.user?.id) {
+                return tracedJsonError(
+                    "Authentication is required for attachments.",
+                    "ATTACHMENT_AUTHENTICATION_REQUIRED",
+                    401,
+                    traceId
+                );
+            }
+            if (!billingPlan?.allowAttachments) {
+                return featureNotIncludedResponse("attachments");
+            }
+        }
         const access = identifyChatCaller(
             req,
             session?.user?.id,
@@ -697,7 +730,7 @@ export async function POST(req: Request) {
             }
             const conversation = await prisma.conversation.findUnique({
                 where: { id: conversationId },
-                select: { userId: true, password: true },
+                select: { userId: true, password: true, selectedModels: true },
             });
             if (!conversation || conversation.userId !== session.user.id) {
                 return tracedJsonError(
@@ -716,6 +749,31 @@ export async function POST(req: Request) {
                 )
             ) {
                 return conversationLockedResponse();
+            }
+            const selectedConversationModels = clampSelectedModels(
+                parseStoredModelIds(conversation.selectedModels)
+            );
+            const maxModels = billingPlan
+                ? effectivePlanModelLimit(billingPlan)
+                : 1;
+            if (selectedConversationModels.length > maxModels) {
+                return tracedJsonError(
+                    `Your plan allows up to ${maxModels} models per conversation.`,
+                    "PLAN_MODEL_LIMIT_EXCEEDED",
+                    403,
+                    traceId
+                );
+            }
+            if (
+                selectedConversationModels.length > 0 &&
+                !selectedConversationModels.includes(requestedModelId)
+            ) {
+                return tracedJsonError(
+                    "The requested model is not selected for this conversation.",
+                    "MODEL_NOT_SELECTED",
+                    403,
+                    traceId
+                );
             }
         }
         const userObjectPrefix = session?.user?.email

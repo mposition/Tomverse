@@ -551,7 +551,9 @@ export function AuthButton() {
                                                 onClick={() => {
                                                     window.location.href = "/api/conversations/export-all";
                                                 }}
-                                                className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-3 text-sm font-semibold text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                                                disabled={accountUsage?.limits.allowDownloads === false}
+                                                title={accountUsage?.limits.allowDownloads === false ? t("modelStatusReasons.upgradeRequired") : ""}
+                                                className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-3 text-sm font-semibold text-zinc-700 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
                                             >
                                                 <Download className="h-4 w-4" />
                                                 {t("auth.downloadAllTxt")}
