@@ -25,6 +25,7 @@ import {
   validatePromotionForCheckout,
   type PromotionRiskFlag,
 } from "@/lib/billingPromotionSecurity";
+import { promotionValidationError } from "@/lib/billingPromotionCore";
 import { sendBillingWelcomeEmail } from "@/lib/billingEmails";
 import { prisma } from "@/lib/prisma";
 import { getPublicAppOrigin } from "@/lib/publicUrl";
@@ -343,14 +344,15 @@ export async function POST(req: Request) {
         request: req,
       });
       if (!promotionValidation.valid) {
+        const validationError = promotionValidationError(
+          promotionValidation.reason
+        );
         return NextResponse.json(
           {
-            error:
-              promotionValidation.reason === "already_used"
-                ? "This promotion code has already been used by this account."
-                : "Invalid promotion code.",
+            code: validationError.code,
+            error: validationError.message,
           },
-          { status: promotionValidation.reason === "already_used" ? 409 : 400 }
+          { status: validationError.status }
         );
       }
       appliedPromotion = promotionValidation.promotion;

@@ -45,6 +45,13 @@ type BillingConfig = {
 
 type BillingInterval = "monthly" | "annual";
 
+type PromotionValidationPayload = {
+  valid?: boolean;
+  promotion?: BillingPromotion;
+  code?: string;
+  error?: string;
+};
+
 type CheckoutCopy = {
   secureCheckout: string;
   upgradeTo: (plan: string) => string;
@@ -505,43 +512,84 @@ export function UpgradeInterestButton({
       .catch(() => undefined);
   }, [billingConfig, isOpen]);
 
-  const submit = async () => {
-    if (isSending) return;
-    const normalizedCode = appliedPromoCode;
-    const analytics = getAnalyticsAttributionSnapshot();
-    trackProductEvent("checkout_started", 0, {
-      billing_interval: billingInterval,
-      plan_id: planId,
-      value: dueUsdCents / 100,
-      currency: "USD",
+  const requestPromotionValidation = async (normalizedCode: string) => {
+    const response = await fetch("/api/billing/promotion/validate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        planId,
+        billingInterval,
+        promoCode: normalizedCode,
+      }),
     });
+    const data = (await response.json().catch(() => null)) as
+      | PromotionValidationPayload
+      | null;
+    if (!response.ok || !data?.valid || !data.promotion) {
+      throw new Error(data?.error || copy.invalidPromo);
+    }
+    return data.promotion;
+  };
+
+  const submit = async () => {
+    if (isSending || isValidatingPromotion) return;
+    const normalizedInputCode = promoCode.trim().toUpperCase();
     setIsSending(true);
     try {
+      let checkoutPromoCode = appliedPromoCode;
+      let promotionForCheckout = appliedPromotion;
+      if (
+        normalizedInputCode &&
+        (normalizedInputCode !== appliedPromoCode || !appliedPromotion)
+      ) {
+        setIsValidatingPromotion(true);
+        promotionForCheckout = await requestPromotionValidation(
+          normalizedInputCode
+        );
+        checkoutPromoCode = normalizedInputCode;
+        setAppliedPromoCode(normalizedInputCode);
+        setAppliedPromotion(promotionForCheckout);
+        dispatchAppToast(copy.promoApplied, "success");
+      }
+
+      const checkoutDueUsdCents = calculateDiscountedCents(
+        baseCents,
+        promotionForCheckout
+      );
+      const analytics = getAnalyticsAttributionSnapshot();
+      trackProductEvent("checkout_started", 0, {
+        billing_interval: billingInterval,
+        plan_id: planId,
+        value: checkoutDueUsdCents / 100,
+        currency: "USD",
+      });
       const response = await fetch("/api/billing/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           planId,
           billingInterval,
-          promoCode: normalizedCode || undefined,
+          promoCode: checkoutPromoCode || undefined,
           ...(analytics ? { analytics } : {}),
         }),
       });
       if (response.status === 401) {
-        window.location.href = `/auth/signin?callbackUrl=${encodeURIComponent(window.location.pathname)}`;
+        window.location.assign(
+          `/auth/signin?callbackUrl=${encodeURIComponent(window.location.pathname)}`
+        );
         return;
       }
       const data = (await response.json().catch(() => null)) as
         | { url?: string; redirectUrl?: string; success?: boolean; error?: string }
         | null;
       if (response.ok && data?.success && data.redirectUrl) {
-        window.location.href = data.redirectUrl;
+        window.location.assign(data.redirectUrl);
         return;
       }
       if (!response.ok || !data?.url) {
         throw new Error(data?.error || "Checkout failed");
       }
-      window.location.href = data.url;
+      window.location.assign(data.url);
     } catch (error) {
       dispatchAppToast(
         error instanceof Error ? error.message : t("billing.waitlistFailed"),
@@ -549,6 +597,7 @@ export function UpgradeInterestButton({
       );
     } finally {
       setIsSending(false);
+      setIsValidatingPromotion(false);
     }
   };
 
@@ -562,27 +611,9 @@ export function UpgradeInterestButton({
     if (isValidatingPromotion) return;
     setIsValidatingPromotion(true);
     try {
-      const response = await fetch("/api/billing/promotion/validate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          planId,
-          billingInterval,
-          promoCode: normalizedCode,
-        }),
-      });
-      const data = (await response.json().catch(() => null)) as
-        | {
-            valid?: boolean;
-            promotion?: BillingPromotion;
-            error?: string;
-          }
-        | null;
-      if (!response.ok || !data?.valid || !data.promotion) {
-        throw new Error(data?.error || copy.invalidPromo);
-      }
+      const promotion = await requestPromotionValidation(normalizedCode);
       setAppliedPromoCode(normalizedCode);
-      setAppliedPromotion(data.promotion);
+      setAppliedPromotion(promotion);
       dispatchAppToast(copy.promoApplied, "success");
     } catch (error) {
       setAppliedPromoCode(null);

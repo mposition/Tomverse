@@ -3,6 +3,7 @@ import "server-only";
 import type { BillingPromotion as PrismaBillingPromotion } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import type { ModelTier } from "@/lib/models";
+import { promotionEligibilityFailure } from "@/lib/billingPromotionCore";
 
 export type BillingPlanId = "free" | "pro" | "max";
 
@@ -240,14 +241,7 @@ export function isBillingPromotionRedeemable(
   promotion: BillingPromotionConfig,
   now = new Date()
 ) {
-  if (!promotion.isActive) return false;
-  if (!promotion.maxRedemptions || !promotion.endsAt) return false;
-  if (promotion.startsAt && new Date(promotion.startsAt) > now) return false;
-  if (new Date(promotion.endsAt) <= now) return false;
-  if (promotion.redeemedCount >= promotion.maxRedemptions) {
-    return false;
-  }
-  return promotion.discountPercent > 0 || Boolean(promotion.discountAmountCents);
+  return promotionEligibilityFailure({ promotion, now }) === null;
 }
 
 export async function getPublicBillingConfig() {

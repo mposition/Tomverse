@@ -6,10 +6,13 @@ import type Stripe from "stripe";
 import { ApiSecurityError } from "@/lib/apiSecurity";
 import {
   getBillingPromotionByCode,
-  isBillingPromotionRedeemable,
   type BillingPlanId,
   type BillingPromotionConfig,
 } from "@/lib/billingConfig";
+import {
+  promotionEligibilityFailure,
+  type PromotionValidationReason,
+} from "@/lib/billingPromotionCore";
 import { getTrustedClientIp } from "@/lib/clientIp";
 import { prisma } from "@/lib/prisma";
 
@@ -164,7 +167,7 @@ export type PromotionValidationResult =
       clientIpHash: string;
       riskFlags: PromotionRiskFlag[];
     }
-  | { valid: false; reason: "invalid" | "already_used" };
+  | { valid: false; reason: PromotionValidationReason };
 
 export async function validatePromotionForCheckout({
   code,
@@ -182,14 +185,14 @@ export async function validatePromotionForCheckout({
   now?: Date;
 }): Promise<PromotionValidationResult> {
   const promotion = await getBillingPromotionByCode(code);
-  if (
-    !promotion ||
-    !isBillingPromotionRedeemable(promotion, now) ||
-    !promotion.appliesToPlanIds.includes(planId) ||
-    (billingInterval === "annual" && !promotion.allowAnnualStacking)
-  ) {
-    return { valid: false, reason: "invalid" };
-  }
+  if (!promotion) return { valid: false, reason: "invalid" };
+  const eligibilityFailure = promotionEligibilityFailure({
+    promotion,
+    planId,
+    billingInterval,
+    now,
+  });
+  if (eligibilityFailure) return { valid: false, reason: eligibilityFailure };
 
   if (userId) {
     const existingRedemption =

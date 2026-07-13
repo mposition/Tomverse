@@ -10,6 +10,7 @@ import {
   readLimitedJson,
 } from "@/lib/apiSecurity";
 import { validatePromotionForCheckout } from "@/lib/billingPromotionSecurity";
+import { promotionValidationError } from "@/lib/billingPromotionCore";
 import { getTrustedClientIp } from "@/lib/clientIp";
 
 const validationSchema = z
@@ -45,15 +46,14 @@ export async function POST(req: Request) {
     });
 
     if (!result.valid) {
+      const validationError = promotionValidationError(result.reason);
       return json(
         {
           valid: false,
-          error:
-            result.reason === "already_used"
-              ? "This promotion code has already been used by this account."
-              : "Invalid promotion code.",
+          code: validationError.code,
+          error: validationError.message,
         },
-        result.reason === "already_used" ? 409 : 400
+        validationError.status
       );
     }
 

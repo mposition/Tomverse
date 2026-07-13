@@ -427,6 +427,8 @@ const checks = [
     file: "components/marketing/UpgradeInterestButton.tsx",
     test: (source) =>
       source.includes('fetch("/api/billing/promotion/validate"') &&
+      source.includes("requestPromotionValidation") &&
+      source.includes("normalizedInputCode !== appliedPromoCode") &&
       source.includes("promotionPolicyCopy") &&
       !source.includes("billingConfig.promotions"),
   },
