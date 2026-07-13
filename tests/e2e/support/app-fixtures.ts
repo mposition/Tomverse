@@ -49,6 +49,7 @@ export async function prepareGuestPage(page: Page, language: QaLanguage = "ko") 
 
     localStorage.clear();
     localStorage.setItem("tomverse_language", lang);
+    localStorage.setItem("tomverse_onboarding_seen_v1", "1");
     localStorage.setItem("guest_count", "0");
     localStorage.setItem("guest_date", new Date().toDateString());
     sessionStorage.setItem("__tomverse_qa_guest_ready", "true");
@@ -72,10 +73,12 @@ export async function mockChatStream(page: Page, responseText: string) {
 }
 
 export type AuthenticatedQaState = {
+  conversationListReads: number;
   deleted: boolean;
   locked: boolean;
   shared: boolean;
   title: string;
+  userSettingsReads: number;
 };
 
 export async function mockAuthenticatedApi(page: Page): Promise<AuthenticatedQaState> {
@@ -88,10 +91,12 @@ export async function mockAuthenticatedApi(page: Page): Promise<AuthenticatedQaS
   ]);
 
   const state: AuthenticatedQaState = {
+    conversationListReads: 0,
     deleted: false,
     locked: false,
     shared: false,
     title: "QA conversation",
+    userSettingsReads: 0,
   };
 
   const conversation = () => ({
@@ -119,14 +124,16 @@ export async function mockAuthenticatedApi(page: Page): Promise<AuthenticatedQaS
     )
   );
 
-  await page.route("**/api/user/settings", (route) =>
-    route.fulfill(
+  await page.route("**/api/user/settings", (route) => {
+    state.userSettingsReads += 1;
+    return route.fulfill(
       json({ theme: "dark", language: "ko", defaultModel: "gpt-5-4-mini" })
-    )
-  );
+    );
+  });
 
   await page.route("**/api/conversations", async (route) => {
     if (route.request().method() === "GET") {
+      state.conversationListReads += 1;
       await route.fulfill(json(state.deleted ? [] : [conversation()]));
       return;
     }

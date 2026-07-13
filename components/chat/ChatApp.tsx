@@ -49,6 +49,7 @@ function ChatAppComponent({
 }: ChatAppProps) {
   const [isMessagesLoaded, setIsMessagesLoaded] = useState(false);
   const { data: session, status } = useSession();
+  const sessionUserId = session?.user?.id || null;
     const { t } = useLanguage();
   const {
     containerRef: turnstileContainerRef,
@@ -69,7 +70,7 @@ function ChatAppComponent({
   
   const isSendingRef = useRef(false);
   const streamingChatIdRef = useRef<string | null>(null);
-  const lastFetchedChatIdRef = useRef<string | null>(null);
+  const lastFetchedConversationKeyRef = useRef<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
     const loadedChatIdRef = useRef<string | null>(null);
   const lastPromptRef = useRef<{
@@ -106,7 +107,7 @@ function ChatAppComponent({
   }, []);
 
     useEffect(() => {
-        if (!isPrivate && !isGuestMode && (!session || !session.user)) {
+        if (!isPrivate && !isGuestMode && !sessionUserId) {
         return;
     }
 
@@ -115,7 +116,7 @@ function ChatAppComponent({
     if (!isMounted) return;
 
     if (isPrivate) {
-      lastFetchedChatIdRef.current = "private-chat";
+      lastFetchedConversationKeyRef.current = "private-chat";
       return;
     }
 
@@ -147,8 +148,10 @@ function ChatAppComponent({
       return;
     }
 
-  	if (initialConversationId && initialConversationId !== lastFetchedChatIdRef.current && initialConversationId !== "guest-chat") {
-      lastFetchedChatIdRef.current = initialConversationId;
+	if (initialConversationId && initialConversationId !== "guest-chat") {
+      const conversationKey = `${sessionUserId || "guest"}:${initialConversationId}:${modelId}`;
+      if (conversationKey === lastFetchedConversationKeyRef.current) return;
+      lastFetchedConversationKeyRef.current = conversationKey;
 	  
       const fetchPastMessages = async () => {
         try {
@@ -223,7 +226,7 @@ function ChatAppComponent({
       fetchPastMessages();
   } 
     else {
-	    lastFetchedChatIdRef.current = null;
+	    lastFetchedConversationKeyRef.current = null;
 	  
         setMessages([
         {
@@ -244,7 +247,7 @@ function ChatAppComponent({
     isPrivate,
     isGuestMode,
     modelId,
-    session,
+    sessionUserId,
     t,
   ]);
   

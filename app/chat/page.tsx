@@ -157,6 +157,44 @@ function ConfirmDialog({
   );
 }
 
+function ChatShellSkeleton({ label }: { label: string }) {
+  return (
+    <main
+      data-testid="chat-shell-skeleton"
+      aria-busy="true"
+      aria-label={label}
+      className="flex h-screen overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100"
+    >
+      <aside className="hidden w-[clamp(19rem,32vw,30rem)] shrink-0 flex-col border-r border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-950 md:flex">
+        <div className="flex items-center gap-3">
+          <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-cyan-400 via-blue-500 to-purple-500" />
+          <div>
+            <div className="text-lg font-black">Tomverse AI</div>
+            <div className="mt-1 h-2 w-20 animate-pulse rounded-full bg-zinc-200 dark:bg-zinc-800" />
+          </div>
+        </div>
+        <div className="mt-6 h-12 animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-900" />
+        <div className="mt-3 h-12 animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-900" />
+        <div className="mt-7 h-11 animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-900" />
+        <div className="mt-4 flex-1 animate-pulse rounded-2xl bg-zinc-50 dark:bg-zinc-900/60" />
+        <div className="mt-4 h-24 animate-pulse rounded-2xl bg-zinc-100 dark:bg-zinc-900" />
+      </aside>
+      <section className="flex min-w-0 flex-1 flex-col">
+        <header className="flex h-16 shrink-0 items-center gap-3 border-b border-zinc-200 px-4 dark:border-zinc-800 md:hidden">
+          <div className="h-9 w-9 animate-pulse rounded-xl bg-zinc-200 dark:bg-zinc-800" />
+          <span className="font-black">Tomverse AI</span>
+        </header>
+        <div className="flex min-h-0 flex-1 flex-col p-3 sm:p-4">
+          <div className="h-11 w-56 max-w-[70vw] animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-900" />
+          <div className="mt-4 min-h-0 flex-1 animate-pulse rounded-2xl border border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/50" />
+          <div className="mt-4 h-28 animate-pulse rounded-2xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900" />
+        </div>
+        <span className="sr-only">{label}</span>
+      </section>
+    </main>
+  );
+}
+
 export default function Home() {
     const { t, setLang } = useLanguage();
   const formatCopy = (key: string, values: Record<string, string>) =>
@@ -168,6 +206,7 @@ export default function Home() {
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const { data: session, status } = useSession();
+  const sessionUserId = session?.user?.id || null;
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [isViewportReady, setIsViewportReady] = useState(false);
 
@@ -206,7 +245,7 @@ export default function Home() {
 
   const [isPrivateMode, setIsPrivateMode] = useState(false);
 
-  const isGuestMode = status !== "loading" && !session?.user;
+  const isGuestMode = status !== "loading" && !sessionUserId;
   const accountUsage = useUserUsage(!isGuestMode);
   const maxSelectableModels = isGuestMode
     ? APP_DEFAULTS.maxGuestSelectedModels
@@ -215,6 +254,11 @@ export default function Home() {
   const MAX_GUEST_MESSAGES = 20;
 
   const isInitialSelectedRef = useRef(false);
+  const currentChatIdRef = useRef(currentChatId);
+
+  useEffect(() => {
+    currentChatIdRef.current = currentChatId;
+  }, [currentChatId]);
 
   const isFreeEnabledModel = useCallback(
     (modelId: string) => isEnabledModelId(modelId) && getModel(modelId)?.tier === "Free",
@@ -510,7 +554,7 @@ export default function Home() {
     }, [currentChatId]);
 
   const fetchConversations = useCallback(async () => {
-    if (!session?.user) return;
+    if (!sessionUserId) return;
 
     try {
 	  const res = await fetch(`/api/conversations`, { cache: "no-store" });
@@ -518,10 +562,10 @@ export default function Home() {
     } catch (error) {
       console.error("Failed to load conversations:", error);
     }
-    }, [session?.user]);
+    }, [sessionUserId]);
 
     useEffect(() => {
-        if (session?.user) {
+        if (sessionUserId) {
             queueMicrotask(() => setIsUserSettingsLoaded(false));
             queueMicrotask(() => {
                 void fetchConversations();
@@ -540,7 +584,7 @@ export default function Home() {
                 .then((data) => {
                     if (data && isEnabledModelId(data.defaultModel)) {
                         setUserDefaultEngine(data.defaultModel);
-                        if (!currentChatId) {
+                        if (!currentChatIdRef.current) {
                             setSelectedModels([data.defaultModel]);
                         }
                     }
@@ -560,7 +604,7 @@ export default function Home() {
                 .catch((err) => {
                     console.error("Failed to load user settings:", err);
                     setUserDefaultEngine(APP_DEFAULTS.defaultModelId);
-                    if (!currentChatId) {
+                    if (!currentChatIdRef.current) {
                         setSelectedModels([APP_DEFAULTS.defaultModelId]);
                     }
                 })
@@ -568,7 +612,7 @@ export default function Home() {
         } else if (status !== "loading") {
             queueMicrotask(() => setIsUserSettingsLoaded(true));
         }
-    }, [currentChatId, fetchConversations, session?.user, setLang, status]);
+    }, [fetchConversations, sessionUserId, setLang, status]);
 
     const handleNewChat = () => {
         setIsPrivateMode(false);
@@ -639,7 +683,7 @@ export default function Home() {
       return;
     }
 
-    if (!session || !session.user) return;
+    if (!sessionUserId) return;
 
 	try {
 	  const res = await fetch(`/api/conversations/${id}`, { cache: "no-store" });
@@ -769,7 +813,7 @@ export default function Home() {
   
   const syncModelSettingsToServer = (targetChatId: string, updatedModels: string[], updatedDisabled: string[]) => {
     if (!targetChatId || targetChatId === "private-chat") return;
-    if (!session || !session.user) return;
+    if (!sessionUserId) return;
 
     if (modelSyncTimerRef.current) {
       clearTimeout(modelSyncTimerRef.current);
@@ -1106,9 +1150,7 @@ export default function Home() {
   return (
     <>
       {!isViewportReady ? (
-        <main className="flex h-screen items-center justify-center bg-white text-zinc-500 dark:bg-zinc-950 dark:text-zinc-400">
-          <span className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent" />
-        </main>
+        <ChatShellSkeleton label={t("auth.loading")} />
       ) : isMobileViewport ? (
         <MobileChatShell
           conversations={blendedConversations}
