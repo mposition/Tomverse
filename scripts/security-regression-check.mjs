@@ -130,9 +130,39 @@ const checks = [
     test: (source) =>
       source.includes('hasAdminPermission(session, "billing:write")') &&
       source.includes("readLimitedJson") &&
+      source.includes("getProviderBillingProfiles") &&
+      source.includes('settlementModel !== "prepaid"') &&
+      source.includes('settlementModel !== "hybrid"') &&
       source.includes("setProviderCreditCheckpoint") &&
       source.includes("writeAdminAuditLog") &&
       source.includes('action: "provider_credit.checkpoint_updated"'),
+  },
+  {
+    name: "Provider billing profile updates are validated, authorized, and audited",
+    file: "app/api/admin/provider-billing/route.ts",
+    test: (source) =>
+      source.includes('hasAdminPermission(session, "billing:write")') &&
+      source.includes("readLimitedJson") &&
+      source.includes("setProviderBillingProfile") &&
+      source.includes("consumeApiRateLimit") &&
+      source.includes('action: "provider_billing.profile_updated"'),
+  },
+  {
+    name: "Provider billing defaults distinguish Mistral hybrid settlement",
+    file: "lib/providerBilling.ts",
+    test: (source) =>
+      source.includes('mistral: defaultProfile("usage_based", "hybrid")') &&
+      source.includes('groq: defaultProfile("usage_based", "postpaid")') &&
+      source.includes('source: "documented_default"'),
+  },
+  {
+    name: "Provider credit controls are limited to prepaid and hybrid profiles",
+    file: "components/admin/AdminProviderHealthPanel.tsx",
+    test: (source) =>
+      source.includes('provider.billingProfile.settlementModel === "prepaid"') &&
+      source.includes('provider.billingProfile.settlementModel === "hybrid"') &&
+      source.includes("{tracksCredit && (") &&
+      source.includes("Projected month-end"),
   },
   {
     name: "Provider health exposes explicit status decision reasons",

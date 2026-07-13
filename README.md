@@ -52,6 +52,26 @@ CHAT_MODEL_GPT_5_5_MAX_OUTPUT_TOKENS=8192
 Application limits are a second line of defense. Configure billing alerts and
 hard spending limits in each AI provider dashboard as well.
 
+## Provider Billing Profiles
+
+The Admin Console provider panel separates how a service is priced from how the
+account settles its bill:
+
+- Pricing: usage-based, subscription, committed capacity, or unknown.
+- Settlement: prepaid, postpaid, hybrid, invoice, or unknown.
+
+Documented defaults are shown until an administrator with `billing:write`
+permission verifies the account-specific contract. Mistral defaults to
+`usage-based / hybrid` because pay-as-you-go charges can coexist with purchased
+credits. A verified profile, optional provider-side monthly limit, and note are
+stored in `ProviderBillingConfig`; changes are rate-limited and audit logged.
+
+Prepaid and hybrid panels expose the optional DB credit checkpoint. Postpaid
+and invoice panels instead show month-to-date accrued cost, projected month-end
+cost, and remaining headroom. Provider-reported usage is preferred when it has
+been synchronized; otherwise the projection uses internal tracked cost. These
+figures are operational estimates and do not replace the provider invoice.
+
 ## Admin Infrastructure Audit
 
 The Admin Console Infrastructure tab reads Railway projected usage, Cloudflare
@@ -77,7 +97,8 @@ checkpoint; it is an operational estimate, not an invoice or payment action.
 Cloudflare usage percentages use the current Standard storage free-tier
 allowances as reference thresholds and are likewise not authoritative billing.
 
-Before deploying the Admin Infrastructure and provider error-detail features,
+Before deploying the Admin Infrastructure, provider billing profiles, and
+provider error-detail features,
 apply the checked-in database migration with `npm run db:migrate` from a
 deployment job that has `DIRECT_DATABASE_URL`.
 

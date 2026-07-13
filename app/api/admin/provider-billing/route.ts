@@ -11,15 +11,32 @@ import {
   consumeApiRateLimit,
   readLimitedJson,
 } from "@/lib/apiSecurity";
+import { setProviderBillingProfile } from "@/lib/providerBilling";
+import type {
+  ProviderPricingModel,
+  ProviderSettlementModel,
+} from "@/lib/providerBillingTypes";
 import type { AiProvider } from "@/lib/models";
-import { getProviderBillingProfiles } from "@/lib/providerBilling";
 import {
   getProviderHealthDashboard,
   MONITORED_PROVIDERS,
 } from "@/lib/providerMonitoring";
-import { setProviderCreditCheckpoint } from "@/lib/providerCredits";
 
-const providerCreditSchema = z
+const pricingModels = [
+  "usage_based",
+  "subscription",
+  "committed_capacity",
+  "unknown",
+] as const;
+const settlementModels = [
+  "prepaid",
+  "postpaid",
+  "hybrid",
+  "invoice",
+  "unknown",
+] as const;
+
+const providerBillingSchema = z
   .object({
     provider: z
       .string()
@@ -28,7 +45,10 @@ const providerCreditSchema = z
         (value) => MONITORED_PROVIDERS.includes(value as AiProvider),
         "Unsupported provider."
       ),
-    creditUsd: z.number().finite().min(0).max(1_000_000),
+    pricingModel: z.enum(pricingModels),
+    settlementModel: z.enum(settlementModels),
+    currency: z.literal("USD"),
+    monthlyLimitUsd: z.number().finite().min(0).max(1_000_000).nullable(),
     note: z.string().trim().max(300).nullable().optional(),
   })
   .strict();
@@ -43,29 +63,24 @@ export async function PATCH(req: Request) {
       return NextResponse.json({ error: "Forbidden." }, { status: 403 });
     }
 
-    await consumeApiRateLimit(req, session.user.id, "admin-provider-credit-write", {
+    await consumeApiRateLimit(req, session.user.id, "admin-provider-billing-write", {
       minute: 10,
       day: 100,
     });
-
-    const body = await readLimitedJson(req, 4 * 1024, providerCreditSchema);
+    const body = await readLimitedJson(req, 4 * 1024, providerBillingSchema);
     const provider = body.provider as AiProvider;
-    const billingProfile = (await getProviderBillingProfiles([provider])).get(provider);
-    if (
-      billingProfile?.settlementModel !== "prepaid" &&
-      billingProfile?.settlementModel !== "hybrid"
-    ) {
-      return NextResponse.json(
-        { error: "Credit checkpoints are only available for prepaid or hybrid providers." },
-        { status: 409 }
-      );
-    }
-    const creditMicroUsd = BigInt(Math.round(body.creditUsd * 1_000_000));
     const note = body.note?.trim() || null;
+    const monthlyLimitMicroUsd =
+      body.monthlyLimitUsd === null
+        ? null
+        : BigInt(Math.round(body.monthlyLimitUsd * 1_000_000));
 
-    await setProviderCreditCheckpoint({
+    await setProviderBillingProfile({
       provider,
-      creditMicroUsd,
+      pricingModel: body.pricingModel as ProviderPricingModel,
+      settlementModel: body.settlementModel as ProviderSettlementModel,
+      currency: body.currency,
+      monthlyLimitMicroUsd,
       note,
       updatedById: session.user.id,
       updatedByEmail: session.user.email || null,
@@ -74,29 +89,30 @@ export async function PATCH(req: Request) {
     await writeAdminAuditLog({
       session,
       request: req,
-      action: "provider_credit.checkpoint_updated",
-      targetType: "ProviderCreditConfig",
+      action: "provider_billing.profile_updated",
+      targetType: "ProviderBillingConfig",
       targetId: provider,
-      summary: `Updated ${provider} provider credit checkpoint.`,
+      summary: `Updated ${provider} provider billing profile.`,
       metadata: {
         provider,
-        creditUsd: Math.round(body.creditUsd * 1_000_000) / 1_000_000,
+        pricingModel: body.pricingModel,
+        settlementModel: body.settlementModel,
+        currency: body.currency,
+        monthlyLimitUsd: body.monthlyLimitUsd,
         hasNote: Boolean(note),
       },
     });
 
-    const dashboard = await getProviderHealthDashboard({
-      includeErrorEvents: true,
-    });
+    const dashboard = await getProviderHealthDashboard({ includeErrorEvents: true });
     return NextResponse.json(dashboard, {
       headers: { "Cache-Control": "no-store" },
     });
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
-    console.error("Failed to update provider credit checkpoint:", error);
+    console.error("Failed to update provider billing profile:", error);
     return NextResponse.json(
-      { error: "Failed to update provider credit checkpoint." },
+      { error: "Failed to update provider billing profile." },
       { status: 500 }
     );
   }

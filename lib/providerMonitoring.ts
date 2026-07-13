@@ -6,6 +6,8 @@ import {
   getProviderCreditSummaries,
   type ProviderCreditSummary,
 } from "@/lib/providerCredits";
+import { getProviderBillingProfiles } from "@/lib/providerBilling";
+import type { ProviderBillingProfile } from "@/lib/providerBillingTypes";
 
 export type ProviderHealthStatus = "available" | "limited" | "outage";
 
@@ -66,6 +68,11 @@ export type ProviderHealthRow = {
   balanceUsd: number | null;
   balanceSource: "api" | "db_estimate" | "env_manual" | "unavailable";
   credit: ProviderCreditSummary;
+  billingProfile: ProviderBillingProfile;
+  projectedMonthEndMicroUsd: number;
+  billingLimitMicroUsd: number;
+  billingLimitSource: "provider_config" | "internal_budget";
+  billingHeadroomMicroUsd: number;
   alertLevel: "none" | "50" | "80" | "95";
   fallback: ProviderFallback;
   modelIncidents: Array<{
@@ -884,7 +891,7 @@ export const getProviderHealthDashboard = async (
       : Promise.resolve([]),
   ]);
 
-  const [balanceEntries, creditByProvider] = await Promise.all([
+  const [balanceEntries, creditByProvider, billingByProvider] = await Promise.all([
     Promise.all(
       MONITORED_PROVIDERS.map(async (provider) => [
         provider,
@@ -892,6 +899,7 @@ export const getProviderHealthDashboard = async (
       ] as const)
     ),
     getProviderCreditSummaries(MONITORED_PROVIDERS),
+    getProviderBillingProfiles(MONITORED_PROVIDERS),
   ]);
   const balanceByProvider = new Map(balanceEntries);
 
@@ -957,6 +965,27 @@ export const getProviderHealthDashboard = async (
         : 0;
     const automaticBalanceUsd = balanceByProvider.get(provider) ?? null;
     const credit = creditByProvider.get(provider)!;
+    const billingProfile = billingByProvider.get(provider)!;
+    const billingBasisMicroUsd =
+      providerReportedMonthCostMicroUsd ?? monthCostMicroUsd;
+    const nextMonthStart = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)
+    );
+    const elapsedMonthFraction = Math.max(
+      (now.getTime() - monthStart.getTime()) /
+        (nextMonthStart.getTime() - monthStart.getTime()),
+      1 / 31
+    );
+    const projectedMonthEndMicroUsd = Math.round(
+      billingBasisMicroUsd / elapsedMonthFraction
+    );
+    const billingLimitSource = billingProfile.monthlyLimitMicroUsd === null
+      ? "internal_budget" as const
+      : "provider_config" as const;
+    const billingLimitMicroUsd =
+      billingProfile.monthlyLimitMicroUsd ?? monthBudgetMicroUsd;
+    const billingHeadroomMicroUsd =
+      billingLimitMicroUsd - billingBasisMicroUsd;
     const databaseEstimatedBalanceUsd =
       credit.estimatedBalanceMicroUsd === null
         ? null
@@ -1080,6 +1109,11 @@ export const getProviderHealthDashboard = async (
               ? "env_manual"
               : "unavailable",
       credit,
+      billingProfile,
+      projectedMonthEndMicroUsd,
+      billingLimitMicroUsd,
+      billingLimitSource,
+      billingHeadroomMicroUsd,
       alertLevel,
       fallback: FALLBACKS[provider],
       modelIncidents,

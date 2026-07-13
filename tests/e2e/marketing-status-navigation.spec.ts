@@ -30,3 +30,18 @@ test("the model catalogue links to live service status", async ({ page }) => {
     "/status"
   );
 });
+
+test("mobile marketing menu exposes public status", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await prepareGuestPage(page, "en");
+  await page.goto("/");
+
+  const menuButton = page.getByRole("button", { name: "Menu" });
+  await expect(menuButton).toBeVisible();
+  await menuButton.click();
+  await expect(page.getByTestId("mobile-status-link")).toBeVisible();
+  await expect(page.getByTestId("mobile-status-link")).toHaveAttribute(
+    "href",
+    "/status"
+  );
+});

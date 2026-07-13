@@ -5,8 +5,10 @@ import {
   AlertCircle,
   ChevronDown,
   CircleDollarSign,
+  CreditCard,
   RefreshCw,
   Save,
+  Settings2,
 } from "lucide-react";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { getEnabledModel, type AiProvider } from "@/lib/models";
@@ -15,6 +17,10 @@ import type {
   ProviderHealthRow,
   ProviderHealthStatus,
 } from "@/lib/providerMonitoring";
+import type {
+  ProviderPricingModel,
+  ProviderSettlementModel,
+} from "@/lib/providerBillingTypes";
 
 const REFRESH_INTERVAL_MS = 30_000;
 
@@ -46,6 +52,24 @@ const balanceSourceCopy: Record<ProviderHealthRow["balanceSource"], string> = {
   env_manual: "environment value",
   unavailable: "not configured",
 };
+const pricingModelCopy: Record<ProviderPricingModel, string> = {
+  usage_based: "Usage-based",
+  subscription: "Subscription",
+  committed_capacity: "Committed capacity",
+  unknown: "Unverified pricing",
+};
+const settlementModelCopy: Record<ProviderSettlementModel, string> = {
+  prepaid: "Prepaid",
+  postpaid: "Postpaid",
+  hybrid: "Hybrid",
+  invoice: "Invoice",
+  unknown: "Unverified settlement",
+};
+const billingSourceCopy: Record<ProviderHealthRow["billingProfile"]["source"], string> = {
+  provider_api: "Provider API",
+  admin_verified: "Admin verified",
+  documented_default: "Documented default",
+};
 const budgetClass = (value: number) => {
   if (value >= 95) return "text-red-300";
   if (value >= 80) return "text-amber-300";
@@ -63,19 +87,35 @@ type SaveCredit = (
   note: string
 ) => Promise<boolean>;
 
+type SaveBilling = (
+  provider: AiProvider,
+  profile: {
+    pricingModel: ProviderPricingModel;
+    settlementModel: ProviderSettlementModel;
+    currency: string;
+    monthlyLimitUsd: number | null;
+    note: string;
+  }
+) => Promise<boolean>;
+
 function ProviderRow({
   provider,
   canManageCredits,
   savingCredit,
+  savingBilling,
   onSaveCredit,
+  onSaveBilling,
 }: {
   provider: ProviderHealthRow;
   canManageCredits: boolean;
   savingCredit: boolean;
+  savingBilling: boolean;
   onSaveCredit: SaveCredit;
+  onSaveBilling: SaveBilling;
 }) {
   const [statusOpen, setStatusOpen] = useState(false);
   const [creditEditorOpen, setCreditEditorOpen] = useState(false);
+  const [billingEditorOpen, setBillingEditorOpen] = useState(false);
   const [selectedErrorCode, setSelectedErrorCode] = useState<string | null>(null);
   const [creditUsd, setCreditUsd] = useState(
     provider.credit.configuredCreditMicroUsd === null
@@ -83,6 +123,21 @@ function ProviderRow({
       : (provider.credit.configuredCreditMicroUsd / 1_000_000).toFixed(2)
   );
   const [creditNote, setCreditNote] = useState(provider.credit.note || "");
+  const [pricingModel, setPricingModel] = useState<ProviderPricingModel>(
+    provider.billingProfile.pricingModel
+  );
+  const [settlementModel, setSettlementModel] = useState<ProviderSettlementModel>(
+    provider.billingProfile.settlementModel
+  );
+  const [billingCurrency, setBillingCurrency] = useState(
+    provider.billingProfile.currency
+  );
+  const [monthlyLimitUsd, setMonthlyLimitUsd] = useState(
+    provider.billingProfile.monthlyLimitMicroUsd === null
+      ? ""
+      : (provider.billingProfile.monthlyLimitMicroUsd / 1_000_000).toFixed(2)
+  );
+  const [billingNote, setBillingNote] = useState(provider.billingProfile.note || "");
   const fallbackModels = provider.fallback.recommendedModelIds
     .map((id) => getEnabledModel(id))
     .filter((model): model is NonNullable<typeof model> => Boolean(model))
@@ -99,6 +154,17 @@ function ProviderRow({
     parsedCreditUsd >= 0 &&
     parsedCreditUsd <= 1_000_000;
   const estimatedBalance = provider.credit.estimatedBalanceMicroUsd;
+  const tracksCredit =
+    provider.billingProfile.settlementModel === "prepaid" ||
+    provider.billingProfile.settlementModel === "hybrid";
+  const billingBasisMicroUsd =
+    provider.providerReportedMonthCostMicroUsd ?? provider.monthCostMicroUsd;
+  const parsedMonthlyLimitUsd = Number(monthlyLimitUsd);
+  const monthlyLimitIsValid =
+    monthlyLimitUsd.trim() === "" ||
+    (Number.isFinite(parsedMonthlyLimitUsd) &&
+      parsedMonthlyLimitUsd >= 0 &&
+      parsedMonthlyLimitUsd <= 1_000_000);
   const selectedError = provider.recentErrors.find(
     (error) => error.code === selectedErrorCode
   );
@@ -131,6 +197,35 @@ function ProviderRow({
     if (saved) setCreditEditorOpen(false);
   };
 
+  const toggleBillingEditor = () => {
+    if (!billingEditorOpen) {
+      setPricingModel(provider.billingProfile.pricingModel);
+      setSettlementModel(provider.billingProfile.settlementModel);
+      setBillingCurrency(provider.billingProfile.currency);
+      setMonthlyLimitUsd(
+        provider.billingProfile.monthlyLimitMicroUsd === null
+          ? ""
+          : (provider.billingProfile.monthlyLimitMicroUsd / 1_000_000).toFixed(2)
+      );
+      setBillingNote(provider.billingProfile.note || "");
+    }
+    setBillingEditorOpen((open) => !open);
+  };
+
+  const submitBilling = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!monthlyLimitIsValid || savingBilling) return;
+    const saved = await onSaveBilling(provider.provider, {
+      pricingModel,
+      settlementModel,
+      currency: billingCurrency,
+      monthlyLimitUsd:
+        monthlyLimitUsd.trim() === "" ? null : parsedMonthlyLimitUsd,
+      note: billingNote,
+    });
+    if (saved) setBillingEditorOpen(false);
+  };
+
   return (
     <section className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -158,6 +253,10 @@ function ProviderRow({
                 className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${apiKeyClass(provider.apiKeyConfigured)}`}
               >
                 {provider.apiKeyConfigured ? "API key set" : "API key missing"}
+              </span>
+              <span className="rounded-full border border-blue-500/25 bg-blue-500/10 px-2.5 py-1 text-xs font-semibold text-blue-200">
+                {pricingModelCopy[provider.billingProfile.pricingModel]} ·{" "}
+                {settlementModelCopy[provider.billingProfile.settlementModel]}
               </span>
             </div>
             <p className="mt-2 text-sm text-zinc-400">
@@ -239,12 +338,6 @@ function ProviderRow({
           <p className="mt-1 text-xs text-zinc-500">
             Provider reported {optionalMoney(provider.providerReportedMonthCostMicroUsd)}
           </p>
-          <p className="mt-1 text-xs text-zinc-500">
-            Balance{" "}
-            {provider.balanceUsd === null
-              ? "Not configured"
-              : `$${provider.balanceUsd.toFixed(2)}`} ({balanceSourceCopy[provider.balanceSource]})
-          </p>
           <p className="mt-1 text-xs text-zinc-500">Variance {varianceLabel}</p>
           <p className="mt-1 text-xs text-zinc-500">Source: {provider.usageSource}</p>
           <p className="mt-1 text-xs text-zinc-500">
@@ -275,101 +368,224 @@ function ProviderRow({
       <div className="mt-5 border-t border-zinc-800 pt-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-3">
-            <CircleDollarSign className="mt-0.5 h-5 w-5 text-emerald-300" />
+            <CreditCard className="mt-0.5 h-5 w-5 text-blue-300" />
             <div>
-              <PanelLabel>Manual credit checkpoint</PanelLabel>
+              <PanelLabel>Billing model</PanelLabel>
               <p className="mt-1 text-xs leading-5 text-zinc-500">
-                Saves an opening credit in DB and subtracts internal estimated
-                usage recorded after the checkpoint. This estimate does not
-                change provider routing or health status.
+                {pricingModelCopy[provider.billingProfile.pricingModel]} ·{" "}
+                {settlementModelCopy[provider.billingProfile.settlementModel]} ·{" "}
+                {billingSourceCopy[provider.billingProfile.source]}
+                {provider.billingProfile.verifiedAt
+                  ? ` · Verified ${dateLabel(provider.billingProfile.verifiedAt)}`
+                  : " · Verify against your account contract"}
               </p>
             </div>
           </div>
           {canManageCredits && (
             <button
               type="button"
-              onClick={toggleCreditEditor}
-              className="inline-flex h-9 shrink-0 cursor-pointer items-center justify-center rounded-xl border border-zinc-700 bg-zinc-900 px-3 text-xs font-bold text-zinc-200 transition hover:bg-zinc-800"
+              onClick={toggleBillingEditor}
+              className="inline-flex h-9 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-3 text-xs font-bold text-zinc-200 transition hover:bg-zinc-800"
             >
-              {creditEditorOpen ? "Close editor" : "Set credit"}
+              <Settings2 className="h-3.5 w-3.5" />
+              {billingEditorOpen ? "Close profile" : "Edit profile"}
             </button>
           )}
         </div>
-        <div className="mt-3 grid gap-3 sm:grid-cols-3">
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {tracksCredit && (
+            <Metric
+              label={provider.billingProfile.settlementModel === "hybrid" ? "Optional credit" : "Estimated balance"}
+              value={
+                provider.balanceUsd === null
+                  ? provider.billingProfile.settlementModel === "hybrid"
+                    ? "Not synced (optional)"
+                    : "Not configured"
+                  : `$${provider.balanceUsd.toFixed(2)}`
+              }
+              detail={provider.balanceUsd === null ? undefined : balanceSourceCopy[provider.balanceSource]}
+            />
+          )}
+          <Metric label="Month accrued" value={money(billingBasisMicroUsd)} />
+          <Metric label="Projected month-end" value={money(provider.projectedMonthEndMicroUsd)} />
           <Metric
-            label="Opening credit"
-            value={
-              provider.credit.configuredCreditMicroUsd === null
-                ? "Not configured"
-                : money(provider.credit.configuredCreditMicroUsd)
-            }
-          />
-          <Metric
-            label="Tracked usage"
-            value={money(provider.credit.usedSinceCheckpointMicroUsd)}
-          />
-          <Metric
-            label="Estimated remaining"
-            value={estimatedBalance === null ? "Not configured" : money(estimatedBalance)}
-            valueClass={
-              estimatedBalance !== null && estimatedBalance < 0
-                ? "text-red-300"
-                : "text-emerald-300"
-            }
+            label={provider.billingLimitSource === "provider_config" ? "Provider limit" : "Internal safety budget"}
+            value={money(provider.billingLimitMicroUsd)}
+            detail={`${money(provider.billingHeadroomMicroUsd)} headroom`}
+            valueClass={provider.billingHeadroomMicroUsd < 0 ? "text-red-300" : "text-white"}
           />
         </div>
-        {provider.credit.checkpointAt && (
+        {provider.billingProfile.note && (
           <p className="mt-2 text-[11px] text-zinc-500">
-            Checkpoint {dateLabel(provider.credit.checkpointAt, "Not configured")}
-            {provider.credit.note ? ` · ${provider.credit.note}` : ""}
+            Profile note · {provider.billingProfile.note}
           </p>
         )}
-        {!canManageCredits && (
-          <p className="mt-2 text-[11px] text-zinc-600">
-            Billing write permission is required to change provider credit.
-          </p>
-        )}
-        {creditEditorOpen && canManageCredits && (
+        {billingEditorOpen && canManageCredits && (
           <form
-            onSubmit={submitCredit}
-            className="mt-4 grid gap-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4 md:grid-cols-[minmax(0,0.7fr)_minmax(0,1.3fr)_auto] md:items-end"
+            onSubmit={submitBilling}
+            className="mt-4 grid gap-3 rounded-2xl border border-blue-500/20 bg-blue-500/5 p-4 md:grid-cols-2 xl:grid-cols-5 xl:items-end"
           >
             <label className="grid gap-1.5 text-xs font-semibold text-zinc-300">
-              Current credit (USD)
+              Pricing model
+              <select
+                value={pricingModel}
+                onChange={(event) => setPricingModel(event.target.value as ProviderPricingModel)}
+                className="h-10 rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-sm text-white outline-none focus:border-blue-500"
+              >
+                {Object.entries(pricingModelCopy).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="grid gap-1.5 text-xs font-semibold text-zinc-300">
+              Settlement
+              <select
+                value={settlementModel}
+                onChange={(event) => setSettlementModel(event.target.value as ProviderSettlementModel)}
+                className="h-10 rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-sm text-white outline-none focus:border-blue-500"
+              >
+                {Object.entries(settlementModelCopy).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="grid gap-1.5 text-xs font-semibold text-zinc-300">
+              Provider limit (USD)
               <input
                 type="number"
                 inputMode="decimal"
                 min="0"
                 max="1000000"
                 step="0.01"
-                value={creditUsd}
-                onChange={(event) => setCreditUsd(event.target.value)}
-                placeholder="100.00"
-                className="h-10 rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-sm text-white outline-none focus:border-emerald-500"
+                value={monthlyLimitUsd}
+                onChange={(event) => setMonthlyLimitUsd(event.target.value)}
+                placeholder="Optional"
+                className="h-10 rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-sm text-white outline-none focus:border-blue-500"
               />
             </label>
             <label className="grid gap-1.5 text-xs font-semibold text-zinc-300">
-              Note (optional)
+              Verification note
               <input
                 type="text"
                 maxLength={300}
-                value={creditNote}
-                onChange={(event) => setCreditNote(event.target.value)}
-                placeholder="Anthropic console balance checked"
-                className="h-10 rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-sm text-white outline-none focus:border-emerald-500"
+                value={billingNote}
+                onChange={(event) => setBillingNote(event.target.value)}
+                placeholder="Checked in provider console"
+                className="h-10 rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-sm text-white outline-none focus:border-blue-500"
               />
             </label>
             <button
               type="submit"
-              disabled={!creditIsValid || savingCredit}
-              className="inline-flex h-10 cursor-pointer items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 text-sm font-bold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={!monthlyLimitIsValid || savingBilling}
+              className="inline-flex h-10 cursor-pointer items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-bold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Save className="h-4 w-4" />
-              {savingCredit ? "Saving" : "Save checkpoint"}
+              {savingBilling ? "Saving" : "Save profile"}
             </button>
           </form>
         )}
       </div>
+
+      {tracksCredit && (
+        <div className="mt-5 border-t border-zinc-800 pt-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <CircleDollarSign className="mt-0.5 h-5 w-5 text-emerald-300" />
+              <div>
+                <PanelLabel>
+                  {provider.billingProfile.settlementModel === "hybrid"
+                    ? "Optional credit checkpoint"
+                    : "Prepaid credit checkpoint"}
+                </PanelLabel>
+                <p className="mt-1 text-xs leading-5 text-zinc-500">
+                  Saves a manually verified credit in DB and subtracts internal
+                  usage recorded after the checkpoint. It does not change routing
+                  or provider health.
+                </p>
+              </div>
+            </div>
+            {canManageCredits && (
+              <button
+                type="button"
+                onClick={toggleCreditEditor}
+                className="inline-flex h-9 shrink-0 cursor-pointer items-center justify-center rounded-xl border border-zinc-700 bg-zinc-900 px-3 text-xs font-bold text-zinc-200 transition hover:bg-zinc-800"
+              >
+                {creditEditorOpen ? "Close editor" : "Set credit"}
+              </button>
+            )}
+          </div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            <Metric
+              label="Opening credit"
+              value={
+                provider.credit.configuredCreditMicroUsd === null
+                  ? provider.billingProfile.settlementModel === "hybrid"
+                    ? "Not set (optional)"
+                    : "Not configured"
+                  : money(provider.credit.configuredCreditMicroUsd)
+              }
+            />
+            <Metric label="Tracked usage" value={money(provider.credit.usedSinceCheckpointMicroUsd)} />
+            <Metric
+              label="Estimated remaining"
+              value={
+                estimatedBalance === null
+                  ? provider.billingProfile.settlementModel === "hybrid"
+                    ? "Not set (optional)"
+                    : "Not configured"
+                  : money(estimatedBalance)
+              }
+              valueClass={estimatedBalance !== null && estimatedBalance < 0 ? "text-red-300" : "text-emerald-300"}
+            />
+          </div>
+          {provider.credit.checkpointAt && (
+            <p className="mt-2 text-[11px] text-zinc-500">
+              Checkpoint {dateLabel(provider.credit.checkpointAt, "Not configured")}
+              {provider.credit.note ? ` · ${provider.credit.note}` : ""}
+            </p>
+          )}
+          {creditEditorOpen && canManageCredits && (
+            <form
+              onSubmit={submitCredit}
+              className="mt-4 grid gap-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4 md:grid-cols-[minmax(0,0.7fr)_minmax(0,1.3fr)_auto] md:items-end"
+            >
+              <label className="grid gap-1.5 text-xs font-semibold text-zinc-300">
+                Current credit (USD)
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  max="1000000"
+                  step="0.01"
+                  value={creditUsd}
+                  onChange={(event) => setCreditUsd(event.target.value)}
+                  placeholder="100.00"
+                  className="h-10 rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-sm text-white outline-none focus:border-emerald-500"
+                />
+              </label>
+              <label className="grid gap-1.5 text-xs font-semibold text-zinc-300">
+                Note (optional)
+                <input
+                  type="text"
+                  maxLength={300}
+                  value={creditNote}
+                  onChange={(event) => setCreditNote(event.target.value)}
+                  placeholder="Provider console balance checked"
+                  className="h-10 rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-sm text-white outline-none focus:border-emerald-500"
+                />
+              </label>
+              <button
+                type="submit"
+                disabled={!creditIsValid || savingCredit}
+                className="inline-flex h-10 cursor-pointer items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 text-sm font-bold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Save className="h-4 w-4" />
+                {savingCredit ? "Saving" : "Save checkpoint"}
+              </button>
+            </form>
+          )}
+        </div>
+      )}
 
       <div className="mt-5 grid gap-4 border-t border-zinc-800 pt-5 lg:grid-cols-2">
         <div>
@@ -516,16 +732,19 @@ function ProviderRow({
 function Metric({
   label,
   value,
+  detail,
   valueClass = "text-white",
 }: {
   label: string;
   value: string;
+  detail?: string;
   valueClass?: string;
 }) {
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
       <div className="text-zinc-500">{label}</div>
       <div className={`mt-1 truncate font-semibold ${valueClass}`}>{value}</div>
+      {detail && <div className="mt-1 truncate text-[11px] text-zinc-500">{detail}</div>}
     </div>
   );
 }
@@ -548,6 +767,7 @@ export function AdminProviderHealthPanel({
   const [dashboard, setDashboard] = useState(initialDashboard);
   const [refreshing, setRefreshing] = useState(false);
   const [savingProvider, setSavingProvider] = useState<AiProvider | null>(null);
+  const [savingBillingProvider, setSavingBillingProvider] = useState<AiProvider | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const refreshDashboard = useCallback(async () => {
@@ -614,6 +834,50 @@ export function AdminProviderHealthPanel({
     []
   );
 
+  const saveProviderBilling = useCallback<SaveBilling>(
+    async (provider, profile) => {
+      setSavingBillingProvider(provider);
+      try {
+        const response = await fetch("/api/admin/provider-billing", {
+          method: "PATCH",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            provider,
+            ...profile,
+            note: profile.note || null,
+          }),
+        });
+        const data = (await response.json().catch(() => null)) as
+          | ProviderHealthDashboard
+          | { error?: string }
+          | null;
+        if (!response.ok) {
+          throw new Error(
+            data && "error" in data && data.error
+              ? data.error
+              : `Billing profile API returned ${response.status}.`
+          );
+        }
+        setDashboard(data as ProviderHealthDashboard);
+        setError(null);
+        return true;
+      } catch (saveError) {
+        setError(
+          saveError instanceof Error
+            ? saveError.message
+            : "Provider billing profile update failed."
+        );
+        return false;
+      } finally {
+        setSavingBillingProvider(null);
+      }
+    },
+    []
+  );
+
   useEffect(() => {
     const refreshWhenVisible = () => {
       if (document.visibilityState === "visible") void refreshDashboard();
@@ -668,7 +932,9 @@ export function AdminProviderHealthPanel({
           provider={provider}
           canManageCredits={canManageCredits}
           savingCredit={savingProvider === provider.provider}
+          savingBilling={savingBillingProvider === provider.provider}
           onSaveCredit={saveProviderCredit}
+          onSaveBilling={saveProviderBilling}
         />
       ))}
     </div>
