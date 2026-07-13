@@ -3,6 +3,13 @@ import "server-only";
 import type Stripe from "stripe";
 import { getBillingPlans, tierForPlanId, type BillingPlanId } from "@/lib/billingConfig";
 import { sendBillingWelcomeEmail } from "@/lib/billingEmails";
+import {
+  encodePromotionRiskFlags,
+  hashPaymentMethodFingerprint,
+  parsePromotionRiskFlags,
+  paymentMethodFingerprint,
+  releasePromotionCheckout,
+} from "@/lib/billingPromotionSecurity";
 import { prisma } from "@/lib/prisma";
 import { getStripe } from "@/lib/stripe";
 import {
@@ -98,7 +105,8 @@ async function syncSubscription(subscription: Stripe.Subscription) {
 
 async function recordPromotionRedemptionFromCheckout(
   session: Stripe.Checkout.Session,
-  subscriptionId: string
+  subscriptionId: string,
+  paymentMethodFingerprintHash: string | null
 ) {
   const promotionId = session.metadata?.promotionId || null;
   const planId = normalizePlanId(session.metadata?.planId);
@@ -116,48 +124,122 @@ async function recordPromotionRedemptionFromCheckout(
     return;
   }
 
-  await prisma.$transaction(async (tx) => {
-    const promotion = await tx.billingPromotion.findUnique({
-      where: { id: promotionId },
-      select: { id: true, isActive: true, maxRedemptions: true },
+  const clientIpHash = /^[a-f0-9]{64}$/.test(
+    session.metadata?.promotionIpHash || ""
+  )
+    ? session.metadata?.promotionIpHash || null
+    : null;
+  const metadataRiskFlags = parsePromotionRiskFlags(
+    session.metadata?.promotionRiskFlags
+  );
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const promotion = await tx.billingPromotion.findUnique({
+        where: { id: promotionId },
+        select: {
+          id: true,
+          isActive: true,
+          maxRedemptions: true,
+          startsAt: true,
+          endsAt: true,
+          appliesToPlanIds: true,
+          allowAnnualStacking: true,
+        },
+      });
+      const now = new Date();
+      let eligiblePlanIds: unknown = [];
+      try {
+        eligiblePlanIds = JSON.parse(promotion?.appliesToPlanIds || "[]");
+      } catch {
+        eligiblePlanIds = [];
+      }
+
+      if (
+        !promotion?.isActive ||
+        !promotion.maxRedemptions ||
+        !promotion.endsAt ||
+        (promotion.startsAt && promotion.startsAt > now) ||
+        promotion.endsAt <= now ||
+        !Array.isArray(eligiblePlanIds) ||
+        !eligiblePlanIds.includes(planId) ||
+        (billingInterval === "annual" && !promotion.allowAnnualStacking)
+      ) {
+        throw new Error("Promotion policy is no longer redeemable.");
+      }
+
+      const existing = await tx.billingPromotionRedemption.findUnique({
+        where: { stripeCheckoutSessionId: session.id },
+        select: { id: true },
+      });
+      if (existing) return;
+
+      const paymentMethodReuse = paymentMethodFingerprintHash
+        ? await tx.billingPromotionRedemption.findFirst({
+            where: {
+              promotionId,
+              paymentMethodFingerprintHash,
+              userId: { not: userId },
+            },
+            select: { id: true },
+          })
+        : null;
+      const riskFlags = new Set(metadataRiskFlags);
+      if (paymentMethodReuse) riskFlags.add("shared_payment_method");
+
+      const updatedPromotion = await tx.billingPromotion.updateMany({
+        where: {
+          id: promotionId,
+          isActive: true,
+          endsAt: { gt: now },
+          redeemedCount: { lt: promotion.maxRedemptions },
+        },
+        data: { redeemedCount: { increment: 1 } },
+      });
+
+      if (updatedPromotion.count !== 1) {
+        throw new Error("Promotion redemption limit reached.");
+      }
+
+      await tx.billingPromotionRedemption.create({
+        data: {
+          promotionId,
+          userId,
+          planId,
+          billingInterval,
+          stripeCheckoutSessionId: session.id,
+          stripeSubscriptionId: subscriptionId,
+          clientIpHash,
+          paymentMethodFingerprintHash,
+          riskFlags: encodePromotionRiskFlags(riskFlags),
+        },
+      });
     });
+  } finally {
+    await releasePromotionCheckout(promotionId, userId).catch(() => undefined);
+  }
+}
 
-    if (!promotion?.isActive) {
-      throw new Error("Promotion is not active.");
-    }
-
-    const existing = await tx.billingPromotionRedemption.findUnique({
-      where: { stripeCheckoutSessionId: session.id },
-      select: { id: true },
+async function getSubscriptionPaymentMethodFingerprintHash(
+  subscription: Stripe.Subscription
+) {
+  try {
+    const stripe = getStripe();
+    const value = subscription.default_payment_method;
+    const paymentMethod =
+      typeof value === "string"
+        ? await stripe.paymentMethods.retrieve(value)
+        : value && typeof value === "object"
+          ? value
+          : null;
+    const fingerprint = paymentMethodFingerprint(paymentMethod);
+    return fingerprint ? hashPaymentMethodFingerprint(fingerprint) : null;
+  } catch (error) {
+    console.warn("Promotion payment-method risk check skipped.", {
+      errorName: error instanceof Error ? error.name : "UnknownError",
     });
-    if (existing) return;
-
-    await tx.billingPromotionRedemption.create({
-      data: {
-        promotionId,
-        userId,
-        planId,
-        billingInterval,
-        stripeCheckoutSessionId: session.id,
-        stripeSubscriptionId: subscriptionId,
-      },
-    });
-
-    const updatedPromotion = await tx.billingPromotion.updateMany({
-      where: {
-        id: promotionId,
-        isActive: true,
-        ...(promotion.maxRedemptions
-          ? { redeemedCount: { lt: promotion.maxRedemptions } }
-          : {}),
-      },
-      data: { redeemedCount: { increment: 1 } },
-    });
-
-    if (updatedPromotion.count !== 1) {
-      throw new Error("Promotion redemption limit reached.");
-    }
-  });
+    return null;
+  }
 }
 
 async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
@@ -166,8 +248,16 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
     typeof session.subscription === "string"
       ? session.subscription
       : session.subscription.id;
-  const subscription = await getStripe().subscriptions.retrieve(subscriptionId);
-  await recordPromotionRedemptionFromCheckout(session, subscriptionId).catch((error) => {
+  const subscription = await getStripe().subscriptions.retrieve(subscriptionId, {
+    expand: ["default_payment_method"],
+  });
+  const paymentMethodFingerprintHash =
+    await getSubscriptionPaymentMethodFingerprintHash(subscription);
+  await recordPromotionRedemptionFromCheckout(
+    session,
+    subscriptionId,
+    paymentMethodFingerprintHash
+  ).catch((error) => {
     console.error("Promotion redemption record failed:", error);
   });
   const synced = await syncSubscription(subscription);

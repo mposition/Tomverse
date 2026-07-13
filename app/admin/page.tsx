@@ -72,6 +72,7 @@ import {
     getBillingPromotions,
     syncBillingDefaultsToDatabase,
 } from "@/lib/billingConfig";
+import { parsePromotionRiskFlags } from "@/lib/billingPromotionSecurity";
 import {
     getProviderHealthDashboard,
     type ProviderHealthStatus,
@@ -355,6 +356,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         dashboard,
         billingPlans,
         billingPromotions,
+        promotionRiskSignalGroups,
         totalUsers,
         paidUsers,
         activeSubscriptions,
@@ -385,6 +387,11 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         getProviderHealthDashboard({ includeErrorEvents: true }),
         getBillingPlans(),
         getBillingPromotions(),
+        prisma.billingPromotionRedemption.groupBy({
+            by: ["promotionId", "riskFlags"],
+            where: { riskFlags: { not: "[]" } },
+            _count: { _all: true },
+        }),
         prisma.user.count(),
         prisma.user.count({ where: activePaidWhere }),
         prisma.user.count({ where: activePaidWhere }),
@@ -603,8 +610,32 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         acknowledgedByEmail: log.acknowledgedByEmail,
         createdAt: log.createdAt.toISOString(),
     }));
+    const promotionRiskSignalCount = new Map<
+        string,
+        { total: number; sharedIp: number; sharedPaymentMethod: number }
+    >();
+    for (const row of promotionRiskSignalGroups) {
+        const current = promotionRiskSignalCount.get(row.promotionId) || {
+            total: 0,
+            sharedIp: 0,
+            sharedPaymentMethod: 0,
+        };
+        const flags = parsePromotionRiskFlags(row.riskFlags);
+        current.total += row._count._all;
+        if (flags.includes("shared_ip")) current.sharedIp += row._count._all;
+        if (flags.includes("shared_payment_method")) {
+            current.sharedPaymentMethod += row._count._all;
+        }
+        promotionRiskSignalCount.set(row.promotionId, current);
+    }
     const promoRiskRows: PromoRiskRow[] = billingPromotions
         .map((promotion) => {
+            const abuseSignals = promotionRiskSignalCount.get(promotion.id) || {
+                total: 0,
+                sharedIp: 0,
+                sharedPaymentMethod: 0,
+            };
+            const abuseSignalCount = abuseSignals.total;
             const nearingLimit =
                 promotion.maxRedemptions &&
                 promotion.redeemedCount >= Math.floor(promotion.maxRedemptions * 0.8);
@@ -612,7 +643,9 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             const exhausted =
                 promotion.maxRedemptions !== null &&
                 promotion.redeemedCount >= promotion.maxRedemptions;
-            const risk = exhausted
+            const risk = abuseSignalCount > 0
+                ? `${abuseSignalCount} abuse signal${abuseSignalCount === 1 ? "" : "s"}`
+                : exhausted
                 ? "exhausted"
                 : nearingLimit
                     ? "near limit"
@@ -624,6 +657,9 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                 redeemedCount: promotion.redeemedCount,
                 maxRedemptions: promotion.maxRedemptions,
                 discountPercent: promotion.discountPercent,
+                abuseSignalCount,
+                sharedIpSignalCount: abuseSignals.sharedIp,
+                sharedPaymentMethodSignalCount: abuseSignals.sharedPaymentMethod,
                 risk,
             };
         })

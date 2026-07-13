@@ -18,7 +18,9 @@ export async function GET(req: Request) {
       day: 2_000,
     });
     const config = await getPublicBillingConfig();
-    return NextResponse.json(await withDisplayCurrency(config, req));
+    return NextResponse.json(await withDisplayCurrency(config, req), {
+      headers: { "Cache-Control": "no-store, max-age=0" },
+    });
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;

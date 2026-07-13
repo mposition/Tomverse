@@ -8,13 +8,23 @@ import {
   PROVIDER_DISPLAY_NAMES,
 } from "@/lib/providerMonitoring";
 import {
+  isRetryableOpenAiStatus,
   OpenAiCostsParseError,
+  openAiCostsRequestPolicy,
+  openAiCostsRetryDelayMs,
   openAiCostsUrl,
   parseOpenAiCostsPage,
   redactProviderDiagnostic,
 } from "@/lib/providerUsageSyncCore";
 
 export type ProviderUsageSyncStatus = "synced" | "skipped" | "failed";
+
+export type ProviderUsageSyncFailureStage =
+  | "connection"
+  | "response"
+  | "provider_http"
+  | "payload"
+  | "storage";
 
 export type ProviderUsageSyncDiagnostic = {
   traceId: string;
@@ -25,6 +35,10 @@ export type ProviderUsageSyncDiagnostic = {
   errorCode: string | null;
   providerRequestId: string | null;
   detail: string | null;
+  attemptCount?: number;
+  attemptTimeoutMs?: number;
+  elapsedMs?: number;
+  failureStage?: ProviderUsageSyncFailureStage;
 };
 
 export type ProviderUsageSyncResult = {
@@ -37,7 +51,7 @@ export type ProviderUsageSyncResult = {
 };
 
 const OPENAI_COSTS_URL = "https://api.openai.com/v1/organization/costs";
-const EXTERNAL_TIMEOUT_MS = 10_000;
+const GENERIC_EXTERNAL_TIMEOUT_MS = 10_000;
 const MAX_EXTERNAL_RESPONSE_BYTES = 512_000;
 const MAX_OPENAI_PAGES = 10;
 
@@ -139,6 +153,16 @@ const diagnosticValue = (payload: unknown, field: string) => {
   return redactProviderDiagnostic((error as Record<string, unknown>)[field], 160);
 };
 
+const isTimeoutError = (error: unknown) =>
+  error instanceof Error &&
+  (error.name === "TimeoutError" || error.name === "AbortError");
+
+const isRetryableNetworkError = (error: unknown) =>
+  isTimeoutError(error) || error instanceof TypeError;
+
+const wait = (milliseconds: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+
 const failedResult = ({
   provider,
   date,
@@ -165,6 +189,10 @@ const failedResult = ({
     errorCode: diagnostic.errorCode,
     providerRequestId: diagnostic.providerRequestId,
     detail: diagnostic.detail,
+    attemptCount: diagnostic.attemptCount,
+    attemptTimeoutMs: diagnostic.attemptTimeoutMs,
+    elapsedMs: diagnostic.elapsedMs,
+    failureStage: diagnostic.failureStage,
     cause:
       cause instanceof Error
         ? redactProviderDiagnostic(cause.message)
@@ -196,15 +224,22 @@ const syncOpenAiCosts = async (date: Date): Promise<ProviderUsageSyncResult> => 
     };
   }
 
+  const requestPolicy = openAiCostsRequestPolicy({
+    timeoutMs: process.env.OPENAI_COSTS_TIMEOUT_MS,
+    maxAttempts: process.env.OPENAI_COSTS_MAX_ATTEMPTS,
+  });
   const traceId = crypto.randomUUID();
+  const syncStartedAt = Date.now();
   let page: string | null = null;
   let pageCount = 0;
   let costUsd = 0;
   let lineItemCount = 0;
   let negativeLineItemCount = 0;
   let normalizedStringAmountCount = 0;
+  let attemptCount = 0;
   let lastHttpStatus: number | null = null;
   let lastProviderRequestId: string | null = null;
+  let failureStage: ProviderUsageSyncFailureStage = "connection";
   const providerRequestIds: string[] = [];
 
   try {
@@ -214,62 +249,112 @@ const syncOpenAiCosts = async (date: Date): Promise<ProviderUsageSyncResult> => 
         throw new Error("OpenAI Costs API pagination exceeded the safety limit.");
       }
       const url = openAiCostsUrl({ baseUrl: OPENAI_COSTS_URL, date, page });
-      lastHttpStatus = null;
-      lastProviderRequestId = null;
-      const response = await fetch(url, {
-        cache: "no-store",
-        signal: AbortSignal.timeout(EXTERNAL_TIMEOUT_MS),
-        headers: {
-          Accept: "application/json",
-          Authorization: `Bearer ${adminKey}`,
-          "Content-Type": "application/json",
-        },
-      });
-      lastHttpStatus = response.status;
-      const requestId = redactProviderDiagnostic(
-        response.headers.get("x-request-id"),
-        160
-      );
-      lastProviderRequestId = requestId;
-      if (requestId) providerRequestIds.push(requestId);
-      const payload = await readBoundedJson(response);
-      if (!response.ok) {
-        const errorCode = diagnosticValue(payload, "code");
-        const errorType = diagnosticValue(payload, "type");
-        const detail = diagnosticValue(payload, "message");
-        const message =
-          response.status === 401 || response.status === 403
-            ? `OpenAI Costs API denied access (${response.status}). Verify that OPENAI_ADMIN_API_KEY was created by an Organization Owner.`
-            : `OpenAI Costs API returned ${response.status}.`;
-        return failedResult({
-          provider,
-          date,
-          message,
-          diagnostic: {
-            traceId,
-            source: "openai_costs",
-            endpoint: endpointLabel(OPENAI_COSTS_URL),
-            httpStatus: response.status,
-            errorType,
-            errorCode,
-            providerRequestId: requestId,
-            detail,
-          },
-        });
+      let pageCompleted = false;
+
+      for (
+        let pageAttempt = 1;
+        pageAttempt <= requestPolicy.maxAttempts;
+        pageAttempt += 1
+      ) {
+        attemptCount += 1;
+        lastHttpStatus = null;
+        lastProviderRequestId = null;
+        failureStage = "connection";
+
+        try {
+          const response = await fetch(url, {
+            cache: "no-store",
+            signal: AbortSignal.timeout(requestPolicy.attemptTimeoutMs),
+            headers: {
+              Accept: "application/json",
+              Authorization: `Bearer ${adminKey}`,
+            },
+          });
+          lastHttpStatus = response.status;
+          const requestId = redactProviderDiagnostic(
+            response.headers.get("x-request-id"),
+            160
+          );
+          lastProviderRequestId = requestId;
+          if (requestId) providerRequestIds.push(requestId);
+          failureStage = "response";
+          const payload = await readBoundedJson(response);
+
+          if (!response.ok) {
+            failureStage = "provider_http";
+            if (
+              isRetryableOpenAiStatus(response.status) &&
+              pageAttempt < requestPolicy.maxAttempts
+            ) {
+              await wait(
+                openAiCostsRetryDelayMs({
+                  attempt: pageAttempt,
+                  retryAfter: response.headers.get("retry-after"),
+                  retryAfterMs: response.headers.get("retry-after-ms"),
+                })
+              );
+              continue;
+            }
+
+            const errorCode = diagnosticValue(payload, "code");
+            const errorType = diagnosticValue(payload, "type");
+            const detail = diagnosticValue(payload, "message");
+            const message =
+              response.status === 401 || response.status === 403
+                ? `OpenAI Costs API denied access (${response.status}). Verify that OPENAI_ADMIN_API_KEY was created by an Organization Owner.`
+                : `OpenAI Costs API returned ${response.status} after ${pageAttempt} attempt${pageAttempt === 1 ? "" : "s"}.`;
+            return failedResult({
+              provider,
+              date,
+              message,
+              diagnostic: {
+                traceId,
+                source: "openai_costs",
+                endpoint: endpointLabel(OPENAI_COSTS_URL),
+                httpStatus: response.status,
+                errorType,
+                errorCode: errorCode || `OPENAI_COSTS_HTTP_${response.status}`,
+                providerRequestId: requestId,
+                detail,
+                attemptCount,
+                attemptTimeoutMs: requestPolicy.attemptTimeoutMs,
+                elapsedMs: Date.now() - syncStartedAt,
+                failureStage,
+              },
+            });
+          }
+
+          failureStage = "payload";
+          const parsed = parseOpenAiCostsPage(payload);
+          costUsd += parsed.costUsd;
+          lineItemCount += parsed.lineItemCount;
+          negativeLineItemCount += parsed.negativeLineItemCount;
+          normalizedStringAmountCount += parsed.normalizedStringAmountCount;
+          if (parsed.hasMore && !parsed.nextPage) {
+            throw new Error("OpenAI Costs API omitted the next page cursor.");
+          }
+          page = parsed.hasMore ? parsed.nextPage : null;
+          pageCompleted = true;
+          break;
+        } catch (error) {
+          if (
+            isRetryableNetworkError(error) &&
+            pageAttempt < requestPolicy.maxAttempts
+          ) {
+            await wait(openAiCostsRetryDelayMs({ attempt: pageAttempt }));
+            continue;
+          }
+          throw error;
+        }
       }
 
-      const parsed = parseOpenAiCostsPage(payload);
-      costUsd += parsed.costUsd;
-      lineItemCount += parsed.lineItemCount;
-      negativeLineItemCount += parsed.negativeLineItemCount;
-      normalizedStringAmountCount += parsed.normalizedStringAmountCount;
-      if (parsed.hasMore && !parsed.nextPage) {
-        throw new Error("OpenAI Costs API omitted the next page cursor.");
+      if (!pageCompleted) {
+        throw new Error("OpenAI Costs API retry policy ended unexpectedly.");
       }
-      page = parsed.hasMore ? parsed.nextPage : null;
     } while (page);
 
     const reportedCostMicroUsd = Math.round(costUsd * 1_000_000);
+    failureStage = "storage";
     await recordProviderReportedUsage({
       provider,
       date,
@@ -283,6 +368,8 @@ const syncOpenAiCosts = async (date: Date): Promise<ProviderUsageSyncResult> => 
         negativeLineItemCount,
         normalizedStringAmountCount,
         providerRequestIds,
+        requestAttemptCount: attemptCount,
+        requestAttemptTimeoutMs: requestPolicy.attemptTimeoutMs,
       },
     });
     return {
@@ -297,14 +384,18 @@ const syncOpenAiCosts = async (date: Date): Promise<ProviderUsageSyncResult> => 
       diagnostic: null,
     };
   } catch (error) {
-    const isTimeout =
-      error instanceof Error &&
-      (error.name === "TimeoutError" || error.name === "AbortError");
+    const isTimeout = isTimeoutError(error);
+    const isNetworkError = !isTimeout && error instanceof TypeError;
+    const noHttpResponse = lastHttpStatus === null && failureStage === "connection";
     return failedResult({
       provider,
       date,
       message: isTimeout
-        ? "OpenAI Costs API timed out after 10 seconds."
+        ? noHttpResponse
+          ? `No HTTP response was received from OpenAI after ${requestPolicy.maxAttempts} attempts (${requestPolicy.attemptTimeoutMs / 1_000}s each).`
+          : `OpenAI Costs API response timed out after ${requestPolicy.maxAttempts} attempts (${requestPolicy.attemptTimeoutMs / 1_000}s each).`
+        : isNetworkError
+          ? `OpenAI Costs API network request failed after ${requestPolicy.maxAttempts} attempts.`
         : "OpenAI Costs API response could not be reconciled.",
       diagnostic: {
         traceId,
@@ -313,15 +404,25 @@ const syncOpenAiCosts = async (date: Date): Promise<ProviderUsageSyncResult> => 
         httpStatus: lastHttpStatus,
         errorType: isTimeout ? "timeout" : error instanceof Error ? error.name : null,
         errorCode: isTimeout
-          ? "OPENAI_COSTS_TIMEOUT"
+          ? noHttpResponse
+            ? "OPENAI_COSTS_CONNECT_TIMEOUT"
+            : "OPENAI_COSTS_RESPONSE_TIMEOUT"
+          : isNetworkError
+            ? "OPENAI_COSTS_NETWORK_ERROR"
           : error instanceof OpenAiCostsParseError
             ? error.code
             : "OPENAI_COSTS_SYNC_FAILED",
         providerRequestId: lastProviderRequestId,
         detail:
-          error instanceof Error
-            ? redactProviderDiagnostic(error.message)
-            : "OpenAI Costs API request failed.",
+          isTimeout && noHttpResponse
+            ? "Tomverse received no response headers, so authentication and API permissions could not yet be evaluated."
+            : error instanceof Error
+              ? redactProviderDiagnostic(error.message)
+              : "OpenAI Costs API request failed.",
+        attemptCount,
+        attemptTimeoutMs: requestPolicy.attemptTimeoutMs,
+        elapsedMs: Date.now() - syncStartedAt,
+        failureStage,
       },
       cause: error,
     });
@@ -353,7 +454,7 @@ const syncGenericUsage = async (
     const authHeader = usageAuthHeaderFor(provider);
     const response = await fetch(url, {
       cache: "no-store",
-      signal: AbortSignal.timeout(EXTERNAL_TIMEOUT_MS),
+      signal: AbortSignal.timeout(GENERIC_EXTERNAL_TIMEOUT_MS),
       headers: {
         Accept: "application/json",
         ...(authHeader ? { Authorization: authHeader } : {}),
@@ -417,9 +518,7 @@ const syncGenericUsage = async (
       diagnostic: null,
     };
   } catch (error) {
-    const isTimeout =
-      error instanceof Error &&
-      (error.name === "TimeoutError" || error.name === "AbortError");
+    const isTimeout = isTimeoutError(error);
     return failedResult({
       provider,
       date,

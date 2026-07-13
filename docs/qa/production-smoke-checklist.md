@@ -71,3 +71,12 @@ Use a short, low-cost prompt for each enabled production model.
 - Product owner:
 - Launch decision: Not ready
 - Notes:
+## Search Launch Checks
+
+- [ ] Confirm `https://tomverse.app/robots.txt` returns HTTP 200 and references the canonical sitemap.
+- [ ] Confirm `https://tomverse.app/sitemap.xml` returns HTTP 200 with absolute canonical and hreflang URLs only.
+- [ ] Inspect the homepage source for canonical, Open Graph, X card, and `Organization`/`SoftwareApplication` JSON-LD.
+- [ ] Validate the deployed homepage in Google Rich Results Test and Schema Markup Validator.
+- [ ] Verify the `tomverse.app` Domain property in Google Search Console using DNS, then submit `/sitemap.xml`.
+- [ ] Add or import the property in Bing Webmaster Tools and confirm sitemap processing.
+- [ ] Check `/chat`, `/auth/signin`, `/admin`, and a `/share/*` page remain `noindex` and absent from the sitemap.

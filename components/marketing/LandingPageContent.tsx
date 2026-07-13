@@ -22,6 +22,7 @@ import {
   Sparkles,
   UploadCloud,
   Workflow,
+  ExternalLink,
 } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { useEffect, useRef } from "react";
@@ -29,6 +30,7 @@ import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
 import { usePublicBilling } from "@/components/marketing/usePublicBilling";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
+import { statusLinkLabel, statusNewTabCopy } from "./statusLinkCopy";
 
 const annualLabelByLanguage: Partial<Record<Language, { annual: string; save: string }>> = {
   en: { annual: "Annual", save: "Save 20%" },
@@ -738,11 +740,17 @@ export function LandingPageContent() {
                 </Link>
                 <Link
                   href="/status"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  prefetch={false}
+                  aria-label={statusLinkLabel(modelLinks.status, lang)}
+                  title={statusNewTabCopy[lang]}
                   data-testid="home-model-status-link"
                   className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 text-sm font-black text-emerald-700 transition hover:bg-emerald-500/15 dark:text-emerald-300"
                 >
                   <Activity className="h-4 w-4" />
                   {modelLinks.status}
+                  <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
                 </Link>
               </div>
             </div>

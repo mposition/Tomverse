@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  isRetryableOpenAiStatus,
   openAiCostsDayRange,
+  openAiCostsRequestPolicy,
+  openAiCostsRetryDelayMs,
   openAiCostsUrl,
   parseOpenAiCostsPage,
   redactProviderDiagnostic,
@@ -23,6 +26,44 @@ test("OpenAI Costs URL uses one exact UTC day", () => {
   assert.equal(url.searchParams.get("bucket_width"), "1d");
   assert.equal(url.searchParams.get("limit"), "1");
   assert.equal(url.searchParams.get("page"), "page_2");
+});
+
+test("OpenAI Costs request policy uses bounded retry settings", () => {
+  assert.deepEqual(openAiCostsRequestPolicy(), {
+    attemptTimeoutMs: 30_000,
+    maxAttempts: 3,
+  });
+  assert.deepEqual(
+    openAiCostsRequestPolicy({ timeoutMs: "45000", maxAttempts: "2" }),
+    { attemptTimeoutMs: 45_000, maxAttempts: 2 }
+  );
+  assert.deepEqual(
+    openAiCostsRequestPolicy({ timeoutMs: "4000", maxAttempts: "4" }),
+    { attemptTimeoutMs: 30_000, maxAttempts: 3 }
+  );
+});
+
+test("OpenAI Costs retry policy covers transient statuses and honors retry headers", () => {
+  for (const status of [408, 409, 429, 500, 502, 503, 599]) {
+    assert.equal(isRetryableOpenAiStatus(status), true);
+  }
+  for (const status of [400, 401, 403, 404, 422]) {
+    assert.equal(isRetryableOpenAiStatus(status), false);
+  }
+  assert.equal(openAiCostsRetryDelayMs({ attempt: 1 }), 500);
+  assert.equal(openAiCostsRetryDelayMs({ attempt: 3 }), 2_000);
+  assert.equal(
+    openAiCostsRetryDelayMs({ attempt: 1, retryAfterMs: "1750" }),
+    1_750
+  );
+  assert.equal(
+    openAiCostsRetryDelayMs({ attempt: 1, retryAfter: "2.5" }),
+    2_500
+  );
+  assert.equal(
+    openAiCostsRetryDelayMs({ attempt: 1, retryAfterMs: "25000" }),
+    10_000
+  );
 });
 
 test("OpenAI Costs parser sums every USD line item", () => {

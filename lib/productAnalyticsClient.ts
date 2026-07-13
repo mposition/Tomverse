@@ -232,7 +232,7 @@ export const configureAnalyticsClient = ({
     });
     window.gtag("js", now);
     window.gtag("config", measurementId, {
-      send_page_view: false,
+      send_page_view: true,
       client_id: runtime.attribution.client_id,
       allow_google_signals: false,
       allow_ad_personalization_signals: false,

@@ -2,6 +2,12 @@
 
 import { Languages } from "lucide-react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
+import { usePathname, useRouter } from "next/navigation";
+import {
+  LOCALIZED_SEO_PATHS,
+  SEO_LOCALES,
+  localizedPath,
+} from "@/lib/seo";
 
 const languageOptions: Array<{ value: Language; label: string }> = [
   { value: "ko", label: "한국어" },
@@ -15,6 +21,25 @@ const languageOptions: Array<{ value: Language; label: string }> = [
 
 export function MarketingLanguageSwitcher() {
   const { lang, setLang } = useLanguage();
+  const pathname = usePathname();
+  const router = useRouter();
+
+  const localizedBasePath = () => {
+    if (LOCALIZED_SEO_PATHS.includes(pathname as (typeof LOCALIZED_SEO_PATHS)[number])) {
+      return pathname;
+    }
+    const segments = pathname.split("/").filter(Boolean);
+    if (
+      segments.length >= 1 &&
+      SEO_LOCALES.includes(segments[0] as Language)
+    ) {
+      const remainder = segments.length === 1 ? "/" : `/${segments.slice(1).join("/")}`;
+      if (LOCALIZED_SEO_PATHS.includes(remainder as (typeof LOCALIZED_SEO_PATHS)[number])) {
+        return remainder;
+      }
+    }
+    return null;
+  };
 
   return (
     <label className="inline-flex h-10 items-center gap-2 rounded-xl border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-700 shadow-sm transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800">
@@ -23,7 +48,12 @@ export function MarketingLanguageSwitcher() {
       <select
         aria-label="Language"
         value={lang}
-        onChange={(event) => setLang(event.target.value as Language)}
+        onChange={(event) => {
+          const nextLanguage = event.target.value as Language;
+          setLang(nextLanguage);
+          const basePath = localizedBasePath();
+          if (basePath) router.push(localizedPath(nextLanguage, basePath));
+        }}
         className="cursor-pointer bg-transparent text-sm font-bold text-zinc-800 outline-none [color-scheme:light] dark:text-zinc-100 dark:[color-scheme:dark]"
       >
         {languageOptions.map((option) => (

@@ -26,18 +26,19 @@ type BillingPlan = {
 };
 
 type BillingPromotion = {
-  code: string;
   discountPercent: number;
   discountAmountCents?: number | null;
-  maxRedemptions?: number | null;
-  redeemedCount?: number;
   durationMonths: number;
-  appliesToPlanIds: Array<"pro" | "max">;
+  allowAnnualStacking: boolean;
 };
 
 type BillingConfig = {
   plans: BillingPlan[];
-  promotions: BillingPromotion[];
+  promotionPolicy?: {
+    codesListed: false;
+    validation: "server_only";
+    annualDiscountStacking: "promotion_specific_default_denied";
+  };
   displayCurrency?: string;
   baseCurrency?: "USD";
 };
@@ -344,6 +345,16 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
   },
 };
 
+const promotionPolicyCopy: Record<Language, string> = {
+  en: "Codes are verified by the server. Promotions do not stack with the annual-plan discount unless that specific code explicitly allows it.",
+  ko: "코드는 서버에서 검증됩니다. 해당 코드에 연간 중복 할인이 명시적으로 허용된 경우가 아니면 연간 플랜 할인과 중복 적용되지 않습니다.",
+  zh: "促销代码由服务器验证。除非该代码明确允许，否则不能与年付折扣叠加。",
+  fr: "Les codes sont vérifiés par le serveur. Ils ne se cumulent pas avec la remise annuelle, sauf autorisation explicite du code.",
+  de: "Codes werden auf dem Server geprüft. Sie sind nicht mit dem Jahresrabatt kombinierbar, außer der Code erlaubt dies ausdrücklich.",
+  es: "Los códigos se validan en el servidor. No se acumulan con el descuento anual salvo que el código lo permita expresamente.",
+  pt: "Os códigos são validados no servidor. Não acumulam com o desconto anual, salvo quando o código permitir explicitamente.",
+};
+
 const formatMoney = (
   amount: number,
   currency = "USD",
@@ -366,7 +377,7 @@ const formatUsdCents = (cents: number, fractionDigits = 0) =>
 
 const calculateDiscountedCents = (
   cents: number,
-  promotion: BillingPromotion | undefined
+  promotion: BillingPromotion | null | undefined
 ) => {
   if (!promotion) return cents;
   if (promotion.discountPercent > 0) {
@@ -378,7 +389,7 @@ const calculateDiscountedCents = (
 const calculateDiscountedDisplayAmount = (
   amount: number,
   planConfig: BillingPlan | undefined,
-  promotion: BillingPromotion | undefined
+  promotion: BillingPromotion | null | undefined
 ) => {
   if (!promotion) return amount;
   if (promotion.discountPercent > 0) {
@@ -433,22 +444,18 @@ export function UpgradeInterestButton({
   const { lang, t } = useLanguage();
   const copy = checkoutCopy[lang] || checkoutCopy.en;
   const [isSending, setIsSending] = useState(false);
+  const [isValidatingPromotion, setIsValidatingPromotion] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
   const [promoCode, setPromoCode] = useState("");
   const [appliedPromoCode, setAppliedPromoCode] = useState<string | null>(null);
+  const [appliedPromotion, setAppliedPromotion] =
+    useState<BillingPromotion | null>(null);
   const [billingInterval, setBillingInterval] =
     useState<BillingInterval>("monthly");
   const [billingConfig, setBillingConfig] = useState<BillingConfig | null>(null);
   const inputId = useId();
   const planId = plan === "Max" ? "max" : "pro";
   const planConfig = billingConfig?.plans.find((item) => item.id === planId);
-  const appliedPromotion =
-    appliedPromoCode && billingConfig
-      ? billingConfig.promotions.find(
-          (item) =>
-            item.code === appliedPromoCode && item.appliesToPlanIds.includes(planId)
-        )
-      : undefined;
   const priceLabel = formatPrice(planConfig, billingInterval);
   const monthlyPriceLabel = formatPrice(planConfig, "monthly");
   const annualPriceLabel = formatPrice(planConfig, "annual");
@@ -545,23 +552,48 @@ export function UpgradeInterestButton({
     }
   };
 
-  const applyPromotion = () => {
+  const applyPromotion = async () => {
     const normalizedCode = promoCode.trim().toUpperCase();
     if (!normalizedCode) {
       setAppliedPromoCode(null);
+      setAppliedPromotion(null);
       return;
     }
-    const promotion = billingConfig?.promotions.find(
-      (item) =>
-        item.code === normalizedCode && item.appliesToPlanIds.includes(planId)
-    );
-    if (!promotion) {
+    if (isValidatingPromotion) return;
+    setIsValidatingPromotion(true);
+    try {
+      const response = await fetch("/api/billing/promotion/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          planId,
+          billingInterval,
+          promoCode: normalizedCode,
+        }),
+      });
+      const data = (await response.json().catch(() => null)) as
+        | {
+            valid?: boolean;
+            promotion?: BillingPromotion;
+            error?: string;
+          }
+        | null;
+      if (!response.ok || !data?.valid || !data.promotion) {
+        throw new Error(data?.error || copy.invalidPromo);
+      }
+      setAppliedPromoCode(normalizedCode);
+      setAppliedPromotion(data.promotion);
+      dispatchAppToast(copy.promoApplied, "success");
+    } catch (error) {
       setAppliedPromoCode(null);
-      dispatchAppToast(copy.invalidPromo, "error");
-      return;
+      setAppliedPromotion(null);
+      dispatchAppToast(
+        error instanceof Error ? error.message : copy.invalidPromo,
+        "error"
+      );
+    } finally {
+      setIsValidatingPromotion(false);
     }
-    setAppliedPromoCode(normalizedCode);
-    dispatchAppToast(copy.promoApplied, "success");
   };
 
   return (
@@ -632,7 +664,12 @@ export function UpgradeInterestButton({
                     <button
                       key={value}
                       type="button"
-                      onClick={() => setBillingInterval(value)}
+                      disabled={isValidatingPromotion}
+                      onClick={() => {
+                        setBillingInterval(value);
+                        setAppliedPromoCode(null);
+                        setAppliedPromotion(null);
+                      }}
                       className={`rounded-2xl border p-4 text-left transition ${
                         billingInterval === value
                           ? "border-blue-500 bg-blue-50 ring-4 ring-blue-500/15 dark:bg-blue-500/10"
@@ -693,11 +730,13 @@ export function UpgradeInterestButton({
                 <input
                   id={inputId}
                   value={promoCode}
+                  disabled={isValidatingPromotion}
                   onChange={(event) => {
                     const nextValue = event.target.value;
                     setPromoCode(nextValue);
                     if (appliedPromoCode !== nextValue.trim().toUpperCase()) {
                       setAppliedPromoCode(null);
+                      setAppliedPromotion(null);
                     }
                   }}
                   className="min-w-0 flex-1 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-base font-black uppercase text-zinc-950 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/15 dark:border-zinc-800 dark:bg-zinc-900 dark:text-white"
@@ -707,13 +746,15 @@ export function UpgradeInterestButton({
                 <button
                   type="button"
                   onClick={applyPromotion}
-                  className="rounded-xl border border-zinc-200 px-4 py-3 text-sm font-black text-zinc-700 hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-900"
+                  disabled={isValidatingPromotion}
+                  aria-busy={isValidatingPromotion}
+                  className="rounded-xl border border-zinc-200 px-4 py-3 text-sm font-black text-zinc-700 hover:bg-zinc-100 disabled:cursor-wait disabled:opacity-60 dark:border-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-900"
                 >
                   {copy.apply}
                 </button>
               </div>
               <p className="mt-2 text-xs font-semibold text-zinc-500 dark:text-zinc-400">
-                {copy.promoFinePrint}
+                {promotionPolicyCopy[lang] || promotionPolicyCopy.en}
               </p>
             </div>
 
@@ -765,7 +806,7 @@ export function UpgradeInterestButton({
                 ) : null}
                 {appliedPromotion ? (
                   <div className="flex justify-between gap-4 text-sm text-blue-600 dark:text-blue-300">
-                    <span className="font-semibold">{appliedPromotion.code}</span>
+                    <span className="font-semibold">{appliedPromoCode}</span>
                     <span className="font-black">{discountLabel || copy.appliedAtCheckout}</span>
                   </div>
                 ) : null}
@@ -798,7 +839,7 @@ export function UpgradeInterestButton({
               <div className="mt-auto hidden flex-col gap-2 pt-6 md:flex">
                 <button
                   type="submit"
-                  disabled={isSending}
+                  disabled={isSending || isValidatingPromotion}
                   className="rounded-xl bg-blue-600 px-4 py-3 text-sm font-black text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {isSending ? t("billing.sending") : copy.continueToCheckout}
@@ -823,7 +864,7 @@ export function UpgradeInterestButton({
               </div>
               <button
                 type="submit"
-                disabled={isSending}
+                disabled={isSending || isValidatingPromotion}
                 className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-black text-white shadow-lg shadow-blue-950/20 hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {isSending ? t("billing.sending") : copy.continueToCheckout}

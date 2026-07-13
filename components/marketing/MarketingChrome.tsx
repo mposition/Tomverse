@@ -2,10 +2,50 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { ArrowRight, Menu, X } from "lucide-react";
+import { ArrowRight, ExternalLink, Menu, X } from "lucide-react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { MarketingLanguageSwitcher } from "./MarketingLanguageSwitcher";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
+import { localizedPath } from "@/lib/seo";
+import { statusLinkLabel, statusNewTabCopy } from "./statusLinkCopy";
+
+const resourceLinks: Record<Language, Array<{ label: string; path: string }>> = {
+  en: [
+    { label: "Compare AI models", path: "/compare-ai-models" },
+    { label: "ChatGPT vs Claude", path: "/chatgpt-vs-claude" },
+    { label: "AI file analysis", path: "/ai-for-file-analysis" },
+  ],
+  ko: [
+    { label: "AI 모델 비교", path: "/compare-ai-models" },
+    { label: "ChatGPT vs Claude", path: "/chatgpt-vs-claude" },
+    { label: "AI 파일 분석", path: "/ai-for-file-analysis" },
+  ],
+  zh: [
+    { label: "比较 AI 模型", path: "/compare-ai-models" },
+    { label: "ChatGPT 与 Claude", path: "/chatgpt-vs-claude" },
+    { label: "AI 文件分析", path: "/ai-for-file-analysis" },
+  ],
+  fr: [
+    { label: "Comparer les modèles", path: "/compare-ai-models" },
+    { label: "ChatGPT vs Claude", path: "/chatgpt-vs-claude" },
+    { label: "Analyse de fichiers", path: "/ai-for-file-analysis" },
+  ],
+  de: [
+    { label: "KI-Modelle vergleichen", path: "/compare-ai-models" },
+    { label: "ChatGPT vs Claude", path: "/chatgpt-vs-claude" },
+    { label: "KI-Dateianalyse", path: "/ai-for-file-analysis" },
+  ],
+  es: [
+    { label: "Comparar modelos", path: "/compare-ai-models" },
+    { label: "ChatGPT vs Claude", path: "/chatgpt-vs-claude" },
+    { label: "Análisis de archivos", path: "/ai-for-file-analysis" },
+  ],
+  pt: [
+    { label: "Comparar modelos", path: "/compare-ai-models" },
+    { label: "ChatGPT vs Claude", path: "/chatgpt-vs-claude" },
+    { label: "Análise de arquivos", path: "/ai-for-file-analysis" },
+  ],
+};
 
 const chrome = {
   en: {
@@ -194,10 +234,24 @@ export function MarketingHeader({ maxWidth = "max-w-7xl" }: { maxWidth?: string 
             <Link
               key={item.href}
               href={item.href}
+              target={item.href === "/status" ? "_blank" : undefined}
+              rel={item.href === "/status" ? "noopener noreferrer" : undefined}
+              prefetch={item.href === "/status" ? false : undefined}
+              aria-label={
+                item.href === "/status"
+                  ? statusLinkLabel(item.label, lang)
+                  : undefined
+              }
+              title={
+                item.href === "/status" ? statusNewTabCopy[lang] : undefined
+              }
               data-testid={item.href === "/status" ? "header-status-link" : undefined}
-              className="hover:text-zinc-950 dark:hover:text-white"
+              className="inline-flex items-center gap-1 hover:text-zinc-950 dark:hover:text-white"
             >
               {item.label}
+              {item.href === "/status" && (
+                <ExternalLink className="h-3 w-3" aria-hidden="true" />
+              )}
             </Link>
           ))}
         </nav>
@@ -233,11 +287,25 @@ export function MarketingHeader({ maxWidth = "max-w-7xl" }: { maxWidth?: string 
               <Link
                 key={item.href}
                 href={item.href}
+                target={item.href === "/status" ? "_blank" : undefined}
+                rel={item.href === "/status" ? "noopener noreferrer" : undefined}
+                prefetch={item.href === "/status" ? false : undefined}
+                aria-label={
+                  item.href === "/status"
+                    ? statusLinkLabel(item.label, lang)
+                    : undefined
+                }
+                title={
+                  item.href === "/status" ? statusNewTabCopy[lang] : undefined
+                }
                 data-testid={item.href === "/status" ? "mobile-status-link" : undefined}
                 onClick={() => setIsMenuOpen(false)}
-                className="rounded-xl px-3 py-3 text-base font-black text-zinc-800 transition hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-900"
+                className="flex items-center gap-2 rounded-xl px-3 py-3 text-base font-black text-zinc-800 transition hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-900"
               >
                 {item.label}
+                {item.href === "/status" && (
+                  <ExternalLink className="h-4 w-4" aria-hidden="true" />
+                )}
               </Link>
             ))}
             <div className="my-2 h-px bg-zinc-200 dark:bg-zinc-800" />
@@ -291,7 +359,30 @@ export function MarketingFooter({ maxWidth = "max-w-7xl" }: { maxWidth?: string 
             <Link
               key={item.href}
               href={item.href}
+              target={item.href === "/status" ? "_blank" : undefined}
+              rel={item.href === "/status" ? "noopener noreferrer" : undefined}
+              prefetch={item.href === "/status" ? false : undefined}
+              aria-label={
+                item.href === "/status"
+                  ? statusLinkLabel(item.label, lang)
+                  : undefined
+              }
+              title={
+                item.href === "/status" ? statusNewTabCopy[lang] : undefined
+              }
               data-testid={item.href === "/status" ? "footer-status-link" : undefined}
+              className="inline-flex items-center gap-1 hover:text-zinc-950 dark:hover:text-white"
+            >
+              {item.label}
+              {item.href === "/status" && (
+                <ExternalLink className="h-3 w-3" aria-hidden="true" />
+              )}
+            </Link>
+          ))}
+          {resourceLinks[lang].map((item) => (
+            <Link
+              key={item.path}
+              href={localizedPath(lang, item.path)}
               className="hover:text-zinc-950 dark:hover:text-white"
             >
               {item.label}

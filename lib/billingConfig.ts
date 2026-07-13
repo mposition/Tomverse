@@ -1,5 +1,6 @@
 import "server-only";
 
+import type { BillingPromotion as PrismaBillingPromotion } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import type { ModelTier } from "@/lib/models";
 
@@ -39,6 +40,7 @@ export type BillingPromotionConfig = {
   stripePromotionCodeId: string | null;
   startsAt: string | null;
   endsAt: string | null;
+  allowAnnualStacking: boolean;
   isActive: boolean;
   updatedAt?: string | null;
 };
@@ -104,23 +106,6 @@ const DEFAULT_PLANS: Record<BillingPlanId, BillingPlanConfig> = {
     sortOrder: 30,
     updatedAt: null,
   },
-};
-
-const DEFAULT_PROMOTION: BillingPromotionConfig = {
-  id: "promo_tomverse50",
-  code: "TOMVERSE50",
-  discountPercent: 50,
-  discountAmountCents: null,
-  maxRedemptions: null,
-  redeemedCount: 0,
-  durationMonths: 1,
-  appliesToPlanIds: ["pro", "max"],
-  stripeCouponId: null,
-  stripePromotionCodeId: null,
-  startsAt: null,
-  endsAt: null,
-  isActive: true,
-  updatedAt: null,
 };
 
 const normalizePlanId = (value: string): BillingPlanId | null =>
@@ -212,32 +197,6 @@ export async function syncBillingDefaultsToDatabase() {
     });
   }
 
-  const existingPromotion = await prisma.billingPromotion.findFirst({
-    where: {
-      OR: [{ id: DEFAULT_PROMOTION.id }, { code: DEFAULT_PROMOTION.code }],
-    },
-    select: { id: true },
-  });
-
-  if (!existingPromotion) {
-    await prisma.billingPromotion.create({
-      data: {
-        id: DEFAULT_PROMOTION.id,
-        code: DEFAULT_PROMOTION.code,
-        discountPercent: DEFAULT_PROMOTION.discountPercent,
-        discountAmountCents: DEFAULT_PROMOTION.discountAmountCents,
-        maxRedemptions: DEFAULT_PROMOTION.maxRedemptions,
-        redeemedCount: DEFAULT_PROMOTION.redeemedCount,
-        durationMonths: DEFAULT_PROMOTION.durationMonths,
-        appliesToPlanIds: JSON.stringify(DEFAULT_PROMOTION.appliesToPlanIds),
-        stripeCouponId: DEFAULT_PROMOTION.stripeCouponId,
-        stripePromotionCodeId: DEFAULT_PROMOTION.stripePromotionCodeId,
-        startsAt: DEFAULT_PROMOTION.startsAt,
-        endsAt: DEFAULT_PROMOTION.endsAt,
-        isActive: DEFAULT_PROMOTION.isActive,
-      },
-    });
-  }
 }
 
 export async function getBillingPlanByTier(tier: ModelTier) {
@@ -249,8 +208,12 @@ export async function getBillingPromotions(): Promise<BillingPromotionConfig[]> 
   const rows = await prisma.billingPromotion.findMany({
     orderBy: [{ isActive: "desc" }, { code: "asc" }],
   });
-  if (rows.length === 0) return [DEFAULT_PROMOTION];
-  return rows.map((row) => ({
+  return rows.map(toBillingPromotionConfig);
+}
+
+const toBillingPromotionConfig = (
+  row: PrismaBillingPromotion
+): BillingPromotionConfig => ({
     id: row.id,
     code: row.code,
     discountPercent: row.discountPercent,
@@ -263,9 +226,14 @@ export async function getBillingPromotions(): Promise<BillingPromotionConfig[]> 
     stripePromotionCodeId: row.stripePromotionCodeId,
     startsAt: row.startsAt?.toISOString() || null,
     endsAt: row.endsAt?.toISOString() || null,
+    allowAnnualStacking: row.allowAnnualStacking,
     isActive: row.isActive,
     updatedAt: row.updatedAt.toISOString(),
-  }));
+  });
+
+export async function getBillingPromotionByCode(code: string) {
+  const row = await prisma.billingPromotion.findUnique({ where: { code } });
+  return row ? toBillingPromotionConfig(row) : null;
 }
 
 export function isBillingPromotionRedeemable(
@@ -273,26 +241,23 @@ export function isBillingPromotionRedeemable(
   now = new Date()
 ) {
   if (!promotion.isActive) return false;
+  if (!promotion.maxRedemptions || !promotion.endsAt) return false;
   if (promotion.startsAt && new Date(promotion.startsAt) > now) return false;
-  if (promotion.endsAt && new Date(promotion.endsAt) < now) return false;
-  if (
-    promotion.maxRedemptions &&
-    promotion.redeemedCount >= promotion.maxRedemptions
-  ) {
+  if (new Date(promotion.endsAt) <= now) return false;
+  if (promotion.redeemedCount >= promotion.maxRedemptions) {
     return false;
   }
   return promotion.discountPercent > 0 || Boolean(promotion.discountAmountCents);
 }
 
 export async function getPublicBillingConfig() {
-  const [plans, promotions] = await Promise.all([
-    getBillingPlans(),
-    getBillingPromotions(),
-  ]);
+  const plans = await getBillingPlans();
   return {
     plans: plans.filter((plan) => plan.isActive),
-    promotions: promotions.filter((promotion) =>
-      isBillingPromotionRedeemable(promotion)
-    ),
+    promotionPolicy: {
+      codesListed: false as const,
+      validation: "server_only" as const,
+      annualDiscountStacking: "promotion_specific_default_denied" as const,
+    },
   };
 }

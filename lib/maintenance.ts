@@ -128,6 +128,23 @@ export async function cleanupExpiredData() {
     },
   });
 
+  const promotionRiskIdentifiers =
+    await prisma.billingPromotionRedemption.updateMany({
+      where: {
+        redeemedAt: {
+          lt: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000),
+        },
+        OR: [
+          { clientIpHash: { not: null } },
+          { paymentMethodFingerprintHash: { not: null } },
+        ],
+      },
+      data: {
+        clientIpHash: null,
+        paymentMethodFingerprintHash: null,
+      },
+    });
+
   const shareSnapshots = await prisma.$executeRaw`
     UPDATE "Conversation"
     SET
@@ -156,6 +173,7 @@ export async function cleanupExpiredData() {
     requestLeases: Number(requestLeases),
     providerErrorEvents: providerErrorEvents.count,
     productAnalyticsEvents: productAnalyticsEvents.count,
+    promotionRiskIdentifiers: promotionRiskIdentifiers.count,
     shareSnapshots: Number(shareSnapshots),
     oauthTokensEncrypted,
   };

@@ -68,6 +68,7 @@ const promotionSchema = z
     stripePromotionCodeId: optionalText,
     startsAt: z.string().datetime().nullable().optional(),
     endsAt: z.string().datetime().nullable().optional(),
+    allowAnnualStacking: z.boolean(),
     isActive: z.boolean(),
     updatedAt: z.string().datetime().nullable().optional(),
   })
@@ -76,6 +77,22 @@ const promotionSchema = z
       promotion.discountPercent > 0 ||
       Boolean(promotion.discountAmountCents && promotion.discountAmountCents > 0),
     { message: "Promotion must have a percent or amount discount." }
+  )
+  .refine(
+    (promotion) =>
+      !promotion.isActive ||
+      (Boolean(promotion.maxRedemptions) && Boolean(promotion.endsAt)),
+    {
+      message:
+        "Active promotions require a maximum redemption count and an end date.",
+    }
+  )
+  .refine(
+    (promotion) =>
+      !promotion.startsAt ||
+      !promotion.endsAt ||
+      new Date(promotion.startsAt) < new Date(promotion.endsAt),
+    { message: "Promotion end date must be after its start date." }
   )
   .strict();
 
@@ -247,7 +264,9 @@ export async function PATCH(req: Request) {
             JSON.stringify(promotion.appliesToPlanIds) ||
           existingPromotion.startsAt?.toISOString() !==
             startsAt?.toISOString() ||
-          existingPromotion.endsAt?.toISOString() !== endsAt?.toISOString());
+          existingPromotion.endsAt?.toISOString() !== endsAt?.toISOString() ||
+          existingPromotion.allowAnnualStacking !==
+            promotion.allowAnnualStacking);
       const stripeCouponId = policyChanged
         ? null
         : promotion.stripeCouponId;
@@ -269,6 +288,7 @@ export async function PATCH(req: Request) {
           stripePromotionCodeId,
           startsAt,
           endsAt,
+          allowAnnualStacking: promotion.allowAnnualStacking,
           isActive: promotion.isActive,
         },
         update: {
@@ -282,6 +302,7 @@ export async function PATCH(req: Request) {
           stripePromotionCodeId,
           startsAt,
           endsAt,
+          allowAnnualStacking: promotion.allowAnnualStacking,
           isActive: promotion.isActive,
         },
       });

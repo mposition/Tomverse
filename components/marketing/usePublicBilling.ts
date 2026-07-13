@@ -17,16 +17,13 @@ type BillingPlan = {
   displayExchangeRate?: number;
 };
 
-type BillingPromotion = {
-  code: string;
-  discountPercent: number;
-  durationMonths: number;
-  appliesToPlanIds: Array<"pro" | "max">;
-};
-
 type BillingConfig = {
   plans: BillingPlan[];
-  promotions: BillingPromotion[];
+  promotionPolicy?: {
+    codesListed: false;
+    validation: "server_only";
+    annualDiscountStacking: "promotion_specific_default_denied";
+  };
   displayCurrency?: string;
   baseCurrency?: "USD";
   exchangeRateUpdatedAt?: string | null;

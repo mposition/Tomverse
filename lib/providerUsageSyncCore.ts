@@ -24,6 +24,92 @@ export const openAiCostsUrl = ({
   return url;
 };
 
+export const OPENAI_COSTS_DEFAULT_ATTEMPT_TIMEOUT_MS = 30_000;
+export const OPENAI_COSTS_DEFAULT_MAX_ATTEMPTS = 3;
+
+const boundedInteger = ({
+  value,
+  fallback,
+  minimum,
+  maximum,
+}: {
+  value: string | undefined;
+  fallback: number;
+  minimum: number;
+  maximum: number;
+}) => {
+  if (!value || !/^\d+$/.test(value.trim())) return fallback;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= minimum && parsed <= maximum
+    ? parsed
+    : fallback;
+};
+
+export const openAiCostsRequestPolicy = ({
+  timeoutMs,
+  maxAttempts,
+}: {
+  timeoutMs?: string;
+  maxAttempts?: string;
+} = {}) => ({
+  attemptTimeoutMs: boundedInteger({
+    value: timeoutMs,
+    fallback: OPENAI_COSTS_DEFAULT_ATTEMPT_TIMEOUT_MS,
+    minimum: 5_000,
+    maximum: 60_000,
+  }),
+  maxAttempts: boundedInteger({
+    value: maxAttempts,
+    fallback: OPENAI_COSTS_DEFAULT_MAX_ATTEMPTS,
+    minimum: 1,
+    maximum: 3,
+  }),
+});
+
+export const isRetryableOpenAiStatus = (status: number) =>
+  status === 408 ||
+  status === 409 ||
+  status === 429 ||
+  (status >= 500 && status <= 599);
+
+const retryAfterHeaderMs = ({
+  retryAfter,
+  retryAfterMs,
+  nowMs,
+}: {
+  retryAfter: string | null;
+  retryAfterMs: string | null;
+  nowMs: number;
+}) => {
+  if (retryAfterMs && /^\d+(?:\.\d+)?$/.test(retryAfterMs.trim())) {
+    return Number(retryAfterMs);
+  }
+  if (!retryAfter) return null;
+  if (/^\d+(?:\.\d+)?$/.test(retryAfter.trim())) {
+    return Number(retryAfter) * 1_000;
+  }
+  const retryAt = Date.parse(retryAfter);
+  return Number.isFinite(retryAt) ? Math.max(0, retryAt - nowMs) : null;
+};
+
+export const openAiCostsRetryDelayMs = ({
+  attempt,
+  retryAfter = null,
+  retryAfterMs = null,
+  nowMs = Date.now(),
+}: {
+  attempt: number;
+  retryAfter?: string | null;
+  retryAfterMs?: string | null;
+  nowMs?: number;
+}) => {
+  const providerDelay = retryAfterHeaderMs({ retryAfter, retryAfterMs, nowMs });
+  if (providerDelay !== null && Number.isFinite(providerDelay)) {
+    return Math.min(Math.max(Math.round(providerDelay), 0), 10_000);
+  }
+  return Math.min(500 * 2 ** Math.max(0, attempt - 1), 4_000);
+};
+
 export type OpenAiCostsParseErrorCode =
   | "OPENAI_COSTS_INVALID_PAYLOAD"
   | "OPENAI_COSTS_INVALID_CURRENCY"

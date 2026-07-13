@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { Activity, ArrowRight } from "lucide-react";
+import { Activity, ExternalLink } from "lucide-react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { ENABLED_MODELS } from "@/lib/models";
 import { getModelBrand } from "@/lib/modelBranding";
 import { getModelBestFor, getModelExperienceStatus, getModelExperienceTags } from "@/lib/modelExperience";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
+import { statusLinkLabel, statusNewTabCopy } from "./statusLinkCopy";
 
 const copy = {
   en: {
@@ -103,6 +104,11 @@ export function ModelsPageContent() {
           <p className="mt-5 text-lg leading-8 text-zinc-600 dark:text-zinc-300">{content.description}</p>
           <Link
             href="/status"
+            target="_blank"
+            rel="noopener noreferrer"
+            prefetch={false}
+            aria-label={statusLinkLabel(content.liveStatus, lang)}
+            title={statusNewTabCopy[lang]}
             data-testid="models-status-link"
             className="mt-7 inline-flex items-center gap-3 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-left transition hover:bg-emerald-500/15"
           >
@@ -117,7 +123,7 @@ export function ModelsPageContent() {
                 {content.liveStatusDescription}
               </span>
             </span>
-            <ArrowRight className="ml-auto h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-300" />
+            <ExternalLink className="ml-auto h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-300" aria-hidden="true" />
           </Link>
         </div>
 

@@ -72,14 +72,15 @@ const newPromotion = (): EditablePromotion => ({
   code: "NEWCODE",
   discountPercent: 10,
   discountAmountCents: null,
-  maxRedemptions: null,
+  maxRedemptions: 100,
   redeemedCount: 0,
   durationMonths: 1,
   appliesToPlanIds: ["pro", "max"],
   stripeCouponId: null,
   stripePromotionCodeId: null,
   startsAt: null,
-  endsAt: null,
+  endsAt: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+  allowAnnualStacking: false,
   isActive: true,
 });
 
@@ -445,7 +446,26 @@ function PromotionEditor({
             {planId}
           </label>
         ))}
+        <label className="flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-100">
+          <input
+            type="checkbox"
+            checked={promotion.allowAnnualStacking}
+            onChange={(event) =>
+              onChange({
+                ...promotion,
+                allowAnnualStacking: event.target.checked,
+              })
+            }
+            className="h-4 w-4 accent-amber-500"
+          />
+          Allow stacking with annual discount
+        </label>
       </div>
+      <p className="mt-2 text-xs leading-5 text-zinc-500">
+        Annual stacking is denied by default and must be explicitly enabled for
+        this code. Active codes always require both a redemption cap and an end
+        date.
+      </p>
 
       <details className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
         <summary className="cursor-pointer text-sm font-bold text-zinc-200">
@@ -550,6 +570,21 @@ export function BillingAdminPanel({
       }
       if (promotion.appliesToPlanIds.length === 0) {
         warnings.push(`${promotion.code}: choose at least one eligible plan.`);
+      }
+      if (
+        promotion.isActive &&
+        (!promotion.maxRedemptions || !promotion.endsAt)
+      ) {
+        warnings.push(
+          `${promotion.code}: active codes require max redemptions and an end date.`
+        );
+      }
+      if (
+        promotion.startsAt &&
+        promotion.endsAt &&
+        new Date(promotion.startsAt) >= new Date(promotion.endsAt)
+      ) {
+        warnings.push(`${promotion.code}: end date must be after start date.`);
       }
       if (
         promotion.stripeCouponId &&
@@ -935,8 +970,8 @@ export function BillingAdminPanel({
               <div>
                 <h3 className="text-lg font-black text-white">Promotion codes</h3>
                 <p className="mt-1 text-sm text-zinc-400">
-                  Codes can limit redemption count, valid dates, plan eligibility,
-                  and percent or fixed USD discounts.
+                  Active codes require a redemption cap and end date. Annual
+                  discount stacking is denied unless explicitly enabled per code.
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">

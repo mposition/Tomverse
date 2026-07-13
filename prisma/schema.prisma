@@ -250,6 +250,7 @@ model BillingPromotion {
   stripePromotionCodeId String?
   startsAt              DateTime?
   endsAt                DateTime?
+  allowAnnualStacking   Boolean                      @default(false)
   isActive              Boolean                      @default(true)
   createdAt             DateTime                     @default(now())
   updatedAt             DateTime                     @updatedAt
@@ -260,21 +261,26 @@ model BillingPromotion {
 }
 
 model BillingPromotionRedemption {
-  id                      String           @id @default(cuid())
-  promotionId             String
-  promotion               BillingPromotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
-  userId                  String
-  user                    User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  planId                  String
-  billingInterval         String
-  stripeCheckoutSessionId String?          @unique
-  stripeSubscriptionId    String?
-  redeemedAt              DateTime         @default(now())
-  createdAt               DateTime         @default(now())
-  updatedAt               DateTime         @updatedAt
+  id                           String           @id @default(cuid())
+  promotionId                  String
+  promotion                    BillingPromotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  userId                       String
+  user                         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planId                       String
+  billingInterval              String
+  stripeCheckoutSessionId      String?          @unique
+  stripeSubscriptionId         String?
+  clientIpHash                 String?
+  paymentMethodFingerprintHash String?
+  riskFlags                    String           @default("[]")
+  redeemedAt                   DateTime         @default(now())
+  createdAt                    DateTime         @default(now())
+  updatedAt                    DateTime         @updatedAt
 
   @@unique([promotionId, userId])
   @@index([promotionId, redeemedAt])
+  @@index([promotionId, clientIpHash, redeemedAt])
+  @@index([promotionId, paymentMethodFingerprintHash, redeemedAt])
   @@index([userId, redeemedAt])
 }
 

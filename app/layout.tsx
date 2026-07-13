@@ -13,6 +13,8 @@ import type { Session } from "next-auth";
 import { cookies, headers } from "next/headers";
 import { AnalyticsProvider } from "@/components/analytics/AnalyticsProvider";
 import { prisma } from "@/lib/prisma";
+import { SITE_NAME, SITE_ORIGIN } from "@/lib/seo";
+import { StructuredData } from "@/components/seo/StructuredData";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -25,9 +27,64 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Tomverse",
+  metadataBase: new URL(SITE_ORIGIN),
+  applicationName: SITE_NAME,
+  title: {
+    default: "Tomverse AI | Compare Leading AI Models",
+    template: "%s | Tomverse AI",
+  },
   description:
     "Tomverse AI helps you compare leading AI models, work with files, and organize useful conversations in one workspace.",
+  authors: [{ name: "Tomverse AI", url: SITE_ORIGIN }],
+  creator: "Tomverse AI",
+  publisher: "Tomverse AI",
+  category: "technology",
+  formatDetection: {
+    email: false,
+    address: false,
+    telephone: false,
+  },
+  openGraph: {
+    type: "website",
+    siteName: SITE_NAME,
+    title: "Tomverse AI | Compare Leading AI Models",
+    description:
+      "Compare leading AI models side by side, analyze files, and organize useful conversations in one workspace.",
+    url: SITE_ORIGIN,
+    locale: "en_AU",
+    images: [
+      {
+        url: "/opengraph-image",
+        width: 1200,
+        height: 630,
+        alt: "Tomverse AI — compare leading AI models in one workspace",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Tomverse AI | Compare Leading AI Models",
+    description:
+      "Compare leading AI models side by side, analyze files, and organize useful conversations in one workspace.",
+    images: [
+      {
+        url: "/twitter-image",
+        alt: "Tomverse AI — compare leading AI models in one workspace",
+      },
+    ],
+  },
+  verification: {
+    ...(process.env.GOOGLE_SITE_VERIFICATION
+      ? { google: process.env.GOOGLE_SITE_VERIFICATION }
+      : {}),
+    ...(process.env.BING_SITE_VERIFICATION
+      ? {
+          other: {
+            "msvalidate.01": process.env.BING_SITE_VERIFICATION,
+          },
+        }
+      : {}),
+  },
 };
 
 const detectInitialLanguage = (acceptLanguage: string | null): Language => {
@@ -58,7 +115,21 @@ export default async function RootLayout({
 }>) {
   let session: Session | null = null;
   const requestHeaders = await headers();
-  const initialLang = detectInitialLanguage(requestHeaders.get("accept-language"));
+  const pathnameLocale = requestHeaders
+    .get("x-tomverse-pathname")
+    ?.split("/")
+    .filter(Boolean)[0]
+    ?.toLowerCase();
+  const initialLang =
+    pathnameLocale === "en" ||
+    pathnameLocale === "ko" ||
+    pathnameLocale === "zh" ||
+    pathnameLocale === "fr" ||
+    pathnameLocale === "de" ||
+    pathnameLocale === "es" ||
+    pathnameLocale === "pt"
+      ? pathnameLocale
+      : detectInitialLanguage(requestHeaders.get("accept-language"));
   const nonce = requestHeaders.get("x-nonce");
   const countryCandidate = requestHeaders.get("cf-ipcountry")?.trim().toUpperCase();
   const analyticsCountry =
@@ -122,6 +193,39 @@ export default async function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
+        <StructuredData
+          nonce={nonce}
+          data={{
+            "@context": "https://schema.org",
+            "@graph": [
+              {
+                "@type": "Organization",
+                "@id": `${SITE_ORIGIN}/#organization`,
+                name: SITE_NAME,
+                url: SITE_ORIGIN,
+                logo: `${SITE_ORIGIN}/tomverse-logo.png`,
+              },
+              {
+                "@type": "SoftwareApplication",
+                "@id": `${SITE_ORIGIN}/#software-application`,
+                name: SITE_NAME,
+                url: SITE_ORIGIN,
+                description:
+                  "A multi-model AI workspace for comparing answers, analyzing files, and organizing conversations.",
+                applicationCategory: "BusinessApplication",
+                applicationSubCategory: "Artificial intelligence workspace",
+                operatingSystem: "Any modern web browser",
+                isAccessibleForFree: true,
+                offers: {
+                  "@type": "Offer",
+                  price: "0",
+                  priceCurrency: "USD",
+                },
+                publisher: { "@id": `${SITE_ORIGIN}/#organization` },
+              },
+            ],
+          }}
+        />
         <SessionProviderWrapper session={session}>
           <LanguageProvider initialLang={initialLang}>
             <AnalyticsProvider

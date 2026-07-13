@@ -18,6 +18,15 @@ type SyncResult = {
     errorCode: string | null;
     providerRequestId: string | null;
     detail: string | null;
+    attemptCount?: number;
+    attemptTimeoutMs?: number;
+    elapsedMs?: number;
+    failureStage?:
+      | "connection"
+      | "response"
+      | "provider_http"
+      | "payload"
+      | "storage";
   } | null;
 };
 
@@ -40,6 +49,41 @@ const statusClass: Record<SyncResult["status"], string> = {
   synced: "border-emerald-500/30 bg-emerald-500/10 text-emerald-200",
   skipped: "border-zinc-700 bg-zinc-900 text-zinc-300",
   failed: "border-red-500/30 bg-red-500/10 text-red-200",
+};
+
+const failureStageLabel: Record<
+  NonNullable<NonNullable<SyncResult["diagnostic"]>["failureStage"]>,
+  string
+> = {
+  connection: "Waiting for response headers",
+  response: "Reading provider response",
+  provider_http: "Provider HTTP response",
+  payload: "Validating provider payload",
+  storage: "Saving reconciliation",
+};
+
+const diagnosticGuidance = (result: SyncResult) => {
+  const diagnostic = result.diagnostic;
+  if (!diagnostic) return null;
+  if (
+    diagnostic.errorCode === "OPENAI_COSTS_CONNECT_TIMEOUT" ||
+    diagnostic.errorCode === "OPENAI_COSTS_NETWORK_ERROR"
+  ) {
+    return "Tomverse did not receive an HTTP response after automatic retries. Authentication cannot be diagnosed from this result. If it repeats after deployment, verify Railway outbound DNS/TLS and HTTPS access to api.openai.com before rotating the Admin API key.";
+  }
+  if (diagnostic.errorCode === "OPENAI_COSTS_RESPONSE_TIMEOUT") {
+    return "OpenAI responded, but the response body did not finish in time. Retry once; if it repeats, use the provider request ID and Tomverse trace when escalating.";
+  }
+  if (diagnostic.httpStatus === 401 || diagnostic.httpStatus === 403) {
+    return "Replace OPENAI_ADMIN_API_KEY with an Organization Admin API key created by an Organization Owner, then redeploy.";
+  }
+  if (diagnostic.httpStatus === 429) {
+    return "The automatic retry policy was exhausted. Wait for the provider retry window, then run the sync again.";
+  }
+  if (diagnostic.httpStatus !== null && diagnostic.httpStatus >= 500) {
+    return "OpenAI returned a server error after automatic retries. Retry later and retain both request IDs for support.";
+  }
+  return null;
 };
 
 export function AdminProviderUsageSyncPanel() {
@@ -136,11 +180,13 @@ export function AdminProviderUsageSyncPanel() {
             </span>
           </div>
           <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-            {response.results.map((result) => (
-              <div
-                key={result.provider}
-                className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3 text-sm"
-              >
+            {response.results.map((result) => {
+              const guidance = diagnosticGuidance(result);
+              return (
+                <div
+                  key={result.provider}
+                  className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3 text-sm"
+                >
                 <div className="flex items-center justify-between gap-3">
                   <span className="font-black text-white">{result.displayName}</span>
                   <span className={`rounded-full border px-2 py-0.5 text-[11px] font-black ${statusClass[result.status]}`}>
@@ -177,6 +223,44 @@ export function AdminProviderUsageSyncPanel() {
                           <dd>{result.diagnostic.errorCode || "Unknown"}</dd>
                         </div>
                       </div>
+                      {(result.diagnostic.attemptCount !== undefined ||
+                        result.diagnostic.elapsedMs !== undefined) && (
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <dt className="font-bold text-zinc-500">Requests attempted</dt>
+                            <dd>{result.diagnostic.attemptCount ?? "Unknown"}</dd>
+                          </div>
+                          <div>
+                            <dt className="font-bold text-zinc-500">Elapsed</dt>
+                            <dd>
+                              {result.diagnostic.elapsedMs === undefined
+                                ? "Unknown"
+                                : `${(result.diagnostic.elapsedMs / 1_000).toFixed(1)}s`}
+                            </dd>
+                          </div>
+                        </div>
+                      )}
+                      {(result.diagnostic.attemptTimeoutMs !== undefined ||
+                        result.diagnostic.failureStage !== undefined) && (
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <dt className="font-bold text-zinc-500">Per-request timeout</dt>
+                            <dd>
+                              {result.diagnostic.attemptTimeoutMs === undefined
+                                ? "Unknown"
+                                : `${result.diagnostic.attemptTimeoutMs / 1_000}s`}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="font-bold text-zinc-500">Failure stage</dt>
+                            <dd>
+                              {result.diagnostic.failureStage
+                                ? failureStageLabel[result.diagnostic.failureStage]
+                                : "Unknown"}
+                            </dd>
+                          </div>
+                        </div>
+                      )}
                       {result.diagnostic.detail && (
                         <div>
                           <dt className="font-bold text-zinc-500">Provider detail</dt>
@@ -197,11 +281,18 @@ export function AdminProviderUsageSyncPanel() {
                           {result.diagnostic.traceId}
                         </dd>
                       </div>
+                      {guidance && (
+                        <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-2 text-amber-100">
+                          <dt className="font-black">Recommended check</dt>
+                          <dd className="mt-1 leading-5">{guidance}</dd>
+                        </div>
+                      )}
                     </dl>
                   </details>
                 )}
-              </div>
-            ))}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

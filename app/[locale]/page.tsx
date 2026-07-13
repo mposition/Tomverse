@@ -2,6 +2,11 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { LandingPageContent } from "@/components/marketing/LandingPageContent";
 import { LanguageProvider, type Language } from "@/components/LanguageProvider";
+import {
+  createPageMetadata,
+  homeSeoCopy,
+  localizedPath,
+} from "@/lib/seo";
 
 const localeAliases: Record<string, Language> = {
   kr: "ko",
@@ -35,21 +40,14 @@ export async function generateMetadata({
   const normalizedLocale = normalizeLocale(locale);
   if (!normalizedLocale) return {};
 
-  return {
-    alternates: {
-      canonical: `/${normalizedLocale}`,
-      languages: {
-        en: "/en",
-        ko: "/ko",
-        "zh-CN": "/zh",
-        fr: "/fr",
-        de: "/de",
-        es: "/es",
-        pt: "/pt",
-        "x-default": "/",
-      },
-    },
-  };
+  const copy = homeSeoCopy[normalizedLocale];
+  return createPageMetadata({
+    title: copy.title,
+    description: copy.description,
+    path: localizedPath(normalizedLocale, "/"),
+    locale: normalizedLocale,
+    localizedBasePath: "/",
+  });
 }
 
 export default async function LocalizedLandingPage({ params }: LocalePageProps) {

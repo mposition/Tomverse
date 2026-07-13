@@ -34,6 +34,7 @@ export function proxy(request: NextRequest) {
     ? "Content-Security-Policy"
     : "Content-Security-Policy-Report-Only";
   const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-tomverse-pathname", request.nextUrl.pathname);
   requestHeaders.set("x-nonce", nonce);
   requestHeaders.set(policyHeader, strictCsp);
 

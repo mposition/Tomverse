@@ -8,6 +8,9 @@ export type PromoRiskRow = {
   redeemedCount: number;
   maxRedemptions: number | null;
   discountPercent: number;
+  abuseSignalCount: number;
+  sharedIpSignalCount: number;
+  sharedPaymentMethodSignalCount: number;
   risk: string;
 };
 
@@ -52,7 +55,8 @@ export function AdminRiskPanels({ promoRisks, slaRows, funnel }: Props) {
         </p>
         <h2 className="mt-2 text-2xl font-black text-white">Promotion risk monitor</h2>
         <p className="mt-2 text-sm leading-6 text-zinc-400">
-          Watch high-discount and nearly exhausted promotion codes.
+          Watch shared-IP/payment-method signals, high discounts, and redemption
+          limits. Identifiers are stored only as keyed hashes.
         </p>
         <div className="mt-5 grid gap-2">
           {promoRisks.length === 0 ? (
@@ -70,7 +74,16 @@ export function AdminRiskPanels({ promoRisks, slaRows, funnel }: Props) {
                 </div>
                 <p className="mt-1 text-xs text-amber-100/70">
                   Redeemed {promo.redeemedCount} / {promo.maxRedemptions ?? "unlimited"} / {promo.discountPercent}% off
+                  {promo.abuseSignalCount > 0
+                    ? ` / ${promo.abuseSignalCount} hashed abuse signal${promo.abuseSignalCount === 1 ? "" : "s"}`
+                    : ""}
                 </p>
+                {promo.abuseSignalCount > 0 ? (
+                  <p className="mt-1 text-xs text-amber-100/70">
+                    Shared IP {promo.sharedIpSignalCount} / Shared payment method{" "}
+                    {promo.sharedPaymentMethodSignalCount}
+                  </p>
+                ) : null}
               </div>
             ))
           )}

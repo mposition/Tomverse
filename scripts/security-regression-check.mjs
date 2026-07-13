@@ -170,11 +170,23 @@ const checks = [
     test: (source) =>
       source.includes("OPENAI_ADMIN_API_KEY") &&
       source.includes('https://api.openai.com/v1/organization/costs') &&
-      source.includes("AbortSignal.timeout(EXTERNAL_TIMEOUT_MS)") &&
+      source.includes("openAiCostsRequestPolicy") &&
+      source.includes("AbortSignal.timeout(requestPolicy.attemptTimeoutMs)") &&
+      source.includes("isRetryableOpenAiStatus") &&
       source.includes("MAX_EXTERNAL_RESPONSE_BYTES") &&
       source.includes("MAX_OPENAI_PAGES") &&
       source.includes('source: "openai_costs"') &&
       source.includes('console.warn("Provider usage sync failed"'),
+  },
+  {
+    name: "OpenAI usage retry duration and attempts remain bounded",
+    file: "lib/providerUsageSyncCore.ts",
+    test: (source) =>
+      source.includes("OPENAI_COSTS_DEFAULT_ATTEMPT_TIMEOUT_MS = 30_000") &&
+      source.includes("OPENAI_COSTS_DEFAULT_MAX_ATTEMPTS = 3") &&
+      source.includes("maximum: 60_000") &&
+      source.includes("maximum: 3") &&
+      source.includes("isRetryableOpenAiStatus"),
   },
   {
     name: "Provider usage diagnostics are redacted and visible only in Admin UI",
@@ -385,6 +397,143 @@ const checks = [
       source.includes("analyticsAttributionSchema.optional()") &&
       source.includes("recordProductAnalyticsEvent") &&
       source.includes("sendToGa4: true"),
+  },
+  {
+    name: "Public billing config does not enumerate promotion objects or codes",
+    file: "lib/billingConfig.ts",
+    test: (source) => {
+      const publicConfig = source.slice(
+        source.indexOf("export async function getPublicBillingConfig")
+      );
+      return (
+        publicConfig.includes("codesListed: false") &&
+        publicConfig.includes('validation: "server_only"') &&
+        !publicConfig.includes("getBillingPromotions()") &&
+        !publicConfig.includes("promotions:")
+      );
+    },
+  },
+  {
+    name: "Promotion validation accepts only bounded input and is rate limited",
+    file: "app/api/billing/promotion/validate/route.ts",
+    test: (source) =>
+      source.includes("readLimitedJson") &&
+      source.includes("consumeApiRateLimit") &&
+      source.includes("validatePromotionForCheckout") &&
+      source.includes('"Cache-Control": "private, no-store, max-age=0"'),
+  },
+  {
+    name: "Billing UI validates entered codes without downloading a promotion list",
+    file: "components/marketing/UpgradeInterestButton.tsx",
+    test: (source) =>
+      source.includes('fetch("/api/billing/promotion/validate"') &&
+      source.includes("promotionPolicyCopy") &&
+      !source.includes("billingConfig.promotions"),
+  },
+  {
+    name: "Public billing configuration responses are not cached",
+    file: "app/api/billing/config/route.ts",
+    test: (source) =>
+      source.includes('"Cache-Control": "no-store, max-age=0"'),
+  },
+  {
+    name: "Checkout disables Stripe code bypass and applies validated promotion IDs",
+    file: "app/api/billing/checkout/route.ts",
+    test: (source) =>
+      source.includes("validatePromotionForCheckout") &&
+      source.includes("allow_promotion_codes: false") &&
+      source.includes("promotion_code:") &&
+      source.includes("reservePromotionCheckout") &&
+      !source.includes("promoCode: appliedPromotion"),
+  },
+  {
+    name: "Active promotions require redemption caps, expiry, and explicit annual stacking",
+    file: "app/api/admin/billing/route.ts",
+    test: (source) =>
+      source.includes("Active promotions require a maximum redemption count") &&
+      source.includes("allowAnnualStacking") &&
+      source.includes("maxRedemptions") &&
+      source.includes("endsAt"),
+  },
+  {
+    name: "Promotion abuse signals use keyed IP and payment-method hashes",
+    file: "lib/billingPromotionSecurity.ts",
+    test: (source) =>
+      source.includes('createHmac("sha256", securitySecret())') &&
+      source.includes('hashPromotionValue("ip"') &&
+      source.includes('hashPromotionValue("payment-method"') &&
+      source.includes('"shared_ip"') &&
+      source.includes('"shared_payment_method"'),
+  },
+  {
+    name: "Robots policy exposes the sitemap and blocks private application routes",
+    file: "app/robots.ts",
+    test: (source) =>
+      source.includes('sitemap: `${SITE_ORIGIN}/sitemap.xml`') &&
+      source.includes('"/admin"') &&
+      source.includes('"/api"') &&
+      source.includes('"/auth"') &&
+      source.includes('"/chat"') &&
+      source.includes('"/share"'),
+  },
+  {
+    name: "Sitemap lists canonical public pages and localized search-intent URLs",
+    file: "app/sitemap.ts",
+    test: (source) =>
+      source.includes("LOCALIZED_SEO_PATHS") &&
+      source.includes("localizedLanguageAlternates") &&
+      source.includes('path: "/status"') &&
+      !source.includes('path: "/chat"') &&
+      !source.includes('path: "/admin"') &&
+      !source.includes('path: "/share"'),
+  },
+  {
+    name: "Global metadata provides canonical origin, social cards, and optional webmaster verification",
+    file: "app/layout.tsx",
+    test: (source) =>
+      source.includes("metadataBase: new URL(SITE_ORIGIN)") &&
+      source.includes('card: "summary_large_image"') &&
+      source.includes('url: "/opengraph-image"') &&
+      source.includes('url: "/twitter-image"') &&
+      source.includes("GOOGLE_SITE_VERIFICATION") &&
+      source.includes("BING_SITE_VERIFICATION"),
+  },
+  {
+    name: "Structured data is sanitized and identifies the organization and software application",
+    file: "app/layout.tsx",
+    test: (source) =>
+      source.includes('"@type": "Organization"') &&
+      source.includes('"@type": "SoftwareApplication"') &&
+      source.includes('"@type": "Offer"') &&
+      read("components/seo/StructuredData.tsx").includes(
+        'JSON.stringify(data).replace(/</g, "\\\\u003c")'
+      ),
+  },
+  {
+    name: "Search-intent pages have localized content and server metadata",
+    file: "app/[locale]/[intent]/page.tsx",
+    test: (source) =>
+      source.includes("generateStaticParams") &&
+      source.includes("createPageMetadata") &&
+      source.includes("localizedBasePath") &&
+      read("components/marketing/searchIntentContent.ts").includes(
+        '"compare-ai-models"'
+      ) &&
+      read("components/marketing/searchIntentContent.ts").includes(
+        '"chatgpt-vs-claude"'
+      ) &&
+      read("components/marketing/searchIntentContent.ts").includes(
+        '"ai-for-file-analysis"'
+      ),
+  },
+  {
+    name: "Authenticated application surfaces are explicitly noindex",
+    file: "app/chat/layout.tsx",
+    test: (source) =>
+      source.includes("index: false") &&
+      read("app/auth/layout.tsx").includes("index: false") &&
+      read("app/admin/layout.tsx").includes("index: false") &&
+      read("app/share/[shareToken]/page.tsx").includes("index: false"),
   },
 ];
 

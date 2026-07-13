@@ -1,11 +1,19 @@
 export const dynamic = "force-dynamic";
 
 import Link from "next/link";
-import { Activity, CheckCircle2, XCircle } from "lucide-react";
+import { Activity, ArrowLeft, CheckCircle2, XCircle } from "lucide-react";
 import {
   getProviderHealthDashboard,
   type ProviderHealthRow,
 } from "@/lib/providerMonitoring";
+import { createPageMetadata } from "@/lib/seo";
+
+export const metadata = createPageMetadata({
+  title: "Service Status",
+  description:
+    "Check current public service-impacting incidents and operational status for AI providers monitored by Tomverse.",
+  path: "/status",
+});
 
 type PublicProviderStatus = "operational" | "incident";
 
@@ -59,7 +67,8 @@ export default async function StatusPage() {
             href="/"
             className="inline-flex cursor-pointer items-center gap-2 text-sm font-black text-blue-300 hover:text-blue-200"
           >
-            Tomverse AI
+            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+            Back to Tomverse homepage
           </Link>
           <div className="mt-6 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div>

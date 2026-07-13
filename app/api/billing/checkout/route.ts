@@ -13,10 +13,18 @@ import {
 } from "@/lib/apiSecurity";
 import {
   getBillingPlans,
-  getBillingPromotions,
   tierForPlanId,
   type BillingPlanId,
+  type BillingPromotionConfig,
 } from "@/lib/billingConfig";
+import {
+  encodePromotionRiskFlags,
+  PROMOTION_CHECKOUT_TTL_SECONDS,
+  releasePromotionCheckout,
+  reservePromotionCheckout,
+  validatePromotionForCheckout,
+  type PromotionRiskFlag,
+} from "@/lib/billingPromotionSecurity";
 import { sendBillingWelcomeEmail } from "@/lib/billingEmails";
 import { prisma } from "@/lib/prisma";
 import { getPublicAppOrigin } from "@/lib/publicUrl";
@@ -38,26 +46,8 @@ const checkoutSchema = z
 
 const activeSubscriptionStatuses = new Set(["active", "trialing", "past_due"]);
 
-type CheckoutPromotion = Awaited<ReturnType<typeof getBillingPromotions>>[number];
+type CheckoutPromotion = BillingPromotionConfig;
 type CheckoutPlan = Awaited<ReturnType<typeof getBillingPlans>>[number];
-
-const isPromotionCurrentlyRedeemable = (
-  promotion: CheckoutPromotion,
-  planId: BillingPlanId,
-  now = new Date()
-) => {
-  if (!promotion.isActive) return false;
-  if (!promotion.appliesToPlanIds.includes(planId)) return false;
-  if (promotion.startsAt && new Date(promotion.startsAt) > now) return false;
-  if (promotion.endsAt && new Date(promotion.endsAt) < now) return false;
-  if (
-    promotion.maxRedemptions &&
-    promotion.redeemedCount >= promotion.maxRedemptions
-  ) {
-    return false;
-  }
-  return promotion.discountPercent > 0 || Boolean(promotion.discountAmountCents);
-};
 
 const calculateDiscountedCents = (
   cents: number,
@@ -89,27 +79,6 @@ const addBillingPeriod = (
   return next;
 };
 
-async function assertPromotionCanBeUsedByUser(
-  promotion: CheckoutPromotion | null,
-  userId: string
-) {
-  if (!promotion) return;
-
-  const existingRedemption = await prisma.billingPromotionRedemption.findUnique({
-    where: {
-      promotionId_userId: {
-        promotionId: promotion.id,
-        userId,
-      },
-    },
-    select: { id: true },
-  });
-
-  if (existingRedemption) {
-    throw new Error("PROMOTION_ALREADY_USED");
-  }
-}
-
 const billingSuccessUrl = (
   origin: string,
   planId: BillingPlanId,
@@ -124,32 +93,28 @@ async function activateZeroDollarPlan({
   planId,
   billingInterval,
   promotion,
+  clientIpHash,
+  riskFlags,
 }: {
   userId: string;
   planId: BillingPlanId;
   billingInterval: "monthly" | "annual";
   promotion: CheckoutPromotion | null;
+  clientIpHash: string | null;
+  riskFlags: PromotionRiskFlag[];
 }) {
   const periodEnd = addBillingPeriod(new Date(), billingInterval);
   await prisma.$transaction(async (tx) => {
     if (promotion) {
-      await tx.billingPromotionRedemption.create({
-        data: {
-          promotionId: promotion.id,
-          userId,
-          planId,
-          billingInterval,
-        },
-      });
-
+      if (!promotion.maxRedemptions || !promotion.endsAt || !clientIpHash) {
+        throw new Error("PROMOTION_POLICY_INCOMPLETE");
+      }
       const updatedPromotion = await tx.billingPromotion.updateMany({
         where: {
           id: promotion.id,
           isActive: true,
-          OR: [
-            { maxRedemptions: null },
-            { redeemedCount: { lt: promotion.maxRedemptions ?? 0 } },
-          ],
+          endsAt: { gt: new Date() },
+          redeemedCount: { lt: promotion.maxRedemptions },
         },
         data: { redeemedCount: { increment: 1 } },
       });
@@ -157,6 +122,17 @@ async function activateZeroDollarPlan({
       if (updatedPromotion.count !== 1) {
         throw new Error("PROMOTION_REDEMPTION_LIMIT_REACHED");
       }
+
+      await tx.billingPromotionRedemption.create({
+        data: {
+          promotionId: promotion.id,
+          userId,
+          planId,
+          billingInterval,
+          clientIpHash,
+          riskFlags: encodePromotionRiskFlags(riskFlags),
+        },
+      });
     }
 
     await tx.user.update({
@@ -180,59 +156,55 @@ async function ensureStripeDiscount(
   promotion: CheckoutPromotion,
   planId: BillingPlanId
 ): Promise<Stripe.Checkout.SessionCreateParams.Discount> {
-  if (promotion.stripeCouponId) {
-    return { coupon: promotion.stripeCouponId };
+  if (promotion.stripePromotionCodeId) {
+    return { promotion_code: promotion.stripePromotionCodeId };
   }
 
   const stripe = getStripe();
-  const coupon = await stripe.coupons.create({
-    name: `${promotion.code} ${planId.toUpperCase()}`,
-    duration: "repeating",
-    duration_in_months: promotion.durationMonths,
-    percent_off:
-      promotion.discountPercent > 0 ? promotion.discountPercent : undefined,
-    amount_off:
-      promotion.discountPercent > 0
-        ? undefined
-        : promotion.discountAmountCents || undefined,
-    currency:
-      promotion.discountPercent > 0 ? undefined : "usd",
+  if (!promotion.maxRedemptions || !promotion.endsAt) {
+    throw new Error("Promotion limits are not configured.");
+  }
+  const couponId =
+    promotion.stripeCouponId ||
+    (
+      await stripe.coupons.create({
+        name: `${promotion.code} ${planId.toUpperCase()}`,
+        duration: "repeating",
+        duration_in_months: promotion.durationMonths,
+        percent_off:
+          promotion.discountPercent > 0 ? promotion.discountPercent : undefined,
+        amount_off:
+          promotion.discountPercent > 0
+            ? undefined
+            : promotion.discountAmountCents || undefined,
+        currency: promotion.discountPercent > 0 ? undefined : "usd",
+        metadata: {
+          tomversePromotionId: promotion.id,
+          planId,
+        },
+      })
+    ).id;
+  const promotionCode = await stripe.promotionCodes.create({
+    promotion: { type: "coupon", coupon: couponId },
+    code: promotion.code,
+    active: true,
+    max_redemptions: promotion.maxRedemptions,
+    expires_at: Math.floor(new Date(promotion.endsAt).getTime() / 1000),
     metadata: {
       tomversePromotionId: promotion.id,
-      tomverseCode: promotion.code,
       planId,
     },
   });
 
-  let promotionCodeId: string | null = null;
-  try {
-    const promotionCode = await stripe.promotionCodes.create({
-      promotion: { type: "coupon", coupon: coupon.id },
-      code: promotion.code,
-      active: promotion.isActive,
-      max_redemptions: promotion.maxRedemptions || undefined,
-      expires_at: promotion.endsAt
-        ? Math.floor(new Date(promotion.endsAt).getTime() / 1000)
-        : undefined,
-      metadata: {
-        tomversePromotionId: promotion.id,
-        planId,
-      },
-    });
-    promotionCodeId = promotionCode.id;
-  } catch {
-    promotionCodeId = null;
-  }
-
   await prisma.billingPromotion.update({
     where: { id: promotion.id },
     data: {
-      stripeCouponId: coupon.id,
-      stripePromotionCodeId: promotionCodeId,
+      stripeCouponId: couponId,
+      stripePromotionCodeId: promotionCode.id,
     },
   });
 
-  return { coupon: coupon.id };
+  return { promotion_code: promotionCode.id };
 }
 
 async function createCheckoutSession(params: Stripe.Checkout.SessionCreateParams) {
@@ -359,31 +331,31 @@ export async function POST(req: Request) {
       );
     }
 
-    const promotions = await getBillingPromotions();
-    const promotion = promoCode
-      ? promotions.find(
-          (item) =>
-            item.code === promoCode &&
-            isPromotionCurrentlyRedeemable(item, planId as BillingPlanId)
-        )
-      : null;
-    if (promoCode && !promotion) {
-      return NextResponse.json(
-        { error: "Invalid promotion code." },
-        { status: 400 }
-      );
-    }
-    const appliedPromotion = promotion || null;
-    try {
-      await assertPromotionCanBeUsedByUser(appliedPromotion, user.id);
-    } catch (error) {
-      if (error instanceof Error && error.message === "PROMOTION_ALREADY_USED") {
+    let appliedPromotion: CheckoutPromotion | null = null;
+    let promotionClientIpHash: string | null = null;
+    let promotionRiskFlags: PromotionRiskFlag[] = [];
+    if (promoCode) {
+      const promotionValidation = await validatePromotionForCheckout({
+        code: promoCode,
+        planId: planId as BillingPlanId,
+        billingInterval,
+        userId: user.id,
+        request: req,
+      });
+      if (!promotionValidation.valid) {
         return NextResponse.json(
-          { error: "This promotion code has already been used by this account." },
-          { status: 409 }
+          {
+            error:
+              promotionValidation.reason === "already_used"
+                ? "This promotion code has already been used by this account."
+                : "Invalid promotion code.",
+          },
+          { status: promotionValidation.reason === "already_used" ? 409 : 400 }
         );
       }
-      throw error;
+      appliedPromotion = promotionValidation.promotion;
+      promotionClientIpHash = promotionValidation.clientIpHash;
+      promotionRiskFlags = promotionValidation.riskFlags;
     }
 
     const finalPriceCents = calculateDiscountedCents(
@@ -416,6 +388,8 @@ export async function POST(req: Request) {
         planId: planId as BillingPlanId,
         billingInterval,
         promotion: appliedPromotion,
+        clientIpHash: promotionClientIpHash,
+        riskFlags: promotionRiskFlags,
       });
       await sendBillingWelcomeEmail({
         to: user.email,
@@ -480,45 +454,66 @@ export async function POST(req: Request) {
       });
     }
 
-    const discount = appliedPromotion
-      ? await ensureStripeDiscount(appliedPromotion, planId as BillingPlanId)
-      : null;
-
-    const checkoutSession = await createCheckoutSession({
-      mode: "subscription",
-      customer: stripeCustomerId,
-      line_items: [buildCheckoutLineItem(plan, billingInterval)],
-      success_url: billingSuccessUrl(
-        origin,
-        planId as BillingPlanId,
-        billingInterval
-      ),
-      cancel_url: `${origin}/pricing?billing=cancelled`,
-      client_reference_id: user.id,
-      allow_promotion_codes: discount ? undefined : true,
-      discounts: discount ? [discount] : undefined,
-      subscription_data: {
+    let promotionLeaseReserved = false;
+    if (appliedPromotion) {
+      await reservePromotionCheckout(appliedPromotion.id, user.id);
+      promotionLeaseReserved = true;
+    }
+    try {
+      const discount = appliedPromotion
+        ? await ensureStripeDiscount(appliedPromotion, planId as BillingPlanId)
+        : null;
+      const promotionMetadata: Record<string, string> = {};
+      if (appliedPromotion) {
+        promotionMetadata.promotionId = appliedPromotion.id;
+        promotionMetadata.promotionIpHash = promotionClientIpHash || "";
+        promotionMetadata.promotionRiskFlags =
+          encodePromotionRiskFlags(promotionRiskFlags);
+      }
+      const checkoutSession = await createCheckoutSession({
+        mode: "subscription",
+        customer: stripeCustomerId,
+        line_items: [buildCheckoutLineItem(plan, billingInterval)],
+        success_url: billingSuccessUrl(
+          origin,
+          planId as BillingPlanId,
+          billingInterval
+        ),
+        cancel_url: `${origin}/pricing?billing=cancelled`,
+        expires_at: appliedPromotion
+          ? Math.floor(Date.now() / 1000) + PROMOTION_CHECKOUT_TTL_SECONDS
+          : undefined,
+        client_reference_id: user.id,
+        allow_promotion_codes: false,
+        discounts: discount ? [discount] : undefined,
+        subscription_data: {
+          metadata: {
+            userId: user.id,
+            planId,
+            tier: tierForPlanId(planId),
+            billingInterval,
+            ...promotionMetadata,
+            ...analyticsMetadata,
+          },
+        },
         metadata: {
           userId: user.id,
           planId,
-          tier: tierForPlanId(planId),
           billingInterval,
-          promoCode: appliedPromotion?.code || "",
-          promotionId: appliedPromotion?.id || "",
+          ...promotionMetadata,
           ...analyticsMetadata,
         },
-      },
-      metadata: {
-        userId: user.id,
-        planId,
-        billingInterval,
-        promoCode: appliedPromotion?.code || "",
-        promotionId: appliedPromotion?.id || "",
-        ...analyticsMetadata,
-      },
-    });
+      });
 
-    return NextResponse.json({ url: checkoutSession.url });
+      return NextResponse.json({ url: checkoutSession.url });
+    } catch (error) {
+      if (promotionLeaseReserved && appliedPromotion) {
+        await releasePromotionCheckout(appliedPromotion.id, user.id).catch(
+          () => undefined
+        );
+      }
+      throw error;
+    }
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;

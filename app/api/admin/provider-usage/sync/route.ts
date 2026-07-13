@@ -1,4 +1,5 @@
 export const dynamic = "force-dynamic";
+export const maxDuration = 120;
 
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
@@ -70,6 +71,9 @@ export async function POST(req: Request) {
             httpStatus: result.diagnostic?.httpStatus,
             errorCode: result.diagnostic?.errorCode,
             providerRequestId: result.diagnostic?.providerRequestId,
+            attemptCount: result.diagnostic?.attemptCount,
+            elapsedMs: result.diagnostic?.elapsedMs,
+            failureStage: result.diagnostic?.failureStage,
           })),
       },
     });

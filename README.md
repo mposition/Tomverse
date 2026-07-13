@@ -52,6 +52,27 @@ CHAT_MODEL_GPT_5_5_MAX_OUTPUT_TOKENS=8192
 Application limits are a second line of defense. Configure billing alerts and
 hard spending limits in each AI provider dashboard as well.
 
+## Customer Billing Promotions
+
+The public billing configuration exposes plans and a generic promotion policy,
+but never promotion objects or code strings. A code is looked up only after the
+customer submits it to the bounded, rate-limited server validation endpoint,
+and checkout repeats the same validation. Stripe's free-form promotion-code
+entry is disabled; Tomverse passes only the server-selected Stripe Promotion
+Code ID.
+
+Every active promotion must have a maximum redemption count and end date. Both
+the database transaction and the Stripe Promotion Code enforce those limits.
+Annual-plan discount stacking is denied by default and must be enabled for the
+specific promotion in Admin Billing. Existing unbounded active promotions are
+paused by migration `20260714000000_harden_billing_promotions`.
+
+Account reuse is blocked, overlapping promotion checkouts use a short lease,
+and shared IP/payment-method signals are recorded for Admin review. IPs and
+Stripe payment fingerprints are stored only as keyed hashes; the maintenance
+job removes those identifiers after 90 days while retaining the redemption
+audit record.
+
 ## Provider Billing Profiles
 
 The Admin Console provider panel separates how a service is priced from how the
@@ -90,6 +111,22 @@ key as an OpenAI Organization Owner and add it to Railway Variables:
 ```text
 OPENAI_ADMIN_API_KEY=<OpenAI organization Admin API key>
 ```
+
+OpenAI cost sync uses a 30-second per-request timeout and up to three attempts
+for connection failures, timeouts, HTTP 408/409/429, and HTTP 5xx responses.
+The limits can be narrowed or extended within the built-in safety bounds without
+making either variable required:
+
+```text
+OPENAI_COSTS_TIMEOUT_MS=30000 # 5000..60000
+OPENAI_COSTS_MAX_ATTEMPTS=3   # 1..3
+```
+
+If all attempts end before response headers arrive, the Admin Console reports a
+connection-stage failure. That result cannot validate the key or its permissions;
+check Railway outbound DNS/TLS and HTTPS access to `api.openai.com` first. A
+received HTTP 401/403 instead means connectivity succeeded and the Admin API key
+or its Organization Owner permissions must be corrected.
 
 The OpenAI adapter calls `/v1/organization/costs` for one exact UTC day, follows
 bounded pagination, and stores the net total of all USD line items. Signed
@@ -277,6 +314,34 @@ In GA4 Admin, register event-scoped custom dimensions for `utm_source`,
 event-scoped custom metric for numeric `model_count`. Mark at least
 `multi_model_compare_completed`, `signup_completed`, and `purchase_completed`
 as key events before paid acquisition begins.
+
+## Search and Social Discovery
+
+The production app generates `/robots.txt` and `/sitemap.xml` from Next.js
+metadata routes. The sitemap contains only public canonical URLs and real
+localized variants of the homepage and search-intent pages. Authenticated app,
+Admin, API, sign-in, and public-share-token routes are excluded or explicitly
+marked `noindex`.
+
+Page metadata uses `https://tomverse.app` as the canonical origin and includes
+Open Graph and X large-card images. The root document also publishes sanitized
+`Organization` and `SoftwareApplication` JSON-LD. Do not add ratings, reviews,
+or pricing claims that cannot be verified from the live product.
+
+For URL-prefix ownership verification, Railway can optionally provide the exact
+HTML meta-tag tokens issued by the webmaster tools:
+
+```text
+GOOGLE_SITE_VERIFICATION=<Google Search Console HTML tag content value>
+BING_SITE_VERIFICATION=<Bing msvalidate.01 content value>
+```
+
+For Google, a Domain property verified by DNS is preferred because it covers
+protocol and subdomain variants and does not depend on an application deploy.
+After ownership is verified, submit `https://tomverse.app/sitemap.xml` in
+Google Search Console. Bing Webmaster Tools can import the verified Google
+property and its sitemap, or the same sitemap can be submitted directly. Keep
+the verification record or meta token in place after registration.
 
 ## Scheduled Maintenance
 

@@ -16,9 +16,8 @@ type PublicBillingPlan = BillingPlanConfig & {
   displayExchangeRate: number;
 };
 
-type PublicBillingConfig<TPromotion> = {
+type PublicBillingConfig<TConfig> = Omit<TConfig, "plans"> & {
   plans: PublicBillingPlan[];
-  promotions: TPromotion[];
   displayCurrency: string;
   baseCurrency: "USD";
   exchangeRateUpdatedAt: string | null;
@@ -155,10 +154,12 @@ const getExchangeRates = async () => {
   }
 };
 
-export async function withDisplayCurrency<TPromotion>(
-  config: { plans: BillingPlanConfig[]; promotions: TPromotion[] },
+export async function withDisplayCurrency<
+  TConfig extends { plans: BillingPlanConfig[] },
+>(
+  config: TConfig,
   req: Request
-): Promise<PublicBillingConfig<TPromotion>> {
+): Promise<PublicBillingConfig<TConfig>> {
   const requestedCurrency = inferCurrencyFromRequest(req);
   const exchangeRates = await getExchangeRates();
   const displayCurrency = exchangeRates.rates[requestedCurrency]
