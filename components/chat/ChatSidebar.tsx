@@ -1145,41 +1145,45 @@ export function ChatSidebar({
                 })}
             </div>
 
-            <div className={`${isMobileDrawer ? "max-h-[40dvh] shrink-0 overflow-y-auto overscroll-contain border-t border-zinc-200 bg-zinc-100/40 p-2 dark:border-zinc-800 dark:bg-zinc-900/50" : "max-h-[45dvh] shrink-0 overflow-y-auto overscroll-contain border-t border-zinc-200 bg-zinc-100/40 p-3 dark:border-zinc-800 dark:bg-zinc-900/50"} flex min-h-0 flex-col gap-2`}>
-                {!isMobileDrawer && (
-                <div className="rounded-3xl border border-zinc-200 bg-white p-3 text-xs shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-                    <div className="mb-2 flex items-center justify-between gap-2">
-                        <span className="font-black text-zinc-900 dark:text-zinc-100">{t("sidebar.currentUsage")}</span>
-                        {displayedPlan && (
-                            <span className="text-[10px] font-black text-zinc-400">
-                                {t(`modelTiers.${displayedPlan.toLowerCase()}`)}
-                            </span>
-                        )}
-                    </div>
-                    {(displayedUsage.limit > 0 || isDailyUnlimited) && (
-                        <div>
-                            <div className="mb-1 flex items-center justify-between font-semibold text-zinc-500 dark:text-zinc-400">
-                                <span>{t("sidebar.todayUsage")}</span>
-                                <span>{isDailyUnlimited ? t("usage.unlimited") : `${displayedRemaining} ${t("sidebar.remaining")}`}</span>
-                            </div>
-                            {!isDailyUnlimited && (
-                                <div className="h-1.5 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
-                                    <div
-                                        className={`h-full transition-all duration-500 ${displayedUsage.used >= displayedUsage.limit ? "bg-red-500" : "bg-blue-500"}`}
-                                        style={{ width: displayedUsageWidth }}
-                                    />
-                                </div>
+            <div className={`${isMobileDrawer ? "max-h-[40dvh] shrink-0 border-t border-zinc-200 bg-zinc-100/40 p-2 dark:border-zinc-800 dark:bg-zinc-900/50" : "max-h-[45dvh] shrink-0 border-t border-zinc-200 bg-zinc-100/40 p-3 dark:border-zinc-800 dark:bg-zinc-900/50"} flex min-h-0 flex-col gap-2 overflow-hidden`}>
+                <div className="shrink-0" data-testid="sidebar-account-controls">
+                    <AuthButton />
+                </div>
+                <div className="flex min-h-0 flex-1 touch-pan-y flex-col gap-2 overflow-y-auto overscroll-contain [scrollbar-gutter:stable]">
+                    {!isMobileDrawer && (
+                    <div className="rounded-3xl border border-zinc-200 bg-white p-3 text-xs shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                            <span className="font-black text-zinc-900 dark:text-zinc-100">{t("sidebar.currentUsage")}</span>
+                            {displayedPlan && (
+                                <span className="text-[10px] font-black text-zinc-400">
+                                    {t(`modelTiers.${displayedPlan.toLowerCase()}`)}
+                                </span>
                             )}
                         </div>
+                        {(displayedUsage.limit > 0 || isDailyUnlimited) && (
+                            <div>
+                                <div className="mb-1 flex items-center justify-between font-semibold text-zinc-500 dark:text-zinc-400">
+                                    <span>{t("sidebar.todayUsage")}</span>
+                                    <span>{isDailyUnlimited ? t("usage.unlimited") : `${displayedRemaining} ${t("sidebar.remaining")}`}</span>
+                                </div>
+                                {!isDailyUnlimited && (
+                                    <div className="h-1.5 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+                                        <div
+                                            className={`h-full transition-all duration-500 ${displayedUsage.used >= displayedUsage.limit ? "bg-red-500" : "bg-blue-500"}`}
+                                            style={{ width: displayedUsageWidth }}
+                                        />
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
                     )}
+                    <FeedbackButton
+                        currentModelId={currentModelId}
+                        currentPlan={displayedPlan}
+                        attachmentCount={attachmentCount}
+                    />
                 </div>
-                )}
-                <FeedbackButton
-                    currentModelId={currentModelId}
-                    currentPlan={displayedPlan}
-                    attachmentCount={attachmentCount}
-                />
-                <AuthButton />
             </div>
         </aside>
         {showPrivateNotice && (

@@ -25,6 +25,18 @@ test("desktop shell fits compact viewport", async ({ page }) => {
   expect(inputBox!.y + inputBox!.height).toBeLessThanOrEqual(768);
 });
 
+test("account controls remain fully visible at a 150 percent scaled viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+
+  const accountControls = page.getByTestId("sidebar-account-controls");
+  await expect(accountControls).toBeVisible();
+
+  const accountBox = await accountControls.boundingBox();
+  expect(accountBox).not.toBeNull();
+  expect(accountBox!.y).toBeGreaterThanOrEqual(0);
+  expect(accountBox!.y + accountBox!.height).toBeLessThanOrEqual(720);
+});
+
 test("desktop model selector adds a second free model panel", async ({ page }) => {
   await expect(page.getByTestId("desktop-model-panel")).toHaveCount(1);
 
