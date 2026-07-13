@@ -8,6 +8,7 @@ import {
   PROVIDER_DISPLAY_NAMES,
 } from "@/lib/providerMonitoring";
 import {
+  OpenAiCostsParseError,
   openAiCostsUrl,
   parseOpenAiCostsPage,
   redactProviderDiagnostic,
@@ -199,6 +200,11 @@ const syncOpenAiCosts = async (date: Date): Promise<ProviderUsageSyncResult> => 
   let page: string | null = null;
   let pageCount = 0;
   let costUsd = 0;
+  let lineItemCount = 0;
+  let negativeLineItemCount = 0;
+  let normalizedStringAmountCount = 0;
+  let lastHttpStatus: number | null = null;
+  let lastProviderRequestId: string | null = null;
   const providerRequestIds: string[] = [];
 
   try {
@@ -208,6 +214,8 @@ const syncOpenAiCosts = async (date: Date): Promise<ProviderUsageSyncResult> => 
         throw new Error("OpenAI Costs API pagination exceeded the safety limit.");
       }
       const url = openAiCostsUrl({ baseUrl: OPENAI_COSTS_URL, date, page });
+      lastHttpStatus = null;
+      lastProviderRequestId = null;
       const response = await fetch(url, {
         cache: "no-store",
         signal: AbortSignal.timeout(EXTERNAL_TIMEOUT_MS),
@@ -217,10 +225,12 @@ const syncOpenAiCosts = async (date: Date): Promise<ProviderUsageSyncResult> => 
           "Content-Type": "application/json",
         },
       });
+      lastHttpStatus = response.status;
       const requestId = redactProviderDiagnostic(
         response.headers.get("x-request-id"),
         160
       );
+      lastProviderRequestId = requestId;
       if (requestId) providerRequestIds.push(requestId);
       const payload = await readBoundedJson(response);
       if (!response.ok) {
@@ -250,6 +260,9 @@ const syncOpenAiCosts = async (date: Date): Promise<ProviderUsageSyncResult> => 
 
       const parsed = parseOpenAiCostsPage(payload);
       costUsd += parsed.costUsd;
+      lineItemCount += parsed.lineItemCount;
+      negativeLineItemCount += parsed.negativeLineItemCount;
+      normalizedStringAmountCount += parsed.normalizedStringAmountCount;
       if (parsed.hasMore && !parsed.nextPage) {
         throw new Error("OpenAI Costs API omitted the next page cursor.");
       }
@@ -266,6 +279,9 @@ const syncOpenAiCosts = async (date: Date): Promise<ProviderUsageSyncResult> => 
         date: date.toISOString().slice(0, 10),
         costUsd,
         pageCount,
+        lineItemCount,
+        negativeLineItemCount,
+        normalizedStringAmountCount,
         providerRequestIds,
       },
     });
@@ -274,7 +290,10 @@ const syncOpenAiCosts = async (date: Date): Promise<ProviderUsageSyncResult> => 
       displayName,
       status: "synced",
       reportedCostMicroUsd,
-      message: "OpenAI organization costs were reconciled.",
+      message:
+        negativeLineItemCount > 0
+          ? "OpenAI net organization costs were reconciled, including credits or adjustments."
+          : "OpenAI organization costs were reconciled.",
       diagnostic: null,
     };
   } catch (error) {
@@ -291,10 +310,14 @@ const syncOpenAiCosts = async (date: Date): Promise<ProviderUsageSyncResult> => 
         traceId,
         source: "openai_costs",
         endpoint: endpointLabel(OPENAI_COSTS_URL),
-        httpStatus: null,
+        httpStatus: lastHttpStatus,
         errorType: isTimeout ? "timeout" : error instanceof Error ? error.name : null,
-        errorCode: isTimeout ? "OPENAI_COSTS_TIMEOUT" : "OPENAI_COSTS_SYNC_FAILED",
-        providerRequestId: providerRequestIds.at(-1) || null,
+        errorCode: isTimeout
+          ? "OPENAI_COSTS_TIMEOUT"
+          : error instanceof OpenAiCostsParseError
+            ? error.code
+            : "OPENAI_COSTS_SYNC_FAILED",
+        providerRequestId: lastProviderRequestId,
         detail:
           error instanceof Error
             ? redactProviderDiagnostic(error.message)

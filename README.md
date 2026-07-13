@@ -92,10 +92,13 @@ OPENAI_ADMIN_API_KEY=<OpenAI organization Admin API key>
 ```
 
 The OpenAI adapter calls `/v1/organization/costs` for one exact UTC day, follows
-bounded pagination, and sums all USD line items. It does not reuse
-`OPENAI_API_KEY`, and the generic `PROVIDER_OPENAI_USAGE_*` variables are ignored.
-Provider failures log only sanitized status, error code, request ID, and a
-Tomverse trace ID; API keys and raw response bodies are never logged.
+bounded pagination, and stores the net total of all USD line items. Signed
+credits or adjustments are preserved, and a genuine zero-cost day is still
+recorded as synced. It does not reuse `OPENAI_API_KEY`, and the generic
+`PROVIDER_OPENAI_USAGE_*` variables are ignored. Provider failures log only the
+sanitized HTTP status, schema path and value type, error code, request ID, and a
+Tomverse trace ID; API keys, amount values, and raw response bodies are never
+logged.
 
 Other providers continue to use the generic configuration when their billing
 API supports a single numeric cost path:

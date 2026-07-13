@@ -40,24 +40,45 @@ test("OpenAI Costs parser sums every USD line item", () => {
     next_page: "page_2",
   });
   assert.equal(parsed.costUsd, 1.5);
+  assert.equal(parsed.lineItemCount, 3);
+  assert.equal(parsed.negativeLineItemCount, 0);
+  assert.equal(parsed.normalizedStringAmountCount, 0);
   assert.equal(parsed.hasMore, true);
   assert.equal(parsed.nextPage, "page_2");
 });
 
-test("OpenAI Costs parser rejects invalid currency and amount", () => {
+test("OpenAI Costs parser reconciles credits and numeric strings", () => {
+  const parsed = parseOpenAiCostsPage({
+    data: [
+      {
+        results: [
+          { amount: { value: 1.25, currency: "usd" } },
+          { amount: { value: -0.25, currency: "usd" } },
+          { amount: { value: "0.50", currency: "USD" } },
+        ],
+      },
+    ],
+  });
+  assert.equal(parsed.costUsd, 1.5);
+  assert.equal(parsed.lineItemCount, 3);
+  assert.equal(parsed.negativeLineItemCount, 1);
+  assert.equal(parsed.normalizedStringAmountCount, 1);
+});
+
+test("OpenAI Costs parser rejects invalid currency and non-numeric amount", () => {
   assert.throws(
     () =>
       parseOpenAiCostsPage({
-        data: [{ results: [{ amount: { value: -1, currency: "usd" } }] }],
+        data: [{ results: [{ amount: { value: "not-a-number", currency: "usd" } }] }],
       }),
-    /invalid USD amount/
+    /non-numeric amount/
   );
   assert.throws(
     () =>
       parseOpenAiCostsPage({
         data: [{ results: [{ amount: { value: 1, currency: "aud" } }] }],
       }),
-    /invalid USD amount/
+    /unsupported or missing currency/
   );
 });
 

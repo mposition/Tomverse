@@ -24,40 +24,116 @@ export const openAiCostsUrl = ({
   return url;
 };
 
-const finiteNonNegative = (value: unknown) =>
-  typeof value === "number" && Number.isFinite(value) && value >= 0
-    ? value
-    : null;
+export type OpenAiCostsParseErrorCode =
+  | "OPENAI_COSTS_INVALID_PAYLOAD"
+  | "OPENAI_COSTS_INVALID_CURRENCY"
+  | "OPENAI_COSTS_INVALID_AMOUNT";
+
+export class OpenAiCostsParseError extends Error {
+  readonly code: OpenAiCostsParseErrorCode;
+
+  constructor(code: OpenAiCostsParseErrorCode, message: string) {
+    super(message);
+    this.name = "OpenAiCostsParseError";
+    this.code = code;
+  }
+}
+
+const finiteSignedAmount = (value: unknown) => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return { value, normalizedFromString: false };
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim();
+    if (
+      /^-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(normalized)
+    ) {
+      const parsed = Number(normalized);
+      if (Number.isFinite(parsed)) {
+        return { value: parsed, normalizedFromString: true };
+      }
+    }
+  }
+  return null;
+};
 
 export const parseOpenAiCostsPage = (payload: unknown) => {
   if (!payload || typeof payload !== "object") {
-    throw new Error("OpenAI Costs API returned an invalid JSON object.");
+    throw new OpenAiCostsParseError(
+      "OPENAI_COSTS_INVALID_PAYLOAD",
+      "OpenAI Costs API returned an invalid JSON object."
+    );
   }
   const record = payload as Record<string, unknown>;
   if (!Array.isArray(record.data)) {
-    throw new Error("OpenAI Costs API response did not contain a data array.");
+    throw new OpenAiCostsParseError(
+      "OPENAI_COSTS_INVALID_PAYLOAD",
+      "OpenAI Costs API response did not contain a data array."
+    );
   }
 
   let costUsd = 0;
-  for (const bucket of record.data) {
-    if (!bucket || typeof bucket !== "object") continue;
+  let lineItemCount = 0;
+  let negativeLineItemCount = 0;
+  let normalizedStringAmountCount = 0;
+  for (const [bucketIndex, bucket] of record.data.entries()) {
+    if (!bucket || typeof bucket !== "object") {
+      throw new OpenAiCostsParseError(
+        "OPENAI_COSTS_INVALID_PAYLOAD",
+        `OpenAI Costs API returned an invalid bucket at data[${bucketIndex}].`
+      );
+    }
     const results = (bucket as Record<string, unknown>).results;
-    if (!Array.isArray(results)) continue;
+    if (!Array.isArray(results)) {
+      throw new OpenAiCostsParseError(
+        "OPENAI_COSTS_INVALID_PAYLOAD",
+        `OpenAI Costs API response omitted results at data[${bucketIndex}].`
+      );
+    }
 
-    for (const result of results) {
-      if (!result || typeof result !== "object") continue;
+    for (const [resultIndex, result] of results.entries()) {
+      const path = `data[${bucketIndex}].results[${resultIndex}]`;
+      if (!result || typeof result !== "object") {
+        throw new OpenAiCostsParseError(
+          "OPENAI_COSTS_INVALID_PAYLOAD",
+          `OpenAI Costs API returned an invalid result at ${path}.`
+        );
+      }
       const amount = (result as Record<string, unknown>).amount;
-      if (!amount || typeof amount !== "object") continue;
+      if (!amount || typeof amount !== "object") {
+        throw new OpenAiCostsParseError(
+          "OPENAI_COSTS_INVALID_PAYLOAD",
+          `OpenAI Costs API response omitted amount at ${path}.`
+        );
+      }
       const amountRecord = amount as Record<string, unknown>;
       const currency =
         typeof amountRecord.currency === "string"
           ? amountRecord.currency.toLowerCase()
           : null;
-      const value = finiteNonNegative(amountRecord.value);
-      if (currency !== "usd" || value === null) {
-        throw new Error("OpenAI Costs API returned an invalid USD amount.");
+      if (currency !== "usd") {
+        throw new OpenAiCostsParseError(
+          "OPENAI_COSTS_INVALID_CURRENCY",
+          `OpenAI Costs API returned an unsupported or missing currency at ${path}.`
+        );
       }
-      costUsd += value;
+      const amountValue = finiteSignedAmount(amountRecord.value);
+      if (!amountValue) {
+        throw new OpenAiCostsParseError(
+          "OPENAI_COSTS_INVALID_AMOUNT",
+          `OpenAI Costs API returned a non-numeric amount at ${path} (${typeof amountRecord.value}).`
+        );
+      }
+      lineItemCount += 1;
+      if (amountValue.value < 0) negativeLineItemCount += 1;
+      if (amountValue.normalizedFromString) normalizedStringAmountCount += 1;
+      costUsd += amountValue.value;
+      if (!Number.isFinite(costUsd)) {
+        throw new OpenAiCostsParseError(
+          "OPENAI_COSTS_INVALID_AMOUNT",
+          "OpenAI Costs API returned an amount total outside the supported numeric range."
+        );
+      }
     }
   }
 
@@ -67,6 +143,9 @@ export const parseOpenAiCostsPage = (payload: unknown) => {
       : null;
   return {
     costUsd,
+    lineItemCount,
+    negativeLineItemCount,
+    normalizedStringAmountCount,
     hasMore: record.has_more === true,
     nextPage,
   };

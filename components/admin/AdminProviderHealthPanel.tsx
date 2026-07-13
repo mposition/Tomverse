@@ -24,7 +24,8 @@ import type {
 
 const REFRESH_INTERVAL_MS = 30_000;
 
-const money = (microUsd: number) => `$${(microUsd / 1_000_000).toFixed(2)}`;
+const money = (microUsd: number) =>
+  `${microUsd < 0 ? "-" : ""}$${Math.abs(microUsd / 1_000_000).toFixed(2)}`;
 const optionalMoney = (microUsd: number | null) =>
   microUsd === null ? "Not synced" : money(microUsd);
 const dateLabel = (value: string | null, fallback = "No success yet") => {
@@ -361,7 +362,8 @@ function ProviderRow({
             {money(provider.monthBudgetMicroUsd)}
           </p>
           <p className="mt-1 text-xs text-zinc-500">
-            Provider reported {optionalMoney(provider.providerReportedMonthCostMicroUsd)}
+            Provider reported net cost{" "}
+            {optionalMoney(provider.providerReportedMonthCostMicroUsd)}
           </p>
           <p className="mt-1 text-xs text-zinc-500">Variance {varianceLabel}</p>
           <p className="mt-1 text-xs text-zinc-500">Source: {provider.usageSource}</p>

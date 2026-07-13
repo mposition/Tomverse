@@ -823,15 +823,15 @@ const sumProviderReportedCost = (
   provider: AiProvider,
   from: Date
 ) => {
-  const total = rows
-    .filter(
-      (row) =>
-        row.provider === provider &&
-        row.source === "provider_api" &&
-        row.date.getTime() >= from.getTime()
-    )
+  const providerRows = rows.filter(
+    (row) =>
+      row.provider === provider &&
+      row.source === "provider_api" &&
+      row.date.getTime() >= from.getTime()
+  );
+  if (providerRows.length === 0) return null;
+  return providerRows
     .reduce((sum, row) => sum + (row.providerReportedCostMicroUsd || 0), 0);
-  return total > 0 ? total : null;
 };
 
 const latestUsageSyncAt = (rows: ProviderDailyUsageRow[], provider: AiProvider) =>

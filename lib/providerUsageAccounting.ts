@@ -76,7 +76,10 @@ export async function recordProviderReportedUsage({
   payload: unknown;
 }) {
   const usageDate = dayStartUtc(date);
-  const safeCost = Math.max(0, Math.min(2_000_000_000, Math.round(costMicroUsd)));
+  const safeCost = Math.max(
+    -2_000_000_000,
+    Math.min(2_000_000_000, Math.round(costMicroUsd))
+  );
   await prisma.providerDailyUsage.upsert({
     where: {
       provider_modelId_source_date: {

@@ -32,7 +32,9 @@ const yesterdayIso = () => {
 };
 
 const money = (microUsd: number | null) =>
-  microUsd === null ? "-" : `$${(microUsd / 1_000_000).toFixed(2)}`;
+  microUsd === null
+    ? "-"
+    : `${microUsd < 0 ? "-" : ""}$${Math.abs(microUsd / 1_000_000).toFixed(2)}`;
 
 const statusClass: Record<SyncResult["status"], string> = {
   synced: "border-emerald-500/30 bg-emerald-500/10 text-emerald-200",
@@ -146,7 +148,7 @@ export function AdminProviderUsageSyncPanel() {
                   </span>
                 </div>
                 <p className="mt-2 font-bold text-zinc-300">
-                  Reported cost {money(result.reportedCostMicroUsd)}
+                  Reported net cost {money(result.reportedCostMicroUsd)}
                 </p>
                 <p className="mt-1 text-xs leading-5 text-zinc-500">{result.message}</p>
                 {result.status === "failed" && result.diagnostic && (
