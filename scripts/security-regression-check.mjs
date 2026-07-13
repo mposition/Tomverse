@@ -165,6 +165,26 @@ const checks = [
       source.includes("Projected month-end"),
   },
   {
+    name: "OpenAI usage reconciliation requires a dedicated bounded Admin API adapter",
+    file: "lib/providerUsageSync.ts",
+    test: (source) =>
+      source.includes("OPENAI_ADMIN_API_KEY") &&
+      source.includes('https://api.openai.com/v1/organization/costs') &&
+      source.includes("AbortSignal.timeout(EXTERNAL_TIMEOUT_MS)") &&
+      source.includes("MAX_EXTERNAL_RESPONSE_BYTES") &&
+      source.includes("MAX_OPENAI_PAGES") &&
+      source.includes('source: "openai_costs"') &&
+      source.includes('console.warn("Provider usage sync failed"'),
+  },
+  {
+    name: "Provider usage diagnostics are redacted and visible only in Admin UI",
+    file: "components/admin/AdminProviderUsageSyncPanel.tsx",
+    test: (source) =>
+      source.includes("View failure details") &&
+      source.includes("Provider request ID") &&
+      source.includes("Tomverse trace"),
+  },
+  {
     name: "Provider health exposes explicit status decision reasons",
     file: "lib/providerMonitoring.ts",
     test: (source) =>

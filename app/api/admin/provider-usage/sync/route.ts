@@ -62,6 +62,15 @@ export async function POST(req: Request) {
         synced: results.filter((result) => result.status === "synced").length,
         failed: results.filter((result) => result.status === "failed").length,
         skipped: results.filter((result) => result.status === "skipped").length,
+        failures: results
+          .filter((result) => result.status === "failed" && result.diagnostic)
+          .map((result) => ({
+            provider: result.provider,
+            traceId: result.diagnostic?.traceId,
+            httpStatus: result.diagnostic?.httpStatus,
+            errorCode: result.diagnostic?.errorCode,
+            providerRequestId: result.diagnostic?.providerRequestId,
+          })),
       },
     });
 

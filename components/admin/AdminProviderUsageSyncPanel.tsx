@@ -9,6 +9,16 @@ type SyncResult = {
   status: "synced" | "skipped" | "failed";
   reportedCostMicroUsd: number | null;
   message: string;
+  diagnostic: {
+    traceId: string;
+    source: "openai_costs" | "generic_usage";
+    endpoint: string;
+    httpStatus: number | null;
+    errorType: string | null;
+    errorCode: string | null;
+    providerRequestId: string | null;
+    detail: string | null;
+  } | null;
 };
 
 type SyncResponse = {
@@ -139,6 +149,55 @@ export function AdminProviderUsageSyncPanel() {
                   Reported cost {money(result.reportedCostMicroUsd)}
                 </p>
                 <p className="mt-1 text-xs leading-5 text-zinc-500">{result.message}</p>
+                {result.status === "failed" && result.diagnostic && (
+                  <details className="mt-3 rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs">
+                    <summary className="cursor-pointer font-black text-red-200">
+                      View failure details
+                    </summary>
+                    <dl className="mt-3 grid gap-2 text-zinc-400">
+                      <div>
+                        <dt className="font-bold text-zinc-500">Source</dt>
+                        <dd>{result.diagnostic.source}</dd>
+                      </div>
+                      <div>
+                        <dt className="font-bold text-zinc-500">Endpoint</dt>
+                        <dd className="break-all font-mono text-[11px]">
+                          {result.diagnostic.endpoint}
+                        </dd>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <dt className="font-bold text-zinc-500">HTTP</dt>
+                          <dd>{result.diagnostic.httpStatus ?? "No response"}</dd>
+                        </div>
+                        <div>
+                          <dt className="font-bold text-zinc-500">Code</dt>
+                          <dd>{result.diagnostic.errorCode || "Unknown"}</dd>
+                        </div>
+                      </div>
+                      {result.diagnostic.detail && (
+                        <div>
+                          <dt className="font-bold text-zinc-500">Provider detail</dt>
+                          <dd className="break-words leading-5">
+                            {result.diagnostic.detail}
+                          </dd>
+                        </div>
+                      )}
+                      <div>
+                        <dt className="font-bold text-zinc-500">Provider request ID</dt>
+                        <dd className="break-all font-mono text-[11px]">
+                          {result.diagnostic.providerRequestId || "Not returned"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="font-bold text-zinc-500">Tomverse trace</dt>
+                        <dd className="break-all font-mono text-[11px]">
+                          {result.diagnostic.traceId}
+                        </dd>
+                      </div>
+                    </dl>
+                  </details>
+                )}
               </div>
             ))}
           </div>

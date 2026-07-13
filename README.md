@@ -72,6 +72,30 @@ cost, and remaining headroom. Provider-reported usage is preferred when it has
 been synchronized; otherwise the projection uses internal tracked cost. These
 figures are operational estimates and do not replace the provider invoice.
 
+## Provider Usage Reconciliation
+
+OpenAI organization costs use a dedicated server-side Admin API key. Create the
+key as an OpenAI Organization Owner and add it to Railway Variables:
+
+```text
+OPENAI_ADMIN_API_KEY=<OpenAI organization Admin API key>
+```
+
+The OpenAI adapter calls `/v1/organization/costs` for one exact UTC day, follows
+bounded pagination, and sums all USD line items. It does not reuse
+`OPENAI_API_KEY`, and the generic `PROVIDER_OPENAI_USAGE_*` variables are ignored.
+Provider failures log only sanitized status, error code, request ID, and a
+Tomverse trace ID; API keys and raw response bodies are never logged.
+
+Other providers continue to use the generic configuration when their billing
+API supports a single numeric cost path:
+
+```text
+PROVIDER_<PROVIDER>_USAGE_URL=<HTTPS endpoint with optional {date} placeholder>
+PROVIDER_<PROVIDER>_USAGE_COST_JSON_PATH=<numeric USD JSON path>
+PROVIDER_<PROVIDER>_USAGE_AUTH_HEADER=<optional complete authorization value>
+```
+
 ## Admin Infrastructure Audit
 
 The Admin Console Infrastructure tab reads Railway projected usage, Cloudflare
