@@ -414,7 +414,7 @@ const checks = [
       ];
       const pricing = read("components/marketing/PricingPageContent.tsx");
       const checkout = read("components/marketing/UpgradeInterestButton.tsx");
-      const signup = read("app/auth/signin/page.tsx");
+      const signup = read("app/(application)/auth/signin/page.tsx");
       const chatInput = read("components/chat/ChatInput.tsx");
       const migration = read(
         "prisma/migrations/20260714233000_expand_product_analytics_funnel/migration.sql"
@@ -581,8 +581,59 @@ const checks = [
       source.includes("BING_SITE_VERIFICATION"),
   },
   {
+    name: "Marketing routes are static while application routes retain request-time rendering",
+    file: "app/(marketing)/layout.tsx",
+    test: (source) => {
+      const rootLayout = read("app/layout.tsx");
+      const applicationLayout = read("app/(application)/layout.tsx");
+      return (
+        source.includes('export const dynamic = "force-static"') &&
+        source.includes("export const revalidate = false") &&
+        applicationLayout.includes('export const dynamic = "force-dynamic"') &&
+        applicationLayout.includes("getServerSession(authOptions)") &&
+        !rootLayout.includes('from "next/headers"') &&
+        !rootLayout.includes("getServerSession") &&
+        !rootLayout.includes("prisma")
+      );
+    },
+  },
+  {
+    name: "Static marketing CSP hashes generated HTML while dynamic routes retain nonces",
+    file: "lib/staticMarketingCsp.ts",
+    test: (source) => {
+      const proxy = read("proxy.ts");
+      const csp = read("lib/csp.ts");
+      const nextConfig = read("next.config.ts");
+      return (
+        source.includes('createHash("sha384")') &&
+        source.includes('readFileSync(htmlPath, "utf8")') &&
+        source.includes("htmlPath.startsWith") &&
+        proxy.includes("getStaticMarketingCspHashes") &&
+        proxy.includes("createStaticMarketingCsp(staticMarketingHashes") &&
+        proxy.includes("Static security policy unavailable") &&
+        proxy.includes(
+          '"public, max-age=0, s-maxage=3600, stale-while-revalidate=86400"'
+        ) &&
+        csp.includes("scriptHashes.join") &&
+        nextConfig.includes('algorithm: "sha384"')
+      );
+    },
+  },
+  {
+    name: "Static marketing route allowlist excludes private and live-status surfaces",
+    file: "lib/marketingRoutes.ts",
+    test: (source) =>
+      source.includes('"/pricing"') &&
+      source.includes('"/support/help-centre"') &&
+      source.includes('"chatgpt-vs-claude"') &&
+      !source.includes('"/chat"') &&
+      !source.includes('"/admin"') &&
+      !source.includes('"/status"') &&
+      !source.includes('"/share"'),
+  },
+  {
     name: "Structured data is sanitized and identifies the organization and software application",
-    file: "app/layout.tsx",
+    file: "app/(marketing)/layout.tsx",
     test: (source) =>
       source.includes('"@type": "Organization"') &&
       source.includes('"@type": "SoftwareApplication"') &&
@@ -593,7 +644,7 @@ const checks = [
   },
   {
     name: "Search-intent pages have localized content and server metadata",
-    file: "app/[locale]/[intent]/page.tsx",
+    file: "app/(marketing)/[locale]/[intent]/page.tsx",
     test: (source) =>
       source.includes("generateStaticParams") &&
       source.includes("createPageMetadata") &&
@@ -610,12 +661,12 @@ const checks = [
   },
   {
     name: "Authenticated application surfaces are explicitly noindex",
-    file: "app/chat/layout.tsx",
+    file: "app/(application)/chat/layout.tsx",
     test: (source) =>
       source.includes("index: false") &&
-      read("app/auth/layout.tsx").includes("index: false") &&
-      read("app/admin/layout.tsx").includes("index: false") &&
-      read("app/share/[shareToken]/page.tsx").includes("index: false"),
+      read("app/(application)/auth/layout.tsx").includes("index: false") &&
+      read("app/(application)/admin/layout.tsx").includes("index: false") &&
+      read("app/(application)/share/[shareToken]/page.tsx").includes("index: false"),
   },
   {
     name: "Paid-launch legal pages disclose recurring billing, refunds, and operator contact",
@@ -681,7 +732,7 @@ const checks = [
         !guide.includes('aria-modal="true"') &&
         source.includes('onFocus={() => dismissGuestQuickStart("completed")}') &&
         source.includes('tomverse_guest_quick_start_seen_v2') &&
-        !read("app/chat/page.tsx").includes("GoLiveOnboarding")
+        !read("app/(application)/chat/page.tsx").includes("GoLiveOnboarding")
       );
     },
   },
@@ -725,13 +776,13 @@ const checks = [
       source.includes('source: "chatgpt-vs-claude"') &&
       source.includes('/model-icons/chatgpt.png') &&
       source.includes('/model-icons/claude.png') &&
-      read("app/chatgpt-vs-claude/page.tsx").includes(
+      read("app/(marketing)/chatgpt-vs-claude/page.tsx").includes(
         'template="chatgpt-vs-claude"'
       ),
   },
   {
     name: "Prepared chat comparison validates and bounds URL presets",
-    file: "app/chat/page.tsx",
+    file: "app/(application)/chat/page.tsx",
     test: (source) =>
       source.includes("comparisonPresetAppliedRef") &&
       source.includes(".filter(isEnabledModelId)") &&

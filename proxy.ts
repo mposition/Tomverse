@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createStrictCsp } from "@/lib/csp";
+import { createStaticMarketingCsp, createStrictCsp } from "@/lib/csp";
+import { isStaticMarketingPathname } from "@/lib/marketingRoutes";
+import { getStaticMarketingCspHashes } from "@/lib/staticMarketingCsp";
 import {
   getPublicReportOrigin,
   hasRequiredOriginSecret,
@@ -27,25 +29,56 @@ export function proxy(request: NextRequest) {
     return blockedOriginResponse();
   }
 
-  const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
-  const strictCsp = createStrictCsp(nonce);
+  const isStaticMarketingRequest = isStaticMarketingPathname(
+    request.nextUrl.pathname
+  );
+  const staticMarketingHashes = isStaticMarketingRequest
+    ? getStaticMarketingCspHashes(request.nextUrl.pathname)
+    : null;
+  if (
+    isStaticMarketingRequest &&
+    process.env.NODE_ENV === "production" &&
+    process.env.CSP_MODE === "enforce" &&
+    !staticMarketingHashes
+  ) {
+    return new NextResponse("Static security policy unavailable", {
+      status: 503,
+      headers: {
+        "Cache-Control": "no-store",
+        "Content-Type": "text/plain; charset=utf-8",
+        "X-Content-Type-Options": "nosniff",
+      },
+    });
+  }
+  const nonce = isStaticMarketingRequest
+    ? null
+    : Buffer.from(crypto.randomUUID()).toString("base64");
+  const csp = nonce
+    ? createStrictCsp(nonce)
+    : createStaticMarketingCsp(staticMarketingHashes || undefined);
   const enforce = process.env.CSP_MODE === "enforce";
   const policyHeader = enforce
     ? "Content-Security-Policy"
     : "Content-Security-Policy-Report-Only";
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set("x-tomverse-pathname", request.nextUrl.pathname);
-  requestHeaders.set("x-nonce", nonce);
-  requestHeaders.set(policyHeader, strictCsp);
+  if (nonce) requestHeaders.set("x-nonce", nonce);
+  requestHeaders.set(policyHeader, csp);
 
   const response = NextResponse.next({
     request: { headers: requestHeaders },
   });
+  if (isStaticMarketingRequest) {
+    response.headers.set(
+      "Cache-Control",
+      "public, max-age=0, s-maxage=3600, stale-while-revalidate=86400"
+    );
+  }
   const reportUrl = new URL(
     "/api/security/csp-report",
     getPublicReportOrigin()
   ).toString();
-  response.headers.set(policyHeader, strictCsp);
+  response.headers.set(policyHeader, csp);
   response.headers.set(
     "Report-To",
     JSON.stringify({

@@ -60,6 +60,18 @@ export const authOptions: NextAuthOptions = {
         async session({ session, user }) {
             if (session.user && user.id) {
                 session.user.id = user.id;
+                const analyticsUser = user as typeof user & {
+                    plan?: unknown;
+                    createdAt?: unknown;
+                };
+                session.user.plan =
+                    analyticsUser.plan === "Pro" || analyticsUser.plan === "Max"
+                        ? analyticsUser.plan
+                        : "Free";
+                session.user.createdAt =
+                    analyticsUser.createdAt instanceof Date
+                        ? analyticsUser.createdAt.toISOString()
+                        : undefined;
             }
             return session;
         },

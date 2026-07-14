@@ -20,8 +20,10 @@ type LocalizedIntentPageProps = {
   params: Promise<{ locale: string; intent: string }>;
 };
 
+export const dynamicParams = false;
+
 export function generateStaticParams() {
-  return SEO_LOCALES.flatMap((locale) =>
+  return [...SEO_LOCALES, ...Object.keys(localeAliases)].flatMap((locale) =>
     SEARCH_INTENT_SLUGS.map((intent) => ({ locale, intent }))
   );
 }
@@ -55,11 +57,15 @@ export default async function LocalizedIntentPage({
   }
 
   return (
-    <LanguageProvider initialLang={normalizedLocale} forceInitialLang>
-      <MarketingInfoPage
-        content={searchIntentPages[intent]}
-        template={intent === "chatgpt-vs-claude" ? "chatgpt-vs-claude" : undefined}
-      />
-    </LanguageProvider>
+    <div lang={normalizedLocale}>
+      <LanguageProvider initialLang={normalizedLocale} forceInitialLang>
+        <MarketingInfoPage
+          content={searchIntentPages[intent]}
+          template={
+            intent === "chatgpt-vs-claude" ? "chatgpt-vs-claude" : undefined
+          }
+        />
+      </LanguageProvider>
+    </div>
   );
 }

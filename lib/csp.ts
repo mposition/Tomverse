@@ -52,3 +52,24 @@ export const createStrictCsp = (nonce: string) =>
     "report-uri /api/security/csp-report",
     "report-to csp-endpoint",
   ].join("; ");
+
+export const createStaticMarketingCsp = ({
+  scriptHashes = [],
+  styleHashes = [],
+}: {
+  scriptHashes?: string[];
+  styleHashes?: string[];
+} = {}) =>
+  [
+    ...directives(
+      `script-src 'self'${
+        isDevelopment ? " 'unsafe-inline' 'unsafe-eval'" : ""
+      }${scriptHashes.length ? ` ${scriptHashes.join(" ")}` : ""} https://accounts.google.com https://apis.google.com https://www.googletagmanager.com https://challenges.cloudflare.com`,
+      `style-src 'self'${
+        isDevelopment ? " 'unsafe-inline'" : ""
+      }${styleHashes.length ? ` ${styleHashes.join(" ")}` : ""} https://accounts.google.com https://challenges.cloudflare.com`,
+      "style-src-attr 'unsafe-inline'"
+    ),
+    "report-uri /api/security/csp-report",
+    "report-to csp-endpoint",
+  ].join("; ");

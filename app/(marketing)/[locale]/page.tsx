@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { LandingPageContent } from "@/components/marketing/LandingPageContent";
 import { LanguageProvider, type Language } from "@/components/LanguageProvider";
 import {
+  SEO_LOCALES,
   createPageMetadata,
   homeSeoCopy,
   localizedPath,
@@ -32,6 +33,14 @@ const normalizeLocale = (value: string): Language | null => {
 type LocalePageProps = {
   params: Promise<{ locale: string }>;
 };
+
+export const dynamicParams = false;
+
+export function generateStaticParams() {
+  return [...SEO_LOCALES, ...Object.keys(localeAliases)].map((locale) => ({
+    locale,
+  }));
+}
 
 export async function generateMetadata({
   params,
@@ -64,8 +73,10 @@ export default async function LocalizedLandingPage({ params }: LocalePageProps) 
   }
 
   return (
-    <LanguageProvider initialLang={normalizedLocale} forceInitialLang>
-      <LandingPageContent />
-    </LanguageProvider>
+    <div lang={normalizedLocale}>
+      <LanguageProvider initialLang={normalizedLocale} forceInitialLang>
+        <LandingPageContent />
+      </LanguageProvider>
+    </div>
   );
 }

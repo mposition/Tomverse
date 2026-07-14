@@ -35,6 +35,11 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   serverExternalPackages: ["officeparser"],
+  experimental: {
+    sri: {
+      algorithm: "sha384",
+    },
+  },
   async headers() {
     return [
       {
