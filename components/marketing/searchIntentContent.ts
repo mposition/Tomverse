@@ -157,11 +157,12 @@ export const searchIntentPages: Record<
   },
   "chatgpt-vs-claude": {
     en: withCta("en", {
-      metadataTitle: "ChatGPT vs Claude: Compare Responses Directly",
-      metadataDescription: "Compare available OpenAI GPT and Anthropic Claude model responses with the same prompt and practical evaluation criteria in Tomverse AI.",
+      metadataTitle: "ChatGPT vs Claude (2026): Writing, Coding and Documents",
+      metadataDescription: "Compare GPT and Claude for writing, coding, long documents, summaries, and instruction following with prompts, methodology, FAQ, and a side-by-side Tomverse test.",
       eyebrow: "Model comparison guide",
       title: "ChatGPT vs Claude: compare the answer, not the brand",
       description: "OpenAI GPT models and Anthropic Claude models are both broad AI assistants. Their results vary by model version, task, prompt, and context, so a direct test is more useful than a universal ranking.",
+      updated: "Reviewed 14 July 2026 · GPT-5.4 mini and Claude Haiku 4.5",
       sections: [
         { title: "What should you compare?", body: "Define what a good answer means before you run the test: factual accuracy, reasoning clarity, instruction following, writing quality, code correctness, citation quality, or appropriate uncertainty." },
         { title: "Run a fair comparison", body: "Use the same prompt, attachments, and constraints for both models, then review complete answers rather than judging the first sentence.", bullets: ["Remove hints that favor a particular provider.", "Test representative tasks instead of one artificial prompt.", "Verify consequential outputs independently."] },
@@ -170,11 +171,12 @@ export const searchIntentPages: Record<
       ],
     }),
     ko: withCta("ko", {
-      metadataTitle: "ChatGPT와 Claude 답변 직접 비교",
-      metadataDescription: "Tomverse AI에서 같은 질문과 평가 기준으로 사용 가능한 OpenAI GPT 모델과 Anthropic Claude 모델의 답변을 직접 비교하세요.",
+      metadataTitle: "ChatGPT vs Claude 2026: 글쓰기·코딩·긴 문서 비교",
+      metadataDescription: "글쓰기, 코딩, 긴 문서, 요약과 지시 이행을 기준으로 GPT와 Claude를 비교하고 프롬프트, 방법론, FAQ와 사전 선택 체험을 확인하세요.",
       eyebrow: "모델 비교 가이드",
       title: "ChatGPT vs Claude: 브랜드가 아닌 답변을 비교하세요",
       description: "OpenAI GPT와 Anthropic Claude는 모두 범용 AI 모델이지만 결과는 모델 버전, 작업, 질문과 맥락에 따라 달라집니다. 보편적인 순위보다 같은 조건의 직접 비교가 더 유용합니다.",
+      updated: "2026년 7월 14일 검토 · GPT-5.4 mini 및 Claude Haiku 4.5",
       sections: [
         { title: "무엇을 비교해야 하나요?", body: "테스트 전에 좋은 답변의 기준을 정하세요. 사실 정확성, 추론의 명확성, 지시 이행, 글 품질, 코드 정확성, 출처와 적절한 불확실성 표현 등을 비교할 수 있습니다." },
         { title: "공정하게 비교하는 방법", body: "두 모델에 같은 질문, 첨부파일과 제약조건을 제공하고 첫 문장이 아닌 전체 답변을 검토하세요.", bullets: ["특정 공급자에 유리한 힌트를 제거합니다.", "하나의 인위적인 질문보다 실제 대표 작업을 테스트합니다.", "중요한 결과는 독립적으로 다시 검증합니다."] },

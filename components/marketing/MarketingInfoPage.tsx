@@ -4,6 +4,7 @@ import Link from "next/link";
 import { ArrowRight, CheckCircle2 } from "lucide-react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
+import { ChatGptVsClaudeGuide } from "./ChatGptVsClaudeGuide";
 
 export type MarketingInfoSection = {
   title: string;
@@ -25,8 +26,10 @@ export type MarketingInfoCopy = {
 
 export function MarketingInfoPage({
   content,
+  template,
 }: {
   content: { en: MarketingInfoCopy } & Partial<Record<Language, MarketingInfoCopy>>;
+  template?: "chatgpt-vs-claude";
 }) {
   const { lang } = useLanguage();
   const page = content[lang] ?? content.en;
@@ -43,33 +46,39 @@ export function MarketingInfoPage({
           {page.updated && <p className="mt-4 text-sm font-semibold text-zinc-500 dark:text-zinc-400">{page.updated}</p>}
         </div>
 
-        <div className="mt-12 grid gap-5">
-          {page.sections.map((section) => (
-            <article key={section.title} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-6 dark:border-zinc-800 dark:bg-zinc-900/40">
-              <h2 className="text-xl font-black">{section.title}</h2>
-              <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">{section.body}</p>
-              {section.bullets && (
-                <ul className="mt-5 grid gap-3">
-                  {section.bullets.map((bullet) => (
-                    <li key={bullet} className="flex gap-3 text-sm font-semibold leading-6 text-zinc-700 dark:text-zinc-200">
-                      <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
-                      {bullet}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </article>
-          ))}
-        </div>
+        {template === "chatgpt-vs-claude" ? (
+          <ChatGptVsClaudeGuide />
+        ) : (
+          <>
+            <div className="mt-12 grid gap-5">
+              {page.sections.map((section) => (
+                <article key={section.title} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-6 dark:border-zinc-800 dark:bg-zinc-900/40">
+                  <h2 className="text-xl font-black">{section.title}</h2>
+                  <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">{section.body}</p>
+                  {section.bullets && (
+                    <ul className="mt-5 grid gap-3">
+                      {section.bullets.map((bullet) => (
+                        <li key={bullet} className="flex gap-3 text-sm font-semibold leading-6 text-zinc-700 dark:text-zinc-200">
+                          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+                          {bullet}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </article>
+              ))}
+            </div>
 
-        {page.cta && (
-          <Link
-            href={page.cta.href}
-            className="mt-10 inline-flex h-12 items-center gap-2 rounded-xl bg-blue-600 px-6 text-sm font-black text-white transition hover:bg-blue-500"
-          >
-            {page.cta.label}
-            <ArrowRight className="h-4 w-4" />
-          </Link>
+            {page.cta && (
+              <Link
+                href={page.cta.href}
+                className="mt-10 inline-flex h-12 items-center gap-2 rounded-xl bg-blue-600 px-6 text-sm font-black text-white transition hover:bg-blue-500"
+              >
+                {page.cta.label}
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+            )}
+          </>
         )}
       </section>
 

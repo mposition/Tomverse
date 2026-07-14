@@ -251,6 +251,7 @@ export default function Home() {
   const comparisonCompletionsRef = useRef<Map<string, Set<string>>>(new Map());
   const comparisonTrackedRef = useRef<Set<string>>(new Set());
   const promptCountsRef = useRef<Map<string, number>>(new Map());
+  const comparisonPresetAppliedRef = useRef(false);
 
   const [isPrivateMode, setIsPrivateMode] = useState(false);
 
@@ -489,7 +490,9 @@ export default function Home() {
             !isUserSettingsLoaded ||
             conversations.length === 0 ||
             currentChatId ||
-            isInitialSelectedRef.current
+            isInitialSelectedRef.current ||
+            comparisonPresetAppliedRef.current ||
+            new URLSearchParams(window.location.search).has("models")
         ) return;
 
         const firstConversation = conversations[0];
@@ -859,6 +862,82 @@ export default function Home() {
       }
     }, 250);
   };  
+
+  useEffect(() => {
+    if (
+      comparisonPresetAppliedRef.current ||
+      status === "loading" ||
+      !isUserSettingsLoaded ||
+      (isGuestMode && !isGuestSettingsLoaded)
+    ) {
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    const requestedModels = uniqueStrings(
+      (params.get("models") || "")
+        .split(",")
+        .map((modelId) => modelId.trim())
+        .filter(isEnabledModelId)
+    ).slice(0, APP_DEFAULTS.maxSelectedModels);
+    const requestedPrompt = (params.get("prompt") || "").trim().slice(0, 1200);
+
+    if (requestedModels.length === 0 && !requestedPrompt) {
+      comparisonPresetAppliedRef.current = true;
+      return;
+    }
+
+    let cancelled = false;
+    const presetModels = isGuestMode
+      ? clampGuestSelectedModels(requestedModels)
+      : clampSelectedModels(requestedModels).slice(0, maxSelectableModels);
+
+    queueMicrotask(() => {
+      if (cancelled) return;
+      comparisonPresetAppliedRef.current = true;
+      if (presetModels.length > 0) {
+        setSelectedModels(presetModels);
+        setDisabledPanels([]);
+        if (currentChatId) {
+          setConversations((current) =>
+            current.map((conversation) =>
+              conversation.id === currentChatId
+                ? {
+                    ...conversation,
+                    selectedModels: presetModels,
+                    disabledPanels: [],
+                  }
+                : conversation
+            )
+          );
+        }
+      }
+      if (requestedPrompt) {
+        setInputValue((current) => current || requestedPrompt);
+      }
+
+      params.delete("models");
+      params.delete("prompt");
+      params.delete("source");
+      const nextSearch = params.toString();
+      window.history.replaceState(
+        null,
+        "",
+        `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`
+      );
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    currentChatId,
+    isGuestMode,
+    isGuestSettingsLoaded,
+    isUserSettingsLoaded,
+    maxSelectableModels,
+    status,
+  ]);
   
   const handleGlobalSubmit = async () => {
     const trimmed = inputValue.trim();

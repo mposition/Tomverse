@@ -652,6 +652,41 @@ const checks = [
       source.includes("content.steps : content.guestSteps") &&
       source.includes("3-model comparison, files, and sharing"),
   },
+  {
+    name: "ChatGPT versus Claude search page contains a full comparison guide and prepared CTA",
+    file: "components/marketing/ChatGptVsClaudeGuide.tsx",
+    test: (source) =>
+      source.includes('id="task-comparison"') &&
+      source.includes('id="methodology"') &&
+      source.includes('id="prompt-examples"') &&
+      source.includes('id="comparison-faq"') &&
+      source.includes('"Writing"') &&
+      source.includes('"Coding"') &&
+      source.includes('"Long documents"') &&
+      source.includes('"Summarization"') &&
+      source.includes('"Instruction following"') &&
+      source.includes('reviewedDate: "14 July 2026"') &&
+      source.includes('models: comparisonModelIds.join(",")') &&
+      source.includes('source: "chatgpt-vs-claude"') &&
+      source.includes('/model-icons/chatgpt.png') &&
+      source.includes('/model-icons/claude.png') &&
+      read("app/chatgpt-vs-claude/page.tsx").includes(
+        'template="chatgpt-vs-claude"'
+      ),
+  },
+  {
+    name: "Prepared chat comparison validates and bounds URL presets",
+    file: "app/chat/page.tsx",
+    test: (source) =>
+      source.includes("comparisonPresetAppliedRef") &&
+      source.includes(".filter(isEnabledModelId)") &&
+      source.includes(".slice(0, APP_DEFAULTS.maxSelectedModels)") &&
+      source.includes('.trim().slice(0, 1200)') &&
+      source.includes("clampGuestSelectedModels(requestedModels)") &&
+      source.includes("clampSelectedModels(requestedModels).slice(0, maxSelectableModels)") &&
+      source.includes('params.delete("models")') &&
+      source.includes('params.delete("prompt")'),
+  },
 ];
 
 const failures = [];

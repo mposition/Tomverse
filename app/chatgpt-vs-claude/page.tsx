@@ -15,7 +15,10 @@ export const metadata = createPageMetadata({
 export default function ChatGptVsClaudePage() {
   return (
     <LanguageProvider initialLang="en" forceInitialLang>
-      <MarketingInfoPage content={searchIntentPages["chatgpt-vs-claude"]} />
+      <MarketingInfoPage
+        content={searchIntentPages["chatgpt-vs-claude"]}
+        template="chatgpt-vs-claude"
+      />
     </LanguageProvider>
   );
 }

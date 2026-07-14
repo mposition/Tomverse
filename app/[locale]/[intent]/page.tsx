@@ -56,7 +56,10 @@ export default async function LocalizedIntentPage({
 
   return (
     <LanguageProvider initialLang={normalizedLocale} forceInitialLang>
-      <MarketingInfoPage content={searchIntentPages[intent]} />
+      <MarketingInfoPage
+        content={searchIntentPages[intent]}
+        template={intent === "chatgpt-vs-claude" ? "chatgpt-vs-claude" : undefined}
+      />
     </LanguageProvider>
   );
 }
