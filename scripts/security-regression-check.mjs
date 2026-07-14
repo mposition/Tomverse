@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 
 const read = (path) => readFileSync(path, "utf8");
 
@@ -686,6 +686,45 @@ const checks = [
       source.includes("clampSelectedModels(requestedModels).slice(0, maxSelectableModels)") &&
       source.includes('params.delete("models")') &&
       source.includes('params.delete("prompt")'),
+  },
+  {
+    name: "Public product proof metrics are thresholded aggregate counts only",
+    file: "app/api/public/proof-metrics/route.ts",
+    test: (source) =>
+      source.includes("PUBLIC_COUNT_THRESHOLD = 20") &&
+      source.includes("productAnalyticsEvent.count") &&
+      source.includes('eventName: "multi_model_compare_completed"') &&
+      source.includes('eventName: "file_attached"') &&
+      source.includes("Math.floor(count / 10) * 10") &&
+      source.includes('"Cache-Control": "public, s-maxage=300') &&
+      !source.includes("findMany") &&
+      !source.includes("userId") &&
+      !source.includes("anonymousIdHash"),
+  },
+  {
+    name: "Landing product proof uses a real UI recording and permission-safe evidence",
+    file: "components/marketing/ProductProofSection.tsx",
+    test: (source) => {
+      const capture = read("scripts/capture-marketing-proof.mjs");
+      return (
+        source.includes("/marketing-proof/three-model-comparison.webm") &&
+        source.includes('fetch("/api/public/proof-metrics"') &&
+        source.includes("controlled demo data") &&
+        source.includes("18-page readiness brief") &&
+        source.includes("explicit permission") &&
+        read("components/marketing/LandingPageContent.tsx").includes(
+          "<ProductProofSection />"
+        ) &&
+        capture.includes('page.route("**/api/chat"') &&
+        capture.includes('"gpt-5-4-mini"') &&
+        capture.includes('"claude-haiku-4-5"') &&
+        capture.includes('"gemini-2-5-flash"') &&
+        !capture.includes("api.openai.com") &&
+        !capture.includes("api.anthropic.com") &&
+        statSync("public/marketing-proof/three-model-comparison.webm").size >
+          100_000
+      );
+    },
   },
 ];
 

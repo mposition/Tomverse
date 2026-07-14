@@ -31,6 +31,7 @@ import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
 import { usePublicBilling } from "@/components/marketing/usePublicBilling";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { statusLinkLabel, statusNewTabCopy } from "./statusLinkCopy";
+import { ProductProofSection } from "./ProductProofSection";
 
 const annualLabelByLanguage: Partial<Record<Language, { annual: string; save: string }>> = {
   en: { annual: "Annual", save: "Save 20%" },
@@ -646,6 +647,8 @@ export function LandingPageContent() {
           </div>
         </div>
       </section>
+
+      <ProductProofSection />
 
       <section id="features" className="border-y border-zinc-200 bg-zinc-50 py-20 dark:border-zinc-800 dark:bg-zinc-900/30">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
