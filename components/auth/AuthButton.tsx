@@ -739,17 +739,17 @@ export function AuthButton() {
                                         {accountUsage && (
                                             <section className="grid gap-3 sm:grid-cols-2">
                                                 <div className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60">
-                                                    <p className="text-xs font-bold uppercase tracking-wide text-zinc-400">{t("usage.todayMessages")}</p>
+                                                    <p className="text-xs font-bold uppercase tracking-wide text-zinc-400">{t("usage.todayCredits")}</p>
                                                     <p className="mt-2 text-lg font-black text-zinc-900 dark:text-zinc-100">
-                                                        {accountUsage.limits.messagesDay <= 0
+                                                        {accountUsage.limits.creditsDay <= 0
                                                             ? t("usage.unlimited")
-                                                            : `${accountUsage.usage.messagesDay}/${accountUsage.limits.messagesDay}`}
+                                                            : `${accountUsage.usage.creditsDay}/${accountUsage.limits.creditsDay}`}
                                                     </p>
                                                 </div>
                                                 <div className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60">
-                                                    <p className="text-xs font-bold uppercase tracking-wide text-zinc-400">{t("usage.monthMessages")}</p>
+                                                    <p className="text-xs font-bold uppercase tracking-wide text-zinc-400">{t("usage.monthCredits")}</p>
                                                     <p className="mt-2 text-lg font-black text-zinc-900 dark:text-zinc-100">
-                                                        {accountUsage.usage.messagesMonth}/{accountUsage.limits.messagesMonth}
+                                                        {accountUsage.usage.creditsMonth}/{accountUsage.limits.creditsMonth}
                                                     </p>
                                                 </div>
                                             </section>

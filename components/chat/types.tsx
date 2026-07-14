@@ -36,6 +36,7 @@ export {
     ENABLED_MODELS,
     getEnabledModel,
     getModel,
+    getModelUsageProfile,
     isEnabledModelId,
 } from "@/lib/models";
 export type {
@@ -44,4 +45,5 @@ export type {
     ModelId,
     ModelStatus,
     ModelTier,
+    ModelUsageCategory,
 } from "@/lib/models";

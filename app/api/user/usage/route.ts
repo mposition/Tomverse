@@ -4,7 +4,10 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { prisma } from "@/lib/prisma";
 import { authOptions } from "@/lib/auth";
-import { getUserChatUsageKey } from "@/lib/chatSecurity";
+import {
+  getPlanEstimatedCostLimits,
+  getUserChatUsageKey,
+} from "@/lib/chatSecurity";
 import {
   apiSecurityResponse,
   consumeApiRateLimit,
@@ -61,6 +64,7 @@ export async function GET(req: Request) {
           { period: "tokens-month", periodStart: monthStart },
           { period: "cost-day", periodStart: dayStart },
           { period: "cost-month", periodStart: monthStart },
+          { period: "pro-model-month", periodStart: monthStart },
         ],
       },
       select: { period: true, count: true },
@@ -70,13 +74,21 @@ export async function GET(req: Request) {
 
     const plan = normalizePlan(user?.plan);
     const billingPlan = await getBillingPlanByTier(plan);
+    const estimatedCostLimits = getPlanEstimatedCostLimits(plan);
     const limits = {
-      messagesDay: billingPlan.dailyMessageLimit,
-      messagesMonth: billingPlan.monthlyMessageLimit,
+      creditsDay: billingPlan.dailyMessageLimit,
+      creditsMonth: billingPlan.monthlyMessageLimit,
+      proModelResponsesMonth:
+        plan === "Free"
+          ? positiveInteger(
+              process.env.CHAT_FREE_PRO_MODEL_RESPONSES_PER_MONTH,
+              30
+            )
+          : 0,
       tokensDay: positiveInteger(process.env.CHAT_USER_TOKENS_PER_DAY, 1_000_000),
       tokensMonth: positiveInteger(process.env.CHAT_USER_TOKENS_PER_MONTH, 20_000_000),
-      costDay: positiveInteger(process.env.CHAT_USER_COST_MICROUSD_PER_DAY, 2_000_000),
-      costMonth: positiveInteger(process.env.CHAT_USER_COST_MICROUSD_PER_MONTH, 20_000_000),
+      costDay: estimatedCostLimits.day,
+      costMonth: estimatedCostLimits.month,
       maxModels: effectivePlanModelLimit(billingPlan),
       allowAttachments: billingPlan.allowAttachments,
       allowSharing: billingPlan.allowSharing,
@@ -93,8 +105,9 @@ export async function GET(req: Request) {
       },
       generatedAt: now.toISOString(),
       usage: {
-        messagesDay: count("day"),
-        messagesMonth: count("month"),
+        creditsDay: count("day"),
+        creditsMonth: count("month"),
+        proModelResponsesMonth: count("pro-model-month"),
         tokensDay: count("tokens-day"),
         tokensMonth: count("tokens-month"),
         costDay: count("cost-day"),

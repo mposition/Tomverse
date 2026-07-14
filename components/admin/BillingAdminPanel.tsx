@@ -183,7 +183,7 @@ function PlanEditor({
             }
           />
         </Field>
-        <Field label="Daily messages (0 = unlimited)">
+        <Field label="Daily AI response credits (0 = no daily guardrail)">
           <TextInput
             type="number"
             min="0"
@@ -193,7 +193,7 @@ function PlanEditor({
             }
           />
         </Field>
-        <Field label="Monthly messages">
+        <Field label="Monthly AI response credits">
           <TextInput
             type="number"
             min="0"

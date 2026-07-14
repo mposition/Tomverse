@@ -13,6 +13,13 @@ export type AiProvider =
 
 export type ModelTier = "Free" | "Pro" | "Max";
 export type ModelStatus = "enabled" | "disabled" | "coming-soon";
+export type ModelUsageClass = "standard" | "search" | "deep-research";
+export type ModelUsageCategory =
+    | "Standard"
+    | "Advanced"
+    | "Premium"
+    | "Reasoning"
+    | "Research";
 
 export type AiModel = {
     id: string;
@@ -24,6 +31,7 @@ export type AiModel = {
     enabled: boolean;
     status: ModelStatus;
     reasoning?: "none" | "low" | "medium" | "high";
+    usageClass?: ModelUsageClass;
 };
 
 export const DEFAULT_MODEL_ID = "gpt-5-4-mini";
@@ -38,7 +46,7 @@ export const AVAILABLE_MODELS = [
     { id: "claude-sonnet-5", name: "Claude Sonnet 5", apiModel: "claude-sonnet-5", provider: "anthropic", icon: "🧠", tier: "Pro", enabled: true, status: "enabled" },
     { id: "claude-haiku-4-5", name: "Claude Haiku 4.5", apiModel: "claude-haiku-4-5-20251001", provider: "anthropic", icon: "🧠", tier: "Free", enabled: true, status: "enabled" },
 
-    { id: "gemini-3-5-flash", name: "Gemini 3.5 Flash", apiModel: "gemini-3.5-flash", provider: "google", icon: "✨", tier: "Pro", enabled: true, status: "enabled" },
+    { id: "gemini-3-5-flash", name: "Gemini 3.5 Flash", apiModel: "gemini-3.5-flash", provider: "google", icon: "✨", tier: "Pro", enabled: true, status: "enabled", usageClass: "standard" },
     { id: "gemini-3-1-pro", name: "Gemini 3.1 Pro", apiModel: "gemini-3.1-pro-preview", provider: "google", icon: "✨", tier: "Max", enabled: true, status: "enabled" },
     { id: "gemini-2-5-pro", name: "Gemini 2.5 Pro", apiModel: "gemini-2.5-pro", provider: "google", icon: "✨", tier: "Pro", enabled: true, status: "enabled" },
     { id: "gemini-2-5-flash", name: "Gemini 3.1 Flash-Lite", apiModel: "gemini-3.1-flash-lite", provider: "google", icon: "✨", tier: "Free", enabled: true, status: "enabled" },
@@ -51,7 +59,7 @@ export const AVAILABLE_MODELS = [
     { id: "grok-3", name: "Grok 3", apiModel: "grok-3", provider: "xai", icon: "𝕏", tier: "Pro", enabled: true, status: "enabled" },
     { id: "grok-3-mini", name: "Grok 3 Mini", apiModel: "grok-3-mini", provider: "xai", icon: "𝕏", tier: "Free", enabled: true, status: "enabled" },
     { id: "deepseek-v4-flash", name: "DeepSeek-V4 Flash", apiModel: "deepseek-v4-flash", provider: "deepseek", icon: "DS", tier: "Free", enabled: true, status: "enabled" },
-    { id: "deepseek-v4-pro", name: "DeepSeek-V4 Pro", apiModel: "deepseek-v4-pro", provider: "deepseek", icon: "DS", tier: "Pro", enabled: true, status: "enabled" },
+    { id: "deepseek-v4-pro", name: "DeepSeek-V4 Pro", apiModel: "deepseek-v4-pro", provider: "deepseek", icon: "DS", tier: "Pro", enabled: true, status: "enabled", usageClass: "standard" },
     { id: "deepseek-r1", name: "DeepSeek R1 Reasoning", apiModel: "deepseek-reasoner", provider: "deepseek", icon: "DS", tier: "Pro", enabled: true, status: "enabled", reasoning: "high" },
     { id: "mistral-small-4", name: "Mistral Small 4", apiModel: "mistral-small-latest", provider: "mistral", icon: "M", tier: "Free", enabled: true, status: "enabled" },
     { id: "mistral-large-3", name: "Mistral Large 3", apiModel: "mistral-large-latest", provider: "mistral", icon: "M", tier: "Max", enabled: true, status: "enabled" },
@@ -62,10 +70,10 @@ export const AVAILABLE_MODELS = [
     { id: "qwen3.7-plus", name: "Qwen 3.7 Plus", apiModel: "qwen3.7-plus", provider: "qwen", icon: "QW", tier: "Pro", enabled: true, status: "enabled" },
     { id: "qwen3.6-flash", name: "Qwen 3.6", apiModel: "qwen3.6-flash", provider: "qwen", icon: "QW", tier: "Free", enabled: true, status: "enabled" },
     { id: "glm-5.2", name: "GLM 5.2", apiModel: "glm-5.2", provider: "zhipu", icon: "Z", tier: "Free", enabled: true, status: "enabled" },
-    { id: "perplexity/sonar", name: "Perplexity Sonar", apiModel: "sonar", provider: "perplexity", icon: "P", tier: "Pro", enabled: true, status: "enabled" },
-    { id: "perplexity/sonar-pro", name: "Perplexity Sonar Pro", apiModel: "sonar-pro", provider: "perplexity", icon: "P", tier: "Pro", enabled: true, status: "enabled" },
-    { id: "perplexity/sonar-reasoning-pro", name: "Perplexity Sonar Reasoning Pro", apiModel: "sonar-reasoning-pro", provider: "perplexity", icon: "P", tier: "Max", enabled: true, status: "enabled", reasoning: "high" },
-    { id: "perplexity/sonar-deep-research", name: "Perplexity Sonar Deep Research", apiModel: "sonar-deep-research", provider: "perplexity", icon: "P", tier: "Max", enabled: true, status: "enabled", reasoning: "high" },
+    { id: "perplexity/sonar", name: "Perplexity Sonar", apiModel: "sonar", provider: "perplexity", icon: "P", tier: "Pro", enabled: true, status: "enabled", usageClass: "search" },
+    { id: "perplexity/sonar-pro", name: "Perplexity Sonar Pro", apiModel: "sonar-pro", provider: "perplexity", icon: "P", tier: "Pro", enabled: true, status: "enabled", usageClass: "search" },
+    { id: "perplexity/sonar-reasoning-pro", name: "Perplexity Sonar Reasoning Pro", apiModel: "sonar-reasoning-pro", provider: "perplexity", icon: "P", tier: "Max", enabled: true, status: "enabled", reasoning: "high", usageClass: "search" },
+    { id: "perplexity/sonar-deep-research", name: "Perplexity Sonar Deep Research", apiModel: "sonar-deep-research", provider: "perplexity", icon: "P", tier: "Max", enabled: true, status: "enabled", reasoning: "high", usageClass: "deep-research" },
 ] as const satisfies readonly AiModel[];
 
 export type ModelId = (typeof AVAILABLE_MODELS)[number]["id"];
@@ -96,6 +104,85 @@ export const getModel = (modelId: string) => modelMap.get(modelId);
 export const getEnabledModel = (modelId: string) => {
     const model = getModel(modelId);
     return model?.enabled ? model : undefined;
+};
+
+export const getModelUsageProfile = (
+    model: Pick<AiModel, "tier" | "reasoning" | "usageClass">
+): { category: ModelUsageCategory; credits: number } => {
+    if (model.usageClass === "deep-research") {
+        return { category: "Research", credits: 30 };
+    }
+    if (model.usageClass === "search") {
+        return { category: "Research", credits: 20 };
+    }
+    if (model.reasoning && model.reasoning !== "none") {
+        return {
+            category: "Reasoning",
+            credits: model.tier === "Max" ? 16 : 12,
+        };
+    }
+    if (model.tier === "Free" || model.usageClass === "standard") {
+        return { category: "Standard", credits: 1 };
+    }
+    if (model.tier === "Max") return { category: "Premium", credits: 8 };
+    return { category: "Advanced", credits: 4 };
+};
+
+export const getModelUsageCredits = (
+    model: Pick<AiModel, "tier" | "reasoning" | "usageClass">
+) => getModelUsageProfile(model).credits;
+
+export const getInputCreditMultiplier = (estimatedInputTokens: number) => {
+    if (estimatedInputTokens > 100_000) return 3;
+    if (estimatedInputTokens > 50_000) return 2;
+    if (estimatedInputTokens > 16_000) return 1.5;
+    return 1;
+};
+
+export const getWeightedUsageCredits = (
+    model: Pick<AiModel, "tier" | "reasoning" | "usageClass">,
+    estimatedInputTokens: number
+) =>
+    Math.ceil(
+        getModelUsageCredits(model) *
+            getInputCreditMultiplier(estimatedInputTokens)
+    );
+
+export type UsageCreditOutcome =
+    | "completed"
+    | "cancelled"
+    | "failed"
+    | "empty";
+
+export const getSettledUsageCredits = ({
+    reservedCredits,
+    reservedInputTokens,
+    reservedOutputTokens,
+    actualInputTokens,
+    actualOutputTokens,
+    outcome,
+}: {
+    reservedCredits: number;
+    reservedInputTokens: number;
+    reservedOutputTokens: number;
+    actualInputTokens: number;
+    actualOutputTokens: number;
+    outcome: UsageCreditOutcome;
+}) => {
+    if (outcome === "completed") return reservedCredits;
+    if (outcome !== "cancelled" || actualOutputTokens <= 16) return 0;
+
+    const reservedTokens = reservedInputTokens + reservedOutputTokens;
+    const actualTokens = actualInputTokens + actualOutputTokens;
+    return Math.min(
+        reservedCredits,
+        Math.max(
+            1,
+            Math.ceil(
+                reservedCredits * (actualTokens / Math.max(1, reservedTokens))
+            )
+        )
+    );
 };
 
 export type ModelBillingProfile = {

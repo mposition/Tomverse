@@ -5,6 +5,8 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
     getModelBillingProfile,
+    getSettledUsageCredits,
+    getWeightedUsageCredits,
     type AiModel,
     type ModelTier,
 } from "@/lib/models";
@@ -38,6 +40,8 @@ export type ChatAccess = {
 
 export type ChatBudget = {
     modelId: string;
+    modelTier: ModelTier;
+    usageCredits: number;
     inputTokens: number;
     maxOutputTokens: number;
     inputUsdPerMillionTokens: number;
@@ -50,13 +54,14 @@ type ReservationEntry = {
     period: string;
     periodStart: Date;
     amount: number;
-    metric: "tokens" | "cost";
+    metric: "tokens" | "cost" | "credits" | "pro-response";
 };
 
 export type ChatUsageReservation = {
     modelId: string;
     provider: AiModel["provider"];
     entries: ReservationEntry[];
+    usageCredits: number;
     inputTokens: number;
     maxOutputTokens: number;
     inputUsdPerMillionTokens: number;
@@ -98,6 +103,39 @@ const configuredTier = (
     value === "Free" || value === "Pro" || value === "Max"
         ? value
         : fallback;
+
+export const getPlanEstimatedCostLimits = (plan: ModelTier) => ({
+    day:
+        plan === "Max"
+            ? positiveInteger(
+                  process.env.CHAT_MAX_COST_MICROUSD_PER_DAY,
+                  1_500_000
+              )
+            : plan === "Pro"
+              ? positiveInteger(
+                    process.env.CHAT_PRO_COST_MICROUSD_PER_DAY,
+                    750_000
+                )
+              : positiveInteger(
+                    process.env.CHAT_FREE_COST_MICROUSD_PER_DAY,
+                    100_000
+                ),
+    month:
+        plan === "Max"
+            ? positiveInteger(
+                  process.env.CHAT_MAX_COST_MICROUSD_PER_MONTH,
+                  9_000_000
+              )
+            : plan === "Pro"
+              ? positiveInteger(
+                    process.env.CHAT_PRO_COST_MICROUSD_PER_MONTH,
+                    4_500_000
+                )
+              : positiveInteger(
+                    process.env.CHAT_FREE_COST_MICROUSD_PER_MONTH,
+                    500_000
+                ),
+});
 
 export const assertModelAccess = (access: Pick<ChatAccess, "kind" | "plan">, model: AiModel) => {
     const maximumTier =
@@ -142,6 +180,8 @@ export const createChatBudget = (
 
     return {
         modelId: model.id,
+        modelTier: model.tier,
+        usageCredits: getWeightedUsageCredits(model, estimatedInputTokens),
         inputTokens: estimatedInputTokens,
         maxOutputTokens: profile.maxOutputTokens,
         inputUsdPerMillionTokens: profile.inputUsdPerMillionTokens,
@@ -162,20 +202,30 @@ const limitsFor = (access: Pick<ChatAccess, "kind" | "plan" | "planLimits">): Li
     const plan = access.plan || "Free";
     const minuteLimit = positiveInteger(process.env.CHAT_USER_PER_MINUTE, 20);
     const monthLimit =
-        access.planLimits?.monthlyMessageLimit ?? (plan === "Max"
-            ? positiveInteger(process.env.CHAT_MAX_PER_MONTH, 50_000)
+        access.planLimits?.monthlyMessageLimit ??
+        (plan === "Max"
+            ? positiveInteger(process.env.CHAT_MAX_PER_MONTH, 8_000)
             : plan === "Pro"
-              ? positiveInteger(process.env.CHAT_PRO_PER_MONTH, positiveInteger(process.env.CHAT_USER_PER_MONTH, 10_000))
-              : positiveInteger(process.env.CHAT_FREE_PER_MONTH, 2_000));
+              ? positiveInteger(
+                    process.env.CHAT_PRO_PER_MONTH,
+                    positiveInteger(process.env.CHAT_USER_PER_MONTH, 3_000)
+                )
+              : positiveInteger(process.env.CHAT_FREE_PER_MONTH, 300));
     const limits: LimitRule[] = [{ period: "minute", limit: minuteLimit }];
     if (monthLimit > 0) {
         limits.push({ period: "month", limit: monthLimit });
     }
 
     const dayLimit =
-        access.planLimits?.dailyMessageLimit ?? (plan === "Pro"
-            ? positiveInteger(process.env.CHAT_PRO_PER_DAY, positiveInteger(process.env.CHAT_USER_PER_DAY, 500))
-            : positiveInteger(process.env.CHAT_FREE_PER_DAY, 100));
+        access.planLimits?.dailyMessageLimit ??
+        (plan === "Max"
+            ? 0
+            : plan === "Pro"
+              ? positiveInteger(
+                    process.env.CHAT_PRO_PER_DAY,
+                    positiveInteger(process.env.CHAT_USER_PER_DAY, 150)
+                )
+              : positiveInteger(process.env.CHAT_FREE_PER_DAY, 30));
 
     if (dayLimit > 0) {
         limits.push({
@@ -395,24 +445,20 @@ export const acquireChatAccess = async (
                       ),
                   },
               ];
+    const plan = access.plan || "Free";
+    const estimatedCostLimits = getPlanEstimatedCostLimits(plan);
     const costLimits =
         access.kind === "user"
             ? [
                   {
                       period: "cost-day",
                       start: periodStart("day", now),
-                      limit: positiveInteger(
-                          process.env.CHAT_USER_COST_MICROUSD_PER_DAY,
-                          2_000_000
-                      ),
+                      limit: estimatedCostLimits.day,
                   },
                   {
                       period: "cost-month",
                       start: periodStart("month", now),
-                      limit: positiveInteger(
-                          process.env.CHAT_USER_COST_MICROUSD_PER_MONTH,
-                          20_000_000
-                      ),
+                      limit: estimatedCostLimits.month,
                   },
               ]
             : [
@@ -446,21 +492,66 @@ export const acquireChatAccess = async (
 
     await prisma.$transaction(async (tx) => {
         for (const rule of limitsFor(access)) {
+            const amount =
+                rule.period === "minute" ? 1 : budget.usageCredits;
             const allowed = await incrementUsage(
                 tx,
                 access.subjectKey,
                 rule.period,
                 periodStart(rule.period, now),
-                rule.limit
+                rule.limit,
+                amount
             );
             if (!allowed) {
                 throw new ChatAccessError(
                     429,
                     "CHAT_QUOTA_EXCEEDED",
-                    "Chat usage limit exceeded.",
+                    "AI response credit limit exceeded.",
                     retryAfterFor(rule.period, now)
                 );
             }
+            if (rule.period !== "minute") {
+                reservationEntries.push({
+                    key: access.subjectKey,
+                    period: rule.period,
+                    periodStart: periodStart(rule.period, now),
+                    amount,
+                    metric: "credits",
+                });
+            }
+        }
+
+        if (
+            access.kind === "user" &&
+            (access.plan || "Free") === "Free" &&
+            budget.modelTier === "Pro"
+        ) {
+            const freeProMonthlyLimit = positiveInteger(
+                process.env.CHAT_FREE_PRO_MODEL_RESPONSES_PER_MONTH,
+                30
+            );
+            const allowed = await incrementUsage(
+                tx,
+                access.subjectKey,
+                "pro-model-month",
+                periodStart("month", now),
+                freeProMonthlyLimit
+            );
+            if (!allowed) {
+                throw new ChatAccessError(
+                    429,
+                    "FREE_PRO_MODEL_QUOTA_EXCEEDED",
+                    "The Free plan includes up to 30 Pro-model responses per month.",
+                    retryAfterFor("month", now)
+                );
+            }
+            reservationEntries.push({
+                key: access.subjectKey,
+                period: "pro-model-month",
+                periodStart: periodStart("month", now),
+                amount: 1,
+                metric: "pro-response",
+            });
         }
 
         const ipAllowed = await incrementUsage(
@@ -487,7 +578,8 @@ export const acquireChatAccess = async (
                     access.ipKey,
                     `guest-ip-${rule.period}`,
                     periodStart(rule.period, now),
-                    rule.limit * 3
+                    rule.limit * 3,
+                    budget.usageCredits
                 );
                 if (!allowed) {
                     throw new ChatAccessError(
@@ -497,6 +589,13 @@ export const acquireChatAccess = async (
                         retryAfterFor(rule.period, now)
                     );
                 }
+                reservationEntries.push({
+                    key: access.ipKey,
+                    period: `guest-ip-${rule.period}`,
+                    periodStart: periodStart(rule.period, now),
+                    amount: budget.usageCredits,
+                    metric: "credits",
+                });
             }
         }
 
@@ -699,6 +798,7 @@ export const acquireChatAccess = async (
             modelId: budget.modelId,
             provider: budget.provider,
             entries: reservationEntries,
+            usageCredits: budget.usageCredits,
             inputTokens: budget.inputTokens,
             maxOutputTokens: budget.maxOutputTokens,
             inputUsdPerMillionTokens: budget.inputUsdPerMillionTokens,
@@ -709,7 +809,11 @@ export const acquireChatAccess = async (
 
 export const settleChatUsage = async (
     reservation: ChatUsageReservation,
-    usage: { inputTokens?: number; outputTokens?: number }
+    usage: {
+        inputTokens?: number;
+        outputTokens?: number;
+        outcome: "completed" | "cancelled" | "failed" | "empty";
+    }
 ) => {
     const actualInput = Number.isSafeInteger(usage.inputTokens)
         ? Math.max(0, usage.inputTokens!)
@@ -718,6 +822,14 @@ export const settleChatUsage = async (
         ? Math.max(0, usage.outputTokens!)
         : reservation.maxOutputTokens;
     const actualTokens = actualInput + actualOutput;
+    const actualCredits = getSettledUsageCredits({
+        reservedCredits: reservation.usageCredits,
+        reservedInputTokens: reservation.inputTokens,
+        reservedOutputTokens: reservation.maxOutputTokens,
+        actualInputTokens: actualInput,
+        actualOutputTokens: actualOutput,
+        outcome: usage.outcome,
+    });
     const actualCost =
         microdollarsFor(
             actualInput,
@@ -730,7 +842,16 @@ export const settleChatUsage = async (
 
     await prisma.$transaction(
         reservation.entries.map((entry) => {
-            const actual = entry.metric === "tokens" ? actualTokens : actualCost;
+            const actual =
+                entry.metric === "tokens"
+                    ? actualTokens
+                    : entry.metric === "cost"
+                      ? actualCost
+                      : entry.metric === "credits"
+                        ? actualCredits
+                        : actualCredits > 0
+                          ? 1
+                          : 0;
             const difference = actual - entry.amount;
             return prisma.chatUsageBucket.updateMany({
                 where: {

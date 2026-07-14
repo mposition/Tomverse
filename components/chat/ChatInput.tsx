@@ -19,7 +19,12 @@ import {
   Star,
   X,
 } from "lucide-react";
-import { AVAILABLE_MODELS, MAX_SELECTED_MODELS, type ChatAttachment } from "@/components/chat/types";
+import {
+  AVAILABLE_MODELS,
+  MAX_SELECTED_MODELS,
+  getModelUsageProfile,
+  type ChatAttachment,
+} from "@/components/chat/types";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { useLanguage } from "@/components/LanguageProvider";
 import { dispatchAppToast } from "@/lib/appToast";
@@ -312,16 +317,16 @@ export function ChatInput({
     .map(id => AVAILABLE_MODELS.find(m => m.id === id)?.name)
     .filter(Boolean);
 
-  const dailyMessageLimit = accountUsage?.limits.messagesDay || 0;
-  const monthlyMessageLimit = accountUsage?.limits.messagesMonth || 0;
+  const dailyCreditLimit = accountUsage?.limits.creditsDay || 0;
+  const monthlyCreditLimit = accountUsage?.limits.creditsMonth || 0;
   const isAccountDailyLimitReached =
     !isGuestMode &&
-    dailyMessageLimit > 0 &&
-    (accountUsage?.usage.messagesDay || 0) >= dailyMessageLimit;
+    dailyCreditLimit > 0 &&
+    (accountUsage?.usage.creditsDay || 0) >= dailyCreditLimit;
   const isAccountMonthlyLimitReached =
     !isGuestMode &&
-    monthlyMessageLimit > 0 &&
-    (accountUsage?.usage.messagesMonth || 0) >= monthlyMessageLimit;
+    monthlyCreditLimit > 0 &&
+    (accountUsage?.usage.creditsMonth || 0) >= monthlyCreditLimit;
   const isUsageLimitReached =
     isGuestLimitReached || isAccountDailyLimitReached || isAccountMonthlyLimitReached;
 
@@ -1329,6 +1334,9 @@ export function ChatInput({
                       </select>
                     </div>
                   </div>
+                  <p className="px-2 text-[10px] leading-4 text-zinc-400">
+                    {t("usage.creditWeightNotice")}
+                  </p>
                   <div className="min-h-0 space-y-3 overflow-y-auto overscroll-contain pr-1">
                     {groupedModels.map((group) => (
                       <div key={group.provider} className="space-y-1">
@@ -1351,6 +1359,7 @@ export function ChatInput({
                               ? model.tier !== "Free"
                               : accountUsage?.plan === "Free" && model.tier === "Max";
                           const unavailable = !model.enabled || modelStatus === "unavailable" || isTierLocked;
+                          const usageProfile = getModelUsageProfile(model);
                           const statusReason = isTierLocked
                             ? isGuestMode
                               ? t("modelStatusReasons.loginRequired")
@@ -1433,7 +1442,7 @@ export function ChatInput({
                                   )}
                                 </span>
                                 <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${model.tier === "Free" ? "bg-emerald-500/10 text-emerald-500" : model.tier === "Pro" ? "bg-blue-500/10 text-blue-500" : "bg-purple-500/10 text-purple-500"}`}>
-                                  {t(`modelTiers.${model.tier.toLowerCase()}`)}
+                                  {usageProfile.category} · {usageProfile.credits}
                                 </span>
                                 <span className={`h-4 w-8 rounded-full p-0.5 transition-colors ${isSelected ? "bg-blue-500" : "bg-zinc-300 dark:bg-zinc-700"}`}>
                                   <span className={`block h-3 w-3 rounded-full bg-white transition-transform ${isSelected ? "translate-x-4" : ""}`} />

@@ -42,7 +42,7 @@ export function UserUsageSummary({
 }) {
   const { t } = useLanguage();
   const usage = useUserUsage(!isGuestMode);
-  const isDailyUnlimited = Boolean(usage && usage.limits.messagesDay <= 0);
+  const isDailyUnlimited = Boolean(usage && usage.limits.creditsDay <= 0);
 
   if (isGuestMode) {
     const used = guestMessageCount || 0;
@@ -75,29 +75,37 @@ export function UserUsageSummary({
         <span className="text-zinc-400">
           {isDailyUnlimited
             ? t("usage.unlimited")
-            : `${Math.max(0, usage.limits.messagesDay - usage.usage.messagesDay)} ${t("usage.left")}`}
+            : `${Math.max(0, usage.limits.creditsDay - usage.usage.creditsDay)} ${t("usage.left")}`}
         </span>
       </div>
       <div className="mt-2">
         <div className="flex justify-between font-semibold">
-          <span>{t("usage.todayMessages")}</span>
+          <span>{t("usage.todayCredits")}</span>
           <span>
             {isDailyUnlimited
               ? t("usage.unlimited")
-              : `${usage.usage.messagesDay}/${usage.limits.messagesDay}`}
+              : `${usage.usage.creditsDay}/${usage.limits.creditsDay}`}
           </span>
         </div>
-        {!isDailyUnlimited && <UsageBar used={usage.usage.messagesDay} limit={usage.limits.messagesDay} />}
+        {!isDailyUnlimited && <UsageBar used={usage.usage.creditsDay} limit={usage.limits.creditsDay} />}
       </div>
       <div className="mt-2">
         <div className="flex justify-between font-semibold">
-          <span>{t("usage.monthMessages")}</span>
+          <span>{t("usage.monthCredits")}</span>
           <span>
-            {usage.usage.messagesMonth}/{usage.limits.messagesMonth}
+            {usage.usage.creditsMonth}/{usage.limits.creditsMonth}
           </span>
         </div>
-        <UsageBar used={usage.usage.messagesMonth} limit={usage.limits.messagesMonth} />
+        <UsageBar used={usage.usage.creditsMonth} limit={usage.limits.creditsMonth} />
       </div>
+      {usage.plan === "Free" && usage.limits.proModelResponsesMonth > 0 && (
+        <div className="mt-2 flex justify-between font-semibold text-zinc-500 dark:text-zinc-400">
+          <span>{t("usage.proResponsesMonth")}</span>
+          <span>
+            {usage.usage.proModelResponsesMonth}/{usage.limits.proModelResponsesMonth}
+          </span>
+        </div>
+      )}
     </section>
   );
 }

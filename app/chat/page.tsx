@@ -26,7 +26,10 @@ import {
   type AppToastEventDetail,
   type AppToastTone,
 } from "@/lib/appToast";
-import { useUserUsage } from "@/components/chat/useUserUsage";
+import {
+  notifyUserUsageChanged,
+  useUserUsage,
+} from "@/components/chat/useUserUsage";
 import {
   trackProductEvent,
   trackProductEventOnce,
@@ -864,14 +867,11 @@ export default function Home() {
     const promptAttachments = await cloneAttachmentPreviews(attachments);
 	
     if (isGuestMode) {
-      if (guestMessageCount >= MAX_GUEST_MESSAGES) {
+      const requestCredits = Math.max(1, activeModelCount);
+      if (guestMessageCount + requestCredits > MAX_GUEST_MESSAGES) {
           showToast(t("sidebar.exceedDailyLimit"), "error");
         return;
       }
-      
-      const newCount = guestMessageCount + 1;
-      setGuestMessageCount(newCount);
-      localStorage.setItem("guest_count", newCount.toString());
     }
 
     if (isPrivateMode) {
@@ -993,6 +993,15 @@ export default function Home() {
 
   const handleResponseComplete = useCallback(
     (promptId: string | null, modelId: string) => {
+      if (isGuestMode) {
+        setGuestMessageCount((current) => {
+          const next = Math.min(MAX_GUEST_MESSAGES, current + 1);
+          localStorage.setItem("guest_count", next.toString());
+          return next;
+        });
+      } else {
+        notifyUserUsageChanged();
+      }
       trackProductEventOnce(
         "first_response_completed",
         "first_response_completed",
@@ -1016,7 +1025,7 @@ export default function Home() {
         );
       }
     },
-    [activeModelCount]
+    [activeModelCount, isGuestMode]
   );
 
   const handleModelFollowupSent = useCallback(

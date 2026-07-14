@@ -37,6 +37,7 @@ import {
     readChatJsonBody,
     releaseChatAccess,
     settleChatUsage,
+    type ChatUsageReservation,
     validateChatPayload,
 } from "@/lib/chatSecurity";
 import {
@@ -639,6 +640,7 @@ const getActiveModel = (model: AiModel) => {
 export async function POST(req: Request) {
     const traceId = randomUUID();
     let leaseId: string | null = null;
+    let usageReservation: ChatUsageReservation | null = null;
     let requestedModelIdForLog: string | undefined;
     let requestedProviderForLog: AiModel["provider"] | undefined;
     try {
@@ -816,7 +818,7 @@ export async function POST(req: Request) {
         let totalAttachmentBytes = 0;
         let totalExtractedCharacters = 0;
         const estimateTextTokens = (text: string) =>
-            Math.max(1, Buffer.byteLength(text, "utf8"));
+            Math.max(1, Math.ceil(Buffer.byteLength(text, "utf8") / 4));
 
         const formattedMessages: ModelMessage[] = [];
         for (const msg of messages) {
@@ -1105,6 +1107,7 @@ export async function POST(req: Request) {
         );
         const accessGrant = await acquireChatAccess(access, budget);
         leaseId = accessGrant.leaseId;
+        usageReservation = accessGrant.usageReservation;
         try {
             await notifyProviderBudgetIfNeeded(modelConfig.provider);
         } catch (error) {
@@ -1129,7 +1132,44 @@ export async function POST(req: Request) {
         let generatedText = "";
         let released = false;
         let sourceCancelled = false;
+        let usageSettlement: Promise<void> | null = null;
         let streamState: "open" | "closed" | "cancelled" = "open";
+        const estimatedGeneratedOutputTokens = () =>
+            generatedText
+                ? Math.max(
+                      1,
+                      Math.ceil(Buffer.byteLength(generatedText, "utf8") / 4)
+                  )
+                : 0;
+        const settleSafely = (
+            outcome: "completed" | "cancelled" | "failed" | "empty",
+            usage?: { inputTokens?: number; outputTokens?: number }
+        ) => {
+            if (usageSettlement) return usageSettlement;
+            const reservation = usageReservation;
+            if (!reservation) return Promise.resolve();
+            usageSettlement = (async () => {
+                try {
+                    await settleChatUsage(reservation, {
+                        inputTokens:
+                            usage?.inputTokens ?? reservation.inputTokens,
+                        outputTokens:
+                            usage?.outputTokens ??
+                            estimatedGeneratedOutputTokens(),
+                        outcome,
+                    });
+                    usageReservation = null;
+                } catch (error) {
+                    logRequestError(
+                        "chat_usage_settlement_failed",
+                        traceId,
+                        error,
+                        requestedModelId
+                    );
+                }
+            })();
+            return usageSettlement;
+        };
         const release = async () => {
             if (released) return;
             released = true;
@@ -1205,6 +1245,28 @@ export async function POST(req: Request) {
                 return false;
             }
         };
+        const errorSafely = (
+            controller: ReadableStreamDefaultController<string>,
+            error: unknown
+        ) => {
+            if (streamState !== "open") return false;
+            try {
+                controller.error(error);
+                streamState = "cancelled";
+                return true;
+            } catch (streamError) {
+                streamState = "cancelled";
+                if (!isClosedStreamControllerError(streamError)) {
+                    logRequestError(
+                        "chat_response_stream_error_failed",
+                        traceId,
+                        streamError,
+                        requestedModelId
+                    );
+                }
+                return false;
+            }
+        };
         const protectedStream = new ReadableStream<string>({
             async pull(controller) {
                 if (streamState !== "open") return;
@@ -1218,8 +1280,8 @@ export async function POST(req: Request) {
                     if (done) {
                         try {
                             const usage = await result.usage;
-                            await settleChatUsage(
-                                accessGrant.usageReservation,
+                            await settleSafely(
+                                generatedText.trim() ? "completed" : "empty",
                                 {
                                     inputTokens: usage.inputTokens,
                                     outputTokens: usage.outputTokens,
@@ -1231,6 +1293,9 @@ export async function POST(req: Request) {
                                 traceId,
                                 error,
                                 requestedModelId
+                            );
+                            await settleSafely(
+                                generatedText.trim() ? "completed" : "empty"
                             );
                         }
                         if (
@@ -1293,6 +1358,7 @@ export async function POST(req: Request) {
                     generatedText += value;
                     if (!enqueueSafely(controller, value)) {
                         await cancelSourceSafely("response stream is no longer open");
+                        await settleSafely("cancelled");
                         await releaseSafely();
                     }
                 } catch (error) {
@@ -1311,6 +1377,7 @@ export async function POST(req: Request) {
                         }
                         streamState = "cancelled";
                         await cancelSourceSafely(error);
+                        await settleSafely("cancelled");
                         await releaseSafely();
                         return;
                     }
@@ -1353,17 +1420,15 @@ export async function POST(req: Request) {
                             requestedModelId
                         );
                     }
-                    enqueueSafely(
-                        controller,
-                        `AI 응답 생성에 실패했습니다. 잠시 후 다시 시도하거나 다른 모델을 선택해주세요.\n추적 ID: ${traceId}`
-                    );
-                    closeSafely(controller);
+                    await settleSafely("failed");
+                    errorSafely(controller, error);
                     await releaseSafely();
                 }
             },
             async cancel(reason) {
                 streamState = "cancelled";
                 await cancelSourceSafely(reason);
+                await settleSafely("cancelled");
                 await releaseSafely();
             },
         });
@@ -1383,6 +1448,23 @@ export async function POST(req: Request) {
     } catch (error: unknown) {
         if (leaseId) {
             await releaseChatAccess(leaseId);
+        }
+        if (usageReservation) {
+            try {
+                await settleChatUsage(usageReservation, {
+                    inputTokens: 0,
+                    outputTokens: 0,
+                    outcome: "failed",
+                });
+                usageReservation = null;
+            } catch (settlementError) {
+                logRequestError(
+                    "chat_usage_refund_failed",
+                    traceId,
+                    settlementError,
+                    requestedModelIdForLog
+                );
+            }
         }
         const accessError = chatErrorResponse(error);
         if (accessError) {

@@ -2,6 +2,14 @@
 
 import { useEffect, useState } from "react";
 
+const USER_USAGE_CHANGED_EVENT = "tomverse:user-usage-changed";
+
+export const notifyUserUsageChanged = () => {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(USER_USAGE_CHANGED_EVENT));
+  }
+};
+
 export type UserPlan = "Free" | "Pro" | "Max";
 
 export type UserUsageResponse = {
@@ -13,16 +21,18 @@ export type UserUsageResponse = {
     cancelAtPeriodEnd?: boolean;
   };
   usage: {
-    messagesDay: number;
-    messagesMonth: number;
+    creditsDay: number;
+    creditsMonth: number;
+    proModelResponsesMonth: number;
     tokensDay: number;
     tokensMonth: number;
     costDay: number;
     costMonth: number;
   };
   limits: {
-    messagesDay: number;
-    messagesMonth: number;
+    creditsDay: number;
+    creditsMonth: number;
+    proModelResponsesMonth: number;
     tokensDay: number;
     tokensMonth: number;
     costDay: number;
@@ -46,24 +56,38 @@ export function useUserUsage(enabled: boolean) {
     }
 
     const controller = new AbortController();
-    void fetch("/api/user/usage", {
-      signal: controller.signal,
-      cache: "no-store",
-    })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data) => {
-        if (!data) {
-          setUsage(null);
-          return;
-        }
-        setUsage({
-          ...data,
-          plan: normalizeUserPlan(data.plan),
-        });
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    const load = () => {
+      void fetch("/api/user/usage", {
+        signal: controller.signal,
+        cache: "no-store",
       })
-      .catch(() => {});
+        .then((response) => (response.ok ? response.json() : null))
+        .then((data) => {
+          if (!data) {
+            setUsage(null);
+            return;
+          }
+          setUsage({
+            ...data,
+            plan: normalizeUserPlan(data.plan),
+          });
+        })
+        .catch(() => {});
+    };
+    const scheduleRefresh = () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(load, 300);
+    };
 
-    return () => controller.abort();
+    load();
+    window.addEventListener(USER_USAGE_CHANGED_EVENT, scheduleRefresh);
+
+    return () => {
+      controller.abort();
+      if (refreshTimer) clearTimeout(refreshTimer);
+      window.removeEventListener(USER_USAGE_CHANGED_EVENT, scheduleRefresh);
+    };
   }, [enabled]);
 
   return enabled ? usage : null;

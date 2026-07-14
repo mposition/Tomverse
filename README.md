@@ -34,14 +34,26 @@ CHAT_USER_TOKENS_PER_DAY=1000000
 CHAT_USER_TOKENS_PER_MONTH=20000000
 CHAT_GUEST_COST_MICROUSD_PER_DAY=20000
 CHAT_GUEST_COST_MICROUSD_PER_MONTH=100000
-CHAT_USER_COST_MICROUSD_PER_DAY=2000000
-CHAT_USER_COST_MICROUSD_PER_MONTH=20000000
+CHAT_FREE_COST_MICROUSD_PER_DAY=100000
+CHAT_FREE_COST_MICROUSD_PER_MONTH=500000
+CHAT_PRO_COST_MICROUSD_PER_DAY=750000
+CHAT_PRO_COST_MICROUSD_PER_MONTH=4500000
+CHAT_MAX_COST_MICROUSD_PER_DAY=1500000
+CHAT_MAX_COST_MICROUSD_PER_MONTH=9000000
+CHAT_FREE_PRO_MODEL_RESPONSES_PER_MONTH=30
 CHAT_PROVIDER_OPENAI_COST_MICROUSD_PER_MONTH=100000000
 ```
 
 Provider variables use the same pattern for every provider. Values are integer
 microdollars, so `1000000` equals USD 1. Model pricing and output limits can be
 overridden with normalized model IDs:
+
+User-facing AI response credits are reserved per model call and settled when
+the stream completes. Base weights are Standard 1, Advanced 4, Premium 8,
+Reasoning 12-16, search 20, and Deep Research 30 credits. Estimated input above
+16K, 50K, and 100K tokens applies a 1.5x, 2x, and 3x multiplier respectively.
+Provider failures and empty responses refund user credits; partial cancellation
+settles proportionally while estimated provider cost accounting remains separate.
 
 ```text
 CHAT_MODEL_GPT_5_5_INPUT_USD_PER_MILLION=15

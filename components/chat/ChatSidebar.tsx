@@ -135,8 +135,8 @@ export function ChatSidebar({
             limit: maxGuestMessages || 20,
         }
         : {
-            used: accountUsage?.usage.messagesDay || 0,
-            limit: accountUsage?.limits.messagesDay || 0,
+            used: accountUsage?.usage.creditsDay || 0,
+            limit: accountUsage?.limits.creditsDay || 0,
         };
     const displayedRemaining =
         displayedUsage.limit > 0
