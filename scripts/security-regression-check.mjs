@@ -632,6 +632,37 @@ const checks = [
       !source.includes('"/share"'),
   },
   {
+    name: "Locale launch policy labels incomplete coverage and excludes it from paid acquisition",
+    file: "lib/localeLaunchPolicy.ts",
+    test: (source) => {
+      const switcher = read(
+        "components/marketing/MarketingLanguageSwitcher.tsx"
+      );
+      const notice = read("components/marketing/LocaleSupportNotice.tsx");
+      const infoPage = read("components/marketing/MarketingInfoPage.tsx");
+      const privacy = read("components/legal/PrivacyPolicy.tsx");
+      const analyticsClient = read("lib/productAnalyticsClient.ts");
+      const analyticsServer = read("lib/productAnalyticsServer.ts");
+      return (
+        source.includes(
+          'export const PAID_MARKETING_LOCALES: readonly Language[] = ["en", "ko"]'
+        ) &&
+        source.includes('marketTier: "limited"') &&
+        source.includes('marketTier: "preview"') &&
+        source.includes("paidMarketingEligible: false") &&
+        switcher.includes("localeLaunchPolicy[language].selectorLabel") &&
+        switcher.includes("MARKETING_LOCALE_NOTICE_ID") &&
+        notice.includes("localizedContentAvailable") &&
+        notice.includes("data-paid-marketing-eligible") &&
+        infoPage.includes("Boolean(localizedPage)") &&
+        infoPage.includes('localizedPage ? lang : "en"') &&
+        privacy.includes("localizedContentAvailable") &&
+        analyticsClient.includes("localeMarketingAnalyticsProperties") &&
+        analyticsServer.includes("localeMarketingAnalyticsProperties")
+      );
+    },
+  },
+  {
     name: "Structured data is sanitized and identifies the organization and software application",
     file: "app/(marketing)/layout.tsx",
     test: (source) =>

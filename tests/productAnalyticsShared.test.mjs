@@ -57,6 +57,18 @@ test("analytics accepts attribution without product content", () => {
   assert.equal(parsed.model_count, 3);
 });
 
+test("analytics accepts privacy-safe locale market classification", () => {
+  const parsed = analyticsClientEventSchema.parse({
+    ...safeEvent,
+    properties: {
+      market_tier: "primary",
+      paid_marketing_eligible: true,
+    },
+  });
+  assert.equal(parsed.properties.market_tier, "primary");
+  assert.equal(parsed.properties.paid_marketing_eligible, true);
+});
+
 test("analytics rejects prompts, responses, and file metadata", () => {
   for (const forbiddenProperty of ["prompt", "response", "file_name", "file_content"]) {
     assert.equal(

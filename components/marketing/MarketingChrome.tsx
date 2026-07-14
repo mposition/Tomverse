@@ -8,6 +8,7 @@ import { MarketingLanguageSwitcher } from "./MarketingLanguageSwitcher";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { localizedPath } from "@/lib/seo";
 import { statusLinkLabel, statusNewTabCopy } from "./statusLinkCopy";
+import { LocaleSupportNotice } from "./LocaleSupportNotice";
 
 const resourceLinks: Record<Language, Array<{ label: string; path: string }>> = {
   en: [
@@ -213,14 +214,21 @@ const chrome = {
   }
 >;
 
-export function MarketingHeader({ maxWidth = "max-w-7xl" }: { maxWidth?: string }) {
+export function MarketingHeader({
+  maxWidth = "max-w-7xl",
+  localizedContentAvailable = true,
+}: {
+  maxWidth?: string;
+  localizedContentAvailable?: boolean;
+}) {
   const { lang } = useLanguage();
   const labels = chrome[lang] ?? chrome.en;
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const chatHref = `/chat?lang=${encodeURIComponent(lang)}`;
 
   return (
-    <header className="sticky top-0 z-40 border-b border-zinc-200/80 bg-white/90 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/85">
+    <>
+      <header className="sticky top-0 z-40 border-b border-zinc-200/80 bg-white/90 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/85">
       <div className={`mx-auto flex h-16 ${maxWidth} items-center justify-between gap-3 px-4 sm:px-6 lg:px-8`}>
         <Link href="/" className="flex min-w-0 items-center gap-3" onClick={() => setIsMenuOpen(false)}>
           <span className="flex h-9 w-9 shrink-0 overflow-hidden rounded-xl bg-white ring-1 ring-zinc-200 dark:ring-zinc-800">
@@ -335,7 +343,12 @@ export function MarketingHeader({ maxWidth = "max-w-7xl" }: { maxWidth?: string 
           </nav>
         </div>
       )}
-    </header>
+      </header>
+      <LocaleSupportNotice
+        localizedContentAvailable={localizedContentAvailable}
+        maxWidth={maxWidth}
+      />
+    </>
   );
 }
 

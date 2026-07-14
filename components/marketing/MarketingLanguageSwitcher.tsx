@@ -8,21 +8,19 @@ import {
   SEO_LOCALES,
   localizedPath,
 } from "@/lib/seo";
+import {
+  getLocaleLaunchPolicy,
+  localeLaunchPolicy,
+} from "@/lib/localeLaunchPolicy";
+import { MARKETING_LOCALE_NOTICE_ID } from "./LocaleSupportNotice";
 
-const languageOptions: Array<{ value: Language; label: string }> = [
-  { value: "ko", label: "한국어" },
-  { value: "en", label: "English" },
-  { value: "zh", label: "中文" },
-  { value: "fr", label: "Français" },
-  { value: "de", label: "Deutsch" },
-  { value: "es", label: "Español" },
-  { value: "pt", label: "Português" },
-];
+const languageOptions: Language[] = ["ko", "en", "zh", "fr", "de", "es", "pt"];
 
 export function MarketingLanguageSwitcher() {
   const { lang, setLang } = useLanguage();
   const pathname = usePathname();
   const router = useRouter();
+  const selectedPolicy = getLocaleLaunchPolicy(lang);
 
   const localizedBasePath = () => {
     if (LOCALIZED_SEO_PATHS.includes(pathname as (typeof LOCALIZED_SEO_PATHS)[number])) {
@@ -42,11 +40,19 @@ export function MarketingLanguageSwitcher() {
   };
 
   return (
-    <label className="inline-flex h-10 items-center gap-2 rounded-xl border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-700 shadow-sm transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800">
+    <label
+      data-market-tier={selectedPolicy.marketTier}
+      className="inline-flex h-10 max-w-[10.5rem] items-center gap-2 rounded-xl border border-zinc-300 bg-white px-2.5 text-sm font-bold text-zinc-700 shadow-sm transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800 sm:max-w-none sm:px-3"
+    >
       <Languages className="h-4 w-4 text-blue-600 dark:text-blue-400" />
       <span className="sr-only">Language</span>
       <select
         aria-label="Language"
+        aria-describedby={
+          selectedPolicy.marketTier === "primary"
+            ? undefined
+            : MARKETING_LOCALE_NOTICE_ID
+        }
         value={lang}
         onChange={(event) => {
           const nextLanguage = event.target.value as Language;
@@ -56,13 +62,13 @@ export function MarketingLanguageSwitcher() {
         }}
         className="cursor-pointer bg-transparent text-sm font-bold text-zinc-800 outline-none [color-scheme:light] dark:text-zinc-100 dark:[color-scheme:dark]"
       >
-        {languageOptions.map((option) => (
+        {languageOptions.map((language) => (
           <option
-            key={option.value}
-            value={option.value}
+            key={language}
+            value={language}
             className="bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100"
           >
-            {option.label}
+            {localeLaunchPolicy[language].selectorLabel}
           </option>
         ))}
       </select>

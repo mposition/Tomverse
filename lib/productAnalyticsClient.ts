@@ -8,6 +8,7 @@ import {
   type ProductAnalyticsEventName,
   type ProductAnalyticsProperties,
 } from "@/lib/productAnalyticsShared";
+import { localeMarketingAnalyticsProperties } from "@/lib/localeLaunchPolicy";
 
 declare global {
   interface Window {
@@ -277,7 +278,10 @@ const sendIntent = (intent: EventIntent) => {
     event_name: intent.eventName,
     occurred_at: intent.occurredAt,
     model_count: Math.max(0, Math.min(3, Math.trunc(intent.modelCount))),
-    properties: intent.properties,
+    properties: {
+      ...intent.properties,
+      ...localeMarketingAnalyticsProperties(runtime.attribution.language),
+    },
     ...runtime.attribution,
   });
 

@@ -11,6 +11,7 @@ import {
   type ProductAnalyticsEventName,
   type ProductAnalyticsProperties,
 } from "@/lib/productAnalyticsShared";
+import { localeMarketingAnalyticsProperties } from "@/lib/localeLaunchPolicy";
 
 type RecordProductAnalyticsEventInput = {
   eventName: ProductAnalyticsEventName;
@@ -43,6 +44,14 @@ const ga4MeasurementId = () => {
   return value && /^G-[A-Z0-9]+$/.test(value) ? value : null;
 };
 
+const analyticsPropertiesForInput = (
+  input: RecordProductAnalyticsEventInput
+) =>
+  analyticsPropertiesSchema.parse({
+    ...(input.properties || {}),
+    ...localeMarketingAnalyticsProperties(input.attribution.language),
+  });
+
 const sendGa4ServerEvent = async (
   input: RecordProductAnalyticsEventInput
 ) => {
@@ -53,7 +62,7 @@ const sendGa4ServerEvent = async (
   const url = new URL("https://region1.google-analytics.com/mp/collect");
   url.searchParams.set("measurement_id", measurementId);
   url.searchParams.set("api_secret", apiSecret);
-  const properties = analyticsPropertiesSchema.parse(input.properties || {});
+  const properties = analyticsPropertiesForInput(input);
   const sessionId = Number(input.attribution.session_id);
   const country = input.attribution.country === "ZZ"
     ? undefined
@@ -104,7 +113,7 @@ const sendGa4ServerEvent = async (
 export async function recordProductAnalyticsEvent(
   input: RecordProductAnalyticsEventInput
 ) {
-  const properties = analyticsPropertiesSchema.parse(input.properties || {});
+  const properties = analyticsPropertiesForInput(input);
   const occurredAt = input.occurredAt || new Date();
 
   try {

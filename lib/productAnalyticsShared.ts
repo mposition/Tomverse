@@ -55,6 +55,8 @@ export const analyticsPropertiesSchema = z
         "checkout_request_failed",
       ])
       .optional(),
+    market_tier: z.enum(["primary", "limited", "preview"]).optional(),
+    paid_marketing_eligible: z.boolean().optional(),
   })
   .strict();
 

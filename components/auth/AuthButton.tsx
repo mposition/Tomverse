@@ -28,6 +28,7 @@ import {
     type Language,
 } from "@/components/LanguageProvider";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
+import { localeLaunchPolicy } from "@/lib/localeLaunchPolicy";
 import { dispatchAppToast } from "@/lib/appToast";
 import { notifyUserSettingsUpdated } from "@/lib/userSettingsEvents";
 import { useUserUsage } from "@/components/chat/useUserUsage";
@@ -857,27 +858,17 @@ export function AuthButton() {
           onChange={(event) => setGlobalLang(event.target.value as Language)}
           className="min-w-0 flex-1 cursor-pointer bg-transparent text-xs font-semibold outline-none"
         >
-          <option className="bg-white text-zinc-900" value="en">
-            {t("auth.languageEnglish")}
-          </option>
-          <option className="bg-white text-zinc-900" value="zh">
-            {t("auth.languageChinese")}
-          </option>
-          <option className="bg-white text-zinc-900" value="ko">
-            {t("auth.languageKorean")}
-          </option>
-          <option className="bg-white text-zinc-900" value="fr">
-            {t("auth.languageFrench")}
-          </option>
-          <option className="bg-white text-zinc-900" value="de">
-            {t("auth.languageGerman")}
-          </option>
-          <option className="bg-white text-zinc-900" value="es">
-            {t("auth.languageSpanish")}
-          </option>
-          <option className="bg-white text-zinc-900" value="pt">
-            {t("auth.languagePortuguese")}
-          </option>
+          {(["en", "ko", "zh", "fr", "de", "es", "pt"] as Language[]).map(
+            (language) => (
+              <option
+                key={language}
+                className="bg-white text-zinc-900"
+                value={language}
+              >
+                {localeLaunchPolicy[language].selectorLabel}
+              </option>
+            )
+          )}
         </select>
       </label>
       <button

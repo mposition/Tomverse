@@ -32,13 +32,20 @@ export function MarketingInfoPage({
   template?: "chatgpt-vs-claude";
 }) {
   const { lang } = useLanguage();
-  const page = content[lang] ?? content.en;
+  const localizedPage = content[lang];
+  const page = localizedPage ?? content.en;
 
   return (
     <main className="min-h-screen bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">
-      <MarketingHeader maxWidth="max-w-6xl" />
+      <MarketingHeader
+        maxWidth="max-w-6xl"
+        localizedContentAvailable={Boolean(localizedPage)}
+      />
 
-      <section className="mx-auto max-w-6xl px-4 py-14 sm:px-6 lg:py-20">
+      <section
+        lang={localizedPage ? lang : "en"}
+        className="mx-auto max-w-6xl px-4 py-14 sm:px-6 lg:py-20"
+      >
         <div className="max-w-3xl">
           <p className="text-sm font-black uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">{page.eyebrow}</p>
           <h1 className="mt-4 text-4xl font-black leading-tight sm:text-6xl">{page.title}</h1>

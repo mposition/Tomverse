@@ -6,6 +6,7 @@ import { ArrowRight, Bot, CalendarClock, Clipboard, Clock, Eye, LockKeyhole, Sha
 import { getModel } from "@/lib/models";
 import type { ShareSnapshot } from "@/lib/shareSnapshot";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
+import { localeLaunchPolicy } from "@/lib/localeLaunchPolicy";
 
 type SharedConversationData = {
   snapshot: ShareSnapshot;
@@ -25,13 +26,13 @@ function getAssistantLabel(modelId: string | null | undefined, fallback: string)
 }
 
 const languageOptions: Array<{ value: Language; label: string }> = [
-  { value: "ko", label: "Korean" },
-  { value: "en", label: "English" },
-  { value: "zh", label: "Chinese" },
-  { value: "fr", label: "Francais" },
-  { value: "de", label: "Deutsch" },
-  { value: "es", label: "Espanol" },
-  { value: "pt", label: "Portugues" },
+  { value: "ko", label: localeLaunchPolicy.ko.selectorLabel },
+  { value: "en", label: localeLaunchPolicy.en.selectorLabel },
+  { value: "zh", label: localeLaunchPolicy.zh.selectorLabel },
+  { value: "fr", label: localeLaunchPolicy.fr.selectorLabel },
+  { value: "de", label: localeLaunchPolicy.de.selectorLabel },
+  { value: "es", label: localeLaunchPolicy.es.selectorLabel },
+  { value: "pt", label: localeLaunchPolicy.pt.selectorLabel },
 ];
 
 export function SharedConversationView({

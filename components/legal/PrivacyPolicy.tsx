@@ -3,6 +3,10 @@
 import Link from "next/link";
 import { ArrowLeft, BarChart3, Database, FileUp, Scale, Send, ShieldCheck, Share2, UserRound } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
+import {
+    MarketingFooter,
+    MarketingHeader,
+} from "@/components/marketing/MarketingChrome";
 
 const sections = [
     ["collectedTitle", "collected", UserRound],
@@ -19,39 +23,20 @@ const sections = [
 ] as const;
 
 export function PrivacyPolicy() {
-    const { t, lang, setLang } = useLanguage();
+    const { t, lang } = useLanguage();
+    const localizedContentAvailable = lang === "en" || lang === "ko" || lang === "zh";
 
     return (
         <main className="min-h-screen overflow-y-auto bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
-            <header className="border-b border-zinc-200 dark:border-zinc-800">
-                <div className="mx-auto flex max-w-4xl items-center justify-between gap-4 px-5 py-4">
-                    <Link
-                        href="/"
-                        className="inline-flex items-center gap-2 text-sm font-medium text-zinc-600 hover:text-zinc-950 dark:text-zinc-300 dark:hover:text-white"
-                    >
-                        <ArrowLeft className="h-4 w-4" />
-                        Tomverse
-                    </Link>
-                    <div className="flex rounded-md border border-zinc-200 p-0.5 dark:border-zinc-700">
-                        {(["en", "ko", "zh"] as const).map((language) => (
-                            <button
-                                key={language}
-                                type="button"
-                                onClick={() => setLang(language)}
-                                className={`rounded px-2.5 py-1 text-xs font-medium ${
-                                    lang === language
-                                        ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-                                        : "text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
-                                }`}
-                            >
-                                {language.toUpperCase()}
-                            </button>
-                        ))}
-                    </div>
-                </div>
-            </header>
+            <MarketingHeader
+                maxWidth="max-w-4xl"
+                localizedContentAvailable={localizedContentAvailable}
+            />
 
-            <article className="mx-auto max-w-4xl px-5 py-12">
+            <article
+                lang={localizedContentAvailable ? lang : "en"}
+                className="mx-auto max-w-4xl px-5 py-12"
+            >
                 <div className="border-b border-zinc-200 pb-8 dark:border-zinc-800">
                     <h1 className="text-3xl font-bold">{t("privacyPolicy.title")}</h1>
                     <p className="mt-2 text-sm text-zinc-500">{t("privacyPolicy.effective")}</p>
@@ -85,6 +70,7 @@ export function PrivacyPolicy() {
                     {t("privacyPolicy.back")}
                 </Link>
             </article>
+            <MarketingFooter maxWidth="max-w-4xl" />
         </main>
     );
 }
