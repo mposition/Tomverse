@@ -583,6 +583,7 @@ export function LandingPageContent() {
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
               <Link
                 href={chatHref}
+                data-testid="landing-primary-cta"
                 onClick={() =>
                   trackProductEvent("cta_start_click", 0, {
                     cta_location: "landing_hero",

@@ -2,18 +2,28 @@
 
 import { signIn } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
 import Link from "next/link";
 import { ShieldCheck } from "lucide-react";
 import { withChatLanguage } from "@/lib/localizedCallbackUrl";
-import { markSignupStarted } from "@/lib/productAnalyticsClient";
+import {
+    markSignupStarted,
+    trackProductEvent,
+} from "@/lib/productAnalyticsClient";
 
 function SignInButtons() {
     const searchParams = useSearchParams();
     const { t, lang } = useLanguage();
     const callbackUrl = withChatLanguage(searchParams.get("callbackUrl"), lang);
     const [acceptedTerms, setAcceptedTerms] = useState(false);
+    const pageViewTrackedRef = useRef(false);
+
+    useEffect(() => {
+        if (pageViewTrackedRef.current) return;
+        pageViewTrackedRef.current = true;
+        trackProductEvent("signup_page_view");
+    }, []);
 
     const providerButtonClass =
         "flex w-full items-center justify-center gap-3 rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm transition-all hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-white dark:border-zinc-700 dark:hover:bg-zinc-100 dark:disabled:hover:bg-white";

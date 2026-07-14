@@ -5,6 +5,7 @@ import {
   getModel,
   getModelUsageProfile,
   getSettledUsageCredits,
+  getTypicalShortRequestCapacities,
   getWeightedUsageCredits,
 } from "../lib/models.ts";
 
@@ -37,6 +38,27 @@ test("long input applies the configured credit multiplier", () => {
   assert.equal(getInputCreditMultiplier(50_001), 2);
   assert.equal(getInputCreditMultiplier(100_001), 3);
   assert.equal(getWeightedUsageCredits(premium, 60_000), 16);
+});
+
+test("pricing examples are derived from the same launch credit weights", () => {
+  assert.deepEqual(getTypicalShortRequestCapacities(300), {
+    standardResponses: 300,
+    advancedResponses: 75,
+    mixedComparisons: 23,
+    mixedComparisonCredits: 13,
+  });
+  assert.deepEqual(getTypicalShortRequestCapacities(3_000), {
+    standardResponses: 3_000,
+    advancedResponses: 750,
+    mixedComparisons: 230,
+    mixedComparisonCredits: 13,
+  });
+  assert.deepEqual(getTypicalShortRequestCapacities(10_000), {
+    standardResponses: 10_000,
+    advancedResponses: 2_500,
+    mixedComparisons: 769,
+    mixedComparisonCredits: 13,
+  });
 });
 
 test("credit settlement refunds failures and empty responses", () => {

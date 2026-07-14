@@ -32,6 +32,10 @@ import { getModelBestFor, getModelExperienceStatus, getModelExperienceTags } fro
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { useUserUsage } from "@/components/chat/useUserUsage";
 import { withChatLanguage } from "@/lib/localizedCallbackUrl";
+import {
+  trackProductEvent,
+  trackProductEventOnce,
+} from "@/lib/productAnalyticsClient";
 
 type PublicModelStatus = "available" | "limited" | "unavailable";
 type PublicModelStatusRecord = {
@@ -304,6 +308,9 @@ export function ChatInput({
   const previousAttachmentsRef = useRef<ChatAttachment[]>([]);
   const hasHandledFocusTokenRef = useRef(false);
   const guestQuickStartActiveRef = useRef(false);
+  const trackedLimitScopeRef = useRef<"guest" | "daily" | "monthly" | null>(
+    null
+  );
   const [isUploading, setIsUploading] = useState(false);
   const [isDragActive, setIsDragActive] = useState(false);
   const [showGuestQuickStart, setShowGuestQuickStart] = useState(false);
@@ -334,6 +341,14 @@ export function ChatInput({
     (accountUsage?.usage.creditsMonth || 0) >= monthlyCreditLimit;
   const isUsageLimitReached =
     isGuestLimitReached || isAccountDailyLimitReached || isAccountMonthlyLimitReached;
+  const limitScope: "guest" | "daily" | "monthly" | null =
+    isGuestLimitReached
+      ? "guest"
+      : isAccountMonthlyLimitReached
+        ? "monthly"
+        : isAccountDailyLimitReached
+          ? "daily"
+          : null;
 
   const placeholderText = isUsageLimitReached
     ? t("chat.exceedDailyLimit")
@@ -380,6 +395,18 @@ export function ChatInput({
   const modelSearchInputRef = useRef<HTMLInputElement | null>(null);
   const lastMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
 
+  useEffect(() => {
+    if (!limitScope || trackedLimitScopeRef.current === limitScope) return;
+    trackedLimitScopeRef.current = limitScope;
+    trackProductEvent("credit_limit_hit", selectedModels.length, {
+      limit_scope: limitScope,
+    });
+    trackProductEvent("upgrade_prompt_view", selectedModels.length, {
+      cta_location: "credit_limit_banner",
+      limit_scope: limitScope,
+    });
+  }, [limitScope, selectedModels.length]);
+
   const announceGuestQuickStart = useCallback((visible: boolean) => {
     if (visible) {
       window.sessionStorage.setItem(GUEST_QUICK_START_ACTIVE_KEY, "1");
@@ -391,13 +418,22 @@ export function ChatInput({
     );
   }, []);
 
-  const dismissGuestQuickStart = useCallback(() => {
+  const dismissGuestQuickStart = useCallback(
+    (outcome: "completed" | "skipped" = "completed") => {
     if (!guestQuickStartActiveRef.current) return;
     window.localStorage.setItem(GUEST_QUICK_START_STORAGE_KEY, "1");
     guestQuickStartActiveRef.current = false;
     setShowGuestQuickStart(false);
     announceGuestQuickStart(false);
-  }, [announceGuestQuickStart]);
+      trackProductEventOnce(
+        `guest_quick_start_${outcome}_v2`,
+        outcome === "skipped" ? "onboarding_skipped" : "onboarding_completed",
+        0,
+        { onboarding_id: "guest_quick_start_v2" }
+      );
+    },
+    [announceGuestQuickStart]
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -410,6 +446,14 @@ export function ChatInput({
       guestQuickStartActiveRef.current = shouldShow;
       setShowGuestQuickStart(shouldShow);
       announceGuestQuickStart(shouldShow);
+      if (shouldShow) {
+        trackProductEventOnce(
+          "guest_quick_start_shown_v2",
+          "onboarding_shown",
+          0,
+          { onboarding_id: "guest_quick_start_v2" }
+        );
+      }
     }, 0);
 
     return () => {
@@ -1119,7 +1163,7 @@ export function ChatInput({
                 </div>
                 <button
                   type="button"
-                  onClick={dismissGuestQuickStart}
+                  onClick={() => dismissGuestQuickStart("skipped")}
                   className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-zinc-500 transition hover:bg-white/80 hover:text-zinc-900 dark:hover:bg-zinc-900 dark:hover:text-white"
                   aria-label={t("auth.cancel")}
                 >
@@ -1148,7 +1192,7 @@ export function ChatInput({
                     <span className="block text-[10px] leading-4 text-zinc-500 dark:text-zinc-400">{t("onboarding.privateBody")}</span>
                     <a
                       href={`/auth/signin?callbackUrl=${encodeURIComponent(signInCallbackUrl)}`}
-                      onClick={dismissGuestQuickStart}
+                      onClick={() => dismissGuestQuickStart("completed")}
                       className="mt-0.5 inline-flex text-[10px] font-black text-blue-700 underline underline-offset-2 dark:text-blue-300"
                     >
                       {t("auth.signIn")}
@@ -1590,7 +1634,7 @@ export function ChatInput({
           data-testid="chat-textarea"
           ref={textareaRef}
           value={value}
-          onFocus={dismissGuestQuickStart}
+          onFocus={() => dismissGuestQuickStart("completed")}
           onChange={(e) => {
             if (e.target.value) dismissGuestQuickStart();
             onChange(e.target.value);

@@ -669,6 +669,8 @@ export function UpgradeInterestButton({
   const submit = async () => {
     if (isSending || isValidatingPromotion) return;
     const normalizedInputCode = promoCode.trim().toUpperCase();
+    let failureStage: "promotion_validation" | "checkout_session" =
+      "checkout_session";
     setIsSending(true);
     try {
       let checkoutPromoCode = appliedPromoCode;
@@ -677,6 +679,7 @@ export function UpgradeInterestButton({
         normalizedInputCode &&
         (normalizedInputCode !== appliedPromoCode || !appliedPromotion)
       ) {
+        failureStage = "promotion_validation";
         setIsValidatingPromotion(true);
         promotionForCheckout = await requestPromotionValidation(
           normalizedInputCode,
@@ -688,6 +691,7 @@ export function UpgradeInterestButton({
         dispatchAppToast(copy.promoApplied, "success");
       }
 
+      failureStage = "checkout_session";
       const checkoutDueUsdCents = calculateDiscountedCents(
         baseCents,
         promotionForCheckout
@@ -727,6 +731,18 @@ export function UpgradeInterestButton({
       }
       window.location.assign(data.url);
     } catch (error) {
+      const errorCode =
+        error instanceof TypeError
+          ? "network_error"
+          : failureStage === "promotion_validation"
+            ? "promotion_invalid"
+            : "checkout_request_failed";
+      trackProductEvent("checkout_failed", 0, {
+        billing_interval: billingInterval,
+        plan_id: planId,
+        failure_stage: failureStage,
+        error_code: errorCode,
+      });
       dispatchAppToast(
         error instanceof Error ? error.message : t("billing.waitlistFailed"),
         "error"
@@ -771,6 +787,10 @@ export function UpgradeInterestButton({
       <button
         type="button"
         onClick={() => {
+          trackProductEvent("plan_selected", 0, {
+            cta_location: `upgrade_${planId}`,
+            plan_id: planId,
+          });
           trackProductEvent("cta_start_click", 0, {
             cta_location: `upgrade_${planId}`,
             plan_id: planId,

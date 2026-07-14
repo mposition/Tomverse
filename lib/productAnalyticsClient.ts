@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  PRODUCT_ANALYTICS_EVENT_NAMES,
   analyticsClientEventSchema,
   analyticsPropertiesSchema,
   type AnalyticsAttribution,
@@ -19,6 +20,9 @@ const CONTEXT_STORAGE_KEY = "tomverse_analytics_context_v1";
 const CONSENT_STORAGE_KEY = "tomverse_analytics_consent_v1";
 const SIGNUP_STORAGE_KEY = "tomverse_analytics_signup_v1";
 const SESSION_STORAGE_KEY = "tomverse_analytics_session_v1";
+const PRECONSENT_ATTRIBUTION_STORAGE_KEY =
+  "tomverse_analytics_preconsent_attribution_v1";
+const PENDING_EVENTS_STORAGE_KEY = "tomverse_analytics_pending_events_v1";
 const MAX_PENDING_EVENTS = 100;
 const ATTRIBUTION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 
@@ -48,6 +52,15 @@ type StoredContext = {
   utmMedium: string;
   utmCampaign: string;
   sentOnce: string[];
+};
+
+type StoredPreConsentAttribution = {
+  firstSeenAt: string;
+  capturedAt: string;
+  hasUtm: boolean;
+  utmSource: string;
+  utmMedium: string;
+  utmCampaign: string;
 };
 
 let runtime: AnalyticsRuntime | null = null;
@@ -109,6 +122,36 @@ const writeStoredContext = (nextRuntime: AnalyticsRuntime) => {
   window.localStorage.setItem(CONTEXT_STORAGE_KEY, JSON.stringify(stored));
 };
 
+const readPreConsentAttribution = (): StoredPreConsentAttribution | null => {
+  try {
+    const parsed = JSON.parse(
+      window.sessionStorage.getItem(PRECONSENT_ATTRIBUTION_STORAGE_KEY) ||
+        "null"
+    ) as Partial<StoredPreConsentAttribution> | null;
+    if (
+      !parsed ||
+      typeof parsed.firstSeenAt !== "string" ||
+      typeof parsed.capturedAt !== "string" ||
+      typeof parsed.hasUtm !== "boolean" ||
+      typeof parsed.utmSource !== "string" ||
+      typeof parsed.utmMedium !== "string" ||
+      typeof parsed.utmCampaign !== "string"
+    ) {
+      return null;
+    }
+    return {
+      firstSeenAt: parsed.firstSeenAt,
+      capturedAt: parsed.capturedAt,
+      hasUtm: parsed.hasUtm,
+      utmSource: parsed.utmSource.slice(0, 100),
+      utmMedium: parsed.utmMedium.slice(0, 100),
+      utmCampaign: parsed.utmCampaign.slice(0, 100),
+    };
+  } catch {
+    return null;
+  }
+};
+
 const currentUtm = () => {
   const params = new URLSearchParams(window.location.search);
   const hasUtm = ["utm_source", "utm_medium", "utm_campaign"].some((key) =>
@@ -120,6 +163,103 @@ const currentUtm = () => {
     utmMedium: limited(params.get("utm_medium"), "(none)"),
     utmCampaign: limited(params.get("utm_campaign"), "(not set)"),
   };
+};
+
+const capturePreConsentAttribution = () => {
+  const existing = readPreConsentAttribution();
+  const urlUtm = currentUtm();
+  const now = new Date().toISOString();
+  const captured: StoredPreConsentAttribution = urlUtm
+    ? {
+        firstSeenAt: existing?.firstSeenAt || now,
+        capturedAt: now,
+        hasUtm: true,
+        utmSource: urlUtm.utmSource,
+        utmMedium: urlUtm.utmMedium,
+        utmCampaign: urlUtm.utmCampaign,
+      }
+    : existing || {
+        firstSeenAt: now,
+        capturedAt: now,
+        hasUtm: false,
+        utmSource: "(direct)",
+        utmMedium: "(none)",
+        utmCampaign: "(not set)",
+      };
+  window.sessionStorage.setItem(
+    PRECONSENT_ATTRIBUTION_STORAGE_KEY,
+    JSON.stringify(captured)
+  );
+  return captured;
+};
+
+const readPendingEvents = (): EventIntent[] => {
+  try {
+    const parsed = JSON.parse(
+      window.sessionStorage.getItem(PENDING_EVENTS_STORAGE_KEY) || "[]"
+    ) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((candidate): EventIntent | null => {
+        if (!candidate || typeof candidate !== "object") return null;
+        const event = candidate as Partial<EventIntent>;
+        const properties = analyticsPropertiesSchema.safeParse(event.properties);
+        if (
+          !isUuid(event.eventId) ||
+          typeof event.eventName !== "string" ||
+          !PRODUCT_ANALYTICS_EVENT_NAMES.includes(
+            event.eventName as ProductAnalyticsEventName
+          ) ||
+          typeof event.occurredAt !== "string" ||
+          !Number.isFinite(new Date(event.occurredAt).getTime()) ||
+          typeof event.modelCount !== "number" ||
+          !properties.success ||
+          (event.onceKey !== undefined && typeof event.onceKey !== "string")
+        ) {
+          return null;
+        }
+        return {
+          eventId: event.eventId,
+          eventName: event.eventName as ProductAnalyticsEventName,
+          occurredAt: event.occurredAt,
+          modelCount: event.modelCount,
+          properties: properties.data,
+          ...(event.onceKey ? { onceKey: event.onceKey.slice(0, 100) } : {}),
+        };
+      })
+      .filter((event): event is EventIntent => Boolean(event))
+      .slice(-MAX_PENDING_EVENTS);
+  } catch {
+    return [];
+  }
+};
+
+const mergePendingEvents = (...eventLists: EventIntent[][]) => {
+  const merged = new Map<string, EventIntent>();
+  for (const event of eventLists.flat()) merged.set(event.eventId, event);
+  return Array.from(merged.values())
+    .sort((left, right) => left.occurredAt.localeCompare(right.occurredAt))
+    .slice(-MAX_PENDING_EVENTS);
+};
+
+const persistPendingEvents = (events: EventIntent[]) => {
+  pendingEvents = events.slice(-MAX_PENDING_EVENTS);
+  pendingOnceKeys.clear();
+  for (const event of pendingEvents) {
+    if (event.onceKey) pendingOnceKeys.add(event.onceKey);
+  }
+  window.sessionStorage.setItem(
+    PENDING_EVENTS_STORAGE_KEY,
+    JSON.stringify(pendingEvents)
+  );
+};
+
+const queuePendingIntent = (intent: EventIntent) => {
+  if (analyticsConsent() === "declined") return;
+  capturePreConsentAttribution();
+  persistPendingEvents(
+    mergePendingEvents(readPendingEvents(), pendingEvents, [intent])
+  );
 };
 
 const sessionId = () => {
@@ -184,12 +324,19 @@ export const configureAnalyticsClient = ({
 }) => {
   const now = new Date();
   const stored = readStoredContext();
+  const preConsentAttribution = capturePreConsentAttribution();
   const storedCapturedAt = stored ? new Date(stored.capturedAt).getTime() : 0;
   const storedAttributionIsFresh =
     storedCapturedAt > 0 && now.getTime() - storedCapturedAt <= ATTRIBUTION_TTL_MS;
   const urlUtm = currentUtm();
   const attribution = urlUtm ||
-    (stored && storedAttributionIsFresh
+    (preConsentAttribution.hasUtm
+      ? {
+          utmSource: preConsentAttribution.utmSource,
+          utmMedium: preConsentAttribution.utmMedium,
+          utmCampaign: preConsentAttribution.utmCampaign,
+        }
+      : stored && storedAttributionIsFresh
       ? {
           utmSource: stored.utmSource,
           utmMedium: stored.utmMedium,
@@ -213,10 +360,13 @@ export const configureAnalyticsClient = ({
     },
     measurementId,
     plan,
-    firstSeenAt: stored?.firstSeenAt || now.toISOString(),
+    firstSeenAt:
+      stored?.firstSeenAt || preConsentAttribution.firstSeenAt || now.toISOString(),
     capturedAt:
-      urlUtm || !storedAttributionIsFresh
-        ? now.toISOString()
+      urlUtm || preConsentAttribution.hasUtm
+        ? preConsentAttribution.capturedAt
+        : !storedAttributionIsFresh
+          ? now.toISOString()
         : stored?.capturedAt || now.toISOString(),
     sentOnce: new Set(stored?.sentOnce || []),
   };
@@ -239,8 +389,10 @@ export const configureAnalyticsClient = ({
     });
   }
 
-  const queued = pendingEvents;
+  const queued = mergePendingEvents(readPendingEvents(), pendingEvents);
   pendingEvents = [];
+  window.sessionStorage.removeItem(PENDING_EVENTS_STORAGE_KEY);
+  window.sessionStorage.removeItem(PRECONSENT_ATTRIBUTION_STORAGE_KEY);
   for (const intent of queued) {
     if (intent.onceKey && runtime.sentOnce.has(intent.onceKey)) continue;
     if (intent.onceKey) runtime.sentOnce.add(intent.onceKey);
@@ -263,6 +415,9 @@ export const disableAnalyticsClient = () => {
   pendingOnceKeys.clear();
   window.localStorage.removeItem(CONTEXT_STORAGE_KEY);
   window.localStorage.removeItem(SIGNUP_STORAGE_KEY);
+  window.sessionStorage.removeItem(SIGNUP_STORAGE_KEY);
+  window.sessionStorage.removeItem(PENDING_EVENTS_STORAGE_KEY);
+  window.sessionStorage.removeItem(PRECONSENT_ATTRIBUTION_STORAGE_KEY);
   for (const cookie of document.cookie.split(";")) {
     const name = cookie.split("=")[0]?.trim();
     if (name === "_ga" || name?.startsWith("_ga_")) {
@@ -286,7 +441,7 @@ export function trackProductEvent(
     properties: parsedProperties.data,
   };
   if (!runtime) {
-    pendingEvents = [...pendingEvents.slice(-(MAX_PENDING_EVENTS - 1)), intent];
+    queuePendingIntent(intent);
     return;
   }
   sendIntent(intent);
@@ -298,7 +453,17 @@ export function trackProductEventOnce(
   modelCount = 0,
   properties: ProductAnalyticsProperties = {}
 ) {
-  if (runtime?.sentOnce.has(onceKey) || pendingOnceKeys.has(onceKey)) return;
+  const alreadyPending = mergePendingEvents(
+    readPendingEvents(),
+    pendingEvents
+  ).some((event) => event.onceKey === onceKey);
+  if (
+    runtime?.sentOnce.has(onceKey) ||
+    pendingOnceKeys.has(onceKey) ||
+    alreadyPending
+  ) {
+    return;
+  }
   const parsedProperties = analyticsPropertiesSchema.safeParse(properties);
   if (!parsedProperties.success) return;
   const intent: EventIntent = {
@@ -310,8 +475,7 @@ export function trackProductEventOnce(
     onceKey,
   };
   if (!runtime) {
-    pendingOnceKeys.add(onceKey);
-    pendingEvents = [...pendingEvents.slice(-(MAX_PENDING_EVENTS - 1)), intent];
+    queuePendingIntent(intent);
     return;
   }
   runtime.sentOnce.add(onceKey);
@@ -320,9 +484,9 @@ export function trackProductEventOnce(
 }
 
 export const markSignupStarted = (method: string) => {
-  if (!runtime) return;
+  if (analyticsConsent() === "declined") return;
   const normalizedMethod = method.trim().slice(0, 32) || "unknown";
-  window.localStorage.setItem(
+  window.sessionStorage.setItem(
     SIGNUP_STORAGE_KEY,
     JSON.stringify({ method: normalizedMethod, startedAt: new Date().toISOString() })
   );
@@ -332,9 +496,12 @@ export const markSignupStarted = (method: string) => {
 export const consumeSignupStarted = () => {
   try {
     const parsed = JSON.parse(
-      window.localStorage.getItem(SIGNUP_STORAGE_KEY) || "null"
+      window.sessionStorage.getItem(SIGNUP_STORAGE_KEY) ||
+        window.localStorage.getItem(SIGNUP_STORAGE_KEY) ||
+        "null"
     ) as { method?: unknown; startedAt?: unknown } | null;
     window.localStorage.removeItem(SIGNUP_STORAGE_KEY);
+    window.sessionStorage.removeItem(SIGNUP_STORAGE_KEY);
     if (
       !parsed ||
       typeof parsed.method !== "string" ||
@@ -345,6 +512,7 @@ export const consumeSignupStarted = () => {
     return { method: parsed.method.slice(0, 32), startedAt: parsed.startedAt };
   } catch {
     window.localStorage.removeItem(SIGNUP_STORAGE_KEY);
+    window.sessionStorage.removeItem(SIGNUP_STORAGE_KEY);
     return null;
   }
 };

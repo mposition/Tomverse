@@ -3,6 +3,8 @@ import { z } from "zod";
 export const PRODUCT_ANALYTICS_EVENT_NAMES = [
   "landing_view",
   "cta_start_click",
+  "pricing_view",
+  "plan_selected",
   "chat_started",
   "first_response_completed",
   "multi_model_compare_completed",
@@ -12,7 +14,14 @@ export const PRODUCT_ANALYTICS_EVENT_NAMES = [
   "share_created",
   "signup_started",
   "signup_completed",
+  "signup_page_view",
+  "onboarding_shown",
+  "onboarding_completed",
+  "onboarding_skipped",
+  "credit_limit_hit",
+  "upgrade_prompt_view",
   "checkout_started",
+  "checkout_failed",
   "purchase_completed",
   "return_day_1",
   "return_day_7",
@@ -34,6 +43,18 @@ export const analyticsPropertiesSchema = z
     currency: z.literal("USD").optional(),
     transaction_id: z.string().trim().min(1).max(100).optional(),
     conversation_mode: z.enum(["guest", "account", "private"]).optional(),
+    onboarding_id: z.string().trim().min(1).max(32).optional(),
+    limit_scope: z.enum(["guest", "daily", "monthly"]).optional(),
+    failure_stage: z
+      .enum(["promotion_validation", "checkout_session"])
+      .optional(),
+    error_code: z
+      .enum([
+        "promotion_invalid",
+        "network_error",
+        "checkout_request_failed",
+      ])
+      .optional(),
   })
   .strict();
 

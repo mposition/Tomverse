@@ -1,11 +1,25 @@
 "use client";
 
 import Link from "next/link";
-import { CheckCircle2, Minus } from "lucide-react";
+import { useEffect, useRef } from "react";
+import {
+  Calculator,
+  CheckCircle2,
+  FileText,
+  Info,
+  MessageSquare,
+  Minus,
+} from "lucide-react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
+import {
+  INPUT_CREDIT_MULTIPLIERS,
+  MODEL_USAGE_CREDIT_WEIGHTS,
+  getTypicalShortRequestCapacities,
+} from "@/lib/models";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
 import { UpgradeInterestButton } from "@/components/marketing/UpgradeInterestButton";
 import { usePublicBilling } from "@/components/marketing/usePublicBilling";
+import { trackProductEvent } from "@/lib/productAnalyticsClient";
 
 const annualLabelByLanguage: Partial<Record<Language, { annual: string; save: string; checkout: string }>> = {
   en: { annual: "Annual", save: "Save 20%", checkout: "Checkout is charged in USD." },
@@ -47,6 +61,178 @@ const promotionDateLocale: Record<Language, string> = {
   de: "de-DE",
   es: "es-ES",
   pt: "pt-BR",
+};
+
+type CreditValueCopy = {
+  eyebrow: string;
+  title: string;
+  description: string;
+  typicalLabel: string;
+  creditUnit: string;
+  monthlyUnit: string;
+  approx: string;
+  standardOnly: string;
+  advancedOnly: string;
+  mixedComparison: string;
+  responseUnit: string;
+  comparisonUnit: string;
+  longContextTitle: string;
+  longContextBody: string;
+  tokenUnit: string;
+  preflightTitle: string;
+  preflightBody: string;
+  preflightCta: string;
+  disclaimer: string;
+};
+
+const creditValueCopy: Record<Language, CreditValueCopy> = {
+  en: {
+    eyebrow: "Credit guide",
+    title: "What can each monthly credit allowance cover?",
+    description: "Compare the allowance with the base cost of common model combinations before choosing a plan.",
+    typicalLabel: "Typical short-request examples",
+    creditUnit: "credits",
+    monthlyUnit: "credits / month",
+    approx: "About",
+    standardOnly: "Standard only",
+    advancedOnly: "Advanced only",
+    mixedComparison: "Standard + Advanced + Premium",
+    responseUnit: "responses",
+    comparisonUnit: "comparisons",
+    longContextTitle: "Long conversations and files use more context",
+    longContextBody: "Input context includes the current prompt, previous conversation, and extracted file content. As that context grows, the base model charge is multiplied by the bands below.",
+    tokenUnit: "input tokens",
+    preflightTitle: "Check the base estimate before sending",
+    preflightBody: "The model selector shows each model's usage class and base credits. Add the selected models together; file and long-context multipliers are applied after the request context is processed.",
+    preflightCta: "Open the model selector",
+    disclaimer: "Illustrative examples for typical short requests without files or long conversation history. They are not guaranteed response counts; actual usage varies by model, full input context, attachments, and reasoning mode.",
+  },
+  ko: {
+    eyebrow: "크레딧 사용 가이드",
+    title: "월 크레딧으로 어느 정도 사용할 수 있나요?",
+    description: "플랜을 선택하기 전에 월 제공량을 자주 사용하는 모델 조합의 기본 차감량과 비교해 보세요.",
+    typicalLabel: "일반적인 짧은 요청 기준 예시",
+    creditUnit: "크레딧",
+    monthlyUnit: "크레딧 / 월",
+    approx: "약",
+    standardOnly: "Standard 단독",
+    advancedOnly: "Advanced 단독",
+    mixedComparison: "Standard + Advanced + Premium",
+    responseUnit: "응답",
+    comparisonUnit: "비교",
+    longContextTitle: "긴 대화와 파일은 더 많은 문맥을 사용합니다",
+    longContextBody: "입력 문맥에는 현재 질문, 이전 대화와 추출된 파일 내용이 포함됩니다. 문맥이 길어지면 아래 구간에 따라 모델 기본 차감량에 배율이 적용됩니다.",
+    tokenUnit: "입력 토큰",
+    preflightTitle: "전송 전에 기본 예상량을 확인하세요",
+    preflightBody: "모델 선택기에서 각 모델의 사용 등급과 기본 크레딧을 확인할 수 있습니다. 선택한 모델의 기본값을 합산하며, 파일·긴 문맥 배율은 요청 문맥 처리 후 적용됩니다.",
+    preflightCta: "모델 선택기에서 확인",
+    disclaimer: "파일이나 긴 대화 기록이 없는 일반적인 짧은 요청 기준의 예시이며 보장 응답 횟수가 아닙니다. 실제 사용량은 모델, 전체 입력 문맥, 첨부파일과 추론 방식에 따라 달라집니다.",
+  },
+  zh: {
+    eyebrow: "积分指南",
+    title: "每月积分大约可以完成多少次请求？",
+    description: "选择方案前，可将每月额度与常用模型组合的基础消耗进行比较。",
+    typicalLabel: "典型短请求示例",
+    creditUnit: "积分",
+    monthlyUnit: "积分 / 月",
+    approx: "约",
+    standardOnly: "仅 Standard",
+    advancedOnly: "仅 Advanced",
+    mixedComparison: "Standard + Advanced + Premium",
+    responseUnit: "次响应",
+    comparisonUnit: "次比较",
+    longContextTitle: "长对话和文件会使用更多上下文",
+    longContextBody: "输入上下文包括当前问题、先前对话和提取的文件内容。上下文增长时，模型基础消耗会按以下区间乘以相应倍数。",
+    tokenUnit: "输入 token",
+    preflightTitle: "发送前查看基础预估",
+    preflightBody: "模型选择器会显示每个模型的使用等级和基础积分。所选模型的基础值相加；文件和长上下文倍数会在处理请求上下文后应用。",
+    preflightCta: "打开模型选择器",
+    disclaimer: "这是无文件、无长对话历史的典型短请求示例，并非保证的响应次数。实际用量会因模型、完整输入上下文、附件和推理模式而异。",
+  },
+  fr: {
+    eyebrow: "Guide des crédits",
+    title: "Que permet chaque enveloppe mensuelle de crédits ?",
+    description: "Comparez l'enveloppe au coût de base des combinaisons de modèles courantes avant de choisir un plan.",
+    typicalLabel: "Exemples de requêtes courtes typiques",
+    creditUnit: "crédits",
+    monthlyUnit: "crédits / mois",
+    approx: "Environ",
+    standardOnly: "Standard uniquement",
+    advancedOnly: "Advanced uniquement",
+    mixedComparison: "Standard + Advanced + Premium",
+    responseUnit: "réponses",
+    comparisonUnit: "comparaisons",
+    longContextTitle: "Les longues conversations et les fichiers utilisent plus de contexte",
+    longContextBody: "Le contexte comprend la demande actuelle, la conversation précédente et le contenu extrait des fichiers. Le coût de base est multiplié selon les paliers ci-dessous.",
+    tokenUnit: "tokens d'entrée",
+    preflightTitle: "Vérifiez l'estimation de base avant l'envoi",
+    preflightBody: "Le sélecteur affiche la classe d'usage et les crédits de base de chaque modèle. Additionnez les modèles sélectionnés ; les multiplicateurs de fichiers et de contexte long sont appliqués après traitement.",
+    preflightCta: "Ouvrir le sélecteur de modèles",
+    disclaimer: "Exemples indicatifs pour des requêtes courtes sans fichier ni long historique. Le nombre de réponses n'est pas garanti et varie selon le modèle, le contexte, les pièces jointes et le mode de raisonnement.",
+  },
+  de: {
+    eyebrow: "Credit-Leitfaden",
+    title: "Was deckt das monatliche Credit-Kontingent ab?",
+    description: "Vergleichen Sie das Kontingent vor der Tarifwahl mit den Basiskosten gängiger Modellkombinationen.",
+    typicalLabel: "Beispiele für typische kurze Anfragen",
+    creditUnit: "Credits",
+    monthlyUnit: "Credits / Monat",
+    approx: "Etwa",
+    standardOnly: "Nur Standard",
+    advancedOnly: "Nur Advanced",
+    mixedComparison: "Standard + Advanced + Premium",
+    responseUnit: "Antworten",
+    comparisonUnit: "Vergleiche",
+    longContextTitle: "Lange Gespräche und Dateien verwenden mehr Kontext",
+    longContextBody: "Der Eingabekontext umfasst die aktuelle Anfrage, den bisherigen Verlauf und extrahierte Dateiinhalte. Mit wachsendem Kontext wird der Basisverbrauch nach den folgenden Stufen multipliziert.",
+    tokenUnit: "Eingabe-Token",
+    preflightTitle: "Basisprognose vor dem Senden prüfen",
+    preflightBody: "Die Modellauswahl zeigt Nutzungsklasse und Basis-Credits jedes Modells. Die ausgewählten Modelle werden addiert; Datei- und Langkontextfaktoren werden nach der Verarbeitung angewendet.",
+    preflightCta: "Modellauswahl öffnen",
+    disclaimer: "Unverbindliche Beispiele für typische kurze Anfragen ohne Dateien oder langen Verlauf. Die Antwortzahl ist nicht garantiert und hängt von Modell, Gesamtkontext, Anhängen und Reasoning-Modus ab.",
+  },
+  es: {
+    eyebrow: "Guía de créditos",
+    title: "¿Qué cubre cada asignación mensual de créditos?",
+    description: "Compara la asignación con el coste base de combinaciones habituales antes de elegir un plan.",
+    typicalLabel: "Ejemplos de solicitudes cortas habituales",
+    creditUnit: "créditos",
+    monthlyUnit: "créditos / mes",
+    approx: "Aprox.",
+    standardOnly: "Solo Standard",
+    advancedOnly: "Solo Advanced",
+    mixedComparison: "Standard + Advanced + Premium",
+    responseUnit: "respuestas",
+    comparisonUnit: "comparaciones",
+    longContextTitle: "Las conversaciones largas y los archivos usan más contexto",
+    longContextBody: "El contexto incluye la solicitud actual, la conversación previa y el contenido extraído de archivos. Al crecer, el coste base se multiplica según los tramos siguientes.",
+    tokenUnit: "tokens de entrada",
+    preflightTitle: "Comprueba la estimación base antes de enviar",
+    preflightBody: "El selector muestra la clase de uso y los créditos base de cada modelo. Suma los modelos seleccionados; los multiplicadores de archivos y contexto largo se aplican tras procesar la solicitud.",
+    preflightCta: "Abrir el selector de modelos",
+    disclaimer: "Ejemplos orientativos para solicitudes cortas sin archivos ni historial largo. No garantizan una cantidad de respuestas; el uso real depende del modelo, contexto, adjuntos y modo de razonamiento.",
+  },
+  pt: {
+    eyebrow: "Guia de créditos",
+    title: "O que cada franquia mensal de créditos pode cobrir?",
+    description: "Compare a franquia com o custo-base das combinações mais comuns antes de escolher um plano.",
+    typicalLabel: "Exemplos de pedidos curtos típicos",
+    creditUnit: "créditos",
+    monthlyUnit: "créditos / mês",
+    approx: "Cerca de",
+    standardOnly: "Somente Standard",
+    advancedOnly: "Somente Advanced",
+    mixedComparison: "Standard + Advanced + Premium",
+    responseUnit: "respostas",
+    comparisonUnit: "comparações",
+    longContextTitle: "Conversas longas e arquivos usam mais contexto",
+    longContextBody: "O contexto inclui o pedido atual, a conversa anterior e o conteúdo extraído dos arquivos. À medida que cresce, o custo-base é multiplicado pelas faixas abaixo.",
+    tokenUnit: "tokens de entrada",
+    preflightTitle: "Confira a estimativa-base antes de enviar",
+    preflightBody: "O seletor mostra a classe de uso e os créditos-base de cada modelo. Some os modelos escolhidos; multiplicadores de arquivos e contexto longo são aplicados após o processamento.",
+    preflightCta: "Abrir o seletor de modelos",
+    disclaimer: "Exemplos ilustrativos para pedidos curtos sem arquivos ou histórico longo. Não garantem uma quantidade de respostas; o uso real varia conforme modelo, contexto, anexos e modo de raciocínio.",
+  },
 };
 
 type PlanCopy = {
@@ -394,11 +580,45 @@ export function PricingPageContent() {
   const { lang } = useLanguage();
   const content = copy[lang] ?? copy.en;
   const billing = usePublicBilling();
+  const pricingViewTrackedRef = useRef(false);
   const annualCopy = annualLabelByLanguage[lang] ?? annualLabelByLanguage.en!;
   const saleCopy = saleLabelByLanguage[lang] ?? saleLabelByLanguage.en!;
   const promotionDetail =
     promotionDetailByLanguage[lang] ?? promotionDetailByLanguage.en!;
+  const creditGuide = creditValueCopy[lang];
+  const numberFormatter = new Intl.NumberFormat(promotionDateLocale[lang]);
+  const creditPlans = ([
+    { id: "free", name: "Free", fallbackCredits: 300 },
+    { id: "pro", name: "Pro", fallbackCredits: 3_000 },
+    { id: "max", name: "Max", fallbackCredits: 10_000 },
+  ] as const).map((plan) => {
+    const configuredCredits = billing.config?.plans.find(
+      (configuredPlan) => configuredPlan.id === plan.id
+    )?.monthlyMessageLimit;
+    const monthlyCredits =
+      typeof configuredCredits === "number" && configuredCredits > 0
+        ? Math.floor(configuredCredits)
+        : plan.fallbackCredits;
+    return {
+      ...plan,
+      monthlyCredits,
+      capacities: getTypicalShortRequestCapacities(monthlyCredits),
+    };
+  });
+  const inputMultiplierBands = [
+    { label: `≤ ${numberFormatter.format(16_000)}`, multiplier: 1 },
+    ...INPUT_CREDIT_MULTIPLIERS.map((item) => ({
+      label: `> ${numberFormatter.format(item.aboveTokens)}`,
+      multiplier: item.multiplier,
+    })),
+  ];
   const featuredPromotion = billing.config?.featuredPromotion ?? null;
+
+  useEffect(() => {
+    if (pricingViewTrackedRef.current) return;
+    pricingViewTrackedRef.current = true;
+    trackProductEvent("pricing_view");
+  }, []);
   const promotionEndDate = featuredPromotion
     ? new Intl.DateTimeFormat(promotionDateLocale[lang], {
         year: "numeric",
@@ -582,6 +802,12 @@ export function PricingPageContent() {
               {planId === "free" ? (
                 <Link
                   href={plan.href}
+                  onClick={() =>
+                    trackProductEvent("plan_selected", 0, {
+                      plan_id: "free",
+                      cta_location: "pricing_plan_card",
+                    })
+                  }
                   className={`mt-8 inline-flex h-12 w-full items-center justify-center rounded-xl text-sm font-black transition ${
                     plan.highlighted ? "bg-white text-blue-700 hover:bg-blue-50"
                       : "border border-zinc-300 text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-zinc-800"
@@ -612,6 +838,159 @@ export function PricingPageContent() {
             );
           })}
         </div>
+
+        <section
+          data-testid="pricing-credit-guide"
+          className="mt-10 overflow-hidden rounded-[2rem] border border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/40"
+        >
+          <div className="border-b border-zinc-200 p-5 dark:border-zinc-800 sm:p-7">
+            <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+              <div className="max-w-3xl">
+                <p className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.18em] text-blue-600 dark:text-blue-400">
+                  <Calculator className="h-4 w-4" />
+                  {creditGuide.eyebrow}
+                </p>
+                <h2 className="mt-3 text-3xl font-black sm:text-4xl">
+                  {creditGuide.title}
+                </h2>
+                <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">
+                  {creditGuide.description}
+                </p>
+              </div>
+              <span className="w-fit rounded-full border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-xs font-black text-emerald-700 dark:text-emerald-300">
+                {creditGuide.typicalLabel}
+              </span>
+            </div>
+
+            <div className="mt-5 flex flex-wrap gap-2 text-xs font-bold text-zinc-600 dark:text-zinc-300">
+              <span className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 dark:border-zinc-700 dark:bg-zinc-950">
+                Standard · {MODEL_USAGE_CREDIT_WEIGHTS.standard} {creditGuide.creditUnit}
+              </span>
+              <span className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 dark:border-zinc-700 dark:bg-zinc-950">
+                Advanced · {MODEL_USAGE_CREDIT_WEIGHTS.advanced} {creditGuide.creditUnit}
+              </span>
+              <span className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 dark:border-zinc-700 dark:bg-zinc-950">
+                Premium · {MODEL_USAGE_CREDIT_WEIGHTS.premium} {creditGuide.creditUnit}
+              </span>
+            </div>
+          </div>
+
+          <div className="grid gap-4 p-4 sm:p-6 lg:grid-cols-3">
+            {creditPlans.map((plan) => {
+              const examples = [
+                {
+                  label: creditGuide.standardOnly,
+                  cost: MODEL_USAGE_CREDIT_WEIGHTS.standard,
+                  value: plan.capacities.standardResponses,
+                  unit: creditGuide.responseUnit,
+                },
+                {
+                  label: creditGuide.advancedOnly,
+                  cost: MODEL_USAGE_CREDIT_WEIGHTS.advanced,
+                  value: plan.capacities.advancedResponses,
+                  unit: creditGuide.responseUnit,
+                },
+                {
+                  label: creditGuide.mixedComparison,
+                  cost: plan.capacities.mixedComparisonCredits,
+                  value: plan.capacities.mixedComparisons,
+                  unit: creditGuide.comparisonUnit,
+                },
+              ];
+
+              return (
+                <article
+                  key={plan.id}
+                  className={`rounded-2xl border p-5 ${
+                    plan.id === "pro"
+                      ? "border-blue-500 bg-blue-600 text-white shadow-xl shadow-blue-950/15"
+                      : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-2xl font-black">{plan.name}</h3>
+                      <p
+                        className={`mt-1 text-xs font-bold ${
+                          plan.id === "pro"
+                            ? "text-blue-100"
+                            : "text-zinc-500 dark:text-zinc-400"
+                        }`}
+                      >
+                        {numberFormatter.format(plan.monthlyCredits)} {creditGuide.monthlyUnit}
+                      </p>
+                    </div>
+                    <MessageSquare className={`h-6 w-6 ${plan.id === "pro" ? "text-white" : "text-blue-600 dark:text-blue-400"}`} />
+                  </div>
+
+                  <div className="mt-5 divide-y divide-zinc-200/80 dark:divide-zinc-800">
+                    {examples.map((example) => (
+                      <div key={example.label} className="py-3 first:pt-0 last:pb-0">
+                        <div className="flex items-start justify-between gap-3">
+                          <p className="text-xs font-bold leading-5">{example.label}</p>
+                          <span
+                            className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black ${
+                              plan.id === "pro"
+                                ? "bg-white/15 text-white"
+                                : "bg-zinc-100 text-zinc-500 dark:bg-zinc-900 dark:text-zinc-300"
+                            }`}
+                          >
+                            {example.cost} {creditGuide.creditUnit}
+                          </span>
+                        </div>
+                        <p className="mt-2 text-xl font-black">
+                          {creditGuide.approx} {numberFormatter.format(example.value)} {example.unit}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+
+          <div className="grid gap-4 border-t border-zinc-200 p-4 dark:border-zinc-800 sm:p-6 lg:grid-cols-2">
+            <article className="rounded-2xl border border-amber-500/25 bg-amber-500/10 p-5">
+              <div className="flex items-center gap-2 text-amber-700 dark:text-amber-300">
+                <FileText className="h-5 w-5" />
+                <h3 className="font-black">{creditGuide.longContextTitle}</h3>
+              </div>
+              <p className="mt-3 text-xs leading-6 text-zinc-600 dark:text-zinc-300">
+                {creditGuide.longContextBody}
+              </p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {inputMultiplierBands.map((band) => (
+                  <span
+                    key={band.label}
+                    className="rounded-full border border-amber-500/20 bg-white/70 px-3 py-1.5 text-[11px] font-black text-amber-900 dark:bg-zinc-950/60 dark:text-amber-200"
+                  >
+                    {band.label} {creditGuide.tokenUnit} · {band.multiplier}×
+                  </span>
+                ))}
+              </div>
+            </article>
+
+            <article className="rounded-2xl border border-blue-500/25 bg-blue-500/10 p-5">
+              <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
+                <Info className="h-5 w-5" />
+                <h3 className="font-black">{creditGuide.preflightTitle}</h3>
+              </div>
+              <p className="mt-3 text-xs leading-6 text-zinc-600 dark:text-zinc-300">
+                {creditGuide.preflightBody}
+              </p>
+              <Link
+                href="/chat"
+                className="mt-4 inline-flex h-10 items-center justify-center rounded-xl bg-blue-600 px-4 text-xs font-black text-white transition hover:bg-blue-500"
+              >
+                {creditGuide.preflightCta}
+              </Link>
+            </article>
+          </div>
+
+          <div className="border-t border-zinc-200 px-5 py-4 text-xs font-semibold leading-6 text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+            {creditGuide.disclaimer}
+          </div>
+        </section>
 
         <div className="mt-6 rounded-2xl border border-blue-200 bg-blue-50 px-5 py-4 text-sm font-semibold leading-7 text-blue-950 dark:border-blue-900/70 dark:bg-blue-950/30 dark:text-blue-100">
           {content.creditNotice}

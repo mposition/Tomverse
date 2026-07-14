@@ -114,6 +114,7 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   let session: Session | null = null;
+  let e2eAnalyticsEnabled = false;
   const requestHeaders = await headers();
   const pathnameLocale = requestHeaders
     .get("x-tomverse-pathname")
@@ -138,10 +139,11 @@ export default async function RootLayout({
       : "ZZ";
 
   try {
-    const e2eAuthCookie =
-      process.env.E2E_AUTH_BYPASS === "true"
-        ? (await cookies()).get("__tomverse_e2e_auth")?.value
-        : null;
+    const e2eCookies =
+      process.env.E2E_AUTH_BYPASS === "true" ? await cookies() : null;
+    const e2eAuthCookie = e2eCookies?.get("__tomverse_e2e_auth")?.value;
+    e2eAnalyticsEnabled =
+      e2eCookies?.get("__tomverse_e2e_analytics")?.value === "1";
 
     if (process.env.E2E_AUTH_BYPASS === "true" && e2eAuthCookie === "1") {
       session = {
@@ -234,7 +236,10 @@ export default async function RootLayout({
               measurementId={measurementId}
               nonce={nonce}
               userCreatedAt={analyticsUserCreatedAt}
-              disabled={process.env.E2E_AUTH_BYPASS === "true"}
+              disabled={
+                process.env.E2E_AUTH_BYPASS === "true" &&
+                !e2eAnalyticsEnabled
+              }
             >
               {children}
             </AnalyticsProvider>

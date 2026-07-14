@@ -321,6 +321,12 @@ the 24-hour activation definition, D1/D7 return, funnel counts, and campaign
 attribution. Prompts, responses, filenames, file contents, email, and profile
 data are rejected by the analytics schema.
 
+Before consent, first-touch UTM values and bounded product-event intents are
+kept only in the current tab's `sessionStorage`. They survive navigation and a
+page reload, are sent only after acceptance, and are deleted on decline. Run
+the complete test-campaign checklist in
+`docs/analytics-campaign-validation.md` before enabling paid acquisition.
+
 In GA4 Admin, register event-scoped custom dimensions for `utm_source`,
 `utm_medium`, `utm_campaign`, `language`, `country`, and `plan`, plus an
 event-scoped custom metric for numeric `model_count`. Mark at least

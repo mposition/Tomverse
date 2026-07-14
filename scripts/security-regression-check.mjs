@@ -383,6 +383,61 @@ const checks = [
       source.includes("disableAnalyticsClient"),
   },
   {
+    name: "Pre-consent campaign attribution and events survive navigation without cookies",
+    file: "lib/productAnalyticsClient.ts",
+    test: (source) =>
+      source.includes("PRECONSENT_ATTRIBUTION_STORAGE_KEY") &&
+      source.includes("PENDING_EVENTS_STORAGE_KEY") &&
+      source.includes("window.sessionStorage.setItem") &&
+      source.includes("capturePreConsentAttribution()") &&
+      source.includes("mergePendingEvents(readPendingEvents(), pendingEvents)") &&
+      source.includes("preConsentAttribution.hasUtm") &&
+      source.includes("analyticsConsent() === \"declined\"") &&
+      source.includes(
+        "window.sessionStorage.removeItem(PRECONSENT_ATTRIBUTION_STORAGE_KEY)"
+      ),
+  },
+  {
+    name: "Go-live acquisition, onboarding, limit, signup, and checkout events are wired",
+    file: "lib/productAnalyticsShared.ts",
+    test: (source) => {
+      const requiredEvents = [
+        "pricing_view",
+        "plan_selected",
+        "signup_page_view",
+        "onboarding_shown",
+        "onboarding_completed",
+        "onboarding_skipped",
+        "credit_limit_hit",
+        "upgrade_prompt_view",
+        "checkout_failed",
+      ];
+      const pricing = read("components/marketing/PricingPageContent.tsx");
+      const checkout = read("components/marketing/UpgradeInterestButton.tsx");
+      const signup = read("app/auth/signin/page.tsx");
+      const chatInput = read("components/chat/ChatInput.tsx");
+      const migration = read(
+        "prisma/migrations/20260714233000_expand_product_analytics_funnel/migration.sql"
+      );
+      const purchase = read("lib/stripeWebhookProcessing.ts");
+      return (
+        requiredEvents.every(
+          (eventName) =>
+            source.includes(`\"${eventName}\"`) &&
+            migration.includes(`'${eventName}'`)
+        ) &&
+        pricing.includes('trackProductEvent("pricing_view")') &&
+        pricing.includes('trackProductEvent("plan_selected"') &&
+        checkout.includes('trackProductEvent("checkout_failed"') &&
+        signup.includes('trackProductEvent("signup_page_view")') &&
+        chatInput.includes('"onboarding_shown"') &&
+        chatInput.includes('trackProductEvent("credit_limit_hit"') &&
+        chatInput.includes('trackProductEvent("upgrade_prompt_view"') &&
+        purchase.includes('eventName: "purchase_completed"')
+      );
+    },
+  },
+  {
     name: "Server purchase analytics keeps GA4 API secret server-side",
     file: "lib/productAnalyticsServer.ts",
     test: (source) =>
@@ -624,7 +679,7 @@ const checks = [
         guide.includes('t("auth.signIn")') &&
         !guide.includes("fixed inset-0") &&
         !guide.includes('aria-modal="true"') &&
-        source.includes('onFocus={dismissGuestQuickStart}') &&
+        source.includes('onFocus={() => dismissGuestQuickStart("completed")}') &&
         source.includes('tomverse_guest_quick_start_seen_v2') &&
         !read("app/chat/page.tsx").includes("GoLiveOnboarding")
       );
@@ -723,6 +778,26 @@ const checks = [
         !capture.includes("api.anthropic.com") &&
         statSync("public/marketing-proof/three-model-comparison.webm").size >
           100_000
+      );
+    },
+  },
+  {
+    name: "Pricing explains credit value using the production model weights",
+    file: "components/marketing/PricingPageContent.tsx",
+    test: (source) => {
+      const models = read("lib/models.ts");
+      return (
+        source.includes('data-testid="pricing-credit-guide"') &&
+        source.includes("getTypicalShortRequestCapacities(monthlyCredits)") &&
+        source.includes("configuredPlan.id === plan.id") &&
+        source.includes("일반적인 짧은 요청 기준 예시") &&
+        source.includes("Standard + Advanced + Premium") &&
+        source.includes("INPUT_CREDIT_MULTIPLIERS.map") &&
+        source.includes("파일·긴 문맥 배율") &&
+        models.includes("MODEL_USAGE_CREDIT_WEIGHTS") &&
+        models.includes("getTypicalShortRequestCapacities") &&
+        models.includes("credits / MODEL_USAGE_CREDIT_WEIGHTS.advanced") &&
+        models.includes("credits / mixedComparisonCredits")
       );
     },
   },

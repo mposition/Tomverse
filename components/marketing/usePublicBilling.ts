@@ -15,6 +15,7 @@ type BillingPlan = {
   displayMonthlyPriceAmount?: number;
   displayAnnualPriceAmount?: number;
   displayExchangeRate?: number;
+  monthlyMessageLimit?: number;
 };
 
 export type FeaturedBillingPromotion = {

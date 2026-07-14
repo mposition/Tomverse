@@ -2,12 +2,14 @@ import { AlertTriangle, BarChart3, CheckCircle2, ShieldCheck } from "lucide-reac
 import type { ProductAnalyticsDashboard } from "@/lib/productAnalyticsDashboard";
 
 const eventGroups = [
-  { label: "Acquisition", events: ["landing_view", "cta_start_click"] },
+  { label: "Acquisition", events: ["landing_view", "cta_start_click", "pricing_view", "plan_selected"] },
+  { label: "Onboarding", events: ["onboarding_shown", "onboarding_completed", "onboarding_skipped"] },
   { label: "First experience", events: ["chat_started", "first_response_completed"] },
   { label: "Core value", events: ["multi_model_compare_completed"] },
   { label: "Activation action", events: ["followup_sent", "file_attached", "conversation_saved", "share_created"] },
-  { label: "Signup", events: ["signup_started", "signup_completed"] },
-  { label: "Payment", events: ["checkout_started", "purchase_completed"] },
+  { label: "Upgrade intent", events: ["credit_limit_hit", "upgrade_prompt_view"] },
+  { label: "Signup", events: ["signup_page_view", "signup_started", "signup_completed"] },
+  { label: "Payment", events: ["checkout_started", "checkout_failed", "purchase_completed"] },
   { label: "Retention", events: ["return_day_1", "return_day_7", "subscription_cancelled"] },
 ] as const;
 

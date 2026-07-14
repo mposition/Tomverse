@@ -21,6 +21,44 @@ export type ModelUsageCategory =
     | "Reasoning"
     | "Research";
 
+export const MODEL_USAGE_CREDIT_WEIGHTS = {
+    standard: 1,
+    advanced: 4,
+    premium: 8,
+    reasoning: 12,
+    premiumReasoning: 16,
+    search: 20,
+    deepResearch: 30,
+} as const;
+
+export const INPUT_CREDIT_MULTIPLIERS = [
+    { aboveTokens: 16_000, multiplier: 1.5 },
+    { aboveTokens: 50_000, multiplier: 2 },
+    { aboveTokens: 100_000, multiplier: 3 },
+] as const;
+
+export const getTypicalShortRequestCapacities = (monthlyCredits: number) => {
+    const credits =
+        Number.isFinite(monthlyCredits) && monthlyCredits > 0
+            ? Math.floor(monthlyCredits)
+            : 0;
+    const mixedComparisonCredits =
+        MODEL_USAGE_CREDIT_WEIGHTS.standard +
+        MODEL_USAGE_CREDIT_WEIGHTS.advanced +
+        MODEL_USAGE_CREDIT_WEIGHTS.premium;
+
+    return {
+        standardResponses: Math.floor(
+            credits / MODEL_USAGE_CREDIT_WEIGHTS.standard
+        ),
+        advancedResponses: Math.floor(
+            credits / MODEL_USAGE_CREDIT_WEIGHTS.advanced
+        ),
+        mixedComparisons: Math.floor(credits / mixedComparisonCredits),
+        mixedComparisonCredits,
+    };
+};
+
 export type AiModel = {
     id: string;
     name: string;
@@ -110,22 +148,42 @@ export const getModelUsageProfile = (
     model: Pick<AiModel, "tier" | "reasoning" | "usageClass">
 ): { category: ModelUsageCategory; credits: number } => {
     if (model.usageClass === "deep-research") {
-        return { category: "Research", credits: 30 };
+        return {
+            category: "Research",
+            credits: MODEL_USAGE_CREDIT_WEIGHTS.deepResearch,
+        };
     }
     if (model.usageClass === "search") {
-        return { category: "Research", credits: 20 };
+        return {
+            category: "Research",
+            credits: MODEL_USAGE_CREDIT_WEIGHTS.search,
+        };
     }
     if (model.reasoning && model.reasoning !== "none") {
         return {
             category: "Reasoning",
-            credits: model.tier === "Max" ? 16 : 12,
+            credits:
+                model.tier === "Max"
+                    ? MODEL_USAGE_CREDIT_WEIGHTS.premiumReasoning
+                    : MODEL_USAGE_CREDIT_WEIGHTS.reasoning,
         };
     }
     if (model.tier === "Free" || model.usageClass === "standard") {
-        return { category: "Standard", credits: 1 };
+        return {
+            category: "Standard",
+            credits: MODEL_USAGE_CREDIT_WEIGHTS.standard,
+        };
     }
-    if (model.tier === "Max") return { category: "Premium", credits: 8 };
-    return { category: "Advanced", credits: 4 };
+    if (model.tier === "Max") {
+        return {
+            category: "Premium",
+            credits: MODEL_USAGE_CREDIT_WEIGHTS.premium,
+        };
+    }
+    return {
+        category: "Advanced",
+        credits: MODEL_USAGE_CREDIT_WEIGHTS.advanced,
+    };
 };
 
 export const getModelUsageCredits = (
@@ -133,10 +191,13 @@ export const getModelUsageCredits = (
 ) => getModelUsageProfile(model).credits;
 
 export const getInputCreditMultiplier = (estimatedInputTokens: number) => {
-    if (estimatedInputTokens > 100_000) return 3;
-    if (estimatedInputTokens > 50_000) return 2;
-    if (estimatedInputTokens > 16_000) return 1.5;
-    return 1;
+    let multiplier = 1;
+    for (const threshold of INPUT_CREDIT_MULTIPLIERS) {
+        if (estimatedInputTokens > threshold.aboveTokens) {
+            multiplier = threshold.multiplier;
+        }
+    }
+    return multiplier;
 };
 
 export const getWeightedUsageCredits = (
