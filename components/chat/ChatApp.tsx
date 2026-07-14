@@ -9,6 +9,7 @@ import { useTurnstile } from "@/components/chat/useTurnstile";
 import { ArrowUp, PauseCircle } from "lucide-react";
 
 const processedPromptKeys = new Set<string>();
+const CHAT_STREAM_IDLE_TIMEOUT_MS = 90_000;
 
 const toChatRequestMessage = (message: Message): Message => {
   if (!message.attachments?.length) return message;
@@ -306,9 +307,16 @@ function ChatAppComponent({
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
-    const timeoutId = window.setTimeout(() => {
-      controller.abort();
-    }, 30000);
+    let idleTimeoutId: number | null = null;
+    const resetIdleTimeout = () => {
+      if (idleTimeoutId !== null) {
+        window.clearTimeout(idleTimeoutId);
+      }
+      idleTimeoutId = window.setTimeout(() => {
+        controller.abort();
+      }, CHAT_STREAM_IDLE_TIMEOUT_MS);
+    };
+    resetIdleTimeout();
     let requestTraceId: string | null = null;
 	
     try {
@@ -333,6 +341,7 @@ function ChatAppComponent({
         }),
         signal: controller.signal,
       });
+      resetIdleTimeout();
       requestTraceId = response.headers.get("X-Request-ID");
 
       if (!response.ok) {
@@ -361,6 +370,7 @@ function ChatAppComponent({
         const { done, value } = await reader.read();
         if (done) break;
 
+        resetIdleTimeout();
         assistantText += decoder.decode(value, { stream: true });
 		setAssistantMessage(assistantMessageId, assistantText, "normal");
       }
@@ -405,7 +415,9 @@ function ChatAppComponent({
         );
       }	
     } finally {
-	  window.clearTimeout(timeoutId);
+	  if (idleTimeoutId !== null) {
+        window.clearTimeout(idleTimeoutId);
+      }
 
       setIsSending(false);
       isSendingRef.current = false;

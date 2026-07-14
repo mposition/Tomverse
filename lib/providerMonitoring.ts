@@ -130,6 +130,13 @@ export const PROVIDER_API_KEY_ENV: Record<AiProvider, string[]> = {
   perplexity: ["PERPLEXITY_API_KEY"],
 };
 
+const NON_PROVIDER_HEALTH_DIAGNOSTIC_CODES = new Set([
+  "AI_STREAM_FAILED.ERR_INVALID_STATE",
+]);
+
+const isNonProviderHealthDiagnostic = (code: string | null | undefined) =>
+  Boolean(code && NON_PROVIDER_HEALTH_DIAGNOSTIC_CODES.has(code));
+
 const FALLBACKS: Record<AiProvider, ProviderFallback> = {
   openai: { reason: "General model fallback", recommendedModelIds: ["gemini-2-5-flash", "claude-haiku-4-5", "llama-3-1"] },
   anthropic: { reason: "Writing and analysis fallback", recommendedModelIds: ["gpt-5-4-mini", "gemini-2-5-flash", "mistral-small-4"] },
@@ -617,7 +624,7 @@ export const recordModelFailure = async (
   provider: AiProvider | undefined,
   code: string
 ) => {
-  if (!modelId) return;
+  if (!modelId || isNonProviderHealthDiagnostic(code)) return;
   const model = AVAILABLE_MODELS.find((item) => item.id === modelId);
   const resolvedProvider = provider || model?.provider;
   const sanitizedCode = code.replace(/[^A-Za-z0-9_.-]/g, "_").slice(0, 80) || "UNKNOWN";
@@ -669,7 +676,7 @@ export const recordProviderFailure = async (
     message?: string;
   }
 ) => {
-  if (!provider) return;
+  if (!provider || isNonProviderHealthDiagnostic(code)) return;
   const sanitizedCode = code.replace(/[^A-Za-z0-9_.-]/g, "_").slice(0, 80) || "UNKNOWN";
   const safeText = (value: string | undefined, maxLength: number) => {
     if (!value) return null;
@@ -863,7 +870,8 @@ export const getProviderHealthDashboard = async (
   const now = new Date();
   const dayStart = periodStart("day", now);
   const monthStart = periodStart("month", now);
-  const [rows, usageRows, errorEvents] = await Promise.all([
+  const fiveMinuteStart = periodStart("five-minute", now);
+  const [rows, usageRows, errorEvents, excludedHealthEvents] = await Promise.all([
     prisma.chatUsageBucket.findMany({
       where: {
         OR: [
@@ -871,8 +879,8 @@ export const getProviderHealthDashboard = async (
           { period: "provider-error-day", periodStart: dayStart },
           { period: "provider-cost-month", periodStart: monthStart },
           { period: "provider-cost-day", periodStart: dayStart },
-          { period: "model-health-5m", periodStart: periodStart("five-minute", now) },
-          { period: "model-error-5m", periodStart: periodStart("five-minute", now) },
+          { period: "model-health-5m", periodStart: fiveMinuteStart },
+          { period: "model-error-5m", periodStart: fiveMinuteStart },
         ],
       },
       select: {
@@ -909,6 +917,19 @@ export const getProviderHealthDashboard = async (
           take: 200,
         })
       : Promise.resolve([]),
+    prisma.providerErrorEvent.findMany({
+      where: {
+        createdAt: { gte: dayStart },
+        diagnosticCode: {
+          in: Array.from(NON_PROVIDER_HEALTH_DIAGNOSTIC_CODES),
+        },
+      },
+      select: {
+        provider: true,
+        modelId: true,
+        createdAt: true,
+      },
+    }),
   ]);
 
   const [balanceEntries, creditByProvider, billingByProvider] = await Promise.all([
@@ -927,13 +948,26 @@ export const getProviderHealthDashboard = async (
     const successKey = `provider:${provider}:success`;
     const failureKey = `provider:${provider}:failure`;
     const successCount24h = countFor(rows, successKey, "provider-health-day");
-    const failureCount24h = countFor(rows, failureKey, "provider-health-day");
+    const excludedFailureCount24h = excludedHealthEvents.filter(
+      (event) => event.provider === provider
+    ).length;
+    const failureCount24h = Math.max(
+      0,
+      countFor(rows, failureKey, "provider-health-day") -
+        excludedFailureCount24h
+    );
     const total = successCount24h + failureCount24h;
     const successRate24h = total > 0 ? Math.round((successCount24h / total) * 1000) / 10 : null;
-    const recentError = latestFor(rows, `provider:${provider}:error:`);
+    const providerErrorRows = rows.filter((row) => {
+      const prefix = `provider:${provider}:error:`;
+      return (
+        row.key.startsWith(prefix) &&
+        !isNonProviderHealthDiagnostic(row.key.slice(prefix.length))
+      );
+    });
+    const recentError = latestFor(providerErrorRows, `provider:${provider}:error:`);
     const recentErrorCode = recentError?.key.split(":error:")[1] || null;
-    const recentErrors = rows
-      .filter((row) => row.key.startsWith(`provider:${provider}:error:`))
+    const recentErrors = providerErrorRows
       .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
       .slice(0, 4)
       .map((row) => ({
@@ -943,7 +977,11 @@ export const getProviderHealthDashboard = async (
         explanation: errorExplanationFor(row.key.split(":error:")[1] || "UNKNOWN"),
       }));
     const recentErrorEvents: ProviderErrorEventRow[] = errorEvents
-      .filter((event) => event.provider === provider)
+      .filter(
+        (event) =>
+          event.provider === provider &&
+          !isNonProviderHealthDiagnostic(event.diagnosticCode)
+      )
       .map((event) => ({
         id: event.id,
         provider,
@@ -1034,9 +1072,25 @@ export const getProviderHealthDashboard = async (
     const modelIncidents = providerModels
       .map((model) => {
         const failure = latestFor(rows, `model:${model.id}:failure`);
-        const recentError = latestFor(rows, `model:${model.id}:error:`);
+        const modelErrorPrefix = `model:${model.id}:error:`;
+        const recentError = latestFor(
+          rows.filter(
+            (row) =>
+              row.key.startsWith(modelErrorPrefix) &&
+              !isNonProviderHealthDiagnostic(
+                row.key.slice(modelErrorPrefix.length)
+              )
+          ),
+          modelErrorPrefix
+        );
+        const excludedFailureCount5m = excludedHealthEvents.filter(
+          (event) =>
+            event.modelId === model.id && event.createdAt >= fiveMinuteStart
+        ).length;
         const failureCount5m =
-          failure?.period === "model-health-5m" ? failure.count : 0;
+          failure?.period === "model-health-5m"
+            ? Math.max(0, failure.count - excludedFailureCount5m)
+            : 0;
         if (failureCount5m <= 0) return null;
         return {
           modelId: model.id,
@@ -1124,7 +1178,10 @@ export const getProviderHealthDashboard = async (
       recentErrors,
       recentErrorEvents,
       lastSuccessAt: latestFor(rows, successKey)?.updatedAt.toISOString() || null,
-      lastFailureAt: latestFor(rows, failureKey)?.updatedAt.toISOString() || null,
+      lastFailureAt:
+        failureCount24h > 0
+          ? latestFor(rows, failureKey)?.updatedAt.toISOString() || null
+          : null,
       todayCostMicroUsd,
       monthCostMicroUsd,
       providerReportedMonthCostMicroUsd,

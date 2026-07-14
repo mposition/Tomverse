@@ -174,6 +174,15 @@ const safeErrorMessage = (error: unknown) => {
     return typeof error.message === "string" ? error.message : undefined;
 };
 
+const isClosedStreamControllerError = (error: unknown) => {
+    const metadata = safeErrorMetadata(error);
+    return (
+        metadata.code === "ERR_INVALID_STATE" &&
+        safeErrorMessage(error)?.toLowerCase().includes("controller is already closed") ===
+            true
+    );
+};
+
 const providerDiagnosticCode = (fallback: string, error: unknown) => {
     const metadata = safeErrorMetadata(error);
     return [
@@ -1119,15 +1128,93 @@ export async function POST(req: Request) {
         leaseId = null;
         let generatedText = "";
         let released = false;
+        let sourceCancelled = false;
+        let streamState: "open" | "closed" | "cancelled" = "open";
         const release = async () => {
             if (released) return;
             released = true;
             await releaseChatAccess(activeLeaseId);
         };
+        const releaseSafely = async () => {
+            try {
+                await release();
+            } catch (error) {
+                logRequestError(
+                    "chat_access_release_failed",
+                    traceId,
+                    error,
+                    requestedModelId
+                );
+            }
+        };
+        const cancelSourceSafely = async (reason?: unknown) => {
+            if (sourceCancelled) return;
+            sourceCancelled = true;
+            try {
+                await sourceReader.cancel(reason);
+            } catch (error) {
+                if (!isClosedStreamControllerError(error)) {
+                    logRequestError(
+                        "ai_source_stream_cancel_failed",
+                        traceId,
+                        error,
+                        requestedModelId
+                    );
+                }
+            }
+        };
+        const enqueueSafely = (
+            controller: ReadableStreamDefaultController<string>,
+            value: string
+        ) => {
+            if (streamState !== "open") return false;
+            try {
+                controller.enqueue(value);
+                return true;
+            } catch (error) {
+                streamState = "cancelled";
+                if (!isClosedStreamControllerError(error)) {
+                    logRequestError(
+                        "chat_response_stream_enqueue_failed",
+                        traceId,
+                        error,
+                        requestedModelId
+                    );
+                }
+                return false;
+            }
+        };
+        const closeSafely = (
+            controller: ReadableStreamDefaultController<string>
+        ) => {
+            if (streamState !== "open") return false;
+            try {
+                controller.close();
+                streamState = "closed";
+                return true;
+            } catch (error) {
+                streamState = "cancelled";
+                if (!isClosedStreamControllerError(error)) {
+                    logRequestError(
+                        "chat_response_stream_close_failed",
+                        traceId,
+                        error,
+                        requestedModelId
+                    );
+                }
+                return false;
+            }
+        };
         const protectedStream = new ReadableStream<string>({
             async pull(controller) {
+                if (streamState !== "open") return;
+
                 try {
                     const { done, value } = await sourceReader.read();
+                    if (streamState !== "open") {
+                        await releaseSafely();
+                        return;
+                    }
                     if (done) {
                         try {
                             const usage = await result.usage;
@@ -1199,13 +1286,34 @@ export async function POST(req: Request) {
                                 requestedModelId
                             );
                         }
-                        controller.close();
-                        await release();
+                        closeSafely(controller);
+                        await releaseSafely();
                         return;
                     }
                     generatedText += value;
-                    controller.enqueue(value);
+                    if (!enqueueSafely(controller, value)) {
+                        await cancelSourceSafely("response stream is no longer open");
+                        await releaseSafely();
+                    }
                 } catch (error) {
+                    const wasAlreadyCancelled = streamState !== "open";
+                    if (
+                        wasAlreadyCancelled ||
+                        isClosedStreamControllerError(error)
+                    ) {
+                        if (!wasAlreadyCancelled) {
+                            logRequestError(
+                                "ai_stream_lifecycle_closed",
+                                traceId,
+                                error,
+                                requestedModelId
+                            );
+                        }
+                        streamState = "cancelled";
+                        await cancelSourceSafely(error);
+                        await releaseSafely();
+                        return;
+                    }
                     const errorMetadata = safeErrorMetadata(error);
                     const diagnosticCode = providerDiagnosticCode(
                         "AI_STREAM_FAILED",
@@ -1245,16 +1353,18 @@ export async function POST(req: Request) {
                             requestedModelId
                         );
                     }
-                    controller.enqueue(
+                    enqueueSafely(
+                        controller,
                         `AI 응답 생성에 실패했습니다. 잠시 후 다시 시도하거나 다른 모델을 선택해주세요.\n추적 ID: ${traceId}`
                     );
-                    controller.close();
-                    await release();
+                    closeSafely(controller);
+                    await releaseSafely();
                 }
             },
             async cancel(reason) {
-                await sourceReader.cancel(reason);
-                await release();
+                streamState = "cancelled";
+                await cancelSourceSafely(reason);
+                await releaseSafely();
             },
         });
 
