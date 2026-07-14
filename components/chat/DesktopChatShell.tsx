@@ -9,6 +9,7 @@ import { ProviderStatusBanner } from "@/components/chat/ProviderStatusBanner";
 import {
   AVAILABLE_MODELS,
   ENABLED_MODELS,
+  getModelUsageProfile,
   type ChatAttachment,
   type Conversation,
 } from "@/components/chat/types";
@@ -134,6 +135,9 @@ export function DesktopChatShell({
 
           {selectedModels.map((modelId) => {
             const modelInfo = AVAILABLE_MODELS.find((model) => model.id === modelId);
+            const usageProfile = modelInfo
+              ? getModelUsageProfile(modelInfo)
+              : null;
             const isPanelDisabled = disabledPanels.includes(modelId);
 
             return (
@@ -177,7 +181,10 @@ export function DesktopChatShell({
                           })}
                         </select>
                         <span className="truncate text-[10px] font-medium text-zinc-400">
-                          {modelInfo?.provider} - {modelInfo ? t(`modelTiers.${modelInfo.tier.toLowerCase()}`) : ""}
+                          {modelInfo?.provider}
+                          {usageProfile
+                            ? ` · ${t(`modelUsageClasses.${usageProfile.category.toLowerCase()}`)} · ${usageProfile.credits}`
+                            : ""}
                         </span>
                       </span>
                     )}

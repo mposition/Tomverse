@@ -402,7 +402,7 @@ const checks = [
       source.includes("sendToGa4: true"),
   },
   {
-    name: "Public billing config does not enumerate promotion objects or codes",
+    name: "Public billing config exposes only the active featured code, not the promotion catalogue",
     file: "lib/billingConfig.ts",
     test: (source) => {
       const publicConfig = source.slice(
@@ -411,6 +411,8 @@ const checks = [
       return (
         publicConfig.includes("codesListed: false") &&
         publicConfig.includes('validation: "server_only"') &&
+        publicConfig.includes('getBillingPromotionByCode("TOMVERSE50")') &&
+        publicConfig.includes("featuredPromotion: publicFeaturedPromotion") &&
         !publicConfig.includes("getBillingPromotions()") &&
         !publicConfig.includes("promotions:")
       );
@@ -434,6 +436,24 @@ const checks = [
       source.includes("normalizedInputCode !== appliedPromoCode") &&
       source.includes("promotionPolicyCopy") &&
       !source.includes("billingConfig.promotions"),
+  },
+  {
+    name: "TOMVERSE50 is bounded, advertised from live config, and auto-validated",
+    file: "prisma/migrations/20260714190000_configure_tomverse50_public_launch/migration.sql",
+    test: (source) =>
+      source.includes("'TOMVERSE50'") &&
+      source.includes('"discountPercent" = 50') &&
+      source.includes('"durationMonths" = 1') &&
+      source.includes('"maxRedemptions" = 100000') &&
+      source.includes("2026-08-31 00:00:00+10") &&
+      source.includes('"allowAnnualStacking" = false') &&
+      source.includes('"isActive" = true') &&
+      read("components/marketing/PricingPageContent.tsx").includes(
+        "featuredPromotion.code"
+      ) &&
+      read("components/marketing/UpgradeInterestButton.tsx").includes(
+        "normalizedFeaturedCode,"
+      ),
   },
   {
     name: "Public billing configuration responses are not cached",
@@ -569,6 +589,26 @@ const checks = [
       source.includes("자동 갱신") &&
       source.includes("discount period") &&
       !source.includes("Discounts apply to the first month of Pro and Max"),
+  },
+  {
+    name: "Public model UI separates usage classes from subscription tiers",
+    file: "components/marketing/ModelsPageContent.tsx",
+    test: (source) =>
+      source.includes("getModelUsageProfile(model)") &&
+      source.includes('usageClass: "Usage class"') &&
+      source.includes('baseCharge: "Base charge"') &&
+      source.includes("usageProfile.credits") &&
+      source.includes("modelUsageClasses") &&
+      !source.includes("modelTiers") &&
+      read("components/chat/ChatInput.tsx").includes(
+        'option value="Research"'
+      ) &&
+      read("components/chat/ChatInput.tsx").includes(
+        "usageClassFilter"
+      ) &&
+      read("components/auth/AuthButton.tsx").includes(
+        "getModelUsageProfile(model)"
+      ),
   },
 ];
 

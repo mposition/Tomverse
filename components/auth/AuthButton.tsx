@@ -3,7 +3,10 @@
 
 import { signIn, signOut, useSession } from "next-auth/react";
 import { useCallback, useState, useEffect, useRef } from "react";
-import { ENABLED_MODELS } from "@/components/chat/types";
+import {
+    ENABLED_MODELS,
+    getModelUsageProfile,
+} from "@/components/chat/types";
 import {
     Bot,
     Check,
@@ -538,11 +541,14 @@ export function AuthButton() {
                                                     onChange={(e) => setDefaultModel(e.target.value)}
                                                     className="mt-1 w-full cursor-pointer bg-transparent text-sm font-semibold text-zinc-900 outline-none dark:text-zinc-100"
                                                 >
-                                                    {ENABLED_MODELS.map((model) => (
-                                                        <option className="bg-white text-zinc-900" key={model.id} value={model.id}>
-                                                            {model.icon} {model.name} · {t(`modelTiers.${model.tier.toLowerCase()}`)}
-                                                        </option>
-                                                    ))}
+                                                    {ENABLED_MODELS.map((model) => {
+                                                        const usageProfile = getModelUsageProfile(model);
+                                                        return (
+                                                            <option className="bg-white text-zinc-900" key={model.id} value={model.id}>
+                                                                {model.icon} {model.name} · {t(`modelUsageClasses.${usageProfile.category.toLowerCase()}`)} · {usageProfile.credits}
+                                                            </option>
+                                                        );
+                                                    })}
                                                 </select>
                                             </span>
                                         </label>

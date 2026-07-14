@@ -245,9 +245,27 @@ export function isBillingPromotionRedeemable(
 }
 
 export async function getPublicBillingConfig() {
-  const plans = await getBillingPlans();
+  const [plans, featuredPromotion] = await Promise.all([
+    getBillingPlans(),
+    getBillingPromotionByCode("TOMVERSE50"),
+  ]);
+  const publicFeaturedPromotion =
+    featuredPromotion && isBillingPromotionRedeemable(featuredPromotion)
+      ? {
+          code: featuredPromotion.code,
+          discountPercent: featuredPromotion.discountPercent,
+          discountAmountCents: featuredPromotion.discountAmountCents,
+          durationMonths: featuredPromotion.durationMonths,
+          appliesToPlanIds: featuredPromotion.appliesToPlanIds,
+          billingIntervals: featuredPromotion.allowAnnualStacking
+            ? (["monthly", "annual"] as const)
+            : (["monthly"] as const),
+          endsAt: featuredPromotion.endsAt,
+        }
+      : null;
   return {
     plans: plans.filter((plan) => plan.isActive),
+    featuredPromotion: publicFeaturedPromotion,
     promotionPolicy: {
       codesListed: false as const,
       validation: "server_only" as const,

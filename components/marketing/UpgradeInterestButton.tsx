@@ -2,10 +2,13 @@
 
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { dispatchAppToast } from "@/lib/appToast";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
-import { getBillingConfigUrl } from "@/components/marketing/usePublicBilling";
+import {
+  getBillingConfigUrl,
+  type FeaturedBillingPromotion,
+} from "@/components/marketing/usePublicBilling";
 import {
   getAnalyticsAttributionSnapshot,
   trackProductEvent,
@@ -35,6 +38,7 @@ type BillingPromotion = {
 
 type BillingConfig = {
   plans: BillingPlan[];
+  featuredPromotion?: FeaturedBillingPromotion | null;
   promotionPolicy?: {
     codesListed: false;
     validation: "server_only";
@@ -528,6 +532,8 @@ export function UpgradeInterestButton({
   const [billingInterval, setBillingInterval] =
     useState<BillingInterval>("monthly");
   const [billingConfig, setBillingConfig] = useState<BillingConfig | null>(null);
+  const billingIntervalRef = useRef<BillingInterval>("monthly");
+  const autoPromotionRequestRef = useRef(0);
   const inputId = useId();
   const planId = plan === "Max" ? "max" : "pro";
   const planConfig = billingConfig?.plans.find((item) => item.id === planId);
@@ -560,6 +566,8 @@ export function UpgradeInterestButton({
           1
         )
       : dueUsdLabel;
+  const displayedDueLabel = isValidatingPromotion ? "…" : dueLabel;
+  const displayedDueUsdLabel = isValidatingPromotion ? null : dueUsdLabel;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -570,34 +578,93 @@ export function UpgradeInterestButton({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isOpen]);
 
+  const requestPromotionValidation = useCallback(
+    async (
+      normalizedCode: string,
+      interval: BillingInterval
+    ) => {
+      const response = await fetch("/api/billing/promotion/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          planId,
+          billingInterval: interval,
+          promoCode: normalizedCode,
+        }),
+      });
+      const data = (await response.json().catch(() => null)) as
+        | PromotionValidationPayload
+        | null;
+      if (!response.ok || !data?.valid || !data.promotion) {
+        throw new Error(data?.error || copy.invalidPromo);
+      }
+      return data.promotion;
+    },
+    [copy.invalidPromo, planId]
+  );
+
+  const applyFeaturedPromotion = useCallback(async (
+    featured: FeaturedBillingPromotion,
+    interval: BillingInterval
+  ) => {
+    const normalizedFeaturedCode = featured.code.trim().toUpperCase();
+    const requestId = autoPromotionRequestRef.current + 1;
+    autoPromotionRequestRef.current = requestId;
+    const eligible =
+      featured.appliesToPlanIds.includes(planId) &&
+      featured.billingIntervals.includes(interval);
+    if (!eligible) {
+      setPromoCode("");
+      setAppliedPromoCode(null);
+      setAppliedPromotion(null);
+      setIsValidatingPromotion(false);
+      return;
+    }
+
+    setPromoCode(normalizedFeaturedCode);
+    setAppliedPromoCode(null);
+    setAppliedPromotion(null);
+    setIsValidatingPromotion(true);
+    try {
+      const promotion = await requestPromotionValidation(
+        normalizedFeaturedCode,
+        interval
+      );
+      if (autoPromotionRequestRef.current !== requestId) return;
+      setAppliedPromoCode(normalizedFeaturedCode);
+      setAppliedPromotion(promotion);
+    } catch (error) {
+      if (autoPromotionRequestRef.current !== requestId) return;
+      setAppliedPromoCode(null);
+      setAppliedPromotion(null);
+      setPromoCode("");
+      dispatchAppToast(
+        error instanceof Error ? error.message : copy.invalidPromo,
+        "error"
+      );
+    } finally {
+      if (autoPromotionRequestRef.current === requestId) {
+        setIsValidatingPromotion(false);
+      }
+    }
+  }, [copy.invalidPromo, planId, requestPromotionValidation]);
+
   useEffect(() => {
     if (!isOpen || billingConfig) return;
     fetch(getBillingConfigUrl())
       .then((response) => (response.ok ? response.json() : null))
       .then((data: BillingConfig | null) => {
-        if (data) setBillingConfig(data);
+        if (!data) return;
+        setBillingConfig(data);
+        if (data.featuredPromotion) {
+          void applyFeaturedPromotion(
+            data.featuredPromotion,
+            billingIntervalRef.current
+          );
+        }
       })
       .catch(() => undefined);
-  }, [billingConfig, isOpen]);
-
-  const requestPromotionValidation = async (normalizedCode: string) => {
-    const response = await fetch("/api/billing/promotion/validate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        planId,
-        billingInterval,
-        promoCode: normalizedCode,
-      }),
-    });
-    const data = (await response.json().catch(() => null)) as
-      | PromotionValidationPayload
-      | null;
-    if (!response.ok || !data?.valid || !data.promotion) {
-      throw new Error(data?.error || copy.invalidPromo);
-    }
-    return data.promotion;
-  };
+  }, [applyFeaturedPromotion, billingConfig, isOpen]);
 
   const submit = async () => {
     if (isSending || isValidatingPromotion) return;
@@ -612,7 +679,8 @@ export function UpgradeInterestButton({
       ) {
         setIsValidatingPromotion(true);
         promotionForCheckout = await requestPromotionValidation(
-          normalizedInputCode
+          normalizedInputCode,
+          billingInterval
         );
         checkoutPromoCode = normalizedInputCode;
         setAppliedPromoCode(normalizedInputCode);
@@ -679,7 +747,10 @@ export function UpgradeInterestButton({
     if (isValidatingPromotion) return;
     setIsValidatingPromotion(true);
     try {
-      const promotion = await requestPromotionValidation(normalizedCode);
+      const promotion = await requestPromotionValidation(
+        normalizedCode,
+        billingInterval
+      );
       setAppliedPromoCode(normalizedCode);
       setAppliedPromotion(promotion);
       dispatchAppToast(copy.promoApplied, "success");
@@ -705,6 +776,12 @@ export function UpgradeInterestButton({
             plan_id: planId,
           });
           setIsOpen(true);
+          if (billingConfig?.featuredPromotion) {
+            void applyFeaturedPromotion(
+              billingConfig.featuredPromotion,
+              billingInterval
+            );
+          }
         }}
         disabled={isSending}
         className={className}
@@ -765,9 +842,17 @@ export function UpgradeInterestButton({
                       type="button"
                       disabled={isValidatingPromotion}
                       onClick={() => {
+                        billingIntervalRef.current = value;
                         setBillingInterval(value);
-                        setAppliedPromoCode(null);
-                        setAppliedPromotion(null);
+                        if (billingConfig?.featuredPromotion) {
+                          void applyFeaturedPromotion(
+                            billingConfig.featuredPromotion,
+                            value
+                          );
+                        } else {
+                          setAppliedPromoCode(null);
+                          setAppliedPromotion(null);
+                        }
                       }}
                       className={`rounded-2xl border p-4 text-left transition ${
                         billingInterval === value
@@ -915,12 +1000,12 @@ export function UpgradeInterestButton({
                       {copy.dueToday}
                     </span>
                     <span className="text-2xl font-black text-zinc-950 dark:text-white">
-                      {dueLabel || priceLabel || "-"}
+                      {displayedDueLabel || priceLabel || "-"}
                     </span>
                   </div>
-                  {usdPriceLabel ? (
+                  {usdPriceLabel && displayedDueUsdLabel ? (
                     <p className="mt-2 text-xs font-semibold leading-5 text-zinc-500 dark:text-zinc-400">
-                      {copy.localPriceNote(dueUsdLabel || usdPriceLabel)}
+                      {copy.localPriceNote(displayedDueUsdLabel || usdPriceLabel)}
                     </p>
                   ) : null}
                 </div>
@@ -980,7 +1065,7 @@ export function UpgradeInterestButton({
                   {copy.dueToday}
                 </span>
                 <span className="text-xl font-black text-zinc-950 dark:text-white">
-                  {dueLabel || priceLabel || "-"}
+                  {displayedDueLabel || priceLabel || "-"}
                 </span>
               </div>
               <button

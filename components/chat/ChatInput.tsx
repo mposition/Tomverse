@@ -340,7 +340,7 @@ export function ChatInput({
   const [menuView, setMenuView] = useState<"actions" | "models">("actions");
   const [modelSearchQuery, setModelSearchQuery] = useState("");
   const [providerFilter, setProviderFilter] = useState("all");
-  const [tierFilter, setTierFilter] = useState("all");
+  const [usageClassFilter, setUsageClassFilter] = useState("all");
   const [liveModelStatuses, setLiveModelStatuses] = useState<Record<string, PublicModelStatusRecord>>({});
   const [favoriteModelIds, setFavoriteModelIds] = useState<string[]>(() => {
     if (typeof window === "undefined") return [];
@@ -418,18 +418,20 @@ export function ChatInput({
     const normalizedQuery = modelSearchQuery.trim().toLowerCase();
 
     return AVAILABLE_MODELS.filter((model) => {
+      const usageCategory = getModelUsageProfile(model).category;
       const matchesQuery =
         !normalizedQuery ||
         model.name.toLowerCase().includes(normalizedQuery) ||
         model.provider.toLowerCase().includes(normalizedQuery) ||
-        model.tier.toLowerCase().includes(normalizedQuery);
+        usageCategory.toLowerCase().includes(normalizedQuery);
       const matchesProvider =
         providerFilter === "all" || model.provider === providerFilter;
-      const matchesTier = tierFilter === "all" || model.tier === tierFilter;
+      const matchesUsageClass =
+        usageClassFilter === "all" || usageCategory === usageClassFilter;
 
-      return matchesQuery && matchesProvider && matchesTier;
+      return matchesQuery && matchesProvider && matchesUsageClass;
     });
-  }, [modelSearchQuery, providerFilter, tierFilter]);
+  }, [modelSearchQuery, providerFilter, usageClassFilter]);
 
   const groupedModels = useMemo(() => {
     const favoriteSet = new Set(favoriteModelIds);
@@ -1323,14 +1325,16 @@ export function ChatInput({
                         ))}
                       </select>
                       <select
-                        value={tierFilter}
-                        onChange={(event) => setTierFilter(event.target.value)}
+                        value={usageClassFilter}
+                        onChange={(event) => setUsageClassFilter(event.target.value)}
                         className="h-9 rounded-lg border border-zinc-200 bg-zinc-50 px-2 text-xs font-medium text-zinc-700 outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
                       >
                         <option value="all">{t("chat.allTiers")}</option>
-                        <option value="Free">{t("modelTiers.free")}</option>
-                        <option value="Pro">{t("modelTiers.pro")}</option>
-                        <option value="Max">{t("modelTiers.max")}</option>
+                        <option value="Standard">{t("modelUsageClasses.standard")}</option>
+                        <option value="Advanced">{t("modelUsageClasses.advanced")}</option>
+                        <option value="Premium">{t("modelUsageClasses.premium")}</option>
+                        <option value="Reasoning">{t("modelUsageClasses.reasoning")}</option>
+                        <option value="Research">{t("modelUsageClasses.research")}</option>
                       </select>
                     </div>
                   </div>
@@ -1441,8 +1445,8 @@ export function ChatInput({
                                     </span>
                                   )}
                                 </span>
-                                <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${model.tier === "Free" ? "bg-emerald-500/10 text-emerald-500" : model.tier === "Pro" ? "bg-blue-500/10 text-blue-500" : "bg-purple-500/10 text-purple-500"}`}>
-                                  {usageProfile.category} · {usageProfile.credits}
+                                <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${usageProfile.category === "Standard" ? "bg-emerald-500/10 text-emerald-500" : usageProfile.category === "Advanced" ? "bg-blue-500/10 text-blue-500" : usageProfile.category === "Premium" ? "bg-purple-500/10 text-purple-500" : usageProfile.category === "Reasoning" ? "bg-amber-500/10 text-amber-500" : "bg-cyan-500/10 text-cyan-500"}`}>
+                                  {t(`modelUsageClasses.${usageProfile.category.toLowerCase()}`)} · {usageProfile.credits}
                                 </span>
                                 <span className={`h-4 w-8 rounded-full p-0.5 transition-colors ${isSelected ? "bg-blue-500" : "bg-zinc-300 dark:bg-zinc-700"}`}>
                                   <span className={`block h-3 w-3 rounded-full bg-white transition-transform ${isSelected ? "translate-x-4" : ""}`} />

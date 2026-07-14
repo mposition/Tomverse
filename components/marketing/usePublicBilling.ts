@@ -17,8 +17,19 @@ type BillingPlan = {
   displayExchangeRate?: number;
 };
 
+export type FeaturedBillingPromotion = {
+  code: string;
+  discountPercent: number;
+  discountAmountCents?: number | null;
+  durationMonths: number;
+  appliesToPlanIds: Array<"free" | "pro" | "max">;
+  billingIntervals: Array<"monthly" | "annual">;
+  endsAt: string;
+};
+
 type BillingConfig = {
   plans: BillingPlan[];
+  featuredPromotion?: FeaturedBillingPromotion | null;
   promotionPolicy?: {
     codesListed: false;
     validation: "server_only";
