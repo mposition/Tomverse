@@ -542,6 +542,34 @@ const checks = [
       read("app/admin/layout.tsx").includes("index: false") &&
       read("app/share/[shareToken]/page.tsx").includes("index: false"),
   },
+  {
+    name: "Paid-launch legal pages disclose recurring billing, refunds, and operator contact",
+    file: "components/marketing/marketingInfoContent.ts",
+    test: (source) =>
+      source.includes("Monthly and annual subscriptions; automatic renewal") &&
+      source.includes("Cancellation and end of paid access") &&
+      source.includes("Unused AI credits") &&
+      source.includes("Promotional purchases") &&
+      source.includes("Provider incidents and credit restoration") &&
+      source.includes("Australian Consumer Law") &&
+      source.includes("Queensland, Australia") &&
+      source.includes("support@tomverse.app") &&
+      !source.includes("Billing is not currently enabled") &&
+      !source.includes("before paid launch") &&
+      !source.includes("유료 출시 전") &&
+      !source.includes("결제 준비"),
+  },
+  {
+    name: "Checkout discloses renewal and links paid users to legal policies",
+    file: "components/marketing/UpgradeInterestButton.tsx",
+    test: (source) =>
+      source.includes('href="/terms"') &&
+      source.includes('href="/refund"') &&
+      source.includes("automatic renewal") &&
+      source.includes("자동 갱신") &&
+      source.includes("discount period") &&
+      !source.includes("Discounts apply to the first month of Pro and Max"),
+  },
 ];
 
 const failures = [];

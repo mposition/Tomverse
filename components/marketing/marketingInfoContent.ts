@@ -41,72 +41,248 @@ export const infoPages = {
     en: {
       eyebrow: "Legal",
       title: "Terms and Conditions",
-      description: "The core terms for using Tomverse AI. This page is a product-ready draft and should be reviewed by counsel before paid launch.",
-      updated: "Last updated: July 11, 2026",
+      description: "These terms govern free and paid use of Tomverse AI, including accounts, AI providers, subscriptions, credits, cancellation, and disputes.",
+      updated: "Last updated: July 14, 2026",
       sections: [
-        { title: "Use of the service", body: "You are responsible for your account activity, prompts, uploaded files, and outputs you choose to use or share." },
-        { title: "Third-party AI providers", body: "Tomverse is a workspace that routes your prompts and selected context to third-party AI providers and displays their responses. Except for product formatting needed to show the conversation, Tomverse does not edit, modify, approve, or verify the substance of AI-generated answers before presenting them to you." },
-        { title: "AI outputs are not professional advice", body: "AI responses may be inaccurate, incomplete, outdated, unsafe, or unsuitable for your circumstances. Outputs are provided for general informational use only and are not legal, medical, financial, moral, safety, or other professional advice. You should independently verify important outputs and consult a qualified professional before relying on them for high-impact decisions." },
-        { title: "Output responsibility and liability", body: "To the maximum extent permitted by law, Tomverse is not responsible for decisions, actions, losses, claims, or damages arising from AI-generated outputs, including legal, medical, ethical, moral, financial, or safety-related consequences. You are responsible for evaluating whether any output is appropriate for your intended use." },
-        { title: "Accounts and access", body: "Some features require login or a paid tier. We may limit, suspend, or terminate access for abuse, security risk, or policy violations." },
-        { title: "Acceptable use", body: "Do not use Tomverse to violate laws, abuse third-party services, bypass rate limits, upload malicious content, or process data you do not have rights to use." },
+        {
+          title: "Agreement, operator, and contact",
+          body: "Tomverse AI is the service and operating name used for tomverse.app (\"Tomverse\", \"we\", \"us\"). The legal seller or contracting operator for a paid transaction is the entity identified on the Stripe Checkout page, receipt, or invoice for that transaction. Billing and legal notices can be sent to support@tomverse.app or through the support form at tomverse.app/support.",
+        },
+        {
+          title: "Accounts and use of the service",
+          body: "You must provide accurate account information, protect access to your account, and take responsibility for account activity, prompts, uploaded files, and content you use or share. We may reasonably limit, suspend, or terminate access where necessary to address abuse, security risk, non-payment, legal requirements, or a material breach of these terms.",
+        },
+        {
+          title: "Third-party AI providers and outputs",
+          body: "Tomverse routes prompts and selected context to third-party AI providers and displays their responses. AI outputs can be inaccurate, incomplete, outdated, unsafe, or unsuitable and are not professional legal, medical, financial, safety, or other advice. Verify important outputs and obtain qualified advice before making high-impact decisions.",
+        },
+        {
+          title: "Plans, AI credits, and fair use",
+          body: "Free, Pro, and Max provide the features and AI-credit allowances shown on the pricing and account pages. Credit use varies by model, reasoning mode, and input size. Monthly credits reset at the beginning of each calendar month in UTC, do not roll over, are not transferable, and have no cash value. Fair-use, abuse-prevention, model, provider-cost, file, and context limits continue to apply.",
+        },
+        {
+          title: "Monthly and annual subscriptions; automatic renewal",
+          body: "Pro and Max are recurring subscriptions processed by Stripe. Monthly subscriptions are charged in advance and renew each month. Annual subscriptions are charged in advance for the year and renew each year. Unless you cancel before the next renewal, you authorise Stripe to charge the payment method on file for the amount and currency shown at checkout. We will give reasonable notice of a material price change where required and you may cancel before it takes effect.",
+        },
+        {
+          title: "Promotions and annual discounts",
+          body: "A promotion applies only to the plan, billing interval, duration, redemption limit, and expiry disclosed for that code. Promotions do not combine with the annual-plan discount unless the specific promotion expressly permits stacking. When a limited promotion ends, the subscription renews at the then-disclosed regular price unless cancelled. A discount has no separate cash value.",
+        },
+        {
+          title: "Cancellation and end of paid access",
+          body: "You can schedule cancellation from the account billing controls. Cancellation stops the next automatic renewal; it does not normally end access immediately. Paid features remain available until the current monthly or annual period ends, after which the account moves to the available Free plan. There is no early-termination fee and cancellation alone does not create an automatic prorated refund. An approved refund or a termination for cause may end paid access earlier.",
+        },
+        {
+          title: "Refunds and provider failures",
+          body: "Refund requests are governed by the Refund Policy at tomverse.app/refund and any rights that cannot be excluded by law. A failed or empty provider response normally releases reserved AI credits automatically; a user-cancelled response that already produced usable output may consume a proportionate amount. If an incident appears to have consumed credits incorrectly, contact support with the trace ID so we can review the logs.",
+        },
+        {
+          title: "Currency, taxes, and payment processing",
+          body: "Local-currency estimates shown before checkout are informational. The amount, billing interval, currency, and any applicable tax shown by Stripe Checkout before confirmation control the transaction. Your bank, card issuer, wallet, or payment provider may apply its own exchange rate or fee. Tomverse does not store complete payment-card details.",
+        },
+        {
+          title: "Acceptable use and rights in content",
+          body: "Do not use Tomverse to violate law, infringe rights, abuse providers, bypass limits, upload malicious material, or process content you are not entitled to use. You retain rights you hold in your input. You grant Tomverse the limited rights necessary to process that input, operate requested features, and send relevant context to the AI providers you select.",
+        },
+        {
+          title: "Consumer rights, governing law, and disputes",
+          body: "Nothing in these terms excludes guarantees, remedies, or other rights that cannot lawfully be excluded, including rights that may apply under the Australian Consumer Law. To the extent permitted by law, these terms are governed by the laws of Queensland, Australia. Please contact support first so we can try to resolve a dispute; this does not restrict your right to contact a regulator, tribunal, or court with jurisdiction.",
+        },
       ],
+      cta: { label: "Contact support", href: "/support" },
     },
     ko: {
       eyebrow: "법적 고지",
       title: "이용약관",
-      description: "Tomverse AI 사용을 위한 기본 약관입니다. 유료 출시 전 법률 검토를 권장하는 제품 초안입니다.",
-      updated: "최종 업데이트: 2026년 7월 11일",
+      description: "계정, AI 제공자, 구독, 크레딧, 취소 및 분쟁을 포함한 Tomverse AI의 무료·유료 서비스 이용 조건입니다.",
+      updated: "최종 업데이트: 2026년 7월 14일",
       sections: [
-        { title: "서비스 이용", body: "사용자는 계정 활동, 입력한 질문, 업로드한 파일, 사용하거나 공유하는 결과물에 대한 책임이 있습니다." },
-        { title: "AI 출력", body: "AI 답변은 부정확하거나 불완전할 수 있습니다. 법률, 의료, 금융, 안전 관련 결정에는 반드시 검토 후 사용해야 합니다." },
-        { title: "계정과 접근", body: "일부 기능은 로그인 또는 유료 등급이 필요합니다. 남용, 보안 위험, 정책 위반이 있는 경우 접근을 제한하거나 중지할 수 있습니다." },
-        { title: "허용되는 사용", body: "법 위반, 제3자 서비스 남용, 사용량 제한 우회, 악성 파일 업로드, 권한 없는 데이터 처리를 위해 Tomverse를 사용하면 안 됩니다." },
+        {
+          title: "약관 동의, 운영 주체 및 연락처",
+          body: "Tomverse AI는 tomverse.app에서 제공되는 서비스 및 운영 명칭입니다(이하 ‘Tomverse’ 또는 ‘당사’). 유료 거래의 법적 판매자 또는 계약 운영 주체는 해당 Stripe 결제 화면, 영수증 또는 인보이스에 표시된 사업자입니다. 결제·법률 관련 문의는 support@tomverse.app 또는 tomverse.app/support의 지원 폼으로 접수할 수 있습니다.",
+        },
+        {
+          title: "계정 및 서비스 이용",
+          body: "사용자는 정확한 계정 정보를 제공하고 계정 접근을 보호해야 하며, 계정 활동, 프롬프트, 업로드 파일, 사용하거나 공유하는 콘텐츠에 책임을 집니다. 남용, 보안 위험, 미결제, 법적 의무 또는 중대한 약관 위반에 대응하기 위해 합리적으로 필요한 범위에서 접근을 제한·정지·종료할 수 있습니다.",
+        },
+        {
+          title: "제3자 AI 제공자와 출력",
+          body: "Tomverse는 프롬프트와 선택된 맥락을 제3자 AI 제공자에게 전송하고 그 응답을 표시합니다. AI 출력은 부정확·불완전·오래되었거나 상황에 부적합할 수 있으며 법률, 의료, 금융, 안전 등 전문적인 조언이 아닙니다. 중요한 결정 전에는 결과를 독립적으로 확인하고 자격 있는 전문가의 조언을 받아야 합니다.",
+        },
+        {
+          title: "플랜, AI 크레딧 및 공정사용",
+          body: "Free, Pro, Max에는 요금 및 계정 페이지에 표시된 기능과 AI 크레딧 한도가 적용됩니다. 크레딧 사용량은 모델, 추론 방식, 입력 크기에 따라 달라집니다. 월 크레딧은 매월 1일 00:00 UTC에 초기화되며 이월·양도할 수 없고 현금 가치가 없습니다. 공정사용, 남용 방지, 모델, 제공자 비용, 파일 및 맥락 한도는 계속 적용됩니다.",
+        },
+        {
+          title: "월간·연간 구독과 자동 갱신",
+          body: "Pro와 Max는 Stripe가 처리하는 정기 구독입니다. 월간 구독은 매월 선결제 후 매월 자동 갱신되고, 연간 구독은 1년분을 선결제한 후 매년 자동 갱신됩니다. 다음 갱신 전에 취소하지 않으면 결제 화면에 표시된 금액과 통화로 저장된 결제수단에 청구하는 데 동의한 것으로 봅니다. 중대한 가격 변경은 법이 요구하는 경우 합리적인 기간 전에 안내하며, 적용 전에 취소할 수 있습니다.",
+        },
+        {
+          title: "프로모션과 연간 할인",
+          body: "프로모션은 해당 코드에 표시된 플랜, 결제 주기, 적용 기간, 최대 사용 횟수 및 종료일에만 적용됩니다. 특정 프로모션에서 중복 적용을 명시적으로 허용하지 않는 한 연간 플랜 할인과 중복되지 않습니다. 기간 한정 프로모션이 끝나면 취소하지 않는 한 안내된 정가로 갱신됩니다. 할인 금액 자체에는 별도의 현금 가치가 없습니다.",
+        },
+        {
+          title: "구독 취소와 유료 서비스 종료 시점",
+          body: "계정의 결제 관리 영역에서 구독 취소를 예약할 수 있습니다. 취소는 다음 자동 갱신을 중단하며 일반적으로 유료 접근을 즉시 종료하지 않습니다. 현재 월간 또는 연간 결제 기간이 끝날 때까지 유료 기능을 사용할 수 있고, 이후 사용 가능한 Free 플랜으로 전환됩니다. 중도 해지 수수료는 없으며 단순 취소만으로 자동 일할 환불이 발생하지 않습니다. 환불 승인 또는 중대한 위반에 따른 종료 시에는 유료 접근이 더 일찍 끝날 수 있습니다.",
+        },
+        {
+          title: "환불과 제공자 장애",
+          body: "환불 요청에는 tomverse.app/refund의 환불 정책과 법률상 배제할 수 없는 권리가 적용됩니다. AI 제공자 요청이 실패하거나 빈 응답으로 끝나면 예약된 크레딧은 일반적으로 자동 복원됩니다. 사용자가 취소하기 전에 사용 가능한 출력이 이미 생성된 경우에는 실제 생성량에 비례한 크레딧이 차감될 수 있습니다. 장애로 크레딧이 잘못 차감된 것으로 보이면 추적 ID와 함께 지원팀에 문의해주세요.",
+        },
+        {
+          title: "세금, 환율 및 결제 통화",
+          body: "결제 전 표시되는 현지 통화 금액은 참고용 환산값입니다. 최종 확인 전 Stripe 결제 화면에 표시된 금액, 결제 주기, 통화 및 적용 세금이 실제 거래 기준입니다. 은행, 카드사, 지갑 또는 결제 제공자가 자체 환율이나 수수료를 적용할 수 있습니다. Tomverse는 전체 카드 정보를 직접 저장하지 않습니다.",
+        },
+        {
+          title: "허용되는 사용과 콘텐츠 권리",
+          body: "법 위반, 권리 침해, 제공자 남용, 한도 우회, 악성 콘텐츠 업로드 또는 권한 없는 데이터 처리를 위해 Tomverse를 사용해서는 안 됩니다. 사용자는 자신이 보유한 입력 콘텐츠의 권리를 유지하며, 요청한 기능 수행과 선택한 AI 제공자에게 필요한 맥락을 전송하는 데 필요한 제한적 처리 권한을 Tomverse에 부여합니다.",
+        },
+        {
+          title: "소비자 권리, 준거법 및 분쟁 처리",
+          body: "본 약관은 호주 소비자법을 포함해 법률상 배제할 수 없는 보증, 구제수단 또는 권리를 제한하지 않습니다. 법이 허용하는 범위에서 본 약관에는 호주 퀸즐랜드주 법률이 적용됩니다. 분쟁이 발생하면 먼저 지원팀에 문의해 해결을 시도할 수 있으며, 이는 관할 규제기관, 재판소 또는 법원에 문제를 제기할 권리를 제한하지 않습니다.",
+        },
       ],
+      cta: { label: "지원팀에 문의", href: "/support" },
     },
     zh: {
       eyebrow: "法律",
       title: "条款与条件",
-      description: "使用 Tomverse AI 的核心条款。此页面是产品草案，付费发布前建议由法律顾问审核。",
-      updated: "最后更新：2026 年 7 月 11 日",
+      description: "这些条款适用于 Tomverse AI 的免费和付费服务，包括账户、AI 提供商、订阅、积分、取消和争议。",
+      updated: "最后更新：2026 年 7 月 14 日",
       sections: [
-        { title: "服务使用", body: "你需要对账户活动、输入内容、上传文件以及选择使用或分享的输出负责。" },
-        { title: "AI 输出", body: "AI 回答可能不准确或不完整。对于法律、医疗、金融或安全相关事项，应在依赖前进行人工审查。" },
-        { title: "账户与访问", body: "部分功能需要登录或付费等级。若存在滥用、安全风险或政策违规，我们可能限制、暂停或终止访问。" },
-        { title: "可接受使用", body: "不得使用 Tomverse 违法、滥用第三方服务、绕过限制、上传恶意内容或处理无权使用的数据。" },
+        { title: "协议、运营方和联系方式", body: "Tomverse AI 是 tomverse.app 使用的服务和运营名称（‘Tomverse’或‘我们’）。付费交易的法定销售方或合同运营方，是相应 Stripe 结账页、收据或发票上标明的实体。账单和法律通知可发送至 support@tomverse.app，或通过 tomverse.app/support 的支持表单提交。" },
+        { title: "账户和服务使用", body: "你必须提供准确的账户信息、保护账户访问，并对账户活动、提示词、上传文件以及使用或分享的内容负责。为处理滥用、安全风险、未付款、法律要求或重大违约，我们可在合理必要范围内限制、暂停或终止访问。" },
+        { title: "第三方 AI 提供商和输出", body: "Tomverse 会把提示词和所选上下文发送给第三方 AI 提供商并显示其响应。AI 输出可能不准确、不完整、过时、不安全或不适合你的情况，也不构成法律、医疗、金融、安全或其他专业建议。" },
+        { title: "方案、AI 积分和公平使用", body: "Free、Pro 和 Max 适用价格页及账户页显示的功能和积分额度。积分消耗因模型、推理方式和输入规模而异。月度积分在每个自然月开始时按 UTC 重置，不结转、不可转让且无现金价值。公平使用、防滥用、模型、提供商成本、文件和上下文限制仍然适用。" },
+        { title: "月付、年付和自动续订", body: "Pro 和 Max 是由 Stripe 处理的定期订阅。月付按月预付并每月续订；年付按年预付并每年续订。除非你在下次续订前取消，否则即授权 Stripe 按结账时显示的金额和币种向已保存的付款方式收费。" },
+        { title: "促销和年付折扣", body: "促销仅适用于该代码披露的方案、计费周期、期限、兑换上限和到期日。除非特定促销明确允许，否则不与年付折扣叠加。限时促销结束后，订阅会按已披露的常规价格续订，除非取消。折扣本身没有现金价值。" },
+        { title: "取消和付费访问结束", body: "你可以在账户的账单控制中安排取消。取消会停止下一次自动续订，通常不会立即终止访问。付费功能持续到当前月度或年度周期结束，之后账户转为可用的 Free 方案。没有提前解约费，单纯取消不会自动产生按比例退款。" },
+        { title: "退款和提供商故障", body: "退款请求适用 tomverse.app/refund 的退款政策及法律不得排除的权利。提供商请求失败或返回空响应时，预留积分通常会自动释放；如果用户取消前已生成可用输出，可能按实际生成量扣除积分。若故障似乎错误消耗了积分，请附上 trace ID 联系支持。" },
+        { title: "币种、税费和付款处理", body: "结账前显示的本地币种换算仅供参考。Stripe 最终确认页显示的金额、计费周期、币种和适用税费是交易依据。银行、发卡机构、钱包或付款服务商可能使用自己的汇率或收取费用。Tomverse 不直接存储完整银行卡信息。" },
+        { title: "消费者权利、适用法律和争议", body: "本条款不排除法律不得排除的保证、救济或其他权利，包括可能适用的澳大利亚消费者法权利。在法律允许的范围内，本条款受澳大利亚昆士兰州法律管辖。请先联系支持尝试解决争议；这不限制你联系有管辖权的监管机构、仲裁庭或法院。" },
       ],
+      cta: { label: "联系支持", href: "/support" },
     },
   },
   refund: {
     en: {
       eyebrow: "Billing",
       title: "Refund Policy",
-      description: "How refunds will work once paid plans are enabled.",
+      description: "Refund, billing correction, cancellation, unused-credit, promotion, and provider-incident rules for active Tomverse paid plans.",
+      updated: "Last updated: July 14, 2026",
       sections: [
-        { title: "Current billing status", body: "Billing is not currently enabled. Free, Pro, and Max describe the intended product direction." },
-        { title: "Future subscriptions", body: "When paid plans launch, refund eligibility will depend on the plan, usage, billing period, and applicable consumer protection laws." },
-        { title: "How to request help", body: "If you believe you were charged incorrectly after billing launches, contact support with your account email and transaction details." },
+        {
+          title: "Scope and non-excludable consumer rights",
+          body: "This policy applies to Pro and Max subscriptions purchased through Tomverse and processed by Stripe. It does not exclude remedies or guarantees that cannot be excluded by law. Where the Australian Consumer Law applies, you may be entitled to cancellation, a refund for an unused portion, correction, or compensation for a major service failure or another failure that is not remedied within a reasonable time.",
+        },
+        {
+          title: "When a refund or billing correction may be available",
+          body: "We will review requests involving duplicate, unauthorised, or incorrect charges; a paid plan that was not activated; a material service failure; or another circumstance where a refund is required by law. We may also approve a discretionary refund after considering when the charge occurred, the billing interval, paid-credit usage, and the facts supplied.",
+          bullets: ["Duplicate, unauthorised, or incorrect charge", "Paid access not delivered or a material service failure", "A remedy required by applicable consumer law"],
+        },
+        {
+          title: "When a refund is generally not available",
+          body: "Except where required by law, refunds are generally not provided for a change of mind, forgetting to cancel before renewal, dissatisfaction with the style or content of a valid AI response, unused time after a normal cancellation, or unused monthly credits. Submitting a request does not guarantee approval and does not itself cancel the subscription.",
+        },
+        {
+          title: "Monthly and annual cancellation",
+          body: "Cancellation from the account area stops the next renewal. A monthly subscription normally remains active through the current paid month; an annual subscription normally remains active through the current paid year. Cancellation alone does not produce an automatic prorated refund. If a refund is approved, the current implementation cancels the paid subscription and moves the account to Free when the approval is processed.",
+        },
+        {
+          title: "Unused AI credits",
+          body: "AI credits are a service allowance, not stored money. Monthly credits reset each calendar month in UTC, do not roll over, are not transferable, and cannot be redeemed for cash. Unused credits remain usable only while the applicable paid access remains active. When a full refund is approved and paid access ends, remaining paid-plan credits are not separately refunded or converted to cash.",
+        },
+        {
+          title: "Promotional purchases",
+          body: "Any approved refund is limited to the amount actually paid after the promotion; the undiscounted price and the discount itself are not refundable. A zero-dollar promotion has no cash refund value. Unless required by law or caused by a Tomverse billing error, a used or refunded promotion code is not guaranteed to be reissued. Promotion and annual-plan discounts stack only when the specific promotion expressly allows it.",
+        },
+        {
+          title: "Provider incidents and credit restoration",
+          body: "When an AI provider request fails before a usable answer or returns empty, Tomverse normally releases the reserved credits automatically. If you cancel after usable output has begun, a proportionate credit charge may remain. Provider downtime does not automatically create a cash refund, but a material unresolved service failure may qualify for a remedy under this policy or applicable law. Send the trace ID to support if credits appear incorrect.",
+        },
+        {
+          title: "Taxes, exchange rates, and payment currency",
+          body: "Refunds cannot exceed the amount and currency actually captured by Stripe. Local price estimates may differ from the final amount because Stripe, your bank, card issuer, wallet, or payment provider may apply taxes, exchange rates, or fees. The Stripe receipt or invoice is the record of the captured amount and merchant identity. Third-party exchange or payment fees are governed by that provider.",
+        },
+        {
+          title: "How to request and how we process it",
+          body: "Paid users can submit a refund review from the account billing area or contact support@tomverse.app. Include the account email, plan, charge date, transaction or receipt reference, reason, and any trace ID. Requests are reviewed individually. If approved, Tomverse submits the eligible refund to Stripe and cancels the related paid subscription; the time for funds to appear depends on Stripe and the payment provider.",
+        },
+        {
+          title: "Operator and disputes",
+          body: "Tomverse AI operates tomverse.app, and the legal seller for a transaction is identified on its Stripe receipt or invoice. Questions or disputes can be sent to support@tomverse.app or tomverse.app/support. You may also use any regulator, tribunal, or court process available under applicable law.",
+        },
       ],
+      cta: { label: "Contact billing support", href: "/support" },
     },
     ko: {
       eyebrow: "결제",
       title: "환불 정책",
-      description: "유료 요금제가 활성화된 이후 적용될 환불 기준입니다.",
+      description: "현재 운영 중인 Tomverse 유료 플랜의 환불, 오청구 정정, 취소, 미사용 크레딧, 프로모션 및 제공자 장애 처리 기준입니다.",
+      updated: "최종 업데이트: 2026년 7월 14일",
       sections: [
-        { title: "현재 결제 상태", body: "현재 결제는 활성화되어 있지 않습니다. Free, Pro, Max는 향후 제품 방향을 설명하는 등급입니다." },
-        { title: "향후 구독", body: "유료 요금제 출시 후 환불 가능 여부는 요금제, 사용량, 결제 기간, 적용 가능한 소비자 보호 법률에 따라 달라질 수 있습니다." },
-        { title: "문의 방법", body: "결제 출시 후 잘못 청구되었다고 판단되면 계정 이메일과 결제 정보를 포함해 지원팀에 문의해주세요." },
+        {
+          title: "적용 범위와 배제할 수 없는 소비자 권리",
+          body: "본 정책은 Tomverse에서 구매하고 Stripe가 처리한 Pro 및 Max 구독에 적용됩니다. 본 정책은 법률상 배제할 수 없는 보증이나 구제수단을 제한하지 않습니다. 호주 소비자법이 적용되는 경우 중대한 서비스 실패 또는 합리적인 기간 안에 해결되지 않은 문제에 대해 계약 취소, 미사용 부분 환불, 문제 시정 또는 손해 배상을 받을 권리가 있을 수 있습니다.",
+        },
+        {
+          title: "환불 또는 결제 정정이 가능한 경우",
+          body: "중복·무단·오청구, 결제한 플랜이 활성화되지 않은 경우, 중대한 서비스 실패 또는 법률상 환불이 필요한 사유는 검토 후 정정하거나 환불합니다. 그 밖의 요청도 결제 시점, 월간·연간 결제 주기, 유료 크레딧 사용량 및 제출된 사실관계를 고려해 재량으로 승인할 수 있습니다.",
+          bullets: ["중복, 무단 또는 잘못된 금액의 청구", "유료 접근 미제공 또는 중대한 서비스 실패", "적용되는 소비자법이 요구하는 구제"],
+        },
+        {
+          title: "일반적으로 환불되지 않는 경우",
+          body: "법률상 환불이 필요한 경우를 제외하고, 단순 변심, 갱신 전 취소를 잊은 경우, 정상 생성된 AI 답변의 문체·내용에 대한 불만, 일반 취소 후 남은 기간 또는 사용하지 않은 월 크레딧은 원칙적으로 환불 대상이 아닙니다. 환불 요청 제출은 승인을 보장하지 않으며 그 자체로 구독을 취소하지 않습니다.",
+        },
+        {
+          title: "월간·연간 구독 취소",
+          body: "계정 영역에서 취소하면 다음 갱신이 중단됩니다. 월간 구독은 일반적으로 현재 결제 월 말까지, 연간 구독은 현재 결제 연도 말까지 유지됩니다. 단순 취소로 자동 일할 환불이 발생하지 않습니다. 환불이 승인되면 현재 시스템은 승인 처리 시 유료 구독을 취소하고 계정을 Free로 전환합니다.",
+        },
+        {
+          title: "미사용 AI 크레딧",
+          body: "AI 크레딧은 예치금이 아닌 서비스 사용 한도입니다. 월 크레딧은 매월 1일 00:00 UTC에 초기화되고 이월·양도할 수 없으며 현금으로 교환되지 않습니다. 미사용 크레딧은 해당 유료 접근이 유지되는 동안에만 사용할 수 있습니다. 전액 환불이 승인되어 유료 접근이 종료되면 남은 유료 플랜 크레딧은 별도 환불하거나 현금으로 전환하지 않습니다.",
+        },
+        {
+          title: "프로모션 결제",
+          body: "승인된 환불은 프로모션 적용 후 실제 결제한 금액을 초과할 수 없으며 정가와의 차액이나 할인 자체는 환불되지 않습니다. 100% 할인 결제에는 현금 환불 가치가 없습니다. 법률상 필요하거나 Tomverse 결제 오류가 원인인 경우를 제외하면 사용했거나 환불된 프로모션 코드의 재발급은 보장되지 않습니다. 연간 할인과 프로모션은 해당 코드가 명시적으로 허용한 경우에만 중복됩니다.",
+        },
+        {
+          title: "AI 제공자 장애와 크레딧 복원",
+          body: "AI 제공자 요청이 사용 가능한 답변을 만들기 전에 실패하거나 빈 응답을 반환하면 Tomverse는 일반적으로 예약 크레딧을 자동 복원합니다. 사용 가능한 출력이 시작된 후 사용자가 취소하면 생성량에 비례한 크레딧이 남을 수 있습니다. 제공자 장애가 곧바로 현금 환불을 발생시키지는 않지만, 해결되지 않은 중대한 서비스 실패는 본 정책 또는 적용 법률에 따른 구제 대상이 될 수 있습니다. 크레딧이 잘못 차감된 것으로 보이면 추적 ID를 보내주세요.",
+        },
+        {
+          title: "세금, 환율 및 결제 통화",
+          body: "환불액은 Stripe가 실제 승인한 금액과 통화를 초과할 수 없습니다. 현지 가격 환산값은 Stripe, 은행, 카드사, 지갑 또는 결제 제공자가 적용하는 세금, 환율이나 수수료로 인해 최종 금액과 다를 수 있습니다. 실제 결제 금액과 판매자 정보는 Stripe 영수증 또는 인보이스를 기준으로 합니다. 제3자의 환전·결제 수수료에는 해당 제공자 정책이 적용됩니다.",
+        },
+        {
+          title: "환불 요청 및 처리 절차",
+          body: "유료 사용자는 계정 결제 영역에서 환불 심사를 요청하거나 support@tomverse.app으로 문의할 수 있습니다. 계정 이메일, 플랜, 결제일, 거래 또는 영수증 번호, 사유 및 관련 추적 ID를 포함해주세요. 요청은 개별 심사됩니다. 승인되면 Tomverse가 Stripe에 환불을 제출하고 관련 유료 구독을 취소하며, 실제 입금 시점은 Stripe와 결제 제공자 처리 기간에 따라 달라집니다.",
+        },
+        {
+          title: "운영 주체와 분쟁",
+          body: "Tomverse AI는 tomverse.app을 운영하며 각 거래의 법적 판매자는 Stripe 영수증 또는 인보이스에 표시됩니다. 문의나 분쟁은 support@tomverse.app 또는 tomverse.app/support로 접수할 수 있고, 적용 법률에 따라 이용 가능한 규제기관, 재판소 또는 법원 절차를 이용할 수 있습니다.",
+        },
       ],
+      cta: { label: "결제 지원 문의", href: "/support" },
     },
     zh: {
       eyebrow: "账单",
       title: "退款政策",
-      description: "付费方案启用后的退款处理方式。",
+      description: "适用于当前 Tomverse 付费方案的退款、账单更正、取消、未用积分、促销和提供商故障规则。",
+      updated: "最后更新：2026 年 7 月 14 日",
       sections: [
-        { title: "当前账单状态", body: "目前尚未启用付费。Free、Pro 和 Max 用于说明未来产品方向。" },
-        { title: "未来订阅", body: "付费方案推出后，退款资格将取决于方案、使用量、账单周期和适用的消费者保护法律。" },
-        { title: "如何寻求帮助", body: "如果付费上线后你认为扣费有误，请联系支持并提供账户邮箱和交易详情。" },
+        { title: "范围和不可排除的消费者权利", body: "本政策适用于通过 Tomverse 购买并由 Stripe 处理的 Pro 和 Max 订阅。本政策不排除法律不得排除的保证或救济。在澳大利亚消费者法适用时，重大服务故障或未在合理时间内纠正的问题可能使你有权取消、获得未使用部分退款、纠正或赔偿。" },
+        { title: "可能退款或更正账单的情况", body: "我们会审查重复、未授权或错误收费；付费方案未激活；重大服务故障；或法律要求退款的情况。其他请求可根据收费时间、计费周期、付费积分使用量和提交的事实酌情批准。", bullets: ["重复、未授权或错误收费", "未提供付费访问或重大服务故障", "适用消费者法要求的救济"] },
+        { title: "通常不退款的情况", body: "除非法律要求，改变主意、忘记在续订前取消、对有效 AI 回答的风格或内容不满意、正常取消后的未使用时间或未使用月度积分通常不予退款。提交请求不保证批准，也不会自动取消订阅。" },
+        { title: "月付和年付取消", body: "账户区域取消会停止下一次续订。月付通常持续到当前付费月结束，年付持续到当前付费年结束。取消本身不会自动按比例退款。批准退款时，当前系统会取消付费订阅并把账户转为 Free。" },
+        { title: "未使用 AI 积分", body: "AI 积分是服务额度，不是储值资金。月度积分按 UTC 在每个自然月开始时重置，不结转、不可转让且不可兑换现金。全额退款获批且付费访问结束后，剩余付费积分不会单独退款或折现。" },
+        { title: "促销购买", body: "获批退款不超过促销后实际支付的金额；原价差额和折扣本身不退款。零元促销没有现金退款价值。除法律要求或 Tomverse 账单错误外，不保证重新发放已使用或已退款的促销代码。" },
+        { title: "提供商故障和积分恢复", body: "AI 提供商在生成可用回答前失败或返回空响应时，Tomverse 通常会自动释放预留积分。可用输出开始后由用户取消时，可能保留按生成量计算的积分消耗。若积分似乎错误扣除，请附 trace ID 联系支持。" },
+        { title: "税费、汇率和付款币种", body: "退款不超过 Stripe 实际收取的金额和币种。本地价格换算可能因税费、汇率或第三方费用与最终金额不同。实际金额和销售方身份以 Stripe 收据或发票为准。" },
+        { title: "如何申请和处理", body: "付费用户可从账户账单区域申请退款审查，或联系 support@tomverse.app。请提供账户邮箱、方案、收费日期、交易或收据编号、原因和相关 trace ID。批准后，Tomverse 会向 Stripe 提交退款并取消相关付费订阅；到账时间取决于 Stripe 和付款服务商。" },
+        { title: "运营方和争议", body: "Tomverse AI 运营 tomverse.app，每笔交易的法定销售方标示在 Stripe 收据或发票上。问题或争议可发送至 support@tomverse.app 或 tomverse.app/support，也可使用适用法律提供的监管机构、仲裁庭或法院程序。" },
       ],
+      cta: { label: "联系账单支持", href: "/support" },
     },
   },
   safety: {
@@ -149,7 +325,8 @@ export const infoPages = {
       sections: [
         { title: "Our mission", body: "Make AI model choice practical, transparent, and useful for everyday work." },
         { title: "Product philosophy", body: "We prefer calm, focused tools over flashy demos: compare models, use real context, protect sensitive conversations, and keep useful outputs portable." },
-        { title: "Where we are headed", body: "We are preparing paid tiers, stronger account controls, more model providers, and support workflows for commercial users." },
+        { title: "Plans and operations", body: "Tomverse currently offers Free, Pro, and Max plans, with monthly and annual paid subscriptions processed through Stripe. We continue to improve account controls, provider coverage, reliability, and support workflows for individual and commercial users." },
+        { title: "Operator and contact", body: "Tomverse AI is the service and operating name for tomverse.app. The legal seller for a paid transaction is identified on the Stripe Checkout page, receipt, or invoice. Contact support@tomverse.app or use tomverse.app/support for account, billing, legal, or product enquiries." },
       ],
     },
     ko: {
@@ -159,7 +336,8 @@ export const infoPages = {
       sections: [
         { title: "미션", body: "AI 모델 선택을 실용적이고 투명하며 일상 업무에 도움이 되는 경험으로 만드는 것입니다." },
         { title: "제품 철학", body: "화려한 데모보다 차분하고 집중된 도구를 지향합니다. 모델 비교, 실제 맥락 활용, 민감한 대화 보호, 결과물 이동성을 중요하게 봅니다." },
-        { title: "앞으로의 방향", body: "유료 등급, 더 강한 계정 제어, 더 많은 모델 공급자, 상업 사용자를 위한 지원 흐름을 준비하고 있습니다." },
+        { title: "플랜과 운영", body: "Tomverse는 현재 Free, Pro, Max 플랜을 제공하며 월간·연간 유료 구독은 Stripe를 통해 처리됩니다. 개인 및 상업 사용자를 위해 계정 제어, 제공자 범위, 안정성과 지원 흐름을 계속 개선하고 있습니다." },
+        { title: "운영 주체와 연락처", body: "Tomverse AI는 tomverse.app의 서비스 및 운영 명칭입니다. 유료 거래의 법적 판매자는 Stripe 결제 화면, 영수증 또는 인보이스에 표시됩니다. 계정, 결제, 법률 또는 제품 관련 문의는 support@tomverse.app 또는 tomverse.app/support로 접수할 수 있습니다." },
       ],
     },
     zh: {
@@ -169,7 +347,8 @@ export const infoPages = {
       sections: [
         { title: "我们的使命", body: "让 AI 模型选择更实用、更透明，并真正服务于日常工作。" },
         { title: "产品理念", body: "我们更偏好冷静、专注的工具，而不是炫目的演示：比较模型、使用真实上下文、保护敏感对话，并保持输出可移植。" },
-        { title: "未来方向", body: "我们正在准备付费等级、更强的账户控制、更多模型供应商，以及面向商业用户的支持流程。" },
+        { title: "方案和运营", body: "Tomverse 目前提供 Free、Pro 和 Max 方案，月付和年付订阅由 Stripe 处理。我们会继续改进账户控制、提供商覆盖、可靠性以及面向个人和商业用户的支持流程。" },
+        { title: "运营方和联系方式", body: "Tomverse AI 是 tomverse.app 的服务和运营名称。付费交易的法定销售方标示在 Stripe 结账页、收据或发票上。账户、账单、法律或产品问题可发送至 support@tomverse.app 或 tomverse.app/support。" },
       ],
     },
   },
@@ -177,7 +356,7 @@ export const infoPages = {
     en: {
       eyebrow: "Support",
       title: "Support",
-      description: "Get help with accounts, model access, files, sharing, billing preparation, and product feedback.",
+      description: "Get help with accounts, model access, files, sharing, active subscriptions, cancellation, refunds, and product feedback.",
       sections: [
         { title: "Help Centre", body: "Start with the Help Centre for common setup and troubleshooting guidance.", bullets: ["Login and OAuth issues", "File upload troubleshooting", "Model access and limits"] },
         { title: "PDF and Office troubleshooting", body: "If a PDF or Office file fails, check that it is not password-protected, corrupted, too large, or a scanned image without extractable text. Re-exporting the document as PDF, reducing the file size, or pasting the key text directly often resolves the issue.", bullets: ["Images, PDFs, Office files, text files, and Google Drive files are supported after login.", "Guest mode does not support attachments.", "Attach up to 5 files, 10 MB each."] },
@@ -188,7 +367,7 @@ export const infoPages = {
     ko: {
       eyebrow: "지원",
       title: "지원",
-      description: "계정, 모델 접근, 파일, 공유, 결제 준비, 제품 피드백에 대한 도움을 받을 수 있습니다.",
+      description: "계정, 모델 접근, 파일, 공유, 유료 구독, 취소, 환불 및 제품 피드백에 대한 도움을 받을 수 있습니다.",
       sections: [
         { title: "Help Centre", body: "일반적인 설정과 문제 해결은 Help Centre에서 먼저 확인할 수 있습니다.", bullets: ["로그인 및 OAuth 문제", "파일 업로드 문제", "모델 접근과 제한"] },
         { title: "지원 문의", body: "계정별 문제는 계정 이메일, 발생 시간, 브라우저, 제품에 표시된 추적 ID를 함께 보내주시면 더 빠르게 확인할 수 있습니다." },
@@ -198,7 +377,7 @@ export const infoPages = {
     zh: {
       eyebrow: "支持",
       title: "支持",
-      description: "获取账户、模型访问、文件、分享、账单准备和产品反馈方面的帮助。",
+      description: "获取账户、模型访问、文件、分享、付费订阅、取消、退款和产品反馈方面的帮助。",
       sections: [
         { title: "Help Centre", body: "常见设置和故障排查可先查看 Help Centre。", bullets: ["登录和 OAuth 问题", "文件上传排查", "模型访问和限制"] },
         { title: "联系支持", body: "对于账户相关问题，请提供账户邮箱、发生时间、浏览器以及产品中显示的追踪 ID。" },

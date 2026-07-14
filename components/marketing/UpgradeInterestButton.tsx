@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import type { ReactNode } from "react";
 import { useEffect, useId, useState } from "react";
 import { dispatchAppToast } from "@/lib/appToast";
@@ -104,7 +105,7 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     promoPlaceholder: "Optional promotion code",
     apply: "Apply",
     promoFinePrint:
-      "Discounts apply to the first month of Pro and Max, then renew at the regular monthly price.",
+      "The validated offer shows its discount period. After it ends, the subscription renews at the regular price unless cancelled.",
     invalidPromo: "Invalid promotion code.",
     promoApplied: "Promotion code applied.",
     orderSummary: "Order summary",
@@ -142,7 +143,7 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     promoPlaceholder: "프로모션 코드 선택 입력",
     apply: "적용",
     promoFinePrint:
-      "할인은 Pro와 Max의 첫 달에 적용되며, 이후에는 정가 월간 요금으로 갱신됩니다.",
+      "검증된 혜택에 할인 적용 기간이 표시됩니다. 기간 종료 후에는 취소하지 않는 한 정가로 갱신됩니다.",
     invalidPromo: "유효하지 않은 프로모션 코드입니다.",
     promoApplied: "프로모션 코드가 적용되었습니다.",
     orderSummary: "주문 요약",
@@ -179,7 +180,7 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     promoPlaceholder: "可选促销代码",
     apply: "应用",
     promoFinePrint:
-      "折扣适用于 Pro 和 Max 的首月，之后将按标准月费续订。",
+      "验证后的优惠会显示折扣期限。优惠结束后，如未取消，订阅将按正常价格续订。",
     invalidPromo: "促销代码无效。",
     promoApplied: "促销代码已应用。",
     orderSummary: "订单摘要",
@@ -217,7 +218,7 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     promoPlaceholder: "Code promotionnel facultatif",
     apply: "Appliquer",
     promoFinePrint:
-      "Les remises s'appliquent au premier mois de Pro et Max, puis le renouvellement se fait au prix mensuel normal.",
+      "L'offre validée indique la durée de la remise. Ensuite, l'abonnement est renouvelé au tarif normal sauf résiliation.",
     invalidPromo: "Code promotionnel invalide.",
     promoApplied: "Code promotionnel appliqué.",
     orderSummary: "Résumé de commande",
@@ -255,7 +256,7 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     promoPlaceholder: "Optionaler Aktionscode",
     apply: "Anwenden",
     promoFinePrint:
-      "Rabatte gelten für den ersten Monat von Pro und Max. Danach verlängert sich das Abo zum regulären Monatspreis.",
+      "Das geprüfte Angebot zeigt die Rabattdauer. Danach verlängert sich das Abo zum regulären Preis, sofern es nicht gekündigt wird.",
     invalidPromo: "Ungültiger Aktionscode.",
     promoApplied: "Aktionscode angewendet.",
     orderSummary: "Bestellübersicht",
@@ -293,7 +294,7 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     promoPlaceholder: "Código promocional opcional",
     apply: "Aplicar",
     promoFinePrint:
-      "Los descuentos se aplican al primer mes de Pro y Max; después se renueva al precio mensual normal.",
+      "La oferta validada muestra la duración del descuento. Después, la suscripción se renueva al precio normal salvo cancelación.",
     invalidPromo: "Código promocional no válido.",
     promoApplied: "Código promocional aplicado.",
     orderSummary: "Resumen del pedido",
@@ -331,7 +332,7 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     promoPlaceholder: "Código promocional opcional",
     apply: "Aplicar",
     promoFinePrint:
-      "Os descontos se aplicam ao primeiro mês dos planos Pro e Max; depois a renovação ocorre pelo preço mensal normal.",
+      "A oferta validada mostra a duração do desconto. Depois, a assinatura renova pelo preço normal, salvo cancelamento.",
     invalidPromo: "Código promocional inválido.",
     promoApplied: "Código promocional aplicado.",
     orderSummary: "Resumo do pedido",
@@ -360,6 +361,72 @@ const promotionPolicyCopy: Record<Language, string> = {
   de: "Codes werden auf dem Server geprüft. Sie sind nicht mit dem Jahresrabatt kombinierbar, außer der Code erlaubt dies ausdrücklich.",
   es: "Los códigos se validan en el servidor. No se acumulan con el descuento anual salvo que el código lo permita expresamente.",
   pt: "Os códigos são validados no servidor. Não acumulam com o desconto anual, salvo quando o código permitir explicitamente.",
+};
+
+type CheckoutLegalCopy = {
+  prefix: string;
+  terms: string;
+  conjunction: string;
+  refund: string;
+  suffix: string;
+};
+
+const checkoutLegalCopy: Record<Language, CheckoutLegalCopy> = {
+  en: {
+    prefix: "By continuing, you agree to the ",
+    terms: "Terms and Conditions",
+    conjunction: " and acknowledge the ",
+    refund: "Refund Policy",
+    suffix:
+      ", including automatic renewal and cancellation at the end of the paid period.",
+  },
+  ko: {
+    prefix: "결제를 계속하면 ",
+    terms: "이용약관",
+    conjunction: "에 동의하고 ",
+    refund: "환불 정책",
+    suffix:
+      "의 자동 갱신 및 결제 기간 말 취소 조건을 확인한 것으로 봅니다.",
+  },
+  zh: {
+    prefix: "继续即表示你同意",
+    terms: "条款与条件",
+    conjunction: "并确认",
+    refund: "退款政策",
+    suffix: "，包括自动续订及在已付费周期结束时取消的条件。",
+  },
+  fr: {
+    prefix: "En continuant, vous acceptez les ",
+    terms: "Conditions générales",
+    conjunction: " et reconnaissez la ",
+    refund: "Politique de remboursement",
+    suffix:
+      ", y compris le renouvellement automatique et la résiliation en fin de période payée.",
+  },
+  de: {
+    prefix: "Mit dem Fortfahren stimmst du den ",
+    terms: "Nutzungsbedingungen",
+    conjunction: " zu und bestätigst die ",
+    refund: "Erstattungsrichtlinie",
+    suffix:
+      " einschließlich automatischer Verlängerung und Kündigung zum Ende des bezahlten Zeitraums.",
+  },
+  es: {
+    prefix: "Al continuar, aceptas los ",
+    terms: "Términos y condiciones",
+    conjunction: " y reconoces la ",
+    refund: "Política de reembolsos",
+    suffix:
+      ", incluida la renovación automática y la cancelación al final del periodo pagado.",
+  },
+  pt: {
+    prefix: "Ao continuar, você concorda com os ",
+    terms: "Termos e Condições",
+    conjunction: " e reconhece a ",
+    refund: "Política de Reembolso",
+    suffix:
+      ", incluindo renovação automática e cancelamento ao final do período pago.",
+  },
 };
 
 const formatMoney = (
@@ -450,6 +517,7 @@ export function UpgradeInterestButton({
 }) {
   const { lang, t } = useLanguage();
   const copy = checkoutCopy[lang] || checkoutCopy.en;
+  const legalCopy = checkoutLegalCopy[lang] || checkoutLegalCopy.en;
   const [isSending, setIsSending] = useState(false);
   const [isValidatingPromotion, setIsValidatingPromotion] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
@@ -785,7 +853,7 @@ export function UpgradeInterestButton({
                 </button>
               </div>
               <p className="mt-2 text-xs font-semibold text-zinc-500 dark:text-zinc-400">
-                {promotionPolicyCopy[lang] || promotionPolicyCopy.en}
+                {copy.promoFinePrint} {promotionPolicyCopy[lang] || promotionPolicyCopy.en}
               </p>
             </div>
 
@@ -866,6 +934,28 @@ export function UpgradeInterestButton({
                     : usdMonthlyPriceLabel || "-"
                 )}
               </div>
+
+              <p className="mt-3 text-xs font-semibold leading-5 text-zinc-500 dark:text-zinc-400">
+                {legalCopy.prefix}
+                <Link
+                  href="/terms"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-black text-blue-700 underline underline-offset-2 hover:text-blue-600 dark:text-blue-300 dark:hover:text-blue-200"
+                >
+                  {legalCopy.terms}
+                </Link>
+                {legalCopy.conjunction}
+                <Link
+                  href="/refund"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-black text-blue-700 underline underline-offset-2 hover:text-blue-600 dark:text-blue-300 dark:hover:text-blue-200"
+                >
+                  {legalCopy.refund}
+                </Link>
+                {legalCopy.suffix}
+              </p>
 
               <div className="mt-auto hidden flex-col gap-2 pt-6 md:flex">
                 <button
