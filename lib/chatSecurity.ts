@@ -204,7 +204,7 @@ const limitsFor = (access: Pick<ChatAccess, "kind" | "plan" | "planLimits">): Li
     const monthLimit =
         access.planLimits?.monthlyMessageLimit ??
         (plan === "Max"
-            ? positiveInteger(process.env.CHAT_MAX_PER_MONTH, 8_000)
+            ? positiveInteger(process.env.CHAT_MAX_PER_MONTH, 10_000)
             : plan === "Pro"
               ? positiveInteger(
                     process.env.CHAT_PRO_PER_MONTH,

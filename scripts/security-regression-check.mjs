@@ -66,7 +66,10 @@ const checks = [
     file: "lib/chatSecurity.ts",
     test: (source) =>
       source.includes("CHAT_USER_TOKENS_PER_DAY") &&
-      source.includes("CHAT_USER_COST_MICROUSD_PER_DAY") &&
+      source.includes("getPlanEstimatedCostLimits") &&
+      source.includes("CHAT_FREE_COST_MICROUSD_PER_DAY") &&
+      source.includes("CHAT_PRO_COST_MICROUSD_PER_DAY") &&
+      source.includes("CHAT_MAX_COST_MICROUSD_PER_DAY") &&
       source.includes("provider-cost-month") &&
       source.includes("ChatRequestLease"),
   },
@@ -475,7 +478,9 @@ const checks = [
       source.includes('"/admin"') &&
       source.includes('"/api"') &&
       source.includes('"/auth"') &&
-      source.includes('"/chat"') &&
+      source.includes('"/chat$"') &&
+      source.includes('"/chat/"') &&
+      !source.includes('"/chat",') &&
       source.includes('"/share"'),
   },
   {

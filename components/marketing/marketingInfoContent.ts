@@ -225,7 +225,7 @@ export const infoPages = {
         {
           title: "Plans, limits, and upgrades",
           body: "Guest mode is intended for quick trials. Free, Pro, and Max plans unlock more model access and higher usage limits. If a model or feature is unavailable, the app will show the reason in the model picker or plan area.",
-          bullets: ["Guest: 100 monthly and 20 daily credits, Free models only, no attachments.", "Free: 300 monthly and 30 daily credits, with up to 30 Pro-model responses.", "Pro: 3,000 monthly and 150 daily credits. Max: 8,000 monthly credits with no daily guardrail; fair-use protections apply."],
+          bullets: ["Guest: 100 monthly and 20 daily credits, Free models only, no attachments.", "Free: 300 monthly and 30 daily credits, with up to 30 Pro-model responses.", "Pro: 3,000 monthly and 150 daily credits. Max: 10,000 monthly credits; Standard models have no daily limit, while Premium usage follows monthly credits and fair-use."],
         },
         {
           title: "Files and Google Drive",
@@ -267,7 +267,7 @@ export const infoPages = {
         {
           title: "플랜, 제한, 업그레이드",
           body: "게스트 모드는 빠른 체험용입니다. Free, Pro, Max 플랜은 더 넓은 모델 접근과 더 높은 사용량을 제공합니다. 모델이나 기능이 제한되면 모델 선택창 또는 플랜 영역에서 이유를 확인할 수 있습니다.",
-          bullets: ["Guest: 월 100 · 일 20 크레딧, Free 모델만 사용, 첨부파일 불가.", "Free: 월 300 · 일 30 크레딧, Pro 모델 월 30응답.", "Pro: 월 3,000 · 일 150 크레딧. Max: 월 8,000 크레딧, 일일 가드레일 없음, 공정사용 보호 적용."],
+          bullets: ["Guest: 월 100 · 일 20 크레딧, Free 모델만 사용, 첨부파일 불가.", "Free: 월 300 · 일 30 크레딧, Pro 모델 월 30응답.", "Pro: 월 3,000 · 일 150 크레딧. Max: 월 10,000 크레딧, Standard 모델 일일 제한 없음, Premium 사용량은 월 크레딧 및 공정사용 정책 적용."],
         },
         {
           title: "파일과 Google Drive",
@@ -309,7 +309,7 @@ export const infoPages = {
         {
           title: "套餐、限制和升级",
           body: "Guest 模式用于快速体验。Free、Pro 和 Max 套餐提供更广的模型访问和更高的使用量。如果某个模型或功能不可用，应用会在模型选择器或套餐区域显示原因。",
-          bullets: ["Guest：每月 100、每日 20 积分，仅限 Free 模型，不可使用附件。", "Free：每月 300、每日 30 积分，每月 30 次 Pro 模型回复。", "Pro：每月 3,000、每日 150 积分。Max：每月 8,000 积分，无每日限制并适用 fair-use。"],
+          bullets: ["Guest：每月 100、每日 20 积分，仅限 Free 模型，不可使用附件。", "Free：每月 300、每日 30 积分，每月 30 次 Pro 模型回复。", "Pro：每月 3,000、每日 150 积分。Max：每月 10,000 积分，Standard 模型无每日限制，Premium 用量适用月度积分和公平使用政策。"],
         },
         {
           title: "文件和 Google Drive",
