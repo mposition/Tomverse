@@ -3,7 +3,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { AlertCircle, ArrowRight, CheckCircle2, Info, Sparkles } from "lucide-react";
 import { DesktopChatShell } from "@/components/chat/DesktopChatShell";
-import { GoLiveOnboarding } from "@/components/chat/GoLiveOnboarding";
 import { MobileChatShell } from "@/components/chat/MobileChatShell";
 import { Conversation, AVAILABLE_MODELS, type ChatAttachment } from "@/components/chat/types";
 import { useSession } from "next-auth/react";
@@ -1332,7 +1331,6 @@ export default function Home() {
           onFollowupSent={handleModelFollowupSent}
         />
       )}
-    {isViewportReady && <GoLiveOnboarding />}
     {toast && (
       <div
         key={toast.id}

@@ -2,6 +2,7 @@
 
 import Script from "next/script";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import {
@@ -14,6 +15,9 @@ import {
 } from "@/lib/productAnalyticsClient";
 
 type ConsentState = "loading" | "unset" | "accepted" | "declined";
+
+const GUEST_QUICK_START_ACTIVE_KEY = "tomverse_guest_quick_start_active_v2";
+const GUEST_QUICK_START_EVENT = "tomverse:guest-quick-start";
 
 const consentCopy: Record<
   Language,
@@ -95,8 +99,10 @@ export function AnalyticsProvider({
   disabled?: boolean;
 }) {
   const { lang } = useLanguage();
+  const pathname = usePathname();
   const [consent, setConsent] = useState<ConsentState>("loading");
   const [showPreferences, setShowPreferences] = useState(false);
+  const [chatConsentReady, setChatConsentReady] = useState(false);
   const lifecycleCheckedRef = useRef(false);
   const copy = consentCopy[lang];
 
@@ -126,6 +132,47 @@ export function AnalyticsProvider({
       cancelled = true;
     };
   }, [disabled]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const scheduleChatConsentReady = (ready: boolean) => {
+      queueMicrotask(() => {
+        if (!cancelled) setChatConsentReady(ready);
+      });
+    };
+    const isChatPath = pathname === "/chat";
+    if (!isChatPath) {
+      scheduleChatConsentReady(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+    if (initialPlan !== "Guest") {
+      scheduleChatConsentReady(true);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    scheduleChatConsentReady(false);
+    const handleQuickStartVisibility = (event: Event) => {
+      const detail = (event as CustomEvent<{ visible?: unknown }>).detail;
+      setChatConsentReady(detail?.visible !== true);
+    };
+    window.addEventListener(GUEST_QUICK_START_EVENT, handleQuickStartVisibility);
+
+    const timeout = window.setTimeout(() => {
+      setChatConsentReady(
+        window.sessionStorage.getItem(GUEST_QUICK_START_ACTIVE_KEY) !== "1"
+      );
+    }, 600);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+      window.removeEventListener(GUEST_QUICK_START_EVENT, handleQuickStartVisibility);
+    };
+  }, [initialPlan, pathname]);
 
   useEffect(() => {
     if (disabled || consent !== "accepted") return;
@@ -176,6 +223,8 @@ export function AnalyticsProvider({
     setShowPreferences(false);
   };
 
+  const consentPromptReady = pathname !== "/chat" || chatConsentReady;
+
   return (
     <>
       {children}
@@ -187,17 +236,22 @@ export function AnalyticsProvider({
           nonce={nonce || undefined}
         />
       ) : null}
-      {!disabled && (consent === "unset" || showPreferences) ? (
+      {!disabled && consentPromptReady && (consent === "unset" || showPreferences) ? (
         <aside
           role="dialog"
           aria-label={copy.title}
-          className="fixed bottom-4 left-1/2 z-[100] w-[min(42rem,calc(100vw-2rem))] -translate-x-1/2 rounded-2xl border border-zinc-700 bg-zinc-950 p-4 text-zinc-100 shadow-2xl shadow-black/40"
+          className="fixed bottom-[max(0.5rem,env(safe-area-inset-bottom))] left-1/2 z-[100] w-[min(46rem,calc(100vw-1rem))] -translate-x-1/2 rounded-xl border border-zinc-700 bg-zinc-950/95 p-2.5 text-zinc-100 shadow-2xl shadow-black/40 backdrop-blur sm:p-3"
         >
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
             <div className="min-w-0">
-              <p className="text-sm font-black">{copy.title}</p>
-              <p className="mt-1 text-xs leading-5 text-zinc-400">{copy.body}</p>
-              <Link href="/privacy" className="mt-1 inline-flex text-xs font-bold text-blue-300 hover:text-blue-200">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs font-black">{copy.title}</p>
+                <Link href="/privacy" className="shrink-0 text-[11px] font-bold text-blue-300 hover:text-blue-200 sm:hidden">
+                  {copy.privacy}
+                </Link>
+              </div>
+              <p className="mt-0.5 text-[11px] leading-4 text-zinc-400">{copy.body}</p>
+              <Link href="/privacy" className="mt-0.5 hidden text-[11px] font-bold text-blue-300 hover:text-blue-200 sm:inline-flex">
                 {copy.privacy}
               </Link>
             </div>
@@ -205,14 +259,14 @@ export function AnalyticsProvider({
               <button
                 type="button"
                 onClick={decline}
-                className="h-10 rounded-xl border border-zinc-700 px-4 text-xs font-black text-zinc-300 hover:bg-zinc-900"
+                className="h-8 flex-1 rounded-lg border border-zinc-700 px-3 text-[11px] font-black text-zinc-300 hover:bg-zinc-900 sm:flex-none"
               >
                 {copy.decline}
               </button>
               <button
                 type="button"
                 onClick={accept}
-                className="h-10 rounded-xl bg-blue-600 px-4 text-xs font-black text-white hover:bg-blue-500"
+                className="h-8 flex-1 rounded-lg bg-blue-600 px-3 text-[11px] font-black text-white hover:bg-blue-500 sm:flex-none"
               >
                 {copy.accept}
               </button>
@@ -221,12 +275,13 @@ export function AnalyticsProvider({
         </aside>
       ) : null}
       {!disabled &&
+      consentPromptReady &&
       !showPreferences &&
       (consent === "accepted" || consent === "declined") ? (
         <button
           type="button"
           onClick={() => setShowPreferences(true)}
-          className="fixed bottom-3 right-3 z-[60] rounded-full border border-zinc-700 bg-zinc-950/90 px-3 py-1.5 text-[11px] font-bold text-zinc-400 shadow-lg backdrop-blur hover:text-zinc-100"
+          className="fixed bottom-2 right-2 z-[60] rounded-full border border-zinc-700 bg-zinc-950/90 px-2.5 py-1 text-[10px] font-bold text-zinc-400 shadow-lg backdrop-blur hover:text-zinc-100"
         >
           {copy.settings}
         </button>

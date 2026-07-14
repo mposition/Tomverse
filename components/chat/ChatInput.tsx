@@ -48,6 +48,9 @@ const GOOGLE_WORKSPACE_TYPES = [
   "application/vnd.google-apps.presentation",
 ].join(",");
 const RECENT_MODEL_STORAGE_KEY = "recent_model_ids";
+const GUEST_QUICK_START_STORAGE_KEY = "tomverse_guest_quick_start_seen_v2";
+const GUEST_QUICK_START_ACTIVE_KEY = "tomverse_guest_quick_start_active_v2";
+const GUEST_QUICK_START_EVENT = "tomverse:guest-quick-start";
 const PROVIDER_DISPLAY_ORDER = ["openai", "google", "anthropic", "deepseek", "mistral"];
 const TEXT_FILE_TYPES = new Set([
   "text/plain",
@@ -300,8 +303,10 @@ export function ChatInput({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const previousAttachmentsRef = useRef<ChatAttachment[]>([]);
   const hasHandledFocusTokenRef = useRef(false);
+  const guestQuickStartActiveRef = useRef(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isDragActive, setIsDragActive] = useState(false);
+  const [showGuestQuickStart, setShowGuestQuickStart] = useState(false);
     const { t, lang } = useLanguage();
     const signInCallbackUrl = withChatLanguage("/chat", lang);
     const accountUsage = useUserUsage(!isGuestMode);
@@ -374,6 +379,48 @@ export function ChatInput({
   const modelMenuButtonRef = useRef<HTMLButtonElement | null>(null);
   const modelSearchInputRef = useRef<HTMLInputElement | null>(null);
   const lastMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
+
+  const announceGuestQuickStart = useCallback((visible: boolean) => {
+    if (visible) {
+      window.sessionStorage.setItem(GUEST_QUICK_START_ACTIVE_KEY, "1");
+    } else {
+      window.sessionStorage.removeItem(GUEST_QUICK_START_ACTIVE_KEY);
+    }
+    window.dispatchEvent(
+      new CustomEvent(GUEST_QUICK_START_EVENT, { detail: { visible } })
+    );
+  }, []);
+
+  const dismissGuestQuickStart = useCallback(() => {
+    if (!guestQuickStartActiveRef.current) return;
+    window.localStorage.setItem(GUEST_QUICK_START_STORAGE_KEY, "1");
+    guestQuickStartActiveRef.current = false;
+    setShowGuestQuickStart(false);
+    announceGuestQuickStart(false);
+  }, [announceGuestQuickStart]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const timeout = window.setTimeout(() => {
+      if (cancelled) return;
+      const shouldShow =
+        isGuestMode &&
+        window.localStorage.getItem(GUEST_QUICK_START_STORAGE_KEY) !== "1";
+
+      guestQuickStartActiveRef.current = shouldShow;
+      setShowGuestQuickStart(shouldShow);
+      announceGuestQuickStart(shouldShow);
+    }, 0);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+      if (guestQuickStartActiveRef.current) {
+        guestQuickStartActiveRef.current = false;
+        announceGuestQuickStart(false);
+      }
+    };
+  }, [announceGuestQuickStart, isGuestMode]);
 
   const getMenuFocusableElements = useCallback(() => {
     const popover = menuPopoverRef.current;
@@ -686,6 +733,7 @@ export function ChatInput({
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       if (!isDisabled) {
+        dismissGuestQuickStart();
         onSubmit();
       }
     }
@@ -1054,13 +1102,72 @@ export function ChatInput({
               </p>
             </div>
           )}
+          {isGuestMode && showGuestQuickStart && (
+            <section
+              data-testid="guest-quick-start"
+              aria-label={t("onboarding.title")}
+              className="mb-2 rounded-xl border border-blue-200 bg-blue-50/90 px-2.5 py-2 text-zinc-900 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-zinc-100"
+            >
+              <div className="flex items-start gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-black text-blue-700 dark:text-blue-300">
+                    {t("onboarding.title")}
+                  </p>
+                  <p className="mt-0.5 text-[11px] leading-4 text-zinc-600 dark:text-zinc-400">
+                    {t("onboarding.description")}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={dismissGuestQuickStart}
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-zinc-500 transition hover:bg-white/80 hover:text-zinc-900 dark:hover:bg-zinc-900 dark:hover:text-white"
+                  aria-label={t("auth.cancel")}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <ol className="mt-2 flex max-w-full gap-1.5 overflow-x-auto overscroll-x-contain pb-0.5 sm:grid sm:grid-cols-3 sm:overflow-visible sm:pb-0">
+                <li className="flex min-w-48 items-start gap-2 rounded-lg bg-white/80 px-2 py-1.5 dark:bg-zinc-950/60 sm:min-w-0">
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[10px] font-black text-white">1</span>
+                  <span className="min-w-0">
+                    <span className="block text-[11px] font-black">{t("onboarding.compareTitle")}</span>
+                    <span className="block text-[10px] leading-4 text-zinc-500 dark:text-zinc-400">{t("onboarding.compareBody")}</span>
+                  </span>
+                </li>
+                <li className="flex min-w-48 items-start gap-2 rounded-lg bg-white/80 px-2 py-1.5 dark:bg-zinc-950/60 sm:min-w-0">
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[10px] font-black text-white">2</span>
+                  <span className="min-w-0">
+                    <span className="block text-[11px] font-black">{t("onboarding.filesTitle")}</span>
+                    <span className="block text-[10px] leading-4 text-zinc-500 dark:text-zinc-400">{t("onboarding.filesBody")}</span>
+                  </span>
+                </li>
+                <li className="flex min-w-56 items-start gap-2 rounded-lg bg-white/80 px-2 py-1.5 dark:bg-zinc-950/60 sm:min-w-0">
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-zinc-900 text-[10px] font-black text-white dark:bg-white dark:text-zinc-950">3</span>
+                  <span className="min-w-0">
+                    <span className="block text-[11px] font-black">{t("onboarding.privateTitle")}</span>
+                    <span className="block text-[10px] leading-4 text-zinc-500 dark:text-zinc-400">{t("onboarding.privateBody")}</span>
+                    <a
+                      href={`/auth/signin?callbackUrl=${encodeURIComponent(signInCallbackUrl)}`}
+                      onClick={dismissGuestQuickStart}
+                      className="mt-0.5 inline-flex text-[10px] font-black text-blue-700 underline underline-offset-2 dark:text-blue-300"
+                    >
+                      {t("auth.signIn")}
+                    </a>
+                  </span>
+                </li>
+              </ol>
+            </section>
+          )}
           {!value.trim() && attachments.length === 0 && (
             <div className="mb-2 hidden max-w-full gap-2 overflow-x-auto overscroll-x-contain pb-1 md:flex md:flex-wrap md:overflow-visible md:pb-0">
               {PROMPT_SUGGESTIONS.map((suggestion) => (
                 <button
                   key={suggestion}
                   type="button"
-                  onClick={() => onChange(t(suggestion))}
+                  onClick={() => {
+                    dismissGuestQuickStart();
+                    onChange(t(suggestion));
+                  }}
                   className="shrink-0 touch-manipulation rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs font-semibold text-zinc-600 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800"
                 >
                   {t(suggestion)}
@@ -1483,7 +1590,11 @@ export function ChatInput({
           data-testid="chat-textarea"
           ref={textareaRef}
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onFocus={dismissGuestQuickStart}
+          onChange={(e) => {
+            if (e.target.value) dismissGuestQuickStart();
+            onChange(e.target.value);
+          }}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           aria-label={placeholderText}
@@ -1506,7 +1617,10 @@ export function ChatInput({
         ) : (
           <button
             type="button"
-            onClick={onSubmit}
+            onClick={() => {
+              dismissGuestQuickStart();
+              onSubmit();
+            }}
             disabled={isDisabled || (!value.trim() && attachments.length === 0)}
             className="order-3 ml-auto flex h-9 w-9 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-blue-600 text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500 dark:disabled:bg-zinc-700 dark:disabled:text-zinc-400 md:h-9 md:w-9"
             title={t("chat.send")}

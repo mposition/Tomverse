@@ -610,6 +610,48 @@ const checks = [
         "getModelUsageProfile(model)"
       ),
   },
+  {
+    name: "Guest chat entry uses a non-blocking inline guide with truthful capabilities",
+    file: "components/chat/ChatInput.tsx",
+    test: (source) => {
+      const guide = source.slice(
+        source.indexOf('data-testid="guest-quick-start"'),
+        source.indexOf("{!value.trim() && attachments.length === 0")
+      );
+      return (
+        guide.includes('t("onboarding.compareTitle")') &&
+        guide.includes('t("onboarding.privateBody")') &&
+        guide.includes('t("auth.signIn")') &&
+        !guide.includes("fixed inset-0") &&
+        !guide.includes('aria-modal="true"') &&
+        source.includes('onFocus={dismissGuestQuickStart}') &&
+        source.includes('tomverse_guest_quick_start_seen_v2') &&
+        !read("app/chat/page.tsx").includes("GoLiveOnboarding")
+      );
+    },
+  },
+  {
+    name: "Analytics consent is compact and waits for the guest quick-start guide",
+    file: "components/analytics/AnalyticsProvider.tsx",
+    test: (source) =>
+      source.includes("usePathname") &&
+      source.includes('tomverse:guest-quick-start') &&
+      source.includes("consentPromptReady") &&
+      source.includes("GUEST_QUICK_START_ACTIVE_KEY") &&
+      source.includes("calc(100vw-1rem)") &&
+      source.includes('className="h-8 flex-1') &&
+      source.includes("env(safe-area-inset-bottom)"),
+  },
+  {
+    name: "Landing entry copy separates guest access from signed-in features",
+    file: "components/marketing/LandingPageContent.tsx",
+    test: (source) =>
+      source.includes('primaryCta: "Use a free model now"') &&
+      source.includes('primaryCta: "지금 바로 무료 모델 사용"') &&
+      source.includes("guestSteps: string[]") &&
+      source.includes("content.steps : content.guestSteps") &&
+      source.includes("3-model comparison, files, and sharing"),
+  },
 ];
 
 const failures = [];

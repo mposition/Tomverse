@@ -86,6 +86,7 @@ type LandingCopy = {
   signedInCta: string;
   pricingCta: string;
   steps: string[];
+  guestSteps: string[];
   previewTitle: string;
   previewCount: string;
   previewAnswers: string[];
@@ -119,10 +120,11 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     title: "Compare the best AI answers in one place.",
     description:
       "Tomverse AI helps you ask once, compare multiple models, attach real files, and keep useful conversations organized for work that needs sharper answers.",
-    primaryCta: "Start for free",
+    primaryCta: "Use a free model now",
     signedInCta: "Start Chat",
     pricingCta: "View pricing",
     steps: ["Choose up to three models", "Send one prompt or attach files", "Compare, follow up, share, or export"],
+    guestSteps: ["Ask one free model now", "Get an answer without signing in", "Sign in for 3-model comparison, files, and sharing"],
     previewTitle: "Tomverse comparison",
     previewCount: "3 models",
     previewAnswers: [
@@ -187,10 +189,11 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     badge: "멀티 모델 AI 워크스페이스",
     title: "최고의 AI 답변을 한곳에서 비교하세요.",
     description: "Tomverse AI는 한 번 질문하고 여러 모델의 답변을 비교하며, 실제 파일을 첨부하고 유용한 대화를 업무 흐름 안에 정리할 수 있게 도와줍니다.",
-    primaryCta: "무료로 시작하기",
+    primaryCta: "지금 바로 무료 모델 사용",
     signedInCta: "대화 시작하기",
     pricingCta: "요금 보기",
     steps: ["최대 3개 모델 선택", "질문 전송 또는 파일 첨부", "비교, 후속 질문, 공유, 내보내기"],
+    guestSteps: ["무료 모델 1개에 바로 질문", "로그인 없이 답변 확인", "로그인하면 3모델 비교·파일·공유 가능"],
     previewTitle: "Tomverse 비교",
     previewCount: "3개 모델",
     previewAnswers: ["실행 가능한 다음 단계 중심 답변", "근거와 선택지를 함께 검토", "빠르고 간결한 구조화 요약"],
@@ -249,10 +252,11 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     badge: "多模型 AI 工作区",
     title: "在一个地方比较最佳 AI 回答。",
     description: "Tomverse AI 帮你一次提问、比较多个模型、附加真实文件，并把有用的对话整理到工作流程中。",
-    primaryCta: "免费开始",
+    primaryCta: "立即使用免费模型",
     signedInCta: "开始聊天",
     pricingCta: "查看价格",
     steps: ["最多选择 3 个模型", "发送问题或添加文件", "比较、追问、分享或导出"],
+    guestSteps: ["立即向一个免费模型提问", "无需登录即可查看回答", "登录后可比较 3 个模型、使用文件和分享"],
     previewTitle: "Tomverse 比较",
     previewCount: "3 个模型",
     previewAnswers: ["给出可执行下一步的直接回答", "同时分析依据和取舍", "快速、简洁、结构化的摘要"],
@@ -311,10 +315,11 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     badge: "Espace IA multi-modèles",
     title: "Comparez les meilleures réponses IA au même endroit.",
     description: "Tomverse AI vous permet de poser une seule question, comparer plusieurs modèles, joindre de vrais fichiers et organiser les conversations utiles pour obtenir de meilleures réponses au travail.",
-    primaryCta: "Commencer gratuitement",
+    primaryCta: "Utiliser un modèle gratuit",
     signedInCta: "Ouvrir le chat",
     pricingCta: "Voir les tarifs",
     steps: ["Choisir jusqu'à trois modèles", "Envoyer une question ou joindre des fichiers", "Comparer, relancer, partager ou exporter"],
+    guestSteps: ["Interroger un modèle gratuit", "Obtenir une réponse sans connexion", "Se connecter pour comparer 3 modèles, joindre des fichiers et partager"],
     previewTitle: "Comparaison Tomverse",
     previewCount: "3 modèles",
     previewAnswers: ["Réponse directe avec prochaines étapes concrètes.", "Raisonnement nuancé avec alternatives.", "Résumé rapide, clair et structuré."],
@@ -345,10 +350,11 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     badge: "Multi-Modell-KI-Arbeitsbereich",
     title: "Vergleichen Sie die besten KI-Antworten an einem Ort.",
     description: "Tomverse AI hilft Ihnen, einmal zu fragen, mehrere Modelle zu vergleichen, echte Dateien anzuhängen und nützliche Unterhaltungen für bessere Arbeit zu organisieren.",
-    primaryCta: "Kostenlos starten",
+    primaryCta: "Jetzt kostenloses Modell nutzen",
     signedInCta: "Chat starten",
     pricingCta: "Preise ansehen",
     steps: ["Bis zu drei Modelle wählen", "Eine Frage senden oder Dateien anhängen", "Vergleichen, nachfragen, teilen oder exportieren"],
+    guestSteps: ["Jetzt ein kostenloses Modell fragen", "Antwort ohne Anmeldung erhalten", "Für 3-Modell-Vergleich, Dateien und Teilen anmelden"],
     previewTitle: "Tomverse-Vergleich",
     previewCount: "3 Modelle",
     previewAnswers: ["Direkte Antwort mit praktischen nächsten Schritten.", "Sorgfältige Abwägung mit Alternativen.", "Schnelle, knappe und strukturierte Zusammenfassung."],
@@ -379,10 +385,11 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     badge: "Espacio de IA multimodelo",
     title: "Compara las mejores respuestas de IA en un solo lugar.",
     description: "Tomverse AI te ayuda a preguntar una vez, comparar varios modelos, adjuntar archivos reales y organizar conversaciones útiles para trabajar mejor.",
-    primaryCta: "Empezar gratis",
+    primaryCta: "Usar un modelo gratis ahora",
     signedInCta: "Iniciar chat",
     pricingCta: "Ver precios",
     steps: ["Elige hasta tres modelos", "Envía una pregunta o adjunta archivos", "Compara, pregunta de nuevo, comparte o exporta"],
+    guestSteps: ["Pregunta ahora a un modelo gratuito", "Recibe una respuesta sin iniciar sesión", "Inicia sesión para comparar 3 modelos, usar archivos y compartir"],
     previewTitle: "Comparación Tomverse",
     previewCount: "3 modelos",
     previewAnswers: ["Respuesta directa con próximos pasos prácticos.", "Razonamiento cuidadoso con alternativas.", "Resumen rápido, breve y estructurado."],
@@ -413,10 +420,11 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     badge: "Workspace de IA multimodelo",
     title: "Compare as melhores respostas de IA em um só lugar.",
     description: "O Tomverse AI ajuda você a perguntar uma vez, comparar vários modelos, anexar arquivos reais e organizar conversas úteis para trabalhos que precisam de respostas melhores.",
-    primaryCta: "Começar grátis",
+    primaryCta: "Usar um modelo gratuito agora",
     signedInCta: "Iniciar chat",
     pricingCta: "Ver preços",
     steps: ["Escolha até três modelos", "Envie uma pergunta ou anexe arquivos", "Compare, pergunte de novo, compartilhe ou exporte"],
+    guestSteps: ["Pergunte já a um modelo gratuito", "Receba uma resposta sem iniciar sessão", "Inicie sessão para comparar 3 modelos, usar ficheiros e partilhar"],
     previewTitle: "Comparação Tomverse",
     previewCount: "3 modelos",
     previewAnswers: ["Resposta direta com próximos passos práticos.", "Raciocínio cuidadoso com alternativas.", "Resumo rápido, curto e estruturado."],
@@ -547,6 +555,7 @@ export function LandingPageContent() {
   const modelLinks = modelLinkLabels[lang];
   const chatHref = `/chat?lang=${encodeURIComponent(lang)}`;
   const primaryCtaLabel = status === "authenticated" ? content.signedInCta : content.primaryCta;
+  const entrySteps = status === "authenticated" ? content.steps : content.guestSteps;
   const landingTrackedRef = useRef(false);
 
   useEffect(() => {
@@ -591,7 +600,7 @@ export function LandingPageContent() {
               </Link>
             </div>
             <div className="mt-8 grid max-w-2xl gap-3 sm:grid-cols-3">
-              {content.steps.map((step, index) => (
+              {entrySteps.map((step, index) => (
                 <div key={step} className="flex items-center gap-2 text-sm font-semibold text-zinc-600 dark:text-zinc-300">
                   <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-black text-zinc-800 dark:bg-zinc-900 dark:text-zinc-100">
                     {index + 1}
