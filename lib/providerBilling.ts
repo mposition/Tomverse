@@ -18,7 +18,7 @@ const DOCUMENTED_DEFAULTS: Record<AiProvider, ProviderBillingProfile> = {
   mistral: defaultProfile("usage_based", "hybrid"),
   moonshot: defaultProfile("unknown", "unknown"),
   qwen: defaultProfile("usage_based", "unknown"),
-  zhipu: defaultProfile("unknown", "unknown"),
+  zhipu: defaultProfile("usage_based", "prepaid"),
   perplexity: defaultProfile("usage_based", "prepaid"),
 };
 

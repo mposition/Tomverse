@@ -1341,10 +1341,10 @@ const mistralInternalUsage = async (
   };
 };
 
-const moonshotInternalUsage = async (
+const zhipuInternalUsage = async (
   date: Date
 ): Promise<ProviderUsageSyncResult> => {
-  const provider: AiProvider = "moonshot";
+  const provider: AiProvider = "zhipu";
   const usage = await getInternalProviderUsageSummary({ provider, date });
   return {
     provider,
@@ -1359,9 +1359,9 @@ const moonshotInternalUsage = async (
       outputTokens: usage.outputTokens,
     },
     usageSourceLabel: "Internal response accounting",
-    reconciliationLabel: "Official daily cost API unavailable",
+    reconciliationLabel: "Official balance and daily cost APIs unavailable",
     message:
-      "Moonshot response tokens are costed with the request-time model price snapshot. The official Balance API is monitored separately; verify the monthly total in Kimi API Platform.",
+      "Zhipu response Usage, including cached prompt tokens, is costed with the request-time model price snapshot. Maintain a Provider Credit checkpoint and verify it periodically in the Z.AI dashboard.",
     diagnostic: null,
   };
 };
@@ -1379,8 +1379,8 @@ export async function syncProviderUsageForDate(
       Boolean(
         process.env[`PROVIDER_${envProvider(provider)}_USAGE_COST_JSON_PATH`]
       );
-    const hasGenericMoonshotUsageEndpoint =
-      provider === "moonshot" &&
+    const hasGenericZhipuUsageEndpoint =
+      provider === "zhipu" &&
       Boolean(usageUrlFor(provider, date)) &&
       Boolean(
         process.env[`PROVIDER_${envProvider(provider)}_USAGE_COST_JSON_PATH`]
@@ -1398,8 +1398,8 @@ export async function syncProviderUsageForDate(
                 ? await syncAlibabaCloudBilling(date)
             : provider === "mistral" && !hasGenericMistralUsageEndpoint
               ? await mistralInternalUsage(date)
-              : provider === "moonshot" && !hasGenericMoonshotUsageEndpoint
-                ? await moonshotInternalUsage(date)
+              : provider === "zhipu" && !hasGenericZhipuUsageEndpoint
+                ? await zhipuInternalUsage(date)
               : await syncGenericUsage(provider, date)
     );
   }

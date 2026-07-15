@@ -9,6 +9,11 @@ import {
 import { getProviderBillingProfiles } from "@/lib/providerBilling";
 import type { ProviderBillingProfile } from "@/lib/providerBillingTypes";
 import {
+  providerCreditAlertLevel,
+  providerCreditRemainingPercent,
+  type ProviderCreditAlertLevel,
+} from "@/lib/providerCreditAlertsCore";
+import {
   parseDeepSeekBalance,
   parseMoonshotBalance,
   type ProviderBalanceSnapshot,
@@ -78,6 +83,8 @@ export type ProviderHealthRow = {
   balanceToppedUpAmount: number | null;
   balanceSource: "api" | "db_estimate" | "env_manual" | "unavailable";
   credit: ProviderCreditSummary;
+  creditRemainingPercent: number | null;
+  creditAlertLevel: ProviderCreditAlertLevel;
   billingProfile: ProviderBillingProfile;
   projectedMonthEndMicroUsd: number;
   internalBudgetSource: "railway_environment" | "code_default";
@@ -613,6 +620,31 @@ export const notifyProviderBudgetIfNeeded = async (provider: AiProvider) => {
   );
 };
 
+export const notifyProviderCreditIfNeeded = async (provider: AiProvider) => {
+  if (provider !== "zhipu") return;
+  const summaries = await getProviderCreditSummaries([provider]);
+  const credit = summaries.get(provider);
+  if (!credit) return;
+  const remainingPercent = providerCreditRemainingPercent(credit);
+  const level = providerCreditAlertLevel(remainingPercent);
+  if (level === "none" || remainingPercent === null) return;
+
+  const reserved = await reserveDailyAlert(
+    `provider-alert:${provider}:credit-remaining:${level}`
+  );
+  if (!reserved) return;
+
+  await sendProviderAlert(
+    provider,
+    `Provider credit ${level}% remaining`,
+    `Estimated remaining credit is ${moneyMicroUsd(
+      credit.estimatedBalanceMicroUsd || 0
+    )} (${remainingPercent.toFixed(1)}%) from the ${moneyMicroUsd(
+      credit.configuredCreditMicroUsd || 0
+    )} checkpoint. Verify the provider dashboard before recharging or changing routing.`
+  );
+};
+
 const moneyMicroUsd = (value: number) => `$${(value / 1_000_000).toFixed(2)}`;
 
 export const recordProviderSuccess = async (provider: AiProvider) => {
@@ -1058,6 +1090,8 @@ export const getProviderHealthDashboard = async (
     const automaticBalanceUsd =
       automaticBalance?.currency === "USD" ? automaticBalance.amount : null;
     const credit = creditByProvider.get(provider)!;
+    const creditRemainingPercent = providerCreditRemainingPercent(credit);
+    const creditAlertLevel = providerCreditAlertLevel(creditRemainingPercent);
     const billingProfile = billingByProvider.get(provider)!;
     const billingBasisMicroUsd =
       providerReportedMonthCostMicroUsd ?? monthCostMicroUsd;
@@ -1253,6 +1287,8 @@ export const getProviderHealthDashboard = async (
               ? "env_manual"
               : "unavailable",
       credit,
+      creditRemainingPercent,
+      creditAlertLevel,
       billingProfile,
       projectedMonthEndMicroUsd,
       internalBudgetSource: monthlyBudgetConfig.source,

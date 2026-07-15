@@ -222,10 +222,22 @@ const checks = [
     name: "Mistral response Usage preserves cached tokens and request-time pricing",
     file: "lib/chatSecurity.ts",
     test: (source) =>
-      source.includes('model.provider === "mistral" ? 0.1 : 1') &&
+      source.includes(
+        "cachedInputPriceMultiplier: profile.cachedInputPriceMultiplier"
+      ) &&
       source.includes("usage.cachedInputTokens") &&
       source.includes("pricingSnapshot: costBreakdown") &&
       source.includes("settledCachedInputTokens"),
+  },
+  {
+    name: "Zhipu uses cached-token pricing and internal credit accounting",
+    file: "lib/providerUsageSync.ts",
+    test: (source) =>
+      source.includes("zhipuInternalUsage") &&
+      source.includes('const provider: AiProvider = "zhipu"') &&
+      source.includes('status: "internal"') &&
+      source.includes("cachedInputTokens: usage.cachedInputTokens") &&
+      source.includes("Official balance and daily cost APIs unavailable"),
   },
   {
     name: "Mistral missing provider reconciliation is reported as internal accounting",
