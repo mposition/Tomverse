@@ -213,9 +213,10 @@ Use a specific tenant GUID or verified tenant domain instead when sign-in must
 be restricted to a single Microsoft Entra directory. Dangerous cross-provider
 email account linking remains disabled for both configurations.
 
-In production, `/api/health` returns `503` until `NEXTAUTH_SECRET`,
+In production, `/api/ready` returns `503` until `NEXTAUTH_SECRET`,
 `OAUTH_TOKEN_ENCRYPTION_KEY`, and `MAINTENANCE_SECRET` are all at least 32
-characters and all three Azure provider variables are configured together.
+characters, all three Azure provider variables are configured together, and
+the database answers a `SELECT 1` readiness query.
 
 Generate a strong value with:
 
@@ -340,9 +341,14 @@ the complete test-campaign checklist in
 
 In GA4 Admin, register event-scoped custom dimensions for `utm_source`,
 `utm_medium`, `utm_campaign`, `language`, `country`, and `plan`, plus an
-event-scoped custom metric for numeric `model_count`. Mark at least
-`multi_model_compare_completed`, `signup_completed`, and `purchase_completed`
-as key events before paid acquisition begins.
+event-scoped custom metric for numeric `model_count`. Funnel events such as
+`multi_model_compare_completed` and `signup_completed` can be marked as key
+events where appropriate. For payment conversion and revenue reporting, use
+the standard GA4 `purchase` event as the only Primary purchase Key Event and
+the only purchase conversion imported into Google Ads. Keep
+`purchase_completed` as a Tomverse first-party ledger and internal funnel event;
+do not mark it as a GA4 Key Event or import it into Google Ads. This prevents a
+single transaction from being counted as two purchase conversions.
 
 ### Model Finder experiment
 
@@ -431,14 +437,30 @@ the five-minute Cron service.
 
 ## Railway Healthcheck
 
-When host protection is enabled, set Railway's Healthcheck Path to:
+When host protection is enabled, keep Railway's deployment Healthcheck Path on
+the process liveness endpoint:
 
 ```text
 /api/health
 ```
 
 This endpoint intentionally bypasses canonical host checks so Railway can verify
-the container without using the public production hostname.
+the container without using the public production hostname. It does not query
+the database or validate service configuration, so a dependency outage cannot
+turn the process liveness check into a restart or deployment loop.
+
+Configure continuous external monitoring against the dependency readiness
+endpoint instead:
+
+```text
+/api/ready
+```
+
+`/api/ready` returns `200` only when PostgreSQL answers `SELECT 1` and the
+required production security environment is valid. It returns `503` with
+boolean `database` and `securityEnvironment` checks otherwise. Neither endpoint
+is cached, and both intentionally bypass canonical host protection without
+exposing secrets.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 

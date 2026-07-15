@@ -18,7 +18,10 @@ const blockedOriginResponse = () =>
   });
 
 export function proxy(request: NextRequest) {
-  if (request.nextUrl.pathname === "/api/health") {
+  if (
+    request.nextUrl.pathname === "/api/health" ||
+    request.nextUrl.pathname === "/api/ready"
+  ) {
     return NextResponse.next();
   }
 

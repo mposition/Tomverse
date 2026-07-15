@@ -311,11 +311,29 @@ const checks = [
       source.includes('"cronSchedule": "0 3 * * *"'),
   },
   {
-    name: "Production health fails closed on weak security configuration",
+    name: "Process liveness stays independent from external dependencies",
     file: "app/api/health/route.ts",
     test: (source) =>
+      source.includes("{ ok: true }") &&
+      source.includes("status: 200") &&
+      !source.includes("prisma") &&
+      !source.includes("getSecurityEnvironmentStatus"),
+  },
+  {
+    name: "Production readiness fails closed on database or security configuration",
+    file: "app/api/ready/route.ts",
+    test: (source) =>
+      source.includes('SELECT 1 AS "ready"') &&
       source.includes("getSecurityEnvironmentStatus") &&
+      source.includes("database && securityEnvironment") &&
       source.includes("status: ready ? 200 : 503"),
+  },
+  {
+    name: "Liveness and readiness bypass canonical host protection",
+    file: "proxy.ts",
+    test: (source) =>
+      source.includes('request.nextUrl.pathname === "/api/health"') &&
+      source.includes('request.nextUrl.pathname === "/api/ready"'),
   },
   {
     name: "Locked conversations are excluded from all-conversation export",
