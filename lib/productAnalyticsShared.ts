@@ -43,6 +43,10 @@ export const PRODUCT_ANALYTICS_EVENT_NAMES = [
 export type ProductAnalyticsEventName =
   (typeof PRODUCT_ANALYTICS_EVENT_NAMES)[number];
 
+export const shouldSendCustomProductEventToGa4 = (
+  eventName: ProductAnalyticsEventName
+) => eventName !== "purchase_completed";
+
 export const PURCHASE_ANALYTICS_TRIGGERS = [
   "limit_hit",
   "usage_widget",

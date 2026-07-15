@@ -5,6 +5,7 @@ import {
   analyticsClientEventSchema,
   analyticsPropertiesSchema,
   ga4EcommerceEventForProductEvent,
+  shouldSendCustomProductEventToGa4,
   type AnalyticsAttribution,
   type ProductAnalyticsEventName,
   type ProductAnalyticsProperties,
@@ -293,17 +294,19 @@ const sendIntent = (intent: EventIntent) => {
     ...runtime.attribution,
   });
 
-  window.gtag?.("event", intent.eventName, {
-    utm_source: payload.utm_source,
-    utm_medium: payload.utm_medium,
-    utm_campaign: payload.utm_campaign,
-    language: payload.language,
-    country: payload.country,
-    model_count: payload.model_count,
-    plan: runtime.plan,
-    session_id: Number(payload.session_id),
-    ...payload.properties,
-  });
+  if (shouldSendCustomProductEventToGa4(intent.eventName)) {
+    window.gtag?.("event", intent.eventName, {
+      utm_source: payload.utm_source,
+      utm_medium: payload.utm_medium,
+      utm_campaign: payload.utm_campaign,
+      language: payload.language,
+      country: payload.country,
+      model_count: payload.model_count,
+      plan: runtime.plan,
+      session_id: Number(payload.session_id),
+      ...payload.properties,
+    });
+  }
 
   const ecommerceEvent = ga4EcommerceEventForProductEvent(
     intent.eventName,

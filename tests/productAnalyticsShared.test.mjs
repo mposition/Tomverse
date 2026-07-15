@@ -4,6 +4,7 @@ import {
   analyticsClientEventSchema,
   ga4EcommerceEventForProductEvent,
   PRODUCT_ANALYTICS_EVENT_NAMES,
+  shouldSendCustomProductEventToGa4,
 } from "../lib/productAnalyticsShared.ts";
 
 const safeEvent = {
@@ -200,6 +201,11 @@ test("GA4 purchase mapping requires complete revenue fields", () => {
     }),
     null
   );
+});
+
+test("purchase_completed stays in the Tomverse ledger and is not sent as a custom GA4 event", () => {
+  assert.equal(shouldSendCustomProductEventToGa4("purchase_completed"), false);
+  assert.equal(shouldSendCustomProductEventToGa4("checkout_started"), true);
 });
 
 test("purchase analytics rejects ambiguous credit quantity fields", () => {

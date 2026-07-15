@@ -15,6 +15,13 @@ const eventGroups = [
   { label: "Retention", events: ["return_day_1", "return_day_7", "subscription_cancelled"] },
 ] as const;
 
+const ga4KeyEventPolicy = [
+  { event: "checkout_started", purpose: "Tomverse funnel", keyEvent: "No" },
+  { event: "begin_checkout", purpose: "GA4 ecommerce", keyEvent: "No" },
+  { event: "purchase_completed", purpose: "Tomverse ledger only", keyEvent: "No" },
+  { event: "purchase", purpose: "GA4 revenue + Google Ads", keyEvent: "Yes · Primary" },
+] as const;
+
 function Metric({ label, value, detail }: { label: string; value: string; detail: string }) {
   return (
     <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
@@ -117,6 +124,36 @@ export function AdminProductAnalyticsPanel({
                 <span className={item.ready ? "text-emerald-300" : "text-amber-300"}>{item.ready ? "Configured" : "Missing"}</span>
               </div>
             ))}
+            <div className="mt-4 overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950/70">
+              <div className="border-b border-zinc-800 px-3 py-3">
+                <p className="text-xs font-black uppercase tracking-[0.14em] text-zinc-300">Key Event policy</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[30rem] text-left text-xs">
+                  <thead className="text-zinc-500">
+                    <tr>
+                      <th className="px-3 py-2">Event</th>
+                      <th className="px-3 py-2">Purpose</th>
+                      <th className="px-3 py-2 text-right">Key Event</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-800">
+                    {ga4KeyEventPolicy.map((item) => (
+                      <tr key={item.event}>
+                        <td className="px-3 py-2 font-mono text-zinc-200">{item.event}</td>
+                        <td className="px-3 py-2 text-zinc-400">{item.purpose}</td>
+                        <td className={`px-3 py-2 text-right font-black ${item.keyEvent.startsWith("Yes") ? "text-emerald-300" : "text-zinc-400"}`}>
+                          {item.keyEvent}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <p className="mt-3 text-xs leading-5 text-amber-200">
+              Only purchase should be imported into Google Ads as the primary conversion. Unmark purchase_completed and begin_checkout as Key Events if they are enabled in the GA4 property.
+            </p>
           </div>
 
           <div className="rounded-3xl border border-zinc-800 bg-zinc-900/60 p-5">

@@ -8,6 +8,7 @@ import {
   analyticsPropertiesSchema,
   ga4EcommerceEventForProductEvent,
   normalizeAnalyticsPlan,
+  shouldSendCustomProductEventToGa4,
   type AnalyticsAttribution,
   type ProductAnalyticsEventName,
   type ProductAnalyticsProperties,
@@ -83,6 +84,31 @@ const sendGa4ServerEvent = async (
     input.eventName,
     properties
   );
+  const ga4Events = [
+    ...(shouldSendCustomProductEventToGa4(input.eventName)
+      ? [
+          {
+            name: input.eventName,
+            params: {
+              ...commonParams,
+              ...properties,
+            },
+          },
+        ]
+      : []),
+    ...(ecommerceEvent
+      ? [
+          {
+            name: ecommerceEvent.name,
+            params: {
+              ...commonParams,
+              ...ecommerceEvent.params,
+            },
+          },
+        ]
+      : []),
+  ];
+  if (ga4Events.length === 0) return;
 
   const response = await fetch(url, {
     method: "POST",
@@ -96,26 +122,7 @@ const sendGa4ServerEvent = async (
         ad_personalization: "DENIED",
       },
       ...(country ? { user_location: country } : {}),
-      events: [
-        {
-          name: input.eventName,
-          params: {
-            ...commonParams,
-            ...properties,
-          },
-        },
-        ...(ecommerceEvent
-          ? [
-              {
-                name: ecommerceEvent.name,
-                params: {
-                  ...commonParams,
-                  ...ecommerceEvent.params,
-                },
-              },
-            ]
-          : []),
-      ],
+      events: ga4Events,
       validation_behavior: "ENFORCE_RECOMMENDATIONS",
     }),
     signal: AbortSignal.timeout(5_000),
