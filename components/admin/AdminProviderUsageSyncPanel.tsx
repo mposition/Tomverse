@@ -187,7 +187,7 @@ export function AdminProviderUsageSyncPanel() {
           </h3>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-400">
             Pull provider-reported spend for a day and store it beside Tomverse internal metering.
-            Mistral uses response-level token accounting when provider reconciliation is unavailable;
+            Mistral and Perplexity use response-level accounting when provider reconciliation is unavailable;
             other providers without a configured usage endpoint are skipped.
           </p>
         </div>

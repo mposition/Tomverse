@@ -1392,6 +1392,31 @@ const moonshotInternalUsage = async (
   };
 };
 
+const perplexityInternalUsage = async (
+  date: Date
+): Promise<ProviderUsageSyncResult> => {
+  const provider: AiProvider = "perplexity";
+  const usage = await getInternalProviderUsageSummary({ provider, date });
+  return {
+    provider,
+    displayName: PROVIDER_DISPLAY_NAMES[provider],
+    status: "internal",
+    reportedCostMicroUsd: null,
+    internalCostMicroUsd: usage.estimatedCostMicroUsd,
+    internalUsage: {
+      requestCount: usage.requestCount,
+      inputTokens: usage.inputTokens,
+      cachedInputTokens: usage.cachedInputTokens,
+      outputTokens: usage.outputTokens,
+    },
+    usageSourceLabel: "Exact response cost accounting",
+    reconciliationLabel: "Official aggregate cost API unavailable",
+    message:
+      "Perplexity usage.cost.total_cost is captured from each successful response and summed in Tomverse. Verify the period total in the Perplexity Billing dashboard.",
+    diagnostic: null,
+  };
+};
+
 const hasGenericUsageEndpoint = (provider: AiProvider, date: Date) =>
   Boolean(usageUrlFor(provider, date)) &&
   Boolean(
@@ -1425,6 +1450,8 @@ const syncProviderUsage = async (
       return hasGenericUsageEndpoint(provider, date)
         ? syncGenericUsage(provider, date)
         : moonshotInternalUsage(date);
+    case "perplexity":
+      return perplexityInternalUsage(date);
     default:
       return syncGenericUsage(provider, date);
   }

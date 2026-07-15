@@ -268,6 +268,11 @@ the original request-time token estimate remains in `pricingSnapshot` for audit.
 Retries under the same reservation are summed so billed retry attempts are not
 lost. No additional Perplexity admin key is required.
 
+The Provider Usage Reconciliation panel reports Perplexity as **Internal** with
+the source **Exact response cost accounting**. Perplexity does not use the
+generic `PROVIDER_PERPLEXITY_USAGE_*` variables; its period total should be
+verified manually against the Perplexity Billing dashboard.
+
 Deploy migration `20260715234500_perplexity_exact_response_cost` before
 releasing exact Perplexity request accounting.
 
