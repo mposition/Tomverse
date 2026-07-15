@@ -18,7 +18,9 @@ import {
 } from "@/lib/productAnalyticsServer";
 import {
   grantCreditPackFromCheckout,
+  handleCreditPackDisputeClosed,
   handleCreditPackDispute,
+  handleCreditPackDisputeReinstated,
   handleCreditPackRefund,
 } from "@/lib/creditPurchase";
 
@@ -341,7 +343,16 @@ export async function processStripeEvent(event: Stripe.Event) {
       await handleCreditPackRefund(event.data.object as Stripe.Charge);
       break;
     case "charge.dispute.created":
+    case "charge.dispute.updated":
       await handleCreditPackDispute(event.data.object as Stripe.Dispute);
+      break;
+    case "charge.dispute.closed":
+      await handleCreditPackDisputeClosed(event.data.object as Stripe.Dispute);
+      break;
+    case "charge.dispute.funds_reinstated":
+      await handleCreditPackDisputeReinstated(
+        event.data.object as Stripe.Dispute
+      );
       break;
     case "customer.subscription.created":
     case "customer.subscription.updated":

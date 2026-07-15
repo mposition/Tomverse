@@ -48,7 +48,12 @@ export async function GET(req: Request) {
     });
     const user = await prisma.user.findUnique({
       where: { id: session.user.id },
-      select: { plan: true },
+      select: {
+        plan: true,
+        creditDebtCredits: true,
+        creditDebtCostMicroUsd: true,
+        billingRiskStatus: true,
+      },
     });
     if (!user) return NextResponse.json({ error: "User not found." }, { status: 404 });
     const plan = normalizePlan(user.plan);
@@ -59,6 +64,11 @@ export async function GET(req: Request) {
       balance: {
         ...balance,
         earliestExpiry: balance.earliestExpiry?.toISOString() || null,
+      },
+      creditDebt: {
+        credits: user.creditDebtCredits,
+        fundedCostMicroUsd: Number(user.creditDebtCostMicroUsd),
+        riskStatus: user.billingRiskStatus,
       },
       notice:
         "Additional credits increase usage only. Your current plan's model access, features, daily limits, and fair-use safeguards do not change.",

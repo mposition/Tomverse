@@ -411,6 +411,9 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                 stripeCustomerId: true,
                 stripeSubscriptionId: true,
                 subscriptionCancelAtPeriodEnd: true,
+                creditDebtCredits: true,
+                creditDebtCostMicroUsd: true,
+                billingRiskStatus: true,
                 _count: {
                     select: {
                         conversations: true,
@@ -432,6 +435,29 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             include: {
                 timelineEvents: {
                     orderBy: { createdAt: "asc" },
+                },
+                user: {
+                    select: {
+                        creditDebtCredits: true,
+                        creditDebtCostMicroUsd: true,
+                        billingRiskStatus: true,
+                        creditPurchases: {
+                            select: {
+                                creditsPurchased: true,
+                                fundedCostMicroUsd: true,
+                                revokedCredits: true,
+                                revokedCostMicroUsd: true,
+                                unrecoveredCredits: true,
+                                unrecoveredCostMicroUsd: true,
+                                lots: {
+                                    select: {
+                                        remainingCredits: true,
+                                        remainingFundedCostMicroUsd: true,
+                                    },
+                                },
+                            },
+                        },
+                    },
                 },
             },
         }),
@@ -538,10 +564,44 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             stripeCustomerId: user.stripeCustomerId,
             stripeSubscriptionId: user.stripeSubscriptionId,
             usageToday: recentUsageByKey.get(userKey) || 0,
+            creditDebtCredits: user.creditDebtCredits,
+            creditDebtCostMicroUsd: Number(user.creditDebtCostMicroUsd),
+            billingRiskStatus: user.billingRiskStatus,
             _count: user._count,
         };
     });
-    const refundRequestRows: RefundRequestRow[] = refundRows.map((request) => ({
+    const refundRequestRows: RefundRequestRow[] = refundRows.map((request) => {
+        const purchases = request.user?.creditPurchases || [];
+        const purchasedCredits = purchases.reduce(
+            (sum, purchase) => sum + purchase.creditsPurchased,
+            0
+        );
+        const purchasedCostMicroUsd = purchases.reduce(
+            (sum, purchase) => sum + Number(purchase.fundedCostMicroUsd),
+            0
+        );
+        const remainingCredits = purchases.reduce(
+            (sum, purchase) =>
+                sum + purchase.lots.reduce((lotSum, lot) => lotSum + lot.remainingCredits, 0),
+            0
+        );
+        const remainingCostMicroUsd = purchases.reduce(
+            (sum, purchase) =>
+                sum + purchase.lots.reduce(
+                    (lotSum, lot) => lotSum + Number(lot.remainingFundedCostMicroUsd),
+                    0
+                ),
+            0
+        );
+        const revokedCredits = purchases.reduce(
+            (sum, purchase) => sum + purchase.revokedCredits,
+            0
+        );
+        const revokedCostMicroUsd = purchases.reduce(
+            (sum, purchase) => sum + Number(purchase.revokedCostMicroUsd),
+            0
+        );
+        return {
         id: request.id,
         email: request.email,
         plan: request.plan,
@@ -567,7 +627,30 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             actorEmail: event.actorEmail,
             createdAt: event.createdAt.toISOString(),
         })),
-    }));
+        creditRisk: {
+            requiresReview:
+                purchases.length > 0 || (request.user?.creditDebtCredits || 0) > 0,
+            purchaseCount: purchases.length,
+            purchasedCredits,
+            remainingCredits,
+            estimatedUsedCredits: Math.max(
+                0,
+                purchasedCredits - remainingCredits - revokedCredits
+            ),
+            purchasedCostMicroUsd,
+            remainingCostMicroUsd,
+            estimatedConsumedCostMicroUsd: Math.max(
+                0,
+                purchasedCostMicroUsd - remainingCostMicroUsd - revokedCostMicroUsd
+            ),
+            unrecoveredCredits: request.user?.creditDebtCredits || 0,
+            unrecoveredCostMicroUsd: Number(
+                request.user?.creditDebtCostMicroUsd || BigInt(0)
+            ),
+            billingRiskStatus: request.user?.billingRiskStatus || "normal",
+        },
+        };
+    });
     const feedbackInboxRows: FeedbackRow[] = feedbackRows.map((feedback) => ({
         id: feedback.id,
         userId: feedback.userId,

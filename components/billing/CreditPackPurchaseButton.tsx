@@ -40,6 +40,7 @@ export function CreditPackPurchaseButton({
   const [open, setOpen] = useState(false);
   const [packs, setPacks] = useState<Pack[] | null>(null);
   const [plan, setPlan] = useState<"Free" | "Pro" | "Max">("Free");
+  const [debtCredits, setDebtCredits] = useState(0);
   const [error, setError] = useState("");
   const [buying, setBuying] = useState<string | null>(null);
 
@@ -54,6 +55,7 @@ export function CreditPackPurchaseButton({
       .then((data) => {
         setPacks(Array.isArray(data.packs) ? data.packs : []);
         setPlan(data.plan === "Pro" || data.plan === "Max" ? data.plan : "Free");
+        setDebtCredits(Math.max(0, Number(data.creditDebt?.credits) || 0));
       })
       .catch((requestError) => {
         if ((requestError as Error).name !== "AbortError") setError(text.error);
@@ -132,6 +134,13 @@ export function CreditPackPurchaseButton({
               ))}
             </div>
             {error && <p className="mt-3 text-sm font-semibold text-red-600 dark:text-red-300">{error}</p>}
+            {debtCredits > 0 && (
+              <p className="mt-3 rounded-2xl border border-red-200 bg-red-50 p-3 text-xs leading-5 text-red-900 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-100">
+                {lang === "ko"
+                  ? `미회수 크레딧 ${debtCredits.toLocaleString(lang)}개가 있습니다. 새로 구매한 크레딧은 이 잔액에 먼저 상계되며, 남은 크레딧만 사용할 수 있습니다.`
+                  : `${debtCredits.toLocaleString(lang)} unrecovered credits are outstanding. New credits are applied to this balance first, and only the remainder becomes available.`}
+              </p>
+            )}
             <p className="mt-5 rounded-2xl bg-amber-50 p-3 text-xs leading-5 text-amber-900 dark:bg-amber-950/30 dark:text-amber-100">{text.notice}</p>
           </section>
         </div>,

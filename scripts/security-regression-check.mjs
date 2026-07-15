@@ -959,6 +959,65 @@ const checks = [
         "tx.comparisonReview.updateMany"
       ),
   },
+  {
+    name: "Credit-pack refunds and disputes record unrecovered debt under an account lock",
+    file: "lib/creditPurchase.ts",
+    test: (source) =>
+      source.includes("lockCreditAccount(tx, candidate.userId)") &&
+      source.includes('type: disputed ? "dispute_unrecovered" : "refund_unrecovered"') &&
+      source.includes('billingRiskStatus: "disputed_hold"') &&
+      source.includes("unrecoveredCredits: { increment: unrecoveredCredits }") &&
+      source.includes("previouslyProcessedAmount") &&
+      source.includes("handleCreditPackDisputeReinstated") &&
+      source.includes('source: "dispute_reinstatement"') &&
+      read("lib/stripeWebhookProcessing.ts").includes(
+        'case "charge.dispute.funds_reinstated"'
+      ) &&
+      read("prisma/schema.prisma").includes("model CreditDebtEntry") &&
+      read(
+        "prisma/migrations/20260715193000_add_credit_debt_and_billing_risk/migration.sql"
+      ).includes('CREATE TABLE "CreditDebtEntry"'),
+  },
+  {
+    name: "Future plan and purchased credits offset debt before becoming available",
+    file: "lib/chatSecurity.ts",
+    test: (source) => {
+      const purchase = read("lib/creditPurchase.ts");
+      const debt = read("lib/creditDebt.ts");
+      return (
+        source.includes('"BILLING_DISPUTE_HOLD"') &&
+        source.includes('type: "plan_offset"') &&
+        source.includes("rawPlanRemaining - debtOffset.offsetCredits") &&
+        purchase.includes('type: "purchase_offset"') &&
+        purchase.includes('type: "debt_offset"') &&
+        debt.includes("unrecoveredCredits: { decrement: allocatedCredits }")
+      );
+    },
+  },
+  {
+    name: "Billing holds and refund credit reviews require admin billing permission and audit evidence",
+    file: "app/api/admin/users/[userId]/billing-risk/route.ts",
+    test: (source) => {
+      const refund = read(
+        "app/api/admin/refund-requests/[requestId]/route.ts"
+      );
+      const creditRefund = read(
+        "app/api/admin/credit-purchases/[purchaseId]/refund/route.ts"
+      );
+      return (
+        source.includes('hasAdminPermission(session, "billing:write")') &&
+        source.includes('z.literal("RELEASE BILLING HOLD")') &&
+        source.includes('action: "billing_risk.hold_released"') &&
+        refund.includes("confirmCreditReview") &&
+        refund.includes("Review the purchased credit balance and consumed AI cost") &&
+        refund.includes("creditDebtCostMicroUsd") &&
+        creditRefund.includes('hasAdminPermission(session, "billing:write")') &&
+        creditRefund.includes('z.literal("REFUND CREDIT PURCHASE")') &&
+        creditRefund.includes("expectedRemainingCredits") &&
+        creditRefund.includes('action: "credit_purchase.refunded"')
+      );
+    },
+  },
 ];
 
 const failures = [];

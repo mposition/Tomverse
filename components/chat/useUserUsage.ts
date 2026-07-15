@@ -36,6 +36,13 @@ export type UserUsageResponse = {
     purchasedFundedCostMicroUsd: number;
     purchasedEarliestExpiry: string | null;
   };
+  creditDebt: {
+    credits: number;
+    fundedCostMicroUsd: number;
+    riskStatus: string;
+    riskReason: string | null;
+    riskAt: string | null;
+  };
   recommendation: {
     primary: "upgrade_pro" | "upgrade_max" | "add_credits" | "business";
     secondary: "upgrade_pro" | "upgrade_max" | "add_credits" | "business" | null;

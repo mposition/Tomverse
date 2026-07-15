@@ -22,6 +22,7 @@ const updateRefundRequestSchema = z
   .object({
     action: z.enum(["approve", "reject"]),
     adminNote: z.string().trim().max(1_000).optional(),
+    confirmCreditReview: z.boolean().optional(),
   })
   .strict();
 
@@ -147,7 +148,33 @@ export async function PATCH(req: Request, context: RouteContext) {
         })
       : null;
 
+    const creditReview = refundRequest.userId
+      ? await prisma.user.findUnique({
+          where: { id: refundRequest.userId },
+          select: {
+            creditDebtCredits: true,
+            creditDebtCostMicroUsd: true,
+            billingRiskStatus: true,
+            _count: { select: { creditPurchases: true } },
+          },
+        })
+      : null;
+
     if (body.action === "approve") {
+      if (
+        (creditReview?._count.creditPurchases || 0) > 0 ||
+        (creditReview?.creditDebtCredits || 0) > 0
+      ) {
+        if (!body.confirmCreditReview) {
+          return NextResponse.json(
+            {
+              error:
+                "Review the purchased credit balance and consumed AI cost before approving this refund.",
+            },
+            { status: 400 }
+          );
+        }
+      }
       let stripeRefund;
       try {
         stripeRefund = await createStripeRefundForSubscription(
@@ -206,6 +233,13 @@ export async function PATCH(req: Request, context: RouteContext) {
               stripeRefundId: stripeRefund.stripeRefundId,
               stripeRefundStatus: stripeRefund.stripeRefundStatus,
               refundAmountCents: stripeRefund.refundAmountCents,
+              creditReviewConfirmed: Boolean(body.confirmCreditReview),
+              creditPurchaseCount: creditReview?._count.creditPurchases || 0,
+              creditDebtCredits: creditReview?.creditDebtCredits || 0,
+              creditDebtCostMicroUsd: Number(
+                creditReview?.creditDebtCostMicroUsd || BigInt(0)
+              ),
+              billingRiskStatus: creditReview?.billingRiskStatus || "normal",
             },
           },
         });
@@ -244,6 +278,12 @@ export async function PATCH(req: Request, context: RouteContext) {
           stripeSubscriptionId: updated.stripeSubscriptionId,
           stripeRefundId: updated.stripeRefundId,
           refundAmountCents: updated.refundAmountCents,
+          creditReviewConfirmed: Boolean(body.confirmCreditReview),
+          creditPurchaseCount: creditReview?._count.creditPurchases || 0,
+          creditDebtCredits: creditReview?.creditDebtCredits || 0,
+          creditDebtCostMicroUsd: Number(
+            creditReview?.creditDebtCostMicroUsd || BigInt(0)
+          ),
         },
       });
 

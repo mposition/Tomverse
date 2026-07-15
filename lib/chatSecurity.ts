@@ -18,6 +18,7 @@ import {
     settleAddOnCredits,
     type AddOnCreditReservationEntry,
 } from "@/lib/creditLedger";
+import { lockCreditAccount, offsetCreditDebt } from "@/lib/creditDebt";
 
 const GUEST_COOKIE_NAME = "tomverse_guest";
 const GUEST_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
@@ -510,7 +511,72 @@ export const acquireChatAccess = async (
     );
 
     await prisma.$transaction(async (tx) => {
+        if (access.kind === "user") {
+            if (!access.userId) {
+                throw new Error("Authenticated chat access is missing a user ID.");
+            }
+            await lockCreditAccount(tx, access.userId);
+        }
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${access.subjectKey}))`;
+        if (access.kind === "user") {
+            const billingRisk = await tx.user.findUniqueOrThrow({
+                where: { id: access.userId! },
+                select: { billingRiskStatus: true },
+            });
+            if (billingRisk.billingRiskStatus === "disputed_hold") {
+                throw new ChatAccessError(
+                    403,
+                    "BILLING_DISPUTE_HOLD",
+                    "AI access is temporarily paused while a payment dispute is reviewed."
+                );
+            }
+
+            const monthStart = periodStart("month", now);
+            const monthlyCost = await tx.chatUsageBucket.findUnique({
+                where: {
+                    key_period_periodStart: {
+                        key: access.subjectKey,
+                        period: "cost-month",
+                        periodStart: monthStart,
+                    },
+                },
+                select: { count: true },
+            });
+            const availableMonthlyCost = Math.max(
+                0,
+                estimatedCostLimits.month - (monthlyCost?.count || 0)
+            );
+            if (availableMonthlyCost > 0) {
+                const debtOffset = await offsetCreditDebt(tx, {
+                    userId: access.userId!,
+                    availableCredits: 0,
+                    availableFundedCostMicroUsd: BigInt(availableMonthlyCost),
+                    type: "plan_offset",
+                    metadata: {
+                        source: "monthly_plan_cost_allowance",
+                        periodStart: monthStart.toISOString(),
+                    },
+                });
+                const costOffset = Number(debtOffset.offsetFundedCostMicroUsd);
+                if (costOffset > 0) {
+                    const allowed = await incrementUsage(
+                        tx,
+                        access.subjectKey,
+                        "cost-month",
+                        monthStart,
+                        estimatedCostLimits.month,
+                        costOffset
+                    );
+                    if (!allowed) {
+                        throw new ChatAccessError(
+                            409,
+                            "CREDIT_DEBT_OFFSET_CONFLICT",
+                            "Credit debt balance changed. Please retry."
+                        );
+                    }
+                }
+            }
+        }
         for (const rule of limitsFor(access)) {
             if (access.kind === "user" && rule.period === "month") continue;
             const amount = rule.period === "minute" ? 1 : budget.usageCredits;
@@ -558,7 +624,38 @@ export const acquireChatAccess = async (
                 },
                 select: { count: true },
             });
-            const planRemaining = Math.max(0, monthRule.limit - (current?.count || 0));
+            const rawPlanRemaining = Math.max(
+                0,
+                monthRule.limit - (current?.count || 0)
+            );
+            const debtOffset = await offsetCreditDebt(tx, {
+                userId: access.userId,
+                availableCredits: rawPlanRemaining,
+                availableFundedCostMicroUsd: BigInt(0),
+                type: "plan_offset",
+                metadata: {
+                    source: "monthly_plan_credits",
+                    periodStart: monthStart.toISOString(),
+                },
+            });
+            if (debtOffset.offsetCredits > 0) {
+                const offsetAllowed = await incrementUsage(
+                    tx,
+                    access.subjectKey,
+                    "month",
+                    monthStart,
+                    monthRule.limit,
+                    debtOffset.offsetCredits
+                );
+                if (!offsetAllowed) {
+                    throw new ChatAccessError(
+                        409,
+                        "CREDIT_DEBT_OFFSET_CONFLICT",
+                        "Credit debt balance changed. Please retry."
+                    );
+                }
+            }
+            const planRemaining = rawPlanRemaining - debtOffset.offsetCredits;
             planReservedCredits = Math.min(planRemaining, budget.usageCredits);
             addOnReservedCredits = budget.usageCredits - planReservedCredits;
             if (planReservedCredits > 0) {
@@ -959,6 +1056,9 @@ export const settleChatUsage = async (
     const planActualCost = Math.max(0, actualCost - addOnActualCost);
 
     await prisma.$transaction(async (tx) => {
+        if (reservation.userId) {
+            await lockCreditAccount(tx, reservation.userId);
+        }
         for (const entry of reservation.entries) {
             const actual =
                 entry.metric === "tokens"

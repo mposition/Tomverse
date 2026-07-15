@@ -53,6 +53,9 @@ export async function GET(req: Request) {
         subscriptionCancelAtPeriodEnd: true,
         stripeCustomerId: true,
         stripeSubscriptionId: true,
+        creditDebtCredits: true,
+        creditDebtCostMicroUsd: true,
+        billingRiskStatus: true,
         _count: {
           select: {
             conversations: true,
@@ -69,6 +72,7 @@ export async function GET(req: Request) {
         ...user,
         subscriptionCurrentPeriodEnd:
           user.subscriptionCurrentPeriodEnd?.toISOString() || null,
+        creditDebtCostMicroUsd: Number(user.creditDebtCostMicroUsd),
       })),
     });
   } catch (error) {

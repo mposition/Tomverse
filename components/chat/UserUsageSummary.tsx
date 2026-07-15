@@ -79,6 +79,34 @@ export function UserUsageSummary({
 
   return (
     <section className="mx-3 mb-3 rounded-2xl border border-zinc-200 bg-white p-3 text-xs text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-200">
+      {usage.creditDebt.riskStatus === "disputed_hold" && (
+        <div className="mb-3 rounded-xl border border-red-300 bg-red-50 p-2.5 text-red-900 dark:border-red-900/70 dark:bg-red-950/30 dark:text-red-100">
+          <p className="font-black">
+            {lang === "ko"
+              ? "결제 분쟁 검토 중에는 AI 요청이 일시 중지됩니다."
+              : "AI requests are paused while a payment dispute is reviewed."}
+          </p>
+          <p className="mt-1 text-[11px] opacity-80">
+            {lang === "ko"
+              ? "분쟁을 해결한 뒤 고객지원에 문의해 주세요."
+              : "Resolve the dispute, then contact support for review."}
+          </p>
+        </div>
+      )}
+      {usage.creditDebt.credits > 0 && (
+        <div className="mb-3 rounded-xl border border-amber-300 bg-amber-50 p-2.5 text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-100">
+          <p className="font-black">
+            {lang === "ko"
+              ? `미회수 크레딧 ${usage.creditDebt.credits.toLocaleString(lang)}개`
+              : `${usage.creditDebt.credits.toLocaleString(lang)} unrecovered credits`}
+          </p>
+          <p className="mt-1 text-[11px] opacity-80">
+            {lang === "ko"
+              ? "향후 플랜 크레딧 또는 추가 구매 크레딧에서 우선 상계됩니다."
+              : "This is offset first from future plan or purchased credits."}
+          </p>
+        </div>
+      )}
       <div className="flex items-center justify-between gap-2">
         <span className="flex items-center gap-2 font-black">
           <BarChart3 className="h-4 w-4 text-blue-500" />

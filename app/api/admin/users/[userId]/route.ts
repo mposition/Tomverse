@@ -60,6 +60,11 @@ export async function GET(req: Request, context: RouteContext) {
           subscriptionCurrentPeriodEnd: true,
           subscriptionBillingInterval: true,
           subscriptionCancelAtPeriodEnd: true,
+          creditDebtCredits: true,
+          creditDebtCostMicroUsd: true,
+          billingRiskStatus: true,
+          billingRiskReason: true,
+          billingRiskAt: true,
           settings: {
             select: {
               language: true,
@@ -107,6 +112,51 @@ export async function GET(req: Request, context: RouteContext) {
               },
             },
           },
+          creditPurchases: {
+            orderBy: { purchasedAt: "desc" },
+            take: 10,
+            select: {
+              id: true,
+              packId: true,
+              creditsPurchased: true,
+              fundedCostMicroUsd: true,
+              amountPaidCents: true,
+              refundedAmountCents: true,
+              revokedCredits: true,
+              revokedCostMicroUsd: true,
+              unrecoveredCredits: true,
+              unrecoveredCostMicroUsd: true,
+              stripeCheckoutSessionId: true,
+              stripePaymentIntentId: true,
+              stripeChargeId: true,
+              stripeDisputeId: true,
+              disputeStatus: true,
+              status: true,
+              purchasedAt: true,
+              expiresAt: true,
+              lots: {
+                select: {
+                  remainingCredits: true,
+                  remainingFundedCostMicroUsd: true,
+                  status: true,
+                },
+              },
+            },
+          },
+          creditDebtEntries: {
+            orderBy: { createdAt: "desc" },
+            take: 20,
+            select: {
+              id: true,
+              purchaseId: true,
+              type: true,
+              creditsDelta: true,
+              fundedCostMicroUsdDelta: true,
+              balanceAfterCredits: true,
+              balanceAfterCostMicroUsd: true,
+              createdAt: true,
+            },
+          },
           _count: {
             select: {
               conversations: true,
@@ -114,6 +164,7 @@ export async function GET(req: Request, context: RouteContext) {
               refundRequests: true,
               promotionRedemptions: true,
               sessions: true,
+              creditPurchases: true,
             },
           },
         },
@@ -167,6 +218,8 @@ export async function GET(req: Request, context: RouteContext) {
     return NextResponse.json({
       user: {
         ...user,
+        creditDebtCostMicroUsd: Number(user.creditDebtCostMicroUsd),
+        billingRiskAt: user.billingRiskAt?.toISOString() || null,
         subscriptionCurrentPeriodEnd:
           user.subscriptionCurrentPeriodEnd?.toISOString() || null,
         settings: user.settings
@@ -183,6 +236,32 @@ export async function GET(req: Request, context: RouteContext) {
         promotionRedemptions: user.promotionRedemptions.map((redemption) => ({
           ...redemption,
           redeemedAt: redemption.redeemedAt.toISOString(),
+        })),
+        creditPurchases: user.creditPurchases.map((purchase) => ({
+          ...purchase,
+          fundedCostMicroUsd: Number(purchase.fundedCostMicroUsd),
+          revokedCostMicroUsd: Number(purchase.revokedCostMicroUsd),
+          unrecoveredCostMicroUsd: Number(purchase.unrecoveredCostMicroUsd),
+          purchasedAt: purchase.purchasedAt.toISOString(),
+          expiresAt: purchase.expiresAt.toISOString(),
+          remainingCredits: purchase.lots.reduce(
+            (sum, lot) => sum + lot.remainingCredits,
+            0
+          ),
+          remainingFundedCostMicroUsd: purchase.lots.reduce(
+            (sum, lot) => sum + Number(lot.remainingFundedCostMicroUsd),
+            0
+          ),
+          lots: purchase.lots.map((lot) => ({
+            ...lot,
+            remainingFundedCostMicroUsd: Number(lot.remainingFundedCostMicroUsd),
+          })),
+        })),
+        creditDebtEntries: user.creditDebtEntries.map((entry) => ({
+          ...entry,
+          fundedCostMicroUsdDelta: Number(entry.fundedCostMicroUsdDelta),
+          balanceAfterCostMicroUsd: Number(entry.balanceAfterCostMicroUsd),
+          createdAt: entry.createdAt.toISOString(),
         })),
         recentConversations: recentConversations.map((conversation) => ({
           ...conversation,

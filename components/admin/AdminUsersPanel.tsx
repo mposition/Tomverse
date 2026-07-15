@@ -18,6 +18,9 @@ export type AdminUserRow = {
   stripeCustomerId: string | null;
   stripeSubscriptionId?: string | null;
   usageToday?: number;
+  creditDebtCredits?: number;
+  creditDebtCostMicroUsd?: number;
+  billingRiskStatus?: string;
   _count: {
     conversations: number;
     accounts: number;
@@ -46,6 +49,11 @@ type AdminUserDetail = {
   subscriptionCurrentPeriodEnd: string | null;
   subscriptionBillingInterval: string | null;
   subscriptionCancelAtPeriodEnd: boolean;
+  creditDebtCredits: number;
+  creditDebtCostMicroUsd: number;
+  billingRiskStatus: string;
+  billingRiskReason: string | null;
+  billingRiskAt: string | null;
   settings: {
     language: string;
     theme: string;
@@ -79,6 +87,38 @@ type AdminUserDetail = {
       discountAmountCents: number | null;
     };
   }>;
+  creditPurchases: Array<{
+    id: string;
+    packId: string;
+    creditsPurchased: number;
+    fundedCostMicroUsd: number;
+    amountPaidCents: number;
+    refundedAmountCents: number;
+    revokedCredits: number;
+    revokedCostMicroUsd: number;
+    unrecoveredCredits: number;
+    unrecoveredCostMicroUsd: number;
+    remainingCredits: number;
+    remainingFundedCostMicroUsd: number;
+    stripeCheckoutSessionId: string;
+    stripePaymentIntentId: string | null;
+    stripeChargeId: string | null;
+    stripeDisputeId: string | null;
+    disputeStatus: string | null;
+    status: string;
+    purchasedAt: string;
+    expiresAt: string;
+  }>;
+  creditDebtEntries: Array<{
+    id: string;
+    purchaseId: string | null;
+    type: string;
+    creditsDelta: number;
+    fundedCostMicroUsdDelta: number;
+    balanceAfterCredits: number;
+    balanceAfterCostMicroUsd: number;
+    createdAt: string;
+  }>;
   recentConversations: Array<{
     id: string;
     title: string;
@@ -104,6 +144,7 @@ type AdminUserDetail = {
     refundRequests: number;
     promotionRedemptions: number;
     sessions: number;
+    creditPurchases: number;
   };
 };
 
@@ -141,8 +182,12 @@ export function AdminUsersPanel({
   const [adjustPlan, setAdjustPlan] = useState<"Free" | "Pro" | "Max">("Free");
   const [adjustReason, setAdjustReason] = useState("");
   const [adjustConfirm, setAdjustConfirm] = useState("");
+  const [riskReleaseReason, setRiskReleaseReason] = useState("");
+  const [riskReleaseConfirm, setRiskReleaseConfirm] = useState("");
+  const [creditRefundReasons, setCreditRefundReasons] = useState<Record<string, string>>({});
+  const [creditRefundConfirms, setCreditRefundConfirms] = useState<Record<string, string>>({});
   const [segment, setSegment] = useState<
-    "all" | "paid" | "free" | "canceling" | "refund" | "promo" | "highUsage"
+    "all" | "paid" | "free" | "canceling" | "refund" | "promo" | "highUsage" | "billingRisk"
   >("all");
 
   const title = useMemo(
@@ -158,6 +203,9 @@ export function AdminUsersPanel({
       if (segment === "refund") return Boolean(user._count.refundRequests);
       if (segment === "promo") return Boolean(user._count.promotionRedemptions);
       if (segment === "highUsage") return (user.usageToday || 0) >= 50;
+      if (segment === "billingRisk") {
+        return user.billingRiskStatus === "disputed_hold" || (user.creditDebtCredits || 0) > 0;
+      }
       return true;
     });
   }, [items, segment]);
@@ -221,6 +269,8 @@ export function AdminUsersPanel({
       `Billing: ${user.subscriptionBillingInterval || "-"}`,
       `Period end: ${dateTimeLabel(user.subscriptionCurrentPeriodEnd)}`,
       `Usage: ${user.usage.today} today / ${user.usage.month} month`,
+      `Credit debt: ${user.creditDebtCredits} credits / $${(user.creditDebtCostMicroUsd / 1_000_000).toFixed(2)} funded cost`,
+      `Billing risk: ${user.billingRiskStatus}`,
       `Stripe customer: ${user.stripeCustomerId || "-"}`,
       `Stripe subscription: ${user.stripeSubscriptionId || "-"}`,
       `Linked accounts: ${user.accounts.map((account) => account.provider).join(", ") || "-"}`,
@@ -292,6 +342,84 @@ export function AdminUsersPanel({
     } catch (error) {
       dispatchAppToast(
         error instanceof Error ? error.message : "Plan adjustment failed.",
+        "error"
+      );
+    } finally {
+      setBillingAction(null);
+    }
+  };
+
+  const releaseBillingHold = async (userId: string) => {
+    if (billingAction) return;
+    setBillingAction("risk");
+    try {
+      const response = await fetch(
+        `/api/admin/users/${encodeURIComponent(userId)}/billing-risk`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "release_hold",
+            reason: riskReleaseReason,
+            confirmText: riskReleaseConfirm,
+          }),
+        }
+      );
+      const data = (await response.json().catch(() => null)) as
+        | { user?: Partial<AdminUserDetail>; error?: string }
+        | null;
+      if (!response.ok || !data?.user) {
+        throw new Error(data?.error || "Billing hold release failed.");
+      }
+      setDetailUser((current) => (current ? { ...current, ...data.user } : current));
+      setRiskReleaseReason("");
+      setRiskReleaseConfirm("");
+      dispatchAppToast("Billing dispute hold released. Credit debt remains enforceable.", "success");
+    } catch (error) {
+      dispatchAppToast(
+        error instanceof Error ? error.message : "Billing hold release failed.",
+        "error"
+      );
+    } finally {
+      setBillingAction(null);
+    }
+  };
+
+  const refundCreditPurchase = async (
+    userId: string,
+    purchase: AdminUserDetail["creditPurchases"][number]
+  ) => {
+    if (billingAction) return;
+    setBillingAction(`refund:${purchase.id}`);
+    try {
+      const response = await fetch(
+        `/api/admin/credit-purchases/${encodeURIComponent(purchase.id)}/refund`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            reason: creditRefundReasons[purchase.id] || "",
+            confirmReviewed: true,
+            confirmText: creditRefundConfirms[purchase.id] || "",
+            expectedRemainingCredits: purchase.remainingCredits,
+            expectedRemainingFundedCostMicroUsd:
+              purchase.remainingFundedCostMicroUsd,
+          }),
+        }
+      );
+      const data = (await response.json().catch(() => null)) as
+        | { success?: boolean; error?: string }
+        | null;
+      if (!response.ok || !data?.success) {
+        throw new Error(data?.error || "Credit purchase refund failed.");
+      }
+      setCreditRefundReasons((current) => ({ ...current, [purchase.id]: "" }));
+      setCreditRefundConfirms((current) => ({ ...current, [purchase.id]: "" }));
+      await loadUserDetail(userId);
+      dispatchAppToast("Credit purchase refunded and balances reconciled.", "success");
+    } catch (error) {
+      dispatchAppToast(
+        error instanceof Error ? error.message : "Credit purchase refund failed.",
         "error"
       );
     } finally {
@@ -385,6 +513,7 @@ export function AdminUsersPanel({
           ["refund", `Refund ${items.filter((user) => user._count.refundRequests).length}`],
           ["promo", `Promo ${items.filter((user) => user._count.promotionRedemptions).length}`],
           ["highUsage", `High usage ${items.filter((user) => (user.usageToday || 0) >= 50).length}`],
+          ["billingRisk", `Billing risk ${items.filter((user) => user.billingRiskStatus === "disputed_hold" || (user.creditDebtCredits || 0) > 0).length}`],
         ].map(([value, label]) => (
           <button
             key={value}
@@ -437,6 +566,14 @@ export function AdminUsersPanel({
                 <td className="px-3 py-3 text-xs text-zinc-400">
                   <span className="font-bold text-zinc-200">{user.usageToday ?? "-"}</span>
                   <span className="ml-1">messages</span>
+                  {(user.creditDebtCredits || 0) > 0 ? (
+                    <div className="mt-1 font-bold text-red-300">
+                      Debt {user.creditDebtCredits?.toLocaleString()} credits
+                    </div>
+                  ) : null}
+                  {user.billingRiskStatus === "disputed_hold" ? (
+                    <div className="mt-1 font-black text-red-300">AI access held</div>
+                  ) : null}
                 </td>
                 <td className="px-3 py-3 text-xs text-zinc-400">
                   <div>{user._count.conversations} conversations</div>
@@ -567,6 +704,116 @@ export function AdminUsersPanel({
             </div>
 
             <div className="grid gap-4 px-5 pb-5 lg:grid-cols-2">
+              <section className={`rounded-2xl border p-4 lg:col-span-2 ${
+                detailUser.billingRiskStatus === "disputed_hold" || detailUser.creditDebtCredits > 0
+                  ? "border-red-500/30 bg-red-500/10"
+                  : "border-zinc-800 bg-zinc-900/60"
+              }`}>
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <h4 className="font-black text-white">Credit debt & billing risk</h4>
+                    <p className="mt-1 text-sm text-zinc-400">
+                      Risk status: <strong className={detailUser.billingRiskStatus === "disputed_hold" ? "text-red-300" : "text-emerald-300"}>{detailUser.billingRiskStatus}</strong>
+                    </p>
+                    {detailUser.billingRiskReason ? <p className="mt-1 text-xs text-red-200">{detailUser.billingRiskReason}</p> : null}
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 text-right">
+                    <div>
+                      <p className="text-xs uppercase tracking-wide text-zinc-500">Unrecovered</p>
+                      <p className="mt-1 text-xl font-black text-white">{detailUser.creditDebtCredits.toLocaleString()} credits</p>
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-wide text-zinc-500">Funded cost</p>
+                      <p className="mt-1 text-xl font-black text-white">${(detailUser.creditDebtCostMicroUsd / 1_000_000).toFixed(2)}</p>
+                    </div>
+                  </div>
+                </div>
+                {detailUser.billingRiskStatus === "disputed_hold" ? (
+                  <div className="mt-4 grid gap-3 md:grid-cols-[1fr_13rem_auto]">
+                    <input
+                      value={riskReleaseReason}
+                      onChange={(event) => setRiskReleaseReason(event.target.value)}
+                      placeholder="Verified resolution reason"
+                      className="h-11 rounded-xl border border-red-500/30 bg-zinc-950 px-3 text-sm text-white outline-none focus:border-red-400"
+                    />
+                    <input
+                      value={riskReleaseConfirm}
+                      onChange={(event) => setRiskReleaseConfirm(event.target.value)}
+                      placeholder="RELEASE BILLING HOLD"
+                      className="h-11 rounded-xl border border-red-500/30 bg-zinc-950 px-3 text-sm text-white outline-none focus:border-red-400"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => releaseBillingHold(detailUser.id)}
+                      disabled={Boolean(billingAction) || riskReleaseReason.trim().length < 5 || riskReleaseConfirm !== "RELEASE BILLING HOLD"}
+                      className="rounded-xl bg-red-600 px-4 py-2 text-sm font-black text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {billingAction === "risk" ? "Releasing..." : "Release hold"}
+                    </button>
+                  </div>
+                ) : null}
+                <p className="mt-3 text-xs text-zinc-500">
+                  Releasing the AI hold does not forgive outstanding debt. Future plan and purchased credits continue to offset it first.
+                </p>
+              </section>
+
+              <section className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 lg:col-span-2">
+                <h4 className="font-black text-white">Additional credit purchases</h4>
+                <div className="mt-3 grid gap-2">
+                  {detailUser.creditPurchases.length === 0 ? (
+                    <p className="text-sm text-zinc-500">No additional credit purchases.</p>
+                  ) : detailUser.creditPurchases.map((purchase) => (
+                    <div key={purchase.id} className="rounded-xl border border-zinc-800 bg-zinc-950 p-3 text-xs text-zinc-400">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="font-black text-white">{purchase.packId} / {purchase.status}</p>
+                        <p>{dateTimeLabel(purchase.purchasedAt)} UTC</p>
+                      </div>
+                      <div className="mt-2 grid gap-1 sm:grid-cols-2 lg:grid-cols-4">
+                        <span>Purchased: {purchase.creditsPurchased.toLocaleString()} / ${(purchase.fundedCostMicroUsd / 1_000_000).toFixed(2)}</span>
+                        <span>Remaining: {purchase.remainingCredits.toLocaleString()} / ${(purchase.remainingFundedCostMicroUsd / 1_000_000).toFixed(2)}</span>
+                        <span>Revoked: {purchase.revokedCredits.toLocaleString()} / ${(purchase.revokedCostMicroUsd / 1_000_000).toFixed(2)}</span>
+                        <span className={purchase.unrecoveredCredits > 0 ? "font-black text-red-300" : ""}>Unrecovered: {purchase.unrecoveredCredits.toLocaleString()} / ${(purchase.unrecoveredCostMicroUsd / 1_000_000).toFixed(2)}</span>
+                      </div>
+                      <div className="mt-2 break-all text-zinc-600">
+                        Payment: {purchase.stripePaymentIntentId || "-"} / Charge: {purchase.stripeChargeId || "-"} / Dispute: {purchase.stripeDisputeId || "-"} {purchase.disputeStatus ? `(${purchase.disputeStatus})` : ""}
+                      </div>
+                      {(purchase.status === "paid" || purchase.status === "partially_refunded") ? (
+                        <details className="mt-3 rounded-xl border border-red-500/20 bg-red-500/5 p-3">
+                          <summary className="cursor-pointer font-black text-red-200">
+                            Review and refund remaining Stripe charge
+                          </summary>
+                          <p className="mt-2 text-zinc-500">
+                            Confirm the remaining balance and estimated consumed cost above. If the customer already used credits, the unrecovered portion becomes credit debt.
+                          </p>
+                          <div className="mt-3 grid gap-2 md:grid-cols-[1fr_14rem_auto]">
+                            <input
+                              value={creditRefundReasons[purchase.id] || ""}
+                              onChange={(event) => setCreditRefundReasons((current) => ({ ...current, [purchase.id]: event.target.value }))}
+                              placeholder="Refund reason for audit log"
+                              className="h-10 rounded-lg border border-zinc-700 bg-zinc-950 px-3 text-white outline-none focus:border-red-400"
+                            />
+                            <input
+                              value={creditRefundConfirms[purchase.id] || ""}
+                              onChange={(event) => setCreditRefundConfirms((current) => ({ ...current, [purchase.id]: event.target.value }))}
+                              placeholder="REFUND CREDIT PURCHASE"
+                              className="h-10 rounded-lg border border-zinc-700 bg-zinc-950 px-3 text-white outline-none focus:border-red-400"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => refundCreditPurchase(detailUser.id, purchase)}
+                              disabled={Boolean(billingAction) || (creditRefundReasons[purchase.id] || "").trim().length < 5 || creditRefundConfirms[purchase.id] !== "REFUND CREDIT PURCHASE"}
+                              className="rounded-lg bg-red-600 px-3 py-2 font-black text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {billingAction === `refund:${purchase.id}` ? "Refunding..." : "Refund"}
+                            </button>
+                          </div>
+                        </details>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </section>
+
               <div className="lg:col-span-2">
                 <AdminNotesBox targetType="User" targetId={detailUser.id} />
               </div>

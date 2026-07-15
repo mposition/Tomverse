@@ -29,6 +29,19 @@ export type RefundRequestRow = {
     actorEmail: string | null;
     createdAt: string;
   }>;
+  creditRisk?: {
+    requiresReview: boolean;
+    purchaseCount: number;
+    purchasedCredits: number;
+    remainingCredits: number;
+    estimatedUsedCredits: number;
+    purchasedCostMicroUsd: number;
+    remainingCostMicroUsd: number;
+    estimatedConsumedCostMicroUsd: number;
+    unrecoveredCredits: number;
+    unrecoveredCostMicroUsd: number;
+    billingRiskStatus: string;
+  };
 };
 
 type Props = {
@@ -60,6 +73,7 @@ export function RefundRequestsPanel({ rows }: Props) {
   const [items, setItems] = useState(rows);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
+  const [creditReviewConfirmed, setCreditReviewConfirmed] = useState<Record<string, boolean>>({});
   const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "approved" | "rejected">("pending");
   const visiblePendingCount = items.filter((item) => item.status === "pending").length;
   const approvedCount = items.filter((item) => item.status === "approved").length;
@@ -108,6 +122,8 @@ export function RefundRequestsPanel({ rows }: Props) {
         body: JSON.stringify({
           action,
           adminNote: notes[id] || undefined,
+          confirmCreditReview:
+            action === "approve" ? Boolean(creditReviewConfirmed[id]) : undefined,
         }),
       });
       const data = (await response.json().catch(() => null)) as {
@@ -261,6 +277,39 @@ export function RefundRequestsPanel({ rows }: Props) {
                   </p>
                 )}
 
+                {request.creditRisk?.requiresReview ? (
+                  <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4">
+                    <p className="text-xs font-black uppercase tracking-[0.16em] text-red-200">
+                      Credit balance and cost review required
+                    </p>
+                    <div className="mt-3 grid gap-2 text-xs text-red-100 sm:grid-cols-2 lg:grid-cols-4">
+                      <span>{request.creditRisk.purchaseCount} credit-pack purchases</span>
+                      <span>Remaining: {request.creditRisk.remainingCredits.toLocaleString()} credits / ${(request.creditRisk.remainingCostMicroUsd / 1_000_000).toFixed(2)}</span>
+                      <span>Estimated consumed: {request.creditRisk.estimatedUsedCredits.toLocaleString()} credits / ${(request.creditRisk.estimatedConsumedCostMicroUsd / 1_000_000).toFixed(2)}</span>
+                      <span className="font-black">Unrecovered: {request.creditRisk.unrecoveredCredits.toLocaleString()} credits / ${(request.creditRisk.unrecoveredCostMicroUsd / 1_000_000).toFixed(2)}</span>
+                    </div>
+                    <p className="mt-2 text-xs text-red-200/80">
+                      Billing risk: {request.creditRisk.billingRiskStatus}. Verify the refundable balance and consumed AI cost before approving.
+                    </p>
+                    {request.status === "pending" ? (
+                      <label className="mt-3 flex cursor-pointer items-start gap-2 text-xs font-bold text-white">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(creditReviewConfirmed[request.id])}
+                          onChange={(event) =>
+                            setCreditReviewConfirmed((current) => ({
+                              ...current,
+                              [request.id]: event.target.checked,
+                            }))
+                          }
+                          className="mt-0.5 h-4 w-4"
+                        />
+                        I reviewed purchased credit balance, used credits, and funded AI cost.
+                      </label>
+                    ) : null}
+                  </div>
+                ) : null}
+
                 {request.timelineEvents && request.timelineEvents.length > 0 ? (
                   <div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950/70 p-3">
                     <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500">
@@ -299,7 +348,13 @@ export function RefundRequestsPanel({ rows }: Props) {
                     <div className="flex flex-wrap gap-2">
                       <button
                         type="button"
-                        disabled={Boolean(busyId)}
+                        disabled={
+                          Boolean(busyId) ||
+                          Boolean(
+                            request.creditRisk?.requiresReview &&
+                              !creditReviewConfirmed[request.id]
+                          )
+                        }
                         onClick={() => updateRequest(request.id, "approve")}
                         className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-black text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
                       >

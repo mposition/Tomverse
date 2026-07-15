@@ -50,6 +50,11 @@ export async function GET(req: Request) {
         subscriptionBillingInterval: true,
         subscriptionStatus: true,
         subscriptionCancelAtPeriodEnd: true,
+        creditDebtCredits: true,
+        creditDebtCostMicroUsd: true,
+        billingRiskStatus: true,
+        billingRiskReason: true,
+        billingRiskAt: true,
       },
     });
     const key = getUserChatUsageKey(session.user.id);
@@ -149,11 +154,21 @@ export async function GET(req: Request) {
         costMonth: count("cost-month"),
       },
       balances: {
-        planRemainingCredits: Math.max(0, limits.creditsMonth - count("month")),
+        planRemainingCredits: Math.max(
+          0,
+          limits.creditsMonth - count("month") - (user?.creditDebtCredits || 0)
+        ),
         planResetsAt: nextMonthStart.toISOString(),
         purchasedRemainingCredits: purchasedBalance.remainingCredits,
         purchasedFundedCostMicroUsd: purchasedBalance.remainingFundedCostMicroUsd,
         purchasedEarliestExpiry: purchasedBalance.earliestExpiry?.toISOString() || null,
+      },
+      creditDebt: {
+        credits: user?.creditDebtCredits || 0,
+        fundedCostMicroUsd: Number(user?.creditDebtCostMicroUsd || BigInt(0)),
+        riskStatus: user?.billingRiskStatus || "normal",
+        riskReason: user?.billingRiskReason || null,
+        riskAt: user?.billingRiskAt?.toISOString() || null,
       },
       recommendation,
       limits,
