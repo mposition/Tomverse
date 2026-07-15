@@ -17,7 +17,7 @@ async function mockProviderStatus(page: Page, status: MockStatus) {
             id: "gemini-2-5-flash",
             provider: "google",
             status,
-            fallbackModelIds: ["gpt-5-4-mini"],
+            fallbackModelIds: ["claude-haiku-4-5"],
           },
         ],
       }),
@@ -54,5 +54,5 @@ test("outage remains visible with a fallback suggestion", async ({ page }) => {
   const banner = page.getByTestId("provider-outage-banner");
   await expect(banner).toBeVisible();
   await expect(banner).toContainText("1 unavailable");
-  await expect(banner).toContainText("GPT-5.4 mini");
+  await expect(banner).toContainText("Claude Haiku 4.5");
 });

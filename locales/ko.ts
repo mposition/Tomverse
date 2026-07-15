@@ -363,7 +363,7 @@ export const ko = {
         description: "세 가지 질문에 답하면 자주 하는 작업에 맞는 기본 모델을 추천해 드립니다. 언제든 설정에서 변경할 수 있습니다.",
         start: "모델 찾기 시작",
         useDefault: "기본 추천으로 바로 시작",
-        later: "나중에 하기",
+        later: "3일 후 다시 알림",
         progress: "3개 중 {current}번째 질문",
         back: "이전",
         next: "다음",

@@ -109,6 +109,9 @@ const DEFAULT_PLANS: Record<BillingPlanId, BillingPlanConfig> = {
   },
 };
 
+export const getDefaultBillingPlans = (): BillingPlanConfig[] =>
+  Object.values(DEFAULT_PLANS).map((plan) => ({ ...plan }));
+
 const normalizePlanId = (value: string): BillingPlanId | null =>
   value === "free" || value === "pro" || value === "max" ? value : null;
 
@@ -135,7 +138,7 @@ export async function getBillingPlans(): Promise<BillingPlanConfig[]> {
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
   });
   const merged = new Map<BillingPlanId, BillingPlanConfig>(
-    Object.values(DEFAULT_PLANS).map((plan) => [plan.id, plan])
+    getDefaultBillingPlans().map((plan) => [plan.id, plan])
   );
 
   for (const row of rows) {

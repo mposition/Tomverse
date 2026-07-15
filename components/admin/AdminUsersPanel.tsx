@@ -119,6 +119,26 @@ type AdminUserDetail = {
     balanceAfterCostMicroUsd: number;
     createdAt: string;
   }>;
+  chatCreditReservations: Array<{
+    id: string;
+    traceId: string;
+    source: string;
+    provider: string;
+    modelId: string;
+    status: string;
+    outcome: string | null;
+    providerRequestId: string | null;
+    providerResponseId: string | null;
+    reservedCredits: number;
+    settledCredits: number;
+    reservedCostMicroUsd: number;
+    settledCostMicroUsd: number;
+    expiresAt: string;
+    settledAt: string | null;
+    reconciledAt: string | null;
+    lastError: string | null;
+    createdAt: string;
+  }>;
   recentConversations: Array<{
     id: string;
     title: string;
@@ -145,6 +165,7 @@ type AdminUserDetail = {
     promotionRedemptions: number;
     sessions: number;
     creditPurchases: number;
+    chatCreditReservations: number;
   };
 };
 
@@ -809,6 +830,45 @@ export function AdminUsersPanel({
                           </div>
                         </details>
                       ) : null}
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 lg:col-span-2">
+                <h4 className="font-black text-white">Durable credit reservations</h4>
+                <p className="mt-1 text-xs text-zinc-500">
+                  Recent reserved → settled/refunded transitions with provider correlation IDs.
+                </p>
+                <div className="mt-3 grid gap-2">
+                  {detailUser.chatCreditReservations.length === 0 ? (
+                    <p className="text-sm text-zinc-500">No credit reservations.</p>
+                  ) : detailUser.chatCreditReservations.map((reservation) => (
+                    <div key={reservation.id} className="rounded-xl border border-zinc-800 bg-zinc-950 p-3 text-xs text-zinc-400">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className={`rounded-full border px-2 py-0.5 font-black ${
+                            reservation.status === "reserved"
+                              ? "border-amber-500/30 bg-amber-500/10 text-amber-200"
+                              : reservation.status === "settled"
+                                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+                                : "border-blue-500/30 bg-blue-500/10 text-blue-200"
+                          }`}>{reservation.status}</span>
+                          <strong className="text-white">{reservation.provider} / {reservation.modelId}</strong>
+                          <span>{reservation.source}</span>
+                        </div>
+                        <span>{dateTimeLabel(reservation.createdAt)} UTC</span>
+                      </div>
+                      <div className="mt-2 grid gap-1 sm:grid-cols-2 lg:grid-cols-4">
+                        <span>Credits: {reservation.reservedCredits} reserved / {reservation.settledCredits} settled</span>
+                        <span>Cost: ${(reservation.reservedCostMicroUsd / 1_000_000).toFixed(4)} / ${(reservation.settledCostMicroUsd / 1_000_000).toFixed(4)}</span>
+                        <span>Outcome: {reservation.outcome || "-"}</span>
+                        <span>{reservation.reconciledAt ? `Auto-refunded ${dateTimeLabel(reservation.reconciledAt)}` : `Expires ${dateTimeLabel(reservation.expiresAt)}`}</span>
+                      </div>
+                      <div className="mt-2 break-all text-zinc-600">
+                        Reservation: {reservation.id} / Trace: {reservation.traceId} / Provider request: {reservation.providerRequestId || "-"} / Response: {reservation.providerResponseId || "-"}
+                      </div>
+                      {reservation.lastError ? <p className="mt-2 text-red-300">{reservation.lastError}</p> : null}
                     </div>
                   ))}
                 </div>

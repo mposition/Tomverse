@@ -6,6 +6,10 @@ import {
   getOptionalModelSuggestion,
   isModelFinderDefaultId,
 } from "../lib/modelFinder.ts";
+import {
+  getModelFinderReappearsAt,
+  shouldAutoShowModelFinder,
+} from "../lib/modelFinderSnooze.ts";
 
 test("model finder returns at most three free Standard defaults", () => {
   const recommendations = getModelFinderRecommendations({
@@ -62,4 +66,39 @@ test("contextual suggestions classify locally without returning prompt content",
   });
   assert.equal(suggestion?.modelId, "claude-sonnet-5");
   assert.deepEqual(Object.keys(suggestion || {}).sort(), ["key", "modelId", "reason"]);
+});
+
+test("model finder dismissal snoozes automatic onboarding for three days", () => {
+  const dismissedAt = new Date("2026-07-15T10:00:00.000Z");
+  assert.equal(
+    getModelFinderReappearsAt(dismissedAt)?.toISOString(),
+    "2026-07-18T10:00:00.000Z"
+  );
+  assert.equal(
+    shouldAutoShowModelFinder({
+      completedAt: null,
+      dismissedAt,
+      now: new Date("2026-07-18T09:59:59.999Z"),
+    }),
+    false
+  );
+  assert.equal(
+    shouldAutoShowModelFinder({
+      completedAt: null,
+      dismissedAt,
+      now: new Date("2026-07-18T10:00:00.000Z"),
+    }),
+    true
+  );
+});
+
+test("completed model finder never auto-opens after a previous dismissal", () => {
+  assert.equal(
+    shouldAutoShowModelFinder({
+      completedAt: new Date("2026-07-16T10:00:00.000Z"),
+      dismissedAt: new Date("2026-07-15T10:00:00.000Z"),
+      now: new Date("2026-07-20T10:00:00.000Z"),
+    }),
+    false
+  );
 });

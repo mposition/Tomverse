@@ -5,11 +5,18 @@ import { ArrowRight, CheckCircle2 } from "lucide-react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
 import { ChatGptVsClaudeGuide } from "./ChatGptVsClaudeGuide";
+import { AiReviewDemo } from "./AiReviewDemo";
+import { trackProductEvent } from "@/lib/productAnalyticsClient";
 
 export type MarketingInfoSection = {
   title: string;
   body: string;
   bullets?: string[];
+  link?: {
+    label: string;
+    href: string;
+    external?: boolean;
+  };
 };
 
 export type MarketingInfoCopy = {
@@ -29,7 +36,7 @@ export function MarketingInfoPage({
   template,
 }: {
   content: { en: MarketingInfoCopy } & Partial<Record<Language, MarketingInfoCopy>>;
-  template?: "chatgpt-vs-claude";
+  template?: "chatgpt-vs-claude" | "ai-answer-review";
 }) {
   const { lang } = useLanguage();
   const localizedPage = content[lang];
@@ -57,6 +64,11 @@ export function MarketingInfoPage({
           <ChatGptVsClaudeGuide />
         ) : (
           <>
+            {template === "ai-answer-review" ? (
+              <div className="mt-12">
+                <AiReviewDemo showLearnMore={false} />
+              </div>
+            ) : null}
             <div className="mt-12 grid gap-5">
               {page.sections.map((section) => (
                 <article key={section.title} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-6 dark:border-zinc-800 dark:bg-zinc-900/40">
@@ -72,6 +84,17 @@ export function MarketingInfoPage({
                       ))}
                     </ul>
                   )}
+                  {section.link ? (
+                    <Link
+                      href={section.link.href}
+                      target={section.link.external ? "_blank" : undefined}
+                      rel={section.link.external ? "noopener noreferrer" : undefined}
+                      className="mt-5 inline-flex items-center gap-2 text-sm font-black text-blue-600 hover:text-blue-500 dark:text-blue-300"
+                    >
+                      {section.link.label}
+                      <ArrowRight className="h-4 w-4" />
+                    </Link>
+                  ) : null}
                 </article>
               ))}
             </div>
@@ -79,6 +102,14 @@ export function MarketingInfoPage({
             {page.cta && (
               <Link
                 href={page.cta.href}
+                onClick={() =>
+                  trackProductEvent("cta_start_click", 0, {
+                    cta_location:
+                      template === "ai-answer-review"
+                        ? "ai_answer_review_page"
+                        : "marketing_info_page",
+                  })
+                }
                 className="mt-10 inline-flex h-12 items-center gap-2 rounded-xl bg-blue-600 px-6 text-sm font-black text-white transition hover:bg-blue-500"
               >
                 {page.cta.label}

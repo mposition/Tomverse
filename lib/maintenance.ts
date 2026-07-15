@@ -7,6 +7,7 @@ import {
   OAUTH_TOKEN_ENCRYPTED_PREFIX,
 } from "@/lib/oauthTokenCrypto";
 import { expireCreditLots } from "@/lib/creditLedger";
+import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
 
 const OAUTH_ACCOUNT_BATCH_SIZE = 200;
 
@@ -79,6 +80,8 @@ const encryptExistingOAuthTokens = async () => {
 
 export async function cleanupExpiredData() {
   assertOAuthTokenEncryptionConfigured();
+
+  const creditReservations = await reconcileExpiredChatCreditReservations();
 
   const sessions = await prisma.session.deleteMany({
     where: { expires: { lte: new Date() } },
@@ -179,5 +182,6 @@ export async function cleanupExpiredData() {
     shareSnapshots: Number(shareSnapshots),
     oauthTokensEncrypted,
     creditLotsExpired,
+    creditReservations,
   };
 }

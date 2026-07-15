@@ -10,18 +10,25 @@ import {
   readLimitedJson,
 } from "@/lib/apiSecurity";
 import { getCreditPack, getCreditPacksForPlan } from "@/lib/creditPacks";
-import { getPurchasedCreditSummary } from "@/lib/creditLedger";
 import { prisma } from "@/lib/prisma";
 import { getPublicAppOrigin } from "@/lib/publicUrl";
 import { getStripe } from "@/lib/stripe";
 import type { ModelTier } from "@/lib/models";
-import { analyticsAttributionSchema } from "@/lib/productAnalyticsShared";
+import {
+  analyticsAttributionSchema,
+  purchaseAnalyticsTriggerSchema,
+} from "@/lib/productAnalyticsShared";
+import {
+  getPurchaseAnalyticsSnapshot,
+  purchaseAnalyticsMetadata,
+} from "@/lib/purchaseAnalytics";
 
 const inputSchema = z
   .object({
     packId: z.string().max(32),
     language: z.enum(["ko", "en", "zh", "fr", "de", "es", "pt"]).optional(),
     analytics: analyticsAttributionSchema.optional(),
+    trigger: purchaseAnalyticsTriggerSchema.default("proactive"),
   })
   .strict();
 const normalizePlan = (value: unknown): ModelTier =>
@@ -57,9 +64,15 @@ export async function GET(req: Request) {
     });
     if (!user) return NextResponse.json({ error: "User not found." }, { status: 404 });
     const plan = normalizePlan(user.plan);
-    const balance = await getPurchasedCreditSummary(session.user.id);
+    const snapshot = await getPurchaseAnalyticsSnapshot({
+      userId: session.user.id,
+      currentPlan: plan,
+      creditDebtCredits: user.creditDebtCredits,
+    });
+    const balance = snapshot.purchasedBalance;
     return NextResponse.json({
       plan,
+      analyticsContext: snapshot.context,
       packs: getCreditPacksForPlan(plan).map(publicPack),
       balance: {
         ...balance,
@@ -91,13 +104,24 @@ export async function POST(req: Request) {
       minute: 5,
       day: 20,
     });
-    const { packId, language, analytics } = await readLimitedJson(req, 4 * 1024, inputSchema);
+    const { packId, language, analytics, trigger } = await readLimitedJson(
+      req,
+      4 * 1024,
+      inputSchema
+    );
     const pack = getCreditPack(packId);
     if (!pack) return NextResponse.json({ error: "Credit pack not found." }, { status: 404 });
 
     const user = await prisma.user.findUnique({
       where: { id: session.user.id },
-      select: { id: true, email: true, name: true, plan: true, stripeCustomerId: true },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        plan: true,
+        stripeCustomerId: true,
+        creditDebtCredits: true,
+      },
     });
     if (!user) return NextResponse.json({ error: "User not found." }, { status: 404 });
     const plan = normalizePlan(user.plan);
@@ -123,6 +147,27 @@ export async function POST(req: Request) {
       });
     }
     const origin = getPublicAppOrigin(req);
+    const purchaseSnapshot = analytics
+      ? await getPurchaseAnalyticsSnapshot({
+          userId: user.id,
+          currentPlan: plan,
+          creditDebtCredits: user.creditDebtCredits,
+        }).catch((snapshotError) => {
+          console.warn("Credit-pack purchase analytics snapshot failed.", {
+            errorName:
+              snapshotError instanceof Error
+                ? snapshotError.name
+                : "UnknownError",
+          });
+          return null;
+        })
+      : null;
+    const purchaseContext = purchaseSnapshot?.context || {
+      currentPlan:
+        plan === "Max" ? "max" : plan === "Pro" ? "pro" : "free",
+      planCreditsRemaining: 0,
+      addonCreditsRemaining: 0,
+    };
     const analyticsMetadata: Record<string, string> = analytics
       ? {
           analyticsClientId: analytics.client_id,
@@ -132,6 +177,12 @@ export async function POST(req: Request) {
           analyticsUtmCampaign: analytics.utm_campaign,
           analyticsLanguage: analytics.language,
           analyticsCountry: analytics.country,
+          ...purchaseAnalyticsMetadata({
+            context: purchaseContext,
+            trigger,
+            productId: pack.id,
+            creditsPurchased: pack.credits,
+          }),
         }
       : {};
     const checkout = await stripe.checkout.sessions.create({

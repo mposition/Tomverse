@@ -45,6 +45,7 @@ export async function GET(req: Request) {
     const [
       oldUsageBuckets,
       expiredLeases,
+      expiredCreditReservations,
       staleShares,
       oldAuditLogs,
       oldNotificationLogs,
@@ -53,6 +54,7 @@ export async function GET(req: Request) {
       oldProductAnalytics,
       oldestUsage,
       oldestLease,
+      oldestCreditReservation,
       oldestShare,
       oldestAudit,
       oldestNotification,
@@ -62,6 +64,9 @@ export async function GET(req: Request) {
     ] = await Promise.all([
       prisma.chatUsageBucket.count({ where: { updatedAt: { lt: usageCutoff } } }),
       prisma.chatRequestLease.count({ where: { expiresAt: { lt: leaseCutoff } } }),
+      prisma.chatCreditReservation.count({
+        where: { status: "reserved", expiresAt: { lt: leaseCutoff } },
+      }),
       prisma.conversation.count({
         where: {
           OR: [
@@ -99,6 +104,13 @@ export async function GET(req: Request) {
           }),
         "createdAt"
       ),
+      prisma.chatCreditReservation
+        .findFirst({
+          where: { status: "reserved", expiresAt: { lt: leaseCutoff } },
+          orderBy: { expiresAt: "asc" },
+          select: { expiresAt: true },
+        })
+        .then((row) => row?.expiresAt.toISOString() || null),
       oldestDate(
         () =>
           prisma.conversation.findFirst({
@@ -164,6 +176,13 @@ export async function GET(req: Request) {
           policy: "Delete expired request leases.",
           staleCount: expiredLeases,
           oldestAt: oldestLease,
+        },
+        {
+          key: "creditReservations",
+          label: "Expired credit reservations",
+          policy: "Refund expired reserved credits within the five-minute reconciliation cycle.",
+          staleCount: expiredCreditReservations,
+          oldestAt: oldestCreditReservation,
         },
         {
           key: "shareSnapshots",

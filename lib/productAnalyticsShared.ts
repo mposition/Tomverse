@@ -43,6 +43,26 @@ export const PRODUCT_ANALYTICS_EVENT_NAMES = [
 export type ProductAnalyticsEventName =
   (typeof PRODUCT_ANALYTICS_EVENT_NAMES)[number];
 
+export const PURCHASE_ANALYTICS_TRIGGERS = [
+  "limit_hit",
+  "usage_widget",
+  "account",
+  "proactive",
+] as const;
+
+export const purchaseAnalyticsTriggerSchema = z.enum(
+  PURCHASE_ANALYTICS_TRIGGERS
+);
+
+export type PurchaseAnalyticsTrigger = z.infer<
+  typeof purchaseAnalyticsTriggerSchema
+>;
+
+export const normalizePurchaseAnalyticsTrigger = (
+  value: unknown,
+  fallback: PurchaseAnalyticsTrigger = "proactive"
+) => purchaseAnalyticsTriggerSchema.safeParse(value).data || fallback;
+
 export const analyticsPropertiesSchema = z
   .object({
     cta_location: z.string().trim().min(1).max(64).optional(),
@@ -51,6 +71,14 @@ export const analyticsPropertiesSchema = z
     model_id: z.string().trim().min(1).max(80).optional(),
     billing_interval: z.enum(["monthly", "annual"]).optional(),
     plan_id: z.enum(["free", "pro", "max"]).optional(),
+    purchase_type: z.enum(["subscription", "credit_pack"]).optional(),
+    product_id: z.string().trim().min(1).max(80).optional(),
+    pack_id: z.string().trim().min(1).max(32).optional(),
+    credits_purchased: z.number().int().min(0).max(1_000_000).optional(),
+    current_plan: z.enum(["free", "pro", "max"]).optional(),
+    trigger: purchaseAnalyticsTriggerSchema.optional(),
+    plan_credits_remaining: z.number().int().min(0).max(1_000_000).optional(),
+    addon_credits_remaining: z.number().int().min(0).max(1_000_000).optional(),
     value: z.number().finite().min(0).max(1_000_000).optional(),
     currency: z.literal("USD").optional(),
     transaction_id: z.string().trim().min(1).max(100).optional(),

@@ -8,6 +8,10 @@ import {
   getAnalyticsAttributionSnapshot,
   trackProductEvent,
 } from "@/lib/productAnalyticsClient";
+import {
+  normalizePurchaseAnalyticsTrigger,
+  type PurchaseAnalyticsTrigger,
+} from "@/lib/productAnalyticsShared";
 
 type Pack = {
   id: string;
@@ -16,6 +20,12 @@ type Pack = {
   priceCents: number;
   currency: string;
   validityDays: number;
+};
+
+type PurchaseAnalyticsContext = {
+  currentPlan: "free" | "pro" | "max";
+  planCreditsRemaining: number;
+  addonCreditsRemaining: number;
 };
 
 const copy: Record<Language, { title: string; body: string; notice: string; buy: string; close: string; loading: string; expiry: string; error: string }> = {
@@ -31,9 +41,11 @@ const copy: Record<Language, { title: string; body: string; notice: string; buy:
 export function CreditPackPurchaseButton({
   children,
   className,
+  trigger = "proactive",
 }: {
   children?: ReactNode;
   className?: string;
+  trigger?: PurchaseAnalyticsTrigger;
 }) {
   const { lang } = useLanguage();
   const text = copy[lang];
@@ -41,6 +53,8 @@ export function CreditPackPurchaseButton({
   const [packs, setPacks] = useState<Pack[] | null>(null);
   const [plan, setPlan] = useState<"Free" | "Pro" | "Max">("Free");
   const [debtCredits, setDebtCredits] = useState(0);
+  const [purchaseAnalyticsContext, setPurchaseAnalyticsContext] =
+    useState<PurchaseAnalyticsContext | null>(null);
   const [error, setError] = useState("");
   const [buying, setBuying] = useState<string | null>(null);
 
@@ -56,6 +70,22 @@ export function CreditPackPurchaseButton({
         setPacks(Array.isArray(data.packs) ? data.packs : []);
         setPlan(data.plan === "Pro" || data.plan === "Max" ? data.plan : "Free");
         setDebtCredits(Math.max(0, Number(data.creditDebt?.credits) || 0));
+        setPurchaseAnalyticsContext({
+          currentPlan:
+            data.analyticsContext?.currentPlan === "max"
+              ? "max"
+              : data.analyticsContext?.currentPlan === "pro"
+                ? "pro"
+                : "free",
+          planCreditsRemaining: Math.max(
+            0,
+            Number(data.analyticsContext?.planCreditsRemaining) || 0
+          ),
+          addonCreditsRemaining: Math.max(
+            0,
+            Number(data.analyticsContext?.addonCreditsRemaining) || 0
+          ),
+        });
       })
       .catch((requestError) => {
         if ((requestError as Error).name !== "AbortError") setError(text.error);
@@ -65,12 +95,26 @@ export function CreditPackPurchaseButton({
 
   const buy = async (packId: string) => {
     const pack = packs?.find((item) => item.id === packId);
+    if (!pack) return;
     setBuying(packId);
     setError("");
+    const purchaseTrigger = normalizePurchaseAnalyticsTrigger(trigger);
+    const analyticsContext = purchaseAnalyticsContext || {
+      currentPlan: plan.toLowerCase() as "free" | "pro" | "max",
+      planCreditsRemaining: 0,
+      addonCreditsRemaining: 0,
+    };
     trackProductEvent("checkout_started", 0, {
       cta_location: "credit_pack_modal",
       plan_id: plan.toLowerCase() as "free" | "pro" | "max",
-      value: (pack?.priceCents || 0) / 100,
+      purchase_type: "credit_pack",
+      pack_id: pack.id,
+      credits_purchased: pack.credits,
+      current_plan: analyticsContext.currentPlan,
+      trigger: purchaseTrigger,
+      plan_credits_remaining: analyticsContext.planCreditsRemaining,
+      addon_credits_remaining: analyticsContext.addonCreditsRemaining,
+      value: pack.priceCents / 100,
       currency: "USD",
     });
     try {
@@ -81,6 +125,7 @@ export function CreditPackPurchaseButton({
         body: JSON.stringify({
           packId,
           language: lang,
+          trigger: purchaseTrigger,
           ...(analytics ? { analytics } : {}),
         }),
       });
@@ -103,6 +148,7 @@ export function CreditPackPurchaseButton({
         type="button"
         onClick={() => {
           setPacks(null);
+          setPurchaseAnalyticsContext(null);
           setError("");
           setOpen(true);
         }}

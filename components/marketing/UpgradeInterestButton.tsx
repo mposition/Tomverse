@@ -13,6 +13,10 @@ import {
   getAnalyticsAttributionSnapshot,
   trackProductEvent,
 } from "@/lib/productAnalyticsClient";
+import {
+  normalizePurchaseAnalyticsTrigger,
+  type PurchaseAnalyticsTrigger,
+} from "@/lib/productAnalyticsShared";
 
 type BillingPlan = {
   id: "free" | "pro" | "max";
@@ -27,6 +31,7 @@ type BillingPlan = {
   displayMonthlyPriceAmount?: number;
   displayAnnualPriceAmount?: number;
   displayExchangeRate?: number;
+  monthlyMessageLimit: number;
 };
 
 type BillingPromotion = {
@@ -49,6 +54,12 @@ type BillingConfig = {
 };
 
 type BillingInterval = "monthly" | "annual";
+
+type PurchaseAnalyticsContext = {
+  currentPlan: "free" | "pro" | "max";
+  planCreditsRemaining: number;
+  addonCreditsRemaining: number;
+};
 
 type PromotionValidationPayload = {
   valid?: boolean;
@@ -514,10 +525,12 @@ export function UpgradeInterestButton({
   plan,
   className,
   children,
+  trigger,
 }: {
   plan: "Pro" | "Max";
   className: string;
   children: ReactNode;
+  trigger?: PurchaseAnalyticsTrigger;
 }) {
   const { lang, t } = useLanguage();
   const copy = checkoutCopy[lang] || checkoutCopy.en;
@@ -532,6 +545,8 @@ export function UpgradeInterestButton({
   const [billingInterval, setBillingInterval] =
     useState<BillingInterval>("monthly");
   const [billingConfig, setBillingConfig] = useState<BillingConfig | null>(null);
+  const [purchaseAnalyticsContext, setPurchaseAnalyticsContext] =
+    useState<PurchaseAnalyticsContext | null>(null);
   const billingIntervalRef = useRef<BillingInterval>("monthly");
   const autoPromotionRequestRef = useRef(0);
   const inputId = useId();
@@ -666,6 +681,37 @@ export function UpgradeInterestButton({
       .catch(() => undefined);
   }, [applyFeaturedPromotion, billingConfig, isOpen]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const controller = new AbortController();
+    void fetch("/api/user/usage", {
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then(async (response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (!data) return;
+        setPurchaseAnalyticsContext({
+          currentPlan:
+            data.plan === "Max" ? "max" : data.plan === "Pro" ? "pro" : "free",
+          planCreditsRemaining: Math.max(
+            0,
+            Number(data.balances?.planRemainingCredits) || 0
+          ),
+          addonCreditsRemaining: Math.max(
+            0,
+            Number(data.balances?.purchasedRemainingCredits) || 0
+          ),
+        });
+      })
+      .catch((requestError) => {
+        if ((requestError as Error).name !== "AbortError") {
+          setPurchaseAnalyticsContext(null);
+        }
+      });
+    return () => controller.abort();
+  }, [isOpen]);
+
   const submit = async () => {
     if (isSending || isValidatingPromotion) return;
     const normalizedInputCode = promoCode.trim().toUpperCase();
@@ -697,9 +743,31 @@ export function UpgradeInterestButton({
         promotionForCheckout
       );
       const analytics = getAnalyticsAttributionSnapshot();
+      const purchaseTrigger = normalizePurchaseAnalyticsTrigger(
+        trigger ||
+          (typeof window !== "undefined"
+            ? new URLSearchParams(window.location.search).get("trigger")
+            : null)
+      );
+      const analyticsContext = purchaseAnalyticsContext || {
+        currentPlan: "free" as const,
+        planCreditsRemaining: 0,
+        addonCreditsRemaining: 0,
+      };
+      const creditsPurchased = Math.max(
+        0,
+        planConfig?.monthlyMessageLimit || (planId === "max" ? 10_000 : 3_000)
+      );
       trackProductEvent("checkout_started", 0, {
         billing_interval: billingInterval,
         plan_id: planId,
+        purchase_type: "subscription",
+        product_id: `subscription_${planId}_${billingInterval}`,
+        credits_purchased: creditsPurchased,
+        current_plan: analyticsContext.currentPlan,
+        trigger: purchaseTrigger,
+        plan_credits_remaining: analyticsContext.planCreditsRemaining,
+        addon_credits_remaining: analyticsContext.addonCreditsRemaining,
         value: checkoutDueUsdCents / 100,
         currency: "USD",
       });
@@ -711,6 +779,7 @@ export function UpgradeInterestButton({
           billingInterval,
           language: lang,
           promoCode: checkoutPromoCode || undefined,
+          trigger: purchaseTrigger,
           ...(analytics ? { analytics } : {}),
         }),
       });

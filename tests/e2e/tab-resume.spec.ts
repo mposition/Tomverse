@@ -21,7 +21,9 @@ test("server response contains an immediate chat shell", async ({ request }) => 
   expect(await response.text()).toContain('data-testid="chat-shell-skeleton"');
 });
 
-test("session revalidation preserves chat data without redundant reloads", async ({ page }) => {
+test("session revalidation preserves chat data without redundant reloads", async ({
+  page,
+}, testInfo) => {
   await prepareGuestPage(page, "ko");
   const state = await mockAuthenticatedApi(page);
   await mockChatStream(page, "Tab resume response");
@@ -36,7 +38,12 @@ test("session revalidation preserves chat data without redundant reloads", async
   );
 
   await page.goto("/chat");
-  await expect(page.getByTestId("desktop-chat-shell")).toBeVisible();
+  const chatShell = page.getByTestId(
+    testInfo.project.name.startsWith("mobile")
+      ? "mobile-chat-shell"
+      : "desktop-chat-shell"
+  );
+  await expect(chatShell).toBeVisible();
   await page.getByTestId("chat-textarea").fill("Keep this message");
   await page.getByTestId("chat-textarea").press("Enter");
   await expect(page.getByText("Tab resume response", { exact: true })).toBeVisible();
@@ -51,7 +58,7 @@ test("session revalidation preserves chat data without redundant reloads", async
   });
   await sessionResponse;
 
-  await expect(page.getByTestId("desktop-chat-shell")).toBeVisible();
+  await expect(chatShell).toBeVisible();
   await expect(page.getByTestId("chat-shell-skeleton")).toBeHidden();
   await expect(page.getByText("Tab resume response", { exact: true })).toBeVisible();
   await expect.poll(() => state.conversationListReads).toBe(conversationReads);

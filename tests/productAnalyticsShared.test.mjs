@@ -29,6 +29,10 @@ test("go-live analytics event names remain complete", () => {
     "chat_started",
     "first_response_completed",
     "multi_model_compare_completed",
+    "comparison_review_viewed",
+    "comparison_review_started",
+    "comparison_review_completed",
+    "comparison_review_failed",
     "followup_sent",
     "file_attached",
     "share_created",
@@ -90,6 +94,55 @@ test("analytics accepts privacy-safe locale market classification", () => {
   });
   assert.equal(parsed.properties.market_tier, "primary");
   assert.equal(parsed.properties.paid_marketing_eligible, true);
+});
+
+test("purchase analytics distinguishes subscriptions from credit packs", () => {
+  const subscription = analyticsClientEventSchema.parse({
+    ...safeEvent,
+    event_name: "checkout_started",
+    properties: {
+      purchase_type: "subscription",
+      product_id: "subscription_pro_monthly",
+      credits_purchased: 3_000,
+      current_plan: "free",
+      trigger: "proactive",
+      plan_credits_remaining: 120,
+      addon_credits_remaining: 40,
+    },
+  });
+  const creditPack = analyticsClientEventSchema.parse({
+    ...safeEvent,
+    event_name: "purchase_completed",
+    properties: {
+      purchase_type: "credit_pack",
+      pack_id: "project_1500",
+      credits_purchased: 1_500,
+      current_plan: "pro",
+      trigger: "usage_widget",
+      plan_credits_remaining: 80,
+      addon_credits_remaining: 20,
+    },
+  });
+
+  assert.equal(subscription.properties.purchase_type, "subscription");
+  assert.equal(subscription.properties.product_id, "subscription_pro_monthly");
+  assert.equal(creditPack.properties.purchase_type, "credit_pack");
+  assert.equal(creditPack.properties.pack_id, "project_1500");
+  assert.equal(creditPack.properties.credits_purchased, 1_500);
+});
+
+test("purchase analytics rejects unsupported triggers", () => {
+  assert.equal(
+    analyticsClientEventSchema.safeParse({
+      ...safeEvent,
+      event_name: "checkout_started",
+      properties: {
+        purchase_type: "subscription",
+        trigger: "unknown_surface",
+      },
+    }).success,
+    false
+  );
 });
 
 test("analytics rejects prompts, responses, and file metadata", () => {

@@ -1,6 +1,7 @@
 const exactMarketingPaths = new Set([
   "/",
   "/about",
+  "/ai-answer-review",
   "/ai-for-file-analysis",
   "/chatgpt-vs-claude",
   "/compare-ai-models",
@@ -31,6 +32,7 @@ const localizedMarketingLocales = new Set([
 ]);
 
 const localizedSearchIntentPaths = new Set([
+  "ai-answer-review",
   "ai-for-file-analysis",
   "chatgpt-vs-claude",
   "compare-ai-models",

@@ -17,6 +17,7 @@
     "security:regression": "node scripts/security-regression-check.mjs",
     "db:migrate": "node scripts/require-direct-database-url.mjs && prisma migrate deploy",
     "maintenance:cleanup": "node scripts/run-maintenance.mjs",
+    "maintenance:credit-reservations": "node scripts/run-credit-reconciliation.mjs",
     "postinstall": "prisma generate"
   },
   "dependencies": {

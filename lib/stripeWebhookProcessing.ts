@@ -16,6 +16,7 @@ import {
   analyticsAttributionFromMetadata,
   recordProductAnalyticsEvent,
 } from "@/lib/productAnalyticsServer";
+import { purchaseAnalyticsFromMetadata } from "@/lib/purchaseAnalytics";
 import {
   grantCreditPackFromCheckout,
   handleCreditPackDisputeClosed,
@@ -286,6 +287,15 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
   const analytics = analyticsAttributionFromMetadata(session.metadata);
   if (synced && analytics) {
     const value = Number(session.metadata?.analyticsValue);
+    const completedPlanId =
+      synced.plan === "Max" ? "max" : synced.plan === "Pro" ? "pro" : "free";
+    const completedBillingInterval = synced.billingInterval || "monthly";
+    const purchaseAnalytics = purchaseAnalyticsFromMetadata(session.metadata, {
+      currentPlan: "free",
+      productId: `subscription_${completedPlanId}_${completedBillingInterval}`,
+      creditsPurchased:
+        synced.plan === "Max" ? 10_000 : synced.plan === "Pro" ? 3_000 : 300,
+    });
     await recordProductAnalyticsEvent({
       eventName: "purchase_completed",
       source: "server",
@@ -294,9 +304,15 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
       modelCount: 0,
       plan: synced.plan,
       properties: {
-        billing_interval: synced.billingInterval || "monthly",
-        plan_id:
-          synced.plan === "Max" ? "max" : synced.plan === "Pro" ? "pro" : "free",
+        billing_interval: completedBillingInterval,
+        plan_id: completedPlanId,
+        purchase_type: "subscription",
+        product_id: purchaseAnalytics.productId,
+        credits_purchased: purchaseAnalytics.creditsPurchased,
+        current_plan: purchaseAnalytics.currentPlan,
+        trigger: purchaseAnalytics.trigger,
+        plan_credits_remaining: purchaseAnalytics.planCreditsRemaining,
+        addon_credits_remaining: purchaseAnalytics.addonCreditsRemaining,
         value: Number.isFinite(value) && value >= 0 ? value : 0,
         currency: "USD",
         transaction_id: session.id,

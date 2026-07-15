@@ -13,6 +13,7 @@ import {
   analyticsAttributionFromMetadata,
   recordProductAnalyticsEvent,
 } from "@/lib/productAnalyticsServer";
+import { purchaseAnalyticsFromMetadata } from "@/lib/purchaseAnalytics";
 
 const stripeId = (value: string | { id: string } | null | undefined) =>
   typeof value === "string" ? value : value?.id || null;
@@ -150,6 +151,11 @@ export async function grantCreditPackFromCheckout(
       select: { plan: true },
     });
     const planId = user?.plan === "Max" ? "max" : user?.plan === "Pro" ? "pro" : "free";
+    const purchaseAnalytics = purchaseAnalyticsFromMetadata(session.metadata, {
+      currentPlan: planId,
+      productId: pack.id,
+      creditsPurchased: pack.credits,
+    });
     await recordProductAnalyticsEvent({
       eventName: "purchase_completed",
       source: "server",
@@ -159,6 +165,13 @@ export async function grantCreditPackFromCheckout(
       plan: user?.plan || "Free",
       properties: {
         plan_id: planId,
+        purchase_type: "credit_pack",
+        pack_id: purchaseAnalytics.productId,
+        credits_purchased: purchaseAnalytics.creditsPurchased,
+        current_plan: purchaseAnalytics.currentPlan,
+        trigger: purchaseAnalytics.trigger,
+        plan_credits_remaining: purchaseAnalytics.planCreditsRemaining,
+        addon_credits_remaining: purchaseAnalytics.addonCreditsRemaining,
         value: pack.priceCents / 100,
         currency: "USD",
         transaction_id: session.id,

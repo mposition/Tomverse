@@ -262,6 +262,7 @@ export default function Home() {
   const latestLocalComparisonPromptRef = useRef<string | null>(null);
   const promptCountsRef = useRef<Map<string, number>>(new Map());
   const comparisonPresetAppliedRef = useRef(false);
+  const comparisonPresetRequestedRef = useRef(false);
 
   const [isPrivateMode, setIsPrivateMode] = useState(false);
 
@@ -505,8 +506,9 @@ export default function Home() {
             conversations.length === 0 ||
             currentChatId ||
             isInitialSelectedRef.current ||
-            comparisonPresetAppliedRef.current ||
-            new URLSearchParams(window.location.search).has("models")
+            comparisonPresetRequestedRef.current ||
+            new URLSearchParams(window.location.search).has("models") ||
+            new URLSearchParams(window.location.search).has("prompt")
         ) return;
 
         const firstConversation = conversations[0];
@@ -523,6 +525,7 @@ export default function Home() {
         }
 
         let cancelled = false;
+        let completed = false;
 
         const openInitialConversation = async () => {
             try {
@@ -530,15 +533,20 @@ export default function Home() {
                     cache: "no-store",
                 });
 
-                if (!res.ok || cancelled) return;
+                if (!res.ok) {
+                    throw new Error(`Initial conversation load failed: ${res.status}`);
+                }
+                if (cancelled) return;
 
                 const data = await res.json();
                 applyConversationSettings(data);
+                completed = true;
                 setCurrentChatId(firstConversation.id);
             } catch (error) {
                 if (!cancelled) {
                     console.error("Failed to open initial conversation:", error);
                     applyConversationSettings(firstConversation);
+                    completed = true;
                     setCurrentChatId(firstConversation.id);
                 }
             }
@@ -548,6 +556,9 @@ export default function Home() {
 
         return () => {
             cancelled = true;
+            if (!completed) {
+                isInitialSelectedRef.current = false;
+            }
         };
     }, [
         applyConversationSettings,
@@ -905,6 +916,7 @@ export default function Home() {
       return;
     }
 
+    comparisonPresetRequestedRef.current = true;
     let cancelled = false;
     const presetModels = isGuestMode
       ? clampGuestSelectedModels(requestedModels)

@@ -7,6 +7,7 @@ const eventGroups = [
   { label: "Model Finder", events: ["model_finder_viewed", "model_finder_started", "model_finder_completed", "model_finder_skipped", "recommended_model_accepted", "recommended_model_changed", "advanced_model_suggested", "advanced_model_selected"] },
   { label: "First experience", events: ["chat_started", "first_response_completed"] },
   { label: "Core value", events: ["multi_model_compare_completed"] },
+  { label: "AI Review", events: ["comparison_review_viewed", "comparison_review_started", "comparison_review_completed", "comparison_review_failed"] },
   { label: "Activation action", events: ["followup_sent", "file_attached", "conversation_saved", "share_created"] },
   { label: "Upgrade intent", events: ["credit_limit_hit", "upgrade_prompt_view"] },
   { label: "Signup", events: ["signup_page_view", "signup_started", "signup_completed"] },
@@ -62,6 +63,23 @@ export function AdminProductAnalyticsPanel({
 
         <div className="mt-4 rounded-2xl border border-blue-500/20 bg-blue-500/5 p-4 text-sm leading-6 text-blue-100">
           <strong>Activation definition:</strong> a new user completes a comparison with at least two models within 24 hours of signup and then sends a follow-up, saves a conversation, or creates a share.
+        </div>
+      </div>
+
+      <div className="rounded-3xl border border-blue-500/20 bg-blue-500/5 p-6">
+        <div>
+          <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-300">AI Review conversion · 30d</p>
+          <h3 className="mt-2 text-xl font-black text-white">Cross-review to upgrade and checkout</h3>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
+            Unique actors are sequenced from comparison_review_started to completed, then to upgrade intent, checkout, and purchase. Conversion rates after completion use completed reviewers as the denominator.
+          </p>
+        </div>
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <Metric label="Review started" value={String(dashboard.reviewFunnel30d.startedUsers)} detail="Unique actors" />
+          <Metric label="Review completed" value={`${dashboard.reviewFunnel30d.completionRate.toFixed(1)}%`} detail={`${dashboard.reviewFunnel30d.completedUsers} unique actors`} />
+          <Metric label="Upgrade intent" value={`${dashboard.reviewFunnel30d.upgradeIntentRate.toFixed(1)}%`} detail={`${dashboard.reviewFunnel30d.upgradeIntentUsers} after review`} />
+          <Metric label="Checkout" value={`${dashboard.reviewFunnel30d.checkoutRate.toFixed(1)}%`} detail={`${dashboard.reviewFunnel30d.checkoutUsers} after review`} />
+          <Metric label="Purchase" value={`${dashboard.reviewFunnel30d.purchaseRate.toFixed(1)}%`} detail={`${dashboard.reviewFunnel30d.purchaseUsers} after review`} />
         </div>
       </div>
 

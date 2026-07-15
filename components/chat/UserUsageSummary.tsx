@@ -168,13 +168,13 @@ export function UserUsageSummary({
           <div className="mt-2 flex flex-wrap gap-2">
             {preferUpgrade ? (
               <>
-                <Link href="/pricing" className="rounded-lg bg-blue-600 px-2.5 py-1.5 font-black text-white">{upgradeLabel}</Link>
-                <CreditPackPurchaseButton className="rounded-lg border border-amber-400 px-2.5 py-1.5 font-black">{addCreditLabel}</CreditPackPurchaseButton>
+                <Link href="/pricing?trigger=usage_widget" className="rounded-lg bg-blue-600 px-2.5 py-1.5 font-black text-white">{upgradeLabel}</Link>
+                <CreditPackPurchaseButton trigger="usage_widget" className="rounded-lg border border-amber-400 px-2.5 py-1.5 font-black">{addCreditLabel}</CreditPackPurchaseButton>
               </>
             ) : (
               <>
-                <CreditPackPurchaseButton className="rounded-lg bg-emerald-600 px-2.5 py-1.5 font-black text-white">{addCreditLabel}</CreditPackPurchaseButton>
-                {usage.plan === "Pro" && <Link href="/pricing" className="rounded-lg border border-amber-400 px-2.5 py-1.5 font-black">{lang === "ko" ? "Max 비교" : "Compare Max"}</Link>}
+                <CreditPackPurchaseButton trigger="usage_widget" className="rounded-lg bg-emerald-600 px-2.5 py-1.5 font-black text-white">{addCreditLabel}</CreditPackPurchaseButton>
+                {usage.plan === "Pro" && <Link href="/pricing?trigger=usage_widget" className="rounded-lg border border-amber-400 px-2.5 py-1.5 font-black">{lang === "ko" ? "Max 비교" : "Compare Max"}</Link>}
                 {usage.recommendation.secondary === "business" && <Link href="/support" className="rounded-lg border border-amber-400 px-2.5 py-1.5 font-black">Business</Link>}
               </>
             )}

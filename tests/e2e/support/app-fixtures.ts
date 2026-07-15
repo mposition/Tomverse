@@ -16,7 +16,72 @@ const json = (body: JsonValue, status = 200) => ({
   body: JSON.stringify(body),
 });
 
+const publicBillingPlans = [
+  {
+    id: "free",
+    name: "Free",
+    monthlyPriceCents: 0,
+    annualPriceCents: 0,
+    currency: "USD",
+    monthlyMessageLimit: 300,
+  },
+  {
+    id: "pro",
+    name: "Pro",
+    monthlyPriceCents: 1_500,
+    annualPriceCents: 14_400,
+    currency: "USD",
+    monthlyMessageLimit: 3_000,
+  },
+  {
+    id: "max",
+    name: "Max",
+    monthlyPriceCents: 2_500,
+    annualPriceCents: 24_000,
+    currency: "USD",
+    monthlyMessageLimit: 10_000,
+  },
+];
+
+export async function mockPublicBillingConfig(page: Page) {
+  await page.context().route("**/api/billing/config**", (route) =>
+    route.fulfill(
+      json({
+        plans: publicBillingPlans,
+        featuredPromotion: null,
+        promotionPolicy: {
+          codesListed: false,
+          validation: "server_only",
+          annualDiscountStacking: "promotion_specific_default_denied",
+        },
+      })
+    )
+  );
+}
+
+export async function mockPublicProofMetrics(page: Page) {
+  await page.context().route("**/api/public/proof-metrics**", (route) =>
+    route.fulfill(
+      json({
+        periodDays: 30,
+        generatedAt: "2099-01-01T00:00:00.000Z",
+        comparisons: null,
+        fileWorkflows: null,
+        minimumPublicCount: 20,
+      })
+    )
+  );
+}
+
 export async function prepareGuestPage(page: Page, language: QaLanguage = "ko") {
+  await mockPublicBillingConfig(page);
+  await mockPublicProofMetrics(page);
+  await page.route("**/api/app-settings**", (route) =>
+    route.fulfill(json({ guestDefaultModelId: "gemini-2-5-flash" }))
+  );
+  await page.route("**/api/models/status**", (route) =>
+    route.fulfill(json({ generatedAt: "2099-01-01T00:00:00.000Z", models: [] }))
+  );
   await page.route("**/api/auth/session**", (route) =>
     route.fulfill(json({ user: null, expires: null }))
   );
@@ -145,6 +210,7 @@ export async function mockAuthenticatedApi(
           usesFilesFrequently: null,
           defaultModelId: "gpt-5-4-mini",
           modelFinderCompletedAt: null,
+          modelFinderDismissedAt: null,
         },
       })
     )
@@ -152,6 +218,65 @@ export async function mockAuthenticatedApi(
 
   await page.route("**/api/models/status", (route) =>
     route.fulfill(json({ models: [] }))
+  );
+
+  await page.route("**/api/user/usage**", (route) =>
+    route.fulfill(
+      json({
+        plan: "Free",
+        subscription: {
+          status: null,
+          billingInterval: null,
+          currentPeriodEnd: null,
+          cancelAtPeriodEnd: false,
+        },
+        usage: {
+          creditsDay: 0,
+          creditsMonth: 0,
+          proModelResponsesMonth: 0,
+          tokensDay: 0,
+          tokensMonth: 0,
+          costDay: 0,
+          costMonth: 0,
+        },
+        balances: {
+          planRemainingCredits: 300,
+          planResetsAt: "2099-02-01T00:00:00.000Z",
+          purchasedRemainingCredits: 0,
+          purchasedFundedCostMicroUsd: 0,
+          purchasedEarliestExpiry: null,
+        },
+        creditDebt: {
+          credits: 0,
+          fundedCostMicroUsd: 0,
+          riskStatus: "clear",
+          riskReason: null,
+          riskAt: null,
+        },
+        recommendation: { primary: "upgrade_pro", secondary: null },
+        limits: {
+          creditsDay: 30,
+          creditsMonth: 300,
+          proModelResponsesMonth: 30,
+          tokensDay: 0,
+          tokensMonth: 0,
+          costDay: 0,
+          costMonth: 0,
+          maxModels: 3,
+          allowAttachments: true,
+          allowSharing: true,
+          allowDownloads: true,
+        },
+      })
+    )
+  );
+
+  await page.route("**/api/projects**", (route) =>
+    route.fulfill(json({ projects: [] }))
+  );
+
+  await page.route("**/api/billing/refund-request**", (route) =>
+    route.fulfill(json({ pendingRequest: null }))
   );
 
   await page.route("**/api/conversations", async (route) => {

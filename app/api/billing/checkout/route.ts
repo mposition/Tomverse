@@ -30,11 +30,18 @@ import { sendBillingWelcomeEmail } from "@/lib/billingEmails";
 import { prisma } from "@/lib/prisma";
 import { getPublicAppOrigin } from "@/lib/publicUrl";
 import { getStripe } from "@/lib/stripe";
-import { analyticsAttributionSchema } from "@/lib/productAnalyticsShared";
+import {
+  analyticsAttributionSchema,
+  purchaseAnalyticsTriggerSchema,
+} from "@/lib/productAnalyticsShared";
 import {
   analyticsCountryFromHeaders,
   recordProductAnalyticsEvent,
 } from "@/lib/productAnalyticsServer";
+import {
+  getPurchaseAnalyticsSnapshot,
+  purchaseAnalyticsMetadata,
+} from "@/lib/purchaseAnalytics";
 
 const checkoutSchema = z
   .object({
@@ -43,6 +50,7 @@ const checkoutSchema = z
     language: z.enum(["ko", "en", "zh", "fr", "de", "es", "pt"]).optional(),
     promoCode: z.string().trim().toUpperCase().max(32).optional(),
     analytics: analyticsAttributionSchema.optional(),
+    trigger: purchaseAnalyticsTriggerSchema.default("proactive"),
   })
   .strict();
 
@@ -294,11 +302,14 @@ export async function POST(req: Request) {
       day: 20,
     });
 
-    const { planId, billingInterval, language, promoCode, analytics } = await readLimitedJson(
-      req,
-      4 * 1024,
-      checkoutSchema
-    );
+    const {
+      planId,
+      billingInterval,
+      language,
+      promoCode,
+      analytics,
+      trigger,
+    } = await readLimitedJson(req, 4 * 1024, checkoutSchema);
     const plans = await getBillingPlans();
     const plan = plans.find((item) => item.id === planId && item.isActive);
     if (!plan) {
@@ -317,6 +328,8 @@ export async function POST(req: Request) {
         stripeCustomerId: true,
         stripeSubscriptionId: true,
         subscriptionStatus: true,
+        plan: true,
+        creditDebtCredits: true,
         settings: {
           select: { language: true },
         },
@@ -375,6 +388,30 @@ export async function POST(req: Request) {
           country: edgeCountry === "ZZ" ? analytics.country : edgeCountry,
         }
       : null;
+    const currentPlan =
+      user.plan === "Max" ? "Max" : user.plan === "Pro" ? "Pro" : "Free";
+    const productId = `subscription_${planId}_${billingInterval}`;
+    const purchaseSnapshot = trustedAnalytics
+      ? await getPurchaseAnalyticsSnapshot({
+          userId: user.id,
+          currentPlan,
+          creditDebtCredits: user.creditDebtCredits,
+        }).catch((snapshotError) => {
+          console.warn("Subscription purchase analytics snapshot failed.", {
+            errorName:
+              snapshotError instanceof Error
+                ? snapshotError.name
+                : "UnknownError",
+          });
+          return null;
+        })
+      : null;
+    const purchaseContext = purchaseSnapshot?.context || {
+      currentPlan:
+        currentPlan === "Max" ? "max" : currentPlan === "Pro" ? "pro" : "free",
+      planCreditsRemaining: 0,
+      addonCreditsRemaining: 0,
+    };
     const analyticsMetadata: Record<string, string> = trustedAnalytics
       ? {
           analyticsClientId: trustedAnalytics.client_id,
@@ -385,6 +422,12 @@ export async function POST(req: Request) {
           analyticsLanguage: trustedAnalytics.language,
           analyticsCountry: trustedAnalytics.country,
           analyticsValue: String(finalPriceCents / 100),
+          ...purchaseAnalyticsMetadata({
+            context: purchaseContext,
+            trigger,
+            productId,
+            creditsPurchased: plan.monthlyMessageLimit,
+          }),
         }
       : {};
     const origin = getPublicAppOrigin(req);
@@ -418,6 +461,13 @@ export async function POST(req: Request) {
           properties: {
             billing_interval: billingInterval,
             plan_id: planId,
+            purchase_type: "subscription",
+            product_id: productId,
+            credits_purchased: plan.monthlyMessageLimit,
+            current_plan: purchaseContext.currentPlan,
+            trigger,
+            plan_credits_remaining: purchaseContext.planCreditsRemaining,
+            addon_credits_remaining: purchaseContext.addonCreditsRemaining,
             value: 0,
             currency: "USD",
             transaction_id: transactionId,

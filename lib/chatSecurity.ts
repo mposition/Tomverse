@@ -2,6 +2,7 @@ import "server-only";
 
 import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import type { Prisma } from "@prisma/client";
+import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import {
     getModelBillingProfile,
@@ -68,6 +69,8 @@ type ReservationEntry = {
 export type ChatUsageReservation = {
     reservationId: string;
     userId?: string;
+    traceId: string;
+    source: "chat" | "comparison_review";
     modelId: string;
     provider: AiModel["provider"];
     entries: ReservationEntry[];
@@ -79,6 +82,78 @@ export type ChatUsageReservation = {
     planReservedCredits: number;
     addOnReservedCredits: number;
     addOnReservations: AddOnCreditReservationEntry[];
+};
+
+const durableReservationPayloadSchema = z
+    .object({
+        reservationId: z.string().min(1).max(100),
+        userId: z.string().min(1).max(100).optional(),
+        traceId: z.string().min(1).max(120),
+        source: z.enum(["chat", "comparison_review"]),
+        modelId: z.string().min(1).max(160),
+        provider: z.string().min(1).max(80),
+        entries: z.array(
+            z
+                .object({
+                    key: z.string().min(1).max(240),
+                    period: z.string().min(1).max(80),
+                    periodStart: z.iso.datetime(),
+                    amount: z.number().int().nonnegative(),
+                    metric: z.enum([
+                        "tokens",
+                        "cost",
+                        "credits",
+                        "plan-credits",
+                        "plan-cost",
+                        "pro-response",
+                    ]),
+                })
+                .strict()
+        ).max(40),
+        usageCredits: z.number().int().positive(),
+        inputTokens: z.number().int().nonnegative(),
+        maxOutputTokens: z.number().int().nonnegative(),
+        inputUsdPerMillionTokens: z.number().nonnegative(),
+        outputUsdPerMillionTokens: z.number().nonnegative(),
+        planReservedCredits: z.number().int().nonnegative(),
+        addOnReservedCredits: z.number().int().nonnegative(),
+        addOnReservations: z.array(
+            z
+                .object({
+                    lotId: z.string().min(1).max(100),
+                    purchaseId: z.string().min(1).max(100).nullable(),
+                    credits: z.number().int().nonnegative(),
+                    fundedCostMicroUsd: z.number().int().nonnegative(),
+                })
+                .strict()
+        ).max(40),
+    })
+    .strict();
+
+const serializeReservation = (
+    reservation: ChatUsageReservation
+): Prisma.InputJsonValue => {
+    const { userId, ...rest } = reservation;
+    return {
+        ...rest,
+        entries: reservation.entries.map((entry) => ({
+            ...entry,
+            periodStart: entry.periodStart.toISOString(),
+        })),
+        ...(userId ? { userId } : {}),
+    };
+};
+
+const deserializeReservation = (payload: Prisma.JsonValue) => {
+    const parsed = durableReservationPayloadSchema.parse(payload);
+    return {
+        ...parsed,
+        provider: parsed.provider as AiModel["provider"],
+        entries: parsed.entries.map((entry) => ({
+            ...entry,
+            periodStart: new Date(entry.periodStart),
+        })),
+    } satisfies ChatUsageReservation;
 };
 
 const PLAN_MODEL_TIER_LIMIT: Record<ModelTier, ModelTier> = {
@@ -402,16 +477,33 @@ const incrementUsage = async (
 
 export const acquireChatAccess = async (
     access: ChatAccess,
-    budget: ChatBudget
+    budget: ChatBudget,
+    options?: {
+        traceId?: string;
+        source?: "chat" | "comparison_review";
+    }
 ) => {
     const now = new Date();
     const leaseId = randomUUID();
     const reservationId = randomUUID();
+    const traceId = options?.traceId || reservationId;
+    const reservationSource = options?.source || "chat";
+    const reservationTtlSeconds = Math.min(
+        1_800,
+        Math.max(
+            300,
+            positiveInteger(process.env.CHAT_RESERVATION_TTL_SECONDS, 300)
+        )
+    );
+    const reservationExpiresAt = new Date(
+        now.getTime() + reservationTtlSeconds * 1000
+    );
     const reservationEntries: ReservationEntry[] = [];
     let planReservedCredits = budget.usageCredits;
     let addOnReservedCredits = 0;
     let addOnReservedCost = 0;
     let addOnReservations: AddOnCreditReservationEntry[] = [];
+    let durableReservation: ChatUsageReservation | null = null;
     const concurrentLimit =
         access.kind === "user"
             ? positiveInteger(process.env.CHAT_USER_CONCURRENT, 3)
@@ -989,14 +1081,12 @@ export const acquireChatAccess = async (
             INSERT INTO "ChatRequestLease" ("id", "subjectKey", "expiresAt", "createdAt")
             VALUES (${leaseId}, ${leaseSubjectKey}, ${new Date(now.getTime() + 120_000)}, NOW())
         `;
-    });
 
-    return {
-        leaseId,
-        setCookie: access.setCookie,
-        usageReservation: {
+        durableReservation = {
             reservationId,
             userId: access.userId,
+            traceId,
+            source: reservationSource,
             modelId: budget.modelId,
             provider: budget.provider,
             entries: reservationEntries,
@@ -1008,7 +1098,36 @@ export const acquireChatAccess = async (
             planReservedCredits,
             addOnReservedCredits,
             addOnReservations,
-        } satisfies ChatUsageReservation,
+        };
+        await tx.chatCreditReservation.create({
+            data: {
+                id: reservationId,
+                userId: access.userId || null,
+                subjectKey: access.subjectKey,
+                traceId,
+                source: reservationSource,
+                provider: budget.provider,
+                modelId: budget.modelId,
+                status: "reserved",
+                idempotencyKey: `chat-credit-reservation:${reservationId}:v1`,
+                reservationPayload: serializeReservation(durableReservation),
+                reservedCredits: budget.usageCredits,
+                reservedCostMicroUsd: BigInt(reservedCost),
+                planReservedCredits,
+                addOnReservedCredits,
+                expiresAt: reservationExpiresAt,
+            },
+        });
+    });
+
+    if (!durableReservation) {
+        throw new Error("Durable chat credit reservation was not created.");
+    }
+
+    return {
+        leaseId,
+        setCookie: access.setCookie,
+        usageReservation: durableReservation,
     };
 };
 
@@ -1018,48 +1137,81 @@ export const settleChatUsage = async (
         inputTokens?: number;
         outputTokens?: number;
         outcome: "completed" | "cancelled" | "failed" | "empty";
+    },
+    options?: {
+        reconciled?: boolean;
+        reason?: string;
     }
 ) => {
-    const actualInput = Number.isSafeInteger(usage.inputTokens)
-        ? Math.max(0, usage.inputTokens!)
-        : reservation.inputTokens;
-    const actualOutput = Number.isSafeInteger(usage.outputTokens)
-        ? Math.max(0, usage.outputTokens!)
-        : reservation.maxOutputTokens;
-    const actualTokens = actualInput + actualOutput;
-    const actualCredits = getSettledUsageCredits({
-        reservedCredits: reservation.usageCredits,
-        reservedInputTokens: reservation.inputTokens,
-        reservedOutputTokens: reservation.maxOutputTokens,
-        actualInputTokens: actualInput,
-        actualOutputTokens: actualOutput,
-        outcome: usage.outcome,
-    });
-    const actualCost =
-        microdollarsFor(
-            actualInput,
-            reservation.inputUsdPerMillionTokens
-        ) +
-        microdollarsFor(
-            actualOutput,
-            reservation.outputUsdPerMillionTokens
-        );
-    const planActualCredits = Math.min(
-        actualCredits,
-        reservation.planReservedCredits
-    );
-    const addOnActualCredits = Math.max(0, actualCredits - planActualCredits);
-    const addOnActualCost =
-        actualCredits > 0 && addOnActualCredits > 0
-            ? Math.ceil((actualCost * addOnActualCredits) / actualCredits)
-            : 0;
-    const planActualCost = Math.max(0, actualCost - addOnActualCost);
-
-    await prisma.$transaction(async (tx) => {
+    const settlement = await prisma.$transaction(async (tx) => {
         if (reservation.userId) {
             await lockCreditAccount(tx, reservation.userId);
         }
-        for (const entry of reservation.entries) {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`chat-credit-reservation:${reservation.reservationId}`}))`;
+        const durable = await tx.chatCreditReservation.findUnique({
+            where: { id: reservation.reservationId },
+        });
+        if (!durable) {
+            throw new Error("Durable chat credit reservation was not found.");
+        }
+        if (durable.status !== "reserved") {
+            return {
+                applied: false,
+                status: durable.status,
+                actualInput: 0,
+                actualOutput: 0,
+                actualCost: 0,
+                provider: durable.provider as AiModel["provider"],
+                modelId: durable.modelId,
+            };
+        }
+        if (
+            durable.idempotencyKey !==
+            `chat-credit-reservation:${reservation.reservationId}:v1`
+        ) {
+            throw new Error("Chat credit reservation idempotency key mismatch.");
+        }
+
+        const canonical = deserializeReservation(durable.reservationPayload);
+        const actualInput = Number.isSafeInteger(usage.inputTokens)
+            ? Math.max(0, usage.inputTokens!)
+            : canonical.inputTokens;
+        const actualOutput = Number.isSafeInteger(usage.outputTokens)
+            ? Math.max(0, usage.outputTokens!)
+            : canonical.maxOutputTokens;
+        const actualTokens = actualInput + actualOutput;
+        const actualCredits = getSettledUsageCredits({
+            reservedCredits: canonical.usageCredits,
+            reservedInputTokens: canonical.inputTokens,
+            reservedOutputTokens: canonical.maxOutputTokens,
+            actualInputTokens: actualInput,
+            actualOutputTokens: actualOutput,
+            outcome: usage.outcome,
+        });
+        const actualCost =
+            microdollarsFor(
+                actualInput,
+                canonical.inputUsdPerMillionTokens
+            ) +
+            microdollarsFor(
+                actualOutput,
+                canonical.outputUsdPerMillionTokens
+            );
+        const planActualCredits = Math.min(
+            actualCredits,
+            canonical.planReservedCredits
+        );
+        const addOnActualCredits = Math.max(
+            0,
+            actualCredits - planActualCredits
+        );
+        const addOnActualCost =
+            actualCredits > 0 && addOnActualCredits > 0
+                ? Math.ceil((actualCost * addOnActualCredits) / actualCredits)
+                : 0;
+        const planActualCost = Math.max(0, actualCost - addOnActualCost);
+
+        for (const entry of canonical.entries) {
             const actual =
                 entry.metric === "tokens"
                     ? actualTokens
@@ -1069,48 +1221,164 @@ export const settleChatUsage = async (
                         ? planActualCost
                         : entry.metric === "plan-credits"
                           ? planActualCredits
-                      : entry.metric === "credits"
-                        ? actualCredits
-                        : actualCredits > 0
-                          ? 1
-                          : 0;
+                          : entry.metric === "credits"
+                            ? actualCredits
+                            : actualCredits > 0
+                              ? 1
+                              : 0;
             const difference = actual - entry.amount;
-            await tx.chatUsageBucket.updateMany({
-                where: {
-                    key: entry.key,
-                    period: entry.period,
-                    periodStart: entry.periodStart,
-                },
-                data: {
-                    count:
-                        difference > 0
-                            ? { increment: difference }
-                            : { decrement: Math.abs(difference) },
-                },
-            });
+            if (difference > 0) {
+                await tx.chatUsageBucket.updateMany({
+                    where: {
+                        key: entry.key,
+                        period: entry.period,
+                        periodStart: entry.periodStart,
+                    },
+                    data: { count: { increment: difference } },
+                });
+            } else if (difference < 0) {
+                const refundAmount = Math.abs(difference);
+                await tx.$executeRaw`
+                    UPDATE "ChatUsageBucket"
+                    SET "count" = GREATEST(0, "count" - ${refundAmount}),
+                        "updatedAt" = NOW()
+                    WHERE "key" = ${entry.key}
+                      AND "period" = ${entry.period}
+                      AND "periodStart" = ${entry.periodStart}
+                `;
+            }
         }
-        if (
-            reservation.userId &&
-            reservation.addOnReservations.length > 0
-        ) {
+        if (canonical.userId && canonical.addOnReservations.length > 0) {
             await settleAddOnCredits(tx, {
-                userId: reservation.userId,
-                reservationId: reservation.reservationId,
-                entries: reservation.addOnReservations,
+                userId: canonical.userId,
+                reservationId: canonical.reservationId,
+                entries: canonical.addOnReservations,
                 settledCredits: addOnActualCredits,
                 settledFundedCostMicroUsd: addOnActualCost,
                 outcome: usage.outcome,
             });
         }
+
+        const terminalStatus = actualCredits > 0 ? "settled" : "refunded";
+        await tx.chatCreditReservation.update({
+            where: { id: durable.id },
+            data: {
+                status: terminalStatus,
+                outcome: usage.outcome,
+                settledCredits: actualCredits,
+                settledCostMicroUsd: BigInt(actualCost),
+                settledAt: new Date(),
+                reconciledAt: options?.reconciled ? new Date() : null,
+                lastError: options?.reason?.slice(0, 500) || null,
+            },
+        });
+
+        return {
+            applied: true,
+            status: terminalStatus,
+            actualInput,
+            actualOutput,
+            actualCost,
+            provider: canonical.provider,
+            modelId: canonical.modelId,
+        };
     });
 
-    await recordInternalProviderUsage({
-        provider: reservation.provider,
-        modelId: reservation.modelId,
-        inputTokens: actualInput,
-        outputTokens: actualOutput,
-        estimatedCostMicroUsd: actualCost,
+    if (
+        settlement.applied &&
+        (settlement.actualInput > 0 ||
+            settlement.actualOutput > 0 ||
+            settlement.actualCost > 0)
+    ) {
+        await recordInternalProviderUsage({
+            provider: settlement.provider,
+            modelId: settlement.modelId,
+            inputTokens: settlement.actualInput,
+            outputTokens: settlement.actualOutput,
+            estimatedCostMicroUsd: settlement.actualCost,
+        });
+    }
+    return { applied: settlement.applied, status: settlement.status };
+};
+
+const boundedProviderIdentifier = (value: string | null | undefined) => {
+    const normalized = value?.trim();
+    if (!normalized) return null;
+    return normalized.replace(/[^A-Za-z0-9._:/-]/g, "").slice(0, 240) || null;
+};
+
+export const linkChatReservationProviderRequest = async (
+    reservationId: string,
+    identifiers: {
+        providerRequestId?: string | null;
+        providerResponseId?: string | null;
+    }
+) => {
+    const providerResponseId = boundedProviderIdentifier(
+        identifiers.providerResponseId
+    );
+    const providerRequestId =
+        boundedProviderIdentifier(identifiers.providerRequestId) ||
+        providerResponseId;
+    if (!providerRequestId && !providerResponseId) return false;
+    const updated = await prisma.chatCreditReservation.updateMany({
+        where: {
+            id: reservationId,
+            providerRequestId: null,
+            providerResponseId: null,
+        },
+        data: {
+            providerRequestId,
+            providerResponseId,
+            providerRequestLinkedAt: new Date(),
+        },
     });
+    return updated.count === 1;
+};
+
+export const reconcileExpiredChatCreditReservations = async (
+    now = new Date(),
+    maximum = 500
+) => {
+    const limit = Math.min(1_000, Math.max(1, maximum));
+    const rows = await prisma.chatCreditReservation.findMany({
+        where: { status: "reserved", expiresAt: { lte: now } },
+        orderBy: [{ expiresAt: "asc" }, { createdAt: "asc" }],
+        take: limit,
+        select: {
+            id: true,
+            reservationPayload: true,
+        },
+    });
+    let refunded = 0;
+    let alreadyFinalized = 0;
+    let failed = 0;
+    for (const row of rows) {
+        try {
+            const reservation = deserializeReservation(row.reservationPayload);
+            const result = await settleChatUsage(
+                reservation,
+                { inputTokens: 0, outputTokens: 0, outcome: "failed" },
+                { reconciled: true, reason: "reservation_expired" }
+            );
+            if (result.applied && result.status === "refunded") refunded += 1;
+            else alreadyFinalized += 1;
+        } catch (error) {
+            failed += 1;
+            const message =
+                error instanceof Error ? error.message.slice(0, 500) : "Unknown error";
+            await prisma.chatCreditReservation.updateMany({
+                where: { id: row.id, status: "reserved" },
+                data: { lastError: `reconcile_failed:${message}` },
+            }).catch(() => undefined);
+        }
+    }
+    return {
+        examined: rows.length,
+        refunded,
+        alreadyFinalized,
+        failed,
+    };
 };
 
 export const releaseChatAccess = async (leaseId: string) => {

@@ -802,12 +802,14 @@ export function AuthButton() {
                                         <div className="grid gap-2 sm:grid-cols-2">
                                             {accountPlan !== "Max" && <UpgradeInterestButton
                                                 plan={accountPlan === "Pro" ? "Max" : "Pro"}
+                                                trigger="account"
                                                 className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-3 text-sm font-black text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-70"
                                             >
                                                 <CreditCard className="h-4 w-4" />
                                                 {accountPlan === "Pro" ? (globalLang === "ko" ? "Max로 업그레이드" : "Upgrade to Max") : t("billing.joinProWaitlist")}
                                             </UpgradeInterestButton>}
                                             <CreditPackPurchaseButton
+                                                trigger="account"
                                                 className="flex w-full items-center justify-center gap-2 rounded-xl border border-purple-300 bg-purple-50 px-3 py-3 text-sm font-black text-purple-700 transition-colors hover:bg-purple-100 disabled:cursor-not-allowed disabled:opacity-70 dark:border-purple-900/60 dark:bg-purple-950/30 dark:text-purple-200 dark:hover:bg-purple-950/50"
                                             >
                                                 <CreditCard className="h-4 w-4" />
@@ -824,6 +826,7 @@ export function AuthButton() {
                                 <div className="flex w-full flex-col gap-2 sm:hidden">
                                     <UpgradeInterestButton
                                         plan={mobileUpgradePlan}
+                                        trigger="account"
                                         className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black text-white transition-colors disabled:cursor-not-allowed disabled:opacity-70 ${
                                             mobileUpgradePlan === "Max"
                                                 ? "bg-purple-600 hover:bg-purple-500"

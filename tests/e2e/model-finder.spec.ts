@@ -25,6 +25,7 @@ test("new signed-in users can choose a Standard default with explicit optional u
             usesFilesFrequently: null,
             defaultModelId: "gpt-5-4-mini",
             modelFinderCompletedAt: null,
+            modelFinderDismissedAt: null,
           },
         }),
       });
@@ -43,6 +44,7 @@ test("new signed-in users can choose a Standard default with explicit optional u
         success: true,
         defaultModelId: selectedModel,
         modelFinderCompletedAt: "2026-07-15T00:00:00.000Z",
+        modelFinderDismissedAt: null,
       }),
     });
   });
@@ -85,4 +87,54 @@ test("new signed-in users can choose a Standard default with explicit optional u
       name: /문서를 첨부하고 이렇게 물어보세요/,
     })
   ).toBeVisible();
+});
+
+test("remind later records a dismissal without completing model finder", async ({
+  page,
+}) => {
+  await mockAuthenticatedApi(page);
+  await page.unroute("**/api/user/model-finder");
+
+  let savedBody: Record<string, unknown> | null = null;
+  await page.route("**/api/user/model-finder", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          variant: "finder",
+          shouldShow: true,
+          settings: {
+            preferredTasks: [],
+            preferredPriority: null,
+            usesFilesFrequently: null,
+            defaultModelId: "gpt-5-4-mini",
+            modelFinderCompletedAt: null,
+            modelFinderDismissedAt: null,
+          },
+        }),
+      });
+      return;
+    }
+
+    savedBody = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        success: true,
+        defaultModelId: "gpt-5-4-mini",
+        modelFinderCompletedAt: null,
+        modelFinderDismissedAt: "2026-07-15T00:00:00.000Z",
+        modelFinderReappearsAt: "2026-07-18T00:00:00.000Z",
+      }),
+    });
+  });
+
+  await page.goto("/chat?lang=ko");
+  const finder = page.getByTestId("model-finder");
+  await expect(finder).toBeVisible();
+  await page.getByTestId("model-finder-remind-later").click();
+  await expect(finder).toBeHidden();
+  expect(savedBody).toEqual({ action: "dismiss" });
 });

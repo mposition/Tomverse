@@ -396,6 +396,28 @@ npm run maintenance:cleanup
 Run it once per day. It deletes expired usage buckets and request leases, and
 removes expired or revoked share tokens and snapshots.
 
+Create a second Railway Cron service for durable AI-credit reservation recovery
+and set its Config File Path to `/railway.credit-reconciliation.json`. It runs
+every five minutes:
+
+```text
+npm run maintenance:credit-reservations
+```
+
+The web service and this Cron service must share `MAINTENANCE_SECRET` and
+`MAINTENANCE_URL`. Chat credit reservations expire after five minutes by
+default; the reconciler atomically refunds reservations that remain in
+`reserved` state after expiry. A value from 300 to 1800 seconds can be set when
+longer provider calls are expected:
+
+```text
+CHAT_RESERVATION_TTL_SECONDS=300
+```
+
+Do not schedule this job less frequently than every five minutes. The daily
+cleanup also runs the reconciler as a fallback, but it is not a substitute for
+the five-minute Cron service.
+
 ## Railway Healthcheck
 
 When host protection is enabled, set Railway's Healthcheck Path to:

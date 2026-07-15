@@ -62,7 +62,11 @@ export default async function LocalizedIntentPage({
         <MarketingInfoPage
           content={searchIntentPages[intent]}
           template={
-            intent === "chatgpt-vs-claude" ? "chatgpt-vs-claude" : undefined
+            intent === "chatgpt-vs-claude"
+              ? "chatgpt-vs-claude"
+              : intent === "ai-answer-review"
+                ? "ai-answer-review"
+                : undefined
           }
         />
       </LanguageProvider>

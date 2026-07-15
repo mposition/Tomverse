@@ -26,10 +26,13 @@ async function dryRunCleanup() {
   const usageCutoff = new Date(Date.now() - 120 * 24 * 60 * 60 * 1000);
   const providerErrorCutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   const productAnalyticsCutoff = new Date(Date.now() - 400 * 24 * 60 * 60 * 1000);
-  const [sessions, usageBuckets, requestLeases, providerErrorEvents, productAnalyticsEvents, shareSnapshots] = await Promise.all([
+  const [sessions, usageBuckets, requestLeases, creditReservations, providerErrorEvents, productAnalyticsEvents, shareSnapshots] = await Promise.all([
     prisma.session.count({ where: { expires: { lte: now } } }),
     prisma.chatUsageBucket.count({ where: { updatedAt: { lt: usageCutoff } } }),
     prisma.chatRequestLease.count({ where: { expiresAt: { lte: now } } }),
+    prisma.chatCreditReservation.count({
+      where: { status: "reserved", expiresAt: { lte: now } },
+    }),
     prisma.providerErrorEvent.count({ where: { createdAt: { lt: providerErrorCutoff } } }),
     prisma.productAnalyticsEvent.count({ where: { occurredAt: { lt: productAnalyticsCutoff } } }),
     prisma.$queryRaw<Array<{ count: bigint }>>`
@@ -48,7 +51,7 @@ async function dryRunCleanup() {
         )
     `.then((rows) => Number(rows[0]?.count || 0)),
   ]);
-  return { sessions, usageBuckets, requestLeases, providerErrorEvents, productAnalyticsEvents, shareSnapshots };
+  return { sessions, usageBuckets, requestLeases, creditReservations, providerErrorEvents, productAnalyticsEvents, shareSnapshots };
 }
 
 export async function POST(req: Request) {

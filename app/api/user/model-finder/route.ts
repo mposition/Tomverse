@@ -21,6 +21,10 @@ import {
   getModelFinderVariant,
   isModelFinderNewUser,
 } from "@/lib/modelFinderExperiment";
+import {
+  getModelFinderReappearsAt,
+  shouldAutoShowModelFinder,
+} from "@/lib/modelFinderSnooze";
 import { prisma } from "@/lib/prisma";
 
 const answersSchema = z
@@ -43,6 +47,9 @@ const actionSchema = z.discriminatedUnion("action", [
     })
     .strict(),
   z.object({ action: z.literal("accept_default") }).strict(),
+  z.object({ action: z.literal("dismiss") }).strict(),
+  // Kept temporarily so an already-loaded client chunk cannot turn a
+  // "later" choice into a permanent completion during a rolling deploy.
   z.object({ action: z.literal("skip") }).strict(),
 ]);
 
@@ -88,6 +95,7 @@ export async function GET(req: Request) {
             usesFilesFrequently: true,
             defaultModel: true,
             modelFinderCompletedAt: true,
+            modelFinderDismissedAt: true,
           },
         },
       },
@@ -102,10 +110,16 @@ export async function GET(req: Request) {
 
     const variant = getModelFinderVariant(userId);
     const isNewUser = isModelFinderNewUser(user.createdAt);
+    const reappearsAt = getModelFinderReappearsAt(
+      user.settings?.modelFinderDismissedAt
+    );
     const shouldShow =
       variant === "finder" &&
       isNewUser &&
-      !user.settings?.modelFinderCompletedAt;
+      shouldAutoShowModelFinder({
+        completedAt: user.settings?.modelFinderCompletedAt,
+        dismissedAt: user.settings?.modelFinderDismissedAt,
+      });
 
     return NextResponse.json(
       {
@@ -120,6 +134,9 @@ export async function GET(req: Request) {
             user.settings?.defaultModel || APP_DEFAULTS.defaultModelId,
           modelFinderCompletedAt:
             user.settings?.modelFinderCompletedAt?.toISOString() || null,
+          modelFinderDismissedAt:
+            user.settings?.modelFinderDismissedAt?.toISOString() || null,
+          modelFinderReappearsAt: reappearsAt?.toISOString() || null,
         },
       },
       { headers: noStoreHeaders }
@@ -151,23 +168,32 @@ export async function POST(req: Request) {
       day: 100,
     });
     const body = await readLimitedJson(req, 8 * 1024, actionSchema);
-    const completedAt = new Date();
+    const actionAt = new Date();
 
-    if (body.action === "skip") {
+    if (body.action === "dismiss" || body.action === "skip") {
       const settings = await prisma.userSettings.upsert({
         where: { userId },
-        update: { modelFinderCompletedAt: completedAt },
+        update: {
+          modelFinderDismissedAt: actionAt,
+          modelFinderCompletedAt: null,
+        },
         create: {
           userId,
           defaultModel: APP_DEFAULTS.defaultModelId,
-          modelFinderCompletedAt: completedAt,
+          modelFinderDismissedAt: actionAt,
         },
       });
+      const reappearsAt = getModelFinderReappearsAt(
+        settings.modelFinderDismissedAt
+      );
       return NextResponse.json(
         {
           success: true,
           defaultModelId: settings.defaultModel,
-          modelFinderCompletedAt: settings.modelFinderCompletedAt?.toISOString(),
+          modelFinderCompletedAt: null,
+          modelFinderDismissedAt:
+            settings.modelFinderDismissedAt?.toISOString() || null,
+          modelFinderReappearsAt: reappearsAt?.toISOString() || null,
         },
         { headers: noStoreHeaders }
       );
@@ -181,12 +207,13 @@ export async function POST(req: Request) {
         where: { userId },
         update: {
           defaultModel: defaultModelId,
-          modelFinderCompletedAt: completedAt,
+          modelFinderCompletedAt: actionAt,
+          modelFinderDismissedAt: null,
         },
         create: {
           userId,
           defaultModel: defaultModelId,
-          modelFinderCompletedAt: completedAt,
+          modelFinderCompletedAt: actionAt,
         },
       });
       return NextResponse.json(
@@ -219,7 +246,8 @@ export async function POST(req: Request) {
         preferredPriority: body.answers.priority,
         usesFilesFrequently: body.answers.fileUsage,
         defaultModel: body.defaultModelId,
-        modelFinderCompletedAt: completedAt,
+        modelFinderCompletedAt: actionAt,
+        modelFinderDismissedAt: null,
       },
       create: {
         userId,
@@ -227,7 +255,7 @@ export async function POST(req: Request) {
         preferredPriority: body.answers.priority,
         usesFilesFrequently: body.answers.fileUsage,
         defaultModel: body.defaultModelId,
-        modelFinderCompletedAt: completedAt,
+        modelFinderCompletedAt: actionAt,
       },
     });
 

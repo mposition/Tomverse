@@ -32,6 +32,7 @@ import {
   ChatAccessError,
   createChatBudget,
   identifyChatCaller,
+  linkChatReservationProviderRequest,
   releaseChatAccess,
   settleChatUsage,
   type ChatUsageReservation,
@@ -490,7 +491,10 @@ export async function POST(
       let reservation: ChatUsageReservation | null = null;
       try {
         const budget = createChatBudget("user", candidate, inputTokens);
-        const grant = await acquireChatAccess(access, budget);
+        const grant = await acquireChatAccess(access, budget, {
+          traceId,
+          source: "comparison_review",
+        });
         leaseId = grant.leaseId;
         reservation = grant.usageReservation;
 
@@ -498,6 +502,10 @@ export async function POST(
           | {
               output: unknown;
               usage: { inputTokens?: number; outputTokens?: number };
+              response: {
+                id: string;
+                headers?: Record<string, string>;
+              };
             }
           | undefined;
         let generationError: unknown;
@@ -519,6 +527,19 @@ export async function POST(
           }
         }
         if (!generated) throw generationError || new Error("No review output.");
+        await linkChatReservationProviderRequest(reservation.reservationId, {
+          providerRequestId:
+            generated.response.headers?.["x-request-id"] ||
+            generated.response.headers?.["request-id"] ||
+            null,
+          providerResponseId: generated.response.id,
+        }).catch((linkError) =>
+          console.error("Comparison review provider request link failed:", {
+            traceId,
+            candidate: candidate.id,
+            linkError,
+          })
+        );
         const result: ComparisonReviewResult = comparisonReviewResultSchema.parse(
           generated.output
         );

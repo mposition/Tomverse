@@ -41,8 +41,8 @@ export const infoPages = {
     en: {
       eyebrow: "Legal",
       title: "Terms and Conditions",
-      description: "These terms govern free and paid use of Tomverse AI, including accounts, AI providers, subscriptions, credits, cancellation, and disputes.",
-      updated: "Last updated: July 14, 2026",
+      description: "These terms govern free and paid use of Tomverse AI, including accounts, AI providers, subscriptions, monthly and additional credits, cancellation, and disputes.",
+      updated: "Last updated: July 15, 2026",
       sections: [
         {
           title: "Agreement, operator, and contact",
@@ -58,7 +58,11 @@ export const infoPages = {
         },
         {
           title: "Plans, AI credits, and fair use",
-          body: "Free, Pro, and Max provide the features and AI-credit allowances shown on the pricing and account pages. Credit use varies by model, reasoning mode, and input size. Monthly credits reset at the beginning of each calendar month in UTC, do not roll over, are not transferable, and have no cash value. Fair-use, abuse-prevention, model, provider-cost, file, and context limits continue to apply.",
+          body: "Free, Pro, and Max provide the features and monthly AI-credit allowances shown on the pricing and account pages. Credit use varies by model, reasoning mode, and input size. Monthly credits reset at the beginning of each calendar month in UTC, do not roll over, are not transferable, and have no cash value. Fair-use, abuse-prevention, model, provider-cost, file, and context limits continue to apply.",
+        },
+        {
+          title: "Additional credit packs",
+          body: "An additional credit pack is a one-time purchase that is separate from a subscription and its monthly credits. Additional credits expire 12 months (365 days) after purchase, are not transferable, and cannot be redeemed for cash. Tomverse deducts available monthly plan credits first and then additional-credit lots in order of earliest expiry. A pack increases only the credit balance available for usage: it does not upgrade the plan or increase model access, features, daily limits, plan-specific higher-cost model limits, fair-use limits, or other safeguards.",
         },
         {
           title: "Monthly and annual subscriptions; automatic renewal",
@@ -70,11 +74,11 @@ export const infoPages = {
         },
         {
           title: "Cancellation and end of paid access",
-          body: "You can schedule cancellation from the account billing controls. Cancellation stops the next automatic renewal; it does not normally end access immediately. Paid features remain available until the current monthly or annual period ends, after which the account moves to the available Free plan. There is no early-termination fee and cancellation alone does not create an automatic prorated refund. An approved refund or a termination for cause may end paid access earlier.",
+          body: "You can schedule cancellation from the account billing controls. Cancellation stops the next automatic renewal; it does not normally end access immediately. Paid features remain available until the current monthly or annual period ends, after which the account moves to the available Free plan. There is no early-termination fee and cancellation alone does not create an automatic prorated refund. An approved refund or a termination for cause may end paid access earlier. Cancelling or downgrading a subscription does not by itself remove valid additional credits: they remain available until their stated expiry, but can be used only with the model access, features, daily limits, and safeguards of the account's then-current plan.",
         },
         {
           title: "Refunds and provider failures",
-          body: "Refund requests are governed by the Refund Policy at tomverse.app/refund and any rights that cannot be excluded by law. A failed or empty provider response normally releases reserved AI credits automatically; a user-cancelled response that already produced usable output may consume a proportionate amount. If an incident appears to have consumed credits incorrectly, contact support with the trace ID so we can review the logs.",
+          body: "Subscription and additional-credit refund requests are governed by the Refund Policy at tomverse.app/refund and any rights that cannot be excluded by law. A failed or empty provider response normally releases reserved AI credits automatically; a user-cancelled response that already produced usable output may consume a proportionate amount. An approved full or partial additional-credit refund, or a chargeback, reverses the corresponding credit entitlement. Available credits are revoked first; any corresponding entitlement already used may be recorded as credit debt and offset against future monthly or additional-credit grants, and access may be temporarily limited while a payment dispute remains unresolved. If an incident appears to have consumed credits incorrectly, contact support with the trace ID so we can review the logs.",
         },
         {
           title: "Currency, taxes, and payment processing",
@@ -94,8 +98,8 @@ export const infoPages = {
     ko: {
       eyebrow: "법적 고지",
       title: "이용약관",
-      description: "계정, AI 제공자, 구독, 크레딧, 취소 및 분쟁을 포함한 Tomverse AI의 무료·유료 서비스 이용 조건입니다.",
-      updated: "최종 업데이트: 2026년 7월 14일",
+      description: "계정, AI 제공자, 구독, 월 크레딧과 추가 크레딧, 취소 및 분쟁을 포함한 Tomverse AI의 무료·유료 서비스 이용 조건입니다.",
+      updated: "최종 업데이트: 2026년 7월 15일",
       sections: [
         {
           title: "약관 동의, 운영 주체 및 연락처",
@@ -111,7 +115,11 @@ export const infoPages = {
         },
         {
           title: "플랜, AI 크레딧 및 공정사용",
-          body: "Free, Pro, Max에는 요금 및 계정 페이지에 표시된 기능과 AI 크레딧 한도가 적용됩니다. 크레딧 사용량은 모델, 추론 방식, 입력 크기에 따라 달라집니다. 월 크레딧은 매월 1일 00:00 UTC에 초기화되며 이월·양도할 수 없고 현금 가치가 없습니다. 공정사용, 남용 방지, 모델, 제공자 비용, 파일 및 맥락 한도는 계속 적용됩니다.",
+          body: "Free, Pro, Max에는 요금 및 계정 페이지에 표시된 기능과 월 AI 크레딧 한도가 적용됩니다. 크레딧 사용량은 모델, 추론 방식, 입력 크기에 따라 달라집니다. 월 크레딧은 매월 1일 00:00 UTC에 초기화되며 이월·양도할 수 없고 현금 가치가 없습니다. 공정사용, 남용 방지, 모델, 제공자 비용, 파일 및 맥락 한도는 계속 적용됩니다.",
+        },
+        {
+          title: "추가 크레딧 팩",
+          body: "추가 크레딧 팩은 구독 및 구독에 포함된 월 크레딧과 분리된 일회성 구매 상품입니다. 추가 크레딧은 구매일로부터 12개월(365일) 후 만료되며 양도하거나 현금으로 교환할 수 없습니다. Tomverse는 사용 가능한 월 플랜 크레딧을 먼저 차감한 뒤 만료일이 빠른 추가 크레딧 묶음부터 차감합니다. 추가 크레딧은 사용 가능한 크레딧 잔액만 늘리며, 플랜을 업그레이드하거나 모델 접근권한, 기능, 일일 제한, 플랜별 고비용 모델 제한, 공정사용 한도 또는 기타 안전장치를 늘리지 않습니다.",
         },
         {
           title: "월간·연간 구독과 자동 갱신",
@@ -123,11 +131,11 @@ export const infoPages = {
         },
         {
           title: "구독 취소와 유료 서비스 종료 시점",
-          body: "계정의 결제 관리 영역에서 구독 취소를 예약할 수 있습니다. 취소는 다음 자동 갱신을 중단하며 일반적으로 유료 접근을 즉시 종료하지 않습니다. 현재 월간 또는 연간 결제 기간이 끝날 때까지 유료 기능을 사용할 수 있고, 이후 사용 가능한 Free 플랜으로 전환됩니다. 중도 해지 수수료는 없으며 단순 취소만으로 자동 일할 환불이 발생하지 않습니다. 환불 승인 또는 중대한 위반에 따른 종료 시에는 유료 접근이 더 일찍 끝날 수 있습니다.",
+          body: "계정의 결제 관리 영역에서 구독 취소를 예약할 수 있습니다. 취소는 다음 자동 갱신을 중단하며 일반적으로 유료 접근을 즉시 종료하지 않습니다. 현재 월간 또는 연간 결제 기간이 끝날 때까지 유료 기능을 사용할 수 있고, 이후 사용 가능한 Free 플랜으로 전환됩니다. 중도 해지 수수료는 없으며 단순 취소만으로 자동 일할 환불이 발생하지 않습니다. 환불 승인 또는 중대한 위반에 따른 종료 시에는 유료 접근이 더 일찍 끝날 수 있습니다. 구독을 취소하거나 하위 플랜으로 변경해도 유효한 추가 크레딧은 그 자체로 소멸하지 않고 표시된 만료일까지 유지되지만, 변경 후 현재 플랜의 모델 접근권한, 기능, 일일 제한 및 안전장치 안에서만 사용할 수 있습니다.",
         },
         {
           title: "환불과 제공자 장애",
-          body: "환불 요청에는 tomverse.app/refund의 환불 정책과 법률상 배제할 수 없는 권리가 적용됩니다. AI 제공자 요청이 실패하거나 빈 응답으로 끝나면 예약된 크레딧은 일반적으로 자동 복원됩니다. 사용자가 취소하기 전에 사용 가능한 출력이 이미 생성된 경우에는 실제 생성량에 비례한 크레딧이 차감될 수 있습니다. 장애로 크레딧이 잘못 차감된 것으로 보이면 추적 ID와 함께 지원팀에 문의해주세요.",
+          body: "구독 및 추가 크레딧 환불 요청에는 tomverse.app/refund의 환불 정책과 법률상 배제할 수 없는 권리가 적용됩니다. AI 제공자 요청이 실패하거나 빈 응답으로 끝나면 예약된 크레딧은 일반적으로 자동 복원됩니다. 사용자가 취소하기 전에 사용 가능한 출력이 이미 생성된 경우에는 실제 생성량에 비례한 크레딧이 차감될 수 있습니다. 추가 크레딧의 전액·부분 환불이 승인되거나 차지백이 발생하면 해당 비율의 크레딧 권리가 취소됩니다. 남은 크레딧을 먼저 회수하고 이미 사용되어 회수할 수 없는 부분은 크레딧 부채로 기록해 이후 월 크레딧 또는 추가 크레딧 지급분에서 우선 상계할 수 있으며, 결제 분쟁이 해결될 때까지 사용을 임시 제한할 수 있습니다. 장애로 크레딧이 잘못 차감된 것으로 보이면 추적 ID와 함께 지원팀에 문의해주세요.",
         },
         {
           title: "세금, 환율 및 결제 통화",
@@ -147,17 +155,18 @@ export const infoPages = {
     zh: {
       eyebrow: "法律",
       title: "条款与条件",
-      description: "这些条款适用于 Tomverse AI 的免费和付费服务，包括账户、AI 提供商、订阅、积分、取消和争议。",
-      updated: "最后更新：2026 年 7 月 14 日",
+      description: "这些条款适用于 Tomverse AI 的免费和付费服务，包括账户、AI 提供商、订阅、月度积分、附加积分、取消和争议。",
+      updated: "最后更新：2026 年 7 月 15 日",
       sections: [
         { title: "协议、运营方和联系方式", body: "Tomverse AI 是 tomverse.app 使用的服务和运营名称（‘Tomverse’或‘我们’）。付费交易的法定销售方或合同运营方，是相应 Stripe 结账页、收据或发票上标明的实体。账单和法律通知可发送至 support@tomverse.app，或通过 tomverse.app/support 的支持表单提交。" },
         { title: "账户和服务使用", body: "你必须提供准确的账户信息、保护账户访问，并对账户活动、提示词、上传文件以及使用或分享的内容负责。为处理滥用、安全风险、未付款、法律要求或重大违约，我们可在合理必要范围内限制、暂停或终止访问。" },
         { title: "第三方 AI 提供商和输出", body: "Tomverse 会把提示词和所选上下文发送给第三方 AI 提供商并显示其响应。AI 输出可能不准确、不完整、过时、不安全或不适合你的情况，也不构成法律、医疗、金融、安全或其他专业建议。" },
-        { title: "方案、AI 积分和公平使用", body: "Free、Pro 和 Max 适用价格页及账户页显示的功能和积分额度。积分消耗因模型、推理方式和输入规模而异。月度积分在每个自然月开始时按 UTC 重置，不结转、不可转让且无现金价值。公平使用、防滥用、模型、提供商成本、文件和上下文限制仍然适用。" },
+        { title: "方案、AI 积分和公平使用", body: "Free、Pro 和 Max 适用价格页及账户页显示的功能和月度积分额度。积分消耗因模型、推理方式和输入规模而异。月度积分在每个自然月开始时按 UTC 重置，不结转、不可转让且无现金价值。公平使用、防滥用、模型、提供商成本、文件和上下文限制仍然适用。" },
+        { title: "附加积分包", body: "附加积分包是与订阅及其月度积分分开的单次购买。附加积分自购买之日起 12 个月（365 天）后到期，不可转让，也不可兑换现金。Tomverse 先扣除可用的月度方案积分，再按最早到期顺序扣除附加积分。积分包只增加可用积分余额，不会升级方案，也不会增加模型访问、功能、每日限制、方案特定的高成本模型限制、公平使用限制或其他保障。" },
         { title: "月付、年付和自动续订", body: "Pro 和 Max 是由 Stripe 处理的定期订阅。月付按月预付并每月续订；年付按年预付并每年续订。除非你在下次续订前取消，否则即授权 Stripe 按结账时显示的金额和币种向已保存的付款方式收费。" },
         { title: "促销和年付折扣", body: "促销仅适用于该代码披露的方案、计费周期、期限、兑换上限和到期日。除非特定促销明确允许，否则不与年付折扣叠加。限时促销结束后，订阅会按已披露的常规价格续订，除非取消。折扣本身没有现金价值。" },
-        { title: "取消和付费访问结束", body: "你可以在账户的账单控制中安排取消。取消会停止下一次自动续订，通常不会立即终止访问。付费功能持续到当前月度或年度周期结束，之后账户转为可用的 Free 方案。没有提前解约费，单纯取消不会自动产生按比例退款。" },
-        { title: "退款和提供商故障", body: "退款请求适用 tomverse.app/refund 的退款政策及法律不得排除的权利。提供商请求失败或返回空响应时，预留积分通常会自动释放；如果用户取消前已生成可用输出，可能按实际生成量扣除积分。若故障似乎错误消耗了积分，请附上 trace ID 联系支持。" },
+        { title: "取消和付费访问结束", body: "你可以在账户的账单控制中安排取消。取消会停止下一次自动续订，通常不会立即终止访问。付费功能持续到当前月度或年度周期结束，之后账户转为可用的 Free 方案。没有提前解约费，单纯取消不会自动产生按比例退款。取消或降级订阅本身不会删除仍有效的附加积分；积分保留至标示的到期日，但只能在账户届时方案的模型访问、功能、每日限制和保障范围内使用。" },
+        { title: "退款和提供商故障", body: "订阅和附加积分退款请求适用 tomverse.app/refund 的退款政策及法律不得排除的权利。提供商请求失败或返回空响应时，预留积分通常会自动释放；如果用户取消前已生成可用输出，可能按实际生成量扣除积分。附加积分的全部或部分退款获批，或发生拒付时，相应比例的积分权益会被撤销。系统先收回可用积分；已使用而无法收回的部分可记为积分债务，并从未来月度积分或附加积分发放中优先抵扣，付款争议未解决期间也可临时限制访问。若故障似乎错误消耗了积分，请附上 trace ID 联系支持。" },
         { title: "币种、税费和付款处理", body: "结账前显示的本地币种换算仅供参考。Stripe 最终确认页显示的金额、计费周期、币种和适用税费是交易依据。银行、发卡机构、钱包或付款服务商可能使用自己的汇率或收取费用。Tomverse 不直接存储完整银行卡信息。" },
         { title: "消费者权利、适用法律和争议", body: "本条款不排除法律不得排除的保证、救济或其他权利，包括可能适用的澳大利亚消费者法权利。在法律允许的范围内，本条款受澳大利亚昆士兰州法律管辖。请先联系支持尝试解决争议；这不限制你联系有管辖权的监管机构、仲裁庭或法院。" },
       ],
@@ -168,29 +177,37 @@ export const infoPages = {
     en: {
       eyebrow: "Billing",
       title: "Refund Policy",
-      description: "Refund, billing correction, cancellation, unused-credit, promotion, and provider-incident rules for active Tomverse paid plans.",
-      updated: "Last updated: July 14, 2026",
+      description: "Refund, billing correction, cancellation, subscription-credit, additional-credit, promotion, and provider-incident rules for Tomverse purchases.",
+      updated: "Last updated: July 15, 2026",
       sections: [
         {
           title: "Scope and non-excludable consumer rights",
-          body: "This policy applies to Pro and Max subscriptions purchased through Tomverse and processed by Stripe. It does not exclude remedies or guarantees that cannot be excluded by law. Where the Australian Consumer Law applies, you may be entitled to cancellation, a refund for an unused portion, correction, or compensation for a major service failure or another failure that is not remedied within a reasonable time.",
+          body: "This policy applies to Pro and Max subscriptions and to one-time additional credit packs purchased through Tomverse and processed by Stripe, including a Starter Credit Pack purchased by a Free-plan user. It does not exclude remedies or guarantees that cannot be excluded by law. Where the Australian Consumer Law applies, you may be entitled to cancellation, a refund for an unused portion, correction, or compensation for a major service failure or another failure that is not remedied within a reasonable time.",
         },
         {
           title: "When a refund or billing correction may be available",
-          body: "We will review requests involving duplicate, unauthorised, or incorrect charges; a paid plan that was not activated; a material service failure; or another circumstance where a refund is required by law. We may also approve a discretionary refund after considering when the charge occurred, the billing interval, paid-credit usage, and the facts supplied.",
-          bullets: ["Duplicate, unauthorised, or incorrect charge", "Paid access not delivered or a material service failure", "A remedy required by applicable consumer law"],
+          body: "We will review requests involving duplicate, unauthorised, or incorrect charges; a paid plan or purchased credit pack that was not delivered; a material service failure; or another circumstance where a refund is required by law. We may also approve a discretionary full or partial refund after considering when the charge occurred, the billing interval or pack, how much paid entitlement was used, and the facts supplied.",
+          bullets: ["Duplicate, unauthorised, or incorrect charge", "Paid access or purchased credits not delivered, or a material service failure", "A remedy required by applicable consumer law"],
         },
         {
           title: "When a refund is generally not available",
-          body: "Except where required by law, refunds are generally not provided for a change of mind, forgetting to cancel before renewal, dissatisfaction with the style or content of a valid AI response, unused time after a normal cancellation, or unused monthly credits. Submitting a request does not guarantee approval and does not itself cancel the subscription.",
+          body: "Except where required by law, refunds are generally not provided for a change of mind, forgetting to cancel before renewal, dissatisfaction with the style or content of a valid AI response, unused time after a normal cancellation, unused monthly credits, or merely leaving purchased additional credits unused after they were correctly issued. Submitting a request does not guarantee approval and does not itself cancel a subscription or credit-pack entitlement.",
         },
         {
           title: "Monthly and annual cancellation",
           body: "Cancellation from the account area stops the next renewal. A monthly subscription normally remains active through the current paid month; an annual subscription normally remains active through the current paid year. Cancellation alone does not produce an automatic prorated refund. If a refund is approved, the current implementation cancels the paid subscription and moves the account to Free when the approval is processed.",
         },
         {
-          title: "Unused AI credits",
-          body: "AI credits are a service allowance, not stored money. Monthly credits reset each calendar month in UTC, do not roll over, are not transferable, and cannot be redeemed for cash. Unused credits remain usable only while the applicable paid access remains active. When a full refund is approved and paid access ends, remaining paid-plan credits are not separately refunded or converted to cash.",
+          title: "Monthly credits and additional credits",
+          body: "AI credits are a service allowance, not stored money. Monthly plan credits reset each calendar month in UTC, do not roll over, and remain tied to the applicable plan period. Additional credits are a separate one-time purchase, expire 12 months (365 days) after purchase, and do not reset with the monthly allowance. Both balances are non-transferable and cannot be redeemed for cash. Tomverse deducts available monthly plan credits first and then additional-credit lots in order of earliest expiry.",
+        },
+        {
+          title: "Plan cancellation and additional-credit access",
+          body: "Cancelling or downgrading Pro or Max does not by itself remove valid additional credits. They remain on the account until their stated expiry, including after the account moves to Free. Additional credits increase usage capacity only: they do not unlock a higher plan, models, files or other features, and they do not increase daily limits, plan-specific higher-cost model limits, fair-use limits, or other safeguards. They can be used only within the permissions and limits of the account's current plan.",
+        },
+        {
+          title: "Additional-credit refunds, partial refunds, and chargebacks",
+          body: "If a full or partial refund is approved, Tomverse reverses the corresponding proportion of the purchased additional-credit entitlement. Available additional credits from the purchase are revoked first. If some of that entitlement has already been used and cannot be recovered, the unrecovered credits and associated funded usage allowance may be recorded as credit debt and offset before future monthly credits or additional-credit purchases are made available. A chargeback or payment dispute may trigger the same provisional reversal and a temporary restriction on AI use while the dispute is unresolved. If the dispute is resolved in the purchaser's favour, the related provisional revocation and debt are restored or cleared to the extent recorded by the system. These rules do not limit rights or remedies that cannot be excluded by law.",
         },
         {
           title: "Promotional purchases",
@@ -206,7 +223,7 @@ export const infoPages = {
         },
         {
           title: "How to request and how we process it",
-          body: "Paid users can submit a refund review from the account billing area or contact support@tomverse.app. Include the account email, plan, charge date, transaction or receipt reference, reason, and any trace ID. Requests are reviewed individually. If approved, Tomverse submits the eligible refund to Stripe and cancels the related paid subscription; the time for funds to appear depends on Stripe and the payment provider.",
+          body: "Subscription and credit-pack purchasers can submit a refund review from the account billing area or contact support@tomverse.app. Include the account email, plan, pack if applicable, charge date, transaction or receipt reference, reason, and any trace ID. Requests are reviewed individually. If approved, Tomverse submits the eligible refund to Stripe. A subscription refund may cancel or downgrade the related paid plan; a credit-pack refund reverses only the corresponding pack entitlement and does not by itself cancel a subscription. The time for funds to appear depends on Stripe and the payment provider.",
         },
         {
           title: "Operator and disputes",
@@ -218,29 +235,37 @@ export const infoPages = {
     ko: {
       eyebrow: "결제",
       title: "환불 정책",
-      description: "현재 운영 중인 Tomverse 유료 플랜의 환불, 오청구 정정, 취소, 미사용 크레딧, 프로모션 및 제공자 장애 처리 기준입니다.",
-      updated: "최종 업데이트: 2026년 7월 14일",
+      description: "Tomverse 구독 및 추가 크레딧 구매의 환불, 오청구 정정, 취소, 크레딧, 프로모션 및 제공자 장애 처리 기준입니다.",
+      updated: "최종 업데이트: 2026년 7월 15일",
       sections: [
         {
           title: "적용 범위와 배제할 수 없는 소비자 권리",
-          body: "본 정책은 Tomverse에서 구매하고 Stripe가 처리한 Pro 및 Max 구독에 적용됩니다. 본 정책은 법률상 배제할 수 없는 보증이나 구제수단을 제한하지 않습니다. 호주 소비자법이 적용되는 경우 중대한 서비스 실패 또는 합리적인 기간 안에 해결되지 않은 문제에 대해 계약 취소, 미사용 부분 환불, 문제 시정 또는 손해 배상을 받을 권리가 있을 수 있습니다.",
+          body: "본 정책은 Tomverse에서 구매하고 Stripe가 처리한 Pro·Max 구독과 일회성 추가 크레딧 팩에 적용되며, Free 플랜 사용자가 구매한 Starter Credit Pack도 포함합니다. 본 정책은 법률상 배제할 수 없는 보증이나 구제수단을 제한하지 않습니다. 호주 소비자법이 적용되는 경우 중대한 서비스 실패 또는 합리적인 기간 안에 해결되지 않은 문제에 대해 계약 취소, 미사용 부분 환불, 문제 시정 또는 손해 배상을 받을 권리가 있을 수 있습니다.",
         },
         {
           title: "환불 또는 결제 정정이 가능한 경우",
-          body: "중복·무단·오청구, 결제한 플랜이 활성화되지 않은 경우, 중대한 서비스 실패 또는 법률상 환불이 필요한 사유는 검토 후 정정하거나 환불합니다. 그 밖의 요청도 결제 시점, 월간·연간 결제 주기, 유료 크레딧 사용량 및 제출된 사실관계를 고려해 재량으로 승인할 수 있습니다.",
-          bullets: ["중복, 무단 또는 잘못된 금액의 청구", "유료 접근 미제공 또는 중대한 서비스 실패", "적용되는 소비자법이 요구하는 구제"],
+          body: "중복·무단·오청구, 결제한 플랜 또는 구매한 크레딧 팩이 지급되지 않은 경우, 중대한 서비스 실패 또는 법률상 환불이 필요한 사유는 검토 후 정정하거나 환불합니다. 그 밖의 요청도 결제 시점, 월간·연간 결제 주기 또는 팩, 사용한 유료 권리의 양 및 제출된 사실관계를 고려해 전액 또는 부분 환불을 재량으로 승인할 수 있습니다.",
+          bullets: ["중복, 무단 또는 잘못된 금액의 청구", "유료 접근 또는 구매 크레딧 미지급, 혹은 중대한 서비스 실패", "적용되는 소비자법이 요구하는 구제"],
         },
         {
           title: "일반적으로 환불되지 않는 경우",
-          body: "법률상 환불이 필요한 경우를 제외하고, 단순 변심, 갱신 전 취소를 잊은 경우, 정상 생성된 AI 답변의 문체·내용에 대한 불만, 일반 취소 후 남은 기간 또는 사용하지 않은 월 크레딧은 원칙적으로 환불 대상이 아닙니다. 환불 요청 제출은 승인을 보장하지 않으며 그 자체로 구독을 취소하지 않습니다.",
+          body: "법률상 환불이 필요한 경우를 제외하고, 단순 변심, 갱신 전 취소를 잊은 경우, 정상 생성된 AI 답변의 문체·내용에 대한 불만, 일반 취소 후 남은 기간, 사용하지 않은 월 크레딧 또는 정상 지급된 추가 크레딧을 단순히 사용하지 않은 경우는 원칙적으로 환불 대상이 아닙니다. 환불 요청 제출은 승인을 보장하지 않으며 그 자체로 구독이나 크레딧 팩 권리를 취소하지 않습니다.",
         },
         {
           title: "월간·연간 구독 취소",
           body: "계정 영역에서 취소하면 다음 갱신이 중단됩니다. 월간 구독은 일반적으로 현재 결제 월 말까지, 연간 구독은 현재 결제 연도 말까지 유지됩니다. 단순 취소로 자동 일할 환불이 발생하지 않습니다. 환불이 승인되면 현재 시스템은 승인 처리 시 유료 구독을 취소하고 계정을 Free로 전환합니다.",
         },
         {
-          title: "미사용 AI 크레딧",
-          body: "AI 크레딧은 예치금이 아닌 서비스 사용 한도입니다. 월 크레딧은 매월 1일 00:00 UTC에 초기화되고 이월·양도할 수 없으며 현금으로 교환되지 않습니다. 미사용 크레딧은 해당 유료 접근이 유지되는 동안에만 사용할 수 있습니다. 전액 환불이 승인되어 유료 접근이 종료되면 남은 유료 플랜 크레딧은 별도 환불하거나 현금으로 전환하지 않습니다.",
+          title: "월 크레딧과 추가 크레딧",
+          body: "AI 크레딧은 예치금이 아닌 서비스 사용 한도입니다. 월 플랜 크레딧은 매월 1일 00:00 UTC에 초기화되고 이월되지 않으며 해당 플랜 기간에 귀속됩니다. 추가 크레딧은 월 크레딧과 분리된 일회성 구매분으로, 구매일로부터 12개월(365일) 후 만료되고 월 초기화 때 사라지지 않습니다. 두 잔액 모두 양도하거나 현금으로 교환할 수 없습니다. Tomverse는 사용 가능한 월 플랜 크레딧을 먼저 차감한 뒤 만료일이 빠른 추가 크레딧 묶음부터 차감합니다.",
+        },
+        {
+          title: "플랜 해지 후 추가 크레딧 이용",
+          body: "Pro 또는 Max를 취소하거나 하위 플랜으로 변경해도 유효한 추가 크레딧은 그 자체로 소멸하지 않으며, 계정이 Free로 전환된 뒤에도 표시된 만료일까지 유지됩니다. 추가 크레딧은 사용량만 늘리고 상위 플랜, 모델, 파일 등 기능을 해제하지 않으며, 일일 제한, 플랜별 고비용 모델 제한, 공정사용 한도 또는 기타 안전장치를 늘리지 않습니다. 항상 계정의 현재 플랜 권한과 제한 안에서만 사용할 수 있습니다.",
+        },
+        {
+          title: "추가 크레딧의 전액·부분 환불 및 차지백",
+          body: "추가 크레딧의 전액 또는 부분 환불이 승인되면 해당 구매에서 환불 비율에 해당하는 크레딧 권리를 취소합니다. 먼저 그 구매에서 남아 있는 추가 크레딧을 회수합니다. 이미 사용해 회수할 수 없는 권리와 관련 원가 한도는 크레딧 부채로 기록하고, 이후 월 크레딧 또는 추가 크레딧 구매분을 제공하기 전에 우선 상계할 수 있습니다. 차지백 또는 결제 분쟁에도 같은 임시 회수와 상계가 적용될 수 있고, 분쟁이 해결될 때까지 AI 사용을 임시 제한할 수 있습니다. 구매자에게 유리하게 분쟁이 종결되면 시스템에 기록된 범위에서 관련 임시 회수분과 부채를 복원하거나 해제합니다. 이 기준은 법률상 배제할 수 없는 권리나 구제수단을 제한하지 않습니다.",
         },
         {
           title: "프로모션 결제",
@@ -256,7 +281,7 @@ export const infoPages = {
         },
         {
           title: "환불 요청 및 처리 절차",
-          body: "유료 사용자는 계정 결제 영역에서 환불 심사를 요청하거나 support@tomverse.app으로 문의할 수 있습니다. 계정 이메일, 플랜, 결제일, 거래 또는 영수증 번호, 사유 및 관련 추적 ID를 포함해주세요. 요청은 개별 심사됩니다. 승인되면 Tomverse가 Stripe에 환불을 제출하고 관련 유료 구독을 취소하며, 실제 입금 시점은 Stripe와 결제 제공자 처리 기간에 따라 달라집니다.",
+          body: "구독 또는 크레딧 팩 구매자는 계정 결제 영역에서 환불 심사를 요청하거나 support@tomverse.app으로 문의할 수 있습니다. 계정 이메일, 플랜, 해당하는 경우 팩 이름, 결제일, 거래 또는 영수증 번호, 사유 및 관련 추적 ID를 포함해주세요. 요청은 개별 심사됩니다. 승인되면 Tomverse가 Stripe에 환불을 제출합니다. 구독 환불은 관련 유료 플랜을 취소하거나 하향 전환할 수 있고, 크레딧 팩 환불은 해당 팩 권리만 취소하며 그 자체로 구독을 취소하지 않습니다. 실제 입금 시점은 Stripe와 결제 제공자 처리 기간에 따라 달라집니다.",
         },
         {
           title: "운영 주체와 분쟁",
@@ -268,18 +293,20 @@ export const infoPages = {
     zh: {
       eyebrow: "账单",
       title: "退款政策",
-      description: "适用于当前 Tomverse 付费方案的退款、账单更正、取消、未用积分、促销和提供商故障规则。",
-      updated: "最后更新：2026 年 7 月 14 日",
+      description: "适用于 Tomverse 订阅和附加积分购买的退款、账单更正、取消、积分、促销和提供商故障规则。",
+      updated: "最后更新：2026 年 7 月 15 日",
       sections: [
-        { title: "范围和不可排除的消费者权利", body: "本政策适用于通过 Tomverse 购买并由 Stripe 处理的 Pro 和 Max 订阅。本政策不排除法律不得排除的保证或救济。在澳大利亚消费者法适用时，重大服务故障或未在合理时间内纠正的问题可能使你有权取消、获得未使用部分退款、纠正或赔偿。" },
-        { title: "可能退款或更正账单的情况", body: "我们会审查重复、未授权或错误收费；付费方案未激活；重大服务故障；或法律要求退款的情况。其他请求可根据收费时间、计费周期、付费积分使用量和提交的事实酌情批准。", bullets: ["重复、未授权或错误收费", "未提供付费访问或重大服务故障", "适用消费者法要求的救济"] },
-        { title: "通常不退款的情况", body: "除非法律要求，改变主意、忘记在续订前取消、对有效 AI 回答的风格或内容不满意、正常取消后的未使用时间或未使用月度积分通常不予退款。提交请求不保证批准，也不会自动取消订阅。" },
+        { title: "范围和不可排除的消费者权利", body: "本政策适用于通过 Tomverse 购买并由 Stripe 处理的 Pro、Max 订阅和一次性附加积分包，包括 Free 方案用户购买的 Starter Credit Pack。本政策不排除法律不得排除的保证或救济。在澳大利亚消费者法适用时，重大服务故障或未在合理时间内纠正的问题可能使你有权取消、获得未使用部分退款、纠正或赔偿。" },
+        { title: "可能退款或更正账单的情况", body: "我们会审查重复、未授权或错误收费；付费方案或购买的积分包未交付；重大服务故障；或法律要求退款的情况。其他请求可根据收费时间、计费周期或积分包、已使用的付费权益及提交的事实，酌情批准全部或部分退款。", bullets: ["重复、未授权或错误收费", "未提供付费访问或购买的积分，或发生重大服务故障", "适用消费者法要求的救济"] },
+        { title: "通常不退款的情况", body: "除非法律要求，改变主意、忘记在续订前取消、对有效 AI 回答的风格或内容不满意、正常取消后的未使用时间、未使用月度积分，或正确发放后仅未使用的附加积分，通常不予退款。提交请求不保证批准，也不会自动取消订阅或积分包权益。" },
         { title: "月付和年付取消", body: "账户区域取消会停止下一次续订。月付通常持续到当前付费月结束，年付持续到当前付费年结束。取消本身不会自动按比例退款。批准退款时，当前系统会取消付费订阅并把账户转为 Free。" },
-        { title: "未使用 AI 积分", body: "AI 积分是服务额度，不是储值资金。月度积分按 UTC 在每个自然月开始时重置，不结转、不可转让且不可兑换现金。全额退款获批且付费访问结束后，剩余付费积分不会单独退款或折现。" },
+        { title: "月度积分和附加积分", body: "AI 积分是服务额度，不是储值资金。月度方案积分按 UTC 在每个自然月开始时重置，不结转，并归属于相应方案周期。附加积分是独立的一次性购买，自购买之日起 12 个月（365 天）后到期，不会随月度额度重置。两种余额均不可转让或兑换现金。Tomverse 先扣除可用月度方案积分，再按最早到期顺序扣除附加积分。" },
+        { title: "取消方案后的附加积分", body: "取消或降级 Pro、Max 本身不会删除仍有效的附加积分。即使账户转为 Free，积分仍保留至标示的到期日。附加积分只增加用量，不会解锁更高方案、模型、文件或其他功能，也不会提高每日限制、方案特定的高成本模型限制、公平使用限制或其他保障；只能在账户当前方案的权限和限制内使用。" },
+        { title: "附加积分的全额退款、部分退款和拒付", body: "附加积分的全部或部分退款获批时，Tomverse 会按相应比例撤销购买权益，并先收回该购买中尚未使用的积分。已经使用而无法收回的积分及相关资助用量可记为积分债务，并在未来月度积分或附加积分购买可用前优先抵扣。拒付或付款争议可触发相同的临时撤销，并在争议未解决期间临时限制 AI 使用。若争议最终对购买者有利，系统会在记录范围内恢复或清除相关临时撤销和债务。本规则不限制法律不得排除的权利或救济。" },
         { title: "促销购买", body: "获批退款不超过促销后实际支付的金额；原价差额和折扣本身不退款。零元促销没有现金退款价值。除法律要求或 Tomverse 账单错误外，不保证重新发放已使用或已退款的促销代码。" },
         { title: "提供商故障和积分恢复", body: "AI 提供商在生成可用回答前失败或返回空响应时，Tomverse 通常会自动释放预留积分。可用输出开始后由用户取消时，可能保留按生成量计算的积分消耗。若积分似乎错误扣除，请附 trace ID 联系支持。" },
         { title: "税费、汇率和付款币种", body: "退款不超过 Stripe 实际收取的金额和币种。本地价格换算可能因税费、汇率或第三方费用与最终金额不同。实际金额和销售方身份以 Stripe 收据或发票为准。" },
-        { title: "如何申请和处理", body: "付费用户可从账户账单区域申请退款审查，或联系 support@tomverse.app。请提供账户邮箱、方案、收费日期、交易或收据编号、原因和相关 trace ID。批准后，Tomverse 会向 Stripe 提交退款并取消相关付费订阅；到账时间取决于 Stripe 和付款服务商。" },
+        { title: "如何申请和处理", body: "订阅或积分包购买者可从账户账单区域申请退款审查，或联系 support@tomverse.app。请提供账户邮箱、方案、适用时的积分包名称、收费日期、交易或收据编号、原因和相关 trace ID。批准后，Tomverse 会向 Stripe 提交退款。订阅退款可能取消或降级相关付费方案；积分包退款只撤销对应积分包权益，不会因此自动取消订阅。到账时间取决于 Stripe 和付款服务商。" },
         { title: "运营方和争议", body: "Tomverse AI 运营 tomverse.app，每笔交易的法定销售方标示在 Stripe 收据或发票上。问题或争议可发送至 support@tomverse.app 或 tomverse.app/support，也可使用适用法律提供的监管机构、仲裁庭或法院程序。" },
       ],
       cta: { label: "联系账单支持", href: "/support" },

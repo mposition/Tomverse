@@ -363,7 +363,7 @@ export const en = {
         description: "Answer three short questions and Tomverse will recommend a default model for your usual work. You can change it any time in Settings.",
         start: "Start model finder",
         useDefault: "Start with the default recommendation",
-        later: "Do this later",
+        later: "Remind me in 3 days",
         progress: "Question {current} of 3",
         back: "Back",
         next: "Next",

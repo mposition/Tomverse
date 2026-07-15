@@ -14,8 +14,9 @@ async function addSecondFreeModel(page: Page) {
   await expect(dialog).toBeVisible();
 
   const freeUnselectedModel = dialog
-    .locator('[data-testid="model-option"][aria-pressed="false"]:not([disabled])')
-    .filter({ hasText: "Free" })
+    .locator(
+      '[data-testid="model-option"][data-model-tier="Free"][aria-pressed="false"]:not([disabled])'
+    )
     .first();
   await expect(freeUnselectedModel).toBeVisible();
   await freeUnselectedModel.click();
@@ -28,6 +29,9 @@ test.beforeEach(async ({ page }, testInfo) => {
   await prepareGuestPage(page, "ko");
   await mockChatStream(page, "Mobile QA response");
   await page.goto("/chat");
+  await expect(
+    page.getByTestId("mobile-chat-shell").locator("header p").nth(1)
+  ).toHaveText("Gemini 3.1 Flash-Lite");
 });
 
 test("mobile shell and drawer stay inside viewport", async ({ page }) => {
@@ -44,6 +48,12 @@ test("mobile shell and drawer stay inside viewport", async ({ page }) => {
 });
 
 test("sent message renders without leaving the active model", async ({ page }) => {
+  const activeModel = page
+    .getByTestId("mobile-chat-shell")
+    .locator("header p")
+    .nth(1);
+  const activeModelName = await activeModel.textContent();
+
   await page.getByTestId("chat-textarea").fill("Mobile immediate message");
   await page.getByTestId("chat-textarea").press("Enter");
 
@@ -53,10 +63,8 @@ test("sent message renders without leaving the active model", async ({ page }) =
       .filter({ hasText: "Mobile immediate message" })
   ).toBeVisible();
   await expect(page.getByText("Mobile QA response", { exact: true })).toBeVisible();
-  await expect(page.getByTestId("mobile-model-tab").first()).toHaveAttribute(
-    "aria-selected",
-    "true"
-  );
+  await expect(page.getByTestId("mobile-model-tab")).toHaveCount(0);
+  await expect(activeModel).toHaveText(activeModelName || "");
 });
 
 test("input remains reachable at virtual-keyboard height", async ({ page }) => {
@@ -75,10 +83,20 @@ test("model tab changes the visible chat panel", async ({ page }) => {
 
   const tabs = page.getByTestId("mobile-model-tab");
   await expect(tabs).toHaveCount(2);
-  await expect(tabs.nth(0)).toHaveAttribute("aria-selected", "true");
+  await expect(
+    page.locator('[data-testid="mobile-model-tab"][aria-selected="true"]')
+  ).toHaveCount(1);
 
-  await tabs.nth(1).click();
-  await expect(tabs.nth(1)).toHaveAttribute("aria-selected", "true");
+  const inactiveTab = page
+    .locator('[data-testid="mobile-model-tab"][aria-selected="false"]')
+    .first();
+  const targetModelId = await inactiveTab.getAttribute("data-model-id");
+  expect(targetModelId).toBeTruthy();
+  const targetTab = page.locator(
+    `[data-testid="mobile-model-tab"][data-model-id="${targetModelId}"]`
+  );
+  await targetTab.click();
+  await expect(targetTab).toHaveAttribute("aria-selected", "true");
   await expectNoHorizontalOverflow(page);
 });
 
@@ -87,6 +105,8 @@ test("horizontal swipe changes the active model tab", async ({ page }) => {
 
   const tabs = page.getByTestId("mobile-model-tab");
   await expect(tabs).toHaveCount(2);
+  await tabs.nth(0).click();
+  await expect(tabs.nth(0)).toHaveAttribute("aria-selected", "true");
 
   const chatArea = page.getByTestId("mobile-chat-shell").locator("section").first();
   await chatArea.dispatchEvent("touchstart", {

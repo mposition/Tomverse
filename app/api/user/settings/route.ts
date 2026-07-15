@@ -74,6 +74,7 @@ export async function GET(req: Request) {
             preferredPriority: settings.preferredPriority,
             usesFilesFrequently: settings.usesFilesFrequently,
             modelFinderCompletedAt: settings.modelFinderCompletedAt?.toISOString() || null,
+            modelFinderDismissedAt: settings.modelFinderDismissedAt?.toISOString() || null,
         });
     } catch (error) {
         const securityResponse = apiSecurityResponse(error);

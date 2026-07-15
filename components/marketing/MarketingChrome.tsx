@@ -13,36 +13,43 @@ import { LocaleSupportNotice } from "./LocaleSupportNotice";
 const resourceLinks: Record<Language, Array<{ label: string; path: string }>> = {
   en: [
     { label: "Compare AI models", path: "/compare-ai-models" },
+    { label: "AI answer review", path: "/ai-answer-review" },
     { label: "ChatGPT vs Claude", path: "/chatgpt-vs-claude" },
     { label: "AI file analysis", path: "/ai-for-file-analysis" },
   ],
   ko: [
     { label: "AI 모델 비교", path: "/compare-ai-models" },
+    { label: "AI 답변 교차검토", path: "/ai-answer-review" },
     { label: "ChatGPT vs Claude", path: "/chatgpt-vs-claude" },
     { label: "AI 파일 분석", path: "/ai-for-file-analysis" },
   ],
   zh: [
     { label: "比较 AI 模型", path: "/compare-ai-models" },
+    { label: "AI 回答交叉审查", path: "/ai-answer-review" },
     { label: "ChatGPT 与 Claude", path: "/chatgpt-vs-claude" },
     { label: "AI 文件分析", path: "/ai-for-file-analysis" },
   ],
   fr: [
     { label: "Comparer les modèles", path: "/compare-ai-models" },
+    { label: "Revue des réponses IA", path: "/ai-answer-review" },
     { label: "ChatGPT vs Claude", path: "/chatgpt-vs-claude" },
     { label: "Analyse de fichiers", path: "/ai-for-file-analysis" },
   ],
   de: [
     { label: "KI-Modelle vergleichen", path: "/compare-ai-models" },
+    { label: "KI-Antworten prüfen", path: "/ai-answer-review" },
     { label: "ChatGPT vs Claude", path: "/chatgpt-vs-claude" },
     { label: "KI-Dateianalyse", path: "/ai-for-file-analysis" },
   ],
   es: [
     { label: "Comparar modelos", path: "/compare-ai-models" },
+    { label: "Revisar respuestas de IA", path: "/ai-answer-review" },
     { label: "ChatGPT vs Claude", path: "/chatgpt-vs-claude" },
     { label: "Análisis de archivos", path: "/ai-for-file-analysis" },
   ],
   pt: [
     { label: "Comparar modelos", path: "/compare-ai-models" },
+    { label: "Revisar respostas de IA", path: "/ai-answer-review" },
     { label: "ChatGPT vs Claude", path: "/chatgpt-vs-claude" },
     { label: "Análise de arquivos", path: "/ai-for-file-analysis" },
   ],

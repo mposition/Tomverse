@@ -17,6 +17,7 @@ export const SEO_LOCALES: readonly Language[] = [
 export const LOCALIZED_SEO_PATHS = [
   "/",
   "/compare-ai-models",
+  "/ai-answer-review",
   "/chatgpt-vs-claude",
   "/ai-for-file-analysis",
 ] as const;
@@ -136,38 +137,38 @@ export const homeSeoCopy: Record<
   { title: string; description: string }
 > = {
   en: {
-    title: "Compare Leading AI Models in One Workspace",
+    title: "Compare AI Answers and Cross-Review What They Missed",
     description:
-      "Compare answers from leading AI models side by side, analyze files, ask follow-up questions, and organize useful conversations with Tomverse AI.",
+      "Ask multiple AI models once, compare their answers, and use Tomverse AI Review to organize agreements, contradictions, omissions, and verification needs.",
   },
   ko: {
-    title: "여러 AI 모델을 한 워크스페이스에서 비교하세요",
+    title: "여러 AI 답변을 비교하고 놓친 부분까지 교차검토하세요",
     description:
-      "Tomverse AI에서 주요 AI 모델의 답변을 나란히 비교하고, 파일을 분석하고, 후속 질문과 유용한 대화를 한곳에서 관리하세요.",
+      "한 번 질문해 여러 AI 답변을 비교하고 Tomverse AI Review로 합의점, 모순, 누락과 추가 검증 항목을 구조화하세요.",
   },
   zh: {
-    title: "在一个工作区比较主流 AI 模型",
+    title: "比较多个 AI 回答并交叉审查遗漏",
     description:
-      "使用 Tomverse AI 并排比较主流 AI 模型的回答、分析文件、继续追问并整理有用的对话。",
+      "一次向多个 AI 提问、比较回答，并使用 Tomverse AI Review 整理共识、矛盾、遗漏和待核实项目。",
   },
   fr: {
-    title: "Comparez les principaux modèles d’IA dans un seul espace",
+    title: "Comparez les réponses IA et examinez leurs omissions",
     description:
-      "Comparez les réponses de plusieurs modèles d’IA, analysez des fichiers, posez des questions de suivi et organisez vos conversations avec Tomverse AI.",
+      "Posez une question à plusieurs modèles, comparez leurs réponses et utilisez Tomverse AI Review pour structurer accords, contradictions et points à vérifier.",
   },
   de: {
-    title: "Führende KI-Modelle in einem Workspace vergleichen",
+    title: "KI-Antworten vergleichen und Auslassungen gegenprüfen",
     description:
-      "Vergleichen Sie Antworten führender KI-Modelle, analysieren Sie Dateien, stellen Sie Folgefragen und organisieren Sie Unterhaltungen mit Tomverse AI.",
+      "Fragen Sie mehrere KI-Modelle einmal, vergleichen Sie Antworten und ordnen Sie mit Tomverse AI Review Gemeinsamkeiten, Widersprüche und Prüfbedarf.",
   },
   es: {
-    title: "Compara los principales modelos de IA en un solo espacio",
+    title: "Compara respuestas de IA y revisa lo que dejaron fuera",
     description:
-      "Compara respuestas de varios modelos de IA, analiza archivos, haz preguntas de seguimiento y organiza conversaciones con Tomverse AI.",
+      "Pregunta una vez a varios modelos, compara sus respuestas y usa Tomverse AI Review para organizar acuerdos, contradicciones, omisiones y verificaciones.",
   },
   pt: {
-    title: "Compare os principais modelos de IA em um só workspace",
+    title: "Compare respostas de IA e revise o que ficou de fora",
     description:
-      "Compare respostas de vários modelos de IA, analise arquivos, faça perguntas de acompanhamento e organize conversas com o Tomverse AI.",
+      "Pergunte uma vez a vários modelos, compare respostas e use o Tomverse AI Review para organizar consensos, contradições, omissões e verificações.",
   },
 };

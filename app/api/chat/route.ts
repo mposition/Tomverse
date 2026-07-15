@@ -32,6 +32,7 @@ import {
     chatErrorResponse,
     createChatBudget,
     identifyChatCaller,
+    linkChatReservationProviderRequest,
     readChatJsonBody,
     releaseChatAccess,
     settleChatUsage,
@@ -1036,7 +1037,10 @@ export async function POST(req: Request) {
             modelConfig,
             estimatedInputTokens
         );
-        const accessGrant = await acquireChatAccess(access, budget);
+        const accessGrant = await acquireChatAccess(access, budget, {
+            traceId,
+            source: "chat",
+        });
         leaseId = accessGrant.leaseId;
         usageReservation = accessGrant.usageReservation;
         try {
@@ -1210,6 +1214,27 @@ export async function POST(req: Request) {
                     }
                     if (done) {
                         try {
+                            try {
+                                const responseMetadata = await result.response;
+                                const responseHeaders = responseMetadata.headers;
+                                await linkChatReservationProviderRequest(
+                                    usageReservation!.reservationId,
+                                    {
+                                        providerRequestId:
+                                            responseHeaders?.["x-request-id"] ||
+                                            responseHeaders?.["request-id"] ||
+                                            null,
+                                        providerResponseId: responseMetadata.id,
+                                    }
+                                );
+                            } catch (error) {
+                                logRequestError(
+                                    "chat_provider_request_link_failed",
+                                    traceId,
+                                    error,
+                                    requestedModelId
+                                );
+                            }
                             const usage = await result.usage;
                             await settleSafely(
                                 generatedText.trim() ? "completed" : "empty",

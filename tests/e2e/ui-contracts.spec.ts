@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
+import { prepareGuestPage } from "./support/app-fixtures";
 
 test("desktop exposes stable QA contracts", async ({ page }) => {
+  await prepareGuestPage(page, "en");
   await page.setViewportSize({ width: 1366, height: 768 });
   await page.goto("/chat");
 
@@ -11,6 +13,7 @@ test("desktop exposes stable QA contracts", async ({ page }) => {
 });
 
 test("mobile exposes stable QA contracts", async ({ page }) => {
+  await prepareGuestPage(page, "en");
   await page.setViewportSize({ width: 412, height: 915 });
   await page.goto("/chat");
 

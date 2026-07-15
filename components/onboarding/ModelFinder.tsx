@@ -210,7 +210,7 @@ export function ModelFinder({ enabled, userId, onComplete }: ModelFinderProps) {
   const handleSkip = async (method: "later" | "default") => {
     try {
       const defaultModelId = await saveAction({
-        action: method === "default" ? "accept_default" : "skip",
+        action: method === "default" ? "accept_default" : "dismiss",
       });
       trackProductEvent("model_finder_skipped", 0, { method });
       if (method === "default") {
@@ -326,6 +326,7 @@ export function ModelFinder({ enabled, userId, onComplete }: ModelFinderProps) {
                 </button>
                 <button
                   type="button"
+                  data-testid="model-finder-remind-later"
                   disabled={isSaving}
                   onClick={() => void handleSkip("later")}
                   className="w-full px-5 py-2 text-sm font-semibold text-zinc-500 hover:text-zinc-900 disabled:opacity-50 dark:hover:text-white"

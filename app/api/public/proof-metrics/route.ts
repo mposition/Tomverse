@@ -5,11 +5,25 @@ import { prisma } from "@/lib/prisma";
 
 const PUBLIC_COUNT_THRESHOLD = 20;
 
+const isDatabaseDisabledForE2e = () =>
+  process.env.E2E_AUTH_BYPASS === "true" &&
+  process.env.E2E_DISABLE_DATABASE === "true";
+
 const publicCount = (count: number) =>
   count >= PUBLIC_COUNT_THRESHOLD ? Math.floor(count / 10) * 10 : null;
 
 export async function GET() {
   const generatedAt = new Date();
+  if (isDatabaseDisabledForE2e()) {
+    return NextResponse.json({
+      periodDays: 30,
+      generatedAt: generatedAt.toISOString(),
+      comparisons: null,
+      fileWorkflows: null,
+      minimumPublicCount: PUBLIC_COUNT_THRESHOLD,
+    });
+  }
+
   const thirtyDaysAgo = new Date(
     generatedAt.getTime() - 30 * 24 * 60 * 60 * 1000
   );

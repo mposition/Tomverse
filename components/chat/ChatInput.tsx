@@ -1195,13 +1195,13 @@ export function ChatInput({
                 </span>
                 <span className="flex flex-wrap items-center gap-3">
                   <a
-                    href={isGuestMode ? `/auth/signin?callbackUrl=${encodeURIComponent(signInCallbackUrl)}` : "/pricing"}
+                    href={isGuestMode ? `/auth/signin?callbackUrl=${encodeURIComponent(signInCallbackUrl)}` : "/pricing?trigger=limit_hit"}
                     className="font-black text-amber-900 underline underline-offset-2 dark:text-amber-100"
                   >
                     {isGuestMode ? t("auth.signIn") : t("billing.joinWaitlist")}
                   </a>
                   {!isGuestMode && isAccountMonthlyLimitReached && (
-                    <CreditPackPurchaseButton>
+                    <CreditPackPurchaseButton trigger="limit_hit">
                       {lang === "ko" ? "추가 크레딧 구매" : "Buy additional credits"}
                     </CreditPackPurchaseButton>
                   )}
@@ -1692,6 +1692,7 @@ export function ChatInput({
                                 type="button"
                                 data-testid="model-option"
                                 data-model-id={model.id}
+                                data-model-tier={model.tier}
                                 disabled={unavailable}
                                 onClick={() => {
                                   rememberRecentModel(model.id);

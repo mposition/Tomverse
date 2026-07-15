@@ -457,6 +457,9 @@ const checks = [
       const migration = read(
         "prisma/migrations/20260715093000_add_model_finder_preferences/migration.sql"
       );
+      const dismissalMigration = read(
+        "prisma/migrations/20260715220000_add_model_finder_dismissed_at/migration.sql"
+      );
       return (
         source.includes("getServerSession(authOptions)") &&
         source.includes("readLimitedJson(req, 8 * 1024, actionSchema)") &&
@@ -473,8 +476,14 @@ const checks = [
         schema.includes("preferredPriority") &&
         schema.includes("usesFilesFrequently") &&
         schema.includes("modelFinderCompletedAt") &&
+        schema.includes("modelFinderDismissedAt") &&
+        source.includes('body.action === "dismiss"') &&
+        source.includes("shouldAutoShowModelFinder") &&
+        component.includes('action: method === "default" ? "accept_default" : "dismiss"') &&
         migration.includes("model_finder_viewed") &&
-        migration.includes("advanced_model_selected")
+        migration.includes("advanced_model_selected") &&
+        dismissalMigration.includes('ADD COLUMN "modelFinderDismissedAt"') &&
+        dismissalMigration.includes('"modelFinderCompletedAt" = NULL')
       );
     },
   },
@@ -657,6 +666,7 @@ const checks = [
     test: (source) =>
       source.includes('"/pricing"') &&
       source.includes('"/support/help-centre"') &&
+      source.includes('"/ai-answer-review"') &&
       source.includes('"chatgpt-vs-claude"') &&
       !source.includes('"/chat"') &&
       !source.includes('"/admin"') &&
@@ -716,11 +726,28 @@ const checks = [
         '"compare-ai-models"'
       ) &&
       read("components/marketing/searchIntentContent.ts").includes(
+        '"ai-answer-review"'
+      ) &&
+      read("components/marketing/searchIntentContent.ts").includes(
         '"chatgpt-vs-claude"'
       ) &&
       read("components/marketing/searchIntentContent.ts").includes(
         '"ai-for-file-analysis"'
       ),
+  },
+  {
+    name: "AI Review marketing describes cross-review without claiming fact verification",
+    file: "components/marketing/AiReviewDemo.tsx",
+    test: (source) =>
+      source.includes("common ground") &&
+      source.includes("Contradiction") &&
+      source.includes("Missing point") &&
+      source.includes("does not browse, externally verify facts, or decide the correct answer") &&
+      source.includes("position bias") &&
+      read("components/marketing/searchIntentContent.ts").includes(
+        '"ai-answer-review"'
+      ) &&
+      read("lib/comparisonReview.ts").includes("const ordered = shuffled(responses)"),
   },
   {
     name: "Authenticated application surfaces are explicitly noindex",
@@ -737,7 +764,10 @@ const checks = [
     test: (source) =>
       source.includes("Monthly and annual subscriptions; automatic renewal") &&
       source.includes("Cancellation and end of paid access") &&
-      source.includes("Unused AI credits") &&
+      source.includes("Monthly credits and additional credits") &&
+      source.includes("Additional-credit refunds, partial refunds, and chargebacks") &&
+      source.includes("12 months (365 days)") &&
+      source.includes("Starter Credit Pack") &&
       source.includes("Promotional purchases") &&
       source.includes("Provider incidents and credit restoration") &&
       source.includes("Australian Consumer Law") &&
@@ -808,8 +838,25 @@ const checks = [
       source.includes("consentPromptReady") &&
       source.includes("GUEST_QUICK_START_ACTIVE_KEY") &&
       source.includes("calc(100vw-1rem)") &&
-      source.includes('className="h-8 flex-1') &&
+      source.includes("grid-cols-[minmax(0,1fr)_auto]") &&
+      source.includes('className="h-8 rounded-lg') &&
       source.includes("env(safe-area-inset-bottom)"),
+  },
+  {
+    name: "Purchase analytics separates subscriptions and credit packs with balance context",
+    file: "lib/productAnalyticsShared.ts",
+    test: (source) =>
+      source.includes('purchase_type: z.enum(["subscription", "credit_pack"])') &&
+      source.includes("product_id:") &&
+      source.includes("pack_id:") &&
+      source.includes("credits_purchased:") &&
+      source.includes("current_plan:") &&
+      source.includes("plan_credits_remaining:") &&
+      source.includes("addon_credits_remaining:") &&
+      source.includes('"limit_hit"') &&
+      source.includes('"usage_widget"') &&
+      source.includes('"account"') &&
+      source.includes('"proactive"'),
   },
   {
     name: "Landing entry copy separates guest access from signed-in features",
@@ -819,7 +866,7 @@ const checks = [
       source.includes('primaryCta: "지금 바로 무료 모델 사용"') &&
       source.includes("guestSteps: string[]") &&
       source.includes("content.steps : content.guestSteps") &&
-      source.includes("3-model comparison, files, and sharing"),
+      source.includes("comparison, AI Review, files, and sharing"),
   },
   {
     name: "ChatGPT versus Claude search page contains a full comparison guide and prepared CTA",
@@ -1015,6 +1062,52 @@ const checks = [
         creditRefund.includes('z.literal("REFUND CREDIT PURCHASE")') &&
         creditRefund.includes("expectedRemainingCredits") &&
         creditRefund.includes('action: "credit_purchase.refunded"')
+      );
+    },
+  },
+  {
+    name: "Chat credit reservations are durable, expiring, and idempotently finalized",
+    file: "lib/chatSecurity.ts",
+    test: (source) => {
+      const schema = read("prisma/schema.prisma");
+      const migration = read(
+        "prisma/migrations/20260715213000_add_durable_chat_credit_reservations/migration.sql"
+      );
+      return (
+        schema.includes("model ChatCreditReservation") &&
+        schema.includes("idempotencyKey") &&
+        schema.includes("expiresAt") &&
+        migration.includes('CREATE TABLE "ChatCreditReservation"') &&
+        source.includes("tx.chatCreditReservation.create") &&
+        source.includes('status: "reserved"') &&
+        source.includes("pg_advisory_xact_lock") &&
+        source.includes("durable.idempotencyKey") &&
+        source.includes('const terminalStatus = actualCredits > 0 ? "settled" : "refunded"') &&
+        source.includes("reconcileExpiredChatCreditReservations") &&
+        source.includes('reason: "reservation_expired"')
+      );
+    },
+  },
+  {
+    name: "Provider correlation and five-minute reservation reconciliation are wired",
+    file: "app/api/internal/maintenance/credit-reservations/route.ts",
+    test: (source) => {
+      const chat = read("app/api/chat/route.ts");
+      const review = read(
+        "app/api/conversations/[conversationId]/comparison-reviews/route.ts"
+      );
+      const cron = read("railway.credit-reconciliation.json");
+      const runner = read("scripts/run-credit-reconciliation.mjs");
+      return (
+        source.includes("MAINTENANCE_SECRET") &&
+        source.includes("timingSafeEqual") &&
+        source.includes("reconcileExpiredChatCreditReservations") &&
+        chat.includes("linkChatReservationProviderRequest") &&
+        chat.includes('responseHeaders?.["x-request-id"]') &&
+        review.includes("linkChatReservationProviderRequest") &&
+        cron.includes('"cronSchedule": "*/5 * * * *"') &&
+        cron.includes('"startCommand": "npm run maintenance:credit-reservations"') &&
+        runner.includes("/api/internal/maintenance/credit-reservations")
       );
     },
   },

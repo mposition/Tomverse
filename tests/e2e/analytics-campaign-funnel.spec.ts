@@ -9,6 +9,7 @@ type CapturedAnalyticsEvent = {
   utm_source: string;
   utm_medium: string;
   utm_campaign: string;
+  properties: Record<string, unknown>;
 };
 
 const billingPlan = (
@@ -31,6 +32,7 @@ test("test campaign retains first-touch UTM through consent, chat, signup, and c
   page,
 }) => {
   const capturedEvents: CapturedAnalyticsEvent[] = [];
+  let checkoutRequest: Record<string, unknown> | null = null;
   await page.context().addCookies([
     {
       name: "__tomverse_e2e_analytics",
@@ -64,13 +66,14 @@ test("test campaign retains first-touch UTM through consent, chat, signup, and c
       }),
     })
   );
-  await page.route("**/api/billing/checkout", (route) =>
-    route.fulfill({
+  await page.route("**/api/billing/checkout", (route) => {
+    checkoutRequest = route.request().postDataJSON() as Record<string, unknown>;
+    return route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({ url: "http://127.0.0.1:3100/__qa_checkout__" }),
-    })
-  );
+    });
+  });
   await page.route("**/__qa_checkout__", (route) =>
     route.fulfill({
       status: 200,
@@ -141,6 +144,19 @@ test("test campaign retains first-touch UTM through consent, chat, signup, and c
         "checkout_started",
       ])
     );
+  const checkoutEvent = capturedEvents.find(
+    (event) => event.event_name === "checkout_started"
+  );
+  expect(checkoutEvent?.properties).toMatchObject({
+    purchase_type: "subscription",
+    product_id: "subscription_pro_monthly",
+    credits_purchased: 3_000,
+    current_plan: "free",
+    trigger: "proactive",
+    plan_credits_remaining: 0,
+    addon_credits_remaining: 0,
+  });
+  expect(checkoutRequest).toMatchObject({ trigger: "proactive" });
 
   for (const event of capturedEvents) {
     expect(event).toMatchObject({

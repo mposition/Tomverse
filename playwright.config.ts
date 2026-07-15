@@ -20,7 +20,7 @@ export default defineConfig({
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  workers: process.env.CI ? 1 : 4,
   reporter: [["list"], ["html", { open: "never" }]],
   outputDir: "test-results",
   use: {
@@ -34,8 +34,13 @@ export default defineConfig({
     url: baseURL,
     env: {
       ALLOWED_REQUEST_HOSTS: allowedRequestHosts.join(","),
+      DATABASE_URL:
+        "postgresql://e2e:e2e@127.0.0.1:1/e2e?connect_timeout=1",
       DISABLE_CSP_UPGRADE_INSECURE_REQUESTS: "true",
+      DIRECT_URL:
+        "postgresql://e2e:e2e@127.0.0.1:1/e2e?connect_timeout=1",
       E2E_AUTH_BYPASS: "true",
+      E2E_DISABLE_DATABASE: "true",
       NODE_OPTIONS: nodeOptions,
       REQUIRE_CLOUDFLARE_ORIGIN_SECRET: "false",
     },

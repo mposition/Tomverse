@@ -21,11 +21,20 @@ const GUEST_QUICK_START_EVENT = "tomverse:guest-quick-start";
 
 const consentCopy: Record<
   Language,
-  { title: string; body: string; accept: string; decline: string; privacy: string; settings: string }
+  {
+    title: string;
+    body: string;
+    mobileBody: string;
+    accept: string;
+    decline: string;
+    privacy: string;
+    settings: string;
+  }
 > = {
   en: {
     title: "Privacy-safe product analytics",
     body: "With your permission, Tomverse measures product usage and campaign attribution. Prompts, responses, filenames, and file contents are never included.",
+    mobileBody: "Help improve Tomverse. Prompts and file contents are never collected.",
     accept: "Allow analytics",
     decline: "Decline",
     privacy: "Privacy policy",
@@ -34,6 +43,7 @@ const consentCopy: Record<
   ko: {
     title: "개인정보를 보호하는 제품 분석",
     body: "동의하면 Tomverse가 제품 사용과 캠페인 유입을 측정합니다. 프롬프트, 응답, 파일명 및 파일 내용은 절대 포함하지 않습니다.",
+    mobileBody: "Tomverse 개선에 동의하시겠어요? 질문과 파일 내용은 수집하지 않습니다.",
     accept: "분석 허용",
     decline: "거부",
     privacy: "개인정보 처리방침",
@@ -42,6 +52,7 @@ const consentCopy: Record<
   zh: {
     title: "保护隐私的产品分析",
     body: "经您同意，Tomverse 会衡量产品使用和活动归因。绝不会收集提示词、回复、文件名或文件内容。",
+    mobileBody: "帮助改进 Tomverse。绝不收集提示词和文件内容。",
     accept: "允许分析",
     decline: "拒绝",
     privacy: "隐私政策",
@@ -50,6 +61,7 @@ const consentCopy: Record<
   fr: {
     title: "Analyse produit respectueuse de la vie privée",
     body: "Avec votre accord, Tomverse mesure l’usage du produit et l’attribution des campagnes. Les prompts, réponses, noms et contenus de fichiers ne sont jamais inclus.",
+    mobileBody: "Aidez à améliorer Tomverse. Prompts et fichiers ne sont jamais collectés.",
     accept: "Autoriser",
     decline: "Refuser",
     privacy: "Confidentialité",
@@ -58,6 +70,7 @@ const consentCopy: Record<
   de: {
     title: "Datenschutzfreundliche Produktanalyse",
     body: "Mit Ihrer Zustimmung misst Tomverse Produktnutzung und Kampagnenzuordnung. Prompts, Antworten, Dateinamen und Dateiinhalte werden niemals erfasst.",
+    mobileBody: "Tomverse verbessern. Prompts und Dateiinhalte werden nie erfasst.",
     accept: "Analyse erlauben",
     decline: "Ablehnen",
     privacy: "Datenschutz",
@@ -66,6 +79,7 @@ const consentCopy: Record<
   es: {
     title: "Analítica de producto con privacidad",
     body: "Con tu permiso, Tomverse mide el uso del producto y la atribución de campañas. Nunca se incluyen prompts, respuestas, nombres ni contenidos de archivos.",
+    mobileBody: "Ayuda a mejorar Tomverse. Nunca recogemos prompts ni archivos.",
     accept: "Permitir analítica",
     decline: "Rechazar",
     privacy: "Privacidad",
@@ -74,6 +88,7 @@ const consentCopy: Record<
   pt: {
     title: "Análise de produto com privacidade",
     body: "Com a sua permissão, o Tomverse mede a utilização do produto e a atribuição de campanhas. Prompts, respostas, nomes e conteúdos de ficheiros nunca são incluídos.",
+    mobileBody: "Ajude a melhorar o Tomverse. Nunca recolhemos prompts nem ficheiros.",
     accept: "Permitir análise",
     decline: "Recusar",
     privacy: "Privacidade",
@@ -240,33 +255,36 @@ export function AnalyticsProvider({
         <aside
           role="dialog"
           aria-label={copy.title}
-          className="fixed bottom-[max(0.5rem,env(safe-area-inset-bottom))] left-1/2 z-[100] w-[min(46rem,calc(100vw-1rem))] -translate-x-1/2 rounded-xl border border-zinc-700 bg-zinc-950/95 p-2.5 text-zinc-100 shadow-2xl shadow-black/40 backdrop-blur sm:p-3"
+          className="fixed bottom-[max(0.5rem,env(safe-area-inset-bottom))] left-1/2 z-[100] w-[min(46rem,calc(100vw-1rem))] -translate-x-1/2 rounded-xl border border-zinc-700 bg-zinc-950/95 p-2 text-zinc-100 shadow-2xl shadow-black/40 backdrop-blur sm:p-3"
         >
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 sm:flex sm:justify-between sm:gap-3">
             <div className="min-w-0">
-              <div className="flex items-center justify-between gap-3">
+              <p className="text-[10px] leading-4 text-zinc-300 sm:hidden">
+                {copy.mobileBody}{" "}
+                <Link href="/privacy" className="font-bold text-blue-300 hover:text-blue-200">
+                  {copy.privacy}
+                </Link>
+              </p>
+              <div className="hidden sm:block">
                 <p className="text-xs font-black">{copy.title}</p>
-                <Link href="/privacy" className="shrink-0 text-[11px] font-bold text-blue-300 hover:text-blue-200 sm:hidden">
+                <p className="mt-0.5 text-[11px] leading-4 text-zinc-400">{copy.body}</p>
+                <Link href="/privacy" className="mt-0.5 inline-flex text-[11px] font-bold text-blue-300 hover:text-blue-200">
                   {copy.privacy}
                 </Link>
               </div>
-              <p className="mt-0.5 text-[11px] leading-4 text-zinc-400">{copy.body}</p>
-              <Link href="/privacy" className="mt-0.5 hidden text-[11px] font-bold text-blue-300 hover:text-blue-200 sm:inline-flex">
-                {copy.privacy}
-              </Link>
             </div>
-            <div className="flex shrink-0 gap-2">
+            <div className="flex shrink-0 gap-1 sm:gap-2">
               <button
                 type="button"
                 onClick={decline}
-                className="h-8 flex-1 rounded-lg border border-zinc-700 px-3 text-[11px] font-black text-zinc-300 hover:bg-zinc-900 sm:flex-none"
+                className="h-8 rounded-lg border border-zinc-700 px-2 text-[10px] font-black text-zinc-300 hover:bg-zinc-900 sm:px-3 sm:text-[11px]"
               >
                 {copy.decline}
               </button>
               <button
                 type="button"
                 onClick={accept}
-                className="h-8 flex-1 rounded-lg bg-blue-600 px-3 text-[11px] font-black text-white hover:bg-blue-500 sm:flex-none"
+                className="h-8 rounded-lg bg-blue-600 px-2 text-[10px] font-black text-white hover:bg-blue-500 sm:px-3 sm:text-[11px]"
               >
                 {copy.accept}
               </button>
