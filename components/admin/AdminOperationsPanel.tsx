@@ -231,7 +231,13 @@ export function AdminOperationsPanel({
           <div className="mt-3 grid gap-2 sm:grid-cols-3">
             {envChecks
               .filter((check) =>
-                ["SLACK_WEBHOOK_URL", "DISCORD_WEBHOOK_URL", "RESEND_API_KEY"].includes(check.name)
+                [
+                  "SLACK_WEBHOOK_URL",
+                  "DISCORD_WEBHOOK_URL",
+                  "RESEND_API_KEY",
+                  "SENTRY_DSN",
+                  "OPS_ALERT_CHANNEL",
+                ].includes(check.name)
               )
               .map((check) => (
                 <div

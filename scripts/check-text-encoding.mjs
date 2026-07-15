@@ -1,13 +1,23 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { findQuestionRunsInsideStrings } from "./text-encoding-check-core.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
 const strict = process.argv.includes("--strict");
 
 const roots = ["app", "components", "lib", "locales"];
-const extensions = new Set([".ts", ".tsx", ".js", ".jsx", ".md", ".json"]);
+const extensions = new Set([
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+  ".md",
+  ".json",
+]);
 
 const patterns = [
   { name: "replacement-character", regex: /\uFFFD/g },
@@ -16,49 +26,6 @@ const patterns = [
   { name: "korean-mojibake-marker", regex: /[\u00EC\u00ED][\u00A0-\u00BF]/g },
   { name: "cjk-mojibake-marker", regex: /[\u00E5\u00E6][\u00A0-\u00BF]/g },
 ];
-
-function findQuestionRunsInsideStrings(text) {
-  const matches = [];
-  let quote = null;
-  let escaped = false;
-  for (let index = 0; index < text.length; index += 1) {
-    const char = text[index];
-    if (quote) {
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (char === "\\") {
-        escaped = true;
-        continue;
-      }
-      if (char === quote) {
-        quote = null;
-        continue;
-      }
-      if (char === "?" && text[index + 1] === "?") {
-        let end = index + 2;
-        while (text[end] === "?") end += 1;
-        matches.push({ index, sample: text.slice(index, end) });
-        index = end - 1;
-      } else if (
-        char === "?" &&
-        /[\p{L}\p{N}]/u.test(text[index - 1] ?? "") &&
-        /[\p{L}\p{N}]/u.test(text[index + 1] ?? "") &&
-        !/[/:=&${}`]/.test(text.slice(Math.max(0, index - 10), Math.min(text.length, index + 10)))
-      ) {
-        matches.push({ index, sample: text.slice(Math.max(0, index - 8), index + 9) });
-      }
-      continue;
-    }
-
-    if (char === "\"" || char === "'" || char === "`") {
-      quote = char;
-    }
-  }
-
-  return matches;
-}
 
 function walk(dir, files = []) {
   if (!fs.existsSync(dir)) return files;
@@ -85,7 +52,7 @@ const findings = [];
 for (const rootName of roots) {
   for (const file of walk(path.join(root, rootName))) {
     const text = fs.readFileSync(file, "utf8");
-    for (const match of findQuestionRunsInsideStrings(text)) {
+    for (const match of findQuestionRunsInsideStrings(text, file)) {
       const position = lineAndColumn(text, match.index);
       findings.push({
         file: path.relative(root, file),

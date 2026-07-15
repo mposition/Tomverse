@@ -1,5 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import { after } from "next/server";
 import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
+import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 
 const isAuthorized = (request: Request) => {
   const configured = process.env.MAINTENANCE_SECRET;
@@ -30,7 +32,19 @@ export async function POST(request: Request) {
       { headers: { "Cache-Control": "no-store" } }
     );
   } catch (error) {
-    console.error("Credit reservation reconciliation failed:", error);
+    after(() =>
+      reportOperationalIncident({
+        code: "CREDIT_RESERVATION_RECONCILIATION_FAILED",
+        title: "Credit reservation reconciliation failed",
+        error,
+        severity: "fatal",
+        cooldownMs: 15 * 60 * 1_000,
+        context: {
+          component: "maintenance-credit-reservations",
+          route: "/api/internal/maintenance/credit-reservations",
+        },
+      })
+    );
     return Response.json(
       { error: "Credit reservation reconciliation failed." },
       { status: 500, headers: { "Cache-Control": "no-store" } }
