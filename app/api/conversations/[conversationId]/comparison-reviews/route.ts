@@ -501,7 +501,11 @@ export async function POST(
         let generated:
           | {
               output: unknown;
-              usage: { inputTokens?: number; outputTokens?: number };
+              usage: {
+                inputTokens?: number;
+                inputTokenDetails: { cacheReadTokens?: number };
+                outputTokens?: number;
+              };
               response: {
                 id: string;
                 headers?: Record<string, string>;
@@ -575,6 +579,7 @@ export async function POST(
         reservation = null;
         await settleChatUsage(successfulReservation, {
           inputTokens: generated.usage.inputTokens,
+          cachedInputTokens: generated.usage.inputTokenDetails.cacheReadTokens,
           outputTokens: generated.usage.outputTokens,
           outcome: "completed",
         }).catch((settlementError) =>

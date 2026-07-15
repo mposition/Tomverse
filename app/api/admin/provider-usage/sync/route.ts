@@ -61,6 +61,7 @@ export async function POST(req: Request) {
       metadata: {
         date: date.toISOString().slice(0, 10),
         synced: results.filter((result) => result.status === "synced").length,
+        internal: results.filter((result) => result.status === "internal").length,
         failed: results.filter((result) => result.status === "failed").length,
         skipped: results.filter((result) => result.status === "skipped").length,
         failures: results

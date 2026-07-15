@@ -73,12 +73,16 @@ const chatBudget = ({
   outputTokens = 900,
   inputRate = 0,
   outputRate = 0,
+  cachedInputPriceMultiplier = 1,
+  provider = "openai",
 }: {
   credits: number;
   inputTokens?: number;
   outputTokens?: number;
   inputRate?: number;
   outputRate?: number;
+  cachedInputPriceMultiplier?: number;
+  provider?: ChatBudget["provider"];
 }): ChatBudget => ({
   modelId: "credit-integration-model",
   modelTier: "Free",
@@ -87,7 +91,8 @@ const chatBudget = ({
   maxOutputTokens: outputTokens,
   inputUsdPerMillionTokens: inputRate,
   outputUsdPerMillionTokens: outputRate,
-  provider: "openai",
+  cachedInputPriceMultiplier,
+  provider,
 });
 
 const createAddOnLot = (
@@ -249,6 +254,59 @@ test("creates a durable reservation and prevents duplicate settlement", async ()
     where: { provider: "openai", source: "internal" },
   });
   assert.equal(providerUsage.requestCount, 1);
+  await releaseChatAccess(acquired.leaseId);
+});
+
+test("stores Mistral cached-token usage and the request-time pricing snapshot", async () => {
+  const user = await createUser();
+  const acquired = await acquireChatAccess(
+    chatAccess(user, 100),
+    chatBudget({
+      credits: 5,
+      inputTokens: 1_013,
+      outputTokens: 30,
+      inputRate: 2,
+      outputRate: 6,
+      cachedInputPriceMultiplier: 0.1,
+      provider: "mistral",
+    })
+  );
+
+  await settleChatUsage(acquired.usageReservation, {
+    inputTokens: 1_013,
+    cachedInputTokens: 1_008,
+    outputTokens: 30,
+    outcome: "completed",
+  });
+
+  const finalized = await prisma.chatCreditReservation.findUniqueOrThrow({
+    where: { id: acquired.usageReservation.reservationId },
+  });
+  assert.equal(finalized.settledInputTokens, 1_013);
+  assert.equal(finalized.settledCachedInputTokens, 1_008);
+  assert.equal(finalized.settledOutputTokens, 30);
+  assert.equal(finalized.settledCostMicroUsd, BigInt(392));
+  assert.deepEqual(finalized.pricingSnapshot, {
+    inputTokens: 1_013,
+    uncachedInputTokens: 5,
+    cachedInputTokens: 1_008,
+    outputTokens: 30,
+    inputUsdPerMillionTokens: 2,
+    outputUsdPerMillionTokens: 6,
+    cachedInputPriceMultiplier: 0.1,
+    uncachedInputCostMicroUsd: 10,
+    cachedInputCostMicroUsd: 202,
+    outputCostMicroUsd: 180,
+    totalCostMicroUsd: 392,
+  });
+
+  const providerUsage = await prisma.providerDailyUsage.findFirstOrThrow({
+    where: { provider: "mistral", source: "internal" },
+  });
+  assert.equal(providerUsage.cachedInputTokens, 1_008);
+  assert.equal(providerUsage.uncachedInputCostMicroUsd, 10);
+  assert.equal(providerUsage.cachedInputCostMicroUsd, 202);
+  assert.equal(providerUsage.outputCostMicroUsd, 180);
   await releaseChatAccess(acquired.leaseId);
 });
 

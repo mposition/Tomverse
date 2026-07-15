@@ -20,6 +20,7 @@ import {
     type AddOnCreditReservationEntry,
 } from "@/lib/creditLedger";
 import { lockCreditAccount, offsetCreditDebt } from "@/lib/creditDebt";
+import { calculateProviderUsageCost } from "@/lib/providerUsageCost";
 
 const GUEST_COOKIE_NAME = "tomverse_guest";
 const GUEST_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
@@ -55,6 +56,7 @@ export type ChatBudget = {
     maxOutputTokens: number;
     inputUsdPerMillionTokens: number;
     outputUsdPerMillionTokens: number;
+    cachedInputPriceMultiplier: number;
     provider: AiModel["provider"];
 };
 
@@ -79,6 +81,7 @@ export type ChatUsageReservation = {
     maxOutputTokens: number;
     inputUsdPerMillionTokens: number;
     outputUsdPerMillionTokens: number;
+    cachedInputPriceMultiplier: number;
     planReservedCredits: number;
     addOnReservedCredits: number;
     addOnReservations: AddOnCreditReservationEntry[];
@@ -115,6 +118,7 @@ const durableReservationPayloadSchema = z
         maxOutputTokens: z.number().int().nonnegative(),
         inputUsdPerMillionTokens: z.number().nonnegative(),
         outputUsdPerMillionTokens: z.number().nonnegative(),
+        cachedInputPriceMultiplier: z.number().min(0).max(1).default(1),
         planReservedCredits: z.number().int().nonnegative(),
         addOnReservedCredits: z.number().int().nonnegative(),
         addOnReservations: z.array(
@@ -275,6 +279,7 @@ export const createChatBudget = (
         maxOutputTokens: profile.maxOutputTokens,
         inputUsdPerMillionTokens: profile.inputUsdPerMillionTokens,
         outputUsdPerMillionTokens: profile.outputUsdPerMillionTokens,
+        cachedInputPriceMultiplier: model.provider === "mistral" ? 0.1 : 1,
         provider: model.provider,
     };
 };
@@ -1101,6 +1106,7 @@ export const acquireChatAccess = async (
             maxOutputTokens: budget.maxOutputTokens,
             inputUsdPerMillionTokens: budget.inputUsdPerMillionTokens,
             outputUsdPerMillionTokens: budget.outputUsdPerMillionTokens,
+            cachedInputPriceMultiplier: budget.cachedInputPriceMultiplier,
             planReservedCredits,
             addOnReservedCredits,
             addOnReservations,
@@ -1141,6 +1147,7 @@ export const settleChatUsage = async (
     reservation: ChatUsageReservation,
     usage: {
         inputTokens?: number;
+        cachedInputTokens?: number;
         outputTokens?: number;
         outcome: "completed" | "cancelled" | "failed" | "empty";
     },
@@ -1166,6 +1173,7 @@ export const settleChatUsage = async (
                 status: durable.status,
                 actualInput: 0,
                 actualOutput: 0,
+                actualCachedInput: 0,
                 actualCost: 0,
                 provider: durable.provider as AiModel["provider"],
                 modelId: durable.modelId,
@@ -1185,6 +1193,12 @@ export const settleChatUsage = async (
         const actualOutput = Number.isSafeInteger(usage.outputTokens)
             ? Math.max(0, usage.outputTokens!)
             : canonical.maxOutputTokens;
+        const actualCachedInput = Math.min(
+            actualInput,
+            Number.isSafeInteger(usage.cachedInputTokens)
+                ? Math.max(0, usage.cachedInputTokens!)
+                : 0
+        );
         const actualTokens = actualInput + actualOutput;
         const actualCredits = getSettledUsageCredits({
             reservedCredits: canonical.usageCredits,
@@ -1194,15 +1208,16 @@ export const settleChatUsage = async (
             actualOutputTokens: actualOutput,
             outcome: usage.outcome,
         });
-        const actualCost =
-            microdollarsFor(
-                actualInput,
-                canonical.inputUsdPerMillionTokens
-            ) +
-            microdollarsFor(
-                actualOutput,
-                canonical.outputUsdPerMillionTokens
-            );
+        const costBreakdown = calculateProviderUsageCost({
+            inputTokens: actualInput,
+            cachedInputTokens: actualCachedInput,
+            outputTokens: actualOutput,
+            inputUsdPerMillionTokens: canonical.inputUsdPerMillionTokens,
+            outputUsdPerMillionTokens: canonical.outputUsdPerMillionTokens,
+            cachedInputPriceMultiplier:
+                canonical.cachedInputPriceMultiplier,
+        });
+        const actualCost = costBreakdown.totalCostMicroUsd;
         const planActualCredits = Math.min(
             actualCredits,
             canonical.planReservedCredits
@@ -1273,6 +1288,10 @@ export const settleChatUsage = async (
                 outcome: usage.outcome,
                 settledCredits: actualCredits,
                 settledCostMicroUsd: BigInt(actualCost),
+                settledInputTokens: actualInput,
+                settledCachedInputTokens: actualCachedInput,
+                settledOutputTokens: actualOutput,
+                pricingSnapshot: costBreakdown,
                 settledAt: new Date(),
                 reconciledAt: options?.reconciled ? new Date() : null,
                 lastError: options?.reason?.slice(0, 500) || null,
@@ -1284,7 +1303,9 @@ export const settleChatUsage = async (
             status: terminalStatus,
             actualInput,
             actualOutput,
+            actualCachedInput,
             actualCost,
+            costBreakdown,
             provider: canonical.provider,
             modelId: canonical.modelId,
         };
@@ -1292,6 +1313,7 @@ export const settleChatUsage = async (
 
     if (
         settlement.applied &&
+        settlement.costBreakdown &&
         (settlement.actualInput > 0 ||
             settlement.actualOutput > 0 ||
             settlement.actualCost > 0)
@@ -1300,8 +1322,14 @@ export const settleChatUsage = async (
             provider: settlement.provider,
             modelId: settlement.modelId,
             inputTokens: settlement.actualInput,
+            cachedInputTokens: settlement.actualCachedInput,
             outputTokens: settlement.actualOutput,
             estimatedCostMicroUsd: settlement.actualCost,
+            uncachedInputCostMicroUsd:
+                settlement.costBreakdown.uncachedInputCostMicroUsd,
+            cachedInputCostMicroUsd:
+                settlement.costBreakdown.cachedInputCostMicroUsd,
+            outputCostMicroUsd: settlement.costBreakdown.outputCostMicroUsd,
         });
     }
     return { applied: settlement.applied, status: settlement.status };

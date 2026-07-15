@@ -206,6 +206,25 @@ const checks = [
       source.includes('provider === "anthropic"'),
   },
   {
+    name: "Mistral response Usage preserves cached tokens and request-time pricing",
+    file: "lib/chatSecurity.ts",
+    test: (source) =>
+      source.includes('model.provider === "mistral" ? 0.1 : 1') &&
+      source.includes("usage.cachedInputTokens") &&
+      source.includes("pricingSnapshot: costBreakdown") &&
+      source.includes("settledCachedInputTokens"),
+  },
+  {
+    name: "Mistral missing provider reconciliation is reported as internal accounting",
+    file: "lib/providerUsageSync.ts",
+    test: (source) =>
+      source.includes('status: "internal"') &&
+      source.includes('usageSourceLabel: "Internal response accounting"') &&
+      source.includes(
+        'reconciliationLabel: "Unavailable on current Mistral plan"'
+      ),
+  },
+  {
     name: "Provider usage diagnostics are redacted and visible only in Admin UI",
     file: "components/admin/AdminProviderUsageSyncPanel.tsx",
     test: (source) =>

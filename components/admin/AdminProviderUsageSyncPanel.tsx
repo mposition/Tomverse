@@ -6,8 +6,17 @@ import { RefreshCw } from "lucide-react";
 type SyncResult = {
   provider: string;
   displayName: string;
-  status: "synced" | "skipped" | "failed";
+  status: "synced" | "internal" | "skipped" | "failed";
   reportedCostMicroUsd: number | null;
+  internalCostMicroUsd?: number;
+  internalUsage?: {
+    requestCount: number;
+    inputTokens: number;
+    cachedInputTokens: number;
+    outputTokens: number;
+  };
+  usageSourceLabel?: string;
+  reconciliationLabel?: string;
   message: string;
   diagnostic: {
     traceId: string;
@@ -47,6 +56,7 @@ const money = (microUsd: number | null) =>
 
 const statusClass: Record<SyncResult["status"], string> = {
   synced: "border-emerald-500/30 bg-emerald-500/10 text-emerald-200",
+  internal: "border-sky-500/30 bg-sky-500/10 text-sky-200",
   skipped: "border-zinc-700 bg-zinc-900 text-zinc-300",
   failed: "border-red-500/30 bg-red-500/10 text-red-200",
 };
@@ -105,6 +115,7 @@ export function AdminProviderUsageSyncPanel() {
     if (!response) return null;
     return {
       synced: response.results.filter((result) => result.status === "synced").length,
+      internal: response.results.filter((result) => result.status === "internal").length,
       skipped: response.results.filter((result) => result.status === "skipped").length,
       failed: response.results.filter((result) => result.status === "failed").length,
     };
@@ -144,7 +155,8 @@ export function AdminProviderUsageSyncPanel() {
           </h3>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-400">
             Pull provider-reported spend for a day and store it beside Tomverse internal metering.
-            Providers without a configured usage endpoint are skipped.
+            Mistral uses response-level token accounting when provider reconciliation is unavailable;
+            other providers without a configured usage endpoint are skipped.
           </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
@@ -178,6 +190,9 @@ export function AdminProviderUsageSyncPanel() {
             <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-emerald-200">
               {summary.synced} synced
             </span>
+            <span className="rounded-full border border-sky-500/30 bg-sky-500/10 px-3 py-1 text-sky-200">
+              {summary.internal} internal
+            </span>
             <span className="rounded-full border border-zinc-700 bg-zinc-900 px-3 py-1">
               {summary.skipped} skipped
             </span>
@@ -203,8 +218,25 @@ export function AdminProviderUsageSyncPanel() {
                   </span>
                 </div>
                 <p className="mt-2 font-bold text-zinc-300">
-                  Reported net cost {money(result.reportedCostMicroUsd)}
+                  {result.status === "internal"
+                    ? `Internal estimated cost ${money(result.internalCostMicroUsd || 0)}`
+                    : `Reported net cost ${money(result.reportedCostMicroUsd)}`}
                 </p>
+                {result.usageSourceLabel && (
+                  <p className="mt-1 text-xs text-sky-200">
+                    Usage source: {result.usageSourceLabel}
+                  </p>
+                )}
+                {result.reconciliationLabel && (
+                  <p className="mt-1 text-xs text-zinc-400">
+                    Provider reconciliation: {result.reconciliationLabel}
+                  </p>
+                )}
+                {result.internalUsage && (
+                  <p className="mt-1 text-xs text-zinc-500">
+                    {result.internalUsage.requestCount} requests · {result.internalUsage.inputTokens.toLocaleString()} input · {result.internalUsage.cachedInputTokens.toLocaleString()} cached · {result.internalUsage.outputTokens.toLocaleString()} output tokens
+                  </p>
+                )}
                 <p className="mt-1 text-xs leading-5 text-zinc-500">{result.message}</p>
                 {result.status === "failed" && result.diagnostic && (
                   <details className="mt-3 rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs">

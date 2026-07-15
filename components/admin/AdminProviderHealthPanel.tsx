@@ -362,13 +362,18 @@ function ProviderRow({
             {money(provider.monthBudgetMicroUsd)}
           </p>
           <p className="mt-1 text-xs text-zinc-500">
-            Provider reported net cost{" "}
-            {optionalMoney(provider.providerReportedMonthCostMicroUsd)}
+            {provider.provider === "mistral"
+              ? "Provider reconciliation: Unavailable on current Mistral plan"
+              : `Provider reported net cost ${optionalMoney(provider.providerReportedMonthCostMicroUsd)}`}
           </p>
           <p className="mt-1 text-xs text-zinc-500">Variance {varianceLabel}</p>
-          <p className="mt-1 text-xs text-zinc-500">Source: {provider.usageSource}</p>
           <p className="mt-1 text-xs text-zinc-500">
-            Last usage sync {dateLabel(provider.lastUsageSyncAt)}
+            Usage source: {provider.provider === "mistral" ? "Internal response accounting" : provider.usageSource}
+          </p>
+          <p className="mt-1 text-xs text-zinc-500">
+            {provider.provider === "mistral"
+              ? "Monthly verification: Compare manually with the Mistral Usage dashboard"
+              : `Last usage sync ${dateLabel(provider.lastUsageSyncAt)}`}
           </p>
         </div>
         <div>

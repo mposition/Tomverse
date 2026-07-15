@@ -1,7 +1,10 @@
 import "server-only";
 
 import type { AiProvider } from "@/lib/models";
-import { recordProviderReportedUsage } from "@/lib/providerUsageAccounting";
+import {
+  getInternalProviderUsageSummary,
+  recordProviderReportedUsage,
+} from "@/lib/providerUsageAccounting";
 import {
   MONITORED_PROVIDERS,
   PROVIDER_API_KEY_ENV,
@@ -20,7 +23,11 @@ import {
   redactProviderDiagnostic,
 } from "@/lib/providerUsageSyncCore";
 
-export type ProviderUsageSyncStatus = "synced" | "skipped" | "failed";
+export type ProviderUsageSyncStatus =
+  | "synced"
+  | "internal"
+  | "skipped"
+  | "failed";
 
 export type ProviderUsageSyncFailureStage =
   | "connection"
@@ -49,6 +56,15 @@ export type ProviderUsageSyncResult = {
   displayName: string;
   status: ProviderUsageSyncStatus;
   reportedCostMicroUsd: number | null;
+  internalCostMicroUsd?: number;
+  internalUsage?: {
+    requestCount: number;
+    inputTokens: number;
+    cachedInputTokens: number;
+    outputTokens: number;
+  };
+  usageSourceLabel?: string;
+  reconciliationLabel?: string;
   message: string;
   diagnostic: ProviderUsageSyncDiagnostic | null;
 };
@@ -702,6 +718,31 @@ const syncGenericUsage = async (
   }
 };
 
+const mistralInternalUsage = async (
+  date: Date
+): Promise<ProviderUsageSyncResult> => {
+  const provider: AiProvider = "mistral";
+  const usage = await getInternalProviderUsageSummary({ provider, date });
+  return {
+    provider,
+    displayName: PROVIDER_DISPLAY_NAMES[provider],
+    status: "internal",
+    reportedCostMicroUsd: null,
+    internalCostMicroUsd: usage.estimatedCostMicroUsd,
+    internalUsage: {
+      requestCount: usage.requestCount,
+      inputTokens: usage.inputTokens,
+      cachedInputTokens: usage.cachedInputTokens,
+      outputTokens: usage.outputTokens,
+    },
+    usageSourceLabel: "Internal response accounting",
+    reconciliationLabel: "Unavailable on current Mistral plan",
+    message:
+      "Response Usage is costed with the request-time model price snapshot. Verify the monthly total manually in the Mistral Usage dashboard.",
+    diagnostic: null,
+  };
+};
+
 export async function syncProviderUsageForDate(
   requestedDate = defaultProviderUsageSyncDate()
 ): Promise<ProviderUsageSyncResult[]> {
@@ -709,11 +750,19 @@ export async function syncProviderUsageForDate(
   const results: ProviderUsageSyncResult[] = [];
 
   for (const provider of MONITORED_PROVIDERS) {
+    const hasGenericMistralUsageEndpoint =
+      provider === "mistral" &&
+      Boolean(usageUrlFor(provider, date)) &&
+      Boolean(
+        process.env[`PROVIDER_${envProvider(provider)}_USAGE_COST_JSON_PATH`]
+      );
     results.push(
       provider === "openai"
         ? await syncOpenAiCosts(date)
         : provider === "anthropic"
           ? await syncAnthropicCosts(date)
+          : provider === "mistral" && !hasGenericMistralUsageEndpoint
+            ? await mistralInternalUsage(date)
           : await syncGenericUsage(provider, date)
     );
   }
