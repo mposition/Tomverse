@@ -2,25 +2,23 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, beforeEach, test } from "node:test";
 import type Stripe from "stripe";
-import type { ChatAccess, ChatBudget } from "@/lib/chatSecurity";
-
-const { prisma } = await import("@/lib/prisma");
-const {
+import {
   acquireChatAccess,
   reconcileExpiredChatCreditReservations,
   releaseChatAccess,
   settleChatUsage,
-} = await import("@/lib/chatSecurity");
-const {
+  type ChatAccess,
+  type ChatBudget,
+} from "@/lib/chatSecurity";
+import {
   handleCreditPackDispute,
   handleCreditPackDisputeClosed,
   grantCreditPackFromCheckout,
-} = await import("@/lib/creditPurchase");
-const { lockCreditAccount } = await import("@/lib/creditDebt");
-const { reserveAddOnCredits, settleAddOnCredits } = await import(
-  "@/lib/creditLedger"
-);
-const { getCreditPack } = await import("@/lib/creditPacks");
+} from "@/lib/creditPurchase";
+import { lockCreditAccount } from "@/lib/creditDebt";
+import { reserveAddOnCredits, settleAddOnCredits } from "@/lib/creditLedger";
+import { getCreditPack } from "@/lib/creditPacks";
+import { prisma } from "@/lib/prisma";
 
 const resetFinanceTestData = () =>
   prisma.$executeRawUnsafe(`
