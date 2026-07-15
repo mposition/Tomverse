@@ -18,8 +18,10 @@ import {
   type PurchaseAnalyticsTrigger,
 } from "@/lib/productAnalyticsShared";
 import {
+  BILLING_CURRENCIES,
   billingCurrencyFractionDigits,
   billingMinorToMajor,
+  formatBillingAmount,
   getClientBillingMarket,
   type BillingCurrency,
 } from "@/lib/billingMarkets";
@@ -457,13 +459,19 @@ const formatMoney = (
   amount: number,
   currency = "USD",
   fractionDigits = 0
-) =>
-  new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency,
-    maximumFractionDigits: fractionDigits,
-    minimumFractionDigits: fractionDigits,
-  }).format(amount);
+) => {
+  const supportedCurrency = BILLING_CURRENCIES.includes(
+    currency as BillingCurrency
+  )
+    ? (currency as BillingCurrency)
+    : "USD";
+  return formatBillingAmount(
+    amount,
+    supportedCurrency,
+    undefined,
+    fractionDigits
+  );
+};
 
 const formatUsdCents = (cents: number, fractionDigits = 0) =>
   new Intl.NumberFormat("en-US", {

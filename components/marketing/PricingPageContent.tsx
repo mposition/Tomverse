@@ -23,6 +23,8 @@ import { usePublicBilling } from "@/components/marketing/usePublicBilling";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import {
   billingCurrencyFractionDigits,
+  formatBillingAmount,
+  formatBillingMinor,
   type BillingCurrency,
 } from "@/lib/billingMarkets";
 
@@ -842,12 +844,12 @@ export function PricingPageContent() {
       const digits = billingCurrencyFractionDigits(
         plan.displayCurrency as BillingCurrency
       );
-      return new Intl.NumberFormat(undefined, {
-        style: "currency",
-        currency: plan.displayCurrency,
-        maximumFractionDigits: digits,
-        minimumFractionDigits: digits,
-      }).format(plan.displayMonthlyPriceAmount * discountMultiplier);
+      return formatBillingAmount(
+        plan.displayMonthlyPriceAmount * discountMultiplier,
+        plan.displayCurrency as BillingCurrency,
+        undefined,
+        digits
+      );
     }
     return new Intl.NumberFormat("en-US", {
       style: "currency",
@@ -1100,12 +1102,10 @@ export function PricingPageContent() {
                     <span className="text-sm text-zinc-500 dark:text-zinc-400">{creditPackGuide.credits}</span>
                   </p>
                   <p className="mt-1 text-xl font-black text-emerald-700 dark:text-emerald-300">
-                    {new Intl.NumberFormat(promotionDateLocale[lang], {
-                      style: "currency",
-                      currency: pack.currency,
-                    }).format(
-                      pack.priceMinor /
-                        (pack.currency === "KRW" ? 1 : 100)
+                    {formatBillingMinor(
+                      pack.priceMinor,
+                      pack.currency as BillingCurrency,
+                      promotionDateLocale[lang]
                     )}
                   </p>
                   <p className="mt-4 flex-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
