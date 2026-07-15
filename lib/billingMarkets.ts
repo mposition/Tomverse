@@ -44,24 +44,67 @@ export const billingMinorToMajor = (amountMinor: number, currency: BillingCurren
 export const billingMajorToMinor = (amount: number, currency: BillingCurrency) =>
   Math.round(amount * 10 ** billingCurrencyFractionDigits(currency));
 
+export const formatBillingAmount = (
+  amount: number,
+  currency: BillingCurrency,
+  locale?: string,
+  fractionDigits = billingCurrencyFractionDigits(currency)
+) => {
+  if (currency === "AUD") {
+    return `A$${new Intl.NumberFormat(locale, {
+      minimumFractionDigits: fractionDigits,
+      maximumFractionDigits: fractionDigits,
+    }).format(amount)}`;
+  }
+  return new Intl.NumberFormat(locale, {
+    style: "currency",
+    currency,
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
+  }).format(amount);
+};
+
 export const formatBillingMinor = (
   amountMinor: number,
   currency: BillingCurrency,
   locale?: string
-) =>
-  new Intl.NumberFormat(locale, {
-    style: "currency",
-    currency,
-    minimumFractionDigits: billingCurrencyFractionDigits(currency),
-    maximumFractionDigits: billingCurrencyFractionDigits(currency),
-  }).format(billingMinorToMajor(amountMinor, currency));
+) => formatBillingAmount(billingMinorToMajor(amountMinor, currency), currency, locale);
 
-const countryFromTimeZone = (timeZone: string) => {
+const TIME_ZONE_TO_BILLING_COUNTRY: Record<string, string> = {
+  "Asia/Shanghai": "CN",
+  "Asia/Chongqing": "CN",
+  "Asia/Seoul": "KR",
+  "Europe/Vienna": "AT",
+  "Europe/Brussels": "BE",
+  "Asia/Nicosia": "CY",
+  "Europe/Nicosia": "CY",
+  "Europe/Berlin": "DE",
+  "Europe/Busingen": "DE",
+  "Europe/Tallinn": "EE",
+  "Europe/Madrid": "ES",
+  "Africa/Ceuta": "ES",
+  "Europe/Helsinki": "FI",
+  "Europe/Paris": "FR",
+  "Europe/Athens": "GR",
+  "Europe/Zagreb": "HR",
+  "Europe/Dublin": "IE",
+  "Europe/Rome": "IT",
+  "Europe/Vilnius": "LT",
+  "Europe/Luxembourg": "LU",
+  "Europe/Riga": "LV",
+  "Europe/Malta": "MT",
+  "Europe/Amsterdam": "NL",
+  "Europe/Lisbon": "PT",
+  "Atlantic/Madeira": "PT",
+  "Atlantic/Azores": "PT",
+  "Europe/Ljubljana": "SI",
+  "Europe/Bratislava": "SK",
+};
+
+export const billingCountryFromTimeZone = (timeZone: string | null | undefined) => {
+  if (!timeZone || timeZone.length > 80) return null;
   if (timeZone.startsWith("Australia/")) return "AU";
-  if (timeZone === "Asia/Shanghai" || timeZone === "Asia/Chongqing") return "CN";
-  if (timeZone === "Asia/Seoul") return "KR";
-  if (timeZone.startsWith("Europe/")) return "DE";
-  return null;
+  return TIME_ZONE_TO_BILLING_COUNTRY[timeZone] || null;
 };
 
 export function getClientBillingMarket(): BillingMarket {
@@ -70,14 +113,15 @@ export function getClientBillingMarket(): BillingMarket {
   }
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
   const locale = navigator.languages?.[0] || navigator.language || "";
-  let country: string | null = null;
+  let localeCountry: string | null = null;
   try {
-    country = locale ? normalizeBillingCountry(new Intl.Locale(locale).region) : null;
+    localeCountry = locale
+      ? normalizeBillingCountry(new Intl.Locale(locale).region)
+      : null;
   } catch {
-    country = null;
+    localeCountry = null;
   }
-  country ||= countryFromTimeZone(timeZone);
-  country ||= "US";
+  const country = billingCountryFromTimeZone(timeZone) || localeCountry || "US";
   return {
     currency: billingCurrencyForCountry(country),
     country,

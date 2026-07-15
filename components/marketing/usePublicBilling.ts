@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   billingCurrencyFractionDigits,
+  formatBillingAmount,
   getBillingMarketQuery,
   type BillingCurrency,
 } from "@/lib/billingMarkets";
@@ -97,12 +98,12 @@ export function usePublicBilling() {
         const digits = billingCurrencyFractionDigits(
           plan.displayCurrency as BillingCurrency
         );
-        return new Intl.NumberFormat(undefined, {
-          style: "currency",
-          currency: plan.displayCurrency,
-          maximumFractionDigits: digits,
-          minimumFractionDigits: digits,
-        }).format(displayAmount);
+        return formatBillingAmount(
+          displayAmount,
+          plan.displayCurrency as BillingCurrency,
+          undefined,
+          digits
+        );
       }
       const cents =
         billingInterval === "annual"

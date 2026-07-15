@@ -1,6 +1,7 @@
 import type { BillingPlanConfig } from "@/lib/billingConfig";
 import {
   billingCurrencyForCountry,
+  billingCountryFromTimeZone,
   billingMinorToMajor,
   normalizeBillingCountry,
   normalizeBillingCurrency,
@@ -41,15 +42,6 @@ const trustedCountryFromHeaders = (headers: Headers) =>
   normalizeBillingCountry(headers.get("x-vercel-ip-country")) ||
   normalizeBillingCountry(headers.get("x-country-code"));
 
-const countryFromTimeZone = (value: string | null) => {
-  if (!value || value.length > 80) return null;
-  if (value.startsWith("Australia/")) return "AU";
-  if (value === "Asia/Seoul") return "KR";
-  if (value === "Asia/Shanghai" || value === "Asia/Chongqing") return "CN";
-  if (value.startsWith("Europe/")) return "DE";
-  return null;
-};
-
 export class BillingMarketValidationError extends Error {
   readonly code = "BILLING_MARKET_MISMATCH";
 
@@ -63,8 +55,8 @@ export function inferBillingMarketFromRequest(req: Request): BillingMarket {
   const url = new URL(req.url);
   const trustedCountry = trustedCountryFromHeaders(req.headers);
   const requestedCountry = normalizeBillingCountry(url.searchParams.get("country"));
-  const timeZoneCountry = countryFromTimeZone(url.searchParams.get("tz"));
-  const country = trustedCountry || requestedCountry || timeZoneCountry || "US";
+  const timeZoneCountry = billingCountryFromTimeZone(url.searchParams.get("tz"));
+  const country = trustedCountry || timeZoneCountry || requestedCountry || "US";
   const expectedCurrency = billingCurrencyForCountry(country);
   const requestedCurrency = normalizeBillingCurrency(url.searchParams.get("currency"));
   return {
