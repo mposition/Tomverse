@@ -16,6 +16,37 @@ export const anthropicCostsDayRange = (date: Date) => {
   };
 };
 
+const xaiTimestamp = (date: Date) =>
+  date.toISOString().slice(0, 19).replace("T", " ");
+
+export const xaiUsageDayRequest = (date: Date) => {
+  const start = new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
+  );
+  const end = new Date(start.getTime() + 86_400_000 - 1_000);
+  return {
+    analyticsRequest: {
+      timeRange: {
+        startTime: xaiTimestamp(start),
+        endTime: xaiTimestamp(end),
+        timezone: "Etc/GMT",
+      },
+      timeUnit: "TIME_UNIT_DAY",
+      values: [{ name: "usd", aggregation: "AGGREGATION_SUM" }],
+      groupBy: ["description"],
+      filters: [],
+    },
+  };
+};
+
+export const xaiUsageUrl = ({
+  baseUrl,
+  teamId,
+}: {
+  baseUrl: string;
+  teamId: string;
+}) => `${baseUrl.replace(/\/$/, "")}/${encodeURIComponent(teamId)}/usage`;
+
 export const anthropicCostsUrl = ({
   baseUrl,
   date,
@@ -166,6 +197,21 @@ export class AnthropicCostsParseError extends Error {
   constructor(code: AnthropicCostsParseErrorCode, message: string) {
     super(message);
     this.name = "AnthropicCostsParseError";
+    this.code = code;
+  }
+}
+
+export type XaiUsageParseErrorCode =
+  | "XAI_USAGE_INVALID_PAYLOAD"
+  | "XAI_USAGE_INVALID_AMOUNT"
+  | "XAI_USAGE_LIMIT_REACHED";
+
+export class XaiUsageParseError extends Error {
+  readonly code: XaiUsageParseErrorCode;
+
+  constructor(code: XaiUsageParseErrorCode, message: string) {
+    super(message);
+    this.name = "XaiUsageParseError";
     this.code = code;
   }
 }
@@ -373,12 +419,91 @@ export const parseAnthropicCostsPage = (payload: unknown) => {
   };
 };
 
+export const parseXaiUsage = (payload: unknown) => {
+  if (!payload || typeof payload !== "object") {
+    throw new XaiUsageParseError(
+      "XAI_USAGE_INVALID_PAYLOAD",
+      "xAI Usage API returned an invalid JSON object."
+    );
+  }
+  const record = payload as Record<string, unknown>;
+  if (record.limitReached === true) {
+    throw new XaiUsageParseError(
+      "XAI_USAGE_LIMIT_REACHED",
+      "xAI Usage API returned a partial result because its cardinality limit was reached."
+    );
+  }
+  if (!Array.isArray(record.timeSeries)) {
+    throw new XaiUsageParseError(
+      "XAI_USAGE_INVALID_PAYLOAD",
+      "xAI Usage API response did not contain a timeSeries array."
+    );
+  }
+
+  let costUsd = 0;
+  let dataPointCount = 0;
+  for (const [seriesIndex, series] of record.timeSeries.entries()) {
+    const seriesPath = `timeSeries[${seriesIndex}]`;
+    if (!series || typeof series !== "object") {
+      throw new XaiUsageParseError(
+        "XAI_USAGE_INVALID_PAYLOAD",
+        `xAI Usage API returned an invalid series at ${seriesPath}.`
+      );
+    }
+    const dataPoints = (series as Record<string, unknown>).dataPoints;
+    if (!Array.isArray(dataPoints)) {
+      throw new XaiUsageParseError(
+        "XAI_USAGE_INVALID_PAYLOAD",
+        `xAI Usage API response omitted dataPoints at ${seriesPath}.`
+      );
+    }
+    for (const [pointIndex, point] of dataPoints.entries()) {
+      const pointPath = `${seriesPath}.dataPoints[${pointIndex}]`;
+      if (!point || typeof point !== "object") {
+        throw new XaiUsageParseError(
+          "XAI_USAGE_INVALID_PAYLOAD",
+          `xAI Usage API returned an invalid data point at ${pointPath}.`
+        );
+      }
+      const values = (point as Record<string, unknown>).values;
+      if (!Array.isArray(values) || values.length < 1) {
+        throw new XaiUsageParseError(
+          "XAI_USAGE_INVALID_PAYLOAD",
+          `xAI Usage API response omitted the USD value at ${pointPath}.`
+        );
+      }
+      const amount = finiteSignedAmount(values[0]);
+      if (!amount || amount.value < 0) {
+        throw new XaiUsageParseError(
+          "XAI_USAGE_INVALID_AMOUNT",
+          `xAI Usage API returned an invalid USD amount at ${pointPath}.`
+        );
+      }
+      costUsd += amount.value;
+      if (!Number.isFinite(costUsd)) {
+        throw new XaiUsageParseError(
+          "XAI_USAGE_INVALID_AMOUNT",
+          "xAI Usage API returned an amount total outside the supported numeric range."
+        );
+      }
+      dataPointCount += 1;
+    }
+  }
+
+  return {
+    costUsd,
+    seriesCount: record.timeSeries.length,
+    dataPointCount,
+  };
+};
+
 export const redactProviderDiagnostic = (value: unknown, maxLength = 300) => {
   if (typeof value !== "string") return null;
   const sanitized = value
     .replace(/Bearer\s+[^\s,;]+/gi, "Bearer [REDACTED]")
     .replace(/\bsk-ant-(?:admin\d*|api\d*)-[A-Za-z0-9_-]{8,}\b/gi, "sk-ant-[REDACTED]")
     .replace(/\bsk-(?:admin-)?[A-Za-z0-9_-]{8,}\b/g, "sk-[REDACTED]")
+    .replace(/\bxai-[A-Za-z0-9_-]{8,}\b/gi, "xai-[REDACTED]")
     .replace(/\s+/g, " ")
     .trim();
   return sanitized ? sanitized.slice(0, maxLength) : null;

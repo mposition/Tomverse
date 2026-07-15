@@ -206,6 +206,19 @@ const checks = [
       source.includes('provider === "anthropic"'),
   },
   {
+    name: "xAI usage reconciliation uses the dedicated Management Usage adapter",
+    file: "lib/providerUsageSync.ts",
+    test: (source) =>
+      source.includes("XAI_MANAGEMENT_API_KEY") &&
+      source.includes("XAI_TEAM_ID") &&
+      source.includes("https://management-api.x.ai/v1/billing/teams") &&
+      source.includes('method: "POST"') &&
+      source.includes("xaiUsageDayRequest") &&
+      source.includes("parseXaiUsage") &&
+      source.includes('source: "xai_usage"') &&
+      source.includes('provider === "xai"'),
+  },
+  {
     name: "Mistral response Usage preserves cached tokens and request-time pricing",
     file: "lib/chatSecurity.ts",
     test: (source) =>

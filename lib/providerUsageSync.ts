@@ -20,7 +20,11 @@ import {
   openAiCostsUrl,
   parseAnthropicCostsPage,
   parseOpenAiCostsPage,
+  parseXaiUsage,
   redactProviderDiagnostic,
+  XaiUsageParseError,
+  xaiUsageDayRequest,
+  xaiUsageUrl,
 } from "@/lib/providerUsageSyncCore";
 
 export type ProviderUsageSyncStatus =
@@ -38,7 +42,11 @@ export type ProviderUsageSyncFailureStage =
 
 export type ProviderUsageSyncDiagnostic = {
   traceId: string;
-  source: "openai_costs" | "anthropic_costs" | "generic_usage";
+  source:
+    | "openai_costs"
+    | "anthropic_costs"
+    | "xai_usage"
+    | "generic_usage";
   endpoint: string;
   httpStatus: number | null;
   errorType: string | null;
@@ -72,6 +80,8 @@ export type ProviderUsageSyncResult = {
 const OPENAI_COSTS_URL = "https://api.openai.com/v1/organization/costs";
 const ANTHROPIC_COSTS_URL =
   "https://api.anthropic.com/v1/organizations/cost_report";
+const XAI_USAGE_BASE_URL =
+  "https://management-api.x.ai/v1/billing/teams";
 const GENERIC_EXTERNAL_TIMEOUT_MS = 10_000;
 const MAX_EXTERNAL_RESPONSE_BYTES = 512_000;
 const MAX_OPENAI_PAGES = 10;
@@ -604,6 +614,145 @@ const syncAnthropicCosts = async (
   }
 };
 
+const syncXaiUsage = async (
+  date: Date
+): Promise<ProviderUsageSyncResult> => {
+  const provider: AiProvider = "xai";
+  const displayName = PROVIDER_DISPLAY_NAMES[provider];
+  const managementKey = process.env.XAI_MANAGEMENT_API_KEY?.trim();
+  const teamId = process.env.XAI_TEAM_ID?.trim();
+  if (!managementKey || !teamId) {
+    const missing = [
+      !managementKey ? "XAI_MANAGEMENT_API_KEY" : null,
+      !teamId ? "XAI_TEAM_ID" : null,
+    ].filter(Boolean);
+    return {
+      provider,
+      displayName,
+      status: "skipped",
+      reportedCostMicroUsd: null,
+      message: `${missing.join(" and ")} ${missing.length === 1 ? "is" : "are"} not configured.`,
+      diagnostic: null,
+    };
+  }
+
+  const url = xaiUsageUrl({ baseUrl: XAI_USAGE_BASE_URL, teamId });
+  const traceId = crypto.randomUUID();
+  let lastHttpStatus: number | null = null;
+  let lastProviderRequestId: string | null = null;
+  let failureStage: ProviderUsageSyncFailureStage = "connection";
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      cache: "no-store",
+      signal: AbortSignal.timeout(GENERIC_EXTERNAL_TIMEOUT_MS),
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${managementKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(xaiUsageDayRequest(date)),
+    });
+    lastHttpStatus = response.status;
+    lastProviderRequestId = redactProviderDiagnostic(
+      response.headers.get("x-request-id") || response.headers.get("request-id"),
+      160
+    );
+    failureStage = "response";
+    const payload = await readBoundedJson(response);
+
+    if (!response.ok) {
+      failureStage = "provider_http";
+      const message =
+        response.status === 401 || response.status === 403
+          ? `xAI Management Usage API denied access (${response.status}). Verify the Management Key permission and Team ID.`
+          : response.status === 404
+            ? "xAI Management Usage API could not find the configured team. Verify XAI_TEAM_ID."
+            : `xAI Management Usage API returned ${response.status}.`;
+      return failedResult({
+        provider,
+        date,
+        message,
+        diagnostic: {
+          traceId,
+          source: "xai_usage",
+          endpoint: endpointLabel(url),
+          httpStatus: response.status,
+          errorType: diagnosticValue(payload, "type"),
+          errorCode:
+            diagnosticValue(payload, "code") ||
+            `XAI_USAGE_HTTP_${response.status}`,
+          providerRequestId: lastProviderRequestId,
+          detail: diagnosticValue(payload, "message"),
+          attemptCount: 1,
+          attemptTimeoutMs: GENERIC_EXTERNAL_TIMEOUT_MS,
+          failureStage,
+        },
+      });
+    }
+
+    failureStage = "payload";
+    const parsed = parseXaiUsage(payload);
+    const reportedCostMicroUsd = Math.round(parsed.costUsd * 1_000_000);
+    failureStage = "storage";
+    await recordProviderReportedUsage({
+      provider,
+      date,
+      costMicroUsd: reportedCostMicroUsd,
+      payload: {
+        source: "xai_usage",
+        date: date.toISOString().slice(0, 10),
+        costUsd: parsed.costUsd,
+        seriesCount: parsed.seriesCount,
+        dataPointCount: parsed.dataPointCount,
+        providerRequestId: lastProviderRequestId,
+      },
+    });
+    return {
+      provider,
+      displayName,
+      status: "synced",
+      reportedCostMicroUsd,
+      message: "xAI team usage costs were reconciled.",
+      diagnostic: null,
+    };
+  } catch (error) {
+    const isTimeout = isTimeoutError(error);
+    return failedResult({
+      provider,
+      date,
+      message: isTimeout
+        ? "xAI Management Usage API timed out after 10 seconds."
+        : "xAI Management Usage API response could not be reconciled.",
+      diagnostic: {
+        traceId,
+        source: "xai_usage",
+        endpoint: endpointLabel(url),
+        httpStatus: lastHttpStatus,
+        errorType: isTimeout
+          ? "timeout"
+          : error instanceof Error
+            ? error.name
+            : null,
+        errorCode: isTimeout
+          ? "XAI_USAGE_TIMEOUT"
+          : error instanceof XaiUsageParseError
+            ? error.code
+            : "XAI_USAGE_SYNC_FAILED",
+        providerRequestId: lastProviderRequestId,
+        detail:
+          error instanceof Error
+            ? redactProviderDiagnostic(error.message)
+            : "xAI Management Usage API request failed.",
+        attemptCount: 1,
+        attemptTimeoutMs: GENERIC_EXTERNAL_TIMEOUT_MS,
+        failureStage,
+      },
+      cause: error,
+    });
+  }
+};
+
 const syncGenericUsage = async (
   provider: AiProvider,
   date: Date
@@ -761,9 +910,11 @@ export async function syncProviderUsageForDate(
         ? await syncOpenAiCosts(date)
         : provider === "anthropic"
           ? await syncAnthropicCosts(date)
-          : provider === "mistral" && !hasGenericMistralUsageEndpoint
-            ? await mistralInternalUsage(date)
-          : await syncGenericUsage(provider, date)
+          : provider === "xai"
+            ? await syncXaiUsage(date)
+            : provider === "mistral" && !hasGenericMistralUsageEndpoint
+              ? await mistralInternalUsage(date)
+              : await syncGenericUsage(provider, date)
     );
   }
 
