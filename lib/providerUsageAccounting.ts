@@ -16,8 +16,12 @@ export type ProviderUsageRecordInput = {
   provider: AiModel["provider"];
   modelId: string;
   inputTokens: number;
+  cachedInputTokens: number;
   outputTokens: number;
   estimatedCostMicroUsd: number;
+  uncachedInputCostMicroUsd: number;
+  cachedInputCostMicroUsd: number;
+  outputCostMicroUsd: number;
   date?: Date;
 };
 
@@ -25,14 +29,25 @@ export async function recordInternalProviderUsage({
   provider,
   modelId,
   inputTokens,
+  cachedInputTokens,
   outputTokens,
   estimatedCostMicroUsd,
+  uncachedInputCostMicroUsd,
+  cachedInputCostMicroUsd,
+  outputCostMicroUsd,
   date,
 }: ProviderUsageRecordInput) {
   const usageDate = dayStartUtc(date);
   const safeInputTokens = Math.max(0, Math.min(2_000_000_000, Math.round(inputTokens)));
   const safeOutputTokens = Math.max(0, Math.min(2_000_000_000, Math.round(outputTokens)));
+  const safeCachedInputTokens = Math.min(
+    safeInputTokens,
+    Math.max(0, Math.min(2_000_000_000, Math.round(cachedInputTokens)))
+  );
   const safeCost = Math.max(0, Math.min(2_000_000_000, Math.round(estimatedCostMicroUsd)));
+  const safeUncachedInputCost = Math.max(0, Math.min(2_000_000_000, Math.round(uncachedInputCostMicroUsd)));
+  const safeCachedInputCost = Math.max(0, Math.min(2_000_000_000, Math.round(cachedInputCostMicroUsd)));
+  const safeOutputCost = Math.max(0, Math.min(2_000_000_000, Math.round(outputCostMicroUsd)));
 
   await prisma.providerDailyUsage.upsert({
     where: {
@@ -50,18 +65,53 @@ export async function recordInternalProviderUsage({
       date: usageDate,
       requestCount: 1,
       inputTokens: safeInputTokens,
+      cachedInputTokens: safeCachedInputTokens,
       outputTokens: safeOutputTokens,
       estimatedCostMicroUsd: safeCost,
+      uncachedInputCostMicroUsd: safeUncachedInputCost,
+      cachedInputCostMicroUsd: safeCachedInputCost,
+      outputCostMicroUsd: safeOutputCost,
       syncedAt: new Date(),
     },
     update: {
       requestCount: { increment: 1 },
       inputTokens: { increment: safeInputTokens },
+      cachedInputTokens: { increment: safeCachedInputTokens },
       outputTokens: { increment: safeOutputTokens },
       estimatedCostMicroUsd: { increment: safeCost },
+      uncachedInputCostMicroUsd: { increment: safeUncachedInputCost },
+      cachedInputCostMicroUsd: { increment: safeCachedInputCost },
+      outputCostMicroUsd: { increment: safeOutputCost },
       syncedAt: new Date(),
     },
   });
+}
+
+export async function getInternalProviderUsageSummary({
+  provider,
+  date,
+}: {
+  provider: AiModel["provider"];
+  date: Date;
+}) {
+  const usageDate = dayStartUtc(date);
+  const aggregate = await prisma.providerDailyUsage.aggregate({
+    where: { provider, source: "internal", date: usageDate },
+    _sum: {
+      requestCount: true,
+      inputTokens: true,
+      cachedInputTokens: true,
+      outputTokens: true,
+      estimatedCostMicroUsd: true,
+    },
+  });
+  return {
+    requestCount: aggregate._sum.requestCount || 0,
+    inputTokens: aggregate._sum.inputTokens || 0,
+    cachedInputTokens: aggregate._sum.cachedInputTokens || 0,
+    outputTokens: aggregate._sum.outputTokens || 0,
+    estimatedCostMicroUsd: aggregate._sum.estimatedCostMicroUsd || 0,
+  };
 }
 
 export async function recordProviderReportedUsage({

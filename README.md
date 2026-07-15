@@ -190,6 +190,26 @@ PROVIDER_<PROVIDER>_USAGE_COST_JSON_PATH=<numeric USD JSON path>
 PROVIDER_<PROVIDER>_USAGE_AUTH_HEADER=<optional complete authorization value>
 ```
 
+Mistral Chat Completion usage is accounted from each API response instead of
+requiring an Admin Usage API. The OpenAI-compatible streaming adapter sends
+`stream_options.include_usage=true`; the final Usage event supplies prompt,
+completion, and cached prompt tokens. Tomverse stores those actual token counts
+with the input/output rates and 10% cached-input multiplier that applied when
+the request was reserved. Historical costs are therefore not recalculated when
+environment pricing changes.
+
+Use a Tomverse-only `MISTRAL_API_KEY`, preferably from a production-only Mistral
+Workspace. The Admin Console labels this mode **Internal response accounting**
+and **Provider reconciliation unavailable on current Mistral plan**. Compare the
+internal monthly total with Mistral Console Usage manually. If a future Mistral
+plan exposes a supported numeric billing endpoint, the generic
+`PROVIDER_MISTRAL_USAGE_*` variables can opt the provider back into automatic
+reconciliation. This calculation covers Chat Completions; OCR, Audio, Agents,
+Connectors, and fine-tuning require separate accounting before they are enabled.
+
+Deploy migration `20260715233000_mistral_response_usage_accounting` before
+releasing cached-token accounting in production.
+
 ## Admin Infrastructure Audit
 
 The Admin Console Infrastructure tab reads Railway projected usage, Cloudflare

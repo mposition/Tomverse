@@ -1078,7 +1078,11 @@ export async function POST(req: Request) {
                 : 0;
         const settleSafely = (
             outcome: "completed" | "cancelled" | "failed" | "empty",
-            usage?: { inputTokens?: number; outputTokens?: number }
+            usage?: {
+                inputTokens?: number;
+                cachedInputTokens?: number;
+                outputTokens?: number;
+            }
         ) => {
             if (usageSettlement) return usageSettlement;
             const reservation = usageReservation;
@@ -1088,6 +1092,7 @@ export async function POST(req: Request) {
                     await settleChatUsage(reservation, {
                         inputTokens:
                             usage?.inputTokens ?? reservation.inputTokens,
+                        cachedInputTokens: usage?.cachedInputTokens,
                         outputTokens:
                             usage?.outputTokens ??
                             estimatedGeneratedOutputTokens(),
@@ -1240,6 +1245,8 @@ export async function POST(req: Request) {
                                 generatedText.trim() ? "completed" : "empty",
                                 {
                                     inputTokens: usage.inputTokens,
+                                    cachedInputTokens:
+                                        usage.inputTokenDetails.cacheReadTokens,
                                     outputTokens: usage.outputTokens,
                                 }
                             );
