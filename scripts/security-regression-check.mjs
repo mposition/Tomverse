@@ -192,6 +192,20 @@ const checks = [
       source.includes("isRetryableOpenAiStatus"),
   },
   {
+    name: "Anthropic usage reconciliation uses the dedicated Admin Cost API adapter",
+    file: "lib/providerUsageSync.ts",
+    test: (source) =>
+      source.includes("ANTHROPIC_ADMIN_API_KEY") &&
+      source.includes("https://api.anthropic.com/v1/organizations/cost_report") &&
+      source.includes('"x-api-key": adminKey') &&
+      source.includes('"anthropic-version": "2023-06-01"') &&
+      source.includes("anthropicCostsUrl") &&
+      source.includes("parseAnthropicCostsPage") &&
+      source.includes("MAX_ANTHROPIC_PAGES") &&
+      source.includes('source: "anthropic_costs"') &&
+      source.includes('provider === "anthropic"'),
+  },
+  {
     name: "Provider usage diagnostics are redacted and visible only in Admin UI",
     file: "components/admin/AdminProviderUsageSyncPanel.tsx",
     test: (source) =>

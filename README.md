@@ -169,6 +169,18 @@ sanitized HTTP status, schema path and value type, error code, request ID, and a
 Tomverse trace ID; API keys, amount values, and raw response bodies are never
 logged.
 
+Anthropic organization costs also use a dedicated server-side Admin API key:
+
+```text
+ANTHROPIC_ADMIN_API_KEY=<Anthropic organization Admin API key>
+```
+
+The Anthropic adapter calls `/v1/organizations/cost_report` with `x-api-key`
+authentication for one exact UTC day, follows bounded `next_page` pagination,
+sums every USD fractional-cent line item across all returned buckets, and stores
+the total as provider-reported micro-USD. It does not reuse `ANTHROPIC_API_KEY`,
+and the generic `PROVIDER_ANTHROPIC_USAGE_*` variables are ignored.
+
 Other providers continue to use the generic configuration when their billing
 API supports a single numeric cost path:
 

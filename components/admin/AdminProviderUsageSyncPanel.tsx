@@ -11,7 +11,7 @@ type SyncResult = {
   message: string;
   diagnostic: {
     traceId: string;
-    source: "openai_costs" | "generic_usage";
+    source: "openai_costs" | "anthropic_costs" | "generic_usage";
     endpoint: string;
     httpStatus: number | null;
     errorType: string | null;
@@ -74,14 +74,23 @@ const diagnosticGuidance = (result: SyncResult) => {
   if (diagnostic.errorCode === "OPENAI_COSTS_RESPONSE_TIMEOUT") {
     return "OpenAI responded, but the response body did not finish in time. Retry once; if it repeats, use the provider request ID and Tomverse trace when escalating.";
   }
+  if (diagnostic.errorCode === "ANTHROPIC_COSTS_TIMEOUT") {
+    return "Anthropic Cost API did not finish within 10 seconds. Retry once; if it repeats, use the provider request ID and Tomverse trace when escalating.";
+  }
   if (diagnostic.httpStatus === 401 || diagnostic.httpStatus === 403) {
-    return "Replace OPENAI_ADMIN_API_KEY with an Organization Admin API key created by an Organization Owner, then redeploy.";
+    return diagnostic.source === "anthropic_costs"
+      ? "Replace ANTHROPIC_ADMIN_API_KEY with an Admin API key for the Claude Console organization, then redeploy. A standard ANTHROPIC_API_KEY cannot access cost reports."
+      : "Replace OPENAI_ADMIN_API_KEY with an Organization Admin API key created by an Organization Owner, then redeploy.";
   }
   if (diagnostic.httpStatus === 429) {
-    return "The automatic retry policy was exhausted. Wait for the provider retry window, then run the sync again.";
+    return diagnostic.source === "openai_costs"
+      ? "The automatic retry policy was exhausted. Wait for the provider retry window, then run the sync again."
+      : "Wait for the provider retry window, then run the sync again.";
   }
   if (diagnostic.httpStatus !== null && diagnostic.httpStatus >= 500) {
-    return "OpenAI returned a server error after automatic retries. Retry later and retain both request IDs for support.";
+    return diagnostic.source === "anthropic_costs"
+      ? "Anthropic returned a server error. Retry later and retain the provider request ID and Tomverse trace for support."
+      : "OpenAI returned a server error after automatic retries. Retry later and retain both request IDs for support.";
   }
   return null;
 };
