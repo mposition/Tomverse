@@ -259,6 +259,25 @@ const checks = [
       source.includes("hasGenericUsageEndpoint(provider, date)"),
   },
   {
+    name: "DeepSeek response Usage replaces a missing aggregate cost API",
+    file: "lib/providerUsageSync.ts",
+    test: (source) => {
+      const model = read("lib/activeAiModel.ts");
+      const adapter = read("lib/deepseekUsageAdapterCore.ts");
+      return (
+        source.includes("deepseekInternalUsage") &&
+        source.includes('const provider: AiProvider = "deepseek"') &&
+        source.includes('case "deepseek"') &&
+        source.includes("DeepSeek Usage export") &&
+        model.includes("deepseekUsageFetch") &&
+        adapter.includes("prompt_cache_hit_tokens") &&
+        adapter.includes("prompt_tokens_details") &&
+        read("lib/models.ts").includes('"deepseek-v4-flash": {') &&
+        read("lib/models.ts").includes('"deepseek-v4-pro": {')
+      );
+    },
+  },
+  {
     name: "Mistral missing provider reconciliation is reported as internal accounting",
     file: "lib/providerUsageSync.ts",
     test: (source) =>

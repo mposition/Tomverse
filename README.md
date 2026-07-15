@@ -289,6 +289,28 @@ granted, and topped-up balances plus `is_available`. A CNY balance is never
 mislabelled as USD. `PROVIDER_DEEPSEEK_BALANCE_URL` remains available only as an
 explicit endpoint override.
 
+DeepSeek does not expose a supported date-based aggregate cost API in the
+current integration. When no custom `PROVIDER_DEEPSEEK_USAGE_*` endpoint is
+configured, Usage Reconciliation therefore shows **Internal response
+accounting** instead of **Skipped**. Tomverse normalizes DeepSeek's
+`prompt_cache_hit_tokens` response field into the standard cached-token Usage
+shape before settlement, then stores request, input, cached-input, output, and
+estimated cost totals in `ProviderDailyUsage`. The Balance API remains the live
+prepaid-funds check; compare monthly internal totals with the DeepSeek Usage CSV
+export.
+
+Set production model pricing explicitly so every request stores the active
+price snapshot:
+
+```text
+CHAT_MODEL_DEEPSEEK_V4_FLASH_INPUT_USD_PER_MILLION=<current cache-miss input price>
+CHAT_MODEL_DEEPSEEK_V4_FLASH_OUTPUT_USD_PER_MILLION=<current output price>
+CHAT_MODEL_DEEPSEEK_V4_FLASH_CACHED_INPUT_PRICE_MULTIPLIER=<cache-hit price divided by cache-miss price>
+CHAT_MODEL_DEEPSEEK_V4_PRO_INPUT_USD_PER_MILLION=<current cache-miss input price>
+CHAT_MODEL_DEEPSEEK_V4_PRO_OUTPUT_USD_PER_MILLION=<current output price>
+CHAT_MODEL_DEEPSEEK_V4_PRO_CACHED_INPUT_PRICE_MULTIPLIER=<cache-hit price divided by cache-miss price>
+```
+
 Moonshot/Kimi balance monitoring uses the existing `MOONSHOT_API_KEY` with the
 official Check Balance endpoint. The URL and JSON path below are supported as
 explicit overrides, but the official values are built in:
