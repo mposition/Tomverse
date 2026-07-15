@@ -36,6 +36,7 @@ model User {
   projects               ConversationProject[]
   refundRequests         RefundRequest[]
   promotionRedemptions   BillingPromotionRedemption[]
+  billingTransactions    BillingTransaction[]
   creditPurchases        CreditPurchase[]
   creditLots             CreditLot[]
   creditLedgerEntries    CreditLedgerEntry[]
@@ -324,6 +325,34 @@ model BillingPromotionRedemption {
   @@index([userId, redeemedAt])
 }
 
+model BillingTransaction {
+  id                      String   @id @default(cuid())
+  userId                  String?
+  user                    User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  productType             String
+  productId               String
+  billingInterval         String?
+  stripeCheckoutSessionId String   @unique
+  stripePaymentIntentId   String?
+  stripeSubscriptionId    String?
+  amountPaidMinor         Int
+  currency                String
+  amountPaidUsdMicroUsd   BigInt
+  usdConversionRate       String?
+  usdConversionSource     String
+  pricingVersion          Int      @default(1)
+  status                  String   @default("paid")
+  paidAt                  DateTime
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  @@index([userId, paidAt])
+  @@index([productType, paidAt])
+  @@index([currency, paidAt])
+  @@index([stripePaymentIntentId])
+  @@index([stripeSubscriptionId])
+}
+
 model CreditPurchase {
   id                         String              @id @default(cuid())
   userId                     String
@@ -335,6 +364,7 @@ model CreditPurchase {
   creditsPurchased           Int
   fundedCostMicroUsd         BigInt
   amountPaidCents            Int
+  amountPaidUsdMicroUsd      BigInt              @default(0)
   refundedAmountCents        Int                 @default(0)
   revokedCredits             Int                 @default(0)
   revokedCostMicroUsd        BigInt              @default(0)
@@ -511,6 +541,7 @@ model RefundRequest {
   stripeRefundStatus           String?
   stripeChargeId               String?
   refundAmountCents            Int?
+  refundCurrency               String?
   requestedAt                  DateTime                     @default(now())
   reviewedAt                   DateTime?
   updatedAt                    DateTime                     @updatedAt

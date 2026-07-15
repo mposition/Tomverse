@@ -17,6 +17,12 @@ import {
   normalizePurchaseAnalyticsTrigger,
   type PurchaseAnalyticsTrigger,
 } from "@/lib/productAnalyticsShared";
+import {
+  billingCurrencyFractionDigits,
+  billingMinorToMajor,
+  getClientBillingMarket,
+  type BillingCurrency,
+} from "@/lib/billingMarkets";
 
 type BillingPlan = {
   id: "free" | "pro" | "max";
@@ -28,6 +34,8 @@ type BillingPlan = {
   baseMonthlyPriceCents?: number;
   baseAnnualPriceCents?: number;
   displayCurrency?: string;
+  displayMonthlyPriceMinor?: number;
+  displayAnnualPriceMinor?: number;
   displayMonthlyPriceAmount?: number;
   displayAnnualPriceAmount?: number;
   displayExchangeRate?: number;
@@ -50,6 +58,7 @@ type BillingConfig = {
     annualDiscountStacking: "promotion_specific_default_denied";
   };
   displayCurrency?: string;
+  displayCountry?: string;
   baseCurrency?: "USD";
 };
 
@@ -132,11 +141,11 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     appliedAtCheckout: "Applied at checkout",
     dueToday: "Due today",
     localPriceNote: (amount) =>
-      `Displayed local price is converted from ${amount}. Checkout is charged in USD.`,
+      `Checkout is charged at the fixed local price shown: ${amount}.`,
     renewalNote: (interval, amount) =>
       interval === "annual"
-        ? `Annual checkout renews every year. Base USD price: ${amount} per year.`
-        : `Monthly checkout renews every month. Base USD price: ${amount} per month.`,
+        ? `Annual checkout renews every year at ${amount} per year.`
+        : `Monthly checkout renews every month at ${amount} per month.`,
     continueToCheckout: "Continue to checkout",
   },
   ko: {
@@ -170,11 +179,11 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     appliedAtCheckout: "결제 시 적용",
     dueToday: "오늘 결제 금액",
     localPriceNote: (amount) =>
-      `표시된 현지 가격은 ${amount} 기준 환산 금액입니다. 실제 결제는 USD로 청구됩니다.`,
+      `표시된 현지통화 고정 금액 ${amount}(으)로 결제됩니다.`,
     renewalNote: (interval, amount) =>
       interval === "annual"
-        ? `연간 결제는 매년 갱신됩니다. USD 기준 가격: 연 ${amount}.`
-        : `월간 결제는 매월 갱신됩니다. USD 기준 가격: 월 ${amount}.`,
+        ? `연간 결제는 연 ${amount}로 매년 갱신됩니다.`
+        : `월간 결제는 월 ${amount}로 매월 갱신됩니다.`,
     continueToCheckout: "결제 계속하기",
   },
   zh: {
@@ -207,11 +216,11 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     appliedAtCheckout: "结账时应用",
     dueToday: "今日应付",
     localPriceNote: (amount) =>
-      `显示的本地价格由 ${amount} 换算而来。结账时将以 USD 收费。`,
+      `结账时将收取所显示的本地固定价格 ${amount}。`,
     renewalNote: (interval, amount) =>
       interval === "annual"
-        ? `年付结账每年续订。USD 基准价格：每年 ${amount}。`
-        : `月付结账每月续订。USD 基准价格：每月 ${amount}。`,
+        ? `年付方案按每年 ${amount} 自动续订。`
+        : `月付方案按每月 ${amount} 自动续订。`,
     continueToCheckout: "继续结账",
   },
   fr: {
@@ -245,11 +254,11 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     appliedAtCheckout: "Appliqué au paiement",
     dueToday: "À payer aujourd'hui",
     localPriceNote: (amount) =>
-      `Le prix local affiché est converti depuis ${amount}. Le paiement est facturé en USD.`,
+      `Le paiement est facturé au prix local fixe affiché : ${amount}.`,
     renewalNote: (interval, amount) =>
       interval === "annual"
-        ? `Le paiement annuel est renouvelé chaque année. Prix de base en USD : ${amount} par an.`
-        : `Le paiement mensuel est renouvelé chaque mois. Prix de base en USD : ${amount} par mois.`,
+        ? `Le paiement annuel est renouvelé à ${amount} par an.`
+        : `Le paiement mensuel est renouvelé à ${amount} par mois.`,
     continueToCheckout: "Continuer vers le paiement",
   },
   de: {
@@ -283,11 +292,11 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     appliedAtCheckout: "Beim Checkout angewendet",
     dueToday: "Heute fällig",
     localPriceNote: (amount) =>
-      `Der angezeigte lokale Preis wird aus ${amount} umgerechnet. Die Zahlung wird in USD berechnet.`,
+      `Beim Checkout wird der angezeigte lokale Festpreis von ${amount} berechnet.`,
     renewalNote: (interval, amount) =>
       interval === "annual"
-        ? `Der jährliche Checkout verlängert sich jedes Jahr. Basispreis in USD: ${amount} pro Jahr.`
-        : `Der monatliche Checkout verlängert sich jeden Monat. Basispreis in USD: ${amount} pro Monat.`,
+        ? `Der Jahresplan verlängert sich zu ${amount} pro Jahr.`
+        : `Der Monatsplan verlängert sich zu ${amount} pro Monat.`,
     continueToCheckout: "Weiter zum Checkout",
   },
   es: {
@@ -321,11 +330,11 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     appliedAtCheckout: "Aplicado al pagar",
     dueToday: "A pagar hoy",
     localPriceNote: (amount) =>
-      `El precio local mostrado se convierte desde ${amount}. El pago se cobra en USD.`,
+      `Se cobra el precio local fijo mostrado: ${amount}.`,
     renewalNote: (interval, amount) =>
       interval === "annual"
-        ? `El pago anual se renueva cada año. Precio base en USD: ${amount} al año.`
-        : `El pago mensual se renueva cada mes. Precio base en USD: ${amount} al mes.`,
+        ? `El pago anual se renueva a ${amount} al año.`
+        : `El pago mensual se renueva a ${amount} al mes.`,
     continueToCheckout: "Continuar al pago",
   },
   pt: {
@@ -359,11 +368,11 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     appliedAtCheckout: "Aplicado no checkout",
     dueToday: "Valor hoje",
     localPriceNote: (amount) =>
-      `O preço local exibido é convertido de ${amount}. O checkout é cobrado em USD.`,
+      `O preço local fixo exibido é cobrado no checkout: ${amount}.`,
     renewalNote: (interval, amount) =>
       interval === "annual"
-        ? `O checkout anual renova a cada ano. Preço base em USD: ${amount} por ano.`
-        : `O checkout mensal renova a cada mês. Preço base em USD: ${amount} por mês.`,
+        ? `O plano anual renova por ${amount} ao ano.`
+        : `O plano mensal renova por ${amount} ao mês.`,
     continueToCheckout: "Continuar para o checkout",
   },
 };
@@ -475,19 +484,21 @@ const calculateDiscountedCents = (
   return Math.max(0, cents - (promotion.discountAmountCents || 0));
 };
 
-const calculateDiscountedDisplayAmount = (
-  amount: number,
-  planConfig: BillingPlan | undefined,
+const calculateDiscountedDisplayMinor = (
+  amountMinor: number,
+  baseUsdCents: number,
   promotion: BillingPromotion | null | undefined
 ) => {
-  if (!promotion) return amount;
+  if (!promotion) return amountMinor;
   if (promotion.discountPercent > 0) {
-    return Math.max(0, amount * (1 - promotion.discountPercent / 100));
+    return Math.max(
+      0,
+      Math.round(amountMinor * (1 - promotion.discountPercent / 100))
+    );
   }
-  const fixedDiscount =
-    ((promotion.discountAmountCents || 0) / 100) *
-    (planConfig?.displayExchangeRate || 1);
-  return Math.max(0, amount - fixedDiscount);
+  const fixedDiscountRatio =
+    baseUsdCents > 0 ? (promotion.discountAmountCents || 0) / baseUsdCents : 0;
+  return Math.max(0, Math.round(amountMinor * (1 - fixedDiscountRatio)));
 };
 
 const formatPrice = (
@@ -500,25 +511,18 @@ const formatPrice = (
       ? planConfig.displayAnnualPriceAmount
       : planConfig.displayMonthlyPriceAmount;
   if (planConfig.displayCurrency && typeof displayAmount === "number") {
-    return formatMoney(displayAmount, planConfig.displayCurrency);
+    const currency = planConfig.displayCurrency as BillingCurrency;
+    return formatMoney(
+      displayAmount,
+      currency,
+      billingCurrencyFractionDigits(currency)
+    );
   }
   const cents =
     billingInterval === "annual"
       ? planConfig.annualPriceCents
       : planConfig.monthlyPriceCents;
   return formatMoney(cents / 100, planConfig.currency || "USD");
-};
-
-const formatUsdPrice = (
-  planConfig: BillingPlan | undefined,
-  billingInterval: BillingInterval
-) => {
-  if (!planConfig) return null;
-  const cents =
-    billingInterval === "annual"
-      ? planConfig.baseAnnualPriceCents ?? planConfig.annualPriceCents
-      : planConfig.baseMonthlyPriceCents ?? planConfig.monthlyPriceCents;
-  return formatUsdCents(cents);
 };
 
 export function UpgradeInterestButton({
@@ -555,9 +559,6 @@ export function UpgradeInterestButton({
   const priceLabel = formatPrice(planConfig, billingInterval);
   const monthlyPriceLabel = formatPrice(planConfig, "monthly");
   const annualPriceLabel = formatPrice(planConfig, "annual");
-  const usdPriceLabel = formatUsdPrice(planConfig, billingInterval);
-  const usdMonthlyPriceLabel = formatUsdPrice(planConfig, "monthly");
-  const usdAnnualPriceLabel = formatUsdPrice(planConfig, "annual");
   const discountLabel = appliedPromotion?.discountPercent
     ? `-${appliedPromotion.discountPercent}%`
     : appliedPromotion?.discountAmountCents
@@ -569,20 +570,28 @@ export function UpgradeInterestButton({
       : planConfig?.baseMonthlyPriceCents ?? planConfig?.monthlyPriceCents ?? 0;
   const dueUsdCents = calculateDiscountedCents(baseCents, appliedPromotion);
   const dueUsdLabel = formatUsdCents(dueUsdCents, 1);
-  const displayAmount =
+  const displayAmountMinor =
     billingInterval === "annual"
-      ? planConfig?.displayAnnualPriceAmount
-      : planConfig?.displayMonthlyPriceAmount;
+      ? planConfig?.displayAnnualPriceMinor
+      : planConfig?.displayMonthlyPriceMinor;
+  const checkoutCurrency = (planConfig?.displayCurrency || "USD") as BillingCurrency;
+  const dueDisplayMinor =
+    typeof displayAmountMinor === "number"
+      ? calculateDiscountedDisplayMinor(
+          displayAmountMinor,
+          baseCents,
+          appliedPromotion
+        )
+      : dueUsdCents;
   const dueLabel =
-    planConfig?.displayCurrency && typeof displayAmount === "number"
+    planConfig?.displayCurrency && typeof displayAmountMinor === "number"
       ? formatMoney(
-          calculateDiscountedDisplayAmount(displayAmount, planConfig, appliedPromotion),
-          planConfig.displayCurrency,
-          1
+          billingMinorToMajor(dueDisplayMinor, checkoutCurrency),
+          checkoutCurrency,
+          billingCurrencyFractionDigits(checkoutCurrency)
         )
       : dueUsdLabel;
   const displayedDueLabel = isValidatingPromotion ? "…" : dueLabel;
-  const displayedDueUsdLabel = isValidatingPromotion ? null : dueUsdLabel;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -738,10 +747,17 @@ export function UpgradeInterestButton({
       }
 
       failureStage = "checkout_session";
-      const checkoutDueUsdCents = calculateDiscountedCents(
+      const checkoutDueMinor = calculateDiscountedDisplayMinor(
+        displayAmountMinor ?? baseCents,
         baseCents,
         promotionForCheckout
       );
+      const checkoutMarket = billingConfig?.displayCountry && planConfig?.displayCurrency
+        ? {
+            country: billingConfig.displayCountry,
+            currency: planConfig.displayCurrency as BillingCurrency,
+          }
+        : getClientBillingMarket();
       const analytics = getAnalyticsAttributionSnapshot();
       const purchaseTrigger = normalizePurchaseAnalyticsTrigger(
         trigger ||
@@ -768,8 +784,8 @@ export function UpgradeInterestButton({
         trigger: purchaseTrigger,
         plan_credits_remaining: analyticsContext.planCreditsRemaining,
         addon_credits_remaining: analyticsContext.addonCreditsRemaining,
-        value: checkoutDueUsdCents / 100,
-        currency: "USD",
+        value: billingMinorToMajor(checkoutDueMinor, checkoutMarket.currency),
+        currency: checkoutMarket.currency,
       });
       const response = await fetch("/api/billing/checkout", {
         method: "POST",
@@ -779,6 +795,8 @@ export function UpgradeInterestButton({
           billingInterval,
           language: lang,
           promoCode: checkoutPromoCode || undefined,
+          currency: checkoutMarket.currency,
+          country: checkoutMarket.country,
           trigger: purchaseTrigger,
           ...(analytics ? { analytics } : {}),
         }),
@@ -1093,9 +1111,11 @@ export function UpgradeInterestButton({
                       {displayedDueLabel || priceLabel || "-"}
                     </span>
                   </div>
-                  {usdPriceLabel && displayedDueUsdLabel ? (
+                  {planConfig?.displayCurrency ? (
                     <p className="mt-2 text-xs font-semibold leading-5 text-zinc-500 dark:text-zinc-400">
-                      {copy.localPriceNote(displayedDueUsdLabel || usdPriceLabel)}
+                      {copy.localPriceNote(
+                        displayedDueLabel || priceLabel || "-"
+                      )}
                     </p>
                   ) : null}
                 </div>
@@ -1105,8 +1125,8 @@ export function UpgradeInterestButton({
                 {copy.renewalNote(
                   billingInterval,
                   billingInterval === "annual"
-                    ? usdAnnualPriceLabel || "-"
-                    : usdMonthlyPriceLabel || "-"
+                    ? annualPriceLabel || "-"
+                    : monthlyPriceLabel || "-"
                 )}
               </div>
 

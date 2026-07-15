@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { CheckCircle2, Download, Loader2, RotateCcw, XCircle } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
+import { formatBillingMinor, normalizeBillingCurrency } from "@/lib/billingMarkets";
 
 export type RefundRequestRow = {
   id: string;
@@ -20,6 +21,7 @@ export type RefundRequestRow = {
   stripeRefundStatus: string | null;
   stripeChargeId: string | null;
   refundAmountCents: number | null;
+  refundCurrency: string | null;
   requestedAt: string;
   reviewedAt: string | null;
   timelineEvents?: Array<{
@@ -61,8 +63,12 @@ const dateLabel = (value: string | null) => {
   return date.toISOString().replace("T", " ").slice(0, 16);
 };
 
-const money = (cents: number | null) =>
-  typeof cents === "number" ? `$${(cents / 100).toFixed(2)}` : "-";
+const money = (amountMinor: number | null, currencyValue: string | null) => {
+  const currency = normalizeBillingCurrency(currencyValue || "USD") || "USD";
+  return typeof amountMinor === "number"
+    ? formatBillingMinor(amountMinor, currency, "en")
+    : "-";
+};
 
 const escapeCsv = (value: unknown) => {
   const text = String(value ?? "");
@@ -86,7 +92,7 @@ export function RefundRequestsPanel({ rows }: Props) {
 
   const exportCsv = () => {
     const csv = [
-      ["id", "requestedAt", "email", "plan", "status", "subscriptionStatus", "billingInterval", "periodEnd", "stripeCustomerId", "refundAmountCents", "reason"],
+      ["id", "requestedAt", "email", "plan", "status", "subscriptionStatus", "billingInterval", "periodEnd", "stripeCustomerId", "refundAmountMinor", "refundCurrency", "reason"],
       ...filteredItems.map((request) => [
         request.id,
         request.requestedAt,
@@ -98,6 +104,7 @@ export function RefundRequestsPanel({ rows }: Props) {
         request.subscriptionCurrentPeriodEnd || "",
         request.stripeCustomerId || "",
         request.refundAmountCents ?? "",
+        request.refundCurrency || "",
         request.reason || "",
       ]),
     ]
@@ -266,7 +273,7 @@ export function RefundRequestsPanel({ rows }: Props) {
                     <span>Period end: {dateLabel(request.subscriptionCurrentPeriodEnd)}</span>
                     <span>Stripe refund: {request.stripeRefundId || "-"}</span>
                     <span>Refund status: {request.stripeRefundStatus || "-"}</span>
-                    <span>Refund amount: {money(request.refundAmountCents)}</span>
+                    <span>Refund amount: {money(request.refundAmountCents, request.refundCurrency)}</span>
                     <span>Reviewed: {dateLabel(request.reviewedAt)}</span>
                   </div>
                 </div>

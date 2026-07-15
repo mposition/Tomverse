@@ -1,6 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import {
+  billingCurrencyFractionDigits,
+  getBillingMarketQuery,
+  type BillingCurrency,
+} from "@/lib/billingMarkets";
 
 type BillingPlan = {
   id: "free" | "pro" | "max";
@@ -12,6 +17,8 @@ type BillingPlan = {
   baseMonthlyPriceCents?: number;
   baseAnnualPriceCents?: number;
   displayCurrency?: string;
+  displayMonthlyPriceMinor?: number;
+  displayAnnualPriceMinor?: number;
   displayMonthlyPriceAmount?: number;
   displayAnnualPriceAmount?: number;
   displayExchangeRate?: number;
@@ -22,6 +29,7 @@ export type PublicCreditPack = {
   id: "starter_500" | "project_1500" | "power_4000";
   name: string;
   credits: number;
+  priceMinor: number;
   priceCents: number;
   currency: string;
   validityDays: number;
@@ -48,62 +56,14 @@ type BillingConfig = {
     annualDiscountStacking: "promotion_specific_default_denied";
   };
   displayCurrency?: string;
+  displayCountry?: string;
   baseCurrency?: "USD";
   exchangeRateUpdatedAt?: string | null;
 };
 
-const REGION_TO_CURRENCY: Record<string, string> = {
-  AU: "AUD",
-  BR: "BRL",
-  CA: "CAD",
-  CN: "CNY",
-  DE: "EUR",
-  ES: "EUR",
-  FR: "EUR",
-  GB: "GBP",
-  JP: "JPY",
-  KR: "KRW",
-  NZ: "NZD",
-  PT: "EUR",
-  US: "USD",
-};
-
-const TIMEZONE_TO_CURRENCY: Array<[string, string]> = [
-  ["Australia/", "AUD"],
-  ["Pacific/Auckland", "NZD"],
-  ["Asia/Seoul", "KRW"],
-  ["Asia/Tokyo", "JPY"],
-  ["Europe/London", "GBP"],
-  ["Europe/", "EUR"],
-  ["America/New_York", "USD"],
-  ["America/Chicago", "USD"],
-  ["America/Denver", "USD"],
-  ["America/Los_Angeles", "USD"],
-  ["America/Toronto", "CAD"],
-  ["America/Vancouver", "CAD"],
-];
-
 export function getBillingConfigUrl() {
   if (typeof window === "undefined") return "/api/billing/config";
-
-  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
-  let currency = TIMEZONE_TO_CURRENCY.find(([prefix]) => timeZone.startsWith(prefix))?.[1];
-
-  const locale = navigator.languages?.[0] || navigator.language || "";
-  if (!currency) {
-    try {
-      const region = locale ? new Intl.Locale(locale).region?.toUpperCase() : undefined;
-      currency = region ? REGION_TO_CURRENCY[region] : undefined;
-    } catch {
-      currency = undefined;
-    }
-  }
-
-  const params = new URLSearchParams();
-  if (currency) params.set("currency", currency);
-  if (timeZone) params.set("tz", timeZone);
-  const query = params.toString();
-  return query ? `/api/billing/config?${query}` : "/api/billing/config";
+  return `/api/billing/config?${getBillingMarketQuery()}`;
 }
 
 export function usePublicBilling() {
@@ -134,11 +94,14 @@ export function usePublicBilling() {
         plan.displayCurrency &&
         typeof displayAmount === "number"
       ) {
+        const digits = billingCurrencyFractionDigits(
+          plan.displayCurrency as BillingCurrency
+        );
         return new Intl.NumberFormat(undefined, {
           style: "currency",
           currency: plan.displayCurrency,
-          maximumFractionDigits: 0,
-          minimumFractionDigits: 0,
+          maximumFractionDigits: digits,
+          minimumFractionDigits: digits,
         }).format(displayAmount);
       }
       const cents =

@@ -815,7 +815,6 @@ export function LandingPageContent() {
             {content.pricingPlans.map((plan, index) => {
               const planId = index === 2 ? "max" : index === 1 ? "pro" : "free";
               const displayPrice = billing.formatPlanPrice(planId) || plan.price;
-              const usdPrice = billing.formatUsdPlanPrice(planId) || plan.price;
               const annualFallback = planId === "max" ? "$240" : planId === "pro" ? "$144" : "$0";
               const annualPrice = billing.formatPlanPrice(planId, "annual") || annualFallback;
               return (
@@ -832,9 +831,6 @@ export function LandingPageContent() {
                       <span>{annualCopy.annual}: {annualPrice}</span>
                       <span className={index === 1 ? "text-white" : "text-emerald-500"}>{annualCopy.save}</span>
                     </div>
-                    <p className={index === 1 ? "text-blue-100" : "text-zinc-500 dark:text-zinc-400"}>
-                      USD base: {usdPrice} monthly.
-                    </p>
                   </div>
                 ) : null}
                 <p className={`mt-3 text-sm leading-6 ${index === 1 ? "text-blue-50" : "text-zinc-600 dark:text-zinc-300"}`}>{plan.description}</p>

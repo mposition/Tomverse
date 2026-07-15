@@ -12,13 +12,22 @@ import {
   normalizePurchaseAnalyticsTrigger,
   type PurchaseAnalyticsTrigger,
 } from "@/lib/productAnalyticsShared";
+import {
+  billingMinorToMajor,
+  formatBillingMinor,
+  getBillingMarketQuery,
+  getClientBillingMarket,
+  type BillingCurrency,
+  type BillingMarket,
+} from "@/lib/billingMarkets";
 
 type Pack = {
   id: string;
   name: string;
   credits: number;
+  priceMinor: number;
   priceCents: number;
-  currency: string;
+  currency: BillingCurrency;
   validityDays: number;
 };
 
@@ -53,6 +62,7 @@ export function CreditPackPurchaseButton({
   const [packs, setPacks] = useState<Pack[] | null>(null);
   const [plan, setPlan] = useState<"Free" | "Pro" | "Max">("Free");
   const [debtCredits, setDebtCredits] = useState(0);
+  const [billingMarket, setBillingMarket] = useState<BillingMarket | null>(null);
   const [purchaseAnalyticsContext, setPurchaseAnalyticsContext] =
     useState<PurchaseAnalyticsContext | null>(null);
   const [error, setError] = useState("");
@@ -61,7 +71,7 @@ export function CreditPackPurchaseButton({
   useEffect(() => {
     if (!open) return;
     const controller = new AbortController();
-    void fetch("/api/billing/credit-packs", { cache: "no-store", signal: controller.signal })
+    void fetch(`/api/billing/credit-packs?${getBillingMarketQuery()}`, { cache: "no-store", signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error("load failed");
         return response.json();
@@ -69,6 +79,7 @@ export function CreditPackPurchaseButton({
       .then((data) => {
         setPacks(Array.isArray(data.packs) ? data.packs : []);
         setPlan(data.plan === "Pro" || data.plan === "Max" ? data.plan : "Free");
+        setBillingMarket(data.market || getClientBillingMarket());
         setDebtCredits(Math.max(0, Number(data.creditDebt?.credits) || 0));
         setPurchaseAnalyticsContext({
           currentPlan:
@@ -115,17 +126,20 @@ export function CreditPackPurchaseButton({
       trigger: purchaseTrigger,
       plan_credits_remaining: analyticsContext.planCreditsRemaining,
       addon_credits_remaining: analyticsContext.addonCreditsRemaining,
-      value: pack.priceCents / 100,
-      currency: "USD",
+      value: billingMinorToMajor(pack.priceMinor, pack.currency),
+      currency: pack.currency,
     });
     try {
       const analytics = getAnalyticsAttributionSnapshot();
+      const market = billingMarket || getClientBillingMarket();
       const response = await fetch("/api/billing/credit-packs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           packId,
           language: lang,
+          currency: pack.currency,
+          country: market.country,
           trigger: purchaseTrigger,
           ...(analytics ? { analytics } : {}),
         }),
@@ -150,6 +164,7 @@ export function CreditPackPurchaseButton({
         onClick={() => {
           setPacks(null);
           setPurchaseAnalyticsContext(null);
+          setBillingMarket(null);
           setError("");
           setOpen(true);
         }}
@@ -175,7 +190,9 @@ export function CreditPackPurchaseButton({
                   <p className="mt-2 text-2xl font-black text-zinc-950 dark:text-white">{pack.credits.toLocaleString(lang)} <span className="text-sm text-zinc-500">credits</span></p>
                   <p className="mt-1 text-xs text-zinc-500">{text.expiry}</p>
                   <button type="button" disabled={Boolean(buying)} onClick={() => void buy(pack.id)} className="mt-4 w-full rounded-xl bg-emerald-600 px-3 py-2.5 text-sm font-black text-white hover:bg-emerald-500 disabled:opacity-60">
-                    {buying === pack.id ? text.loading : `${text.buy} · ${new Intl.NumberFormat(lang, { style: "currency", currency: pack.currency }).format(pack.priceCents / 100)}`}
+                    {buying === pack.id
+                      ? text.loading
+                      : `${text.buy} · ${formatBillingMinor(pack.priceMinor, pack.currency, lang)}`}
                   </button>
                 </article>
               ))}

@@ -119,6 +119,15 @@ export async function POST(req: Request, context: RouteContext) {
         { status: 409 }
       );
     }
+    if (charge.currency.toUpperCase() !== purchase.currency.toUpperCase()) {
+      return NextResponse.json(
+        {
+          error:
+            "Stripe charge currency does not match the original credit purchase. Refund was stopped for manual review.",
+        },
+        { status: 409 }
+      );
+    }
 
     const amount = charge.amount - charge.amount_refunded;
     const estimatedUsedCredits = Math.max(
@@ -159,6 +168,7 @@ export async function POST(req: Request, context: RouteContext) {
         stripeRefundId: refund.id,
         stripeChargeId: charge.id,
         refundAmountCents: amount,
+        refundCurrency: charge.currency.toUpperCase(),
         creditsPurchased: purchase.creditsPurchased,
         remainingCreditsReviewed: remainingCredits,
         estimatedUsedCredits,

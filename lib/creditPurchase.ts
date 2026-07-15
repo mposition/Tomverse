@@ -14,6 +14,13 @@ import {
   recordProductAnalyticsEvent,
 } from "@/lib/productAnalyticsServer";
 import { purchaseAnalyticsFromMetadata } from "@/lib/purchaseAnalytics";
+import {
+  billingSnapshotFromCheckoutSession,
+  recordBillingTransactionFromCheckout,
+  type CheckoutBillingSnapshot,
+} from "@/lib/billingTransactions";
+import { billingMinorToMajor } from "@/lib/billingMarkets";
+import { getUsdRevenueSnapshot } from "@/lib/billingPriceCatalog";
 
 const stripeId = (value: string | { id: string } | null | undefined) =>
   typeof value === "string" ? value : value?.id || null;
@@ -33,11 +40,35 @@ export async function grantCreditPackFromCheckout(
   const userId = session.client_reference_id || session.metadata.userId;
   const pack = getCreditPack(session.metadata.packId || "");
   if (!userId || !pack) throw new Error("Invalid credit-pack checkout metadata.");
+  const signedBilling: CheckoutBillingSnapshot = session.metadata?.billingCurrency
+    ? billingSnapshotFromCheckoutSession(session)
+    : {
+        currency: "USD",
+        country: "ZZ",
+        expectedAmountMinor: pack.priceCents,
+        amountUsdMicroUsd: BigInt(pack.priceCents) * BigInt(10_000),
+        usdConversionRate: "1",
+        usdConversionSource: "legacy_usd",
+        pricingVersion: 1,
+      };
+  const paymentRevenueSnapshot = await getUsdRevenueSnapshot({
+    amountMinor: signedBilling.expectedAmountMinor,
+    currency: signedBilling.currency,
+    fallbackUsdMinor: Number(
+      signedBilling.amountUsdMicroUsd / BigInt(10_000)
+    ),
+  });
+  const billing: CheckoutBillingSnapshot = {
+    ...signedBilling,
+    amountUsdMicroUsd: paymentRevenueSnapshot.amountUsdMicroUsd,
+    usdConversionRate: paymentRevenueSnapshot.usdConversionRate,
+    usdConversionSource: paymentRevenueSnapshot.source,
+  };
   if (
-    session.amount_total !== pack.priceCents ||
-    session.currency?.toUpperCase() !== pack.currency
+    session.amount_total !== billing.expectedAmountMinor ||
+    session.currency?.toUpperCase() !== billing.currency
   ) {
-    throw new Error("Credit-pack checkout amount did not match the server price.");
+    throw new Error("Credit-pack checkout amount did not match the server price snapshot.");
   }
 
   const paymentIntentId = stripeId(session.payment_intent);
@@ -52,6 +83,15 @@ export async function grantCreditPackFromCheckout(
       });
       if (existing) return;
 
+      await recordBillingTransactionFromCheckout({
+        db: tx,
+        session,
+        userId,
+        productType: "credit_pack",
+        productId: pack.id,
+        snapshot: billing,
+      });
+
       const purchase = await tx.creditPurchase.create({
         data: {
           userId,
@@ -60,8 +100,9 @@ export async function grantCreditPackFromCheckout(
           stripePaymentIntentId: paymentIntentId,
           creditsPurchased: pack.credits,
           fundedCostMicroUsd: BigInt(pack.fundedCostMicroUsd),
-          amountPaidCents: pack.priceCents,
-          currency: pack.currency,
+          amountPaidCents: billing.expectedAmountMinor,
+          amountPaidUsdMicroUsd: billing.amountUsdMicroUsd,
+          currency: billing.currency,
           purchasedAt,
           expiresAt,
           status: "paid",
@@ -173,8 +214,11 @@ export async function grantCreditPackFromCheckout(
         trigger: purchaseAnalytics.trigger,
         plan_credits_remaining: purchaseAnalytics.planCreditsRemaining,
         addon_credits_remaining: purchaseAnalytics.addonCreditsRemaining,
-        value: pack.priceCents / 100,
-        currency: "USD",
+        value: billingMinorToMajor(
+          billing.expectedAmountMinor,
+          billing.currency
+        ),
+        currency: billing.currency,
         transaction_id: session.id,
       },
       dedupeKey: `stripe-credit-pack:${session.id}`,
@@ -325,6 +369,12 @@ async function revokePurchaseBalance({
         disputeStatus: disputeStatus || undefined,
       },
     });
+    const transactionStatus =
+      disputed || purchase.status === "disputed"
+        ? "disputed"
+        : refundAmount >= purchase.amountPaidCents
+          ? "refunded"
+          : "partially_refunded";
     await tx.creditPurchase.update({
       where: { id: purchase.id },
       data: {
@@ -355,12 +405,12 @@ async function revokePurchaseBalance({
         disputeDebtCostMicroUsd: disputed
           ? { increment: unrecoveredCost }
           : undefined,
-        status: disputed || purchase.status === "disputed"
-          ? "disputed"
-          : refundAmount >= purchase.amountPaidCents
-            ? "refunded"
-            : "partially_refunded",
+        status: transactionStatus,
       },
+    });
+    await tx.billingTransaction.updateMany({
+      where: { stripeCheckoutSessionId: purchase.stripeCheckoutSessionId },
+      data: { status: transactionStatus },
     });
     if (disputed) {
       await tx.user.update({
@@ -543,6 +593,12 @@ export async function handleCreditPackDisputeReinstated(
         disputeOffsetCostMicroUsd: BigInt(0),
         status:
           remainingRefundAmount > 0 ? "partially_refunded" : "paid",
+      },
+    });
+    await tx.billingTransaction.updateMany({
+      where: { stripeCheckoutSessionId: purchase.stripeCheckoutSessionId },
+      data: {
+        status: remainingRefundAmount > 0 ? "partially_refunded" : "paid",
       },
     });
 
