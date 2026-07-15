@@ -4,6 +4,7 @@ import { anthropic } from "@ai-sdk/anthropic";
 import { google } from "@ai-sdk/google";
 import { createOpenAI, openai } from "@ai-sdk/openai";
 import type { AiModel } from "@/lib/models";
+import { deepseekUsageFetch } from "@/lib/deepseekUsageAdapter";
 import { perplexityUsageFetch } from "@/lib/perplexityUsageCapture";
 
 const groq = createOpenAI({
@@ -14,6 +15,7 @@ const groq = createOpenAI({
 const deepseek = createOpenAI({
   baseURL: "https://api.deepseek.com",
   apiKey: process.env.DEEPSEEK_API_KEY,
+  fetch: deepseekUsageFetch,
 });
 
 const mistral = createOpenAI({

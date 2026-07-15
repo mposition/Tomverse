@@ -1392,6 +1392,32 @@ const moonshotInternalUsage = async (
   };
 };
 
+const deepseekInternalUsage = async (
+  date: Date
+): Promise<ProviderUsageSyncResult> => {
+  const provider: AiProvider = "deepseek";
+  const usage = await getInternalProviderUsageSummary({ provider, date });
+  return {
+    provider,
+    displayName: PROVIDER_DISPLAY_NAMES[provider],
+    status: "internal",
+    reportedCostMicroUsd: null,
+    internalCostMicroUsd: usage.estimatedCostMicroUsd,
+    internalUsage: {
+      requestCount: usage.requestCount,
+      inputTokens: usage.inputTokens,
+      cachedInputTokens: usage.cachedInputTokens,
+      outputTokens: usage.outputTokens,
+    },
+    usageSourceLabel: "Internal response accounting",
+    reconciliationLabel:
+      "Official daily cost API unavailable; live balance is monitored separately",
+    message:
+      "DeepSeek response Usage, including cache-hit tokens, is costed with the request-time model price snapshot. The Balance API remains a separate live prepaid-funds check; verify monthly totals with the DeepSeek Usage export.",
+    diagnostic: null,
+  };
+};
+
 const perplexityInternalUsage = async (
   date: Date
 ): Promise<ProviderUsageSyncResult> => {
@@ -1438,6 +1464,10 @@ const syncProviderUsage = async (
       return syncGoogleCloudBilling(date);
     case "qwen":
       return syncAlibabaCloudBilling(date);
+    case "deepseek":
+      return hasGenericUsageEndpoint(provider, date)
+        ? syncGenericUsage(provider, date)
+        : deepseekInternalUsage(date);
     case "mistral":
       return hasGenericUsageEndpoint(provider, date)
         ? syncGenericUsage(provider, date)

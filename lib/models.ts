@@ -274,6 +274,26 @@ const BILLING_DEFAULTS: Record<ModelTier, ModelBillingProfile> = {
     },
 };
 
+const MODEL_BILLING_DEFAULTS: Partial<
+    Record<string, Partial<ModelBillingProfile>>
+> = {
+    "deepseek-v4-flash": {
+        inputUsdPerMillionTokens: 0.14,
+        outputUsdPerMillionTokens: 0.28,
+        cachedInputPriceMultiplier: 0.02,
+    },
+    "deepseek-v4-pro": {
+        inputUsdPerMillionTokens: 0.435,
+        outputUsdPerMillionTokens: 0.87,
+        cachedInputPriceMultiplier: 1 / 120,
+    },
+    "deepseek-r1": {
+        inputUsdPerMillionTokens: 0.14,
+        outputUsdPerMillionTokens: 0.28,
+        cachedInputPriceMultiplier: 0.02,
+    },
+};
+
 const modelEnvKey = (modelId: string, suffix: string) =>
     `CHAT_MODEL_${modelId.replace(/[^A-Za-z0-9]/g, "_").toUpperCase()}_${suffix}`;
 
@@ -292,7 +312,10 @@ const priceMultiplier = (value: string | undefined, fallback: number) => {
 export const getModelBillingProfile = (
     model: Pick<AiModel, "id" | "tier" | "provider">
 ): ModelBillingProfile => {
-    const defaults = BILLING_DEFAULTS[model.tier];
+    const defaults = {
+        ...BILLING_DEFAULTS[model.tier],
+        ...MODEL_BILLING_DEFAULTS[model.id],
+    };
     return {
         maxOutputTokens: Math.floor(
             positiveNumber(
