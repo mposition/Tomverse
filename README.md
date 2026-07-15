@@ -284,6 +284,22 @@ granted, and topped-up balances plus `is_available`. A CNY balance is never
 mislabelled as USD. `PROVIDER_DEEPSEEK_BALANCE_URL` remains available only as an
 explicit endpoint override.
 
+Moonshot/Kimi balance monitoring uses the existing `MOONSHOT_API_KEY` with the
+official Check Balance endpoint. The URL and JSON path below are supported as
+explicit overrides, but the official values are built in:
+
+```text
+PROVIDER_MOONSHOT_BALANCE_URL=https://api.moonshot.ai/v1/users/me/balance
+PROVIDER_MOONSHOT_BALANCE_JSON_PATH=data.available_balance
+```
+
+The provider panel displays the available, voucher, and cash balances. Moonshot
+does not expose a supported date-based cost API, so Usage Reconciliation shows
+**Internal response accounting** instead of **Skipped**. Request tokens and the
+request-time model price snapshot supply the internal daily cost; the Balance
+API remains a separate live prepaid-funds check. Compare the monthly internal
+total with Kimi API Platform manually.
+
 Google Cloud Billing reconciliation reads the standard Cloud Billing export in
 BigQuery. First enable the standard usage-cost export, then give a dedicated
 service account **BigQuery Job User** on the query project and **BigQuery Data

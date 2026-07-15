@@ -15,6 +15,7 @@ import {
 } from "@/lib/providerCreditAlertsCore";
 import {
   parseDeepSeekBalance,
+  parseMoonshotBalance,
   type ProviderBalanceSnapshot,
 } from "@/lib/providerBalanceCore";
 
@@ -788,6 +789,8 @@ const automaticBalanceFor = async (
     process.env[`PROVIDER_${providerKey}_BALANCE_URL`] ||
     (provider === "deepseek"
       ? "https://api.deepseek.com/user/balance"
+      : provider === "moonshot"
+        ? "https://api.moonshot.ai/v1/users/me/balance"
       : undefined);
   if (!url) return null;
 
@@ -809,6 +812,7 @@ const automaticBalanceFor = async (
     if (!response.ok) return null;
     const data = await response.json();
     if (provider === "deepseek") return parseDeepSeekBalance(data);
+    if (provider === "moonshot") return parseMoonshotBalance(data);
     const value = firstNumericValue(
       data,
       jsonPath

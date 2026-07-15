@@ -1345,6 +1345,10 @@ const zhipuInternalUsage = async (
   date: Date
 ): Promise<ProviderUsageSyncResult> => {
   const provider: AiProvider = "zhipu";
+const moonshotInternalUsage = async (
+  date: Date
+): Promise<ProviderUsageSyncResult> => {
+  const provider: AiProvider = "moonshot";
   const usage = await getInternalProviderUsageSummary({ provider, date });
   return {
     provider,
@@ -1362,6 +1366,9 @@ const zhipuInternalUsage = async (
     reconciliationLabel: "Official balance and daily cost APIs unavailable",
     message:
       "Zhipu response Usage, including cached prompt tokens, is costed with the request-time model price snapshot. Maintain a Provider Credit checkpoint and verify it periodically in the Z.AI dashboard.",
+    reconciliationLabel: "Official daily cost API unavailable",
+    message:
+      "Moonshot response tokens are costed with the request-time model price snapshot. The official Balance API is monitored separately; verify the monthly total in Kimi API Platform.",
     diagnostic: null,
   };
 };
@@ -1381,6 +1388,8 @@ export async function syncProviderUsageForDate(
       );
     const hasGenericZhipuUsageEndpoint =
       provider === "zhipu" &&
+    const hasGenericMoonshotUsageEndpoint =
+      provider === "moonshot" &&
       Boolean(usageUrlFor(provider, date)) &&
       Boolean(
         process.env[`PROVIDER_${envProvider(provider)}_USAGE_COST_JSON_PATH`]
@@ -1400,6 +1409,8 @@ export async function syncProviderUsageForDate(
               ? await mistralInternalUsage(date)
               : provider === "zhipu" && !hasGenericZhipuUsageEndpoint
                 ? await zhipuInternalUsage(date)
+              : provider === "moonshot" && !hasGenericMoonshotUsageEndpoint
+                ? await moonshotInternalUsage(date)
               : await syncGenericUsage(provider, date)
     );
   }
