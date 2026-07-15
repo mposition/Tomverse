@@ -5,7 +5,10 @@ import {
   parsePerplexityResponseBody,
   parsePerplexityUsageCost,
 } from "../lib/perplexityUsageCore.ts";
-import { parseDeepSeekBalance } from "../lib/providerBalanceCore.ts";
+import {
+  parseDeepSeekBalance,
+  parseMoonshotBalance,
+} from "../lib/providerBalanceCore.ts";
 import {
   createAlibabaCloudBillingRequest,
   googleCloudBillingQueryRequest,
@@ -82,6 +85,28 @@ test("DeepSeek balance prefers USD and retains availability breakdown", () => {
     grantedAmount: 0.5,
     toppedUpAmount: 2,
   });
+});
+
+test("Moonshot balance exposes available, voucher, and cash balances", () => {
+  assert.deepEqual(
+    parseMoonshotBalance({
+      code: 0,
+      data: {
+        available_balance: 49.58894,
+        voucher_balance: 46.58893,
+        cash_balance: 3.00001,
+      },
+      scode: "0x0",
+      status: true,
+    }),
+    {
+      amount: 49.58894,
+      currency: "USD",
+      available: true,
+      grantedAmount: 46.58893,
+      toppedUpAmount: 3.00001,
+    }
+  );
 });
 
 test("Google Cloud billing query includes credits and converts local currency to USD", () => {
