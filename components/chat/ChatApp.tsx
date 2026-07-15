@@ -37,7 +37,11 @@ type ChatAppProps = {
     modelId: string,
     status: "idle" | "loading" | "responding" | "error" | "paused"
   ) => void;
-  onResponseComplete?: (promptId: string | null, modelId: string) => void;
+  onResponseComplete?: (
+    promptId: string | null,
+    modelId: string,
+    responseText: string
+  ) => void;
   onFollowupSent?: (modelId: string) => void;
 };
 
@@ -382,7 +386,7 @@ function ChatAppComponent({
           "error"
         );
       } else {
-        onResponseComplete?.(analyticsPromptId, modelId);
+        onResponseComplete?.(analyticsPromptId, modelId, assistantText);
       }
     } catch (error: unknown) {
       const requestError =

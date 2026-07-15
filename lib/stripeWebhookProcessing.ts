@@ -16,6 +16,11 @@ import {
   analyticsAttributionFromMetadata,
   recordProductAnalyticsEvent,
 } from "@/lib/productAnalyticsServer";
+import {
+  grantCreditPackFromCheckout,
+  handleCreditPackDispute,
+  handleCreditPackRefund,
+} from "@/lib/creditPurchase";
 
 const subscriptionActiveStatuses = new Set(["active", "trialing", "past_due"]);
 
@@ -243,6 +248,10 @@ async function getSubscriptionPaymentMethodFingerprintHash(
 }
 
 async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
+  if (session.metadata?.purchaseType === "credit_pack") {
+    await grantCreditPackFromCheckout(session);
+    return;
+  }
   if (!session.subscription) return;
   const subscriptionId =
     typeof session.subscription === "string"
@@ -325,7 +334,14 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
 export async function processStripeEvent(event: Stripe.Event) {
   switch (event.type) {
     case "checkout.session.completed":
+    case "checkout.session.async_payment_succeeded":
       await handleCheckoutCompleted(event.data.object as Stripe.Checkout.Session);
+      break;
+    case "charge.refunded":
+      await handleCreditPackRefund(event.data.object as Stripe.Charge);
+      break;
+    case "charge.dispute.created":
+      await handleCreditPackDispute(event.data.object as Stripe.Dispute);
       break;
     case "customer.subscription.created":
     case "customer.subscription.updated":

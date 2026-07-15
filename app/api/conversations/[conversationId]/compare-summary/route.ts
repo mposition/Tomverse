@@ -72,12 +72,14 @@ export async function GET(
     }));
 
     return NextResponse.json({
+      mode: "quick-local",
+      usageCredits: 0,
       title: conversation.title,
       items,
       note:
         items.length < 2
           ? "At least two model responses are needed to compare."
-          : "This is a quick local comparison of the latest response from each model.",
+          : "Quick difference summary uses local excerpts only. No AI model is called and no credits are used.",
     });
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);

@@ -31,6 +31,7 @@ type DesktopChatShellProps = {
   promptPayload: PromptPayload | null;
   inputValue: string;
   setInputValue: (value: string) => void;
+  personalizedPrompt?: string | null;
   attachments: ChatAttachment[];
   setAttachments: (attachments: ChatAttachment[]) => void;
   isSending: boolean;
@@ -49,13 +50,14 @@ type DesktopChatShellProps = {
   onRevokeShare: (id: string) => void;
   onDownload: (id: string, title: string) => void;
   onTogglePrivateMode: () => void;
-  onToggleModel: (modelId: string) => void;
+  onToggleModel: (modelId: string) => boolean;
   onSubmit: () => void;
   onChangePanelModel: (oldModelId: string, newModelId: string) => void;
   onTogglePanelDisable: (modelId: string) => void;
   onRemoveModel: (modelId: string) => void;
   onCompareSummary: () => void;
-  onResponseComplete: (promptId: string | null, modelId: string) => void;
+  onComparisonReview: () => void;
+  onResponseComplete: (promptId: string | null, modelId: string, responseText: string) => void;
   onFollowupSent: (modelId: string) => void;
 };
 
@@ -67,6 +69,7 @@ export function DesktopChatShell({
   promptPayload,
   inputValue,
   setInputValue,
+  personalizedPrompt,
   attachments,
   setAttachments,
   isSending,
@@ -91,6 +94,7 @@ export function DesktopChatShell({
   onTogglePanelDisable,
   onRemoveModel,
   onCompareSummary,
+  onComparisonReview,
   onResponseComplete,
   onFollowupSent,
 }: DesktopChatShellProps) {
@@ -241,21 +245,31 @@ export function DesktopChatShell({
           })}
         </div>
 
-        {selectedModels.length > 1 && currentChatId && !isGuestMode && (
-          <div className="border-t border-zinc-200 bg-white px-4 py-2 dark:border-zinc-800 dark:bg-zinc-950">
+        {selectedModels.length > 1 && currentChatId && (
+          <div className="flex gap-2 border-t border-zinc-200 bg-white px-4 py-2 dark:border-zinc-800 dark:bg-zinc-950">
             <button
               type="button"
               onClick={onCompareSummary}
               className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-xs font-black text-blue-700 hover:bg-blue-100 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200 dark:hover:bg-blue-950"
             >
-              {t("chat.summarizeModelDifferences")}
+              {t("chat.quickDifferenceSummary")}
             </button>
+            {!isGuestMode && currentChatId !== "private-chat" && (
+              <button
+                type="button"
+                onClick={onComparisonReview}
+                className="rounded-xl bg-blue-600 px-4 py-2 text-xs font-black text-white hover:bg-blue-500"
+              >
+                {t("chat.aiReviewButton")}
+              </button>
+            )}
           </div>
         )}
 
         <ChatInput
           value={inputValue}
           onChange={setInputValue}
+          personalizedPrompt={personalizedPrompt}
           onSubmit={onSubmit}
           onCancel={() => {}}
           isSending={isSending}

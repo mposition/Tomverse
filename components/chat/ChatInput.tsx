@@ -36,6 +36,8 @@ import {
   trackProductEvent,
   trackProductEventOnce,
 } from "@/lib/productAnalyticsClient";
+import { getContextualModelSuggestion } from "@/lib/modelFinder";
+import { CreditPackPurchaseButton } from "@/components/billing/CreditPackPurchaseButton";
 
 type PublicModelStatus = "available" | "limited" | "unavailable";
 type PublicModelStatusRecord = {
@@ -200,6 +202,7 @@ const loadExternalScript = (src: string) =>
 type ChatInputProps = {
   value: string;
   onChange: (value: string) => void;
+  personalizedPrompt?: string | null;
   onSubmit: () => void;
   onCancel: () => void;
   disabled?: boolean;
@@ -207,7 +210,7 @@ type ChatInputProps = {
   focusToken?: number;
   selectedModels: string[];
   isGuestLimitReached?: boolean;
-  onToggleModel: (modelId: string) => void;
+  onToggleModel: (modelId: string) => boolean;
   attachments: ChatAttachment[];
   onAttachmentsChange: (attachments: ChatAttachment[]) => void;
   canAttach?: boolean;
@@ -290,6 +293,7 @@ const isGooglePickerConfig = (value: unknown): value is GooglePickerConfig => {
 export function ChatInput({
   value,
   onChange,
+  personalizedPrompt,
   onSubmit,
   onCancel,
   disabled = false,
@@ -314,6 +318,7 @@ export function ChatInput({
   const [isUploading, setIsUploading] = useState(false);
   const [isDragActive, setIsDragActive] = useState(false);
   const [showGuestQuickStart, setShowGuestQuickStart] = useState(false);
+  const [dismissedSuggestionKey, setDismissedSuggestionKey] = useState<string | null>(null);
     const { t, lang } = useLanguage();
     const signInCallbackUrl = withChatLanguage("/chat", lang);
     const accountUsage = useUserUsage(!isGuestMode);
@@ -321,26 +326,34 @@ export function ChatInput({
       canAttachProp &&
       !isGuestMode &&
       accountUsage?.limits.allowAttachments !== false;
-    const maxSelectableModels = isGuestMode
+  const maxSelectableModels = isGuestMode
       ? APP_DEFAULTS.maxGuestSelectedModels
       : accountUsage?.limits.maxModels || MAX_SELECTED_MODELS;
-
   const activeModelNames = selectedModels
     .map(id => AVAILABLE_MODELS.find(m => m.id === id)?.name)
     .filter(Boolean);
 
   const dailyCreditLimit = accountUsage?.limits.creditsDay || 0;
-  const monthlyCreditLimit = accountUsage?.limits.creditsMonth || 0;
+  const estimatedRequestCredits = selectedModels.reduce((sum, modelId) => {
+    const model = AVAILABLE_MODELS.find((item) => item.id === modelId);
+    return sum + (model ? getModelUsageProfile(model).credits : 0);
+  }, 0);
+  const totalAvailableCredits = accountUsage
+    ? accountUsage.balances.planRemainingCredits +
+      accountUsage.balances.purchasedRemainingCredits
+    : 0;
   const isAccountDailyLimitReached =
     !isGuestMode &&
     dailyCreditLimit > 0 &&
-    (accountUsage?.usage.creditsDay || 0) >= dailyCreditLimit;
+    Boolean(accountUsage) &&
+    (accountUsage?.usage.creditsDay || 0) + estimatedRequestCredits > dailyCreditLimit;
   const isAccountMonthlyLimitReached =
     !isGuestMode &&
-    monthlyCreditLimit > 0 &&
-    (accountUsage?.usage.creditsMonth || 0) >= monthlyCreditLimit;
+    Boolean(accountUsage) &&
+    estimatedRequestCredits > totalAvailableCredits;
   const isUsageLimitReached =
     isGuestLimitReached || isAccountDailyLimitReached || isAccountMonthlyLimitReached;
+  const creditShortfall = Math.max(0, estimatedRequestCredits - totalAvailableCredits);
   const limitScope: "guest" | "daily" | "monthly" | null =
     isGuestLimitReached
       ? "guest"
@@ -388,12 +401,62 @@ export function ChatInput({
       return [];
     }
   });
+  const contextualSuggestion = useMemo(
+    () =>
+      isGuestMode
+        ? null
+        : getContextualModelSuggestion({ text: value, attachments }),
+    [attachments, isGuestMode, value]
+  );
+  const contextualModel = contextualSuggestion
+    ? AVAILABLE_MODELS.find(
+        (model) => model.id === contextualSuggestion.modelId && model.enabled
+      )
+    : undefined;
+  const contextualProfile = contextualModel
+    ? getModelUsageProfile(contextualModel)
+    : null;
+  const contextualLiveStatus = contextualModel
+    ? liveModelStatuses[contextualModel.id]?.status
+    : undefined;
+  const showContextualSuggestion = Boolean(
+    contextualSuggestion &&
+      contextualModel &&
+      contextualProfile &&
+      contextualSuggestion.key !== dismissedSuggestionKey &&
+      !selectedModels.includes(contextualModel.id) &&
+      contextualLiveStatus !== "unavailable"
+  );
   const menuRef = useRef<HTMLDivElement>(null);
   const menuPopoverRef = useRef<HTMLDivElement>(null);
   const actionMenuButtonRef = useRef<HTMLButtonElement | null>(null);
   const modelMenuButtonRef = useRef<HTMLButtonElement | null>(null);
   const modelSearchInputRef = useRef<HTMLInputElement | null>(null);
   const lastMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (
+      !showContextualSuggestion ||
+      !contextualSuggestion ||
+      !contextualModel
+    ) {
+      return;
+    }
+    trackProductEventOnce(
+      `contextual_model_${contextualSuggestion.key}_v1`,
+      "advanced_model_suggested",
+      selectedModels.length,
+      {
+        model_id: contextualModel.id,
+        suggestion_reason: contextualSuggestion.reason,
+      }
+    );
+  }, [
+    contextualModel,
+    contextualSuggestion,
+    selectedModels.length,
+    showContextualSuggestion,
+  ]);
 
   useEffect(() => {
     if (!limitScope || trackedLimitScopeRef.current === limitScope) return;
@@ -1130,12 +1193,19 @@ export function ChatInput({
                 <span className="font-black">
                   {isGuestMode ? t("chat.guestLimitReachedTitle") : t("chat.accountLimitReachedTitle")}
                 </span>
-                <a
-                  href={isGuestMode ? `/auth/signin?callbackUrl=${encodeURIComponent(signInCallbackUrl)}` : "/pricing"}
-                  className="font-black text-amber-900 underline underline-offset-2 dark:text-amber-100"
-                >
-                  {isGuestMode ? t("auth.signIn") : t("billing.joinWaitlist")}
-                </a>
+                <span className="flex flex-wrap items-center gap-3">
+                  <a
+                    href={isGuestMode ? `/auth/signin?callbackUrl=${encodeURIComponent(signInCallbackUrl)}` : "/pricing"}
+                    className="font-black text-amber-900 underline underline-offset-2 dark:text-amber-100"
+                  >
+                    {isGuestMode ? t("auth.signIn") : t("billing.joinWaitlist")}
+                  </a>
+                  {!isGuestMode && isAccountMonthlyLimitReached && (
+                    <CreditPackPurchaseButton>
+                      {lang === "ko" ? "추가 크레딧 구매" : "Buy additional credits"}
+                    </CreditPackPurchaseButton>
+                  )}
+                </span>
               </div>
               <p className="mt-1 leading-5 opacity-90">
                 {isGuestMode
@@ -1144,6 +1214,13 @@ export function ChatInput({
                     ? t("chat.monthlyLimitReachedBody")
                     : t("chat.dailyLimitReachedBody")}
               </p>
+              {!isGuestMode && isAccountMonthlyLimitReached && (
+                <p className="mt-1 font-semibold leading-5">
+                  {lang === "ko"
+                    ? `예상 차감 ${estimatedRequestCredits} · 현재 잔액 ${totalAvailableCredits} · ${creditShortfall} 크레딧 부족`
+                    : `Estimated ${estimatedRequestCredits} · Balance ${totalAvailableCredits} · ${creditShortfall} credits short`}
+                </p>
+              )}
             </div>
           )}
           {isGuestMode && showGuestQuickStart && (
@@ -1203,7 +1280,19 @@ export function ChatInput({
             </section>
           )}
           {!value.trim() && attachments.length === 0 && (
-            <div className="mb-2 hidden max-w-full gap-2 overflow-x-auto overscroll-x-contain pb-1 md:flex md:flex-wrap md:overflow-visible md:pb-0">
+            <div className="mb-2 flex max-w-full gap-2 overflow-x-auto overscroll-x-contain pb-1 md:flex-wrap md:overflow-visible md:pb-0">
+              {personalizedPrompt && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    dismissGuestQuickStart();
+                    onChange(personalizedPrompt);
+                  }}
+                  className="shrink-0 touch-manipulation rounded-full border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700 transition-colors hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-200 dark:hover:bg-blue-950/60"
+                >
+                  {personalizedPrompt}
+                </button>
+              )}
               {PROMPT_SUGGESTIONS.map((suggestion) => (
                 <button
                   key={suggestion}
@@ -1219,6 +1308,67 @@ export function ChatInput({
               ))}
             </div>
           )}
+          {showContextualSuggestion &&
+            contextualSuggestion &&
+            contextualModel &&
+            contextualProfile && (
+              <div className="mb-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3 dark:border-amber-900/60 dark:bg-amber-950/20">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-black text-zinc-900 dark:text-white">
+                      {t(
+                        contextualSuggestion.reason === "research"
+                          ? "modelFinder.contextualTitleResearch"
+                          : "modelFinder.contextualTitleDeep"
+                      )}
+                    </p>
+                    <p className="mt-1 text-[11px] leading-5 text-zinc-600 dark:text-zinc-300">
+                      {t("modelFinder.contextualCreditNotice")
+                        .replace(
+                          "{category}",
+                          t(
+                            `modelUsageClasses.${contextualProfile.category.toLowerCase()}`
+                          )
+                        )
+                        .replace("{credits}", String(contextualProfile.credits))}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const added = onToggleModel(contextualModel.id);
+                        if (!added) return;
+                        setDismissedSuggestionKey(contextualSuggestion.key);
+                        trackProductEvent(
+                          "advanced_model_selected",
+                          selectedModels.length + 1,
+                          {
+                            model_id: contextualModel.id,
+                            suggestion_reason: contextualSuggestion.reason,
+                          }
+                        );
+                      }}
+                      className="rounded-xl bg-amber-600 px-3 py-2 text-[11px] font-black text-white hover:bg-amber-500"
+                    >
+                      {t("modelFinder.contextualUse").replace(
+                        "{model}",
+                        contextualModel.name
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setDismissedSuggestionKey(contextualSuggestion.key)
+                      }
+                      className="rounded-xl border border-amber-300 bg-white px-3 py-2 text-[11px] font-bold text-amber-900 hover:bg-amber-100 dark:border-amber-800 dark:bg-zinc-950 dark:text-amber-200"
+                    >
+                      {t("modelFinder.contextualContinue")}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           {attachments.length > 0 && (
             <div className="mb-2 rounded-2xl bg-zinc-50 p-1.5 dark:bg-zinc-950/70 md:mb-3 md:bg-transparent md:p-0">
             <div className="flex max-w-full gap-2 overflow-x-auto overscroll-x-contain pb-1 md:flex-wrap md:overflow-visible md:pb-0">

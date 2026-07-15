@@ -333,6 +333,21 @@ event-scoped custom metric for numeric `model_count`. Mark at least
 `multi_model_compare_completed`, `signup_completed`, and `purchase_completed`
 as key events before paid acquisition begins.
 
+### Model Finder experiment
+
+The signed-in onboarding experiment assigns new accounts deterministically so
+the same account always receives the same variant. Existing accounts are not
+interrupted and can reopen Model Finder from Settings.
+
+```text
+MODEL_FINDER_EXPERIMENT_PERCENT=50
+MODEL_FINDER_LAUNCH_AT=2026-07-15T00:00:00.000Z
+```
+
+The percentage is bounded to `0..100`. Funnel events carry only the experiment
+variant, recommendation rank, selected model ID, and a bounded suggestion
+reason. Prompts, responses, and file metadata are not collected.
+
 ## Search and Social Discovery
 
 The production app generates `/robots.txt` and `/sitemap.xml` from Next.js

@@ -69,6 +69,11 @@ export async function GET(req: Request) {
             theme: settings.theme,
             language: settings.language,
             defaultModel: settings.defaultModel,
+            defaultModelId: settings.defaultModel,
+            preferredTasks: settings.preferredTasks,
+            preferredPriority: settings.preferredPriority,
+            usesFilesFrequently: settings.usesFilesFrequently,
+            modelFinderCompletedAt: settings.modelFinderCompletedAt?.toISOString() || null,
         });
     } catch (error) {
         const securityResponse = apiSecurityResponse(error);

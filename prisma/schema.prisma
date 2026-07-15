@@ -31,10 +31,14 @@ model User {
   projects               ConversationProject[]
   refundRequests         RefundRequest[]
   promotionRedemptions   BillingPromotionRedemption[]
+  creditPurchases        CreditPurchase[]
+  creditLots             CreditLot[]
+  creditLedgerEntries    CreditLedgerEntry[]
   adminAuditLogs         AdminAuditLog[]
   adminNotes             AdminNote[]
   modelOverrides         ModelOverride[]
   conversations          Conversation[]
+  comparisonReviews      ComparisonReview[]
   productAnalyticsEvents ProductAnalyticsEvent[]
 }
 
@@ -46,6 +50,10 @@ model UserSettings {
   theme        String @default("dark") // "dark", "light", "system"
   language     String @default("en") // "ko", "en"
   defaultModel String @default("gpt-5-4-mini")
+  preferredTasks         Json?
+  preferredPriority      String?
+  usesFilesFrequently    String?
+  modelFinderCompletedAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -109,6 +117,7 @@ model Conversation {
   shareRevokedAt DateTime?
 
   messages  Message[]
+  comparisonReviews ComparisonReview[]
   user      User?                @relation(fields: [userId], references: [id], onDelete: Cascade)
   project   ConversationProject? @relation(fields: [projectId], references: [id], onDelete: SetNull)
   createdAt DateTime             @default(now())
@@ -143,6 +152,29 @@ model Message {
   createdAt      DateTime     @default(now())
 
   @@index([conversationId])
+}
+
+model ComparisonReview {
+  id                  String       @id @default(cuid())
+  userId              String
+  user                User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversationId      String
+  conversation        Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  promptMessageId     String
+  assistantMessageIds Json
+  reviewerModelId     String
+  reviewMode          String
+  promptVersion       String
+  result              Json
+  usageCredits        Int
+  inputHash           String
+  isStale             Boolean      @default(false)
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  @@unique([userId, inputHash])
+  @@index([conversationId, createdAt])
+  @@index([conversationId, isStale])
 }
 
 model ProductAnalyticsEvent {
@@ -282,6 +314,78 @@ model BillingPromotionRedemption {
   @@index([promotionId, clientIpHash, redeemedAt])
   @@index([promotionId, paymentMethodFingerprintHash, redeemedAt])
   @@index([userId, redeemedAt])
+}
+
+model CreditPurchase {
+  id                      String              @id @default(cuid())
+  userId                  String
+  user                    User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  packId                  String
+  stripeCheckoutSessionId String              @unique
+  stripePaymentIntentId   String?             @unique
+  stripeChargeId          String?             @unique
+  creditsPurchased        Int
+  fundedCostMicroUsd      BigInt
+  amountPaidCents         Int
+  refundedAmountCents     Int                 @default(0)
+  revokedCredits          Int                 @default(0)
+  revokedCostMicroUsd     BigInt              @default(0)
+  currency                String              @default("USD")
+  status                  String              @default("paid")
+  purchasedAt             DateTime            @default(now())
+  expiresAt               DateTime
+  createdAt               DateTime            @default(now())
+  updatedAt               DateTime            @updatedAt
+  lots                    CreditLot[]
+  ledgerEntries           CreditLedgerEntry[]
+
+  @@index([userId, purchasedAt])
+  @@index([status, purchasedAt])
+  @@index([stripePaymentIntentId])
+}
+
+model CreditLot {
+  id                          String              @id @default(cuid())
+  userId                      String
+  user                        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  purchaseId                  String?
+  purchase                    CreditPurchase?     @relation(fields: [purchaseId], references: [id], onDelete: SetNull)
+  source                      String
+  originalCredits             Int
+  remainingCredits            Int
+  originalFundedCostMicroUsd  BigInt              @default(0)
+  remainingFundedCostMicroUsd BigInt              @default(0)
+  expiresAt                   DateTime
+  status                      String              @default("active")
+  createdAt                   DateTime            @default(now())
+  updatedAt                   DateTime            @updatedAt
+  ledgerEntries               CreditLedgerEntry[]
+
+  @@index([userId, status, expiresAt])
+  @@index([purchaseId])
+}
+
+model CreditLedgerEntry {
+  id                          String          @id @default(cuid())
+  userId                      String
+  user                        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  creditLotId                 String
+  creditLot                   CreditLot       @relation(fields: [creditLotId], references: [id], onDelete: Cascade)
+  purchaseId                  String?
+  purchase                    CreditPurchase? @relation(fields: [purchaseId], references: [id], onDelete: SetNull)
+  type                        String
+  creditsDelta                Int
+  fundedCostMicroUsdDelta     BigInt          @default(0)
+  balanceAfterCredits         Int
+  balanceAfterFundedCostMicroUsd BigInt       @default(0)
+  reservationId               String?
+  metadata                    Json?
+  createdAt                   DateTime        @default(now())
+
+  @@index([userId, createdAt])
+  @@index([creditLotId, createdAt])
+  @@index([purchaseId, createdAt])
+  @@index([reservationId])
 }
 
 model AppSetting {

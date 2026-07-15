@@ -24,6 +24,7 @@ const SESSION_STORAGE_KEY = "tomverse_analytics_session_v1";
 const PRECONSENT_ATTRIBUTION_STORAGE_KEY =
   "tomverse_analytics_preconsent_attribution_v1";
 const PENDING_EVENTS_STORAGE_KEY = "tomverse_analytics_pending_events_v1";
+const MODEL_FINDER_VARIANT_STORAGE_KEY = "tomverse_model_finder_variant_v1";
 const MAX_PENDING_EVENTS = 100;
 const ATTRIBUTION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 
@@ -273,6 +274,9 @@ const sessionId = () => {
 
 const sendIntent = (intent: EventIntent) => {
   if (!runtime) return;
+  const storedVariant = window.localStorage.getItem(
+    MODEL_FINDER_VARIANT_STORAGE_KEY
+  );
   const payload = analyticsClientEventSchema.parse({
     event_id: intent.eventId,
     event_name: intent.eventName,
@@ -280,6 +284,9 @@ const sendIntent = (intent: EventIntent) => {
     model_count: Math.max(0, Math.min(3, Math.trunc(intent.modelCount))),
     properties: {
       ...intent.properties,
+      ...(storedVariant === "control" || storedVariant === "finder"
+        ? { experiment_variant: storedVariant }
+        : {}),
       ...localeMarketingAnalyticsProperties(runtime.attribution.language),
     },
     ...runtime.attribution,

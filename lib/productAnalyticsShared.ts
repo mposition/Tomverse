@@ -8,6 +8,10 @@ export const PRODUCT_ANALYTICS_EVENT_NAMES = [
   "chat_started",
   "first_response_completed",
   "multi_model_compare_completed",
+  "comparison_review_viewed",
+  "comparison_review_started",
+  "comparison_review_completed",
+  "comparison_review_failed",
   "followup_sent",
   "file_attached",
   "conversation_saved",
@@ -26,6 +30,14 @@ export const PRODUCT_ANALYTICS_EVENT_NAMES = [
   "return_day_1",
   "return_day_7",
   "subscription_cancelled",
+  "model_finder_viewed",
+  "model_finder_started",
+  "model_finder_completed",
+  "model_finder_skipped",
+  "recommended_model_accepted",
+  "recommended_model_changed",
+  "advanced_model_suggested",
+  "advanced_model_selected",
 ] as const;
 
 export type ProductAnalyticsEventName =
@@ -57,6 +69,12 @@ export const analyticsPropertiesSchema = z
       .optional(),
     market_tier: z.enum(["primary", "limited", "preview"]).optional(),
     paid_marketing_eligible: z.boolean().optional(),
+    experiment_variant: z.enum(["control", "finder"]).optional(),
+    recommendation_rank: z.number().int().min(1).max(3).optional(),
+    suggestion_reason: z.enum(["document", "deep_analysis", "research"]).optional(),
+    review_mode: z.enum(["balanced", "evidence", "action"]).optional(),
+    cached: z.boolean().optional(),
+    usage_credits: z.number().int().min(0).max(100).optional(),
   })
   .strict();
 

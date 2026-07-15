@@ -6,6 +6,7 @@ import {
   encryptOAuthAccountTokens,
   OAUTH_TOKEN_ENCRYPTED_PREFIX,
 } from "@/lib/oauthTokenCrypto";
+import { expireCreditLots } from "@/lib/creditLedger";
 
 const OAUTH_ACCOUNT_BATCH_SIZE = 200;
 
@@ -96,7 +97,7 @@ export async function cleanupExpiredData() {
       )
       OR (
         "period" LIKE '%month%'
-        AND "periodStart" < DATE_TRUNC('month', NOW())
+        AND "periodStart" < DATE_TRUNC('month', NOW()) - INTERVAL '120 days'
       )
       OR (
         "period" NOT LIKE '%minute%'
@@ -166,6 +167,7 @@ export async function cleanupExpiredData() {
       )
   `;
   const oauthTokensEncrypted = await encryptExistingOAuthTokens();
+  const creditLotsExpired = await expireCreditLots();
 
   return {
     sessions: sessions.count,
@@ -176,5 +178,6 @@ export async function cleanupExpiredData() {
     promotionRiskIdentifiers: promotionRiskIdentifiers.count,
     shareSnapshots: Number(shareSnapshots),
     oauthTokensEncrypted,
+    creditLotsExpired,
   };
 }

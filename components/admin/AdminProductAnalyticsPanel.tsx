@@ -4,6 +4,7 @@ import type { ProductAnalyticsDashboard } from "@/lib/productAnalyticsDashboard"
 const eventGroups = [
   { label: "Acquisition", events: ["landing_view", "cta_start_click", "pricing_view", "plan_selected"] },
   { label: "Onboarding", events: ["onboarding_shown", "onboarding_completed", "onboarding_skipped"] },
+  { label: "Model Finder", events: ["model_finder_viewed", "model_finder_started", "model_finder_completed", "model_finder_skipped", "recommended_model_accepted", "recommended_model_changed", "advanced_model_suggested", "advanced_model_selected"] },
   { label: "First experience", events: ["chat_started", "first_response_completed"] },
   { label: "Core value", events: ["multi_model_compare_completed"] },
   { label: "Activation action", events: ["followup_sent", "file_attached", "conversation_saved", "share_created"] },

@@ -38,6 +38,8 @@ import {
 } from "@/lib/productAnalyticsClient";
 import { UpgradeInterestButton } from "@/components/marketing/UpgradeInterestButton";
 import { withChatLanguage } from "@/lib/localizedCallbackUrl";
+import { openModelFinder } from "@/lib/modelFinderEvents";
+import { CreditPackPurchaseButton } from "@/components/billing/CreditPackPurchaseButton";
 
 export function AuthButton() {
   const { data: session, status } = useSession();
@@ -553,6 +555,17 @@ export function AuthButton() {
                                                 </select>
                                             </span>
                                         </label>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                closeSettingsModal();
+                                                requestAnimationFrame(() => openModelFinder());
+                                            }}
+                                            className="flex w-full items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-3 text-sm font-black text-blue-700 transition hover:bg-blue-100 dark:border-blue-900/60 dark:bg-blue-950/20 dark:text-blue-200 dark:hover:bg-blue-950/40"
+                                        >
+                                            <Bot className="h-4 w-4" />
+                                            {t("modelFinder.findAgain")}
+                                        </button>
                                     </div>
                                 )}
 
@@ -744,7 +757,7 @@ export function AuthButton() {
                                             </div>
                                         )}
                                         {accountUsage && (
-                                            <section className="grid gap-3 sm:grid-cols-2">
+                                            <section className="grid gap-3 sm:grid-cols-3">
                                                 <div className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60">
                                                     <p className="text-xs font-bold uppercase tracking-wide text-zinc-400">{t("usage.todayCredits")}</p>
                                                     <p className="mt-2 text-lg font-black text-zinc-900 dark:text-zinc-100">
@@ -757,6 +770,22 @@ export function AuthButton() {
                                                     <p className="text-xs font-bold uppercase tracking-wide text-zinc-400">{t("usage.monthCredits")}</p>
                                                     <p className="mt-2 text-lg font-black text-zinc-900 dark:text-zinc-100">
                                                         {accountUsage.usage.creditsMonth}/{accountUsage.limits.creditsMonth}
+                                                    </p>
+                                                    <p className="mt-1 text-xs text-zinc-400">
+                                                        {accountUsage.balances.planRemainingCredits.toLocaleString(globalLang)} {t("usage.left")}
+                                                    </p>
+                                                </div>
+                                                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-900/50 dark:bg-emerald-950/20">
+                                                    <p className="text-xs font-bold uppercase tracking-wide text-emerald-600 dark:text-emerald-300">
+                                                        {globalLang === "ko" ? "추가 구매 크레딧" : "Purchased credits"}
+                                                    </p>
+                                                    <p className="mt-2 text-lg font-black text-zinc-900 dark:text-zinc-100">
+                                                        {accountUsage.balances.purchasedRemainingCredits.toLocaleString(globalLang)}
+                                                    </p>
+                                                    <p className="mt-1 text-xs text-zinc-400">
+                                                        {accountUsage.balances.purchasedEarliestExpiry
+                                                            ? `${globalLang === "ko" ? "만료" : "Expires"} ${new Date(accountUsage.balances.purchasedEarliestExpiry).toLocaleDateString(globalLang)}`
+                                                            : globalLang === "ko" ? "구매 내역 없음" : "No purchases"}
                                                     </p>
                                                 </div>
                                             </section>
@@ -771,20 +800,19 @@ export function AuthButton() {
                                             </ul>
                                         </section>
                                         <div className="grid gap-2 sm:grid-cols-2">
-                                            <UpgradeInterestButton
-                                                plan="Pro"
+                                            {accountPlan !== "Max" && <UpgradeInterestButton
+                                                plan={accountPlan === "Pro" ? "Max" : "Pro"}
                                                 className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-3 text-sm font-black text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-70"
                                             >
                                                 <CreditCard className="h-4 w-4" />
-                                                {t("billing.joinProWaitlist")}
-                                            </UpgradeInterestButton>
-                                            <UpgradeInterestButton
-                                                plan="Max"
+                                                {accountPlan === "Pro" ? (globalLang === "ko" ? "Max로 업그레이드" : "Upgrade to Max") : t("billing.joinProWaitlist")}
+                                            </UpgradeInterestButton>}
+                                            <CreditPackPurchaseButton
                                                 className="flex w-full items-center justify-center gap-2 rounded-xl border border-purple-300 bg-purple-50 px-3 py-3 text-sm font-black text-purple-700 transition-colors hover:bg-purple-100 disabled:cursor-not-allowed disabled:opacity-70 dark:border-purple-900/60 dark:bg-purple-950/30 dark:text-purple-200 dark:hover:bg-purple-950/50"
                                             >
                                                 <CreditCard className="h-4 w-4" />
-                                                {t("billing.joinMaxWaitlist")}
-                                            </UpgradeInterestButton>
+                                                {globalLang === "ko" ? "추가 크레딧 구매" : "Buy additional credits"}
+                                            </CreditPackPurchaseButton>
                                         </div>
                                     </div>
                                 )}

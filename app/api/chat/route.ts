@@ -1,7 +1,4 @@
 import { streamText, type FilePart, type ModelMessage } from "ai";
-import { openai, createOpenAI } from "@ai-sdk/openai";
-import { anthropic } from "@ai-sdk/anthropic";
-import { google } from "@ai-sdk/google";
 import { APP_DEFAULTS, clampSelectedModels } from "@/lib/appDefaults";
 import { createHash, randomUUID } from "node:crypto";
 import { getServerSession } from "next-auth/next";
@@ -15,6 +12,7 @@ import {
 } from "@/lib/r2";
 import { prisma } from "@/lib/prisma";
 import { getEnabledModel, type AiModel } from "@/lib/models";
+import { getActiveAiModel } from "@/lib/activeAiModel";
 import { assertModelNotAdminDisabled } from "@/lib/modelOverrides";
 import { parseOfficeSafely } from "@/lib/officeSecurity";
 import {
@@ -65,46 +63,6 @@ import {
     featureNotIncludedResponse,
     getUserBillingPlan,
 } from "@/lib/billingEntitlements";
-
-const groq = createOpenAI({
-    baseURL: "https://api.groq.com/openai/v1",
-    apiKey: process.env.GROQ_API_KEY,
-});
-
-const deepseek = createOpenAI({
-    baseURL: "https://api.deepseek.com",
-    apiKey: process.env.DEEPSEEK_API_KEY,
-});
-
-const mistral = createOpenAI({
-    baseURL: "https://api.mistral.ai/v1",
-    apiKey: process.env.MISTRAL_API_KEY,
-});
-
-const xai = createOpenAI({
-    baseURL: "https://api.x.ai/v1",
-    apiKey: process.env.XAI_API_KEY,
-});
-
-const moonshot = createOpenAI({
-    baseURL: "https://api.moonshot.ai/v1",
-    apiKey: process.env.MOONSHOT_API_KEY,
-});
-
-const qwen = createOpenAI({
-    baseURL: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-    apiKey: process.env.DASHSCOPE_API_KEY,
-});
-
-const zhipu = createOpenAI({
-    baseURL: process.env.ZHIPU_BASE_URL || "https://api.z.ai/api/paas/v4",
-    apiKey: process.env.ZHIPU_API_KEY,
-});
-
-const perplexity = createOpenAI({
-    baseURL: "https://api.perplexity.ai",
-    apiKey: process.env.PERPLEXITY_API_KEY,
-});
 
 const MAX_ATTACHMENTS = 5;
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
@@ -610,33 +568,6 @@ export async function DELETE(req: Request) {
     }
 }
 
-const getActiveModel = (model: AiModel) => {
-    switch (model.provider) {
-        case "openai":
-            return openai(model.apiModel);
-        case "anthropic":
-            return anthropic(model.apiModel);
-        case "google":
-            return google(model.apiModel);
-        case "groq":
-            return groq.chat(model.apiModel);
-        case "deepseek":
-            return deepseek.chat(model.apiModel);
-        case "mistral":
-            return mistral.chat(model.apiModel);
-        case "xai":
-            return xai.chat(model.apiModel);
-        case "moonshot":
-            return moonshot.chat(model.apiModel);
-        case "qwen":
-            return qwen.chat(model.apiModel);
-        case "perplexity":
-            return perplexity.chat(model.apiModel);
-        case "zhipu":
-            return zhipu.chat(model.apiModel);
-    }
-};
-
 export async function POST(req: Request) {
     const traceId = randomUUID();
     let leaseId: string | null = null;
@@ -813,7 +744,7 @@ export async function POST(req: Request) {
                 .slice(0, 20)}/`
             : null;
 
-        const activeModel = getActiveModel(modelConfig);
+        const activeModel = getActiveAiModel(modelConfig);
         let estimatedInputTokens = 0;
         let totalAttachmentBytes = 0;
         let totalExtractedCharacters = 0;
@@ -1320,6 +1251,27 @@ export async function POST(req: Request) {
                                         1,
                                         Buffer.byteLength(storedContent, "utf8")
                                     );
+                                    const sourcePrompt = await tx.message.findFirst({
+                                        where: {
+                                            conversationId,
+                                            role: "user",
+                                        },
+                                        orderBy: [
+                                            { createdAt: "desc" },
+                                            { id: "desc" },
+                                        ],
+                                        select: { id: true },
+                                    });
+                                    if (sourcePrompt) {
+                                        await tx.comparisonReview.updateMany({
+                                            where: {
+                                                conversationId,
+                                                promptMessageId: sourcePrompt.id,
+                                                isStale: false,
+                                            },
+                                            data: { isStale: true },
+                                        });
+                                    }
                                     await tx.message.create({
                                         data: {
                                             id: assistantMessageId,

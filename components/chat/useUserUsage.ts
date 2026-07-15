@@ -29,6 +29,17 @@ export type UserUsageResponse = {
     costDay: number;
     costMonth: number;
   };
+  balances: {
+    planRemainingCredits: number;
+    planResetsAt: string;
+    purchasedRemainingCredits: number;
+    purchasedFundedCostMicroUsd: number;
+    purchasedEarliestExpiry: string | null;
+  };
+  recommendation: {
+    primary: "upgrade_pro" | "upgrade_max" | "add_credits" | "business";
+    secondary: "upgrade_pro" | "upgrade_max" | "add_credits" | "business" | null;
+  };
   limits: {
     creditsDay: number;
     creditsMonth: number;

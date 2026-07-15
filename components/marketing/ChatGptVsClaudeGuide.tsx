@@ -514,7 +514,7 @@ function SectionHeading({ icon: Icon, title, body }: { icon: typeof Scale; title
 function ModelBadge({ image, name, provider }: { image: string; name: string; provider: string }) {
   return (
     <span className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900">
-      <Image src={image} width={32} height={32} alt="" className="h-8 w-8 rounded-lg object-contain" />
+      <Image unoptimized src={image} width={32} height={32} alt="" className="h-8 w-8 rounded-lg object-contain" />
       <span><span className="block text-sm font-black">{name}</span><span className="block text-[11px] text-zinc-500">{provider}</span></span>
     </span>
   );
@@ -523,7 +523,7 @@ function ModelBadge({ image, name, provider }: { image: string; name: string; pr
 function ResultCard({ image, title, body, accent }: { image: string; title: string; body: string; accent: "blue" | "orange" }) {
   return (
     <article className={`rounded-2xl border p-4 ${accent === "blue" ? "border-blue-400/30 bg-blue-500/10" : "border-orange-400/30 bg-orange-500/10"}`}>
-      <div className="flex items-center gap-3"><Image src={image} width={36} height={36} alt="" className="h-9 w-9 rounded-lg bg-white object-contain" /><h3 className="font-black">{title}</h3></div>
+      <div className="flex items-center gap-3"><Image unoptimized src={image} width={36} height={36} alt="" className="h-9 w-9 rounded-lg bg-white object-contain" /><h3 className="font-black">{title}</h3></div>
       <p className="mt-4 text-sm leading-7 text-zinc-300">{body}</p>
     </article>
   );
@@ -532,7 +532,7 @@ function ResultCard({ image, title, body, accent }: { image: string; title: stri
 function PreviewPanel({ image, model, body }: { image: string; model: string; body: string }) {
   return (
     <article className="min-h-56 rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
-      <div className="flex items-center gap-3 border-b border-zinc-800 pb-3"><Image src={image} width={34} height={34} alt="" className="h-[34px] w-[34px] rounded-lg bg-white object-contain" /><div><h3 className="text-sm font-black text-white">{model}</h3><p className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">Available</p></div></div>
+      <div className="flex items-center gap-3 border-b border-zinc-800 pb-3"><Image unoptimized src={image} width={34} height={34} alt="" className="h-[34px] w-[34px] rounded-lg bg-white object-contain" /><div><h3 className="text-sm font-black text-white">{model}</h3><p className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">Available</p></div></div>
       <p className="mt-4 text-sm leading-7 text-zinc-300">{body}</p>
     </article>
   );

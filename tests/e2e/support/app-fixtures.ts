@@ -81,7 +81,10 @@ export type AuthenticatedQaState = {
   userSettingsReads: number;
 };
 
-export async function mockAuthenticatedApi(page: Page): Promise<AuthenticatedQaState> {
+export async function mockAuthenticatedApi(
+  page: Page,
+  options: { selectedModels?: string[] } = {}
+): Promise<AuthenticatedQaState> {
   await page.context().addCookies([
     {
       name: "__tomverse_e2e_auth",
@@ -102,7 +105,7 @@ export async function mockAuthenticatedApi(page: Page): Promise<AuthenticatedQaS
   const conversation = () => ({
     id: "qa-conversation",
     title: state.title,
-    selectedModels: ["gpt-5-4-mini"],
+    selectedModels: options.selectedModels || ["gpt-5-4-mini"],
     disabledPanels: [],
     isLocked: state.locked,
     shareEnabled: state.shared,
@@ -130,6 +133,26 @@ export async function mockAuthenticatedApi(page: Page): Promise<AuthenticatedQaS
       json({ theme: "dark", language: "ko", defaultModel: "gpt-5-4-mini" })
     );
   });
+
+  await page.route("**/api/user/model-finder", (route) =>
+    route.fulfill(
+      json({
+        variant: "control",
+        shouldShow: false,
+        settings: {
+          preferredTasks: [],
+          preferredPriority: null,
+          usesFilesFrequently: null,
+          defaultModelId: "gpt-5-4-mini",
+          modelFinderCompletedAt: null,
+        },
+      })
+    )
+  );
+
+  await page.route("**/api/models/status", (route) =>
+    route.fulfill(json({ models: [] }))
+  );
 
   await page.route("**/api/conversations", async (route) => {
     if (route.request().method() === "GET") {

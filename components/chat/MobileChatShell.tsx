@@ -41,6 +41,7 @@ type MobileChatShellProps = {
   promptPayload: PromptPayload | null;
   inputValue: string;
   setInputValue: (value: string) => void;
+  personalizedPrompt?: string | null;
   attachments: ChatAttachment[];
   setAttachments: (attachments: ChatAttachment[]) => void;
   isSending: boolean;
@@ -59,10 +60,11 @@ type MobileChatShellProps = {
   onRevokeShare: (id: string) => void;
   onDownload: (id: string, title: string) => void;
   onTogglePrivateMode: () => void;
-  onToggleModel: (modelId: string) => void;
+  onToggleModel: (modelId: string) => boolean;
   onSubmit: () => void;
   onCompareSummary: () => void;
-  onResponseComplete: (promptId: string | null, modelId: string) => void;
+  onComparisonReview: () => void;
+  onResponseComplete: (promptId: string | null, modelId: string, responseText: string) => void;
   onFollowupSent: (modelId: string) => void;
 };
 
@@ -74,6 +76,7 @@ export function MobileChatShell({
   promptPayload,
   inputValue,
   setInputValue,
+  personalizedPrompt,
   attachments,
   setAttachments,
   isSending,
@@ -95,6 +98,7 @@ export function MobileChatShell({
   onToggleModel,
   onSubmit,
   onCompareSummary,
+  onComparisonReview,
   onResponseComplete,
   onFollowupSent,
 }: MobileChatShellProps) {
@@ -363,15 +367,24 @@ export function MobileChatShell({
         </div>
       )}
 
-      {selectedModels.length > 1 && currentChatId && !isGuestMode && (
-        <div className="shrink-0 border-b border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950">
+      {selectedModels.length > 1 && currentChatId && (
+        <div className={`grid shrink-0 gap-2 border-b border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950 ${!isGuestMode && currentChatId !== "private-chat" ? "grid-cols-2" : "grid-cols-1"}`}>
           <button
             type="button"
             onClick={onCompareSummary}
             className="h-8 w-full rounded-xl border border-blue-200 bg-blue-50 text-[11px] font-black text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200"
           >
-            {t("chat.summarizeModelDifferences")}
+            {t("chat.quickDifferenceSummary")}
           </button>
+          {!isGuestMode && currentChatId !== "private-chat" && (
+            <button
+              type="button"
+              onClick={onComparisonReview}
+              className="h-8 rounded-xl bg-blue-600 px-2 text-[11px] font-black text-white"
+            >
+              {t("chat.aiReviewButton")}
+            </button>
+          )}
         </div>
       )}
 
@@ -444,6 +457,7 @@ export function MobileChatShell({
       <ChatInput
         value={inputValue}
         onChange={setInputValue}
+        personalizedPrompt={personalizedPrompt}
         onSubmit={onSubmit}
         onCancel={() => {}}
         isSending={isSending}

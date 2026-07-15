@@ -165,11 +165,22 @@ export async function DELETE(
             return NextResponse.json({ error: "Unsupported model." }, { status: 400 });
         }
 
-        await prisma.message.deleteMany({
-            where: {
-                conversationId: conversationId,
-                modelId: parsedModelId.data,
-                role: "assistant"
+        await prisma.$transaction(async (tx) => {
+            const deletedSources = await tx.message.deleteMany({
+                where: {
+                    conversationId,
+                    modelId: parsedModelId.data,
+                    role: "assistant",
+                },
+            });
+            if (deletedSources.count > 0) {
+                await tx.comparisonReview.updateMany({
+                    where: {
+                        conversationId,
+                        isStale: false,
+                    },
+                    data: { isStale: true },
+                });
             }
         });
 

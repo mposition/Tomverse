@@ -1,4 +1,4 @@
-import type { en } from "./en";
+import { en } from "./en";
 
 export const fr = {
     sidebar: {
@@ -80,6 +80,7 @@ export const fr = {
         projectDeleteFailed: "Impossible de supprimer le projet.",
     },
     chat: {
+        ...en.chat,
         welcome: "Bonjour ! Comment puis-je vous aider aujourd'hui ?",
         guestWelcome: "Bonjour ! Vous êtes en mode invité. Posez votre question.",
         inputPlaceholder: "Posez votre question...",
@@ -319,6 +320,7 @@ export const fr = {
         cta: "Saisir une question",
         dontShowAgain: "Fermer ce guide",
     },
+    modelFinder: en.modelFinder,
     auth: {
         saveMessage: "Paramètres enregistrés.",
         failedMessage: "Impossible d'enregistrer les paramètres.",

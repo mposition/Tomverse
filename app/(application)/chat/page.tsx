@@ -1,9 +1,11 @@
 ﻿"use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { AlertCircle, ArrowRight, CheckCircle2, Info, Sparkles } from "lucide-react";
+import { AlertCircle, ArrowRight, CheckCircle2, Info, Sparkles, X } from "lucide-react";
 import { DesktopChatShell } from "@/components/chat/DesktopChatShell";
 import { MobileChatShell } from "@/components/chat/MobileChatShell";
+import { ComparisonReviewDialog } from "@/components/chat/ComparisonReviewDialog";
+import { ModelFinder } from "@/components/onboarding/ModelFinder";
 import { Conversation, AVAILABLE_MODELS, type ChatAttachment } from "@/components/chat/types";
 import { useSession } from "next-auth/react";
 import {
@@ -227,6 +229,9 @@ export default function Home() {
   const [isUserSettingsLoaded, setIsUserSettingsLoaded] = useState(false);
 
   const [inputValue, setInputValue] = useState("");
+  const [personalizedPrompt, setPersonalizedPrompt] = useState<string | null>(null);
+  const [awaitingPostResponseTips, setAwaitingPostResponseTips] = useState(false);
+  const [showPostResponseTips, setShowPostResponseTips] = useState(false);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [promptPayload, setPromptPayload] = useState<{ id: string; text: string; chatId: string; userMessageId: string; attachments: ChatAttachment[] } | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
@@ -238,6 +243,7 @@ export default function Home() {
     note: string;
     items: Array<{ modelId: string; modelName: string; summary: string }>;
   } | null>(null);
+  const [showComparisonReview, setShowComparisonReview] = useState(false);
   const [unlockDialog, setUnlockDialog] = useState<{ id: string; password: string; error: string } | null>(null);
   const [lockedSelectDialog, setLockedSelectDialog] = useState<{ id: string; password: string; error: string } | null>(null);
   const [toast, setToast] = useState<AppToast | null>(null);
@@ -250,6 +256,10 @@ export default function Home() {
   const modelSyncAbortRef = useRef<AbortController | null>(null);
   const comparisonCompletionsRef = useRef<Map<string, Set<string>>>(new Map());
   const comparisonTrackedRef = useRef<Set<string>>(new Set());
+  const localComparisonResponsesRef = useRef<
+    Map<string, Map<string, string>>
+  >(new Map());
+  const latestLocalComparisonPromptRef = useRef<string | null>(null);
   const promptCountsRef = useRef<Map<string, number>>(new Map());
   const comparisonPresetAppliedRef = useRef(false);
 
@@ -630,6 +640,8 @@ export default function Home() {
     }, [fetchConversations, sessionUserId, setLang, status]);
 
     const handleNewChat = () => {
+        localComparisonResponsesRef.current.clear();
+        latestLocalComparisonPromptRef.current = null;
         setIsPrivateMode(false);
     if (isGuestMode) {
       const newGuestChat = {
@@ -654,6 +666,8 @@ export default function Home() {
 
     const handleSelectConversation = async (id: string, skipLockCheck = false) => {
         if (isSending) return;
+        localComparisonResponsesRef.current.clear();
+        latestLocalComparisonPromptRef.current = null;
 
         if (!isGuestMode && !skipLockCheck) {
             const targetConv = conversations.find((c) => c.id === id);
@@ -1070,7 +1084,15 @@ export default function Home() {
   );
 
   const handleResponseComplete = useCallback(
-    (promptId: string | null, modelId: string) => {
+    (promptId: string | null, modelId: string, responseText: string) => {
+      if (promptId && responseText.trim()) {
+        const responses =
+          localComparisonResponsesRef.current.get(promptId) ||
+          new Map<string, string>();
+        responses.set(modelId, responseText);
+        localComparisonResponsesRef.current.set(promptId, responses);
+        latestLocalComparisonPromptRef.current = promptId;
+      }
       if (isGuestMode) {
         setGuestMessageCount((current) => {
           const next = Math.min(MAX_GUEST_MESSAGES, current + 1);
@@ -1086,6 +1108,13 @@ export default function Home() {
         activeModelCount,
         { model_id: modelId }
       );
+      if (
+        awaitingPostResponseTips &&
+        localStorage.getItem("tomverse_post_response_tips_seen_v1") !== "1"
+      ) {
+        setAwaitingPostResponseTips(false);
+        setShowPostResponseTips(true);
+      }
       if (!promptId || activeModelCount < 2) return;
 
       const completedModels =
@@ -1103,7 +1132,7 @@ export default function Home() {
         );
       }
     },
-    [activeModelCount, isGuestMode]
+    [activeModelCount, awaitingPostResponseTips, isGuestMode]
   );
 
   const handleModelFollowupSent = useCallback(
@@ -1119,6 +1148,8 @@ export default function Home() {
     if (isPrivateMode) {
       handleNewChat();
     } else {
+      localComparisonResponsesRef.current.clear();
+      latestLocalComparisonPromptRef.current = null;
       setIsPrivateMode(true);
       setCurrentChatId("private-chat");
     }
@@ -1129,20 +1160,20 @@ export default function Home() {
       isGuestMode &&
       !clampGuestSelectedModels([modelId]).includes(modelId)
     ) {
-      return;
+      return false;
     }
 	let nextModels = [...selectedModels];
     let nextDisabled = [...disabledPanels];
 
 	if (nextModels.includes(modelId)) {
-      if (nextModels.length === 1) return; 
+      if (nextModels.length === 1) return false; 
       nextModels = nextModels.filter((id) => id !== modelId);
       nextDisabled = nextDisabled.filter((id) => id !== modelId);
     } else {
         const maxModels = maxSelectableModels;
         if (nextModels.length >= maxModels) {
             showToast(isGuestMode ? t("chat.maxGuestModelCompare") : t("chat.maxModelCompare"), "info");
-            return;
+            return false;
         }
 
         nextModels.push(modelId);
@@ -1156,7 +1187,38 @@ export default function Home() {
     if (currentChatId && currentChatId !== "private-chat") {
       syncModelSettingsToServer(currentChatId, nextModels, nextDisabled);
     }
+    return true;
   };
+
+  const handleModelFinderComplete = ({
+      defaultModelId,
+      optionalModelId,
+      promptExample,
+    }: {
+      defaultModelId: string;
+      optionalModelId?: string;
+      promptExample?: string;
+    }) => {
+      const nextModels = clampSelectedModels(
+        [defaultModelId, optionalModelId]
+          .filter((modelId): modelId is string => Boolean(modelId))
+          .filter(isEnabledModelId)
+      ).slice(0, maxSelectableModels);
+
+      setUserDefaultEngine(defaultModelId);
+      setSelectedModels(nextModels.length ? nextModels : [defaultModelId]);
+      setDisabledPanels([]);
+      setPersonalizedPrompt(promptExample || null);
+      if (
+        localStorage.getItem("tomverse_post_response_tips_seen_v1") !== "1"
+      ) {
+        setAwaitingPostResponseTips(true);
+      }
+      if (currentChatId && currentChatId !== "private-chat") {
+        syncModelSettingsToServer(currentChatId, nextModels, []);
+      }
+      setFocusToken((current) => current + 1);
+    };
 
   const handleRemoveModel = async (modelId: string) => {
     setPendingRemoveModelId(modelId);
@@ -1304,7 +1366,39 @@ export default function Home() {
     };
 
     const handleCompareSummary = async () => {
-      if (!currentChatId || isGuestMode || currentChatId === "private-chat") return;
+      if (!currentChatId) return;
+      if (isGuestMode || currentChatId === "private-chat") {
+        const promptId = latestLocalComparisonPromptRef.current;
+        const responses = promptId
+          ? localComparisonResponsesRef.current.get(promptId)
+          : null;
+        const items = selectedModels
+          .map((modelId) => {
+            const content = responses?.get(modelId);
+            if (!content) return null;
+            return {
+              modelId,
+              modelName: getModel(modelId)?.name || modelId,
+              summary: content.replace(/\s+/g, " ").trim().slice(0, 220),
+            };
+          })
+          .filter(
+            (item): item is {
+              modelId: string;
+              modelName: string;
+              summary: string;
+            } => Boolean(item)
+          );
+        setCompareSummary({
+          title: t("chat.quickDifferenceSummary"),
+          items,
+          note:
+            items.length < 2
+              ? t("chat.aiReviewResponsesRequired")
+              : t("chat.quickDifferenceSummaryNote"),
+        });
+        return;
+      }
       try {
         const response = await fetch(
           `/api/conversations/${currentChatId}/compare-summary`,
@@ -1338,6 +1432,11 @@ export default function Home() {
 
   return (
     <>
+      <ModelFinder
+        enabled={Boolean(sessionUserId && isUserSettingsLoaded)}
+        userId={sessionUserId}
+        onComplete={handleModelFinderComplete}
+      />
       {!isViewportReady ? (
         <ChatShellSkeleton label={t("auth.loading")} />
       ) : isMobileViewport ? (
@@ -1349,6 +1448,7 @@ export default function Home() {
           promptPayload={promptPayload}
           inputValue={inputValue}
           setInputValue={setInputValue}
+          personalizedPrompt={personalizedPrompt}
           attachments={attachments}
           setAttachments={handleAttachmentsChange}
           isSending={isSending}
@@ -1370,6 +1470,7 @@ export default function Home() {
           onToggleModel={toggleModel}
           onSubmit={handleGlobalSubmit}
           onCompareSummary={handleCompareSummary}
+          onComparisonReview={() => setShowComparisonReview(true)}
           onResponseComplete={handleResponseComplete}
           onFollowupSent={handleModelFollowupSent}
         />
@@ -1382,6 +1483,7 @@ export default function Home() {
           promptPayload={promptPayload}
           inputValue={inputValue}
           setInputValue={setInputValue}
+          personalizedPrompt={personalizedPrompt}
           attachments={attachments}
           setAttachments={handleAttachmentsChange}
           isSending={isSending}
@@ -1406,6 +1508,7 @@ export default function Home() {
           onTogglePanelDisable={togglePanelDisable}
           onRemoveModel={handleRemoveModel}
           onCompareSummary={handleCompareSummary}
+          onComparisonReview={() => setShowComparisonReview(true)}
           onResponseComplete={handleResponseComplete}
           onFollowupSent={handleModelFollowupSent}
         />
@@ -1430,6 +1533,34 @@ export default function Home() {
         </span>
         <span className="min-w-0 whitespace-pre-line break-words">{toast.message}</span>
       </div>
+    )}
+    {showPostResponseTips && (
+      <aside className="fixed bottom-5 right-5 z-[75] w-[min(22rem,calc(100vw-2rem))] rounded-2xl border border-blue-200 bg-white p-4 shadow-2xl shadow-zinc-900/20 dark:border-blue-900/60 dark:bg-zinc-900">
+        <div className="flex items-start gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white">
+            <Sparkles className="h-4 w-4" aria-hidden="true" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-black text-zinc-950 dark:text-white">
+              {t("modelFinder.postResponseTitle")}
+            </p>
+            <p className="mt-1 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+              {t("modelFinder.postResponseBody")}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              localStorage.setItem("tomverse_post_response_tips_seen_v1", "1");
+              setShowPostResponseTips(false);
+            }}
+            aria-label={t("modelFinder.dismissTips")}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-white"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      </aside>
     )}
     {billingSuccess && (
       <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
@@ -1537,7 +1668,7 @@ export default function Home() {
           <div className="flex shrink-0 items-start justify-between gap-4 border-b border-zinc-200 p-4 dark:border-zinc-800 sm:p-5">
             <div className="min-w-0">
               <h2 id="model-comparison-title" className="text-lg font-black text-zinc-900 dark:text-zinc-100">
-                {t("chat.modelComparison")}
+                {t("chat.quickDifferenceSummary")}
               </h2>
               <p id="model-comparison-note" className="mt-1 text-sm leading-5 text-zinc-500">
                 {compareSummary.note}
@@ -1568,6 +1699,15 @@ export default function Home() {
           </div>
         </section>
       </div>
+    )}
+    {showComparisonReview && (
+      <ComparisonReviewDialog
+        conversationId={
+          currentChatId && currentChatId !== "private-chat" ? currentChatId : null
+        }
+        open
+        onClose={() => setShowComparisonReview(false)}
+      />
     )}
     {pendingRemoveModelId && (
       <ConfirmDialog

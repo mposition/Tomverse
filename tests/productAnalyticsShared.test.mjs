@@ -46,9 +46,32 @@ test("go-live analytics event names remain complete", () => {
     "return_day_1",
     "return_day_7",
     "subscription_cancelled",
+    "model_finder_viewed",
+    "model_finder_started",
+    "model_finder_completed",
+    "model_finder_skipped",
+    "recommended_model_accepted",
+    "recommended_model_changed",
+    "advanced_model_suggested",
+    "advanced_model_selected",
   ]) {
     assert.ok(PRODUCT_ANALYTICS_EVENT_NAMES.includes(eventName));
   }
+});
+
+test("model finder analytics accepts only privacy-safe experiment metadata", () => {
+  const parsed = analyticsClientEventSchema.parse({
+    ...safeEvent,
+    event_name: "recommended_model_accepted",
+    properties: {
+      model_id: "gemini-2-5-flash",
+      experiment_variant: "finder",
+      recommendation_rank: 1,
+      suggestion_reason: "document",
+    },
+  });
+  assert.equal(parsed.properties.experiment_variant, "finder");
+  assert.equal(parsed.properties.recommendation_rank, 1);
 });
 
 test("analytics accepts attribution without product content", () => {

@@ -1,4 +1,4 @@
-import type { en } from "./en";
+import { en } from "./en";
 
 export const es = {
     sidebar: {
@@ -80,6 +80,7 @@ export const es = {
         projectDeleteFailed: "No se pudo eliminar el proyecto.",
     },
     chat: {
+        ...en.chat,
         welcome: "¡Hola! ¿En qué puedo ayudarte hoy?",
         guestWelcome: "¡Hola! Estás en modo invitado. Escribe tu pregunta.",
         inputPlaceholder: "Pregunta lo que quieras...",
@@ -319,6 +320,7 @@ export const es = {
         cta: "Escribir una pregunta",
         dontShowAgain: "Cerrar esta guía",
     },
+    modelFinder: en.modelFinder,
     auth: {
         saveMessage: "Configuración guardada.",
         failedMessage: "No se pudo guardar la configuración.",

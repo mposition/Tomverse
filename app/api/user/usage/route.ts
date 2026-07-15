@@ -14,6 +14,8 @@ import {
 } from "@/lib/apiSecurity";
 import { getBillingPlanByTier } from "@/lib/billingConfig";
 import { effectivePlanModelLimit } from "@/lib/billingEntitlements";
+import { getPurchasedCreditSummary } from "@/lib/creditLedger";
+import { recommendCreditAction } from "@/lib/creditPacks";
 
 const positiveInteger = (value: string | undefined, fallback: number) => {
   const parsed = Number(value);
@@ -54,7 +56,9 @@ export async function GET(req: Request) {
     const now = new Date();
     const dayStart = periodStart("day", now);
     const monthStart = periodStart("month", now);
-    const rows = await prisma.chatUsageBucket.findMany({
+    const historyStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 2, 1));
+    const [rows, monthlyRows, purchasedBalance, addOnPurchasesLast90Days] = await Promise.all([
+      prisma.chatUsageBucket.findMany({
       where: {
         key,
         OR: [
@@ -68,7 +72,25 @@ export async function GET(req: Request) {
         ],
       },
       select: { period: true, count: true },
-    });
+      }),
+      prisma.chatUsageBucket.findMany({
+        where: {
+          key,
+          period: "month",
+          periodStart: { gte: historyStart, lte: monthStart },
+        },
+        orderBy: { periodStart: "asc" },
+        select: { periodStart: true, count: true },
+      }),
+      getPurchasedCreditSummary(session.user.id, now),
+      prisma.creditPurchase.count({
+        where: {
+          userId: session.user.id,
+          status: { in: ["paid", "partially_refunded"] },
+          purchasedAt: { gte: new Date(now.getTime() - 90 * 86_400_000) },
+        },
+      }),
+    ]);
     const count = (period: string) =>
       rows.find((row) => row.period === period)?.count || 0;
 
@@ -94,6 +116,19 @@ export async function GET(req: Request) {
       allowSharing: billingPlan.allowSharing,
       allowDownloads: billingPlan.allowDownloads,
     };
+    const monthlyUsagePercents = monthlyRows.map((row) =>
+      limits.creditsMonth > 0
+        ? Math.round((row.count / limits.creditsMonth) * 100)
+        : 0
+    );
+    const recommendation = recommendCreditAction({
+      plan,
+      monthlyUsagePercents,
+      addOnPurchasesLast90Days,
+    });
+    const nextMonthStart = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)
+    );
 
     return NextResponse.json({
       plan,
@@ -113,6 +148,14 @@ export async function GET(req: Request) {
         costDay: count("cost-day"),
         costMonth: count("cost-month"),
       },
+      balances: {
+        planRemainingCredits: Math.max(0, limits.creditsMonth - count("month")),
+        planResetsAt: nextMonthStart.toISOString(),
+        purchasedRemainingCredits: purchasedBalance.remainingCredits,
+        purchasedFundedCostMicroUsd: purchasedBalance.remainingFundedCostMicroUsd,
+        purchasedEarliestExpiry: purchasedBalance.earliestExpiry?.toISOString() || null,
+      },
+      recommendation,
       limits,
     });
   } catch (error) {

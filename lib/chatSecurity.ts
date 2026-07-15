@@ -12,6 +12,12 @@ import {
 } from "@/lib/models";
 import { getTrustedClientIp } from "@/lib/clientIp";
 import { recordInternalProviderUsage } from "@/lib/providerUsageAccounting";
+import {
+    AddOnCreditError,
+    reserveAddOnCredits,
+    settleAddOnCredits,
+    type AddOnCreditReservationEntry,
+} from "@/lib/creditLedger";
 
 const GUEST_COOKIE_NAME = "tomverse_guest";
 const GUEST_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
@@ -30,6 +36,7 @@ export type ChatAccess = {
     kind: AccessKind;
     subjectKey: string;
     ipKey: string;
+    userId?: string;
     plan?: ModelTier;
     planLimits?: {
         dailyMessageLimit: number;
@@ -54,10 +61,12 @@ type ReservationEntry = {
     period: string;
     periodStart: Date;
     amount: number;
-    metric: "tokens" | "cost" | "credits" | "pro-response";
+    metric: "tokens" | "cost" | "credits" | "plan-credits" | "plan-cost" | "pro-response";
 };
 
 export type ChatUsageReservation = {
+    reservationId: string;
+    userId?: string;
     modelId: string;
     provider: AiModel["provider"];
     entries: ReservationEntry[];
@@ -66,6 +75,9 @@ export type ChatUsageReservation = {
     maxOutputTokens: number;
     inputUsdPerMillionTokens: number;
     outputUsdPerMillionTokens: number;
+    planReservedCredits: number;
+    addOnReservedCredits: number;
+    addOnReservations: AddOnCreditReservationEntry[];
 };
 
 const PLAN_MODEL_TIER_LIMIT: Record<ModelTier, ModelTier> = {
@@ -79,7 +91,8 @@ export class ChatAccessError extends Error {
         public readonly status: number,
         public readonly code: string,
         message: string,
-        public readonly retryAfter?: number
+        public readonly retryAfter?: number,
+        public readonly details?: Record<string, number | string>
     ) {
         super(message);
     }
@@ -314,6 +327,7 @@ export const identifyChatCaller = (
             kind: "user",
             subjectKey: `user:${hashKey("user", userId)}`,
             ipKey,
+            userId,
             plan,
             planLimits,
         };
@@ -391,7 +405,12 @@ export const acquireChatAccess = async (
 ) => {
     const now = new Date();
     const leaseId = randomUUID();
+    const reservationId = randomUUID();
     const reservationEntries: ReservationEntry[] = [];
+    let planReservedCredits = budget.usageCredits;
+    let addOnReservedCredits = 0;
+    let addOnReservedCost = 0;
+    let addOnReservations: AddOnCreditReservationEntry[] = [];
     const concurrentLimit =
         access.kind === "user"
             ? positiveInteger(process.env.CHAT_USER_CONCURRENT, 3)
@@ -491,9 +510,10 @@ export const acquireChatAccess = async (
     );
 
     await prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${access.subjectKey}))`;
         for (const rule of limitsFor(access)) {
-            const amount =
-                rule.period === "minute" ? 1 : budget.usageCredits;
+            if (access.kind === "user" && rule.period === "month") continue;
+            const amount = rule.period === "minute" ? 1 : budget.usageCredits;
             const allowed = await incrementUsage(
                 tx,
                 access.subjectKey,
@@ -518,6 +538,81 @@ export const acquireChatAccess = async (
                     amount,
                     metric: "credits",
                 });
+            }
+        }
+
+        if (access.kind === "user") {
+            if (!access.userId) throw new Error("Authenticated chat access is missing a user ID.");
+            const monthRule = limitsFor(access).find((rule) => rule.period === "month");
+            if (!monthRule) {
+                throw new ChatAccessError(503, "CHAT_PLAN_NOT_CONFIGURED", "Monthly plan credits are not configured.");
+            }
+            const monthStart = periodStart("month", now);
+            const current = await tx.chatUsageBucket.findUnique({
+                where: {
+                    key_period_periodStart: {
+                        key: access.subjectKey,
+                        period: "month",
+                        periodStart: monthStart,
+                    },
+                },
+                select: { count: true },
+            });
+            const planRemaining = Math.max(0, monthRule.limit - (current?.count || 0));
+            planReservedCredits = Math.min(planRemaining, budget.usageCredits);
+            addOnReservedCredits = budget.usageCredits - planReservedCredits;
+            if (planReservedCredits > 0) {
+                const allowed = await incrementUsage(
+                    tx,
+                    access.subjectKey,
+                    "month",
+                    monthStart,
+                    monthRule.limit,
+                    planReservedCredits
+                );
+                if (!allowed) {
+                    throw new ChatAccessError(409, "CREDIT_RESERVATION_CONFLICT", "Credit balance changed. Please retry.");
+                }
+                reservationEntries.push({
+                    key: access.subjectKey,
+                    period: "month",
+                    periodStart: monthStart,
+                    amount: planReservedCredits,
+                    metric: "plan-credits",
+                });
+            }
+            if (addOnReservedCredits > 0) {
+                addOnReservedCost = Math.ceil(
+                    (reservedCost * addOnReservedCredits) / budget.usageCredits
+                );
+                try {
+                    addOnReservations = await reserveAddOnCredits(tx, {
+                        userId: access.userId,
+                        reservationId,
+                        credits: addOnReservedCredits,
+                        fundedCostMicroUsd: addOnReservedCost,
+                        now,
+                    });
+                } catch (error) {
+                    if (error instanceof AddOnCreditError) {
+                        throw new ChatAccessError(
+                            402,
+                            "CREDIT_BALANCE_INSUFFICIENT",
+                            "Not enough credits are available for this request.",
+                            undefined,
+                            {
+                                requiredCredits: budget.usageCredits,
+                                planCreditsAvailable: planRemaining,
+                                purchasedCreditsAvailable: error.availableCredits,
+                                shortfallCredits: Math.max(
+                                    0,
+                                    budget.usageCredits - planRemaining - error.availableCredits
+                                ),
+                            }
+                        );
+                    }
+                    throw error;
+                }
             }
         }
 
@@ -658,13 +753,18 @@ export const acquireChatAccess = async (
         }
 
         for (const rule of costLimits) {
+            const reservedRuleCost =
+                access.kind === "user" && rule.period === "cost-month"
+                    ? reservedCost - addOnReservedCost
+                    : reservedCost;
+            if (reservedRuleCost <= 0) continue;
             const allowed = await incrementUsage(
                 tx,
                 access.subjectKey,
                 rule.period,
                 rule.start,
                 rule.limit,
-                reservedCost
+                reservedRuleCost
             );
             if (!allowed) {
                 throw new ChatAccessError(
@@ -681,8 +781,11 @@ export const acquireChatAccess = async (
                 key: access.subjectKey,
                 period: rule.period,
                 periodStart: rule.start,
-                amount: reservedCost,
-                metric: "cost",
+                amount: reservedRuleCost,
+                metric:
+                    access.kind === "user" && rule.period === "cost-month"
+                        ? "plan-cost"
+                        : "cost",
             });
             if (access.kind === "guest") {
                 const ipPeriod = `ip-${rule.period}`;
@@ -692,7 +795,7 @@ export const acquireChatAccess = async (
                     ipPeriod,
                     rule.start,
                     rule.limit * 3,
-                    reservedCost
+                    reservedRuleCost
                 );
                 if (!ipAllowed) {
                     throw new ChatAccessError(
@@ -709,7 +812,7 @@ export const acquireChatAccess = async (
                     key: access.ipKey,
                     period: ipPeriod,
                     periodStart: rule.start,
-                    amount: reservedCost,
+                    amount: reservedRuleCost,
                     metric: "cost",
                 });
             }
@@ -795,6 +898,8 @@ export const acquireChatAccess = async (
         leaseId,
         setCookie: access.setCookie,
         usageReservation: {
+            reservationId,
+            userId: access.userId,
             modelId: budget.modelId,
             provider: budget.provider,
             entries: reservationEntries,
@@ -803,6 +908,9 @@ export const acquireChatAccess = async (
             maxOutputTokens: budget.maxOutputTokens,
             inputUsdPerMillionTokens: budget.inputUsdPerMillionTokens,
             outputUsdPerMillionTokens: budget.outputUsdPerMillionTokens,
+            planReservedCredits,
+            addOnReservedCredits,
+            addOnReservations,
         } satisfies ChatUsageReservation,
     };
 };
@@ -839,21 +947,35 @@ export const settleChatUsage = async (
             actualOutput,
             reservation.outputUsdPerMillionTokens
         );
+    const planActualCredits = Math.min(
+        actualCredits,
+        reservation.planReservedCredits
+    );
+    const addOnActualCredits = Math.max(0, actualCredits - planActualCredits);
+    const addOnActualCost =
+        actualCredits > 0 && addOnActualCredits > 0
+            ? Math.ceil((actualCost * addOnActualCredits) / actualCredits)
+            : 0;
+    const planActualCost = Math.max(0, actualCost - addOnActualCost);
 
-    await prisma.$transaction(
-        reservation.entries.map((entry) => {
+    await prisma.$transaction(async (tx) => {
+        for (const entry of reservation.entries) {
             const actual =
                 entry.metric === "tokens"
                     ? actualTokens
                     : entry.metric === "cost"
                       ? actualCost
+                      : entry.metric === "plan-cost"
+                        ? planActualCost
+                        : entry.metric === "plan-credits"
+                          ? planActualCredits
                       : entry.metric === "credits"
                         ? actualCredits
                         : actualCredits > 0
                           ? 1
                           : 0;
             const difference = actual - entry.amount;
-            return prisma.chatUsageBucket.updateMany({
+            await tx.chatUsageBucket.updateMany({
                 where: {
                     key: entry.key,
                     period: entry.period,
@@ -866,8 +988,21 @@ export const settleChatUsage = async (
                             : { decrement: Math.abs(difference) },
                 },
             });
-        })
-    );
+        }
+        if (
+            reservation.userId &&
+            reservation.addOnReservations.length > 0
+        ) {
+            await settleAddOnCredits(tx, {
+                userId: reservation.userId,
+                reservationId: reservation.reservationId,
+                entries: reservation.addOnReservations,
+                settledCredits: addOnActualCredits,
+                settledFundedCostMicroUsd: addOnActualCost,
+                outcome: usage.outcome,
+            });
+        }
+    });
 
     await recordInternalProviderUsage({
         provider: reservation.provider,
@@ -1088,7 +1223,11 @@ export const chatErrorResponse = (error: unknown) => {
         headers.set("Retry-After", String(error.retryAfter));
     }
     return new Response(
-        JSON.stringify({ error: error.message, code: error.code }),
+        JSON.stringify({
+            error: error.message,
+            code: error.code,
+            ...(error.details ? { details: error.details } : {}),
+        }),
         { status: error.status, headers }
     );
 };
