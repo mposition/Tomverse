@@ -77,7 +77,10 @@ const run = (args, label) => {
 console.log(
   `[db-integration] Using dedicated database ${databaseName} on ${testDatabaseUrl.hostname}.`
 );
-run(["node_modules/prisma/build/index.js", "migrate", "deploy"], "Applying migrations");
+run(
+  ["node_modules/prisma/build/index.js", "db", "push"],
+  "Synchronizing the current Prisma schema"
+);
 run(
   [
     "--conditions=react-server",

@@ -14,8 +14,10 @@ dedicated database or schema whose name contains `test`, `testing`, or `ci`, for
 postgresql://postgres:password@127.0.0.1:5432/tomverse_test
 ```
 
-The runner refuses a URL identical to `DATABASE_URL` or `DIRECT_DATABASE_URL`. It applies
-all Prisma migrations before running the tests.
+The runner refuses a URL identical to `DATABASE_URL` or `DIRECT_DATABASE_URL`. It
+synchronizes the dedicated database to the current Prisma schema with `prisma db push`
+before running the tests. The historical migration chain predates several baseline auth
+tables, so it is not used to provision the disposable integration-test database.
 
 ## Run locally
 
