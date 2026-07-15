@@ -23,6 +23,11 @@ model User {
   subscriptionCurrentPeriodEnd  DateTime?
   subscriptionBillingInterval   String?
   subscriptionCancelAtPeriodEnd Boolean       @default(false)
+  creditDebtCredits             Int           @default(0)
+  creditDebtCostMicroUsd        BigInt        @default(0)
+  billingRiskStatus             String        @default("normal")
+  billingRiskReason             String?
+  billingRiskAt                 DateTime?
   createdAt                     DateTime?     @default(now())
   settings                      UserSettings?
 
@@ -34,6 +39,7 @@ model User {
   creditPurchases        CreditPurchase[]
   creditLots             CreditLot[]
   creditLedgerEntries    CreditLedgerEntry[]
+  creditDebtEntries      CreditDebtEntry[]
   adminAuditLogs         AdminAuditLog[]
   adminNotes             AdminNote[]
   modelOverrides         ModelOverride[]
@@ -330,6 +336,17 @@ model CreditPurchase {
   refundedAmountCents     Int                 @default(0)
   revokedCredits          Int                 @default(0)
   revokedCostMicroUsd     BigInt              @default(0)
+  unrecoveredCredits      Int                 @default(0)
+  unrecoveredCostMicroUsd BigInt              @default(0)
+  stripeDisputeId         String?             @unique
+  disputeStatus           String?
+  disputeAmountCents      Int                 @default(0)
+  disputeRevokedCredits   Int                 @default(0)
+  disputeRevokedCostMicroUsd BigInt           @default(0)
+  disputeDebtCredits      Int                 @default(0)
+  disputeDebtCostMicroUsd BigInt              @default(0)
+  disputeOffsetCredits    Int                 @default(0)
+  disputeOffsetCostMicroUsd BigInt             @default(0)
   currency                String              @default("USD")
   status                  String              @default("paid")
   purchasedAt             DateTime            @default(now())
@@ -338,6 +355,7 @@ model CreditPurchase {
   updatedAt               DateTime            @updatedAt
   lots                    CreditLot[]
   ledgerEntries           CreditLedgerEntry[]
+  debtEntries             CreditDebtEntry[]
 
   @@index([userId, purchasedAt])
   @@index([status, purchasedAt])
@@ -386,6 +404,25 @@ model CreditLedgerEntry {
   @@index([creditLotId, createdAt])
   @@index([purchaseId, createdAt])
   @@index([reservationId])
+}
+
+model CreditDebtEntry {
+  id                       String          @id @default(cuid())
+  userId                   String
+  user                     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  purchaseId               String?
+  purchase                 CreditPurchase? @relation(fields: [purchaseId], references: [id], onDelete: SetNull)
+  type                     String
+  creditsDelta             Int
+  fundedCostMicroUsdDelta  BigInt          @default(0)
+  balanceAfterCredits      Int
+  balanceAfterCostMicroUsd BigInt          @default(0)
+  metadata                 Json?
+  createdAt                DateTime        @default(now())
+
+  @@index([userId, createdAt])
+  @@index([purchaseId, createdAt])
+  @@index([type, createdAt])
 }
 
 model AppSetting {
