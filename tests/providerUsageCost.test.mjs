@@ -45,3 +45,19 @@ test("cached tokens are bounded by total prompt tokens", () => {
   assert.equal(usage.uncachedInputTokens, 0);
   assert.equal(usage.totalCostMicroUsd, 1);
 });
+
+test("Zhipu cached prompt tokens can use a request-time twenty percent multiplier", () => {
+  const result = calculateProviderUsageCost({
+    inputTokens: 1_000,
+    cachedInputTokens: 600,
+    outputTokens: 100,
+    inputUsdPerMillionTokens: 1,
+    outputUsdPerMillionTokens: 3,
+    cachedInputPriceMultiplier: 0.2,
+  });
+
+  assert.equal(result.uncachedInputCostMicroUsd, 400);
+  assert.equal(result.cachedInputCostMicroUsd, 120);
+  assert.equal(result.outputCostMicroUsd, 300);
+  assert.equal(result.totalCostMicroUsd, 820);
+});

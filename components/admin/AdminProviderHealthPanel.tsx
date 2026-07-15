@@ -88,6 +88,12 @@ const budgetClass = (value: number) => {
   if (value >= 50) return "text-sky-300";
   return "text-emerald-300";
 };
+const creditAlertClass = (level: ProviderHealthRow["creditAlertLevel"]) => {
+  if (level === "5") return "text-red-300";
+  if (level === "20") return "text-amber-300";
+  if (level === "50") return "text-sky-300";
+  return "text-emerald-300";
+};
 const apiKeyClass = (configured: boolean) =>
   configured
     ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
@@ -167,6 +173,7 @@ function ProviderRow({
     parsedCreditUsd <= 1_000_000;
   const estimatedBalance = provider.credit.estimatedBalanceMicroUsd;
   const tracksCredit =
+    provider.provider === "zhipu" ||
     provider.billingProfile.settlementModel === "prepaid" ||
     provider.billingProfile.settlementModel === "hybrid";
   const billingBasisMicroUsd =
@@ -638,7 +645,16 @@ function ProviderRow({
                     : "Not configured"
                   : money(estimatedBalance)
               }
-              valueClass={estimatedBalance !== null && estimatedBalance < 0 ? "text-red-300" : "text-emerald-300"}
+              detail={
+                provider.creditRemainingPercent === null
+                  ? undefined
+                  : `${provider.creditRemainingPercent.toFixed(1)}% of checkpoint remaining${
+                      provider.creditAlertLevel === "none"
+                        ? ""
+                        : ` · ${provider.creditAlertLevel}% alert active`
+                    }`
+              }
+              valueClass={creditAlertClass(provider.creditAlertLevel)}
             />
           </div>
           {provider.credit.checkpointAt && (

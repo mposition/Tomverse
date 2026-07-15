@@ -1341,6 +1341,31 @@ const mistralInternalUsage = async (
   };
 };
 
+const zhipuInternalUsage = async (
+  date: Date
+): Promise<ProviderUsageSyncResult> => {
+  const provider: AiProvider = "zhipu";
+  const usage = await getInternalProviderUsageSummary({ provider, date });
+  return {
+    provider,
+    displayName: PROVIDER_DISPLAY_NAMES[provider],
+    status: "internal",
+    reportedCostMicroUsd: null,
+    internalCostMicroUsd: usage.estimatedCostMicroUsd,
+    internalUsage: {
+      requestCount: usage.requestCount,
+      inputTokens: usage.inputTokens,
+      cachedInputTokens: usage.cachedInputTokens,
+      outputTokens: usage.outputTokens,
+    },
+    usageSourceLabel: "Internal response accounting",
+    reconciliationLabel: "Official balance and daily cost APIs unavailable",
+    message:
+      "Zhipu response Usage, including cached prompt tokens, is costed with the request-time model price snapshot. Maintain a Provider Credit checkpoint and verify it periodically in the Z.AI dashboard.",
+    diagnostic: null,
+  };
+};
+
 export async function syncProviderUsageForDate(
   requestedDate = defaultProviderUsageSyncDate()
 ): Promise<ProviderUsageSyncResult[]> {
@@ -1350,6 +1375,12 @@ export async function syncProviderUsageForDate(
   for (const provider of MONITORED_PROVIDERS) {
     const hasGenericMistralUsageEndpoint =
       provider === "mistral" &&
+      Boolean(usageUrlFor(provider, date)) &&
+      Boolean(
+        process.env[`PROVIDER_${envProvider(provider)}_USAGE_COST_JSON_PATH`]
+      );
+    const hasGenericZhipuUsageEndpoint =
+      provider === "zhipu" &&
       Boolean(usageUrlFor(provider, date)) &&
       Boolean(
         process.env[`PROVIDER_${envProvider(provider)}_USAGE_COST_JSON_PATH`]
@@ -1367,6 +1398,8 @@ export async function syncProviderUsageForDate(
                 ? await syncAlibabaCloudBilling(date)
             : provider === "mistral" && !hasGenericMistralUsageEndpoint
               ? await mistralInternalUsage(date)
+              : provider === "zhipu" && !hasGenericZhipuUsageEndpoint
+                ? await zhipuInternalUsage(date)
               : await syncGenericUsage(provider, date)
     );
   }

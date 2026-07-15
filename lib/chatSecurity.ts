@@ -22,6 +22,7 @@ import {
 import { lockCreditAccount, offsetCreditDebt } from "@/lib/creditDebt";
 import { calculateProviderUsageCost } from "@/lib/providerUsageCost";
 import type { PerplexityUsageCostSnapshot } from "@/lib/perplexityUsageCore";
+import { notifyProviderCreditIfNeeded } from "@/lib/providerMonitoring";
 
 const GUEST_COOKIE_NAME = "tomverse_guest";
 const GUEST_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
@@ -280,7 +281,7 @@ export const createChatBudget = (
         maxOutputTokens: profile.maxOutputTokens,
         inputUsdPerMillionTokens: profile.inputUsdPerMillionTokens,
         outputUsdPerMillionTokens: profile.outputUsdPerMillionTokens,
-        cachedInputPriceMultiplier: model.provider === "mistral" ? 0.1 : 1,
+        cachedInputPriceMultiplier: profile.cachedInputPriceMultiplier,
         provider: model.provider,
     };
 };
@@ -1357,6 +1358,16 @@ export const settleChatUsage = async (
                 settlement.costBreakdown.cachedInputCostMicroUsd,
             outputCostMicroUsd: settlement.costBreakdown.outputCostMicroUsd,
         });
+        if (settlement.provider === "zhipu") {
+            await notifyProviderCreditIfNeeded(settlement.provider).catch(
+                (error) =>
+                    console.error("Provider credit alert failed:", {
+                        provider: settlement.provider,
+                        modelId: settlement.modelId,
+                        error,
+                    })
+            );
+        }
     }
     return { applied: settlement.applied, status: settlement.status };
 };

@@ -250,6 +250,7 @@ export type ModelBillingProfile = {
     maxOutputTokens: number;
     inputUsdPerMillionTokens: number;
     outputUsdPerMillionTokens: number;
+    cachedInputPriceMultiplier: number;
 };
 
 const BILLING_DEFAULTS: Record<ModelTier, ModelBillingProfile> = {
@@ -257,16 +258,19 @@ const BILLING_DEFAULTS: Record<ModelTier, ModelBillingProfile> = {
         maxOutputTokens: 2_048,
         inputUsdPerMillionTokens: 0.5,
         outputUsdPerMillionTokens: 1,
+        cachedInputPriceMultiplier: 1,
     },
     Pro: {
         maxOutputTokens: 4_096,
         inputUsdPerMillionTokens: 3,
         outputUsdPerMillionTokens: 12,
+        cachedInputPriceMultiplier: 1,
     },
     Max: {
         maxOutputTokens: 8_192,
         inputUsdPerMillionTokens: 15,
         outputUsdPerMillionTokens: 60,
+        cachedInputPriceMultiplier: 1,
     },
 };
 
@@ -278,8 +282,15 @@ const positiveNumber = (value: string | undefined, fallback: number) => {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
 
+const priceMultiplier = (value: string | undefined, fallback: number) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed >= 0 && parsed <= 1
+        ? parsed
+        : fallback;
+};
+
 export const getModelBillingProfile = (
-    model: Pick<AiModel, "id" | "tier">
+    model: Pick<AiModel, "id" | "tier" | "provider">
 ): ModelBillingProfile => {
     const defaults = BILLING_DEFAULTS[model.tier];
     return {
@@ -296,6 +307,16 @@ export const getModelBillingProfile = (
         outputUsdPerMillionTokens: positiveNumber(
             process.env[modelEnvKey(model.id, "OUTPUT_USD_PER_MILLION")],
             defaults.outputUsdPerMillionTokens
+        ),
+        cachedInputPriceMultiplier: priceMultiplier(
+            process.env[
+                modelEnvKey(model.id, "CACHED_INPUT_PRICE_MULTIPLIER")
+            ],
+            model.provider === "mistral"
+                ? 0.1
+                : model.provider === "zhipu"
+                  ? 0.2
+                  : defaults.cachedInputPriceMultiplier
         ),
     };
 };
