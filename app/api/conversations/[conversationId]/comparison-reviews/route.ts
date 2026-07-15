@@ -6,6 +6,12 @@ import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import { getActiveAiModel } from "@/lib/activeAiModel";
+import {
+  consumePerplexityUsage,
+  discardPerplexityUsage,
+  perplexityUsageHeaders,
+} from "@/lib/perplexityUsageCapture";
+import type { PerplexityUsageCostSnapshot } from "@/lib/perplexityUsageCore";
 import { getUserBillingPlan } from "@/lib/billingEntitlements";
 import {
   buildComparisonReviewPrompt,
@@ -489,6 +495,8 @@ export async function POST(
     for (const candidate of candidates) {
       let leaseId: string | null = null;
       let reservation: ChatUsageReservation | null = null;
+      let providerUsageTraceId: string | null = null;
+      let providerUsageSnapshot: PerplexityUsageCostSnapshot | null = null;
       try {
         const budget = createChatBudget("user", candidate, inputTokens);
         const grant = await acquireChatAccess(access, budget, {
@@ -497,6 +505,7 @@ export async function POST(
         });
         leaseId = grant.leaseId;
         reservation = grant.usageReservation;
+        providerUsageTraceId = reservation.reservationId;
 
         let generated:
           | {
@@ -524,6 +533,10 @@ export async function POST(
               maxOutputTokens: budget.maxOutputTokens,
               maxRetries: 1,
               abortSignal: AbortSignal.timeout(45_000),
+              headers:
+                candidate.provider === "perplexity"
+                  ? perplexityUsageHeaders(providerUsageTraceId)
+                  : undefined,
             });
             break;
           } catch (error) {
@@ -531,6 +544,11 @@ export async function POST(
           }
         }
         if (!generated) throw generationError || new Error("No review output.");
+        if (candidate.provider === "perplexity") {
+          providerUsageSnapshot = await consumePerplexityUsage(
+            providerUsageTraceId
+          );
+        }
         await linkChatReservationProviderRequest(reservation.reservationId, {
           providerRequestId:
             generated.response.headers?.["x-request-id"] ||
@@ -582,6 +600,8 @@ export async function POST(
           cachedInputTokens: generated.usage.inputTokenDetails.cacheReadTokens,
           outputTokens: generated.usage.outputTokens,
           outcome: "completed",
+        }, {
+          providerUsageSnapshot,
         }).catch((settlementError) =>
           console.error("Comparison review settlement failed:", {
             traceId,
@@ -611,10 +631,17 @@ export async function POST(
       } catch (error) {
         lastError = error;
         if (reservation) {
+          if (candidate.provider === "perplexity" && providerUsageTraceId) {
+            providerUsageSnapshot = await consumePerplexityUsage(
+              providerUsageTraceId
+            );
+          }
           await settleChatUsage(reservation, {
             inputTokens: 0,
             outputTokens: 0,
             outcome: "failed",
+          }, {
+            providerUsageSnapshot,
           }).catch((settlementError) =>
             console.error("Comparison review refund failed:", {
               traceId,
@@ -643,6 +670,9 @@ export async function POST(
           error,
         });
       } finally {
+        if (providerUsageTraceId) {
+          discardPerplexityUsage(providerUsageTraceId);
+        }
         if (leaseId) await releaseChatAccess(leaseId);
       }
     }

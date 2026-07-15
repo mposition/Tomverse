@@ -4,6 +4,7 @@ import { anthropic } from "@ai-sdk/anthropic";
 import { google } from "@ai-sdk/google";
 import { createOpenAI, openai } from "@ai-sdk/openai";
 import type { AiModel } from "@/lib/models";
+import { perplexityUsageFetch } from "@/lib/perplexityUsageCapture";
 
 const groq = createOpenAI({
   baseURL: "https://api.groq.com/openai/v1",
@@ -43,6 +44,7 @@ const zhipu = createOpenAI({
 const perplexity = createOpenAI({
   baseURL: "https://api.perplexity.ai",
   apiKey: process.env.PERPLEXITY_API_KEY,
+  fetch: perplexityUsageFetch,
 });
 
 export const getActiveAiModel = (model: AiModel) => {

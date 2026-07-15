@@ -21,6 +21,7 @@ import {
 } from "@/lib/creditLedger";
 import { lockCreditAccount, offsetCreditDebt } from "@/lib/creditDebt";
 import { calculateProviderUsageCost } from "@/lib/providerUsageCost";
+import type { PerplexityUsageCostSnapshot } from "@/lib/perplexityUsageCore";
 
 const GUEST_COOKIE_NAME = "tomverse_guest";
 const GUEST_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
@@ -1154,6 +1155,7 @@ export const settleChatUsage = async (
     options?: {
         reconciled?: boolean;
         reason?: string;
+        providerUsageSnapshot?: PerplexityUsageCostSnapshot | null;
     }
 ) => {
     const settlement = await prisma.$transaction(async (tx) => {
@@ -1208,7 +1210,7 @@ export const settleChatUsage = async (
             actualOutputTokens: actualOutput,
             outcome: usage.outcome,
         });
-        const costBreakdown = calculateProviderUsageCost({
+        const tokenCostBreakdown = calculateProviderUsageCost({
             inputTokens: actualInput,
             cachedInputTokens: actualCachedInput,
             outputTokens: actualOutput,
@@ -1217,6 +1219,29 @@ export const settleChatUsage = async (
             cachedInputPriceMultiplier:
                 canonical.cachedInputPriceMultiplier,
         });
+        const providerUsageSnapshot =
+            canonical.provider === "perplexity" &&
+            options?.providerUsageSnapshot?.source ===
+                "perplexity_response_usage"
+                ? options.providerUsageSnapshot
+                : null;
+        const costBreakdown = providerUsageSnapshot
+            ? {
+                  ...tokenCostBreakdown,
+                  costSource: "provider_response" as const,
+                  tokenEstimatedTotalCostMicroUsd:
+                      tokenCostBreakdown.totalCostMicroUsd,
+                  totalCostMicroUsd:
+                      providerUsageSnapshot.totalCostMicroUsd,
+                  uncachedInputCostMicroUsd:
+                      providerUsageSnapshot.inputTokensCostMicroUsd ??
+                      tokenCostBreakdown.uncachedInputCostMicroUsd,
+                  cachedInputCostMicroUsd: 0,
+                  outputCostMicroUsd:
+                      providerUsageSnapshot.outputTokensCostMicroUsd ??
+                      tokenCostBreakdown.outputCostMicroUsd,
+              }
+            : tokenCostBreakdown;
         const actualCost = costBreakdown.totalCostMicroUsd;
         const planActualCredits = Math.min(
             actualCredits,
@@ -1292,6 +1317,7 @@ export const settleChatUsage = async (
                 settledCachedInputTokens: actualCachedInput,
                 settledOutputTokens: actualOutput,
                 pricingSnapshot: costBreakdown,
+                providerUsageSnapshot: providerUsageSnapshot ?? undefined,
                 settledAt: new Date(),
                 reconciledAt: options?.reconciled ? new Date() : null,
                 lastError: options?.reason?.slice(0, 500) || null,

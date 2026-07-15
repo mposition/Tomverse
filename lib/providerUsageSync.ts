@@ -1,5 +1,6 @@
 import "server-only";
 
+import { sign as signJwt } from "node:crypto";
 import type { AiProvider } from "@/lib/models";
 import {
   getInternalProviderUsageSummary,
@@ -26,6 +27,14 @@ import {
   xaiUsageDayRequest,
   xaiUsageUrl,
 } from "@/lib/providerUsageSyncCore";
+import {
+  CloudBillingParseError,
+  createAlibabaCloudBillingRequest,
+  googleCloudBillingQueryRequest,
+  parseAlibabaCloudBillingPage,
+  parseGoogleCloudBillingQuery,
+  validateGoogleBillingExportTable,
+} from "@/lib/cloudBillingSyncCore";
 
 export type ProviderUsageSyncStatus =
   | "synced"
@@ -46,6 +55,8 @@ export type ProviderUsageSyncDiagnostic = {
     | "openai_costs"
     | "anthropic_costs"
     | "xai_usage"
+    | "google_cloud_billing"
+    | "alibaba_cloud_billing"
     | "generic_usage";
   endpoint: string;
   httpStatus: number | null;
@@ -82,10 +93,15 @@ const ANTHROPIC_COSTS_URL =
   "https://api.anthropic.com/v1/organizations/cost_report";
 const XAI_USAGE_BASE_URL =
   "https://management-api.x.ai/v1/billing/teams";
+const GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token";
+const GOOGLE_BIGQUERY_API = "https://bigquery.googleapis.com/bigquery/v2";
+const ALIBABA_BILLING_DEFAULT_ENDPOINT =
+  "https://business.ap-southeast-1.aliyuncs.com";
 const GENERIC_EXTERNAL_TIMEOUT_MS = 10_000;
 const MAX_EXTERNAL_RESPONSE_BYTES = 512_000;
 const MAX_OPENAI_PAGES = 10;
 const MAX_ANTHROPIC_PAGES = 10;
+const MAX_ALIBABA_BILLING_PAGES = 167;
 
 const envProvider = (provider: AiProvider) => provider.toUpperCase();
 
@@ -180,9 +196,13 @@ const readBoundedJson = async (response: Response) => {
 
 const diagnosticValue = (payload: unknown, field: string) => {
   if (!payload || typeof payload !== "object") return null;
-  const error = (payload as Record<string, unknown>).error;
-  if (!error || typeof error !== "object") return null;
-  return redactProviderDiagnostic((error as Record<string, unknown>)[field], 160);
+  const record = payload as Record<string, unknown>;
+  const error = record.error;
+  const value =
+    error && typeof error === "object"
+      ? (error as Record<string, unknown>)[field]
+      : record[field] ?? record[field[0]?.toUpperCase() + field.slice(1)];
+  return redactProviderDiagnostic(value, 160);
 };
 
 const isTimeoutError = (error: unknown) =>
@@ -753,6 +773,435 @@ const syncXaiUsage = async (
   }
 };
 
+type GoogleServiceAccount = {
+  project_id?: string;
+  client_email: string;
+  private_key: string;
+};
+
+const base64Url = (value: string | Uint8Array) =>
+  Buffer.from(value)
+    .toString("base64")
+    .replace(/=/g, "")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_");
+
+const googleServiceAccount = (): GoogleServiceAccount | null => {
+  const json = process.env.GOOGLE_CLOUD_BILLING_SERVICE_ACCOUNT_JSON?.trim();
+  const base64 =
+    process.env.GOOGLE_CLOUD_BILLING_SERVICE_ACCOUNT_JSON_BASE64?.trim();
+  if (!json && !base64) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(
+      json || Buffer.from(base64!, "base64").toString("utf8")
+    );
+  } catch {
+    throw new CloudBillingParseError(
+      "GOOGLE_BILLING_CREDENTIALS_INVALID",
+      "Google Cloud Billing service-account JSON is invalid."
+    );
+  }
+  if (!parsed || typeof parsed !== "object") {
+    throw new CloudBillingParseError(
+      "GOOGLE_BILLING_CREDENTIALS_INVALID",
+      "Google Cloud Billing service-account JSON is invalid."
+    );
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    typeof record.client_email !== "string" ||
+    !record.client_email.trim() ||
+    typeof record.private_key !== "string" ||
+    !record.private_key.includes("PRIVATE KEY")
+  ) {
+    throw new CloudBillingParseError(
+      "GOOGLE_BILLING_CREDENTIALS_INVALID",
+      "Google Cloud Billing service-account JSON omitted client_email or private_key."
+    );
+  }
+  return {
+    project_id:
+      typeof record.project_id === "string" ? record.project_id.trim() : undefined,
+    client_email: record.client_email.trim(),
+    private_key: record.private_key,
+  };
+};
+
+const googleAccessToken = async (account: GoogleServiceAccount) => {
+  const issuedAt = Math.floor(Date.now() / 1_000);
+  const header = base64Url(
+    JSON.stringify({ alg: "RS256", typ: "JWT" })
+  );
+  const claims = base64Url(
+    JSON.stringify({
+      iss: account.client_email,
+      scope: "https://www.googleapis.com/auth/cloud-platform",
+      aud: GOOGLE_OAUTH_TOKEN_URL,
+      iat: issuedAt,
+      exp: issuedAt + 3_600,
+    })
+  );
+  const unsigned = `${header}.${claims}`;
+  const signature = signJwt(
+    "RSA-SHA256",
+    Buffer.from(unsigned, "utf8"),
+    account.private_key
+  );
+  const assertion = `${unsigned}.${base64Url(signature)}`;
+  const response = await fetch(GOOGLE_OAUTH_TOKEN_URL, {
+    method: "POST",
+    cache: "no-store",
+    signal: AbortSignal.timeout(GENERIC_EXTERNAL_TIMEOUT_MS),
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion,
+    }),
+  });
+  const payload = await readBoundedJson(response);
+  const token =
+    payload && typeof payload === "object"
+      ? (payload as Record<string, unknown>).access_token
+      : null;
+  if (!response.ok || typeof token !== "string" || !token) {
+    const error = new CloudBillingParseError(
+      response.ok
+        ? "GOOGLE_BILLING_TOKEN_INVALID"
+        : `GOOGLE_BILLING_TOKEN_HTTP_${response.status}`,
+      response.status === 401 || response.status === 403
+        ? "Google OAuth denied the billing service account."
+        : "Google OAuth did not return a usable access token."
+    );
+    Object.assign(error, { httpStatus: response.status, payload });
+    throw error;
+  }
+  return token;
+};
+
+const syncGoogleCloudBilling = async (
+  date: Date
+): Promise<ProviderUsageSyncResult> => {
+  const provider: AiProvider = "google";
+  const displayName = PROVIDER_DISPLAY_NAMES[provider];
+  const table = process.env.GOOGLE_CLOUD_BILLING_EXPORT_TABLE?.trim();
+  const hasCredentials = Boolean(
+    process.env.GOOGLE_CLOUD_BILLING_SERVICE_ACCOUNT_JSON?.trim() ||
+      process.env.GOOGLE_CLOUD_BILLING_SERVICE_ACCOUNT_JSON_BASE64?.trim()
+  );
+  if (!hasCredentials || !table) {
+    return {
+      provider,
+      displayName,
+      status: "skipped",
+      reportedCostMicroUsd: null,
+      message:
+        "Google Cloud Billing export table or service-account JSON is not configured.",
+      diagnostic: null,
+    };
+  }
+
+  const traceId = crypto.randomUUID();
+  let endpoint = GOOGLE_OAUTH_TOKEN_URL;
+  let failureStage: ProviderUsageSyncFailureStage = "connection";
+  let httpStatus: number | null = null;
+  let payload: unknown = null;
+  try {
+    const account = googleServiceAccount()!;
+    const projectId =
+      process.env.GOOGLE_CLOUD_BILLING_PROJECT_ID?.trim() || account.project_id;
+    if (!projectId || !/^[A-Za-z0-9_-]+$/.test(projectId)) {
+      throw new CloudBillingParseError(
+        "GOOGLE_BILLING_PROJECT_INVALID",
+        "GOOGLE_CLOUD_BILLING_PROJECT_ID is missing or invalid."
+      );
+    }
+    validateGoogleBillingExportTable(table);
+    const token = await googleAccessToken(account);
+    endpoint = `${GOOGLE_BIGQUERY_API}/projects/${encodeURIComponent(projectId)}/queries`;
+    failureStage = "connection";
+    const response = await fetch(endpoint, {
+      method: "POST",
+      cache: "no-store",
+      signal: AbortSignal.timeout(30_000),
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(
+        googleCloudBillingQueryRequest(
+          table,
+          date,
+          process.env.GOOGLE_CLOUD_BILLING_LOCATION?.trim()
+        )
+      ),
+    });
+    httpStatus = response.status;
+    failureStage = "response";
+    payload = await readBoundedJson(response);
+    if (!response.ok) {
+      failureStage = "provider_http";
+      return failedResult({
+        provider,
+        date,
+        message:
+          response.status === 401 || response.status === 403
+            ? "Google BigQuery denied billing-export access. Verify the service-account IAM role."
+            : `Google BigQuery Billing query returned ${response.status}.`,
+        diagnostic: {
+          traceId,
+          source: "google_cloud_billing",
+          endpoint: endpointLabel(endpoint),
+          httpStatus: response.status,
+          errorType: diagnosticValue(payload, "status"),
+          errorCode:
+            diagnosticValue(payload, "reason") ||
+            `GOOGLE_BILLING_HTTP_${response.status}`,
+          providerRequestId: redactProviderDiagnostic(
+            response.headers.get("x-guploader-uploadid"),
+            160
+          ),
+          detail: diagnosticValue(payload, "message"),
+          failureStage,
+        },
+      });
+    }
+    failureStage = "payload";
+    const parsed = parseGoogleCloudBillingQuery(payload);
+    failureStage = "storage";
+    await recordProviderReportedUsage({
+      provider,
+      date,
+      costMicroUsd: parsed.costMicroUsd,
+      payload: {
+        source: "google_cloud_billing",
+        date: date.toISOString().slice(0, 10),
+        exportTable: table,
+        rowCount: parsed.rowCount,
+        invalidCurrencyRateRows: parsed.invalidCurrencyRateRows,
+        currency: "USD",
+      },
+    });
+    return {
+      provider,
+      displayName,
+      status: "synced",
+      reportedCostMicroUsd: parsed.costMicroUsd,
+      message: "Google Cloud Billing export net costs were reconciled.",
+      diagnostic: null,
+    };
+  } catch (error) {
+    const status =
+      error && typeof error === "object" && "httpStatus" in error
+        ? Number((error as { httpStatus?: unknown }).httpStatus) || httpStatus
+        : httpStatus;
+    const errorPayload =
+      error && typeof error === "object" && "payload" in error
+        ? (error as { payload?: unknown }).payload
+        : payload;
+    return failedResult({
+      provider,
+      date,
+      message: isTimeoutError(error)
+        ? "Google Cloud Billing query timed out."
+        : "Google Cloud Billing export could not be reconciled.",
+      diagnostic: {
+        traceId,
+        source: "google_cloud_billing",
+        endpoint: endpointLabel(endpoint),
+        httpStatus: status,
+        errorType: error instanceof Error ? error.name : null,
+        errorCode:
+          error instanceof CloudBillingParseError
+            ? error.code
+            : "GOOGLE_BILLING_SYNC_FAILED",
+        providerRequestId: null,
+        detail:
+          diagnosticValue(errorPayload, "message") ||
+          (error instanceof Error
+            ? redactProviderDiagnostic(error.message)
+            : "Google Cloud Billing request failed."),
+        failureStage,
+      },
+      cause: error,
+    });
+  }
+};
+
+const syncAlibabaCloudBilling = async (
+  date: Date
+): Promise<ProviderUsageSyncResult> => {
+  const provider: AiProvider = "qwen";
+  const displayName = PROVIDER_DISPLAY_NAMES[provider];
+  const accessKeyId = process.env.ALIBABA_CLOUD_ACCESS_KEY_ID?.trim();
+  const accessKeySecret = process.env.ALIBABA_CLOUD_ACCESS_KEY_SECRET?.trim();
+  if (!accessKeyId || !accessKeySecret) {
+    return {
+      provider,
+      displayName,
+      status: "skipped",
+      reportedCostMicroUsd: null,
+      message: "Alibaba Cloud Billing RAM access key is not configured.",
+      diagnostic: null,
+    };
+  }
+
+  const endpoint =
+    process.env.ALIBABA_CLOUD_BILLING_ENDPOINT?.trim() ||
+    ALIBABA_BILLING_DEFAULT_ENDPOINT;
+  const traceId = crypto.randomUUID();
+  let page = 1;
+  let costUsd = 0;
+  let itemCount = 0;
+  let expectedTotal = 0;
+  let lastHttpStatus: number | null = null;
+  let lastRequestId: string | null = null;
+  let failureStage: ProviderUsageSyncFailureStage = "connection";
+  try {
+    do {
+      if (page > MAX_ALIBABA_BILLING_PAGES) {
+        throw new CloudBillingParseError(
+          "ALIBABA_BILLING_PAGE_LIMIT",
+          "Alibaba Cloud Billing pagination exceeded the 50,000-row API safety limit."
+        );
+      }
+      const request = createAlibabaCloudBillingRequest({
+        endpoint,
+        accessKeyId,
+        accessKeySecret,
+        securityToken: process.env.ALIBABA_CLOUD_SECURITY_TOKEN?.trim(),
+        date,
+        pageNumber: page,
+        productCode: process.env.ALIBABA_CLOUD_BILLING_PRODUCT_CODE?.trim(),
+        nonce: crypto.randomUUID(),
+      });
+      failureStage = "connection";
+      const response = await fetch(request.url, {
+        method: "POST",
+        cache: "no-store",
+        signal: AbortSignal.timeout(GENERIC_EXTERNAL_TIMEOUT_MS),
+        headers: {
+          ...request.headers,
+          Accept: "application/json",
+        },
+        body: request.body,
+      });
+      lastHttpStatus = response.status;
+      failureStage = "response";
+      const payload = await readBoundedJson(response);
+      lastRequestId =
+        redactProviderDiagnostic(
+          response.headers.get("x-acs-request-id") ||
+            diagnosticValue(payload, "RequestId"),
+          160
+        ) || lastRequestId;
+      if (!response.ok) {
+        failureStage = "provider_http";
+        return failedResult({
+          provider,
+          date,
+          message:
+            response.status === 401 || response.status === 403
+              ? "Alibaba Cloud Billing denied access. Grant the RAM user read-only BSS billing permission."
+              : `Alibaba Cloud Billing returned ${response.status}.`,
+          diagnostic: {
+            traceId,
+            source: "alibaba_cloud_billing",
+            endpoint: endpointLabel(request.url),
+            httpStatus: response.status,
+            errorType: diagnosticValue(payload, "Code"),
+            errorCode:
+              diagnosticValue(payload, "Code") ||
+              `ALIBABA_BILLING_HTTP_${response.status}`,
+            providerRequestId: lastRequestId,
+            detail: diagnosticValue(payload, "Message"),
+            attemptCount: page,
+            failureStage,
+          },
+        });
+      }
+      failureStage = "payload";
+      const parsed = parseAlibabaCloudBillingPage(payload);
+      costUsd += parsed.costUsd;
+      itemCount += parsed.itemCount;
+      expectedTotal = parsed.totalCount;
+      lastRequestId = parsed.requestId || lastRequestId;
+      if (expectedTotal > 50_000) {
+        throw new CloudBillingParseError(
+          "ALIBABA_BILLING_ROW_LIMIT",
+          "Alibaba Cloud Billing reported more than 50,000 rows; configure ALIBABA_CLOUD_BILLING_PRODUCT_CODE to narrow the bill."
+        );
+      }
+      page += 1;
+      if (parsed.itemCount < 300) break;
+    } while (itemCount < expectedTotal);
+
+    const reportedCostMicroUsd = Math.round(costUsd * 1_000_000);
+    if (!Number.isSafeInteger(reportedCostMicroUsd)) {
+      throw new CloudBillingParseError(
+        "ALIBABA_BILLING_INVALID_AMOUNT",
+        "Alibaba Cloud Billing total is outside the supported micro-USD range."
+      );
+    }
+    failureStage = "storage";
+    await recordProviderReportedUsage({
+      provider,
+      date,
+      costMicroUsd: reportedCostMicroUsd,
+      payload: {
+        source: "alibaba_cloud_billing",
+        date: date.toISOString().slice(0, 10),
+        costUsd,
+        itemCount,
+        pageCount: page - 1,
+        productCode:
+          process.env.ALIBABA_CLOUD_BILLING_PRODUCT_CODE?.trim() || null,
+        currency: "USD",
+        providerRequestId: lastRequestId,
+      },
+    });
+    return {
+      provider,
+      displayName,
+      status: "synced",
+      reportedCostMicroUsd,
+      message: "Alibaba Cloud daily instance bills were reconciled.",
+      diagnostic: null,
+    };
+  } catch (error) {
+    return failedResult({
+      provider,
+      date,
+      message: isTimeoutError(error)
+        ? "Alibaba Cloud Billing timed out after 10 seconds."
+        : "Alibaba Cloud Billing response could not be reconciled.",
+      diagnostic: {
+        traceId,
+        source: "alibaba_cloud_billing",
+        endpoint: endpointLabel(endpoint),
+        httpStatus: lastHttpStatus,
+        errorType: error instanceof Error ? error.name : null,
+        errorCode:
+          error instanceof CloudBillingParseError
+            ? error.code
+            : "ALIBABA_BILLING_SYNC_FAILED",
+        providerRequestId: lastRequestId,
+        detail:
+          error instanceof Error
+            ? redactProviderDiagnostic(error.message)
+            : "Alibaba Cloud Billing request failed.",
+        attemptCount: page,
+        failureStage,
+      },
+      cause: error,
+    });
+  }
+};
+
 const syncGenericUsage = async (
   provider: AiProvider,
   date: Date
@@ -910,8 +1359,12 @@ export async function syncProviderUsageForDate(
         ? await syncOpenAiCosts(date)
         : provider === "anthropic"
           ? await syncAnthropicCosts(date)
-          : provider === "xai"
+        : provider === "xai"
             ? await syncXaiUsage(date)
+            : provider === "google"
+              ? await syncGoogleCloudBilling(date)
+              : provider === "qwen"
+                ? await syncAlibabaCloudBilling(date)
             : provider === "mistral" && !hasGenericMistralUsageEndpoint
               ? await mistralInternalUsage(date)
               : await syncGenericUsage(provider, date)
