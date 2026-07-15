@@ -20,7 +20,11 @@ type SyncResult = {
   message: string;
   diagnostic: {
     traceId: string;
-    source: "openai_costs" | "anthropic_costs" | "generic_usage";
+    source:
+      | "openai_costs"
+      | "anthropic_costs"
+      | "xai_usage"
+      | "generic_usage";
     endpoint: string;
     httpStatus: number | null;
     errorType: string | null;
@@ -90,7 +94,15 @@ const diagnosticGuidance = (result: SyncResult) => {
   if (diagnostic.httpStatus === 401 || diagnostic.httpStatus === 403) {
     return diagnostic.source === "anthropic_costs"
       ? "Replace ANTHROPIC_ADMIN_API_KEY with an Admin API key for the Claude Console organization, then redeploy. A standard ANTHROPIC_API_KEY cannot access cost reports."
-      : "Replace OPENAI_ADMIN_API_KEY with an Organization Admin API key created by an Organization Owner, then redeploy.";
+      : diagnostic.source === "xai_usage"
+        ? "Verify that XAI_MANAGEMENT_API_KEY is a Management Key with the required team permission and that XAI_TEAM_ID belongs to the same xAI team. A standard XAI_API_KEY cannot access Management Usage."
+        : "Replace OPENAI_ADMIN_API_KEY with an Organization Admin API key created by an Organization Owner, then redeploy.";
+  }
+  if (diagnostic.source === "xai_usage" && diagnostic.httpStatus === 404) {
+    return "Copy the Team ID from the active xAI Console team settings into XAI_TEAM_ID, then redeploy.";
+  }
+  if (diagnostic.errorCode === "XAI_USAGE_LIMIT_REACHED") {
+    return "xAI returned only a subset of the requested usage series, so Tomverse did not store the partial total. Retry the single-day sync; if it repeats, review the xAI Usage Explorer and retain the Tomverse trace.";
   }
   if (diagnostic.httpStatus === 429) {
     return diagnostic.source === "openai_costs"

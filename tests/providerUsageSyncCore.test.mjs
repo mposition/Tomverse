@@ -10,8 +10,73 @@ import {
   openAiCostsUrl,
   parseAnthropicCostsPage,
   parseOpenAiCostsPage,
+  parseXaiUsage,
   redactProviderDiagnostic,
+  xaiUsageDayRequest,
+  xaiUsageUrl,
 } from "../lib/providerUsageSyncCore.ts";
+
+test("xAI Usage request covers one exact UTC day and requests summed USD", () => {
+  const date = new Date("2026-07-12T18:42:00.000Z");
+  assert.deepEqual(xaiUsageDayRequest(date), {
+    analyticsRequest: {
+      timeRange: {
+        startTime: "2026-07-12 00:00:00",
+        endTime: "2026-07-12 23:59:59",
+        timezone: "Etc/GMT",
+      },
+      timeUnit: "TIME_UNIT_DAY",
+      values: [{ name: "usd", aggregation: "AGGREGATION_SUM" }],
+      groupBy: ["description"],
+      filters: [],
+    },
+  });
+  assert.equal(
+    xaiUsageUrl({
+      baseUrl: "https://management-api.x.ai/v1/billing/teams/",
+      teamId: "65c1e471-205f-4566-9c5a-07198bcdf4ce",
+    }),
+    "https://management-api.x.ai/v1/billing/teams/65c1e471-205f-4566-9c5a-07198bcdf4ce/usage"
+  );
+});
+
+test("xAI Usage parser sums USD values across every time series", () => {
+  const parsed = parseXaiUsage({
+    timeSeries: [
+      {
+        group: ["Chat grok-4"],
+        dataPoints: [
+          { timestamp: "2026-07-12T00:00:00Z", values: [0.75] },
+        ],
+      },
+      {
+        group: ["Chat grok-4-fast"],
+        dataPoints: [
+          { timestamp: "2026-07-12T00:00:00Z", values: ["0.0095"] },
+        ],
+      },
+    ],
+    limitReached: false,
+  });
+  assert.equal(parsed.costUsd, 0.7595);
+  assert.equal(parsed.seriesCount, 2);
+  assert.equal(parsed.dataPointCount, 2);
+});
+
+test("xAI Usage parser rejects partial and invalid cost payloads", () => {
+  assert.throws(
+    () => parseXaiUsage({ timeSeries: [], limitReached: true }),
+    /partial result/
+  );
+  assert.throws(
+    () =>
+      parseXaiUsage({
+        timeSeries: [{ dataPoints: [{ values: [-1] }] }],
+        limitReached: false,
+      }),
+    /invalid USD amount/
+  );
+});
 
 test("Anthropic Cost URL uses one exact UTC day and a page cursor", () => {
   const date = new Date("2026-07-12T18:42:00.000Z");
@@ -183,12 +248,12 @@ test("OpenAI Costs parser rejects invalid currency and non-numeric amount", () =
   );
 });
 
-test("provider diagnostics redact bearer, OpenAI, and Anthropic keys", () => {
+test("provider diagnostics redact bearer, OpenAI, Anthropic, and xAI keys", () => {
   const diagnostic = redactProviderDiagnostic(
-    "Authorization Bearer sk-admin-secret123456 and sk-project987654 with sk-ant-admin01-secret987654"
+    "Authorization Bearer sk-admin-secret123456 and sk-project987654 with sk-ant-admin01-secret987654 plus xai-managementSecret987654"
   );
   assert.equal(
     diagnostic,
-    "Authorization Bearer [REDACTED] and sk-[REDACTED] with sk-ant-[REDACTED]"
+    "Authorization Bearer [REDACTED] and sk-[REDACTED] with sk-ant-[REDACTED] plus xai-[REDACTED]"
   );
 });

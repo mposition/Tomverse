@@ -181,6 +181,23 @@ sums every USD fractional-cent line item across all returned buckets, and stores
 the total as provider-reported micro-USD. It does not reuse `ANTHROPIC_API_KEY`,
 and the generic `PROVIDER_ANTHROPIC_USAGE_*` variables are ignored.
 
+xAI team usage requires a Management Key that is separate from the inference
+`XAI_API_KEY`. Add both server-only values to the web and provider-usage Cron
+services:
+
+```text
+XAI_MANAGEMENT_API_KEY=<xAI Management Key>
+XAI_TEAM_ID=<xAI Team UUID>
+```
+
+The dedicated xAI adapter sends a bounded POST request to
+`https://management-api.x.ai/v1/billing/teams/{team_id}/usage` for one exact UTC
+day. It requests the summed `usd` value, totals every returned
+`timeSeries[].dataPoints[].values[0]`, and stores the result as provider-reported
+micro-USD. A response with `limitReached=true` is rejected rather than storing a
+partial cost. `XAI_ADMIN_API_KEY`, `PROVIDER_XAI_USAGE_URL`, and
+`PROVIDER_XAI_USAGE_COST_JSON_PATH` are not used by this adapter.
+
 Other providers continue to use the generic configuration when their billing
 API supports a single numeric cost path:
 
