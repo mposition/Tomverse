@@ -227,6 +227,38 @@ Connectors, and fine-tuning require separate accounting before they are enabled.
 Deploy migration `20260715233000_mistral_response_usage_accounting` before
 releasing cached-token accounting in production.
 
+Zhipu/Z.AI Chat Completion usage is also accounted from the final response
+Usage event. Prompt, completion, total, and
+`prompt_tokens_details.cached_tokens` values flow through the durable chat
+reservation settlement and are stored in `ProviderDailyUsage`. The Admin Usage
+Reconciliation panel therefore labels Zhipu **Internal response accounting**
+instead of **Skipped** when no custom daily-cost endpoint is configured.
+
+Set the GLM model prices to the values that apply to the production account.
+The cached-input multiplier is snapshotted with every request so later pricing
+changes do not rewrite historical estimates:
+
+```text
+CHAT_MODEL_GLM_5_2_INPUT_USD_PER_MILLION=<current uncached input price>
+CHAT_MODEL_GLM_5_2_OUTPUT_USD_PER_MILLION=<current output price>
+CHAT_MODEL_GLM_5_2_CACHED_INPUT_PRICE_MULTIPLIER=0.2
+```
+
+The code uses `0.2` as the Zhipu cached-input fallback, but the production value
+must be verified against the current model price or account contract before
+launch.
+
+Zhipu does not have a supported general-account balance API in the current
+integration. After a recharge, enter the verified USD balance with **Set
+credit** on the Zhipu provider card. Tomverse stores the checkpoint in
+`ProviderCreditConfig`, subtracts internal response costs recorded after that
+checkpoint, and shows the estimated remaining balance. When the estimate falls
+to 50%, 20%, or 5% of the checkpoint, Tomverse sends an internal provider alert
+through the configured Admin notification channels. Each level is deduplicated
+to at most one alert per UTC day. Update the checkpoint only after a recharge or
+manual provider-dashboard verification; a new checkpoint resets the usage
+baseline without rewriting historical usage.
+
 Perplexity costs are captured from each successful Chat Completion response.
 Tomverse preserves the provider's exact `usage.cost.total_cost`, including the
 request, search-query, citation, reasoning, input, and output components, in the
