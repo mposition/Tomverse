@@ -42,6 +42,21 @@ import {
   getPurchaseAnalyticsSnapshot,
   purchaseAnalyticsMetadata,
 } from "@/lib/purchaseAnalytics";
+import {
+  BillingMarketValidationError,
+  validateBillingMarketRequest,
+} from "@/lib/billingCurrency";
+import {
+  getBillingPriceCatalog,
+  getPlanPriceMinor,
+  getUsdRevenueSnapshot,
+} from "@/lib/billingPriceCatalog";
+import {
+  billingMinorToMajor,
+  BILLING_CURRENCIES,
+  type BillingCurrency,
+} from "@/lib/billingMarkets";
+import { checkoutBillingMetadata } from "@/lib/billingTransactions";
 
 const checkoutSchema = z
   .object({
@@ -51,6 +66,8 @@ const checkoutSchema = z
     promoCode: z.string().trim().toUpperCase().max(32).optional(),
     analytics: analyticsAttributionSchema.optional(),
     trigger: purchaseAnalyticsTriggerSchema.default("proactive"),
+    currency: z.enum(BILLING_CURRENCIES).optional(),
+    country: z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/).optional(),
   })
   .strict();
 
@@ -226,20 +243,19 @@ async function createCheckoutSession(params: Stripe.Checkout.SessionCreateParams
 
 function buildCheckoutLineItem(
   plan: CheckoutPlan,
-  billingInterval: "monthly" | "annual"
+  billingInterval: "monthly" | "annual",
+  currency: BillingCurrency,
+  amountMinor: number
 ): Stripe.Checkout.SessionCreateParams.LineItem {
   if (billingInterval === "monthly") {
-    if (plan.stripePriceId) {
-      return { price: plan.stripePriceId, quantity: 1 };
-    }
-    if (plan.monthlyPriceCents <= 0) {
+    if (amountMinor <= 0) {
       throw new Error("Monthly price is not configured.");
     }
     return {
       quantity: 1,
       price_data: {
-        currency: "usd",
-        unit_amount: plan.monthlyPriceCents,
+        currency: currency.toLowerCase(),
+        unit_amount: amountMinor,
         product: plan.stripeProductId || undefined,
         product_data: plan.stripeProductId
           ? undefined
@@ -257,19 +273,15 @@ function buildCheckoutLineItem(
     };
   }
 
-  if (plan.stripeAnnualPriceId) {
-    return { price: plan.stripeAnnualPriceId, quantity: 1 };
-  }
-
-  if (plan.annualPriceCents <= 0) {
+  if (amountMinor <= 0) {
     throw new Error("Annual price is not configured.");
   }
 
   return {
     quantity: 1,
     price_data: {
-      currency: "usd",
-      unit_amount: plan.annualPriceCents,
+      currency: currency.toLowerCase(),
+      unit_amount: amountMinor,
       product: plan.stripeProductId || undefined,
       product_data: plan.stripeProductId
         ? undefined
@@ -309,6 +321,8 @@ export async function POST(req: Request) {
       promoCode,
       analytics,
       trigger,
+      currency,
+      country,
     } = await readLimitedJson(req, 4 * 1024, checkoutSchema);
     const plans = await getBillingPlans();
     const plan = plans.find((item) => item.id === planId && item.isActive);
@@ -318,6 +332,15 @@ export async function POST(req: Request) {
         { status: 503 }
       );
     }
+    const market = validateBillingMarketRequest({ req, currency, country });
+    const priceCatalog = await getBillingPriceCatalog();
+    const basePriceMinor = getPlanPriceMinor(
+      plan,
+      market.currency,
+      billingInterval,
+      priceCatalog
+    );
+    const baseUsdCents = priceCentsForInterval(plan, billingInterval);
 
     const user = await prisma.user.findUnique({
       where: { id: session.user.id },
@@ -377,10 +400,25 @@ export async function POST(req: Request) {
       promotionRiskFlags = promotionValidation.riskFlags;
     }
 
-    const finalPriceCents = calculateDiscountedCents(
-      priceCentsForInterval(plan, billingInterval),
+    if (
+      market.currency !== "USD" &&
+      appliedPromotion?.discountAmountCents &&
+      appliedPromotion.discountPercent <= 0
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Fixed-amount promotion codes are currently available only for USD checkout. Use a percentage promotion for localized billing.",
+        },
+        { status: 400 }
+      );
+    }
+
+    const finalPriceMinor = calculateDiscountedCents(
+      basePriceMinor,
       appliedPromotion
     );
+    const finalUsdCents = calculateDiscountedCents(baseUsdCents, appliedPromotion);
     const edgeCountry = analyticsCountryFromHeaders(req.headers);
     const trustedAnalytics = analytics
       ? {
@@ -421,7 +459,10 @@ export async function POST(req: Request) {
           analyticsUtmCampaign: trustedAnalytics.utm_campaign,
           analyticsLanguage: trustedAnalytics.language,
           analyticsCountry: trustedAnalytics.country,
-          analyticsValue: String(finalPriceCents / 100),
+          analyticsValue: String(
+            billingMinorToMajor(finalPriceMinor, market.currency)
+          ),
+          analyticsCurrency: market.currency,
           ...purchaseAnalyticsMetadata({
             context: purchaseContext,
             trigger,
@@ -431,7 +472,7 @@ export async function POST(req: Request) {
         }
       : {};
     const origin = getPublicAppOrigin(req);
-    if (finalPriceCents <= 0) {
+    if (finalPriceMinor <= 0) {
       const periodEnd = await activateZeroDollarPlan({
         userId: user.id,
         planId: planId as BillingPlanId,
@@ -469,7 +510,7 @@ export async function POST(req: Request) {
             plan_credits_remaining: purchaseContext.planCreditsRemaining,
             addon_credits_remaining: purchaseContext.addonCreditsRemaining,
             value: 0,
-            currency: "USD",
+            currency: market.currency,
             transaction_id: transactionId,
           },
           dedupeKey: `zero-checkout:${transactionId}`,
@@ -495,6 +536,21 @@ export async function POST(req: Request) {
         periodEnd: periodEnd.toISOString(),
       });
     }
+
+    const usdRevenueSnapshot = await getUsdRevenueSnapshot({
+      amountMinor: finalPriceMinor,
+      currency: market.currency,
+      fallbackUsdMinor: finalUsdCents,
+    });
+    const billingMetadata = checkoutBillingMetadata({
+      currency: market.currency,
+      country: market.country,
+      expectedAmountMinor: finalPriceMinor,
+      amountUsdMicroUsd: usdRevenueSnapshot.amountUsdMicroUsd,
+      usdConversionRate: usdRevenueSnapshot.usdConversionRate,
+      usdConversionSource: usdRevenueSnapshot.source,
+      pricingVersion: priceCatalog.version,
+    });
 
     const stripe = getStripe();
     let stripeCustomerId = user.stripeCustomerId;
@@ -530,7 +586,14 @@ export async function POST(req: Request) {
       const checkoutSession = await createCheckoutSession({
         mode: "subscription",
         customer: stripeCustomerId,
-        line_items: [buildCheckoutLineItem(plan, billingInterval)],
+        line_items: [
+          buildCheckoutLineItem(
+            plan,
+            billingInterval,
+            market.currency,
+            basePriceMinor
+          ),
+        ],
         success_url: billingSuccessUrl(
           origin,
           planId as BillingPlanId,
@@ -550,6 +613,7 @@ export async function POST(req: Request) {
             planId,
             tier: tierForPlanId(planId),
             billingInterval,
+            ...billingMetadata,
             ...promotionMetadata,
             ...analyticsMetadata,
           },
@@ -558,6 +622,7 @@ export async function POST(req: Request) {
           userId: user.id,
           planId,
           billingInterval,
+          ...billingMetadata,
           ...promotionMetadata,
           ...analyticsMetadata,
         },
@@ -573,6 +638,12 @@ export async function POST(req: Request) {
       throw error;
     }
   } catch (error) {
+    if (error instanceof BillingMarketValidationError) {
+      return NextResponse.json(
+        { code: error.code, error: error.message },
+        { status: 400 }
+      );
+    }
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
     if (

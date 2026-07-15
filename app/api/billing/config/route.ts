@@ -21,17 +21,18 @@ const isDatabaseDisabledForE2e = () =>
 export async function GET(req: Request) {
   try {
     if (isDatabaseDisabledForE2e()) {
-      return NextResponse.json(
-        {
-          plans: getDefaultBillingPlans().filter((plan) => plan.isActive),
-          creditPacks: getPublicCreditPackCatalog(),
-          featuredPromotion: null,
-          promotionPolicy: {
-            codesListed: false,
-            validation: "server_only",
-            annualDiscountStacking: "promotion_specific_default_denied",
-          },
+      const fallbackConfig = {
+        plans: getDefaultBillingPlans().filter((plan) => plan.isActive),
+        creditPacks: getPublicCreditPackCatalog(),
+        featuredPromotion: null,
+        promotionPolicy: {
+          codesListed: false as const,
+          validation: "server_only" as const,
+          annualDiscountStacking: "promotion_specific_default_denied" as const,
         },
+      };
+      return NextResponse.json(
+        await withDisplayCurrency(fallbackConfig, req),
         { headers: { "Cache-Control": "no-store, max-age=0" } }
       );
     }

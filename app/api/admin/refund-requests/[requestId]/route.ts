@@ -46,6 +46,7 @@ async function createStripeRefundForSubscription(subscriptionId: string | null) 
       stripeRefundStatus: null,
       stripeChargeId: null,
       refundAmountCents: null,
+      refundCurrency: null,
     };
   }
 
@@ -71,6 +72,7 @@ async function createStripeRefundForSubscription(subscriptionId: string | null) 
       stripeRefundStatus: "no_payment_intent",
       stripeChargeId: null,
       refundAmountCents: null,
+      refundCurrency: null,
     };
   }
 
@@ -85,6 +87,7 @@ async function createStripeRefundForSubscription(subscriptionId: string | null) 
       stripeRefundStatus: charge ? "already_refunded" : "no_charge",
       stripeChargeId: charge?.id || null,
       refundAmountCents: 0,
+      refundCurrency: charge?.currency?.toUpperCase() || null,
     };
   }
 
@@ -104,6 +107,7 @@ async function createStripeRefundForSubscription(subscriptionId: string | null) 
     stripeRefundStatus: refund.status || "pending",
     stripeChargeId: charge.id,
     refundAmountCents: amount,
+    refundCurrency: charge.currency.toUpperCase(),
   };
 }
 
@@ -214,6 +218,7 @@ export async function PATCH(req: Request, context: RouteContext) {
             stripeRefundStatus: stripeRefund.stripeRefundStatus,
             stripeChargeId: stripeRefund.stripeChargeId,
             refundAmountCents: stripeRefund.refundAmountCents,
+            refundCurrency: stripeRefund.refundCurrency,
           },
           include: {
             timelineEvents: {
@@ -221,6 +226,14 @@ export async function PATCH(req: Request, context: RouteContext) {
             },
           },
         });
+        if (stripeRefund.stripeRefundId && refundRequest.stripeSubscriptionId) {
+          await tx.billingTransaction.updateMany({
+            where: {
+              stripeSubscriptionId: refundRequest.stripeSubscriptionId,
+            },
+            data: { status: "refunded" },
+          });
+        }
 
         const event = await tx.refundRequestTimelineEvent.create({
           data: {

@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   CreditCard,
   Database,
+  Globe2,
   Loader2,
   Plus,
   RefreshCw,
@@ -18,11 +19,21 @@ import type {
   BillingPlanConfig,
   BillingPromotionConfig,
 } from "@/lib/billingConfig";
+import type { BillingPriceCatalog } from "@/lib/billingPriceCatalog";
+import {
+  BILLING_CURRENCIES,
+  billingCurrencyFractionDigits,
+  billingMajorToMinor,
+  billingMinorToMajor,
+  type BillingCurrency,
+} from "@/lib/billingMarkets";
 import { dispatchAppToast } from "@/lib/appToast";
 
 type BillingConfigPayload = {
   plans: BillingPlanConfig[];
   promotions: BillingPromotionConfig[];
+  priceCatalog: BillingPriceCatalog;
+  priceCatalogUpdatedAt: string | null;
 };
 
 type Props = BillingConfigPayload & {
@@ -50,6 +61,18 @@ const money = (cents: number) => `$${dollars(cents)}`;
 const toCents = (value: string) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed * 100) : 0;
+};
+
+const priceInputValue = (amountMinor: number, currency: BillingCurrency) =>
+  billingMinorToMajor(amountMinor, currency).toFixed(
+    billingCurrencyFractionDigits(currency)
+  );
+
+const priceMinorFromInput = (value: string, currency: BillingCurrency) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0
+    ? billingMajorToMinor(parsed, currency)
+    : 0;
 };
 
 const toDateInputValue = (value: string | null) => {
@@ -499,9 +522,156 @@ function PromotionEditor({
   );
 }
 
+const LOCALIZED_PLAN_CURRENCIES = ["AUD", "CNY", "EUR", "KRW"] as const;
+const CREDIT_PACK_LABELS = {
+  starter_500: "Starter · 500 credits",
+  project_1500: "Project · 1,500 credits",
+  power_4000: "Power · 4,000 credits",
+} as const;
+
+function LocalizedPriceEditor({
+  catalog,
+  onChange,
+}: {
+  catalog: BillingPriceCatalog;
+  onChange: (catalog: BillingPriceCatalog) => void;
+}) {
+  const updatePlanPrice = (
+    planId: "pro" | "max",
+    currency: (typeof LOCALIZED_PLAN_CURRENCIES)[number],
+    interval: "monthly" | "annual",
+    value: string
+  ) => {
+    onChange({
+      ...catalog,
+      plans: {
+        ...catalog.plans,
+        [planId]: {
+          ...catalog.plans[planId],
+          [currency]: {
+            ...catalog.plans[planId][currency],
+            [interval]: priceMinorFromInput(value, currency),
+          },
+        },
+      },
+    });
+  };
+
+  const updatePackPrice = (
+    packId: keyof BillingPriceCatalog["creditPacks"],
+    currency: BillingCurrency,
+    value: string
+  ) => {
+    onChange({
+      ...catalog,
+      creditPacks: {
+        ...catalog.creditPacks,
+        [packId]: {
+          ...catalog.creditPacks[packId],
+          [currency]: priceMinorFromInput(value, currency),
+        },
+      },
+    });
+  };
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h3 className="text-lg font-black text-white">Fixed subscription prices</h3>
+        <p className="mt-1 max-w-3xl text-sm leading-6 text-zinc-400">
+          These are the exact amounts charged by Stripe for each billing market.
+          USD remains managed in the Plans tab. KRW is zero-decimal; all other
+          currencies accept two decimal places. Changes apply to new checkouts;
+          existing subscriptions retain the price accepted at purchase.
+        </p>
+      </div>
+      <div className="overflow-x-auto rounded-2xl border border-zinc-800">
+        <table className="min-w-[860px] w-full text-left text-sm">
+          <thead className="bg-zinc-900 text-xs uppercase tracking-[0.12em] text-zinc-500">
+            <tr>
+              <th className="px-4 py-3">Currency</th>
+              <th className="px-4 py-3">Pro monthly</th>
+              <th className="px-4 py-3">Pro annual</th>
+              <th className="px-4 py-3">Max monthly</th>
+              <th className="px-4 py-3">Max annual</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-zinc-800">
+            {LOCALIZED_PLAN_CURRENCIES.map((currency) => (
+              <tr key={currency} className="bg-zinc-950/60">
+                <td className="px-4 py-3 font-black text-white">{currency}</td>
+                {(["pro", "max"] as const).flatMap((planId) =>
+                  (["monthly", "annual"] as const).map((interval) => (
+                    <td key={`${planId}-${interval}`} className="px-3 py-3">
+                      <TextInput
+                        type="number"
+                        min="0"
+                        step={currency === "KRW" ? "1" : "0.01"}
+                        value={priceInputValue(
+                          catalog.plans[planId][currency][interval],
+                          currency
+                        )}
+                        onChange={(event) =>
+                          updatePlanPrice(
+                            planId,
+                            currency,
+                            interval,
+                            event.target.value
+                          )
+                        }
+                        aria-label={`${planId} ${interval} ${currency}`}
+                      />
+                    </td>
+                  ))
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div>
+        <h3 className="text-lg font-black text-white">Fixed credit-pack prices</h3>
+        <p className="mt-1 text-sm text-zinc-400">
+          Credit entitlements stay unchanged; only the one-time checkout amount is edited here.
+        </p>
+      </div>
+      <div className="grid gap-4 xl:grid-cols-3">
+        {(Object.keys(CREDIT_PACK_LABELS) as Array<keyof typeof CREDIT_PACK_LABELS>).map(
+          (packId) => (
+            <article key={packId} className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4">
+              <h4 className="font-black text-white">{CREDIT_PACK_LABELS[packId]}</h4>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                {BILLING_CURRENCIES.map((currency) => (
+                  <Field key={currency} label={`${currency} checkout amount`}>
+                    <TextInput
+                      type="number"
+                      min="0.01"
+                      step={currency === "KRW" ? "1" : "0.01"}
+                      value={priceInputValue(
+                        catalog.creditPacks[packId][currency],
+                        currency
+                      )}
+                      onChange={(event) =>
+                        updatePackPrice(packId, currency, event.target.value)
+                      }
+                    />
+                  </Field>
+                ))}
+              </div>
+            </article>
+          )
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function BillingAdminPanel({
   plans,
   promotions,
+  priceCatalog,
+  priceCatalogUpdatedAt,
   paidUserCount,
   activeSubscriptionCount,
 }: Props) {
@@ -511,11 +681,18 @@ export function BillingAdminPanel({
   const [baselinePlans, setBaselinePlans] = useState<EditablePlan[]>(plans);
   const [baselinePromotions, setBaselinePromotions] =
     useState<EditablePromotion[]>(promotions);
+  const [draftPriceCatalog, setDraftPriceCatalog] =
+    useState<BillingPriceCatalog>(priceCatalog);
+  const [baselinePriceCatalog, setBaselinePriceCatalog] =
+    useState<BillingPriceCatalog>(priceCatalog);
+  const [draftPriceCatalogUpdatedAt, setDraftPriceCatalogUpdatedAt] =
+    useState<string | null>(priceCatalogUpdatedAt);
   const [isSaving, setIsSaving] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isValidatingStripe, setIsValidatingStripe] = useState(false);
   const [showSaveReview, setShowSaveReview] = useState(false);
-  const [activeTab, setActiveTab] = useState<"plans" | "promotions">("plans");
+  const [activeTab, setActiveTab] =
+    useState<"plans" | "prices" | "promotions">("plans");
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [stripeValidation, setStripeValidation] = useState<
     Array<{
@@ -548,6 +725,13 @@ export function BillingAdminPanel({
         (promotion) => !draftPromotions.some((item) => item.id === promotion.id)
       ).length,
     [baselinePromotions, draftPromotions, promotions]
+  );
+  const dirtyPriceCount = useMemo(
+    () =>
+      JSON.stringify(draftPriceCatalog) === JSON.stringify(baselinePriceCatalog)
+        ? 0
+        : 1,
+    [baselinePriceCatalog, draftPriceCatalog]
   );
   const stripeWarnings = useMemo(() => {
     const warnings: string[] = [];
@@ -623,6 +807,9 @@ export function BillingAdminPanel({
     setDraftPromotions(data.promotions);
     setBaselinePlans(data.plans);
     setBaselinePromotions(data.promotions);
+    setDraftPriceCatalog(data.priceCatalog);
+    setBaselinePriceCatalog(data.priceCatalog);
+    setDraftPriceCatalogUpdatedAt(data.priceCatalogUpdatedAt);
     setLastSyncedAt(new Date().toLocaleTimeString());
   };
 
@@ -632,7 +819,7 @@ export function BillingAdminPanel({
     try {
       const response = await fetch("/api/admin/billing", { cache: "no-store" });
       const data = (await response.json().catch(() => null)) as AdminBillingResponse | null;
-      if (!response.ok || !data?.plans || !data?.promotions) {
+      if (!response.ok || !data?.plans || !data?.promotions || !data?.priceCatalog) {
         throw new Error(data?.error || "Billing refresh failed");
       }
       applyResponse(data);
@@ -655,10 +842,12 @@ export function BillingAdminPanel({
         body: JSON.stringify({
           plans: draftPlans,
           promotions: draftPromotions,
+          priceCatalog: draftPriceCatalog,
+          priceCatalogUpdatedAt: draftPriceCatalogUpdatedAt,
         }),
       });
       const data = (await response.json().catch(() => null)) as AdminBillingResponse | null;
-      if (!response.ok || !data?.plans || !data?.promotions) {
+      if (!response.ok || !data?.plans || !data?.promotions || !data?.priceCatalog) {
         throw new Error(data?.error || "Billing save failed");
       }
       applyResponse(data);
@@ -671,7 +860,7 @@ export function BillingAdminPanel({
   };
 
   const requestSave = () => {
-    if (dirtyPlanCount + dirtyPromotionCount > 0 && !showSaveReview) {
+    if (dirtyPlanCount + dirtyPromotionCount + dirtyPriceCount > 0 && !showSaveReview) {
       setShowSaveReview(true);
       return;
     }
@@ -731,7 +920,7 @@ export function BillingAdminPanel({
               Billing control center
             </div>
             <h2 className="mt-3 text-2xl font-black text-white">
-              Plans, Stripe IDs, and promotion codes
+              Plans, fixed market prices, Stripe IDs, and promotion codes
             </h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
               These values are loaded from the production database and saved back through
@@ -797,6 +986,7 @@ export function BillingAdminPanel({
             </p>
             <p className="mt-2 text-sm font-bold text-blue-100">
               {dirtyPlanCount} plan change{dirtyPlanCount === 1 ? "" : "s"} ·{" "}
+              {dirtyPriceCount} market price change{dirtyPriceCount === 1 ? "" : "s"} ·{" "}
               {dirtyPromotionCount} promotion change{dirtyPromotionCount === 1 ? "" : "s"}
             </p>
             <p className="mt-1 text-xs leading-5 text-blue-100/70">
@@ -868,6 +1058,7 @@ export function BillingAdminPanel({
         <div className="inline-flex rounded-2xl border border-zinc-800 bg-zinc-900 p-1">
           {[
             ["plans", "Plans", WalletCards],
+            ["prices", "Market prices", Globe2],
             ["promotions", "Promotions", TicketPercent],
           ].map(([value, label, Icon]) => {
             const active = activeTab === value;
@@ -876,7 +1067,9 @@ export function BillingAdminPanel({
               <button
                 key={value as string}
                 type="button"
-                onClick={() => setActiveTab(value as "plans" | "promotions")}
+                onClick={() =>
+                  setActiveTab(value as "plans" | "prices" | "promotions")
+                }
                 className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold transition ${
                   active
                     ? "bg-blue-600 text-white shadow-lg shadow-blue-950/30"
@@ -892,7 +1085,7 @@ export function BillingAdminPanel({
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-300">
             <CheckCircle2 className="h-3.5 w-3.5" />
-            Connected to BillingPlan / BillingPromotion
+            Connected to BillingPlan / AppSetting / BillingPromotion
           </div>
           <button
             type="button"
@@ -964,6 +1157,11 @@ export function BillingAdminPanel({
               />
             ))}
           </div>
+        ) : activeTab === "prices" ? (
+          <LocalizedPriceEditor
+            catalog={draftPriceCatalog}
+            onChange={setDraftPriceCatalog}
+          />
         ) : (
           <div>
             <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1023,7 +1221,7 @@ export function BillingAdminPanel({
         <div>
           <p className="text-sm font-bold text-white">Ready to publish billing changes?</p>
           <p className="mt-1 text-xs text-zinc-400">
-            Plan prices, Stripe IDs, and promotion rules are applied after saving to DB.
+            Plan prices, localized market prices, Stripe IDs, and promotion rules are applied after saving to DB.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">

@@ -85,6 +85,26 @@ Stripe payment fingerprints are stored only as keyed hashes; the maintenance
 job removes those identifiers after 90 days while retaining the redemption
 audit record.
 
+## Fixed-currency customer billing
+
+New subscription and credit-pack checkouts use fixed prices in USD, AUD, CNY,
+EUR, or KRW. Localized prices are stored in the `billing.fixed-prices.v1`
+`AppSetting` and are edited in Admin Billing under **Market prices**; live FX is
+not used for the customer-facing amount. USD subscription prices remain in
+`BillingPlan`. Price changes affect new checkouts only and do not rewrite an
+existing Stripe subscription price.
+
+Stripe amounts and GA4 ecommerce values use each currency's own minor-unit
+rules. In particular, KRW is zero-decimal (`20000` means ₩20,000), while
+`1500` means USD 15.00. Checkout completion writes the actual Stripe currency
+and `amount_total` to `BillingTransaction`, together with a payment-time USD
+revenue snapshot. Credit purchases retain the same snapshot on
+`CreditPurchase`. Refund APIs refund the original Stripe charge in its original
+currency and stop for manual review if the stored purchase currency differs.
+
+Deploy migration `20260715230000_fixed_currency_billing` before enabling these
+checkouts in production.
+
 ## Provider Billing Profiles
 
 The Admin Console provider panel separates how a service is priced from how the

@@ -32,6 +32,7 @@ const resetFinanceTestData = () =>
       "CreditLedgerEntry",
       "CreditLot",
       "CreditPurchase",
+      "BillingTransaction",
       "User"
     RESTART IDENTITY CASCADE
   `);
@@ -186,6 +187,15 @@ const createPartiallyConsumedDispute = async () => {
   const user = await createUser("Pro");
   const checkout = creditPackCheckout(user.id);
   assert.equal(await grantCreditPackFromCheckout(checkout.session), true);
+  const billingTransaction = await prisma.billingTransaction.findUniqueOrThrow({
+    where: { stripeCheckoutSessionId: checkout.session.id },
+  });
+  assert.equal(billingTransaction.currency, "USD");
+  assert.equal(billingTransaction.amountPaidMinor, checkout.pack.priceCents);
+  assert.equal(
+    billingTransaction.amountPaidUsdMicroUsd,
+    BigInt(checkout.pack.priceCents) * BigInt(10_000)
+  );
   await consumePurchasedCredits({
     userId: user.id,
     credits: 1_200,

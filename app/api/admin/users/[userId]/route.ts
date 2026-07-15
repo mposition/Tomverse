@@ -121,6 +121,8 @@ export async function GET(req: Request, context: RouteContext) {
               creditsPurchased: true,
               fundedCostMicroUsd: true,
               amountPaidCents: true,
+              amountPaidUsdMicroUsd: true,
+              currency: true,
               refundedAmountCents: true,
               revokedCredits: true,
               revokedCostMicroUsd: true,
@@ -265,6 +267,7 @@ export async function GET(req: Request, context: RouteContext) {
         creditPurchases: user.creditPurchases.map((purchase) => ({
           ...purchase,
           fundedCostMicroUsd: Number(purchase.fundedCostMicroUsd),
+          amountPaidUsdMicroUsd: Number(purchase.amountPaidUsdMicroUsd),
           revokedCostMicroUsd: Number(purchase.revokedCostMicroUsd),
           unrecoveredCostMicroUsd: Number(purchase.unrecoveredCostMicroUsd),
           purchasedAt: purchase.purchasedAt.toISOString(),

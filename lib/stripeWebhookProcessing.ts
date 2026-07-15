@@ -24,6 +24,16 @@ import {
   handleCreditPackDisputeReinstated,
   handleCreditPackRefund,
 } from "@/lib/creditPurchase";
+import {
+  billingSnapshotFromCheckoutSession,
+  recordBillingTransactionFromCheckout,
+  type CheckoutBillingSnapshot,
+} from "@/lib/billingTransactions";
+import {
+  billingMinorToMajor,
+  normalizeBillingCurrency,
+} from "@/lib/billingMarkets";
+import { getUsdRevenueSnapshot } from "@/lib/billingPriceCatalog";
 
 const subscriptionActiveStatuses = new Set(["active", "trialing", "past_due"]);
 
@@ -273,6 +283,54 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
     console.error("Promotion redemption record failed:", error);
   });
   const synced = await syncSubscription(subscription);
+  let billingSnapshot: CheckoutBillingSnapshot | null = null;
+  if (synced && session.amount_total !== null) {
+    const legacyCurrency = normalizeBillingCurrency(session.currency);
+    const signedBilling = session.metadata?.billingCurrency
+      ? billingSnapshotFromCheckoutSession(session)
+      : legacyCurrency
+        ? {
+            currency: legacyCurrency,
+            country: "ZZ",
+            expectedAmountMinor: session.amount_total,
+            amountUsdMicroUsd:
+              legacyCurrency === "USD"
+                ? BigInt(session.amount_total) * BigInt(10_000)
+                : BigInt(0),
+            usdConversionRate: legacyCurrency === "USD" ? "1" : null,
+            usdConversionSource: "legacy_checkout",
+            pricingVersion: 1,
+          }
+        : null;
+    if (signedBilling) {
+      const paymentRevenueSnapshot = await getUsdRevenueSnapshot({
+        amountMinor: signedBilling.expectedAmountMinor,
+        currency: signedBilling.currency,
+        fallbackUsdMinor: Number(
+          signedBilling.amountUsdMicroUsd / BigInt(10_000)
+        ),
+      });
+      billingSnapshot = {
+        ...signedBilling,
+        amountUsdMicroUsd: paymentRevenueSnapshot.amountUsdMicroUsd,
+        usdConversionRate: paymentRevenueSnapshot.usdConversionRate,
+        usdConversionSource: paymentRevenueSnapshot.source,
+      };
+    }
+    if (billingSnapshot) {
+      await recordBillingTransactionFromCheckout({
+        db: prisma,
+        session,
+        userId: synced.user.id,
+        productType: "subscription",
+        productId: `subscription_${
+          synced.plan === "Max" ? "max" : synced.plan === "Pro" ? "pro" : "free"
+        }_${synced.billingInterval || "monthly"}`,
+        billingInterval: synced.billingInterval || "monthly",
+        snapshot: billingSnapshot,
+      });
+    }
+  }
   if (synced && synced.plan !== "Free") {
     await sendBillingWelcomeEmail({
       to: synced.user.email,
@@ -286,7 +344,6 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
   }
   const analytics = analyticsAttributionFromMetadata(session.metadata);
   if (synced && analytics) {
-    const value = Number(session.metadata?.analyticsValue);
     const completedPlanId =
       synced.plan === "Max" ? "max" : synced.plan === "Pro" ? "pro" : "free";
     const completedBillingInterval = synced.billingInterval || "monthly";
@@ -313,8 +370,13 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
         trigger: purchaseAnalytics.trigger,
         plan_credits_remaining: purchaseAnalytics.planCreditsRemaining,
         addon_credits_remaining: purchaseAnalytics.addonCreditsRemaining,
-        value: Number.isFinite(value) && value >= 0 ? value : 0,
-        currency: "USD",
+        value: billingSnapshot
+          ? billingMinorToMajor(
+              billingSnapshot.expectedAmountMinor,
+              billingSnapshot.currency
+            )
+          : 0,
+        currency: billingSnapshot?.currency || "USD",
         transaction_id: session.id,
       },
       dedupeKey: `stripe-checkout:${session.id}`,

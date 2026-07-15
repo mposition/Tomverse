@@ -72,6 +72,7 @@ import {
     getBillingPromotions,
     syncBillingDefaultsToDatabase,
 } from "@/lib/billingConfig";
+import { getBillingPriceCatalogWithMeta } from "@/lib/billingPriceCatalog";
 import { parsePromotionRiskFlags } from "@/lib/billingPromotionSecurity";
 import {
     getProviderHealthDashboard,
@@ -356,6 +357,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         dashboard,
         billingPlans,
         billingPromotions,
+        billingPricing,
         promotionRiskSignalGroups,
         totalUsers,
         paidUsers,
@@ -387,6 +389,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         getProviderHealthDashboard({ includeErrorEvents: true }),
         getBillingPlans(),
         getBillingPromotions(),
+        getBillingPriceCatalogWithMeta(),
         prisma.billingPromotionRedemption.groupBy({
             by: ["promotionId", "riskFlags"],
             where: { riskFlags: { not: "[]" } },
@@ -618,6 +621,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         stripeRefundStatus: request.stripeRefundStatus,
         stripeChargeId: request.stripeChargeId,
         refundAmountCents: request.refundAmountCents,
+        refundCurrency: request.refundCurrency,
         requestedAt: request.requestedAt.toISOString(),
         reviewedAt: request.reviewedAt?.toISOString() || null,
         timelineEvents: request.timelineEvents.map((event) => ({
@@ -1209,10 +1213,12 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                         <div className="mt-4" />
                         <BillingAdminPanel
                             plans={billingPlans}
-                        promotions={billingPromotions}
-                        paidUserCount={paidUsers}
-                        activeSubscriptionCount={activeSubscriptions}
-                    />
+                            promotions={billingPromotions}
+                            priceCatalog={billingPricing.catalog}
+                            priceCatalogUpdatedAt={billingPricing.updatedAt}
+                            paidUserCount={paidUsers}
+                            activeSubscriptionCount={activeSubscriptions}
+                        />
                     </section>
                     )}
 

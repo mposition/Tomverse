@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { Clipboard, Download, Loader2, RefreshCw, Save, Search, X } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
+import { formatBillingMinor, normalizeBillingCurrency } from "@/lib/billingMarkets";
 import { AdminNotesBox } from "@/components/admin/AdminNotesBox";
 import { AdminUserDeleteButton } from "@/components/admin/AdminUserDeleteButton";
 
@@ -93,6 +94,8 @@ type AdminUserDetail = {
     creditsPurchased: number;
     fundedCostMicroUsd: number;
     amountPaidCents: number;
+    amountPaidUsdMicroUsd: number;
+    currency: string;
     refundedAmountCents: number;
     revokedCredits: number;
     revokedCostMicroUsd: number;
@@ -789,6 +792,13 @@ export function AdminUsersPanel({
                         <p className="font-black text-white">{purchase.packId} / {purchase.status}</p>
                         <p>{dateTimeLabel(purchase.purchasedAt)} UTC</p>
                       </div>
+                      <p className="mt-2 font-bold text-zinc-200">
+                        Paid: {formatBillingMinor(
+                          purchase.amountPaidCents,
+                          normalizeBillingCurrency(purchase.currency) || "USD",
+                          "en"
+                        )} · USD snapshot ${(purchase.amountPaidUsdMicroUsd / 1_000_000).toFixed(2)}
+                      </p>
                       <div className="mt-2 grid gap-1 sm:grid-cols-2 lg:grid-cols-4">
                         <span>Purchased: {purchase.creditsPurchased.toLocaleString()} / ${(purchase.fundedCostMicroUsd / 1_000_000).toFixed(2)}</span>
                         <span>Remaining: {purchase.remainingCredits.toLocaleString()} / ${(purchase.remainingFundedCostMicroUsd / 1_000_000).toFixed(2)}</span>

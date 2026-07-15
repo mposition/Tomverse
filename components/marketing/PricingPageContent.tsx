@@ -21,15 +21,19 @@ import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
 import { UpgradeInterestButton } from "@/components/marketing/UpgradeInterestButton";
 import { usePublicBilling } from "@/components/marketing/usePublicBilling";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
+import {
+  billingCurrencyFractionDigits,
+  type BillingCurrency,
+} from "@/lib/billingMarkets";
 
 const annualLabelByLanguage: Partial<Record<Language, { annual: string; save: string; checkout: string }>> = {
-  en: { annual: "Annual", save: "Save 20%", checkout: "Checkout is charged in USD." },
-  ko: { annual: "연간", save: "20% 할인", checkout: "실제 결제는 USD로 청구됩니다." },
-  zh: { annual: "年付", save: "节省 20%", checkout: "实际结账将以 USD 收取。" },
-  fr: { annual: "Annuel", save: "-20 %", checkout: "Le paiement est facturé en USD." },
-  de: { annual: "Jährlich", save: "20 % sparen", checkout: "Die Zahlung erfolgt in USD." },
-  es: { annual: "Anual", save: "20 % de descuento", checkout: "El pago se cobra en USD." },
-  pt: { annual: "Anual", save: "20% de desconto", checkout: "O pagamento é cobrado em USD." },
+  en: { annual: "Annual", save: "Save 20%", checkout: "The fixed local price shown is charged at checkout." },
+  ko: { annual: "연간", save: "20% 할인", checkout: "표시된 현지통화 고정 금액으로 결제됩니다." },
+  zh: { annual: "年付", save: "节省 20%", checkout: "结账时将收取所显示的本地固定价格。" },
+  fr: { annual: "Annuel", save: "-20 %", checkout: "Le prix local fixe affiché est facturé au paiement." },
+  de: { annual: "Jährlich", save: "20 % sparen", checkout: "Beim Checkout wird der angezeigte lokale Festpreis berechnet." },
+  es: { annual: "Anual", save: "20 % de descuento", checkout: "Se cobra el precio local fijo mostrado." },
+  pt: { annual: "Anual", save: "20% de desconto", checkout: "O preço local fixo exibido é cobrado no checkout." },
 };
 
 const saleLabelByLanguage: Partial<Record<Language, { badge: string; intro: string; regular: string; duration: string }>> = {
@@ -257,7 +261,7 @@ const creditPackCopy: Record<Language, CreditPackCopy> = {
   en: {
     eyebrow: "One-time add-ons",
     title: "Need more credits without changing plans?",
-    description: "Buy an additional credit pack for a temporary project or a busier month. Pack pricing is shown in USD and checkout is available after sign-in.",
+    description: "Buy an additional credit pack for a temporary project or a busier month. Fixed local pricing is shown and checkout is available after sign-in.",
     availableFor: "Available on",
     oneTime: "One-time purchase",
     validity: "Valid for 12 months",
@@ -285,7 +289,7 @@ const creditPackCopy: Record<Language, CreditPackCopy> = {
   ko: {
     eyebrow: "일회성 추가 상품",
     title: "플랜 변경 없이 크레딧만 더 필요하신가요?",
-    description: "이번 달 작업량이 많거나 일시적인 프로젝트가 있을 때 추가 크레딧 팩을 구매할 수 있습니다. 가격은 USD 기준이며 로그인 후 결제할 수 있습니다.",
+    description: "이번 달 작업량이 많거나 일시적인 프로젝트가 있을 때 추가 크레딧 팩을 구매할 수 있습니다. 현지통화 고정 가격이 표시되며 로그인 후 결제할 수 있습니다.",
     availableFor: "구매 가능 플랜",
     oneTime: "일회성 구매",
     validity: "12개월 유효",
@@ -313,7 +317,7 @@ const creditPackCopy: Record<Language, CreditPackCopy> = {
   zh: {
     eyebrow: "一次性加购",
     title: "无需更改方案，也能增加积分",
-    description: "当本月工作量增加或有临时项目时，可购买额外积分包。价格以 USD 显示，登录后可结账。",
+    description: "当本月工作量增加或有临时项目时，可购买额外积分包。页面显示本地固定价格，登录后可结账。",
     availableFor: "适用方案",
     oneTime: "一次性购买",
     validity: "有效期 12 个月",
@@ -337,7 +341,7 @@ const creditPackCopy: Record<Language, CreditPackCopy> = {
   fr: {
     eyebrow: "Crédits ponctuels",
     title: "Besoin de crédits sans changer de formule ?",
-    description: "Achetez un pack pour un projet temporaire ou un mois plus chargé. Les prix sont en USD et l’achat est disponible après connexion.",
+    description: "Achetez un pack pour un projet temporaire ou un mois plus chargé. Le prix local fixe est affiché et l’achat est disponible après connexion.",
     availableFor: "Disponible avec",
     oneTime: "Achat unique",
     validity: "Valable 12 mois",
@@ -361,7 +365,7 @@ const creditPackCopy: Record<Language, CreditPackCopy> = {
   de: {
     eyebrow: "Einmalige Zusatzpakete",
     title: "Mehr Credits ohne Tarifwechsel?",
-    description: "Kaufen Sie ein Paket für ein vorübergehendes Projekt oder einen arbeitsreichen Monat. Preise werden in USD angezeigt; Kauf nach Anmeldung.",
+    description: "Kaufen Sie ein Paket für ein vorübergehendes Projekt oder einen arbeitsreichen Monat. Der lokale Festpreis wird angezeigt; Kauf nach Anmeldung.",
     availableFor: "Verfügbar für",
     oneTime: "Einmalkauf",
     validity: "12 Monate gültig",
@@ -385,7 +389,7 @@ const creditPackCopy: Record<Language, CreditPackCopy> = {
   es: {
     eyebrow: "Complementos de un pago",
     title: "¿Necesitas más créditos sin cambiar de plan?",
-    description: "Compra un paquete para un proyecto temporal o un mes con más trabajo. Los precios se muestran en USD y la compra requiere iniciar sesión.",
+    description: "Compra un paquete para un proyecto temporal o un mes con más trabajo. Se muestra el precio local fijo y la compra requiere iniciar sesión.",
     availableFor: "Disponible en",
     oneTime: "Compra única",
     validity: "Válido 12 meses",
@@ -409,7 +413,7 @@ const creditPackCopy: Record<Language, CreditPackCopy> = {
   pt: {
     eyebrow: "Créditos avulsos",
     title: "Precisa de mais créditos sem mudar de plano?",
-    description: "Compre um pacote para um projeto temporário ou um mês mais intenso. Os preços são exibidos em USD e a compra fica disponível após o login.",
+    description: "Compre um pacote para um projeto temporário ou um mês mais intenso. O preço local fixo é exibido e a compra fica disponível após o login.",
     availableFor: "Disponível no",
     oneTime: "Compra única",
     validity: "Válido por 12 meses",
@@ -509,7 +513,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       },
     ],
     note:
-      "Prices are shown in USD before tax. On Max, Standard models have no daily limit; Premium usage is subject to monthly credits and the Fair Use Policy.",
+      "Prices are shown before tax in the selected fixed billing currency. On Max, Standard models have no daily limit; Premium usage is subject to monthly credits and the Fair Use Policy.",
     plans: [
       {
         name: "Free",
@@ -594,7 +598,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       { question: "출시 할인은 어떻게 적용되나요", answer: "출시 특가로 Pro 또는 Max 첫 달 동안 50% 할인을 받을 수 있습니다. 이후에는 취소하지 않는 한 정가 월 요금으로 갱신됩니다.", promotionOnly: true },
       { question: "Pro는 선택 가능한 모델을 제한하나요", answer: "Pro는 사용 가능한 모델 카탈로그를 열어두는 방향입니다. 고비용 모델은 단순히 모델 선택을 막기보다 사용량과 비용 한도로 관리합니다." },
     ],
-    note: "가격은 세금 전 USD 기준입니다. Max는 Standard 모델 일일 제한 없음, Premium 사용량은 월 크레딧 및 공정사용 정책이 적용됩니다.",
+    note: "가격은 선택된 현지통화의 세금 전 고정 금액입니다. Max는 Standard 모델 일일 제한 없음, Premium 사용량은 월 크레딧 및 공정사용 정책이 적용됩니다.",
     plans: [
       { name: "Free", eyebrow: "처음 시작하는 사용자", price: "$0", period: "월", description: "가벼운 일상 사용과 고급 모델 체험을 위한 월 300 AI 크레딧", cta: "무료로 시작", href: "/chat", usage: "월 300 AI 크레딧", features: ["선별된 모델 카탈로그 접근", "고급 모델 월 30응답까지", "최대 3개 모델 비교", "로그인 후 파일 첨부, 공유, 다운로드", "가벼운 개인 사용에 적합"] },
       { name: "Pro", eyebrow: "일상 생산성", price: "$15", period: "월", description: "일상적인 멀티모델 비교를 위한 월 3,000 AI 크레딧", cta: "Pro로 업그레이드", href: "/chat", highlighted: true, badge: "추천", usage: "월 3,000 AI 크레딧", features: ["모든 사용 가능 모델 접근", "모델별 가중치에 따라 월 크레딧 사용", "최대 3개 모델 나란히 비교", "파일 첨부 및 Google Drive 파일", "공유 및 다운로드"] },
@@ -628,7 +632,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       { question: "发布折扣如何使用？", answer: "发布特价可让 Pro 或 Max 首月享受 50% 折扣。之后除非取消，否则会按标准月费续订。", promotionOnly: true },
       { question: "Pro 会限制我能选择的模型吗？", answer: "Pro 的目标是开放可用模型目录。成本更高的模型会通过使用量和成本限制来管理，而不是简单地在模型选择器中锁定。" },
     ],
-    note: "价格为税前 USD。Max 的 Standard 模型无每日限制；Premium 用量受月度积分和公平使用政策约束。",
+    note: "价格为所选结算货币的税前固定金额。Max 的 Standard 模型无每日限制；Premium 用量受月度积分和公平使用政策约束。",
     plans: [
       { name: "Free", eyebrow: "适合开始使用", price: "$0", period: "每月", description: "每月 300 AI 积分，适合轻量日常使用和体验高级模型。", cta: "免费开始", href: "/chat", usage: "每月 300 AI 积分", features: ["访问精选模型目录", "最多比较 3 个模型", "基础聊天记录", "登录后可使用文件附件、分享和下载", "适合轻量个人使用"] },
       { name: "Pro", eyebrow: "日常生产力", price: "$15", period: "每月", description: "每月 3,000 AI 积分，适合日常多模型比较。", cta: "升级到 Pro", href: "/chat", highlighted: true, badge: "推荐", usage: "每月 3,000 AI 积分", features: ["访问所有可用模型", "最多并排比较 3 个模型", "文件附件和 Google Drive 文件", "分享和下载对话", "按模型加权使用月度积分"] },
@@ -662,7 +666,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       { question: "Comment fonctionne la réduction de lancement ?", answer: "L'offre de lancement applique -50 % sur Pro ou Max le premier mois. Ensuite, le plan se renouvelle au prix mensuel standard, sauf annulation.", promotionOnly: true },
       { question: "Pro limite-t-il les modèles que je peux choisir ?", answer: "Pro vise à ouvrir le catalogue de modèles disponible. Les modèles plus coûteux sont gérés par des limites d'usage et de coût plutôt que par un simple blocage dans le sélecteur." },
     ],
-    note: "Les prix sont indiqués en USD hors taxes. Avec Max, les modèles Standard n'ont pas de limite quotidienne ; l'usage Premium reste soumis aux crédits mensuels et à la politique d'utilisation équitable.",
+    note: "Les prix sont des montants fixes hors taxes dans la devise de facturation sélectionnée. Avec Max, les modèles Standard n'ont pas de limite quotidienne ; l'usage Premium reste soumis aux crédits mensuels et à la politique d'utilisation équitable.",
     plans: [
       { name: "Free", eyebrow: "Pour commencer", price: "$0", period: "par mois", description: "300 crédits IA mensuels pour un usage quotidien léger et l'essai de modèles avancés.", cta: "Commencer gratuitement", href: "/chat", usage: "300 crédits IA par mois", features: ["Accès au catalogue de modèles sélectionnés", "Comparer jusqu'à 3 modèles", "Historique de conversation de base", "Pièces jointes, partage et téléchargements après connexion", "Adapté à un usage personnel léger"] },
       { name: "Pro", eyebrow: "Productivité quotidienne", price: "$15", period: "par mois", description: "3 000 crédits IA mensuels pour les comparaisons multi-modèles quotidiennes.", cta: "Passer à Pro", href: "/chat", highlighted: true, badge: "Recommandé", usage: "3 000 crédits IA par mois", features: ["Accès à tous les modèles disponibles", "Comparer jusqu'à 3 modèles côte à côte", "Pièces jointes et fichiers Google Drive", "Partager et télécharger les conversations", "Crédits mensuels pondérés selon le modèle"] },
@@ -696,7 +700,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       { question: "Wie funktioniert der Launch-Rabatt?", answer: "Das Launch-Angebot gewährt im ersten Monat 50 % Rabatt auf Pro oder Max. Danach verlängert sich der Plan zum regulären Monatspreis, sofern er nicht gekündigt wird.", promotionOnly: true },
       { question: "Beschränkt Pro die auswählbaren Modelle?", answer: "Pro soll den verfügbaren Modellkatalog öffnen. Kostenintensivere Modelle werden über Nutzungs- und Kostenlimits gesteuert, nicht über eine einfache Sperre im Modellwähler." },
     ],
-    note: "Preise verstehen sich in USD vor Steuern. Bei Max haben Standard-Modelle kein Tageslimit; Premium-Nutzung unterliegt den monatlichen Credits und der Fair-Use-Richtlinie.",
+    note: "Preise sind feste Beträge vor Steuern in der ausgewählten Abrechnungswährung. Bei Max haben Standard-Modelle kein Tageslimit; Premium-Nutzung unterliegt den monatlichen Credits und der Fair-Use-Richtlinie.",
     plans: [
       { name: "Free", eyebrow: "Für den Einstieg", price: "$0", period: "pro Monat", description: "300 monatliche KI-Credits für leichte Alltagsnutzung und zum Testen fortgeschrittener Modelle.", cta: "Kostenlos starten", href: "/chat", usage: "300 KI-Credits pro Monat", features: ["Zugriff auf den ausgewählten Modellkatalog", "Bis zu 3 Modelle vergleichen", "Grundlegender Chatverlauf", "Dateianhänge, Teilen und Downloads nach Anmeldung", "Gut für leichte persönliche Nutzung"] },
       { name: "Pro", eyebrow: "Tägliche Produktivität", price: "$15", period: "pro Monat", description: "3.000 monatliche KI-Credits für alltägliche Multi-Modell-Vergleiche.", cta: "Auf Pro upgraden", href: "/chat", highlighted: true, badge: "Empfohlen", usage: "3.000 KI-Credits pro Monat", features: ["Zugriff auf alle verfügbaren Modelle", "Bis zu 3 Modelle nebeneinander vergleichen", "Dateianhänge und Google-Drive-Dateien", "Unterhaltungen teilen und herunterladen", "Nach Modell gewichtete Monats-Credits"] },
@@ -730,7 +734,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       { question: "¿Cómo funciona el descuento de lanzamiento?", answer: "La oferta de lanzamiento aplica un 50 % de descuento en Pro o Max durante el primer mes. Después, el plan se renueva al precio mensual regular salvo cancelación.", promotionOnly: true },
       { question: "¿Pro limita los modelos que puedo elegir?", answer: "Pro está pensado para abrir el catálogo de modelos disponible. Los modelos de mayor coste se gestionan con límites de uso y coste, no con un bloqueo simple del selector." },
     ],
-    note: "Los precios están en USD antes de impuestos. En Max, los modelos Standard no tienen límite diario; el uso Premium está sujeto a los créditos mensuales y a la política de uso justo.",
+    note: "Los precios son importes fijos antes de impuestos en la moneda de facturación seleccionada. En Max, los modelos Standard no tienen límite diario; el uso Premium está sujeto a los créditos mensuales y a la política de uso justo.",
     plans: [
       { name: "Free", eyebrow: "Para empezar", price: "$0", period: "al mes", description: "300 créditos de IA al mes para uso diario ligero y probar modelos avanzados.", cta: "Empezar gratis", href: "/chat", usage: "300 créditos de IA al mes", features: ["Acceso al catálogo de modelos seleccionados", "Comparar hasta 3 modelos", "Historial básico de chat", "Archivos, compartir y descargas tras iniciar sesión", "Adecuado para uso personal ligero"] },
       { name: "Pro", eyebrow: "Productividad diaria", price: "$15", period: "al mes", description: "3.000 créditos de IA al mes para comparaciones multimodelo cotidianas.", cta: "Actualizar a Pro", href: "/chat", highlighted: true, badge: "Recomendado", usage: "3.000 créditos de IA al mes", features: ["Acceso a todos los modelos disponibles", "Comparar hasta 3 modelos lado a lado", "Archivos adjuntos y Google Drive", "Compartir y descargar conversaciones", "Créditos mensuales ponderados por modelo"] },
@@ -764,7 +768,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       { question: "Como funciona o desconto de lançamento?", answer: "A oferta de lançamento aplica 50% de desconto no Pro ou Max no primeiro mês. Depois disso, o plano renova pelo preço mensal regular, salvo cancelamento.", promotionOnly: true },
       { question: "O Pro limita quais modelos posso escolher?", answer: "O Pro foi pensado para liberar o catálogo de modelos disponível. Modelos de custo maior são gerenciados por limites de uso e custo, não por um bloqueio simples no seletor." },
     ],
-    note: "Os preços são em USD antes de impostos. No Max, modelos Standard não têm limite diário; o uso Premium está sujeito aos créditos mensais e à política de uso justo.",
+    note: "Os preços são valores fixos antes de impostos na moeda de cobrança selecionada. No Max, modelos Standard não têm limite diário; o uso Premium está sujeito aos créditos mensais e à política de uso justo.",
     plans: [
       { name: "Free", eyebrow: "Para começar", price: "$0", period: "por mês", description: "300 créditos de IA por mês para uso diário leve e para testar modelos avançados.", cta: "Começar grátis", href: "/chat", usage: "300 créditos de IA por mês", features: ["Acesso ao catálogo de modelos selecionados", "Comparar até 3 modelos", "Histórico básico de chat", "Anexos, compartilhamento e downloads após login", "Bom para uso pessoal leve"] },
       { name: "Pro", eyebrow: "Produtividade diária", price: "$15", period: "por mês", description: "3.000 créditos de IA por mês para comparações multimodelo cotidianas.", cta: "Atualizar para Pro", href: "/chat", highlighted: true, badge: "Recomendado", usage: "3.000 créditos de IA por mês", features: ["Acesso a todos os modelos disponíveis", "Comparar até 3 modelos lado a lado", "Anexos e arquivos do Google Drive", "Compartilhar e baixar conversas", "Créditos mensais ponderados por modelo"] },
@@ -835,11 +839,14 @@ export function PricingPageContent() {
     const plan = billing.config?.plans.find((item) => item.id === planId);
     const discountMultiplier = 1 - discountPercent / 100;
     if (plan?.displayCurrency && typeof plan.displayMonthlyPriceAmount === "number") {
+      const digits = billingCurrencyFractionDigits(
+        plan.displayCurrency as BillingCurrency
+      );
       return new Intl.NumberFormat(undefined, {
         style: "currency",
         currency: plan.displayCurrency,
-        maximumFractionDigits: 1,
-        minimumFractionDigits: 0,
+        maximumFractionDigits: digits,
+        minimumFractionDigits: digits,
       }).format(plan.displayMonthlyPriceAmount * discountMultiplier);
     }
     return new Intl.NumberFormat("en-US", {
@@ -898,7 +905,6 @@ export function PricingPageContent() {
             const displayPrice = billing.formatPlanPrice(planId) || plan.price;
             const annualFallback = planId === "max" ? "$240" : planId === "pro" ? "$144" : "$0";
             const annualPrice = billing.formatPlanPrice(planId, "annual") || annualFallback;
-            const annualUsdPrice = billing.formatUsdPlanPrice(planId, "annual") || annualFallback;
             const promotionEligible = Boolean(
               featuredPromotion &&
               featuredPromotion.appliesToPlanIds.includes(planId) &&
@@ -991,7 +997,7 @@ export function PricingPageContent() {
                   </div>
                   <div className="mt-1 text-lg font-black">{annualPrice}</div>
                   <p className={plan.highlighted ? "text-blue-100" : "text-zinc-500 dark:text-zinc-400"}>
-                    {annualUsdPrice} / {annualCopy.annual}. {annualCopy.checkout}
+                    {annualCopy.checkout}
                   </p>
                 </div>
               ) : null}
@@ -1097,7 +1103,10 @@ export function PricingPageContent() {
                     {new Intl.NumberFormat(promotionDateLocale[lang], {
                       style: "currency",
                       currency: pack.currency,
-                    }).format(pack.priceCents / 100)}
+                    }).format(
+                      pack.priceMinor /
+                        (pack.currency === "KRW" ? 1 : 100)
+                    )}
                   </p>
                   <p className="mt-4 flex-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
                     {creditPackGuide.packDescriptions[pack.id]}

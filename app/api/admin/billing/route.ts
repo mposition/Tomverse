@@ -22,6 +22,12 @@ import {
   syncBillingDefaultsToDatabase,
 } from "@/lib/billingConfig";
 import { prisma } from "@/lib/prisma";
+import {
+  BILLING_PRICE_CATALOG_KEY,
+  billingPriceCatalogSchema,
+  getBillingPriceCatalogWithMeta,
+  saveBillingPriceCatalog,
+} from "@/lib/billingPriceCatalog";
 
 const optionalText = z
   .string()
@@ -113,6 +119,8 @@ const updateBillingSchema = z
       })
       .strict()
       .optional(),
+    priceCatalog: billingPriceCatalogSchema.optional(),
+    priceCatalogUpdatedAt: z.string().datetime().nullable().optional(),
   })
   .strict();
 
@@ -130,12 +138,19 @@ export async function GET(req: Request) {
       day: 500,
     });
     await syncBillingDefaultsToDatabase();
-    const [plans, promotions, settings] = await Promise.all([
+    const [plans, promotions, settings, pricing] = await Promise.all([
       getBillingPlans(),
       getBillingPromotions(),
       getPublicAppSettings(),
+      getBillingPriceCatalogWithMeta(),
     ]);
-    return NextResponse.json({ plans, promotions, settings });
+    return NextResponse.json({
+      plans,
+      promotions,
+      settings,
+      priceCatalog: pricing.catalog,
+      priceCatalogUpdatedAt: pricing.updatedAt,
+    });
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
@@ -160,7 +175,7 @@ export async function PATCH(req: Request) {
       minute: 10,
       day: 100,
     });
-    const body = await readLimitedJson(req, 32 * 1024, updateBillingSchema);
+    const body = await readLimitedJson(req, 64 * 1024, updateBillingSchema);
     await syncBillingDefaultsToDatabase();
 
     const existingPlans = await prisma.billingPlan.findMany({
@@ -198,6 +213,26 @@ export async function PATCH(req: Request) {
       ) {
         return NextResponse.json(
           { error: `Promotion ${promotion.code} was changed by another admin. Reload before saving.` },
+          { status: 409 }
+        );
+      }
+    }
+
+    if (body.priceCatalog) {
+      const currentPricing = await prisma.appSetting.findUnique({
+        where: { key: BILLING_PRICE_CATALOG_KEY },
+        select: { updatedAt: true },
+      });
+      const currentUpdatedAt = currentPricing?.updatedAt.toISOString() || null;
+      if (
+        body.priceCatalogUpdatedAt !== undefined &&
+        body.priceCatalogUpdatedAt !== currentUpdatedAt
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "Localized prices were changed by another admin. Reload before saving.",
+          },
           { status: 409 }
         );
       }
@@ -317,6 +352,9 @@ export async function PATCH(req: Request) {
     if (body.settings?.guestDefaultModelId) {
       await updateGuestDefaultModel(body.settings.guestDefaultModelId);
     }
+    if (body.priceCatalog) {
+      await saveBillingPriceCatalog(body.priceCatalog);
+    }
 
     await writeAdminAuditLog({
       session,
@@ -329,15 +367,23 @@ export async function PATCH(req: Request) {
         plans: (body.plans || []).map((plan) => plan.id),
         promotions: (body.promotions || []).map((promotion) => promotion.code),
         guestDefaultModelId: body.settings?.guestDefaultModelId || null,
+        localizedPricesUpdated: Boolean(body.priceCatalog),
       },
     });
 
-    const [plans, promotions, settings] = await Promise.all([
+    const [plans, promotions, settings, pricing] = await Promise.all([
       getBillingPlans(),
       getBillingPromotions(),
       getPublicAppSettings(),
+      getBillingPriceCatalogWithMeta(),
     ]);
-    return NextResponse.json({ plans, promotions, settings });
+    return NextResponse.json({
+      plans,
+      promotions,
+      settings,
+      priceCatalog: pricing.catalog,
+      priceCatalogUpdatedAt: pricing.updatedAt,
+    });
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;

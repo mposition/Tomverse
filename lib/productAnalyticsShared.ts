@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { BILLING_CURRENCIES, type BillingCurrency } from "@/lib/billingMarkets";
 
 export const PRODUCT_ANALYTICS_EVENT_NAMES = [
   "landing_view",
@@ -96,7 +97,7 @@ export const analyticsPropertiesSchema = z
     plan_credits_remaining: z.number().int().min(0).max(1_000_000).optional(),
     addon_credits_remaining: z.number().int().min(0).max(1_000_000).optional(),
     value: z.number().finite().min(0).max(1_000_000).optional(),
-    currency: z.literal("USD").optional(),
+    currency: z.enum(BILLING_CURRENCIES).optional(),
     transaction_id: z.string().trim().min(1).max(100).optional(),
     conversation_mode: z.enum(["guest", "account", "private"]).optional(),
     onboarding_id: z.string().trim().min(1).max(32).optional(),
@@ -155,7 +156,7 @@ export type Ga4EcommerceEvent = {
   params: {
     transaction_id?: string;
     value: number;
-    currency: "USD";
+    currency: BillingCurrency;
     purchase_type: "subscription" | "credit_pack";
     product_id: string;
     current_plan?: "free" | "pro" | "max";
@@ -200,7 +201,7 @@ export const ga4EcommerceEventForProductEvent = (
   if (
     !properties.purchase_type ||
     !properties.product_id ||
-    properties.currency !== "USD" ||
+    !properties.currency ||
     typeof properties.value !== "number"
   ) {
     return null;

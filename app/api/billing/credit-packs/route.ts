@@ -22,6 +22,22 @@ import {
   getPurchaseAnalyticsSnapshot,
   purchaseAnalyticsMetadata,
 } from "@/lib/purchaseAnalytics";
+import {
+  BillingMarketValidationError,
+  inferBillingMarketFromRequest,
+  validateBillingMarketRequest,
+} from "@/lib/billingCurrency";
+import {
+  getBillingPriceCatalog,
+  getCreditPackPriceMinor,
+  getUsdRevenueSnapshot,
+} from "@/lib/billingPriceCatalog";
+import {
+  BILLING_CURRENCIES,
+  billingMinorToMajor,
+  type BillingCurrency,
+} from "@/lib/billingMarkets";
+import { checkoutBillingMetadata } from "@/lib/billingTransactions";
 
 const inputSchema = z
   .object({
@@ -29,17 +45,24 @@ const inputSchema = z
     language: z.enum(["ko", "en", "zh", "fr", "de", "es", "pt"]).optional(),
     analytics: analyticsAttributionSchema.optional(),
     trigger: purchaseAnalyticsTriggerSchema.default("proactive"),
+    currency: z.enum(BILLING_CURRENCIES).optional(),
+    country: z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/).optional(),
   })
   .strict();
 const normalizePlan = (value: unknown): ModelTier =>
   value === "Pro" || value === "Max" ? value : "Free";
 
-const publicPack = (pack: NonNullable<ReturnType<typeof getCreditPack>>) => ({
+const publicPack = (
+  pack: NonNullable<ReturnType<typeof getCreditPack>>,
+  priceMinor: number,
+  currency: BillingCurrency
+) => ({
   id: pack.id,
   name: pack.name,
   credits: pack.credits,
-  priceCents: pack.priceCents,
-  currency: pack.currency,
+  priceMinor,
+  priceCents: priceMinor,
+  currency,
   validityDays: pack.validityDays,
 });
 
@@ -64,6 +87,8 @@ export async function GET(req: Request) {
     });
     if (!user) return NextResponse.json({ error: "User not found." }, { status: 404 });
     const plan = normalizePlan(user.plan);
+    const market = inferBillingMarketFromRequest(req);
+    const catalog = await getBillingPriceCatalog();
     const snapshot = await getPurchaseAnalyticsSnapshot({
       userId: session.user.id,
       currentPlan: plan,
@@ -73,7 +98,14 @@ export async function GET(req: Request) {
     return NextResponse.json({
       plan,
       analyticsContext: snapshot.context,
-      packs: getCreditPacksForPlan(plan).map(publicPack),
+      market,
+      packs: getCreditPacksForPlan(plan).map((pack) =>
+        publicPack(
+          pack,
+          getCreditPackPriceMinor(pack.id, market.currency, catalog),
+          market.currency
+        )
+      ),
       balance: {
         ...balance,
         earliestExpiry: balance.earliestExpiry?.toISOString() || null,
@@ -104,13 +136,30 @@ export async function POST(req: Request) {
       minute: 5,
       day: 20,
     });
-    const { packId, language, analytics, trigger } = await readLimitedJson(
+    const { packId, language, analytics, trigger, currency, country } = await readLimitedJson(
       req,
       4 * 1024,
       inputSchema
     );
     const pack = getCreditPack(packId);
     if (!pack) return NextResponse.json({ error: "Credit pack not found." }, { status: 404 });
+    const market = validateBillingMarketRequest({ req, currency, country });
+    const catalog = await getBillingPriceCatalog();
+    const priceMinor = getCreditPackPriceMinor(pack.id, market.currency, catalog);
+    const usdRevenueSnapshot = await getUsdRevenueSnapshot({
+      amountMinor: priceMinor,
+      currency: market.currency,
+      fallbackUsdMinor: pack.priceCents,
+    });
+    const billingMetadata = checkoutBillingMetadata({
+      currency: market.currency,
+      country: market.country,
+      expectedAmountMinor: priceMinor,
+      amountUsdMicroUsd: usdRevenueSnapshot.amountUsdMicroUsd,
+      usdConversionRate: usdRevenueSnapshot.usdConversionRate,
+      usdConversionSource: usdRevenueSnapshot.source,
+      pricingVersion: catalog.version,
+    });
 
     const user = await prisma.user.findUnique({
       where: { id: session.user.id },
@@ -133,6 +182,21 @@ export async function POST(req: Request) {
     }
 
     const stripe = getStripe();
+    let stripeProductId: string | null = null;
+    if (pack.stripePriceId) {
+      try {
+        const existingPrice = await stripe.prices.retrieve(pack.stripePriceId);
+        stripeProductId =
+          typeof existingPrice.product === "string"
+            ? existingPrice.product
+            : existingPrice.product?.id || null;
+      } catch (error) {
+        console.warn("Credit-pack Stripe product lookup failed; using inline product data.", {
+          packId: pack.id,
+          errorName: error instanceof Error ? error.name : "UnknownError",
+        });
+      }
+    }
     let customerId = user.stripeCustomerId;
     if (!customerId) {
       const customer = await stripe.customers.create({
@@ -183,6 +247,8 @@ export async function POST(req: Request) {
             productId: pack.id,
             creditQuantity: pack.credits,
           }),
+          analyticsValue: String(billingMinorToMajor(priceMinor, market.currency)),
+          analyticsCurrency: market.currency,
         }
       : {};
     const checkout = await stripe.checkout.sessions.create({
@@ -190,28 +256,35 @@ export async function POST(req: Request) {
       customer: customerId,
       client_reference_id: user.id,
       line_items: [
-        pack.stripePriceId
-          ? { price: pack.stripePriceId, quantity: 1 }
-          : {
-              quantity: 1,
-              price_data: {
-                currency: pack.currency.toLowerCase(),
-                unit_amount: pack.priceCents,
-                product_data: {
+        {
+          quantity: 1,
+          price_data: {
+            currency: market.currency.toLowerCase(),
+            unit_amount: priceMinor,
+            product: stripeProductId || undefined,
+            product_data: stripeProductId
+              ? undefined
+              : {
                   name: `Tomverse ${pack.name}`,
                   description: `${pack.credits.toLocaleString("en-US")} additional AI credits · valid for 12 months`,
                   metadata: { packId: pack.id },
                 },
-              },
-            },
+          },
+        },
       ],
       payment_intent_data: {
-        metadata: { purchaseType: "credit_pack", packId: pack.id, userId: user.id },
+        metadata: {
+          purchaseType: "credit_pack",
+          packId: pack.id,
+          userId: user.id,
+          ...billingMetadata,
+        },
       },
       metadata: {
         purchaseType: "credit_pack",
         packId: pack.id,
         userId: user.id,
+        ...billingMetadata,
         ...analyticsMetadata,
       },
       success_url: `${origin}/chat?billing=credits-success&pack=${encodeURIComponent(pack.id)}${
@@ -222,6 +295,12 @@ export async function POST(req: Request) {
     });
     return NextResponse.json({ url: checkout.url });
   } catch (error) {
+    if (error instanceof BillingMarketValidationError) {
+      return NextResponse.json(
+        { code: error.code, error: error.message },
+        { status: 400 }
+      );
+    }
     const response = apiSecurityResponse(error);
     if (response) return response;
     console.error("Failed to create credit-pack checkout:", error);
