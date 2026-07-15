@@ -13,6 +13,11 @@ import {
 import { prisma } from "@/lib/prisma";
 import { getEnabledModel, type AiModel } from "@/lib/models";
 import { getActiveAiModel } from "@/lib/activeAiModel";
+import {
+    consumePerplexityUsage,
+    discardPerplexityUsage,
+    perplexityUsageHeaders,
+} from "@/lib/perplexityUsageCapture";
 import { assertModelNotAdminDisabled } from "@/lib/modelOverrides";
 import { parseOfficeSafely } from "@/lib/officeSecurity";
 import {
@@ -1059,6 +1064,10 @@ export async function POST(req: Request) {
             messages: formattedMessages,
             maxOutputTokens: budget.maxOutputTokens,
             maxRetries: modelConfig.provider === "zhipu" ? 0 : undefined,
+            headers:
+                modelConfig.provider === "perplexity"
+                    ? perplexityUsageHeaders(traceId)
+                    : undefined,
         });
 
         const sourceReader = result.textStream.getReader();
@@ -1089,6 +1098,10 @@ export async function POST(req: Request) {
             if (!reservation) return Promise.resolve();
             usageSettlement = (async () => {
                 try {
+                    const providerUsageSnapshot =
+                        modelConfig.provider === "perplexity"
+                            ? await consumePerplexityUsage(traceId)
+                            : null;
                     await settleChatUsage(reservation, {
                         inputTokens:
                             usage?.inputTokens ?? reservation.inputTokens,
@@ -1097,6 +1110,8 @@ export async function POST(req: Request) {
                             usage?.outputTokens ??
                             estimatedGeneratedOutputTokens(),
                         outcome,
+                    }, {
+                        providerUsageSnapshot,
                     });
                     usageReservation = null;
                 } catch (error) {
@@ -1435,10 +1450,16 @@ export async function POST(req: Request) {
         }
         if (usageReservation) {
             try {
+                const providerUsageSnapshot =
+                    requestedProviderForLog === "perplexity"
+                        ? await consumePerplexityUsage(traceId)
+                        : null;
                 await settleChatUsage(usageReservation, {
                     inputTokens: 0,
                     outputTokens: 0,
                     outcome: "failed",
+                }, {
+                    providerUsageSnapshot,
                 });
                 usageReservation = null;
             } catch (settlementError) {
@@ -1449,6 +1470,9 @@ export async function POST(req: Request) {
                     requestedModelIdForLog
                 );
             }
+        }
+        if (requestedProviderForLog === "perplexity") {
+            discardPerplexityUsage(traceId);
         }
         const accessError = chatErrorResponse(error);
         if (accessError) {

@@ -24,6 +24,8 @@ type SyncResult = {
       | "openai_costs"
       | "anthropic_costs"
       | "xai_usage"
+      | "google_cloud_billing"
+      | "alibaba_cloud_billing"
       | "generic_usage";
     endpoint: string;
     httpStatus: number | null;
@@ -100,6 +102,24 @@ const diagnosticGuidance = (result: SyncResult) => {
   }
   if (diagnostic.source === "xai_usage" && diagnostic.httpStatus === 404) {
     return "Copy the Team ID from the active xAI Console team settings into XAI_TEAM_ID, then redeploy.";
+  }
+  if (diagnostic.source === "google_cloud_billing") {
+    if (diagnostic.httpStatus === 401 || diagnostic.httpStatus === 403) {
+      return "Grant the configured service account BigQuery Job User on the query project and BigQuery Data Viewer on the billing-export dataset, then retry yesterday's sync.";
+    }
+    if (diagnostic.errorCode === "GOOGLE_BILLING_JOB_INCOMPLETE") {
+      return "The bounded BigQuery job did not finish. Retry once; if it repeats, verify that the export table is partitioned and contains billing rows for the selected date.";
+    }
+    return "Verify GOOGLE_CLOUD_BILLING_EXPORT_TABLE and the billing service-account JSON. Billing export data can arrive several hours late.";
+  }
+  if (diagnostic.source === "alibaba_cloud_billing") {
+    if (diagnostic.errorCode === "ALIBABA_BILLING_NON_USD") {
+      return "Tomverse will not guess a foreign-exchange rate. Use the international USD billing account or reconcile the non-USD Alibaba bill separately.";
+    }
+    if (diagnostic.httpStatus === 401 || diagnostic.httpStatus === 403) {
+      return "Grant the RAM identity AliyunBSSReadOnlyAccess (or bssapi:QueryInstanceBill) and verify the AccessKey pair.";
+    }
+    return "Verify the Singapore BSS endpoint and optional ALIBABA_CLOUD_BILLING_PRODUCT_CODE. Daily instance bills can be delayed by about one day.";
   }
   if (diagnostic.errorCode === "XAI_USAGE_LIMIT_REACHED") {
     return "xAI returned only a subset of the requested usage series, so Tomverse did not store the partial total. Retry the single-day sync; if it repeats, review the xAI Usage Explorer and retain the Tomverse trace.";

@@ -8,6 +8,10 @@ import {
 } from "@/lib/providerCredits";
 import { getProviderBillingProfiles } from "@/lib/providerBilling";
 import type { ProviderBillingProfile } from "@/lib/providerBillingTypes";
+import {
+  parseDeepSeekBalance,
+  type ProviderBalanceSnapshot,
+} from "@/lib/providerBalanceCore";
 
 export type ProviderHealthStatus = "available" | "limited" | "outage";
 
@@ -66,6 +70,11 @@ export type ProviderHealthRow = {
   dayBudgetMicroUsd: number;
   budgetUsagePercent: number;
   balanceUsd: number | null;
+  balanceAmount: number | null;
+  balanceCurrency: string;
+  balanceAvailable: boolean | null;
+  balanceGrantedAmount: number | null;
+  balanceToppedUpAmount: number | null;
   balanceSource: "api" | "db_estimate" | "env_manual" | "unavailable";
   credit: ProviderCreditSummary;
   billingProfile: ProviderBillingProfile;
@@ -739,9 +748,15 @@ const firstNumericValue = (data: unknown, paths: string[]) => {
   return null;
 };
 
-const automaticBalanceFor = async (provider: AiProvider) => {
+const automaticBalanceFor = async (
+  provider: AiProvider
+): Promise<ProviderBalanceSnapshot | null> => {
   const providerKey = envProvider(provider);
-  const url = process.env[`PROVIDER_${providerKey}_BALANCE_URL`];
+  const url =
+    process.env[`PROVIDER_${providerKey}_BALANCE_URL`] ||
+    (provider === "deepseek"
+      ? "https://api.deepseek.com/user/balance"
+      : undefined);
   if (!url) return null;
 
   const apiKey = PROVIDER_API_KEY_ENV[provider].map((key) => process.env[key]).find(Boolean);
@@ -753,6 +768,7 @@ const automaticBalanceFor = async (provider: AiProvider) => {
   try {
     const response = await fetch(url, {
       cache: "no-store",
+      signal: AbortSignal.timeout(10_000),
       headers: {
         Accept: "application/json",
         ...(authHeader ? { Authorization: authHeader } : {}),
@@ -760,6 +776,7 @@ const automaticBalanceFor = async (provider: AiProvider) => {
     });
     if (!response.ok) return null;
     const data = await response.json();
+    if (provider === "deepseek") return parseDeepSeekBalance(data);
     const value = firstNumericValue(
       data,
       jsonPath
@@ -775,7 +792,18 @@ const automaticBalanceFor = async (provider: AiProvider) => {
             "data.credit",
           ]
     );
-    return value === null ? null : value;
+    return value === null
+      ? null
+      : {
+          amount: value,
+          currency:
+            process.env[`PROVIDER_${providerKey}_BALANCE_CURRENCY`]
+              ?.trim()
+              .toUpperCase() || "USD",
+          available: null,
+          grantedAmount: null,
+          toppedUpAmount: null,
+        };
   } catch (error) {
     console.error(`Provider balance lookup failed for ${provider}:`, error);
     return null;
@@ -1022,7 +1050,9 @@ export const getProviderHealthDashboard = async (
       monthBudgetMicroUsd > 0
         ? Math.min(999, Math.round((monthCostMicroUsd / monthBudgetMicroUsd) * 1000) / 10)
         : 0;
-    const automaticBalanceUsd = balanceByProvider.get(provider) ?? null;
+    const automaticBalance = balanceByProvider.get(provider) ?? null;
+    const automaticBalanceUsd =
+      automaticBalance?.currency === "USD" ? automaticBalance.amount : null;
     const credit = creditByProvider.get(provider)!;
     const billingProfile = billingByProvider.get(provider)!;
     const billingBasisMicroUsd =
@@ -1068,6 +1098,8 @@ export const getProviderHealthDashboard = async (
       automaticBalanceUsd ??
       databaseEstimatedBalanceUsd ??
       environmentManualBalanceUsd;
+    const balanceAmount = automaticBalance?.amount ?? balanceUsd;
+    const balanceCurrency = automaticBalance?.currency ?? "USD";
     const providerModels = AVAILABLE_MODELS.filter((model) => model.provider === provider);
     const modelIncidents = providerModels
       .map((model) => {
@@ -1106,7 +1138,10 @@ export const getProviderHealthDashboard = async (
     const apiKeyConfigured = PROVIDER_API_KEY_ENV[provider].some((key) => !!process.env[key]);
     const failureOutageThreshold = Math.max(5, successCount24h);
     const status: ProviderHealthStatus =
-      !apiKeyConfigured || budgetUsagePercent >= 100 || failureCount24h >= failureOutageThreshold
+      !apiKeyConfigured ||
+      automaticBalance?.available === false ||
+      budgetUsagePercent >= 100 ||
+      failureCount24h >= failureOutageThreshold
         ? "outage"
         : failureCount24h > 0 || budgetUsagePercent >= 80
           ? "limited"
@@ -1118,6 +1153,14 @@ export const getProviderHealthDashboard = async (
           code: "API_KEY_MISSING",
           title: "API key is not configured",
           detail: "No configured provider API key was detected, so requests cannot be sent.",
+        });
+      }
+      if (automaticBalance?.available === false) {
+        statusReasons.push({
+          code: "PROVIDER_BALANCE_UNAVAILABLE",
+          title: "Provider balance is unavailable",
+          detail:
+            "The provider balance API reports that the account cannot currently fund inference requests.",
         });
       }
       if (budgetUsagePercent >= 100) {
@@ -1192,8 +1235,13 @@ export const getProviderHealthDashboard = async (
       dayBudgetMicroUsd,
       budgetUsagePercent,
       balanceUsd,
+      balanceAmount,
+      balanceCurrency,
+      balanceAvailable: automaticBalance?.available ?? null,
+      balanceGrantedAmount: automaticBalance?.grantedAmount ?? null,
+      balanceToppedUpAmount: automaticBalance?.toppedUpAmount ?? null,
       balanceSource:
-        automaticBalanceUsd !== null
+        automaticBalance !== null
           ? "api"
           : databaseEstimatedBalanceUsd !== null
             ? "db_estimate"

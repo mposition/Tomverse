@@ -483,6 +483,7 @@ model ChatCreditReservation {
   settledCachedInputTokens Int       @default(0)
   settledOutputTokens      Int       @default(0)
   pricingSnapshot          Json?
+  providerUsageSnapshot    Json?
   expiresAt                DateTime
   settledAt                DateTime?
   reconciledAt             DateTime?

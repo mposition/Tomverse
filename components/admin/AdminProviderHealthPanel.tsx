@@ -28,6 +28,17 @@ const money = (microUsd: number) =>
   `${microUsd < 0 ? "-" : ""}$${Math.abs(microUsd / 1_000_000).toFixed(2)}`;
 const optionalMoney = (microUsd: number | null) =>
   microUsd === null ? "Not synced" : money(microUsd);
+const balanceMoney = (amount: number, currency: string) => {
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency,
+      maximumFractionDigits: 4,
+    }).format(amount);
+  } catch {
+    return `${currency} ${amount.toFixed(4)}`;
+  }
+};
 const dateLabel = (value: string | null, fallback = "No success yet") => {
   if (!value) return fallback;
   return new Date(value).toISOString().replace("T", " ").slice(0, 16);
@@ -433,13 +444,41 @@ function ProviderRow({
             <Metric
               label={provider.billingProfile.settlementModel === "hybrid" ? "Optional credit" : "Estimated balance"}
               value={
-                provider.balanceUsd === null
+                provider.balanceAmount === null
                   ? provider.billingProfile.settlementModel === "hybrid"
                     ? "Not synced (optional)"
                     : "Not configured"
-                  : `$${provider.balanceUsd.toFixed(2)}`
+                  : balanceMoney(
+                      provider.balanceAmount,
+                      provider.balanceCurrency
+                    )
               }
-              detail={provider.balanceUsd === null ? undefined : balanceSourceCopy[provider.balanceSource]}
+              detail={
+                provider.balanceAmount === null
+                  ? undefined
+                  : [
+                      balanceSourceCopy[provider.balanceSource],
+                      provider.balanceAvailable === null
+                        ? null
+                        : provider.balanceAvailable
+                          ? "available"
+                          : "unavailable",
+                      provider.balanceGrantedAmount === null
+                        ? null
+                        : `granted ${balanceMoney(
+                            provider.balanceGrantedAmount,
+                            provider.balanceCurrency
+                          )}`,
+                      provider.balanceToppedUpAmount === null
+                        ? null
+                        : `topped up ${balanceMoney(
+                            provider.balanceToppedUpAmount,
+                            provider.balanceCurrency
+                          )}`,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")
+              }
             />
           )}
           <Metric label="Month accrued" value={money(billingBasisMicroUsd)} />

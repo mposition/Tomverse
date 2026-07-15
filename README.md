@@ -227,6 +227,74 @@ Connectors, and fine-tuning require separate accounting before they are enabled.
 Deploy migration `20260715233000_mistral_response_usage_accounting` before
 releasing cached-token accounting in production.
 
+Perplexity costs are captured from each successful Chat Completion response.
+Tomverse preserves the provider's exact `usage.cost.total_cost`, including the
+request, search-query, citation, reasoning, input, and output components, in the
+durable `ChatCreditReservation.providerUsageSnapshot`. The exact provider total
+overrides the token-price estimate for settlement and internal provider usage;
+the original request-time token estimate remains in `pricingSnapshot` for audit.
+Retries under the same reservation are summed so billed retry attempts are not
+lost. No additional Perplexity admin key is required.
+
+Deploy migration `20260715234500_perplexity_exact_response_cost` before
+releasing exact Perplexity request accounting.
+
+DeepSeek prepaid balance monitoring uses the inference key against the official
+`GET https://api.deepseek.com/user/balance` endpoint. No extra URL variable is
+required:
+
+```text
+DEEPSEEK_API_KEY=<DeepSeek API key>
+```
+
+The Admin Console keeps the returned currency intact and displays total,
+granted, and topped-up balances plus `is_available`. A CNY balance is never
+mislabelled as USD. `PROVIDER_DEEPSEEK_BALANCE_URL` remains available only as an
+explicit endpoint override.
+
+Google Cloud Billing reconciliation reads the standard Cloud Billing export in
+BigQuery. First enable the standard usage-cost export, then give a dedicated
+service account **BigQuery Job User** on the query project and **BigQuery Data
+Viewer** on the export dataset. Configure the full table identifier and one of
+the two credential formats below on the web and provider-usage Cron services:
+
+```text
+GOOGLE_CLOUD_BILLING_PROJECT_ID=<BigQuery query project; defaults to service-account project_id>
+GOOGLE_CLOUD_BILLING_EXPORT_TABLE=<project.dataset.gcp_billing_export_v1_ACCOUNT_ID>
+GOOGLE_CLOUD_BILLING_LOCATION=<BigQuery dataset location, such as US or australia-southeast1>
+GOOGLE_CLOUD_BILLING_SERVICE_ACCOUNT_JSON=<complete service-account JSON>
+# Alternative for platforms where multiline JSON is inconvenient:
+GOOGLE_CLOUD_BILLING_SERVICE_ACCOUNT_JSON_BASE64=<base64 service-account JSON>
+```
+
+The query sums cost and credits for the selected UTC usage date and divides by
+the export's `currency_conversion_rate`, producing a net micro-USD amount even
+when the Cloud Billing account uses a local invoice currency. Billing export can
+arrive several hours late, so the scheduled reconciliation should continue to
+sync the previous UTC day. The service-account secret is never returned to the
+browser or written to provider usage JSON.
+
+Alibaba Cloud Billing reconciliation is attached to the Qwen provider card and
+uses a dedicated RAM identity against the international Singapore BSS endpoint.
+Grant `AliyunBSSReadOnlyAccess` or the narrower
+`bssapi:QueryInstanceBill` permission and configure:
+
+```text
+ALIBABA_CLOUD_ACCESS_KEY_ID=<RAM AccessKey ID>
+ALIBABA_CLOUD_ACCESS_KEY_SECRET=<RAM AccessKey secret>
+ALIBABA_CLOUD_SECURITY_TOKEN=<optional temporary RAM token>
+ALIBABA_CLOUD_BILLING_PRODUCT_CODE=<optional product filter, recommended for shared accounts>
+ALIBABA_CLOUD_BILLING_ENDPOINT=https://business.ap-southeast-1.aliyuncs.com
+```
+
+Requests use the current `ACS3-HMAC-SHA256` signature, daily granularity,
+bounded pagination, and sum the returned USD `PretaxAmount` values. Alibaba can
+delay daily instance bills by about one day. Non-USD bills are rejected instead
+of applying an unverified FX rate; use an international USD billing account for
+exact micro-USD reconciliation. If `ALIBABA_CLOUD_BILLING_PRODUCT_CODE` is
+omitted, the result represents the whole Alibaba Cloud account rather than only
+Model Studio/Qwen usage.
+
 ## Admin Infrastructure Audit
 
 The Admin Console Infrastructure tab reads Railway projected usage, Cloudflare
