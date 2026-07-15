@@ -20,6 +20,7 @@ import { analyticsAttributionSchema } from "@/lib/productAnalyticsShared";
 const inputSchema = z
   .object({
     packId: z.string().max(32),
+    language: z.enum(["ko", "en", "zh", "fr", "de", "es", "pt"]).optional(),
     analytics: analyticsAttributionSchema.optional(),
   })
   .strict();
@@ -80,7 +81,7 @@ export async function POST(req: Request) {
       minute: 5,
       day: 20,
     });
-    const { packId, analytics } = await readLimitedJson(req, 4 * 1024, inputSchema);
+    const { packId, language, analytics } = await readLimitedJson(req, 4 * 1024, inputSchema);
     const pack = getCreditPack(packId);
     if (!pack) return NextResponse.json({ error: "Credit pack not found." }, { status: 404 });
 
@@ -152,7 +153,9 @@ export async function POST(req: Request) {
         userId: user.id,
         ...analyticsMetadata,
       },
-      success_url: `${origin}/chat?billing=credits-success&pack=${encodeURIComponent(pack.id)}`,
+      success_url: `${origin}/chat?billing=credits-success&pack=${encodeURIComponent(pack.id)}${
+        language ? `&lang=${encodeURIComponent(language)}` : ""
+      }`,
       cancel_url: `${origin}/chat?billing=credits-cancelled`,
       allow_promotion_codes: false,
     });

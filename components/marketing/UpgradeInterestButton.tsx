@@ -709,6 +709,7 @@ export function UpgradeInterestButton({
         body: JSON.stringify({
           planId,
           billingInterval,
+          language: lang,
           promoCode: checkoutPromoCode || undefined,
           ...(analytics ? { analytics } : {}),
         }),

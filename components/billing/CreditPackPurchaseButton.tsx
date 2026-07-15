@@ -78,6 +78,7 @@ export function CreditPackPurchaseButton({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           packId,
+          language: lang,
           ...(analytics ? { analytics } : {}),
         }),
       });

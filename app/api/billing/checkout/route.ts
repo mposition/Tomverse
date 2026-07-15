@@ -40,6 +40,7 @@ const checkoutSchema = z
   .object({
     planId: z.enum(["pro", "max"]),
     billingInterval: z.enum(["monthly", "annual"]).default("monthly"),
+    language: z.enum(["ko", "en", "zh", "fr", "de", "es", "pt"]).optional(),
     promoCode: z.string().trim().toUpperCase().max(32).optional(),
     analytics: analyticsAttributionSchema.optional(),
   })
@@ -83,11 +84,14 @@ const addBillingPeriod = (
 const billingSuccessUrl = (
   origin: string,
   planId: BillingPlanId,
-  billingInterval: "monthly" | "annual"
+  billingInterval: "monthly" | "annual",
+  language?: "ko" | "en" | "zh" | "fr" | "de" | "es" | "pt"
 ) =>
   `${origin}/chat?billing=success&plan=${encodeURIComponent(
     planId
-  )}&interval=${encodeURIComponent(billingInterval)}`;
+  )}&interval=${encodeURIComponent(billingInterval)}${
+    language ? `&lang=${encodeURIComponent(language)}` : ""
+  }`;
 
 async function activateZeroDollarPlan({
   userId,
@@ -290,7 +294,7 @@ export async function POST(req: Request) {
       day: 20,
     });
 
-    const { planId, billingInterval, promoCode, analytics } = await readLimitedJson(
+    const { planId, billingInterval, language, promoCode, analytics } = await readLimitedJson(
       req,
       4 * 1024,
       checkoutSchema
@@ -435,7 +439,8 @@ export async function POST(req: Request) {
         redirectUrl: billingSuccessUrl(
           origin,
           planId as BillingPlanId,
-          billingInterval
+          billingInterval,
+          language
         ),
         periodEnd: periodEnd.toISOString(),
       });
@@ -479,7 +484,8 @@ export async function POST(req: Request) {
         success_url: billingSuccessUrl(
           origin,
           planId as BillingPlanId,
-          billingInterval
+          billingInterval,
+          language
         ),
         cancel_url: `${origin}/pricing?billing=cancelled`,
         expires_at: appliedPromotion

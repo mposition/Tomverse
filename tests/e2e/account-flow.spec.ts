@@ -50,6 +50,16 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByTestId("chat-input")).toBeVisible();
 });
 
+test("billing success modal respects the explicit return language", async ({ page }) => {
+  await page.goto("/chat?billing=success&plan=max&interval=monthly&lang=ko");
+
+  const successDialog = page.getByRole("dialog", { name: "결제 완료" });
+  await expect(successDialog).toBeVisible();
+  await expect(successDialog).toContainText("결제가 성공적으로 완료되었습니다.");
+  await expect(successDialog).toContainText("월간");
+  await expect(successDialog.getByRole("button", { name: "닫기" })).toBeVisible();
+});
+
 test("authenticated user opens settings and starts Private Mode", async ({ page }) => {
   await openSidebarOnMobile(page);
 

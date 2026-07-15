@@ -94,8 +94,8 @@ type AppToast = {
 };
 
 type BillingSuccessState = {
-  plan: string;
-  interval: string;
+  plan: string | null;
+  interval: "monthly" | "annual";
 };
 
 const normalizeBillingPlanLabel = (value: string | null) => {
@@ -366,10 +366,14 @@ export default function Home() {
 
     const plan = params.get("plan");
     const interval = params.get("interval");
+    const urlLanguage = params.get("lang");
+    if (isLanguage(urlLanguage)) {
+      setLang(urlLanguage);
+    }
     queueMicrotask(() => {
       setBillingSuccess({
-        plan: normalizeBillingPlanLabel(plan) || t("billing.upgradedPlanFallback"),
-        interval: interval === "annual" ? t("billing.intervalAnnual") : t("billing.intervalMonthly"),
+        plan: normalizeBillingPlanLabel(plan),
+        interval: interval === "annual" ? "annual" : "monthly",
       });
     });
 
@@ -396,7 +400,7 @@ export default function Home() {
       "",
       `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`
     );
-  }, [t]);
+  }, [setLang]);
 
   useEffect(() => {
     const handleToast = (event: Event) => {
@@ -1593,18 +1597,26 @@ export default function Home() {
                 {t("billing.paymentSuccessfulTitle")}
               </h2>
               <p className="mt-4 text-base leading-7 text-zinc-300">
-                {formatCopy("billing.paymentSuccessfulWelcome", { plan: billingSuccess.plan })}
+                {formatCopy("billing.paymentSuccessfulWelcome", {
+                  plan: billingSuccess.plan || t("billing.upgradedPlanFallback"),
+                })}
               </p>
             </div>
 
             <div className="mt-6 grid gap-3 sm:grid-cols-3">
               <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
                 <p className="text-xs font-semibold text-zinc-400">{t("billing.plan")}</p>
-                <p className="mt-1 text-lg font-black">{billingSuccess.plan}</p>
+                <p className="mt-1 text-lg font-black">
+                  {billingSuccess.plan || t("billing.upgradedPlanFallback")}
+                </p>
               </div>
               <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
                 <p className="text-xs font-semibold text-zinc-400">{t("billing.billing")}</p>
-                <p className="mt-1 text-lg font-black">{billingSuccess.interval}</p>
+                <p className="mt-1 text-lg font-black">
+                  {billingSuccess.interval === "annual"
+                    ? t("billing.intervalAnnual")
+                    : t("billing.intervalMonthly")}
+                </p>
               </div>
               <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4">
                 <p className="text-xs font-semibold text-emerald-200">{t("billing.status")}</p>
