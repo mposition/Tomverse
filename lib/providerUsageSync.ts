@@ -1345,10 +1345,6 @@ const zhipuInternalUsage = async (
   date: Date
 ): Promise<ProviderUsageSyncResult> => {
   const provider: AiProvider = "zhipu";
-const moonshotInternalUsage = async (
-  date: Date
-): Promise<ProviderUsageSyncResult> => {
-  const provider: AiProvider = "zhipu";
   const usage = await getInternalProviderUsageSummary({ provider, date });
   return {
     provider,
@@ -1366,11 +1362,72 @@ const moonshotInternalUsage = async (
     reconciliationLabel: "Official balance and daily cost APIs unavailable",
     message:
       "Zhipu response Usage, including cached prompt tokens, is costed with the request-time model price snapshot. Maintain a Provider Credit checkpoint and verify it periodically in the Z.AI dashboard.",
-    reconciliationLabel: "Official daily cost API unavailable",
-    message:
-      "Zhipu response Usage, including cached prompt tokens, is costed with the request-time model price snapshot. Maintain a Provider Credit checkpoint and verify it periodically in the Z.AI dashboard.",
     diagnostic: null,
   };
+};
+
+const moonshotInternalUsage = async (
+  date: Date
+): Promise<ProviderUsageSyncResult> => {
+  const provider: AiProvider = "moonshot";
+  const usage = await getInternalProviderUsageSummary({ provider, date });
+  return {
+    provider,
+    displayName: PROVIDER_DISPLAY_NAMES[provider],
+    status: "internal",
+    reportedCostMicroUsd: null,
+    internalCostMicroUsd: usage.estimatedCostMicroUsd,
+    internalUsage: {
+      requestCount: usage.requestCount,
+      inputTokens: usage.inputTokens,
+      cachedInputTokens: usage.cachedInputTokens,
+      outputTokens: usage.outputTokens,
+    },
+    usageSourceLabel: "Internal response accounting",
+    reconciliationLabel:
+      "Official daily cost API unavailable; live balance is monitored separately",
+    message:
+      "Moonshot response Usage is costed with the request-time model price snapshot. The Check Balance API remains a separate live prepaid-funds check; verify the monthly total in Kimi API Platform.",
+    diagnostic: null,
+  };
+};
+
+const hasGenericUsageEndpoint = (provider: AiProvider, date: Date) =>
+  Boolean(usageUrlFor(provider, date)) &&
+  Boolean(
+    process.env[`PROVIDER_${envProvider(provider)}_USAGE_COST_JSON_PATH`]
+  );
+
+const syncProviderUsage = async (
+  provider: AiProvider,
+  date: Date
+): Promise<ProviderUsageSyncResult> => {
+  switch (provider) {
+    case "openai":
+      return syncOpenAiCosts(date);
+    case "anthropic":
+      return syncAnthropicCosts(date);
+    case "xai":
+      return syncXaiUsage(date);
+    case "google":
+      return syncGoogleCloudBilling(date);
+    case "qwen":
+      return syncAlibabaCloudBilling(date);
+    case "mistral":
+      return hasGenericUsageEndpoint(provider, date)
+        ? syncGenericUsage(provider, date)
+        : mistralInternalUsage(date);
+    case "zhipu":
+      return hasGenericUsageEndpoint(provider, date)
+        ? syncGenericUsage(provider, date)
+        : zhipuInternalUsage(date);
+    case "moonshot":
+      return hasGenericUsageEndpoint(provider, date)
+        ? syncGenericUsage(provider, date)
+        : moonshotInternalUsage(date);
+    default:
+      return syncGenericUsage(provider, date);
+  }
 };
 
 export async function syncProviderUsageForDate(
@@ -1380,39 +1437,7 @@ export async function syncProviderUsageForDate(
   const results: ProviderUsageSyncResult[] = [];
 
   for (const provider of MONITORED_PROVIDERS) {
-    const hasGenericMistralUsageEndpoint =
-      provider === "mistral" &&
-      Boolean(usageUrlFor(provider, date)) &&
-      Boolean(
-        process.env[`PROVIDER_${envProvider(provider)}_USAGE_COST_JSON_PATH`]
-      );
-    const hasGenericZhipuUsageEndpoint =
-      provider === "zhipu" &&
-    const hasGenericMoonshotUsageEndpoint =
-      provider === "moonshot" &&
-      Boolean(usageUrlFor(provider, date)) &&
-      Boolean(
-        process.env[`PROVIDER_${envProvider(provider)}_USAGE_COST_JSON_PATH`]
-      );
-    results.push(
-      provider === "openai"
-        ? await syncOpenAiCosts(date)
-        : provider === "anthropic"
-          ? await syncAnthropicCosts(date)
-        : provider === "xai"
-            ? await syncXaiUsage(date)
-            : provider === "google"
-              ? await syncGoogleCloudBilling(date)
-              : provider === "qwen"
-                ? await syncAlibabaCloudBilling(date)
-            : provider === "mistral" && !hasGenericMistralUsageEndpoint
-              ? await mistralInternalUsage(date)
-              : provider === "zhipu" && !hasGenericZhipuUsageEndpoint
-                ? await zhipuInternalUsage(date)
-              : provider === "moonshot" && !hasGenericMoonshotUsageEndpoint
-                ? await moonshotInternalUsage(date)
-              : await syncGenericUsage(provider, date)
-    );
+    results.push(await syncProviderUsage(provider, date));
   }
 
   return results;
