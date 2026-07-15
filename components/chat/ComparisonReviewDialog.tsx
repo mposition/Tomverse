@@ -136,7 +136,7 @@ export function ComparisonReviewDialog({
   const [review, setReview] = useState<ComparisonReview | null>(null);
   const [mode, setMode] = useState<ReviewMode>("balanced");
   const [includeSynthesis, setIncludeSynthesis] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
 
@@ -297,7 +297,10 @@ export function ComparisonReviewDialog({
 
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-5 sm:px-6">
           {loading ? (
-            <div className="flex min-h-64 flex-col items-center justify-center text-zinc-500">
+            <div
+              data-testid="comparison-review-loading"
+              className="flex min-h-64 flex-col items-center justify-center text-zinc-500"
+            >
               <LoaderCircle className="h-7 w-7 animate-spin text-blue-500" />
               <p className="mt-3 text-sm font-semibold">{t("chat.aiReviewPreparing")}</p>
             </div>
@@ -441,7 +444,7 @@ export function ComparisonReviewDialog({
               </button>
             </div>
           ) : (
-            <div className="space-y-5">
+            <div data-testid="comparison-review-setup" className="space-y-5">
               <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-300">
                 {t("chat.aiReviewDescription")}
               </p>

@@ -11,12 +11,15 @@ const reviewModels = [
   "gemini-2-5-flash",
 ];
 
-async function mockComparisonReview(page: Page) {
+async function mockComparisonReview(page: Page, getDelayMs = 0) {
   let requestBody: Record<string, unknown> | null = null;
   await page.route(
     "**/api/conversations/qa-conversation/comparison-reviews",
     async (route) => {
       if (route.request().method() === "GET") {
+        if (getDelayMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, getDelayMs));
+        }
         await route.fulfill({
           status: 200,
           contentType: "application/json",
@@ -127,6 +130,22 @@ async function mockComparisonReview(page: Page) {
   );
   return { getRequestBody: () => requestBody };
 }
+
+test("AI comparison review does not flash an unavailable setup before loading", async ({
+  page,
+}) => {
+  await prepareGuestPage(page, "ko");
+  await mockAuthenticatedApi(page, { selectedModels: reviewModels });
+  await mockComparisonReview(page, 300);
+  await page.goto("/chat");
+
+  await page.getByRole("button", { name: "AI 답변 교차검토" }).click();
+  const dialog = page.getByRole("dialog", { name: "AI 답변 교차검토" });
+  await expect(dialog.getByTestId("comparison-review-loading")).toBeVisible();
+  await expect(dialog.getByTestId("comparison-review-setup")).toHaveCount(0);
+  await expect(dialog.getByTestId("comparison-review-setup")).toBeVisible();
+  await expect(dialog.getByTestId("comparison-review-loading")).toHaveCount(0);
+});
 
 for (const viewport of [
   { name: "desktop", width: 1280, height: 720 },
