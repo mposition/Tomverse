@@ -1341,6 +1341,31 @@ const mistralInternalUsage = async (
   };
 };
 
+const moonshotInternalUsage = async (
+  date: Date
+): Promise<ProviderUsageSyncResult> => {
+  const provider: AiProvider = "moonshot";
+  const usage = await getInternalProviderUsageSummary({ provider, date });
+  return {
+    provider,
+    displayName: PROVIDER_DISPLAY_NAMES[provider],
+    status: "internal",
+    reportedCostMicroUsd: null,
+    internalCostMicroUsd: usage.estimatedCostMicroUsd,
+    internalUsage: {
+      requestCount: usage.requestCount,
+      inputTokens: usage.inputTokens,
+      cachedInputTokens: usage.cachedInputTokens,
+      outputTokens: usage.outputTokens,
+    },
+    usageSourceLabel: "Internal response accounting",
+    reconciliationLabel: "Official daily cost API unavailable",
+    message:
+      "Moonshot response tokens are costed with the request-time model price snapshot. The official Balance API is monitored separately; verify the monthly total in Kimi API Platform.",
+    diagnostic: null,
+  };
+};
+
 export async function syncProviderUsageForDate(
   requestedDate = defaultProviderUsageSyncDate()
 ): Promise<ProviderUsageSyncResult[]> {
@@ -1350,6 +1375,12 @@ export async function syncProviderUsageForDate(
   for (const provider of MONITORED_PROVIDERS) {
     const hasGenericMistralUsageEndpoint =
       provider === "mistral" &&
+      Boolean(usageUrlFor(provider, date)) &&
+      Boolean(
+        process.env[`PROVIDER_${envProvider(provider)}_USAGE_COST_JSON_PATH`]
+      );
+    const hasGenericMoonshotUsageEndpoint =
+      provider === "moonshot" &&
       Boolean(usageUrlFor(provider, date)) &&
       Boolean(
         process.env[`PROVIDER_${envProvider(provider)}_USAGE_COST_JSON_PATH`]
@@ -1367,6 +1398,8 @@ export async function syncProviderUsageForDate(
                 ? await syncAlibabaCloudBilling(date)
             : provider === "mistral" && !hasGenericMistralUsageEndpoint
               ? await mistralInternalUsage(date)
+              : provider === "moonshot" && !hasGenericMoonshotUsageEndpoint
+                ? await moonshotInternalUsage(date)
               : await syncGenericUsage(provider, date)
     );
   }

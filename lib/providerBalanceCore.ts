@@ -93,3 +93,47 @@ export const parseDeepSeekBalance = (
     available: record.is_available,
   };
 };
+
+const moonshotAmount = (value: unknown, path: string) => {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new ProviderBalanceParseError(
+      `Moonshot Balance API returned an invalid amount at ${path}.`
+    );
+  }
+  return value;
+};
+
+export const parseMoonshotBalance = (
+  payload: unknown
+): ProviderBalanceSnapshot => {
+  if (!payload || typeof payload !== "object") {
+    throw new ProviderBalanceParseError(
+      "Moonshot Balance API returned an invalid JSON object."
+    );
+  }
+  const record = payload as Record<string, unknown>;
+  const data = record.data;
+  if (record.status !== true || !data || typeof data !== "object") {
+    throw new ProviderBalanceParseError(
+      "Moonshot Balance API response did not contain a successful balance payload."
+    );
+  }
+  const balance = data as Record<string, unknown>;
+  const amount = moonshotAmount(
+    balance.available_balance,
+    "data.available_balance"
+  );
+  return {
+    amount,
+    currency: "USD",
+    available: amount > 0,
+    grantedAmount: moonshotAmount(
+      balance.voucher_balance,
+      "data.voucher_balance"
+    ),
+    toppedUpAmount: moonshotAmount(
+      balance.cash_balance,
+      "data.cash_balance"
+    ),
+  };
+};
