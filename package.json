@@ -12,7 +12,7 @@
     "test:e2e:ui": "npm run build && playwright test --ui",
     "test:db:integration": "node scripts/run-db-integration-tests.mjs",
     "lint": "eslint",
-    "check": "eslint . --max-warnings=0 && tsc --noEmit --incremental false && next build",
+    "check": "eslint . --max-warnings=0 && next typegen && tsc --noEmit --incremental false && next build",
     "check:encoding": "node scripts/check-text-encoding.mjs",
     "check:encoding:strict": "node scripts/check-text-encoding.mjs --strict",
     "security:regression": "node scripts/security-regression-check.mjs",
