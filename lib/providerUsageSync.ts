@@ -8,11 +8,14 @@ import {
   PROVIDER_DISPLAY_NAMES,
 } from "@/lib/providerMonitoring";
 import {
+  anthropicCostsUrl,
+  AnthropicCostsParseError,
   isRetryableOpenAiStatus,
   OpenAiCostsParseError,
   openAiCostsRequestPolicy,
   openAiCostsRetryDelayMs,
   openAiCostsUrl,
+  parseAnthropicCostsPage,
   parseOpenAiCostsPage,
   redactProviderDiagnostic,
 } from "@/lib/providerUsageSyncCore";
@@ -28,7 +31,7 @@ export type ProviderUsageSyncFailureStage =
 
 export type ProviderUsageSyncDiagnostic = {
   traceId: string;
-  source: "openai_costs" | "generic_usage";
+  source: "openai_costs" | "anthropic_costs" | "generic_usage";
   endpoint: string;
   httpStatus: number | null;
   errorType: string | null;
@@ -51,9 +54,12 @@ export type ProviderUsageSyncResult = {
 };
 
 const OPENAI_COSTS_URL = "https://api.openai.com/v1/organization/costs";
+const ANTHROPIC_COSTS_URL =
+  "https://api.anthropic.com/v1/organizations/cost_report";
 const GENERIC_EXTERNAL_TIMEOUT_MS = 10_000;
 const MAX_EXTERNAL_RESPONSE_BYTES = 512_000;
 const MAX_OPENAI_PAGES = 10;
+const MAX_ANTHROPIC_PAGES = 10;
 
 const envProvider = (provider: AiProvider) => provider.toUpperCase();
 
@@ -429,6 +435,159 @@ const syncOpenAiCosts = async (date: Date): Promise<ProviderUsageSyncResult> => 
   }
 };
 
+const syncAnthropicCosts = async (
+  date: Date
+): Promise<ProviderUsageSyncResult> => {
+  const provider: AiProvider = "anthropic";
+  const displayName = PROVIDER_DISPLAY_NAMES[provider];
+  const adminKey = process.env.ANTHROPIC_ADMIN_API_KEY?.trim();
+  if (!adminKey) {
+    return {
+      provider,
+      displayName,
+      status: "skipped",
+      reportedCostMicroUsd: null,
+      message: "ANTHROPIC_ADMIN_API_KEY is not configured.",
+      diagnostic: null,
+    };
+  }
+
+  const traceId = crypto.randomUUID();
+  let page: string | null = null;
+  let pageCount = 0;
+  let reportedCostMicroUsd = 0;
+  let lineItemCount = 0;
+  let lastHttpStatus: number | null = null;
+  let lastProviderRequestId: string | null = null;
+  let failureStage: ProviderUsageSyncFailureStage = "connection";
+  const providerRequestIds: string[] = [];
+
+  try {
+    do {
+      pageCount += 1;
+      if (pageCount > MAX_ANTHROPIC_PAGES) {
+        throw new Error("Anthropic Cost API pagination exceeded the safety limit.");
+      }
+      const url = anthropicCostsUrl({
+        baseUrl: ANTHROPIC_COSTS_URL,
+        date,
+        page,
+      });
+      failureStage = "connection";
+      lastHttpStatus = null;
+      lastProviderRequestId = null;
+      const response = await fetch(url, {
+        cache: "no-store",
+        signal: AbortSignal.timeout(GENERIC_EXTERNAL_TIMEOUT_MS),
+        headers: {
+          Accept: "application/json",
+          "anthropic-version": "2023-06-01",
+          "x-api-key": adminKey,
+        },
+      });
+      lastHttpStatus = response.status;
+      const requestId = redactProviderDiagnostic(
+        response.headers.get("request-id") || response.headers.get("x-request-id"),
+        160
+      );
+      lastProviderRequestId = requestId;
+      if (requestId) providerRequestIds.push(requestId);
+      failureStage = "response";
+      const payload = await readBoundedJson(response);
+
+      if (!response.ok) {
+        failureStage = "provider_http";
+        const message =
+          response.status === 401 || response.status === 403
+            ? `Anthropic Cost API denied access (${response.status}). Verify that ANTHROPIC_ADMIN_API_KEY is an Admin API key for a Claude Console organization.`
+            : `Anthropic Cost API returned ${response.status}.`;
+        return failedResult({
+          provider,
+          date,
+          message,
+          diagnostic: {
+            traceId,
+            source: "anthropic_costs",
+            endpoint: endpointLabel(ANTHROPIC_COSTS_URL),
+            httpStatus: response.status,
+            errorType: diagnosticValue(payload, "type"),
+            errorCode:
+              diagnosticValue(payload, "code") ||
+              `ANTHROPIC_COSTS_HTTP_${response.status}`,
+            providerRequestId: requestId,
+            detail: diagnosticValue(payload, "message"),
+            attemptCount: pageCount,
+            attemptTimeoutMs: GENERIC_EXTERNAL_TIMEOUT_MS,
+            failureStage,
+          },
+        });
+      }
+
+      failureStage = "payload";
+      const parsed = parseAnthropicCostsPage(payload);
+      reportedCostMicroUsd += parsed.costMicroUsd;
+      lineItemCount += parsed.lineItemCount;
+      if (parsed.hasMore && !parsed.nextPage) {
+        throw new Error("Anthropic Cost API omitted the next page cursor.");
+      }
+      page = parsed.hasMore ? parsed.nextPage : null;
+    } while (page);
+
+    failureStage = "storage";
+    await recordProviderReportedUsage({
+      provider,
+      date,
+      costMicroUsd: reportedCostMicroUsd,
+      payload: {
+        source: "anthropic_costs",
+        date: date.toISOString().slice(0, 10),
+        costMicroUsd: reportedCostMicroUsd,
+        pageCount,
+        lineItemCount,
+        providerRequestIds,
+      },
+    });
+    return {
+      provider,
+      displayName,
+      status: "synced",
+      reportedCostMicroUsd,
+      message: "Anthropic organization costs were reconciled.",
+      diagnostic: null,
+    };
+  } catch (error) {
+    const isTimeout = isTimeoutError(error);
+    return failedResult({
+      provider,
+      date,
+      message: isTimeout
+        ? "Anthropic Cost API timed out after 10 seconds."
+        : "Anthropic Cost API response could not be reconciled.",
+      diagnostic: {
+        traceId,
+        source: "anthropic_costs",
+        endpoint: endpointLabel(ANTHROPIC_COSTS_URL),
+        httpStatus: lastHttpStatus,
+        errorType: isTimeout ? "timeout" : error instanceof Error ? error.name : null,
+        errorCode: isTimeout
+          ? "ANTHROPIC_COSTS_TIMEOUT"
+          : error instanceof AnthropicCostsParseError
+            ? error.code
+            : "ANTHROPIC_COSTS_SYNC_FAILED",
+        providerRequestId: lastProviderRequestId,
+        detail:
+          error instanceof Error
+            ? redactProviderDiagnostic(error.message)
+            : "Anthropic Cost API request failed.",
+        attemptCount: pageCount,
+        attemptTimeoutMs: GENERIC_EXTERNAL_TIMEOUT_MS,
+        failureStage,
+      },
+      cause: error,
+    });
+  }
+};
+
 const syncGenericUsage = async (
   provider: AiProvider,
   date: Date
@@ -553,7 +712,9 @@ export async function syncProviderUsageForDate(
     results.push(
       provider === "openai"
         ? await syncOpenAiCosts(date)
-        : await syncGenericUsage(provider, date)
+        : provider === "anthropic"
+          ? await syncAnthropicCosts(date)
+          : await syncGenericUsage(provider, date)
     );
   }
 

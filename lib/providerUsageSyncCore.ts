@@ -5,6 +5,36 @@ export const openAiCostsDayRange = (date: Date) => {
   return { startTime, endTime: startTime + 86_400 };
 };
 
+export const anthropicCostsDayRange = (date: Date) => {
+  const startingAt = new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
+  );
+  const endingAt = new Date(startingAt.getTime() + 86_400_000);
+  return {
+    startingAt: startingAt.toISOString(),
+    endingAt: endingAt.toISOString(),
+  };
+};
+
+export const anthropicCostsUrl = ({
+  baseUrl,
+  date,
+  page,
+}: {
+  baseUrl: string;
+  date: Date;
+  page?: string | null;
+}) => {
+  const { startingAt, endingAt } = anthropicCostsDayRange(date);
+  const url = new URL(baseUrl);
+  url.searchParams.set("starting_at", startingAt);
+  url.searchParams.set("ending_at", endingAt);
+  url.searchParams.set("bucket_width", "1d");
+  url.searchParams.set("limit", "1");
+  if (page) url.searchParams.set("page", page);
+  return url;
+};
+
 export const openAiCostsUrl = ({
   baseUrl,
   date,
@@ -125,6 +155,21 @@ export class OpenAiCostsParseError extends Error {
   }
 }
 
+export type AnthropicCostsParseErrorCode =
+  | "ANTHROPIC_COSTS_INVALID_PAYLOAD"
+  | "ANTHROPIC_COSTS_INVALID_CURRENCY"
+  | "ANTHROPIC_COSTS_INVALID_AMOUNT";
+
+export class AnthropicCostsParseError extends Error {
+  readonly code: AnthropicCostsParseErrorCode;
+
+  constructor(code: AnthropicCostsParseErrorCode, message: string) {
+    super(message);
+    this.name = "AnthropicCostsParseError";
+    this.code = code;
+  }
+}
+
 const finiteSignedAmount = (value: unknown) => {
   if (typeof value === "number" && Number.isFinite(value)) {
     return { value, normalizedFromString: false };
@@ -237,10 +282,102 @@ export const parseOpenAiCostsPage = (payload: unknown) => {
   };
 };
 
+export const parseAnthropicCostsPage = (payload: unknown) => {
+  if (!payload || typeof payload !== "object") {
+    throw new AnthropicCostsParseError(
+      "ANTHROPIC_COSTS_INVALID_PAYLOAD",
+      "Anthropic Cost API returned an invalid JSON object."
+    );
+  }
+  const record = payload as Record<string, unknown>;
+  if (!Array.isArray(record.data)) {
+    throw new AnthropicCostsParseError(
+      "ANTHROPIC_COSTS_INVALID_PAYLOAD",
+      "Anthropic Cost API response did not contain a data array."
+    );
+  }
+
+  let costMicroUsd = 0;
+  let lineItemCount = 0;
+  for (const [bucketIndex, bucket] of record.data.entries()) {
+    if (!bucket || typeof bucket !== "object") {
+      throw new AnthropicCostsParseError(
+        "ANTHROPIC_COSTS_INVALID_PAYLOAD",
+        `Anthropic Cost API returned an invalid bucket at data[${bucketIndex}].`
+      );
+    }
+    const results = (bucket as Record<string, unknown>).results;
+    if (!Array.isArray(results)) {
+      throw new AnthropicCostsParseError(
+        "ANTHROPIC_COSTS_INVALID_PAYLOAD",
+        `Anthropic Cost API response omitted results at data[${bucketIndex}].`
+      );
+    }
+
+    for (const [resultIndex, result] of results.entries()) {
+      const path = `data[${bucketIndex}].results[${resultIndex}]`;
+      if (!result || typeof result !== "object") {
+        throw new AnthropicCostsParseError(
+          "ANTHROPIC_COSTS_INVALID_PAYLOAD",
+          `Anthropic Cost API returned an invalid result at ${path}.`
+        );
+      }
+      const resultRecord = result as Record<string, unknown>;
+      const currency =
+        typeof resultRecord.currency === "string"
+          ? resultRecord.currency.toUpperCase()
+          : null;
+      if (currency !== "USD") {
+        throw new AnthropicCostsParseError(
+          "ANTHROPIC_COSTS_INVALID_CURRENCY",
+          `Anthropic Cost API returned an unsupported or missing currency at ${path}.`
+        );
+      }
+      if (
+        typeof resultRecord.amount !== "string" ||
+        !/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(resultRecord.amount.trim())
+      ) {
+        throw new AnthropicCostsParseError(
+          "ANTHROPIC_COSTS_INVALID_AMOUNT",
+          `Anthropic Cost API returned an invalid decimal-cent amount at ${path}.`
+        );
+      }
+      const amountInCents = Number(resultRecord.amount);
+      const lineItemMicroUsd = amountInCents * 10_000;
+      if (!Number.isFinite(lineItemMicroUsd)) {
+        throw new AnthropicCostsParseError(
+          "ANTHROPIC_COSTS_INVALID_AMOUNT",
+          `Anthropic Cost API returned an amount outside the supported numeric range at ${path}.`
+        );
+      }
+      costMicroUsd += lineItemMicroUsd;
+      if (!Number.isFinite(costMicroUsd)) {
+        throw new AnthropicCostsParseError(
+          "ANTHROPIC_COSTS_INVALID_AMOUNT",
+          "Anthropic Cost API returned an amount total outside the supported numeric range."
+        );
+      }
+      lineItemCount += 1;
+    }
+  }
+
+  const nextPage =
+    typeof record.next_page === "string" && record.next_page.trim()
+      ? record.next_page
+      : null;
+  return {
+    costMicroUsd: Math.round(costMicroUsd),
+    lineItemCount,
+    hasMore: record.has_more === true,
+    nextPage,
+  };
+};
+
 export const redactProviderDiagnostic = (value: unknown, maxLength = 300) => {
   if (typeof value !== "string") return null;
   const sanitized = value
     .replace(/Bearer\s+[^\s,;]+/gi, "Bearer [REDACTED]")
+    .replace(/\bsk-ant-(?:admin\d*|api\d*)-[A-Za-z0-9_-]{8,}\b/gi, "sk-ant-[REDACTED]")
     .replace(/\bsk-(?:admin-)?[A-Za-z0-9_-]{8,}\b/g, "sk-[REDACTED]")
     .replace(/\s+/g, " ")
     .trim();

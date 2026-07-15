@@ -1157,6 +1157,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                                             "STRIPE_WEBHOOK_SECRET",
                                             "SLACK_WEBHOOK_URL",
                                             "OPENAI_ADMIN_API_KEY",
+                                            "ANTHROPIC_ADMIN_API_KEY",
                                             "PROVIDER_USAGE_SYNC_SECRET",
                                             "PROVIDER_OPENAI_BALANCE_USD",
                                             "CHAT_PROVIDER_OPENAI_COST_MICROUSD_PER_DAY",

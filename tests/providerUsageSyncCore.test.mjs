@@ -1,14 +1,74 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  anthropicCostsDayRange,
+  anthropicCostsUrl,
   isRetryableOpenAiStatus,
   openAiCostsDayRange,
   openAiCostsRequestPolicy,
   openAiCostsRetryDelayMs,
   openAiCostsUrl,
+  parseAnthropicCostsPage,
   parseOpenAiCostsPage,
   redactProviderDiagnostic,
 } from "../lib/providerUsageSyncCore.ts";
+
+test("Anthropic Cost URL uses one exact UTC day and a page cursor", () => {
+  const date = new Date("2026-07-12T18:42:00.000Z");
+  assert.deepEqual(anthropicCostsDayRange(date), {
+    startingAt: "2026-07-12T00:00:00.000Z",
+    endingAt: "2026-07-13T00:00:00.000Z",
+  });
+
+  const url = anthropicCostsUrl({
+    baseUrl: "https://api.anthropic.com/v1/organizations/cost_report",
+    date,
+    page: "page_2",
+  });
+  assert.equal(url.searchParams.get("starting_at"), "2026-07-12T00:00:00.000Z");
+  assert.equal(url.searchParams.get("ending_at"), "2026-07-13T00:00:00.000Z");
+  assert.equal(url.searchParams.get("bucket_width"), "1d");
+  assert.equal(url.searchParams.get("limit"), "1");
+  assert.equal(url.searchParams.get("page"), "page_2");
+});
+
+test("Anthropic Cost parser sums fractional-cent USD line items", () => {
+  const parsed = parseAnthropicCostsPage({
+    data: [
+      {
+        starting_at: "2026-07-12T00:00:00Z",
+        ending_at: "2026-07-13T00:00:00Z",
+        results: [
+          { amount: "123.45", currency: "USD" },
+          { amount: "0.005", currency: "usd" },
+        ],
+      },
+    ],
+    has_more: true,
+    next_page: "page_2",
+  });
+  assert.equal(parsed.costMicroUsd, 1_234_550);
+  assert.equal(parsed.lineItemCount, 2);
+  assert.equal(parsed.hasMore, true);
+  assert.equal(parsed.nextPage, "page_2");
+});
+
+test("Anthropic Cost parser rejects unsupported currency and invalid amounts", () => {
+  assert.throws(
+    () =>
+      parseAnthropicCostsPage({
+        data: [{ results: [{ amount: "1.00", currency: "AUD" }] }],
+      }),
+    /unsupported or missing currency/
+  );
+  assert.throws(
+    () =>
+      parseAnthropicCostsPage({
+        data: [{ results: [{ amount: "-1.00", currency: "USD" }] }],
+      }),
+    /invalid decimal-cent amount/
+  );
+});
 
 test("OpenAI Costs URL uses one exact UTC day", () => {
   const date = new Date("2026-07-12T18:42:00.000Z");
@@ -123,12 +183,12 @@ test("OpenAI Costs parser rejects invalid currency and non-numeric amount", () =
   );
 });
 
-test("provider diagnostics redact bearer and OpenAI keys", () => {
+test("provider diagnostics redact bearer, OpenAI, and Anthropic keys", () => {
   const diagnostic = redactProviderDiagnostic(
-    "Authorization Bearer sk-admin-secret123456 and sk-project987654"
+    "Authorization Bearer sk-admin-secret123456 and sk-project987654 with sk-ant-admin01-secret987654"
   );
   assert.equal(
     diagnostic,
-    "Authorization Bearer [REDACTED] and sk-[REDACTED]"
+    "Authorization Bearer [REDACTED] and sk-[REDACTED] with sk-ant-[REDACTED]"
   );
 });
