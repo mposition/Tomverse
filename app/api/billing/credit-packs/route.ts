@@ -112,7 +112,7 @@ export async function POST(req: Request) {
       });
     }
     const origin = getPublicAppOrigin(req);
-    const analyticsMetadata = analytics
+    const analyticsMetadata: Record<string, string> = analytics
       ? {
           analyticsClientId: analytics.client_id,
           analyticsSessionId: analytics.session_id,

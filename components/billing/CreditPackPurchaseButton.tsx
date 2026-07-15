@@ -72,12 +72,13 @@ export function CreditPackPurchaseButton({
       currency: "USD",
     });
     try {
+      const analytics = getAnalyticsAttributionSnapshot();
       const response = await fetch("/api/billing/credit-packs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           packId,
-          analytics: getAnalyticsAttributionSnapshot(),
+          ...(analytics ? { analytics } : {}),
         }),
       });
       const data = await response.json();
