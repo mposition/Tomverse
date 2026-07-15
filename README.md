@@ -313,6 +313,17 @@ GA4_MEASUREMENT_ID=G-XXXXXXXXXX
 GA4_API_SECRET=your-ga4-measurement-protocol-secret
 ```
 
+For GA4 DebugView verification, set the following only in the staging service:
+
+```text
+NEXT_PUBLIC_GA4_DEBUG_MODE=true
+```
+
+This adds `debug_mode: true` to the client GA configuration, client product and
+Ecommerce events, and server Measurement Protocol events. Leave the variable
+unset or set it to `false` in production. Because `NEXT_PUBLIC_*` values are
+inlined into the browser bundle, rebuild and redeploy staging after changing it.
+
 Tomverse does not load Google Analytics or create its pseudonymous analytics
 identifier until the visitor accepts the analytics notice. Every accepted
 event is also written to the bounded first-party analytics ledger so the Admin

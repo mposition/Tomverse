@@ -47,6 +47,12 @@ export const shouldSendCustomProductEventToGa4 = (
   eventName: ProductAnalyticsEventName
 ) => eventName !== "purchase_completed";
 
+export const isGa4DebugModeEnabled = (value: unknown) =>
+  typeof value === "string" && value.trim().toLowerCase() === "true";
+
+export const ga4DebugEventParams = (value: unknown) =>
+  isGa4DebugModeEnabled(value) ? ({ debug_mode: true } as const) : {};
+
 export const PURCHASE_ANALYTICS_TRIGGERS = [
   "limit_hit",
   "usage_widget",

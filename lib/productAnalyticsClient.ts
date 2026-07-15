@@ -4,6 +4,7 @@ import {
   PRODUCT_ANALYTICS_EVENT_NAMES,
   analyticsClientEventSchema,
   analyticsPropertiesSchema,
+  ga4DebugEventParams,
   ga4EcommerceEventForProductEvent,
   shouldSendCustomProductEventToGa4,
   type AnalyticsAttribution,
@@ -29,6 +30,9 @@ const PENDING_EVENTS_STORAGE_KEY = "tomverse_analytics_pending_events_v1";
 const MODEL_FINDER_VARIANT_STORAGE_KEY = "tomverse_model_finder_variant_v1";
 const MAX_PENDING_EVENTS = 100;
 const ATTRIBUTION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+const GA4_DEBUG_PARAMS = ga4DebugEventParams(
+  process.env.NEXT_PUBLIC_GA4_DEBUG_MODE
+);
 
 type AnalyticsRuntime = {
   attribution: AnalyticsAttribution;
@@ -304,6 +308,7 @@ const sendIntent = (intent: EventIntent) => {
       model_count: payload.model_count,
       plan: runtime.plan,
       session_id: Number(payload.session_id),
+      ...GA4_DEBUG_PARAMS,
       ...payload.properties,
     });
   }
@@ -321,6 +326,7 @@ const sendIntent = (intent: EventIntent) => {
       country: payload.country,
       plan: runtime.plan,
       session_id: Number(payload.session_id),
+      ...GA4_DEBUG_PARAMS,
       ...ecommerceEvent.params,
     });
   }
@@ -418,6 +424,7 @@ export const configureAnalyticsClient = ({
       client_id: runtime.attribution.client_id,
       allow_google_signals: false,
       allow_ad_personalization_signals: false,
+      ...GA4_DEBUG_PARAMS,
     });
   }
 

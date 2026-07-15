@@ -45,3 +45,4 @@ next-env.d.ts
 
 /app/generated/prisma
 .vs
+.local-backups/aihub-clone.dump

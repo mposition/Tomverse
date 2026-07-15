@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import {
   analyticsAttributionSchema,
   analyticsPropertiesSchema,
+  ga4DebugEventParams,
   ga4EcommerceEventForProductEvent,
   normalizeAnalyticsPlan,
   shouldSendCustomProductEventToGa4,
@@ -66,6 +67,9 @@ const sendGa4ServerEvent = async (
   url.searchParams.set("api_secret", apiSecret);
   const properties = analyticsPropertiesForInput(input);
   const sessionId = Number(input.attribution.session_id);
+  const debugParams = ga4DebugEventParams(
+    process.env.NEXT_PUBLIC_GA4_DEBUG_MODE
+  );
   const country = input.attribution.country === "ZZ"
     ? undefined
     : { country_id: input.attribution.country };
@@ -79,6 +83,7 @@ const sendGa4ServerEvent = async (
     plan: normalizeAnalyticsPlan(input.plan),
     session_id: sessionId,
     engagement_time_msec: 100,
+    ...debugParams,
   };
   const ecommerceEvent = ga4EcommerceEventForProductEvent(
     input.eventName,

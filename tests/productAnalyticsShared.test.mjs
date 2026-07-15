@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   analyticsClientEventSchema,
+  ga4DebugEventParams,
   ga4EcommerceEventForProductEvent,
+  isGa4DebugModeEnabled,
   PRODUCT_ANALYTICS_EVENT_NAMES,
   shouldSendCustomProductEventToGa4,
 } from "../lib/productAnalyticsShared.ts";
@@ -206,6 +208,17 @@ test("GA4 purchase mapping requires complete revenue fields", () => {
 test("purchase_completed stays in the Tomverse ledger and is not sent as a custom GA4 event", () => {
   assert.equal(shouldSendCustomProductEventToGa4("purchase_completed"), false);
   assert.equal(shouldSendCustomProductEventToGa4("checkout_started"), true);
+});
+
+test("GA4 debug mode is opt-in and accepts only an explicit true value", () => {
+  assert.equal(isGa4DebugModeEnabled("true"), true);
+  assert.equal(isGa4DebugModeEnabled(" TRUE "), true);
+  assert.equal(isGa4DebugModeEnabled("false"), false);
+  assert.equal(isGa4DebugModeEnabled(undefined), false);
+  assert.equal(isGa4DebugModeEnabled(true), false);
+  assert.deepEqual(ga4DebugEventParams("true"), { debug_mode: true });
+  assert.deepEqual(ga4DebugEventParams("false"), {});
+  assert.deepEqual(ga4DebugEventParams(undefined), {});
 });
 
 test("purchase analytics rejects ambiguous credit quantity fields", () => {

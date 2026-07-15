@@ -1,7 +1,10 @@
 import "server-only";
 
 import { prisma } from "@/lib/prisma";
-import { PRODUCT_ANALYTICS_EVENT_NAMES } from "@/lib/productAnalyticsShared";
+import {
+  isGa4DebugModeEnabled,
+  PRODUCT_ANALYTICS_EVENT_NAMES,
+} from "@/lib/productAnalyticsShared";
 
 type ActorRow = {
   userId: string | null;
@@ -31,6 +34,7 @@ export type ProductAnalyticsDashboard = {
   configured: {
     measurementId: boolean;
     apiSecret: boolean;
+    debugMode: boolean;
   };
   funnel30d: Array<{ eventName: string; count: number }>;
   weeklyActiveComparisonUsers: number;
@@ -66,6 +70,9 @@ const emptyDashboard = (): ProductAnalyticsDashboard => ({
       process.env.GA4_MEASUREMENT_ID?.trim() || ""
     ),
     apiSecret: Boolean(process.env.GA4_API_SECRET?.trim()),
+    debugMode: isGa4DebugModeEnabled(
+      process.env.NEXT_PUBLIC_GA4_DEBUG_MODE
+    ),
   },
   funnel30d: PRODUCT_ANALYTICS_EVENT_NAMES.map((eventName) => ({
     eventName,
@@ -297,6 +304,9 @@ export async function getProductAnalyticsDashboard(): Promise<ProductAnalyticsDa
           process.env.GA4_MEASUREMENT_ID?.trim() || ""
         ),
         apiSecret: Boolean(process.env.GA4_API_SECRET?.trim()),
+        debugMode: isGa4DebugModeEnabled(
+          process.env.NEXT_PUBLIC_GA4_DEBUG_MODE
+        ),
       },
       funnel30d: PRODUCT_ANALYTICS_EVENT_NAMES.map((eventName) => ({
         eventName,
