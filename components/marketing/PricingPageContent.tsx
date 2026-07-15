@@ -5,6 +5,7 @@ import { useEffect, useRef } from "react";
 import {
   Calculator,
   CheckCircle2,
+  Coins,
   FileText,
   Info,
   MessageSquare,
@@ -232,6 +233,202 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     preflightBody: "O seletor mostra a classe de uso e os créditos-base de cada modelo. Some os modelos escolhidos; multiplicadores de arquivos e contexto longo são aplicados após o processamento.",
     preflightCta: "Abrir o seletor de modelos",
     disclaimer: "Exemplos ilustrativos para pedidos curtos sem arquivos ou histórico longo. Não garantem uma quantidade de respostas; o uso real varia conforme modelo, contexto, anexos e modo de raciocínio.",
+  },
+};
+
+type CreditPackCopy = {
+  eyebrow: string;
+  title: string;
+  description: string;
+  availableFor: string;
+  oneTime: string;
+  validity: string;
+  credits: string;
+  policyTitle: string;
+  policies: string[];
+  guidance: string;
+  purchaseCta: string;
+  loading: string;
+  packNames: Record<"starter_500" | "project_1500" | "power_4000", string>;
+  packDescriptions: Record<"starter_500" | "project_1500" | "power_4000", string>;
+};
+
+const creditPackCopy: Record<Language, CreditPackCopy> = {
+  en: {
+    eyebrow: "One-time add-ons",
+    title: "Need more credits without changing plans?",
+    description: "Buy an additional credit pack for a temporary project or a busier month. Pack pricing is shown in USD and checkout is available after sign-in.",
+    availableFor: "Available on",
+    oneTime: "One-time purchase",
+    validity: "Valid for 12 months",
+    credits: "credits",
+    policyTitle: "How additional credits work",
+    policies: [
+      "Monthly plan credits are used first, followed by additional credits with the earliest expiry.",
+      "Additional credits do not unlock models or features and do not raise daily, fair-use, or plan-specific limits.",
+      "Unused additional credits remain available after a plan change or cancellation until their displayed expiry date.",
+    ],
+    guidance: "Free: Pro remains the recommended upgrade for recurring use; the Starter pack is for occasional overflow. Pro and Max: use packs for one-off work and upgrade when higher usage repeats each month.",
+    purchaseCta: "Sign in to buy credits",
+    loading: "Loading current credit-pack pricing…",
+    packNames: {
+      starter_500: "Starter Credit Pack",
+      project_1500: "Project Credit Pack",
+      power_4000: "Power Credit Pack",
+    },
+    packDescriptions: {
+      starter_500: "A small add-on for Free users who need a little more usage this month.",
+      project_1500: "Extra capacity for a document, research, or short-term project.",
+      power_4000: "A larger add-on for intensive Pro or Max work without changing plans.",
+    },
+  },
+  ko: {
+    eyebrow: "일회성 추가 상품",
+    title: "플랜 변경 없이 크레딧만 더 필요하신가요?",
+    description: "이번 달 작업량이 많거나 일시적인 프로젝트가 있을 때 추가 크레딧 팩을 구매할 수 있습니다. 가격은 USD 기준이며 로그인 후 결제할 수 있습니다.",
+    availableFor: "구매 가능 플랜",
+    oneTime: "일회성 구매",
+    validity: "12개월 유효",
+    credits: "크레딧",
+    policyTitle: "추가 크레딧 이용 방식",
+    policies: [
+      "월 플랜 크레딧을 먼저 사용한 뒤 만료일이 빠른 추가 크레딧부터 차감합니다.",
+      "추가 크레딧은 모델·기능을 해제하지 않으며 일일 한도, 공정사용 및 플랜별 제한도 늘리지 않습니다.",
+      "플랜을 변경하거나 해지해도 미사용 추가 크레딧은 표시된 만료일까지 유지됩니다.",
+    ],
+    guidance: "Free는 반복 사용 시 Pro 업그레이드가 우선이며 Starter 팩은 일시적인 추가 사용용입니다. Pro·Max는 한 번의 프로젝트에는 팩을, 매월 사용량이 반복해서 많다면 상위 플랜을 권장합니다.",
+    purchaseCta: "로그인하고 크레딧 구매",
+    loading: "현재 크레딧 팩 가격을 불러오는 중…",
+    packNames: {
+      starter_500: "Starter 크레딧 팩",
+      project_1500: "Project 크레딧 팩",
+      power_4000: "Power 크레딧 팩",
+    },
+    packDescriptions: {
+      starter_500: "이번 달 사용량이 조금 더 필요한 Free 사용자를 위한 소형 팩입니다.",
+      project_1500: "문서, 리서치 또는 단기 프로젝트를 위한 추가 사용량입니다.",
+      power_4000: "플랜 변경 없이 집중적인 Pro·Max 작업을 이어가기 위한 대용량 팩입니다.",
+    },
+  },
+  zh: {
+    eyebrow: "一次性加购",
+    title: "无需更改方案，也能增加积分",
+    description: "当本月工作量增加或有临时项目时，可购买额外积分包。价格以 USD 显示，登录后可结账。",
+    availableFor: "适用方案",
+    oneTime: "一次性购买",
+    validity: "有效期 12 个月",
+    credits: "积分",
+    policyTitle: "额外积分的使用方式",
+    policies: [
+      "先扣除月度方案积分，再按最早到期顺序扣除额外积分。",
+      "额外积分不会解锁模型或功能，也不会提高每日、公平使用或方案限制。",
+      "更改或取消方案后，未使用的额外积分会保留到标示的到期日。",
+    ],
+    guidance: "Free 的长期使用仍建议升级 Pro；Starter 包适合偶尔超额。Pro 和 Max 可为一次性项目加购，若每月持续高用量则建议升级。",
+    purchaseCta: "登录后购买积分",
+    loading: "正在加载当前积分包价格…",
+    packNames: { starter_500: "Starter 积分包", project_1500: "Project 积分包", power_4000: "Power 积分包" },
+    packDescriptions: {
+      starter_500: "适合本月只需少量额外用量的 Free 用户。",
+      project_1500: "适合文档、研究或短期项目的额外用量。",
+      power_4000: "无需更改方案即可支持密集的 Pro 或 Max 工作。",
+    },
+  },
+  fr: {
+    eyebrow: "Crédits ponctuels",
+    title: "Besoin de crédits sans changer de formule ?",
+    description: "Achetez un pack pour un projet temporaire ou un mois plus chargé. Les prix sont en USD et l’achat est disponible après connexion.",
+    availableFor: "Disponible avec",
+    oneTime: "Achat unique",
+    validity: "Valable 12 mois",
+    credits: "crédits",
+    policyTitle: "Fonctionnement des crédits supplémentaires",
+    policies: [
+      "Les crédits mensuels sont utilisés avant les crédits supplémentaires arrivant le plus tôt à expiration.",
+      "Ils ne débloquent aucun modèle ou fonction et n’augmentent aucune limite quotidienne ou de fair-use.",
+      "Ils restent disponibles après un changement ou une résiliation jusqu’à leur date d’expiration.",
+    ],
+    guidance: "Avec Free, Pro reste conseillé pour un usage récurrent. Utilisez un pack pour un besoin ponctuel et passez au plan supérieur si ce besoin revient chaque mois.",
+    purchaseCta: "Se connecter pour acheter",
+    loading: "Chargement des prix actuels…",
+    packNames: { starter_500: "Pack Starter", project_1500: "Pack Project", power_4000: "Pack Power" },
+    packDescriptions: {
+      starter_500: "Un petit complément pour les utilisateurs Free.",
+      project_1500: "Une capacité supplémentaire pour un projet ponctuel.",
+      power_4000: "Un grand complément pour un usage Pro ou Max intensif.",
+    },
+  },
+  de: {
+    eyebrow: "Einmalige Zusatzpakete",
+    title: "Mehr Credits ohne Tarifwechsel?",
+    description: "Kaufen Sie ein Paket für ein vorübergehendes Projekt oder einen arbeitsreichen Monat. Preise werden in USD angezeigt; Kauf nach Anmeldung.",
+    availableFor: "Verfügbar für",
+    oneTime: "Einmalkauf",
+    validity: "12 Monate gültig",
+    credits: "Credits",
+    policyTitle: "So funktionieren zusätzliche Credits",
+    policies: [
+      "Monatliche Tarif-Credits werden zuerst verbraucht, danach Zusatz-Credits mit dem frühesten Ablaufdatum.",
+      "Zusatz-Credits schalten keine Modelle oder Funktionen frei und erhöhen keine Tages- oder Fair-Use-Limits.",
+      "Nach Tarifwechsel oder Kündigung bleiben sie bis zum angegebenen Ablaufdatum erhalten.",
+    ],
+    guidance: "Bei Free bleibt Pro für regelmäßige Nutzung die Empfehlung. Pakete eignen sich für einmalige Projekte; bei monatlich höherem Bedarf ist ein Upgrade sinnvoller.",
+    purchaseCta: "Anmelden und Credits kaufen",
+    loading: "Aktuelle Paketpreise werden geladen…",
+    packNames: { starter_500: "Starter-Credit-Paket", project_1500: "Project-Credit-Paket", power_4000: "Power-Credit-Paket" },
+    packDescriptions: {
+      starter_500: "Ein kleines Zusatzpaket für Free-Nutzer.",
+      project_1500: "Zusätzliche Kapazität für ein zeitlich begrenztes Projekt.",
+      power_4000: "Ein großes Paket für intensive Pro- oder Max-Arbeit.",
+    },
+  },
+  es: {
+    eyebrow: "Complementos de un pago",
+    title: "¿Necesitas más créditos sin cambiar de plan?",
+    description: "Compra un paquete para un proyecto temporal o un mes con más trabajo. Los precios se muestran en USD y la compra requiere iniciar sesión.",
+    availableFor: "Disponible en",
+    oneTime: "Compra única",
+    validity: "Válido 12 meses",
+    credits: "créditos",
+    policyTitle: "Cómo funcionan los créditos adicionales",
+    policies: [
+      "Primero se usan los créditos mensuales y después los adicionales con vencimiento más próximo.",
+      "No desbloquean modelos ni funciones y no aumentan límites diarios, de uso justo o del plan.",
+      "Se conservan tras cambiar o cancelar el plan hasta la fecha de vencimiento indicada.",
+    ],
+    guidance: "En Free, Pro sigue siendo la opción recomendada para uso recurrente. Usa paquetes para proyectos puntuales y mejora el plan si el mayor uso se repite cada mes.",
+    purchaseCta: "Inicia sesión para comprar",
+    loading: "Cargando precios actuales…",
+    packNames: { starter_500: "Paquete Starter", project_1500: "Paquete Project", power_4000: "Paquete Power" },
+    packDescriptions: {
+      starter_500: "Un pequeño complemento para usuarios Free.",
+      project_1500: "Capacidad adicional para un proyecto temporal.",
+      power_4000: "Un complemento grande para trabajo intensivo en Pro o Max.",
+    },
+  },
+  pt: {
+    eyebrow: "Créditos avulsos",
+    title: "Precisa de mais créditos sem mudar de plano?",
+    description: "Compre um pacote para um projeto temporário ou um mês mais intenso. Os preços são exibidos em USD e a compra fica disponível após o login.",
+    availableFor: "Disponível no",
+    oneTime: "Compra única",
+    validity: "Válido por 12 meses",
+    credits: "créditos",
+    policyTitle: "Como funcionam os créditos adicionais",
+    policies: [
+      "Os créditos mensais são usados primeiro; depois, os adicionais com vencimento mais próximo.",
+      "Eles não liberam modelos ou recursos nem aumentam limites diários, de uso justo ou do plano.",
+      "Continuam disponíveis após mudança ou cancelamento até a data de validade indicada.",
+    ],
+    guidance: "No Free, o Pro continua recomendado para uso recorrente. Use pacotes para projetos pontuais e faça upgrade se o uso maior se repetir todo mês.",
+    purchaseCta: "Entrar para comprar créditos",
+    loading: "Carregando preços atuais…",
+    packNames: { starter_500: "Pacote Starter", project_1500: "Pacote Project", power_4000: "Pacote Power" },
+    packDescriptions: {
+      starter_500: "Um pequeno adicional para usuários Free.",
+      project_1500: "Capacidade extra para um projeto temporário.",
+      power_4000: "Um pacote maior para trabalho intenso no Pro ou Max.",
+    },
   },
 };
 
@@ -586,6 +783,8 @@ export function PricingPageContent() {
   const promotionDetail =
     promotionDetailByLanguage[lang] ?? promotionDetailByLanguage.en!;
   const creditGuide = creditValueCopy[lang];
+  const creditPackGuide = creditPackCopy[lang];
+  const publicCreditPacks = billing.config?.creditPacks ?? [];
   const numberFormatter = new Intl.NumberFormat(promotionDateLocale[lang]);
   const creditPlans = ([
     { id: "free", name: "Free", fallbackCredits: 300 },
@@ -838,6 +1037,96 @@ export function PricingPageContent() {
             );
           })}
         </div>
+
+        <section
+          data-testid="pricing-credit-packs"
+          className="mt-16 overflow-hidden rounded-[2rem] border border-emerald-500/25 bg-gradient-to-br from-emerald-500/10 via-white to-blue-500/5 dark:via-zinc-950 dark:to-blue-950/20"
+        >
+          <div className="grid gap-6 p-5 sm:p-7 lg:grid-cols-[1fr_auto] lg:items-end">
+            <div className="max-w-3xl">
+              <p className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.18em] text-emerald-700 dark:text-emerald-300">
+                <Coins className="h-4 w-4" />
+                {creditPackGuide.eyebrow}
+              </p>
+              <h2 className="mt-3 text-3xl font-black sm:text-4xl">{creditPackGuide.title}</h2>
+              <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">
+                {creditPackGuide.description}
+              </p>
+            </div>
+            <Link
+              href="/chat"
+              onClick={() =>
+                trackProductEvent("cta_start_click", 0, {
+                  cta_location: "pricing_credit_pack_section",
+                })
+              }
+              className="inline-flex h-11 items-center justify-center rounded-xl bg-emerald-600 px-5 text-sm font-black text-white transition hover:bg-emerald-500"
+            >
+              {creditPackGuide.purchaseCta}
+            </Link>
+          </div>
+
+          <div className="grid gap-4 border-t border-emerald-500/20 p-5 sm:p-7 lg:grid-cols-3">
+            {publicCreditPacks.length === 0 ? (
+              <p className="text-sm font-semibold text-zinc-500 dark:text-zinc-400 lg:col-span-3">
+                {creditPackGuide.loading}
+              </p>
+            ) : (
+              publicCreditPacks.map((pack) => (
+                <article
+                  key={pack.id}
+                  data-pack-id={pack.id}
+                  className="flex min-h-full flex-col rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950/80"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-lg font-black">{creditPackGuide.packNames[pack.id]}</h3>
+                      <p className="mt-2 text-xs font-black uppercase tracking-[0.12em] text-emerald-700 dark:text-emerald-300">
+                        {creditPackGuide.availableFor}: {pack.allowedPlans.join(" / ")}
+                      </p>
+                    </div>
+                    <span className="shrink-0 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[10px] font-black text-emerald-700 dark:text-emerald-300">
+                      {creditPackGuide.oneTime}
+                    </span>
+                  </div>
+                  <p className="mt-5 text-3xl font-black">
+                    {numberFormatter.format(pack.credits)}{" "}
+                    <span className="text-sm text-zinc-500 dark:text-zinc-400">{creditPackGuide.credits}</span>
+                  </p>
+                  <p className="mt-1 text-xl font-black text-emerald-700 dark:text-emerald-300">
+                    {new Intl.NumberFormat(promotionDateLocale[lang], {
+                      style: "currency",
+                      currency: pack.currency,
+                    }).format(pack.priceCents / 100)}
+                  </p>
+                  <p className="mt-4 flex-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+                    {creditPackGuide.packDescriptions[pack.id]}
+                  </p>
+                  <p className="mt-4 border-t border-zinc-200 pt-3 text-xs font-bold text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+                    {creditPackGuide.validity}
+                  </p>
+                </article>
+              ))
+            )}
+          </div>
+
+          <div className="grid gap-5 border-t border-emerald-500/20 bg-white/60 p-5 dark:bg-zinc-950/40 sm:p-7 lg:grid-cols-[0.75fr_1.25fr]">
+            <div>
+              <h3 className="font-black">{creditPackGuide.policyTitle}</h3>
+              <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">
+                {creditPackGuide.guidance}
+              </p>
+            </div>
+            <ul className="grid gap-3">
+              {creditPackGuide.policies.map((policy) => (
+                <li key={policy} className="flex gap-3 text-sm font-semibold leading-6 text-zinc-700 dark:text-zinc-200">
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-300" />
+                  {policy}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </section>
 
         <section
           data-testid="pricing-credit-guide"

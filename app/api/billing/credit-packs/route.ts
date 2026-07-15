@@ -181,7 +181,7 @@ export async function POST(req: Request) {
             context: purchaseContext,
             trigger,
             productId: pack.id,
-            creditsPurchased: pack.credits,
+            creditQuantity: pack.credits,
           }),
         }
       : {};

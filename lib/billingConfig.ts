@@ -4,6 +4,7 @@ import type { BillingPromotion as PrismaBillingPromotion } from "@prisma/client"
 import { prisma } from "@/lib/prisma";
 import type { ModelTier } from "@/lib/models";
 import { promotionEligibilityFailure } from "@/lib/billingPromotionCore";
+import { getPublicCreditPackCatalog } from "@/lib/creditPacks";
 
 export type BillingPlanId = "free" | "pro" | "max";
 
@@ -268,6 +269,7 @@ export async function getPublicBillingConfig() {
       : null;
   return {
     plans: plans.filter((plan) => plan.isActive),
+    creditPacks: getPublicCreditPackCatalog(),
     featuredPromotion: publicFeaturedPromotion,
     promotionPolicy: {
       codesListed: false as const,

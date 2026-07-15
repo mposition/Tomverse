@@ -37,4 +37,7 @@ test("pricing page supports Chinese copy", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: "选择适合你的 AI 能力等级。" })
   ).toBeVisible();
+  await expect(page.getByTestId("pricing-credit-packs")).toBeVisible();
+  await expect(page.locator('[data-pack-id="starter_500"]')).toContainText("500");
+  await expect(page.locator('[data-pack-id="project_1500"]')).toContainText("1,500");
 });

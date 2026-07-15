@@ -2,8 +2,26 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   getCreditPacksForPlan,
+  getPublicCreditPackCatalog,
   recommendCreditAction,
 } from "../lib/creditPacks.ts";
+
+test("public credit-pack catalog exposes prices and eligibility without payment secrets", () => {
+  const catalog = getPublicCreditPackCatalog();
+
+  assert.deepEqual(
+    catalog.map((pack) => [pack.id, pack.credits, pack.priceCents, pack.allowedPlans]),
+    [
+      ["starter_500", 500, 499, ["Free"]],
+      ["project_1500", 1_500, 999, ["Pro", "Max"]],
+      ["power_4000", 4_000, 1_999, ["Pro", "Max"]],
+    ]
+  );
+  for (const pack of catalog) {
+    assert.equal("stripePriceId" in pack, false);
+    assert.equal("fundedCostMicroUsd" in pack, false);
+  }
+});
 
 test("Free can only buy the small starter pack", () => {
   assert.deepEqual(

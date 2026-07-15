@@ -754,7 +754,7 @@ export function UpgradeInterestButton({
         planCreditsRemaining: 0,
         addonCreditsRemaining: 0,
       };
-      const creditsPurchased = Math.max(
+      const monthlyCreditsIncluded = Math.max(
         0,
         planConfig?.monthlyMessageLimit || (planId === "max" ? 10_000 : 3_000)
       );
@@ -763,7 +763,7 @@ export function UpgradeInterestButton({
         plan_id: planId,
         purchase_type: "subscription",
         product_id: `subscription_${planId}_${billingInterval}`,
-        credits_purchased: creditsPurchased,
+        monthly_credits_included: monthlyCreditsIncluded,
         current_plan: analyticsContext.currentPlan,
         trigger: purchaseTrigger,
         plan_credits_remaining: analyticsContext.planCreditsRemaining,

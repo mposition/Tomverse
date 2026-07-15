@@ -154,7 +154,7 @@ export async function grantCreditPackFromCheckout(
     const purchaseAnalytics = purchaseAnalyticsFromMetadata(session.metadata, {
       currentPlan: planId,
       productId: pack.id,
-      creditsPurchased: pack.credits,
+      creditQuantity: pack.credits,
     });
     await recordProductAnalyticsEvent({
       eventName: "purchase_completed",
@@ -166,8 +166,9 @@ export async function grantCreditPackFromCheckout(
       properties: {
         plan_id: planId,
         purchase_type: "credit_pack",
+        product_id: purchaseAnalytics.productId,
         pack_id: purchaseAnalytics.productId,
-        credits_purchased: purchaseAnalytics.creditsPurchased,
+        credits_purchased: purchaseAnalytics.creditQuantity,
         current_plan: purchaseAnalytics.currentPlan,
         trigger: purchaseAnalytics.trigger,
         plan_credits_remaining: purchaseAnalytics.planCreditsRemaining,

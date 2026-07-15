@@ -18,6 +18,16 @@ type BillingPlan = {
   monthlyMessageLimit?: number;
 };
 
+export type PublicCreditPack = {
+  id: "starter_500" | "project_1500" | "power_4000";
+  name: string;
+  credits: number;
+  priceCents: number;
+  currency: string;
+  validityDays: number;
+  allowedPlans: Array<"Free" | "Pro" | "Max">;
+};
+
 export type FeaturedBillingPromotion = {
   code: string;
   discountPercent: number;
@@ -30,6 +40,7 @@ export type FeaturedBillingPromotion = {
 
 type BillingConfig = {
   plans: BillingPlan[];
+  creditPacks?: PublicCreditPack[];
   featuredPromotion?: FeaturedBillingPromotion | null;
   promotionPolicy?: {
     codesListed: false;

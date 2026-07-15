@@ -4,6 +4,7 @@ import {
   PRODUCT_ANALYTICS_EVENT_NAMES,
   analyticsClientEventSchema,
   analyticsPropertiesSchema,
+  ga4EcommerceEventForProductEvent,
   type AnalyticsAttribution,
   type ProductAnalyticsEventName,
   type ProductAnalyticsProperties,
@@ -303,6 +304,23 @@ const sendIntent = (intent: EventIntent) => {
     session_id: Number(payload.session_id),
     ...payload.properties,
   });
+
+  const ecommerceEvent = ga4EcommerceEventForProductEvent(
+    intent.eventName,
+    payload.properties
+  );
+  if (ecommerceEvent) {
+    window.gtag?.("event", ecommerceEvent.name, {
+      utm_source: payload.utm_source,
+      utm_medium: payload.utm_medium,
+      utm_campaign: payload.utm_campaign,
+      language: payload.language,
+      country: payload.country,
+      plan: runtime.plan,
+      session_id: Number(payload.session_id),
+      ...ecommerceEvent.params,
+    });
+  }
 
   void fetch("/api/analytics/events", {
     method: "POST",

@@ -12,6 +12,7 @@ import {
   getPublicBillingConfig,
 } from "@/lib/billingConfig";
 import { withDisplayCurrency } from "@/lib/billingCurrency";
+import { getPublicCreditPackCatalog } from "@/lib/creditPacks";
 
 const isDatabaseDisabledForE2e = () =>
   process.env.E2E_AUTH_BYPASS === "true" &&
@@ -23,6 +24,7 @@ export async function GET(req: Request) {
       return NextResponse.json(
         {
           plans: getDefaultBillingPlans().filter((plan) => plan.isActive),
+          creditPacks: getPublicCreditPackCatalog(),
           featuredPromotion: null,
           promotionPolicy: {
             codesListed: false,

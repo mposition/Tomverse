@@ -150,7 +150,7 @@ test("test campaign retains first-touch UTM through consent, chat, signup, and c
   expect(checkoutEvent?.properties).toMatchObject({
     purchase_type: "subscription",
     product_id: "subscription_pro_monthly",
-    credits_purchased: 3_000,
+    monthly_credits_included: 3_000,
     current_plan: "free",
     trigger: "proactive",
     plan_credits_remaining: 0,

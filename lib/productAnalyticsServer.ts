@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import {
   analyticsAttributionSchema,
   analyticsPropertiesSchema,
+  ga4EcommerceEventForProductEvent,
   normalizeAnalyticsPlan,
   type AnalyticsAttribution,
   type ProductAnalyticsEventName,
@@ -67,6 +68,21 @@ const sendGa4ServerEvent = async (
   const country = input.attribution.country === "ZZ"
     ? undefined
     : { country_id: input.attribution.country };
+  const commonParams = {
+    utm_source: input.attribution.utm_source,
+    utm_medium: input.attribution.utm_medium,
+    utm_campaign: input.attribution.utm_campaign,
+    language: input.attribution.language,
+    country: input.attribution.country,
+    model_count: Math.max(0, Math.min(3, input.modelCount)),
+    plan: normalizeAnalyticsPlan(input.plan),
+    session_id: sessionId,
+    engagement_time_msec: 100,
+  };
+  const ecommerceEvent = ga4EcommerceEventForProductEvent(
+    input.eventName,
+    properties
+  );
 
   const response = await fetch(url, {
     method: "POST",
@@ -84,18 +100,21 @@ const sendGa4ServerEvent = async (
         {
           name: input.eventName,
           params: {
-            utm_source: input.attribution.utm_source,
-            utm_medium: input.attribution.utm_medium,
-            utm_campaign: input.attribution.utm_campaign,
-            language: input.attribution.language,
-            country: input.attribution.country,
-            model_count: Math.max(0, Math.min(3, input.modelCount)),
-            plan: normalizeAnalyticsPlan(input.plan),
-            session_id: sessionId,
-            engagement_time_msec: 100,
+            ...commonParams,
             ...properties,
           },
         },
+        ...(ecommerceEvent
+          ? [
+              {
+                name: ecommerceEvent.name,
+                params: {
+                  ...commonParams,
+                  ...ecommerceEvent.params,
+                },
+              },
+            ]
+          : []),
       ],
       validation_behavior: "ENFORCE_RECOMMENDATIONS",
     }),

@@ -72,16 +72,16 @@ export const purchaseAnalyticsMetadata = ({
   context,
   trigger,
   productId,
-  creditsPurchased,
+  creditQuantity,
 }: {
   context: PurchaseAnalyticsContext;
   trigger: PurchaseAnalyticsTrigger;
   productId: string;
-  creditsPurchased: number;
+  creditQuantity: number;
 }) => ({
   analyticsPurchaseTrigger: trigger,
   analyticsProductId: productId,
-  analyticsCreditsPurchased: String(Math.max(0, Math.trunc(creditsPurchased))),
+  analyticsCreditQuantity: String(Math.max(0, Math.trunc(creditQuantity))),
   analyticsCurrentPlan: context.currentPlan,
   analyticsPlanCreditsRemaining: String(context.planCreditsRemaining),
   analyticsAddonCreditsRemaining: String(context.addonCreditsRemaining),
@@ -93,7 +93,7 @@ export const purchaseAnalyticsFromMetadata = (
     currentPlan: PurchaseAnalyticsContext["currentPlan"];
     trigger?: PurchaseAnalyticsTrigger;
     productId: string;
-    creditsPurchased: number;
+    creditQuantity: number;
   }
 ) => ({
   currentPlan:
@@ -107,9 +107,9 @@ export const purchaseAnalyticsFromMetadata = (
       metadata?.analyticsPurchaseTrigger
     ).data || fallback.trigger || "proactive",
   productId: metadata?.analyticsProductId || fallback.productId,
-  creditsPurchased: safeInteger(
-    metadata?.analyticsCreditsPurchased,
-    fallback.creditsPurchased
+  creditQuantity: safeInteger(
+    metadata?.analyticsCreditQuantity || metadata?.analyticsCreditsPurchased,
+    fallback.creditQuantity
   ),
   planCreditsRemaining: safeInteger(
     metadata?.analyticsPlanCreditsRemaining,

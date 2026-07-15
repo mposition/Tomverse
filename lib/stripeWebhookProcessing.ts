@@ -293,7 +293,7 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
     const purchaseAnalytics = purchaseAnalyticsFromMetadata(session.metadata, {
       currentPlan: "free",
       productId: `subscription_${completedPlanId}_${completedBillingInterval}`,
-      creditsPurchased:
+      creditQuantity:
         synced.plan === "Max" ? 10_000 : synced.plan === "Pro" ? 3_000 : 300,
     });
     await recordProductAnalyticsEvent({
@@ -308,7 +308,7 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
         plan_id: completedPlanId,
         purchase_type: "subscription",
         product_id: purchaseAnalytics.productId,
-        credits_purchased: purchaseAnalytics.creditsPurchased,
+        monthly_credits_included: purchaseAnalytics.creditQuantity,
         current_plan: purchaseAnalytics.currentPlan,
         trigger: purchaseAnalytics.trigger,
         plan_credits_remaining: purchaseAnalytics.planCreditsRemaining,

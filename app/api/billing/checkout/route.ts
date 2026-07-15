@@ -426,7 +426,7 @@ export async function POST(req: Request) {
             context: purchaseContext,
             trigger,
             productId,
-            creditsPurchased: plan.monthlyMessageLimit,
+            creditQuantity: plan.monthlyMessageLimit,
           }),
         }
       : {};
@@ -463,7 +463,7 @@ export async function POST(req: Request) {
             plan_id: planId,
             purchase_type: "subscription",
             product_id: productId,
-            credits_purchased: plan.monthlyMessageLimit,
+            monthly_credits_included: plan.monthlyMessageLimit,
             current_plan: purchaseContext.currentPlan,
             trigger,
             plan_credits_remaining: purchaseContext.planCreditsRemaining,

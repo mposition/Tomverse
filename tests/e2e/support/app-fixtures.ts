@@ -43,11 +43,42 @@ const publicBillingPlans = [
   },
 ];
 
+const publicCreditPacks = [
+  {
+    id: "starter_500",
+    name: "Starter Credit Pack",
+    credits: 500,
+    priceCents: 499,
+    currency: "USD",
+    validityDays: 365,
+    allowedPlans: ["Free"],
+  },
+  {
+    id: "project_1500",
+    name: "Project Credit Pack",
+    credits: 1_500,
+    priceCents: 999,
+    currency: "USD",
+    validityDays: 365,
+    allowedPlans: ["Pro", "Max"],
+  },
+  {
+    id: "power_4000",
+    name: "Power Credit Pack",
+    credits: 4_000,
+    priceCents: 1_999,
+    currency: "USD",
+    validityDays: 365,
+    allowedPlans: ["Pro", "Max"],
+  },
+];
+
 export async function mockPublicBillingConfig(page: Page) {
   await page.context().route("**/api/billing/config**", (route) =>
     route.fulfill(
       json({
         plans: publicBillingPlans,
+        creditPacks: publicCreditPacks,
         featuredPromotion: null,
         promotionPolicy: {
           codesListed: false,

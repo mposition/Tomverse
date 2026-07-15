@@ -108,6 +108,7 @@ export function CreditPackPurchaseButton({
       cta_location: "credit_pack_modal",
       plan_id: plan.toLowerCase() as "free" | "pro" | "max",
       purchase_type: "credit_pack",
+      product_id: pack.id,
       pack_id: pack.id,
       credits_purchased: pack.credits,
       current_plan: analyticsContext.currentPlan,

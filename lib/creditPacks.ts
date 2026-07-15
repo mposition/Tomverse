@@ -73,6 +73,24 @@ export const CREDIT_PACKS: readonly CreditPack[] = [
   },
 ] as const;
 
+export type PublicCreditPack = Pick<
+  CreditPack,
+  "id" | "name" | "credits" | "priceCents" | "currency" | "validityDays" | "allowedPlans"
+>;
+
+export const getPublicCreditPackCatalog = (): PublicCreditPack[] =>
+  CREDIT_PACKS.map(
+    ({ id, name, credits, priceCents, currency, validityDays, allowedPlans }) => ({
+      id,
+      name,
+      credits,
+      priceCents,
+      currency,
+      validityDays,
+      allowedPlans: [...allowedPlans],
+    })
+  );
+
 export const getCreditPack = (id: string) =>
   CREDIT_PACKS.find((pack) => pack.id === id);
 

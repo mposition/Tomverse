@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   analyticsClientEventSchema,
+  ga4EcommerceEventForProductEvent,
   PRODUCT_ANALYTICS_EVENT_NAMES,
 } from "../lib/productAnalyticsShared.ts";
 
@@ -103,7 +104,7 @@ test("purchase analytics distinguishes subscriptions from credit packs", () => {
     properties: {
       purchase_type: "subscription",
       product_id: "subscription_pro_monthly",
-      credits_purchased: 3_000,
+      monthly_credits_included: 3_000,
       current_plan: "free",
       trigger: "proactive",
       plan_credits_remaining: 120,
@@ -115,6 +116,7 @@ test("purchase analytics distinguishes subscriptions from credit packs", () => {
     event_name: "purchase_completed",
     properties: {
       purchase_type: "credit_pack",
+      product_id: "project_1500",
       pack_id: "project_1500",
       credits_purchased: 1_500,
       current_plan: "pro",
@@ -126,9 +128,106 @@ test("purchase analytics distinguishes subscriptions from credit packs", () => {
 
   assert.equal(subscription.properties.purchase_type, "subscription");
   assert.equal(subscription.properties.product_id, "subscription_pro_monthly");
+  assert.equal(subscription.properties.monthly_credits_included, 3_000);
+  assert.equal(subscription.properties.credits_purchased, undefined);
   assert.equal(creditPack.properties.purchase_type, "credit_pack");
+  assert.equal(creditPack.properties.product_id, "project_1500");
   assert.equal(creditPack.properties.pack_id, "project_1500");
   assert.equal(creditPack.properties.credits_purchased, 1_500);
+  assert.equal(creditPack.properties.monthly_credits_included, undefined);
+});
+
+test("GA4 ecommerce mapping emits begin_checkout with a single product item", () => {
+  const event = ga4EcommerceEventForProductEvent("checkout_started", {
+    billing_interval: "annual",
+    plan_id: "pro",
+    purchase_type: "subscription",
+    product_id: "subscription_pro_annual",
+    monthly_credits_included: 3_000,
+    current_plan: "free",
+    trigger: "proactive",
+    value: 144,
+    currency: "USD",
+  });
+
+  assert.equal(event?.name, "begin_checkout");
+  assert.equal(event?.params.value, 144);
+  assert.equal(event?.params.currency, "USD");
+  assert.equal(event?.params.transaction_id, undefined);
+  assert.deepEqual(event?.params.items, [
+    {
+      item_id: "subscription_pro_annual",
+      item_name: "Tomverse Pro annual",
+      affiliation: "Tomverse",
+      item_brand: "Tomverse",
+      item_category: "Subscription",
+      item_variant: "annual",
+      price: 144,
+      quantity: 1,
+    },
+  ]);
+});
+
+test("GA4 ecommerce mapping emits purchase with Stripe transaction id", () => {
+  const event = ga4EcommerceEventForProductEvent("purchase_completed", {
+    plan_id: "pro",
+    purchase_type: "credit_pack",
+    product_id: "project_1500",
+    pack_id: "project_1500",
+    credits_purchased: 1_500,
+    current_plan: "pro",
+    trigger: "usage_widget",
+    value: 9.99,
+    currency: "USD",
+    transaction_id: "cs_test_123",
+  });
+
+  assert.equal(event?.name, "purchase");
+  assert.equal(event?.params.transaction_id, "cs_test_123");
+  assert.equal(event?.params.items[0].item_id, "project_1500");
+  assert.equal(event?.params.items[0].item_category, "Credit pack");
+  assert.equal(event?.params.items[0].price, 9.99);
+  assert.equal(event?.params.credits_purchased, 1_500);
+});
+
+test("GA4 purchase mapping requires complete revenue fields", () => {
+  assert.equal(
+    ga4EcommerceEventForProductEvent("purchase_completed", {
+      purchase_type: "subscription",
+      product_id: "subscription_pro_monthly",
+      value: 15,
+      currency: "USD",
+    }),
+    null
+  );
+});
+
+test("purchase analytics rejects ambiguous credit quantity fields", () => {
+  assert.equal(
+    analyticsClientEventSchema.safeParse({
+      ...safeEvent,
+      event_name: "checkout_started",
+      properties: {
+        purchase_type: "subscription",
+        product_id: "subscription_pro_annual",
+        credits_purchased: 36_000,
+      },
+    }).success,
+    false
+  );
+  assert.equal(
+    analyticsClientEventSchema.safeParse({
+      ...safeEvent,
+      event_name: "checkout_started",
+      properties: {
+        purchase_type: "credit_pack",
+        product_id: "project_1500",
+        pack_id: "project_1500",
+        monthly_credits_included: 1_500,
+      },
+    }).success,
+    false
+  );
 });
 
 test("purchase analytics rejects unsupported triggers", () => {

@@ -482,7 +482,11 @@ export const acquireChatAccess = async (
         traceId?: string;
         source?: "chat" | "comparison_review";
     }
-) => {
+): Promise<{
+    leaseId: string;
+    setCookie: string | undefined;
+    usageReservation: ChatUsageReservation;
+}> => {
     const now = new Date();
     const leaseId = randomUUID();
     const reservationId = randomUUID();
