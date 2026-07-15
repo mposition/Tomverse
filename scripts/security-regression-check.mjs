@@ -206,6 +206,15 @@ const checks = [
       source.includes('case "anthropic"'),
   },
   {
+    name: "Perplexity usage sync exposes exact response cost accounting instead of skipped",
+    file: "lib/providerUsageSync.ts",
+    test: (source) =>
+      source.includes("const perplexityInternalUsage") &&
+      source.includes('usageSourceLabel: "Exact response cost accounting"') &&
+      source.includes('case "perplexity"') &&
+      source.includes("return perplexityInternalUsage(date)"),
+  },
+  {
     name: "xAI usage reconciliation uses the dedicated Management Usage adapter",
     file: "lib/providerUsageSync.ts",
     test: (source) =>
