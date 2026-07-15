@@ -1011,54 +1011,56 @@ export const acquireChatAccess = async (
             }
         }
 
-        const providerKey = `provider:${budget.provider}`;
-        const providerDayStart = periodStart("day", now);
-        const providerDayAllowed = await incrementUsage(
-            tx,
-            providerKey,
-            "provider-cost-day",
-            providerDayStart,
-            providerDailyLimit,
-            reservedCost
-        );
-        if (!providerDayAllowed) {
-            throw new ChatAccessError(
-                503,
-                "PROVIDER_DAILY_SPEND_LIMIT_REACHED",
-                "This AI provider is temporarily unavailable."
+        if (reservedCost > 0) {
+            const providerKey = `provider:${budget.provider}`;
+            const providerDayStart = periodStart("day", now);
+            const providerDayAllowed = await incrementUsage(
+                tx,
+                providerKey,
+                "provider-cost-day",
+                providerDayStart,
+                providerDailyLimit,
+                reservedCost
             );
-        }
-        reservationEntries.push({
-            key: providerKey,
-            period: "provider-cost-day",
-            periodStart: providerDayStart,
-            amount: reservedCost,
-            metric: "cost",
-        });
+            if (!providerDayAllowed) {
+                throw new ChatAccessError(
+                    503,
+                    "PROVIDER_DAILY_SPEND_LIMIT_REACHED",
+                    "This AI provider is temporarily unavailable."
+                );
+            }
+            reservationEntries.push({
+                key: providerKey,
+                period: "provider-cost-day",
+                periodStart: providerDayStart,
+                amount: reservedCost,
+                metric: "cost",
+            });
 
-        const providerStart = periodStart("month", now);
-        const providerAllowed = await incrementUsage(
-            tx,
-            providerKey,
-            "provider-cost-month",
-            providerStart,
-            providerMonthlyLimit,
-            reservedCost
-        );
-        if (!providerAllowed) {
-            throw new ChatAccessError(
-                503,
-                "PROVIDER_SPEND_LIMIT_REACHED",
-                "This AI provider is temporarily unavailable."
+            const providerStart = periodStart("month", now);
+            const providerAllowed = await incrementUsage(
+                tx,
+                providerKey,
+                "provider-cost-month",
+                providerStart,
+                providerMonthlyLimit,
+                reservedCost
             );
+            if (!providerAllowed) {
+                throw new ChatAccessError(
+                    503,
+                    "PROVIDER_SPEND_LIMIT_REACHED",
+                    "This AI provider is temporarily unavailable."
+                );
+            }
+            reservationEntries.push({
+                key: providerKey,
+                period: "provider-cost-month",
+                periodStart: providerStart,
+                amount: reservedCost,
+                metric: "cost",
+            });
         }
-        reservationEntries.push({
-            key: providerKey,
-            period: "provider-cost-month",
-            periodStart: providerStart,
-            amount: reservedCost,
-            metric: "cost",
-        });
 
         const leaseSubjectKey =
             access.kind === "guest" ? access.ipKey : access.subjectKey;
