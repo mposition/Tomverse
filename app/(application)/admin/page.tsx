@@ -987,6 +987,23 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             configured: isConfigured(process.env.DISCORD_WEBHOOK_URL),
             description: "Optional secondary incident notification channel.",
         },
+        {
+            name: "SENTRY_DSN",
+            configured: isConfigured(process.env.SENTRY_DSN),
+            description: "DB-independent server error retention for outages that cannot be written to Prisma.",
+        },
+        {
+            name: "OPS_ALERT_CHANNEL",
+            configured:
+                isConfigured(process.env.OPS_ALERT_SLACK_WEBHOOK_URL) ||
+                isConfigured(process.env.SLACK_WEBHOOK_URL) ||
+                isConfigured(process.env.OPS_ALERT_DISCORD_WEBHOOK_URL) ||
+                isConfigured(process.env.DISCORD_WEBHOOK_URL) ||
+                (isConfigured(process.env.RESEND_API_KEY) &&
+                    (isConfigured(process.env.OPS_ALERT_EMAIL) ||
+                        isConfigured(process.env.ADMIN_ALERT_EMAIL))),
+            description: "At least one DB-independent Slack, Discord, or email incident channel.",
+        },
     ];
 
     return (
@@ -1156,6 +1173,8 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                                             "STRIPE_SECRET_KEY",
                                             "STRIPE_WEBHOOK_SECRET",
                                             "SLACK_WEBHOOK_URL",
+                                            "SENTRY_DSN",
+                                            "OPS_ALERT_CHANNEL",
                                             "OPENAI_ADMIN_API_KEY",
                                             "ANTHROPIC_ADMIN_API_KEY",
                                             "PROVIDER_USAGE_SYNC_SECRET",

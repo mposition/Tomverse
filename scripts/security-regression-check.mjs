@@ -384,7 +384,40 @@ const checks = [
       source.includes('SELECT 1 AS "ready"') &&
       source.includes("getSecurityEnvironmentStatus") &&
       source.includes("database && securityEnvironment") &&
-      source.includes("status: ready ? 200 : 503"),
+      source.includes("status: ready ? 200 : 503") &&
+      source.includes("reportOperationalDependencyStatus") &&
+      source.includes("DATABASE_READINESS_FAILED") &&
+      source.includes("after(async ()"),
+  },
+  {
+    name: "Operational outage reporting is independent from Prisma storage",
+    file: "lib/operationalMonitoring.ts",
+    test: (source) => {
+      const instrumentation = read("instrumentation.ts");
+      return (
+        source.includes("Sentry.captureException") &&
+        source.includes("OPS_ALERT_SLACK_WEBHOOK_URL") &&
+        source.includes("OPS_ALERT_DISCORD_WEBHOOK_URL") &&
+        source.includes("operational_incident") &&
+        !source.includes('from "@/lib/prisma"') &&
+        instrumentation.includes("Sentry.captureRequestError")
+      );
+    },
+  },
+  {
+    name: "Maintenance failures use DB-independent operational reporting",
+    file: "app/api/internal/maintenance/cleanup/route.ts",
+    test: (source) => {
+      const reservations = read(
+        "app/api/internal/maintenance/credit-reservations/route.ts"
+      );
+      return (
+        source.includes("reportOperationalIncident") &&
+        source.includes("SCHEDULED_MAINTENANCE_CLEANUP_FAILED") &&
+        reservations.includes("reportOperationalIncident") &&
+        reservations.includes("CREDIT_RESERVATION_RECONCILIATION_FAILED")
+      );
+    },
   },
   {
     name: "Liveness and readiness bypass canonical host protection",

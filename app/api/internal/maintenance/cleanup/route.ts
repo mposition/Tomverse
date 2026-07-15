@@ -1,5 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import { after } from "next/server";
 import { cleanupExpiredData } from "@/lib/maintenance";
+import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 
 const isAuthorized = (request: Request) => {
   const configured = process.env.MAINTENANCE_SECRET;
@@ -32,7 +34,19 @@ export async function POST(request: Request) {
       { headers: { "Cache-Control": "no-store" } }
     );
   } catch (error) {
-    console.error("Scheduled maintenance cleanup failed:", error);
+    after(() =>
+      reportOperationalIncident({
+        code: "SCHEDULED_MAINTENANCE_CLEANUP_FAILED",
+        title: "Scheduled maintenance cleanup failed",
+        error,
+        severity: "error",
+        cooldownMs: 60 * 60 * 1_000,
+        context: {
+          component: "maintenance-cleanup",
+          route: "/api/internal/maintenance/cleanup",
+        },
+      })
+    );
     return Response.json(
       { error: "Maintenance cleanup failed." },
       {

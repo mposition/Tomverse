@@ -1348,7 +1348,7 @@ const zhipuInternalUsage = async (
 const moonshotInternalUsage = async (
   date: Date
 ): Promise<ProviderUsageSyncResult> => {
-  const provider: AiProvider = "moonshot";
+  const provider: AiProvider = "zhipu";
   const usage = await getInternalProviderUsageSummary({ provider, date });
   return {
     provider,
@@ -1368,7 +1368,7 @@ const moonshotInternalUsage = async (
       "Zhipu response Usage, including cached prompt tokens, is costed with the request-time model price snapshot. Maintain a Provider Credit checkpoint and verify it periodically in the Z.AI dashboard.",
     reconciliationLabel: "Official daily cost API unavailable",
     message:
-      "Moonshot response tokens are costed with the request-time model price snapshot. The official Balance API is monitored separately; verify the monthly total in Kimi API Platform.",
+      "Zhipu response Usage, including cached prompt tokens, is costed with the request-time model price snapshot. Maintain a Provider Credit checkpoint and verify it periodically in the Z.AI dashboard.",
     diagnostic: null,
   };
 };

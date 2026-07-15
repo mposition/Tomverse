@@ -413,6 +413,41 @@ Do not rotate `OAUTH_TOKEN_ENCRYPTION_KEY` without re-encrypting existing
 `enc:v1:` OAuth tokens, because old encrypted account tokens cannot be
 decrypted with a new key.
 
+## DB-independent error monitoring
+
+Prisma-backed `ProviderErrorEvent` and `AdminNotificationLog` records cannot be
+written while PostgreSQL itself is unavailable. Production therefore uses a
+separate server error path which never imports Prisma:
+
+```text
+SENTRY_DSN=<Sentry Next.js project DSN>
+SENTRY_ENVIRONMENT=production
+SENTRY_TRACES_SAMPLE_RATE=0
+
+# Optional but recommended for readable production stack traces
+SENTRY_ORG=<Sentry organization slug>
+SENTRY_PROJECT=<Sentry project slug>
+SENTRY_AUTH_TOKEN=<source-map upload token>
+
+# Dedicated values take precedence; existing provider-alert hooks are fallbacks.
+OPS_ALERT_SLACK_WEBHOOK_URL=<Slack incoming webhook URL>
+OPS_ALERT_DISCORD_WEBHOOK_URL=<Discord webhook URL>
+OPS_ALERT_EMAIL=<operations email address>
+OPS_ALERT_COOLDOWN_SECONDS=600
+```
+
+`instrumentation.ts` forwards unhandled App Router server errors to Sentry.
+Caught readiness and maintenance errors are reported explicitly, because a
+handled `503` or `500` is not an unhandled exception. Slack, Discord, and Resend
+delivery runs directly and never attempts to create an `AdminNotificationLog`.
+Messages redact database credentials, bearer tokens, cookies, and secret-shaped
+context keys. Prompts, file contents, request bodies, authorization headers, and
+cookies are not sent to Sentry.
+
+The Admin Console environment audit shows `SENTRY_DSN` and
+`OPS_ALERT_CHANNEL`. These checks confirm application configuration only; they
+do not prove that an external uptime monitor is running.
+
 ## API Storage Limits
 
 General write APIs use per-user and per-IP rate limits, bounded JSON parsing,
@@ -646,6 +681,36 @@ required production security environment is valid. It returns `503` with
 boolean `database` and `securityEnvironment` checks otherwise. Neither endpoint
 is cached, and both intentionally bypass canonical host protection without
 exposing secrets.
+
+Create the readiness monitor in a service outside the Tomverse Railway project
+so a project-wide outage cannot disable both the app and its monitor. Use these
+settings:
+
+```text
+URL: https://tomverse.app/api/ready
+Method: GET
+Interval: 60 seconds
+Timeout: 10 seconds
+Incident condition: 2 consecutive non-2xx responses
+Recovery notification: enabled
+Channels: operations Slack and email
+```
+
+Do not point Railway's container Healthcheck Path at `/api/ready`; keep it on
+`/api/health` to avoid restarting a healthy process during a database outage.
+After deployment, temporarily use an invalid staging database host and verify
+all of the following before Go-Live:
+
+1. `/api/health` remains `200` while `/api/ready` returns `503`.
+2. Sentry receives `DATABASE_READINESS_FAILED` with no connection credentials.
+3. Slack or email receives the incident and later the recovery notification.
+4. The external uptime service records both outage and recovery.
+5. Railway Logs contain the structured `operational_incident` record.
+
+Configure a Railway Log Drain to an external log destination as a second copy
+of structured application logs. A Log Drain and the external uptime monitor are
+Railway/service settings and cannot be created merely by deploying repository
+files.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 

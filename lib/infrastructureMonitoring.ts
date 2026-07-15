@@ -466,10 +466,12 @@ const databaseSnapshot = async (): Promise<DatabaseInfrastructureSnapshot> => {
 };
 
 export async function getInfrastructureDashboard(): Promise<InfrastructureDashboard> {
-  const credit = await prisma.infrastructureCreditConfig.findUnique({
-    where: { service: "railway" },
-    select: { creditMicroUsd: true, note: true },
-  });
+  const credit = await prisma.infrastructureCreditConfig
+    .findUnique({
+      where: { service: "railway" },
+      select: { creditMicroUsd: true, note: true },
+    })
+    .catch(() => null);
   const [railway, r2, database] = await Promise.all([
     railwaySnapshot(credit),
     r2Snapshot(),
