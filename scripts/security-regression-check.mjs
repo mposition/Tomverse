@@ -203,7 +203,7 @@ const checks = [
       source.includes("parseAnthropicCostsPage") &&
       source.includes("MAX_ANTHROPIC_PAGES") &&
       source.includes('source: "anthropic_costs"') &&
-      source.includes('provider === "anthropic"'),
+      source.includes('case "anthropic"'),
   },
   {
     name: "xAI usage reconciliation uses the dedicated Management Usage adapter",
@@ -216,7 +216,7 @@ const checks = [
       source.includes("xaiUsageDayRequest") &&
       source.includes("parseXaiUsage") &&
       source.includes('source: "xai_usage"') &&
-      source.includes('provider === "xai"'),
+      source.includes('case "xai"'),
   },
   {
     name: "Mistral response Usage preserves cached tokens and request-time pricing",
@@ -238,6 +238,16 @@ const checks = [
       source.includes('status: "internal"') &&
       source.includes("cachedInputTokens: usage.cachedInputTokens") &&
       source.includes("Official balance and daily cost APIs unavailable"),
+  },
+  {
+    name: "Moonshot uses response accounting when daily cost reconciliation is unavailable",
+    file: "lib/providerUsageSync.ts",
+    test: (source) =>
+      source.includes("moonshotInternalUsage") &&
+      source.includes('const provider: AiProvider = "moonshot"') &&
+      source.includes("live balance is monitored separately") &&
+      source.includes('case "moonshot"') &&
+      source.includes("hasGenericUsageEndpoint(provider, date)"),
   },
   {
     name: "Mistral missing provider reconciliation is reported as internal accounting",
