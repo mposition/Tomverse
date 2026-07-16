@@ -9,6 +9,7 @@ import {
 } from "@/components/chat/types";
 import {
     Bot,
+    BarChart3,
     Check,
     ChevronDown,
     CreditCard,
@@ -48,6 +49,7 @@ import {
     storeAndApplyThemePreference,
     type ThemePreference,
 } from "@/lib/theme";
+import { openAnalyticsPreferences } from "@/lib/analyticsPreferencesEvents";
 
 export function AuthButton() {
   const { data: session, status } = useSession();
@@ -436,7 +438,9 @@ export function AuthButton() {
             <span className="block truncate text-[10px] font-semibold text-zinc-400">
               {accountPlan ? t(`modelTiers.${accountPlan.toLowerCase()}`) : t("auth.loading")}
               {accountUsage
-                ? ` · ${accountUsage.balances.planRemainingCredits.toLocaleString(globalLang)} ${t("usage.left")}`
+                ? ` · ${formatCopy("auth.planCreditsCompact", {
+                    count: accountUsage.balances.planRemainingCredits.toLocaleString(globalLang),
+                  })}`
                 : ""}
             </span>
           </span>
@@ -537,6 +541,18 @@ export function AuthButton() {
                 >
                   <Settings className="h-4 w-4 text-zinc-500" />
                   {t("auth.setting")}
+                </button>
+                <button
+                  type="button"
+                  data-testid="account-analytics-settings"
+                  onClick={() => {
+                    setIsAccountMenuOpen(false);
+                    openAnalyticsPreferences();
+                  }}
+                  className="flex min-h-11 w-full items-center gap-2 rounded-xl px-3 text-sm font-bold text-zinc-700 transition hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-900"
+                >
+                  <BarChart3 className="h-4 w-4 text-blue-500" />
+                  {t("auth.analyticsSettings")}
                 </button>
                 {mobileUpgradePlan && accountUsage ? (
                   <UpgradeCtaLink
@@ -953,12 +969,12 @@ export function AuthButton() {
                                                         {accountUsage.usage.creditsMonth}/{accountUsage.limits.creditsMonth}
                                                     </p>
                                                     <p className="mt-1 text-xs text-zinc-400">
-                                                        {accountUsage.balances.planRemainingCredits.toLocaleString(globalLang)} {t("usage.left")}
+                                                        {t("auth.planCreditsRemaining")}: {accountUsage.balances.planRemainingCredits.toLocaleString(globalLang)}
                                                     </p>
                                                 </div>
                                                 <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-900/50 dark:bg-emerald-950/20">
                                                     <p className="text-xs font-bold uppercase tracking-wide text-emerald-600 dark:text-emerald-300">
-                                                        {globalLang === "ko" ? "추가 구매 크레딧" : "Purchased credits"}
+                                                        {t("auth.purchasedCreditsRemaining")}
                                                     </p>
                                                     <p className="mt-2 text-lg font-black text-zinc-900 dark:text-zinc-100">
                                                         {accountUsage.balances.purchasedRemainingCredits.toLocaleString(globalLang)}

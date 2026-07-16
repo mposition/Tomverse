@@ -18,6 +18,7 @@ import {
   type AnalyticsConsentMode,
   type ResolvedAnalyticsConsentPolicy,
 } from "@/lib/analyticsConsentPolicy";
+import { ANALYTICS_PREFERENCES_OPEN_EVENT } from "@/lib/analyticsPreferencesEvents";
 
 type ConsentState = "loading" | "unset" | "accepted" | "declined";
 
@@ -337,6 +338,21 @@ export function AnalyticsProvider({
     };
   }, [pathname]);
 
+  useEffect(() => {
+    if (disabled) return;
+    const openPreferences = () => setShowPreferences(true);
+    window.addEventListener(
+      ANALYTICS_PREFERENCES_OPEN_EVENT,
+      openPreferences
+    );
+    return () => {
+      window.removeEventListener(
+        ANALYTICS_PREFERENCES_OPEN_EVENT,
+        openPreferences
+      );
+    };
+  }, [disabled]);
+
   const analyticsEnabled = Boolean(
     resolvedPolicy &&
       (consent === "accepted" ||
@@ -474,6 +490,7 @@ export function AnalyticsProvider({
       consentPromptReady &&
       !showPreferences &&
       !isMobileChatTextEntryActive &&
+      !(pathname === "/chat" && initialPlan !== "Guest") &&
       (consent === "accepted" || consent === "declined") ? (
         <button
           type="button"
