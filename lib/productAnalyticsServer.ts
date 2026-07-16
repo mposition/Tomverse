@@ -3,6 +3,7 @@ import "server-only";
 import { createHash, createHmac } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { normalizeAnalyticsCountry } from "@/lib/analyticsConsentPolicy";
 import {
   analyticsAttributionSchema,
   analyticsPropertiesSchema,
@@ -190,8 +191,9 @@ export async function recordProductAnalyticsEvent(
 }
 
 export const analyticsCountryFromHeaders = (headers: Headers) => {
-  const candidate = headers.get("cf-ipcountry")?.trim().toUpperCase();
-  return candidate && /^[A-Z]{2}$/.test(candidate) ? candidate : "ZZ";
+  return normalizeAnalyticsCountry(
+    headers.get("cf-ipcountry") || headers.get("x-vercel-ip-country")
+  );
 };
 
 export const analyticsAttributionFromMetadata = (

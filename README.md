@@ -574,7 +574,15 @@ Railway. The API secret must remain server-only:
 ```text
 GA4_MEASUREMENT_ID=G-XXXXXXXXXX
 GA4_API_SECRET=your-ga4-measurement-protocol-secret
+ANALYTICS_DEFAULT_ENABLED_COUNTRIES=AU
 ```
+
+`ANALYTICS_DEFAULT_ENABLED_COUNTRIES` is a server-only, comma-separated
+allowlist for regions where privacy-minimized analytics may start after a clear
+notice with an immediate opt-out. It defaults to `AU`. Add another country only
+after a country-specific privacy review. EU/EEA countries, the United Kingdom,
+and Switzerland remain explicit opt-in even if accidentally placed in this
+allowlist. An unknown country also fails closed to explicit opt-in.
 
 For GA4 DebugView verification, set the following only in the staging service:
 
@@ -587,18 +595,25 @@ Ecommerce events, and server Measurement Protocol events. Leave the variable
 unset or set it to `false` in production. Because `NEXT_PUBLIC_*` values are
 inlined into the browser bundle, rebuild and redeploy staging after changing it.
 
-Tomverse does not load Google Analytics or create its pseudonymous analytics
-identifier until the visitor accepts the analytics notice. Every accepted
-event is also written to the bounded first-party analytics ledger so the Admin
-Console Analytics tab can report the weekly active comparison-user North Star,
-the 24-hour activation definition, D1/D7 return, funnel counts, and campaign
-attribution. Prompts, responses, filenames, file contents, email, and profile
-data are rejected by the analytics schema.
+In explicit opt-in regions, Tomverse does not load Google Analytics or create
+its pseudonymous analytics identifier until the visitor accepts the analytics
+notice. In a reviewed default-enabled region such as Australia, analytics
+starts only after the same-origin country policy check completes; the visitor
+sees a compact notice and can turn analytics off immediately or later through
+the persistent Analytics settings control. A failed or unknown country check
+falls back to explicit opt-in. Advertising storage, advertising user data, and
+ad personalization remain denied in every region.
 
-Before consent, first-touch UTM values and bounded product-event intents are
-kept only in the current tab's `sessionStorage`. They survive navigation and a
-page reload, are sent only after acceptance, and are deleted on decline. Run
-the complete test-campaign checklist in
+Every enabled event is also written to the bounded first-party analytics ledger
+so the Admin Console Analytics tab can report the weekly active comparison-user
+North Star, the 24-hour activation definition, D1/D7 return, funnel counts, and
+campaign attribution. Prompts, responses, filenames, file contents, email, and
+profile data are rejected by the analytics schema.
+
+Before analytics is enabled, first-touch UTM values and bounded product-event
+intents are kept only in the current tab's `sessionStorage`. They survive
+navigation and a page reload, are sent only after analytics becomes permitted,
+and are deleted on decline or opt-out. Run the complete test-campaign checklist in
 `docs/analytics-campaign-validation.md` before enabling paid acquisition.
 
 In GA4 Admin, register event-scoped custom dimensions for `utm_source`,

@@ -6,6 +6,10 @@ import type { Session } from "next-auth";
 import { AnalyticsProvider } from "@/components/analytics/AnalyticsProvider";
 import SessionProviderWrapper from "@/components/auth/SessionProviderWrapper";
 import { LanguageProvider, type Language } from "@/components/LanguageProvider";
+import {
+  normalizeAnalyticsCountry,
+  resolveAnalyticsConsentPolicy,
+} from "@/lib/analyticsConsentPolicy";
 import { authOptions } from "@/lib/auth";
 
 const detectInitialLanguage = (acceptLanguage: string | null): Language => {
@@ -47,11 +51,14 @@ export default async function ApplicationLayout({
   const requestHeaders = await headers();
   const initialLang = detectInitialLanguage(requestHeaders.get("accept-language"));
   const nonce = requestHeaders.get("x-nonce");
-  const countryCandidate = requestHeaders.get("cf-ipcountry")?.trim().toUpperCase();
-  const analyticsCountry =
-    countryCandidate && /^[A-Z]{2}$/.test(countryCandidate)
-      ? countryCandidate
-      : "ZZ";
+  const analyticsCountry = normalizeAnalyticsCountry(
+    requestHeaders.get("cf-ipcountry") ||
+      requestHeaders.get("x-vercel-ip-country")
+  );
+  const analyticsConsentPolicy = resolveAnalyticsConsentPolicy(
+    analyticsCountry,
+    process.env.ANALYTICS_DEFAULT_ENABLED_COUNTRIES
+  );
 
   try {
     const e2eCookies =
@@ -95,6 +102,7 @@ export default async function ApplicationLayout({
           measurementId={measurementId}
           nonce={nonce}
           userCreatedAt={session?.user?.createdAt || null}
+          initialConsentMode={analyticsConsentPolicy.mode}
           disabled={
             process.env.E2E_AUTH_BYPASS === "true" && !e2eAnalyticsEnabled
           }

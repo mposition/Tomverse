@@ -425,7 +425,7 @@ export const es = {
     },
     privacyPolicy: {
         title: "Política de privacidad",
-        effective: "Vigente desde: 13 de julio de 2026",
+        effective: "Vigente desde: 16 de julio de 2026",
         intro: "Tomverse procesa información personal y datos de chat solo cuando es necesario para prestar el servicio. Este aviso explica los flujos de datos de los chats estándar y del modo privado.",
         collectedTitle: "Información que procesamos",
         collected: "Podemos procesar identificadores de cuenta, correo y datos de perfil proporcionados por proveedores de inicio de sesión, ajustes de usuario, chats y mensajes estándar, adjuntos, ajustes de compartición, datos de uso y registros de seguridad. Para evitar el abuso de promociones, procesamos hashes con clave derivados de una IP de cliente fiable y de la huella de un método de pago de Stripe. Tomverse no almacena datos brutos de tarjetas o cuentas bancarias.",
@@ -438,7 +438,7 @@ export const es = {
         attachmentsTitle: "Adjuntos",
         attachments: "Los adjuntos pueden almacenarse temporalmente en almacenamiento cifrado para entrega al modelo y extracción de documentos. Actualmente se eliminan tras aproximadamente un día mediante la política de ciclo de vida.",
         analyticsTitle: "Analítica de producto y atribución de campañas",
-        analytics: "Con consentimiento, Tomverse registra eventos de producto aprobados y metadatos de campaña como fuente UTM, idioma, país, número de modelos y plan. Los mismos metadatos aprobados pueden enviarse a Google Analytics 4. No se incluyen prompts, respuestas, nombres o contenidos de archivos, direcciones de correo ni nombres de perfil. El consentimiento puede rechazarse antes de iniciar la analítica.",
+        analytics: "Tomverse siempre usa el almacenamiento esencial de sesión, seguridad, idioma y preferencias necesario para prestar el servicio. Para analítica, los visitantes de la UE/EEE, Reino Unido, Suiza o una región no verificada deben aceptar antes de iniciar Google Analytics 4. En Australia y regiones añadidas tras revisión legal, la analítica minimizada comienza después de un aviso claro y puede desactivarse de inmediato o más tarde. Registramos eventos aprobados y metadatos como fuente UTM, idioma, país, número de modelos y plan. Google también puede procesar la dirección IP, datos del navegador, URL de página y ubicación aproximada fuera del país del visitante. Nunca se incluyen prompts, respuestas, nombres o contenidos de archivos, correos ni nombres de perfil. El almacenamiento publicitario y la personalización permanecen desactivados.",
         retentionTitle: "Retención y eliminación",
         retention: "Los chats estándar pueden permanecer hasta que el usuario los elimine o se borren los datos de la cuenta. El historial del modo privado no se almacena en la base. Los hashes de IP y huella de pago para seguridad de promociones se eliminan tras 90 días; pueden conservarse por separado registros mínimos de facturación, legales, de seguridad o respuesta a incidentes.",
         sharingTitle: "Enlaces compartidos",

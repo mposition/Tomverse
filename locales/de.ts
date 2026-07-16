@@ -425,7 +425,7 @@ export const de = {
     },
     privacyPolicy: {
         title: "Datenschutzerklärung",
-        effective: "Gültig ab: 13. Juli 2026",
+        effective: "Gültig ab: 16. Juli 2026",
         intro: "Tomverse verarbeitet personenbezogene Informationen und Chatdaten nur soweit erforderlich, um den Dienst bereitzustellen. Dieser Hinweis erklärt die unterschiedlichen Datenflüsse für Standard-Chats und den privaten Modus.",
         collectedTitle: "Verarbeitete Informationen",
         collected: "Wir können Konto-IDs, E-Mail- und Profildaten von Login-Anbietern, Benutzereinstellungen, Standard-Chats und Nachrichten, Anhänge, Freigabeeinstellungen, Nutzungsdaten und Sicherheitsprotokolle verarbeiten. Zur Verhinderung von Aktionsmissbrauch verarbeiten wir Schlüssel-Hashes aus einer vertrauenswürdigen Client-IP und einem Stripe-Zahlungsmittel-Fingerabdruck. Tomverse speichert keine rohen Karten- oder Bankdaten.",
@@ -438,7 +438,7 @@ export const de = {
         attachmentsTitle: "Anhänge",
         attachments: "Anhänge können vorübergehend in verschlüsseltem Objektspeicher für Modellzustellung und Dokumentextraktion gespeichert werden. Temporäre Anhänge werden derzeit nach etwa einem Tag per Lifecycle-Regel gelöscht.",
         analyticsTitle: "Produktanalyse und Kampagnenzuordnung",
-        analytics: "Mit Zustimmung erfasst Tomverse genehmigte Produktereignisse und Kampagnenmetadaten wie UTM-Quelle, Sprache, Land, Modellanzahl und Tarif. Dieselben genehmigten Metadaten können an Google Analytics 4 gesendet werden. Prompts, Modellantworten, Dateinamen, Dateiinhalte, E-Mail-Adressen und Profilnamen werden nicht erfasst. Die Zustimmung kann vor Beginn der Analyse verweigert werden.",
+        analytics: "Tomverse nutzt stets den für den Dienst erforderlichen Sitzungs-, Sicherheits-, Sprach- und Einstellungsspeicher. Für Produktanalysen müssen Besucher aus EU/EWR, Vereinigtem Königreich, Schweiz oder einer nicht verifizierten Region vor dem Start von Google Analytics 4 ausdrücklich zustimmen. In Australien und nach rechtlicher Prüfung freigegebenen Regionen startet die datensparsame Analyse nach einem klaren Hinweis und kann sofort oder später deaktiviert werden. Erfasst werden genehmigte Ereignisse und Metadaten wie UTM-Quelle, Sprache, Land, Modellanzahl und Tarif. Google kann zudem IP-Adresse, Browserdaten, Seiten-URL und ungefähren Standort außerhalb des Besucherlandes verarbeiten. Prompts, Modellantworten, Dateinamen, Dateiinhalte, E-Mail-Adressen und Profilnamen werden nie einbezogen. Werbespeicher und Personalisierung bleiben deaktiviert.",
         retentionTitle: "Aufbewahrung und Löschung",
         retention: "Standard-Chats können verbleiben, bis der Nutzer sie löscht oder Kontodaten entfernt werden. Der Chatverlauf im privaten Modus wird nicht in der Datenbank gespeichert. IP- und Zahlungsmittel-Fingerabdruck-Hashes für Aktionssicherheit werden nach 90 Tagen entfernt; minimale Abrechnungs-, Rechts-, Sicherheits- oder Incident-Daten können getrennt aufbewahrt werden.",
         sharingTitle: "Freigabelinks",
