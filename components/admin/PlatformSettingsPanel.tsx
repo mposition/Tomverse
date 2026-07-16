@@ -2,7 +2,11 @@
 
 import { useState } from "react";
 import { Bot, Database, Loader2, RefreshCw, Save, Settings2 } from "lucide-react";
-import { AVAILABLE_MODELS } from "@/lib/models";
+import {
+  AVAILABLE_MODELS,
+  canUseModelWithPlan,
+  getModelUsageProfile,
+} from "@/lib/models";
 import type { PublicAppSettings } from "@/lib/appSettings";
 import { dispatchAppToast } from "@/lib/appToast";
 import { ModelLogo } from "@/components/chat/ModelLogo";
@@ -16,8 +20,11 @@ type Props = {
   settings: PublicAppSettings;
 };
 
-const freeModels = AVAILABLE_MODELS.filter(
-  (model) => model.enabled && model.tier === "Free"
+const guestModels = AVAILABLE_MODELS.filter(
+  (model) =>
+    model.enabled &&
+    canUseModelWithPlan("Guest", model) &&
+    getModelUsageProfile(model).category === "Standard"
 );
 
 export function PlatformSettingsPanel({ settings }: Props) {
@@ -28,7 +35,7 @@ export function PlatformSettingsPanel({ settings }: Props) {
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const selectedModel =
-    freeModels.find((model) => model.id === guestDefaultModelId) || freeModels[0];
+    guestModels.find((model) => model.id === guestDefaultModelId) || guestModels[0];
 
   const applySettings = (nextSettings: PublicAppSettings) => {
     setGuestDefaultModelId(nextSettings.guestDefaultModelId);
@@ -156,7 +163,7 @@ export function PlatformSettingsPanel({ settings }: Props) {
                   onChange={(event) => setGuestDefaultModelId(event.target.value)}
                   className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm font-bold text-white outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
                 >
-                  {freeModels.map((model) => (
+                  {guestModels.map((model) => (
                     <option key={model.id} value={model.id}>
                       {model.name} - {model.provider}
                     </option>
@@ -177,16 +184,16 @@ export function PlatformSettingsPanel({ settings }: Props) {
               <div>
                 <h3 className="font-black text-white">{selectedModel.name}</h3>
                 <p className="mt-1 text-sm font-semibold text-zinc-500">
-                  {selectedModel.provider} · {selectedModel.tier}
+                  {selectedModel.provider} · {getModelUsageProfile(selectedModel).category} · Guest
                 </p>
                 <p className="mt-3 text-sm leading-6 text-zinc-400">
-                  Only enabled Free-tier models can be used as the guest default.
+                  Only enabled guest-accessible Standard models can be used as the guest default.
                 </p>
               </div>
             </div>
           ) : (
             <p className="mt-4 text-sm text-red-200">
-              No eligible Free model is available.
+              No eligible guest-accessible Standard model is available.
             </p>
           )}
           <div className="mt-5 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">

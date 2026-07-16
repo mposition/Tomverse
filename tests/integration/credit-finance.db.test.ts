@@ -85,7 +85,8 @@ const chatBudget = ({
   provider?: ChatBudget["provider"];
 }): ChatBudget => ({
   modelId: "credit-integration-model",
-  modelTier: "Free",
+  minimumPlan: "Guest",
+  modelUsageClass: "standard",
   usageCredits: credits,
   inputTokens,
   maxOutputTokens: outputTokens,

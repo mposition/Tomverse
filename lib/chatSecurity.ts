@@ -5,11 +5,15 @@ import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import {
+    canUseModelWithPlan,
     getModelBillingProfile,
+    getModelUsageProfile,
     getSettledUsageCredits,
     getWeightedUsageCredits,
     type AiModel,
+    type ModelMinimumPlan,
     type ModelTier,
+    type ModelUsageClass,
 } from "@/lib/models";
 import { getTrustedClientIp } from "@/lib/clientIp";
 import { recordInternalProviderUsage } from "@/lib/providerUsageAccounting";
@@ -52,7 +56,8 @@ export type ChatAccess = {
 
 export type ChatBudget = {
     modelId: string;
-    modelTier: ModelTier;
+    minimumPlan: ModelMinimumPlan;
+    modelUsageClass: ModelUsageClass;
     usageCredits: number;
     inputTokens: number;
     maxOutputTokens: number;
@@ -162,12 +167,6 @@ const deserializeReservation = (payload: Prisma.JsonValue) => {
     } satisfies ChatUsageReservation;
 };
 
-const PLAN_MODEL_TIER_LIMIT: Record<ModelTier, ModelTier> = {
-    Free: "Pro",
-    Pro: "Max",
-    Max: "Max",
-};
-
 export class ChatAccessError extends Error {
     constructor(
         public readonly status: number,
@@ -184,20 +183,6 @@ const positiveInteger = (value: string | undefined, fallback: number) => {
     const parsed = Number(value);
     return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 };
-
-const TIER_RANK: Record<ModelTier, number> = {
-    Free: 0,
-    Pro: 1,
-    Max: 2,
-};
-
-const configuredTier = (
-    value: string | undefined,
-    fallback: ModelTier
-): ModelTier =>
-    value === "Free" || value === "Pro" || value === "Max"
-        ? value
-        : fallback;
 
 export const getPlanEstimatedCostLimits = (plan: ModelTier) => ({
     day:
@@ -233,16 +218,21 @@ export const getPlanEstimatedCostLimits = (plan: ModelTier) => ({
 });
 
 export const assertModelAccess = (access: Pick<ChatAccess, "kind" | "plan">, model: AiModel) => {
-    const maximumTier =
-        access.kind === "guest"
-            ? configuredTier(process.env.CHAT_GUEST_MAX_TIER, "Free")
-            : PLAN_MODEL_TIER_LIMIT[access.plan || "Free"];
-
-    if (TIER_RANK[model.tier] > TIER_RANK[maximumTier]) {
+    const currentPlan = access.kind === "guest" ? "Guest" : access.plan || "Free";
+    if (!canUseModelWithPlan(currentPlan, model)) {
+        const usageClass = getModelUsageProfile(model).category;
         throw new ChatAccessError(
             403,
-            "MODEL_TIER_FORBIDDEN",
-            "This model is not available for your account."
+            "MODEL_ACCESS_FORBIDDEN",
+            currentPlan === "Guest"
+                ? `Sign in to use this ${usageClass} model.`
+                : `This ${usageClass} model requires the ${model.minimumPlan} plan or higher.`,
+            undefined,
+            {
+                currentPlan,
+                minimumPlan: model.minimumPlan,
+                usageClass,
+            }
         );
     }
 };
@@ -275,7 +265,8 @@ export const createChatBudget = (
 
     return {
         modelId: model.id,
-        modelTier: model.tier,
+        minimumPlan: model.minimumPlan,
+        modelUsageClass: model.usageClass,
         usageCredits: getWeightedUsageCredits(model, estimatedInputTokens),
         inputTokens: estimatedInputTokens,
         maxOutputTokens: profile.maxOutputTokens,
@@ -819,7 +810,8 @@ export const acquireChatAccess = async (
         if (
             access.kind === "user" &&
             (access.plan || "Free") === "Free" &&
-            budget.modelTier === "Pro"
+            budget.minimumPlan === "Free" &&
+            budget.modelUsageClass !== "standard"
         ) {
             const freeProMonthlyLimit = positiveInteger(
                 process.env.CHAT_FREE_PRO_MODEL_RESPONSES_PER_MONTH,
@@ -836,7 +828,7 @@ export const acquireChatAccess = async (
                 throw new ChatAccessError(
                     429,
                     "FREE_PRO_MODEL_QUOTA_EXCEEDED",
-                    "The Free plan includes up to 30 Pro-model responses per month.",
+                    "The Free plan includes up to 30 selected higher-cost model responses per month.",
                     retryAfterFor("month", now)
                 );
             }

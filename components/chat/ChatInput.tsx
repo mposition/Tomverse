@@ -30,6 +30,7 @@ import { useLanguage } from "@/components/LanguageProvider";
 import { dispatchAppToast } from "@/lib/appToast";
 import { getModelBestFor, getModelExperienceStatus, getModelExperienceTags } from "@/lib/modelExperience";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
+import { canUseModelWithPlan } from "@/lib/models";
 import { useUserUsage } from "@/components/chat/useUserUsage";
 import { withChatLanguage } from "@/lib/localizedCallbackUrl";
 import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
@@ -1675,13 +1676,13 @@ export function ChatInput({
                             .filter((item): item is (typeof AVAILABLE_MODELS)[number] => Boolean(item))
                             .filter((item) => item.enabled && item.id !== model.id)
                             .slice(0, 2);
-                          const isTierLocked =
-                            isGuestMode
-                              ? model.tier !== "Free"
-                              : accountUsage?.plan === "Free" && model.tier === "Max";
-                          const unavailable = !model.enabled || modelStatus === "unavailable" || isTierLocked;
+                          const currentPlan = isGuestMode
+                            ? "Guest"
+                            : accountUsage?.plan ?? "Free";
+                          const isPlanLocked = !canUseModelWithPlan(currentPlan, model);
+                          const unavailable = !model.enabled || modelStatus === "unavailable" || isPlanLocked;
                           const usageProfile = getModelUsageProfile(model);
-                          const statusReason = isTierLocked
+                          const statusReason = isPlanLocked
                             ? isGuestMode
                               ? t("modelStatusReasons.loginRequired")
                               : t("modelStatusReasons.upgradeRequired")
@@ -1708,8 +1709,9 @@ export function ChatInput({
                                 type="button"
                                 data-testid="model-option"
                                 data-model-id={model.id}
-                                data-model-tier={model.tier}
-                                disabled={unavailable}
+                                data-model-usage-class={usageProfile.category}
+                                data-model-minimum-plan={model.minimumPlan}
+                                disabled={unavailable && !isSelected}
                                 onClick={() => {
                                   rememberRecentModel(model.id);
                                   onToggleModel(model.id);
@@ -1812,7 +1814,7 @@ export function ChatInput({
           placeholder={placeholderText}
           disabled={isDisabled}
           rows={1}
-                  className="order-2 max-h-[96px] min-h-[44px] w-full flex-none resize-none overflow-y-auto border-0 bg-transparent px-1 py-1.5 text-[13px] leading-5 text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-500 md:order-first md:max-h-[160px] md:min-h-[56px] md:py-2 md:text-sm md:leading-6"
+                  className="order-2 max-h-[96px] min-h-[44px] w-full flex-none resize-none overflow-y-auto border-0 bg-transparent px-1 py-1.5 text-base leading-5 text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-500 md:order-first md:max-h-[160px] md:min-h-[56px] md:py-2 md:text-sm md:leading-6"
               />
 
         {isSending ? (

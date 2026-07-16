@@ -651,7 +651,7 @@ const checks = [
         source.includes("readLimitedJson(req, 8 * 1024, actionSchema)") &&
         source.includes("isModelFinderDefaultId(body.defaultModelId)") &&
         source.includes("getModelFinderRecommendations(body.answers)") &&
-        rules.includes('model.tier === "Free"') &&
+        rules.includes('canUseModelWithPlan("Guest", model)') &&
         rules.includes('category === "Standard"') &&
         component.includes('"model_finder_started"') &&
         component.includes('"recommended_model_accepted"') &&

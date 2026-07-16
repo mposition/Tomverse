@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { AlertCircle, ArrowRight, CheckCircle2, Info, Sparkles, X } from "lucide-react";
 import { DesktopChatShell } from "@/components/chat/DesktopChatShell";
 import { MobileChatShell } from "@/components/chat/MobileChatShell";
@@ -17,7 +17,12 @@ import {
   clampGuestSelectedModels,
   clampSelectedModels,
 } from "@/lib/appDefaults";
-import { getModel, isEnabledModelId } from "@/lib/models";
+import {
+  canUseModelWithPlan,
+  getModel,
+  getModelUsageProfile,
+  isEnabledModelId,
+} from "@/lib/models";
 import {
   USER_SETTINGS_UPDATED_EVENT,
   type UserSettingsUpdatedDetail,
@@ -274,8 +279,21 @@ export default function Home() {
     : accountUsage?.limits.maxModels || APP_DEFAULTS.maxSelectedModels;
   const [guestMessageCount, setGuestMessageCount] = useState(0);
   const MAX_GUEST_MESSAGES = 20;
+  const currentAccessPlan = isGuestMode ? "Guest" : accountUsage?.plan ?? "Free";
+  const planLockedModelIds = useMemo(
+    () =>
+      selectedModels.filter((modelId) => {
+        const model = getModel(modelId);
+        return Boolean(model && !canUseModelWithPlan(currentAccessPlan, model));
+      }),
+    [currentAccessPlan, selectedModels]
+  );
+  const effectiveDisabledPanels = useMemo(
+    () => uniqueStrings([...disabledPanels, ...planLockedModelIds]),
+    [disabledPanels, planLockedModelIds]
+  );
   const activeModelCount = selectedModels.filter(
-    (modelId) => !disabledPanels.includes(modelId)
+    (modelId) => !effectiveDisabledPanels.includes(modelId)
   ).length;
 
   const isInitialSelectedRef = useRef(false);
@@ -285,8 +303,15 @@ export default function Home() {
     currentChatIdRef.current = currentChatId;
   }, [currentChatId]);
 
-  const isFreeEnabledModel = useCallback(
-    (modelId: string) => isEnabledModelId(modelId) && getModel(modelId)?.tier === "Free",
+  const isGuestEligibleModel = useCallback(
+    (modelId: string) => {
+      const model = getModel(modelId);
+      return Boolean(
+        model?.enabled &&
+          canUseModelWithPlan("Guest", model) &&
+          getModelUsageProfile(model).category === "Standard"
+      );
+    },
     []
   );
 
@@ -307,7 +332,7 @@ export default function Home() {
       .then((data) => {
         const nextGuestModel =
           typeof data?.guestDefaultModelId === "string" &&
-          isFreeEnabledModel(data.guestDefaultModelId)
+          isGuestEligibleModel(data.guestDefaultModelId)
             ? data.guestDefaultModelId
             : APP_DEFAULTS.guestDefaultModelId;
         if (cancelled) return;
@@ -323,7 +348,7 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, [isFreeEnabledModel, isGuestMode]);
+  }, [isGuestEligibleModel, isGuestMode]);
 
   useEffect(() => {
     const mediaQuery = window.matchMedia("(max-width: 767px)");
@@ -1179,6 +1204,15 @@ export default function Home() {
   };
 
   const toggleModel = (modelId: string) => {
+    const model = getModel(modelId);
+    const isSelected = selectedModels.includes(modelId);
+    if (
+      !isSelected &&
+      (!model || !canUseModelWithPlan(currentAccessPlan, model))
+    ) {
+      showToast(t("modelStatusReasons.upgradeRequired"), "info");
+      return false;
+    }
     if (
       isGuestMode &&
       !clampGuestSelectedModels([modelId]).includes(modelId)
@@ -1467,7 +1501,7 @@ export default function Home() {
           conversations={blendedConversations}
           currentChatId={currentChatId}
           selectedModels={selectedModels}
-          disabledPanels={disabledPanels}
+          disabledPanels={effectiveDisabledPanels}
           promptPayload={promptPayload}
           inputValue={inputValue}
           setInputValue={setInputValue}
@@ -1502,7 +1536,7 @@ export default function Home() {
           conversations={blendedConversations}
           currentChatId={currentChatId}
           selectedModels={selectedModels}
-          disabledPanels={disabledPanels}
+          disabledPanels={effectiveDisabledPanels}
           promptPayload={promptPayload}
           inputValue={inputValue}
           setInputValue={setInputValue}

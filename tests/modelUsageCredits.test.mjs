@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  canUseModelWithPlan,
   getInputCreditMultiplier,
   getModel,
   getModelUsageProfile,
@@ -29,6 +30,25 @@ test("model usage profiles match the launch credit examples", () => {
     category: "Standard",
     credits: 1,
   });
+});
+
+test("model usage classes are independent from subscription access", () => {
+  const premium = getModel("gpt-5-5");
+  const guestStandard = getModel("gpt-5-4-mini");
+  const freeStandard = getModel("gemini-3-5-flash");
+
+  assert.equal(premium.minimumPlan, "Pro");
+  assert.equal(canUseModelWithPlan("Free", premium), false);
+  assert.equal(canUseModelWithPlan("Pro", premium), true);
+  assert.equal(canUseModelWithPlan("Max", premium), true);
+
+  assert.equal(canUseModelWithPlan("Guest", guestStandard), true);
+  assert.equal(getModelUsageProfile(guestStandard).category, "Standard");
+
+  assert.equal(getModelUsageProfile(freeStandard).category, "Standard");
+  assert.equal(freeStandard.minimumPlan, "Free");
+  assert.equal(canUseModelWithPlan("Guest", freeStandard), false);
+  assert.equal(canUseModelWithPlan("Free", freeStandard), true);
 });
 
 test("long input applies the configured credit multiplier", () => {
