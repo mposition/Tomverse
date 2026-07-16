@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   canUseModelWithPlan,
+  PUBLIC_MODELS,
   getEnabledModel,
   getInputCreditMultiplier,
   getModel,
@@ -57,6 +58,8 @@ test("retired Gemini 2.5 Pro is not callable and points to its replacement", () 
   assert.equal(retired.enabled, false);
   assert.equal(retired.status, "disabled");
   assert.equal(retired.replacementModelId, "gemini-3-1-pro");
+  assert.equal(retired.publiclyListed, false);
+  assert.equal(PUBLIC_MODELS.some((model) => model.id === retired.id), false);
   assert.equal(getEnabledModel(retired.id), undefined);
   assert.equal(getEnabledModel(retired.replacementModelId)?.enabled, true);
 });

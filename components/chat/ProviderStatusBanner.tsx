@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Info, RefreshCw, Shuffle } from "lucide-react";
-import { AVAILABLE_MODELS } from "@/components/chat/types";
+import { AVAILABLE_MODELS, PUBLIC_MODELS } from "@/components/chat/types";
 import { useLanguage } from "@/components/LanguageProvider";
 
 type PublicModelStatus = "available" | "limited" | "unavailable";
@@ -19,6 +19,8 @@ type ProviderStatusBannerProps = {
   compact?: boolean;
   onToggleModel?: (modelId: string) => void;
 };
+
+const PUBLIC_MODEL_IDS = new Set(PUBLIC_MODELS.map((model) => model.id));
 
 const modelName = (id: string) =>
   AVAILABLE_MODELS.find((model) => model.id === id)?.name || id;
@@ -56,7 +58,8 @@ export function ProviderStatusBanner({
               typeof record.provider !== "string" ||
               (record.status !== "available" &&
                 record.status !== "limited" &&
-                record.status !== "unavailable")
+                record.status !== "unavailable") ||
+              !PUBLIC_MODEL_IDS.has(record.id)
             ) {
               return null;
             }
@@ -67,6 +70,7 @@ export function ProviderStatusBanner({
               fallbackModelIds: Array.isArray(record.fallbackModelIds)
                 ? record.fallbackModelIds
                     .filter((id): id is string => typeof id === "string")
+                    .filter((id) => PUBLIC_MODEL_IDS.has(id))
                     .slice(0, 3)
                 : [],
             };

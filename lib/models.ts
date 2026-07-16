@@ -76,6 +76,8 @@ export type AiModel = {
     minimumPlan: ModelMinimumPlan;
     usageClass: ModelUsageClass;
     replacementModelId?: string;
+    /** Keep historical IDs resolvable while omitting retired models from user catalogues. */
+    publiclyListed?: boolean;
     enabled: boolean;
     status: ModelStatus;
     reasoning?: "none" | "low" | "medium" | "high";
@@ -95,7 +97,7 @@ export const AVAILABLE_MODELS = [
 
     { id: "gemini-3-5-flash", name: "Gemini 3.5 Flash", apiModel: "gemini-3.5-flash", provider: "google", icon: "✨", minimumPlan: "Free", usageClass: "standard", enabled: true, status: "enabled" },
     { id: "gemini-3-1-pro", name: "Gemini 3.1 Pro", apiModel: "gemini-3.1-pro-preview", provider: "google", icon: "✨", minimumPlan: "Pro", usageClass: "premium", enabled: true, status: "enabled" },
-    { id: "gemini-2-5-pro", name: "Gemini 2.5 Pro", apiModel: "gemini-2.5-pro", provider: "google", icon: "✨", minimumPlan: "Free", usageClass: "advanced", replacementModelId: "gemini-3-1-pro", enabled: false, status: "disabled" },
+    { id: "gemini-2-5-pro", name: "Gemini 2.5 Pro", apiModel: "gemini-2.5-pro", provider: "google", icon: "✨", minimumPlan: "Free", usageClass: "advanced", replacementModelId: "gemini-3-1-pro", publiclyListed: false, enabled: false, status: "disabled" },
     { id: "gemini-2-5-flash", name: "Gemini 3.1 Flash-Lite", apiModel: "gemini-3.1-flash-lite", provider: "google", icon: "✨", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled" },
 
     { id: "llama-3-1", name: "Llama 3.1", apiModel: "llama-3.1-8b-instant", provider: "groq", icon: "∞", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled" },
@@ -144,6 +146,10 @@ const modelMap = new Map<string, AiModel>(
 
 export const ENABLED_MODELS = AVAILABLE_MODELS.filter(
     (model) => model.enabled
+);
+
+export const PUBLIC_MODELS: readonly AiModel[] = AVAILABLE_MODELS.filter(
+    (model) => (model as AiModel).publiclyListed !== false
 );
 
 export const getModel = (modelId: string) => modelMap.get(modelId);
