@@ -3,14 +3,16 @@
 import { Conversation } from "./types";
 import { getModel } from "@/components/chat/types";
 import { AuthButton } from "@/components/auth/AuthButton";
-import { useCallback, useState, useEffect, useRef } from "react";
+import { useCallback, useState, useEffect, useId, useRef } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
 import Link from "next/link";
-import { AlertTriangle, CloudUpload, Crown, Database, Download, Folder, FolderPlus, Link2Off, Lock, MessageSquare, MoreVertical, Pencil, Pin, Search, Send, Share2, ShieldCheck, Sparkles, Star, Tag, Trash2, Unlock, X } from "lucide-react";
+import { AlertTriangle, Check, CircleHelp, CloudUpload, Crown, Database, Download, Folder, FolderPlus, Link2Off, Lock, MessageSquare, MoreVertical, Pencil, Pin, Search, Send, Share2, ShieldCheck, Sparkles, Star, Tag, Trash2, Unlock, X } from "lucide-react";
 import { FeedbackButton } from "@/components/chat/FeedbackButton";
+import { FeatureHelpPopover } from "@/components/chat/FeatureHelpPopover";
+import { chatHelpCopy } from "@/components/chat/chatHelpCopy";
 import { useUserUsage, type UserPlan } from "@/components/chat/useUserUsage";
 import { dispatchAppToast } from "@/lib/appToast";
-import { trackProductEvent } from "@/lib/productAnalyticsClient";
+import { trackProductEvent, trackProductEventOnce } from "@/lib/productAnalyticsClient";
 
 type ChatSidebarProps = {
     conversations: Conversation[];
@@ -41,6 +43,8 @@ type ConversationProject = {
     name: string;
     conversationCount?: number;
 };
+
+const SIDEBAR_TOUR_STORAGE_KEY = "tomverse_sidebar_tour_v1";
 
 export function ChatSidebar({
     conversations,
@@ -116,13 +120,20 @@ export function ChatSidebar({
         snippet: string;
     }>>([]);
     const [renameTarget, setRenameTarget] = useState<Conversation | null>(null);
+    const [shareTarget, setShareTarget] = useState<Conversation | null>(null);
     const [renameValue, setRenameValue] = useState("");
     const [lockTarget, setLockTarget] = useState<Conversation | null>(null);
     const [lockPassword, setLockPassword] = useState("");
     const [lockError, setLockError] = useState("");
     const privateModeButtonRef = useRef<HTMLButtonElement | null>(null);
     const privateNoticeDialogRef = useRef<HTMLDivElement | null>(null);
-    const { t } = useLanguage();
+    const helpMenuRef = useRef<HTMLSpanElement | null>(null);
+    const [showHelpMenu, setShowHelpMenu] = useState(false);
+    const [sidebarTourStep, setSidebarTourStep] = useState<number | null>(null);
+    const { t, lang } = useLanguage();
+    const helpCopy = chatHelpCopy[lang];
+    const tooltipIdPrefix = useId();
+    const helpTooltipId = `${tooltipIdPrefix}-help`;
     const accountUsage = useUserUsage(!isGuestMode);
     const canShare =
         !isGuestMode && accountUsage?.limits.allowSharing !== false;
@@ -188,6 +199,12 @@ export function ChatSidebar({
             Number(favoriteConversationIds.includes(a.id));
         return favoriteDelta;
     });
+    const activeLabelFilter =
+        conversationFilter === "work" ||
+        conversationFilter === "research" ||
+        conversationFilter === "personal"
+            ? conversationFilter
+            : null;
 
     useEffect(() => {
         if (isGuestMode || normalizedSearch.length < 2) {
@@ -209,6 +226,41 @@ export function ChatSidebar({
             controller.abort();
         };
     }, [isGuestMode, normalizedSearch.length, searchQuery]);
+
+    useEffect(() => {
+        if (!showHelpMenu) return;
+        const closeOnOutsideClick = (event: PointerEvent) => {
+            if (!helpMenuRef.current?.contains(event.target as Node)) {
+                setShowHelpMenu(false);
+            }
+        };
+        const closeOnEscape = (event: KeyboardEvent) => {
+            if (event.key === "Escape") setShowHelpMenu(false);
+        };
+        document.addEventListener("pointerdown", closeOnOutsideClick);
+        document.addEventListener("keydown", closeOnEscape);
+        return () => {
+            document.removeEventListener("pointerdown", closeOnOutsideClick);
+            document.removeEventListener("keydown", closeOnEscape);
+        };
+    }, [showHelpMenu]);
+
+    useEffect(() => {
+        if (isGuestMode || !conversations.some((conversation) => conversation.id !== "private-chat")) {
+            return;
+        }
+        const desktopViewport = window.matchMedia("(min-width: 768px)").matches;
+        const visibleSidebar = isMobileDrawer ? !desktopViewport : desktopViewport;
+        if (!visibleSidebar || localStorage.getItem(SIDEBAR_TOUR_STORAGE_KEY)) return;
+        const timer = window.setTimeout(() => {
+            setSidebarTourStep((current) => current ?? 0);
+            trackProductEventOnce(
+                "sidebar_tour_started:auto:v1",
+                "sidebar_tour_started"
+            );
+        }, 500);
+        return () => window.clearTimeout(timer);
+    }, [conversations, isGuestMode, isMobileDrawer]);
 
     useEffect(() => {
         if (!showProjectForm && !editingProjectId && !deleteProjectArmedId) return;
@@ -480,6 +532,29 @@ export function ChatSidebar({
         }
     }, []);
 
+    const startSidebarTour = () => {
+        setShowHelpMenu(false);
+        setSidebarTourStep(0);
+        trackProductEvent("sidebar_tour_started");
+    };
+
+    const skipSidebarTour = () => {
+        localStorage.setItem(SIDEBAR_TOUR_STORAGE_KEY, "skipped");
+        setSidebarTourStep(null);
+        trackProductEvent("sidebar_tour_skipped");
+    };
+
+    const advanceSidebarTour = () => {
+        if (sidebarTourStep === null) return;
+        if (sidebarTourStep < helpCopy.tourSteps.length - 1) {
+            setSidebarTourStep(sidebarTourStep + 1);
+            return;
+        }
+        localStorage.setItem(SIDEBAR_TOUR_STORAGE_KEY, "completed");
+        setSidebarTourStep(null);
+        trackProductEvent("sidebar_tour_completed");
+    };
+
     const getPrivateNoticeFocusableElements = useCallback(() => {
         const dialog = privateNoticeDialogRef.current;
         if (!dialog) return [];
@@ -555,7 +630,7 @@ export function ChatSidebar({
 
     return (
         <>
-        <aside className={`flex h-full w-full shrink-0 select-none flex-col border-r border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 ${isMobileDrawer ? "" : "md:w-80"}`}>
+        <aside className={`relative flex h-full w-full shrink-0 select-none flex-col border-r border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 ${isMobileDrawer ? "" : "md:w-80"}`}>
 
             <div className={`${isMobileDrawer ? "p-3" : "p-4"} border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-2.5`}>
                 <span className={`flex items-center justify-center overflow-hidden rounded-xl bg-white ring-1 ring-zinc-200 shadow-sm dark:ring-zinc-800 ${isMobileDrawer ? "h-8 w-8" : "h-9 w-9"}`}>
@@ -569,6 +644,68 @@ export function ChatSidebar({
                 <h1 className={`${isMobileDrawer ? "text-sm" : "text-base"} font-bold tracking-tight text-zinc-800 dark:text-zinc-100`}>
                     Tomverse AI
                 </h1>
+                <span ref={helpMenuRef} className="group/help relative ml-auto inline-flex">
+                    <button
+                        type="button"
+                        aria-label={t("sidebar.helpAndGuides")}
+                        aria-describedby={helpTooltipId}
+                        aria-expanded={showHelpMenu}
+                        aria-haspopup="menu"
+                        data-testid="sidebar-help-button"
+                        onClick={() => {
+                            setShowHelpMenu((current) => !current);
+                            trackProductEvent("help_opened", 0, {
+                                help_source: "sidebar_header",
+                                help_topic: "workspace",
+                            });
+                        }}
+                        className={`inline-flex items-center justify-center rounded-full text-zinc-500 transition hover:bg-blue-50 hover:text-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-zinc-400 dark:hover:bg-blue-950/50 dark:hover:text-blue-300 ${isMobileDrawer ? "h-10 w-10" : "h-8 w-8"}`}
+                    >
+                        <CircleHelp className="h-5 w-5" aria-hidden="true" />
+                    </button>
+                    {!showHelpMenu ? (
+                        <span
+                            id={helpTooltipId}
+                            role="tooltip"
+                            className="pointer-events-none absolute right-0 top-full z-50 mt-1 hidden w-max max-w-64 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs font-bold text-zinc-700 shadow-xl group-hover/help:block group-focus-within/help:block dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
+                        >
+                            {t("sidebar.helpAndGuides")}
+                        </span>
+                    ) : null}
+                    {showHelpMenu ? (
+                        <span
+                            role="menu"
+                            className="absolute right-0 top-full z-[75] mt-2 block w-64 rounded-2xl border border-zinc-200 bg-white p-2 text-left shadow-2xl dark:border-zinc-700 dark:bg-zinc-900"
+                        >
+                            <span className="block px-3 py-2 text-xs font-black uppercase tracking-wide text-zinc-500">
+                                {helpCopy.quickHelp}
+                            </span>
+                            <button
+                                type="button"
+                                role="menuitem"
+                                data-testid="sidebar-tour-replay"
+                                onClick={startSidebarTour}
+                                className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-bold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                            >
+                                <Sparkles className="h-4 w-4 text-blue-500" aria-hidden="true" />
+                                {helpCopy.replayTour}
+                            </button>
+                            <Link
+                                href="/support/help-centre/chat-workspace"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                prefetch={false}
+                                role="menuitem"
+                                data-testid="sidebar-help-link"
+                                onClick={() => setShowHelpMenu(false)}
+                                className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-bold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                            >
+                                <CircleHelp className="h-4 w-4 text-blue-500" aria-hidden="true" />
+                                {helpCopy.openFullGuide}
+                            </Link>
+                        </span>
+                    ) : null}
+                </span>
             </div>
 
             <div className={`${isMobileDrawer ? "p-2.5" : "p-3"} border-b border-zinc-200/60 dark:border-zinc-800/40`}>
@@ -579,27 +716,40 @@ export function ChatSidebar({
                     <span className="text-sm">+</span> {t("sidebar.newChat")}
                 </button>
 
-                <button
-                    ref={privateModeButtonRef}
-                    onClick={() => {
-                        if (isPrivateMode) {
-                            onTogglePrivateMode();
-                        } else {
-                            setShowPrivateNotice(true);
-                        }
-                    }}
-                    disabled={isGuestMode}
-                    className={`mt-2 w-full flex items-center justify-center gap-2 rounded-lg border px-4 text-xs font-semibold transition-all ${isMobileDrawer ? "py-2" : "py-2.5"} ${isGuestMode
-                            ? "cursor-not-allowed opacity-50 border-zinc-200 bg-white text-zinc-400 dark:border-zinc-700/50 dark:bg-zinc-800/50 dark:text-zinc-500"
-                            : isPrivateMode
-                                ? "cursor-pointer border-purple-700/70 bg-purple-950/40 text-purple-200 hover:bg-purple-900/50"
-                                : "cursor-pointer border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700/50 dark:bg-zinc-800/50 dark:text-zinc-300 dark:hover:bg-zinc-700/60 dark:hover:text-white"
-                        }`}
-                    title={isGuestMode ? t("sidebar.loginRequired") : ""}
-                >
-                    {isPrivateMode ? t("sidebar.privateModeStop") : t("sidebar.privateModeStart")}
-                    {isGuestMode && <Crown className="h-3.5 w-3.5" aria-hidden="true" />}
-                </button>
+                <div className="mt-2 flex items-center gap-1">
+                    <button
+                        ref={privateModeButtonRef}
+                        onClick={() => {
+                            if (isPrivateMode) {
+                                onTogglePrivateMode();
+                            } else {
+                                setShowPrivateNotice(true);
+                            }
+                        }}
+                        disabled={isGuestMode}
+                        className={`flex min-w-0 flex-1 items-center justify-center gap-2 rounded-lg border px-4 text-xs font-semibold transition-all ${isMobileDrawer ? "py-2" : "py-2.5"} ${isGuestMode
+                                ? "cursor-not-allowed opacity-50 border-zinc-200 bg-white text-zinc-400 dark:border-zinc-700/50 dark:bg-zinc-800/50 dark:text-zinc-500"
+                                : isPrivateMode
+                                    ? "cursor-pointer border-purple-700/70 bg-purple-950/40 text-purple-200 hover:bg-purple-900/50"
+                                    : "cursor-pointer border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700/50 dark:bg-zinc-800/50 dark:text-zinc-300 dark:hover:bg-zinc-700/60 dark:hover:text-white"
+                            }`}
+                        title={isGuestMode ? t("sidebar.loginRequired") : ""}
+                    >
+                        {isPrivateMode ? t("sidebar.privateModeStop") : t("sidebar.privateModeStart")}
+                        {isGuestMode && <Crown className="h-3.5 w-3.5" aria-hidden="true" />}
+                    </button>
+                    <FeatureHelpPopover
+                        title={helpCopy.privateTitle}
+                        description={helpCopy.privateDescription}
+                        buttonLabel={helpCopy.helpAboutPrivate}
+                        learnMoreLabel={helpCopy.learnMore}
+                        topic="private"
+                        href="/support/help-centre/chat-workspace#files-and-drive"
+                        mobile={isMobileDrawer}
+                        align="right"
+                        testId="private-mode-help"
+                    />
+                </div>
             </div>
 
             <div className={`border-b border-zinc-200/60 px-3 dark:border-zinc-800/40 ${isMobileDrawer ? "py-2" : "py-3"}`}>
@@ -612,36 +762,119 @@ export function ChatSidebar({
                         className="h-9 w-full rounded-lg border border-zinc-200 bg-white pl-9 pr-3 text-xs text-zinc-800 outline-none transition placeholder:text-zinc-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-blue-500"
                     />
                 </div>
-                <div className="mt-2 flex flex-wrap gap-1 rounded-xl bg-zinc-100 p-1 dark:bg-zinc-900">
-                    {[
-                        ["all", t("chat.allTiers")],
-                        ["locked", t("sidebar.lockedBadge")],
-                        ["shared", t("sidebar.sharedBadge")],
-                        ["work", t("sidebar.labelWork")],
-                        ["research", t("sidebar.labelResearch")],
-                        ["personal", t("sidebar.labelPersonal")],
-                    ].map(([value, label]) => (
-                        <button
-                            key={value}
-                            type="button"
-                            onClick={() => setConversationFilter(value as typeof conversationFilter)}
-                            className={`shrink-0 rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition-colors ${
-                                conversationFilter === value
-                                    ? "bg-white text-zinc-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-100"
-                                    : "text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
-                            }`}
-                            aria-pressed={conversationFilter === value}
-                        >
-                            {label}
-                        </button>
-                    ))}
+                <div
+                    data-testid="sidebar-status-filters"
+                    className={`mt-2 rounded-xl border border-zinc-200 bg-white p-2 transition dark:border-zinc-800 dark:bg-zinc-950 ${
+                        sidebarTourStep === 2 ? "ring-2 ring-blue-500 ring-offset-2 dark:ring-offset-zinc-950" : ""
+                    }`}
+                >
+                    <div className="flex items-center gap-1">
+                        <span className="text-[10px] font-black uppercase tracking-wide text-zinc-500">
+                            {helpCopy.statusTitle}
+                        </span>
+                        <FeatureHelpPopover
+                            title={helpCopy.statusTitle}
+                            description={helpCopy.statusDescription}
+                            buttonLabel={helpCopy.helpAboutStatus}
+                            learnMoreLabel={helpCopy.learnMore}
+                            topic="locked"
+                            href="/support/help-centre/chat-workspace#states-and-labels"
+                            mobile={isMobileDrawer}
+                            testId="status-help"
+                        />
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-900">
+                        {[
+                            ["locked", helpCopy.lockedFilter],
+                            ["shared", isMobileDrawer ? helpCopy.sharedBadge : helpCopy.sharedFilter],
+                        ].map(([value, label]) => (
+                            <button
+                                key={value}
+                                type="button"
+                                onClick={() =>
+                                    setConversationFilter((current) =>
+                                        current === value ? "all" : (value as ConversationFilter)
+                                    )
+                                }
+                                className={`shrink-0 rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition-colors ${
+                                    conversationFilter === value
+                                        ? "bg-white text-zinc-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-100"
+                                        : "text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
+                                }`}
+                                aria-pressed={conversationFilter === value}
+                            >
+                                {label}
+                            </button>
+                        ))}
+                    </div>
                 </div>
-                {(!isMobileDrawer || projects.length > 0 || showProjectForm) && (
-                <div className={`${isMobileDrawer ? "mt-2" : "mt-3"} rounded-xl border border-zinc-200 bg-white p-2 dark:border-zinc-800 dark:bg-zinc-950`}>
+                <div
+                    data-testid="sidebar-label-filters"
+                    className={`mt-2 rounded-xl border border-zinc-200 bg-white p-2 transition dark:border-zinc-800 dark:bg-zinc-950 ${
+                        sidebarTourStep === 1 ? "ring-2 ring-blue-500 ring-offset-2 dark:ring-offset-zinc-950" : ""
+                    }`}
+                >
+                    <div className="flex items-center gap-1">
+                        <span className="text-[10px] font-black uppercase tracking-wide text-zinc-500">
+                            {helpCopy.labelsTitle}
+                        </span>
+                        <FeatureHelpPopover
+                            title={helpCopy.labelsTitle}
+                            description={helpCopy.labelsDescription}
+                            buttonLabel={helpCopy.helpAboutLabels}
+                            learnMoreLabel={helpCopy.learnMore}
+                            topic="label"
+                            href="/support/help-centre/chat-workspace#labels"
+                            mobile={isMobileDrawer}
+                            testId="labels-help"
+                        />
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-900">
+                        {[
+                            ["work", t("sidebar.labelWork")],
+                            ["research", t("sidebar.labelResearch")],
+                            ["personal", t("sidebar.labelPersonal")],
+                        ].map(([value, label]) => (
+                            <button
+                                key={value}
+                                type="button"
+                                onClick={() =>
+                                    setConversationFilter((current) =>
+                                        current === value ? "all" : (value as ConversationFilter)
+                                    )
+                                }
+                                className={`shrink-0 rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition-colors ${
+                                    conversationFilter === value
+                                        ? "bg-white text-zinc-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-100"
+                                        : "text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
+                                }`}
+                                aria-pressed={conversationFilter === value}
+                            >
+                                {label}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+                <div
+                    data-testid="sidebar-projects"
+                    className={`${isMobileDrawer ? "mt-2" : "mt-3"} rounded-xl border border-zinc-200 bg-white p-2 transition dark:border-zinc-800 dark:bg-zinc-950 ${
+                        sidebarTourStep === 0 ? "ring-2 ring-blue-500 ring-offset-2 dark:ring-offset-zinc-950" : ""
+                    }`}
+                >
                     <div className="flex items-center justify-between gap-2">
                         <span className="inline-flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wide text-zinc-500">
                             <Folder className="h-3.5 w-3.5" />
                             {t("sidebar.projects")}
+                            <FeatureHelpPopover
+                                title={t("sidebar.projects")}
+                                description={helpCopy.projectsDescription}
+                                buttonLabel={helpCopy.helpAboutProjects}
+                                learnMoreLabel={helpCopy.learnMore}
+                                topic="project"
+                                href="/support/help-centre/chat-workspace#projects"
+                                mobile={isMobileDrawer}
+                                testId="projects-help"
+                            />
                         </span>
                         <button
                             type="button"
@@ -693,9 +926,22 @@ export function ChatSidebar({
                     )}
                     <div className="mt-2 space-y-1">
                         {projects.length === 0 ? (
-                            <span className="px-1 text-[11px] font-medium text-zinc-400">
-                                {t("sidebar.noProjects")}
-                            </span>
+                            <div className="rounded-lg bg-zinc-50 p-2.5 dark:bg-zinc-900">
+                                <p className="text-[11px] font-medium leading-5 text-zinc-500 dark:text-zinc-400">
+                                    {helpCopy.emptyProject}
+                                </p>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setShowProjectForm(true);
+                                        setProjectName("");
+                                    }}
+                                    className="mt-2 inline-flex items-center gap-1 text-[11px] font-black text-blue-600 hover:text-blue-500 dark:text-blue-300"
+                                >
+                                    <FolderPlus className="h-3.5 w-3.5" aria-hidden="true" />
+                                    {helpCopy.createProject}
+                                </button>
+                            </div>
                         ) : (
                             projects.map((project) => {
                                 const isEditingProject = editingProjectId === project.id;
@@ -755,7 +1001,13 @@ export function ChatSidebar({
                                             <>
                                                 <button
                                                     type="button"
-                                                    onClick={() => setConversationFilter(`project:${project.id}`)}
+                                                    onClick={() =>
+                                                        setConversationFilter((current) =>
+                                                            current === `project:${project.id}`
+                                                                ? "all"
+                                                                : `project:${project.id}`
+                                                        )
+                                                    }
                                                     className="flex min-w-0 flex-1 items-center justify-between gap-2 rounded-md px-1.5 py-1 text-left"
                                                     aria-pressed={isProjectActive}
                                                 >
@@ -802,7 +1054,6 @@ export function ChatSidebar({
                         )}
                     </div>
                 </div>
-                )}
             </div>
 
             <div className={`${isMobileDrawer ? "min-h-0 p-2" : "min-h-[10rem] p-2"} flex-1 overflow-y-auto overscroll-contain space-y-1 md:min-h-0`}>
@@ -825,9 +1076,26 @@ export function ChatSidebar({
                     </div>
                 )}
                 {filteredConversations.length === 0 && (
-                    <div className="flex h-32 flex-col items-center justify-center rounded-lg border border-dashed border-zinc-200 px-4 text-center text-xs text-zinc-400 dark:border-zinc-800">
+                    <div className="flex min-h-32 flex-col items-center justify-center rounded-lg border border-dashed border-zinc-200 px-4 py-4 text-center text-xs text-zinc-400 dark:border-zinc-800">
                         <MessageSquare className="mb-2 h-5 w-5" />
-                        {t("sidebar.noConversations")}
+                        {activeLabelFilter && !normalizedSearch ? (
+                            <>
+                                <p className="font-bold text-zinc-600 dark:text-zinc-300">
+                                    {helpCopy.emptyLabels[activeLabelFilter]}
+                                </p>
+                                <p className="mt-1 leading-5">{helpCopy.emptyLabelBody}</p>
+                                <Link
+                                    href="/support/help-centre/chat-workspace#labels"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="mt-2 font-black text-blue-600 hover:text-blue-500 dark:text-blue-300"
+                                >
+                                    {helpCopy.labelGuide}
+                                </Link>
+                            </>
+                        ) : (
+                            t("sidebar.noConversations")
+                        )}
                     </div>
                 )}
                 {filteredConversations.map((conv) => {
@@ -878,12 +1146,12 @@ export function ChatSidebar({
                                         <span className="truncate">{getConversationModelSummary(conv)}</span>
                                         {conv.shareEnabled && (
                                             <span className="shrink-0 rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[9px] font-bold text-blue-500">
-                                                {t("sidebar.sharedBadge")}
+                                                {helpCopy.sharedBadge}
                                             </span>
                                         )}
                                         {conv.isLocked && (
                                             <span className="shrink-0 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-bold text-amber-500">
-                                                {t("sidebar.lockedBadge")}
+                                                {helpCopy.lockedBadge}
                                             </span>
                                         )}
                                     </span>
@@ -958,6 +1226,9 @@ export function ChatSidebar({
                                         </button>
 
                                         <div className="my-1 border-t border-zinc-800" />
+                                        <div className="px-3 py-1 text-[10px] font-black uppercase tracking-wide text-zinc-500">
+                                            {helpCopy.labelAssignment}
+                                        </div>
                                         {(["work", "research", "personal"] as const).map((label) => (
                                             <button
                                                 key={label}
@@ -973,7 +1244,11 @@ export function ChatSidebar({
                                                 className={`${menuItemBase} ${menuItemEnabled}`}
                                             >
                                                 <span className="flex items-center gap-2">
-                                                    <Tag className={menuIconClass} />
+                                                    {conversationLabels[conv.id] === label ? (
+                                                        <Check className={`${menuIconClass} text-blue-400`} />
+                                                    ) : (
+                                                        <Tag className={menuIconClass} />
+                                                    )}
                                                     <span>{labelText(label)}</span>
                                                 </span>
                                             </button>
@@ -1032,8 +1307,11 @@ export function ChatSidebar({
                                             onClick={(e) => {
                                                 e.stopPropagation();
                                                 if (canShare) {
-                                                    onShare(conv.id, conv.title);
+                                                    setShareTarget(conv);
                                                     setOpenMenuId(null);
+                                                    trackProductEvent("ui_help_opened", 0, {
+                                                        help_topic: "shared",
+                                                    });
                                                 }
                                             }}
                                             disabled={!canShare}
@@ -1141,6 +1419,9 @@ export function ChatSidebar({
                                                     setLockTarget(conv);
                                                     setLockPassword("");
                                                     setLockError("");
+                                                    trackProductEvent("ui_help_opened", 0, {
+                                                        help_topic: "locked",
+                                                    });
                                                 }}
                                                 className={`${menuItemBase} ${menuItemEnabled}`}
                                             >
@@ -1163,10 +1444,21 @@ export function ChatSidebar({
                     <AuthButton />
                 </div>
                 <div className="flex min-h-0 flex-1 touch-pan-y flex-col gap-2 overflow-y-auto overscroll-contain [scrollbar-gutter:stable]">
-                    {!isMobileDrawer && (
                     <div className="rounded-3xl border border-zinc-200 bg-white p-3 text-xs shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
                         <div className="mb-2 flex items-center justify-between gap-2">
-                            <span className="font-black text-zinc-900 dark:text-zinc-100">{t("sidebar.currentUsage")}</span>
+                            <span className="inline-flex items-center gap-1 font-black text-zinc-900 dark:text-zinc-100">
+                                {t("sidebar.currentUsage")}
+                                <FeatureHelpPopover
+                                    title={helpCopy.creditsTitle}
+                                    description={helpCopy.creditsDescription}
+                                    buttonLabel={helpCopy.helpAboutCredits}
+                                    learnMoreLabel={helpCopy.learnMore}
+                                    topic="credits"
+                                    href="/support/help-centre/chat-workspace#credits-and-plans"
+                                    mobile={isMobileDrawer}
+                                    testId="credits-help"
+                                />
+                            </span>
                             {displayedPlan && (
                                 <span className="text-[10px] font-black text-zinc-400">
                                     {t(`modelTiers.${displayedPlan.toLowerCase()}`)}
@@ -1190,7 +1482,6 @@ export function ChatSidebar({
                             </div>
                         )}
                     </div>
-                    )}
                     <FeedbackButton
                         currentModelId={currentModelId}
                         currentPlan={displayedPlan}
@@ -1198,6 +1489,45 @@ export function ChatSidebar({
                     />
                 </div>
             </div>
+            {sidebarTourStep !== null ? (
+                <div
+                    data-testid="sidebar-tour"
+                    className="absolute inset-x-3 bottom-3 z-[80] rounded-2xl border border-blue-300 bg-white p-4 shadow-2xl dark:border-blue-800 dark:bg-zinc-900"
+                    role="dialog"
+                    aria-label={helpCopy.tourSteps[sidebarTourStep].title}
+                    aria-live="polite"
+                >
+                    <div className="flex items-center justify-between gap-3">
+                        <span className="text-[10px] font-black uppercase tracking-[0.16em] text-blue-600 dark:text-blue-300">
+                            {sidebarTourStep + 1} / {helpCopy.tourSteps.length}
+                        </span>
+                        <button
+                            type="button"
+                            data-testid="sidebar-tour-skip"
+                            onClick={skipSidebarTour}
+                            className="text-[11px] font-bold text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+                        >
+                            {helpCopy.tourSkip}
+                        </button>
+                    </div>
+                    <h2 className="mt-2 text-sm font-black text-zinc-950 dark:text-white">
+                        {helpCopy.tourSteps[sidebarTourStep].title}
+                    </h2>
+                    <p className="mt-1 text-xs font-medium leading-5 text-zinc-600 dark:text-zinc-300">
+                        {helpCopy.tourSteps[sidebarTourStep].body}
+                    </p>
+                    <button
+                        type="button"
+                        data-testid="sidebar-tour-next"
+                        onClick={advanceSidebarTour}
+                        className="mt-3 flex h-9 w-full items-center justify-center rounded-xl bg-blue-600 px-4 text-xs font-black text-white hover:bg-blue-500"
+                    >
+                        {sidebarTourStep === helpCopy.tourSteps.length - 1
+                            ? helpCopy.tourDone
+                            : helpCopy.tourNext}
+                    </button>
+                </div>
+            ) : null}
         </aside>
         {showPrivateNotice && (
             <div
@@ -1331,6 +1661,67 @@ export function ChatSidebar({
                 </form>
             </div>
         )}
+        {shareTarget && (
+            <div
+                className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4"
+                role="presentation"
+                onMouseDown={(event) => {
+                    if (event.target === event.currentTarget) setShareTarget(null);
+                }}
+            >
+                <div
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="conversation-share-title"
+                    data-testid="share-confirmation-dialog"
+                    className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900"
+                >
+                    <div className="flex items-start gap-3">
+                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-300">
+                            <Share2 className="h-5 w-5" aria-hidden="true" />
+                        </span>
+                        <div>
+                            <h2 id="conversation-share-title" className="text-base font-black text-zinc-950 dark:text-white">
+                                {helpCopy.shareDialogTitle}
+                            </h2>
+                            <p className="mt-1 text-xs font-semibold text-zinc-500">{shareTarget.title}</p>
+                        </div>
+                    </div>
+                    <div className="mt-5 space-y-3 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+                        <p>{helpCopy.shareDialogBody}</p>
+                        <p className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs font-semibold text-blue-950 dark:border-blue-900/70 dark:bg-blue-950/30 dark:text-blue-100">
+                            {helpCopy.shareDialogSnapshot}
+                        </p>
+                        <p className="flex gap-2 text-xs font-semibold text-amber-700 dark:text-amber-300">
+                            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                            {helpCopy.shareDialogVisibility}
+                        </p>
+                    </div>
+                    <div className="mt-5 flex justify-end gap-2">
+                        <button
+                            type="button"
+                            onClick={() => setShareTarget(null)}
+                            className="rounded-lg px-4 py-2 text-sm font-semibold text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                        >
+                            {t("auth.cancel")}
+                        </button>
+                        <button
+                            type="button"
+                            data-testid="share-confirmation-submit"
+                            onClick={() => {
+                                onShare(shareTarget.id, shareTarget.title);
+                                setShareTarget(null);
+                            }}
+                            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-black text-white hover:bg-blue-500"
+                        >
+                            {shareTarget.shareEnabled
+                                ? t("sidebar.refreshShare")
+                                : helpCopy.shareDialogConfirm}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
         {lockTarget && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
                 <form
@@ -1356,6 +1747,9 @@ export function ChatSidebar({
                         {t("sidebar.lock")}
                     </h2>
                     <p className="mt-2 text-sm text-zinc-500">{lockTarget.title}</p>
+                    <p className="mt-3 rounded-xl bg-amber-50 p-3 text-xs font-semibold leading-5 text-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+                        {helpCopy.lockDescription}
+                    </p>
                     <label
                         htmlFor="conversation-lock-password"
                         className="mt-4 block text-xs font-semibold text-zinc-500"

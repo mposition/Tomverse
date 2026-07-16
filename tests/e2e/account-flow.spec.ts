@@ -73,7 +73,7 @@ test("authenticated user opens settings and starts Private Mode", async ({ page 
   await expect(settingsDialog).toBeHidden();
 
   await openSidebarOnMobile(page);
-  await page.getByRole("button", { name: /Private Mode/ }).click();
+  await page.getByRole("button", { name: /Private Mode/ }).first().click();
   const privateModeDialog = page.getByRole("dialog").filter({ hasText: /Private Mode/ }).last();
   await expect(privateModeDialog).toBeVisible();
   await privateModeDialog.getByRole("button").last().click();
@@ -106,6 +106,9 @@ test("share uses product toast and copies the canonical URL", async ({ page }) =
     .getByRole("button", { name: /공유|Share|分享/ })
     .first()
     .click();
+
+  await expect(page.getByTestId("share-confirmation-dialog")).toBeVisible();
+  await page.getByTestId("share-confirmation-submit").click();
 
   await expect(page.getByRole("status")).toContainText(/복사|copied|复制/);
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(

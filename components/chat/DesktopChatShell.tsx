@@ -6,6 +6,8 @@ import { ChatInput } from "@/components/chat/ChatInput";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { ProviderStatusBanner } from "@/components/chat/ProviderStatusBanner";
+import { FeatureHelpPopover } from "@/components/chat/FeatureHelpPopover";
+import { chatHelpCopy } from "@/components/chat/chatHelpCopy";
 import {
   AVAILABLE_MODELS,
   ENABLED_MODELS,
@@ -98,7 +100,8 @@ export function DesktopChatShell({
   onResponseComplete,
   onFollowupSent,
 }: DesktopChatShellProps) {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
+  const helpCopy = chatHelpCopy[lang];
 
   return (
     <main
@@ -255,13 +258,25 @@ export function DesktopChatShell({
               {t("chat.quickDifferenceSummary")}
             </button>
             {!isGuestMode && currentChatId !== "private-chat" && (
-              <button
-                type="button"
-                onClick={onComparisonReview}
-                className="rounded-xl bg-blue-600 px-4 py-2 text-xs font-black text-white hover:bg-blue-500"
-              >
-                {t("chat.aiReviewButton")}
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={onComparisonReview}
+                  className="rounded-xl bg-blue-600 px-4 py-2 text-xs font-black text-white hover:bg-blue-500"
+                >
+                  {t("chat.aiReviewButton")}
+                </button>
+                <FeatureHelpPopover
+                  title={helpCopy.aiReviewTitle}
+                  description={helpCopy.aiReviewDescription}
+                  buttonLabel={helpCopy.helpAboutAiReview}
+                  learnMoreLabel={helpCopy.learnMore}
+                  topic="ai_review"
+                  href="/support/help-centre/chat-workspace#ai-review"
+                  align="right"
+                  testId="ai-review-help"
+                />
+              </div>
             )}
           </div>
         )}

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { prepareGuestPage } from "./support/app-fixtures";
+import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
 
 test("desktop exposes stable QA contracts", async ({ page }) => {
   await prepareGuestPage(page, "en");
@@ -10,6 +10,35 @@ test("desktop exposes stable QA contracts", async ({ page }) => {
   await expect(page.getByTestId("chat-input")).toBeVisible();
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
   await expect(page.getByTestId("chat-message-list")).toBeVisible();
+
+  await page.getByTestId("sidebar-help-button").click();
+  const helpLink = page.getByTestId("sidebar-help-link");
+  await expect(helpLink).toBeVisible();
+  await expect(helpLink).toHaveAttribute(
+    "href",
+    "/support/help-centre/chat-workspace"
+  );
+  await expect(helpLink).toHaveAttribute("target", "_blank");
+  await expect(page.getByText("Status", { exact: true })).toBeVisible();
+  await expect(page.getByText("Labels", { exact: true })).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await page.getByTestId("status-help").click();
+  await expect(page.getByRole("tooltip")).toContainText("protection and sharing state");
+});
+
+test("chat workspace guide exposes the full help structure", async ({ page }) => {
+  await prepareGuestPage(page, "en");
+  await page.goto("/support/help-centre/chat-workspace");
+
+  await expect(
+    page.getByRole("heading", {
+      level: 1,
+      name: "Use the Tomverse chat workspace with confidence",
+    })
+  ).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2 })).toHaveCount(10);
+  await expect(page.getByText("AI Review compares only the supplied answers.")).toBeVisible();
 });
 
 test("mobile exposes stable QA contracts", async ({ page }) => {
@@ -20,4 +49,38 @@ test("mobile exposes stable QA contracts", async ({ page }) => {
   await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
   await expect(page.getByTestId("chat-input")).toBeVisible();
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
+
+  await page
+    .getByTestId("mobile-chat-shell")
+    .locator("header")
+    .getByRole("button")
+    .first()
+    .click();
+  await page.getByTestId("status-help").click();
+  await expect(page.getByRole("dialog", { name: "Status" })).toContainText(
+    "protection and sharing state"
+  );
+});
+
+test("authenticated users can complete and replay the sidebar tour", async ({ page }) => {
+  await prepareGuestPage(page, "en");
+  await mockAuthenticatedApi(page, { showSidebarTour: true });
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await page.goto("/chat");
+
+  const tour = page.getByTestId("sidebar-tour");
+  await expect(tour).toBeVisible();
+  await page.getByTestId("sidebar-tour-next").click();
+  await page.getByTestId("sidebar-tour-next").click();
+  await page.getByTestId("sidebar-tour-next").click();
+  await expect(tour).toBeHidden();
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("tomverse_sidebar_tour_v1")))
+    .toBe("completed");
+
+  await page.getByTestId("sidebar-help-button").click();
+  await page.getByTestId("sidebar-tour-replay").click();
+  await expect(tour).toBeVisible();
+  await page.getByTestId("sidebar-tour-skip").click();
+  await expect(tour).toBeHidden();
 });
