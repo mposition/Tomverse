@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import { AVAILABLE_MODELS } from "@/lib/models";
+import { AVAILABLE_MODELS, getModel } from "@/lib/models";
 import { getModelOverrideMap, resolveModelOverrideStatus } from "@/lib/modelOverrides";
 import { getProviderHealthDashboard } from "@/lib/providerMonitoring";
 import { getTrustedClientIp } from "@/lib/clientIp";
@@ -34,7 +34,9 @@ const fallbackModelStatus = () => ({
       model.enabled && model.status === "enabled"
         ? ("available" as const)
         : ("unavailable" as const),
-    fallbackModelIds: [],
+    fallbackModelIds: getModel(model.id)?.replacementModelId
+      ? [getModel(model.id)!.replacementModelId!]
+      : [],
     recentFailureCount5m: 0,
     recentErrorCode: null,
   })),
@@ -77,6 +79,7 @@ export async function GET(req: Request) {
     );
 
     const models = AVAILABLE_MODELS.map((model) => {
+      const replacementModelId = getModel(model.id)?.replacementModelId;
       const provider = providerStatus.get(model.provider);
       const override = overrideMap.get(model.id);
       const incident = modelIncidents.get(model.id);
@@ -95,7 +98,14 @@ export async function GET(req: Request) {
         status,
         fallbackModelIds:
           status === "unavailable"
-            ? provider?.fallback.recommendedModelIds || []
+            ? Array.from(
+                new Set([
+                  ...(replacementModelId
+                    ? [replacementModelId]
+                    : []),
+                  ...(provider?.fallback.recommendedModelIds || []),
+                ])
+              )
             : [],
       };
     });

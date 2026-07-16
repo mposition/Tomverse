@@ -50,6 +50,42 @@ test("mobile analytics consent stays compact with one-row actions", async ({
   await expect(banner).toBeHidden();
 });
 
+test("mobile analytics settings shortcut hides while the chat keyboard is active", async ({
+  page,
+}, testInfo) => {
+  test.skip(
+    !testInfo.project.name.startsWith("mobile"),
+    "Chat keyboard overlap only runs in mobile projects."
+  );
+
+  await page.setViewportSize({ width: 390, height: 520 });
+  await page.context().addCookies([
+    {
+      name: "__tomverse_e2e_analytics",
+      value: "1",
+      url: "http://127.0.0.1:3100",
+    },
+  ]);
+  await prepareGuestPage(page, "en");
+  await page.addInitScript(() => {
+    window.localStorage.setItem("tomverse_analytics_consent_v1", "accepted");
+    window.localStorage.setItem("tomverse_guest_quick_start_seen_v2", "1");
+    window.sessionStorage.removeItem("tomverse_guest_quick_start_active_v2");
+  });
+  await page.goto("/chat");
+
+  const settings = page.getByTestId("analytics-settings-button");
+  await expect(settings).toBeVisible();
+
+  const textarea = page.getByTestId("chat-textarea");
+  await textarea.fill("Keyboard overlap regression");
+  await expect(settings).toBeHidden();
+  await expect(page.getByRole("button", { name: "Send", exact: true })).toBeVisible();
+
+  await textarea.evaluate((element) => element.blur());
+  await expect(settings).toBeVisible();
+});
+
 test("Australia starts privacy-minimized analytics with an immediate opt-out", async ({
   page,
 }, testInfo) => {

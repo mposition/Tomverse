@@ -11,7 +11,7 @@ import {
     writeR2Object,
 } from "@/lib/r2";
 import { prisma } from "@/lib/prisma";
-import { getEnabledModel, type AiModel } from "@/lib/models";
+import { getEnabledModel, getModel, type AiModel } from "@/lib/models";
 import { getActiveAiModel } from "@/lib/activeAiModel";
 import {
     consumePerplexityUsage,
@@ -137,6 +137,42 @@ const safeErrorMessage = (error: unknown) => {
         return undefined;
     }
     return typeof error.message === "string" ? error.message : undefined;
+};
+
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+    value && typeof value === "object" && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : null;
+
+const summarizeProviderCompletionMetadata = (metadata: unknown) => {
+    const google = asRecord(asRecord(metadata)?.google);
+    if (!google) return undefined;
+
+    const promptFeedback = asRecord(google.promptFeedback);
+    const blockedCategories = Array.isArray(google.safetyRatings)
+        ? google.safetyRatings
+              .map(asRecord)
+              .filter((rating): rating is Record<string, unknown> => Boolean(rating))
+              .filter((rating) => rating.blocked === true)
+              .map((rating) =>
+                  typeof rating.category === "string" ? rating.category : null
+              )
+              .filter((category): category is string => Boolean(category))
+              .slice(0, 5)
+        : [];
+    const parts = [
+        typeof promptFeedback?.blockReason === "string"
+            ? `blockReason=${promptFeedback.blockReason}`
+            : null,
+        typeof google.finishMessage === "string"
+            ? `finishMessage=${google.finishMessage}`
+            : null,
+        blockedCategories.length > 0
+            ? `blockedSafety=${blockedCategories.join(",")}`
+            : null,
+    ].filter((part): part is string => Boolean(part));
+
+    return parts.length > 0 ? parts.join("; ") : undefined;
 };
 
 const isClosedStreamControllerError = (error: unknown) => {
@@ -593,6 +629,20 @@ export async function POST(req: Request) {
         } = validateChatPayload(body);
         const requestedModelId = modelId || APP_DEFAULTS.defaultModelId;
         requestedModelIdForLog = requestedModelId;
+        const catalogModel = getModel(requestedModelId);
+        if (catalogModel && !catalogModel.enabled) {
+            const replacement = catalogModel.replacementModelId
+                ? getEnabledModel(catalogModel.replacementModelId)
+                : undefined;
+            return tracedJsonError(
+                replacement
+                    ? `${catalogModel.name} is no longer available. Please select ${replacement.name}.`
+                    : `${catalogModel.name} is no longer available. Please select another model.`,
+                "MODEL_RETIRED",
+                410,
+                traceId
+            );
+        }
         const modelConfig = getEnabledModel(requestedModelId);
         if (!modelConfig) {
             return tracedJsonError(
@@ -1233,20 +1283,55 @@ export async function POST(req: Request) {
                         return;
                     }
                     if (done) {
-                        try {
+                        const completionResults = await Promise.allSettled([
+                            result.response,
+                            result.usage,
+                            result.finishReason,
+                            result.rawFinishReason,
+                            result.providerMetadata,
+                        ] as const);
+                        const [
+                            responseResult,
+                            usageResult,
+                            finishReasonResult,
+                            rawFinishReasonResult,
+                            providerMetadataResult,
+                        ] = completionResults;
+                        const rejectedCompletion = completionResults.find(
+                            (item): item is PromiseRejectedResult =>
+                                item.status === "rejected"
+                        );
+                        const completionError = rejectedCompletion?.reason;
+                        const finishReason =
+                            finishReasonResult.status === "fulfilled"
+                                ? finishReasonResult.value
+                                : "unknown";
+                        const rawFinishReason =
+                            rawFinishReasonResult.status === "fulfilled"
+                                ? rawFinishReasonResult.value
+                                : undefined;
+                        const providerMetadataSummary =
+                            providerMetadataResult.status === "fulfilled"
+                                ? summarizeProviderCompletionMetadata(
+                                      providerMetadataResult.value
+                                  )
+                                : undefined;
+
+                        if (responseResult.status === "fulfilled") {
                             try {
-                                const responseMetadata = await result.response;
-                                const responseHeaders = responseMetadata.headers;
+                                const responseHeaders = responseResult.value.headers;
+                                if (usageReservation) {
                                 await linkChatReservationProviderRequest(
-                                    usageReservation!.reservationId,
+                                    usageReservation.reservationId,
                                     {
                                         providerRequestId:
                                             responseHeaders?.["x-request-id"] ||
                                             responseHeaders?.["request-id"] ||
                                             null,
-                                        providerResponseId: responseMetadata.id,
+                                        providerResponseId: responseResult.value.id,
                                     }
                                 );
+                                }
                             } catch (error) {
                                 logRequestError(
                                     "chat_provider_request_link_failed",
@@ -1255,7 +1340,19 @@ export async function POST(req: Request) {
                                     requestedModelId
                                 );
                             }
-                            const usage = await result.usage;
+                        }
+
+                        if (completionError) {
+                            logRequestError(
+                                "chat_stream_completion_metadata_failed",
+                                traceId,
+                                completionError,
+                                requestedModelId
+                            );
+                        }
+
+                        if (usageResult.status === "fulfilled") {
+                            const usage = usageResult.value;
                             await settleSafely(
                                 generatedText.trim() ? "completed" : "empty",
                                 {
@@ -1265,13 +1362,7 @@ export async function POST(req: Request) {
                                     outputTokens: usage.outputTokens,
                                 }
                             );
-                        } catch (error) {
-                            logRequestError(
-                                "chat_usage_settlement_failed",
-                                traceId,
-                                error,
-                                requestedModelId
-                            );
+                        } else {
                             await settleSafely(
                                 generatedText.trim() ? "completed" : "empty"
                             );
@@ -1339,16 +1430,81 @@ export async function POST(req: Request) {
                                 );
                             }
                         }
-                        try {
-                            await recordProviderSuccess(modelConfig.provider);
-                            await recordModelSuccess(requestedModelId);
-                        } catch (error) {
-                            logRequestError(
-                                "provider_success_record_failed",
-                                traceId,
-                                error,
-                                requestedModelId
+                        const isEmptyResponse = !generatedText.trim();
+                        if (isEmptyResponse) {
+                            const completionMetadata = safeErrorMetadata(
+                                completionError
                             );
+                            const finishReasonCode = String(
+                                rawFinishReason || finishReason || "unknown"
+                            )
+                                .replace(/[^A-Za-z0-9_.-]/g, "_")
+                                .toUpperCase()
+                                .slice(0, 40);
+                            const diagnosticCode = completionError
+                                ? providerDiagnosticCode(
+                                      "AI_EMPTY_RESPONSE",
+                                      completionError
+                                  )
+                                : `AI_EMPTY_RESPONSE.${finishReasonCode}`;
+                            const diagnosticMessage = [
+                                safeErrorMessage(completionError),
+                                `finishReason=${finishReason}`,
+                                rawFinishReason
+                                    ? `rawFinishReason=${rawFinishReason}`
+                                    : null,
+                                providerMetadataSummary,
+                            ]
+                                .filter((part): part is string => Boolean(part))
+                                .join("; ");
+                            try {
+                                await recordProviderFailure(
+                                    modelConfig.provider,
+                                    diagnosticCode,
+                                    {
+                                        modelId: requestedModelId,
+                                        phase: "stream",
+                                        traceId,
+                                        errorName:
+                                            completionMetadata.name ||
+                                            "EmptyResponse",
+                                        errorCode:
+                                            completionMetadata.code ||
+                                            finishReasonCode,
+                                        httpStatus:
+                                            completionMetadata.statusCode,
+                                        retryable:
+                                            completionMetadata.isRetryable,
+                                        message: diagnosticMessage,
+                                    }
+                                );
+                                await recordModelFailure(
+                                    requestedModelId,
+                                    modelConfig.provider,
+                                    diagnosticCode
+                                );
+                            } catch (error) {
+                                logRequestError(
+                                    "provider_empty_response_record_failed",
+                                    traceId,
+                                    error,
+                                    requestedModelId
+                                );
+                            }
+                        } else {
+                            try {
+                                await recordProviderSuccess(
+                                    modelConfig.provider
+                                );
+                                await recordModelSuccess(requestedModelId);
+                            } catch (error) {
+                                logRequestError(
+                                    "provider_success_record_failed",
+                                    traceId,
+                                    error,
+                                    requestedModelId
+                                );
+                            }
                         }
                         closeSafely(controller);
                         await releaseSafely();

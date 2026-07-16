@@ -175,6 +175,8 @@ export function AnalyticsProvider({
   const [analyticsClientReady, setAnalyticsClientReady] = useState(false);
   const [showPreferences, setShowPreferences] = useState(false);
   const [chatConsentReady, setChatConsentReady] = useState(false);
+  const [isMobileChatTextEntryActive, setIsMobileChatTextEntryActive] =
+    useState(false);
   const lifecycleCheckedRef = useRef(false);
   const copy = consentCopy[lang];
 
@@ -279,6 +281,61 @@ export function AnalyticsProvider({
       window.removeEventListener(GUEST_QUICK_START_EVENT, handleQuickStartVisibility);
     };
   }, [initialPlan, pathname]);
+
+  useEffect(() => {
+    if (pathname !== "/chat") {
+      queueMicrotask(() => setIsMobileChatTextEntryActive(false));
+      return;
+    }
+
+    let frameId: number | null = null;
+    const nonTextInputTypes = new Set([
+      "button",
+      "checkbox",
+      "color",
+      "file",
+      "hidden",
+      "radio",
+      "range",
+      "reset",
+      "submit",
+    ]);
+    const update = () => {
+      frameId = null;
+      const activeElement = document.activeElement;
+      const isTextEntry =
+        activeElement instanceof HTMLTextAreaElement ||
+        (activeElement instanceof HTMLInputElement &&
+          !nonTextInputTypes.has(activeElement.type)) ||
+        (activeElement instanceof HTMLElement && activeElement.isContentEditable);
+      const visualViewport = window.visualViewport;
+      const keyboardReducedViewport = Boolean(
+        visualViewport && window.innerHeight - visualViewport.height > 120
+      );
+      const isMobile = window.matchMedia("(max-width: 767px)").matches;
+      setIsMobileChatTextEntryActive(
+        isMobile && (isTextEntry || keyboardReducedViewport)
+      );
+    };
+    const scheduleUpdate = () => {
+      if (frameId !== null) window.cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(update);
+    };
+
+    document.addEventListener("focusin", scheduleUpdate);
+    document.addEventListener("focusout", scheduleUpdate);
+    window.addEventListener("resize", scheduleUpdate);
+    window.visualViewport?.addEventListener("resize", scheduleUpdate);
+    scheduleUpdate();
+
+    return () => {
+      if (frameId !== null) window.cancelAnimationFrame(frameId);
+      document.removeEventListener("focusin", scheduleUpdate);
+      document.removeEventListener("focusout", scheduleUpdate);
+      window.removeEventListener("resize", scheduleUpdate);
+      window.visualViewport?.removeEventListener("resize", scheduleUpdate);
+    };
+  }, [pathname]);
 
   const analyticsEnabled = Boolean(
     resolvedPolicy &&
@@ -416,9 +473,11 @@ export function AnalyticsProvider({
       {!disabled &&
       consentPromptReady &&
       !showPreferences &&
+      !isMobileChatTextEntryActive &&
       (consent === "accepted" || consent === "declined") ? (
         <button
           type="button"
+          data-testid="analytics-settings-button"
           onClick={() => setShowPreferences(true)}
           className="fixed bottom-2 right-2 z-[60] rounded-full border border-zinc-700 bg-zinc-950/90 px-2.5 py-1 text-[10px] font-bold text-zinc-400 shadow-lg backdrop-blur hover:text-zinc-100"
         >

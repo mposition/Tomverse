@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   canUseModelWithPlan,
+  getEnabledModel,
   getInputCreditMultiplier,
   getModel,
   getModelUsageProfile,
@@ -49,6 +50,15 @@ test("model usage classes are independent from subscription access", () => {
   assert.equal(freeStandard.minimumPlan, "Free");
   assert.equal(canUseModelWithPlan("Guest", freeStandard), false);
   assert.equal(canUseModelWithPlan("Free", freeStandard), true);
+});
+
+test("retired Gemini 2.5 Pro is not callable and points to its replacement", () => {
+  const retired = getModel("gemini-2-5-pro");
+  assert.equal(retired.enabled, false);
+  assert.equal(retired.status, "disabled");
+  assert.equal(retired.replacementModelId, "gemini-3-1-pro");
+  assert.equal(getEnabledModel(retired.id), undefined);
+  assert.equal(getEnabledModel(retired.replacementModelId)?.enabled, true);
 });
 
 test("long input applies the configured credit multiplier", () => {
