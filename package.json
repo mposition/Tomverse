@@ -10,6 +10,7 @@
     "test:e2e": "npm run build && playwright test",
     "test:e2e:quick": "npm run build && playwright test --project=desktop-chromium",
     "test:e2e:ui": "npm run build && playwright test --ui",
+    "capture:marketing-proof": "node scripts/capture-marketing-proof.mjs",
     "test:db:integration": "node scripts/run-db-integration-tests.mjs",
     "lint": "eslint",
     "check": "eslint . --max-warnings=0 && next typegen && tsc --noEmit --incremental false && next build",

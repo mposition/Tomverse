@@ -699,6 +699,31 @@ const checks = [
       ),
   },
   {
+    name: "TOMFRIEND100 is a bounded 60-day non-renewing Pro pass",
+    file: "prisma/migrations/20260716150000_founding_tester_pass/migration.sql",
+    test: (source) => {
+      const checkout = read("app/api/billing/checkout/route.ts");
+      const maintenance = read("lib/maintenance.ts");
+      const entitlements = read("lib/billingEntitlements.ts");
+      return (
+        source.includes("'TOMFRIEND100'") &&
+        source.includes("'internal_pass'") &&
+        source.includes("'[\"pro\"]'") &&
+        source.includes("\n  25,\n") &&
+        source.includes("\n  60,\n") &&
+        source.includes("redemption.\"redeemedAt\" + INTERVAL '60 days'") &&
+        source.includes('app_user.\"stripeSubscriptionId\" IS NULL') &&
+        checkout.includes("activateInternalPass") &&
+        checkout.includes("addUtcDays(accessStartsAt, promotion.accessDurationDays)") &&
+        checkout.includes("isInternalPassPromotion(appliedPromotion)") &&
+        !checkout.includes("if (finalPriceMinor <= 0)") &&
+        maintenance.includes("sendFoundingTesterPassReminders") &&
+        maintenance.includes("expireFoundingTesterPasses") &&
+        entitlements.includes("effectivePlanForAccess")
+      );
+    },
+  },
+  {
     name: "Public billing configuration responses are not cached",
     file: "app/api/billing/config/route.ts",
     test: (source) =>
@@ -990,6 +1015,31 @@ const checks = [
       source.includes("env(safe-area-inset-bottom)"),
   },
   {
+    name: "Regional analytics defaults fail closed and preserve strict opt-in countries",
+    file: "lib/analyticsConsentPolicy.ts",
+    test: (source) => {
+      const provider = read("components/analytics/AnalyticsProvider.tsx");
+      const client = read("lib/productAnalyticsClient.ts");
+      const route = read("app/api/analytics/consent-policy/route.ts");
+      return (
+        source.includes('const DEFAULT_ENABLED_COUNTRIES = "AU"') &&
+        source.includes("STRICT_OPT_IN_COUNTRIES") &&
+        source.includes('"GB"') &&
+        source.includes('"DE"') &&
+        source.includes('country === "ZZ"') &&
+        provider.includes('fetch("/api/analytics/consent-policy"') &&
+        provider.includes('resolvedPolicy.mode === "notice_opt_out"') &&
+        provider.includes("analyticsEnabled && analyticsClientReady && measurementId") &&
+        client.includes('analytics_storage: analyticsStorage') &&
+        client.includes('ad_storage: "denied"') &&
+        client.includes('ad_user_data: "denied"') &&
+        client.includes('ad_personalization: "denied"') &&
+        route.includes("ANALYTICS_DEFAULT_ENABLED_COUNTRIES") &&
+        route.includes('"Cache-Control": "private, no-store, max-age=0"')
+      );
+    },
+  },
+  {
     name: "Purchase analytics separates subscriptions and credit packs with balance context",
     file: "lib/productAnalyticsShared.ts",
     test: (source) =>
@@ -1009,11 +1059,13 @@ const checks = [
     name: "Landing entry copy separates guest access from signed-in features",
     file: "components/marketing/LandingPageContent.tsx",
     test: (source) =>
-      source.includes('primaryCta: "Use a free model now"') &&
-      source.includes('primaryCta: "지금 바로 무료 모델 사용"') &&
-      source.includes("guestSteps: string[]") &&
-      source.includes("content.steps : content.guestSteps") &&
-      source.includes("comparison, AI Review, files, and sharing"),
+      source.includes('primaryCta: "Start comparing multiple AIs free"') &&
+      source.includes('primaryCta: "여러 AI 무료 비교 시작하기"') &&
+      source.includes('data-testid="landing-guest-cta"') &&
+      source.includes("const comparisonHref =") &&
+      source.includes('cta_location: "landing_hero_compare"') &&
+      source.includes('cta_location: "landing_hero_guest"') &&
+      source.includes("Get a one-minute recommendation after sign-up"),
   },
   {
     name: "ChatGPT versus Claude search page contains a full comparison guide and prepared CTA",
@@ -1065,27 +1117,34 @@ const checks = [
       !source.includes("anonymousIdHash"),
   },
   {
-    name: "Landing product proof uses a real UI recording and permission-safe evidence",
+    name: "Landing product proof covers comparison, AI Review, and permission-safe evidence",
     file: "components/marketing/ProductProofSection.tsx",
     test: (source) => {
       const capture = read("scripts/capture-marketing-proof.mjs");
       return (
-        source.includes("/marketing-proof/three-model-comparison.webm") &&
+        source.includes("/marketing-proof/tomverse-review-workflow.webm") &&
+        source.includes("/marketing-proof/tomverse-review-workflow-poster.png") &&
         source.includes('fetch("/api/public/proof-metrics"') &&
         source.includes("controlled demo data") &&
         source.includes("18-page readiness brief") &&
-        source.includes("explicit permission") &&
+        source.includes("AI Review compares only the supplied answers") &&
         read("components/marketing/LandingPageContent.tsx").includes(
           "<ProductProofSection />"
         ) &&
         capture.includes('page.route("**/api/chat"') &&
+        capture.includes("comparison-reviews") &&
+        capture.includes("All three answers recommend measurable launch gates") &&
+        capture.includes("One question. Multiple AI answers") &&
         capture.includes('"gpt-5-4-mini"') &&
         capture.includes('"claude-haiku-4-5"') &&
         capture.includes('"gemini-2-5-flash"') &&
+        capture.includes("posterPath") &&
         !capture.includes("api.openai.com") &&
         !capture.includes("api.anthropic.com") &&
-        statSync("public/marketing-proof/three-model-comparison.webm").size >
-          100_000
+        statSync("public/marketing-proof/tomverse-review-workflow.webm").size >
+          100_000 &&
+        statSync("public/marketing-proof/tomverse-review-workflow-poster.png").size >
+          20_000
       );
     },
   },

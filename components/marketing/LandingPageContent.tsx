@@ -1,83 +1,30 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import {
-  Activity,
   ArrowRight,
-  BarChart3,
   Bot,
-  BriefcaseBusiness,
-  CheckCircle2,
-  Code2,
+  ExternalLink,
   FileText,
   FolderKanban,
-  HeartHandshake,
-  HelpCircle,
-  Layers3,
   LockKeyhole,
-  Search,
-  ServerCog,
+  MessageSquareMore,
   Share2,
   ShieldCheck,
   Sparkles,
-  UploadCloud,
-  Workflow,
-  ExternalLink,
 } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { useEffect, useRef } from "react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
-import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
 import { usePublicBilling } from "@/components/marketing/usePublicBilling";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
-import { statusLinkLabel, statusNewTabCopy } from "./statusLinkCopy";
+import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
 import { ProductProofSection } from "./ProductProofSection";
-import { AiReviewDemo } from "./AiReviewDemo";
-
-const annualLabelByLanguage: Partial<Record<Language, { annual: string; save: string }>> = {
-  en: { annual: "Annual", save: "Save 20%" },
-  ko: { annual: "연간", save: "20% 할인" },
-  zh: { annual: "年付", save: "节省 20%" },
-  fr: { annual: "Annuel", save: "-20 %" },
-  de: { annual: "Jährlich", save: "20 % sparen" },
-  es: { annual: "Anual", save: "20 % de descuento" },
-  pt: { annual: "Anual", save: "20% de desconto" },
-};
-
-const modelLinkLabels: Record<
-  Language,
-  { catalogue: string; status: string }
-> = {
-  en: { catalogue: "Explore all models", status: "Live service status" },
-  ko: { catalogue: "전체 모델 보기", status: "실시간 서비스 상태" },
-  zh: { catalogue: "查看所有模型", status: "实时服务状态" },
-  fr: { catalogue: "Voir tous les modèles", status: "État du service" },
-  de: { catalogue: "Alle Modelle ansehen", status: "Live-Servicestatus" },
-  es: { catalogue: "Ver todos los modelos", status: "Estado del servicio" },
-  pt: { catalogue: "Ver todos os modelos", status: "Status do serviço" },
-};
-
-const supportedModels = [
-  { name: "GPT", mark: "◎", detail: "OpenAI", className: "from-white to-zinc-100", image: "/model-icons/chatgpt.png" },
-  { name: "Claude", mark: "AI", detail: "Anthropic", className: "from-white to-orange-50", image: "/model-icons/claude.png" },
-  { name: "Gemini", mark: "✦", detail: "Google", className: "from-white to-sky-50", image: "/model-icons/gemini.png" },
-  { name: "Llama", mark: "∞", detail: "Groq", className: "from-white to-blue-50", image: "/model-icons/llama.png" },
-  { name: "DeepSeek", mark: "DS", detail: "DeepSeek", className: "from-white to-blue-50", image: "/model-icons/deepseek.png" },
-  { name: "Mistral", mark: "M", detail: "Mistral AI", className: "from-white to-orange-50", image: "/model-icons/mistral.png" },
-  { name: "Grok", mark: "/", detail: "xAI", className: "from-white to-zinc-100", image: "/model-icons/grok.png" },
-  { name: "Kimi", mark: "KM", detail: "Moonshot", className: "from-white to-blue-50", image: "/model-icons/kimi.png" },
-  { name: "Qwen", mark: "QW", detail: "Alibaba", className: "from-white to-indigo-50", image: "/model-icons/qwen.png" },
-  { name: "Perplexity", mark: "P", detail: "Sonar", className: "from-white to-cyan-50", image: "/model-icons/perplexity.png" },
-];
+import { statusLinkLabel, statusNewTabCopy } from "./statusLinkCopy";
 
 type CardCopy = { title: string; description: string };
-type PricingPreviewCopy = CardCopy & { price: string; bullets: string[] };
-type LaunchCopy = {
-  eyebrow: string;
-  title: string;
-  description: string;
-  items: CardCopy[];
-};
+type PlanCopy = CardCopy & { id: "free" | "pro" | "max"; fallbackPrice: string };
 
 type LandingCopy = {
   app: string;
@@ -86,478 +33,449 @@ type LandingCopy = {
   description: string;
   primaryCta: string;
   signedInCta: string;
+  guestCta: string;
   pricingCta: string;
+  modelFinderLead: string;
+  modelFinderCta: string;
   steps: string[];
-  guestSteps: string[];
   previewTitle: string;
   previewCount: string;
   previewAnswers: string[];
-  featuresTitle: string;
-  featuresDescription: string;
-  features: CardCopy[];
-  useCasesTitle: string;
-  useCasesDescription: string;
-  useCases: CardCopy[];
-  whyTitle: string;
-  whyDescription: string;
-  whyItems: CardCopy[];
+  reviewTitle: string;
+  reviewItems: string[];
+  modelStripLabel: string;
+  modelCatalogue: string;
+  status: string;
+  supportTitle: string;
+  supportDescription: string;
+  supportItems: CardCopy[];
   trustTitle: string;
   trustDescription: string;
   trustItems: CardCopy[];
-  modelsTitle: string;
-  modelsDescription: string;
+  safetyCta: string;
   pricingTitle: string;
   pricingDescription: string;
-  pricingPlans: PricingPreviewCopy[];
+  plans: PlanCopy[];
+  monthly: string;
+  pricingDetails: string;
   faqTitle: string;
   faqs: Array<{ question: string; answer: string }>;
   ctaTitle: string;
   ctaDescription: string;
 };
 
+const supportedModels = [
+  { name: "GPT", provider: "OpenAI", image: "/model-icons/chatgpt.png" },
+  { name: "Claude", provider: "Anthropic", image: "/model-icons/claude.png" },
+  { name: "Gemini", provider: "Google", image: "/model-icons/gemini.png" },
+  { name: "Llama", provider: "Groq", image: "/model-icons/llama.png" },
+  { name: "DeepSeek", provider: "DeepSeek", image: "/model-icons/deepseek.png" },
+  { name: "Mistral", provider: "Mistral AI", image: "/model-icons/mistral.png" },
+  { name: "Grok", provider: "xAI", image: "/model-icons/grok.png" },
+  { name: "Kimi", provider: "Moonshot", image: "/model-icons/kimi.png" },
+  { name: "Qwen", provider: "Alibaba", image: "/model-icons/qwen.png" },
+  { name: "Perplexity", provider: "Sonar", image: "/model-icons/perplexity.png" },
+];
+
+const englishCopy: LandingCopy = {
+  app: "Open app",
+  badge: "Multi-model comparison + AI cross-review",
+  title: "Ask once. Compare answers. Review what they missed.",
+  description:
+    "Send one question to several leading AI models. Compare their answers side by side, then let Tomverse AI Review organize common ground, contradictions, missing points, and claims that still need independent verification.",
+  primaryCta: "Start comparing multiple AIs free",
+  signedInCta: "Open your comparison workspace",
+  guestCta: "Try one free model without signing in",
+  pricingCta: "See pricing",
+  modelFinderLead: "Not sure which AI fits your work?",
+  modelFinderCta: "Get a one-minute recommendation after sign-up.",
+  steps: ["Choose up to three models", "Ask once or attach a file", "Compare, review, follow up, or share"],
+  previewTitle: "One question, multiple perspectives",
+  previewCount: "3 models",
+  previewAnswers: ["Clear next steps", "Risks and trade-offs", "Concise operating plan"],
+  reviewTitle: "Tomverse AI Review",
+  reviewItems: ["Common ground", "Contradiction", "Missing point", "Verify next"],
+  modelStripLabel: "Compare models across leading providers",
+  modelCatalogue: "Explore all models",
+  status: "Live service status",
+  supportTitle: "Keep the work moving after the comparison.",
+  supportDescription:
+    "Tomverse keeps the useful context around each answer, so a comparison can become a document, a follow-up, or a result your team can revisit.",
+  supportItems: [
+    { title: "Files and real context", description: "Add images, PDFs, Office documents, text files, or supported Google Drive files when the source material matters." },
+    { title: "Targeted follow-up", description: "Ask one model a follow-up without losing the other answers or the original comparison." },
+    { title: "Projects and records", description: "Organize conversations into projects and keep a reusable record instead of rebuilding context across tabs." },
+    { title: "Share the outcome", description: "Create a read-only share page or download a clean text record when the result is ready." },
+  ],
+  trustTitle: "Clear controls for private and shared work.",
+  trustDescription:
+    "Tomverse makes storage, locks, and sharing behavior visible. AI providers still receive the prompts needed to generate a response, including when Private Mode is used.",
+  trustItems: [
+    { title: "Private Mode", description: "Tomverse does not save the conversation to chat history while the selected providers still process the request." },
+    { title: "Locked conversations", description: "Protect sensitive saved chats and require unlock verification before protected actions." },
+    { title: "Read-only sharing", description: "Share a snapshot designed not to expose later conversation updates." },
+  ],
+  safetyCta: "Read the safety and security overview",
+  pricingTitle: "Start free. Upgrade when the work grows.",
+  pricingDescription:
+    "The homepage shows only the essentials. Model weights, credit examples, annual billing, add-on credits, and Fair Use details are explained on the pricing page.",
+  plans: [
+    { id: "free", title: "Free", fallbackPrice: "$0", description: "300 monthly AI credits for light everyday use and trying advanced models." },
+    { id: "pro", title: "Pro", fallbackPrice: "$15", description: "3,000 monthly AI credits for regular multi-model comparison." },
+    { id: "max", title: "Max", fallbackPrice: "$25", description: "10,000 monthly AI credits for advanced models and long documents." },
+  ],
+  monthly: "/ month",
+  pricingDetails: "Compare plans and credit usage",
+  faqTitle: "Three quick questions",
+  faqs: [
+    { question: "Can I use Tomverse for free?", answer: "Yes. You can try one supported free model without signing in. A Free account adds multi-model comparison and other signed-in workflows within the plan limits." },
+    { question: "Which models can I compare?", answer: "The available catalogue spans providers such as OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Mistral, Moonshot, Alibaba, and Perplexity. Availability can change, so the live status page is the source of current service state." },
+    { question: "How is my data handled?", answer: "Tomverse applies attachment limits, locked-chat controls, read-only share snapshots, and Private Mode. Selected AI providers still receive the request content needed to answer; review the Safety page for the complete boundaries." },
+  ],
+  ctaTitle: "One clearer view starts with one question.",
+  ctaDescription: "Compare several AI answers, then use AI Review to decide what deserves a closer look.",
+};
+
 const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
-  en: {
-    app: "Open app",
-    badge: "Multi-model comparison + AI cross-review",
-    title: "Ask once. Compare answers. Review what they missed.",
-    description:
-      "Ask multiple AI models once, then use Tomverse AI Review to organize their common ground, contradictions, missing points, and claims that still need verification.",
-    primaryCta: "Use a free model now",
-    signedInCta: "Start Chat",
-    pricingCta: "View pricing",
-    steps: ["Choose up to three models", "Send one prompt or attach files", "Compare, run AI Review, follow up, or share"],
-    guestSteps: ["Ask one free model now", "Get an answer without signing in", "Sign in for comparison, AI Review, files, and sharing"],
-    previewTitle: "Answers before AI Review",
-    previewCount: "3 models",
-    previewAnswers: [
-      "Direct answer with practical next steps.",
-      "Careful reasoning and tradeoffs.",
-      "Fast summary with concise structure.",
-    ],
-    featuresTitle: "A calmer way to use many AIs.",
-    featuresDescription:
-      "Designed for repeated work, not one-off demos. Keep your model choices, files, private sessions, and shareable outputs in one workflow.",
-    features: [
-      { title: "Compare, then run AI Review", description: "Ask once, compare multiple answers, and organize their agreements, contradictions, omissions, and verification needs." },
-      { title: "Work with files and context", description: "Attach images, PDFs, office documents, and Google Drive files when your task needs real material." },
-      { title: "Share polished conversations", description: "Turn useful chats into read-only public pages or download them as clean text records." },
-      { title: "Built for privacy-aware work", description: "Use locked chats, Private Mode, rate limits, and hardened security controls for safer daily use." },
-    ],
-    useCasesTitle: "Built for real daily work.",
-    useCasesDescription: "Use Tomverse when the task benefits from multiple perspectives, real files, and a reusable record.",
-    useCases: [
-      { title: "Research and summaries", description: "Compare concise summaries, deeper analysis, and source-aware follow-up ideas." },
-      { title: "Coding and debugging", description: "Ask several models for fixes, tradeoffs, tests, and alternative implementations." },
-      { title: "Business writing", description: "Draft emails, proposals, product copy, and planning notes with multiple styles." },
-      { title: "File-based analysis", description: "Bring screenshots, PDFs, office files, and Drive context into the conversation." },
-    ],
-    whyTitle: "Why use Tomverse instead of opening every AI app",
-    whyDescription: "Tomverse keeps model choice, conversation context, sharing, and privacy controls in one workflow.",
-    whyItems: [
-      { title: "One prompt, multiple answers", description: "Compare different model strengths without copying prompts across tabs." },
-      { title: "Follow up where it matters", description: "Ask a specific model a follow-up while keeping the full comparison nearby." },
-      { title: "Portable outcomes", description: "Share useful conversations or download clean text records for later work." },
-    ],
-    trustTitle: "Designed with trust controls from day one.",
-    trustDescription: "Public AI tools need clear boundaries. Tomverse makes privacy and sharing behavior visible to users.",
-    trustItems: [
-      { title: "Private Mode clarity", description: "Private Mode does not save Tomverse chat history, while still sending prompts to selected AI providers." },
-      { title: "Read-only share snapshots", description: "Shared links are public read-only views designed to avoid exposing later conversation updates." },
-      { title: "Locked conversations", description: "Sensitive chats can be locked and require unlock verification before protected actions." },
-      { title: "Attachment safeguards", description: "Files are validated, bounded, and handled with temporary storage controls." },
-    ],
-    modelsTitle: "Built around the model market.",
-    modelsDescription:
-      "New models arrive constantly. Tomverse keeps model choice centralized so users can compare the right options without rebuilding their workflow.",
-    pricingTitle: "Start free, upgrade when usage grows.",
-    pricingDescription: "Plans are built around usage allowance, file workflows, sharing, and access to the available model catalogue.",
-    pricingPlans: [
-      { title: "Free", price: "$0", description: "300 monthly AI credits for light everyday use and trying advanced models.", bullets: ["300 monthly AI credits", "30 selected higher-cost model responses per month", "Files, sharing, and downloads after login"] },
-      { title: "Pro", price: "$15/mo", description: "3,000 monthly AI credits for everyday multi-model comparisons.", bullets: ["3,000 monthly AI credits", "All available models with weighted usage", "Files, sharing, downloads"] },
-      { title: "Max", price: "$25/mo", description: "10,000 monthly AI credits for intensive advanced-model and long-document work.", bullets: ["No daily limit on Standard models", "Premium usage follows monthly credits and Fair Use", "Higher file and context limits"] },
-    ],
-    faqTitle: "Quick questions",
-    faqs: [
-      { question: "Can I use Tomverse for free", answer: "Yes. Free is intended for light usage with access to a selected model catalogue within usage limits." },
-      { question: "Which models are supported", answer: "Tomverse supports models across providers such as OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Moonshot, Qwen, and Perplexity." },
-      { question: "What is Private Mode", answer: "Private Mode means Tomverse does not save the conversation to the Tomverse database. AI providers may still receive prompts to generate responses." },
-      { question: "Can I attach files", answer: "Yes. Tomverse supports images, PDFs, Office documents, Google Drive files, and other allowed attachment types depending on provider support." },
-    ],
-    ctaTitle: "Ready to compare smarter",
-    ctaDescription: "Start with the free workspace and upgrade when you need more power.",
-  },
+  en: englishCopy,
   ko: {
+    ...englishCopy,
     app: "앱 열기",
-    badge: "멀티 모델 비교 + AI 답변 교차검토",
-    title: "한 번 질문하고 여러 AI의 답변을 비교하세요.",
-    description: "Tomverse AI Review가 여러 답변의 합의점, 모순, 누락과 추가 검증이 필요한 항목까지 다시 점검합니다.",
-    primaryCta: "지금 바로 무료 모델 사용",
-    signedInCta: "대화 시작하기",
+    badge: "멀티모델 비교 + AI 답변 교차검토",
+    title: "한 번 질문하고, 여러 AI 답변을 비교하고, 놓친 부분까지 검토하세요.",
+    description: "하나의 질문을 여러 주요 AI 모델에 보내 나란히 비교하세요. Tomverse AI Review가 합의점, 모순, 누락과 독립적인 추가 검증이 필요한 주장을 구조화합니다.",
+    primaryCta: "여러 AI 무료 비교 시작하기",
+    signedInCta: "내 비교 워크스페이스 열기",
+    guestCta: "로그인 없이 무료 모델 1개 체험",
     pricingCta: "요금 보기",
-    steps: ["최대 3개 모델 선택", "질문 전송 또는 파일 첨부", "비교, AI Review, 후속 질문 또는 공유"],
-    guestSteps: ["무료 모델 1개에 바로 질문", "로그인 없이 답변 확인", "로그인하면 비교·AI Review·파일·공유 가능"],
-    previewTitle: "AI Review 전 모델 답변",
+    modelFinderLead: "어떤 AI가 내 작업에 맞는지 모르시겠나요?",
+    modelFinderCta: "가입 후 1분 추천을 받아보세요.",
+    steps: ["최대 3개 모델 선택", "한 번 질문하거나 파일 첨부", "비교·교차검토·후속 질문·공유"],
+    previewTitle: "하나의 질문, 여러 관점",
     previewCount: "3개 모델",
-    previewAnswers: ["실행 가능한 다음 단계 중심 답변", "근거와 선택지를 함께 검토", "빠르고 간결한 구조화 요약"],
-    featuresTitle: "여러 AI를 더 차분하게 사용하는 방법.",
-    featuresDescription: "일회성 데모가 아니라 반복적인 업무를 위해 설계했습니다. 모델 선택, 파일, Private Mode, 공유 가능한 결과를 하나의 흐름에서 관리하세요.",
-    features: [
-      { title: "비교한 뒤 AI Review 실행", description: "한 번 질문해 여러 답변을 비교하고 합의점, 모순, 누락과 추가 검증 항목을 구조화합니다." },
-      { title: "파일과 실제 맥락으로 작업", description: "이미지, PDF, Office 문서, Google Drive 파일처럼 실제 자료가 필요한 작업을 바로 이어갈 수 있습니다." },
-      { title: "정리된 대화 공유", description: "유용한 대화를 읽기 전용 공개 페이지로 만들거나 깔끔한 텍스트 기록으로 다운로드할 수 있습니다." },
-      { title: "프라이버시를 고려한 작업 환경", description: "잠금 대화, Private Mode, 사용량 제한, 강화된 보안 제어로 매일 더 안전하게 사용할 수 있습니다." },
+    previewAnswers: ["명확한 다음 단계", "위험과 장단점", "간결한 실행 계획"],
+    reviewTitle: "Tomverse AI Review",
+    reviewItems: ["공통점", "모순", "누락", "추가 검증"],
+    modelStripLabel: "주요 공급자의 모델을 한곳에서 비교",
+    modelCatalogue: "전체 모델 보기",
+    status: "실시간 서비스 상태",
+    supportTitle: "비교한 뒤의 작업도 한 흐름으로 이어가세요.",
+    supportDescription: "각 답변의 유용한 맥락을 유지해 비교 결과를 문서, 후속 질문 또는 팀이 다시 확인할 수 있는 기록으로 만듭니다.",
+    supportItems: [
+      { title: "파일과 실제 맥락", description: "원본 자료가 중요할 때 이미지, PDF, Office 문서, 텍스트 또는 지원되는 Google Drive 파일을 추가하세요." },
+      { title: "특정 모델 후속 질문", description: "원래 비교와 다른 답변을 유지하면서 필요한 모델 하나에만 후속 질문을 보낼 수 있습니다." },
+      { title: "프로젝트와 기록", description: "대화를 프로젝트로 정리하고 여러 탭에서 맥락을 다시 만들지 않아도 되는 기록을 유지하세요." },
+      { title: "결과 공유", description: "결과가 준비되면 읽기 전용 공유 페이지를 만들거나 깔끔한 텍스트 기록으로 다운로드하세요." },
     ],
-    useCasesTitle: "실제 일상 업무를 위해 만들었습니다.",
-    useCasesDescription: "여러 관점, 실제 파일, 재사용 가능한 기록이 필요한 작업에 Tomverse를 사용하세요.",
-    useCases: [
-      { title: "리서치와 요약", description: "짧은 요약, 깊은 분석, 후속 질문 아이디어를 함께 비교하세요." },
-      { title: "코딩과 디버깅", description: "여러 모델에 수정안, 장단점, 테스트, 대안 구현을 물어볼 수 있습니다." },
-      { title: "비즈니스 글쓰기", description: "이메일, 제안서, 제품 문구, 기획 노트를 여러 스타일로 작성하세요." },
-      { title: "파일 기반 분석", description: "스크린샷, PDF, Office 파일, Drive 맥락을 대화에 포함할 수 있습니다." },
-    ],
-    whyTitle: "여러 AI 앱을 따로 여는 대신 Tomverse를 쓰는 이유",
-    whyDescription: "Tomverse는 모델 선택, 대화 맥락, 공유, 개인정보 제어를 하나의 업무 흐름에 모아줍니다.",
-    whyItems: [
-      { title: "한 번의 질문, 여러 답변", description: "여러 탭에 프롬프트를 복사하지 않고 모델별 강점을 비교하세요." },
-      { title: "필요한 모델에만 후속 질문", description: "전체 비교 흐름은 유지하면서 특정 모델에게만 추가 질문할 수 있습니다." },
-      { title: "결과를 쉽게 공유", description: "유용한 대화를 공유하거나 나중에 사용할 수 있도록 텍스트 기록으로 저장하세요." },
-    ],
-    trustTitle: "처음부터 신뢰 제어를 담았습니다.",
-    trustDescription: "공개 AI 도구에는 명확한 경계가 필요합니다. Tomverse는 저장, 공유, 잠금 동작을 사용자에게 분명히 보여줍니다.",
+    trustTitle: "비공개 작업과 공유를 위한 명확한 제어.",
+    trustDescription: "저장, 잠금, 공유 동작을 분명히 보여드립니다. Private Mode에서도 답변 생성에 필요한 요청은 선택한 AI 공급자에게 전송됩니다.",
     trustItems: [
-      { title: "Private Mode 명확화", description: "Private Mode는 Tomverse 대화 기록을 저장하지 않지만, 선택한 AI 공급자에게 요청은 전송될 수 있습니다." },
-      { title: "읽기 전용 공유 스냅샷", description: "공유 링크는 이후 대화 업데이트가 노출되지 않도록 설계된 공개 읽기 전용 보기입니다." },
-      { title: "잠긴 대화", description: "민감한 대화는 잠글 수 있으며 보호된 작업 전에는 잠금 해제가 필요합니다." },
-      { title: "첨부파일 보호", description: "파일은 검증, 크기 제한, 임시 저장 제어를 거쳐 처리됩니다." },
+      { title: "Private Mode", description: "Tomverse 대화 기록에는 저장하지 않지만 선택한 공급자는 요청을 처리합니다." },
+      { title: "잠긴 대화", description: "민감한 저장 대화를 보호하고 중요한 작업 전에 잠금 해제 확인을 요구합니다." },
+      { title: "읽기 전용 공유", description: "이후 대화 업데이트가 노출되지 않도록 설계된 스냅샷을 공유합니다." },
     ],
-    modelsTitle: "빠르게 변하는 모델 시장을 기준으로 설계했습니다.",
-    modelsDescription: "새 모델은 계속 등장합니다. Tomverse는 모델 선택을 중앙화해 사용자가 워크플로를 바꾸지 않고 적절한 옵션을 비교할 수 있게 합니다.",
-    pricingTitle: "무료로 시작하고 사용량이 늘면 업그레이드하세요.",
-    pricingDescription: "플랜은 사용량, 파일 워크플로, 공유 기능, 사용 가능한 모델 카탈로그 접근을 기준으로 구성됩니다.",
-    pricingPlans: [
-      { title: "Free", price: "$0", description: "가벼운 일상 사용과 고급 모델 체험을 위한 월 300 AI 크레딧", bullets: ["월 300 AI 크레딧", "선별된 고비용 모델 월 30응답", "로그인 후 파일, 공유, 다운로드"] },
-      { title: "Pro", price: "$15/월", description: "일상적인 멀티모델 비교를 위한 월 3,000 AI 크레딧", bullets: ["월 3,000 AI 크레딧", "모든 모델 및 가중 차감", "파일, 공유, 다운로드"] },
-      { title: "Max", price: "$25/월", description: "집중적인 고급 모델·긴 문서 작업을 위한 월 10,000 AI 크레딧", bullets: ["Standard 모델 일일 제한 없음", "Premium 사용량은 월 크레딧 및 공정사용 정책 적용", "더 높은 파일 및 맥락 한도"] },
+    safetyCta: "안전 및 보안 개요 보기",
+    pricingTitle: "무료로 시작하고 작업이 커질 때 업그레이드하세요.",
+    pricingDescription: "홈페이지에는 핵심만 표시합니다. 모델별 차감량, 크레딧 예시, 연간 결제, 추가 크레딧과 공정사용 정책은 요금 페이지에서 확인하세요.",
+    plans: [
+      { id: "free", title: "Free", fallbackPrice: "$0", description: "가벼운 일상 사용과 고급 모델 체험을 위한 월 300 AI 크레딧." },
+      { id: "pro", title: "Pro", fallbackPrice: "$15", description: "일상적인 멀티모델 비교를 위한 월 3,000 AI 크레딧." },
+      { id: "max", title: "Max", fallbackPrice: "$25", description: "고급 모델·긴 문서 작업을 위한 월 10,000 AI 크레딧." },
     ],
-    faqTitle: "자주 묻는 질문",
+    monthly: "/ 월",
+    pricingDetails: "플랜과 크레딧 사용량 비교",
+    faqTitle: "빠르게 확인하는 세 가지",
     faqs: [
-      { question: "무료로 사용할 수 있나요", answer: "네. Free는 사용량 한도 안에서 제공되는 모델 카탈로그를 이용하는 가벼운 일상 사용용 플랜입니다." },
-      { question: "어떤 모델을 지원하나요", answer: "Tomverse는 OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Moonshot, Qwen, Perplexity 등 여러 공급자의 모델을 지원합니다." },
-      { question: "Private Mode란 무엇인가요", answer: "Private Mode에서는 Tomverse 데이터베이스에 대화를 저장하지 않습니다. 다만 응답 생성을 위해 AI 공급자에게 요청은 전송될 수 있습니다." },
-      { question: "파일을 첨부할 수 있나요", answer: "네. 이미지, PDF, Office 문서, Google Drive 파일 등 허용된 파일 형식을 공급자 지원 범위 안에서 사용할 수 있습니다." },
+      { question: "Tomverse를 무료로 사용할 수 있나요?", answer: "네. 로그인 없이 지원되는 무료 모델 1개를 체험할 수 있습니다. Free 계정을 만들면 플랜 한도 안에서 멀티모델 비교와 로그인 전용 기능을 사용할 수 있습니다." },
+      { question: "어떤 모델을 비교할 수 있나요?", answer: "OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Mistral, Moonshot, Alibaba, Perplexity 등의 모델을 지원합니다. 제공 상태는 바뀔 수 있으므로 실시간 상태 페이지에서 현재 상태를 확인할 수 있습니다." },
+      { question: "데이터는 어떻게 처리되나요?", answer: "첨부파일 제한, 대화 잠금, 읽기 전용 공유 스냅샷과 Private Mode를 적용합니다. 선택한 AI 공급자는 답변에 필요한 요청 내용을 처리하므로 전체 범위는 안전 페이지에서 확인하세요." },
     ],
-    ctaTitle: "더 똑똑하게 비교할 준비가 되셨나요",
-    ctaDescription: "무료 워크스페이스로 시작하고 더 많은 기능이 필요할 때 업그레이드하세요.",
+    ctaTitle: "더 명확한 시야는 하나의 질문에서 시작됩니다.",
+    ctaDescription: "여러 AI 답변을 비교한 뒤 AI Review로 더 살펴볼 부분을 빠르게 찾으세요.",
   },
   zh: {
+    ...englishCopy,
     app: "打开应用",
-    badge: "多模型比较 + AI 回答交叉审查",
-    title: "提问一次，比较多个 AI 回答，再检查遗漏。",
-    description: "Tomverse AI Review 会整理回答之间的共识、矛盾、遗漏和仍需核实的项目。",
-    primaryCta: "立即使用免费模型",
-    signedInCta: "开始聊天",
+    badge: "多模型比较 + AI 交叉审查",
+    title: "问一次，比较多个回答，再检查遗漏。",
+    description: "将同一问题发送给多个主流 AI 模型并排比较。Tomverse AI Review 会整理共识、矛盾、遗漏以及仍需独立核实的说法。",
+    primaryCta: "免费开始比较多个 AI",
+    signedInCta: "打开比较工作区",
+    guestCta: "无需登录试用一个免费模型",
     pricingCta: "查看价格",
-    steps: ["最多选择 3 个模型", "发送问题或添加文件", "比较、运行 AI Review、追问或分享"],
-    guestSteps: ["立即向一个免费模型提问", "无需登录即可查看回答", "登录后可比较、运行 AI Review、使用文件和分享"],
-    previewTitle: "AI Review 前的回答",
+    modelFinderLead: "不确定哪种 AI 适合你的工作？",
+    modelFinderCta: "注册后获取一分钟推荐。",
+    steps: ["最多选择三个模型", "提问一次或附加文件", "比较、审查、追问或分享"],
+    previewTitle: "一个问题，多种视角",
     previewCount: "3 个模型",
-    previewAnswers: ["给出可执行下一步的直接回答", "同时分析依据和取舍", "快速、简洁、结构化的摘要"],
-    featuresTitle: "更从容地使用多个 AI。",
-    featuresDescription: "Tomverse 不是一次性演示工具，而是为重复性的日常工作设计。模型选择、文件、Private Mode 和可分享结果都在一个流程中完成。",
-    features: [
-      { title: "比较后运行 AI Review", description: "提问一次，比较多个回答，并整理共识、矛盾、遗漏和待核实项目。" },
-      { title: "结合文件和真实上下文工作", description: "当任务需要真实材料时，可添加图片、PDF、Office 文档和 Google Drive 文件。" },
-      { title: "分享整理好的对话", description: "把有用的聊天转换为只读公开页面，或下载为干净的文本记录。" },
-      { title: "为注重隐私的工作而设计", description: "通过锁定对话、Private Mode、使用限制和强化安全控制，更安心地日常使用。" },
+    previewAnswers: ["清晰的下一步", "风险与取舍", "简洁的执行计划"],
+    reviewItems: ["共识", "矛盾", "遗漏", "下一步核实"],
+    modelStripLabel: "比较多个主流供应商的模型",
+    modelCatalogue: "浏览全部模型",
+    status: "实时服务状态",
+    supportTitle: "比较之后，继续完成工作。",
+    supportDescription: "Tomverse 保留每个回答的上下文，让比较结果变成文档、追问或可复用的团队记录。",
+    supportItems: [
+      { title: "文件与真实上下文", description: "需要原始材料时，可添加图片、PDF、Office 文档、文本或受支持的 Google Drive 文件。" },
+      { title: "定向追问", description: "保留原始比较，同时只向一个模型继续提问。" },
+      { title: "项目与记录", description: "按项目整理对话，避免在多个标签页重复建立上下文。" },
+      { title: "分享结果", description: "创建只读分享页，或下载整洁的文本记录。" },
     ],
-    useCasesTitle: "为真实的日常工作而构建。",
-    useCasesDescription: "当任务需要多种视角、真实文件和可复用记录时，使用 Tomverse。",
-    useCases: [
-      { title: "研究与总结", description: "比较简洁摘要、深入分析和后续问题建议。" },
-      { title: "编码与调试", description: "让多个模型提供修复方案、取舍、测试和替代实现。" },
-      { title: "商务写作", description: "用不同风格起草邮件、提案、产品文案和计划笔记。" },
-      { title: "基于文件的分析", description: "把截图、PDF、Office 文件和 Drive 上下文带入对话。" },
-    ],
-    whyTitle: "为什么不用分别打开每个 AI 应用？",
-    whyDescription: "Tomverse 将模型选择、对话上下文、分享和隐私控制集中到一个工作流程中。",
-    whyItems: [
-      { title: "一次提问，多种回答", description: "无需在多个标签页之间复制提示词，也能比较不同模型的优势。" },
-      { title: "只向关键模型追问", description: "在保留完整比较的同时，只向某个特定模型继续提问。" },
-      { title: "结果更易复用", description: "分享有用对话，或下载为干净的文本记录供后续使用。" },
-    ],
-    trustTitle: "从第一天起就加入信任控制。",
-    trustDescription: "公开 AI 工具需要清晰边界。Tomverse 会明确展示保存、分享和锁定行为。",
+    trustTitle: "为私密与共享工作提供清晰控制。",
+    trustDescription: "存储、锁定和共享行为清晰可见。即使使用 Private Mode，所选 AI 供应商仍会处理生成回答所需的请求。",
     trustItems: [
-      { title: "Private Mode 说明清楚", description: "Private Mode 不保存 Tomverse 聊天记录，但请求仍可能发送给所选 AI 提供商。" },
-      { title: "只读分享快照", description: "分享链接是公开只读视图，设计上不会暴露后续对话更新。" },
-      { title: "锁定对话", description: "敏感对话可以锁定，执行受保护操作前需要先验证解锁。" },
-      { title: "附件安全控制", description: "文件会经过验证、大小限制，并使用临时存储控制处理。" },
+      { title: "Private Mode", description: "不保存到 Tomverse 对话历史，但所选供应商仍会处理请求。" },
+      { title: "锁定对话", description: "保护敏感对话，并在受保护操作前要求解锁验证。" },
+      { title: "只读分享", description: "分享不会暴露后续对话更新的快照。" },
     ],
-    modelsTitle: "围绕快速变化的模型市场构建。",
-    modelsDescription: "新模型不断出现。Tomverse 将模型选择集中管理，让用户无需重建流程也能比较合适选项。",
-    pricingTitle: "免费开始，使用量增长后再升级。",
-    pricingDescription: "方案围绕使用额度、文件工作流、分享功能和可用模型目录访问来设计。",
-    pricingPlans: [
-      { title: "Free", price: "$0", description: "用于体验 Tomverse 和轻量日常工作。", bullets: ["精选模型目录", "受限的日常使用量", "登录后可使用文件、分享和下载"] },
-      { title: "Pro", price: "$15/月", description: "适合每天进行多模型比较的用户。", bullets: ["每月 3,000 AI 积分", "所有可用模型", "文件、分享、下载"] },
-      { title: "Max", price: "$25/月", description: "适合更高强度的 AI 工作流。", bullets: ["每月 10,000 积分", "Standard 模型无每日限制", "Premium 用量适用月度积分和公平使用政策"] },
+    safetyCta: "查看安全与保障说明",
+    pricingTitle: "免费开始，按需升级。",
+    pricingDescription: "首页只展示核心信息。模型权重、积分示例、年付、附加积分和公平使用政策请查看价格页。",
+    plans: [
+      { id: "free", title: "Free", fallbackPrice: "$0", description: "每月 300 AI 积分，适合轻量日常使用。" },
+      { id: "pro", title: "Pro", fallbackPrice: "$15", description: "每月 3,000 AI 积分，适合常规多模型比较。" },
+      { id: "max", title: "Max", fallbackPrice: "$25", description: "每月 10,000 AI 积分，适合高级模型和长文档。" },
     ],
-    faqTitle: "常见问题",
+    monthly: "/ 月",
+    pricingDetails: "比较套餐与积分用量",
+    faqTitle: "三个常见问题",
     faqs: [
-      { question: "可以免费使用 Tomverse 吗？", answer: "可以。Free 适合轻量日常使用，可在使用限制内访问精选模型目录。" },
-      { question: "支持哪些模型？", answer: "Tomverse 支持 OpenAI、Anthropic、Google、Groq、DeepSeek、xAI、Moonshot、Qwen、Perplexity 等多个提供商的模型。" },
-      { question: "什么是 Private Mode？", answer: "Private Mode 表示 Tomverse 不会把对话保存到 Tomverse 数据库中。但 AI 提供商仍可能接收提示词以生成回复。" },
-      { question: "可以添加文件吗？", answer: "可以。Tomverse 支持图片、PDF、Office 文档、Google Drive 文件以及其他允许的附件类型，具体取决于提供商支持。" },
+      { question: "可以免费使用 Tomverse 吗？", answer: "可以。无需登录即可试用一个受支持的免费模型；Free 账户可在套餐限制内使用多模型比较等功能。" },
+      { question: "可以比较哪些模型？", answer: "模型目录覆盖 OpenAI、Anthropic、Google、Groq、DeepSeek、xAI、Mistral、Moonshot、Alibaba 和 Perplexity 等供应商；当前状态请查看实时状态页。" },
+      { question: "数据如何处理？", answer: "Tomverse 提供附件限制、对话锁、只读分享快照和 Private Mode。所选 AI 供应商仍会处理生成回答所需的内容；完整边界请查看安全页。" },
     ],
-    ctaTitle: "准备好更聪明地比较了吗？",
-    ctaDescription: "从免费工作区开始，在需要更多能力时再升级。",
+    ctaTitle: "一个问题，获得更清晰的全貌。",
+    ctaDescription: "比较多个 AI 回答，再用 AI Review 找出值得深入核实的部分。",
   },
   fr: {
-    app: "Ouvrir l'app",
+    ...englishCopy,
+    app: "Ouvrir l’app",
     badge: "Comparaison multi-modèles + revue croisée IA",
-    title: "Posez une question, comparez les réponses et repérez les omissions.",
-    description: "Tomverse AI Review organise les accords, contradictions, omissions et points qui nécessitent encore une vérification.",
-    primaryCta: "Utiliser un modèle gratuit",
-    signedInCta: "Ouvrir le chat",
+    title: "Une question. Plusieurs réponses. Une revue des oublis.",
+    description: "Envoyez la même question à plusieurs modèles IA, comparez leurs réponses, puis structurez avec Tomverse AI Review les accords, contradictions, omissions et points à vérifier indépendamment.",
+    primaryCta: "Comparer plusieurs IA gratuitement",
+    signedInCta: "Ouvrir mon espace de comparaison",
+    guestCta: "Essayer un modèle gratuit sans connexion",
     pricingCta: "Voir les tarifs",
-    steps: ["Choisir jusqu'à trois modèles", "Envoyer une question ou joindre des fichiers", "Comparer, lancer AI Review, relancer ou partager"],
-    guestSteps: ["Interroger un modèle gratuit", "Obtenir une réponse sans connexion", "Se connecter pour comparer, utiliser AI Review, joindre des fichiers et partager"],
-    previewTitle: "Réponses avant AI Review",
+    modelFinderLead: "Vous ne savez pas quelle IA choisir ?",
+    modelFinderCta: "Obtenez une recommandation en une minute après inscription.",
+    steps: ["Choisissez jusqu’à trois modèles", "Posez une question ou joignez un fichier", "Comparez, révisez, relancez ou partagez"],
+    previewTitle: "Une question, plusieurs points de vue",
     previewCount: "3 modèles",
-    previewAnswers: ["Réponse directe avec prochaines étapes concrètes.", "Raisonnement nuancé avec alternatives.", "Résumé rapide, clair et structuré."],
-    featuresTitle: "Une façon plus sereine d'utiliser plusieurs IA.",
-    featuresDescription: "Pensé pour le travail récurrent, pas pour de simples démonstrations. Gardez vos modèles, fichiers, sessions privées et résultats partageables dans un seul flux.",
-    features: [{ title: "Comparer puis lancer AI Review", description: "Comparez plusieurs réponses, puis structurez accords, contradictions, omissions et points à vérifier." }, { title: "Travailler avec fichiers et contexte", description: "Joignez images, PDF, documents Office et fichiers Google Drive lorsque la tâche exige du contenu réel." }, { title: "Partager des conversations propres", description: "Transformez les échanges utiles en pages publiques en lecture seule ou téléchargez-les en texte clair." }, { title: "Conçu pour un travail attentif à la confidentialité", description: "Utilisez conversations verrouillées, Private Mode, limites d'usage et contrôles de sécurité renforcés." }],
-    useCasesTitle: "Conçu pour le vrai travail quotidien.",
-    useCasesDescription: "Utilisez Tomverse lorsque la tâche bénéficie de plusieurs perspectives, de fichiers réels et d'un historique réutilisable.",
-    useCases: [{ title: "Recherche et synthèse", description: "Comparez résumés courts, analyses approfondies et idées de relance." }, { title: "Code et débogage", description: "Demandez à plusieurs modèles des corrections, compromis, tests et alternatives." }, { title: "Rédaction professionnelle", description: "Rédigez e-mails, propositions, textes produit et notes de planification avec plusieurs styles." }, { title: "Analyse basée sur fichiers", description: "Ajoutez captures, PDF, fichiers Office et contexte Drive à la conversation." }],
-    whyTitle: "Pourquoi utiliser Tomverse plutôt que chaque app IA séparément",
-    whyDescription: "Tomverse réunit choix du modèle, contexte de conversation, partage et contrôles de confidentialité dans un seul flux.",
-    whyItems: [{ title: "Une question, plusieurs réponses", description: "Comparez les forces des modèles sans copier vos prompts entre onglets." }, { title: "Relancer le bon modèle", description: "Posez une question de suivi à un modèle précis tout en gardant la comparaison complète à portée de main." }, { title: "Des résultats réutilisables", description: "Partagez les conversations utiles ou téléchargez des traces texte propres pour plus tard." }],
-    trustTitle: "Des contrôles de confiance dès le premier jour.",
-    trustDescription: "Les outils IA publics ont besoin de limites claires. Tomverse rend visibles les comportements de sauvegarde, partage et verrouillage.",
-    trustItems: [{ title: "Clarté du Private Mode", description: "Private Mode n'enregistre pas l'historique dans Tomverse, même si les prompts peuvent être envoyés aux fournisseurs IA sélectionnés." }, { title: "Snapshots partagés en lecture seule", description: "Les liens partagés sont des vues publiques en lecture seule conçues pour ne pas exposer les mises à jour ultérieures." }, { title: "Conversations verrouillées", description: "Les chats sensibles peuvent être verrouillés et demander une vérification avant les actions protégées." }, { title: "Protection des pièces jointes", description: "Les fichiers sont validés, limités et traités avec un stockage temporaire contrôlé." }],
-    modelsTitle: "Construit autour du marché des modèles.",
-    modelsDescription: "De nouveaux modèles arrivent constamment. Tomverse centralise le choix afin de comparer les bonnes options sans reconstruire le flux de travail.",
-    pricingTitle: "Commencez gratuitement, passez au niveau supérieur quand l'usage augmente.",
-    pricingDescription: "Les plans sont basés sur les quotas d'utilisation, les workflows avec fichiers, le partage et l'accès au catalogue de modèles.",
-    pricingPlans: [{ title: "Free", price: "$0", description: "Pour essayer Tomverse et un travail quotidien léger.", bullets: ["300 crédits IA par mois", "30 réponses Pro par mois", "Fichiers, partage et téléchargements"] }, { title: "Pro", price: "$15/mois", description: "Pour la comparaison multi-modèles quotidienne.", bullets: ["3 000 crédits IA par mois", "Tous les modèles avec usage pondéré", "Fichiers, partage, téléchargements"] }, { title: "Max", price: "$25/mois", description: "Pour les workflows IA plus intensifs.", bullets: ["10 000 crédits IA par mois", "Aucune limite quotidienne sur les modèles Standard", "Usage Premium soumis aux crédits mensuels et au fair-use"] }],
-    faqTitle: "Questions rapides",
-    faqs: [{ question: "Puis-je utiliser Tomverse gratuitement ?", answer: "Oui. Free est prévu pour un usage léger avec accès aux niveaux Free et Pro dans les limites d'utilisation." }, { question: "Quels modèles sont pris en charge ?", answer: "Tomverse prend en charge des modèles d'OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Moonshot, Qwen, Perplexity et d'autres fournisseurs." }, { question: "Qu'est-ce que Private Mode ?", answer: "Private Mode signifie que Tomverse n'enregistre pas la conversation dans sa base de données. Les fournisseurs IA peuvent toujours recevoir les prompts pour générer des réponses." }, { question: "Puis-je joindre des fichiers ?", answer: "Oui. Tomverse prend en charge images, PDF, documents Office, fichiers Google Drive et autres types autorisés selon le fournisseur." }],
-    ctaTitle: "Prêt à comparer plus intelligemment ?",
-    ctaDescription: "Commencez avec l'espace gratuit et passez au niveau supérieur lorsque vous avez besoin de plus de puissance.",
+    previewAnswers: ["Prochaines étapes", "Risques et compromis", "Plan d’action concis"],
+    reviewItems: ["Points communs", "Contradiction", "Omission", "À vérifier"],
+    modelStripLabel: "Comparez les modèles des principaux fournisseurs",
+    modelCatalogue: "Explorer tous les modèles",
+    status: "État du service",
+    supportTitle: "Poursuivez le travail après la comparaison.",
+    supportDescription: "Tomverse conserve le contexte utile pour transformer une comparaison en document, relance ou résultat réutilisable.",
+    supportItems: [
+      { title: "Fichiers et contexte réel", description: "Ajoutez images, PDF, documents Office, texte ou fichiers Google Drive pris en charge." },
+      { title: "Relance ciblée", description: "Interrogez un seul modèle sans perdre les autres réponses ni la comparaison." },
+      { title: "Projets et archives", description: "Organisez les conversations en projets et conservez un contexte réutilisable." },
+      { title: "Partager le résultat", description: "Créez une page en lecture seule ou téléchargez une trace texte propre." },
+    ],
+    trustTitle: "Des contrôles clairs pour le travail privé et partagé.",
+    trustDescription: "Le stockage, le verrouillage et le partage sont visibles. Même en Private Mode, les fournisseurs sélectionnés traitent la demande nécessaire à la réponse.",
+    trustItems: [
+      { title: "Private Mode", description: "La conversation n’est pas enregistrée dans l’historique Tomverse, mais les fournisseurs traitent la demande." },
+      { title: "Conversations verrouillées", description: "Protégez les conversations sensibles avant les actions à risque." },
+      { title: "Partage en lecture seule", description: "Partagez un instantané qui n’expose pas les mises à jour ultérieures." },
+    ],
+    safetyCta: "Lire l’aperçu sécurité",
+    pricingTitle: "Commencez gratuitement, évoluez selon vos besoins.",
+    pricingDescription: "Les poids des modèles, exemples de crédits, paiements annuels, crédits additionnels et Fair Use sont détaillés sur la page Tarifs.",
+    plans: [
+      { id: "free", title: "Free", fallbackPrice: "$0", description: "300 crédits IA mensuels pour un usage léger." },
+      { id: "pro", title: "Pro", fallbackPrice: "$15", description: "3 000 crédits IA mensuels pour comparer régulièrement." },
+      { id: "max", title: "Max", fallbackPrice: "$25", description: "10 000 crédits IA mensuels pour modèles avancés et longs documents." },
+    ],
+    monthly: "/ mois",
+    pricingDetails: "Comparer les plans et crédits",
+    faqTitle: "Trois questions rapides",
+    faqs: [
+      { question: "Puis-je utiliser Tomverse gratuitement ?", answer: "Oui. Un modèle gratuit est accessible sans connexion. Un compte Free ajoute la comparaison multi-modèles dans les limites du plan." },
+      { question: "Quels modèles puis-je comparer ?", answer: "Le catalogue couvre notamment OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Mistral, Moonshot, Alibaba et Perplexity. Consultez la page d’état pour la disponibilité actuelle." },
+      { question: "Comment mes données sont-elles traitées ?", answer: "Tomverse applique limites de pièces jointes, verrouillage, instantanés en lecture seule et Private Mode. Les fournisseurs sélectionnés traitent toujours le contenu nécessaire à la réponse." },
+    ],
+    ctaTitle: "Une vision plus claire commence par une question.",
+    ctaDescription: "Comparez plusieurs réponses puis utilisez AI Review pour cibler ce qui mérite un examen approfondi.",
   },
   de: {
+    ...englishCopy,
     app: "App öffnen",
     badge: "Multi-Modell-Vergleich + KI-Gegenprüfung",
-    title: "Einmal fragen, Antworten vergleichen und Lücken erkennen.",
-    description: "Tomverse AI Review ordnet Gemeinsamkeiten, Widersprüche, Auslassungen und Aussagen, die noch geprüft werden müssen.",
-    primaryCta: "Jetzt kostenloses Modell nutzen",
-    signedInCta: "Chat starten",
+    title: "Einmal fragen. Antworten vergleichen. Lücken prüfen.",
+    description: "Senden Sie eine Frage an mehrere führende KI-Modelle. Vergleichen Sie die Antworten und strukturieren Sie mit Tomverse AI Review Gemeinsamkeiten, Widersprüche, Lücken und externen Prüfbedarf.",
+    primaryCta: "Mehrere KIs kostenlos vergleichen",
+    signedInCta: "Vergleichs-Workspace öffnen",
+    guestCta: "Ein Gratis-Modell ohne Anmeldung testen",
     pricingCta: "Preise ansehen",
-    steps: ["Bis zu drei Modelle wählen", "Eine Frage senden oder Dateien anhängen", "Vergleichen, AI Review starten, nachfragen oder teilen"],
-    guestSteps: ["Jetzt ein kostenloses Modell fragen", "Antwort ohne Anmeldung erhalten", "Für Vergleich, AI Review, Dateien und Teilen anmelden"],
-    previewTitle: "Antworten vor AI Review",
+    modelFinderLead: "Unsicher, welche KI passt?",
+    modelFinderCta: "Nach der Anmeldung in einer Minute empfehlen lassen.",
+    steps: ["Bis zu drei Modelle wählen", "Einmal fragen oder Datei anhängen", "Vergleichen, prüfen, nachfragen oder teilen"],
+    previewTitle: "Eine Frage, mehrere Perspektiven",
     previewCount: "3 Modelle",
-    previewAnswers: ["Direkte Antwort mit praktischen nächsten Schritten.", "Sorgfältige Abwägung mit Alternativen.", "Schnelle, knappe und strukturierte Zusammenfassung."],
-    featuresTitle: "Eine ruhigere Art, viele KIs zu nutzen.",
-    featuresDescription: "Für wiederkehrende Arbeit entwickelt, nicht für einzelne Demos. Halten Sie Modelle, Dateien, private Sitzungen und teilbare Ergebnisse in einem Ablauf.",
-    features: [{ title: "Vergleichen und AI Review starten", description: "Vergleichen Sie Antworten und strukturieren Sie Gemeinsamkeiten, Widersprüche, Lücken und Prüfbedarf." }, { title: "Mit Dateien und Kontext arbeiten", description: "Hängen Sie Bilder, PDFs, Office-Dokumente und Google-Drive-Dateien an, wenn die Aufgabe echtes Material braucht." }, { title: "Saubere Unterhaltungen teilen", description: "Machen Sie nützliche Chats zu öffentlichen schreibgeschützten Seiten oder laden Sie sie als klare Textprotokolle herunter." }, { title: "Für datenschutzbewusstes Arbeiten gebaut", description: "Nutzen Sie gesperrte Chats, Private Mode, Nutzungslimits und gehärtete Sicherheitskontrollen." }],
-    useCasesTitle: "Gebaut für echte tägliche Arbeit.",
-    useCasesDescription: "Nutzen Sie Tomverse, wenn Aufgaben von mehreren Perspektiven, echten Dateien und wiederverwendbaren Ergebnissen profitieren.",
-    useCases: [{ title: "Recherche und Zusammenfassungen", description: "Vergleichen Sie kurze Zusammenfassungen, tiefere Analysen und Ideen für Folgefragen." }, { title: "Programmierung und Debugging", description: "Bitten Sie mehrere Modelle um Korrekturen, Abwägungen, Tests und alternative Implementierungen." }, { title: "Geschäftliche Texte", description: "Entwerfen Sie E-Mails, Angebote, Produkttexte und Planungsnotizen in mehreren Stilen." }, { title: "Dateibasierte Analyse", description: "Bringen Sie Screenshots, PDFs, Office-Dateien und Drive-Kontext in die Unterhaltung." }],
-    whyTitle: "Warum Tomverse statt jede KI-App einzeln zu öffnen",
-    whyDescription: "Tomverse hält Modellauswahl, Gesprächskontext, Teilen und Datenschutzkontrollen in einem Arbeitsfluss.",
-    whyItems: [{ title: "Eine Frage, mehrere Antworten", description: "Vergleichen Sie Modellstärken, ohne Prompts zwischen Tabs zu kopieren." }, { title: "Dort nachfragen, wo es zählt", description: "Stellen Sie einem bestimmten Modell eine Folgefrage und behalten Sie den gesamten Vergleich in der Nähe." }, { title: "Wiederverwendbare Ergebnisse", description: "Teilen Sie nützliche Unterhaltungen oder laden Sie saubere Textprotokolle für spätere Arbeit herunter." }],
-    trustTitle: "Mit Vertrauenskontrollen ab dem ersten Tag.",
-    trustDescription: "Öffentliche KI-Tools brauchen klare Grenzen. Tomverse macht Speichern, Teilen und Sperren für Nutzer sichtbar.",
-    trustItems: [{ title: "Private Mode klar erklärt", description: "Private Mode speichert keine Tomverse-Chatverläufe, sendet Prompts aber weiterhin an ausgewählte KI-Anbieter." }, { title: "Schreibgeschützte Teilen-Snapshots", description: "Geteilte Links sind öffentliche schreibgeschützte Ansichten, die spätere Aktualisierungen nicht offenlegen sollen." }, { title: "Gesperrte Unterhaltungen", description: "Sensible Chats können gesperrt werden und vor geschützten Aktionen eine Entsperrprüfung verlangen." }, { title: "Schutz für Anhänge", description: "Dateien werden validiert, begrenzt und über kontrollierten temporären Speicher verarbeitet." }],
-    modelsTitle: "Für den dynamischen Modellmarkt gebaut.",
-    modelsDescription: "Neue Modelle erscheinen ständig. Tomverse zentralisiert die Modellauswahl, damit Nutzer passende Optionen vergleichen können, ohne ihren Ablauf neu aufzubauen.",
-    pricingTitle: "Kostenlos starten, upgraden wenn die Nutzung wächst.",
-    pricingDescription: "Pläne basieren auf Nutzungskontingenten, Datei-Workflows, Teilen und Zugriff auf den verfügbaren Modellkatalog.",
-    pricingPlans: [{ title: "Free", price: "$0", description: "Zum Ausprobieren von Tomverse und für leichte tägliche Arbeit.", bullets: ["300 KI-Credits pro Monat", "30 Pro-Antworten pro Monat", "Dateien, Teilen und Downloads"] }, { title: "Pro", price: "$15/Monat", description: "Für täglichen Multi-Modell-Vergleich.", bullets: ["3.000 KI-Credits pro Monat", "Alle Modelle mit gewichteter Nutzung", "Dateien, Teilen, Downloads"] }, { title: "Max", price: "$25/Monat", description: "Für intensivere KI-Workflows.", bullets: ["10.000 KI-Credits pro Monat", "Kein Tageslimit für Standard-Modelle", "Premium-Nutzung folgt Monats-Credits und Fair-Use"] }],
-    faqTitle: "Kurze Fragen",
-    faqs: [{ question: "Kann ich Tomverse kostenlos nutzen?", answer: "Ja. Free ist für leichte Nutzung gedacht und bietet innerhalb der Nutzungslimits Zugriff auf einen ausgewählten Modellkatalog." }, { question: "Welche Modelle werden unterstützt?", answer: "Tomverse unterstützt Modelle von OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Moonshot, Qwen, Perplexity und weiteren Anbietern." }, { question: "Was ist Private Mode?", answer: "Private Mode bedeutet, dass Tomverse die Unterhaltung nicht in der Tomverse-Datenbank speichert. KI-Anbieter können Prompts weiterhin zur Antwortgenerierung erhalten." }, { question: "Kann ich Dateien anhängen?", answer: "Ja. Tomverse unterstützt Bilder, PDFs, Office-Dokumente, Google-Drive-Dateien und weitere erlaubte Dateitypen je nach Anbieter." }],
-    ctaTitle: "Bereit, intelligenter zu vergleichen?",
-    ctaDescription: "Starten Sie mit dem kostenlosen Arbeitsbereich und upgraden Sie, wenn Sie mehr Leistung brauchen.",
+    previewAnswers: ["Klare nächste Schritte", "Risiken und Abwägungen", "Kompakter Betriebsplan"],
+    reviewItems: ["Gemeinsamkeit", "Widerspruch", "Lücke", "Zu prüfen"],
+    modelStripLabel: "Modelle führender Anbieter vergleichen",
+    modelCatalogue: "Alle Modelle ansehen",
+    status: "Live-Servicestatus",
+    supportTitle: "Nach dem Vergleich direkt weiterarbeiten.",
+    supportDescription: "Tomverse hält den nützlichen Kontext zusammen, damit aus dem Vergleich ein Dokument, eine Nachfrage oder ein wiederverwendbares Ergebnis wird.",
+    supportItems: [
+      { title: "Dateien und echter Kontext", description: "Bilder, PDFs, Office-Dokumente, Text oder unterstützte Google-Drive-Dateien hinzufügen." },
+      { title: "Gezielte Nachfrage", description: "Ein Modell weiterfragen, ohne die anderen Antworten oder den Vergleich zu verlieren." },
+      { title: "Projekte und Verlauf", description: "Unterhaltungen in Projekten organisieren und Kontext wiederverwenden." },
+      { title: "Ergebnis teilen", description: "Schreibgeschützte Freigabe erstellen oder einen sauberen Textverlauf laden." },
+    ],
+    trustTitle: "Klare Kontrollen für private und geteilte Arbeit.",
+    trustDescription: "Speicherung, Sperren und Freigaben sind sichtbar. Auch im Private Mode verarbeiten ausgewählte KI-Anbieter die für die Antwort nötige Anfrage.",
+    trustItems: [
+      { title: "Private Mode", description: "Kein Tomverse-Chatverlauf, während ausgewählte Anbieter die Anfrage verarbeiten." },
+      { title: "Gesperrte Unterhaltungen", description: "Sensible Chats schützen und vor geschützten Aktionen entsperren." },
+      { title: "Schreibgeschütztes Teilen", description: "Einen Snapshot teilen, der spätere Aktualisierungen nicht offenlegt." },
+    ],
+    safetyCta: "Sicherheitsübersicht lesen",
+    pricingTitle: "Kostenlos starten, bei Bedarf erweitern.",
+    pricingDescription: "Modellgewichte, Kreditbeispiele, Jahreszahlung, Zusatzkredite und Fair Use stehen auf der Preisseite.",
+    plans: [
+      { id: "free", title: "Free", fallbackPrice: "$0", description: "300 monatliche KI-Kredite für leichte Nutzung." },
+      { id: "pro", title: "Pro", fallbackPrice: "$15", description: "3.000 monatliche KI-Kredite für regelmäßige Vergleiche." },
+      { id: "max", title: "Max", fallbackPrice: "$25", description: "10.000 monatliche KI-Kredite für fortgeschrittene Modelle und lange Dokumente." },
+    ],
+    monthly: "/ Monat",
+    pricingDetails: "Pläne und Kreditverbrauch vergleichen",
+    faqTitle: "Drei kurze Fragen",
+    faqs: [
+      { question: "Kann ich Tomverse kostenlos nutzen?", answer: "Ja. Ein unterstütztes Gratis-Modell ist ohne Anmeldung nutzbar. Ein Free-Konto ermöglicht Multi-Modell-Vergleiche innerhalb der Planlimits." },
+      { question: "Welche Modelle kann ich vergleichen?", answer: "Der Katalog umfasst unter anderem OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Mistral, Moonshot, Alibaba und Perplexity. Aktuelle Verfügbarkeit zeigt die Statusseite." },
+      { question: "Wie werden meine Daten verarbeitet?", answer: "Tomverse nutzt Anhangslimits, Chatsperren, schreibgeschützte Snapshots und Private Mode. Ausgewählte KI-Anbieter verarbeiten weiterhin die für Antworten nötigen Inhalte." },
+    ],
+    ctaTitle: "Ein klarerer Blick beginnt mit einer Frage.",
+    ctaDescription: "Mehrere Antworten vergleichen und mit AI Review gezielt tiefer prüfen.",
   },
   es: {
+    ...englishCopy,
     app: "Abrir app",
     badge: "Comparación multimodelo + revisión cruzada de IA",
-    title: "Pregunta una vez, compara respuestas y revisa lo que falta.",
-    description: "Tomverse AI Review organiza acuerdos, contradicciones, omisiones y afirmaciones que todavía necesitan verificación.",
-    primaryCta: "Usar un modelo gratis ahora",
-    signedInCta: "Iniciar chat",
+    title: "Pregunta una vez. Compara respuestas. Revisa lo omitido.",
+    description: "Envía una pregunta a varios modelos líderes, compara las respuestas y usa Tomverse AI Review para ordenar acuerdos, contradicciones, omisiones y puntos que aún requieren verificación independiente.",
+    primaryCta: "Comparar varias IA gratis",
+    signedInCta: "Abrir mi espacio de comparación",
+    guestCta: "Probar un modelo gratis sin iniciar sesión",
     pricingCta: "Ver precios",
-    steps: ["Elige hasta tres modelos", "Envía una pregunta o adjunta archivos", "Compara, ejecuta AI Review, continúa o comparte"],
-    guestSteps: ["Pregunta ahora a un modelo gratuito", "Recibe una respuesta sin iniciar sesión", "Inicia sesión para comparar, usar AI Review, archivos y compartir"],
-    previewTitle: "Respuestas antes de AI Review",
+    modelFinderLead: "¿No sabes qué IA encaja contigo?",
+    modelFinderCta: "Recibe una recomendación de un minuto tras registrarte.",
+    steps: ["Elige hasta tres modelos", "Pregunta o adjunta un archivo", "Compara, revisa, continúa o comparte"],
+    previewTitle: "Una pregunta, varias perspectivas",
     previewCount: "3 modelos",
-    previewAnswers: ["Respuesta directa con próximos pasos prácticos.", "Razonamiento cuidadoso con alternativas.", "Resumen rápido, breve y estructurado."],
-    featuresTitle: "Una forma más tranquila de usar muchas IA.",
-    featuresDescription: "Diseñado para trabajo repetido, no para demos aisladas. Mantén modelos, archivos, sesiones privadas y resultados compartibles en un solo flujo.",
-    features: [{ title: "Compara y ejecuta AI Review", description: "Compara respuestas y estructura acuerdos, contradicciones, omisiones y puntos por verificar." }, { title: "Trabaja con archivos y contexto", description: "Adjunta imágenes, PDF, documentos Office y archivos de Google Drive cuando la tarea requiere material real." }, { title: "Comparte conversaciones pulidas", description: "Convierte chats útiles en páginas públicas de solo lectura o descárgalos como registros de texto limpios." }, { title: "Creado para trabajo con privacidad", description: "Usa chats bloqueados, Private Mode, límites de uso y controles de seguridad reforzados." }],
-    useCasesTitle: "Creado para trabajo diario real.",
-    useCasesDescription: "Usa Tomverse cuando la tarea se beneficia de varias perspectivas, archivos reales y un registro reutilizable.",
-    useCases: [{ title: "Investigación y resúmenes", description: "Compara resúmenes breves, análisis más profundos e ideas para preguntas de seguimiento." }, { title: "Programación y depuración", description: "Pide a varios modelos correcciones, alternativas, pruebas y tradeoffs." }, { title: "Redacción de negocios", description: "Redacta emails, propuestas, textos de producto y notas de planificación con varios estilos." }, { title: "Análisis basado en archivos", description: "Incluye capturas, PDF, archivos Office y contexto de Drive en la conversación." }],
-    whyTitle: "Por qué usar Tomverse en vez de abrir cada app de IA",
-    whyDescription: "Tomverse mantiene elección de modelo, contexto, compartición y privacidad en un solo flujo.",
-    whyItems: [{ title: "Una pregunta, varias respuestas", description: "Compara fortalezas de modelos sin copiar prompts entre pestañas." }, { title: "Continúa con el modelo adecuado", description: "Haz una pregunta de seguimiento a un modelo específico mientras mantienes la comparación cerca." }, { title: "Resultados portables", description: "Comparte conversaciones útiles o descarga registros de texto limpios para usarlos después." }],
-    trustTitle: "Controles de confianza desde el primer día.",
-    trustDescription: "Las herramientas públicas de IA necesitan límites claros. Tomverse muestra el comportamiento de guardado, compartición y bloqueo.",
-    trustItems: [{ title: "Claridad de Private Mode", description: "Private Mode no guarda historial en Tomverse, aunque los prompts pueden enviarse a los proveedores de IA seleccionados." }, { title: "Snapshots compartidos de solo lectura", description: "Los enlaces compartidos son vistas públicas de solo lectura que no exponen actualizaciones posteriores." }, { title: "Conversaciones bloqueadas", description: "Los chats sensibles pueden bloquearse y requerir verificación antes de acciones protegidas." }, { title: "Protección de adjuntos", description: "Los archivos se validan, limitan y procesan con almacenamiento temporal controlado." }],
-    modelsTitle: "Diseñado para el mercado cambiante de modelos.",
-    modelsDescription: "Aparecen modelos nuevos constantemente. Tomverse centraliza la elección para comparar opciones adecuadas sin rehacer el flujo de trabajo.",
-    pricingTitle: "Empieza gratis y actualiza cuando crezca el uso.",
-    pricingDescription: "Los planes se basan en límites de uso, flujos con archivos, compartición y acceso al catálogo de modelos.",
-    pricingPlans: [{ title: "Free", price: "$0", description: "Para probar Tomverse y trabajo diario ligero.", bullets: ["300 créditos de IA al mes", "30 respuestas Pro al mes", "Archivos, compartir y descargas"] }, { title: "Pro", price: "$15/mes", description: "Para comparación multimodelo diaria.", bullets: ["3.000 créditos de IA al mes", "Todos los modelos con uso ponderado", "Archivos, compartir, descargas"] }, { title: "Max", price: "$25/mes", description: "Para flujos de IA más intensivos.", bullets: ["10.000 créditos de IA al mes", "Sin límite diario en modelos Standard", "Uso Premium sujeto a créditos mensuales y uso justo"] }],
-    faqTitle: "Preguntas rápidas",
-    faqs: [{ question: "¿Puedo usar Tomverse gratis?", answer: "Sí. Free está pensado para uso ligero con acceso a niveles Free y Pro dentro de los límites." }, { question: "¿Qué modelos se admiten?", answer: "Tomverse admite modelos de OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Moonshot, Qwen, Perplexity y otros proveedores." }, { question: "¿Qué es Private Mode?", answer: "Private Mode significa que Tomverse no guarda la conversación en su base de datos. Los proveedores de IA aún pueden recibir prompts para generar respuestas." }, { question: "¿Puedo adjuntar archivos?", answer: "Sí. Tomverse admite imágenes, PDF, documentos Office, archivos de Google Drive y otros tipos permitidos según el proveedor." }],
-    ctaTitle: "¿Listo para comparar mejor?",
-    ctaDescription: "Empieza con el espacio gratuito y actualiza cuando necesites más potencia.",
+    previewAnswers: ["Próximos pasos claros", "Riesgos y alternativas", "Plan operativo conciso"],
+    reviewItems: ["Coincidencias", "Contradicción", "Omisión", "Por verificar"],
+    modelStripLabel: "Compara modelos de los principales proveedores",
+    modelCatalogue: "Explorar todos los modelos",
+    status: "Estado del servicio",
+    supportTitle: "Continúa el trabajo después de comparar.",
+    supportDescription: "Tomverse conserva el contexto útil para convertir una comparación en documento, seguimiento o resultado reutilizable.",
+    supportItems: [
+      { title: "Archivos y contexto real", description: "Añade imágenes, PDF, documentos Office, texto o archivos compatibles de Google Drive." },
+      { title: "Seguimiento dirigido", description: "Pregunta a un modelo concreto sin perder las demás respuestas." },
+      { title: "Proyectos y registros", description: "Organiza conversaciones en proyectos y conserva un contexto reutilizable." },
+      { title: "Comparte el resultado", description: "Crea una página de solo lectura o descarga un registro de texto limpio." },
+    ],
+    trustTitle: "Controles claros para trabajo privado y compartido.",
+    trustDescription: "El almacenamiento, bloqueo y uso compartido son visibles. Incluso en Private Mode, los proveedores elegidos procesan la solicitud necesaria para responder.",
+    trustItems: [
+      { title: "Private Mode", description: "No se guarda en el historial de Tomverse, pero los proveedores seleccionados procesan la solicitud." },
+      { title: "Conversaciones bloqueadas", description: "Protege chats sensibles antes de acciones protegidas." },
+      { title: "Compartir en solo lectura", description: "Comparte una instantánea que no expone cambios posteriores." },
+    ],
+    safetyCta: "Leer seguridad y protección",
+    pricingTitle: "Empieza gratis y mejora cuando crezca el trabajo.",
+    pricingDescription: "Los pesos por modelo, ejemplos de créditos, pago anual, créditos extra y Fair Use están en la página de precios.",
+    plans: [
+      { id: "free", title: "Free", fallbackPrice: "$0", description: "300 créditos IA al mes para uso ligero." },
+      { id: "pro", title: "Pro", fallbackPrice: "$15", description: "3.000 créditos IA al mes para comparaciones habituales." },
+      { id: "max", title: "Max", fallbackPrice: "$25", description: "10.000 créditos IA al mes para modelos avanzados y documentos largos." },
+    ],
+    monthly: "/ mes",
+    pricingDetails: "Comparar planes y créditos",
+    faqTitle: "Tres preguntas rápidas",
+    faqs: [
+      { question: "¿Puedo usar Tomverse gratis?", answer: "Sí. Puedes probar un modelo gratuito compatible sin iniciar sesión. Una cuenta Free añade comparación multimodelo dentro de los límites del plan." },
+      { question: "¿Qué modelos puedo comparar?", answer: "El catálogo incluye proveedores como OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Mistral, Moonshot, Alibaba y Perplexity. Consulta el estado en vivo para la disponibilidad actual." },
+      { question: "¿Cómo se tratan mis datos?", answer: "Tomverse aplica límites de archivos, bloqueo de chats, instantáneas de solo lectura y Private Mode. Los proveedores elegidos siguen procesando el contenido necesario para responder." },
+    ],
+    ctaTitle: "Una visión más clara empieza con una pregunta.",
+    ctaDescription: "Compara varias respuestas y usa AI Review para decidir qué revisar con más detalle.",
   },
   pt: {
+    ...englishCopy,
     app: "Abrir app",
-    badge: "Comparação multimodelo + revisão cruzada de IA",
-    title: "Pergunte uma vez, compare respostas e revise o que faltou.",
-    description: "O Tomverse AI Review organiza consensos, contradições, omissões e alegações que ainda precisam de verificação.",
-    primaryCta: "Usar um modelo gratuito agora",
-    signedInCta: "Iniciar chat",
+    badge: "Comparação multimodelo + revisão cruzada por IA",
+    title: "Pergunte uma vez. Compare respostas. Revise o que faltou.",
+    description: "Envie uma pergunta a vários modelos líderes, compare as respostas e use o Tomverse AI Review para organizar consensos, contradições, omissões e pontos que ainda exigem verificação independente.",
+    primaryCta: "Comparar várias IAs gratuitamente",
+    signedInCta: "Abrir meu workspace de comparação",
+    guestCta: "Testar um modelo grátis sem entrar",
     pricingCta: "Ver preços",
-    steps: ["Escolha até três modelos", "Envie uma pergunta ou anexe arquivos", "Compare, execute AI Review, continue ou compartilhe"],
-    guestSteps: ["Pergunte já a um modelo gratuito", "Receba uma resposta sem iniciar sessão", "Inicie sessão para comparar, usar AI Review, arquivos e compartilhar"],
-    previewTitle: "Respostas antes do AI Review",
+    modelFinderLead: "Não sabe qual IA combina com seu trabalho?",
+    modelFinderCta: "Receba uma recomendação de um minuto após criar a conta.",
+    steps: ["Escolha até três modelos", "Pergunte ou anexe um arquivo", "Compare, revise, continue ou compartilhe"],
+    previewTitle: "Uma pergunta, várias perspectivas",
     previewCount: "3 modelos",
-    previewAnswers: ["Resposta direta com próximos passos práticos.", "Raciocínio cuidadoso com alternativas.", "Resumo rápido, curto e estruturado."],
-    featuresTitle: "Uma forma mais tranquila de usar várias IAs.",
-    featuresDescription: "Criado para trabalho recorrente, não para demonstrações isoladas. Mantenha modelos, arquivos, sessões privadas e resultados compartilháveis em um só fluxo.",
-    features: [{ title: "Compare e execute o AI Review", description: "Compare respostas e organize consensos, contradições, omissões e pontos a verificar." }, { title: "Trabalhe com arquivos e contexto", description: "Anexe imagens, PDFs, documentos Office e arquivos do Google Drive quando a tarefa exigir material real." }, { title: "Compartilhe conversas bem organizadas", description: "Transforme chats úteis em páginas públicas somente leitura ou baixe registros limpos em texto." }, { title: "Feito para trabalho com privacidade", description: "Use chats bloqueados, Private Mode, limites de uso e controles de segurança reforçados." }],
-    useCasesTitle: "Criado para trabalho diário real.",
-    useCasesDescription: "Use o Tomverse quando a tarefa se beneficia de várias perspectivas, arquivos reais e um registro reutilizável.",
-    useCases: [{ title: "Pesquisa e resumos", description: "Compare resumos objetivos, análises mais profundas e ideias para perguntas de acompanhamento." }, { title: "Programação e depuração", description: "Peça correções, alternativas, testes e tradeoffs a vários modelos." }, { title: "Redação de negócios", description: "Crie e-mails, propostas, textos de produto e notas de planejamento com vários estilos." }, { title: "Análise baseada em arquivos", description: "Inclua capturas, PDFs, arquivos Office e contexto do Drive na conversa." }],
-    whyTitle: "Por que usar o Tomverse em vez de abrir cada app de IA",
-    whyDescription: "O Tomverse mantém escolha de modelo, contexto da conversa, compartilhamento e privacidade em um único fluxo.",
-    whyItems: [{ title: "Uma pergunta, várias respostas", description: "Compare os pontos fortes dos modelos sem copiar prompts entre abas." }, { title: "Continue com o modelo certo", description: "Faça uma pergunta de acompanhamento a um modelo específico mantendo a comparação completa por perto." }, { title: "Resultados reutilizáveis", description: "Compartilhe conversas úteis ou baixe registros de texto limpos para usar depois." }],
-    trustTitle: "Controles de confiança desde o primeiro dia.",
-    trustDescription: "Ferramentas públicas de IA precisam de limites claros. O Tomverse mostra como salvamento, compartilhamento e bloqueio funcionam.",
-    trustItems: [{ title: "Private Mode claro", description: "Private Mode não salva o histórico no Tomverse, embora os prompts ainda possam ser enviados aos provedores de IA selecionados." }, { title: "Snapshots compartilhados somente leitura", description: "Links compartilhados são visualizações públicas somente leitura, projetadas para não expor atualizações posteriores." }, { title: "Conversas bloqueadas", description: "Chats sensíveis podem ser bloqueados e exigir verificação antes de ações protegidas." }, { title: "Proteção de anexos", description: "Arquivos são validados, limitados e processados com armazenamento temporário controlado." }],
-    modelsTitle: "Criado para o mercado de modelos em constante mudança.",
-    modelsDescription: "Novos modelos chegam o tempo todo. O Tomverse centraliza a escolha para que usuários comparem as opções certas sem refazer o fluxo de trabalho.",
-    pricingTitle: "Comece grátis e faça upgrade quando o uso crescer.",
-    pricingDescription: "Os planos são baseados em limites de uso, workflows com arquivos, compartilhamento e acesso ao catálogo de modelos disponível.",
-    pricingPlans: [{ title: "Free", price: "$0", description: "Para testar o Tomverse e trabalhos diários leves.", bullets: ["300 créditos de IA por mês", "30 respostas Pro por mês", "Arquivos, compartilhamento e downloads"] }, { title: "Pro", price: "$15/mês", description: "Para comparação multimodelo diária.", bullets: ["3.000 créditos de IA por mês", "Todos os modelos com uso ponderado", "Arquivos, compartilhamento, downloads"] }, { title: "Max", price: "$25/mês", description: "Para fluxos de IA mais intensivos.", bullets: ["10.000 créditos de IA por mês", "Sem limite diário em modelos Standard", "Uso Premium sujeito a créditos mensais e uso justo"] }],
-    faqTitle: "Perguntas rápidas",
-    faqs: [{ question: "Posso usar o Tomverse de graça?", answer: "Sim. O Free é pensado para uso leve com acesso aos níveis Free e Pro dentro dos limites de uso." }, { question: "Quais modelos são compatíveis?", answer: "O Tomverse oferece suporte a modelos da OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Moonshot, Qwen, Perplexity e outros provedores." }, { question: "O que é Private Mode?", answer: "Private Mode significa que o Tomverse não salva a conversa no banco de dados da Tomverse. Provedores de IA ainda podem receber prompts para gerar respostas." }, { question: "Posso anexar arquivos?", answer: "Sim. O Tomverse aceita imagens, PDFs, documentos Office, arquivos do Google Drive e outros tipos permitidos dependendo do provedor." }],
-    ctaTitle: "Pronto para comparar melhor?",
-    ctaDescription: "Comece com o workspace gratuito e faça upgrade quando precisar de mais potência.",
-  }
+    previewAnswers: ["Próximos passos claros", "Riscos e escolhas", "Plano operacional conciso"],
+    reviewItems: ["Consenso", "Contradição", "Omissão", "A verificar"],
+    modelStripLabel: "Compare modelos dos principais provedores",
+    modelCatalogue: "Explorar todos os modelos",
+    status: "Status do serviço",
+    supportTitle: "Continue o trabalho depois da comparação.",
+    supportDescription: "O Tomverse mantém o contexto útil para transformar uma comparação em documento, acompanhamento ou resultado reutilizável.",
+    supportItems: [
+      { title: "Arquivos e contexto real", description: "Adicione imagens, PDFs, documentos Office, texto ou arquivos compatíveis do Google Drive." },
+      { title: "Acompanhamento direcionado", description: "Pergunte a um modelo específico sem perder as outras respostas." },
+      { title: "Projetos e registros", description: "Organize conversas por projeto e mantenha contexto reutilizável." },
+      { title: "Compartilhe o resultado", description: "Crie uma página somente leitura ou baixe um registro de texto limpo." },
+    ],
+    trustTitle: "Controles claros para trabalho privado e compartilhado.",
+    trustDescription: "Armazenamento, bloqueio e compartilhamento ficam visíveis. Mesmo no Private Mode, os provedores escolhidos processam a solicitação necessária para responder.",
+    trustItems: [
+      { title: "Private Mode", description: "Não salva no histórico do Tomverse, mas os provedores selecionados processam a solicitação." },
+      { title: "Conversas bloqueadas", description: "Proteja chats sensíveis antes de ações protegidas." },
+      { title: "Compartilhamento somente leitura", description: "Compartilhe um snapshot que não expõe atualizações posteriores." },
+    ],
+    safetyCta: "Ler visão geral de segurança",
+    pricingTitle: "Comece grátis e evolua quando o trabalho crescer.",
+    pricingDescription: "Pesos por modelo, exemplos de créditos, cobrança anual, créditos extras e Fair Use estão na página de preços.",
+    plans: [
+      { id: "free", title: "Free", fallbackPrice: "$0", description: "300 créditos de IA por mês para uso leve." },
+      { id: "pro", title: "Pro", fallbackPrice: "$15", description: "3.000 créditos de IA por mês para comparações regulares." },
+      { id: "max", title: "Max", fallbackPrice: "$25", description: "10.000 créditos de IA por mês para modelos avançados e documentos longos." },
+    ],
+    monthly: "/ mês",
+    pricingDetails: "Comparar planos e créditos",
+    faqTitle: "Três perguntas rápidas",
+    faqs: [
+      { question: "Posso usar o Tomverse gratuitamente?", answer: "Sim. Você pode testar um modelo gratuito compatível sem entrar. Uma conta Free adiciona comparação multimodelo dentro dos limites do plano." },
+      { question: "Quais modelos posso comparar?", answer: "O catálogo inclui provedores como OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Mistral, Moonshot, Alibaba e Perplexity. Veja a página de status para a disponibilidade atual." },
+      { question: "Como meus dados são tratados?", answer: "O Tomverse aplica limites de anexos, bloqueio, snapshots somente leitura e Private Mode. Os provedores escolhidos continuam processando o conteúdo necessário para responder." },
+    ],
+    ctaTitle: "Uma visão mais clara começa com uma pergunta.",
+    ctaDescription: "Compare várias respostas e use o AI Review para decidir o que merece análise mais profunda.",
+  },
 };
 
-const launchCopy: { en: LaunchCopy } & Partial<Record<Language, LaunchCopy>> = {
-  en: {
-    eyebrow: "AI workspace for daily work",
-    title: "More than a model picker.",
-    description:
-      "Tomverse brings the controls, organization, sharing, and support context users need to rely on one AI workspace every day.",
-    items: [
-      { title: "Project organization", description: "Group chats into projects, rename them, and keep growing workspaces easier to scan." },
-      { title: "Plan and usage clarity", description: "Users can see current plan, daily and monthly usage, remaining limits, and why a feature is locked." },
-      { title: "Provider status awareness", description: "When a model provider is limited, Tomverse shows status and suggests nearby alternatives." },
-      { title: "File workflows", description: "Images, PDFs, Office files, text files, and Google Drive imports are supported with validation and guidance." },
-      { title: "Support context", description: "Feedback can include trace ID, model, plan, browser, and attachment context for faster support." },
-      { title: "Public share documents", description: "Shared conversations are read-only snapshots with model filters, copy actions, expiry, and app CTA." },
-    ],
-  },
-  ko: {
-    eyebrow: "일상 업무를 위한 AI 워크스페이스",
-    title: "단순한 모델 선택기를 넘어.",
-    description: "Tomverse는 매일 신뢰하고 사용할 수 있는 AI 워크스페이스가 되도록 제어, 정리, 공유, 지원 맥락을 하나로 모았습니다.",
-    items: [
-      { title: "프로젝트 정리", description: "대화를 프로젝트로 묶고 이름을 바꿔, 커지는 워크스페이스도 쉽게 훑어볼 수 있습니다." },
-      { title: "플랜과 사용량 명확화", description: "현재 플랜, 일일/월간 사용량, 남은 한도, 기능이 잠긴 이유를 바로 확인할 수 있습니다." },
-      { title: "공급자 상태 인지", description: "모델 공급자가 제한 중이면 Tomverse가 상태를 표시하고 가까운 대체 모델을 제안합니다." },
-      { title: "파일 워크플로", description: "이미지, PDF, Office 파일, 텍스트 파일, Google Drive 가져오기를 검증과 안내와 함께 지원합니다." },
-      { title: "지원 요청 맥락", description: "피드백에는 추적 ID, 모델, 플랜, 브라우저, 첨부파일 맥락이 포함될 수 있어 더 빠른 지원이 가능합니다." },
-      { title: "공개 공유 문서", description: "공유 대화는 모델 필터, 복사, 만료일, 앱 열기 CTA가 포함된 읽기 전용 스냅샷입니다." },
-    ],
-  },
-  zh: {
-    eyebrow: "用于日常工作的 AI 工作区",
-    title: "不只是模型选择器。",
-    description: "Tomverse 将控制、整理、分享和支持上下文整合在一起，让用户每天都能依赖同一个 AI 工作区。",
-    items: [
-      { title: "项目整理", description: "将对话归入项目、重命名，并让不断增长的工作区更容易浏览。" },
-      { title: "清晰的方案与用量", description: "用户可以看到当前方案、每日和每月用量、剩余额度，以及功能被锁定的原因。" },
-      { title: "提供商状态感知", description: "当某个模型提供商受限时，Tomverse 会显示状态并推荐相近替代模型。" },
-      { title: "文件工作流", description: "支持图片、PDF、Office 文件、文本文件和 Google Drive 导入，并提供验证和提示。" },
-      { title: "支持上下文", description: "反馈可包含追踪 ID、模型、方案、浏览器和附件上下文，帮助更快处理问题。" },
-      { title: "公开分享文档", description: "分享对话是只读快照，包含模型筛选、复制操作、过期时间和打开应用 CTA。" },
-    ],
-  },
-  fr: {
-    eyebrow: "Espace IA pour le travail quotidien",
-    title: "Bien plus qu'un sélecteur de modèles.",
-    description: "Tomverse réunit contrôles, organisation, partage et contexte de support afin qu'un seul espace IA puisse servir au quotidien.",
-    items: [{ title: "Organisation par projets", description: "Regroupez les chats en projets, renommez-les et gardez les grands espaces plus lisibles." }, { title: "Clarté du plan et de l'usage", description: "Les utilisateurs voient le plan actuel, l'usage quotidien et mensuel, les limites restantes et la raison pour laquelle une fonction est verrouillée." }, { title: "État des fournisseurs", description: "Quand un fournisseur est limité, Tomverse affiche l'état et suggère des alternatives proches." }, { title: "Flux avec fichiers", description: "Images, PDF, fichiers Office, texte et imports Google Drive sont pris en charge avec validation et conseils." }, { title: "Contexte de support", description: "Les retours peuvent inclure trace ID, modèle, plan, navigateur et contexte des pièces jointes." }, { title: "Documents partagés publics", description: "Les conversations partagées sont des snapshots en lecture seule avec filtres de modèle, copie, expiration et CTA vers l'app." }],
-  },
-  de: {
-    eyebrow: "KI-Arbeitsbereich für den Alltag",
-    title: "Mehr als ein Modellwähler.",
-    description: "Tomverse vereint Steuerung, Organisation, Teilen und Support-Kontext, damit Nutzer täglich auf einen einzigen KI-Arbeitsbereich vertrauen können.",
-    items: [{ title: "Projektorganisation", description: "Gruppieren Sie Chats in Projekte, benennen Sie sie um und halten Sie wachsende Arbeitsbereiche übersichtlich." }, { title: "Klarheit zu Plan und Nutzung", description: "Nutzer sehen ihren aktuellen Plan, die tägliche und monatliche Nutzung, verbleibende Limits und warum eine Funktion gesperrt ist." }, { title: "Anbieterstatus im Blick", description: "Wenn ein Modellanbieter eingeschränkt ist, zeigt Tomverse den Status und schlägt passende Alternativen vor." }, { title: "Datei-Workflows", description: "Bilder, PDFs, Office-Dateien, Textdateien und Google-Drive-Importe werden mit Validierung und Anleitung unterstützt." }, { title: "Support-Kontext", description: "Feedback kann Trace-ID, Modell, Plan, Browser und Anhangskontext enthalten." }, { title: "Öffentliche geteilte Dokumente", description: "Geteilte Unterhaltungen sind schreibgeschützte Snapshots mit Modellfiltern, Kopieraktionen, Ablaufdatum und App-CTA." }],
-  },
-  es: {
-    eyebrow: "Espacio de IA para el trabajo diario",
-    title: "Más que un selector de modelos.",
-    description: "Tomverse reúne controles, organización, compartición y contexto de soporte para que los usuarios dependan de un solo espacio de IA cada día.",
-    items: [{ title: "Organización por proyectos", description: "Agrupa chats en proyectos, cámbiales el nombre y mantén espacios grandes más fáciles de revisar." }, { title: "Claridad de plan y uso", description: "Los usuarios ven su plan actual, uso diario y mensual, límites restantes y por qué una función está bloqueada." }, { title: "Estado de proveedores", description: "Cuando un proveedor está limitado, Tomverse muestra el estado y sugiere alternativas cercanas." }, { title: "Flujos con archivos", description: "Se admiten imágenes, PDF, archivos Office, texto e importaciones de Google Drive con validación y guía." }, { title: "Contexto de soporte", description: "El feedback puede incluir trace ID, modelo, plan, navegador y contexto de adjuntos." }, { title: "Documentos públicos compartidos", description: "Las conversaciones compartidas son snapshots de solo lectura con filtros de modelo, copia, caducidad y CTA hacia la app." }],
-  },
-  pt: {
-    eyebrow: "Workspace de IA para o trabalho diário",
-    title: "Mais do que um seletor de modelos.",
-    description: "O Tomverse reúne controles, organização, compartilhamento e contexto de suporte para que usuários dependam de um único workspace de IA todos os dias.",
-    items: [{ title: "Organização por projetos", description: "Agrupe chats em projetos, renomeie-os e mantenha espaços grandes mais fáceis de examinar." }, { title: "Clareza de plano e uso", description: "Usuários veem o plano atual, uso diário e mensal, limites restantes e por que um recurso está bloqueado." }, { title: "Status dos provedores", description: "Quando um provedor está limitado, o Tomverse mostra o status e sugere alternativas próximas." }, { title: "Fluxos com arquivos", description: "Imagens, PDFs, arquivos Office, texto e importações do Google Drive são suportados com validação e orientação." }, { title: "Contexto de suporte", description: "Feedback pode incluir trace ID, modelo, plano, navegador e contexto de anexos." }, { title: "Documentos públicos compartilhados", description: "Conversas compartilhadas são snapshots somente leitura com filtros de modelo, cópia, expiração e CTA para abrir o app." }],
-  }
-};
-
-const featureIcons = [Layers3, FileText, Share2, LockKeyhole];
-const useCaseIcons = [Search, Code2, BriefcaseBusiness, FileText];
-const trustIcons = [ShieldCheck, Share2, LockKeyhole, FileText];
-const launchIcons = [FolderKanban, BarChart3, ServerCog, UploadCloud, HeartHandshake, Share2];
-
-const CardGrid = ({
-  items,
-  icons,
-}: {
-  items: CardCopy[];
-  icons: Array<typeof Layers3>;
-}) => (
-  <div className="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-    {items.map((item, index) => {
-      const Icon = icons[index] ?? Layers3;
-      return (
-        <article key={item.title} className="rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-950">
-          <Icon className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-          <h3 className="mt-4 text-base font-black">{item.title}</h3>
-          <p className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-400">{item.description}</p>
-        </article>
-      );
-    })}
-  </div>
-);
+const supportIcons = [FileText, MessageSquareMore, FolderKanban, Share2];
+const trustIcons = [ShieldCheck, LockKeyhole, Share2];
 
 export function LandingPageContent() {
   const { lang } = useLanguage();
   const { status } = useSession();
-  const content = copy[lang] ?? copy.en;
-  const launch = launchCopy[lang] ?? launchCopy.en;
+  const content = copy[lang] ?? englishCopy;
   const billing = usePublicBilling();
-  const annualCopy = annualLabelByLanguage[lang] ?? annualLabelByLanguage.en!;
-  const modelLinks = modelLinkLabels[lang];
   const chatHref = `/chat?lang=${encodeURIComponent(lang)}`;
-  const primaryCtaLabel = status === "authenticated" ? content.signedInCta : content.primaryCta;
-  const entrySteps = status === "authenticated" ? content.steps : content.guestSteps;
+  const signInHref = `/auth/signin?callbackUrl=${encodeURIComponent(chatHref)}`;
+  const comparisonHref = status === "authenticated" ? chatHref : signInHref;
   const landingTrackedRef = useRef(false);
 
   useEffect(() => {
@@ -570,315 +488,153 @@ export function LandingPageContent() {
     <main className="min-h-screen overflow-x-hidden bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">
       <MarketingHeader />
 
-      <section className="relative">
-        <div className="mx-auto grid max-w-7xl gap-10 px-4 pb-14 pt-10 sm:px-6 sm:pb-16 sm:pt-12 lg:grid-cols-[1.05fr_0.95fr] lg:items-center lg:px-8 lg:pb-16 lg:pt-14 xl:pt-16">
+      <section className="relative border-b border-zinc-200 dark:border-zinc-800">
+        <div className="mx-auto grid max-w-7xl gap-10 px-4 pb-12 pt-10 sm:px-6 sm:pb-14 sm:pt-12 lg:grid-cols-[1.03fr_0.97fr] lg:items-center lg:px-8 lg:py-16">
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/40 dark:text-blue-300">
-              <Sparkles className="h-3.5 w-3.5" />
+              <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
               {content.badge}
             </div>
-            <h1 className="mt-6 max-w-4xl text-5xl font-black leading-[1.04] text-zinc-950 dark:text-white sm:text-6xl lg:text-7xl">
+            <h1 className="mt-6 max-w-4xl text-4xl font-black leading-[1.05] tracking-tight sm:text-6xl lg:text-7xl">
               {content.title}
             </h1>
             <p className="mt-6 max-w-2xl text-lg leading-8 text-zinc-600 dark:text-zinc-300">{content.description}</p>
-            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
+              <Link
+                href={comparisonHref}
+                data-testid="landing-primary-cta"
+                onClick={() => trackProductEvent("cta_start_click", 0, { cta_location: "landing_hero_compare" })}
+                className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-blue-600 px-6 text-sm font-black text-white shadow-lg shadow-blue-950/20 transition hover:bg-blue-500"
+              >
+                {status === "authenticated" ? content.signedInCta : content.primaryCta}
+                <ArrowRight className="h-4 w-4" aria-hidden="true" />
+              </Link>
               <Link
                 href={chatHref}
-                data-testid="landing-primary-cta"
-                onClick={() =>
-                  trackProductEvent("cta_start_click", 0, {
-                    cta_location: "landing_hero",
-                  })
-                }
-                className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-blue-600 px-6 text-sm font-black text-white shadow-lg shadow-blue-950/20 transition hover:bg-blue-500"
+                data-testid="landing-guest-cta"
+                onClick={() => trackProductEvent("cta_start_click", 0, { cta_location: "landing_hero_guest" })}
+                className="inline-flex min-h-12 items-center justify-center rounded-xl border border-zinc-300 px-5 text-center text-sm font-black text-zinc-800 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-zinc-900"
               >
-                {primaryCtaLabel}
-                <ArrowRight className="h-4 w-4" />
-              </Link>
-              <Link
-                href="/pricing"
-                className="inline-flex h-12 items-center justify-center rounded-xl border border-zinc-300 px-6 text-sm font-black text-zinc-800 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-zinc-900"
-              >
-                {content.pricingCta}
+                {content.guestCta}
               </Link>
             </div>
-            <div className="mt-8 grid max-w-2xl gap-3 sm:grid-cols-3">
-              {entrySteps.map((step, index) => (
+
+            <p className="mt-4 text-sm text-zinc-500 dark:text-zinc-400">
+              <span className="font-bold text-zinc-700 dark:text-zinc-200">{content.modelFinderLead}</span>{" "}
+              <Link href={signInHref} className="font-black text-blue-600 hover:text-blue-500 dark:text-blue-400">
+                {content.modelFinderCta}
+              </Link>
+            </p>
+            <div className="mt-7 grid max-w-2xl gap-3 sm:grid-cols-3">
+              {content.steps.map((step, index) => (
                 <div key={step} className="flex items-center gap-2 text-sm font-semibold text-zinc-600 dark:text-zinc-300">
-                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-black text-zinc-800 dark:bg-zinc-900 dark:text-zinc-100">
-                    {index + 1}
-                  </span>
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-black dark:bg-zinc-900">{index + 1}</span>
                   {step}
                 </div>
               ))}
             </div>
+            <Link href="/pricing" className="mt-5 inline-flex items-center gap-1 text-sm font-bold text-zinc-500 hover:text-blue-600 dark:hover:text-blue-400">
+              {content.pricingCta}<ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+            </Link>
           </div>
 
-          <div className="relative">
-            <div className="overflow-hidden rounded-3xl border border-zinc-200 bg-zinc-950 p-2 shadow-2xl shadow-zinc-300/60 dark:border-zinc-800 dark:shadow-black/50 md:rounded-[2rem] md:p-3">
-              <div className="rounded-2xl border border-zinc-800 bg-zinc-950 md:rounded-[1.5rem]">
-                <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2.5 md:px-4 md:py-3">
-                  <div className="flex items-center gap-2">
-                    <Bot className="h-4 w-4 text-blue-400" />
-                    <span className="text-xs font-bold text-zinc-300">{content.previewTitle}</span>
-                  </div>
-                  <span className="rounded-full bg-emerald-500/10 px-2 py-1 text-[10px] font-black text-emerald-300">
-                    {content.previewCount}
-                  </span>
-                </div>
-                <div className="grid gap-2 p-3 md:grid-cols-3 md:gap-3 md:p-4">
-                  {["GPT", "Claude", "Gemini"].map((model, index) => (
-                    <div key={model} className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-3 md:min-h-72 md:p-4">
-                      <div className="mb-3 flex items-center justify-between md:mb-5">
-                        <span className="text-sm font-black text-white">{model}</span>
-                        <span className="h-2 w-2 rounded-full bg-blue-400" />
-                      </div>
-                      <div className="space-y-2 md:space-y-3">
-                        <div className="h-2.5 w-3/4 rounded-full bg-zinc-700 md:h-3" />
-                        <div className="h-2.5 w-full rounded-full bg-zinc-800 md:h-3" />
-                        <div className="hidden h-3 w-5/6 rounded-full bg-zinc-800 md:block" />
-                        <div className="mt-3 rounded-xl bg-blue-600 p-2.5 text-xs font-bold leading-5 text-white md:mt-5 md:p-3">
-                          {content.previewAnswers[index]}
-                        </div>
-                      </div>
-                    </div>
+          <div className="overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-950 p-2 shadow-2xl shadow-zinc-300/60 dark:shadow-black/50 md:p-3">
+            <div className="rounded-[1.25rem] border border-zinc-800 bg-zinc-950 text-white">
+              <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
+                <span className="flex items-center gap-2 text-xs font-bold text-zinc-300"><Bot className="h-4 w-4 text-blue-400" />{content.previewTitle}</span>
+                <span className="rounded-full bg-emerald-500/10 px-2 py-1 text-[10px] font-black text-emerald-300">{content.previewCount}</span>
+              </div>
+              <div className="grid gap-2 p-3 sm:grid-cols-3">
+                {["GPT", "Claude", "Gemini"].map((model, index) => (
+                  <article key={model} className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-3">
+                    <div className="flex items-center justify-between"><span className="text-sm font-black">{model}</span><span className="h-2 w-2 rounded-full bg-blue-400" /></div>
+                    <div className="mt-4 space-y-2"><div className="h-2 w-4/5 rounded-full bg-zinc-700" /><div className="h-2 w-full rounded-full bg-zinc-800" /></div>
+                    <p className="mt-4 rounded-xl bg-blue-600/90 p-2.5 text-xs font-bold leading-5">{content.previewAnswers[index]}</p>
+                  </article>
+                ))}
+              </div>
+              <div className="mx-3 mb-3 rounded-2xl border border-blue-500/30 bg-blue-500/10 p-3">
+                <div className="flex items-center gap-2 text-xs font-black text-blue-200"><Sparkles className="h-3.5 w-3.5" />{content.reviewTitle}</div>
+                <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  {content.reviewItems.map((item, index) => (
+                    <span key={item} className="flex items-center gap-1.5 rounded-lg bg-black/20 px-2 py-2 text-[11px] font-bold text-zinc-200">
+                      <span className={`h-1.5 w-1.5 rounded-full ${index === 1 || index === 3 ? "bg-amber-400" : "bg-emerald-400"}`} />{item}
+                    </span>
                   ))}
                 </div>
               </div>
             </div>
           </div>
         </div>
-      </section>
 
-      <section id="ai-review" className="border-y border-blue-100 bg-blue-50/60 py-16 dark:border-blue-950 dark:bg-blue-950/10 sm:py-20">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <AiReviewDemo />
+        <div className="mx-auto max-w-7xl px-4 pb-10 sm:px-6 lg:px-8">
+          <p className="text-center text-xs font-black uppercase tracking-[0.18em] text-zinc-400">{content.modelStripLabel}</p>
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+            {supportedModels.map((model) => (
+              <span key={model.name} title={model.provider} className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-black dark:border-zinc-800 dark:bg-zinc-900">
+                <Image src={model.image} alt="" width={22} height={22} className="h-5.5 w-5.5 rounded-md object-contain" />{model.name}
+              </span>
+            ))}
+          </div>
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-4 text-sm font-bold">
+            <Link href="/models" className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-500 dark:text-blue-400">{content.modelCatalogue}<ArrowRight className="h-3.5 w-3.5" /></Link>
+            <Link href="/status" target="_blank" rel="noopener noreferrer" aria-label={statusLinkLabel(content.status, lang)} className="inline-flex items-center gap-1 text-zinc-500 hover:text-blue-600 dark:hover:text-blue-400">
+              {content.status}<ExternalLink className="h-3.5 w-3.5" /><span className="sr-only">({statusNewTabCopy[lang]})</span>
+            </Link>
+          </div>
         </div>
       </section>
 
       <ProductProofSection />
 
-      <section id="features" className="border-y border-zinc-200 bg-zinc-50 py-20 dark:border-zinc-800 dark:bg-zinc-900/30">
+      <section id="features" className="border-y border-zinc-200 bg-zinc-50 py-16 dark:border-zinc-800 dark:bg-zinc-900/30 sm:py-20">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="max-w-2xl">
-            <h2 className="text-3xl font-black sm:text-4xl">{content.featuresTitle}</h2>
-            <p className="mt-4 text-base leading-7 text-zinc-600 dark:text-zinc-300">{content.featuresDescription}</p>
-          </div>
-          <CardGrid items={content.features} icons={featureIcons} />
-        </div>
-      </section>
-
-      <section className="py-20">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-            <div className="max-w-3xl">
-              <p className="text-xs font-black uppercase tracking-[0.22em] text-blue-600 dark:text-blue-400">
-                {launch.eyebrow}
-              </p>
-              <h2 className="mt-3 text-3xl font-black sm:text-4xl">{launch.title}</h2>
-              <p className="mt-4 text-base leading-7 text-zinc-600 dark:text-zinc-300">{launch.description}</p>
-            </div>
-            <Link
-              href="/support/help-centre"
-              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-zinc-300 px-4 text-sm font-black text-zinc-800 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-zinc-900"
-            >
-              Help Centre
-              <ArrowRight className="h-4 w-4" />
-            </Link>
-          </div>
-          <div className="mt-10 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {launch.items.map((item, index) => {
-              const Icon = launchIcons[index] ?? Layers3;
-              return (
-                <article
-                  key={item.title}
-                  className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
-                >
-                  <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-300">
-                    <Icon className="h-5 w-5" />
-                  </span>
-                  <h3 className="mt-4 text-base font-black">{item.title}</h3>
-                  <p className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-400">{item.description}</p>
-                </article>
-              );
+          <div className="max-w-3xl"><h2 className="text-3xl font-black sm:text-4xl">{content.supportTitle}</h2><p className="mt-4 text-base leading-7 text-zinc-600 dark:text-zinc-300">{content.supportDescription}</p></div>
+          <div className="mt-9 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {content.supportItems.map((item, index) => {
+              const Icon = supportIcons[index];
+              return <article key={item.title} className="rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-950"><Icon className="h-5 w-5 text-blue-600 dark:text-blue-400" /><h3 className="mt-4 font-black">{item.title}</h3><p className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-400">{item.description}</p></article>;
             })}
           </div>
         </div>
       </section>
 
-      <section className="border-y border-zinc-200 bg-zinc-50 py-20 dark:border-zinc-800 dark:bg-zinc-900/30">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="max-w-2xl">
-            <h2 className="text-3xl font-black sm:text-4xl">{content.useCasesTitle}</h2>
-            <p className="mt-4 text-base leading-7 text-zinc-600 dark:text-zinc-300">{content.useCasesDescription}</p>
-          </div>
-          <CardGrid items={content.useCases} icons={useCaseIcons} />
-        </div>
-      </section>
-
-      <section className="border-y border-zinc-200 bg-zinc-950 py-20 text-white dark:border-zinc-800">
-        <div className="mx-auto grid max-w-7xl gap-10 px-4 sm:px-6 lg:grid-cols-[0.85fr_1.15fr] lg:px-8">
-          <div>
-            <Workflow className="h-7 w-7 text-blue-400" />
-            <h2 className="mt-5 text-3xl font-black sm:text-4xl">{content.whyTitle}</h2>
-            <p className="mt-4 text-base leading-7 text-zinc-300">{content.whyDescription}</p>
-          </div>
-          <div className="grid gap-4">
-            {content.whyItems.map((item) => (
-              <article key={item.title} className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5">
-                <h3 className="font-black">{item.title}</h3>
-                <p className="mt-2 text-sm leading-6 text-zinc-300">{item.description}</p>
-              </article>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="py-20">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="max-w-2xl">
-            <h2 className="text-3xl font-black sm:text-4xl">{content.trustTitle}</h2>
-            <p className="mt-4 text-base leading-7 text-zinc-600 dark:text-zinc-300">{content.trustDescription}</p>
-          </div>
-          <CardGrid items={content.trustItems} icons={trustIcons} />
-        </div>
-      </section>
-
-      <section id="models" className="border-y border-zinc-200 bg-zinc-50 py-20 dark:border-zinc-800 dark:bg-zinc-900/30">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="grid gap-10 lg:grid-cols-[0.8fr_1.2fr] lg:items-center">
-            <div>
-              <h2 className="text-3xl font-black sm:text-4xl">{content.modelsTitle}</h2>
-              <p className="mt-4 text-base leading-7 text-zinc-600 dark:text-zinc-300">{content.modelsDescription}</p>
-              <div className="mt-6 flex flex-wrap gap-3">
-                <Link
-                  href="/models"
-                  className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-zinc-300 bg-white px-4 text-sm font-black text-zinc-800 transition hover:border-zinc-400 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-900"
-                >
-                  {modelLinks.catalogue}
-                  <ArrowRight className="h-4 w-4" />
-                </Link>
-                <Link
-                  href="/status"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  prefetch={false}
-                  aria-label={statusLinkLabel(modelLinks.status, lang)}
-                  title={statusNewTabCopy[lang]}
-                  data-testid="home-model-status-link"
-                  className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 text-sm font-black text-emerald-700 transition hover:bg-emerald-500/15 dark:text-emerald-300"
-                >
-                  <Activity className="h-4 w-4" />
-                  {modelLinks.status}
-                  <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-                </Link>
-              </div>
-            </div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              {supportedModels.map((model) => (
-                <article
-                  key={model.name}
-                  className="flex items-center gap-3 rounded-2xl border border-zinc-200 bg-white p-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-zinc-800 dark:bg-zinc-950"
-                >
-                  <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${model.className} text-lg font-black text-white shadow-sm ring-1 ring-zinc-200/70 dark:ring-zinc-800`}>
-                    {model.image ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={model.image} alt={`${model.name} logo`} className="h-8 w-8 object-contain" />
-                    ) : (
-                      model.mark
-                    )}
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block truncate text-base font-black text-zinc-950 dark:text-white">{model.name}</span>
-                    <span className="block truncate text-xs font-bold text-zinc-500 dark:text-zinc-400">{model.detail}</span>
-                  </span>
-                </article>
-              ))}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="py-20">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="flex flex-col justify-between gap-5 md:flex-row md:items-end">
-            <div className="max-w-2xl">
-              <h2 className="text-3xl font-black sm:text-4xl">{content.pricingTitle}</h2>
-              <p className="mt-4 text-base leading-7 text-zinc-600 dark:text-zinc-300">{content.pricingDescription}</p>
-            </div>
-            <Link href="/pricing" className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 text-sm font-black text-white transition hover:bg-blue-500">
-              {content.pricingCta}
-              <ArrowRight className="h-4 w-4" />
-            </Link>
-          </div>
-          <div className="mt-10 grid gap-4 lg:grid-cols-3">
-            {content.pricingPlans.map((plan, index) => {
-              const planId = index === 2 ? "max" : index === 1 ? "pro" : "free";
-              const displayPrice = billing.formatPlanPrice(planId) || plan.price;
-              const annualFallback = planId === "max" ? "$240" : planId === "pro" ? "$144" : "$0";
-              const annualPrice = billing.formatPlanPrice(planId, "annual") || annualFallback;
-              return (
-              <article key={plan.title} className={`rounded-2xl border p-6 ${index === 1 ? "border-blue-500 bg-blue-600 text-white" : "border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/40"}`}>
-                <h3 className="text-2xl font-black">{plan.title}</h3>
-                <p className={`mt-2 text-3xl font-black ${index === 1 ? "text-white" : "text-zinc-950 dark:text-white"}`}>{displayPrice}</p>
-                {planId !== "free" ? (
-                  <div className={`mt-3 rounded-xl border px-3 py-2 text-xs font-bold leading-5 ${
-                    index === 1
-                      ? "border-white/20 bg-white/10 text-blue-50"
-                      : "border-zinc-200 bg-white text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950/60 dark:text-zinc-300"
-                  }`}>
-                    <div className="flex items-center justify-between gap-2">
-                      <span>{annualCopy.annual}: {annualPrice}</span>
-                      <span className={index === 1 ? "text-white" : "text-emerald-500"}>{annualCopy.save}</span>
-                    </div>
-                  </div>
-                ) : null}
-                <p className={`mt-3 text-sm leading-6 ${index === 1 ? "text-blue-50" : "text-zinc-600 dark:text-zinc-300"}`}>{plan.description}</p>
-                <ul className="mt-5 space-y-3">
-                  {plan.bullets.map((bullet) => (
-                    <li key={bullet} className={`flex gap-3 text-sm font-semibold ${index === 1 ? "text-white" : "text-zinc-700 dark:text-zinc-200"}`}>
-                      <CheckCircle2 className={`mt-0.5 h-4 w-4 shrink-0 ${index === 1 ? "text-white" : "text-blue-600 dark:text-blue-400"}`} />
-                      {bullet}
-                    </li>
-                  ))}
-                </ul>
-              </article>
-              );
+      <section className="bg-zinc-950 py-16 text-white sm:py-20">
+        <div className="mx-auto grid max-w-7xl gap-8 px-4 sm:px-6 lg:grid-cols-[0.9fr_1.1fr] lg:items-start lg:px-8">
+          <div><h2 className="text-3xl font-black sm:text-4xl">{content.trustTitle}</h2><p className="mt-4 text-base leading-7 text-zinc-300">{content.trustDescription}</p><Link href="/safety" className="mt-6 inline-flex items-center gap-2 text-sm font-black text-blue-300 hover:text-blue-200">{content.safetyCta}<ArrowRight className="h-4 w-4" /></Link></div>
+          <div className="divide-y divide-zinc-800 rounded-3xl border border-zinc-800 bg-zinc-900/50 px-5">
+            {content.trustItems.map((item, index) => {
+              const Icon = trustIcons[index];
+              return <article key={item.title} className="flex gap-4 py-5"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-500/10 text-blue-300"><Icon className="h-5 w-5" /></span><div><h3 className="font-black">{item.title}</h3><p className="mt-2 text-sm leading-6 text-zinc-400">{item.description}</p></div></article>;
             })}
           </div>
         </div>
       </section>
 
-      <section className="border-y border-zinc-200 bg-zinc-50 py-20 dark:border-zinc-800 dark:bg-zinc-900/30">
-        <div className="mx-auto grid max-w-7xl gap-8 px-4 sm:px-6 lg:grid-cols-[0.6fr_1.4fr] lg:px-8">
-          <div>
-            <HelpCircle className="h-7 w-7 text-blue-600 dark:text-blue-400" />
-            <h2 className="mt-5 text-3xl font-black sm:text-4xl">{content.faqTitle}</h2>
+      <section id="pricing" className="border-b border-zinc-200 py-16 dark:border-zinc-800 sm:py-20">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="max-w-3xl"><h2 className="text-3xl font-black sm:text-4xl">{content.pricingTitle}</h2><p className="mt-4 text-base leading-7 text-zinc-600 dark:text-zinc-300">{content.pricingDescription}</p></div>
+          <div className="mt-9 grid gap-4 md:grid-cols-3">
+            {content.plans.map((plan) => {
+              const formatted = billing.formatPlanPrice(plan.id) || plan.fallbackPrice;
+              return <article key={plan.id} className={`rounded-2xl border p-5 ${plan.id === "pro" ? "border-blue-500 bg-blue-50/70 dark:bg-blue-950/20" : "border-zinc-200 dark:border-zinc-800"}`}><h3 className="text-lg font-black">{plan.title}</h3><p className="mt-4 text-3xl font-black">{formatted}<span className="ml-1 text-sm font-semibold text-zinc-500">{plan.id === "free" ? "" : content.monthly}</span></p><p className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-400">{plan.description}</p></article>;
+            })}
           </div>
-          <div className="grid gap-4 md:grid-cols-2">
-            {content.faqs.map((faq) => (
-              <article key={faq.question} className="rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-950">
-                <h3 className="font-black">{faq.question}</h3>
-                <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">{faq.answer}</p>
-              </article>
-            ))}
-          </div>
+          <Link href="/pricing" className="mt-7 inline-flex items-center gap-2 rounded-xl bg-zinc-950 px-5 py-3 text-sm font-black text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200">{content.pricingDetails}<ArrowRight className="h-4 w-4" /></Link>
         </div>
       </section>
 
-      <section className="bg-blue-600 py-16 text-white">
-        <div className="mx-auto flex max-w-7xl flex-col items-start justify-between gap-6 px-4 sm:px-6 md:flex-row md:items-center lg:px-8">
-          <div>
-            <h2 className="text-3xl font-black">{content.ctaTitle}</h2>
-            <p className="mt-2 text-sm font-medium text-blue-100">{content.ctaDescription}</p>
+      <section className="py-16 sm:py-20">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <h2 className="text-3xl font-black sm:text-4xl">{content.faqTitle}</h2>
+          <div className="mt-8 grid gap-4 lg:grid-cols-3">
+            {content.faqs.map((item) => <details key={item.question} className="group rounded-2xl border border-zinc-200 p-5 dark:border-zinc-800"><summary className="cursor-pointer list-none font-black">{item.question}</summary><p className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-400">{item.answer}</p></details>)}
           </div>
-          <Link
-            href={chatHref}
-            className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-white px-6 text-sm font-black text-blue-700 transition hover:bg-blue-50"
-          >
-            {content.app}
-            <ArrowRight className="h-4 w-4" />
-          </Link>
+          <div className="mt-12 flex flex-col items-start justify-between gap-6 rounded-3xl bg-blue-600 p-7 text-white sm:p-9 lg:flex-row lg:items-center">
+            <div className="max-w-2xl"><h2 className="text-3xl font-black">{content.ctaTitle}</h2><p className="mt-3 leading-7 text-blue-100">{content.ctaDescription}</p></div>
+            <Link href={comparisonHref} onClick={() => trackProductEvent("cta_start_click", 0, { cta_location: "landing_final_compare" })} className="inline-flex min-h-12 shrink-0 items-center justify-center gap-2 rounded-xl bg-white px-6 text-sm font-black text-blue-700 hover:bg-blue-50">{status === "authenticated" ? content.app : content.primaryCta}<ArrowRight className="h-4 w-4" /></Link>
+          </div>
         </div>
       </section>
 

@@ -420,7 +420,7 @@ export const fr = {
     },
     privacyPolicy: {
         title: "Politique de confidentialité",
-        effective: "En vigueur : 13 juillet 2026",
+        effective: "En vigueur : 16 juillet 2026",
         intro: "Tomverse traite les informations personnelles et les données de chat uniquement lorsque cela est nécessaire pour fournir le service. Cet avis explique les flux de données des chats standard et du mode privé.",
         collectedTitle: "Informations traitées",
         collected: "Nous pouvons traiter les identifiants de compte, l'e-mail et les données de profil fournis par les fournisseurs de connexion, les paramètres utilisateur, les chats et messages standard, les pièces jointes, les paramètres de partage, les données d'utilisation et les journaux de sécurité. Pour prévenir l'abus des promotions, nous traitons des hachages à clé dérivés d'une IP client fiable et d'une empreinte de moyen de paiement Stripe. Tomverse ne stocke pas les données brutes de carte ou de compte bancaire.",
@@ -433,7 +433,7 @@ export const fr = {
         attachmentsTitle: "Pièces jointes",
         attachments: "Les pièces jointes peuvent être stockées temporairement dans un stockage objet chiffré pour l'envoi au modèle et l'extraction de documents. Elles sont actuellement supprimées après environ un jour par la règle de cycle de vie.",
         analyticsTitle: "Analyse produit et attribution des campagnes",
-        analytics: "Avec le consentement de l'utilisateur, Tomverse enregistre des événements produit approuvés et des métadonnées de campagne telles que la source UTM, la langue, le pays, le nombre de modèles et le forfait. Les mêmes métadonnées approuvées peuvent être envoyées à Google Analytics 4. Les prompts, réponses, noms et contenus de fichiers, adresses e-mail et noms de profil ne sont pas inclus. Le consentement peut être refusé avant le démarrage de l'analyse.",
+        analytics: "Tomverse utilise toujours le stockage essentiel de session, sécurité, langue et préférences nécessaire au service. Pour l’analyse produit, les visiteurs de l’UE/EEE, du Royaume-Uni, de Suisse ou d’une région non vérifiée doivent consentir avant le démarrage de Google Analytics 4. En Australie et dans toute région ajoutée après examen juridique, l’analyse minimisée démarre après un avis clair et peut être désactivée immédiatement ou plus tard. Nous enregistrons des événements approuvés et des métadonnées comme la source UTM, la langue, le pays, le nombre de modèles et le forfait. Google peut aussi traiter l’adresse IP, le navigateur, l’URL de page et la localisation approximative hors du pays du visiteur. Prompts, réponses, noms et contenus de fichiers, e-mails et noms de profil ne sont jamais inclus. Le stockage publicitaire et la personnalisation restent désactivés.",
         retentionTitle: "Conservation et suppression",
         retention: "Les chats standard peuvent rester jusqu'à leur suppression par l'utilisateur ou la suppression des données du compte. L'historique du mode privé n'est pas stocké dans la base. Les hachages IP et d'empreinte de paiement liés à la sécurité des promotions sont supprimés après 90 jours ; des données minimales de facturation, légales, de sécurité ou d'incident peuvent être conservées séparément.",
         sharingTitle: "Liens de partage",

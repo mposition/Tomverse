@@ -74,6 +74,24 @@ type StoredPreConsentAttribution = {
 let runtime: AnalyticsRuntime | null = null;
 let pendingEvents: EventIntent[] = [];
 const pendingOnceKeys = new Set<string>();
+let ga4ConsentInitialized = false;
+
+const applyGa4ConsentMode = (analyticsStorage: "granted" | "denied") => {
+  window.dataLayer = window.dataLayer || [];
+  window.gtag =
+    window.gtag || ((...args: unknown[]) => window.dataLayer?.push(args));
+  window.gtag(
+    "consent",
+    ga4ConsentInitialized ? "update" : "default",
+    {
+      analytics_storage: analyticsStorage,
+      ad_storage: "denied",
+      ad_user_data: "denied",
+      ad_personalization: "denied",
+    }
+  );
+  ga4ConsentInitialized = true;
+};
 
 const isUuid = (value: unknown): value is string =>
   typeof value === "string" &&
@@ -410,16 +428,9 @@ export const configureAnalyticsClient = ({
   };
 
   if (measurementId) {
-    window.dataLayer = window.dataLayer || [];
-    window.gtag = window.gtag || ((...args: unknown[]) => window.dataLayer?.push(args));
-    window.gtag("consent", "default", {
-      analytics_storage: "granted",
-      ad_storage: "denied",
-      ad_user_data: "denied",
-      ad_personalization: "denied",
-    });
-    window.gtag("js", now);
-    window.gtag("config", measurementId, {
+    applyGa4ConsentMode("granted");
+    window.gtag?.("js", now);
+    window.gtag?.("config", measurementId, {
       send_page_view: true,
       client_id: runtime.attribution.client_id,
       allow_google_signals: false,
@@ -443,12 +454,7 @@ export const configureAnalyticsClient = ({
 };
 
 export const disableAnalyticsClient = () => {
-  window.gtag?.("consent", "update", {
-    analytics_storage: "denied",
-    ad_storage: "denied",
-    ad_user_data: "denied",
-    ad_personalization: "denied",
-  });
+  applyGa4ConsentMode("denied");
   runtime = null;
   pendingEvents = [];
   pendingOnceKeys.clear();
@@ -461,6 +467,10 @@ export const disableAnalyticsClient = () => {
     const name = cookie.split("=")[0]?.trim();
     if (name === "_ga" || name?.startsWith("_ga_")) {
       document.cookie = `${name}=; Max-Age=0; Path=/; SameSite=Lax`;
+      const hostname = window.location.hostname;
+      if (hostname.includes(".")) {
+        document.cookie = `${name}=; Max-Age=0; Path=/; Domain=.${hostname}; SameSite=Lax`;
+      }
     }
   }
 };

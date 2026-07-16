@@ -526,7 +526,7 @@ export const en = {
     },
     privacyPolicy: {
         title: "Privacy Policy",
-        effective: "Effective: July 13, 2026",
+        effective: "Effective: July 16, 2026",
         intro: "Tomverse processes personal information and chat data only as needed to provide the service. This notice explains the different data flows for standard chats and Private Mode.",
         collectedTitle: "Information we process",
         collected: "We may process account identifiers, email and profile data supplied by login providers, user settings, standard chats and messages, attachments, sharing settings, usage data, and security logs. To prevent promotion abuse, we process keyed hashes derived from a trusted client IP and a Stripe payment-method fingerprint. Tomverse does not store raw card or bank details.",
@@ -539,7 +539,7 @@ export const en = {
         attachmentsTitle: "Attachments",
         attachments: "Attachments may be stored temporarily in encrypted object storage for model delivery and document extraction. Temporary attachments are currently deleted after approximately one day under the lifecycle policy.",
         analyticsTitle: "Product analytics and campaign attribution",
-        analytics: "With consent, Tomverse records approved product events and campaign parameters such as UTM source, language, country, model count, and plan. Google Analytics 4 may receive the same approved metadata. Prompts, model responses, filenames, file contents, email addresses, and profile names are not included. Consent can be declined before analytics starts.",
+        analytics: "Tomverse always uses essential session, security, language, and preference storage needed to provide the service. For product analytics, EU/EEA, UK, Swiss, and unverified-region visitors must opt in before Google Analytics 4 starts. In Australia and any other region added only after legal review, privacy-minimized analytics starts after a clear notice and can be turned off immediately or later in Analytics settings. We record approved product events and metadata such as UTM source, language, country, model count, and plan. Google may also process connection and device data, including an IP address, browser information, page URL, and approximate location, potentially outside the visitor's country. Prompts, model responses, filenames, file contents, email addresses, and profile names are never included. Advertising storage and personalization remain disabled.",
         retentionTitle: "Retention and deletion",
         retention: "Standard chats may remain until the user deletes them or account data is removed. Private Mode chat history is not stored in the database. Promotion-security IP and payment-method fingerprint hashes are removed after 90 days; minimal billing, legal, security, or incident-response records may be retained separately.",
         sharingTitle: "Share links",
