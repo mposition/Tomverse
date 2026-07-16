@@ -65,16 +65,16 @@ type LandingCopy = {
 };
 
 const supportedModels = [
-  { name: "GPT", provider: "OpenAI", image: "/model-icons/chatgpt.png" },
-  { name: "Claude", provider: "Anthropic", image: "/model-icons/claude.png" },
-  { name: "Gemini", provider: "Google", image: "/model-icons/gemini.png" },
-  { name: "Llama", provider: "Groq", image: "/model-icons/llama.png" },
-  { name: "DeepSeek", provider: "DeepSeek", image: "/model-icons/deepseek.png" },
-  { name: "Mistral", provider: "Mistral AI", image: "/model-icons/mistral.png" },
-  { name: "Grok", provider: "xAI", image: "/model-icons/grok.png" },
-  { name: "Kimi", provider: "Moonshot", image: "/model-icons/kimi.png" },
-  { name: "Qwen", provider: "Alibaba", image: "/model-icons/qwen.png" },
-  { name: "Perplexity", provider: "Sonar", image: "/model-icons/perplexity.png" },
+  { name: "GPT", provider: "OpenAI", image: "/model-icons/chatgpt.png", mark: "O" },
+  { name: "Claude", provider: "Anthropic", image: "/model-icons/claude.png", mark: "A" },
+  { name: "Gemini", provider: "Google", image: "/model-icons/gemini.png", mark: "G" },
+  { name: "Llama", provider: "Groq", image: "/model-icons/llama.png", mark: "L" },
+  { name: "DeepSeek", provider: "DeepSeek", image: "/model-icons/deepseek.png", mark: "D" },
+  { name: "Mistral", provider: "Mistral AI", image: "/model-icons/mistral.png", mark: "M" },
+  { name: "Grok", provider: "xAI", image: "/model-icons/grok.png", mark: "X" },
+  { name: "Kimi", provider: "Moonshot", image: "/model-icons/kimi.png", mark: "K" },
+  { name: "Qwen", provider: "Alibaba", image: "/model-icons/qwen.png", mark: "Q" },
+  { name: "Perplexity", provider: "Sonar", image: "/model-icons/perplexity.png", mark: "P" },
 ];
 
 const englishCopy: LandingCopy = {
@@ -573,13 +573,28 @@ export function LandingPageContent() {
           <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
             {supportedModels.map((model) => (
               <span key={model.name} title={model.provider} className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-black dark:border-zinc-800 dark:bg-zinc-900">
-                <Image src={model.image} alt="" width={22} height={22} className="h-5.5 w-5.5 rounded-md object-contain" />{model.name}
+                <span className="relative flex h-5.5 w-5.5 shrink-0 items-center justify-center rounded-md bg-zinc-200 text-[9px] font-black text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300" aria-hidden="true">
+                  {model.mark}
+                  <Image
+                    unoptimized
+                    src={model.image}
+                    alt=""
+                    width={22}
+                    height={22}
+                    data-testid="home-provider-logo"
+                    className="absolute inset-0 h-5.5 w-5.5 rounded-md bg-white object-contain"
+                    onError={(event) => {
+                      event.currentTarget.hidden = true;
+                    }}
+                  />
+                </span>
+                {model.name}
               </span>
             ))}
           </div>
           <div className="mt-4 flex flex-wrap items-center justify-center gap-4 text-sm font-bold">
             <Link href="/models" className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-500 dark:text-blue-400">{content.modelCatalogue}<ArrowRight className="h-3.5 w-3.5" /></Link>
-            <Link href="/status" target="_blank" rel="noopener noreferrer" aria-label={statusLinkLabel(content.status, lang)} className="inline-flex items-center gap-1 text-zinc-500 hover:text-blue-600 dark:hover:text-blue-400">
+            <Link href="/status" target="_blank" rel="noopener noreferrer" data-testid="home-model-status-link" aria-label={statusLinkLabel(content.status, lang)} className="inline-flex items-center gap-1 text-zinc-500 hover:text-blue-600 dark:hover:text-blue-400">
               {content.status}<ExternalLink className="h-3.5 w-3.5" /><span className="sr-only">({statusNewTabCopy[lang]})</span>
             </Link>
           </div>

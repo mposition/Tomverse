@@ -1031,7 +1031,8 @@ const checks = [
       return (
         guide.includes('t("onboarding.compareTitle")') &&
         guide.includes('t("onboarding.privateBody")') &&
-        guide.includes('t("auth.signIn")') &&
+        guide.includes('t("auth.login")') &&
+        !source.includes('t("auth.signIn")') &&
         !guide.includes("fixed inset-0") &&
         !guide.includes('aria-modal="true"') &&
         source.includes('onFocus={() => dismissGuestQuickStart("completed")}') &&

@@ -53,6 +53,50 @@ test("mobile marketing menu exposes public status", async ({ page }) => {
   await expectSafeNewTabLink(page.getByTestId("mobile-status-link"));
 });
 
+test("the homepage serves provider logos without the failing image optimizer", async ({
+  page,
+}) => {
+  await prepareGuestPage(page, "en");
+  const failedImages: string[] = [];
+  page.on("response", (response) => {
+    if (
+      response.request().resourceType() === "image" &&
+      response.url().includes("/model-icons/") &&
+      response.status() >= 400
+    ) {
+      failedImages.push(`${response.status()} ${response.url()}`);
+    }
+  });
+
+  await page.goto("/");
+  const providerLogos = page.getByTestId("home-provider-logo");
+  await expect(providerLogos).toHaveCount(10);
+  for (let index = 0; index < 10; index += 1) {
+    const logo = providerLogos.nth(index);
+    await logo.scrollIntoViewIfNeeded();
+    await expect
+      .poll(() =>
+        logo.evaluate((element) => (element as HTMLImageElement).naturalWidth)
+      )
+      .toBeGreaterThan(0);
+  }
+  const imageState = await providerLogos.evaluateAll((elements) =>
+    elements.map((element) => {
+      const image = element as HTMLImageElement;
+      return {
+        src: image.currentSrc || image.src,
+        complete: image.complete,
+        naturalWidth: image.naturalWidth,
+      };
+    })
+  );
+
+  expect(failedImages).toEqual([]);
+  expect(imageState.every((image) => image.complete && image.naturalWidth > 0)).toBe(true);
+  expect(imageState.every((image) => image.src.includes("/model-icons/"))).toBe(true);
+  expect(imageState.every((image) => !image.src.includes("/_next/image"))).toBe(true);
+});
+
 test("ChatGPT vs Claude guide serves every comparison image", async ({ page }) => {
   await prepareGuestPage(page, "en");
   for (const path of [

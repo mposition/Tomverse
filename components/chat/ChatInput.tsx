@@ -1201,7 +1201,7 @@ export function ChatInput({
                     href={isGuestMode ? `/auth/signin?callbackUrl=${encodeURIComponent(signInCallbackUrl)}` : "/pricing?trigger=limit_hit"}
                     className="font-black text-amber-900 underline underline-offset-2 dark:text-amber-100"
                   >
-                    {isGuestMode ? t("auth.signIn") : t("billing.joinWaitlist")}
+                    {isGuestMode ? t("auth.login") : t("billing.joinWaitlist")}
                   </a>
                   {!isGuestMode && isAccountMonthlyLimitReached && (
                     <CreditPackPurchaseButton trigger="limit_hit">
@@ -1275,7 +1275,7 @@ export function ChatInput({
                       onClick={() => dismissGuestQuickStart("completed")}
                       className="mt-0.5 inline-flex text-[10px] font-black text-blue-700 underline underline-offset-2 dark:text-blue-300"
                     >
-                      {t("auth.signIn")}
+                      {t("auth.login")}
                     </a>
                   </span>
                 </li>
