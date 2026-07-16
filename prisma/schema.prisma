@@ -286,6 +286,8 @@ model BillingPromotion {
   maxRedemptions        Int?
   redeemedCount         Int                          @default(0)
   durationMonths        Int
+  fulfillmentType       String                       @default("stripe_subscription")
+  accessDurationDays    Int?
   appliesToPlanIds      String                       @default("[]")
   stripeCouponId        String?
   stripePromotionCodeId String?
@@ -314,6 +316,11 @@ model BillingPromotionRedemption {
   clientIpHash                 String?
   paymentMethodFingerprintHash String?
   riskFlags                    String           @default("[]")
+  accessStartsAt               DateTime?
+  accessEndsAt                 DateTime?
+  reminderSentAt               DateTime?
+  expiredAt                    DateTime?
+  expiryNoticeSentAt           DateTime?
   redeemedAt                   DateTime         @default(now())
   createdAt                    DateTime         @default(now())
   updatedAt                    DateTime         @updatedAt
@@ -323,6 +330,8 @@ model BillingPromotionRedemption {
   @@index([promotionId, clientIpHash, redeemedAt])
   @@index([promotionId, paymentMethodFingerprintHash, redeemedAt])
   @@index([userId, redeemedAt])
+  @@index([accessEndsAt, reminderSentAt])
+  @@index([accessEndsAt, expiredAt])
 }
 
 model BillingTransaction {

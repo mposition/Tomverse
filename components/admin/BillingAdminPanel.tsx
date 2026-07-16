@@ -98,6 +98,8 @@ const newPromotion = (): EditablePromotion => ({
   maxRedemptions: 100,
   redeemedCount: 0,
   durationMonths: 1,
+  fulfillmentType: "stripe_subscription",
+  accessDurationDays: null,
   appliesToPlanIds: ["pro", "max"],
   stripeCouponId: null,
   stripePromotionCodeId: null,
@@ -399,7 +401,44 @@ function PromotionEditor({
         </Field>
       </div>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-4">
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <Field label="Fulfillment">
+          <select
+            value={promotion.fulfillmentType}
+            onChange={(event) => {
+              const fulfillmentType = event.target.value as
+                | "stripe_subscription"
+                | "internal_pass";
+              onChange({
+                ...promotion,
+                fulfillmentType,
+                accessDurationDays:
+                  fulfillmentType === "internal_pass"
+                    ? promotion.accessDurationDays || 60
+                    : null,
+              });
+            }}
+            className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-sm text-white outline-none focus:border-blue-500"
+          >
+            <option value="stripe_subscription">Stripe subscription</option>
+            <option value="internal_pass">Internal pass (no renewal)</option>
+          </select>
+        </Field>
+        <Field label="Pass duration days">
+          <TextInput
+            type="number"
+            min="1"
+            max="366"
+            disabled={promotion.fulfillmentType !== "internal_pass"}
+            value={promotion.accessDurationDays || ""}
+            onChange={(event) =>
+              onChange({
+                ...promotion,
+                accessDurationDays: Number(event.target.value) || 60,
+              })
+            }
+          />
+        </Field>
         <Field label="Duration months">
           <TextInput
             type="number"
@@ -446,6 +485,14 @@ function PromotionEditor({
           />
         </Field>
       </div>
+
+      {promotion.fulfillmentType === "internal_pass" ? (
+        <p className="mt-3 rounded-xl border border-blue-500/20 bg-blue-500/10 px-3 py-2 text-xs font-semibold leading-5 text-blue-200">
+          Internal passes collect no payment method, do not renew, and return the
+          user to Free after the configured number of days. Use 100% discount and
+          Pro-only eligibility.
+        </p>
+      ) : null}
 
       <div className="mt-4 flex flex-wrap gap-2">
         {(["pro", "max"] as const).map((planId) => (

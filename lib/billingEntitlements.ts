@@ -7,6 +7,7 @@ import {
 } from "@/lib/billingConfig";
 import type { ModelTier } from "@/lib/models";
 import { prisma } from "@/lib/prisma";
+import { effectivePlanForAccess } from "@/lib/foundingTesterPassCore";
 
 export type BillingFeature =
   | "attachments"
@@ -21,9 +22,21 @@ export const getUserBillingPlan = async (
 ): Promise<BillingPlanConfig> => {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { plan: true },
+    select: {
+      plan: true,
+      subscriptionStatus: true,
+      subscriptionCurrentPeriodEnd: true,
+    },
   });
-  return getBillingPlanByTier(normalizePlanTier(user?.plan));
+  return getBillingPlanByTier(
+    normalizePlanTier(
+      effectivePlanForAccess({
+        plan: user?.plan,
+        subscriptionStatus: user?.subscriptionStatus,
+        subscriptionCurrentPeriodEnd: user?.subscriptionCurrentPeriodEnd,
+      })
+    )
+  );
 };
 
 export const effectivePlanModelLimit = (plan: BillingPlanConfig) =>

@@ -699,6 +699,31 @@ const checks = [
       ),
   },
   {
+    name: "TOMFRIEND100 is a bounded 60-day non-renewing Pro pass",
+    file: "prisma/migrations/20260716150000_founding_tester_pass/migration.sql",
+    test: (source) => {
+      const checkout = read("app/api/billing/checkout/route.ts");
+      const maintenance = read("lib/maintenance.ts");
+      const entitlements = read("lib/billingEntitlements.ts");
+      return (
+        source.includes("'TOMFRIEND100'") &&
+        source.includes("'internal_pass'") &&
+        source.includes("'[\"pro\"]'") &&
+        source.includes("\n  25,\n") &&
+        source.includes("\n  60,\n") &&
+        source.includes("redemption.\"redeemedAt\" + INTERVAL '60 days'") &&
+        source.includes('app_user.\"stripeSubscriptionId\" IS NULL') &&
+        checkout.includes("activateInternalPass") &&
+        checkout.includes("addUtcDays(accessStartsAt, promotion.accessDurationDays)") &&
+        checkout.includes("isInternalPassPromotion(appliedPromotion)") &&
+        !checkout.includes("if (finalPriceMinor <= 0)") &&
+        maintenance.includes("sendFoundingTesterPassReminders") &&
+        maintenance.includes("expireFoundingTesterPasses") &&
+        entitlements.includes("effectivePlanForAccess")
+      );
+    },
+  },
+  {
     name: "Public billing configuration responses are not cached",
     file: "app/api/billing/config/route.ts",
     test: (source) =>

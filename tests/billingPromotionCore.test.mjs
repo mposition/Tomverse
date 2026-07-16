@@ -77,3 +77,48 @@ test("promotion validation errors have stable public codes", () => {
     "Invalid promotion code."
   );
 });
+
+test("internal passes require an exact bounded duration and a 100% discount", () => {
+  assert.equal(
+    promotionEligibilityFailure({
+      promotion: promotion({
+        fulfillmentType: "internal_pass",
+        accessDurationDays: 60,
+        discountPercent: 100,
+        appliesToPlanIds: ["pro"],
+      }),
+      planId: "pro",
+      billingInterval: "monthly",
+      now,
+    }),
+    null
+  );
+  assert.equal(
+    promotionEligibilityFailure({
+      promotion: promotion({
+        fulfillmentType: "internal_pass",
+        accessDurationDays: null,
+        discountPercent: 100,
+        appliesToPlanIds: ["pro"],
+      }),
+      planId: "pro",
+      billingInterval: "monthly",
+      now,
+    }),
+    "unavailable"
+  );
+  assert.equal(
+    promotionEligibilityFailure({
+      promotion: promotion({
+        fulfillmentType: "internal_pass",
+        accessDurationDays: 60,
+        discountPercent: 50,
+        appliesToPlanIds: ["pro"],
+      }),
+      planId: "pro",
+      billingInterval: "monthly",
+      now,
+    }),
+    "unavailable"
+  );
+});

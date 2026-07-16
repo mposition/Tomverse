@@ -63,6 +63,12 @@ export async function POST(req: Request) {
         discountPercent: result.promotion.discountPercent,
         discountAmountCents: result.promotion.discountAmountCents,
         durationMonths: result.promotion.durationMonths,
+        fulfillmentType: result.promotion.fulfillmentType,
+        accessDurationDays: result.promotion.accessDurationDays,
+        paymentMethodRequired:
+          result.promotion.fulfillmentType !== "internal_pass",
+        automaticRenewal:
+          result.promotion.fulfillmentType !== "internal_pass",
         allowAnnualStacking: result.promotion.allowAnnualStacking,
       },
     });

@@ -48,6 +48,10 @@ type BillingPromotion = {
   discountPercent: number;
   discountAmountCents?: number | null;
   durationMonths: number;
+  fulfillmentType: "stripe_subscription" | "internal_pass";
+  accessDurationDays: number | null;
+  paymentMethodRequired: boolean;
+  automaticRenewal: boolean;
   allowAnnualStacking: boolean;
 };
 
@@ -109,6 +113,66 @@ type CheckoutCopy = {
   localPriceNote: (amount: string) => string;
   renewalNote: (interval: BillingInterval, amount: string) => string;
   continueToCheckout: string;
+};
+
+const foundingTesterPassCopy: Record<
+  Language,
+  {
+    title: string;
+    detail: (days: number) => string;
+    billingLabel: string;
+    activate: string;
+  }
+> = {
+  en: {
+    title: "Founding Tester Pass",
+    detail: (days) =>
+      `${days} days of Pro access. No payment method, charge, or automatic renewal. Your account returns to Free when the pass ends.`,
+    billingLabel: "Non-renewing pass",
+    activate: "Activate Tester Pass",
+  },
+  ko: {
+    title: "Founding Tester Pass",
+    detail: (days) =>
+      `${days}일 동안 Pro를 이용합니다. 결제수단 등록, 결제 및 자동 갱신이 없으며 기간 종료 후 Free 플랜으로 전환됩니다.`,
+    billingLabel: "자동 갱신 없는 이용권",
+    activate: "Tester Pass 활성화",
+  },
+  zh: {
+    title: "创始测试通行证",
+    detail: (days) =>
+      `${days} 天 Pro 权限。无需付款方式，不收费，也不会自动续费；结束后账户恢复为 Free。`,
+    billingLabel: "不自动续费的通行证",
+    activate: "激活测试通行证",
+  },
+  fr: {
+    title: "Pass testeur fondateur",
+    detail: (days) =>
+      `${days} jours d’accès Pro, sans moyen de paiement, prélèvement ni renouvellement automatique. Le compte repasse ensuite à Free.`,
+    billingLabel: "Pass sans renouvellement",
+    activate: "Activer le pass testeur",
+  },
+  de: {
+    title: "Founding Tester Pass",
+    detail: (days) =>
+      `${days} Tage Pro-Zugang ohne Zahlungsmethode, Belastung oder automatische Verlängerung. Danach wird das Konto auf Free zurückgesetzt.`,
+    billingLabel: "Pass ohne Verlängerung",
+    activate: "Tester Pass aktivieren",
+  },
+  es: {
+    title: "Pase Founding Tester",
+    detail: (days) =>
+      `${days} días de acceso Pro sin método de pago, cargo ni renovación automática. Después, la cuenta vuelve a Free.`,
+    billingLabel: "Pase sin renovación",
+    activate: "Activar pase de prueba",
+  },
+  pt: {
+    title: "Passe Founding Tester",
+    detail: (days) =>
+      `${days} dias de acesso Pro sem método de pagamento, cobrança ou renovação automática. Depois, a conta regressa ao Free.`,
+    billingLabel: "Passe sem renovação",
+    activate: "Ativar passe de teste",
+  },
 };
 
 const checkoutCopy: Record<Language, CheckoutCopy> = {
@@ -600,6 +664,11 @@ export function UpgradeInterestButton({
         )
       : dueUsdLabel;
   const displayedDueLabel = isValidatingPromotion ? "…" : dueLabel;
+  const foundingPass =
+    appliedPromotion?.fulfillmentType === "internal_pass"
+      ? appliedPromotion
+      : null;
+  const passCopy = foundingTesterPassCopy[lang] || foundingTesterPassCopy.en;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -782,19 +851,21 @@ export function UpgradeInterestButton({
         0,
         planConfig?.monthlyMessageLimit || (planId === "max" ? 10_000 : 3_000)
       );
-      trackProductEvent("checkout_started", 0, {
-        billing_interval: billingInterval,
-        plan_id: planId,
-        purchase_type: "subscription",
-        product_id: `subscription_${planId}_${billingInterval}`,
-        monthly_credits_included: monthlyCreditsIncluded,
-        current_plan: analyticsContext.currentPlan,
-        trigger: purchaseTrigger,
-        plan_credits_remaining: analyticsContext.planCreditsRemaining,
-        addon_credits_remaining: analyticsContext.addonCreditsRemaining,
-        value: billingMinorToMajor(checkoutDueMinor, checkoutMarket.currency),
-        currency: checkoutMarket.currency,
-      });
+      if (promotionForCheckout?.fulfillmentType !== "internal_pass") {
+        trackProductEvent("checkout_started", 0, {
+          billing_interval: billingInterval,
+          plan_id: planId,
+          purchase_type: "subscription",
+          product_id: `subscription_${planId}_${billingInterval}`,
+          monthly_credits_included: monthlyCreditsIncluded,
+          current_plan: analyticsContext.currentPlan,
+          trigger: purchaseTrigger,
+          plan_credits_remaining: analyticsContext.planCreditsRemaining,
+          addon_credits_remaining: analyticsContext.addonCreditsRemaining,
+          value: billingMinorToMajor(checkoutDueMinor, checkoutMarket.currency),
+          currency: checkoutMarket.currency,
+        });
+      }
       const response = await fetch("/api/billing/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -922,7 +993,7 @@ export function UpgradeInterestButton({
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-600 dark:text-blue-300">
-                    {copy.secureCheckout}
+                    {foundingPass ? passCopy.title : copy.secureCheckout}
                   </p>
                   <h2
                     id={`${inputId}-title`}
@@ -931,7 +1002,9 @@ export function UpgradeInterestButton({
                     {copy.upgradeTo(plan)}
                   </h2>
                   <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-                    {copy.description}
+                    {foundingPass
+                      ? passCopy.detail(foundingPass.accessDurationDays || 60)
+                      : copy.description}
                   </p>
                 </div>
                 <button
@@ -997,17 +1070,23 @@ export function UpgradeInterestButton({
                 </div>
               </div>
 
-              <div className="mt-6 rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
+              <div className={`mt-6 rounded-2xl border p-4 ${
+                foundingPass
+                  ? "border-blue-500/30 bg-blue-500/10"
+                  : "border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/60"
+              }`}>
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div>
                     <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500 dark:text-zinc-400">
-                      {copy.paymentMethods}
+                      {foundingPass ? passCopy.title : copy.paymentMethods}
                     </p>
                     <p className="mt-2 text-xs font-semibold leading-5 text-zinc-500 dark:text-zinc-400">
-                      {copy.paymentHint}
+                      {foundingPass
+                        ? passCopy.detail(foundingPass.accessDurationDays || 60)
+                        : copy.paymentHint}
                     </p>
                   </div>
-                  <div className="flex flex-wrap gap-2 sm:justify-end">
+                  {!foundingPass ? <div className="flex flex-wrap gap-2 sm:justify-end">
                     {["PayPal", "GPay", "Apple Pay", "Card"].map((method) => (
                       <span
                         key={method}
@@ -1016,7 +1095,7 @@ export function UpgradeInterestButton({
                         {method}
                       </span>
                     ))}
-                  </div>
+                  </div> : null}
                 </div>
               </div>
 
@@ -1054,7 +1133,11 @@ export function UpgradeInterestButton({
                 </button>
               </div>
               <p className="mt-2 text-xs font-semibold text-zinc-500 dark:text-zinc-400">
-                {copy.promoFinePrint} {promotionPolicyCopy[lang] || promotionPolicyCopy.en}
+                {foundingPass
+                  ? passCopy.detail(foundingPass.accessDurationDays || 60)
+                  : `${copy.promoFinePrint} ${
+                      promotionPolicyCopy[lang] || promotionPolicyCopy.en
+                    }`}
               </p>
             </div>
 
@@ -1087,7 +1170,11 @@ export function UpgradeInterestButton({
                     {copy.billing}
                   </span>
                   <span className="font-black text-zinc-950 dark:text-white">
-                    {billingInterval === "annual" ? copy.yearly : copy.monthly}
+                    {foundingPass
+                      ? passCopy.billingLabel
+                      : billingInterval === "annual"
+                        ? copy.yearly
+                        : copy.monthly}
                   </span>
                 </div>
                 <div className="flex justify-between gap-4 text-sm">
@@ -1119,7 +1206,7 @@ export function UpgradeInterestButton({
                       {displayedDueLabel || priceLabel || "-"}
                     </span>
                   </div>
-                  {planConfig?.displayCurrency ? (
+                  {planConfig?.displayCurrency && !foundingPass ? (
                     <p className="mt-2 text-xs font-semibold leading-5 text-zinc-500 dark:text-zinc-400">
                       {copy.localPriceNote(
                         displayedDueLabel || priceLabel || "-"
@@ -1130,12 +1217,14 @@ export function UpgradeInterestButton({
               </div>
 
               <div className="mt-4 rounded-2xl border border-blue-500/20 bg-blue-500/10 p-4 text-xs font-semibold leading-5 text-blue-700 dark:text-blue-200">
-                {copy.renewalNote(
-                  billingInterval,
-                  billingInterval === "annual"
-                    ? annualPriceLabel || "-"
-                    : monthlyPriceLabel || "-"
-                )}
+                {foundingPass
+                  ? passCopy.detail(foundingPass.accessDurationDays || 60)
+                  : copy.renewalNote(
+                      billingInterval,
+                      billingInterval === "annual"
+                        ? annualPriceLabel || "-"
+                        : monthlyPriceLabel || "-"
+                    )}
               </div>
 
               <p className="mt-3 text-xs font-semibold leading-5 text-zinc-500 dark:text-zinc-400">
@@ -1166,7 +1255,11 @@ export function UpgradeInterestButton({
                   disabled={isSending || isValidatingPromotion}
                   className="rounded-xl bg-blue-600 px-4 py-3 text-sm font-black text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {isSending ? t("billing.sending") : copy.continueToCheckout}
+                  {isSending
+                    ? t("billing.sending")
+                    : foundingPass
+                      ? passCopy.activate
+                      : copy.continueToCheckout}
                 </button>
                 <button
                   type="button"
@@ -1191,7 +1284,11 @@ export function UpgradeInterestButton({
                 disabled={isSending || isValidatingPromotion}
                 className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-black text-white shadow-lg shadow-blue-950/20 hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {isSending ? t("billing.sending") : copy.continueToCheckout}
+                {isSending
+                  ? t("billing.sending")
+                  : foundingPass
+                    ? passCopy.activate
+                    : copy.continueToCheckout}
               </button>
             </div>
           </form>
