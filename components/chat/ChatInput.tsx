@@ -1732,6 +1732,10 @@ export function ChatInput({
                             modelStatus === "unavailable" ||
                             isPlanLocked ||
                             imageIncompatible;
+                          const selectionDisabled =
+                            !model.enabled ||
+                            modelStatus === "unavailable" ||
+                            imageIncompatible;
                           const usageProfile = getModelUsageProfile(model);
                           const statusReason = isPlanLocked
                             ? isGuestMode
@@ -1765,7 +1769,8 @@ export function ChatInput({
                                 data-model-usage-class={usageProfile.category}
                                 data-model-minimum-plan={model.minimumPlan}
                                 data-model-image-input={modelSupportsImageInput(model)}
-                                disabled={unavailable && !isSelected}
+                                data-model-plan-locked={isPlanLocked}
+                                disabled={selectionDisabled && !isSelected}
                                 onClick={() => {
                                   rememberRecentModel(model.id);
                                   onToggleModel(model.id);

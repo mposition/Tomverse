@@ -126,10 +126,12 @@ export function ComparisonReviewDialog({
   conversationId,
   open,
   onClose,
+  onCompleted,
 }: {
   conversationId: string | null;
   open: boolean;
   onClose: () => void;
+  onCompleted?: () => void;
 }) {
   const { t } = useLanguage();
   const [setup, setSetup] = useState<ReviewSetup | null>(null);
@@ -247,6 +249,7 @@ export function ComparisonReviewDialog({
           usage_credits: data.usageCredits,
         }
       );
+      onCompleted?.();
     } catch (runError) {
       trackProductEvent(
         "comparison_review_failed",

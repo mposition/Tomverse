@@ -252,6 +252,7 @@ export function MobileChatShell({
         <button
           type="button"
           onClick={() => setIsDrawerOpen(true)}
+          data-testid="mobile-sidebar-open"
           className="flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-50 text-zinc-600 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
           aria-label={t("chat.moreActions")}
         >

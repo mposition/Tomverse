@@ -8,6 +8,7 @@ import { useLanguage } from "@/components/LanguageProvider";
 import Link from "next/link";
 import { AlertTriangle, Check, CircleHelp, CloudUpload, Crown, Database, Download, Folder, FolderPlus, Link2Off, Lock, MessageSquare, MoreVertical, Pencil, Pin, Search, Send, Share2, ShieldCheck, Sparkles, Star, Tag, Trash2, Unlock, X } from "lucide-react";
 import { FeedbackButton } from "@/components/chat/FeedbackButton";
+import { UserUsageSummary } from "@/components/chat/UserUsageSummary";
 import { FeatureHelpPopover } from "@/components/chat/FeatureHelpPopover";
 import { chatHelpCopy } from "@/components/chat/chatHelpCopy";
 import { useUserUsage, type UserPlan } from "@/components/chat/useUserUsage";
@@ -141,24 +142,6 @@ export function ChatSidebar({
     const canDownload =
         !isGuestMode && accountUsage?.limits.allowDownloads !== false;
     const displayedPlan: UserPlan | "Guest" | null = isGuestMode ? "Guest" : accountUsage?.plan || null;
-    const displayedUsage = isGuestMode
-        ? {
-            used: guestMessageCount || 0,
-            limit: maxGuestMessages || 20,
-        }
-        : {
-            used: accountUsage?.usage.creditsDay || 0,
-            limit: accountUsage?.limits.creditsDay || 0,
-        };
-    const displayedRemaining =
-        displayedUsage.limit > 0
-            ? Math.max(displayedUsage.limit - displayedUsage.used, 0)
-            : 0;
-    const displayedUsageWidth =
-        displayedUsage.limit > 0
-            ? `${Math.min((displayedUsage.used / displayedUsage.limit) * 100, 100)}%`
-            : "0%";
-    const isDailyUnlimited = !isGuestMode && displayedUsage.limit <= 0 && accountUsage?.plan === "Max";
     const menuItemBase =
         "flex w-full items-center justify-between whitespace-nowrap rounded px-3 py-2 text-sm transition-colors";
 
@@ -753,6 +736,7 @@ export function ChatSidebar({
                 </div>
             </div>
 
+            <div className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain [scrollbar-gutter:stable]">
             <div className={`border-b border-zinc-200/60 px-3 dark:border-zinc-800/40 ${isMobileDrawer ? "py-2" : "py-3"}`}>
                 <div className="relative">
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
@@ -1057,7 +1041,7 @@ export function ChatSidebar({
                 </div>
             </div>
 
-            <div className={`${isMobileDrawer ? "min-h-0 p-2" : "min-h-[10rem] p-2"} flex-1 overflow-y-auto overscroll-contain space-y-1 md:min-h-0`}>
+            <div className={`${isMobileDrawer ? "min-h-0 p-2" : "min-h-[10rem] p-2"} space-y-1 md:min-h-0`}>
                 {messageSearchResults.length > 0 && (
                     <div className="mb-2 rounded-xl border border-blue-200 bg-blue-50 p-2 text-xs dark:border-blue-900/50 dark:bg-blue-950/20">
                         <p className="px-1 pb-1 font-black text-blue-700 dark:text-blue-300">
@@ -1439,50 +1423,34 @@ export function ChatSidebar({
                     );
                 })}
             </div>
+            </div>
 
-            <div className={`${isMobileDrawer ? "max-h-[40dvh] shrink-0 border-t border-zinc-200 bg-zinc-100/40 p-2 dark:border-zinc-800 dark:bg-zinc-900/50" : "max-h-[45dvh] shrink-0 border-t border-zinc-200 bg-zinc-100/40 p-3 dark:border-zinc-800 dark:bg-zinc-900/50"} flex min-h-0 flex-col gap-2 overflow-hidden`}>
+            <div className={`${isMobileDrawer ? "max-h-[52dvh] shrink-0 border-t border-zinc-200 bg-zinc-100/40 p-2 dark:border-zinc-800 dark:bg-zinc-900/50" : "max-h-[48dvh] shrink-0 border-t border-zinc-200 bg-zinc-100/40 p-3 dark:border-zinc-800 dark:bg-zinc-900/50"} flex min-h-0 touch-pan-y flex-col gap-2 overflow-y-auto overscroll-contain [scrollbar-gutter:stable]`}>
+                <div className="shrink-0">
+                    <UserUsageSummary
+                        isGuestMode={isGuestMode}
+                        guestMessageCount={guestMessageCount}
+                        maxGuestMessages={maxGuestMessages}
+                        usageOverride={isGuestMode ? undefined : accountUsage}
+                        compact
+                        headerAction={
+                            <FeatureHelpPopover
+                                title={helpCopy.creditsTitle}
+                                description={helpCopy.creditsDescription}
+                                buttonLabel={helpCopy.helpAboutCredits}
+                                learnMoreLabel={helpCopy.learnMore}
+                                topic="credits"
+                                href={chatWorkspaceGuideHref(lang, "credits-and-plans")}
+                                mobile={isMobileDrawer}
+                                testId="credits-help"
+                            />
+                        }
+                    />
+                </div>
                 <div className="shrink-0" data-testid="sidebar-account-controls">
                     <AuthButton />
                 </div>
-                <div className="flex min-h-0 flex-1 touch-pan-y flex-col gap-2 overflow-y-auto overscroll-contain [scrollbar-gutter:stable]">
-                    <div className="rounded-3xl border border-zinc-200 bg-white p-3 text-xs shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-                        <div className="mb-2 flex items-center justify-between gap-2">
-                            <span className="inline-flex items-center gap-1 font-black text-zinc-900 dark:text-zinc-100">
-                                {t("sidebar.currentUsage")}
-                                <FeatureHelpPopover
-                                    title={helpCopy.creditsTitle}
-                                    description={helpCopy.creditsDescription}
-                                    buttonLabel={helpCopy.helpAboutCredits}
-                                    learnMoreLabel={helpCopy.learnMore}
-                                    topic="credits"
-                                    href={chatWorkspaceGuideHref(lang, "credits-and-plans")}
-                                    mobile={isMobileDrawer}
-                                    testId="credits-help"
-                                />
-                            </span>
-                            {displayedPlan && (
-                                <span className="text-[10px] font-black text-zinc-400">
-                                    {t(`modelTiers.${displayedPlan.toLowerCase()}`)}
-                                </span>
-                            )}
-                        </div>
-                        {(displayedUsage.limit > 0 || isDailyUnlimited) && (
-                            <div>
-                                <div className="mb-1 flex items-center justify-between font-semibold text-zinc-500 dark:text-zinc-400">
-                                    <span>{t("sidebar.todayUsage")}</span>
-                                    <span>{isDailyUnlimited ? t("usage.unlimited") : `${displayedRemaining} ${t("sidebar.remaining")}`}</span>
-                                </div>
-                                {!isDailyUnlimited && (
-                                    <div className="h-1.5 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
-                                        <div
-                                            className={`h-full transition-all duration-500 ${displayedUsage.used >= displayedUsage.limit ? "bg-red-500" : "bg-blue-500"}`}
-                                            style={{ width: displayedUsageWidth }}
-                                        />
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                    </div>
+                <div className="shrink-0">
                     <FeedbackButton
                         currentModelId={currentModelId}
                         currentPlan={displayedPlan}

@@ -1,10 +1,15 @@
 "use client";
 
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { BarChart3, Coins } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
-import { useUserUsage } from "@/components/chat/useUserUsage";
+import {
+  useUserUsage,
+  type UserUsageResponse,
+} from "@/components/chat/useUserUsage";
 import { CreditPackPurchaseButton } from "@/components/billing/CreditPackPurchaseButton";
+import { UpgradeCtaLink } from "@/components/billing/UpgradeCtaLink";
 
 const percent = (used: number, limit: number) =>
   limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
@@ -37,20 +42,30 @@ export function UserUsageSummary({
   isGuestMode,
   guestMessageCount,
   maxGuestMessages,
+  usageOverride,
+  compact = false,
+  headerAction,
 }: {
   isGuestMode?: boolean;
   guestMessageCount?: number;
   maxGuestMessages?: number;
+  usageOverride?: UserUsageResponse | null;
+  compact?: boolean;
+  headerAction?: ReactNode;
 }) {
   const { t, lang } = useLanguage();
-  const usage = useUserUsage(!isGuestMode);
+  const fetchedUsage = useUserUsage(!isGuestMode && usageOverride === undefined);
+  const usage = usageOverride === undefined ? fetchedUsage : usageOverride;
   const isDailyUnlimited = Boolean(usage && usage.limits.creditsDay <= 0);
 
   if (isGuestMode) {
     const used = guestMessageCount || 0;
     const limit = maxGuestMessages || 20;
     return (
-      <section className="mx-3 mb-3 rounded-2xl border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-100">
+      <section
+        data-testid={compact ? "sidebar-upgrade-card" : undefined}
+        className={`${compact ? "rounded-3xl" : "mx-3 mb-3 rounded-2xl"} border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-100`}
+      >
         <div className="flex items-center gap-2 font-black">
           <BarChart3 className="h-4 w-4" />
           {t("usage.guestUsage")}
@@ -70,12 +85,90 @@ export function UserUsageSummary({
   const warningLevel = monthlyPercent >= 100 ? 100 : monthlyPercent >= 95 ? 95 : monthlyPercent >= 80 ? 80 : 0;
   const preferUpgrade = usage.recommendation.primary === "upgrade_pro" || usage.recommendation.primary === "upgrade_max";
   const upgradeLabel = usage.recommendation.primary === "upgrade_max"
-    ? (lang === "ko" ? "Max로 업그레이드" : "Upgrade to Max")
-    : (lang === "ko" ? "Pro로 업그레이드" : "Upgrade to Pro");
-  const addCreditLabel = lang === "ko" ? "추가 크레딧 구매" : "Buy additional credits";
+    ? t("upgrade.upgradeToMax")
+    : t("upgrade.upgradeToPro");
+  const addCreditLabel = t("upgrade.buyAdditionalCredits");
   const expiryLabel = usage.balances.purchasedEarliestExpiry
     ? new Date(usage.balances.purchasedEarliestExpiry).toLocaleDateString(lang)
     : null;
+
+  if (compact) {
+    const dailyRemaining = Math.max(
+      0,
+      usage.limits.creditsDay - usage.usage.creditsDay
+    );
+    const upgradeTarget = usage.plan === "Free" ? "Pro" : usage.plan === "Pro" ? "Max" : null;
+    const showAddCredits = usage.plan === "Max" && warningLevel > 0;
+
+    return (
+      <section
+        data-testid="sidebar-upgrade-card"
+        className="rounded-3xl border border-zinc-200 bg-white p-3 text-xs text-zinc-700 shadow-sm dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200"
+      >
+        <div className="flex items-center justify-between gap-2">
+          <span className="flex items-center gap-1.5 font-black text-zinc-900 dark:text-zinc-100">
+            <BarChart3 className="h-4 w-4 text-blue-500" />
+            {t("sidebar.currentUsage")}
+          </span>
+          <span className="flex items-center gap-1">
+            {headerAction}
+            <span className="rounded-full bg-zinc-100 px-2 py-1 text-[10px] font-black text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
+              {planLabel}
+            </span>
+          </span>
+        </div>
+        <div className="mt-2 flex items-center justify-between font-semibold text-zinc-500 dark:text-zinc-400">
+          <span>{t("sidebar.todayUsage")}</span>
+          <span>
+            {isDailyUnlimited
+              ? t("usage.unlimited")
+              : `${dailyRemaining} ${t("sidebar.remaining")}`}
+          </span>
+        </div>
+        {!isDailyUnlimited && (
+          <UsageBar
+            used={usage.usage.creditsDay}
+            limit={usage.limits.creditsDay}
+          />
+        )}
+
+        {upgradeTarget && (
+          <div className="mt-3 border-t border-zinc-200 pt-3 dark:border-zinc-800">
+            <UpgradeCtaLink
+              targetPlan={upgradeTarget}
+              currentPlan={usage.plan}
+              trigger="usage_widget"
+              ctaLocation="chat_sidebar_upgrade"
+              planCreditsRemaining={usage.balances.planRemainingCredits}
+              addonCreditsRemaining={usage.balances.purchasedRemainingCredits}
+              testId="sidebar-upgrade-cta"
+              className="flex min-h-10 w-full items-center justify-center rounded-xl bg-blue-600 px-3 py-2 text-center text-xs font-black text-white shadow-sm shadow-blue-950/20 transition hover:bg-blue-500"
+            >
+              {upgradeTarget === "Pro"
+                ? t("upgrade.upgradeToPro")
+                : t("upgrade.upgradeToMax")}
+            </UpgradeCtaLink>
+            <p className="mt-1.5 text-center text-[10px] font-medium leading-4 text-zinc-500 dark:text-zinc-400">
+              {upgradeTarget === "Pro"
+                ? t("upgrade.proBenefit")
+                : t("upgrade.maxBenefit")}
+            </p>
+          </div>
+        )}
+
+        {showAddCredits && (
+          <div className="mt-3 border-t border-zinc-200 pt-3 dark:border-zinc-800">
+            <CreditPackPurchaseButton
+              trigger="usage_widget"
+              className="flex min-h-10 w-full items-center justify-center rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white hover:bg-emerald-500"
+            >
+              {t("upgrade.buyAdditionalCredits")}
+            </CreditPackPurchaseButton>
+          </div>
+        )}
+      </section>
+    );
+  }
 
   return (
     <section className="mx-3 mb-3 rounded-2xl border border-zinc-200 bg-white p-3 text-xs text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-200">
@@ -168,13 +261,35 @@ export function UserUsageSummary({
           <div className="mt-2 flex flex-wrap gap-2">
             {preferUpgrade ? (
               <>
-                <Link href="/pricing?trigger=usage_widget" className="rounded-lg bg-blue-600 px-2.5 py-1.5 font-black text-white">{upgradeLabel}</Link>
+                <UpgradeCtaLink
+                  targetPlan={usage.plan === "Pro" ? "Max" : "Pro"}
+                  currentPlan={usage.plan}
+                  trigger="usage_widget"
+                  ctaLocation="usage_summary_warning"
+                  planCreditsRemaining={usage.balances.planRemainingCredits}
+                  addonCreditsRemaining={usage.balances.purchasedRemainingCredits}
+                  className="rounded-lg bg-blue-600 px-2.5 py-1.5 font-black text-white"
+                >
+                  {upgradeLabel}
+                </UpgradeCtaLink>
                 <CreditPackPurchaseButton trigger="usage_widget" className="rounded-lg border border-amber-400 px-2.5 py-1.5 font-black">{addCreditLabel}</CreditPackPurchaseButton>
               </>
             ) : (
               <>
                 <CreditPackPurchaseButton trigger="usage_widget" className="rounded-lg bg-emerald-600 px-2.5 py-1.5 font-black text-white">{addCreditLabel}</CreditPackPurchaseButton>
-                {usage.plan === "Pro" && <Link href="/pricing?trigger=usage_widget" className="rounded-lg border border-amber-400 px-2.5 py-1.5 font-black">{lang === "ko" ? "Max 비교" : "Compare Max"}</Link>}
+                {usage.plan === "Pro" && (
+                  <UpgradeCtaLink
+                    targetPlan="Max"
+                    currentPlan={usage.plan}
+                    trigger="usage_widget"
+                    ctaLocation="usage_summary_secondary"
+                    planCreditsRemaining={usage.balances.planRemainingCredits}
+                    addonCreditsRemaining={usage.balances.purchasedRemainingCredits}
+                    className="rounded-lg border border-amber-400 px-2.5 py-1.5 font-black"
+                  >
+                    {t("upgrade.compareMax")}
+                  </UpgradeCtaLink>
+                )}
                 {usage.recommendation.secondary === "business" && <Link href="/support" className="rounded-lg border border-amber-400 px-2.5 py-1.5 font-black">Business</Link>}
               </>
             )}
