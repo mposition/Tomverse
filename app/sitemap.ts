@@ -19,6 +19,7 @@ const publicPages: Array<{
   { path: "/faq", changeFrequency: "monthly", priority: 0.6 },
   { path: "/support", changeFrequency: "monthly", priority: 0.5 },
   { path: "/support/help-centre", changeFrequency: "monthly", priority: 0.5 },
+  { path: "/support/help-centre/chat-workspace", changeFrequency: "monthly", priority: 0.6 },
   { path: "/safety", changeFrequency: "monthly", priority: 0.6 },
   { path: "/safety/approach", changeFrequency: "monthly", priority: 0.5 },
   { path: "/safety/security-privacy", changeFrequency: "monthly", priority: 0.5 },

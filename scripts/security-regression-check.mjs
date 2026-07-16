@@ -512,6 +512,43 @@ const checks = [
       !source.includes("file_content:"),
   },
   {
+    name: "Help analytics is bounded and excludes conversation content",
+    file: "lib/productAnalyticsShared.ts",
+    test: (source) =>
+      source.includes('"help_opened"') &&
+      source.includes('"help_article_viewed"') &&
+      source.includes('"ui_help_opened"') &&
+      source.includes('"sidebar_tour_started"') &&
+      source.includes('"sidebar_tour_completed"') &&
+      source.includes('"sidebar_tour_skipped"') &&
+      source.includes("help_source:") &&
+      source.includes("help_topic:") &&
+      source.includes('help_article_id: z.enum(["chat_workspace"])'),
+  },
+  {
+    name: "Chat sidebar exposes accessible new-tab workspace help",
+    file: "components/chat/ChatSidebar.tsx",
+    test: (source) =>
+      source.includes('href="/support/help-centre/chat-workspace"') &&
+      source.includes('target="_blank"') &&
+      source.includes('rel="noopener noreferrer"') &&
+      source.includes('trackProductEvent("help_opened"') &&
+      source.includes('help_source: "sidebar_header"'),
+  },
+  {
+    name: "Chat sidebar separates status, labels, and projects with contextual help",
+    file: "components/chat/ChatSidebar.tsx",
+    test: (source) =>
+      source.includes('data-testid="sidebar-status-filters"') &&
+      source.includes('data-testid="sidebar-label-filters"') &&
+      source.includes('data-testid="sidebar-projects"') &&
+      source.includes('topic="locked"') &&
+      source.includes('topic="label"') &&
+      source.includes('topic="project"') &&
+      source.includes("SIDEBAR_TOUR_STORAGE_KEY") &&
+      source.includes('trackProductEvent("sidebar_tour_completed")'),
+  },
+  {
     name: "Product analytics API uses bounded input and trusted plan resolution",
     file: "app/api/analytics/events/route.ts",
     test: (source) =>
@@ -522,10 +559,12 @@ const checks = [
       source.includes("analyticsCountryFromHeaders"),
   },
   {
-    name: "GA4 only loads after explicit analytics consent",
+    name: "GA4 loads only after consent or a resolved notice-and-opt-out policy",
     file: "components/analytics/AnalyticsProvider.tsx",
     test: (source) =>
-      source.includes('consent === "accepted" && measurementId') &&
+      source.includes('consent === "accepted" ||') &&
+      source.includes('resolvedPolicy.mode === "notice_opt_out"') &&
+      source.includes("analyticsEnabled && analyticsClientReady && measurementId") &&
       source.includes("googletagmanager.com/gtag/js") &&
       source.includes("disableAnalyticsClient"),
   },
@@ -709,8 +748,8 @@ const checks = [
         source.includes("'TOMFRIEND100'") &&
         source.includes("'internal_pass'") &&
         source.includes("'[\"pro\"]'") &&
-        source.includes("\n  25,\n") &&
-        source.includes("\n  60,\n") &&
+        /\r?\n  25,\r?\n/.test(source) &&
+        /\r?\n  60,\r?\n/.test(source) &&
         source.includes("redemption.\"redeemedAt\" + INTERVAL '60 days'") &&
         source.includes('app_user.\"stripeSubscriptionId\" IS NULL') &&
         checkout.includes("activateInternalPass") &&

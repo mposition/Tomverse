@@ -38,6 +38,8 @@ import {
 } from "@/lib/productAnalyticsClient";
 import { getContextualModelSuggestion } from "@/lib/modelFinder";
 import { CreditPackPurchaseButton } from "@/components/billing/CreditPackPurchaseButton";
+import { FeatureHelpPopover } from "@/components/chat/FeatureHelpPopover";
+import { chatHelpCopy } from "@/components/chat/chatHelpCopy";
 
 type PublicModelStatus = "available" | "limited" | "unavailable";
 type PublicModelStatusRecord = {
@@ -320,6 +322,7 @@ export function ChatInput({
   const [showGuestQuickStart, setShowGuestQuickStart] = useState(false);
   const [dismissedSuggestionKey, setDismissedSuggestionKey] = useState<string | null>(null);
     const { t, lang } = useLanguage();
+    const helpCopy = chatHelpCopy[lang];
     const signInCallbackUrl = withChatLanguage("/chat", lang);
     const accountUsage = useUserUsage(!isGuestMode);
     const canAttach =
@@ -1639,9 +1642,21 @@ export function ChatInput({
                       </select>
                     </div>
                   </div>
-                  <p className="px-2 text-[10px] leading-4 text-zinc-400">
-                    {t("usage.creditWeightNotice")}
-                  </p>
+                  <div className="flex items-start gap-1 px-2">
+                    <p className="min-w-0 flex-1 text-[10px] leading-4 text-zinc-400">
+                      {t("usage.creditWeightNotice")}
+                    </p>
+                    <FeatureHelpPopover
+                      title={helpCopy.modelCreditsTitle}
+                      description={helpCopy.modelCreditsDescription}
+                      buttonLabel={helpCopy.helpAboutModelCredits}
+                      learnMoreLabel={helpCopy.learnMore}
+                      topic="credits"
+                      href="/support/help-centre/chat-workspace#credits-and-plans"
+                      align="right"
+                      testId="model-credits-help"
+                    />
+                  </div>
                   <div className="min-h-0 space-y-3 overflow-y-auto overscroll-contain pr-1">
                     {groupedModels.map((group) => (
                       <div key={group.provider} className="space-y-1">

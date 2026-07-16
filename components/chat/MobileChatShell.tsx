@@ -6,6 +6,8 @@ import { ChatInput } from "@/components/chat/ChatInput";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { ProviderStatusBanner } from "@/components/chat/ProviderStatusBanner";
+import { FeatureHelpPopover } from "@/components/chat/FeatureHelpPopover";
+import { chatHelpCopy } from "@/components/chat/chatHelpCopy";
 import {
   AVAILABLE_MODELS,
   type ChatAttachment,
@@ -102,7 +104,8 @@ export function MobileChatShell({
   onResponseComplete,
   onFollowupSent,
 }: MobileChatShellProps) {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
+  const helpCopy = chatHelpCopy[lang];
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const drawerPanelRef = useRef<HTMLDivElement | null>(null);
   const drawerCloseButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -377,13 +380,26 @@ export function MobileChatShell({
             {t("chat.quickDifferenceSummary")}
           </button>
           {!isGuestMode && currentChatId !== "private-chat" && (
-            <button
-              type="button"
-              onClick={onComparisonReview}
-              className="h-8 rounded-xl bg-blue-600 px-2 text-[11px] font-black text-white"
-            >
-              {t("chat.aiReviewButton")}
-            </button>
+            <div className="flex min-w-0 items-center gap-0.5">
+              <button
+                type="button"
+                onClick={onComparisonReview}
+                className="h-8 min-w-0 flex-1 rounded-xl bg-blue-600 px-2 text-[11px] font-black text-white"
+              >
+                {t("chat.aiReviewButton")}
+              </button>
+              <FeatureHelpPopover
+                title={helpCopy.aiReviewTitle}
+                description={helpCopy.aiReviewDescription}
+                buttonLabel={helpCopy.helpAboutAiReview}
+                learnMoreLabel={helpCopy.learnMore}
+                topic="ai_review"
+                href="/support/help-centre/chat-workspace#ai-review"
+                mobile
+                align="right"
+                testId="ai-review-help-mobile"
+              />
+            </div>
           )}
         </div>
       )}

@@ -179,8 +179,16 @@ export type AuthenticatedQaState = {
 
 export async function mockAuthenticatedApi(
   page: Page,
-  options: { selectedModels?: string[] } = {}
+  options: { selectedModels?: string[]; showSidebarTour?: boolean } = {}
 ): Promise<AuthenticatedQaState> {
+  await page.addInitScript((showSidebarTour) => {
+    if (showSidebarTour) {
+      localStorage.removeItem("tomverse_sidebar_tour_v1");
+      return;
+    }
+    localStorage.setItem("tomverse_sidebar_tour_v1", "completed");
+  }, options.showSidebarTour === true);
+
   await page.context().addCookies([
     {
       name: "__tomverse_e2e_auth",

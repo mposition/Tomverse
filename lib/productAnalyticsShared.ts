@@ -40,6 +40,12 @@ export const PRODUCT_ANALYTICS_EVENT_NAMES = [
   "recommended_model_changed",
   "advanced_model_suggested",
   "advanced_model_selected",
+  "help_opened",
+  "help_article_viewed",
+  "ui_help_opened",
+  "sidebar_tour_started",
+  "sidebar_tour_completed",
+  "sidebar_tour_skipped",
 ] as const;
 
 export type ProductAnalyticsEventName =
@@ -124,6 +130,23 @@ export const analyticsPropertiesSchema = z
     review_mode: z.enum(["balanced", "evidence", "action"]).optional(),
     cached: z.boolean().optional(),
     usage_credits: z.number().int().min(0).max(100).optional(),
+    help_source: z
+      .enum(["sidebar_header", "help_centre", "workspace_guide"])
+      .optional(),
+    help_topic: z
+      .enum([
+        "workspace",
+        "project",
+        "label",
+        "labels",
+        "locked",
+        "shared",
+        "private",
+        "ai_review",
+        "credits",
+      ])
+      .optional(),
+    help_article_id: z.enum(["chat_workspace"]).optional(),
   })
   .strict()
   .superRefine((properties, context) => {

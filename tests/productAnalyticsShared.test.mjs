@@ -62,8 +62,77 @@ test("go-live analytics event names remain complete", () => {
     "recommended_model_changed",
     "advanced_model_suggested",
     "advanced_model_selected",
+    "help_opened",
+    "help_article_viewed",
+    "ui_help_opened",
+    "sidebar_tour_started",
+    "sidebar_tour_completed",
+    "sidebar_tour_skipped",
   ]) {
     assert.ok(PRODUCT_ANALYTICS_EVENT_NAMES.includes(eventName));
+  }
+});
+
+test("help analytics accepts only bounded navigation metadata", () => {
+  const opened = analyticsClientEventSchema.parse({
+    ...safeEvent,
+    event_name: "help_opened",
+    properties: {
+      help_source: "sidebar_header",
+      help_topic: "workspace",
+    },
+  });
+  const article = analyticsClientEventSchema.parse({
+    ...safeEvent,
+    event_name: "help_article_viewed",
+    properties: {
+      help_source: "help_centre",
+      help_topic: "workspace",
+      help_article_id: "chat_workspace",
+    },
+  });
+
+  assert.equal(opened.properties.help_source, "sidebar_header");
+  assert.equal(article.properties.help_article_id, "chat_workspace");
+  assert.equal(
+    analyticsClientEventSchema.safeParse({
+      ...safeEvent,
+      event_name: "help_opened",
+      properties: { help_topic: "user_prompt" },
+    }).success,
+    false
+  );
+});
+
+test("contextual UI help and sidebar tour events stay content-free", () => {
+  for (const helpTopic of [
+    "project",
+    "label",
+    "locked",
+    "shared",
+    "private",
+    "ai_review",
+    "credits",
+  ]) {
+    const parsed = analyticsClientEventSchema.parse({
+      ...safeEvent,
+      event_name: "ui_help_opened",
+      properties: { help_topic: helpTopic },
+    });
+    assert.equal(parsed.properties.help_topic, helpTopic);
+  }
+
+  for (const eventName of [
+    "sidebar_tour_started",
+    "sidebar_tour_completed",
+    "sidebar_tour_skipped",
+  ]) {
+    const parsed = analyticsClientEventSchema.parse({
+      ...safeEvent,
+      event_name: eventName,
+      properties: {},
+    });
+    assert.equal(parsed.event_name, eventName);
   }
 });
 

@@ -422,6 +422,7 @@ export const infoPages = {
           title: "Getting started",
           body: "Tomverse lets you ask once, compare answers from multiple AI models, attach useful context, and keep the result organized in one workspace. Start with one model for simple questions or compare up to three models when you want different perspectives.",
           bullets: ["Use Start Chat to open the app.", "Choose models from the model picker before sending.", "Use projects, pins, and search to keep important conversations easy to find."],
+          link: { label: "Open the Chat Workspace Guide", href: "/support/help-centre/chat-workspace" },
         },
         {
           title: "Login and account access",
@@ -464,6 +465,7 @@ export const infoPages = {
           title: "처음 시작하기",
           body: "Tomverse는 한 번 질문하고 여러 AI 모델의 답변을 비교하며, 필요한 파일 맥락을 첨부하고, 유용한 결과를 하나의 워크스페이스에 정리할 수 있도록 돕습니다. 간단한 질문은 한 모델로 시작하고, 다양한 관점이 필요할 때는 최대 세 개 모델을 비교하세요.",
           bullets: ["앱 열기 또는 대화 시작으로 채팅 화면을 엽니다.", "질문을 보내기 전에 모델 선택창에서 원하는 모델을 고릅니다.", "프로젝트, 고정, 검색 기능으로 중요한 대화를 쉽게 다시 찾을 수 있습니다."],
+          link: { label: "Chat Workspace Guide 열기", href: "/support/help-centre/chat-workspace" },
         },
         {
           title: "로그인과 계정 접근",
@@ -506,6 +508,7 @@ export const infoPages = {
           title: "开始使用",
           body: "Tomverse 可让你一次提问、比较多个 AI 模型的答案、附加必要上下文，并把有价值的结果整理在一个工作区中。简单问题可从一个模型开始；需要不同视角时，可比较最多三个模型。",
           bullets: ["使用 Start Chat 打开应用。", "发送问题前先在模型选择器中选择模型。", "使用项目、置顶和搜索功能找回重要对话。"],
+          link: { label: "打开 Chat Workspace Guide", href: "/support/help-centre/chat-workspace" },
         },
         {
           title: "登录和账户访问",
