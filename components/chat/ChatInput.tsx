@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import {
   AVAILABLE_MODELS,
+  PUBLIC_MODELS,
   MAX_SELECTED_MODELS,
   getModelUsageProfile,
   type ChatAttachment,
@@ -62,6 +63,7 @@ const GUEST_QUICK_START_STORAGE_KEY = "tomverse_guest_quick_start_seen_v2";
 const GUEST_QUICK_START_ACTIVE_KEY = "tomverse_guest_quick_start_active_v2";
 const GUEST_QUICK_START_EVENT = "tomverse:guest-quick-start";
 const PROVIDER_DISPLAY_ORDER = ["openai", "google", "anthropic", "deepseek", "mistral"];
+const PUBLIC_MODEL_IDS = new Set(PUBLIC_MODELS.map((model) => model.id));
 const TEXT_FILE_TYPES = new Set([
   "text/plain",
   "text/markdown",
@@ -565,7 +567,7 @@ export function ChatInput({
 
   const modelProviders = useMemo(
     () =>
-      Array.from(new Set(AVAILABLE_MODELS.map((model) => model.provider))).sort(
+      Array.from(new Set(PUBLIC_MODELS.map((model) => model.provider))).sort(
         (a, b) =>
           getProviderSortRank(a) - getProviderSortRank(b) ||
           a.localeCompare(b)
@@ -576,7 +578,7 @@ export function ChatInput({
   const filteredModels = useMemo(() => {
     const normalizedQuery = modelSearchQuery.trim().toLowerCase();
 
-    return AVAILABLE_MODELS.filter((model) => {
+    return PUBLIC_MODELS.filter((model) => {
       const usageCategory = getModelUsageProfile(model).category;
       const matchesQuery =
         !normalizedQuery ||
@@ -644,6 +646,7 @@ export function ChatInput({
           };
           if (
             typeof record.id === "string" &&
+            PUBLIC_MODEL_IDS.has(record.id) &&
             (record.status === "available" ||
               record.status === "limited" ||
               record.status === "unavailable")
@@ -652,7 +655,10 @@ export function ChatInput({
             next[record.id] = {
               status: isUnavailable ? "unavailable" : "available",
               fallbackModelIds: isUnavailable && Array.isArray(record.fallbackModelIds)
-                ? record.fallbackModelIds.filter((id): id is string => typeof id === "string").slice(0, 3)
+                ? record.fallbackModelIds
+                    .filter((id): id is string => typeof id === "string")
+                    .filter((id) => PUBLIC_MODEL_IDS.has(id))
+                    .slice(0, 3)
                 : [],
             };
           }
@@ -1672,8 +1678,8 @@ export function ChatInput({
                           const liveStatus = liveModelStatuses[model.id];
                           const modelStatus = liveStatus?.status || getModelExperienceStatus(model);
                           const fallbackModels = (liveStatus?.fallbackModelIds || [])
-                            .map((id) => AVAILABLE_MODELS.find((item) => item.id === id))
-                            .filter((item): item is (typeof AVAILABLE_MODELS)[number] => Boolean(item))
+                            .map((id) => PUBLIC_MODELS.find((item) => item.id === id))
+                            .filter((item): item is (typeof PUBLIC_MODELS)[number] => Boolean(item))
                             .filter((item) => item.enabled && item.id !== model.id)
                             .slice(0, 2);
                           const currentPlan = isGuestMode

@@ -198,6 +198,11 @@ export function ModelOverridesPanel({ models, overrides }: Props) {
                       <span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${statusClass(status)}`}>
                         {statusOptions.find((option) => option.value === status)?.label || status}
                       </span>
+                      {model.publiclyListed === false ? (
+                        <span className="rounded-full border border-zinc-700 bg-zinc-950 px-2.5 py-1 text-xs font-bold text-zinc-300">
+                          Hidden from users
+                        </span>
+                      ) : null}
                     </div>
                     <p className="mt-1 truncate text-xs text-zinc-500">
                       {model.id} · {model.provider} · {getModelUsageProfile(model).category} · {model.minimumPlan}+ · {dateLabel(current?.updatedAt)} UTC

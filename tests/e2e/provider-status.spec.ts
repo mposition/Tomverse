@@ -56,3 +56,41 @@ test("outage remains visible with a fallback suggestion", async ({ page }) => {
   await expect(banner).toContainText("1 unavailable");
   await expect(banner).toContainText("Claude Haiku 4.5");
 });
+
+test("retired models stay out of the user model catalogue", async ({ page }) => {
+  await prepareGuestPage(page, "en");
+  await page.route("**/api/models/status", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        generatedAt: new Date().toISOString(),
+        models: [
+          {
+            id: "gemini-2-5-pro",
+            provider: "google",
+            status: "unavailable",
+            fallbackModelIds: ["gemini-3-1-pro"],
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.goto("/chat");
+  await expect(page.getByTestId("provider-outage-banner")).toHaveCount(0);
+  const dismissOnboarding = page.getByRole("button", {
+    name: "Start using Tomverse",
+  });
+  if (await dismissOnboarding.isVisible()) {
+    await dismissOnboarding.click();
+  }
+
+  await page.locator('button[aria-controls="chat-input-popover"]').nth(1).click();
+  await expect(page.getByText("Gemini 2.5 Pro", { exact: true })).toHaveCount(0);
+  await expect(
+    page
+      .getByRole("dialog", { name: "Select model" })
+      .getByRole("button", { name: /Gemini 3\.1 Pro available/ })
+  ).toBeVisible();
+});

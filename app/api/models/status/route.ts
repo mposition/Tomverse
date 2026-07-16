@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import { AVAILABLE_MODELS, getModel } from "@/lib/models";
+import { PUBLIC_MODELS, getModel } from "@/lib/models";
 import { getModelOverrideMap, resolveModelOverrideStatus } from "@/lib/modelOverrides";
 import { getProviderHealthDashboard } from "@/lib/providerMonitoring";
 import { getTrustedClientIp } from "@/lib/clientIp";
@@ -27,7 +27,7 @@ const isTransientStatusDbError = (error: unknown) => {
 
 const fallbackModelStatus = () => ({
   generatedAt: new Date().toISOString(),
-  models: AVAILABLE_MODELS.map((model) => ({
+  models: PUBLIC_MODELS.map((model) => ({
     id: model.id,
     provider: model.provider,
     status:
@@ -78,7 +78,8 @@ export async function GET(req: Request) {
       )
     );
 
-    const models = AVAILABLE_MODELS.map((model) => {
+    const publicModelIds = new Set(PUBLIC_MODELS.map((model) => model.id));
+    const models = PUBLIC_MODELS.map((model) => {
       const replacementModelId = getModel(model.id)?.replacementModelId;
       const provider = providerStatus.get(model.provider);
       const override = overrideMap.get(model.id);
@@ -105,7 +106,7 @@ export async function GET(req: Request) {
                     : []),
                   ...(provider?.fallback.recommendedModelIds || []),
                 ])
-              )
+              ).filter((modelId) => publicModelIds.has(modelId))
             : [],
       };
     });

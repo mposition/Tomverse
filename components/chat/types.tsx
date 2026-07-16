@@ -34,6 +34,7 @@ export const MAX_SELECTED_MODELS = 3;
 export {
     AVAILABLE_MODELS,
     ENABLED_MODELS,
+    PUBLIC_MODELS,
     getEnabledModel,
     getModel,
     getModelUsageProfile,
