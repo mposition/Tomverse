@@ -141,7 +141,7 @@ const emailCopy = {
           <strong>Your Tomverse AI membership has been moved back to Free.</strong>
         </div>
         ${adminNote ? `<p><strong>Note from Tomverse:</strong> ${adminNote}</p>` : ""}
-        <p>If a payment refund is applicable, processing time may depend on Stripe, your card issuer, PayPal, Apple Pay, or Google Pay.</p>
+        <p>If a payment refund is applicable, processing time may depend on Stripe, your card issuer, Apple Pay, or Google Pay.</p>
         <p style="color:#6b7280;">Request ID: ${requestId}</p>
       `,
     },
@@ -223,7 +223,7 @@ const emailCopy = {
           <strong>Tomverse AI 멤버십이 Free 플랜으로 변경되었습니다.</strong>
         </div>
         ${adminNote ? `<p><strong>Tomverse 메모:</strong> ${adminNote}</p>` : ""}
-        <p>환불이 적용되는 경우, 처리 시간은 Stripe, 카드사, PayPal, Apple Pay 또는 Google Pay 정책에 따라 달라질 수 있습니다.</p>
+        <p>환불이 적용되는 경우, 처리 시간은 Stripe, 카드사, Apple Pay 또는 Google Pay 정책에 따라 달라질 수 있습니다.</p>
         <p style="color:#6b7280;">요청 ID: ${requestId}</p>
       `,
     },
@@ -305,7 +305,7 @@ const emailCopy = {
           <strong>您的 Tomverse AI 会员资格已切换回 Free。</strong>
         </div>
         ${adminNote ? `<p><strong>Tomverse 备注：</strong> ${adminNote}</p>` : ""}
-        <p>如适用退款，处理时间可能取决于 Stripe、发卡行、PayPal、Apple Pay 或 Google Pay。</p>
+        <p>如适用退款，处理时间可能取决于 Stripe、发卡行、Apple Pay 或 Google Pay。</p>
         <p style="color:#6b7280;">请求 ID：${requestId}</p>
       `,
     },
@@ -387,7 +387,7 @@ const emailCopy = {
           <strong>Votre abonnement Tomverse AI est repassé au plan Free.</strong>
         </div>
         ${adminNote ? `<p><strong>Note de Tomverse :</strong> ${adminNote}</p>` : ""}
-        <p>Si un remboursement est applicable, le délai de traitement peut dépendre de Stripe, de votre banque, de PayPal, Apple Pay ou Google Pay.</p>
+        <p>Si un remboursement est applicable, le délai de traitement peut dépendre de Stripe, de votre banque, d’Apple Pay ou de Google Pay.</p>
         <p style="color:#6b7280;">ID de demande : ${requestId}</p>
       `,
     },
@@ -469,7 +469,7 @@ const emailCopy = {
           <strong>Ihre Tomverse AI Mitgliedschaft wurde auf Free zurückgesetzt.</strong>
         </div>
         ${adminNote ? `<p><strong>Hinweis von Tomverse:</strong> ${adminNote}</p>` : ""}
-        <p>Falls eine Rückerstattung gilt, kann die Bearbeitungszeit von Stripe, Ihrer Bank, PayPal, Apple Pay oder Google Pay abhängen.</p>
+        <p>Falls eine Rückerstattung gilt, kann die Bearbeitungszeit von Stripe, Ihrer Bank, Apple Pay oder Google Pay abhängen.</p>
         <p style="color:#6b7280;">Anfrage-ID: ${requestId}</p>
       `,
     },
@@ -551,7 +551,7 @@ const emailCopy = {
           <strong>Tu membresía de Tomverse AI volvió al plan Free.</strong>
         </div>
         ${adminNote ? `<p><strong>Nota de Tomverse:</strong> ${adminNote}</p>` : ""}
-        <p>Si corresponde un reembolso, el tiempo de procesamiento puede depender de Stripe, tu banco, PayPal, Apple Pay o Google Pay.</p>
+        <p>Si corresponde un reembolso, el tiempo de procesamiento puede depender de Stripe, tu banco, Apple Pay o Google Pay.</p>
         <p style="color:#6b7280;">ID de solicitud: ${requestId}</p>
       `,
     },
@@ -633,7 +633,7 @@ const emailCopy = {
           <strong>A sua subscrição Tomverse AI voltou para o plano Free.</strong>
         </div>
         ${adminNote ? `<p><strong>Nota da Tomverse:</strong> ${adminNote}</p>` : ""}
-        <p>Se houver reembolso aplicável, o tempo de processamento pode depender da Stripe, do emissor do cartão, PayPal, Apple Pay ou Google Pay.</p>
+        <p>Se houver reembolso aplicável, o tempo de processamento pode depender da Stripe, do emissor do cartão, Apple Pay ou Google Pay.</p>
         <p style="color:#6b7280;">ID do pedido: ${requestId}</p>
       `,
     },
