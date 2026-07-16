@@ -174,6 +174,7 @@ export type AuthenticatedQaState = {
   locked: boolean;
   shared: boolean;
   title: string;
+  theme: "dark" | "light" | "system";
   userSettingsReads: number;
 };
 
@@ -203,6 +204,7 @@ export async function mockAuthenticatedApi(
     locked: false,
     shared: false,
     title: "QA conversation",
+    theme: "dark",
     userSettingsReads: 0,
   };
 
@@ -231,10 +233,34 @@ export async function mockAuthenticatedApi(
     )
   );
 
-  await page.route("**/api/user/settings", (route) => {
+  await page.route("**/api/user/settings", async (route) => {
+    if (route.request().method() === "POST") {
+      const body = route.request().postDataJSON() as {
+        theme?: unknown;
+        language?: unknown;
+        defaultModel?: unknown;
+      };
+      if (body.theme === "dark" || body.theme === "light" || body.theme === "system") {
+        state.theme = body.theme;
+      }
+      return route.fulfill(
+        json({
+          success: true,
+          settings: {
+            theme: state.theme,
+            language: typeof body.language === "string" ? body.language : "ko",
+            defaultModel:
+              typeof body.defaultModel === "string"
+                ? body.defaultModel
+                : "gpt-5-4-mini",
+          },
+        })
+      );
+    }
+
     state.userSettingsReads += 1;
     return route.fulfill(
-      json({ theme: "dark", language: "ko", defaultModel: "gpt-5-4-mini" })
+      json({ theme: state.theme, language: "ko", defaultModel: "gpt-5-4-mini" })
     );
   });
 

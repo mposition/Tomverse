@@ -343,6 +343,7 @@ export const de = {
         setting: "Einstellungen",
         darkTheme: "Dunkles Design",
         lightTheme: "Helles Design",
+        systemTheme: "Systemeinstellung verwenden",
         cancel: "Abbrechen",
         ok: "OK",
         login: "Anmelden / Registrieren",

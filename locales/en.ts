@@ -449,6 +449,7 @@ export const en = {
         setting: "Settings",
         darkTheme: "Dark Theme",
         lightTheme: "Light Theme",
+        systemTheme: "Use System Setting",
         cancel: "Cancel",
         ok: "OK",
         login: "Login / Sign Up",

@@ -343,6 +343,7 @@ export const fr = {
         setting: "Paramètres",
         darkTheme: "Thème sombre",
         lightTheme: "Thème clair",
+        systemTheme: "Utiliser le réglage système",
         cancel: "Annuler",
         ok: "OK",
         login: "Connexion / Inscription",

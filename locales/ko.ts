@@ -449,6 +449,7 @@ export const ko = {
         setting: "설정",
         darkTheme: "어두운 테마",
         lightTheme: "밝은 테마",
+        systemTheme: "시스템 설정 사용",
         cancel: "취소",
         ok: "확인",
         login: "로그인 / 회원가입",

@@ -343,6 +343,7 @@ export const pt = {
         setting: "Configurações",
         darkTheme: "Tema escuro",
         lightTheme: "Tema claro",
+        systemTheme: "Usar configuração do sistema",
         cancel: "Cancelar",
         ok: "OK",
         login: "Entrar / Criar conta",
