@@ -10,6 +10,7 @@ import {
 import {
     Bot,
     Check,
+    ChevronDown,
     CreditCard,
     Crown,
     Database,
@@ -51,9 +52,12 @@ import {
 export function AuthButton() {
   const { data: session, status } = useSession();
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
     const [activeSettingsTab, setActiveSettingsTab] = useState<"account" | "preferences" | "data" | "plan">("account");
     const settingsButtonRef = useRef<HTMLButtonElement | null>(null);
     const settingsDialogRef = useRef<HTMLDivElement | null>(null);
+    const accountMenuRef = useRef<HTMLDivElement | null>(null);
+    const accountMenuButtonRef = useRef<HTMLButtonElement | null>(null);
 
     const { t, lang: globalLang, setLang: setGlobalLang } = useLanguage();
     const chatCallbackUrl = withChatLanguage("/chat", globalLang);
@@ -106,8 +110,17 @@ export function AuthButton() {
 
     const closeSettingsModal = useCallback(() => {
         setIsModalOpen(false);
-        requestAnimationFrame(() => settingsButtonRef.current?.focus());
+        requestAnimationFrame(() => accountMenuButtonRef.current?.focus());
     }, []);
+
+    const openSettingsTab = useCallback(
+        (tab: "account" | "preferences" | "data" | "plan") => {
+            setIsAccountMenuOpen(false);
+            setActiveSettingsTab(tab);
+            setIsModalOpen(true);
+        },
+        []
+    );
 
     const getSettingsFocusableElements = useCallback(() => {
         const dialog = settingsDialogRef.current;
@@ -214,6 +227,33 @@ export function AuthButton() {
         document.addEventListener("keydown", handleKeyDown, true);
         return () => document.removeEventListener("keydown", handleKeyDown, true);
     }, [closeSettingsModal, getSettingsFocusableElements, isModalOpen]);
+
+    useEffect(() => {
+        if (!isAccountMenuOpen) return;
+
+        const handlePointerDown = (event: PointerEvent) => {
+            const target = event.target as Node;
+            if (
+                !accountMenuRef.current?.contains(target) &&
+                !accountMenuButtonRef.current?.contains(target)
+            ) {
+                setIsAccountMenuOpen(false);
+            }
+        };
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key !== "Escape") return;
+            event.preventDefault();
+            setIsAccountMenuOpen(false);
+            accountMenuButtonRef.current?.focus();
+        };
+
+        document.addEventListener("pointerdown", handlePointerDown);
+        document.addEventListener("keydown", handleKeyDown);
+        return () => {
+            document.removeEventListener("pointerdown", handlePointerDown);
+            document.removeEventListener("keydown", handleKeyDown);
+        };
+    }, [isAccountMenuOpen]);
 
     const handleSaveSettings = async () => {
         try {
@@ -366,27 +406,18 @@ export function AuthButton() {
 
   if (session && session.user) {
     return (
-      <div className="relative flex w-full flex-col gap-3 rounded-3xl border border-zinc-200 bg-white p-3 shadow-sm ring-1 ring-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:ring-zinc-900">
-        {mobileUpgradePlan && accountUsage ? (
-          <UpgradeCtaLink
-            targetPlan={mobileUpgradePlan}
-            currentPlan={accountUsage.plan}
-            trigger="account"
-            ctaLocation="account_plan_badge"
-            planCreditsRemaining={accountUsage.balances.planRemainingCredits}
-            addonCreditsRemaining={accountUsage.balances.purchasedRemainingCredits}
-            testId="account-plan-upgrade-badge"
-            className={`absolute right-3 top-3 rounded-full px-2.5 py-1 text-xs font-black transition hover:ring-2 hover:ring-blue-400/40 ${accountPlan === "Free" ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-blue-500/10 text-blue-600 dark:text-blue-300"}`}
+      <div className="relative w-full" data-testid="account-card-compact">
+        <div className="flex min-h-12 items-center gap-1.5 rounded-2xl border border-zinc-200 bg-white p-1.5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+          <button
+            ref={accountMenuButtonRef}
+            type="button"
+            data-testid="account-menu-trigger"
+            aria-expanded={isAccountMenuOpen}
+            aria-controls="account-quick-menu"
+            onClick={() => setIsAccountMenuOpen((current) => !current)}
+            className="flex min-w-0 flex-1 items-center gap-2 rounded-xl px-1.5 py-1 text-left transition hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:hover:bg-zinc-900"
           >
-            {t(`modelTiers.${accountPlan!.toLowerCase()}`)} · {t("upgrade.upgradeShort")}
-          </UpgradeCtaLink>
-        ) : (
-          <span className={`absolute right-3 top-3 rounded-full px-2.5 py-1 text-xs font-black ${accountPlan === "Max" ? "bg-purple-500/10 text-purple-600 dark:text-purple-300" : "bg-zinc-100 text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400"}`}>
-            {accountPlan ? t(`modelTiers.${accountPlan.toLowerCase()}`) : t("auth.loading")}
-          </span>
-        )}
-        <div className="flex min-w-0 items-center gap-3 pr-12">
-          <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-teal-600 text-lg font-black text-white ring-1 ring-teal-400/50 dark:bg-teal-700 dark:ring-teal-400/40">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-teal-600 text-sm font-black text-white ring-1 ring-teal-400/50 dark:bg-teal-700 dark:ring-teal-400/40">
             {session.user.image ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -395,63 +426,161 @@ export function AuthButton() {
                 className="h-full w-full object-cover"
               />
             ) : (
-              (session.user.email?.[0] || "T").toUpperCase()
+              (session.user.name?.[0] || session.user.email?.[0] || "T").toUpperCase()
             )}
           </span>
-          <div className="flex flex-col min-w-0 flex-1">
-            <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400">{t("auth.signedAs")}</span>
-            <span className="truncate text-sm font-black text-zinc-800 dark:text-zinc-100">
-              {session.user.email}
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-xs font-black text-zinc-800 dark:text-zinc-100">
+              {session.user.name || session.user.email || "Tomverse"}
             </span>
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-            <button
-                ref={settingsButtonRef}
-                type="button"
-                onClick={() => setIsModalOpen(true)}
-                className="flex h-10 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-zinc-200 bg-zinc-50 text-xs font-black text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white"
-            >
-                <Settings className="h-3.5 w-3.5" />
-                {t("auth.setting")}
-            </button>
-            <button
-                type="button"
-                onClick={() => signOut()}
-                className="flex h-10 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-zinc-200 bg-zinc-50 text-xs font-black text-zinc-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:bg-red-950/30 dark:hover:text-red-300"
-            >
-                <LogOut className="h-3.5 w-3.5" />
-                {t("auth.singedOut")}
-            </button>
-        </div>
-        {mobileUpgradePlan && accountUsage ? (
-          <UpgradeCtaLink
-            targetPlan={mobileUpgradePlan}
-            currentPlan={accountUsage.plan}
-            trigger="account"
-            ctaLocation="account_card_plan"
-            planCreditsRemaining={accountUsage.balances.planRemainingCredits}
-            addonCreditsRemaining={accountUsage.balances.purchasedRemainingCredits}
-            testId="account-plan-view"
-            className="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 text-xs font-black text-blue-700 transition hover:bg-blue-100 dark:border-blue-900/70 dark:bg-blue-950/30 dark:text-blue-200 dark:hover:bg-blue-950/60"
-          >
-            <Crown className="h-3.5 w-3.5" />
-            {mobileUpgradePlan === "Pro"
-              ? t("upgrade.viewProPlan")
-              : t("upgrade.viewMaxPlan")}
-          </UpgradeCtaLink>
-        ) : accountPlan === "Max" ? (
-          <button
-            type="button"
-            onClick={() => {
-              setActiveSettingsTab("plan");
-              setIsModalOpen(true);
-            }}
-            className="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl border border-zinc-200 bg-zinc-50 text-xs font-black text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
-          >
-            <CreditCard className="h-3.5 w-3.5" />
-            {t("upgrade.viewCurrentPlan")}
+            <span className="block truncate text-[10px] font-semibold text-zinc-400">
+              {accountPlan ? t(`modelTiers.${accountPlan.toLowerCase()}`) : t("auth.loading")}
+              {accountUsage
+                ? ` · ${accountUsage.balances.planRemainingCredits.toLocaleString(globalLang)} ${t("usage.left")}`
+                : ""}
+            </span>
+          </span>
+          <ChevronDown
+            className={`h-4 w-4 shrink-0 text-zinc-400 transition-transform ${isAccountMenuOpen ? "rotate-180" : ""}`}
+            aria-hidden="true"
+          />
           </button>
+          {mobileUpgradePlan && accountUsage ? (
+            <UpgradeCtaLink
+              targetPlan={mobileUpgradePlan}
+              currentPlan={accountUsage.plan}
+              trigger="account"
+              ctaLocation="account_plan_badge"
+              planCreditsRemaining={accountUsage.balances.planRemainingCredits}
+              addonCreditsRemaining={accountUsage.balances.purchasedRemainingCredits}
+              testId="account-plan-upgrade-badge"
+              className="inline-flex h-8 shrink-0 items-center rounded-lg bg-blue-600 px-2 text-[10px] font-black text-white transition hover:bg-blue-500"
+            >
+              {t("upgrade.upgradeShort")}
+            </UpgradeCtaLink>
+          ) : (
+            <span className={`shrink-0 rounded-lg px-2 py-1 text-[10px] font-black ${accountPlan === "Max" ? "bg-purple-500/10 text-purple-600 dark:text-purple-300" : "bg-zinc-100 text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400"}`}>
+              {accountPlan ? t(`modelTiers.${accountPlan.toLowerCase()}`) : t("auth.loading")}
+            </span>
+          )}
+        </div>
+
+        {isAccountMenuOpen ? (
+          <>
+            <button
+              type="button"
+              data-testid="account-menu-backdrop"
+              aria-label={t("auth.closeAccountMenu")}
+              onClick={() => setIsAccountMenuOpen(false)}
+              className="fixed inset-0 z-[85] bg-black/45 backdrop-blur-[1px] md:hidden"
+            />
+            <div
+              ref={accountMenuRef}
+              id="account-quick-menu"
+              data-testid="account-menu"
+              role="dialog"
+              aria-label={t("auth.accountMenu")}
+              className="fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[90] max-h-[calc(100dvh-1.5rem)] overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-3 shadow-2xl overscroll-contain dark:border-zinc-700 dark:bg-zinc-950 md:absolute md:inset-x-0 md:bottom-[calc(100%+0.5rem)]"
+            >
+              <div className="flex min-w-0 items-center gap-2 border-b border-zinc-200 pb-3 dark:border-zinc-800">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-teal-600 text-sm font-black text-white">
+                  {(session.user.name?.[0] || session.user.email?.[0] || "T").toUpperCase()}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-black text-zinc-900 dark:text-zinc-100">
+                    {session.user.name || session.user.email || "Tomverse"}
+                  </span>
+                  {session.user.name && session.user.email ? (
+                    <span className="block truncate text-[11px] text-zinc-400">{session.user.email}</span>
+                  ) : null}
+                </span>
+                <span className="rounded-full bg-zinc-100 px-2 py-1 text-[10px] font-black text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
+                  {accountPlan ? t(`modelTiers.${accountPlan.toLowerCase()}`) : t("auth.loading")}
+                </span>
+              </div>
+
+              {accountUsage ? (
+                <div className="my-3 grid grid-cols-2 gap-2">
+                  <div className="rounded-xl bg-zinc-100 p-2.5 dark:bg-zinc-900">
+                    <span className="block text-[10px] font-bold text-zinc-500 dark:text-zinc-400">
+                      {t("auth.planCreditsRemaining")}
+                    </span>
+                    <strong className="mt-1 block text-sm text-zinc-900 dark:text-zinc-100">
+                      {accountUsage.balances.planRemainingCredits.toLocaleString(globalLang)}
+                    </strong>
+                  </div>
+                  <div className="rounded-xl bg-emerald-50 p-2.5 dark:bg-emerald-950/30">
+                    <span className="block text-[10px] font-bold text-emerald-700 dark:text-emerald-300">
+                      {t("auth.purchasedCreditsRemaining")}
+                    </span>
+                    <strong className="mt-1 block text-sm text-zinc-900 dark:text-zinc-100">
+                      {accountUsage.balances.purchasedRemainingCredits.toLocaleString(globalLang)}
+                    </strong>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="space-y-1">
+                <button
+                  type="button"
+                  onClick={() => openSettingsTab("plan")}
+                  className="flex min-h-11 w-full items-center gap-2 rounded-xl px-3 text-sm font-bold text-zinc-700 transition hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-900"
+                >
+                  <CreditCard className="h-4 w-4 text-blue-500" />
+                  {t("auth.usageAndPlan")}
+                </button>
+                <button
+                  ref={settingsButtonRef}
+                  type="button"
+                  onClick={() => openSettingsTab("account")}
+                  className="flex min-h-11 w-full items-center gap-2 rounded-xl px-3 text-sm font-bold text-zinc-700 transition hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-900"
+                >
+                  <Settings className="h-4 w-4 text-zinc-500" />
+                  {t("auth.setting")}
+                </button>
+                {mobileUpgradePlan && accountUsage ? (
+                  <UpgradeCtaLink
+                    targetPlan={mobileUpgradePlan}
+                    currentPlan={accountUsage.plan}
+                    trigger="account"
+                    ctaLocation="account_card_plan"
+                    planCreditsRemaining={accountUsage.balances.planRemainingCredits}
+                    addonCreditsRemaining={accountUsage.balances.purchasedRemainingCredits}
+                    testId="account-plan-view"
+                    onClick={() => setIsAccountMenuOpen(false)}
+                    className="flex min-h-11 w-full items-center gap-2 rounded-xl bg-blue-600 px-3 text-sm font-black text-white transition hover:bg-blue-500"
+                  >
+                    <Crown className="h-4 w-4" />
+                    {mobileUpgradePlan === "Pro"
+                      ? t("upgrade.viewProPlan")
+                      : t("upgrade.viewMaxPlan")}
+                  </UpgradeCtaLink>
+                ) : accountPlan === "Max" ? (
+                  <button
+                    type="button"
+                    data-testid="account-plan-view"
+                    onClick={() => openSettingsTab("plan")}
+                    className="flex min-h-11 w-full items-center gap-2 rounded-xl px-3 text-sm font-bold text-zinc-700 transition hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-900"
+                  >
+                    <CreditCard className="h-4 w-4 text-purple-500" />
+                    {t("upgrade.viewCurrentPlan")}
+                  </button>
+                ) : null}
+                <div className="my-1 border-t border-zinc-200 dark:border-zinc-800" />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsAccountMenuOpen(false);
+                    void signOut();
+                  }}
+                  className="flex min-h-11 w-full items-center gap-2 rounded-xl px-3 text-sm font-bold text-zinc-600 transition hover:bg-red-50 hover:text-red-600 dark:text-zinc-300 dark:hover:bg-red-950/30 dark:hover:text-red-300"
+                >
+                  <LogOut className="h-4 w-4" />
+                  {t("auth.singedOut")}
+                </button>
+              </div>
+            </div>
+          </>
         ) : null}
 
             {isModalOpen && (
