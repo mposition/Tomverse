@@ -8,7 +8,7 @@ import {
   apiSecurityResponse,
   consumeApiRateLimit,
 } from "@/lib/apiSecurity";
-import { getAdminUsersPage, getAdminUserStats } from "@/lib/adminUsers";
+import { getAdminUsersPage, getFreshAdminUserStats } from "@/lib/adminUsers";
 import { normalizeAdminUserSegment } from "@/lib/adminUserTypes";
 
 export async function GET(req: Request) {
@@ -35,7 +35,7 @@ export async function GET(req: Request) {
 
     const [page, stats] = await Promise.all([
       getAdminUsersPage({ query, cursor, segment, take }),
-      includeStats ? getAdminUserStats() : Promise.resolve(undefined),
+      includeStats ? getFreshAdminUserStats() : Promise.resolve(undefined),
     ]);
 
     return NextResponse.json(

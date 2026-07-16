@@ -48,6 +48,14 @@ model User {
   conversations          Conversation[]
   comparisonReviews      ComparisonReview[]
   productAnalyticsEvents ProductAnalyticsEvent[]
+
+  @@index([plan, id])
+  @@index([createdAt])
+  @@index([subscriptionStatus, subscriptionCurrentPeriodEnd])
+  @@index([subscriptionCancelAtPeriodEnd, subscriptionStatus])
+  @@index([billingRiskStatus])
+  @@index([creditDebtCredits])
+  @@index([creditDebtCostMicroUsd])
 }
 
 model UserSettings {

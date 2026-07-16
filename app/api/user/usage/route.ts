@@ -144,6 +144,7 @@ export async function GET(req: Request) {
     const nextMonthStart = new Date(
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)
     );
+    const nextDayStart = new Date(dayStart.getTime() + 86_400_000);
 
     return NextResponse.json({
       plan,
@@ -164,6 +165,11 @@ export async function GET(req: Request) {
         costMonth: count("cost-month"),
       },
       balances: {
+        dailyRemainingCredits:
+          limits.creditsDay > 0
+            ? Math.max(0, limits.creditsDay - count("day"))
+            : null,
+        dailyResetsAt: nextDayStart.toISOString(),
         planRemainingCredits: Math.max(
           0,
           limits.creditsMonth - count("month") - (user?.creditDebtCredits || 0)

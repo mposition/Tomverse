@@ -87,6 +87,22 @@ export function AuthButton() {
     });
     const accountUsage = useUserUsage(Boolean(session?.user));
     const accountPlan = accountUsage?.plan || null;
+    const dailyCreditsLimit = accountUsage?.limits.creditsDay || 0;
+    const hasDailyCreditGuardrail = dailyCreditsLimit > 0;
+    const dailyCreditsRemaining = hasDailyCreditGuardrail
+        ? accountUsage?.balances.dailyRemainingCredits ?? Math.max(
+            0,
+            dailyCreditsLimit - (accountUsage?.usage.creditsDay || 0)
+        )
+        : null;
+    const dailyCreditsResetLabel = accountUsage?.balances.dailyResetsAt
+        ? new Intl.DateTimeFormat(globalLang, {
+            month: "short",
+            day: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
+        }).format(new Date(accountUsage.balances.dailyResetsAt))
+        : null;
     const planPeriodEnd = accountUsage?.subscription?.currentPeriodEnd;
     const planPeriodEndLabel = planPeriodEnd
         ? new Intl.DateTimeFormat(globalLang, {
@@ -505,6 +521,28 @@ export function AuthButton() {
 
               {accountUsage ? (
                 <div className="my-3 grid grid-cols-2 gap-2">
+                  <div
+                    className="col-span-2 rounded-xl bg-blue-50 p-2.5 dark:bg-blue-950/30"
+                    data-testid="account-daily-credits"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <span className="block text-[10px] font-bold text-blue-700 dark:text-blue-300">
+                        {t("auth.dailyCreditsRemaining")}
+                      </span>
+                      {hasDailyCreditGuardrail && dailyCreditsResetLabel ? (
+                        <span className="text-right text-[9px] leading-4 text-blue-500 dark:text-blue-400">
+                          {formatCopy("auth.dailyCreditsResetAt", {
+                            time: dailyCreditsResetLabel,
+                          })}
+                        </span>
+                      ) : null}
+                    </div>
+                    <strong className="mt-1 block text-sm text-zinc-900 dark:text-zinc-100">
+                      {hasDailyCreditGuardrail && dailyCreditsRemaining !== null
+                        ? `${dailyCreditsRemaining.toLocaleString(globalLang)} / ${dailyCreditsLimit.toLocaleString(globalLang)}`
+                        : t("auth.dailyCreditsUnlimitedStandard")}
+                    </strong>
+                  </div>
                   <div className="rounded-xl bg-zinc-100 p-2.5 dark:bg-zinc-900">
                     <span className="block text-[10px] font-bold text-zinc-500 dark:text-zinc-400">
                       {t("auth.planCreditsRemaining")}

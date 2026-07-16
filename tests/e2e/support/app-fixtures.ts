@@ -305,6 +305,8 @@ export async function mockAuthenticatedApi(
           costMonth: 0,
         },
         balances: {
+          dailyRemainingCredits: 30,
+          dailyResetsAt: "2099-01-02T00:00:00.000Z",
           planRemainingCredits: 300,
           planResetsAt: "2099-02-01T00:00:00.000Z",
           purchasedRemainingCredits: 0,

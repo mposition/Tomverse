@@ -1374,7 +1374,9 @@ const checks = [
       source.includes("isAdminSession(session)") &&
       source.includes('"admin-users-export"') &&
       source.includes('"Cache-Control": "private, no-store, max-age=0"') &&
-      source.includes("getAllAdminUsersForExport"),
+      source.includes("getAdminUsersExportBatch") &&
+      source.includes("new ReadableStream") &&
+      source.includes('"X-Accel-Buffering": "no"'),
   },
 ];
 

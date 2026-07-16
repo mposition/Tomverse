@@ -6,29 +6,36 @@ const escapeSpreadsheetCell = (value: unknown) => {
   return `"${text.replace(/"/g, '""')}"`;
 };
 
-export const adminUsersCsv = (users: AdminUserRow[]) => {
-  const rows: unknown[][] = [
-    [
-      "id",
-      "email",
-      "name",
-      "createdAt",
-      "accessPlan",
-      "subscriptionStatus",
-      "subscriptionPeriodEnd",
-      "cancelAtPeriodEnd",
-      "stripeCustomerId",
-      "stripeSubscriptionId",
-      "billingRiskStatus",
-      "creditDebtCredits",
-      "creditDebtCostMicroUsd",
-      "conversations",
-      "linkedAccounts",
-      "refundRequests",
-      "promotionRedemptions",
-      "usageToday",
-    ],
-    ...users.map((user) => [
+export const ADMIN_USERS_CSV_HEADER = [
+  "id",
+  "email",
+  "name",
+  "createdAt",
+  "accessPlan",
+  "subscriptionStatus",
+  "subscriptionPeriodEnd",
+  "cancelAtPeriodEnd",
+  "stripeCustomerId",
+  "stripeSubscriptionId",
+  "billingRiskStatus",
+  "creditDebtCredits",
+  "creditDebtCostMicroUsd",
+  "conversations",
+  "linkedAccounts",
+  "refundRequests",
+  "promotionRedemptions",
+  "usageToday",
+] as const;
+
+const serializeCsvRows = (rows: unknown[][]) =>
+  rows.map((row) => row.map(escapeSpreadsheetCell).join(",")).join("\r\n");
+
+export const adminUsersCsvHeader = () =>
+  `\uFEFF${serializeCsvRows([Array.from(ADMIN_USERS_CSV_HEADER)])}\r\n`;
+
+export const adminUsersCsvRows = (users: AdminUserRow[]) => {
+  if (users.length === 0) return "";
+  const rows = users.map((user) => [
       user.id,
       user.email || "",
       user.name || "",
@@ -47,10 +54,10 @@ export const adminUsersCsv = (users: AdminUserRow[]) => {
       user._count.refundRequests,
       user._count.promotionRedemptions,
       user.usageToday,
-    ]),
-  ];
+    ]);
 
-  return `\uFEFF${rows
-    .map((row) => row.map(escapeSpreadsheetCell).join(","))
-    .join("\r\n")}`;
+  return `${serializeCsvRows(rows)}\r\n`;
 };
+
+export const adminUsersCsv = (users: AdminUserRow[]) =>
+  `${adminUsersCsvHeader()}${adminUsersCsvRows(users)}`.replace(/\r\n$/, "");

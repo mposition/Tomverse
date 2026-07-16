@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { Prisma } from "@prisma/client";
+import { unstable_cache } from "next/cache";
 import { FOUNDING_TESTER_PASS_STATUS, INTERNAL_PASS_FULFILLMENT } from "@/lib/foundingTesterPassCore";
 import { getUserChatUsageKey } from "@/lib/chatSecurity";
 import { prisma } from "@/lib/prisma";
@@ -175,7 +176,7 @@ const getUsageTodayByUserId = async (
   );
 };
 
-export const getAdminUserStats = async (
+const queryAdminUserStats = async (
   now = new Date()
 ): Promise<AdminUserStats> => {
   const sevenDaysAgo = new Date(now.getTime() - 7 * 86_400_000);
@@ -223,6 +224,22 @@ export const getAdminUserStats = async (
   };
 };
 
+const getCachedAdminUserStats = unstable_cache(
+  async () => queryAdminUserStats(new Date()),
+  ["admin-user-stats-v1"],
+  {
+    revalidate: 60,
+    tags: ["admin-user-stats"],
+  }
+);
+
+export const getAdminUserStats = (): Promise<AdminUserStats> =>
+  getCachedAdminUserStats();
+
+export const getFreshAdminUserStats = (
+  now = new Date()
+): Promise<AdminUserStats> => queryAdminUserStats(now);
+
 export const getAdminUsersPage = async ({
   query = "",
   segment = "all",
@@ -257,34 +274,35 @@ export const getAdminUsersPage = async ({
   };
 };
 
-export const getAllAdminUsersForExport = async ({
+export const getAdminUsersExportBatch = async ({
   query = "",
   segment = "all",
+  cursor,
+  take = 500,
   now = new Date(),
 }: {
   query?: string;
   segment?: AdminUserSegment;
+  cursor?: string | null;
+  take?: number;
   now?: Date;
-} = {}): Promise<AdminUserRow[]> => {
-  const users: AdminUserRow[] = [];
-  let cursor: string | null = null;
+} = {}): Promise<AdminUsersPage> => {
+  const batchSize = Math.min(Math.max(Math.trunc(take), 1), 1_000);
+  const records: AdminUserRecord[] = await prisma.user.findMany({
+    where: combineWhere(segment, query.trim(), now),
+    orderBy: { id: "desc" },
+    take: batchSize + 1,
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    select: adminUserListSelect,
+  });
+  const hasMore = records.length > batchSize;
+  const batchRecords = hasMore ? records.slice(0, batchSize) : records;
+  const usageByUserId = await getUsageTodayByUserId(batchRecords, now);
 
-  do {
-    const records: AdminUserRecord[] = await prisma.user.findMany({
-      where: combineWhere(segment, query.trim(), now),
-      orderBy: { id: "desc" },
-      take: 500,
-      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-      select: adminUserListSelect,
-    });
-    const usageByUserId = await getUsageTodayByUserId(records, now);
-    users.push(
-      ...records.map((user) =>
-        serializeAdminUser(user, usageByUserId.get(user.id) || 0)
-      )
-    );
-    cursor = records.length === 500 ? records.at(-1)?.id || null : null;
-  } while (cursor);
-
-  return users;
+  return {
+    users: batchRecords.map((user) =>
+      serializeAdminUser(user, usageByUserId.get(user.id) || 0)
+    ),
+    nextCursor: hasMore ? batchRecords.at(-1)?.id || null : null,
+  };
 };
