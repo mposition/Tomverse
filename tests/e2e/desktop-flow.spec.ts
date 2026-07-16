@@ -56,6 +56,27 @@ test("desktop model selector adds a second free model panel", async ({ page }) =
   await expectNoHorizontalOverflow(page);
 });
 
+test("model names remain readable in the narrow selector", async ({ page }) => {
+  await modelMenuTrigger(page).click();
+  const dialog = page.locator("#chat-input-popover");
+  const longName = dialog
+    .locator('[data-model-id="perplexity/sonar-deep-research"]')
+    .getByTestId("model-option-name");
+
+  await expect(longName).toHaveText("Perplexity Sonar Deep Research");
+  const styles = await longName.evaluate((element) => {
+    const computed = getComputedStyle(element);
+    return {
+      overflow: computed.overflow,
+      textOverflow: computed.textOverflow,
+      whiteSpace: computed.whiteSpace,
+    };
+  });
+  expect(styles.whiteSpace).toBe("normal");
+  expect(styles.textOverflow).not.toBe("ellipsis");
+  expect(styles.overflow).not.toBe("hidden");
+});
+
 test("action and model popovers remain visible and keyboard closable", async ({ page }) => {
   const actions = actionMenuTrigger(page);
   await actions.click();
