@@ -1700,7 +1700,7 @@ export function ChatInput({
                           return (
                             <div
                               key={model.id}
-                              className="flex w-full items-center gap-2 rounded-xl px-2 py-1.5 transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                              className="flex w-full items-start gap-2 rounded-xl px-2 py-1.5 transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
                             >
                               <button
                                 type="button"
@@ -1723,14 +1723,19 @@ export function ChatInput({
                                   onToggleModel(model.id);
                                 }}
                                 aria-pressed={isSelected}
-                                className="flex min-w-0 flex-1 items-center gap-2 rounded-lg py-1 text-sm disabled:cursor-not-allowed disabled:opacity-45"
+                                className="flex min-w-0 flex-1 items-start gap-2 rounded-lg py-1 text-sm disabled:cursor-not-allowed disabled:opacity-45"
                               >
                                 <ModelLogo model={model} size="md" />
                                 <span className="min-w-0 flex-1 text-left">
-                                  <span className="flex min-w-0 items-center gap-1.5">
-                                    <span className="truncate text-zinc-800 dark:text-zinc-100">{model.name}</span>
+                                  <span className="flex min-w-0 items-start gap-1.5">
                                     <span
-                                      className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                                      data-testid="model-option-name"
+                                      className="min-w-0 whitespace-normal break-words font-semibold leading-5 text-zinc-800 dark:text-zinc-100"
+                                    >
+                                      {model.name}
+                                    </span>
+                                    <span
+                                      className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${
                                         modelStatus === "available"
                                           ? "bg-emerald-500"
                                           : modelStatus === "limited"
@@ -1747,6 +1752,9 @@ export function ChatInput({
                                     {statusReason}
                                   </span>
                                   <span className="mt-1 flex max-w-full flex-wrap gap-1">
+                                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${usageProfile.category === "Standard" ? "bg-emerald-500/10 text-emerald-500" : usageProfile.category === "Advanced" ? "bg-blue-500/10 text-blue-500" : usageProfile.category === "Premium" ? "bg-purple-500/10 text-purple-500" : usageProfile.category === "Reasoning" ? "bg-amber-500/10 text-amber-500" : "bg-cyan-500/10 text-cyan-500"}`}>
+                                      {t(`modelUsageClasses.${usageProfile.category.toLowerCase()}`)} · {usageProfile.credits}
+                                    </span>
                                     {modelTags.map((tag) => (
                                       <span
                                         key={tag}
@@ -1771,10 +1779,7 @@ export function ChatInput({
                                     </span>
                                   )}
                                 </span>
-                                <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${usageProfile.category === "Standard" ? "bg-emerald-500/10 text-emerald-500" : usageProfile.category === "Advanced" ? "bg-blue-500/10 text-blue-500" : usageProfile.category === "Premium" ? "bg-purple-500/10 text-purple-500" : usageProfile.category === "Reasoning" ? "bg-amber-500/10 text-amber-500" : "bg-cyan-500/10 text-cyan-500"}`}>
-                                  {t(`modelUsageClasses.${usageProfile.category.toLowerCase()}`)} · {usageProfile.credits}
-                                </span>
-                                <span className={`h-4 w-8 rounded-full p-0.5 transition-colors ${isSelected ? "bg-blue-500" : "bg-zinc-300 dark:bg-zinc-700"}`}>
+                                <span className={`mt-0.5 h-4 w-8 shrink-0 rounded-full p-0.5 transition-colors ${isSelected ? "bg-blue-500" : "bg-zinc-300 dark:bg-zinc-700"}`}>
                                   <span className={`block h-3 w-3 rounded-full bg-white transition-transform ${isSelected ? "translate-x-4" : ""}`} />
                                 </span>
                               </button>
