@@ -40,6 +40,11 @@ import { UpgradeInterestButton } from "@/components/marketing/UpgradeInterestBut
 import { withChatLanguage } from "@/lib/localizedCallbackUrl";
 import { openModelFinder } from "@/lib/modelFinderEvents";
 import { CreditPackPurchaseButton } from "@/components/billing/CreditPackPurchaseButton";
+import {
+    isThemePreference,
+    storeAndApplyThemePreference,
+    type ThemePreference,
+} from "@/lib/theme";
 
 export function AuthButton() {
   const { data: session, status } = useSession();
@@ -56,7 +61,7 @@ export function AuthButton() {
             t(key)
         );
 
-    const [theme, setTheme] = useState<"dark" | "light">(APP_DEFAULTS.defaultTheme);
+    const [theme, setTheme] = useState<ThemePreference>(APP_DEFAULTS.defaultTheme);
     const [language, setLanguage] = useState<Language>(APP_DEFAULTS.defaultLanguage);
     const [defaultModel, setDefaultModel] = useState<string>(APP_DEFAULTS.defaultModelId);
     const [isDeletingChats, setIsDeletingChats] = useState(false);
@@ -126,7 +131,11 @@ export function AuthButton() {
                 .then((res) => res.json())
                 .then((data) => {
                     if (!data.error) {
-                        setTheme(data.theme || APP_DEFAULTS.defaultTheme);
+                        setTheme(
+                            isThemePreference(data.theme)
+                                ? data.theme
+                                : APP_DEFAULTS.defaultTheme
+                        );
                         setLanguage(data.language || globalLang);
                         setDefaultModel(data.defaultModel || APP_DEFAULTS.defaultModelId);
                     }
@@ -218,13 +227,9 @@ export function AuthButton() {
 
                 setGlobalLang(language);
 
-                if (theme === "light") {
-                    document.documentElement.classList.remove("dark");
-                } else {
-                    document.documentElement.classList.add("dark");
-                }
+                storeAndApplyThemePreference(theme);
 
-                notifyUserSettingsUpdated({ defaultModel });
+                notifyUserSettingsUpdated({ defaultModel, theme });
             } else {
                 dispatchAppToast(t("auth.failedMessage"), "error");
             }
@@ -506,11 +511,12 @@ export function AuthButton() {
                                                 <span className="block text-xs font-semibold text-zinc-500">{t("auth.theme")}</span>
                                                 <select
                                                     value={theme}
-                                                    onChange={(e) => setTheme(e.target.value as "dark" | "light")}
+                                                    onChange={(e) => setTheme(e.target.value as ThemePreference)}
                                                     className="mt-1 w-full cursor-pointer bg-transparent text-sm font-semibold text-zinc-900 outline-none dark:text-zinc-100"
                                                 >
                                                     <option className="bg-white text-zinc-900" value="dark">{t("auth.darkTheme")}</option>
                                                     <option className="bg-white text-zinc-900" value="light">{t("auth.lightTheme")}</option>
+                                                    <option className="bg-white text-zinc-900" value="system">{t("auth.systemTheme")}</option>
                                                 </select>
                                             </span>
                                         </label>

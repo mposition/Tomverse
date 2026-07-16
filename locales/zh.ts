@@ -339,6 +339,7 @@ export const zh = {
         setting: "设置",
         darkTheme: "深色主题",
         lightTheme: "浅色主题",
+        systemTheme: "使用系统设置",
         cancel: "取消",
         ok: "确定",
         login: "登录 / 注册",

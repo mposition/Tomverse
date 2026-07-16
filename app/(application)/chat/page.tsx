@@ -40,6 +40,10 @@ import {
   trackProductEvent,
   trackProductEventOnce,
 } from "@/lib/productAnalyticsClient";
+import {
+  isThemePreference,
+  storeAndApplyThemePreference,
+} from "@/lib/theme";
 
 const normalizeStringArray = (value: unknown, fallback: string[]) => {
   let parsed = value;
@@ -661,12 +665,8 @@ export default function Home() {
                         }
                     }
 
-                    if (data && data.theme) {
-                        if (data.theme === "light") {
-                            document.documentElement.classList.remove("dark");
-                        } else {
-                            document.documentElement.classList.add("dark");
-                        }
+                    if (data && isThemePreference(data.theme)) {
+                        storeAndApplyThemePreference(data.theme);
                     }
 
                     if (!isLanguage(urlLanguage) && data && isLanguage(data.language)) {

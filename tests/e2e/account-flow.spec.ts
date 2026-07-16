@@ -82,6 +82,38 @@ test("authenticated user opens settings and starts Private Mode", async ({ page 
   await expect(page.getByText(/Private Mode/).first()).toBeVisible();
 });
 
+test("theme preference changes immediately and follows the system setting", async ({ page }) => {
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  await openSidebarOnMobile(page);
+
+  await page.getByRole("button", { name: /설정|Settings|设置/ }).click();
+  let settingsDialog = page.getByRole("dialog", {
+    name: /사용자 설정|User Settings|用户设置/,
+  });
+  await settingsDialog.getByRole("button", { name: /환경설정|Preferences/ }).click();
+  await settingsDialog.getByLabel(/테마|Theme/).selectOption("light");
+  await settingsDialog.getByRole("button", { name: /확인|OK/, exact: true }).click();
+
+  await expect(page.locator("html")).not.toHaveClass(/dark/);
+  await expect
+    .poll(() => page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor))
+    .toBe("rgb(255, 255, 255)");
+
+  await page.emulateMedia({ colorScheme: "dark" });
+  await openSidebarOnMobile(page);
+  await page.getByRole("button", { name: /설정|Settings|设置/ }).click();
+  settingsDialog = page.getByRole("dialog", {
+    name: /사용자 설정|User Settings|用户设置/,
+  });
+  await settingsDialog.getByRole("button", { name: /환경설정|Preferences/ }).click();
+  await settingsDialog.getByLabel(/테마|Theme/).selectOption("system");
+  await settingsDialog.getByRole("button", { name: /확인|OK/, exact: true }).click();
+
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  await page.emulateMedia({ colorScheme: "light" });
+  await expect(page.locator("html")).not.toHaveClass(/dark/);
+});
+
 test("authenticated selector blocks a fourth model", async ({ page }) => {
   await openModelSelector(page);
 
