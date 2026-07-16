@@ -1533,27 +1533,28 @@ export function ChatSidebar({
             </div>
 
             <div className={`${isMobileDrawer ? "shrink-0 border-t border-zinc-200 bg-zinc-100/40 p-2 dark:border-zinc-800 dark:bg-zinc-900/50" : "shrink-0 border-t border-zinc-200 bg-zinc-100/40 p-3 dark:border-zinc-800 dark:bg-zinc-900/50"} flex min-h-0 flex-col gap-2 overflow-visible`}>
-                <div className="shrink-0">
-                    <UserUsageSummary
-                        isGuestMode={isGuestMode}
-                        guestMessageCount={guestMessageCount}
-                        maxGuestMessages={maxGuestMessages}
-                        usageOverride={isGuestMode ? undefined : accountUsage}
-                        compact
-                        headerAction={
-                            <FeatureHelpPopover
-                                title={helpCopy.creditsTitle}
-                                description={helpCopy.creditsDescription}
-                                buttonLabel={helpCopy.helpAboutCredits}
-                                learnMoreLabel={helpCopy.learnMore}
-                                topic="credits"
-                                href={chatWorkspaceGuideHref(lang, "credits-and-plans")}
-                                mobile={isMobileDrawer}
-                                testId="credits-help"
-                            />
-                        }
-                    />
-                </div>
+                {isGuestMode ? (
+                    <div className="shrink-0">
+                        <UserUsageSummary
+                            isGuestMode
+                            guestMessageCount={guestMessageCount}
+                            maxGuestMessages={maxGuestMessages}
+                            compact
+                            headerAction={
+                                <FeatureHelpPopover
+                                    title={helpCopy.creditsTitle}
+                                    description={helpCopy.creditsDescription}
+                                    buttonLabel={helpCopy.helpAboutCredits}
+                                    learnMoreLabel={helpCopy.learnMore}
+                                    topic="credits"
+                                    href={chatWorkspaceGuideHref(lang, "credits-and-plans")}
+                                    mobile={isMobileDrawer}
+                                    testId="credits-help"
+                                />
+                            }
+                        />
+                    </div>
+                ) : null}
                 <div className="shrink-0" data-testid="sidebar-account-controls">
                     <AuthButton />
                 </div>

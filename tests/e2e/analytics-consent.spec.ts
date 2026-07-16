@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { prepareGuestPage } from "./support/app-fixtures";
+import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
 
 test("mobile analytics consent stays compact with one-row actions", async ({
   page,
@@ -84,6 +84,38 @@ test("mobile analytics settings shortcut hides while the chat keyboard is active
 
   await textarea.evaluate((element) => element.blur());
   await expect(settings).toBeVisible();
+});
+
+test("authenticated chat moves analytics settings into the account menu", async ({
+  page,
+}, testInfo) => {
+  test.skip(
+    testInfo.project.name !== "desktop-chromium",
+    "Authenticated account-menu analytics is covered once in desktop Chromium."
+  );
+
+  await page.context().addCookies([
+    {
+      name: "__tomverse_e2e_analytics",
+      value: "1",
+      url: "http://127.0.0.1:3100",
+    },
+  ]);
+  await prepareGuestPage(page, "en");
+  await mockAuthenticatedApi(page);
+  await page.addInitScript(() => {
+    window.localStorage.setItem("tomverse_analytics_consent_v1", "accepted");
+  });
+  await page.goto("/chat?lang=en");
+
+  await expect(page.getByTestId("analytics-settings-button")).toHaveCount(0);
+  await page.getByTestId("account-menu-trigger").click();
+  const analyticsSettings = page.getByTestId("account-analytics-settings");
+  await expect(analyticsSettings).toBeVisible();
+  await analyticsSettings.click();
+  await expect(
+    page.getByRole("dialog", { name: "Privacy-safe product analytics" })
+  ).toBeVisible();
 });
 
 test("Australia starts privacy-minimized analytics with an immediate opt-out", async ({

@@ -29,25 +29,28 @@ test.describe("desktop upgrade discovery", () => {
     await prepareAuthenticatedChat(page);
   });
 
-  test("sidebar and account card expose a direct localized upgrade path", async ({
+  test("compact account card exposes a direct localized upgrade path", async ({
     page,
   }) => {
-    const usageCta = page.getByTestId("sidebar-upgrade-cta");
-    await expect(usageCta).toBeVisible();
-    await expect(usageCta).toHaveAttribute("href", /\/pricing\?/);
-    await expect(usageCta).toHaveAttribute("href", /lang=ko/);
-    await expect(usageCta).toHaveAttribute("href", /trigger=usage_widget/);
-    await expect(usageCta).toHaveAttribute("href", /utm_source=qa/);
-    await expect(usageCta).toHaveAttribute("href", /utm_medium=e2e/);
-    await expect(usageCta).toHaveAttribute(
+    await expect(page.getByTestId("sidebar-upgrade-card")).toHaveCount(0);
+    const accountUpgrade = page.getByTestId("account-plan-upgrade-badge");
+    await expect(accountUpgrade).toBeVisible();
+    await expect(accountUpgrade).toHaveAttribute("href", /\/pricing\?/);
+    await expect(accountUpgrade).toHaveAttribute("href", /lang=ko/);
+    await expect(accountUpgrade).toHaveAttribute("href", /trigger=account/);
+    await expect(accountUpgrade).toHaveAttribute("href", /utm_source=qa/);
+    await expect(accountUpgrade).toHaveAttribute("href", /utm_medium=e2e/);
+    await expect(accountUpgrade).toHaveAttribute(
       "href",
       /utm_campaign=upgrade-discovery/
     );
 
-    await expect(page.getByTestId("account-plan-upgrade-badge")).toBeVisible();
     await page.getByTestId("account-menu-trigger").click();
-    await expect(page.getByTestId("account-menu")).toBeVisible();
-    await expect(page.getByTestId("account-plan-view")).toBeVisible();
+    const accountMenu = page.getByTestId("account-menu");
+    await expect(accountMenu).toBeVisible();
+    await expect(accountMenu.getByText(/월간 .*크레딧 남음/)).toBeVisible();
+    await expect(accountMenu.getByText(/추가 구매 크레딧 남음/)).toBeVisible();
+    await expect(accountMenu.getByTestId("account-plan-view")).toBeVisible();
   });
 
   test("locked paid model opens an actionable plan dialog", async ({ page }) => {
@@ -81,21 +84,22 @@ test.describe("mobile upgrade discovery", () => {
     await prepareAuthenticatedChat(page);
   });
 
-  test("upgrade CTA is visible immediately when the sidebar opens", async ({
+  test("compact upgrade action is visible immediately when the sidebar opens", async ({
     page,
   }) => {
     await page.getByTestId("mobile-sidebar-open").click();
-    const usageCta = page.getByTestId("sidebar-upgrade-cta");
-    await expect(usageCta).toBeVisible();
+    await expect(page.getByTestId("sidebar-upgrade-card")).toHaveCount(0);
+    const accountUpgrade = page.getByTestId("account-plan-upgrade-badge");
+    await expect(accountUpgrade).toBeVisible();
 
-    const box = await usageCta.boundingBox();
+    const box = await accountUpgrade.boundingBox();
     const viewport = page.viewportSize();
     expect(box).not.toBeNull();
     expect(viewport).not.toBeNull();
     expect(box!.y).toBeGreaterThanOrEqual(0);
     expect(box!.y + box!.height).toBeLessThanOrEqual(viewport!.height);
-    await expect(usageCta).toHaveAttribute("href", /trigger=usage_widget/);
-    await expect(usageCta).toHaveAttribute("href", /utm_campaign=upgrade-discovery/);
+    await expect(accountUpgrade).toHaveAttribute("href", /trigger=account/);
+    await expect(accountUpgrade).toHaveAttribute("href", /utm_campaign=upgrade-discovery/);
   });
 
   test("compact account launcher opens an in-viewport mobile account sheet", async ({
