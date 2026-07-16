@@ -1,10 +1,16 @@
 "use client";
 
-import { usePathname } from "next/navigation";
+import { Suspense, useEffect } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { AnalyticsProvider } from "@/components/analytics/AnalyticsProvider";
 import SessionProviderWrapper from "@/components/auth/SessionProviderWrapper";
-import { LanguageProvider, type Language } from "@/components/LanguageProvider";
+import {
+  LanguageProvider,
+  useLanguage,
+  type Language,
+} from "@/components/LanguageProvider";
+import { isAppLanguage } from "@/lib/localizedCallbackUrl";
 
 const localeAliases: Record<string, Language> = { kr: "ko", cn: "zh" };
 const supportedLocales = new Set<Language>([
@@ -34,6 +40,24 @@ const normalizePlan = (
   return authenticated ? "Free" : "Guest";
 };
 
+function MarketingLanguageQuerySync({ enabled }: { enabled: boolean }) {
+  const searchParams = useSearchParams();
+  const { lang, setLang } = useLanguage();
+  const requestedLanguage = searchParams.get("lang");
+
+  useEffect(() => {
+    if (
+      enabled &&
+      isAppLanguage(requestedLanguage) &&
+      requestedLanguage !== lang
+    ) {
+      setLang(requestedLanguage);
+    }
+  }, [enabled, lang, requestedLanguage, setLang]);
+
+  return null;
+}
+
 function SessionAwareMarketingProviders({
   children,
   measurementId,
@@ -43,13 +67,17 @@ function SessionAwareMarketingProviders({
 }) {
   const pathname = usePathname();
   const { data: session } = useSession();
-  const initialLang = pathnameLanguage(pathname) || "en";
+  const pathLanguage = pathnameLanguage(pathname);
+  const initialLang = pathLanguage || "en";
 
   return (
     <LanguageProvider
       initialLang={initialLang}
-      forceInitialLang={pathnameLanguage(pathname) !== null}
+      forceInitialLang={pathLanguage !== null}
     >
+      <Suspense fallback={null}>
+        <MarketingLanguageQuerySync enabled={pathLanguage === null} />
+      </Suspense>
       <AnalyticsProvider
         country="ZZ"
         initialPlan={normalizePlan(

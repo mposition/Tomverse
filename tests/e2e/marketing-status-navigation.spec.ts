@@ -61,7 +61,7 @@ test("the homepage serves provider logos without the failing image optimizer", a
   page.on("response", (response) => {
     if (
       response.request().resourceType() === "image" &&
-      response.url().includes("/model-icons/") &&
+      response.url().includes("/_next/static/media/") &&
       response.status() >= 400
     ) {
       failedImages.push(`${response.status()} ${response.url()}`);
@@ -93,7 +93,7 @@ test("the homepage serves provider logos without the failing image optimizer", a
 
   expect(failedImages).toEqual([]);
   expect(imageState.every((image) => image.complete && image.naturalWidth > 0)).toBe(true);
-  expect(imageState.every((image) => image.src.includes("/model-icons/"))).toBe(true);
+  expect(imageState.every((image) => image.src.includes("/_next/static/media/"))).toBe(true);
   expect(imageState.every((image) => !image.src.includes("/_next/image"))).toBe(true);
 });
 

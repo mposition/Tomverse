@@ -13,6 +13,7 @@ import { chatHelpCopy } from "@/components/chat/chatHelpCopy";
 import { useUserUsage, type UserPlan } from "@/components/chat/useUserUsage";
 import { dispatchAppToast } from "@/lib/appToast";
 import { trackProductEvent, trackProductEventOnce } from "@/lib/productAnalyticsClient";
+import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
 
 type ChatSidebarProps = {
     conversations: Conversation[];
@@ -691,7 +692,7 @@ export function ChatSidebar({
                                 {helpCopy.replayTour}
                             </button>
                             <Link
-                                href="/support/help-centre/chat-workspace"
+                                href={chatWorkspaceGuideHref(lang)}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 prefetch={false}
@@ -744,7 +745,7 @@ export function ChatSidebar({
                         buttonLabel={helpCopy.helpAboutPrivate}
                         learnMoreLabel={helpCopy.learnMore}
                         topic="private"
-                        href="/support/help-centre/chat-workspace#files-and-drive"
+                        href={chatWorkspaceGuideHref(lang, "files-and-drive")}
                         mobile={isMobileDrawer}
                         align="right"
                         testId="private-mode-help"
@@ -778,7 +779,7 @@ export function ChatSidebar({
                             buttonLabel={helpCopy.helpAboutStatus}
                             learnMoreLabel={helpCopy.learnMore}
                             topic="locked"
-                            href="/support/help-centre/chat-workspace#states-and-labels"
+                            href={chatWorkspaceGuideHref(lang, "states-and-labels")}
                             mobile={isMobileDrawer}
                             testId="status-help"
                         />
@@ -824,7 +825,7 @@ export function ChatSidebar({
                             buttonLabel={helpCopy.helpAboutLabels}
                             learnMoreLabel={helpCopy.learnMore}
                             topic="label"
-                            href="/support/help-centre/chat-workspace#labels"
+                            href={chatWorkspaceGuideHref(lang, "labels")}
                             mobile={isMobileDrawer}
                             testId="labels-help"
                         />
@@ -871,7 +872,7 @@ export function ChatSidebar({
                                 buttonLabel={helpCopy.helpAboutProjects}
                                 learnMoreLabel={helpCopy.learnMore}
                                 topic="project"
-                                href="/support/help-centre/chat-workspace#projects"
+                                href={chatWorkspaceGuideHref(lang, "projects")}
                                 mobile={isMobileDrawer}
                                 testId="projects-help"
                             />
@@ -1085,7 +1086,7 @@ export function ChatSidebar({
                                 </p>
                                 <p className="mt-1 leading-5">{helpCopy.emptyLabelBody}</p>
                                 <Link
-                                    href="/support/help-centre/chat-workspace#labels"
+                                    href={chatWorkspaceGuideHref(lang, "labels")}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="mt-2 font-black text-blue-600 hover:text-blue-500 dark:text-blue-300"
@@ -1454,7 +1455,7 @@ export function ChatSidebar({
                                     buttonLabel={helpCopy.helpAboutCredits}
                                     learnMoreLabel={helpCopy.learnMore}
                                     topic="credits"
-                                    href="/support/help-centre/chat-workspace#credits-and-plans"
+                                    href={chatWorkspaceGuideHref(lang, "credits-and-plans")}
                                     mobile={isMobileDrawer}
                                     testId="credits-help"
                                 />

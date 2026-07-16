@@ -7,6 +7,7 @@ import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
 import { ChatGptVsClaudeGuide } from "./ChatGptVsClaudeGuide";
 import { AiReviewDemo } from "./AiReviewDemo";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
+import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
 
 export type MarketingInfoSection = {
   title: string;
@@ -86,7 +87,11 @@ export function MarketingInfoPage({
                   )}
                   {section.link ? (
                     <Link
-                      href={section.link.href}
+                      href={
+                        section.link.href === "/support/help-centre/chat-workspace"
+                          ? chatWorkspaceGuideHref(lang)
+                          : section.link.href
+                      }
                       target={section.link.external ? "_blank" : undefined}
                       rel={section.link.external ? "noopener noreferrer" : undefined}
                       className="mt-5 inline-flex items-center gap-2 text-sm font-black text-blue-600 hover:text-blue-500 dark:text-blue-300"

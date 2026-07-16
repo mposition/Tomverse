@@ -32,6 +32,7 @@ import { getModelBestFor, getModelExperienceStatus, getModelExperienceTags } fro
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { useUserUsage } from "@/components/chat/useUserUsage";
 import { withChatLanguage } from "@/lib/localizedCallbackUrl";
+import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
 import {
   trackProductEvent,
   trackProductEventOnce,
@@ -1652,7 +1653,7 @@ export function ChatInput({
                       buttonLabel={helpCopy.helpAboutModelCredits}
                       learnMoreLabel={helpCopy.learnMore}
                       topic="credits"
-                      href="/support/help-centre/chat-workspace#credits-and-plans"
+                      href={chatWorkspaceGuideHref(lang, "credits-and-plans")}
                       align="right"
                       testId="model-credits-help"
                     />
