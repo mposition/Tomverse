@@ -119,7 +119,7 @@ test("authenticated selector blocks a fourth model", async ({ page }) => {
 
   const selectedModels = page.locator('[data-testid="model-option"][aria-pressed="true"]');
   const unselectedModels = page.locator(
-    '[data-testid="model-option"][aria-pressed="false"]:not([disabled])'
+    '[data-testid="model-option"][data-model-plan-locked="false"][aria-pressed="false"]:not([disabled])'
   );
 
   await unselectedModels.first().click();

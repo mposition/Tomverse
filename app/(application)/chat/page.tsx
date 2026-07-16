@@ -5,6 +5,7 @@ import { AlertCircle, ArrowRight, CheckCircle2, Info, Sparkles, X } from "lucide
 import { DesktopChatShell } from "@/components/chat/DesktopChatShell";
 import { MobileChatShell } from "@/components/chat/MobileChatShell";
 import { ComparisonReviewDialog } from "@/components/chat/ComparisonReviewDialog";
+import { UpgradeCtaLink } from "@/components/billing/UpgradeCtaLink";
 import { ModelFinder } from "@/components/onboarding/ModelFinder";
 import { Conversation, AVAILABLE_MODELS, type ChatAttachment } from "@/components/chat/types";
 import { useSession } from "next-auth/react";
@@ -22,6 +23,7 @@ import {
   getModel,
   getModelUsageProfile,
   isEnabledModelId,
+  type AiModel,
 } from "@/lib/models";
 import {
   USER_SETTINGS_UPDATED_EVENT,
@@ -254,6 +256,10 @@ export default function Home() {
     items: Array<{ modelId: string; modelName: string; summary: string }>;
   } | null>(null);
   const [showComparisonReview, setShowComparisonReview] = useState(false);
+  const [upgradeModelPrompt, setUpgradeModelPrompt] = useState<AiModel | null>(null);
+  const [valueUpgradeSource, setValueUpgradeSource] = useState<
+    "comparison" | "ai_review" | null
+  >(null);
   const [unlockDialog, setUnlockDialog] = useState<{ id: string; password: string; error: string } | null>(null);
   const [lockedSelectDialog, setLockedSelectDialog] = useState<{ id: string; password: string; error: string } | null>(null);
   const [toast, setToast] = useState<AppToast | null>(null);
@@ -1131,6 +1137,21 @@ export default function Home() {
     [activeModelCount, attachments.length]
   );
 
+  const maybeShowValueUpgradePrompt = useCallback(
+    (source: "comparison" | "ai_review") => {
+      if (isGuestMode || accountUsage?.plan !== "Free") return;
+      const storageKey = "tomverse_value_upgrade_prompt_seen_v1";
+      if (localStorage.getItem(storageKey) === "1") return;
+      setValueUpgradeSource(source);
+    },
+    [accountUsage?.plan, isGuestMode]
+  );
+
+  useEffect(() => {
+    if (!valueUpgradeSource || showPostResponseTips) return;
+    localStorage.setItem("tomverse_value_upgrade_prompt_seen_v1", "1");
+  }, [showPostResponseTips, valueUpgradeSource]);
+
   const handleResponseComplete = useCallback(
     (promptId: string | null, modelId: string, responseText: string) => {
       if (promptId && responseText.trim()) {
@@ -1178,9 +1199,15 @@ export default function Home() {
           "multi_model_compare_completed",
           activeModelCount
         );
+        maybeShowValueUpgradePrompt("comparison");
       }
     },
-    [activeModelCount, awaitingPostResponseTips, isGuestMode]
+    [
+      activeModelCount,
+      awaitingPostResponseTips,
+      isGuestMode,
+      maybeShowValueUpgradePrompt,
+    ]
   );
 
   const handleModelFollowupSent = useCallback(
@@ -1210,7 +1237,12 @@ export default function Home() {
       !isSelected &&
       (!model || !canUseModelWithPlan(currentAccessPlan, model))
     ) {
-      showToast(t("modelStatusReasons.upgradeRequired"), "info");
+      if (!model) return false;
+      if (isGuestMode) {
+        showToast(t("modelStatusReasons.loginRequired"), "info");
+      } else {
+        setUpgradeModelPrompt(model);
+      }
       return false;
     }
     if (
@@ -1317,7 +1349,16 @@ export default function Home() {
     if (newModelId !== oldModelId && selectedModels.includes(newModelId)) {
       return;
     }
-	const nextModels = clampSelectedModels(
+    const nextModel = getModel(newModelId);
+    if (!nextModel || !canUseModelWithPlan(currentAccessPlan, nextModel)) {
+      if (nextModel && !isGuestMode) {
+        setUpgradeModelPrompt(nextModel);
+      } else {
+        showToast(t("modelStatusReasons.loginRequired"), "info");
+      }
+      return;
+    }
+    const nextModels = clampSelectedModels(
       selectedModels.map((id) => (id === oldModelId ? newModelId : id))
     );
     let nextDisabled = [...disabledPanels];
@@ -1591,6 +1632,54 @@ export default function Home() {
         <span className="min-w-0 whitespace-pre-line break-words">{toast.message}</span>
       </div>
     )}
+    {upgradeModelPrompt && accountUsage && (
+      <div className="fixed inset-0 z-[78] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+        <section
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="locked-model-upgrade-title"
+          className="w-full max-w-sm rounded-3xl border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900"
+        >
+          <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-500/10 text-blue-600 dark:text-blue-300">
+            <Sparkles className="h-5 w-5" aria-hidden="true" />
+          </span>
+          <h2
+            id="locked-model-upgrade-title"
+            className="mt-4 text-lg font-black text-zinc-950 dark:text-white"
+          >
+            {t("upgrade.lockedModelTitle")}
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+            {formatCopy("upgrade.lockedModelBody", {
+              model: upgradeModelPrompt.name,
+            })}
+          </p>
+          <div className="mt-5 grid gap-2 sm:grid-cols-2">
+            <UpgradeCtaLink
+              targetPlan="Pro"
+              currentPlan={accountUsage.plan}
+              trigger="proactive"
+              ctaLocation="chat_locked_model"
+              planCreditsRemaining={accountUsage.balances.planRemainingCredits}
+              addonCreditsRemaining={accountUsage.balances.purchasedRemainingCredits}
+              testId="locked-model-plan-cta"
+              onClick={() => setUpgradeModelPrompt(null)}
+              className="flex min-h-11 items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-black text-white hover:bg-blue-500"
+            >
+              {t("upgrade.viewProPlan")}
+            </UpgradeCtaLink>
+            <button
+              type="button"
+              onClick={() => setUpgradeModelPrompt(null)}
+              data-testid="locked-model-choose-another"
+              className="min-h-11 rounded-xl border border-zinc-200 px-4 py-2 text-sm font-bold text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              {t("upgrade.chooseAnotherModel")}
+            </button>
+          </div>
+        </section>
+      </div>
+    )}
     {showPostResponseTips && (
       <aside className="fixed bottom-5 right-5 z-[75] w-[min(22rem,calc(100vw-2rem))] rounded-2xl border border-blue-200 bg-white p-4 shadow-2xl shadow-zinc-900/20 dark:border-blue-900/60 dark:bg-zinc-900">
         <div className="flex items-start gap-3">
@@ -1617,6 +1706,46 @@ export default function Home() {
             <X className="h-4 w-4" />
           </button>
         </div>
+      </aside>
+    )}
+    {valueUpgradeSource && !showPostResponseTips && accountUsage?.plan === "Free" && (
+      <aside
+        data-testid="value-upgrade-prompt"
+        className="fixed inset-x-3 top-[max(0.75rem,env(safe-area-inset-top))] z-[76] mx-auto w-auto max-w-sm rounded-2xl border border-blue-200 bg-white p-4 shadow-2xl shadow-zinc-900/20 dark:border-blue-900/60 dark:bg-zinc-900 md:inset-x-auto md:right-5 md:top-5 md:w-[22rem]"
+      >
+        <div className="flex items-start gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white">
+            <Sparkles className="h-4 w-4" aria-hidden="true" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-black text-zinc-950 dark:text-white">
+              {t("upgrade.valuePromptTitle")}
+            </p>
+            <p className="mt-1 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+              {t("upgrade.valuePromptBody")}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setValueUpgradeSource(null)}
+            aria-label={t("auth.cancel")}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-white"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <UpgradeCtaLink
+          targetPlan="Pro"
+          currentPlan="Free"
+          trigger="proactive"
+          ctaLocation={`chat_value_moment_${valueUpgradeSource}`}
+          planCreditsRemaining={accountUsage.balances.planRemainingCredits}
+          addonCreditsRemaining={accountUsage.balances.purchasedRemainingCredits}
+          onClick={() => setValueUpgradeSource(null)}
+          className="mt-3 flex min-h-10 w-full items-center justify-center rounded-xl bg-blue-600 px-3 py-2 text-xs font-black text-white hover:bg-blue-500"
+        >
+          {t("upgrade.compareProPlan")}
+        </UpgradeCtaLink>
       </aside>
     )}
     {billingSuccess && (
@@ -1789,6 +1918,7 @@ export default function Home() {
         }
         open
         onClose={() => setShowComparisonReview(false)}
+        onCompleted={() => maybeShowValueUpgradePrompt("ai_review")}
       />
     )}
     {pendingRemoveModelId && (
