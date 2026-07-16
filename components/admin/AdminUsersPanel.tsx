@@ -1,7 +1,17 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Clipboard, Download, Loader2, RefreshCw, Save, Search, X } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Clipboard,
+  Download,
+  Loader2,
+  RefreshCw,
+  Save,
+  Search,
+  X,
+} from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
 import type {
   AdminUserRow,
@@ -19,6 +29,8 @@ type Props = {
   currentUserId: string;
   conversationCount: number;
 };
+
+type PageSize = 30 | 50;
 
 type AdminUserDetail = {
   id: string;
@@ -179,15 +191,6 @@ const segmentLabels: Record<AdminUserSegment, string> = {
   billingRisk: "Billing risk",
 };
 
-const downloadBlob = (blob: Blob, filename: string) => {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(url);
-};
-
 export function AdminUsersPanel({
   rows,
   initialNextCursor,
@@ -201,8 +204,6 @@ export function AdminUsersPanel({
   const [query, setQuery] = useState("");
   const [appliedQuery, setAppliedQuery] = useState("");
   const [isSearching, setIsSearching] = useState(false);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [isExportingCsv, setIsExportingCsv] = useState(false);
   const [detailUser, setDetailUser] = useState<AdminUserDetail | null>(null);
   const [detailError, setDetailError] = useState("");
   const [loadingDetailId, setLoadingDetailId] = useState<string | null>(null);
@@ -215,6 +216,9 @@ export function AdminUsersPanel({
   const [creditRefundReasons, setCreditRefundReasons] = useState<Record<string, string>>({});
   const [creditRefundConfirms, setCreditRefundConfirms] = useState<Record<string, string>>({});
   const [segment, setSegment] = useState<AdminUserSegment>("all");
+  const [pageSize, setPageSize] = useState<PageSize>(30);
+  const [pageIndex, setPageIndex] = useState(0);
+  const [pageCursors, setPageCursors] = useState<Array<string | null>>([null]);
 
   const title = useMemo(
     () => (appliedQuery ? "Search results" : segmentLabels[segment]),
@@ -224,24 +228,27 @@ export function AdminUsersPanel({
   const fetchUsers = async ({
     requestedSegment = segment,
     requestedQuery = appliedQuery,
-    cursor = null,
-    append = false,
+    requestedTake = pageSize,
+    cursor = pageCursors[pageIndex] || null,
+    targetPageIndex = pageIndex,
+    cursorHistory = pageCursors,
     refreshStats = false,
   }: {
     requestedSegment?: AdminUserSegment;
     requestedQuery?: string;
+    requestedTake?: PageSize;
     cursor?: string | null;
-    append?: boolean;
+    targetPageIndex?: number;
+    cursorHistory?: Array<string | null>;
     refreshStats?: boolean;
   } = {}) => {
     const normalized = requestedQuery.trim();
-    if (append) setIsLoadingMore(true);
-    else setIsSearching(true);
+    setIsSearching(true);
     try {
       const params = new URLSearchParams({
         q: normalized,
         segment: requestedSegment,
-        take: "30",
+        take: String(requestedTake),
       });
       if (cursor) params.set("cursor", cursor);
       if (refreshStats) params.set("includeStats", "1");
@@ -259,9 +266,13 @@ export function AdminUsersPanel({
       if (!response.ok || !data?.users) {
         throw new Error(data?.error || "Failed to search users.");
       }
-      setItems((current) => (append ? [...current, ...data.users!] : data.users!));
+      setItems(data.users);
       setNextCursor(data.nextCursor || null);
-      if (!append) setAppliedQuery(normalized);
+      setAppliedQuery(normalized);
+      setSegment(requestedSegment);
+      setPageSize(requestedTake);
+      setPageIndex(targetPageIndex);
+      setPageCursors(cursorHistory);
       if (data.stats) setStatsSnapshot(data.stats);
     } catch (error) {
       dispatchAppToast(
@@ -269,18 +280,62 @@ export function AdminUsersPanel({
         "error"
       );
     } finally {
-      if (append) setIsLoadingMore(false);
-      else setIsSearching(false);
+      setIsSearching(false);
     }
   };
 
   const selectSegment = (nextSegment: AdminUserSegment) => {
-    setSegment(nextSegment);
     setQuery("");
-    void fetchUsers({ requestedSegment: nextSegment, requestedQuery: "" });
+    void fetchUsers({
+      requestedSegment: nextSegment,
+      requestedQuery: "",
+      cursor: null,
+      targetPageIndex: 0,
+      cursorHistory: [null],
+    });
   };
 
-  const searchUsers = () => fetchUsers({ requestedQuery: query });
+  const searchUsers = () =>
+    fetchUsers({
+      requestedQuery: query,
+      cursor: null,
+      targetPageIndex: 0,
+      cursorHistory: [null],
+    });
+
+  const showNextPage = () => {
+    if (!nextCursor || isSearching) return;
+    const targetPageIndex = pageIndex + 1;
+    void fetchUsers({
+      cursor: nextCursor,
+      targetPageIndex,
+      cursorHistory: [
+        ...pageCursors.slice(0, targetPageIndex),
+        nextCursor,
+      ],
+    });
+  };
+
+  const showPreviousPage = () => {
+    if (pageIndex === 0 || isSearching) return;
+    const targetPageIndex = pageIndex - 1;
+    const cursorHistory = pageCursors.slice(0, targetPageIndex + 1);
+    void fetchUsers({
+      cursor: cursorHistory[targetPageIndex] || null,
+      targetPageIndex,
+      cursorHistory,
+    });
+  };
+
+  const changePageSize = (nextPageSize: PageSize) => {
+    if (nextPageSize === pageSize || isSearching) return;
+    void fetchUsers({
+      requestedTake: nextPageSize,
+      cursor: null,
+      targetPageIndex: 0,
+      cursorHistory: [null],
+    });
+  };
 
   const loadUserDetail = async (userId: string) => {
     setDetailError("");
@@ -474,41 +529,6 @@ export function AdminUsersPanel({
     }
   };
 
-  const exportUsersCsv = async (scope: "result" | "all") => {
-    if (isExportingCsv) return;
-    setIsExportingCsv(true);
-    try {
-      const params = new URLSearchParams({
-        q: scope === "result" ? appliedQuery : "",
-        segment: scope === "result" ? segment : "all",
-      });
-      const response = await fetch(
-        `/api/admin/users/export?${params.toString()}`,
-        { cache: "no-store" }
-      );
-      if (!response.ok) {
-        const data = (await response.json().catch(() => null)) as
-          | { error?: string }
-          | null;
-        throw new Error(data?.error || "Failed to export users.");
-      }
-      const disposition = response.headers.get("content-disposition") || "";
-      const filename =
-        disposition.match(/filename="([^"]+)"/i)?.[1] ||
-        (scope === "all"
-          ? "tomverse-all-users.csv"
-          : `tomverse-current-result-${segment}.csv`);
-      downloadBlob(await response.blob(), filename);
-    } catch (error) {
-      dispatchAppToast(
-        error instanceof Error ? error.message : "Failed to export users.",
-        "error"
-      );
-    } finally {
-      setIsExportingCsv(false);
-    }
-  };
-
   return (
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-4 sm:p-5">
       <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4 sm:p-5">
@@ -600,24 +620,22 @@ export function AdminUsersPanel({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => void exportUsersCsv("result")}
-            disabled={isExportingCsv}
-            className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-black text-zinc-200 transition hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-50"
+          <a
+            href={`/api/admin/users/export?q=${encodeURIComponent(appliedQuery)}&segment=${encodeURIComponent(segment)}`}
+            download
+            className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-black text-zinc-200 transition hover:bg-zinc-900"
           >
             <Download className="h-3.5 w-3.5" />
             Export current result
-          </button>
-          <button
-            type="button"
-            onClick={() => void exportUsersCsv("all")}
-            disabled={isExportingCsv}
-            className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-blue-500/40 bg-blue-500/10 px-3 py-2 text-xs font-black text-blue-100 transition hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+          </a>
+          <a
+            href="/api/admin/users/export?q=&segment=all"
+            download
+            className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-blue-500/40 bg-blue-500/10 px-3 py-2 text-xs font-black text-blue-100 transition hover:bg-blue-500/20"
           >
-            {isExportingCsv ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+            <Download className="h-3.5 w-3.5" />
             Export all users
-          </button>
+          </a>
         </div>
       </div>
 
@@ -649,7 +667,7 @@ export function AdminUsersPanel({
 
       <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
         <span className="rounded-full border border-zinc-800 bg-zinc-900 px-3 py-1.5 font-bold text-zinc-300">
-          Currently loaded {items.length}
+          Page {pageIndex + 1} - {items.length} accounts shown
         </span>
         <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1.5 font-bold text-blue-200">
           Segment: {segmentLabels[segment]}
@@ -659,6 +677,21 @@ export function AdminUsersPanel({
             Search: {appliedQuery}
           </span>
         ) : null}
+        <label className="ml-auto inline-flex items-center gap-2 text-zinc-400">
+          <span>Rows per page</span>
+          <select
+            value={pageSize}
+            onChange={(event) =>
+              changePageSize(Number(event.target.value) as PageSize)
+            }
+            disabled={isSearching}
+            className="h-8 cursor-pointer rounded-lg border border-zinc-700 bg-zinc-900 px-2 font-bold text-zinc-100 outline-none focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+            aria-label="Rows per page"
+          >
+            <option value={30}>30</option>
+            <option value={50}>50</option>
+          </select>
+        </label>
       </div>
 
       <div className="mt-5 overflow-x-auto">
@@ -742,24 +775,36 @@ export function AdminUsersPanel({
         ) : null}
       </div>
 
-      {nextCursor ? (
-        <div className="mt-4 flex justify-center">
-          <button
-            type="button"
-            onClick={() =>
-              void fetchUsers({
-                cursor: nextCursor,
-                append: true,
-              })
-            }
-            disabled={isLoadingMore}
-            className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-black text-zinc-100 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {isLoadingMore ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            Load 30 more
-          </button>
-        </div>
-      ) : null}
+      <nav
+        className="mt-4 flex flex-wrap items-center justify-center gap-3"
+        aria-label="User result pages"
+      >
+        <button
+          type="button"
+          onClick={showPreviousPage}
+          disabled={pageIndex === 0 || isSearching}
+          className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-black text-zinc-100 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <ChevronLeft className="h-4 w-4" />
+          Previous
+        </button>
+        <span className="min-w-24 text-center text-sm font-bold text-zinc-400">
+          {isSearching ? (
+            <Loader2 className="mx-auto h-4 w-4 animate-spin" />
+          ) : (
+            `Page ${pageIndex + 1}`
+          )}
+        </span>
+        <button
+          type="button"
+          onClick={showNextPage}
+          disabled={!nextCursor || isSearching}
+          className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-black text-zinc-100 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Next
+          <ChevronRight className="h-4 w-4" />
+        </button>
+      </nav>
 
       {detailUser ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">

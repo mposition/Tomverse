@@ -30,6 +30,8 @@ export type UserUsageResponse = {
     costMonth: number;
   };
   balances: {
+    dailyRemainingCredits: number | null;
+    dailyResetsAt: string;
     planRemainingCredits: number;
     planResetsAt: string;
     purchasedRemainingCredits: number;

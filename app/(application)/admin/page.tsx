@@ -389,7 +389,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             where: { riskFlags: { not: "[]" } },
             _count: { _all: true },
         }),
-        getAdminUserStats(now),
+        getAdminUserStats(),
         prisma.conversation.count(),
         prisma.message.count(),
         getAdminUsersPage({ take: 30, now }),

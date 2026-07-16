@@ -48,6 +48,9 @@ test.describe("desktop upgrade discovery", () => {
     await page.getByTestId("account-menu-trigger").click();
     const accountMenu = page.getByTestId("account-menu");
     await expect(accountMenu).toBeVisible();
+    await expect(accountMenu.getByTestId("account-daily-credits")).toContainText(
+      "30 / 30"
+    );
     await expect(accountMenu.getByText(/월간 .*크레딧 남음/)).toBeVisible();
     await expect(accountMenu.getByText(/추가 구매 크레딧 남음/)).toBeVisible();
     await expect(accountMenu.getByTestId("account-plan-view")).toBeVisible();

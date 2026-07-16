@@ -4,7 +4,11 @@ import {
   ADMIN_USER_SEGMENTS,
   normalizeAdminUserSegment,
 } from "../lib/adminUserTypes.ts";
-import { adminUsersCsv } from "../lib/adminUsersCsv.ts";
+import {
+  adminUsersCsv,
+  adminUsersCsvHeader,
+  adminUsersCsvRows,
+} from "../lib/adminUsersCsv.ts";
 
 test("admin user segments reject unknown client values", () => {
   assert.equal(normalizeAdminUserSegment("activePaid"), "activePaid");
@@ -14,8 +18,7 @@ test("admin user segments reject unknown client values", () => {
 });
 
 test("admin user CSV neutralizes spreadsheet formulas and includes audit fields", () => {
-  const csv = adminUsersCsv([
-    {
+  const user = {
       id: "user-1",
       email: "=IMPORTXML(\"https://example.test\")",
       name: "+cmd",
@@ -37,11 +40,21 @@ test("admin user CSV neutralizes spreadsheet formulas and includes audit fields"
         refundRequests: 0,
         promotionRedemptions: 0,
       },
-    },
-  ]);
+    };
+  const csv = adminUsersCsv([user]);
 
   assert.match(csv, /"'=IMPORTXML\(""https:\/\/example\.test""\)"/);
   assert.match(csv, /"'\+cmd"/);
   assert.match(csv, /"billingRiskStatus"/);
   assert.match(csv, /"usageToday"/);
+
+  const headerChunk = adminUsersCsvHeader();
+  const rowChunk = adminUsersCsvRows([user]);
+  assert.ok(headerChunk.startsWith("\uFEFF"));
+  assert.ok(!rowChunk.startsWith("\uFEFF"));
+  assert.ok(rowChunk.endsWith("\r\n"));
+  assert.equal(
+    `${headerChunk}${rowChunk}`.replace(/\r\n$/, ""),
+    csv
+  );
 });
