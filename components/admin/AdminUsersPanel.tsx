@@ -3,37 +3,20 @@
 import { useMemo, useState } from "react";
 import { Clipboard, Download, Loader2, RefreshCw, Save, Search, X } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
+import type {
+  AdminUserRow,
+  AdminUserSegment,
+  AdminUserStats,
+} from "@/lib/adminUserTypes";
 import { formatBillingMinor, normalizeBillingCurrency } from "@/lib/billingMarkets";
 import { AdminNotesBox } from "@/components/admin/AdminNotesBox";
 import { AdminUserDeleteButton } from "@/components/admin/AdminUserDeleteButton";
 
-export type AdminUserRow = {
-  id: string;
-  email: string | null;
-  name: string | null;
-  plan: string | null;
-  subscriptionStatus: string | null;
-  subscriptionCurrentPeriodEnd: string | null;
-  subscriptionBillingInterval: string | null;
-  subscriptionCancelAtPeriodEnd?: boolean;
-  stripeCustomerId: string | null;
-  stripeSubscriptionId?: string | null;
-  usageToday?: number;
-  creditDebtCredits?: number;
-  creditDebtCostMicroUsd?: number;
-  billingRiskStatus?: string;
-  _count: {
-    conversations: number;
-    accounts: number;
-    refundRequests?: number;
-    promotionRedemptions?: number;
-  };
-};
-
 type Props = {
   rows: AdminUserRow[];
+  initialNextCursor: string | null;
+  stats: AdminUserStats;
   currentUserId: string;
-  paidUserCount: number;
   conversationCount: number;
 };
 
@@ -185,20 +168,41 @@ const dateTimeLabel = (value: string | null | undefined) => {
   return date.toISOString().replace("T", " ").slice(0, 16);
 };
 
-const escapeCsv = (value: unknown) => {
-  const text = String(value ?? "");
-  return `"${text.replace(/"/g, '""')}"`;
+const segmentLabels: Record<AdminUserSegment, string> = {
+  all: "All accounts",
+  free: "Free access",
+  pro: "Pro access",
+  max: "Max access",
+  activePaid: "Active paid subscriptions",
+  testerPass: "Tester Pass",
+  canceling: "Canceling subscriptions",
+  billingRisk: "Billing risk",
+};
+
+const downloadBlob = (blob: Blob, filename: string) => {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
 };
 
 export function AdminUsersPanel({
   rows,
+  initialNextCursor,
+  stats,
   currentUserId,
-  paidUserCount,
   conversationCount,
 }: Props) {
   const [items, setItems] = useState(rows);
+  const [nextCursor, setNextCursor] = useState(initialNextCursor);
+  const [statsSnapshot, setStatsSnapshot] = useState(stats);
   const [query, setQuery] = useState("");
+  const [appliedQuery, setAppliedQuery] = useState("");
   const [isSearching, setIsSearching] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [isExportingCsv, setIsExportingCsv] = useState(false);
   const [detailUser, setDetailUser] = useState<AdminUserDetail | null>(null);
   const [detailError, setDetailError] = useState("");
   const [loadingDetailId, setLoadingDetailId] = useState<string | null>(null);
@@ -210,54 +214,73 @@ export function AdminUsersPanel({
   const [riskReleaseConfirm, setRiskReleaseConfirm] = useState("");
   const [creditRefundReasons, setCreditRefundReasons] = useState<Record<string, string>>({});
   const [creditRefundConfirms, setCreditRefundConfirms] = useState<Record<string, string>>({});
-  const [segment, setSegment] = useState<
-    "all" | "paid" | "free" | "canceling" | "refund" | "promo" | "highUsage" | "billingRisk"
-  >("all");
+  const [segment, setSegment] = useState<AdminUserSegment>("all");
 
   const title = useMemo(
-    () => (query.trim() ? "Search results" : "Recent accounts"),
-    [query]
+    () => (appliedQuery ? "Search results" : segmentLabels[segment]),
+    [appliedQuery, segment]
   );
 
-  const filteredItems = useMemo(() => {
-    return items.filter((user) => {
-      if (segment === "paid") return user.plan === "Pro" || user.plan === "Max";
-      if (segment === "free") return !user.plan || user.plan === "Free";
-      if (segment === "canceling") return Boolean(user.subscriptionCancelAtPeriodEnd);
-      if (segment === "refund") return Boolean(user._count.refundRequests);
-      if (segment === "promo") return Boolean(user._count.promotionRedemptions);
-      if (segment === "highUsage") return (user.usageToday || 0) >= 50;
-      if (segment === "billingRisk") {
-        return user.billingRiskStatus === "disputed_hold" || (user.creditDebtCredits || 0) > 0;
-      }
-      return true;
-    });
-  }, [items, segment]);
-
-  const searchUsers = async () => {
-    const normalized = query.trim();
-    setIsSearching(true);
+  const fetchUsers = async ({
+    requestedSegment = segment,
+    requestedQuery = appliedQuery,
+    cursor = null,
+    append = false,
+    refreshStats = false,
+  }: {
+    requestedSegment?: AdminUserSegment;
+    requestedQuery?: string;
+    cursor?: string | null;
+    append?: boolean;
+    refreshStats?: boolean;
+  } = {}) => {
+    const normalized = requestedQuery.trim();
+    if (append) setIsLoadingMore(true);
+    else setIsSearching(true);
     try {
-      const response = await fetch(
-        `/api/admin/users?q=${encodeURIComponent(normalized)}&take=30`,
-        { cache: "no-store" }
-      );
+      const params = new URLSearchParams({
+        q: normalized,
+        segment: requestedSegment,
+        take: "30",
+      });
+      if (cursor) params.set("cursor", cursor);
+      if (refreshStats) params.set("includeStats", "1");
+      const response = await fetch(`/api/admin/users?${params.toString()}`, {
+        cache: "no-store",
+      });
       const data = (await response.json().catch(() => null)) as
-        | { users?: AdminUserRow[]; error?: string }
+        | {
+            users?: AdminUserRow[];
+            nextCursor?: string | null;
+            stats?: AdminUserStats;
+            error?: string;
+          }
         | null;
       if (!response.ok || !data?.users) {
         throw new Error(data?.error || "Failed to search users.");
       }
-      setItems(data.users);
+      setItems((current) => (append ? [...current, ...data.users!] : data.users!));
+      setNextCursor(data.nextCursor || null);
+      if (!append) setAppliedQuery(normalized);
+      if (data.stats) setStatsSnapshot(data.stats);
     } catch (error) {
       dispatchAppToast(
         error instanceof Error ? error.message : "Failed to search users.",
         "error"
       );
     } finally {
-      setIsSearching(false);
+      if (append) setIsLoadingMore(false);
+      else setIsSearching(false);
     }
   };
+
+  const selectSegment = (nextSegment: AdminUserSegment) => {
+    setSegment(nextSegment);
+    setQuery("");
+    void fetchUsers({ requestedSegment: nextSegment, requestedQuery: "" });
+  };
+
+  const searchUsers = () => fetchUsers({ requestedQuery: query });
 
   const loadUserDetail = async (userId: string) => {
     setDetailError("");
@@ -451,36 +474,123 @@ export function AdminUsersPanel({
     }
   };
 
-  const exportUsersCsv = () => {
-    const csv = [
-      ["id", "email", "name", "plan", "subscriptionStatus", "periodEnd", "stripeCustomerId", "conversations", "usageToday"],
-      ...filteredItems.map((user) => [
-        user.id,
-        user.email || "",
-        user.name || "",
-        user.plan || "Free",
-        user.subscriptionStatus || "",
-        user.subscriptionCurrentPeriodEnd || "",
-        user.stripeCustomerId || "",
-        user._count.conversations,
-        user.usageToday ?? "",
-      ]),
-    ]
-      .map((line) => line.map(escapeCsv).join(","))
-      .join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "tomverse-admin-users.csv";
-    link.click();
-    URL.revokeObjectURL(url);
+  const exportUsersCsv = async (scope: "result" | "all") => {
+    if (isExportingCsv) return;
+    setIsExportingCsv(true);
+    try {
+      const params = new URLSearchParams({
+        q: scope === "result" ? appliedQuery : "",
+        segment: scope === "result" ? segment : "all",
+      });
+      const response = await fetch(
+        `/api/admin/users/export?${params.toString()}`,
+        { cache: "no-store" }
+      );
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as
+          | { error?: string }
+          | null;
+        throw new Error(data?.error || "Failed to export users.");
+      }
+      const disposition = response.headers.get("content-disposition") || "";
+      const filename =
+        disposition.match(/filename="([^"]+)"/i)?.[1] ||
+        (scope === "all"
+          ? "tomverse-all-users.csv"
+          : `tomverse-current-result-${segment}.csv`);
+      downloadBlob(await response.blob(), filename);
+    } catch (error) {
+      dispatchAppToast(
+        error instanceof Error ? error.message : "Failed to export users.",
+        "error"
+      );
+    } finally {
+      setIsExportingCsv(false);
+    }
   };
 
   return (
-    <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
+    <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-4 sm:p-5">
+      <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4 sm:p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-300">
+              User overview
+            </p>
+            <h2 className="mt-2 text-xl font-black text-white">All-database account statistics</h2>
+          </div>
+          <div className="flex items-center gap-2 text-xs text-zinc-500">
+            <span>Last aggregated {dateTimeLabel(statsSnapshot.generatedAt)} UTC</span>
+            <button
+              type="button"
+              onClick={() =>
+                void fetchUsers({
+                  requestedSegment: segment,
+                  requestedQuery: appliedQuery,
+                  refreshStats: true,
+                })
+              }
+              disabled={isSearching}
+              className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-xl border border-zinc-800 text-zinc-300 transition hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-50"
+              aria-label="Refresh user statistics and current results"
+            >
+              <RefreshCw className={`h-4 w-4 ${isSearching ? "animate-spin" : ""}`} />
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 gap-2 lg:grid-cols-4">
+          {([
+            { segment: "all", label: "Total accounts", value: statsSnapshot.totalAccounts, detail: "All User records" },
+            { segment: "free", label: "Free access", value: statsSnapshot.freeUsers, detail: "Current DB access plan" },
+            { segment: "pro", label: "Pro access", value: statsSnapshot.proUsers, detail: "Paid and granted access" },
+            { segment: "max", label: "Max access", value: statsSnapshot.maxUsers, detail: "Paid and granted access" },
+            { segment: "activePaid", label: "Active paid", value: statsSnapshot.activePaidSubscriptions, detail: "Active or trialing Stripe" },
+            { segment: "testerPass", label: "Tester Pass", value: statsSnapshot.testerPassUsers, detail: "Active internal pass" },
+            { segment: "canceling", label: "Canceling", value: statsSnapshot.cancelingSubscriptions, detail: "Paid, cancel at period end" },
+            { segment: "billingRisk", label: "Billing risk", value: statsSnapshot.billingRiskUsers, detail: "Hold or unrecovered debt" },
+          ] satisfies Array<{
+            segment: AdminUserSegment;
+            label: string;
+            value: number;
+            detail: string;
+          }>).map((card) => (
+            <button
+              key={card.segment}
+              type="button"
+              onClick={() => selectSegment(card.segment)}
+              aria-pressed={segment === card.segment}
+              className={`cursor-pointer rounded-2xl border p-3 text-left transition sm:p-4 ${
+                segment === card.segment
+                  ? "border-blue-500/50 bg-blue-500/15"
+                  : "border-zinc-800 bg-zinc-900/70 hover:border-zinc-700 hover:bg-zinc-900"
+              }`}
+            >
+              <span className="block text-xs font-bold text-zinc-400">{card.label}</span>
+              <span className="mt-2 block text-2xl font-black text-white">{card.value.toLocaleString()}</span>
+              <span className="mt-1 block text-[11px] leading-4 text-zinc-500">{card.detail}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 px-3 py-2">
+            <span className="text-xs text-zinc-500">New accounts · 7 days</span>
+            <strong className="ml-2 text-sm text-white">{statsSnapshot.newUsers7d.toLocaleString()}</strong>
+          </div>
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 px-3 py-2">
+            <span className="text-xs text-zinc-500">New accounts · 30 days</span>
+            <strong className="ml-2 text-sm text-white">{statsSnapshot.newUsers30d.toLocaleString()}</strong>
+          </div>
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 px-3 py-2">
+            <span className="text-xs text-zinc-500">Paid conversion</span>
+            <strong className="ml-2 text-sm text-white">{statsSnapshot.paidConversionRatePercent.toFixed(2)}%</strong>
+          </div>
+        </div>
+      </div>
+
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-        <div>
+        <div className="mt-5">
           <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-300">
             Users
           </p>
@@ -489,24 +599,33 @@ export function AdminUsersPanel({
             Search by email, name, user ID, or Stripe customer ID. {conversationCount} conversations are stored across the workspace.
           </p>
         </div>
-        <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-xs font-black text-blue-200">
-          {paidUserCount} active paid users
-        </span>
-        <button
-          type="button"
-          onClick={exportUsersCsv}
-          className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-black text-zinc-200 transition hover:bg-zinc-900"
-        >
-          <Download className="h-3.5 w-3.5" />
-          Export CSV
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void exportUsersCsv("result")}
+            disabled={isExportingCsv}
+            className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-black text-zinc-200 transition hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Export current result
+          </button>
+          <button
+            type="button"
+            onClick={() => void exportUsersCsv("all")}
+            disabled={isExportingCsv}
+            className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-blue-500/40 bg-blue-500/10 px-3 py-2 text-xs font-black text-blue-100 transition hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isExportingCsv ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+            Export all users
+          </button>
+        </div>
       </div>
 
       <form
         className="mt-5 grid gap-3 md:grid-cols-[1fr_auto]"
         onSubmit={(event) => {
           event.preventDefault();
-          searchUsers();
+          void searchUsers();
         }}
       >
         <label className="relative block">
@@ -528,30 +647,18 @@ export function AdminUsersPanel({
         </button>
       </form>
 
-      <div className="mt-4 flex flex-wrap gap-2">
-        {[
-          ["all", `All ${items.length}`],
-          ["paid", `Paid ${items.filter((user) => user.plan === "Pro" || user.plan === "Max").length}`],
-          ["free", `Free ${items.filter((user) => !user.plan || user.plan === "Free").length}`],
-          ["canceling", `Canceling ${items.filter((user) => user.subscriptionCancelAtPeriodEnd).length}`],
-          ["refund", `Refund ${items.filter((user) => user._count.refundRequests).length}`],
-          ["promo", `Promo ${items.filter((user) => user._count.promotionRedemptions).length}`],
-          ["highUsage", `High usage ${items.filter((user) => (user.usageToday || 0) >= 50).length}`],
-          ["billingRisk", `Billing risk ${items.filter((user) => user.billingRiskStatus === "disputed_hold" || (user.creditDebtCredits || 0) > 0).length}`],
-        ].map(([value, label]) => (
-          <button
-            key={value}
-            type="button"
-            onClick={() => setSegment(value as typeof segment)}
-            className={`cursor-pointer rounded-xl border px-3 py-2 text-xs font-black transition ${
-              segment === value
-                ? "border-blue-500/40 bg-blue-500/20 text-blue-100"
-                : "border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-white"
-            }`}
-          >
-            {label}
-          </button>
-        ))}
+      <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
+        <span className="rounded-full border border-zinc-800 bg-zinc-900 px-3 py-1.5 font-bold text-zinc-300">
+          Currently loaded {items.length}
+        </span>
+        <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1.5 font-bold text-blue-200">
+          Segment: {segmentLabels[segment]}
+        </span>
+        {appliedQuery ? (
+          <span className="max-w-full truncate rounded-full border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-zinc-400">
+            Search: {appliedQuery}
+          </span>
+        ) : null}
       </div>
 
       <div className="mt-5 overflow-x-auto">
@@ -567,7 +674,7 @@ export function AdminUsersPanel({
             </tr>
           </thead>
           <tbody>
-            {filteredItems.map((user) => (
+            {items.map((user) => (
               <tr key={user.id} className="rounded-2xl bg-zinc-900/70 text-zinc-200">
                 <td className="rounded-l-2xl px-3 py-3">
                   <div className="font-bold">{user.email || user.name || "No email"}</div>
@@ -628,12 +735,31 @@ export function AdminUsersPanel({
             ))}
           </tbody>
         </table>
-        {filteredItems.length === 0 ? (
+        {items.length === 0 ? (
           <div className="mt-3 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5 text-sm text-zinc-400">
-            No users match the current segment.
+            No users match the current database segment and search.
           </div>
         ) : null}
       </div>
+
+      {nextCursor ? (
+        <div className="mt-4 flex justify-center">
+          <button
+            type="button"
+            onClick={() =>
+              void fetchUsers({
+                cursor: nextCursor,
+                append: true,
+              })
+            }
+            disabled={isLoadingMore}
+            className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-black text-zinc-100 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isLoadingMore ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            Load 30 more
+          </button>
+        </div>
+      ) : null}
 
       {detailUser ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">

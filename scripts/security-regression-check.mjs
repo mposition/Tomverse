@@ -1367,6 +1367,15 @@ const checks = [
       );
     },
   },
+  {
+    name: "Full admin user export remains admin-only, rate-limited, and non-cacheable",
+    file: "app/api/admin/users/export/route.ts",
+    test: (source) =>
+      source.includes("isAdminSession(session)") &&
+      source.includes('"admin-users-export"') &&
+      source.includes('"Cache-Control": "private, no-store, max-age=0"') &&
+      source.includes("getAllAdminUsersForExport"),
+  },
 ];
 
 const failures = [];

@@ -8,7 +8,8 @@ import {
   apiSecurityResponse,
   consumeApiRateLimit,
 } from "@/lib/apiSecurity";
-import { prisma } from "@/lib/prisma";
+import { getAdminUsersPage, getAdminUserStats } from "@/lib/adminUsers";
+import { normalizeAdminUserSegment } from "@/lib/adminUserTypes";
 
 export async function GET(req: Request) {
   try {
@@ -23,58 +24,29 @@ export async function GET(req: Request) {
     });
 
     const url = new URL(req.url);
-    const query = (url.searchParams.get("q") || "").trim();
-    const take = Math.min(
-      Math.max(Number(url.searchParams.get("take") || 20), 1),
-      50
-    );
+    const query = (url.searchParams.get("q") || "").trim().slice(0, 200);
+    const cursor = (url.searchParams.get("cursor") || "").trim() || null;
+    const segment = normalizeAdminUserSegment(url.searchParams.get("segment"));
+    const includeStats = url.searchParams.get("includeStats") === "1";
+    const requestedTake = Number(url.searchParams.get("take") || 20);
+    const take = Number.isFinite(requestedTake)
+      ? Math.min(Math.max(Math.trunc(requestedTake), 1), 50)
+      : 20;
 
-    const users = await prisma.user.findMany({
-      where: query
-        ? {
-            OR: [
-              { id: { contains: query, mode: "insensitive" } },
-              { email: { contains: query, mode: "insensitive" } },
-              { name: { contains: query, mode: "insensitive" } },
-              { stripeCustomerId: { contains: query, mode: "insensitive" } },
-            ],
-          }
-        : undefined,
-      orderBy: { id: "desc" },
-      take,
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        plan: true,
-        subscriptionStatus: true,
-        subscriptionCurrentPeriodEnd: true,
-        subscriptionBillingInterval: true,
-        subscriptionCancelAtPeriodEnd: true,
-        stripeCustomerId: true,
-        stripeSubscriptionId: true,
-        creditDebtCredits: true,
-        creditDebtCostMicroUsd: true,
-        billingRiskStatus: true,
-        _count: {
-          select: {
-            conversations: true,
-            accounts: true,
-            refundRequests: true,
-            promotionRedemptions: true,
-          },
-        },
+    const [page, stats] = await Promise.all([
+      getAdminUsersPage({ query, cursor, segment, take }),
+      includeStats ? getAdminUserStats() : Promise.resolve(undefined),
+    ]);
+
+    return NextResponse.json(
+      {
+        ...page,
+        ...(stats ? { stats } : {}),
       },
-    });
-
-    return NextResponse.json({
-      users: users.map((user) => ({
-        ...user,
-        subscriptionCurrentPeriodEnd:
-          user.subscriptionCurrentPeriodEnd?.toISOString() || null,
-        creditDebtCostMicroUsd: Number(user.creditDebtCostMicroUsd),
-      })),
-    });
+      {
+        headers: { "Cache-Control": "private, no-store, max-age=0" },
+      }
+    );
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
