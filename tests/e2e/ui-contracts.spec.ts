@@ -25,12 +25,36 @@ test("desktop exposes stable QA contracts", async ({ page }) => {
     "/support/help-centre/chat-workspace?lang=en"
   );
   await expect(helpLink).toHaveAttribute("target", "_blank");
+
+  await page.keyboard.press("Escape");
+  const organizerToggle = page.getByTestId("sidebar-organizer-toggle");
+  if ((await organizerToggle.getAttribute("aria-expanded")) !== "true") {
+    await organizerToggle.click();
+  }
   await expect(page.getByText("Status", { exact: true })).toBeVisible();
   await expect(page.getByText("Labels", { exact: true })).toBeVisible();
 
-  await page.keyboard.press("Escape");
   await page.getByTestId("status-help").click();
-  await expect(page.getByRole("tooltip")).toContainText("protection and sharing state");
+  let tooltip = page.getByRole("tooltip");
+  await expect(tooltip).toContainText("protection and sharing state");
+
+  for (const helpTestId of ["status-help", "labels-help", "projects-help"]) {
+    if (helpTestId !== "status-help") {
+      await page.keyboard.press("Escape");
+      await page.getByTestId(helpTestId).click();
+      tooltip = page.getByRole("tooltip");
+      await expect(tooltip).toBeVisible();
+    }
+
+    const box = await tooltip.boundingBox();
+    const viewport = page.viewportSize();
+    expect(box).not.toBeNull();
+    expect(viewport).not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.y).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(viewport!.width);
+    expect(box!.y + box!.height).toBeLessThanOrEqual(viewport!.height);
+  }
 });
 
 test("chat workspace guide exposes the full help structure", async ({ page }) => {
@@ -85,6 +109,10 @@ test("mobile exposes stable QA contracts", async ({ page }) => {
     .getByRole("button")
     .first()
     .click();
+  const organizerToggle = page.getByTestId("sidebar-organizer-toggle");
+  if ((await organizerToggle.getAttribute("aria-expanded")) !== "true") {
+    await organizerToggle.click();
+  }
   await page.getByTestId("status-help").click();
   await expect(page.getByRole("dialog", { name: "Status" })).toContainText(
     "protection and sharing state"
