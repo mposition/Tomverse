@@ -29,9 +29,13 @@ import {
 } from "lucide-react";
 import { authOptions } from "@/lib/auth";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
+import {
+    getAdminActivePaidWhere,
+    getAdminUsersPage,
+    getAdminUserStats,
+} from "@/lib/adminUsers";
 import { getPublicAppSettings } from "@/lib/appSettings";
 import { AVAILABLE_MODELS } from "@/lib/models";
-import { getUserChatUsageKey } from "@/lib/chatSecurity";
 import { prisma } from "@/lib/prisma";
 import { AdminProviderHealthPanel } from "@/components/admin/AdminProviderHealthPanel";
 import { AdminAuditPanel, type AdminAuditRow } from "@/components/admin/AdminAuditPanel";
@@ -60,7 +64,7 @@ import {
     type SlaRow,
 } from "@/components/admin/AdminRiskPanels";
 import { AdminSavedViewsPanel } from "@/components/admin/AdminSavedViewsPanel";
-import { AdminUsersPanel, type AdminUserRow } from "@/components/admin/AdminUsersPanel";
+import { AdminUsersPanel } from "@/components/admin/AdminUsersPanel";
 import { AdminWebhookPanel } from "@/components/admin/AdminWebhookPanel";
 import { BillingAdminPanel } from "@/components/admin/BillingAdminPanel";
 import { FeedbackInboxPanel, type FeedbackRow } from "@/components/admin/FeedbackInboxPanel";
@@ -344,14 +348,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     const now = new Date();
     const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
     const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-    const activePaidWhere = {
-        plan: { in: ["Pro", "Max"] },
-        subscriptionStatus: { in: ["active", "trialing"] },
-        OR: [
-            { subscriptionCurrentPeriodEnd: null },
-            { subscriptionCurrentPeriodEnd: { gt: now } },
-        ],
-    };
+    const activePaidWhere = getAdminActivePaidWhere(now);
 
     const [
         dashboard,
@@ -359,12 +356,10 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         billingPromotions,
         billingPricing,
         promotionRiskSignalGroups,
-        totalUsers,
-        paidUsers,
-        activeSubscriptions,
+        userStats,
         conversationCount,
         messageCount,
-        recentUsers,
+        initialUsersPage,
         feedbackRows,
         openFeedbackCount,
         refundRows,
@@ -377,7 +372,6 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         promotionRedemptions,
         approvedRefundCount,
         rejectedRefundCount,
-        cancelAtPeriodEndCount,
         modelOverrides,
         notificationLogs,
         providerIncidents,
@@ -395,38 +389,10 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             where: { riskFlags: { not: "[]" } },
             _count: { _all: true },
         }),
-        prisma.user.count(),
-        prisma.user.count({ where: activePaidWhere }),
-        prisma.user.count({ where: activePaidWhere }),
+        getAdminUserStats(now),
         prisma.conversation.count(),
         prisma.message.count(),
-        prisma.user.findMany({
-            orderBy: { id: "desc" },
-            take: 12,
-            select: {
-                id: true,
-                email: true,
-                name: true,
-                plan: true,
-                subscriptionStatus: true,
-                subscriptionCurrentPeriodEnd: true,
-                subscriptionBillingInterval: true,
-                stripeCustomerId: true,
-                stripeSubscriptionId: true,
-                subscriptionCancelAtPeriodEnd: true,
-                creditDebtCredits: true,
-                creditDebtCostMicroUsd: true,
-                billingRiskStatus: true,
-                _count: {
-                    select: {
-                        conversations: true,
-                        accounts: true,
-                        refundRequests: true,
-                        promotionRedemptions: true,
-                    },
-                },
-            },
-        }),
+        getAdminUsersPage({ take: 30, now }),
         prisma.feedback.findMany({
             orderBy: { createdAt: "desc" },
             take: 10,
@@ -494,12 +460,6 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         prisma.billingPromotionRedemption.count(),
         prisma.refundRequest.count({ where: { status: "approved" } }),
         prisma.refundRequest.count({ where: { status: "rejected" } }),
-        prisma.user.count({
-            where: {
-                ...activePaidWhere,
-                subscriptionCancelAtPeriodEnd: true,
-            },
-        }),
         getModelOverrides(),
         prisma.adminNotificationLog.findMany({
             orderBy: { createdAt: "desc" },
@@ -535,44 +495,10 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         (sum, provider) => sum + provider.monthCostMicroUsd,
         0
     );
-    const recentUserUsageKeys = new Map(
-        recentUsers.map((user) => [user.id, getUserChatUsageKey(user.id)])
-    );
-    const recentUsageRows =
-        recentUserUsageKeys.size > 0
-            ? await prisma.chatUsageBucket.findMany({
-                  where: {
-                      key: { in: Array.from(recentUserUsageKeys.values()) },
-                      period: "day",
-                      periodStart: dayStart,
-                  },
-                  select: { key: true, count: true },
-              })
-            : [];
-    const recentUsageByKey = new Map(
-        recentUsageRows.map((row) => [row.key, row.count])
-    );
-    const adminUserRows: AdminUserRow[] = recentUsers.map((user) => {
-        const userKey = getUserChatUsageKey(user.id);
-        return {
-            id: user.id,
-            email: user.email,
-            name: user.name,
-            plan: user.plan,
-            subscriptionStatus: user.subscriptionStatus,
-            subscriptionCurrentPeriodEnd:
-                user.subscriptionCurrentPeriodEnd?.toISOString() || null,
-            subscriptionBillingInterval: user.subscriptionBillingInterval,
-            subscriptionCancelAtPeriodEnd: user.subscriptionCancelAtPeriodEnd,
-            stripeCustomerId: user.stripeCustomerId,
-            stripeSubscriptionId: user.stripeSubscriptionId,
-            usageToday: recentUsageByKey.get(userKey) || 0,
-            creditDebtCredits: user.creditDebtCredits,
-            creditDebtCostMicroUsd: Number(user.creditDebtCostMicroUsd),
-            billingRiskStatus: user.billingRiskStatus,
-            _count: user._count,
-        };
-    });
+    const totalUsers = userStats.totalAccounts;
+    const paidUsers = userStats.activePaidSubscriptions;
+    const activeSubscriptions = userStats.activePaidSubscriptions;
+    const cancelAtPeriodEndCount = userStats.cancelingSubscriptions;
     const refundRequestRows: RefundRequestRow[] = refundRows.map((request) => {
         const purchases = request.user?.creditPurchases || [];
         const purchasedCredits = purchases.reduce(
@@ -1201,9 +1127,10 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
 
                     {activeTab === "users" && (
                         <AdminUsersPanel
-                            rows={adminUserRows}
+                            rows={initialUsersPage.users}
+                            initialNextCursor={initialUsersPage.nextCursor}
+                            stats={userStats}
                             currentUserId={session.user.id}
-                            paidUserCount={paidUsers}
                             conversationCount={conversationCount}
                         />
                     )}
