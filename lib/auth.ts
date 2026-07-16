@@ -7,6 +7,7 @@ import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/prisma";
 import { encryptOAuthAccountTokens } from "@/lib/oauthTokenCrypto";
 import { logAuthAuditEvent } from "@/lib/securityAudit";
+import { effectivePlanForAccess } from "@/lib/foundingTesterPassCore";
 
 const SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
 const SESSION_UPDATE_AGE_SECONDS = 24 * 60 * 60;
@@ -63,11 +64,15 @@ export const authOptions: NextAuthOptions = {
                 const analyticsUser = user as typeof user & {
                     plan?: unknown;
                     createdAt?: unknown;
+                    subscriptionStatus?: string | null;
+                    subscriptionCurrentPeriodEnd?: Date | null;
                 };
-                session.user.plan =
-                    analyticsUser.plan === "Pro" || analyticsUser.plan === "Max"
-                        ? analyticsUser.plan
-                        : "Free";
+                session.user.plan = effectivePlanForAccess({
+                    plan: analyticsUser.plan,
+                    subscriptionStatus: analyticsUser.subscriptionStatus,
+                    subscriptionCurrentPeriodEnd:
+                        analyticsUser.subscriptionCurrentPeriodEnd,
+                });
                 session.user.createdAt =
                     analyticsUser.createdAt instanceof Date
                         ? analyticsUser.createdAt.toISOString()

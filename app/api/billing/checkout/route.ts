@@ -26,7 +26,7 @@ import {
   type PromotionRiskFlag,
 } from "@/lib/billingPromotionSecurity";
 import { promotionValidationError } from "@/lib/billingPromotionCore";
-import { sendBillingWelcomeEmail } from "@/lib/billingEmails";
+import { sendFoundingTesterPassStartedEmail } from "@/lib/billingEmails";
 import { prisma } from "@/lib/prisma";
 import { getPublicAppOrigin } from "@/lib/publicUrl";
 import { getStripe } from "@/lib/stripe";
@@ -57,6 +57,11 @@ import {
   type BillingCurrency,
 } from "@/lib/billingMarkets";
 import { checkoutBillingMetadata } from "@/lib/billingTransactions";
+import {
+  FOUNDING_TESTER_PASS_STATUS,
+  addUtcDays,
+  isInternalPassPromotion,
+} from "@/lib/foundingTesterPassCore";
 
 const checkoutSchema = z
   .object({
@@ -93,77 +98,74 @@ const priceCentsForInterval = (
 ) =>
   billingInterval === "annual" ? plan.annualPriceCents : plan.monthlyPriceCents;
 
-const addBillingPeriod = (
-  date: Date,
-  billingInterval: "monthly" | "annual"
-) => {
-  const next = new Date(date);
-  if (billingInterval === "annual") {
-    next.setUTCFullYear(next.getUTCFullYear() + 1);
-  } else {
-    next.setUTCMonth(next.getUTCMonth() + 1);
-  }
-  return next;
-};
-
 const billingSuccessUrl = (
   origin: string,
   planId: BillingPlanId,
   billingInterval: "monthly" | "annual",
-  language?: "ko" | "en" | "zh" | "fr" | "de" | "es" | "pt"
+  language?: "ko" | "en" | "zh" | "fr" | "de" | "es" | "pt",
+  accessType?: "founding-tester-pass"
 ) =>
   `${origin}/chat?billing=success&plan=${encodeURIComponent(
     planId
   )}&interval=${encodeURIComponent(billingInterval)}${
     language ? `&lang=${encodeURIComponent(language)}` : ""
-  }`;
+  }${accessType ? `&access=${encodeURIComponent(accessType)}` : ""}`;
 
-async function activateZeroDollarPlan({
+async function activateInternalPass({
   userId,
   planId,
-  billingInterval,
   promotion,
   clientIpHash,
   riskFlags,
 }: {
   userId: string;
   planId: BillingPlanId;
-  billingInterval: "monthly" | "annual";
-  promotion: CheckoutPromotion | null;
+  promotion: CheckoutPromotion;
   clientIpHash: string | null;
   riskFlags: PromotionRiskFlag[];
 }) {
-  const periodEnd = addBillingPeriod(new Date(), billingInterval);
+  if (
+    !isInternalPassPromotion(promotion) ||
+    promotion.discountPercent !== 100 ||
+    promotion.appliesToPlanIds.length !== 1 ||
+    promotion.appliesToPlanIds[0] !== "pro" ||
+    !promotion.accessDurationDays
+  ) {
+    throw new Error("INTERNAL_PASS_POLICY_INVALID");
+  }
+  const accessStartsAt = new Date();
+  const periodEnd = addUtcDays(accessStartsAt, promotion.accessDurationDays);
   await prisma.$transaction(async (tx) => {
-    if (promotion) {
-      if (!promotion.maxRedemptions || !promotion.endsAt || !clientIpHash) {
-        throw new Error("PROMOTION_POLICY_INCOMPLETE");
-      }
-      const updatedPromotion = await tx.billingPromotion.updateMany({
-        where: {
-          id: promotion.id,
-          isActive: true,
-          endsAt: { gt: new Date() },
-          redeemedCount: { lt: promotion.maxRedemptions },
-        },
-        data: { redeemedCount: { increment: 1 } },
-      });
-
-      if (updatedPromotion.count !== 1) {
-        throw new Error("PROMOTION_REDEMPTION_LIMIT_REACHED");
-      }
-
-      await tx.billingPromotionRedemption.create({
-        data: {
-          promotionId: promotion.id,
-          userId,
-          planId,
-          billingInterval,
-          clientIpHash,
-          riskFlags: encodePromotionRiskFlags(riskFlags),
-        },
-      });
+    if (!promotion.maxRedemptions || !promotion.endsAt || !clientIpHash) {
+      throw new Error("PROMOTION_POLICY_INCOMPLETE");
     }
+    const updatedPromotion = await tx.billingPromotion.updateMany({
+      where: {
+        id: promotion.id,
+        fulfillmentType: "internal_pass",
+        isActive: true,
+        endsAt: { gt: accessStartsAt },
+        redeemedCount: { lt: promotion.maxRedemptions },
+      },
+      data: { redeemedCount: { increment: 1 } },
+    });
+
+    if (updatedPromotion.count !== 1) {
+      throw new Error("PROMOTION_REDEMPTION_LIMIT_REACHED");
+    }
+
+    await tx.billingPromotionRedemption.create({
+      data: {
+        promotionId: promotion.id,
+        userId,
+        planId,
+        billingInterval: "internal_pass",
+        clientIpHash,
+        riskFlags: encodePromotionRiskFlags(riskFlags),
+        accessStartsAt,
+        accessEndsAt: periodEnd,
+      },
+    });
 
     await tx.user.update({
       where: { id: userId },
@@ -171,10 +173,10 @@ async function activateZeroDollarPlan({
         plan: tierForPlanId(planId),
         stripeSubscriptionId: null,
         stripePriceId: null,
-        subscriptionStatus: "active",
+        subscriptionStatus: FOUNDING_TESTER_PASS_STATUS,
         subscriptionCurrentPeriodEnd: periodEnd,
-        subscriptionBillingInterval: billingInterval,
-        subscriptionCancelAtPeriodEnd: false,
+        subscriptionBillingInterval: null,
+        subscriptionCancelAtPeriodEnd: true,
       },
     });
   });
@@ -472,51 +474,56 @@ export async function POST(req: Request) {
         }
       : {};
     const origin = getPublicAppOrigin(req);
-    if (finalPriceMinor <= 0) {
-      const periodEnd = await activateZeroDollarPlan({
+    const internalPass =
+      appliedPromotion && isInternalPassPromotion(appliedPromotion)
+        ? appliedPromotion
+        : null;
+    if (internalPass) {
+      if (billingInterval !== "monthly" || finalPriceMinor !== 0) {
+        return NextResponse.json(
+          { error: "This access pass is available only for the monthly Pro plan." },
+          { status: 400 }
+        );
+      }
+      const periodEnd = await activateInternalPass({
         userId: user.id,
         planId: planId as BillingPlanId,
-        billingInterval,
-        promotion: appliedPromotion,
+        promotion: internalPass,
         clientIpHash: promotionClientIpHash,
         riskFlags: promotionRiskFlags,
       });
-      await sendBillingWelcomeEmail({
+      await sendFoundingTesterPassStartedEmail({
         to: user.email,
-        plan: tierForPlanId(planId),
-        billingInterval,
         periodEnd,
         language: user.settings?.language,
       }).catch((emailError) => {
-        console.error("Billing welcome email failed:", emailError);
+        console.error("Founding Tester Pass welcome email failed:", emailError);
       });
       if (trustedAnalytics) {
-        const transactionId = `zero-${randomUUID()}`;
+        const activationId = `pass-${randomUUID()}`;
         await recordProductAnalyticsEvent({
-          eventName: "purchase_completed",
+          eventName: "promotion_pass_activated",
           source: "server",
           userId: user.id,
           attribution: trustedAnalytics,
           modelCount: 0,
           plan: tierForPlanId(planId),
           properties: {
-            billing_interval: billingInterval,
             plan_id: planId,
-            purchase_type: "subscription",
-            product_id: productId,
+            product_id: "founding_tester_pass_pro_60d",
+            promotion_code: internalPass.code,
+            access_duration_days: internalPass.accessDurationDays || 60,
+            automatic_renewal: false,
             monthly_credits_included: plan.monthlyMessageLimit,
             current_plan: purchaseContext.currentPlan,
             trigger,
             plan_credits_remaining: purchaseContext.planCreditsRemaining,
             addon_credits_remaining: purchaseContext.addonCreditsRemaining,
-            value: 0,
-            currency: market.currency,
-            transaction_id: transactionId,
           },
-          dedupeKey: `zero-checkout:${transactionId}`,
+          dedupeKey: `promotion-pass:${activationId}`,
           sendToGa4: true,
         }).catch((analyticsError) => {
-          console.warn("Zero-dollar purchase analytics failed.", {
+          console.warn("Founding Tester Pass analytics failed.", {
             errorName:
               analyticsError instanceof Error
                 ? analyticsError.name
@@ -531,9 +538,13 @@ export async function POST(req: Request) {
           origin,
           planId as BillingPlanId,
           billingInterval,
-          language
+          language,
+          "founding-tester-pass"
         ),
         periodEnd: periodEnd.toISOString(),
+        accessType: "founding_tester_pass",
+        automaticRenewal: false,
+        paymentMethodRequired: false,
       });
     }
 

@@ -727,6 +727,191 @@ export async function sendBillingWelcomeEmail(input: BillingWelcomeEmailInput) {
   await sendTransactionalEmail({ to: input.to, subject, text, html });
 }
 
+type FoundingTesterPassEmailInput = {
+  to: string | null | undefined;
+  periodEnd: Date | string;
+  language?: string | null;
+};
+
+const foundingTesterPassCopy: Record<
+  EmailLanguage,
+  {
+    startedSubject: string;
+    startedTitle: string;
+    startedBody: (periodEnd: string) => string;
+    reminderSubject: string;
+    reminderTitle: string;
+    reminderBody: (periodEnd: string) => string;
+    endedSubject: string;
+    endedTitle: string;
+    endedBody: string;
+    noRenewal: string;
+    upgrade: string;
+  }
+> = {
+  en: {
+    startedSubject: "Your 60-day Tomverse Founding Tester Pass is active",
+    startedTitle: "Founding Tester Pass activated",
+    startedBody: (periodEnd) =>
+      `Your Pro access is active until ${periodEnd}. No payment method was collected and this pass will not renew automatically.`,
+    reminderSubject: "Your Founding Tester Pass ends in 7 days",
+    reminderTitle: "Seven days of Pro access remain",
+    reminderBody: (periodEnd) =>
+      `Your Founding Tester Pass ends on ${periodEnd}. After that, your account returns to Free unless you choose a paid plan.`,
+    endedSubject: "Your Founding Tester Pass has ended",
+    endedTitle: "Your account has returned to Free",
+    endedBody:
+      "Your complimentary Pro access has ended. Your account and conversations remain available on the Free plan.",
+    noRenewal: "There is no automatic renewal or charge.",
+    upgrade: "View Pro and Max plans",
+  },
+  ko: {
+    startedSubject: "Tomverse Founding Tester Pass 60일 혜택이 시작되었습니다",
+    startedTitle: "Founding Tester Pass가 활성화되었습니다",
+    startedBody: (periodEnd) =>
+      `Pro 이용 권한은 ${periodEnd}까지 유지됩니다. 결제수단은 등록되지 않았으며 자동으로 유료 갱신되지 않습니다.`,
+    reminderSubject: "Founding Tester Pass가 7일 후 종료됩니다",
+    reminderTitle: "Pro 이용 기간이 7일 남았습니다",
+    reminderBody: (periodEnd) =>
+      `Founding Tester Pass는 ${periodEnd}에 종료됩니다. 유료 플랜을 선택하지 않으면 이후 Free 플랜으로 전환됩니다.`,
+    endedSubject: "Founding Tester Pass가 종료되었습니다",
+    endedTitle: "계정이 Free 플랜으로 전환되었습니다",
+    endedBody:
+      "무료로 제공된 Pro 이용 기간이 종료되었습니다. 계정과 기존 대화는 Free 플랜에서 계속 이용할 수 있습니다.",
+    noRenewal: "자동 갱신이나 자동 결제는 없습니다.",
+    upgrade: "Pro 및 Max 플랜 보기",
+  },
+  zh: {
+    startedSubject: "您的 Tomverse 60 天创始测试通行证已生效",
+    startedTitle: "创始测试通行证已激活",
+    startedBody: (periodEnd) =>
+      `Pro 权限有效至 ${periodEnd}。我们未收集付款方式，此通行证不会自动续费。`,
+    reminderSubject: "您的创始测试通行证将在 7 天后结束",
+    reminderTitle: "Pro 权限还剩 7 天",
+    reminderBody: (periodEnd) =>
+      `通行证将于 ${periodEnd}结束。若不选择付费方案，账户随后将恢复为 Free。`,
+    endedSubject: "您的创始测试通行证已结束",
+    endedTitle: "您的账户已恢复为 Free",
+    endedBody: "赠送的 Pro 权限已结束，您的账户和对话仍可在 Free 方案中使用。",
+    noRenewal: "不会自动续费或扣款。",
+    upgrade: "查看 Pro 和 Max 方案",
+  },
+  fr: {
+    startedSubject: "Votre pass testeur fondateur Tomverse de 60 jours est actif",
+    startedTitle: "Pass testeur fondateur activé",
+    startedBody: (periodEnd) =>
+      `Votre accès Pro est actif jusqu’au ${periodEnd}. Aucun moyen de paiement n’a été enregistré et le pass ne se renouvelle pas automatiquement.`,
+    reminderSubject: "Votre pass testeur fondateur se termine dans 7 jours",
+    reminderTitle: "Il reste sept jours d’accès Pro",
+    reminderBody: (periodEnd) =>
+      `Le pass se termine le ${periodEnd}. Votre compte repassera ensuite à Free sauf si vous choisissez une offre payante.`,
+    endedSubject: "Votre pass testeur fondateur est terminé",
+    endedTitle: "Votre compte est repassé à Free",
+    endedBody:
+      "Votre accès Pro offert est terminé. Votre compte et vos conversations restent disponibles avec l’offre Free.",
+    noRenewal: "Aucun renouvellement ni prélèvement automatique.",
+    upgrade: "Voir les offres Pro et Max",
+  },
+  de: {
+    startedSubject: "Ihr 60-tägiger Tomverse Founding Tester Pass ist aktiv",
+    startedTitle: "Founding Tester Pass aktiviert",
+    startedBody: (periodEnd) =>
+      `Ihr Pro-Zugang ist bis ${periodEnd} aktiv. Es wurde keine Zahlungsmethode hinterlegt und der Pass verlängert sich nicht automatisch.`,
+    reminderSubject: "Ihr Founding Tester Pass endet in 7 Tagen",
+    reminderTitle: "Noch sieben Tage Pro-Zugang",
+    reminderBody: (periodEnd) =>
+      `Der Pass endet am ${periodEnd}. Danach wird Ihr Konto auf Free zurückgesetzt, sofern Sie keinen kostenpflichtigen Tarif wählen.`,
+    endedSubject: "Ihr Founding Tester Pass ist beendet",
+    endedTitle: "Ihr Konto wurde auf Free zurückgesetzt",
+    endedBody:
+      "Ihr kostenloser Pro-Zugang ist beendet. Konto und Unterhaltungen bleiben im Free-Tarif verfügbar.",
+    noRenewal: "Keine automatische Verlängerung oder Belastung.",
+    upgrade: "Pro- und Max-Tarife ansehen",
+  },
+  es: {
+    startedSubject: "Tu pase Tomverse Founding Tester de 60 días está activo",
+    startedTitle: "Pase Founding Tester activado",
+    startedBody: (periodEnd) =>
+      `Tu acceso Pro está activo hasta el ${periodEnd}. No se registró ningún método de pago y el pase no se renovará automáticamente.`,
+    reminderSubject: "Tu pase Founding Tester termina en 7 días",
+    reminderTitle: "Quedan siete días de acceso Pro",
+    reminderBody: (periodEnd) =>
+      `El pase termina el ${periodEnd}. Después, tu cuenta volverá a Free salvo que elijas un plan de pago.`,
+    endedSubject: "Tu pase Founding Tester ha terminado",
+    endedTitle: "Tu cuenta ha vuelto a Free",
+    endedBody:
+      "Tu acceso Pro gratuito ha terminado. Tu cuenta y conversaciones siguen disponibles en el plan Free.",
+    noRenewal: "No hay renovación ni cobro automático.",
+    upgrade: "Ver planes Pro y Max",
+  },
+  pt: {
+    startedSubject: "O seu passe Tomverse Founding Tester de 60 dias está ativo",
+    startedTitle: "Passe Founding Tester ativado",
+    startedBody: (periodEnd) =>
+      `O acesso Pro está ativo até ${periodEnd}. Nenhum método de pagamento foi registado e o passe não será renovado automaticamente.`,
+    reminderSubject: "O seu passe Founding Tester termina em 7 dias",
+    reminderTitle: "Restam sete dias de acesso Pro",
+    reminderBody: (periodEnd) =>
+      `O passe termina em ${periodEnd}. Depois disso, a conta regressa ao Free, salvo se escolher um plano pago.`,
+    endedSubject: "O seu passe Founding Tester terminou",
+    endedTitle: "A sua conta regressou ao Free",
+    endedBody:
+      "O acesso Pro gratuito terminou. A conta e as conversas continuam disponíveis no plano Free.",
+    noRenewal: "Não existe renovação nem cobrança automática.",
+    upgrade: "Ver planos Pro e Max",
+  },
+};
+
+const passEmail = async (
+  input: FoundingTesterPassEmailInput,
+  phase: "started" | "reminder" | "ended"
+) => {
+  if (!input.to) return { sent: false, skipped: true } as const;
+  const language = normalizeLanguage(input.language);
+  const copy = foundingTesterPassCopy[language];
+  const periodEnd = formatDate(input.periodEnd, language);
+  const subject =
+    phase === "started"
+      ? copy.startedSubject
+      : phase === "reminder"
+        ? copy.reminderSubject
+        : copy.endedSubject;
+  const title =
+    phase === "started"
+      ? copy.startedTitle
+      : phase === "reminder"
+        ? copy.reminderTitle
+        : copy.endedTitle;
+  const body =
+    phase === "started"
+      ? copy.startedBody(periodEnd)
+      : phase === "reminder"
+        ? copy.reminderBody(periodEnd)
+        : copy.endedBody;
+  const pricingLink = `${appUrl()}/pricing?lang=${language}`;
+  const text = [body, copy.noRenewal, `${copy.upgrade}: ${pricingLink}`].join("\n");
+  const html = shell(
+    title,
+    `<p>${escapeHtml(body)}</p>
+     <p><strong>${escapeHtml(copy.noRenewal)}</strong></p>
+     <p><a href="${pricingLink}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;font-weight:800;border-radius:12px;padding:12px 18px;">${escapeHtml(copy.upgrade)}</a></p>`,
+    language
+  );
+  return sendTransactionalEmail({ to: input.to, subject, text, html });
+};
+
+export const sendFoundingTesterPassStartedEmail = (
+  input: FoundingTesterPassEmailInput
+) => passEmail(input, "started");
+
+export const sendFoundingTesterPassReminderEmail = (
+  input: FoundingTesterPassEmailInput
+) => passEmail(input, "reminder");
+
+export const sendFoundingTesterPassEndedEmail = (
+  input: FoundingTesterPassEmailInput
+) => passEmail(input, "ended");
+
 export async function sendRefundRequestReceivedEmail(input: RefundEmailInput) {
   if (!input.to) return;
   const language = normalizeLanguage(input.language);

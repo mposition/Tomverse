@@ -8,8 +8,172 @@ import {
 } from "@/lib/oauthTokenCrypto";
 import { expireCreditLots } from "@/lib/creditLedger";
 import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
+import {
+  sendFoundingTesterPassEndedEmail,
+  sendFoundingTesterPassReminderEmail,
+} from "@/lib/billingEmails";
+import {
+  FOUNDING_TESTER_PASS_EXPIRED_STATUS,
+  FOUNDING_TESTER_PASS_STATUS,
+} from "@/lib/foundingTesterPassCore";
 
 const OAUTH_ACCOUNT_BATCH_SIZE = 200;
+const TESTER_PASS_BATCH_SIZE = 100;
+const TESTER_PASS_REMINDER_WINDOW_MS = 7 * 86_400_000;
+
+const resetReminderClaim = (id: string, claimedAt: Date) =>
+  prisma.billingPromotionRedemption.updateMany({
+    where: { id, reminderSentAt: claimedAt },
+    data: { reminderSentAt: null },
+  });
+
+const sendFoundingTesterPassReminders = async (now: Date) => {
+  const rows = await prisma.billingPromotionRedemption.findMany({
+    where: {
+      reminderSentAt: null,
+      expiredAt: null,
+      accessEndsAt: {
+        gt: now,
+        lte: new Date(now.getTime() + TESTER_PASS_REMINDER_WINDOW_MS),
+      },
+      promotion: { fulfillmentType: "internal_pass" },
+    },
+    orderBy: { accessEndsAt: "asc" },
+    take: TESTER_PASS_BATCH_SIZE,
+    select: {
+      id: true,
+      accessEndsAt: true,
+      user: {
+        select: {
+          email: true,
+          settings: { select: { language: true } },
+        },
+      },
+    },
+  });
+  let sent = 0;
+  for (const row of rows) {
+    if (!row.accessEndsAt) continue;
+    const claimedAt = new Date();
+    const claimed = await prisma.billingPromotionRedemption.updateMany({
+      where: { id: row.id, reminderSentAt: null, expiredAt: null },
+      data: { reminderSentAt: claimedAt },
+    });
+    if (claimed.count !== 1) continue;
+    try {
+      const result = await sendFoundingTesterPassReminderEmail({
+        to: row.user.email,
+        periodEnd: row.accessEndsAt,
+        language: row.user.settings?.language,
+      });
+      if (!result.sent) {
+        await resetReminderClaim(row.id, claimedAt);
+        continue;
+      }
+      sent += 1;
+    } catch (error) {
+      await resetReminderClaim(row.id, claimedAt).catch(() => undefined);
+      console.error("Founding Tester Pass reminder email failed:", {
+        redemptionId: row.id,
+        errorName: error instanceof Error ? error.name : "UnknownError",
+      });
+    }
+  }
+  return sent;
+};
+
+const expireFoundingTesterPasses = async (now: Date) => {
+  const rows = await prisma.billingPromotionRedemption.findMany({
+    where: {
+      expiredAt: null,
+      accessEndsAt: { lte: now },
+      promotion: { fulfillmentType: "internal_pass" },
+    },
+    orderBy: { accessEndsAt: "asc" },
+    take: TESTER_PASS_BATCH_SIZE,
+    select: { id: true, userId: true },
+  });
+  let expired = 0;
+  let downgraded = 0;
+  for (const row of rows) {
+    const outcome = await prisma.$transaction(async (tx) => {
+      const marked = await tx.billingPromotionRedemption.updateMany({
+        where: { id: row.id, expiredAt: null },
+        data: { expiredAt: now },
+      });
+      if (marked.count !== 1) return { expired: false, downgraded: false };
+      const user = await tx.user.updateMany({
+        where: {
+          id: row.userId,
+          stripeSubscriptionId: null,
+          subscriptionStatus: FOUNDING_TESTER_PASS_STATUS,
+          subscriptionCurrentPeriodEnd: { lte: now },
+        },
+        data: {
+          plan: "Free",
+          subscriptionStatus: FOUNDING_TESTER_PASS_EXPIRED_STATUS,
+          subscriptionBillingInterval: null,
+          subscriptionCancelAtPeriodEnd: true,
+        },
+      });
+      if (user.count !== 1) {
+        await tx.billingPromotionRedemption.update({
+          where: { id: row.id },
+          data: { expiryNoticeSentAt: now },
+        });
+      }
+      return { expired: true, downgraded: user.count === 1 };
+    });
+    if (outcome.expired) expired += 1;
+    if (outcome.downgraded) downgraded += 1;
+  }
+  return { expired, downgraded };
+};
+
+const sendFoundingTesterPassEndedNotices = async (now: Date) => {
+  const rows = await prisma.billingPromotionRedemption.findMany({
+    where: {
+      expiredAt: { not: null },
+      expiryNoticeSentAt: null,
+      promotion: { fulfillmentType: "internal_pass" },
+    },
+    orderBy: { expiredAt: "asc" },
+    take: TESTER_PASS_BATCH_SIZE,
+    select: {
+      id: true,
+      accessEndsAt: true,
+      user: {
+        select: {
+          email: true,
+          settings: { select: { language: true } },
+        },
+      },
+    },
+  });
+  let sent = 0;
+  for (const row of rows) {
+    if (!row.accessEndsAt) continue;
+    try {
+      const result = await sendFoundingTesterPassEndedEmail({
+        to: row.user.email,
+        periodEnd: row.accessEndsAt,
+        language: row.user.settings?.language,
+      });
+      if (!result.sent) continue;
+      const marked = await prisma.billingPromotionRedemption.updateMany({
+        where: { id: row.id, expiryNoticeSentAt: null },
+        data: { expiryNoticeSentAt: now },
+      });
+      sent += marked.count;
+    } catch (error) {
+      console.error("Founding Tester Pass ended email failed:", {
+        redemptionId: row.id,
+        errorName: error instanceof Error ? error.name : "UnknownError",
+      });
+    }
+  }
+  return sent;
+};
 
 const encryptExistingOAuthTokens = async () => {
   let encryptedCount = 0;
@@ -80,8 +244,12 @@ const encryptExistingOAuthTokens = async () => {
 
 export async function cleanupExpiredData() {
   assertOAuthTokenEncryptionConfigured();
+  const now = new Date();
 
   const creditReservations = await reconcileExpiredChatCreditReservations();
+  const testerPassReminders = await sendFoundingTesterPassReminders(now);
+  const testerPassExpirations = await expireFoundingTesterPasses(now);
+  const testerPassEndedNotices = await sendFoundingTesterPassEndedNotices(now);
 
   const sessions = await prisma.session.deleteMany({
     where: { expires: { lte: new Date() } },
@@ -183,5 +351,8 @@ export async function cleanupExpiredData() {
     oauthTokensEncrypted,
     creditLotsExpired,
     creditReservations,
+    testerPassReminders,
+    testerPassExpirations,
+    testerPassEndedNotices,
   };
 }

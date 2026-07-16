@@ -96,6 +96,7 @@ type AppToast = {
 type BillingSuccessState = {
   plan: string | null;
   interval: "monthly" | "annual";
+  accessType: "subscription" | "founding_tester_pass";
 };
 
 const normalizeBillingPlanLabel = (value: string | null) => {
@@ -367,6 +368,10 @@ export default function Home() {
 
     const plan = params.get("plan");
     const interval = params.get("interval");
+    const accessType =
+      params.get("access") === "founding-tester-pass"
+        ? "founding_tester_pass"
+        : "subscription";
     const urlLanguage = params.get("lang");
     if (isLanguage(urlLanguage)) {
       setLang(urlLanguage);
@@ -375,6 +380,7 @@ export default function Home() {
       setBillingSuccess({
         plan: normalizeBillingPlanLabel(plan),
         interval: interval === "annual" ? "annual" : "monthly",
+        accessType,
       });
     });
 
@@ -395,6 +401,7 @@ export default function Home() {
     params.delete("billing");
     params.delete("plan");
     params.delete("interval");
+    params.delete("access");
     const nextSearch = params.toString();
     window.history.replaceState(
       null,
@@ -1583,7 +1590,11 @@ export default function Home() {
         <div
           role="dialog"
           aria-modal="true"
-          aria-label={t("billing.paymentSuccessfulEyebrow")}
+          aria-label={
+            billingSuccess.accessType === "founding_tester_pass"
+              ? t("billing.testerPassActivatedEyebrow")
+              : t("billing.paymentSuccessfulEyebrow")
+          }
           className="relative w-full max-w-lg overflow-hidden rounded-3xl border border-blue-400/30 bg-zinc-950 text-white shadow-2xl shadow-blue-950/40"
         >
           <div className="absolute inset-x-0 top-0 h-56 bg-gradient-to-br from-blue-500/35 via-cyan-400/15 to-purple-500/25 sm:h-52" />
@@ -1603,15 +1614,24 @@ export default function Home() {
 
             <div className="mt-6 sm:mt-7">
               <p className="pb-1 text-xs font-black uppercase leading-none tracking-[0.24em] text-blue-100">
-                {t("billing.paymentSuccessfulEyebrow")}
+                {billingSuccess.accessType === "founding_tester_pass"
+                  ? t("billing.testerPassActivatedEyebrow")
+                  : t("billing.paymentSuccessfulEyebrow")}
               </p>
               <h2 className="mt-3 text-[2rem] font-black leading-tight tracking-tight sm:text-4xl">
-                {t("billing.paymentSuccessfulTitle")}
+                {billingSuccess.accessType === "founding_tester_pass"
+                  ? t("billing.testerPassActivatedTitle")
+                  : t("billing.paymentSuccessfulTitle")}
               </h2>
               <p className="mt-4 text-base leading-7 text-zinc-300">
-                {formatCopy("billing.paymentSuccessfulWelcome", {
+                {formatCopy(
+                  billingSuccess.accessType === "founding_tester_pass"
+                    ? "billing.testerPassActivatedWelcome"
+                    : "billing.paymentSuccessfulWelcome",
+                  {
                   plan: billingSuccess.plan || t("billing.upgradedPlanFallback"),
-                })}
+                  }
+                )}
               </p>
             </div>
 
@@ -1625,9 +1645,11 @@ export default function Home() {
               <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
                 <p className="text-xs font-semibold text-zinc-400">{t("billing.billing")}</p>
                 <p className="mt-1 text-lg font-black">
-                  {billingSuccess.interval === "annual"
-                    ? t("billing.intervalAnnual")
-                    : t("billing.intervalMonthly")}
+                  {billingSuccess.accessType === "founding_tester_pass"
+                    ? t("billing.testerPassBillingLabel")
+                    : billingSuccess.interval === "annual"
+                      ? t("billing.intervalAnnual")
+                      : t("billing.intervalMonthly")}
                 </p>
               </div>
               <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4">
@@ -1637,7 +1659,9 @@ export default function Home() {
             </div>
 
             <div className="mt-6 rounded-2xl border border-blue-400/20 bg-blue-500/10 p-4 text-sm leading-6 text-blue-100">
-              {t("billing.webhookNotice")}
+              {billingSuccess.accessType === "founding_tester_pass"
+                ? t("billing.testerPassNotice")
+                : t("billing.webhookNotice")}
             </div>
 
             <div className="mt-7 flex flex-col gap-3 sm:flex-row">

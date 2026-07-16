@@ -85,6 +85,21 @@ Stripe payment fingerprints are stored only as keyed hashes; the maintenance
 job removes those identifiers after 90 days while retaining the redemption
 audit record.
 
+`TOMFRIEND100` is intentionally different from a Stripe discount. Migration
+`20260716150000_founding_tester_pass` configures it as a private Founding Tester
+Pass with these controls:
+
+- Pro only, 100% discount, exactly 60 days of access.
+- 25 total redemptions and campaign redemption through 2026-08-30 Brisbane time.
+- No Stripe Checkout session, payment method, charge, or automatic renewal.
+- A reminder email seven days before expiry, then an automatic return to Free.
+- An expiry email linking to the regular Pro and Max pricing page.
+
+The Admin Billing editor identifies this with `fulfillmentType=internal_pass`
+and `accessDurationDays=60`. All ordinary promotions, including `TOMVERSE50`,
+use `stripe_subscription`; even a 100% Stripe promotion must not enter the
+internal-pass path merely because the amount due today is zero.
+
 ## Fixed-currency customer billing
 
 New subscription and credit-pack checkouts use fixed prices in USD, AUD, CNY,
@@ -657,8 +672,9 @@ daily at 03:00 UTC:
 npm run maintenance:cleanup
 ```
 
-Run it once per day. It deletes expired usage buckets and request leases, and
-removes expired or revoked share tokens and snapshots.
+Run it once per day. It sends Founding Tester Pass expiry notices, returns
+expired pass accounts to Free, deletes expired usage buckets and request leases,
+and removes expired or revoked share tokens and snapshots.
 
 Create a second Railway Cron service for durable AI-credit reservation recovery
 and set its Config File Path to `/railway.credit-reconciliation.json`. It runs

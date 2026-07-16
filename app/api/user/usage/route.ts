@@ -16,6 +16,7 @@ import { getBillingPlanByTier } from "@/lib/billingConfig";
 import { effectivePlanModelLimit } from "@/lib/billingEntitlements";
 import { getPurchasedCreditSummary } from "@/lib/creditLedger";
 import { recommendCreditAction } from "@/lib/creditPacks";
+import { effectivePlanForAccess } from "@/lib/foundingTesterPassCore";
 
 const positiveInteger = (value: string | undefined, fallback: number) => {
   const parsed = Number(value);
@@ -99,7 +100,16 @@ export async function GET(req: Request) {
     const count = (period: string) =>
       rows.find((row) => row.period === period)?.count || 0;
 
-    const plan = normalizePlan(user?.plan);
+    const plan = normalizePlan(
+      effectivePlanForAccess(
+        {
+          plan: user?.plan,
+          subscriptionStatus: user?.subscriptionStatus,
+          subscriptionCurrentPeriodEnd: user?.subscriptionCurrentPeriodEnd,
+        },
+        now
+      )
+    );
     const billingPlan = await getBillingPlanByTier(plan);
     const estimatedCostLimits = getPlanEstimatedCostLimits(plan);
     const limits = {

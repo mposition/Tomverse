@@ -69,6 +69,8 @@ const promotionSchema = z
     maxRedemptions: z.number().int().min(1).max(1_000_000).nullable().optional(),
     redeemedCount: z.number().int().min(0).max(1_000_000).optional(),
     durationMonths: z.number().int().min(1).max(36),
+    fulfillmentType: z.enum(["stripe_subscription", "internal_pass"]),
+    accessDurationDays: z.number().int().min(1).max(366).nullable().optional(),
     appliesToPlanIds: z.array(z.enum(["pro", "max"])).min(1).max(2),
     stripeCouponId: optionalText,
     stripePromotionCodeId: optionalText,
@@ -83,6 +85,20 @@ const promotionSchema = z
       promotion.discountPercent > 0 ||
       Boolean(promotion.discountAmountCents && promotion.discountAmountCents > 0),
     { message: "Promotion must have a percent or amount discount." }
+  )
+  .refine(
+    (promotion) =>
+      promotion.fulfillmentType !== "internal_pass" ||
+      (promotion.discountPercent === 100 &&
+        promotion.accessDurationDays !== null &&
+        promotion.accessDurationDays !== undefined &&
+        promotion.appliesToPlanIds.length === 1 &&
+        promotion.appliesToPlanIds[0] === "pro" &&
+        !promotion.allowAnnualStacking),
+    {
+      message:
+        "Internal passes require 100% discount, a duration in days, Pro-only eligibility, and no annual stacking.",
+    }
   )
   .refine(
     (promotion) =>
@@ -295,6 +311,9 @@ export async function PATCH(req: Request) {
           existingPromotion.maxRedemptions !==
             (promotion.maxRedemptions || null) ||
           existingPromotion.durationMonths !== promotion.durationMonths ||
+          existingPromotion.fulfillmentType !== promotion.fulfillmentType ||
+          existingPromotion.accessDurationDays !==
+            (promotion.accessDurationDays || null) ||
           existingPromotion.appliesToPlanIds !==
             JSON.stringify(promotion.appliesToPlanIds) ||
           existingPromotion.startsAt?.toISOString() !==
@@ -318,6 +337,8 @@ export async function PATCH(req: Request) {
           maxRedemptions: promotion.maxRedemptions || null,
           redeemedCount: promotion.redeemedCount || 0,
           durationMonths: promotion.durationMonths,
+          fulfillmentType: promotion.fulfillmentType,
+          accessDurationDays: promotion.accessDurationDays || null,
           appliesToPlanIds: JSON.stringify(promotion.appliesToPlanIds),
           stripeCouponId,
           stripePromotionCodeId,
@@ -332,6 +353,8 @@ export async function PATCH(req: Request) {
           discountAmountCents: promotion.discountAmountCents || null,
           maxRedemptions: promotion.maxRedemptions || null,
           durationMonths: promotion.durationMonths,
+          fulfillmentType: promotion.fulfillmentType,
+          accessDurationDays: promotion.accessDurationDays || null,
           appliesToPlanIds: JSON.stringify(promotion.appliesToPlanIds),
           stripeCouponId,
           stripePromotionCodeId,

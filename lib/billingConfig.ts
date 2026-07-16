@@ -37,6 +37,8 @@ export type BillingPromotionConfig = {
   maxRedemptions: number | null;
   redeemedCount: number;
   durationMonths: number;
+  fulfillmentType: "stripe_subscription" | "internal_pass";
+  accessDurationDays: number | null;
   appliesToPlanIds: BillingPlanId[];
   stripeCouponId: string | null;
   stripePromotionCodeId: string | null;
@@ -226,6 +228,11 @@ const toBillingPromotionConfig = (
     maxRedemptions: row.maxRedemptions,
     redeemedCount: row.redeemedCount,
     durationMonths: row.durationMonths,
+    fulfillmentType:
+      row.fulfillmentType === "internal_pass"
+        ? "internal_pass"
+        : "stripe_subscription",
+    accessDurationDays: row.accessDurationDays,
     appliesToPlanIds: parsePlanIds(row.appliesToPlanIds),
     stripeCouponId: row.stripeCouponId,
     stripePromotionCodeId: row.stripePromotionCodeId,

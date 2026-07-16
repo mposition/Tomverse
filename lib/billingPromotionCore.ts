@@ -18,6 +18,8 @@ type PromotionEligibilityInput = {
   allowAnnualStacking: boolean;
   discountPercent: number;
   discountAmountCents: number | null;
+  fulfillmentType?: string | null;
+  accessDurationDays?: number | null;
 };
 
 export const promotionEligibilityFailure = ({
@@ -44,6 +46,15 @@ export const promotionEligibilityFailure = ({
   if (
     promotion.discountPercent <= 0 &&
     !(promotion.discountAmountCents && promotion.discountAmountCents > 0)
+  ) {
+    return "unavailable";
+  }
+  if (
+    promotion.fulfillmentType === "internal_pass" &&
+    (promotion.discountPercent !== 100 ||
+      !Number.isSafeInteger(promotion.accessDurationDays) ||
+      (promotion.accessDurationDays || 0) <= 0 ||
+      (promotion.accessDurationDays || 0) > 366)
   ) {
     return "unavailable";
   }
