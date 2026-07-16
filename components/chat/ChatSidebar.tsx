@@ -3,10 +3,10 @@
 import { Conversation } from "./types";
 import { getModel } from "@/components/chat/types";
 import { AuthButton } from "@/components/auth/AuthButton";
-import { useCallback, useState, useEffect, useId, useRef } from "react";
+import { useCallback, useState, useEffect, useId, useRef, useSyncExternalStore } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
 import Link from "next/link";
-import { AlertTriangle, Check, CircleHelp, CloudUpload, Crown, Database, Download, Folder, FolderPlus, Link2Off, Lock, MessageSquare, MoreVertical, Pencil, Pin, Search, Send, Share2, ShieldCheck, Sparkles, Star, Tag, Trash2, Unlock, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, CircleHelp, CloudUpload, Crown, Database, Download, Folder, FolderPlus, Link2Off, Lock, MessageSquare, MoreVertical, Pencil, Pin, Search, Send, Share2, ShieldCheck, SlidersHorizontal, Sparkles, Star, Tag, Trash2, Unlock, X } from "lucide-react";
 import { FeedbackButton } from "@/components/chat/FeedbackButton";
 import { UserUsageSummary } from "@/components/chat/UserUsageSummary";
 import { FeatureHelpPopover } from "@/components/chat/FeatureHelpPopover";
@@ -47,6 +47,36 @@ type ConversationProject = {
 };
 
 const SIDEBAR_TOUR_STORAGE_KEY = "tomverse_sidebar_tour_v1";
+const ORGANIZER_STORAGE_KEY = "tomverse_sidebar_organizer_v1";
+const ORGANIZER_CHANGE_EVENT = "tomverse-sidebar-organizer-change";
+const SHORT_SIDEBAR_MEDIA_QUERY = "(max-height: 860px)";
+
+type OrganizerPreference = "auto" | "expanded" | "collapsed";
+
+const subscribeOrganizerPreference = (onStoreChange: () => void) => {
+    window.addEventListener("storage", onStoreChange);
+    window.addEventListener(ORGANIZER_CHANGE_EVENT, onStoreChange);
+    return () => {
+        window.removeEventListener("storage", onStoreChange);
+        window.removeEventListener(ORGANIZER_CHANGE_EVENT, onStoreChange);
+    };
+};
+
+const getOrganizerPreference = (): OrganizerPreference => {
+    const stored = localStorage.getItem(ORGANIZER_STORAGE_KEY);
+    return stored === "expanded" || stored === "collapsed" ? stored : "auto";
+};
+
+const getServerOrganizerPreference = (): OrganizerPreference => "auto";
+
+const subscribeShortSidebar = (onStoreChange: () => void) => {
+    const mediaQuery = window.matchMedia(SHORT_SIDEBAR_MEDIA_QUERY);
+    mediaQuery.addEventListener("change", onStoreChange);
+    return () => mediaQuery.removeEventListener("change", onStoreChange);
+};
+
+const getShortSidebarSnapshot = () => window.matchMedia(SHORT_SIDEBAR_MEDIA_QUERY).matches;
+const getServerShortSidebarSnapshot = () => false;
 
 export function ChatSidebar({
     conversations,
@@ -132,6 +162,16 @@ export function ChatSidebar({
     const helpMenuRef = useRef<HTMLSpanElement | null>(null);
     const [showHelpMenu, setShowHelpMenu] = useState(false);
     const [sidebarTourStep, setSidebarTourStep] = useState<number | null>(null);
+    const organizerPreference = useSyncExternalStore(
+        subscribeOrganizerPreference,
+        getOrganizerPreference,
+        getServerOrganizerPreference
+    );
+    const hasShortSidebar = useSyncExternalStore(
+        subscribeShortSidebar,
+        getShortSidebarSnapshot,
+        getServerShortSidebarSnapshot
+    );
     const { t, lang } = useLanguage();
     const helpCopy = chatHelpCopy[lang];
     const tooltipIdPrefix = useId();
@@ -150,6 +190,17 @@ export function ChatSidebar({
 
     const menuItemDisabled =
         "cursor-not-allowed bg-zinc-900/50 text-zinc-600";
+
+    const organizerExpanded =
+        sidebarTourStep !== null ||
+        organizerPreference === "expanded" ||
+        (organizerPreference === "auto" && !hasShortSidebar && !isMobileDrawer);
+
+    const toggleOrganizer = () => {
+        const nextPreference: OrganizerPreference = organizerExpanded ? "collapsed" : "expanded";
+        localStorage.setItem(ORGANIZER_STORAGE_KEY, nextPreference);
+        window.dispatchEvent(new Event(ORGANIZER_CHANGE_EVENT));
+    };
 
     const menuIconClass = "h-3.5 w-3.5 shrink-0";
     const crownClass = "h-3.5 w-3.5 shrink-0 text-amber-400";
@@ -499,6 +550,22 @@ export function ChatSidebar({
     const projectText = (projectId: string) =>
         projects.find((project) => project.id === projectId)?.name || t("sidebar.uncategorizedProject");
 
+    const activeOrganizerSummary = (() => {
+        if (conversationFilter === "locked") return helpCopy.lockedFilter;
+        if (conversationFilter === "shared") return helpCopy.sharedFilter;
+        if (
+            conversationFilter === "work" ||
+            conversationFilter === "research" ||
+            conversationFilter === "personal"
+        ) {
+            return labelText(conversationFilter);
+        }
+        if (conversationFilter.startsWith("project:")) {
+            return projectText(conversationFilter.slice("project:".length));
+        }
+        return t("sidebar.organizerNoFilter");
+    })();
+
     const getConversationModelSummary = (conversation: Conversation) => {
         const models = conversation.selectedModels
             ?.map((modelId) => getModel(modelId)?.name)
@@ -736,8 +803,7 @@ export function ChatSidebar({
                 </div>
             </div>
 
-            <div className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain [scrollbar-gutter:stable]">
-            <div className={`border-b border-zinc-200/60 px-3 dark:border-zinc-800/40 ${isMobileDrawer ? "py-2" : "py-3"}`}>
+            <div className={`shrink-0 border-b border-zinc-200/60 px-3 dark:border-zinc-800/40 ${isMobileDrawer ? "py-2" : "py-3"}`}>
                 <div className="relative">
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
                     <input
@@ -747,6 +813,42 @@ export function ChatSidebar({
                         className="h-9 w-full rounded-lg border border-zinc-200 bg-white pl-9 pr-3 text-xs text-zinc-800 outline-none transition placeholder:text-zinc-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-blue-500"
                     />
                 </div>
+                <div className="mt-2 rounded-xl border border-zinc-200 bg-white p-1.5 dark:border-zinc-800 dark:bg-zinc-950">
+                    <button
+                        type="button"
+                        data-testid="sidebar-organizer-toggle"
+                        aria-expanded={organizerExpanded}
+                        aria-controls="sidebar-organizer-content"
+                        onClick={toggleOrganizer}
+                        className="flex min-h-9 w-full items-center gap-2 rounded-lg px-2 text-left transition hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:hover:bg-zinc-900"
+                    >
+                        <SlidersHorizontal className="h-3.5 w-3.5 shrink-0 text-blue-500" aria-hidden="true" />
+                        <span className="min-w-0 flex-1">
+                            <span className="block text-[11px] font-black text-zinc-700 dark:text-zinc-200">
+                                {t("sidebar.organizerTools")}
+                            </span>
+                            {!organizerExpanded ? (
+                                <span className="block truncate text-[10px] font-medium text-zinc-400">
+                                    {activeOrganizerSummary}
+                                </span>
+                            ) : null}
+                        </span>
+                        <span className="inline-flex shrink-0 items-center gap-1 text-[10px] font-bold text-zinc-500 dark:text-zinc-400">
+                            {organizerExpanded
+                                ? t("sidebar.organizerCollapse")
+                                : t("sidebar.organizerExpand")}
+                            <ChevronDown
+                                className={`h-3.5 w-3.5 transition-transform ${organizerExpanded ? "rotate-180" : ""}`}
+                                aria-hidden="true"
+                            />
+                        </span>
+                    </button>
+                    {organizerExpanded ? (
+                        <div
+                            id="sidebar-organizer-content"
+                            data-testid="sidebar-organizer-content"
+                            className="max-h-80 touch-pan-y overflow-y-auto overscroll-contain pr-0.5 [scrollbar-gutter:stable] [@media(max-height:860px)]:max-h-40"
+                        >
                 <div
                     data-testid="sidebar-status-filters"
                     className={`mt-2 rounded-xl border border-zinc-200 bg-white p-2 transition dark:border-zinc-800 dark:bg-zinc-950 ${
@@ -1039,9 +1141,15 @@ export function ChatSidebar({
                         )}
                     </div>
                 </div>
+                        </div>
+                    ) : null}
+                </div>
             </div>
 
-            <div className={`${isMobileDrawer ? "min-h-0 p-2" : "min-h-[10rem] p-2"} space-y-1 md:min-h-0`}>
+            <div
+                data-testid="sidebar-conversation-list"
+                className="min-h-[10rem] flex-1 touch-pan-y space-y-1 overflow-y-auto overscroll-contain p-2 [scrollbar-gutter:stable]"
+            >
                 {messageSearchResults.length > 0 && (
                     <div className="mb-2 rounded-xl border border-blue-200 bg-blue-50 p-2 text-xs dark:border-blue-900/50 dark:bg-blue-950/20">
                         <p className="px-1 pb-1 font-black text-blue-700 dark:text-blue-300">
@@ -1423,9 +1531,8 @@ export function ChatSidebar({
                     );
                 })}
             </div>
-            </div>
 
-            <div className={`${isMobileDrawer ? "max-h-[52dvh] shrink-0 border-t border-zinc-200 bg-zinc-100/40 p-2 dark:border-zinc-800 dark:bg-zinc-900/50" : "max-h-[48dvh] shrink-0 border-t border-zinc-200 bg-zinc-100/40 p-3 dark:border-zinc-800 dark:bg-zinc-900/50"} flex min-h-0 touch-pan-y flex-col gap-2 overflow-y-auto overscroll-contain [scrollbar-gutter:stable]`}>
+            <div className={`${isMobileDrawer ? "shrink-0 border-t border-zinc-200 bg-zinc-100/40 p-2 dark:border-zinc-800 dark:bg-zinc-900/50" : "shrink-0 border-t border-zinc-200 bg-zinc-100/40 p-3 dark:border-zinc-800 dark:bg-zinc-900/50"} flex min-h-0 flex-col gap-2 overflow-visible`}>
                 <div className="shrink-0">
                     <UserUsageSummary
                         isGuestMode={isGuestMode}

@@ -31,6 +31,12 @@ async function openSidebarOnMobile(page: Page) {
   }
 }
 
+async function openAccountMenu(page: Page) {
+  await openSidebarOnMobile(page);
+  await page.getByTestId("account-menu-trigger").click();
+  await expect(page.getByTestId("account-menu")).toBeVisible();
+}
+
 async function openConversationMenu(page: Page) {
   await openSidebarOnMobile(page);
   await page.getByTestId("conversation-menu").first().click();
@@ -61,9 +67,11 @@ test("billing success modal respects the explicit return language", async ({ pag
 });
 
 test("authenticated user opens settings and starts Private Mode", async ({ page }) => {
-  await openSidebarOnMobile(page);
-
-  await page.getByRole("button", { name: /설정|Settings|设置/ }).click();
+  await openAccountMenu(page);
+  await page
+    .getByTestId("account-menu")
+    .getByRole("button", { name: /설정|Settings|设置/ })
+    .click();
   const settingsDialog = page.getByRole("dialog", {
     name: /사용자 설정|User Settings|用户设置/,
   });
@@ -84,9 +92,11 @@ test("authenticated user opens settings and starts Private Mode", async ({ page 
 
 test("theme preference changes immediately and follows the system setting", async ({ page }) => {
   await expect(page.locator("html")).toHaveClass(/dark/);
-  await openSidebarOnMobile(page);
-
-  await page.getByRole("button", { name: /설정|Settings|设置/ }).click();
+  await openAccountMenu(page);
+  await page
+    .getByTestId("account-menu")
+    .getByRole("button", { name: /설정|Settings|设置/ })
+    .click();
   let settingsDialog = page.getByRole("dialog", {
     name: /사용자 설정|User Settings|用户设置/,
   });
@@ -100,8 +110,11 @@ test("theme preference changes immediately and follows the system setting", asyn
     .toBe("rgb(255, 255, 255)");
 
   await page.emulateMedia({ colorScheme: "dark" });
-  await openSidebarOnMobile(page);
-  await page.getByRole("button", { name: /설정|Settings|设置/ }).click();
+  await openAccountMenu(page);
+  await page
+    .getByTestId("account-menu")
+    .getByRole("button", { name: /설정|Settings|设置/ })
+    .click();
   settingsDialog = page.getByRole("dialog", {
     name: /사용자 설정|User Settings|用户设置/,
   });

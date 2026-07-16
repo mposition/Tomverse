@@ -45,6 +45,8 @@ test.describe("desktop upgrade discovery", () => {
     );
 
     await expect(page.getByTestId("account-plan-upgrade-badge")).toBeVisible();
+    await page.getByTestId("account-menu-trigger").click();
+    await expect(page.getByTestId("account-menu")).toBeVisible();
     await expect(page.getByTestId("account-plan-view")).toBeVisible();
   });
 
@@ -94,6 +96,27 @@ test.describe("mobile upgrade discovery", () => {
     expect(box!.y + box!.height).toBeLessThanOrEqual(viewport!.height);
     await expect(usageCta).toHaveAttribute("href", /trigger=usage_widget/);
     await expect(usageCta).toHaveAttribute("href", /utm_campaign=upgrade-discovery/);
+  });
+
+  test("compact account launcher opens an in-viewport mobile account sheet", async ({
+    page,
+  }) => {
+    await page.getByTestId("mobile-sidebar-open").click();
+    await page.getByTestId("account-menu-trigger").click();
+
+    const accountMenu = page.getByTestId("account-menu");
+    await expect(accountMenu).toBeVisible();
+    await expect(page.getByTestId("account-menu-backdrop")).toBeVisible();
+    await expect(accountMenu.getByTestId("account-plan-view")).toBeVisible();
+
+    const menuBox = await accountMenu.boundingBox();
+    const viewport = page.viewportSize();
+    expect(menuBox).not.toBeNull();
+    expect(viewport).not.toBeNull();
+    expect(menuBox!.x).toBeGreaterThanOrEqual(0);
+    expect(menuBox!.y).toBeGreaterThanOrEqual(0);
+    expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(viewport!.width);
+    expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(viewport!.height);
   });
 });
 
