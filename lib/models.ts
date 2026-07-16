@@ -29,6 +29,17 @@ export type ModelUsageCategory =
     | "Reasoning"
     | "Research";
 
+export type ModelInputCapabilities = {
+    /** The provider model accepts native image content, not only extracted text. */
+    image: boolean;
+    /** The provider model accepts a PDF binary when text extraction is unavailable. */
+    nativePdf: boolean;
+    /** Provider limit for images included in one request. */
+    maxImages?: number;
+    /** Provider limit for the combined base64-encoded image payload. */
+    maxBase64ImagePayloadBytes?: number;
+};
+
 export const MODEL_USAGE_CREDIT_WEIGHTS = {
     standard: 1,
     advanced: 4,
@@ -81,26 +92,36 @@ export type AiModel = {
     enabled: boolean;
     status: ModelStatus;
     reasoning?: "none" | "low" | "medium" | "high";
+    /** Published context window for catalogue metadata and request validation. */
+    contextWindowTokens?: number;
+    /** Explicit per-model native input support. Omitted means text-only. */
+    inputCapabilities?: ModelInputCapabilities;
 };
+
+const FULL_BINARY_INPUT = {
+    image: true,
+    nativePdf: true,
+} as const satisfies ModelInputCapabilities;
 
 export const DEFAULT_MODEL_ID = "gpt-5-4-mini";
 
 export const AVAILABLE_MODELS = [
-    { id: "gpt-5-5", name: "GPT-5.5", apiModel: "gpt-5.5", provider: "openai", icon: "🤖", minimumPlan: "Pro", usageClass: "premium", enabled: true, status: "enabled" },
-    { id: "gpt-5-5-thinking", name: "GPT-5.5 Thinking", apiModel: "gpt-5.5", provider: "openai", icon: "🤖", minimumPlan: "Pro", usageClass: "premium-reasoning", enabled: true, status: "enabled", reasoning: "high" },
-    { id: "gpt-5-4-mini", name: "GPT-5.4 mini", apiModel: "gpt-5.4-mini", provider: "openai", icon: "🤖", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled" },
+    { id: "gpt-5-5", name: "GPT-5.5", apiModel: "gpt-5.5", provider: "openai", icon: "🤖", minimumPlan: "Pro", usageClass: "premium", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
+    { id: "gpt-5-5-thinking", name: "GPT-5.5 Thinking", apiModel: "gpt-5.5", provider: "openai", icon: "🤖", minimumPlan: "Pro", usageClass: "premium-reasoning", enabled: true, status: "enabled", reasoning: "high", inputCapabilities: FULL_BINARY_INPUT },
+    { id: "gpt-5-4-mini", name: "GPT-5.4 mini", apiModel: "gpt-5.4-mini", provider: "openai", icon: "🤖", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
 
-    { id: "claude-fable-5", name: "Claude Fable 5", apiModel: "claude-fable-5", provider: "anthropic", icon: "🧠", minimumPlan: "Pro", usageClass: "premium", enabled: true, status: "enabled" },
-    { id: "claude-opus-4-8", name: "Claude Opus 4.8", apiModel: "claude-opus-4-8", provider: "anthropic", icon: "🧠", minimumPlan: "Pro", usageClass: "premium", enabled: true, status: "enabled" },
-    { id: "claude-sonnet-5", name: "Claude Sonnet 5", apiModel: "claude-sonnet-5", provider: "anthropic", icon: "🧠", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled" },
-    { id: "claude-haiku-4-5", name: "Claude Haiku 4.5", apiModel: "claude-haiku-4-5-20251001", provider: "anthropic", icon: "🧠", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled" },
+    { id: "claude-fable-5", name: "Claude Fable 5", apiModel: "claude-fable-5", provider: "anthropic", icon: "🧠", minimumPlan: "Pro", usageClass: "premium", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
+    { id: "claude-opus-4-8", name: "Claude Opus 4.8", apiModel: "claude-opus-4-8", provider: "anthropic", icon: "🧠", minimumPlan: "Pro", usageClass: "premium", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
+    { id: "claude-sonnet-5", name: "Claude Sonnet 5", apiModel: "claude-sonnet-5", provider: "anthropic", icon: "🧠", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
+    { id: "claude-haiku-4-5", name: "Claude Haiku 4.5", apiModel: "claude-haiku-4-5-20251001", provider: "anthropic", icon: "🧠", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
 
-    { id: "gemini-3-5-flash", name: "Gemini 3.5 Flash", apiModel: "gemini-3.5-flash", provider: "google", icon: "✨", minimumPlan: "Free", usageClass: "standard", enabled: true, status: "enabled" },
-    { id: "gemini-3-1-pro", name: "Gemini 3.1 Pro", apiModel: "gemini-3.1-pro-preview", provider: "google", icon: "✨", minimumPlan: "Pro", usageClass: "premium", enabled: true, status: "enabled" },
-    { id: "gemini-2-5-pro", name: "Gemini 2.5 Pro", apiModel: "gemini-2.5-pro", provider: "google", icon: "✨", minimumPlan: "Free", usageClass: "advanced", replacementModelId: "gemini-3-1-pro", publiclyListed: false, enabled: false, status: "disabled" },
-    { id: "gemini-2-5-flash", name: "Gemini 3.1 Flash-Lite", apiModel: "gemini-3.1-flash-lite", provider: "google", icon: "✨", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled" },
+    { id: "gemini-3-5-flash", name: "Gemini 3.5 Flash", apiModel: "gemini-3.5-flash", provider: "google", icon: "✨", minimumPlan: "Free", usageClass: "standard", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
+    { id: "gemini-3-1-pro", name: "Gemini 3.1 Pro", apiModel: "gemini-3.1-pro-preview", provider: "google", icon: "✨", minimumPlan: "Pro", usageClass: "premium", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
+    { id: "gemini-2-5-pro", name: "Gemini 2.5 Pro", apiModel: "gemini-2.5-pro", provider: "google", icon: "✨", minimumPlan: "Free", usageClass: "advanced", replacementModelId: "gemini-3-1-pro", publiclyListed: false, enabled: false, status: "disabled", inputCapabilities: FULL_BINARY_INPUT },
+    { id: "gemini-2-5-flash", name: "Gemini 3.1 Flash-Lite", apiModel: "gemini-3.1-flash-lite", provider: "google", icon: "✨", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
 
     { id: "llama-3-1", name: "Llama 3.1", apiModel: "llama-3.1-8b-instant", provider: "groq", icon: "∞", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled" },
+    { id: "llama-4-scout", name: "Llama 4 Scout", apiModel: "meta-llama/llama-4-scout-17b-16e-instruct", provider: "groq", icon: "∞", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", contextWindowTokens: 131_072, inputCapabilities: { image: true, nativePdf: false, maxImages: 5, maxBase64ImagePayloadBytes: 4 * 1024 * 1024 } },
     { id: "llama-3-3", name: "Llama 3.3", apiModel: "llama-3.3-70b-versatile", provider: "groq", icon: "∞", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled" },
 
     { id: "grok-4", name: "Grok 4", apiModel: "grok-4", provider: "xai", icon: "𝕏", minimumPlan: "Pro", usageClass: "premium", enabled: true, status: "enabled" },
@@ -153,6 +174,14 @@ export const PUBLIC_MODELS: readonly AiModel[] = AVAILABLE_MODELS.filter(
 );
 
 export const getModel = (modelId: string) => modelMap.get(modelId);
+
+export const modelSupportsImageInput = (
+    model: Pick<AiModel, "id" | "inputCapabilities">
+) => model.inputCapabilities?.image === true;
+
+export const modelSupportsNativePdfInput = (
+    model: Pick<AiModel, "id" | "inputCapabilities">
+) => model.inputCapabilities?.nativePdf === true;
 
 export const getEnabledModel = (modelId: string) => {
     const model = getModel(modelId);
@@ -297,12 +326,19 @@ const getModelCostClass = (usageClass: ModelUsageClass): ModelCostClass => {
 const MODEL_BILLING_DEFAULTS: Partial<
     Record<string, Partial<ModelBillingProfile>>
 > = {
+    "llama-4-scout": {
+        maxOutputTokens: 8_192,
+        inputUsdPerMillionTokens: 0.11,
+        outputUsdPerMillionTokens: 0.34,
+        cachedInputPriceMultiplier: 1,
+    },
     "deepseek-v4-flash": {
         inputUsdPerMillionTokens: 0.14,
         outputUsdPerMillionTokens: 0.28,
         cachedInputPriceMultiplier: 0.02,
     },
     "deepseek-v4-pro": {
+        maxOutputTokens: 4_096,
         inputUsdPerMillionTokens: 0.435,
         outputUsdPerMillionTokens: 0.87,
         cachedInputPriceMultiplier: 1 / 120,

@@ -31,7 +31,7 @@ import { useLanguage } from "@/components/LanguageProvider";
 import { dispatchAppToast } from "@/lib/appToast";
 import { getModelBestFor, getModelExperienceStatus, getModelExperienceTags } from "@/lib/modelExperience";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
-import { canUseModelWithPlan } from "@/lib/models";
+import { canUseModelWithPlan, modelSupportsImageInput } from "@/lib/models";
 import { useUserUsage } from "@/components/chat/useUserUsage";
 import { withChatLanguage } from "@/lib/localizedCallbackUrl";
 import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
@@ -339,6 +339,22 @@ export function ChatInput({
   const activeModelNames = selectedModels
     .map(id => AVAILABLE_MODELS.find(m => m.id === id)?.name)
     .filter(Boolean);
+  const hasImageAttachments = useMemo(
+    () => attachments.some((attachment) => attachment.mediaType.startsWith("image/")),
+    [attachments]
+  );
+  const imageUnsupportedSelectedModels = useMemo(
+    () =>
+      hasImageAttachments
+        ? selectedModels
+            .map((id) => AVAILABLE_MODELS.find((model) => model.id === id))
+            .filter(
+              (model): model is (typeof AVAILABLE_MODELS)[number] =>
+                model !== undefined && !modelSupportsImageInput(model)
+            )
+        : [],
+    [hasImageAttachments, selectedModels]
+  );
 
   const dailyCreditLimit = accountUsage?.limits.creditsDay || 0;
   const estimatedRequestCredits = selectedModels.reduce((sum, modelId) => {
@@ -1432,6 +1448,29 @@ export function ChatInput({
             </div>
             </div>
           )}
+          {imageUnsupportedSelectedModels.length > 0 && (
+            <div
+              role="status"
+              data-testid="image-model-compatibility-warning"
+              className="mb-2 flex flex-col gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100 sm:flex-row sm:items-center"
+            >
+              <p className="min-w-0 flex-1 leading-5">
+                <span className="font-black">{t("chat.imageUnsupportedSelected")}</span>{" "}
+                {imageUnsupportedSelectedModels.map((model) => model.name).join(", ")}
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  imageUnsupportedSelectedModels.forEach((model) =>
+                    onToggleModel(model.id)
+                  );
+                }}
+                className="shrink-0 rounded-lg border border-amber-400 bg-white px-2.5 py-1.5 font-bold text-amber-900 transition hover:bg-amber-100 dark:border-amber-700 dark:bg-zinc-950 dark:text-amber-100 dark:hover:bg-amber-950/60"
+              >
+                {t("chat.removeImageUnsupportedModels")}
+              </button>
+            </div>
+          )}
           <div className="flex max-w-full flex-wrap items-center gap-2">
         <div className="relative order-1 flex min-w-0 max-w-full flex-1 items-center gap-2 md:order-none md:flex-none" ref={menuRef}>
           <button
@@ -1686,12 +1725,20 @@ export function ChatInput({
                             ? "Guest"
                             : accountUsage?.plan ?? "Free";
                           const isPlanLocked = !canUseModelWithPlan(currentPlan, model);
-                          const unavailable = !model.enabled || modelStatus === "unavailable" || isPlanLocked;
+                          const imageIncompatible =
+                            hasImageAttachments && !modelSupportsImageInput(model);
+                          const unavailable =
+                            !model.enabled ||
+                            modelStatus === "unavailable" ||
+                            isPlanLocked ||
+                            imageIncompatible;
                           const usageProfile = getModelUsageProfile(model);
                           const statusReason = isPlanLocked
                             ? isGuestMode
                               ? t("modelStatusReasons.loginRequired")
                               : t("modelStatusReasons.upgradeRequired")
+                            : imageIncompatible
+                              ? t("modelStatusReasons.imageUnsupported")
                             : !model.enabled || modelStatus === "unavailable"
                               ? t("modelStatusReasons.unavailable")
                               : model.status !== "enabled" || modelStatus === "limited"
@@ -1717,6 +1764,7 @@ export function ChatInput({
                                 data-model-id={model.id}
                                 data-model-usage-class={usageProfile.category}
                                 data-model-minimum-plan={model.minimumPlan}
+                                data-model-image-input={modelSupportsImageInput(model)}
                                 disabled={unavailable && !isSelected}
                                 onClick={() => {
                                   rememberRecentModel(model.id);
@@ -1754,6 +1802,13 @@ export function ChatInput({
                                   <span className="mt-1 flex max-w-full flex-wrap gap-1">
                                     <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${usageProfile.category === "Standard" ? "bg-emerald-500/10 text-emerald-500" : usageProfile.category === "Advanced" ? "bg-blue-500/10 text-blue-500" : usageProfile.category === "Premium" ? "bg-purple-500/10 text-purple-500" : usageProfile.category === "Reasoning" ? "bg-amber-500/10 text-amber-500" : "bg-cyan-500/10 text-cyan-500"}`}>
                                       {t(`modelUsageClasses.${usageProfile.category.toLowerCase()}`)} · {usageProfile.credits}
+                                    </span>
+                                    <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[9px] font-bold text-zinc-500 dark:bg-zinc-800 dark:text-zinc-300">
+                                      {t(
+                                        modelSupportsImageInput(model)
+                                          ? "modelTags.imageInput"
+                                          : "modelTags.textOnly"
+                                      )}
                                     </span>
                                     {modelTags.map((tag) => (
                                       <span

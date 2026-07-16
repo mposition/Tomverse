@@ -152,6 +152,8 @@ export const fr = {
         recentModels: "Récents",
         attachmentGuideTitle: "Pièces jointes prises en charge",
         attachmentGuideBody: "Images, PDF, texte, fichiers Office et Google Drive sont pris en charge. Jusqu'à 5 fichiers de 10 Mo chacun.",
+        imageUnsupportedSelected: "Ces modèles sélectionnés ne peuvent pas lire les images :",
+        removeImageUnsupportedModels: "Retirer les modèles incompatibles",
         closeModelPanel: "Fermer le panneau des modèles",
         pausePanel: "Mettre le chat en pause",
         resumePanel: "Reprendre le chat",
@@ -276,6 +278,8 @@ export const fr = {
         reasoning: "Raisonnement",
         free: "Gratuit",
         research: "Recherche",
+        imageInput: "Entrée image",
+        textOnly: "Texte uniquement",
     },
     modelBestFor: {
         perplexity: "Idéal pour la recherche sourcée et les réponses liées au web.",
@@ -294,6 +298,7 @@ export const fr = {
         upgradeRequired: "Mettez votre abonnement à niveau pour utiliser ce modèle",
         unavailable: "Temporairement indisponible",
         limited: "Limité par la disponibilité du fournisseur",
+        imageUnsupported: "Ce modèle ne peut pas lire l'image jointe",
     },
     providerStatus: {
         allAvailable: "Les fournisseurs sélectionnés sont disponibles",

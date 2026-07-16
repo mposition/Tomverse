@@ -136,4 +136,56 @@ test.describe("attachment UX", () => {
     expect(uploadState.uploadCount).toBe(1);
     expect(uploadState.finalizeCount).toBe(1);
   });
+
+  test("image attachments disable text-only Llama models and keep Scout available", async ({ page }) => {
+    await attachFromComputer(page, {
+      name: "vision-model-check.png",
+      mimeType: "image/png",
+      buffer: createQaPngBuffer(),
+    });
+
+    await actionMenuTrigger(page).click();
+    await page
+      .getByRole("dialog", { name: /더 많은 작업|More actions|更多操作/ })
+      .getByRole("button", { name: /모델 선택|Select model|选择模型/ })
+      .click();
+
+    const textOnlyLlama = page.locator(
+      '[data-testid="model-option"][data-model-id="llama-3-1"]'
+    );
+    const scout = page.locator(
+      '[data-testid="model-option"][data-model-id="llama-4-scout"]'
+    );
+    await expect(textOnlyLlama).toBeDisabled();
+    await expect(textOnlyLlama).toHaveAttribute("data-model-image-input", "false");
+    await expect(scout).toBeEnabled();
+    await expect(scout).toHaveAttribute("data-model-image-input", "true");
+  });
+
+  test("warns when a selected text-only model becomes incompatible with an image", async ({ page }) => {
+    await actionMenuTrigger(page).click();
+    await page
+      .getByRole("dialog", { name: /더 많은 작업|More actions|更多操作/ })
+      .getByRole("button", { name: /모델 선택|Select model|选择模型/ })
+      .click();
+    await page
+      .locator('[data-testid="model-option"][data-model-id="llama-3-1"]')
+      .click();
+    await page.keyboard.press("Escape");
+
+    await attachFromComputer(page, {
+      name: "selected-model-warning.png",
+      mimeType: "image/png",
+      buffer: createQaPngBuffer(),
+    });
+
+    const warning = page.getByTestId("image-model-compatibility-warning");
+    await expect(warning).toContainText("Llama 3.1");
+    await warning
+      .getByRole("button", {
+        name: /미지원 모델 선택 해제|Remove incompatible models|移除不兼容模型/,
+      })
+      .click();
+    await expect(warning).toBeHidden();
+  });
 });
