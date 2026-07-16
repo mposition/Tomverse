@@ -149,6 +149,8 @@ export const zh = {
         recentModels: "最近使用",
         attachmentGuideTitle: "支持的附件",
         attachmentGuideBody: "支持图片、PDF、文本、Office 文件和 Google Drive 文件。最多 5 个文件，每个 10MB。",
+        imageUnsupportedSelected: "以下所选模型无法读取图片：",
+        removeImageUnsupportedModels: "移除不兼容模型",
         closeModelPanel: "关闭模型面板",
         pausePanel: "暂停对话",
         resumePanel: "恢复对话",
@@ -273,6 +275,8 @@ export const zh = {
         reasoning: "推理",
         free: "免费",
         research: "研究",
+        imageInput: "图片输入",
+        textOnly: "仅文本",
     },
     modelBestFor: {
         perplexity: "适合带来源的研究和联网回答。",
@@ -291,6 +295,7 @@ export const zh = {
         upgradeRequired: "需要升级套餐才能使用此模型",
         unavailable: "暂时不可用",
         limited: "受提供商可用性限制",
+        imageUnsupported: "此模型无法读取附加的图片",
     },
     providerStatus: {
         allAvailable: "所选提供商均可用",

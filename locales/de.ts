@@ -152,6 +152,8 @@ export const de = {
         recentModels: "Zuletzt verwendet",
         attachmentGuideTitle: "Unterstützte Anhänge",
         attachmentGuideBody: "Bilder, PDFs, Text, Office-Dateien und Google Drive-Dateien werden unterstützt. Bis zu 5 Dateien mit je 10 MB.",
+        imageUnsupportedSelected: "Diese ausgewählten Modelle können Bilder nicht lesen:",
+        removeImageUnsupportedModels: "Nicht kompatible Modelle entfernen",
         closeModelPanel: "Modellpanel schließen",
         pausePanel: "Chat pausieren",
         resumePanel: "Chat fortsetzen",
@@ -276,6 +278,8 @@ export const de = {
         reasoning: "Logik",
         free: "Kostenlos",
         research: "Recherche",
+        imageInput: "Bildeingabe",
+        textOnly: "Nur Text",
     },
     modelBestFor: {
         perplexity: "Am besten für quellenbasierte Recherche und webbezogene Antworten.",
@@ -294,6 +298,7 @@ export const de = {
         upgradeRequired: "Für dieses Modell ist ein Tarif-Upgrade erforderlich",
         unavailable: "Vorübergehend nicht verfügbar",
         limited: "Durch Anbieter-Verfügbarkeit eingeschränkt",
+        imageUnsupported: "Dieses Modell kann das angehängte Bild nicht lesen",
     },
     providerStatus: {
         allAvailable: "Ausgewählte Anbieter sind verfügbar",

@@ -22,3 +22,12 @@ test("DeepSeek model defaults distinguish cache-hit and cache-miss pricing", () 
     cachedInputPriceMultiplier: 1 / 120,
   });
 });
+
+test("Llama 4 Scout uses the published Groq token pricing and output cap", () => {
+  assert.deepEqual(profile("llama-4-scout"), {
+    maxOutputTokens: 8_192,
+    inputUsdPerMillionTokens: 0.11,
+    outputUsdPerMillionTokens: 0.34,
+    cachedInputPriceMultiplier: 1,
+  });
+});

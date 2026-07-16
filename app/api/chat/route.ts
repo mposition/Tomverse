@@ -11,7 +11,13 @@ import {
     writeR2Object,
 } from "@/lib/r2";
 import { prisma } from "@/lib/prisma";
-import { getEnabledModel, getModel, type AiModel } from "@/lib/models";
+import {
+    getEnabledModel,
+    getModel,
+    modelSupportsImageInput,
+    modelSupportsNativePdfInput,
+    type AiModel,
+} from "@/lib/models";
 import { getActiveAiModel } from "@/lib/activeAiModel";
 import {
     consumePerplexityUsage,
@@ -247,13 +253,6 @@ const isImageAttachmentType = (
     mediaType: string
 ): mediaType is "image/png" | "image/jpeg" | "image/webp" =>
     IMAGE_ATTACHMENT_TYPES.has(mediaType);
-const PROVIDERS_WITH_BINARY_ATTACHMENT_SUPPORT = new Set<AiModel["provider"]>([
-    "openai",
-    "anthropic",
-    "google",
-]);
-const modelSupportsBinaryAttachments = (model: AiModel) =>
-    PROVIDERS_WITH_BINARY_ATTACHMENT_SUPPORT.has(model.provider);
 const GOOGLE_EXPORT_TYPES: Record<
     string,
     { mediaType: string; extension: string; kind: "file" | "text" }
@@ -804,6 +803,8 @@ export async function POST(req: Request) {
         let estimatedInputTokens = 0;
         let totalAttachmentBytes = 0;
         let totalExtractedCharacters = 0;
+        let totalImageCount = 0;
+        let totalBase64ImagePayloadBytes = 0;
         const estimateTextTokens = (text: string) =>
             Math.max(1, Math.ceil(Buffer.byteLength(text, "utf8") / 4));
 
@@ -883,6 +884,13 @@ export async function POST(req: Request) {
                 }
 
                 if (isImageAttachmentType(attachment.mediaType)) {
+                    if (!modelSupportsImageInput(modelConfig)) {
+                        throw new ChatAccessError(
+                            400,
+                            "ATTACHMENT_MODEL_UNSUPPORTED",
+                            `${modelConfig.name} does not support image input. Choose an image-capable model or retry without attachments.`
+                        );
+                    }
                     try {
                         attachmentBuffer = await normalizeImageSafely(
                             attachmentBuffer ||
@@ -899,6 +907,33 @@ export async function POST(req: Request) {
                     }
                     attachmentBytes = attachmentBuffer.byteLength;
                     attachmentData = attachmentBuffer.toString("base64");
+                    totalImageCount += 1;
+                    totalBase64ImagePayloadBytes += Buffer.byteLength(
+                        attachmentData,
+                        "utf8"
+                    );
+                    const imageCapabilities = modelConfig.inputCapabilities;
+                    if (
+                        imageCapabilities?.maxImages &&
+                        totalImageCount > imageCapabilities.maxImages
+                    ) {
+                        throw new ChatAccessError(
+                            400,
+                            "ATTACHMENT_MODEL_IMAGE_LIMIT",
+                            `${modelConfig.name} accepts up to ${imageCapabilities.maxImages} images per request.`
+                        );
+                    }
+                    if (
+                        imageCapabilities?.maxBase64ImagePayloadBytes &&
+                        totalBase64ImagePayloadBytes >
+                            imageCapabilities.maxBase64ImagePayloadBytes
+                    ) {
+                        throw new ChatAccessError(
+                            413,
+                            "ATTACHMENT_MODEL_IMAGE_PAYLOAD_TOO_LARGE",
+                            `${modelConfig.name} accepts up to 4 MB of base64 image data per request. Use a smaller image.`
+                        );
+                    }
                 } else if (attachment.mediaType === "application/pdf") {
                     const pdfBuffer =
                         attachmentBuffer || Buffer.from(attachmentData, "base64");
@@ -933,12 +968,12 @@ export async function POST(req: Request) {
                                 "The attached PDF is invalid or unsupported."
                             );
                         }
-                        if (modelSupportsBinaryAttachments(modelConfig)) {
+                        if (modelSupportsNativePdfInput(modelConfig)) {
                             pdfFilePartBuffer = pdfBuffer;
                         }
                     }
                     if (!extractedPdfText && !pdfFilePartBuffer) {
-                        if (modelSupportsBinaryAttachments(modelConfig)) {
+                        if (modelSupportsNativePdfInput(modelConfig)) {
                             pdfFilePartBuffer = pdfBuffer;
                         } else {
                             throw new ChatAccessError(
@@ -1055,14 +1090,18 @@ export async function POST(req: Request) {
                 }
             }
 
-            if (
-                fileParts.length > 0 &&
-                !modelSupportsBinaryAttachments(modelConfig)
-            ) {
+            const hasUnsupportedFilePart = fileParts.some((part) =>
+                isImageAttachmentType(part.mediaType)
+                    ? !modelSupportsImageInput(modelConfig)
+                    : part.mediaType === "application/pdf"
+                      ? !modelSupportsNativePdfInput(modelConfig)
+                      : true
+            );
+            if (hasUnsupportedFilePart) {
                 throw new ChatAccessError(
                     400,
                     "ATTACHMENT_MODEL_UNSUPPORTED",
-                    "선택한 모델은 이미지/PDF 첨부파일을 지원하지 않습니다. GPT, Claude, Gemini 계열 모델을 선택하거나 첨부파일 없이 다시 시도해주세요."
+                    `${modelConfig.name} does not support this attachment type. Choose a compatible model or retry without attachments.`
                 );
             }
 
@@ -1092,6 +1131,17 @@ export async function POST(req: Request) {
             modelConfig,
             estimatedInputTokens
         );
+        if (
+            modelConfig.contextWindowTokens &&
+            estimatedInputTokens + budget.maxOutputTokens >
+                modelConfig.contextWindowTokens
+        ) {
+            throw new ChatAccessError(
+                400,
+                "MODEL_CONTEXT_WINDOW_EXCEEDED",
+                `${modelConfig.name} supports up to ${modelConfig.contextWindowTokens.toLocaleString("en-US")} input and output tokens combined. Start a new conversation or shorten the attachments.`
+            );
+        }
         const accessGrant = await acquireChatAccess(access, budget, {
             traceId,
             source: "chat",

@@ -10,6 +10,8 @@ import {
   getSettledUsageCredits,
   getTypicalShortRequestCapacities,
   getWeightedUsageCredits,
+  modelSupportsImageInput,
+  modelSupportsNativePdfInput,
 } from "../lib/models.ts";
 
 const profile = (modelId) => getModelUsageProfile(getModel(modelId));
@@ -62,6 +64,25 @@ test("retired Gemini 2.5 Pro is not callable and points to its replacement", () 
   assert.equal(PUBLIC_MODELS.some((model) => model.id === retired.id), false);
   assert.equal(getEnabledModel(retired.id), undefined);
   assert.equal(getEnabledModel(retired.replacementModelId)?.enabled, true);
+});
+
+test("Llama 4 Scout is a Standard vision model with explicit Groq limits", () => {
+  const scout = getModel("llama-4-scout");
+  assert.ok(scout);
+  assert.equal(scout.apiModel, "meta-llama/llama-4-scout-17b-16e-instruct");
+  assert.deepEqual(getModelUsageProfile(scout), {
+    category: "Standard",
+    credits: 1,
+  });
+  assert.equal(scout.contextWindowTokens, 131_072);
+  assert.equal(modelSupportsImageInput(scout), true);
+  assert.equal(modelSupportsNativePdfInput(scout), false);
+  assert.equal(scout.inputCapabilities?.maxImages, 5);
+  assert.equal(
+    scout.inputCapabilities?.maxBase64ImagePayloadBytes,
+    4 * 1024 * 1024
+  );
+  assert.equal(modelSupportsImageInput(getModel("llama-3-1")), false);
 });
 
 test("long input applies the configured credit multiplier", () => {

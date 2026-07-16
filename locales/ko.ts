@@ -149,6 +149,8 @@ export const ko = {
         recentModels: "최근 사용",
         attachmentGuideTitle: "지원하는 첨부파일",
         attachmentGuideBody: "이미지, PDF, 텍스트, Office 파일, Google Drive 파일을 지원합니다. 최대 5개, 파일당 10MB까지 가능합니다.",
+        imageUnsupportedSelected: "이미지를 읽을 수 없는 선택 모델:",
+        removeImageUnsupportedModels: "미지원 모델 선택 해제",
         closeModelPanel: "모델 패널 닫기",
         pausePanel: "대화 일시정지",
         resumePanel: "대화 다시 시작",
@@ -314,6 +316,8 @@ export const ko = {
         reasoning: "추론",
         free: "무료",
         research: "리서치",
+        imageInput: "이미지 입력",
+        textOnly: "텍스트 전용",
     },
     modelBestFor: {
         perplexity: "출처 기반 리서치와 웹 정보를 반영한 답변에 적합합니다.",
@@ -332,6 +336,7 @@ export const ko = {
         upgradeRequired: "이 모델을 사용하려면 요금제를 업그레이드해야 합니다",
         unavailable: "일시적으로 사용할 수 없습니다",
         limited: "공급자 상태에 따라 제한 중입니다",
+        imageUnsupported: "이 모델은 첨부된 이미지를 읽을 수 없습니다",
     },
     providerStatus: {
         allAvailable: "선택한 모든 공급자가 사용 가능합니다",

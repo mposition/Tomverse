@@ -152,6 +152,8 @@ export const pt = {
         recentModels: "Recentes",
         attachmentGuideTitle: "Anexos compatíveis",
         attachmentGuideBody: "Imagens, PDFs, texto, arquivos Office e Google Drive são suportados. Até 5 arquivos de 10 MB cada.",
+        imageUnsupportedSelected: "Estes modelos selecionados não conseguem ler imagens:",
+        removeImageUnsupportedModels: "Remover modelos incompatíveis",
         closeModelPanel: "Fechar painel de modelos",
         pausePanel: "Pausar chat",
         resumePanel: "Retomar chat",
@@ -276,6 +278,8 @@ export const pt = {
         reasoning: "Raciocínio",
         free: "Grátis",
         research: "Pesquisa",
+        imageInput: "Entrada de imagem",
+        textOnly: "Somente texto",
     },
     modelBestFor: {
         perplexity: "Ideal para pesquisa com fontes e respostas com contexto web.",
@@ -294,6 +298,7 @@ export const pt = {
         upgradeRequired: "Faça upgrade do plano para usar este modelo",
         unavailable: "Temporariamente indisponível",
         limited: "Limitado pela disponibilidade do provedor",
+        imageUnsupported: "Este modelo não consegue ler a imagem anexada",
     },
     providerStatus: {
         allAvailable: "Os provedores selecionados estão disponíveis",
