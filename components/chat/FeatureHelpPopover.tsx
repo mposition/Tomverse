@@ -2,7 +2,15 @@
 
 import Link from "next/link";
 import { ExternalLink, Info, X } from "lucide-react";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+import { createPortal } from "react-dom";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 
 export type UiHelpTopic =
@@ -27,6 +35,17 @@ type FeatureHelpPopoverProps = {
   className?: string;
 };
 
+type FloatingPosition = {
+  top: number;
+  left: number;
+  width: number;
+  maxHeight: number;
+};
+
+const FLOATING_GAP = 6;
+const VIEWPORT_MARGIN = 8;
+const DESKTOP_POPOVER_WIDTH = 288;
+
 export function FeatureHelpPopover({
   title,
   description,
@@ -41,13 +60,21 @@ export function FeatureHelpPopover({
 }: FeatureHelpPopoverProps) {
   const [open, setOpen] = useState(false);
   const [narrowViewport, setNarrowViewport] = useState(false);
+  const [floatingPosition, setFloatingPosition] =
+    useState<FloatingPosition | null>(null);
   const id = useId();
   const rootRef = useRef<HTMLSpanElement | null>(null);
+  const popoverRef = useRef<HTMLSpanElement | null>(null);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const openedForInteractionRef = useRef(false);
 
   const renderAsSheet = mobile || narrowViewport;
 
   const openPopover = useCallback(() => {
+    if (closeTimerRef.current) {
+      clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
     setOpen(true);
     if (!openedForInteractionRef.current) {
       openedForInteractionRef.current = true;
@@ -56,8 +83,24 @@ export function FeatureHelpPopover({
   }, [topic]);
 
   const closePopover = useCallback(() => {
+    if (closeTimerRef.current) {
+      clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
     setOpen(false);
+    setFloatingPosition(null);
     openedForInteractionRef.current = false;
+  }, []);
+
+  const scheduleClosePopover = useCallback(() => {
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = setTimeout(closePopover, 100);
+  }, [closePopover]);
+
+  const keepPopoverOpen = useCallback(() => {
+    if (!closeTimerRef.current) return;
+    clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = null;
   }, []);
 
   useEffect(() => {
@@ -68,13 +111,92 @@ export function FeatureHelpPopover({
     return () => media.removeEventListener("change", sync);
   }, []);
 
+  useEffect(
+    () => () => {
+      if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+    },
+    []
+  );
+
+  const updateFloatingPosition = useCallback(() => {
+    const anchor = rootRef.current;
+    const popover = popoverRef.current;
+    if (!anchor || !popover) return;
+
+    const anchorRect = anchor.getBoundingClientRect();
+    const viewportWidth = document.documentElement.clientWidth;
+    const viewportHeight = document.documentElement.clientHeight;
+    const width = Math.min(
+      DESKTOP_POPOVER_WIDTH,
+      viewportWidth - VIEWPORT_MARGIN * 2
+    );
+    const naturalHeight = popover.scrollHeight;
+    const spaceBelow =
+      viewportHeight - anchorRect.bottom - FLOATING_GAP - VIEWPORT_MARGIN;
+    const spaceAbove = anchorRect.top - FLOATING_GAP - VIEWPORT_MARGIN;
+    const placeAbove = naturalHeight > spaceBelow && spaceAbove > spaceBelow;
+    const maxHeight = Math.max(96, placeAbove ? spaceAbove : spaceBelow);
+    const renderedHeight = Math.min(naturalHeight, maxHeight);
+    const preferredLeft =
+      align === "right" ? anchorRect.right - width : anchorRect.left;
+    const left = Math.min(
+      Math.max(VIEWPORT_MARGIN, preferredLeft),
+      viewportWidth - width - VIEWPORT_MARGIN
+    );
+    const preferredTop = placeAbove
+      ? anchorRect.top - FLOATING_GAP - renderedHeight
+      : anchorRect.bottom + FLOATING_GAP;
+    const top = Math.min(
+      Math.max(VIEWPORT_MARGIN, preferredTop),
+      viewportHeight - renderedHeight - VIEWPORT_MARGIN
+    );
+    const nextPosition = {
+      top: Math.round(top),
+      left: Math.round(left),
+      width: Math.round(width),
+      maxHeight: Math.round(maxHeight),
+    };
+
+    setFloatingPosition((current) =>
+      current &&
+      current.top === nextPosition.top &&
+      current.left === nextPosition.left &&
+      current.width === nextPosition.width &&
+      current.maxHeight === nextPosition.maxHeight
+        ? current
+        : nextPosition
+    );
+  }, [align]);
+
+  useLayoutEffect(() => {
+    if (!open || renderAsSheet) return;
+
+    updateFloatingPosition();
+    const resizeObserver = new ResizeObserver(updateFloatingPosition);
+    if (rootRef.current) resizeObserver.observe(rootRef.current);
+    if (popoverRef.current) resizeObserver.observe(popoverRef.current);
+    window.addEventListener("resize", updateFloatingPosition);
+    window.addEventListener("scroll", updateFloatingPosition, true);
+
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", updateFloatingPosition);
+      window.removeEventListener("scroll", updateFloatingPosition, true);
+    };
+  }, [open, renderAsSheet, updateFloatingPosition]);
+
   useEffect(() => {
     if (!open) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") closePopover();
     };
     const handlePointerDown = (event: PointerEvent) => {
-      if (!renderAsSheet && !rootRef.current?.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (
+        !renderAsSheet &&
+        !rootRef.current?.contains(target) &&
+        !popoverRef.current?.contains(target)
+      ) {
         closePopover();
       }
     };
@@ -120,6 +242,52 @@ export function FeatureHelpPopover({
     </>
   );
 
+  const floatingLayer =
+    open && typeof document !== "undefined"
+      ? createPortal(
+          renderAsSheet ? (
+            <span
+              className="fixed inset-0 z-[120] flex items-end bg-black/55"
+              role="presentation"
+              onPointerDown={(event) => {
+                if (event.target === event.currentTarget) closePopover();
+              }}
+            >
+              <span
+                id={id}
+                role="dialog"
+                aria-modal="true"
+                aria-label={title}
+                className="block max-h-[calc(100dvh-1rem)] w-full overflow-y-auto overscroll-contain rounded-t-3xl border border-zinc-200 bg-white px-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] pt-5 text-left shadow-2xl dark:border-zinc-800 dark:bg-zinc-900"
+              >
+                {content}
+              </span>
+            </span>
+          ) : (
+            <span
+              ref={popoverRef}
+              id={id}
+              role="tooltip"
+              data-testid={testId ? `${testId}-content` : undefined}
+              onMouseEnter={keepPopoverOpen}
+              onMouseLeave={scheduleClosePopover}
+              onFocusCapture={keepPopoverOpen}
+              className="fixed z-[120] block overflow-y-auto overscroll-contain rounded-2xl border border-zinc-200 bg-white p-4 text-left shadow-2xl dark:border-zinc-700 dark:bg-zinc-900"
+              style={{
+                top: floatingPosition?.top ?? 0,
+                left: floatingPosition?.left ?? 0,
+                width: floatingPosition?.width ?? DESKTOP_POPOVER_WIDTH,
+                maxHeight: floatingPosition?.maxHeight ?? "calc(100dvh - 1rem)",
+                visibility: floatingPosition ? "visible" : "hidden",
+              }}
+            >
+              {content}
+            </span>
+          ),
+          document.body
+        )
+      : null;
+
   return (
     <span
       ref={rootRef}
@@ -128,15 +296,23 @@ export function FeatureHelpPopover({
         if (!renderAsSheet) openPopover();
       }}
       onMouseLeave={() => {
-        if (!renderAsSheet) closePopover();
+        if (!renderAsSheet) scheduleClosePopover();
       }}
       onFocusCapture={() => {
         if (!renderAsSheet) openPopover();
       }}
-      onBlurCapture={(event) => {
-        if (!renderAsSheet && !event.currentTarget.contains(event.relatedTarget)) {
-          closePopover();
-        }
+      onBlurCapture={() => {
+        if (renderAsSheet) return;
+        requestAnimationFrame(() => {
+          const activeElement = document.activeElement;
+          if (
+            activeElement &&
+            !rootRef.current?.contains(activeElement) &&
+            !popoverRef.current?.contains(activeElement)
+          ) {
+            closePopover();
+          }
+        });
       }}
     >
       <button
@@ -154,38 +330,7 @@ export function FeatureHelpPopover({
       >
         <Info className="h-4 w-4" aria-hidden="true" />
       </button>
-
-      {open && renderAsSheet ? (
-        <span
-          className="fixed inset-0 z-[95] flex items-end bg-black/55"
-          role="presentation"
-          onPointerDown={(event) => {
-            if (event.target === event.currentTarget) closePopover();
-          }}
-        >
-          <span
-            id={id}
-            role="dialog"
-            aria-modal="true"
-            aria-label={title}
-            className="block w-full rounded-t-3xl border border-zinc-200 bg-white px-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] pt-5 text-left shadow-2xl dark:border-zinc-800 dark:bg-zinc-900"
-          >
-            {content}
-          </span>
-        </span>
-      ) : null}
-
-      {open && !renderAsSheet ? (
-        <span
-          id={id}
-          role="tooltip"
-          className={`absolute top-full z-[70] mt-1 block w-72 rounded-2xl border border-zinc-200 bg-white p-4 text-left shadow-2xl dark:border-zinc-700 dark:bg-zinc-900 ${
-            align === "right" ? "right-0" : "left-0"
-          }`}
-        >
-          {content}
-        </span>
-      ) : null}
+      {floatingLayer}
     </span>
   );
 }
