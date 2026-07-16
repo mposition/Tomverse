@@ -54,12 +54,22 @@ const checks = [
       !source.includes('"user" | "assistant" | "system"'),
   },
   {
-    name: "/api/chat has guest verification and model tier checks",
+    name: "/api/chat has guest verification and model access checks",
     file: "app/api/chat/route.ts",
     test: (source) =>
       source.includes("assertModelAccess(access, modelConfig)") &&
       source.includes("getUserBillingPlan") &&
       source.includes("verifyGuestTurnstile"),
+  },
+  {
+    name: "/api/chat treats retired models and empty provider streams as failures",
+    file: "app/api/chat/route.ts",
+    test: (source) =>
+      source.includes('"MODEL_RETIRED"') &&
+      source.includes("const isEmptyResponse = !generatedText.trim()") &&
+      source.includes('"AI_EMPTY_RESPONSE"') &&
+      source.indexOf("if (isEmptyResponse)") <
+        source.indexOf("await recordProviderSuccess"),
   },
   {
     name: "Chat usage limits reserve tokens, cost, provider budget, and lease",

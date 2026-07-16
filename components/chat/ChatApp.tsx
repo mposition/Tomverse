@@ -357,6 +357,8 @@ function ChatAppComponent({
         const requestError = new Error(`Chat request failed: ${response.status}`);
         (requestError as Error & { traceId?: string }).traceId =
           requestTraceId || undefined;
+        (requestError as Error & { code?: string }).code =
+          typeof errorBody?.code === "string" ? errorBody.code : undefined;
         (requestError as Error & { publicMessage?: string }).publicMessage =
           typeof errorBody?.error === "string" ? errorBody.error : undefined;
         throw requestError;
@@ -380,9 +382,19 @@ function ChatAppComponent({
       }
 
 	  if (!assistantText.trim()) {
+        if (requestTraceId && typeof window !== "undefined") {
+          window.localStorage.setItem(
+            "tomverse_last_error_trace_id",
+            requestTraceId
+          );
+        }
         setAssistantMessage(
           assistantMessageId,
-          t("chat.responseEmpty"),
+          `${t("chat.responseEmpty")}${
+            requestTraceId
+              ? `\n${t("chat.traceId")}: ${requestTraceId}`
+              : ""
+          }`,
           "error"
         );
       } else {
@@ -391,7 +403,12 @@ function ChatAppComponent({
     } catch (error: unknown) {
       const requestError =
         error && typeof error === "object"
-          ? (error as { name?: unknown; traceId?: unknown; publicMessage?: unknown })
+          ? (error as {
+              name?: unknown;
+              code?: unknown;
+              traceId?: unknown;
+              publicMessage?: unknown;
+            })
           : {};
       if (requestError.name === "AbortError") {
         setAssistantMessage(
@@ -412,7 +429,11 @@ function ChatAppComponent({
         }
         setAssistantMessage(
           assistantMessageId,
-          `${typeof requestError.publicMessage === "string" ? requestError.publicMessage : t("chat.responseError")}${
+          `${requestError.code === "MODEL_RETIRED"
+            ? t("chat.modelRetired")
+            : typeof requestError.publicMessage === "string"
+              ? requestError.publicMessage
+              : t("chat.responseError")}${
             traceId ? `\n${t("chat.traceId")}: ${traceId}` : ""
           }`,
           "error"
