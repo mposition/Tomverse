@@ -190,7 +190,7 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     annualDescription: "Save 20% with yearly billing.",
     paymentMethods: "Payment methods",
     paymentHint:
-      "Stripe shows wallets and PayPal when available for your device, browser, region, and Stripe account settings.",
+      "Stripe accepts cards and shows supported wallets such as Google Pay and Apple Pay when available for your device, browser, region, and Stripe account settings.",
     promoLabel: "Promotion code",
     promoPlaceholder: "Optional promotion code",
     apply: "Apply",
@@ -228,7 +228,7 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     annualDescription: "연간 결제로 20%를 절약하세요.",
     paymentMethods: "결제 방법",
     paymentHint:
-      "Stripe는 기기, 브라우저, 지역, 계정 설정에서 지원되는 경우 지갑 결제와 PayPal을 표시합니다.",
+      "Stripe는 카드 결제를 제공하며, 기기, 브라우저, 지역 및 Stripe 계정 설정에서 지원되는 경우 Google Pay와 Apple Pay 같은 지갑 결제를 표시합니다.",
     promoLabel: "프로모션 코드",
     promoPlaceholder: "프로모션 코드 선택 입력",
     apply: "적용",
@@ -265,7 +265,7 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     annualDescription: "选择年付可节省 20%。",
     paymentMethods: "付款方式",
     paymentHint:
-      "当你的设备、浏览器、地区和 Stripe 账户设置支持时，Stripe 会显示钱包付款和 PayPal。",
+      "Stripe 支持银行卡付款；当你的设备、浏览器、地区和 Stripe 账户设置允许时，还会显示 Google Pay 和 Apple Pay 等钱包付款方式。",
     promoLabel: "促销代码",
     promoPlaceholder: "可选促销代码",
     apply: "应用",
@@ -303,7 +303,7 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     annualDescription: "Économisez 20 % avec la facturation annuelle.",
     paymentMethods: "Moyens de paiement",
     paymentHint:
-      "Stripe affiche les portefeuilles et PayPal lorsque votre appareil, navigateur, région et compte Stripe le permettent.",
+      "Stripe accepte les cartes et affiche les portefeuilles compatibles comme Google Pay et Apple Pay selon l’appareil, le navigateur, la région et les réglages du compte Stripe.",
     promoLabel: "Code promotionnel",
     promoPlaceholder: "Code promotionnel facultatif",
     apply: "Appliquer",
@@ -341,7 +341,7 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     annualDescription: "Spare 20 % mit jährlicher Abrechnung.",
     paymentMethods: "Zahlungsmethoden",
     paymentHint:
-      "Stripe zeigt Wallets und PayPal an, wenn sie für dein Gerät, deinen Browser, deine Region und deine Stripe-Kontoeinstellungen verfügbar sind.",
+      "Stripe akzeptiert Karten und zeigt unterstützte Wallets wie Google Pay und Apple Pay an, wenn sie für Gerät, Browser, Region und Stripe-Kontoeinstellungen verfügbar sind.",
     promoLabel: "Aktionscode",
     promoPlaceholder: "Optionaler Aktionscode",
     apply: "Anwenden",
@@ -379,7 +379,7 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     annualDescription: "Ahorra un 20 % con la facturación anual.",
     paymentMethods: "Métodos de pago",
     paymentHint:
-      "Stripe muestra billeteras y PayPal cuando están disponibles para tu dispositivo, navegador, región y configuración de cuenta de Stripe.",
+      "Stripe acepta tarjetas y muestra billeteras compatibles como Google Pay y Apple Pay cuando están disponibles para tu dispositivo, navegador, región y cuenta de Stripe.",
     promoLabel: "Código promocional",
     promoPlaceholder: "Código promocional opcional",
     apply: "Aplicar",
@@ -417,7 +417,7 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     annualDescription: "Economize 20% com a cobrança anual.",
     paymentMethods: "Métodos de pagamento",
     paymentHint:
-      "A Stripe mostra carteiras digitais e PayPal quando disponíveis para seu dispositivo, navegador, região e configurações da conta Stripe.",
+      "A Stripe aceita cartões e mostra carteiras digitais compatíveis, como Google Pay e Apple Pay, quando disponíveis para seu dispositivo, navegador, região e conta Stripe.",
     promoLabel: "Código promocional",
     promoPlaceholder: "Código promocional opcional",
     apply: "Aplicar",
@@ -1087,7 +1087,7 @@ export function UpgradeInterestButton({
                     </p>
                   </div>
                   {!foundingPass ? <div className="flex flex-wrap gap-2 sm:justify-end">
-                    {["PayPal", "GPay", "Apple Pay", "Card"].map((method) => (
+                    {["GPay", "Apple Pay", "Card"].map((method) => (
                       <span
                         key={method}
                         className="rounded-full bg-zinc-200/70 px-3 py-1.5 text-[11px] font-black text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"
