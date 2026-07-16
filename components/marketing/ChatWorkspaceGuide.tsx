@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { useEffect } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
+import { helpCentreHref } from "@/lib/localizedHelpHref";
 import {
   trackProductEvent,
   trackProductEventOnce,
@@ -123,7 +124,7 @@ export function ChatWorkspaceGuide() {
 
       <article lang={lang} className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8 lg:py-16">
         <Link
-          href="/support/help-centre"
+          href={helpCentreHref(lang)}
           className="inline-flex items-center gap-2 text-sm font-black text-blue-600 hover:text-blue-500 dark:text-blue-300"
         >
           <ArrowLeft className="h-4 w-4" aria-hidden="true" />
@@ -270,7 +271,7 @@ export function ChatWorkspaceGuide() {
           </div>
           <div className="flex flex-col gap-3 sm:flex-row">
             <Link
-              href="/support/help-centre"
+              href={helpCentreHref(lang)}
               className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-zinc-700 px-4 text-sm font-black hover:bg-zinc-900"
             >
               {copy.allHelp}

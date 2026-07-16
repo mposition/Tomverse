@@ -22,7 +22,7 @@ test("desktop exposes stable QA contracts", async ({ page }) => {
   await expect(helpLink).toBeVisible();
   await expect(helpLink).toHaveAttribute(
     "href",
-    "/support/help-centre/chat-workspace"
+    "/support/help-centre/chat-workspace?lang=en"
   );
   await expect(helpLink).toHaveAttribute("target", "_blank");
   await expect(page.getByText("Status", { exact: true })).toBeVisible();
@@ -45,6 +45,29 @@ test("chat workspace guide exposes the full help structure", async ({ page }) =>
   ).toBeVisible();
   await expect(page.getByRole("heading", { level: 2 })).toHaveCount(10);
   await expect(page.getByText("AI Review compares only the supplied answers.")).toBeVisible();
+});
+
+test("chat workspace guide honors the language passed from the app", async ({ page }) => {
+  await prepareGuestPage(page, "en");
+  await page.goto("/support/help-centre/chat-workspace?lang=ko");
+
+  await expect(page).toHaveURL(/\/support\/help-centre\/chat-workspace\?lang=ko$/);
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("tomverse_language")))
+    .toBe("ko");
+
+  await expect(
+    page.getByRole("heading", {
+      level: 1,
+      name: "Tomverse Chat 워크스페이스 사용 가이드",
+    })
+  ).toBeVisible();
+  const localizedHelpLinks = page.locator(
+    'a[href="/support/help-centre?lang=ko"]'
+  );
+  await expect(localizedHelpLinks).toHaveCount(2);
+  await expect(localizedHelpLinks.first()).toBeVisible();
+  await expect(localizedHelpLinks.last()).toBeVisible();
 });
 
 test("mobile exposes stable QA contracts", async ({ page }) => {

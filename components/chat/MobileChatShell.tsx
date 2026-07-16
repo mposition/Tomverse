@@ -8,6 +8,7 @@ import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { ProviderStatusBanner } from "@/components/chat/ProviderStatusBanner";
 import { FeatureHelpPopover } from "@/components/chat/FeatureHelpPopover";
 import { chatHelpCopy } from "@/components/chat/chatHelpCopy";
+import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
 import {
   AVAILABLE_MODELS,
   type ChatAttachment,
@@ -394,7 +395,7 @@ export function MobileChatShell({
                 buttonLabel={helpCopy.helpAboutAiReview}
                 learnMoreLabel={helpCopy.learnMore}
                 topic="ai_review"
-                href="/support/help-centre/chat-workspace#ai-review"
+                href={chatWorkspaceGuideHref(lang, "ai-review")}
                 mobile
                 align="right"
                 testId="ai-review-help-mobile"

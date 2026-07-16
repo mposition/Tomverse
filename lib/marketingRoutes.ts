@@ -16,6 +16,7 @@ const exactMarketingPaths = new Set([
   "/safety/trust-transparency",
   "/support",
   "/support/help-centre",
+  "/support/help-centre/chat-workspace",
   "/terms",
 ]);
 

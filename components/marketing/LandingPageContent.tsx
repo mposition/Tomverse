@@ -2,6 +2,16 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import chatgptIcon from "@/public/model-icons/chatgpt.png";
+import claudeIcon from "@/public/model-icons/claude.png";
+import deepseekIcon from "@/public/model-icons/deepseek.png";
+import geminiIcon from "@/public/model-icons/gemini.png";
+import grokIcon from "@/public/model-icons/grok.png";
+import kimiIcon from "@/public/model-icons/kimi.png";
+import llamaIcon from "@/public/model-icons/llama.png";
+import mistralIcon from "@/public/model-icons/mistral.png";
+import perplexityIcon from "@/public/model-icons/perplexity.png";
+import qwenIcon from "@/public/model-icons/qwen.png";
 import {
   ArrowRight,
   Bot,
@@ -65,16 +75,16 @@ type LandingCopy = {
 };
 
 const supportedModels = [
-  { name: "GPT", provider: "OpenAI", image: "/model-icons/chatgpt.png", mark: "O" },
-  { name: "Claude", provider: "Anthropic", image: "/model-icons/claude.png", mark: "A" },
-  { name: "Gemini", provider: "Google", image: "/model-icons/gemini.png", mark: "G" },
-  { name: "Llama", provider: "Groq", image: "/model-icons/llama.png", mark: "L" },
-  { name: "DeepSeek", provider: "DeepSeek", image: "/model-icons/deepseek.png", mark: "D" },
-  { name: "Mistral", provider: "Mistral AI", image: "/model-icons/mistral.png", mark: "M" },
-  { name: "Grok", provider: "xAI", image: "/model-icons/grok.png", mark: "X" },
-  { name: "Kimi", provider: "Moonshot", image: "/model-icons/kimi.png", mark: "K" },
-  { name: "Qwen", provider: "Alibaba", image: "/model-icons/qwen.png", mark: "Q" },
-  { name: "Perplexity", provider: "Sonar", image: "/model-icons/perplexity.png", mark: "P" },
+  { name: "GPT", provider: "OpenAI", image: chatgptIcon, mark: "O" },
+  { name: "Claude", provider: "Anthropic", image: claudeIcon, mark: "A" },
+  { name: "Gemini", provider: "Google", image: geminiIcon, mark: "G" },
+  { name: "Llama", provider: "Groq", image: llamaIcon, mark: "L" },
+  { name: "DeepSeek", provider: "DeepSeek", image: deepseekIcon, mark: "D" },
+  { name: "Mistral", provider: "Mistral AI", image: mistralIcon, mark: "M" },
+  { name: "Grok", provider: "xAI", image: grokIcon, mark: "X" },
+  { name: "Kimi", provider: "Moonshot", image: kimiIcon, mark: "K" },
+  { name: "Qwen", provider: "Alibaba", image: qwenIcon, mark: "Q" },
+  { name: "Perplexity", provider: "Sonar", image: perplexityIcon, mark: "P" },
 ];
 
 const englishCopy: LandingCopy = {

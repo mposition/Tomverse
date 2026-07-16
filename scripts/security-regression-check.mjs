@@ -529,7 +529,7 @@ const checks = [
     name: "Chat sidebar exposes accessible new-tab workspace help",
     file: "components/chat/ChatSidebar.tsx",
     test: (source) =>
-      source.includes('href="/support/help-centre/chat-workspace"') &&
+      source.includes("chatWorkspaceGuideHref(lang)") &&
       source.includes('target="_blank"') &&
       source.includes('rel="noopener noreferrer"') &&
       source.includes('trackProductEvent("help_opened"') &&
