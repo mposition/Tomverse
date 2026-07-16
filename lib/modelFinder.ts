@@ -1,5 +1,6 @@
 import {
   AVAILABLE_MODELS,
+  canUseModelWithPlan,
   getModel,
   getModelUsageProfile,
   type AiModel,
@@ -153,7 +154,7 @@ export const isModelFinderDefault = (
 ): model is AiModel =>
   Boolean(
     model?.enabled &&
-      model.tier === "Free" &&
+      canUseModelWithPlan("Guest", model) &&
       getModelUsageProfile(model).category === "Standard"
   );
 

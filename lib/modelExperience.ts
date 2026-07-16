@@ -36,7 +36,7 @@ export const getModelExperienceTags = (model: AiModel) => {
   const tags = new Set<ModelExperienceTag>(providerTags[model.provider] ?? []);
 
   if (model.reasoning && model.reasoning !== "none") tags.add("reasoning");
-  if (model.tier === "Free") tags.add("free");
+  if (model.minimumPlan === "Guest") tags.add("free");
   if (model.name.toLowerCase().includes("code") || model.id.includes("codestral")) {
     tags.add("coding");
   }

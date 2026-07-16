@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { Loader2, Search, ShieldAlert } from "lucide-react";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { dispatchAppToast } from "@/lib/appToast";
-import type { AiModel } from "@/lib/models";
+import { getModelUsageProfile, type AiModel } from "@/lib/models";
 import type { AdminModelOverrideStatus } from "@/lib/modelOverrides";
 
 type ModelOverrideRow = {
@@ -62,7 +62,13 @@ export function ModelOverridesPanel({ models, overrides }: Props) {
     return models.filter((model) => {
       if (provider !== "all" && model.provider !== provider) return false;
       if (!normalized) return true;
-      return [model.name, model.id, model.provider, model.tier]
+      return [
+        model.name,
+        model.id,
+        model.provider,
+        model.minimumPlan,
+        getModelUsageProfile(model).category,
+      ]
         .join(" ")
         .toLowerCase()
         .includes(normalized);
@@ -194,7 +200,7 @@ export function ModelOverridesPanel({ models, overrides }: Props) {
                       </span>
                     </div>
                     <p className="mt-1 truncate text-xs text-zinc-500">
-                      {model.id} · {model.provider} · {model.tier} · {dateLabel(current?.updatedAt)} UTC
+                      {model.id} · {model.provider} · {getModelUsageProfile(model).category} · {model.minimumPlan}+ · {dateLabel(current?.updatedAt)} UTC
                     </p>
                   </div>
                 </div>

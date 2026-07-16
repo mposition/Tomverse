@@ -46,7 +46,7 @@ test("desktop model selector adds a second free model panel", async ({ page }) =
 
   const freeUnselectedModel = dialog
     .locator(
-      '[data-testid="model-option"][data-model-tier="Free"][aria-pressed="false"]:not([disabled])'
+      '[data-testid="model-option"][data-model-usage-class="Standard"][data-model-minimum-plan="Guest"][aria-pressed="false"]:not([disabled])'
     )
     .first();
   await expect(freeUnselectedModel).toBeVisible();

@@ -1,16 +1,24 @@
 import {
+  canUseModelWithPlan,
   DEFAULT_MODEL_ID,
   getModel,
+  getModelUsageProfile,
   isEnabledModelId,
 } from "@/lib/models";
 
 const GUEST_DEFAULT_MODEL_ID = "gemini-2-5-flash";
 
-if (
-  !isEnabledModelId(GUEST_DEFAULT_MODEL_ID) ||
-  getModel(GUEST_DEFAULT_MODEL_ID)?.tier !== "Free"
-) {
-  throw new Error("Guest default model must be an enabled Free model.");
+const isGuestEligibleModel = (modelId: string) => {
+  const model = getModel(modelId);
+  return Boolean(
+    model?.enabled &&
+      canUseModelWithPlan("Guest", model) &&
+      getModelUsageProfile(model).category === "Standard"
+  );
+};
+
+if (!isEnabledModelId(GUEST_DEFAULT_MODEL_ID) || !isGuestEligibleModel(GUEST_DEFAULT_MODEL_ID)) {
+  throw new Error("Guest default model must be an enabled guest-accessible Standard model.");
 }
 
 export const APP_DEFAULTS = {
@@ -39,5 +47,5 @@ export const clampSelectedModels = (models: string[]) =>
 
 export const clampGuestSelectedModels = (models: string[]) =>
   clampSelectedModels(models).filter(
-    (modelId) => getModel(modelId)?.tier === "Free"
+    isGuestEligibleModel
   ).slice(0, APP_DEFAULTS.maxGuestSelectedModels);

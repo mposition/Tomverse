@@ -1,7 +1,12 @@
 import "server-only";
 
 import { APP_DEFAULTS } from "@/lib/appDefaults";
-import { getModel, isEnabledModelId } from "@/lib/models";
+import {
+  canUseModelWithPlan,
+  getModel,
+  getModelUsageProfile,
+  isEnabledModelId,
+} from "@/lib/models";
 import { prisma } from "@/lib/prisma";
 
 export type PublicAppSettings = {
@@ -10,8 +15,15 @@ export type PublicAppSettings = {
 
 const GUEST_DEFAULT_MODEL_KEY = "guestDefaultModelId";
 
-export const isValidGuestDefaultModel = (modelId: string) =>
-  isEnabledModelId(modelId) && getModel(modelId)?.tier === "Free";
+export const isValidGuestDefaultModel = (modelId: string) => {
+  const model = getModel(modelId);
+  return Boolean(
+    isEnabledModelId(modelId) &&
+      model &&
+      canUseModelWithPlan("Guest", model) &&
+      getModelUsageProfile(model).category === "Standard"
+  );
+};
 
 const normalizeGuestDefaultModel = (modelId: string | null | undefined) =>
   modelId && isValidGuestDefaultModel(modelId)
@@ -32,7 +44,9 @@ export async function getPublicAppSettings(): Promise<PublicAppSettings> {
 export async function updateGuestDefaultModel(modelId: string) {
   const normalized = normalizeGuestDefaultModel(modelId);
   if (normalized !== modelId) {
-    throw new Error("Guest default model must be an enabled Free model.");
+    throw new Error(
+      "Guest default model must be an enabled guest-accessible Standard model."
+    );
   }
 
   await prisma.appSetting.upsert({

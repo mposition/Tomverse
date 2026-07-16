@@ -15,7 +15,7 @@ async function addSecondFreeModel(page: Page) {
 
   const freeUnselectedModel = dialog
     .locator(
-      '[data-testid="model-option"][data-model-tier="Free"][aria-pressed="false"]:not([disabled])'
+      '[data-testid="model-option"][data-model-usage-class="Standard"][data-model-minimum-plan="Guest"][aria-pressed="false"]:not([disabled])'
     )
     .first();
   await expect(freeUnselectedModel).toBeVisible();
@@ -71,7 +71,13 @@ test("input remains reachable at virtual-keyboard height", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 520 });
   await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
 
-  await page.getByTestId("chat-textarea").focus();
+  const textarea = page.getByTestId("chat-textarea");
+  const mobileFontSize = await textarea.evaluate((element) =>
+    Number.parseFloat(getComputedStyle(element).fontSize)
+  );
+  expect(mobileFontSize).toBeGreaterThanOrEqual(16);
+
+  await textarea.focus();
   const box = await page.getByTestId("chat-input").boundingBox();
   expect(box).not.toBeNull();
   expect(box!.y + box!.height).toBeLessThanOrEqual(520);
