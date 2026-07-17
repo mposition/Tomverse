@@ -427,12 +427,32 @@ function ChatAppComponent({
         if (traceId && typeof window !== "undefined") {
           window.localStorage.setItem("tomverse_last_error_trace_id", traceId);
         }
+        const errorCode =
+          typeof requestError.code === "string" ? requestError.code : "";
+        const localizedRequestError =
+          errorCode === "CREDIT_BALANCE_INSUFFICIENT" ||
+          errorCode === "CREDIT_COST_ALLOWANCE_INSUFFICIENT"
+            ? t("chat.comparisonCreditsInsufficient")
+            : errorCode === "INTERNAL_DAILY_COST_SAFETY_LIMIT"
+              ? t("chat.internalDailyCostSafetyLimit")
+              : errorCode === "INTERNAL_MONTHLY_COST_SAFETY_LIMIT"
+                ? t("chat.internalMonthlyCostSafetyLimit")
+                : errorCode === "PROVIDER_DAILY_SPEND_LIMIT_REACHED" ||
+                    errorCode === "PROVIDER_SPEND_LIMIT_REACHED"
+                  ? t("chat.providerCostSafetyLimit")
+                  : errorCode === "CHAT_CONCURRENCY_EXCEEDED"
+                    ? t("chat.comparisonConcurrencyLimit")
+                    : errorCode === "FREE_PRO_MODEL_QUOTA_EXCEEDED"
+                      ? t("chat.comparisonHigherCostQuotaExceeded")
+                  : errorCode === "CHAT_QUOTA_EXCEEDED"
+                    ? t("chat.comparisonDailyCreditsInsufficient")
+                    : null;
         setAssistantMessage(
           assistantMessageId,
-          `${requestError.code === "MODEL_RETIRED"
+          `${errorCode === "MODEL_RETIRED"
             ? t("chat.modelRetired")
-            : typeof requestError.publicMessage === "string"
-              ? requestError.publicMessage
+            : localizedRequestError || typeof requestError.publicMessage === "string"
+              ? localizedRequestError || requestError.publicMessage
               : t("chat.responseError")}${
             traceId ? `\n${t("chat.traceId")}: ${traceId}` : ""
           }`,

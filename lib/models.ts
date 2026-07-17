@@ -283,6 +283,7 @@ export const getSettledUsageCredits = ({
 
 export type ModelBillingProfile = {
     maxOutputTokens: number;
+    reservationOutputTokens: number;
     inputUsdPerMillionTokens: number;
     outputUsdPerMillionTokens: number;
     cachedInputPriceMultiplier: number;
@@ -293,18 +294,21 @@ type ModelCostClass = "standard" | "advanced" | "premium";
 const BILLING_DEFAULTS: Record<ModelCostClass, ModelBillingProfile> = {
     standard: {
         maxOutputTokens: 2_048,
+        reservationOutputTokens: 1_024,
         inputUsdPerMillionTokens: 0.5,
         outputUsdPerMillionTokens: 1,
         cachedInputPriceMultiplier: 1,
     },
     advanced: {
         maxOutputTokens: 4_096,
+        reservationOutputTokens: 2_048,
         inputUsdPerMillionTokens: 3,
         outputUsdPerMillionTokens: 12,
         cachedInputPriceMultiplier: 1,
     },
     premium: {
         maxOutputTokens: 8_192,
+        reservationOutputTokens: 2_048,
         inputUsdPerMillionTokens: 15,
         outputUsdPerMillionTokens: 60,
         cachedInputPriceMultiplier: 1,
@@ -328,6 +332,7 @@ const MODEL_BILLING_DEFAULTS: Partial<
 > = {
     "llama-4-scout": {
         maxOutputTokens: 8_192,
+        reservationOutputTokens: 2_048,
         inputUsdPerMillionTokens: 0.11,
         outputUsdPerMillionTokens: 0.34,
         cachedInputPriceMultiplier: 1,
@@ -339,6 +344,7 @@ const MODEL_BILLING_DEFAULTS: Partial<
     },
     "deepseek-v4-pro": {
         maxOutputTokens: 4_096,
+        reservationOutputTokens: 2_048,
         inputUsdPerMillionTokens: 0.435,
         outputUsdPerMillionTokens: 0.87,
         cachedInputPriceMultiplier: 1 / 120,
@@ -372,13 +378,26 @@ export const getModelBillingProfile = (
         ...BILLING_DEFAULTS[getModelCostClass(model.usageClass)],
         ...MODEL_BILLING_DEFAULTS[model.id],
     };
-    return {
-        maxOutputTokens: Math.floor(
+    const maxOutputTokens = Math.floor(
+        positiveNumber(
+            process.env[modelEnvKey(model.id, "MAX_OUTPUT_TOKENS")],
+            defaults.maxOutputTokens
+        )
+    );
+    const reservationOutputTokens = Math.min(
+        maxOutputTokens,
+        Math.floor(
             positiveNumber(
-                process.env[modelEnvKey(model.id, "MAX_OUTPUT_TOKENS")],
-                defaults.maxOutputTokens
+                process.env[
+                    modelEnvKey(model.id, "RESERVATION_OUTPUT_TOKENS")
+                ],
+                defaults.reservationOutputTokens
             )
-        ),
+        )
+    );
+    return {
+        maxOutputTokens,
+        reservationOutputTokens,
         inputUsdPerMillionTokens: positiveNumber(
             process.env[modelEnvKey(model.id, "INPUT_USD_PER_MILLION")],
             defaults.inputUsdPerMillionTokens

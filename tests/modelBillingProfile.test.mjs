@@ -11,12 +11,14 @@ const profile = (modelId) => {
 test("DeepSeek model defaults distinguish cache-hit and cache-miss pricing", () => {
   assert.deepEqual(profile("deepseek-v4-flash"), {
     maxOutputTokens: 2_048,
+    reservationOutputTokens: 1_024,
     inputUsdPerMillionTokens: 0.14,
     outputUsdPerMillionTokens: 0.28,
     cachedInputPriceMultiplier: 0.02,
   });
   assert.deepEqual(profile("deepseek-v4-pro"), {
     maxOutputTokens: 4_096,
+    reservationOutputTokens: 2_048,
     inputUsdPerMillionTokens: 0.435,
     outputUsdPerMillionTokens: 0.87,
     cachedInputPriceMultiplier: 1 / 120,
@@ -26,6 +28,7 @@ test("DeepSeek model defaults distinguish cache-hit and cache-miss pricing", () 
 test("Llama 4 Scout uses the published Groq token pricing and output cap", () => {
   assert.deepEqual(profile("llama-4-scout"), {
     maxOutputTokens: 8_192,
+    reservationOutputTokens: 2_048,
     inputUsdPerMillionTokens: 0.11,
     outputUsdPerMillionTokens: 0.34,
     cachedInputPriceMultiplier: 1,

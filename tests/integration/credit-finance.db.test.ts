@@ -4,6 +4,7 @@ import { after, beforeEach, test } from "node:test";
 import type Stripe from "stripe";
 import {
   acquireChatAccess,
+  preflightChatComparisonAccess,
   reconcileExpiredChatCreditReservations,
   releaseChatAccess,
   settleChatUsage,
@@ -71,6 +72,7 @@ const chatBudget = ({
   credits,
   inputTokens = 100,
   outputTokens = 900,
+  reservedOutputTokens = outputTokens,
   inputRate = 0,
   outputRate = 0,
   cachedInputPriceMultiplier = 1,
@@ -79,6 +81,7 @@ const chatBudget = ({
   credits: number;
   inputTokens?: number;
   outputTokens?: number;
+  reservedOutputTokens?: number;
   inputRate?: number;
   outputRate?: number;
   cachedInputPriceMultiplier?: number;
@@ -90,6 +93,7 @@ const chatBudget = ({
   usageCredits: credits,
   inputTokens,
   maxOutputTokens: outputTokens,
+  reservedOutputTokens,
   inputUsdPerMillionTokens: inputRate,
   outputUsdPerMillionTokens: outputRate,
   cachedInputPriceMultiplier,
@@ -505,4 +509,45 @@ test("serializes concurrent reservations without overspending plan or add-on bal
   await Promise.all(
     succeeded.map(({ value }) => releaseChatAccess(value.leaseId))
   );
+});
+
+test("preflights and reserves three premium models without full-output quota collisions", async () => {
+  const user = await createUser("Max");
+  const access = chatAccess(user, 10_000);
+  const previousDailyLimit = process.env.CHAT_MAX_COST_MICROUSD_PER_DAY;
+  process.env.CHAT_MAX_COST_MICROUSD_PER_DAY = "1500000";
+
+  try {
+    const budgets = ["premium-a", "premium-b", "premium-c"].map((modelId) => ({
+      ...chatBudget({
+        credits: 8,
+        inputTokens: 100,
+        outputTokens: 8_192,
+        reservedOutputTokens: 2_048,
+        inputRate: 15,
+        outputRate: 60,
+      }),
+      modelId,
+    }));
+
+    const preflight = await preflightChatComparisonAccess(access, budgets);
+    assert.equal(preflight.modelCount, 3);
+    assert.equal(preflight.requiredCredits, 24);
+    assert.equal(preflight.reservedCostMicroUsd, 373_140);
+    assert.equal(await prisma.chatUsageBucket.count(), 0);
+
+    const acquired = await Promise.all(
+      budgets.map((budget) => acquireChatAccess(access, budget))
+    );
+    assert.equal(acquired.length, 3);
+    assert.equal(await prisma.chatCreditReservation.count(), 3);
+
+    await Promise.all(acquired.map((grant) => releaseChatAccess(grant.leaseId)));
+  } finally {
+    if (previousDailyLimit === undefined) {
+      delete process.env.CHAT_MAX_COST_MICROUSD_PER_DAY;
+    } else {
+      process.env.CHAT_MAX_COST_MICROUSD_PER_DAY = previousDailyLimit;
+    }
+  }
 });
