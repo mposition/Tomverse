@@ -16,6 +16,7 @@
     "capture:week1-marketing-kit:en": "node scripts/capture-week1-marketing-kit-en.mjs",
     "validate:week1-marketing-kit:en": "node scripts/validate-week1-marketing-kit-en.mjs",
     "test:db:integration": "node scripts/run-db-integration-tests.mjs",
+    "test:unit": "node scripts/run-unit-tests.mjs",
     "lint": "eslint",
     "check": "eslint . --max-warnings=0 && next typegen && tsc --noEmit --incremental false && next build",
     "check:encoding": "node scripts/check-text-encoding.mjs",

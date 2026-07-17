@@ -331,6 +331,9 @@ console.log("Daily security audit report prepared.", {
   slack: deliveries.slack.status,
   email: deliveries.email.status,
 });
+for (const entry of statuses) {
+  console.log(`[security-audit] ${entry.label}: ${entry.status}`);
+}
 
 if (
   shouldSend &&

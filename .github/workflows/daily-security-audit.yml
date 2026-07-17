@@ -131,18 +131,27 @@ jobs:
           REPORT_STATUS: ${{ steps.report.outcome }}
         run: |
           failed=0
-          for result in \
-            "$GITLEAKS_STATUS" \
-            "$SETUP_NODE_STATUS" \
-            "$INSTALL_STATUS" \
-            "$DEPENDENCY_STATUS" \
-            "$REGRESSION_STATUS" \
-            "$UNIT_STATUS" \
-            "$ENCODING_STATUS" \
-            "$PRODUCTION_STATUS" \
-            "$REPORT_STATUS"; do
+          check_result() {
+            name="$1"
+            result="$2"
             if [ "$result" != "success" ]; then
+              echo "::error title=Security audit check failed::${name} finished with status ${result:-unknown}. Review that step's log."
               failed=1
+            else
+              echo "PASS: ${name}"
             fi
-          done
-          exit "$failed"
+          }
+          check_result "Secret history scan" "$GITLEAKS_STATUS"
+          check_result "Node runtime setup" "$SETUP_NODE_STATUS"
+          check_result "Dependency installation" "$INSTALL_STATUS"
+          check_result "Production dependency audit" "$DEPENDENCY_STATUS"
+          check_result "Security regression checks" "$REGRESSION_STATUS"
+          check_result "Unit and API policy tests" "$UNIT_STATUS"
+          check_result "Strict encoding validation" "$ENCODING_STATUS"
+          check_result "Lint, type, and production build" "$PRODUCTION_STATUS"
+          check_result "Daily report generation/delivery" "$REPORT_STATUS"
+          if [ "$failed" -ne 0 ]; then
+            echo "One or more security audit checks failed. See the named annotations above."
+            exit 1
+          fi
+          echo "All security audit checks passed."

@@ -1400,12 +1400,19 @@ const checks = [
         source.includes("actions/setup-node@v6") &&
         source.includes("actions/upload-artifact@v7") &&
         source.includes("node scripts/send-security-audit-report.mjs") &&
+        source.includes('check_result "Unit and API policy tests"') &&
         source.includes("SECURITY_AUDIT_SLACK_WEBHOOK_URL") &&
         source.includes("SECURITY_AUDIT_EMAILS") &&
         source.includes("RESEND_API_KEY") &&
         reporter.includes("<!channel>") &&
         reporter.includes("https://api.resend.com/emails") &&
         reporter.includes("Australia/Brisbane") &&
+        read("package.json").includes(
+          '"test:unit": "node scripts/run-unit-tests.mjs"'
+        ) &&
+        read("scripts/run-unit-tests.mjs").includes(
+          'name.endsWith(".test.mjs") || name.endsWith(".test.ts")'
+        ) &&
         financeWorkflow.includes("actions/checkout@v6") &&
         financeWorkflow.includes("actions/setup-node@v6") &&
         !source.includes("ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION")
