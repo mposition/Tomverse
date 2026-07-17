@@ -3,6 +3,7 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { AVAILABLE_MODELS, type AiProvider, type ModelTier } from "@/lib/models";
 import { getRuntimeModel, getRuntimeModels } from "@/lib/modelRegistry";
+import { sendManagedSlackMessage } from "@/lib/managedSlack";
 import {
   getProviderCreditSummaries,
   type ProviderCreditSummary,
@@ -242,12 +243,19 @@ const alertPolicyFor = async (provider: AiProvider) => {
       budgetThresholds: true,
       providerFailureThreshold: true,
       modelFailureThreshold: true,
+      notifyEmail: true,
+      notifySlack: true,
+      notifyDiscord: true,
     },
   });
   return {
     budgetThresholds: parseThresholds(policy?.budgetThresholds),
     providerFailureThreshold: policy?.providerFailureThreshold || 5,
     modelFailureThreshold: policy?.modelFailureThreshold || modelFailureThresholdFromEnv(),
+    notifyEmail: policy?.notifyEmail ?? true,
+    notifySlack: policy?.notifySlack ?? Boolean(process.env.SLACK_WEBHOOK_URL),
+    notifyDiscord:
+      policy?.notifyDiscord ?? Boolean(process.env.DISCORD_WEBHOOK_URL),
   };
 };
 
@@ -529,6 +537,7 @@ const sendProviderAlert = async (
   detail: string
 ) => {
   const displayName = PROVIDER_DISPLAY_NAMES[provider];
+  const policy = await alertPolicyFor(provider);
   const log = {
     title,
     detail: `Provider: ${displayName}\n${detail}`,
@@ -536,25 +545,35 @@ const sendProviderAlert = async (
     targetId: provider,
   };
   await Promise.all([
-    sendWebhook("slack", process.env.SLACK_WEBHOOK_URL, {
-      text: `[Tomverse Admin] ${title}`,
-      blocks: [
-        {
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: `*${title}*\nProvider: ${displayName}\n${detail}`,
-          },
-        },
-      ],
-    }, log),
-    sendWebhook("discord", process.env.DISCORD_WEBHOOK_URL, {
-      content: `**${title}**\nProvider: ${displayName}\n${detail}`,
-    }, log),
-    sendEmailAlert(title, `Provider: ${displayName}\n${detail}`, {
-      targetType: "Provider",
-      targetId: provider,
-    }),
+    ...(policy.notifySlack
+      ? [
+          sendManagedSlackMessage({
+            key: "provider_alert" as const,
+            variables: { title, provider: displayName, detail },
+            webhookUrl: process.env.SLACK_WEBHOOK_URL,
+            targetType: log.targetType,
+            targetId: log.targetId,
+          }),
+        ]
+      : []),
+    ...(policy.notifyDiscord
+      ? [
+          sendWebhook(
+            "discord",
+            process.env.DISCORD_WEBHOOK_URL,
+            { content: `**${title}**\nProvider: ${displayName}\n${detail}` },
+            log
+          ),
+        ]
+      : []),
+    ...(policy.notifyEmail
+      ? [
+          sendEmailAlert(title, `Provider: ${displayName}\n${detail}`, {
+            targetType: "Provider",
+            targetId: provider,
+          }),
+        ]
+      : []),
   ]);
 };
 

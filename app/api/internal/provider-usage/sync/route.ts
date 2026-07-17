@@ -8,6 +8,7 @@ import {
 } from "@/lib/providerUsageSync";
 import { getProviderHealthDashboard } from "@/lib/providerMonitoring";
 import { sendDailyProviderUsageSlackReport } from "@/lib/providerDailyUsageReport";
+import { sendDailyInfrastructureSlackReport } from "@/lib/infrastructureSlackReport";
 
 const authorized = (req: Request) => {
   const secret = process.env.PROVIDER_USAGE_SYNC_SECRET;
@@ -32,10 +33,24 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
 
+  const date = dateFromUrl(req);
+  const notifySlack = new URL(req.url).searchParams.get("notify") === "slack";
+  const infrastructureNotification = notifySlack
+    ? await sendDailyInfrastructureSlackReport().catch((error) => {
+        console.error("Daily infrastructure Slack report failed:", error);
+        return {
+          delivered: false,
+          status: "failed" as const,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Infrastructure report failed.",
+        };
+      })
+    : null;
+
   try {
-    const date = dateFromUrl(req);
     const results = await syncProviderUsageForDate(date);
-    const notifySlack = new URL(req.url).searchParams.get("notify") === "slack";
     const notification = notifySlack
       ? await sendDailyProviderUsageSlackReport({
           date: date.toISOString().slice(0, 10),
@@ -47,11 +62,16 @@ export async function POST(req: Request) {
       date: date.toISOString().slice(0, 10),
       results,
       notification,
+      infrastructureNotification,
     });
   } catch (error) {
     console.error("Internal provider usage sync failed:", error);
     return NextResponse.json(
-      { error: "Provider usage sync failed." },
+      {
+        error: "Provider usage sync failed.",
+        date: date.toISOString().slice(0, 10),
+        infrastructureNotification,
+      },
       { status: 500 }
     );
   }

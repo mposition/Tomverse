@@ -777,10 +777,12 @@ Do not schedule this job less frequently than every five minutes. The daily
 cleanup also runs the reconciler as a fallback, but it is not a substitute for
 the five-minute Cron service.
 
-Create a third Railway Cron service for the daily provider usage summary and
+Create a third Railway Cron service for the daily operations summary and
 set its Config File Path to `/railway.provider-usage-sync.json`. It runs at
-00:30 UTC (10:30 Australia/Brisbane) and posts the previous UTC day's synced
-usage plus the latest estimated balance or budget headroom to Slack:
+00:30 UTC (10:30 Australia/Brisbane). The same run refreshes the Infrastructure
+dashboard sources and sends two managed Slack reports: the previous UTC day's
+provider usage/balance summary and the latest Railway, R2, PostgreSQL, and
+Prisma statistics:
 
 ```text
 npm run maintenance:provider-usage
@@ -789,7 +791,18 @@ npm run maintenance:provider-usage
 Set `PROVIDER_USAGE_SYNC_SECRET` on both the web and Cron services. The Cron
 service also needs `PROVIDER_USAGE_SYNC_URL=https://tomverse.app`. Configure
 `PROVIDER_USAGE_SLACK_WEBHOOK_URL` on the web service for a dedicated report
-channel, or it falls back to `SLACK_WEBHOOK_URL`.
+channel, or it falls back to `SLACK_WEBHOOK_URL`. Infrastructure reports use
+`INFRASTRUCTURE_SLACK_WEBHOOK_URL` when configured and otherwise use
+`SLACK_WEBHOOK_URL`.
+
+The Admin **Alerts** tab contains the managed Slack templates for daily
+Infrastructure, daily Provider Usage, and Provider Incident messages. Operators
+with `ops:write` permission can enable or disable scheduled delivery, edit only
+the documented placeholders, and send a test message using live dashboard data.
+Every send, failure, and skipped delivery is written to Admin notification logs.
+Run `npm run db:migrate` after deploying the Slack template migration. Critical
+DB-outage alerts intentionally remain environment-backed and independent from
+these DB templates so they still work during a database outage.
 
 ## Railway Healthcheck
 
