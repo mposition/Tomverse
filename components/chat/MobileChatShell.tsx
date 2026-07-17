@@ -50,6 +50,7 @@ type MobileChatShellProps = {
   isSending: boolean;
   focusToken: number;
   isGuestMode: boolean;
+  guestPreviewMode?: boolean;
   guestMessageCount: number;
   maxGuestMessages: number;
   isPrivateMode: boolean;
@@ -85,6 +86,7 @@ export function MobileChatShell({
   isSending,
   focusToken,
   isGuestMode,
+  guestPreviewMode = false,
   guestMessageCount,
   maxGuestMessages,
   isPrivateMode,
@@ -494,6 +496,7 @@ export function MobileChatShell({
         onAttachmentsChange={setAttachments}
         canAttach={!isGuestMode}
         isGuestMode={isGuestMode}
+        guestPreviewMode={guestPreviewMode}
         isGuestLimitReached={isGuestMode && guestMessageCount >= maxGuestMessages}
       />
 

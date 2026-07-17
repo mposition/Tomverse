@@ -69,6 +69,54 @@ const isLanguage = (value: unknown): value is Language =>
   value === "es" ||
   value === "pt";
 
+const guestTrialCopy: Record<
+  Language,
+  { title: string; body: string; action: string; cancel: string }
+> = {
+  en: {
+    title: "Compare this answer with another AI",
+    body: "Sign in to send the same question to up to three models and compare their answers side by side.",
+    action: "Sign in to compare",
+    cancel: "Continue with one model",
+  },
+  ko: {
+    title: "다른 AI 답변과 비교해 보세요",
+    body: "로그인하면 같은 질문을 최대 3개 모델에 보내 답변을 한 화면에서 비교할 수 있습니다.",
+    action: "로그인하고 비교하기",
+    cancel: "모델 1개로 계속하기",
+  },
+  zh: {
+    title: "与另一个 AI 的回答比较",
+    body: "登录后可将同一问题发送给最多三个模型，并排比较回答。",
+    action: "登录并比较",
+    cancel: "继续使用一个模型",
+  },
+  fr: {
+    title: "Comparez cette réponse avec une autre IA",
+    body: "Connectez-vous pour envoyer la même question à trois modèles et comparer leurs réponses.",
+    action: "Se connecter et comparer",
+    cancel: "Continuer avec un modèle",
+  },
+  de: {
+    title: "Diese Antwort mit einer anderen KI vergleichen",
+    body: "Melden Sie sich an, um dieselbe Frage an bis zu drei Modelle zu senden und die Antworten zu vergleichen.",
+    action: "Anmelden und vergleichen",
+    cancel: "Mit einem Modell fortfahren",
+  },
+  es: {
+    title: "Compara esta respuesta con otra IA",
+    body: "Inicia sesión para enviar la misma pregunta a hasta tres modelos y comparar sus respuestas.",
+    action: "Iniciar sesión y comparar",
+    cancel: "Continuar con un modelo",
+  },
+  pt: {
+    title: "Compare esta resposta com outra IA",
+    body: "Entre para enviar a mesma pergunta a até três modelos e comparar as respostas.",
+    action: "Entrar e comparar",
+    cancel: "Continuar com um modelo",
+  },
+};
+
 const cloneAttachmentPreviews = async (
   items: ChatAttachment[]
 ): Promise<ChatAttachment[]> =>
@@ -216,7 +264,7 @@ function ChatShellSkeleton({ label }: { label: string }) {
 }
 
 export default function Home() {
-    const { t, setLang } = useLanguage();
+    const { t, setLang, lang } = useLanguage();
   const formatCopy = (key: string, values: Record<string, string>) =>
     Object.entries(values).reduce(
       (text, [name, value]) => text.replaceAll(`{${name}}`, value),
@@ -244,6 +292,14 @@ export default function Home() {
   const [personalizedPrompt, setPersonalizedPrompt] = useState<string | null>(null);
   const [awaitingPostResponseTips, setAwaitingPostResponseTips] = useState(false);
   const [showPostResponseTips, setShowPostResponseTips] = useState(false);
+  const [isGuestPreviewEntry] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("entry") ===
+        "guest-preview"
+  );
+  const [showGuestCompareHint, setShowGuestCompareHint] = useState(false);
+  const [showGuestSignInPrompt, setShowGuestSignInPrompt] = useState(false);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [promptPayload, setPromptPayload] = useState<{ id: string; text: string; chatId: string; userMessageId: string; attachments: ChatAttachment[] } | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
@@ -327,6 +383,13 @@ export default function Home() {
   useEffect(() => {
     currentChatIdRef.current = currentChatId;
   }, [currentChatId]);
+
+  useEffect(() => {
+    if (!isGuestPreviewEntry) return;
+
+    localStorage.setItem("tomverse_sidebar_organizer_v1", "collapsed");
+    window.dispatchEvent(new Event("tomverse-sidebar-organizer-change"));
+  }, [isGuestPreviewEntry]);
 
   const isGuestEligibleModel = useCallback(
     (modelId: string) => {
@@ -1275,6 +1338,14 @@ export default function Home() {
           localStorage.setItem("guest_count", next.toString());
           return next;
         });
+        if (
+          isGuestPreviewEntry &&
+          responseText.trim() &&
+          localStorage.getItem("tomverse_guest_compare_hint_seen_v1") !== "1"
+        ) {
+          localStorage.setItem("tomverse_guest_compare_hint_seen_v1", "1");
+          setShowGuestCompareHint(true);
+        }
       } else {
         notifyUserUsageChanged();
       }
@@ -1312,6 +1383,7 @@ export default function Home() {
     [
       activeModelCount,
       awaitingPostResponseTips,
+      isGuestPreviewEntry,
       isGuestMode,
       maybeShowValueUpgradePrompt,
     ]
@@ -1340,13 +1412,17 @@ export default function Home() {
   const toggleModel = (modelId: string) => {
     const model = getModel(modelId);
     const isSelected = selectedModels.includes(modelId);
+    if (isGuestMode && !isSelected && selectedModels.length >= 1) {
+      setShowGuestSignInPrompt(true);
+      return false;
+    }
     if (
       !isSelected &&
       (!model || !canUseModelWithPlan(currentAccessPlan, model))
     ) {
       if (!model) return false;
       if (isGuestMode) {
-        showToast(t("modelStatusReasons.loginRequired"), "info");
+        setShowGuestSignInPrompt(true);
       } else {
         setUpgradeModelPrompt(model);
       }
@@ -1622,6 +1698,10 @@ export default function Home() {
       : toast?.tone === "error"
         ? AlertCircle
         : Info;
+  const trialCopy = guestTrialCopy[lang];
+  const guestCompareSignInHref = `/auth/signin?callbackUrl=${encodeURIComponent(
+    `/chat?lang=${encodeURIComponent(lang)}`
+  )}`;
 
   return (
     <>
@@ -1647,6 +1727,7 @@ export default function Home() {
           isSending={isSending}
           focusToken={focusToken}
           isGuestMode={isGuestMode}
+          guestPreviewMode={isGuestPreviewEntry}
           guestMessageCount={guestMessageCount}
           maxGuestMessages={MAX_GUEST_MESSAGES}
           isPrivateMode={isPrivateMode}
@@ -1682,6 +1763,7 @@ export default function Home() {
           isSending={isSending}
           focusToken={focusToken}
           isGuestMode={isGuestMode}
+          guestPreviewMode={isGuestPreviewEntry}
           guestMessageCount={guestMessageCount}
           maxGuestMessages={MAX_GUEST_MESSAGES}
           isPrivateMode={isPrivateMode}
@@ -1706,6 +1788,79 @@ export default function Home() {
           onFollowupSent={handleModelFollowupSent}
         />
       )}
+    {showGuestCompareHint && isGuestMode && (
+      <aside
+        data-testid="guest-compare-hint"
+        className="fixed inset-x-3 top-[max(0.75rem,env(safe-area-inset-top))] z-[76] mx-auto w-auto max-w-sm rounded-2xl border border-blue-200 bg-white p-4 shadow-2xl shadow-zinc-900/20 dark:border-blue-900/60 dark:bg-zinc-900 md:inset-x-auto md:right-5 md:top-5 md:w-[22rem]"
+      >
+        <div className="flex items-start gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white">
+            <Sparkles className="h-4 w-4" aria-hidden="true" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-black text-zinc-950 dark:text-white">{trialCopy.title}</p>
+            <p className="mt-1 text-xs leading-5 text-zinc-600 dark:text-zinc-300">{trialCopy.body}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowGuestCompareHint(false)}
+            aria-label={trialCopy.cancel}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-white"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <a
+          href={guestCompareSignInHref}
+          onClick={() =>
+            trackProductEvent("signup_started", 1, {
+              trigger: "proactive",
+              cta_location: "guest_first_response",
+            })
+          }
+          className="mt-3 flex min-h-10 w-full items-center justify-center rounded-xl bg-blue-600 px-3 py-2 text-xs font-black text-white hover:bg-blue-500"
+        >
+          {trialCopy.action}
+        </a>
+      </aside>
+    )}
+    {showGuestSignInPrompt && isGuestMode && (
+      <div className="fixed inset-0 z-[78] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+        <section
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="guest-compare-signin-title"
+          className="w-full max-w-sm rounded-3xl border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900"
+        >
+          <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-500/10 text-blue-600 dark:text-blue-300">
+            <Sparkles className="h-5 w-5" aria-hidden="true" />
+          </span>
+          <h2 id="guest-compare-signin-title" className="mt-4 text-xl font-black">{trialCopy.title}</h2>
+          <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">{trialCopy.body}</p>
+          <div className="mt-5 grid gap-2 sm:grid-cols-2">
+            <a
+              href={guestCompareSignInHref}
+              onClick={() =>
+                trackProductEvent("signup_started", 1, {
+                  trigger: "proactive",
+                  cta_location: "guest_multi_model",
+                })
+              }
+              className="flex min-h-11 items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-center text-sm font-black text-white hover:bg-blue-500"
+            >
+              {trialCopy.action}
+            </a>
+            <button
+              type="button"
+              onClick={() => setShowGuestSignInPrompt(false)}
+              className="min-h-11 rounded-xl border border-zinc-200 px-4 py-2 text-sm font-bold text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              {trialCopy.cancel}
+            </button>
+          </div>
+        </section>
+      </div>
+    )}
     {toast && (
       <div
         key={toast.id}
