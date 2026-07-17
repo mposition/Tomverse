@@ -32,8 +32,7 @@ type ChatMessageListProps = {
   onRetryLast?: () => void;
   onRetryWithoutAttachments?: () => void;
 };
-type MarkdownCodeProps = ComponentPropsWithoutRef<"code"> &
-  ExtraProps & { inline?: boolean };
+type MarkdownCodeProps = ComponentPropsWithoutRef<"code"> & ExtraProps;
 
 const getAttachmentLabel = (attachment: ChatAttachment) => {
   const extension = attachment.name.split(".").pop();
@@ -359,18 +358,18 @@ export function ChatMessageList({
                         ol: ({ children }) => <ol className="mb-3 list-decimal pl-5 last:mb-0">{children}</ol>,
                         li: ({ children }) => <li className="mb-1">{children}</li>,
                         pre: ({ children }) => (
-                          <pre className="mb-3 overflow-x-auto rounded-lg bg-zinc-950 p-3 last:mb-0">
+                          <pre className="mb-3 overflow-x-auto rounded-lg bg-zinc-950 p-3 text-zinc-100 last:mb-0 [&>code]:block [&>code]:rounded-none [&>code]:bg-transparent [&>code]:p-0 [&>code]:text-zinc-100">
                             {children}
                           </pre>
                         ),
-                        code: ({ inline, children, ...props }: MarkdownCodeProps) =>
-                          inline ? (
-                            <code className="rounded bg-zinc-200 text-zinc-800 px-1 py-0.5 text-[0.9em] dark:bg-zinc-800 dark:text-zinc-100" {...props}>
-                              {children}
-                            </code>
-                          ) : (
-                            <code {...props}>{children}</code>
-                          ),
+                        code: ({ children, className, ...props }: MarkdownCodeProps) => (
+                          <code
+                            {...props}
+                            className={`rounded bg-zinc-200 px-1 py-0.5 text-[0.9em] text-zinc-800 dark:bg-zinc-800 dark:text-zinc-100 ${className || ""}`}
+                          >
+                            {children}
+                          </code>
+                        ),
                         a: ({ children, href }) => (
                           <a href={href} target="_blank" rel="noreferrer" className="text-blue-600 dark:text-blue-400 underline">
                             {children}

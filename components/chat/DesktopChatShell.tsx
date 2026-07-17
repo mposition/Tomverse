@@ -286,9 +286,17 @@ export function DesktopChatShell({
                 <button
                   type="button"
                   onClick={onComparisonReview}
-                  className="rounded-xl bg-blue-600 px-4 py-2 text-xs font-black text-white hover:bg-blue-500"
+                  className="flex items-center justify-between gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-black text-white hover:bg-blue-500"
                 >
-                  {t("chat.aiReviewButton")}
+                  <span>{t("chat.aiReviewButton")}</span>
+                  <CreditCostBadge
+                    credits={4}
+                    size="xs"
+                    tone="onColor"
+                    label={`4 ${t("chat.aiReviewCredits")}`}
+                    testId="ai-review-entry-credit-cost"
+                    className="border-0 bg-white/20"
+                  />
                 </button>
                 <FeatureHelpPopover
                   title={helpCopy.aiReviewTitle}
