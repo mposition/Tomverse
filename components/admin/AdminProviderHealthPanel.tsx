@@ -6,6 +6,7 @@ import {
   ChevronDown,
   CircleDollarSign,
   CreditCard,
+  ExternalLink,
   RefreshCw,
   Save,
   Settings2,
@@ -23,6 +24,22 @@ import type {
 } from "@/lib/providerBillingTypes";
 
 const REFRESH_INTERVAL_MS = 30_000;
+
+const providerConsoleHref: Record<AiProvider, string> = {
+  openai: "https://platform.openai.com/settings/organization/billing/overview",
+  anthropic: "https://platform.claude.com/dashboard",
+  google:
+    "https://aistudio.google.com/billing?billing=0126EA-F8BC8E-ED63F7&project=gen-lang-client-0902272053",
+  groq: "https://console.groq.com/settings/organization/usage",
+  xai: "https://console.x.ai/team/efce823d-10a4-4ac4-a8ae-844b6f4c0f66",
+  deepseek: "https://platform.deepseek.com/usage",
+  mistral: "https://admin.mistral.ai/organization/usage",
+  moonshot: "https://platform.kimi.ai/console/account",
+  qwen: "https://billing-cost.console.alibabacloud.com/finance/month-bill/account",
+  zhipu: "https://z.ai/manage-apikey/billing",
+  perplexity:
+    "https://console.perplexity.ai/group/36f95894-ee38-4751-b4a0-4365e41a3c31/billing",
+};
 
 const money = (microUsd: number) =>
   `${microUsd < 0 ? "-" : ""}$${Math.abs(microUsd / 1_000_000).toFixed(2)}`;
@@ -280,7 +297,17 @@ function ProviderRow({
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-lg font-semibold text-white">
-                {provider.displayName}
+                <a
+                  href={providerConsoleHref[provider.provider]}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-sm underline-offset-4 transition hover:text-blue-300 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                  aria-label={`Open ${provider.displayName} provider console in a new tab`}
+                  title={`Open ${provider.displayName} provider console`}
+                >
+                  {provider.displayName}
+                  <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                </a>
               </h2>
               <button
                 type="button"
