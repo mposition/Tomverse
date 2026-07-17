@@ -32,6 +32,29 @@ test("recommended picker and credit summary fit the active viewport", async ({ p
   await expectNoHorizontalOverflow(page);
 });
 
+test("mobile model picker scrolls from recommendations through the full model list", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await modelMenuTrigger(page).click();
+
+  const dialog = page.locator("#chat-input-popover");
+  const scrollRegion = dialog.getByTestId("model-picker-scroll-region");
+  const summary = dialog.getByTestId("model-selection-summary");
+  await expect(scrollRegion).toBeVisible();
+  await expect(summary).toBeVisible();
+
+  const dimensions = await scrollRegion.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+  }));
+  expect(dimensions.scrollHeight).toBeGreaterThan(dimensions.clientHeight);
+
+  const lastModel = dialog.getByTestId("model-option").last();
+  await lastModel.scrollIntoViewIfNeeded();
+  await expect.poll(() => scrollRegion.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  await expect(lastModel).toBeVisible();
+  await expect(summary).toBeVisible();
+});
+
 test("search hides recommendations and shows matching full-list models", async ({ page }) => {
   await modelMenuTrigger(page).click();
   const dialog = page.locator("#chat-input-popover");

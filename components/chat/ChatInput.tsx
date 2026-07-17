@@ -1801,7 +1801,7 @@ export function ChatInput({
                       </span>
                     </div>
                   </div>
-                  <div className="mb-2 shrink-0 space-y-2 px-1">
+                  <div className="mb-2 shrink-0 px-1">
                     <div className="relative">
                       <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
                       <input
@@ -1813,6 +1813,11 @@ export function ChatInput({
                         className="h-9 w-full rounded-lg border border-zinc-200 bg-zinc-50 pl-9 pr-3 text-xs text-zinc-800 outline-none transition placeholder:text-zinc-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:focus:border-blue-500"
                       />
                     </div>
+                  </div>
+                  <div
+                    data-testid="model-picker-scroll-region"
+                    className="min-h-0 flex-1 touch-pan-y space-y-2 overflow-y-auto overscroll-contain px-1 pb-2 pr-2 [-webkit-overflow-scrolling:touch]"
+                  >
 
                     {!modelSearchQuery.trim() && (
                       <section
@@ -1982,8 +1987,7 @@ export function ChatInput({
                         ))}
                       </div>
                     )}
-                  </div>
-                  <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pr-1">
+                  <div className="space-y-3">
                     {groupedModels.map((group) => (
                       <div key={group.provider} className="space-y-1">
                         <div className="px-2 text-[10px] font-bold uppercase tracking-wide text-zinc-400">
@@ -2139,6 +2143,7 @@ export function ChatInput({
                         {t("chat.noModelsFound")}
                       </div>
                     )}
+                  </div>
                   </div>
                   <div data-testid="model-selection-summary" className="mt-2 flex shrink-0 items-center gap-2 border-t border-zinc-200 px-1 pt-2 dark:border-zinc-700">
                     <p className="min-w-0 flex-1 text-[11px] font-bold text-zinc-600 dark:text-zinc-300">
