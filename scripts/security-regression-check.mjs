@@ -1017,8 +1017,12 @@ const checks = [
       source.includes('data-testid="model-credit-badge"') &&
       source.includes("getModelPickerDescription") &&
       source.includes("getModelPickerFeatures") &&
+      source.includes('data-testid="model-recommendations"') &&
+      source.includes('data-testid="recommended-model-option"') &&
+      source.includes('data-testid="model-search-input"') &&
       source.includes('data-testid="model-selection-summary"') &&
       source.includes('data-testid="request-credit-estimate"') &&
+      !source.includes('data-testid="show-all-models"') &&
       !source.includes('option value="Research"') &&
       !source.includes("usageClassFilter") &&
       read("components/auth/AuthButton.tsx").includes(

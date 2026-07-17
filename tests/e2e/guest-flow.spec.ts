@@ -65,7 +65,6 @@ test("guest cannot activate a paid model", async ({ page }) => {
   await page.goto("/chat");
 
   await modelSelectorTrigger(page).click();
-  await page.getByTestId("show-all-models").click();
   const paidModel = page
     .locator(
       '[data-testid="model-option"][data-model-plan-locked="true"]:not([disabled])'

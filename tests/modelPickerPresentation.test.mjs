@@ -7,6 +7,7 @@ import {
   getModelPickerFeatures,
   getModelPickerUsageBand,
   modelMatchesCapability,
+  modelPickerCopy,
   modelPickerFeatureLabels,
 } from "../lib/modelPickerPresentation.ts";
 
@@ -50,4 +51,7 @@ test("recommended and capability filters use model behavior", () => {
   assert.equal(modelMatchesCapability(getModel("deepseek-r1"), "reasoning"), true);
   assert.equal(modelMatchesCapability(getModel("perplexity/sonar"), "search"), true);
   assert.equal(modelMatchesCapability(getModel("gpt-5-4-mini"), "fast"), true);
+  assert.equal(modelPickerCopy.ko.personalizedRecommendations, "나에게 추천");
+  assert.equal(modelPickerCopy.ko.tomverseRecommendations, "Tomverse 추천");
+  assert.equal(modelPickerCopy.en.searchPlaceholder, "Search model names or tasks");
 });
