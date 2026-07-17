@@ -7,6 +7,8 @@ export type InfrastructureStatus =
 export type RailwayUsageMeasurement = {
   measurement: string;
   estimatedValue: number;
+  unit: string;
+  estimatedCostMicroUsd: number | null;
   projectId: string | null;
 };
 
@@ -19,6 +21,10 @@ export type RailwayInfrastructureSnapshot = {
   configuredCreditMicroUsd: number | null;
   projectedBalanceMicroUsd: number | null;
   creditNote: string | null;
+  warningReasons: Array<{
+    code: string;
+    detail: string;
+  }>;
   measurements: RailwayUsageMeasurement[];
   apiRateLimit: {
     limit: number | null;

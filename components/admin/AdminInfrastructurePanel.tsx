@@ -232,9 +232,24 @@ export function AdminInfrastructurePanel({
             <p className="mt-4 text-xs leading-5 text-zinc-400">
               {data.railway.message}
             </p>
+            {data.railway.warningReasons.length > 0 ? (
+              <div className="mt-3 rounded-xl border border-amber-500/25 bg-amber-500/5 p-3">
+                <p className="text-xs font-black text-amber-200">Warning details</p>
+                <div className="mt-2 space-y-2">
+                  {data.railway.warningReasons.map((reason) => (
+                    <div key={reason.code} className="text-xs leading-5 text-zinc-400">
+                      <code className="text-[10px] font-bold text-amber-300">
+                        {reason.code}
+                      </code>
+                      <p>{reason.detail}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             <div className="mt-4 grid grid-cols-3 gap-2 text-xs">
               <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
-                <p className="text-zinc-500">Projected cost</p>
+                <p className="text-zinc-500">Estimated resource cost</p>
                 <p className="mt-1 font-black text-white">
                   {money(data.railway.projectedMonthCostMicroUsd)}
                 </p>
@@ -266,15 +281,28 @@ export function AdminInfrastructurePanel({
                   key={`${measurement.projectId || "scope"}-${measurement.measurement}`}
                   className="flex items-center justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-xs"
                 >
-                  <span className="truncate text-zinc-400">
-                    {measurement.measurement.replaceAll("_", " ")}
+                  <span className="min-w-0">
+                    <span className="block truncate text-zinc-400">
+                      {measurement.measurement.replaceAll("_", " ")}
+                    </span>
+                    <span className="block text-[10px] text-zinc-600">
+                      {measurement.estimatedValue.toFixed(3)} {measurement.unit}
+                    </span>
                   </span>
-                  <span className="font-black text-zinc-200">
-                    ${measurement.estimatedValue.toFixed(3)}
+                  <span className="shrink-0 font-black text-zinc-200">
+                    {measurement.estimatedCostMicroUsd === null
+                      ? "Not priced"
+                      : money(measurement.estimatedCostMicroUsd)}
                   </span>
                 </div>
               ))}
             </div>
+            <p className="mt-3 text-[10px] leading-4 text-zinc-600">
+              Resource estimate applies Railway&apos;s published CPU, RAM, egress, and
+              volume rates to API usage units. Subscription, included usage,
+              discounts, taxes, backups, and unclassified resources are excluded;
+              Railway Billing remains authoritative.
+            </p>
             <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3 text-xs text-zinc-400">
               <p>Token: {data.railway.tokenConfigured ? "configured" : "missing"}</p>
               <p className="mt-1">Scope: {data.railway.scope}</p>
