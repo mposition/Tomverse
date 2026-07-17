@@ -142,7 +142,8 @@ export function AdminSlackTemplatesPanel() {
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
             Edit scheduled reports and provider alert messages, then send a safe
             test from Admin. Database outage alerts remain independent so they still
-            work when the application database is unavailable.
+            work when the application database is unavailable. Every Slack delivery
+            automatically starts with &lt;!channel&gt; to notify the channel.
           </p>
         </div>
         <div className="flex flex-wrap gap-2 text-xs font-black">

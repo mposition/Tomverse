@@ -46,7 +46,7 @@ import { AdminBillingLifecyclePanel } from "@/components/admin/AdminBillingLifec
 import { AdminGlobalSearchPanel } from "@/components/admin/AdminGlobalSearchPanel";
 import { AdminInfrastructurePanel } from "@/components/admin/AdminInfrastructurePanel";
 import { AdminModelMetricsPanel, type AdminModelMetricRow } from "@/components/admin/AdminModelMetricsPanel";
-import { AdminNotificationsPanel, type AdminNotificationRow } from "@/components/admin/AdminNotificationsPanel";
+import { AdminNotificationsPanel } from "@/components/admin/AdminNotificationsPanel";
 import { AdminOperationsPanel } from "@/components/admin/AdminOperationsPanel";
 import { AdminProductAnalyticsPanel } from "@/components/admin/AdminProductAnalyticsPanel";
 import {
@@ -372,7 +372,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         promotionRedemptions,
         approvedRefundCount,
         rejectedRefundCount,
-        notificationLogs,
+        alertFailureCount,
         providerIncidents,
         providerChecks,
         checkoutStartedCount,
@@ -460,9 +460,8 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         prisma.billingPromotionRedemption.count(),
         prisma.refundRequest.count({ where: { status: "approved" } }),
         prisma.refundRequest.count({ where: { status: "rejected" } }),
-        prisma.adminNotificationLog.findMany({
-            orderBy: { createdAt: "desc" },
-            take: 50,
+        prisma.adminNotificationLog.count({
+            where: { status: "failed", acknowledgedAt: null },
         }),
         prisma.adminProviderIncident.findMany({
             orderBy: { createdAt: "desc" },
@@ -608,19 +607,6 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         metadata: log.metadata,
         ipAddress: log.ipAddress,
         userAgent: log.userAgent,
-        createdAt: log.createdAt.toISOString(),
-    }));
-    const notificationRows: AdminNotificationRow[] = notificationLogs.map((log) => ({
-        id: log.id,
-        channel: log.channel,
-        title: log.title,
-        detail: log.detail,
-        status: log.status,
-        targetType: log.targetType,
-        targetId: log.targetId,
-        error: log.error,
-        acknowledgedAt: log.acknowledgedAt?.toISOString() || null,
-        acknowledgedByEmail: log.acknowledgedByEmail,
         createdAt: log.createdAt.toISOString(),
     }));
     const promotionRiskSignalCount = new Map<
@@ -827,7 +813,6 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             azureOAuthConfigurationComplete,
             isGa4MeasurementId(process.env.GA4_MEASUREMENT_ID),
         ].filter((configured) => !configured).length;
-    const alertFailures = notificationRows.filter((row) => row.status === "failed").length;
     const healthScore = Math.max(
         0,
         Math.min(
@@ -838,7 +823,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                 pendingRefundCount * 3 -
                 openFeedbackCount * 2 -
                 missingEnvCount * 10 -
-                alertFailures * 4
+                alertFailureCount * 4
         )
     );
     const envChecks = [
@@ -1276,7 +1261,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                         <section className="flex flex-col gap-4">
                             <AdminAlertPolicyPanel />
                             <AdminSlackTemplatesPanel />
-                            <AdminNotificationsPanel rows={notificationRows} />
+                            <AdminNotificationsPanel />
                             <AdminWebhookPanel />
                             <AdminReportsPanel />
                         </section>

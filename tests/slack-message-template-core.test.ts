@@ -3,8 +3,13 @@ import test from "node:test";
 import {
   invalidTemplatePlaceholders,
   renderSlackTemplate,
+  SLACK_ALERT_MENTION,
   templatePlaceholders,
 } from "../lib/slackMessageTemplateCore.ts";
+
+test("uses a channel-wide mention for every Slack delivery", () => {
+  assert.equal(SLACK_ALERT_MENTION, "<!channel>");
+});
 
 test("renders managed Slack template variables", () => {
   assert.equal(

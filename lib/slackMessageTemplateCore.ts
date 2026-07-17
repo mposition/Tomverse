@@ -4,6 +4,10 @@ export const SLACK_TEMPLATE_KEYS = [
   "provider_alert",
 ] as const;
 
+// Slack's special mention syntax. Keep this outside editable templates so every
+// managed delivery, including tests, always raises a channel notification.
+export const SLACK_ALERT_MENTION = "<!channel>";
+
 export type SlackTemplateKey = (typeof SLACK_TEMPLATE_KEYS)[number];
 
 export type SlackTemplateDefinition = {

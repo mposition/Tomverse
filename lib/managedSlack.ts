@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import {
   DEFAULT_SLACK_TEMPLATES,
   renderSlackTemplate,
+  SLACK_ALERT_MENTION,
   slackTemplateDefinition,
   type SlackTemplateKey,
 } from "@/lib/slackMessageTemplateCore";
@@ -153,15 +154,23 @@ export async function sendManagedSlackMessage(input: {
     if (target.protocol !== "https:") {
       throw new Error("Slack webhook URL must use HTTPS.");
     }
+    const slackText = `${SLACK_ALERT_MENTION}\n${title}\n${detail}`;
+    const slackBlockText = `${SLACK_ALERT_MENTION}\n*${title}*\n${detail}`.slice(
+      0,
+      3_000
+    );
     const response = await fetch(target, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        text: `${title}\n${detail}`,
+        text: slackText,
         blocks: [
           {
             type: "section",
-            text: { type: "mrkdwn", text: `*${title}*\n${detail}` },
+            text: {
+              type: "mrkdwn",
+              text: slackBlockText,
+            },
           },
         ],
       }),
