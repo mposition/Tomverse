@@ -30,12 +30,13 @@ const checks = [
       source.includes("Misdirected Request"),
   },
   {
-    name: "Client IP uses trusted proxy header fallback",
+    name: "Production client IP fails closed unless Cloudflare origin is verified",
     file: "lib/clientIp.ts",
     test: (source) =>
       source.includes("TRUSTED_PROXY_IP_HEADER") &&
       source.includes("x-real-ip") &&
-      source.includes("cf-connecting-ip"),
+      source.includes("cf-connecting-ip") &&
+      source.includes('if (process.env.NODE_ENV === "production") return "unknown"'),
   },
   {
     name: "/api/chat rejects inline attachment data",
@@ -1381,6 +1382,120 @@ const checks = [
       source.includes("getAdminUsersExportBatch") &&
       source.includes("new ReadableStream") &&
       source.includes('"X-Accel-Buffering": "no"'),
+  },
+  {
+    name: "Provider model catalog monitor is authenticated, fixed-egress, and scheduled",
+    file: "app/api/internal/provider-model-catalog/check/route.ts",
+    test: (source) => {
+      const monitor = read("lib/providerModelCatalogMonitor.ts");
+      const cron = read("railway.provider-model-catalog.json");
+      const runner = read("scripts/run-provider-model-catalog-monitor.mjs");
+      return (
+        source.includes("PROVIDER_MODEL_CATALOG_SYNC_SECRET") &&
+        source.includes("MAINTENANCE_SECRET") &&
+        source.includes("timingSafeEqual") &&
+        source.includes("PROVIDER_MODEL_CATALOG_MONITOR_FAILED") &&
+        monitor.includes("PROVIDER_API_CONFIGURATION") &&
+        monitor.includes('redirect: "error"') &&
+        monitor.includes("PROVIDER_MODEL_MISSING_CONFIRMATION_RUNS") &&
+        cron.includes('"cronSchedule": "0 0 * * *"') &&
+        cron.includes('"startCommand": "npm run maintenance:provider-model-catalog"') &&
+        runner.includes("/api/internal/provider-model-catalog/check")
+      );
+    },
+  },
+  {
+    name: "Unassigned administrators fail closed and billing cannot write support",
+    file: "lib/adminAuthCore.ts",
+    test: (source) =>
+      source.includes('|| "readonly"') &&
+      source.includes('if (permission === "support:write") return role === "support"') &&
+      !source.includes('permission === "support:write") return role === "billing"'),
+  },
+  {
+    name: "High-risk approvals bind exact payloads, block self-review, and are single-use",
+    file: "lib/adminApproval.ts",
+    test: (source) => {
+      const route = read("app/api/admin/approvals/route.ts");
+      return (
+        source.includes("approvalPayloadHash") &&
+        source.includes('status: "executing"') &&
+        source.includes('status: "consumed"') &&
+        source.includes('action: "admin_approval.execution_started"') &&
+        route.includes("existing.requestedById === session.user.id") &&
+        route.includes("updateMany") &&
+        route.includes("canReviewAdminApproval")
+      );
+    },
+  },
+  {
+    name: "Model registry cannot select arbitrary egress targets or secret names",
+    file: "lib/activeAiModel.ts",
+    test: (source) => {
+      const adminSchema = read("lib/modelRegistryAdmin.ts");
+      const shared = read("lib/modelRegistryShared.ts");
+      return (
+        source.includes("PROVIDER_API_CONFIGURATION[model.provider]") &&
+        source.includes("process.env[defaults.apiKeyEnvName]") &&
+        !source.includes("process.env[model.apiKeyEnvName") &&
+        !adminSchema.includes("apiBaseUrl: z.") &&
+        !adminSchema.includes("apiKeyEnvName: z.") &&
+        shared.includes("isApprovedProviderApiBaseUrl") &&
+        shared.includes("isApprovedProviderApiKeyEnvName")
+      );
+    },
+  },
+  {
+    name: "Production readiness validates the complete security control plane",
+    file: "lib/securityEnvironment.ts",
+    test: (source) =>
+      source.includes("cspEnforcement") &&
+      source.includes("stripeWebhookSecret") &&
+      source.includes("providerUsageSyncSecret") &&
+      source.includes("cloudflareOriginProtection") &&
+      source.includes("trustedClientIpHeader") &&
+      source.includes("turnstile") &&
+      source.includes("operationalAlertChannel") &&
+      source.includes("sentry") &&
+      source.includes("e2eBypassDisabled") &&
+      source.includes("databaseTransportSecurity"),
+  },
+  {
+    name: "Cookie-authenticated mutations enforce same-origin requests",
+    file: "proxy.ts",
+    test: (source) =>
+      source.includes("requiresMutationOriginCheck") &&
+      source.includes("hasValidMutationOrigin") &&
+      source.includes("INVALID_REQUEST_ORIGIN"),
+  },
+  {
+    name: "Self-service account deletion is reauthenticated and delayed",
+    file: "app/api/user/account/route.ts",
+    test: (source) => {
+      const deletion = read("lib/accountDeletion.ts");
+      return (
+        source.includes("assertRecentAdminAuthentication(req, session)") &&
+        source.includes('confirmationText: z.literal("DELETE MY ACCOUNT")') &&
+        source.includes("scheduleTomverseAccountDeletion") &&
+        deletion.includes('accountStatus: "pending_deletion"') &&
+        deletion.includes("ACCOUNT_DELETION_GRACE_MS") &&
+        deletion.includes("revokeAllUserSessions")
+      );
+    },
+  },
+  {
+    name: "Emergency user controls revoke sessions and chat enforces restrictions",
+    file: "app/api/admin/users/[userId]/security/route.ts",
+    test: (source) => {
+      const chat = read("lib/chatSecurity.ts");
+      const restrictions = read("lib/userOperationalSecurity.ts");
+      return (
+        source.includes("revokeAllUserSessions") &&
+        source.includes('action: "user.unlink_oauth"') &&
+        chat.includes("enforceUserOperationalSecurity") &&
+        restrictions.includes('"AI_USAGE_RESTRICTED"')
+      );
+    },
   },
 ];
 

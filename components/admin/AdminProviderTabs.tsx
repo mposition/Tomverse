@@ -12,6 +12,7 @@ type Props = {
   controlsContent: ReactNode;
   activeIncidentCount: number;
   blockedModelCount: number;
+  initialTab?: ProviderSubTab;
 };
 
 const tabs: Array<{
@@ -46,8 +47,9 @@ export function AdminProviderTabs({
   controlsContent,
   activeIncidentCount,
   blockedModelCount,
+  initialTab = "health",
 }: Props) {
-  const [activeTab, setActiveTab] = useState<ProviderSubTab>("health");
+  const [activeTab, setActiveTab] = useState<ProviderSubTab>(initialTab);
 
   const content =
     activeTab === "operations"

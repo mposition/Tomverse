@@ -2,8 +2,15 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
+import type { Session } from "next-auth";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
+import {
+  AdminApprovalRequiredError,
+  adminApprovalErrorResponse,
+  runWithAdminApproval,
+} from "@/lib/adminApproval";
+import { refundApprovalThresholdCents } from "@/lib/adminApprovalCore";
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import {
@@ -39,7 +46,16 @@ async function cancelStripeSubscription(subscriptionId: string | null) {
   }
 }
 
-async function createStripeRefundForSubscription(subscriptionId: string | null) {
+async function createStripeRefundForSubscription(
+  subscriptionId: string | null,
+  approval?: {
+    session: Session;
+    request: Request;
+    requestId: string;
+    payload: Record<string, unknown>;
+    reason: string;
+  }
+) {
   if (!subscriptionId || !isStripeConfigured()) {
     return {
       stripeRefundId: null,
@@ -92,15 +108,49 @@ async function createStripeRefundForSubscription(subscriptionId: string | null) 
   }
 
   const amount = charge.amount - charge.amount_refunded;
-  const refund = await stripe.refunds.create({
-    charge: charge.id,
-    amount,
-    reason: "requested_by_customer",
-    metadata: {
-      tomverseRefundRequest: "true",
-      subscriptionId,
-    },
-  });
+  const createRefund = async () => {
+    if (approval) {
+      await writeAdminAuditLog({
+        session: approval.session,
+        request: approval.request,
+        action: "refund.execution_started",
+        targetType: "RefundRequest",
+        targetId: approval.requestId,
+        summary: `Started Stripe refund for ${approval.requestId}.`,
+        metadata: { amount, currency: charge.currency.toUpperCase(), chargeId: charge.id },
+      });
+    }
+    return stripe.refunds.create({
+      charge: charge.id,
+      amount,
+      reason: "requested_by_customer",
+      metadata: {
+        tomverseRefundRequest: "true",
+        subscriptionId,
+      },
+    });
+  };
+  const refund =
+    approval &&
+    amount >= refundApprovalThresholdCents(process.env.ADMIN_REFUND_APPROVAL_THRESHOLD_CENTS)
+      ? await runWithAdminApproval(
+          {
+            session: approval.session,
+            request: approval.request,
+            action: "refund.approve",
+            targetType: "RefundRequest",
+            targetId: approval.requestId,
+            payload: {
+              ...approval.payload,
+              refundAmountCents: amount,
+              refundCurrency: charge.currency.toUpperCase(),
+              stripeChargeId: charge.id,
+            },
+            reason: approval.reason,
+          },
+          createRefund
+        )
+      : await createRefund();
 
   return {
     stripeRefundId: refund.id,
@@ -182,9 +232,19 @@ export async function PATCH(req: Request, context: RouteContext) {
       let stripeRefund;
       try {
         stripeRefund = await createStripeRefundForSubscription(
-          refundRequest.stripeSubscriptionId
+          refundRequest.stripeSubscriptionId,
+          {
+            session,
+            request: req,
+            requestId: refundRequest.id,
+            payload: body,
+            reason:
+              body.adminNote ||
+              `Approve refund request ${refundRequest.id}.`,
+          }
         );
       } catch (error) {
+        if (error instanceof AdminApprovalRequiredError) throw error;
         console.error("Stripe refund creation failed:", error);
         await writeAdminAuditLog({
           session,
@@ -372,6 +432,8 @@ export async function PATCH(req: Request, context: RouteContext) {
 
     return NextResponse.json({ success: true, refundRequest: updated });
   } catch (error) {
+    const approvalResponse = adminApprovalErrorResponse(error);
+    if (approvalResponse) return approvalResponse;
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
     console.error("Refund request update failed:", error);

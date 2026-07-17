@@ -29,6 +29,14 @@ import type { PerplexityUsageCostSnapshot } from "@/lib/perplexityUsageCore";
 import { notifyProviderCreditIfNeeded } from "@/lib/providerMonitoring";
 import { getUserDayWindow } from "@/lib/userDailyUsage";
 import { getChatCreditAllocation } from "@/lib/chatCreditAllocation";
+import {
+    assertOperationalFeatureEnabled,
+    OperationalFeatureDisabledError,
+} from "@/lib/appSettings";
+import {
+    enforceUserOperationalSecurity,
+    UserOperationalRestrictionError,
+} from "@/lib/userOperationalSecurity";
 
 const GUEST_COOKIE_NAME = "tomverse_guest";
 const GUEST_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
@@ -522,12 +530,32 @@ export const preflightChatComparisonAccess = async (
     access: ChatAccess,
     budgets: ChatBudget[]
 ) => {
+    try {
+        await assertOperationalFeatureEnabled("aiChatEnabled");
+    } catch (error) {
+        if (error instanceof OperationalFeatureDisabledError) {
+            throw new ChatAccessError(
+                503,
+                "AI_CHAT_DISABLED_BY_ADMIN",
+                "AI chat is temporarily paused for operational maintenance."
+            );
+        }
+        throw error;
+    }
     if (access.kind !== "user" || !access.userId) {
         throw new ChatAccessError(
             401,
             "COMPARISON_AUTHENTICATION_REQUIRED",
             "Sign in before comparing multiple models."
         );
+    }
+    try {
+        await enforceUserOperationalSecurity(access.userId);
+    } catch (error) {
+        if (error instanceof UserOperationalRestrictionError) {
+            throw new ChatAccessError(403, error.code, error.message);
+        }
+        throw error;
     }
     if (budgets.length < 2 || budgets.length > 3) {
         throw new ChatAccessError(
@@ -973,6 +1001,28 @@ export const acquireChatAccess = async (
     setCookie: string | undefined;
     usageReservation: ChatUsageReservation;
 }> => {
+    try {
+        await assertOperationalFeatureEnabled("aiChatEnabled");
+    } catch (error) {
+        if (error instanceof OperationalFeatureDisabledError) {
+            throw new ChatAccessError(
+                503,
+                "AI_CHAT_DISABLED_BY_ADMIN",
+                "AI chat is temporarily paused for operational maintenance."
+            );
+        }
+        throw error;
+    }
+    if (access.kind === "user" && access.userId) {
+        try {
+            await enforceUserOperationalSecurity(access.userId);
+        } catch (error) {
+            if (error instanceof UserOperationalRestrictionError) {
+                throw new ChatAccessError(403, error.code, error.message);
+            }
+            throw error;
+        }
+    }
     const now = new Date();
     const leaseId = randomUUID();
     const reservationId = randomUUID();

@@ -39,6 +39,7 @@ type BillingConfigPayload = {
 type Props = BillingConfigPayload & {
   paidUserCount: number;
   activeSubscriptionCount: number;
+  initialTab?: "plans" | "prices" | "promotions";
 };
 
 type EditablePlan = BillingPlanConfig;
@@ -721,6 +722,7 @@ export function BillingAdminPanel({
   priceCatalogUpdatedAt,
   paidUserCount,
   activeSubscriptionCount,
+  initialTab = "plans",
 }: Props) {
   const [draftPlans, setDraftPlans] = useState<EditablePlan[]>(plans);
   const [draftPromotions, setDraftPromotions] =
@@ -739,7 +741,7 @@ export function BillingAdminPanel({
   const [isValidatingStripe, setIsValidatingStripe] = useState(false);
   const [showSaveReview, setShowSaveReview] = useState(false);
   const [activeTab, setActiveTab] =
-    useState<"plans" | "prices" | "promotions">("plans");
+    useState<"plans" | "prices" | "promotions">(initialTab);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [stripeValidation, setStripeValidation] = useState<
     Array<{

@@ -28,6 +28,22 @@ model User {
   billingRiskStatus             String        @default("normal")
   billingRiskReason             String?
   billingRiskAt                 DateTime?
+  accountStatus                 String        @default("active")
+  accountSuspendedAt            DateTime?
+  accountSuspendedUntil         DateTime?
+  accountSuspensionReason       String?
+  accountSuspendedById          String?
+  accountSuspendedByEmail       String?
+  aiUsageRestricted             Boolean       @default(false)
+  aiUsageRestrictedAt           DateTime?
+  aiUsageRestrictedUntil        DateTime?
+  aiUsageRestrictionReason      String?
+  aiUsageRestrictedById         String?
+  aiUsageRestrictedByEmail      String?
+  securityIncidentNote          String?
+  accountDeletionRequestedAt    DateTime?
+  accountDeletionScheduledFor   DateTime?
+  lastLoginAt                   DateTime?
   createdAt                     DateTime?     @default(now())
   settings                      UserSettings?
 
@@ -48,12 +64,16 @@ model User {
   conversations          Conversation[]
   comparisonReviews      ComparisonReview[]
   productAnalyticsEvents ProductAnalyticsEvent[]
+  privacyRequests        PrivacyRequest[]
 
   @@index([plan, id])
   @@index([createdAt])
   @@index([subscriptionStatus, subscriptionCurrentPeriodEnd])
   @@index([subscriptionCancelAtPeriodEnd, subscriptionStatus])
   @@index([billingRiskStatus])
+  @@index([accountStatus, accountSuspendedUntil])
+  @@index([accountStatus, accountDeletionScheduledFor])
+  @@index([aiUsageRestricted, aiUsageRestrictedUntil])
   @@index([creditDebtCredits])
   @@index([creditDebtCostMicroUsd])
 }
@@ -71,9 +91,9 @@ model UserSettings {
   usesFilesFrequently    String?
   modelFinderCompletedAt DateTime?
   modelFinderDismissedAt DateTime?
-  timeZone              String    @default("UTC")
-  timeZoneInitializedAt DateTime?
-  timeZoneChangedAt     DateTime?
+  timeZone               String    @default("UTC")
+  timeZoneInitializedAt  DateTime?
+  timeZoneChangedAt      DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -103,10 +123,12 @@ model Session {
   sessionToken String   @unique
   userId       String
   expires      DateTime
+  createdAt    DateTime @default(now())
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([expires])
+  @@index([userId, createdAt])
 }
 
 model VerificationToken {
@@ -593,23 +615,26 @@ model RefundRequestTimelineEvent {
 }
 
 model AdminAuditLog {
-  id          String   @id @default(cuid())
-  actorUserId String?
-  actorEmail  String?
-  action      String
-  targetType  String
-  targetId    String?
-  summary     String
-  metadata    Json?
-  ipAddress   String?
-  userAgent   String?
-  createdAt   DateTime @default(now())
+  id           String   @id @default(cuid())
+  actorUserId  String?
+  actorEmail   String?
+  action       String
+  targetType   String
+  targetId     String?
+  summary      String
+  metadata     Json?
+  ipAddress    String?
+  userAgent    String?
+  previousHash String?
+  entryHash    String?  @unique
+  createdAt    DateTime @default(now())
 
   actor User? @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
 
   @@index([action, createdAt])
   @@index([targetType, targetId])
   @@index([actorUserId, createdAt])
+  @@index([createdAt, entryHash])
 }
 
 model AdminActionApproval {
@@ -620,15 +645,22 @@ model AdminActionApproval {
   status           String    @default("pending")
   reason           String?
   payload          Json?
+  payloadHash      String
   requestedById    String?
   requestedByEmail String?
   reviewedById     String?
   reviewedByEmail  String?
   reviewedAt       DateTime?
+  expiresAt        DateTime
+  consumedAt       DateTime?
+  consumedById     String?
+  consumedByEmail  String?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
   @@index([status, createdAt])
+  @@index([status, expiresAt])
+  @@index([payloadHash])
   @@index([action, createdAt])
   @@index([targetType, targetId])
 }
@@ -665,44 +697,92 @@ model ModelOverride {
 /// Database-backed source of truth for AI models. Rows are retired instead of
 /// physically removed so historical conversations can still resolve model IDs.
 model ModelRegistryEntry {
-  id                              String   @id
-  name                            String
-  apiModel                        String
-  provider                        String
-  apiBaseUrl                      String
-  apiKeyEnvName                   String
-  icon                            String   @default("")
-  bestFor                         String   @default("")
-  minimumPlan                     String
-  usageClass                      String
-  creditWeight                    Int
-  publiclyListed                  Boolean  @default(true)
-  enabled                         Boolean  @default(true)
-  status                          String   @default("enabled")
-  operationalReason               String?
-  userVisibleNote                 String?
-  replacementModelId              String?
-  catalogDeleted                  Boolean  @default(false)
-  reasoning                       String?
-  contextWindowTokens             Int?
-  supportsImage                   Boolean  @default(false)
-  supportsNativePdf               Boolean  @default(false)
-  maxImages                       Int?
-  maxBase64ImagePayloadBytes      Int?
-  maxOutputTokens                 Int?
-  reservationOutputTokens        Int?
-  inputUsdPerMillionTokens        Float?
-  outputUsdPerMillionTokens       Float?
-  cachedInputPriceMultiplier      Float?
-  sortOrder                       Int      @default(0)
-  updatedById                     String?
-  updatedByEmail                  String?
-  createdAt                       DateTime @default(now())
-  updatedAt                       DateTime @updatedAt
+  id                         String   @id
+  name                       String
+  apiModel                   String
+  provider                   String
+  apiBaseUrl                 String
+  apiKeyEnvName              String
+  icon                       String   @default("")
+  bestFor                    String   @default("")
+  minimumPlan                String
+  usageClass                 String
+  creditWeight               Int
+  publiclyListed             Boolean  @default(true)
+  enabled                    Boolean  @default(true)
+  status                     String   @default("enabled")
+  operationalReason          String?
+  userVisibleNote            String?
+  replacementModelId         String?
+  catalogDeleted             Boolean  @default(false)
+  reasoning                  String?
+  contextWindowTokens        Int?
+  supportsImage              Boolean  @default(false)
+  supportsNativePdf          Boolean  @default(false)
+  maxImages                  Int?
+  maxBase64ImagePayloadBytes Int?
+  maxOutputTokens            Int?
+  reservationOutputTokens    Int?
+  inputUsdPerMillionTokens   Float?
+  outputUsdPerMillionTokens  Float?
+  cachedInputPriceMultiplier Float?
+  sortOrder                  Int      @default(0)
+  updatedById                String?
+  updatedByEmail             String?
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
 
   @@index([provider, sortOrder])
   @@index([status, catalogDeleted])
   @@index([publiclyListed, enabled, catalogDeleted])
+}
+
+/// Latest model-catalog observation for a provider/model pair. A missing model
+/// is never treated as definitively deprecated after a single failed lookup;
+/// consecutive successful catalog scans are required.
+model ProviderModelCatalogEntry {
+  id                 String    @id @default(cuid())
+  provider           String
+  apiModel           String
+  modelRegistryId    String?
+  displayName        String?
+  status             String    @default("candidate")
+  firstSeenAt        DateTime?
+  lastSeenAt         DateTime?
+  lastCheckedAt      DateTime
+  missingSinceAt     DateTime?
+  consecutiveSeen    Int       @default(0)
+  consecutiveMissing Int       @default(0)
+  lifecycle          String?
+  metadata           Json?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@unique([provider, apiModel])
+  @@index([provider, status, updatedAt])
+  @@index([modelRegistryId])
+  @@index([status, lastCheckedAt])
+}
+
+/// Immutable summary of each provider catalog request. This makes daily
+/// monitoring auditable and distinguishes provider/API failures from absence.
+model ProviderModelCatalogRun {
+  id              String    @id @default(cuid())
+  provider        String
+  status          String
+  discoveredCount Int       @default(0)
+  mappedCount     Int       @default(0)
+  candidateCount  Int       @default(0)
+  missingCount    Int       @default(0)
+  lifecycleCount  Int       @default(0)
+  errorCode       String?
+  errorDetail     String?
+  startedAt       DateTime  @default(now())
+  completedAt     DateTime?
+  createdAt       DateTime  @default(now())
+
+  @@index([provider, startedAt])
+  @@index([status, startedAt])
 }
 
 model AdminNotificationLog {
@@ -763,22 +843,22 @@ model AdminSlackTemplate {
 }
 
 model AdminProviderIncident {
-  id               String    @id @default(cuid())
-  provider         String?
-  modelId          String?
-  status           String    @default("limited")
-  title            String
-  message          String?
-  fallbackModelIds String    @default("[]")
+  id                  String    @id @default(cuid())
+  provider            String?
+  modelId             String?
+  status              String    @default("limited")
+  title               String
+  message             String?
+  fallbackModelIds    String    @default("[]")
   previousModelStates Json?
-  createdById      String?
-  createdByEmail   String?
-  resolvedById     String?
-  resolvedByEmail  String?
-  startsAt         DateTime  @default(now())
-  resolvedAt       DateTime?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  createdById         String?
+  createdByEmail      String?
+  resolvedById        String?
+  resolvedByEmail     String?
+  startsAt            DateTime  @default(now())
+  resolvedAt          DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   @@index([status, createdAt])
   @@index([provider, status])
@@ -906,4 +986,61 @@ model AdminOperationReport {
 
   @@index([status, createdAt])
   @@index([createdById, createdAt])
+}
+
+model ScheduledJobRun {
+  id             String    @id @default(cuid())
+  jobKey         String
+  status         String    @default("running")
+  source         String    @default("internal_api")
+  processedCount Int?
+  result         Json?
+  error          String?
+  startedAt      DateTime  @default(now())
+  completedAt    DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@index([jobKey, startedAt])
+  @@index([jobKey, status, startedAt])
+  @@index([status, startedAt])
+}
+
+model AdminOperationalCheckpoint {
+  key            String    @id
+  name           String
+  status         String    @default("unknown")
+  observedAt     DateTime?
+  nextDueAt      DateTime?
+  detail         String?
+  evidenceUrl    String?
+  updatedById    String?
+  updatedByEmail String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([status, nextDueAt])
+  @@index([updatedAt])
+}
+
+model PrivacyRequest {
+  id              String    @id @default(cuid())
+  userId          String?
+  user            User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  email           String
+  requestType     String
+  status          String    @default("open")
+  dueAt           DateTime
+  legalHold       Boolean   @default(false)
+  legalHoldReason String?
+  note            String?
+  completedAt     DateTime?
+  handledById     String?
+  handledByEmail  String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([status, dueAt])
+  @@index([userId, createdAt])
+  @@index([email, createdAt])
+  @@index([legalHold, dueAt])
 }

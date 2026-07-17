@@ -7,28 +7,19 @@ import { getServerSession } from "next-auth/next";
 import {
     Activity,
     AlertTriangle,
-    ArrowRight,
-    BarChart3,
-    Bell,
     CheckCircle2,
-    Cloud,
-    CreditCard,
-    Database,
-    Gauge,
     KeyRound,
-    LayoutDashboard,
-    LifeBuoy,
     MessageSquare,
-    RotateCcw,
-    ScrollText,
-    Search,
-    ShieldCheck,
     Users,
     WalletCards,
     XCircle,
 } from "lucide-react";
 import { authOptions } from "@/lib/auth";
-import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
+import {
+    getAdminRole,
+    getConfiguredAdminAccessWithActivity,
+    isAdminSession,
+} from "@/lib/adminAuth";
 import {
     getAdminActivePaidWhere,
     getAdminUsersPage,
@@ -42,6 +33,15 @@ import { AdminAuditPanel, type AdminAuditRow } from "@/components/admin/AdminAud
 import { AdminAlertPolicyPanel } from "@/components/admin/AdminAlertPolicyPanel";
 import { AdminSlackTemplatesPanel } from "@/components/admin/AdminSlackTemplatesPanel";
 import { AdminApprovalsPanel } from "@/components/admin/AdminApprovalsPanel";
+import { AdminScheduledJobsPanel } from "@/components/admin/AdminScheduledJobsPanel";
+import { AdminOperationalReadinessPanel } from "@/components/admin/AdminOperationalReadinessPanel";
+import { AdminPrivacyRequestsPanel } from "@/components/admin/AdminPrivacyRequestsPanel";
+import { AdminAuditIntegrityPanel } from "@/components/admin/AdminAuditIntegrityPanel";
+import { AdminAccessPanel } from "@/components/admin/AdminAccessPanel";
+import {
+    AdminCreditLedgerPanel,
+    type AdminCreditLedgerRow,
+} from "@/components/admin/AdminCreditLedgerPanel";
 import { AdminBillingLifecyclePanel } from "@/components/admin/AdminBillingLifecyclePanel";
 import { AdminGlobalSearchPanel } from "@/components/admin/AdminGlobalSearchPanel";
 import { AdminInfrastructurePanel } from "@/components/admin/AdminInfrastructurePanel";
@@ -93,91 +93,38 @@ const statusCopy: Record<ProviderHealthStatus, string> = {
     outage: "Outage",
 };
 
-const adminTabs = [
-    {
-        id: "overview",
-        label: "Overview",
-        description: "Launch status",
-        icon: LayoutDashboard,
-    },
-    {
-        id: "search",
-        label: "Search",
-        description: "Find records",
-        icon: Search,
-    },
-    {
-        id: "platform",
-        label: "Platform",
-        description: "Defaults and product settings",
-        icon: Gauge,
-    },
-    {
-        id: "users",
-        label: "Users",
-        description: "Accounts and usage",
-        icon: Users,
-    },
-    {
-        id: "billing",
-        label: "Billing",
-        description: "Plans and promotions",
-        icon: CreditCard,
-    },
-    {
-        id: "refunds",
-        label: "Refunds",
-        description: "Cancellation queue",
-        icon: RotateCcw,
-    },
-    {
-        id: "providers",
-        label: "Providers",
-        description: "Health and budgets",
-        icon: Activity,
-    },
-    {
-        id: "analytics",
-        label: "Analytics",
-        description: "Funnel and activation",
-        icon: BarChart3,
-    },
-    {
-        id: "infrastructure",
-        label: "Infrastructure",
-        description: "Railway, R2, and database",
-        icon: Cloud,
-    },
-    {
-        id: "alerts",
-        label: "Alerts",
-        description: "Delivery logs",
-        icon: Bell,
-    },
-    {
-        id: "retention",
-        label: "Retention",
-        description: "Cleanup status",
-        icon: Database,
-    },
-    {
-        id: "feedback",
-        label: "Feedback",
-        description: "Support inbox",
-        icon: LifeBuoy,
-    },
-    {
-        id: "audit",
-        label: "Audit",
-        description: "Admin activity",
-        icon: ScrollText,
-    },
+export const ADMIN_WORKSPACE_VIEWS = [
+    "overview",
+    "work-queue",
+    "incidents",
+    "search",
+    "platform",
+    "users",
+    "feedback",
+    "support",
+    "billing",
+    "refunds",
+    "credit-ledger",
+    "promotions",
+    "providers",
+    "models",
+    "usage-cost",
+    "fallback-policies",
+    "analytics",
+    "infrastructure",
+    "jobs",
+    "alerts",
+    "webhooks",
+    "approvals",
+    "audit",
+    "retention",
+    "admin-access",
 ] as const;
 
-type AdminTab = (typeof adminTabs)[number]["id"];
+export type AdminWorkspaceView = (typeof ADMIN_WORKSPACE_VIEWS)[number];
 
-const isAdminTab = (value: unknown): value is AdminTab =>
-    typeof value === "string" && adminTabs.some((tab) => tab.id === value);
+export const isAdminWorkspaceView = (value: unknown): value is AdminWorkspaceView =>
+    typeof value === "string" && ADMIN_WORKSPACE_VIEWS.includes(value as AdminWorkspaceView);
 
 const isConfigured = (value: string | undefined) =>
     typeof value === "string" && value.trim().length > 0;
@@ -254,56 +201,6 @@ function CommercialKpiCard({
     );
 }
 
-function AdminNav({ activeTab }: { activeTab: AdminTab }) {
-    return (
-        <aside className="lg:sticky lg:top-6 lg:self-start">
-            <div className="rounded-3xl border border-zinc-800 bg-zinc-950/80 p-3 shadow-2xl shadow-black/20">
-                <div className="px-3 py-3">
-                    <div className="text-xs font-black uppercase tracking-[0.18em] text-blue-300">
-                        Tomverse
-                    </div>
-                    <div className="mt-1 text-lg font-black text-white">Admin Console</div>
-                </div>
-                <nav className="mt-2 grid gap-1">
-                    {adminTabs.map((tab) => {
-                        const Icon = tab.icon;
-                        const active = activeTab === tab.id;
-                        return (
-                            <Link
-                                key={tab.id}
-                                href={tab.id === "overview" ? "/admin" : `/admin?tab=${tab.id}`}
-                                className={`flex items-start gap-3 rounded-2xl px-3 py-3 text-sm font-bold transition ${
-                                    active
-                                        ? "border border-blue-500/30 bg-blue-600 text-white shadow-lg shadow-blue-950/30"
-                                        : "text-zinc-400 hover:bg-zinc-900 hover:text-white"
-                                }`}
-                            >
-                                <Icon className="mt-0.5 h-4 w-4 shrink-0" />
-                                <span>
-                                    <span className="block">{tab.label}</span>
-                                    <span
-                                        className={`mt-0.5 block text-xs font-semibold ${
-                                            active ? "text-blue-100/80" : "text-zinc-600"
-                                        }`}
-                                    >
-                                        {tab.description}
-                                    </span>
-                                </span>
-                            </Link>
-                        );
-                    })}
-                </nav>
-                <Link
-                    href="/chat"
-                    className="mt-4 flex items-center justify-center gap-2 rounded-2xl border border-zinc-800 px-3 py-2.5 text-sm font-black text-zinc-200 transition hover:border-zinc-700 hover:bg-zinc-900"
-                >
-                    Open app <ArrowRight className="h-4 w-4" />
-                </Link>
-            </div>
-        </aside>
-    );
-}
-
 function SectionHeader({
     eyebrow,
     title,
@@ -326,11 +223,7 @@ function SectionHeader({
     );
 }
 
-type AdminPageProps = {
-    searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
-};
-
-export default async function AdminPage({ searchParams }: AdminPageProps) {
+export async function AdminWorkspace({ activeView }: { activeView: AdminWorkspaceView }) {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) {
         redirect("/auth/signin?callbackUrl=/admin");
@@ -339,9 +232,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         notFound();
     }
 
-    const query = await searchParams;
-    const rawTab = Array.isArray(query.tab) ? query.tab[0] : query.tab;
-    const activeTab = isAdminTab(rawTab) ? rawTab : "overview";
+    const activeTab = activeView;
 
     await syncBillingDefaultsToDatabase();
 
@@ -349,6 +240,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
     const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
     const activePaidWhere = getAdminActivePaidWhere(now);
+    const configuredAdminAccess = await getConfiguredAdminAccessWithActivity();
 
     const [
         dashboard,
@@ -379,6 +271,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         usersWithConversations,
         productAnalyticsDashboard,
         modelRegistryModels,
+        creditLedgerEntries,
     ] = await Promise.all([
         getProviderHealthDashboard({ includeErrorEvents: true }),
         getBillingPlans(),
@@ -480,6 +373,11 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         }),
         getProductAnalyticsDashboard(),
         getRuntimeModels({ includeCatalogDeleted: true }),
+        prisma.creditLedgerEntry.findMany({
+            orderBy: { createdAt: "desc" },
+            take: 100,
+            include: { user: { select: { email: true } } },
+        }),
     ]);
     const availableCount = dashboard.providers.filter(
         (provider) => provider.status === "available"
@@ -608,6 +506,17 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         ipAddress: log.ipAddress,
         userAgent: log.userAgent,
         createdAt: log.createdAt.toISOString(),
+    }));
+    const creditLedgerRows: AdminCreditLedgerRow[] = creditLedgerEntries.map((entry) => ({
+        id: entry.id,
+        userId: entry.userId,
+        userEmail: entry.user.email,
+        type: entry.type,
+        creditsDelta: entry.creditsDelta,
+        balanceAfterCredits: entry.balanceAfterCredits,
+        fundedCostMicroUsdDelta: Number(entry.fundedCostMicroUsdDelta),
+        reservationId: entry.reservationId,
+        createdAt: entry.createdAt.toISOString(),
     }));
     const promotionRiskSignalCount = new Map<
         string,
@@ -766,6 +675,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                 title: `${provider.displayName} is ${statusCopy[provider.status]}`,
                 detail: provider.recentErrorCode || provider.fallback.reason,
                 tone: provider.status === "outage" ? "red" : "amber",
+                href: `/admin/providers/${provider.provider}`,
             })),
         ...dashboard.providers
             .filter((provider) => !provider.apiKeyConfigured)
@@ -773,6 +683,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                 title: `${provider.displayName} API key missing`,
                 detail: "Provider calls will fail or remain unavailable until the key is configured.",
                 tone: "zinc",
+                href: `/admin/providers/${provider.provider}`,
             })),
         ...(openFeedbackCount > 0
             ? [
@@ -780,6 +691,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                       title: `${openFeedbackCount} open feedback item${openFeedbackCount === 1 ? "" : "s"}`,
                       detail: "Review user-reported issues before launch traffic grows.",
                       tone: "blue",
+                      href: "/admin/feedback",
                   },
               ]
             : []),
@@ -789,16 +701,14 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                       title: `${pendingRefundCount} pending refund request${pendingRefundCount === 1 ? "" : "s"}`,
                       detail: "Review billing cancellation requests and approve or reject them before renewal disputes grow.",
                       tone: "amber",
+                      href: "/admin/refunds",
                   },
               ]
             : []),
     ].slice(0, 6);
     const generatedAtLabel = dashboard.generatedAt.replace("T", " ").slice(0, 16);
     const monthSpendLabel = money(monthSpend);
-    const activeTabInfo =
-        adminTabs.find((tab) => tab.id === activeTab) || adminTabs[0];
-    const ActiveTabIcon = activeTabInfo.icon;
-    const adminRole = getAdminRole(session) || "owner";
+    const adminRole = getAdminRole(session) || "readonly";
     const missingEnvCount = [
         process.env.ADMIN_EMAILS,
         process.env.STRIPE_SECRET_KEY,
@@ -944,39 +854,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     ];
 
     return (
-        <main className="min-h-screen bg-zinc-950 text-zinc-100">
-            <div className="mx-auto grid w-full max-w-[96rem] gap-6 px-5 py-6 lg:grid-cols-[16rem_1fr] lg:px-8">
-                <AdminNav activeTab={activeTab} />
-                <div className="flex min-w-0 flex-col gap-8">
-                    <header id="overview" className="rounded-3xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 p-6 shadow-2xl shadow-black/20">
-                        <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-                            <div>
-                                <div className="inline-flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-blue-200">
-                                    <ShieldCheck className="h-3.5 w-3.5" />
-                                    Admin only
-                                </div>
-                                <h1 className="mt-5 text-3xl font-black tracking-tight text-white sm:text-4xl">
-                                    Tomverse Operations
-                                </h1>
-                                <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-400">
-                                    Commercial launch console for users, billing, provider health,
-                                    feedback, alerts, and launch-critical limits.
-                                </p>
-                            </div>
-                            <div className="text-sm text-zinc-500">
-                                <span className="inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-950 px-3 py-1.5 font-bold text-zinc-300">
-                                    <ActiveTabIcon className="h-4 w-4 text-blue-300" />
-                                    {activeTabInfo.label}
-                                </span>
-                                <span className="ml-2 inline-flex items-center gap-2 rounded-full border border-purple-500/30 bg-purple-500/10 px-3 py-1.5 font-bold capitalize text-purple-200">
-                                    {adminRole}
-                                </span>
-                                <div className="mt-2 text-right text-xs">
-                                    Generated {generatedAtLabel} UTC
-                                </div>
-                            </div>
-                        </div>
-                    </header>
+        <div className="flex min-w-0 flex-col gap-6">
 
                     {activeTab === "overview" && (
                         <>
@@ -1079,8 +957,9 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                                             </div>
                                         ) : (
                                             needsAttention.map((item) => (
-                                                <div
+                                                <Link
                                                     key={`${item.title}-${item.detail}`}
+                                                    href={item.href}
                                                     className={`rounded-2xl border p-4 ${
                                                         item.tone === "red"
                                                             ? "border-red-500/30 bg-red-500/10"
@@ -1093,7 +972,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                                                 >
                                                     <div className="font-black text-white">{item.title}</div>
                                                     <p className="mt-1 text-sm leading-6 text-zinc-400">{item.detail}</p>
-                                                </div>
+                                                </Link>
                                             ))
                                         )}
                                     </div>
@@ -1129,14 +1008,60 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                                 </div>
                             </section>
 
-                            <AdminRiskPanels
-                                promoRisks={promoRiskRows}
-                                slaRows={slaRows}
-                                funnel={funnelMetrics}
-                            />
-
-                            <AdminApprovalsPanel />
+                            <section className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5">
+                                <div className="flex items-center justify-between gap-3">
+                                    <SectionHeader
+                                        eyebrow="Recent activity"
+                                        title="Latest administrator changes"
+                                        description="The most recent operational changes, plan actions, incident updates, and governance events."
+                                    />
+                                    <Link href="/admin/audit" className="shrink-0 text-xs font-black text-blue-300 hover:text-blue-200">Open audit log</Link>
+                                </div>
+                                <div className="mt-4 grid gap-2">
+                                    {auditRows.slice(0, 8).map((entry) => (
+                                        <div key={entry.id} className="grid gap-2 rounded-xl border border-zinc-800 bg-zinc-900/60 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+                                            <div className="min-w-0">
+                                                <p className="truncate text-sm font-black text-zinc-100">{entry.summary}</p>
+                                                <p className="mt-1 truncate text-xs text-zinc-500">{entry.actorEmail || "Administrator"} · {entry.action}</p>
+                                            </div>
+                                            <span className="text-xs text-zinc-600">{new Date(entry.createdAt).toISOString().replace("T", " ").slice(0, 16)} UTC</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </section>
                         </>
+                    )}
+
+                    {activeTab === "work-queue" && (
+                        <section className="flex flex-col gap-4">
+                            <AdminOperationsPanel
+                                generatedAt={generatedAtLabel}
+                                totalUsers={totalUsers}
+                                paidUsers={paidUsers}
+                                activeSubscriptions={activeSubscriptions}
+                                openFeedbackCount={openFeedbackCount}
+                                pendingRefundCount={pendingRefundCount}
+                                providerAvailableCount={availableCount}
+                                providerTotalCount={dashboard.providers.length}
+                                monthSpendLabel={monthSpendLabel}
+                                needsAttention={needsAttention}
+                                envChecks={envChecks}
+                                adminRole={adminRole}
+                                healthScore={healthScore}
+                            />
+                            <AdminApprovalsPanel />
+                            <AdminScheduledJobsPanel />
+                            <RefundRequestsPanel rows={refundRequestRows.filter((row) => row.status === "pending")} />
+                            <FeedbackInboxPanel rows={feedbackInboxRows.filter((row) => row.status === "open")} />
+                        </section>
+                    )}
+
+                    {activeTab === "incidents" && (
+                        <AdminProviderOpsPanel
+                            models={modelRegistryModels.filter((model) => !model.catalogDeleted)}
+                            incidents={providerIncidentRows}
+                            checks={providerCheckRows}
+                        />
                     )}
 
                     {activeTab === "users" && (
@@ -1262,8 +1187,6 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                             <AdminAlertPolicyPanel />
                             <AdminSlackTemplatesPanel />
                             <AdminNotificationsPanel />
-                            <AdminWebhookPanel />
-                            <AdminReportsPanel />
                         </section>
                     )}
 
@@ -1275,11 +1198,106 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                     <FeedbackInboxPanel rows={feedbackInboxRows} />
                     )}
 
+                    {activeTab === "support" && (
+                        <section className="flex flex-col gap-4">
+                            <FeedbackInboxPanel rows={feedbackInboxRows} />
+                            <AdminPrivacyRequestsPanel />
+                        </section>
+                    )}
+
+                    {activeTab === "credit-ledger" && (
+                        <AdminCreditLedgerPanel rows={creditLedgerRows} />
+                    )}
+
+                    {activeTab === "promotions" && (
+                        <section className="flex flex-col gap-4">
+                            <BillingAdminPanel
+                                plans={billingPlans}
+                                promotions={billingPromotions}
+                                priceCatalog={billingPricing.catalog}
+                                priceCatalogUpdatedAt={billingPricing.updatedAt}
+                                paidUserCount={paidUsers}
+                                activeSubscriptionCount={activeSubscriptions}
+                                initialTab="promotions"
+                            />
+                            <AdminRiskPanels
+                                promoRisks={promoRiskRows}
+                                slaRows={slaRows}
+                                funnel={funnelMetrics}
+                                adminAccess={configuredAdminAccess}
+                            />
+                        </section>
+                    )}
+
+                    {activeTab === "models" && <AdminModelRegistryPanel />}
+
+                    {activeTab === "usage-cost" && (
+                        <section className="flex flex-col gap-4">
+                            <AdminProviderUsageSyncPanel />
+                            <AdminProviderHealthPanel
+                                initialDashboard={dashboard}
+                                canManageCredits={adminRole === "owner" || adminRole === "billing"}
+                            />
+                            <AdminModelMetricsPanel rows={modelMetricRows} />
+                        </section>
+                    )}
+
+                    {activeTab === "fallback-policies" && (
+                        <AdminProviderOpsPanel
+                            models={modelRegistryModels.filter((model) => !model.catalogDeleted)}
+                            incidents={providerIncidentRows}
+                            checks={providerCheckRows}
+                        />
+                    )}
+
+                    {activeTab === "jobs" && <AdminScheduledJobsPanel />}
+
+                    {activeTab === "webhooks" && (
+                        <section className="flex flex-col gap-4">
+                            <AdminWebhookPanel />
+                            <AdminReportsPanel />
+                        </section>
+                    )}
+
+                    {activeTab === "approvals" && <AdminApprovalsPanel />}
+
+                    {activeTab === "admin-access" && (
+                        <section className="flex flex-col gap-4">
+                            <AdminAccessPanel access={configuredAdminAccess} />
+                            <AdminOperationalReadinessPanel />
+                            <AdminAuditIntegrityPanel />
+                        </section>
+                    )}
+
                     {activeTab === "audit" && (
                         <AdminAuditPanel rows={auditRows} />
                     )}
-                </div>
-            </div>
-        </main>
+        </div>
     );
+}
+
+type LegacyAdminPageProps = {
+    searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+};
+
+const legacyAdminTabRoutes: Record<string, string> = {
+    overview: "/admin/overview",
+    search: "/admin/search",
+    platform: "/admin/platform",
+    users: "/admin/users",
+    billing: "/admin/billing",
+    refunds: "/admin/refunds",
+    providers: "/admin/providers",
+    analytics: "/admin/analytics",
+    infrastructure: "/admin/infrastructure",
+    alerts: "/admin/alerts",
+    retention: "/admin/retention",
+    feedback: "/admin/feedback",
+    audit: "/admin/audit",
+};
+
+export default async function AdminPage({ searchParams }: LegacyAdminPageProps) {
+    const query = await searchParams;
+    const rawTab = Array.isArray(query.tab) ? query.tab[0] : query.tab;
+    redirect((rawTab && legacyAdminTabRoutes[rawTab]) || "/admin/overview");
 }

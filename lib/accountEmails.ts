@@ -10,6 +10,20 @@ type AccountWelcomeEmailInput = {
   language?: string | null;
 };
 
+export async function sendAccountDeletionScheduledEmail(input: {
+  to: string | null | undefined;
+  scheduledFor: Date;
+}) {
+  if (!input.to) return { sent: false, reason: "Recipient email missing" };
+  const date = input.scheduledFor.toISOString();
+  return sendTransactionalEmail({
+    to: input.to,
+    subject: "Tomverse account deletion scheduled",
+    text: `Your Tomverse account has been signed out and scheduled for permanent deletion on ${date}. If you did not request this, contact support@tomverse.app immediately.`,
+    html: `<p>Your Tomverse account has been signed out and scheduled for permanent deletion on <strong>${escapeHtml(date)}</strong>.</p><p>If you did not request this, contact <a href="mailto:support@tomverse.app">support@tomverse.app</a> immediately.</p>`,
+  });
+}
+
 type WelcomeCopy = {
   brandLabel: string;
   subject: string;

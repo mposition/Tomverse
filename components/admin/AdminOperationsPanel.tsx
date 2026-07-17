@@ -18,6 +18,7 @@ type AttentionItem = {
   title: string;
   detail: string;
   tone: string;
+  href: string;
 };
 
 type EnvCheck = {
@@ -265,7 +266,7 @@ export function AdminOperationsPanel({
               Needs attention
             </h3>
             <Link
-              href="#providers"
+              href="/admin/providers"
               className="inline-flex items-center gap-1 text-xs font-bold text-blue-300 hover:text-blue-200"
             >
               Providers <ArrowRight className="h-3.5 w-3.5" />
@@ -278,13 +279,14 @@ export function AdminOperationsPanel({
               </div>
             ) : (
               needsAttention.slice(0, 4).map((item) => (
-                <div
+                <Link
                   key={`${item.title}-${item.detail}`}
+                  href={item.href}
                   className={`rounded-xl border px-3 py-2 ${toneClass(item.tone)}`}
                 >
                   <p className="text-sm font-black">{item.title}</p>
                   <p className="mt-1 text-xs leading-5 opacity-80">{item.detail}</p>
-                </div>
+                </Link>
               ))
             )}
           </div>

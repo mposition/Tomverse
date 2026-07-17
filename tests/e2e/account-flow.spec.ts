@@ -68,10 +68,7 @@ test("billing success modal respects the explicit return language", async ({ pag
 
 test("authenticated user opens settings and starts Private Mode", async ({ page }) => {
   await openAccountMenu(page);
-  await page
-    .getByTestId("account-menu")
-    .getByRole("button", { name: /설정|Settings|设置/ })
-    .click();
+  await page.getByTestId("account-settings").click();
   const settingsDialog = page.getByRole("dialog", {
     name: /사용자 설정|User Settings|用户设置/,
   });
@@ -93,10 +90,7 @@ test("authenticated user opens settings and starts Private Mode", async ({ page 
 test("theme preference changes immediately and follows the system setting", async ({ page }) => {
   await expect(page.locator("html")).toHaveClass(/dark/);
   await openAccountMenu(page);
-  await page
-    .getByTestId("account-menu")
-    .getByRole("button", { name: /설정|Settings|设置/ })
-    .click();
+  await page.getByTestId("account-settings").click();
   let settingsDialog = page.getByRole("dialog", {
     name: /사용자 설정|User Settings|用户设置/,
   });
@@ -111,10 +105,7 @@ test("theme preference changes immediately and follows the system setting", asyn
 
   await page.emulateMedia({ colorScheme: "dark" });
   await openAccountMenu(page);
-  await page
-    .getByTestId("account-menu")
-    .getByRole("button", { name: /설정|Settings|设置/ })
-    .click();
+  await page.getByTestId("account-settings").click();
   settingsDialog = page.getByRole("dialog", {
     name: /사용자 설정|User Settings|用户设置/,
   });

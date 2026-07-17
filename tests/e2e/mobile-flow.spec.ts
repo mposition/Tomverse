@@ -1,37 +1,28 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import {
   expectNoHorizontalOverflow,
+  mockAuthenticatedApi,
   mockChatStream,
   prepareGuestPage,
 } from "./support/app-fixtures";
-
-const modelMenuTrigger = (page: Page) =>
-  page.locator('button[aria-controls="chat-input-popover"]').nth(1);
-
-async function addSecondFreeModel(page: Page) {
-  await modelMenuTrigger(page).click();
-  const dialog = page.locator("#chat-input-popover");
-  await expect(dialog).toBeVisible();
-
-  const freeUnselectedModel = dialog
-    .locator(
-      '[data-testid="model-option"][data-model-usage-class="Standard"][data-model-minimum-plan="Guest"][aria-pressed="false"]:not([disabled])'
-    )
-    .first();
-  await expect(freeUnselectedModel).toBeVisible();
-  await freeUnselectedModel.click();
-  await page.keyboard.press("Escape");
-}
 
 test.beforeEach(async ({ page }, testInfo) => {
   test.skip(!testInfo.project.name.startsWith("mobile"), "Mobile flow only runs in mobile projects.");
 
   await prepareGuestPage(page, "ko");
+  const needsMultipleModels =
+    testInfo.title.includes("model tab") ||
+    testInfo.title.includes("horizontal swipe");
+  if (needsMultipleModels) {
+    await mockAuthenticatedApi(page, {
+      selectedModels: ["gemini-2-5-flash", "gpt-5-4-mini"],
+    });
+  }
   await mockChatStream(page, "Mobile QA response");
   await page.goto("/chat");
   await expect(
     page.getByTestId("mobile-chat-shell").locator("header p").nth(1)
-  ).toHaveText("Gemini 3.1 Flash-Lite");
+  ).toHaveText(needsMultipleModels ? "GPT-5.4 mini" : "Gemini 3.1 Flash-Lite");
 });
 
 test("mobile shell and drawer stay inside viewport", async ({ page }) => {
@@ -85,8 +76,6 @@ test("input remains reachable at virtual-keyboard height", async ({ page }) => {
 });
 
 test("model tab changes the visible chat panel", async ({ page }) => {
-  await addSecondFreeModel(page);
-
   const tabs = page.getByTestId("mobile-model-tab");
   await expect(tabs).toHaveCount(2);
   await expect(
@@ -107,8 +96,6 @@ test("model tab changes the visible chat panel", async ({ page }) => {
 });
 
 test("horizontal swipe changes the active model tab", async ({ page }) => {
-  await addSecondFreeModel(page);
-
   const tabs = page.getByTestId("mobile-model-tab");
   await expect(tabs).toHaveCount(2);
   await tabs.nth(0).click();

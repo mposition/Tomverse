@@ -5,6 +5,10 @@ import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import { deleteTomverseAccount } from "@/lib/accountDeletion";
+import {
+  adminApprovalErrorResponse,
+  runWithAdminApproval,
+} from "@/lib/adminApproval";
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { getUserChatUsageKey } from "@/lib/chatSecurity";
@@ -65,6 +69,16 @@ export async function GET(req: Request, context: RouteContext) {
           billingRiskStatus: true,
           billingRiskReason: true,
           billingRiskAt: true,
+          accountStatus: true,
+          accountSuspendedAt: true,
+          accountSuspendedUntil: true,
+          accountSuspensionReason: true,
+          aiUsageRestricted: true,
+          aiUsageRestrictedAt: true,
+          aiUsageRestrictedUntil: true,
+          aiUsageRestrictionReason: true,
+          securityIncidentNote: true,
+          lastLoginAt: true,
           settings: {
             select: {
               language: true,
@@ -183,6 +197,18 @@ export async function GET(req: Request, context: RouteContext) {
               createdAt: true,
             },
           },
+          privacyRequests: {
+            orderBy: { createdAt: "desc" },
+            take: 10,
+            select: {
+              id: true,
+              requestType: true,
+              status: true,
+              dueAt: true,
+              legalHold: true,
+              createdAt: true,
+            },
+          },
           _count: {
             select: {
               conversations: true,
@@ -247,6 +273,11 @@ export async function GET(req: Request, context: RouteContext) {
         ...user,
         creditDebtCostMicroUsd: Number(user.creditDebtCostMicroUsd),
         billingRiskAt: user.billingRiskAt?.toISOString() || null,
+        accountSuspendedAt: user.accountSuspendedAt?.toISOString() || null,
+        accountSuspendedUntil: user.accountSuspendedUntil?.toISOString() || null,
+        aiUsageRestrictedAt: user.aiUsageRestrictedAt?.toISOString() || null,
+        aiUsageRestrictedUntil: user.aiUsageRestrictedUntil?.toISOString() || null,
+        lastLoginAt: user.lastLoginAt?.toISOString() || null,
         subscriptionCurrentPeriodEnd:
           user.subscriptionCurrentPeriodEnd?.toISOString() || null,
         settings: user.settings
@@ -334,6 +365,27 @@ export async function GET(req: Request, context: RouteContext) {
             detail: `${event.summary} / ${event.actorEmail || "admin"}`,
             at: event.createdAt.toISOString(),
           })),
+          ...user.privacyRequests.map((request) => ({
+            id: request.id,
+            type: "privacy",
+            title: `Privacy ${request.requestType} / ${request.status}`,
+            detail: `Due ${request.dueAt.toISOString()}${request.legalHold ? " / legal hold" : ""}`,
+            at: request.createdAt.toISOString(),
+          })),
+          ...user.creditDebtEntries.slice(0, 10).map((entry) => ({
+            id: entry.id,
+            type: "credit",
+            title: `Credit debt ${entry.type}`,
+            detail: `${entry.creditsDelta} credits`,
+            at: entry.createdAt.toISOString(),
+          })),
+          ...(user.lastLoginAt ? [{
+            id: `last-login-${user.id}`,
+            type: "login",
+            title: "Most recent successful login",
+            detail: user.accountStatus === "suspended" ? "Account is currently suspended" : "Account active",
+            at: user.lastLoginAt.toISOString(),
+          }] : []),
         ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()).slice(0, 20),
         usage: {
           today:
@@ -377,12 +429,26 @@ export async function DELETE(req: Request, context: RouteContext) {
       );
     }
 
-    await readLimitedJson(req, 1024, deleteUserSchema);
-    const result = await deleteTomverseAccount(userId);
+    const body = await readLimitedJson(req, 1024, deleteUserSchema);
+    const result = await runWithAdminApproval(
+      {
+        session,
+        request: req,
+        action: "user.delete",
+        targetType: "User",
+        targetId: userId,
+        payload: body,
+        reason: `Permanently delete user ${userId}.`,
+      },
+      async () => {
+        const deletion = await deleteTomverseAccount(userId);
+        if (!deletion.deleted) throw new Error("User not found.");
+        return deletion;
+      }
+    );
     if (!result.deleted) {
       return NextResponse.json({ error: "User not found." }, { status: 404 });
     }
-
     await writeAdminAuditLog({
       session,
       request: req,
@@ -390,13 +456,13 @@ export async function DELETE(req: Request, context: RouteContext) {
       targetType: "User",
       targetId: userId,
       summary: `Deleted user account ${result.email || userId}.`,
-      metadata: {
-        email: result.email || null,
-      },
+      metadata: { email: result.email || null },
     });
 
     return NextResponse.json({ success: true });
   } catch (error) {
+    const approvalResponse = adminApprovalErrorResponse(error);
+    if (approvalResponse) return approvalResponse;
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
     console.error("Admin user deletion failed:", error);

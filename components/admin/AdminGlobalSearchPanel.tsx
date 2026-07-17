@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Loader2, Search } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
 
@@ -22,12 +23,15 @@ const dateLabel = (value: string | null) => {
 };
 
 export function AdminGlobalSearchPanel() {
-  const [query, setQuery] = useState("");
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const [query, setQuery] = useState(() => searchParams.get("q") || "");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
 
-  const runSearch = async () => {
-    const normalized = query.trim();
+  const runSearch = useCallback(async (searchQuery: string) => {
+    const normalized = searchQuery.trim();
     if (normalized.length < 2) {
       setResults([]);
       return;
@@ -53,6 +57,23 @@ export function AdminGlobalSearchPanel() {
     } finally {
       setIsSearching(false);
     }
+  }, []);
+
+  useEffect(() => {
+    const initialQuery = searchParams.get("q") || "";
+    if (initialQuery.trim().length >= 2) {
+      queueMicrotask(() => void runSearch(initialQuery));
+    }
+  }, [runSearch, searchParams]);
+
+  const submitSearch = () => {
+    const normalized = query.trim();
+    const params = new URLSearchParams(searchParams.toString());
+    if (normalized) params.set("q", normalized);
+    else params.delete("q");
+    const suffix = params.toString();
+    router.replace(suffix ? `${pathname}?${suffix}` : pathname, { scroll: false });
+    void runSearch(normalized);
   };
 
   return (
@@ -71,7 +92,7 @@ export function AdminGlobalSearchPanel() {
         className="mt-5 grid gap-3 md:grid-cols-[1fr_auto]"
         onSubmit={(event) => {
           event.preventDefault();
-          runSearch();
+          submitSearch();
         }}
       >
         <label className="relative block">

@@ -111,7 +111,13 @@ export async function GET(req: Request) {
           },
           orderBy: { createdAt: "desc" },
           take,
-          select: { id: true, conversationId: true, modelId: true, createdAt: true },
+          select: {
+            id: true,
+            conversationId: true,
+            modelId: true,
+            createdAt: true,
+            conversation: { select: { userId: true } },
+          },
         }),
       ]);
 
@@ -122,7 +128,7 @@ export async function GET(req: Request) {
           id: user.id,
           title: user.email || user.name || user.id,
           detail: `${user.plan || "Free"} plan`,
-          href: "/admin?tab=users",
+          href: `/admin/users/${encodeURIComponent(user.id)}`,
           createdAt: null,
         })),
         ...feedback.map((item) => ({
@@ -130,7 +136,7 @@ export async function GET(req: Request) {
           id: item.id,
           title: item.email || item.traceId || item.id,
           detail: `${item.type} / ${item.status}`,
-          href: "/admin?tab=feedback",
+          href: "/admin/feedback",
           createdAt: toIso(item.createdAt),
         })),
         ...refunds.map((item) => ({
@@ -138,7 +144,7 @@ export async function GET(req: Request) {
           id: item.id,
           title: item.email || item.id,
           detail: `${item.plan || "Unknown"} / ${item.status}`,
-          href: "/admin?tab=refunds",
+          href: "/admin/refunds",
           createdAt: toIso(item.requestedAt),
         })),
         ...auditLogs.map((item) => ({
@@ -146,7 +152,7 @@ export async function GET(req: Request) {
           id: item.id,
           title: item.action,
           detail: `${item.actorEmail || "Admin"} / ${item.targetType || "-"} ${item.targetId || ""}`,
-          href: "/admin?tab=audit",
+          href: "/admin/audit",
           createdAt: toIso(item.createdAt),
         })),
         ...conversations.map((item) => ({
@@ -154,7 +160,7 @@ export async function GET(req: Request) {
           id: item.id,
           title: item.title,
           detail: `User ${item.userId}`,
-          href: "/admin?tab=users",
+          href: `/admin/users/${encodeURIComponent(item.userId)}`,
           createdAt: toIso(item.updatedAt),
         })),
         ...messages.map((item) => ({
@@ -162,7 +168,7 @@ export async function GET(req: Request) {
           id: item.id,
           title: item.modelId || item.id,
           detail: `Conversation ${item.conversationId}`,
-          href: "/admin?tab=users",
+          href: `/admin/users/${encodeURIComponent(item.conversation.userId)}`,
           createdAt: toIso(item.createdAt),
         })),
       ].slice(0, 40),

@@ -4,6 +4,10 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import type { Session } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import {
+  adminApprovalErrorResponse,
+  runWithAdminApproval,
+} from "@/lib/adminApproval";
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
@@ -68,10 +72,37 @@ export async function PATCH(
         return NextResponse.json({ error: "Replacement model does not exist in the active registry." }, { status: 400 });
       }
     }
-    const row = await prisma.modelRegistryEntry.update({
-      where: { id: modelId },
-      data: registryInputToData(body, actor(session)),
-    });
+    if (body.status !== "disabled") {
+      await writeAdminAuditLog({
+        session,
+        request: req,
+        action: "model.registry.update_started",
+        targetType: "Model",
+        targetId: modelId,
+        summary: `Started model registry update for ${modelId}.`,
+        metadata: { provider: body.provider, status: body.status },
+      });
+    }
+    const updateModel = () =>
+      prisma.modelRegistryEntry.update({
+        where: { id: modelId },
+        data: registryInputToData(body, actor(session)),
+      });
+    const row =
+      body.status === "disabled"
+        ? await runWithAdminApproval(
+            {
+              session,
+              request: req,
+              action: "model.disable",
+              targetType: "Model",
+              targetId: modelId,
+              payload: body,
+              reason: body.operationalReason || `Disable model ${modelId}.`,
+            },
+            updateModel
+          )
+        : await updateModel();
     await writeAdminAuditLog({
       session,
       request: req,
@@ -84,6 +115,8 @@ export async function PATCH(
     const model = registryRowToModel(row);
     return NextResponse.json({ model: { ...model, environment: validateProviderConfiguration(model) } });
   } catch (error) {
+    const approvalResponse = adminApprovalErrorResponse(error);
+    if (approvalResponse) return approvalResponse;
     const response = apiSecurityResponse(error);
     if (response) return response;
     if (error && typeof error === "object" && "code" in error && error.code === "P2025") {
@@ -125,19 +158,31 @@ export async function DELETE(
         { status: 409 }
       );
     }
-    const row = await prisma.modelRegistryEntry.update({
-      where: { id: modelId },
-      data: {
-        catalogDeleted: true,
-        publiclyListed: false,
-        enabled: false,
-        status: "disabled",
-        operationalReason: "Removed from the active catalogue.",
-        userVisibleNote: null,
-        updatedById: session.user.id,
-        updatedByEmail: session.user.email || null,
+    const row = await runWithAdminApproval(
+      {
+        session,
+        request: req,
+        action: "model.archive",
+        targetType: "Model",
+        targetId: modelId,
+        payload: { catalogDeleted: true },
+        reason: `Remove model ${modelId} from the active catalogue.`,
       },
-    });
+      () =>
+        prisma.modelRegistryEntry.update({
+          where: { id: modelId },
+          data: {
+            catalogDeleted: true,
+            publiclyListed: false,
+            enabled: false,
+            status: "disabled",
+            operationalReason: "Removed from the active catalogue.",
+            userVisibleNote: null,
+            updatedById: session.user.id,
+            updatedByEmail: session.user.email || null,
+          },
+        })
+    );
     await writeAdminAuditLog({
       session,
       request: req,
@@ -148,6 +193,8 @@ export async function DELETE(
     });
     return NextResponse.json({ model: registryRowToModel(row) });
   } catch (error) {
+    const approvalResponse = adminApprovalErrorResponse(error);
+    if (approvalResponse) return approvalResponse;
     const response = apiSecurityResponse(error);
     if (response) return response;
     if (error && typeof error === "object" && "code" in error && error.code === "P2025") {

@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
+import { writeAdminAuditLog } from "@/lib/adminAudit";
 import {
   apiSecurityResponse,
   consumeApiRateLimit,
@@ -76,6 +77,23 @@ export async function POST(req: Request) {
         ),
       });
     }
+    await writeAdminAuditLog({
+      session,
+      request: req,
+      action: "stripe.configuration.validated",
+      targetType: "StripeConfiguration",
+      targetId: "billing-plans",
+      summary: `Validated ${results.length} Stripe billing plan configurations.`,
+      metadata: {
+        plans: results.map((result) => ({
+          planId: result.planId,
+          product: result.product,
+          monthlyPrice: result.monthlyPrice,
+          annualPrice: result.annualPrice,
+          errorCount: result.errors.length,
+        })),
+      },
+    });
 
     return NextResponse.json({ results });
   } catch (error) {

@@ -1,6 +1,10 @@
 name: Weekly Security Audit
 
 on:
+  pull_request:
+  push:
+    branches:
+      - main
   schedule:
     # Mondays at 09:00 Australia/Brisbane (23:00 UTC Sunday, no DST in Brisbane).
     - cron: "0 23 * * 0"
@@ -10,8 +14,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: weekly-security-audit
-  cancel-in-progress: false
+  group: security-audit-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   audit:
@@ -38,6 +42,9 @@ jobs:
       - name: Security regression checks
         run: npm run security:regression
 
+      - name: Unit and API policy tests
+        run: npm run test:unit
+
       - name: Type, lint, and production build
         run: npm run check
 
@@ -46,10 +53,11 @@ jobs:
         shell: bash
         run: |
           {
-            echo "## Tomverse Weekly Security Audit"
+            echo "## Tomverse Security Audit"
             echo ""
             echo "- Dependency audit: see job logs"
             echo "- Security regression script: see job logs"
+            echo "- Unit and API policy tests: see job logs"
             echo "- Lint/type/build gate: see job logs"
             echo ""
             echo "Review this workflow if any prior step failed."

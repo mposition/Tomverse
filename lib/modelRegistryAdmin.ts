@@ -6,8 +6,8 @@ import type { AiModel } from "@/lib/models";
 import {
   AI_PROVIDERS,
   PROVIDER_API_CONFIGURATION,
-  isSafeProviderApiBaseUrl,
-  normalizeApiBaseUrl,
+  isApprovedProviderApiBaseUrl,
+  isApprovedProviderApiKeyEnvName,
 } from "@/lib/modelRegistryShared";
 
 const nullablePositiveInt = (maximum: number) =>
@@ -28,19 +28,6 @@ const modelFields = {
   name: z.string().trim().min(1).max(160),
   apiModel: z.string().trim().min(1).max(240),
   provider: z.enum(AI_PROVIDERS),
-  apiBaseUrl: z
-    .string()
-    .trim()
-    .min(1)
-    .max(500)
-    .transform(normalizeApiBaseUrl)
-    .refine(isSafeProviderApiBaseUrl, "API Base URL must be a public HTTPS URL without credentials, query, or fragment."),
-  apiKeyEnvName: z
-    .string()
-    .trim()
-    .min(1)
-    .max(120)
-    .regex(/^[A-Z][A-Z0-9_]*$/, "Use an uppercase environment variable name."),
   icon: z.string().trim().max(24).default(""),
   bestFor: z.string().trim().max(240).default(""),
   minimumPlan: z.enum(["Guest", "Free", "Pro"]),
@@ -119,12 +106,13 @@ export function registryInputToData(
   Prisma.ModelRegistryEntryUncheckedCreateInput,
   "id" | "createdAt" | "updatedAt"
 > {
+  const providerConfiguration = PROVIDER_API_CONFIGURATION[input.provider];
   return {
     name: input.name,
     apiModel: input.apiModel,
     provider: input.provider,
-    apiBaseUrl: input.apiBaseUrl,
-    apiKeyEnvName: input.apiKeyEnvName,
+    apiBaseUrl: providerConfiguration.baseUrl,
+    apiKeyEnvName: providerConfiguration.apiKeyEnvName,
     icon: input.icon,
     bestFor: input.bestFor,
     minimumPlan: input.minimumPlan,
@@ -158,10 +146,12 @@ export function registryInputToData(
 
 export function validateProviderConfiguration(model: AiModel) {
   const defaults = PROVIDER_API_CONFIGURATION[model.provider];
-  const apiKeyEnvName = model.apiKeyEnvName || defaults.apiKeyEnvName;
   const warnings: string[] = [];
-  if (normalizeApiBaseUrl(model.apiBaseUrl || defaults.baseUrl) !== defaults.baseUrl) {
-    warnings.push("This model uses a custom API Base URL. Verify SDK protocol compatibility before enabling it.");
+  if (!isApprovedProviderApiBaseUrl(model.provider, model.apiBaseUrl || defaults.baseUrl)) {
+    warnings.push("Blocked: the stored API endpoint does not match the provider allowlist.");
+  }
+  if (!isApprovedProviderApiKeyEnvName(model.provider, model.apiKeyEnvName || defaults.apiKeyEnvName)) {
+    warnings.push("Blocked: the stored API-key reference does not match the provider allowlist.");
   }
   if (!model.bestFor.trim()) {
     warnings.push("No user-facing purpose is configured; the model picker will show only the model name.");
@@ -173,10 +163,12 @@ export function validateProviderConfiguration(model: AiModel) {
     warnings.push("Native PDF is enabled while image input is disabled. Confirm this provider combination.");
   }
   return {
-    compatible: isSafeProviderApiBaseUrl(model.apiBaseUrl || defaults.baseUrl),
+    compatible:
+      isApprovedProviderApiBaseUrl(model.provider, model.apiBaseUrl || defaults.baseUrl) &&
+      isApprovedProviderApiKeyEnvName(model.provider, model.apiKeyEnvName || defaults.apiKeyEnvName),
     protocol: defaults.protocol,
-    apiKeyEnvName,
-    apiKeyConfigured: Boolean(process.env[apiKeyEnvName]?.trim()),
+    apiKeyEnvName: defaults.apiKeyEnvName,
+    apiKeyConfigured: Boolean(process.env[defaults.apiKeyEnvName]?.trim()),
     warnings,
   };
 }

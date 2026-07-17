@@ -13,8 +13,8 @@ import {
 } from "@/lib/apiSecurity";
 import type { AiProvider } from "@/lib/models";
 import { getRuntimeModel } from "@/lib/modelRegistry";
+import { PROVIDER_API_CONFIGURATION } from "@/lib/modelRegistryShared";
 import {
-  PROVIDER_API_KEY_ENV,
   PROVIDER_DISPLAY_NAMES,
 } from "@/lib/providerMonitoring";
 import { prisma } from "@/lib/prisma";
@@ -83,9 +83,7 @@ export async function POST(req: Request) {
     if (body.modelId && !model) {
       return NextResponse.json({ error: "Unknown model." }, { status: 400 });
     }
-    const envNames = model?.apiKeyEnvName
-      ? [model.apiKeyEnvName]
-      : PROVIDER_API_KEY_ENV[body.provider] || [];
+    const envNames = [PROVIDER_API_CONFIGURATION[body.provider].apiKeyEnvName];
     const hasKey = envNames.some((name) => isConfigured(process.env[name]));
     const providerMatchesModel = !model || model.provider === body.provider;
 

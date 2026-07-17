@@ -504,10 +504,37 @@ Use a specific tenant GUID or verified tenant domain instead when sign-in must
 be restricted to a single Microsoft Entra directory. Dangerous cross-provider
 email account linking remains disabled for both configurations.
 
-In production, `/api/ready` returns `503` until `NEXTAUTH_SECRET`,
-`OAUTH_TOKEN_ENCRYPTION_KEY`, and `MAINTENANCE_SECRET` are all at least 32
-characters, all three Azure provider variables are configured together, and
-the database answers a `SELECT 1` readiness query.
+In production, `/api/ready` fails closed until PostgreSQL answers `SELECT 1`
+and all launch security checks pass. The required production configuration is:
+
+```text
+NEXTAUTH_SECRET=<at least 32 characters>
+OAUTH_TOKEN_ENCRYPTION_KEY=<at least 32 characters>
+MAINTENANCE_SECRET=<at least 32 characters>
+CSP_MODE=enforce
+STRIPE_WEBHOOK_SECRET=<Stripe signing secret>
+PROVIDER_USAGE_SYNC_SECRET=<at least 32 characters>
+PROVIDER_MODEL_CATALOG_SYNC_SECRET=<optional dedicated 32+ character secret; otherwise MAINTENANCE_SECRET>
+REQUIRE_CLOUDFLARE_ORIGIN_SECRET=true
+CLOUDFLARE_ORIGIN_SECRET=<at least 32 characters>
+TRUSTED_PROXY_IP_HEADER=cf-connecting-ip
+NEXT_PUBLIC_TURNSTILE_SITE_KEY=<site key>
+TURNSTILE_SECRET_KEY=<secret key>
+TURNSTILE_EXPECTED_HOSTNAME=tomverse.app
+SENTRY_DSN=<Sentry DSN>
+# At least one independent operations alert channel:
+OPS_ALERT_SLACK_WEBHOOK_URL=<webhook URL>
+# Public database URLs must use sslmode=verify-full or sslmode=verify-ca.
+DATABASE_URL=<PostgreSQL URL>
+E2E_AUTH_BYPASS=false
+E2E_DISABLE_DATABASE=false
+```
+
+All three Azure provider variables must also be configured together when
+Microsoft login is enabled. Private Railway database hosts (`*.internal`) do
+not require a public TLS query parameter; public database endpoints do. The
+readiness response exposes only aggregate booleans, while the failed check
+names are sent to the independent operational alert path.
 
 Generate a strong value with:
 
@@ -581,11 +608,12 @@ Production guest chat requires Cloudflare Turnstile:
 NEXT_PUBLIC_TURNSTILE_SITE_KEY=your-site-key
 TURNSTILE_SECRET_KEY=your-secret-key
 TURNSTILE_EXPECTED_HOSTNAME=tomverse.app
-TRUSTED_PROXY_IP_HEADER=x-real-ip
+TRUSTED_PROXY_IP_HEADER=cf-connecting-ip
 ```
 
-Railway sets `X-Real-IP` at its trusted edge, so `x-real-ip` is the secure
-default. Do not trust `X-Forwarded-For` directly.
+Production does not trust `X-Real-IP` or `X-Forwarded-For`. Client IP addresses
+are accepted only from Cloudflare after the origin verification header has
+been validated.
 
 Production requests are restricted to the canonical host by default. Add extra
 hosts only when you intentionally serve the same deployment from another domain:
@@ -608,8 +636,10 @@ REQUIRE_CLOUDFLARE_ORIGIN_SECRET=true
 ```
 
 Cloudflare must overwrite `X-Tomverse-Origin-Verify` with that secret before
-forwarding requests. Without a valid origin secret, the application ignores
-`CF-Connecting-IP` and safely falls back to Railway's `X-Real-IP`.
+forwarding requests. Without a valid origin secret, production requests are
+rejected and client IP resolution fails closed to `unknown`. Remove or
+firewall Railway's generated public domain so Cloudflare is the only public
+ingress path.
 
 ## Content Security Policy
 
@@ -734,6 +764,53 @@ Google Search Console. Bing Webmaster Tools can import the verified Google
 property and its sitemap, or the same sitemap can be submitted directly. Keep
 the verification record or meta token in place after registration.
 
+## Administrator security and operational controls
+
+Administrator allowlists and roles are intentionally separate. `ADMIN_EMAILS`
+or `ADMIN_USER_IDS` grants console access; the role lists grant write
+permissions. An authorized identity that is missing from every role list is
+`readonly`, never `owner`:
+
+```text
+ADMIN_EMAILS=owner@example.com,operator@example.com
+ADMIN_OWNER_EMAILS=owner@example.com
+ADMIN_OPS_EMAILS=operator@example.com
+ADMIN_BILLING_EMAILS=
+ADMIN_SUPPORT_EMAILS=
+ADMIN_READONLY_EMAILS=
+```
+
+Optional administrator expiries are enforced with a JSON object. If this
+variable is present but malformed, administrator access fails closed:
+
+```text
+ADMIN_ACCESS_EXPIRY_JSON={"operator@example.com":"2026-12-31T23:59:59.000Z"}
+ADMIN_SESSION_MAX_HOURS=8
+ADMIN_RECENT_AUTH_MINUTES=30
+ADMIN_APPROVAL_TTL_MINUTES=30
+ADMIN_REFUND_APPROVAL_THRESHOLD_CENTS=10000
+```
+
+High-risk operations create an exact, expiring approval request. A different
+administrator must approve it; the original requester then retries the same
+target and payload. Successful execution consumes the approval once. Existing
+administrators must sign in again after the security migration. Recent-auth
+checks use the current database session's creation time, not a user-wide last
+login timestamp.
+
+New admin audit records are serialized into an HMAC chain. A dedicated secret
+is recommended; when omitted, `NEXTAUTH_SECRET` is used:
+
+```text
+ADMIN_AUDIT_INTEGRITY_KEY=<independent random value with at least 32 characters>
+```
+
+The Admin Overview includes scheduled-job delay detection, privacy-request
+deadlines, operational verification checkpoints, and audit-chain verification.
+The Platform tab contains server-enforced emergency switches for AI chat,
+attachments, and public sharing. Disabling sharing still permits revocation,
+and disabling attachments still permits deletion.
+
 ## Scheduled Maintenance
 
 Set the same secret on the web service and the Railway Cron service:
@@ -775,7 +852,10 @@ CHAT_RESERVATION_TTL_SECONDS=300
 
 Do not schedule this job less frequently than every five minutes. The daily
 cleanup also runs the reconciler as a fallback, but it is not a substitute for
-the five-minute Cron service.
+the five-minute Cron service. This five-minute job also runs the Railway, R2,
+PostgreSQL, and Prisma threshold monitor at most once every 15 minutes. Warning
+or error thresholds are sent through the DB-independent operational alert
+channels and appear as a separate scheduled-job row in Admin.
 
 Create a third Railway Cron service for the daily operations summary and
 set its Config File Path to `/railway.provider-usage-sync.json`. It runs at
@@ -795,12 +875,51 @@ channel, or it falls back to `SLACK_WEBHOOK_URL`. Infrastructure reports use
 `INFRASTRUCTURE_SLACK_WEBHOOK_URL` when configured and otherwise use
 `SLACK_WEBHOOK_URL`.
 
+Create a fourth Railway Cron service for Provider model lifecycle and discovery
+monitoring and set its Config File Path to
+`/railway.provider-model-catalog.json`. It runs at 00:00 UTC, which is 10:00
+Australia/Brisbane year-round:
+
+```text
+npm run maintenance:provider-model-catalog
+```
+
+Set `PROVIDER_MODEL_CATALOG_SYNC_URL=https://tomverse.app` on the Cron service.
+It can share the web service's existing `MAINTENANCE_SECRET`, or use a separate
+32+ character `PROVIDER_MODEL_CATALOG_SYNC_SECRET` configured identically on
+the web and Cron services. Provider API keys remain on the web service only;
+the Cron calls the authenticated internal route and never receives those keys.
+
+The monitor queries each configured Provider's fixed, code-allowlisted model
+catalog endpoint, compares the result with `ModelRegistryEntry`, and stores an
+auditable daily snapshot. Explicit lifecycle states such as `legacy` or
+`archived` are reported immediately. A model merely absent from a successful
+catalog response is reported as **missing**, not definitively deprecated;
+`likely_deprecated` requires two consecutive successful missing scans by
+default. This prevents an API outage or account permission difference from
+becoming a false deprecation alert. The threshold can be set from 2 to 7 with:
+
+```text
+PROVIDER_MODEL_MISSING_CONFIRMATION_RUNS=2
+```
+
+Slack delivery uses `PROVIDER_MODEL_CATALOG_SLACK_WEBHOOK_URL`, then
+`OPS_ALERT_SLACK_WEBHOOK_URL`, then `SLACK_WEBHOOK_URL`. Email delivery uses a
+comma-separated `PROVIDER_MODEL_CATALOG_ALERT_EMAIL`, then `OPS_ALERT_EMAIL`,
+then `ADMIN_ALERT_EMAIL`, and requires `RESEND_API_KEY`. A daily report is sent
+even when there are no changes. It separates lifecycle warnings, consecutive
+catalog misses, newly discovered model candidates, missing keys, and Provider
+API failures. Admin Scheduled Jobs records the latest run, result counts,
+delay, and failure state. Admin Alerts also exposes the managed Slack template
+and a safe test payload.
+
 All Tomverse Slack deliveries, including Admin test messages and DB-independent
 operational alerts, automatically include `<!channel>` so the destination channel
 receives an explicit notification.
 
 The Admin **Alerts** tab contains the managed Slack templates for daily
-Infrastructure, daily Provider Usage, and Provider Incident messages. Operators
+Infrastructure, daily Provider Usage, daily Provider Model Catalog, and
+Provider Incident messages. Operators
 with `ops:write` permission can enable or disable scheduled delivery, edit only
 the documented placeholders, and send a test message using live dashboard data.
 Every send, failure, and skipped delivery is written to Admin notification logs.

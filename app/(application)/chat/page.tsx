@@ -770,12 +770,19 @@ export default function Home() {
                 if (cancelled) return;
 
                 const data = await res.json();
+                // Keep the synchronous guard in step with the conversation we
+                // are about to render. The settings request can resolve in the
+                // same frame; without this assignment it may incorrectly
+                // replace a restored multi-model selection with the account's
+                // single default model.
+                currentChatIdRef.current = firstConversation.id;
                 applyConversationSettings(data);
                 completed = true;
                 setCurrentChatId(firstConversation.id);
             } catch (error) {
                 if (!cancelled) {
                     console.error("Failed to open initial conversation:", error);
+                    currentChatIdRef.current = firstConversation.id;
                     applyConversationSettings(firstConversation);
                     completed = true;
                     setCurrentChatId(firstConversation.id);
@@ -912,7 +919,9 @@ export default function Home() {
       };
         setConversations((prev) => [newGuestChat, ...prev]);
       setCurrentChatId(newGuestChat.id);
+      currentChatIdRef.current = newGuestChat.id;
     } else {
+        currentChatIdRef.current = null;
         setCurrentChatId(null);
         setSelectedModels([userDefaultEngine]);
     }
@@ -939,6 +948,7 @@ export default function Home() {
             }
         }
 
+	  currentChatIdRef.current = id;
       setCurrentChatId(id);
 	  setPromptPayload(null);
 

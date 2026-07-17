@@ -14,6 +14,9 @@ export type AdminApprovalRow = {
   requestedByEmail: string | null;
   reviewedByEmail: string | null;
   reviewedAt: string | null;
+  expiresAt: string;
+  consumedAt: string | null;
+  canReview?: boolean;
   createdAt: string;
 };
 
@@ -26,7 +29,9 @@ const dateLabel = (value: string | null) => {
 
 const statusClass = (status: string) => {
   if (status === "approved") return "border-emerald-500/30 bg-emerald-500/10 text-emerald-200";
+  if (status === "consumed") return "border-blue-500/30 bg-blue-500/10 text-blue-200";
   if (status === "rejected") return "border-red-500/30 bg-red-500/10 text-red-200";
+  if (status === "expired") return "border-zinc-700 bg-zinc-800 text-zinc-300";
   return "border-amber-500/30 bg-amber-500/10 text-amber-200";
 };
 
@@ -60,6 +65,9 @@ export function AdminApprovalsPanel() {
     queueMicrotask(() => {
       void load();
     });
+    const refresh = () => void load();
+    window.addEventListener("admin:refresh", refresh);
+    return () => window.removeEventListener("admin:refresh", refresh);
   }, [load]);
 
   const review = async (approvalId: string, status: "approved" | "rejected") => {
@@ -91,6 +99,10 @@ export function AdminApprovalsPanel() {
   };
 
   const pendingCount = rows.filter((row) => row.status === "pending").length;
+  const visibleRows = [
+    ...rows.filter((row) => row.status === "pending" || row.status === "approved"),
+    ...rows.filter((row) => row.status !== "pending" && row.status !== "approved").slice(0, 8),
+  ];
 
   return (
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
@@ -101,7 +113,8 @@ export function AdminApprovalsPanel() {
           </p>
           <h2 className="mt-2 text-2xl font-black text-white">High-risk admin approvals</h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-            Use this queue to record and review high-impact operations before they are executed.
+            A second authorized administrator reviews each exact target and payload. After approval,
+            the original requester must retry the same action before expiry; successful execution consumes it once.
           </p>
         </div>
         <span className="inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-black text-amber-200">
@@ -121,7 +134,7 @@ export function AdminApprovalsPanel() {
             No approval requests yet.
           </div>
         ) : (
-          rows.slice(0, 8).map((row) => (
+          visibleRows.map((row) => (
             <article key={row.id} className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
               <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                 <div>
@@ -136,13 +149,17 @@ export function AdminApprovalsPanel() {
                   <p className="mt-1 text-xs text-zinc-500">
                     Target: {row.targetType} {row.targetId || ""} / Requested by {row.requestedByEmail || "admin"}
                   </p>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    Expires {dateLabel(row.expiresAt)} UTC
+                    {row.consumedAt ? ` / Consumed ${dateLabel(row.consumedAt)} UTC` : ""}
+                  </p>
                   {row.reviewedAt ? (
                     <p className="mt-1 text-xs text-zinc-500">
                       Reviewed {dateLabel(row.reviewedAt)} by {row.reviewedByEmail || "admin"}
                     </p>
                   ) : null}
                 </div>
-                {row.status === "pending" ? (
+                {row.status === "pending" && row.canReview ? (
                   <div className="flex shrink-0 flex-wrap gap-2">
                     <button
                       type="button"
@@ -163,6 +180,14 @@ export function AdminApprovalsPanel() {
                       Reject
                     </button>
                   </div>
+                ) : row.status === "pending" ? (
+                  <span className="rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-400">
+                    Awaiting another authorized administrator
+                  </span>
+                ) : row.status === "approved" ? (
+                  <span className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-200">
+                    Approved · original requester must retry exact action
+                  </span>
                 ) : null}
               </div>
             </article>

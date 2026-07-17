@@ -85,6 +85,7 @@ export function AuthButton() {
     const [isRequestingDeletion, setIsRequestingDeletion] = useState(false);
     const [isAccountDeleteArmed, setIsAccountDeleteArmed] = useState(false);
     const [accountDeletionConsent, setAccountDeletionConsent] = useState(false);
+    const [accountDeletionConfirmation, setAccountDeletionConfirmation] = useState("");
     const [isRequestingRefund, setIsRequestingRefund] = useState(false);
     const [isCancellingSubscription, setIsCancellingSubscription] = useState(false);
     const [subscriptionCancelAtPeriodEnd, setSubscriptionCancelAtPeriodEnd] = useState(false);
@@ -373,7 +374,19 @@ export function AuthButton() {
         setIsDeletingChats(true);
         try {
             const response = await fetch("/api/conversations", { method: "DELETE" });
-            if (!response.ok) throw new Error(`Delete failed: ${response.status}`);
+            const data = (await response.json().catch(() => null)) as
+                | { code?: string; error?: string; scheduledFor?: string }
+                | null;
+            if (!response.ok) {
+                if (response.status === 428 && data?.code === "ACCOUNT_REAUTHENTICATION_REQUIRED") {
+                    dispatchAppToast(t("auth.deleteAccountReauthRequired"), "error");
+                    await signOut({
+                        callbackUrl: `/auth/signin?callbackUrl=${encodeURIComponent(chatCallbackUrl)}`,
+                    });
+                    return;
+                }
+                throw new Error(data?.error || `Delete failed: ${response.status}`);
+            }
             dispatchAppToast(t("auth.deleteAllChatsSuccess"), "success");
             window.location.href = "/chat";
         } catch {
@@ -390,6 +403,10 @@ export function AuthButton() {
             dispatchAppToast(t("auth.deleteAccountConsentRequired"), "error");
             return;
         }
+        if (accountDeletionConfirmation !== "DELETE MY ACCOUNT") {
+            dispatchAppToast(t("auth.deleteAccountConfirmationRequired"), "error");
+            return;
+        }
         if (!isAccountDeleteArmed) {
             setIsAccountDeleteArmed(true);
             dispatchAppToast(t("auth.deleteAccountSecondConfirm"), "info");
@@ -400,7 +417,10 @@ export function AuthButton() {
             const response = await fetch("/api/user/account", {
                 method: "DELETE",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ confirm: true }),
+                body: JSON.stringify({
+                    confirm: true,
+                    confirmationText: accountDeletionConfirmation,
+                }),
             });
             if (!response.ok) throw new Error(`Delete failed: ${response.status}`);
             localStorage.removeItem("tomverse_refund_requested_at");
@@ -639,6 +659,7 @@ export function AuthButton() {
                 <button
                   ref={settingsButtonRef}
                   type="button"
+                  data-testid="account-settings"
                   onClick={() => openSettingsTab("account")}
                   className="flex min-h-11 w-full items-center gap-2 rounded-xl px-3 text-sm font-bold text-zinc-700 transition hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-900"
                 >
@@ -958,10 +979,24 @@ export function AuthButton() {
                                                             {t("auth.deleteAccountConsent")}
                                                         </span>
                                                     </label>
+                                                    <label className="mt-3 block text-xs font-bold text-red-800 dark:text-red-100">
+                                                        {t("auth.deleteAccountConfirmationPrompt")}
+                                                        <input
+                                                            value={accountDeletionConfirmation}
+                                                            onChange={(event) => {
+                                                                setAccountDeletionConfirmation(event.target.value);
+                                                                setIsAccountDeleteArmed(false);
+                                                            }}
+                                                            autoComplete="off"
+                                                            spellCheck={false}
+                                                            className="mt-2 h-10 w-full rounded-lg border border-red-300 bg-white px-3 font-mono text-sm text-zinc-950 outline-none focus:border-red-500 focus:ring-4 focus:ring-red-500/10 dark:border-red-900 dark:bg-zinc-950 dark:text-white"
+                                                            placeholder="DELETE MY ACCOUNT"
+                                                        />
+                                                    </label>
                                                     <button
                                                         type="button"
                                                         onClick={handleDeleteAccount}
-                                                        disabled={isRequestingDeletion || !accountDeletionConsent}
+                                                        disabled={isRequestingDeletion || !accountDeletionConsent || accountDeletionConfirmation !== "DELETE MY ACCOUNT"}
                                                         className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-red-300 bg-red-600 px-3 py-3 text-sm font-black text-white transition-colors hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-800"
                                                     >
                                                         <Trash2 className="h-4 w-4" />

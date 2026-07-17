@@ -8,6 +8,8 @@ import {
 const reviewModels = [
   "gpt-5-4-mini",
   "claude-haiku-4-5",
+  // The stable Tomverse catalog id is intentionally preserved even though the
+  // provider-facing API model has advanced to Gemini 3.1 Flash-Lite.
   "gemini-2-5-flash",
 ];
 

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { AlertTriangle, BookOpen, KeyRound, LifeBuoy, TrendingUp } from "lucide-react";
+import type { ConfiguredAdminAccess } from "@/lib/adminAuth";
 
 export type PromoRiskRow = {
   code: string;
@@ -35,6 +36,7 @@ type Props = {
   promoRisks: PromoRiskRow[];
   slaRows: SlaRow[];
   funnel: FunnelMetrics;
+  adminAccess: ConfiguredAdminAccess[];
 };
 
 const pct = (value: number, total: number) =>
@@ -46,7 +48,7 @@ const dateLabel = (value: string) => {
   return date.toISOString().replace("T", " ").slice(0, 16);
 };
 
-export function AdminRiskPanels({ promoRisks, slaRows, funnel }: Props) {
+export function AdminRiskPanels({ promoRisks, slaRows, funnel, adminAccess }: Props) {
   return (
     <div className="grid gap-4 xl:grid-cols-2">
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
@@ -107,7 +109,7 @@ export function AdminRiskPanels({ promoRisks, slaRows, funnel }: Props) {
             slaRows.map((row) => (
               <Link
                 key={row.id}
-                href="/admin?tab=feedback"
+                href="/admin/feedback"
                 className="rounded-2xl border border-red-500/20 bg-red-500/10 p-4 transition hover:bg-red-500/15"
               >
                 <div className="flex items-center justify-between gap-3">
@@ -210,8 +212,47 @@ export function AdminRiskPanels({ promoRisks, slaRows, funnel }: Props) {
         </div>
         <p className="mt-4 flex items-center gap-2 text-xs text-zinc-500">
           <LifeBuoy className="h-3.5 w-3.5" />
-          Roles are resolved from ADMIN_OWNER_EMAILS, ADMIN_BILLING_EMAILS, ADMIN_OPS_EMAILS, ADMIN_SUPPORT_EMAILS, and ADMIN_READONLY_EMAILS.
+          Roles are resolved from ADMIN_OWNER_EMAILS, ADMIN_BILLING_EMAILS, ADMIN_OPS_EMAILS, ADMIN_SUPPORT_EMAILS, and ADMIN_READONLY_EMAILS. Optional expiries use ADMIN_ACCESS_EXPIRY_JSON.
         </p>
+        <div className="mt-5 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
+          <h3 className="font-black text-white">Configured administrator access</h3>
+          <p className="mt-1 text-xs leading-5 text-zinc-500">
+            Entries without an explicit role are readonly. Role-only emails that are
+            absent from ADMIN_EMAILS are shown as not authorized.
+          </p>
+          <div className="mt-3 grid gap-2">
+            {adminAccess.length === 0 ? (
+              <p className="text-sm text-amber-200">No administrator identities are configured.</p>
+            ) : (
+              adminAccess.map((entry) => (
+                <div
+                  key={`${entry.identityType}:${entry.identity}`}
+                  className="flex flex-col gap-2 rounded-xl border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-xs sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate font-bold text-zinc-200">{entry.identity}</p>
+                    <p className="text-zinc-600">
+                      {entry.identityType}
+                      {entry.expiresAt ? ` · expires ${new Date(entry.expiresAt).toISOString().slice(0, 10)} UTC` : " · no expiry"}
+                    </p>
+                    <p className="text-zinc-600">
+                      Last login {entry.lastLoginAt ? new Date(entry.lastLoginAt).toISOString().replace("T", " ").slice(0, 16) : "never"} · activity {entry.lastActivityAt ? new Date(entry.lastActivityAt).toISOString().replace("T", " ").slice(0, 16) : "none"} UTC
+                    </p>
+                  </div>
+                  <span
+                    className={`w-fit rounded-full border px-2.5 py-1 font-black ${
+                      entry.accessEnabled
+                        ? "border-blue-500/30 bg-blue-500/10 text-blue-200"
+                        : "border-red-500/30 bg-red-500/10 text-red-200"
+                    }`}
+                  >
+                    {entry.role}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
       </section>
     </div>
   );

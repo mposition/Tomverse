@@ -61,11 +61,16 @@ export async function GET(req: Request) {
           process.env.PROVIDER_USAGE_SLACK_WEBHOOK_URL ||
             process.env.SLACK_WEBHOOK_URL
         ),
+        provider_model_catalog_daily: Boolean(
+          process.env.PROVIDER_MODEL_CATALOG_SLACK_WEBHOOK_URL ||
+            process.env.OPS_ALERT_SLACK_WEBHOOK_URL ||
+            process.env.SLACK_WEBHOOK_URL
+        ),
         provider_alert: Boolean(process.env.SLACK_WEBHOOK_URL),
       },
       schedule: {
-        cron: "30 0 * * *",
-        localTime: "10:30 Australia/Brisbane",
+        cron: "0 0 * * * / 30 0 * * *",
+        localTime: "10:00 / 10:30 Australia/Brisbane",
       },
     });
   } catch (error) {
@@ -156,6 +161,33 @@ export async function POST(req: Request) {
               dashboard: await getProviderHealthDashboard(),
               test: true,
             })
+          : body.key === "provider_model_catalog_daily"
+            ? await sendManagedSlackMessage({
+                key: "provider_model_catalog_daily",
+                variables: {
+                  localDate: new Intl.DateTimeFormat("en-AU", {
+                    dateStyle: "medium",
+                    timeZone: "Australia/Brisbane",
+                  }).format(new Date()),
+                  summary:
+                    "*Summary* · checked 11/11 · lifecycle warnings 1 · catalog missing 1 · new candidates 2",
+                  lifecycleRows:
+                    "*Lifecycle warning*\n• Google Gemini `gemini-example`: legacy",
+                  missingRows:
+                    "*Missing from successful provider catalogs*\n• Google Gemini `gemini-example-old`: successful catalog scans missing ×2",
+                  candidateRows:
+                    "*New model candidates found today*\n• OpenAI `gpt-example-new`\n• Anthropic `claude-example-new`",
+                  providerFailures: "*Provider checks not completed*\nNone",
+                  generatedAt: new Date().toISOString(),
+                },
+                webhookUrl:
+                  process.env.PROVIDER_MODEL_CATALOG_SLACK_WEBHOOK_URL ||
+                  process.env.OPS_ALERT_SLACK_WEBHOOK_URL ||
+                  process.env.SLACK_WEBHOOK_URL,
+                targetType: "SlackTemplateTest",
+                targetId: body.key,
+                test: true,
+              })
           : await sendManagedSlackMessage({
               key: "provider_alert",
               variables: {

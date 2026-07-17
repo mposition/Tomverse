@@ -4,6 +4,10 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
+import {
+  adminApprovalErrorResponse,
+  runWithAdminApproval,
+} from "@/lib/adminApproval";
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 import {
@@ -77,7 +81,21 @@ export async function POST(req: Request) {
       );
     }
 
-    const result = body.mode === "execute" ? await cleanupExpiredData() : await dryRunCleanup();
+    const result =
+      body.mode === "execute"
+        ? await runWithAdminApproval(
+            {
+              session,
+              request: req,
+              action: "retention.cleanup.execute",
+              targetType: "Retention",
+              targetId: "expired-data",
+              payload: body,
+              reason: "Execute destructive retention cleanup.",
+            },
+            cleanupExpiredData
+          )
+        : await dryRunCleanup();
     const run = await prisma.adminRetentionRun.create({
       data: {
         mode: body.mode,
@@ -100,6 +118,8 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ success: true, run });
   } catch (error) {
+    const approvalResponse = adminApprovalErrorResponse(error);
+    if (approvalResponse) return approvalResponse;
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
     console.error("Admin cleanup run failed:", error);

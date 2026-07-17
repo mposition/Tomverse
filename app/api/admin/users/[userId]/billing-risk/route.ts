@@ -4,6 +4,10 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
+import {
+  adminApprovalErrorResponse,
+  runWithAdminApproval,
+} from "@/lib/adminApproval";
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import {
@@ -62,21 +66,33 @@ export async function PATCH(req: Request, context: RouteContext) {
       );
     }
 
-    const updated = await prisma.user.update({
-      where: { id: userId },
-      data: {
-        billingRiskStatus: "normal",
-        billingRiskReason: null,
-        billingRiskAt: null,
+    const updated = await runWithAdminApproval(
+      {
+        session,
+        request: req,
+        action: "billing_risk.release_hold",
+        targetType: "User",
+        targetId: userId,
+        payload: body,
+        reason: body.reason,
       },
-      select: {
-        billingRiskStatus: true,
-        billingRiskReason: true,
-        billingRiskAt: true,
-        creditDebtCredits: true,
-        creditDebtCostMicroUsd: true,
-      },
-    });
+      () =>
+        prisma.user.update({
+          where: { id: userId },
+          data: {
+            billingRiskStatus: "normal",
+            billingRiskReason: null,
+            billingRiskAt: null,
+          },
+          select: {
+            billingRiskStatus: true,
+            billingRiskReason: true,
+            billingRiskAt: true,
+            creditDebtCredits: true,
+            creditDebtCostMicroUsd: true,
+          },
+        })
+    );
 
     await writeAdminAuditLog({
       session,
@@ -102,6 +118,8 @@ export async function PATCH(req: Request, context: RouteContext) {
       },
     });
   } catch (error) {
+    const approvalResponse = adminApprovalErrorResponse(error);
+    if (approvalResponse) return approvalResponse;
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
     console.error("Admin billing-risk update failed:", error);

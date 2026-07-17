@@ -80,7 +80,7 @@ test("mobile analytics settings shortcut hides while the chat keyboard is active
   const textarea = page.getByTestId("chat-textarea");
   await textarea.fill("Keyboard overlap regression");
   await expect(settings).toBeHidden();
-  await expect(page.getByRole("button", { name: "Send", exact: true })).toBeVisible();
+  await expect(page.getByTestId("chat-send-button")).toBeVisible();
 
   await textarea.evaluate((element) => element.blur());
   await expect(settings).toBeVisible();

@@ -129,6 +129,7 @@ export function ModelFinder({ enabled, userId, onComplete }: ModelFinderProps) {
     if (!enabled || !userId || requestedUserIdRef.current === userId) return;
     requestedUserIdRef.current = userId;
     let cancelled = false;
+    let completed = false;
 
     fetch("/api/user/model-finder", { cache: "no-store" })
       .then(async (response) => {
@@ -140,6 +141,7 @@ export function ModelFinder({ enabled, userId, onComplete }: ModelFinderProps) {
       })
       .then((data) => {
         if (cancelled) return;
+        completed = true;
         if (data.variant === "control" || data.variant === "finder") {
           window.localStorage.setItem(VARIANT_STORAGE_KEY, data.variant);
         }
@@ -155,11 +157,19 @@ export function ModelFinder({ enabled, userId, onComplete }: ModelFinderProps) {
         }
       })
       .catch((loadError) => {
+        if (!cancelled && requestedUserIdRef.current === userId) {
+          requestedUserIdRef.current = null;
+        }
         console.error("Failed to load model finder:", loadError);
       });
 
     return () => {
       cancelled = true;
+      // `enabled` can briefly change while session settings settle. Do not let
+      // a cancelled request permanently suppress onboarding for this user.
+      if (!completed && requestedUserIdRef.current === userId) {
+        requestedUserIdRef.current = null;
+      }
     };
   }, [enabled, reset, userId]);
 

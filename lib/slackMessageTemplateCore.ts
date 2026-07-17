@@ -1,6 +1,7 @@
 export const SLACK_TEMPLATE_KEYS = [
   "infrastructure_daily",
   "provider_usage_daily",
+  "provider_model_catalog_daily",
   "provider_alert",
 ] as const;
 
@@ -64,6 +65,25 @@ export const DEFAULT_SLACK_TEMPLATES: SlackTemplateDefinition[] = [
       "providerRows",
       "failed",
       "skipped",
+      "generatedAt",
+    ],
+  },
+  {
+    key: "provider_model_catalog_daily",
+    name: "Daily provider model catalog report",
+    description:
+      "Current model lifecycle warnings, consecutive catalog misses, and newly available provider models sent daily at 10:00 Australia/Brisbane.",
+    enabled: true,
+    titleTemplate: "Tomverse model catalog report · {{localDate}}",
+    bodyTemplate:
+      "{{summary}}\n{{lifecycleRows}}\n{{missingRows}}\n{{candidateRows}}\n{{providerFailures}}\nGenerated {{generatedAt}}",
+    allowedVariables: [
+      "localDate",
+      "summary",
+      "lifecycleRows",
+      "missingRows",
+      "candidateRows",
+      "providerFailures",
       "generatedAt",
     ],
   },

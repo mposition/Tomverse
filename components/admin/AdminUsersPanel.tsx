@@ -1,6 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronLeft,
   ChevronRight,
@@ -28,6 +30,13 @@ type Props = {
   stats: AdminUserStats;
   currentUserId: string;
   conversationCount: number;
+  initialDetailUserId?: string;
+  detailMode?: "modal" | "page";
+  initialSegment?: AdminUserSegment;
+  initialQuery?: string;
+  initialPageSize?: PageSize;
+  initialPageIndex?: number;
+  initialPageCursors?: Array<string | null>;
 };
 
 type PageSize = 30 | 50;
@@ -50,6 +59,16 @@ type AdminUserDetail = {
   billingRiskStatus: string;
   billingRiskReason: string | null;
   billingRiskAt: string | null;
+  accountStatus: string;
+  accountSuspendedAt: string | null;
+  accountSuspendedUntil: string | null;
+  accountSuspensionReason: string | null;
+  aiUsageRestricted: boolean;
+  aiUsageRestrictedAt: string | null;
+  aiUsageRestrictedUntil: string | null;
+  aiUsageRestrictionReason: string | null;
+  securityIncidentNote: string | null;
+  lastLoginAt: string | null;
   settings: {
     language: string;
     theme: string;
@@ -197,28 +216,41 @@ export function AdminUsersPanel({
   stats,
   currentUserId,
   conversationCount,
+  initialDetailUserId,
+  detailMode = "modal",
+  initialSegment = "all",
+  initialQuery = "",
+  initialPageSize = 30,
+  initialPageIndex = 0,
+  initialPageCursors = [null],
 }: Props) {
+  const router = useRouter();
   const [items, setItems] = useState(rows);
   const [nextCursor, setNextCursor] = useState(initialNextCursor);
   const [statsSnapshot, setStatsSnapshot] = useState(stats);
-  const [query, setQuery] = useState("");
-  const [appliedQuery, setAppliedQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery);
+  const [appliedQuery, setAppliedQuery] = useState(initialQuery);
   const [isSearching, setIsSearching] = useState(false);
   const [detailUser, setDetailUser] = useState<AdminUserDetail | null>(null);
   const [detailError, setDetailError] = useState("");
   const [loadingDetailId, setLoadingDetailId] = useState<string | null>(null);
   const [billingAction, setBillingAction] = useState<string | null>(null);
   const [adjustPlan, setAdjustPlan] = useState<"Free" | "Pro" | "Max">("Free");
+  const [adjustPeriodEnd, setAdjustPeriodEnd] = useState<string | null>(null);
   const [adjustReason, setAdjustReason] = useState("");
   const [adjustConfirm, setAdjustConfirm] = useState("");
   const [riskReleaseReason, setRiskReleaseReason] = useState("");
   const [riskReleaseConfirm, setRiskReleaseConfirm] = useState("");
   const [creditRefundReasons, setCreditRefundReasons] = useState<Record<string, string>>({});
   const [creditRefundConfirms, setCreditRefundConfirms] = useState<Record<string, string>>({});
-  const [segment, setSegment] = useState<AdminUserSegment>("all");
-  const [pageSize, setPageSize] = useState<PageSize>(30);
-  const [pageIndex, setPageIndex] = useState(0);
-  const [pageCursors, setPageCursors] = useState<Array<string | null>>([null]);
+  const [securityReason, setSecurityReason] = useState("");
+  const [securityUntil, setSecurityUntil] = useState("");
+  const [securityIncidentNote, setSecurityIncidentNote] = useState("");
+  const [segment, setSegment] = useState<AdminUserSegment>(initialSegment);
+  const [pageSize, setPageSize] = useState<PageSize>(initialPageSize);
+  const [pageIndex, setPageIndex] = useState(initialPageIndex);
+  const [pageCursors, setPageCursors] = useState<Array<string | null>>(initialPageCursors);
+  const initialDetailLoadedRef = useRef<string | null>(null);
 
   const title = useMemo(
     () => (appliedQuery ? "Search results" : segmentLabels[segment]),
@@ -274,6 +306,17 @@ export function AdminUsersPanel({
       setPageIndex(targetPageIndex);
       setPageCursors(cursorHistory);
       if (data.stats) setStatsSnapshot(data.stats);
+      if (detailMode !== "page") {
+        const url = new URLSearchParams();
+        if (normalized) url.set("q", normalized);
+        if (requestedSegment !== "all") url.set("segment", requestedSegment);
+        if (requestedTake !== 30) url.set("take", String(requestedTake));
+        if (cursor) url.set("cursor", cursor);
+        if (targetPageIndex > 0) url.set("page", String(targetPageIndex + 1));
+        const serializedCursors = cursorHistory.map((value) => value || "_").join(",");
+        if (serializedCursors !== "_") url.set("cursors", serializedCursors);
+        router.replace(`/admin/users${url.size ? `?${url.toString()}` : ""}`, { scroll: false });
+      }
     } catch (error) {
       dispatchAppToast(
         error instanceof Error ? error.message : "Failed to search users.",
@@ -337,7 +380,7 @@ export function AdminUsersPanel({
     });
   };
 
-  const loadUserDetail = async (userId: string) => {
+  const loadUserDetail = useCallback(async (userId: string) => {
     setDetailError("");
     setLoadingDetailId(userId);
     try {
@@ -359,7 +402,7 @@ export function AdminUsersPanel({
     } finally {
       setLoadingDetailId(null);
     }
-  };
+  }, []);
 
   const copyUserContext = async (user: AdminUserDetail) => {
     const text = [
@@ -416,6 +459,12 @@ export function AdminUsersPanel({
     if (billingAction) return;
     setBillingAction("adjust");
     try {
+      const periodEnd =
+        adjustPlan === "Free"
+          ? null
+          : adjustPeriodEnd ||
+            new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+      if (adjustPlan !== "Free" && !adjustPeriodEnd) setAdjustPeriodEnd(periodEnd);
       const response = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/plan-adjust`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -425,10 +474,7 @@ export function AdminUsersPanel({
           confirmText: adjustConfirm,
           subscriptionStatus: "manually_adjusted",
           billingInterval: adjustPlan === "Free" ? null : "monthly",
-          periodEnd:
-            adjustPlan === "Free"
-              ? null
-              : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+          periodEnd,
         }),
       });
       const data = (await response.json().catch(() => null)) as
@@ -440,6 +486,7 @@ export function AdminUsersPanel({
       setDetailUser((current) => (current ? { ...current, ...data.user } : current));
       setAdjustReason("");
       setAdjustConfirm("");
+      setAdjustPeriodEnd(null);
       dispatchAppToast("User plan adjusted.", "success");
     } catch (error) {
       dispatchAppToast(
@@ -529,8 +576,77 @@ export function AdminUsersPanel({
     }
   };
 
+  const applySecurityAction = async (
+    userId: string,
+    action:
+      | "suspend"
+      | "unsuspend"
+      | "revoke_sessions"
+      | "restrict_ai"
+      | "unrestrict_ai"
+      | "unlink_oauth",
+    provider?: string
+  ) => {
+    if (billingAction) return;
+    if (securityReason.trim().length < 5) {
+      dispatchAppToast("Enter an audit reason of at least five characters.", "error");
+      return;
+    }
+    setBillingAction(`security:${action}${provider ? `:${provider}` : ""}`);
+    try {
+      const response = await fetch(
+        `/api/admin/users/${encodeURIComponent(userId)}/security`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action,
+            reason: securityReason,
+            until: securityUntil ? new Date(securityUntil).toISOString() : null,
+            incidentNote: securityIncidentNote.trim() || null,
+            provider: provider || null,
+          }),
+        }
+      );
+      const data = (await response.json().catch(() => null)) as
+        | {
+            user?: Partial<AdminUserDetail>;
+            error?: string;
+            approvalId?: string;
+          }
+        | null;
+      if (!response.ok || !data?.user) {
+        throw new Error(
+          data?.approvalId
+            ? `${data.error || "A second administrator must approve this action."} Approval ${data.approvalId}`
+            : data?.error || "Security control failed."
+        );
+      }
+      await loadUserDetail(userId);
+      setSecurityReason("");
+      setSecurityUntil("");
+      setSecurityIncidentNote("");
+      dispatchAppToast("User security control applied.", "success");
+    } catch (error) {
+      dispatchAppToast(
+        error instanceof Error ? error.message : "Security control failed.",
+        "error"
+      );
+    } finally {
+      setBillingAction(null);
+    }
+  };
+
+  useEffect(() => {
+    if (!initialDetailUserId || initialDetailLoadedRef.current === initialDetailUserId) return;
+    initialDetailLoadedRef.current = initialDetailUserId;
+    void loadUserDetail(initialDetailUserId);
+  }, [initialDetailUserId, loadUserDetail]);
+
   return (
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-4 sm:p-5">
+      {detailMode !== "page" ? (
+      <>
       <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4 sm:p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -713,18 +829,13 @@ export function AdminUsersPanel({
                   <div className="font-bold text-zinc-100">
                     {user.name || "Name not provided"}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => loadUserDetail(user.id)}
-                    disabled={loadingDetailId === user.id}
-                    className="mt-1 inline-flex cursor-pointer items-center gap-1.5 text-left text-xs font-bold text-blue-300 underline-offset-4 transition hover:text-blue-200 hover:underline disabled:cursor-wait disabled:opacity-60"
+                  <Link
+                    href={`/admin/users/${encodeURIComponent(user.id)}`}
+                    className="mt-1 inline-flex cursor-pointer items-center gap-1.5 text-left text-xs font-bold text-blue-300 underline-offset-4 transition hover:text-blue-200 hover:underline"
                     aria-label={`View details for ${user.email || user.name || "user"}`}
                   >
-                    {loadingDetailId === user.id ? (
-                      <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
-                    ) : null}
                     {user.email || "No email · View details"}
-                  </button>
+                  </Link>
                 </td>
                 <td className="px-3 py-3">
                   <span className={`rounded-full border px-2.5 py-1 text-xs font-black ${planClass(user.plan)}`}>
@@ -807,9 +918,16 @@ export function AdminUsersPanel({
         </button>
       </nav>
 
+      </>
+      ) : loadingDetailId ? (
+        <div className="flex min-h-80 items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-900/50 text-sm text-zinc-500">
+          <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading customer detail
+        </div>
+      ) : null}
+
       {detailUser ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-          <div className="max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-3xl border border-zinc-800 bg-zinc-950 shadow-2xl shadow-black">
+        <div className={detailMode === "page" ? "relative" : "fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"}>
+          <div className={detailMode === "page" ? "w-full overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950" : "max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-3xl border border-zinc-800 bg-zinc-950 shadow-2xl shadow-black"}>
             <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-zinc-800 bg-zinc-950/95 p-5 backdrop-blur">
               <div>
                 <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-300">
@@ -833,7 +951,7 @@ export function AdminUsersPanel({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setDetailUser(null)}
+                  onClick={() => detailMode === "page" ? router.push("/admin/users") : setDetailUser(null)}
                   className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-xl border border-zinc-700 text-zinc-300 hover:bg-zinc-800"
                   aria-label="Close user detail"
                 >
@@ -902,6 +1020,114 @@ export function AdminUsersPanel({
             </div>
 
             <div className="grid gap-4 px-5 pb-5 lg:grid-cols-2">
+              <section className={`rounded-2xl border p-4 lg:col-span-2 ${
+                detailUser.accountStatus === "suspended" || detailUser.aiUsageRestricted
+                  ? "border-amber-500/30 bg-amber-500/10"
+                  : "border-zinc-800 bg-zinc-900/60"
+              }`}>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h4 className="font-black text-white">Account security controls</h4>
+                    <p className="mt-1 text-xs text-zinc-400">
+                      Last login: {dateTimeLabel(detailUser.lastLoginAt)} UTC · Active sessions: {detailUser._count.sessions}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2 text-xs font-black">
+                    <span className={`rounded-full border px-2.5 py-1 ${
+                      detailUser.accountStatus === "suspended"
+                        ? "border-red-500/30 bg-red-500/10 text-red-200"
+                        : "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+                    }`}>
+                      Account {detailUser.accountStatus}
+                    </span>
+                    <span className={`rounded-full border px-2.5 py-1 ${
+                      detailUser.aiUsageRestricted
+                        ? "border-amber-500/30 bg-amber-500/10 text-amber-200"
+                        : "border-zinc-700 text-zinc-300"
+                    }`}>
+                      AI {detailUser.aiUsageRestricted ? "restricted" : "allowed"}
+                    </span>
+                  </div>
+                </div>
+                {detailUser.accountSuspensionReason || detailUser.aiUsageRestrictionReason ? (
+                  <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-950 p-3 text-xs text-zinc-400">
+                    {detailUser.accountSuspensionReason ? (
+                      <p>Suspension: {detailUser.accountSuspensionReason} · until {dateTimeLabel(detailUser.accountSuspendedUntil)} UTC</p>
+                    ) : null}
+                    {detailUser.aiUsageRestrictionReason ? (
+                      <p>AI restriction: {detailUser.aiUsageRestrictionReason} · until {dateTimeLabel(detailUser.aiUsageRestrictedUntil)} UTC</p>
+                    ) : null}
+                    {detailUser.securityIncidentNote ? <p className="mt-1 text-zinc-300">Incident note: {detailUser.securityIncidentNote}</p> : null}
+                  </div>
+                ) : null}
+                <div className="mt-4 grid gap-2 md:grid-cols-3">
+                  <input
+                    value={securityReason}
+                    onChange={(event) => setSecurityReason(event.target.value)}
+                    placeholder="Required audit reason"
+                    className="h-10 rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-sm text-white outline-none focus:border-blue-400 md:col-span-2"
+                  />
+                  <input
+                    type="datetime-local"
+                    value={securityUntil}
+                    onChange={(event) => setSecurityUntil(event.target.value)}
+                    aria-label="Optional security control expiry"
+                    className="h-10 rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-sm text-white outline-none focus:border-blue-400"
+                  />
+                  <input
+                    value={securityIncidentNote}
+                    onChange={(event) => setSecurityIncidentNote(event.target.value)}
+                    placeholder="Optional security incident note"
+                    className="h-10 rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-sm text-white outline-none focus:border-blue-400 md:col-span-3"
+                  />
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => applySecurityAction(detailUser.id, detailUser.accountStatus === "suspended" ? "unsuspend" : "suspend")}
+                    disabled={Boolean(billingAction)}
+                    className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-black text-red-100 hover:bg-red-500/20 disabled:opacity-50"
+                  >
+                    {detailUser.accountStatus === "suspended" ? "Unsuspend account" : "Suspend account"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applySecurityAction(detailUser.id, detailUser.aiUsageRestricted ? "unrestrict_ai" : "restrict_ai")}
+                    disabled={Boolean(billingAction)}
+                    className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-black text-amber-100 hover:bg-amber-500/20 disabled:opacity-50"
+                  >
+                    {detailUser.aiUsageRestricted ? "Restore AI usage" : "Restrict AI usage"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applySecurityAction(detailUser.id, "revoke_sessions")}
+                    disabled={Boolean(billingAction)}
+                    className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-xs font-black text-white hover:bg-zinc-800 disabled:opacity-50"
+                  >
+                    Revoke all sessions
+                  </button>
+                </div>
+                {detailUser.accounts.length > 0 ? (
+                  <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-zinc-800 pt-3">
+                    <span className="text-xs font-bold text-zinc-500">Unlink OAuth (owner + two-person approval):</span>
+                    {detailUser.accounts.map((account) => (
+                      <button
+                        key={`unlink-${account.provider}-${account.providerAccountId}`}
+                        type="button"
+                        onClick={() => applySecurityAction(detailUser.id, "unlink_oauth", account.provider)}
+                        disabled={Boolean(billingAction)}
+                        className="rounded-lg border border-red-500/30 px-2.5 py-1.5 text-xs font-black text-red-200 hover:bg-red-500/10 disabled:opacity-50"
+                      >
+                        Unlink {account.provider}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                <p className="mt-3 text-xs text-zinc-500">
+                  High-risk controls require a recent administrator login. Sign in again if the console requests reauthentication.
+                </p>
+              </section>
+
               <section className={`rounded-2xl border p-4 lg:col-span-2 ${
                 detailUser.billingRiskStatus === "disputed_hold" || detailUser.creditDebtCredits > 0
                   ? "border-red-500/30 bg-red-500/10"
@@ -1134,7 +1360,10 @@ export function AdminUsersPanel({
                 <div className="mt-3 grid gap-3 md:grid-cols-[10rem_1fr_10rem_auto]">
                   <select
                     value={adjustPlan}
-                    onChange={(event) => setAdjustPlan(event.target.value as "Free" | "Pro" | "Max")}
+                    onChange={(event) => {
+                      setAdjustPlan(event.target.value as "Free" | "Pro" | "Max");
+                      setAdjustPeriodEnd(null);
+                    }}
                     className="h-11 rounded-xl border border-zinc-800 bg-zinc-950 px-3 text-sm font-bold text-white outline-none focus:border-blue-500"
                   >
                     <option value="Free">Free</option>

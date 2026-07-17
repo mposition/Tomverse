@@ -91,6 +91,6 @@ test("retired models stay out of the user model catalogue", async ({ page }) => 
   await expect(
     page
       .getByRole("dialog", { name: "Select model" })
-      .getByRole("button", { name: /Gemini 3\.1 Pro available/ })
+      .getByRole("button", { name: /Gemini 3\.1 Pro/ })
   ).toBeVisible();
 });

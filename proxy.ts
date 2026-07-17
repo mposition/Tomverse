@@ -7,6 +7,10 @@ import {
   hasRequiredOriginSecret,
   isAllowedRequestHost,
 } from "@/lib/originProtection";
+import {
+  hasValidMutationOrigin,
+  requiresMutationOriginCheck,
+} from "@/lib/requestOrigin";
 
 const blockedOriginResponse = () =>
   new NextResponse("Misdirected Request", {
@@ -16,6 +20,18 @@ const blockedOriginResponse = () =>
       "X-Content-Type-Options": "nosniff",
     },
   });
+
+const blockedMutationOriginResponse = () =>
+  NextResponse.json(
+    { error: "Cross-site mutation request rejected.", code: "INVALID_REQUEST_ORIGIN" },
+    {
+      status: 403,
+      headers: {
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+      },
+    }
+  );
 
 export function proxy(request: NextRequest) {
   if (
@@ -30,6 +46,14 @@ export function proxy(request: NextRequest) {
     !hasRequiredOriginSecret(request.headers)
   ) {
     return blockedOriginResponse();
+  }
+
+  if (
+    request.nextUrl.pathname.startsWith("/api/") &&
+    requiresMutationOriginCheck(request.method, request.nextUrl.pathname) &&
+    !hasValidMutationOrigin(request)
+  ) {
+    return blockedMutationOriginResponse();
   }
 
   const isStaticMarketingRequest = isStaticMarketingPathname(

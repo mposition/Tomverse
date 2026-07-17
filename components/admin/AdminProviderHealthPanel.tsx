@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import {
   AlertCircle,
@@ -311,6 +312,12 @@ function ProviderRow({
                   <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
                 </a>
               </h2>
+              <Link
+                href={`/admin/providers/${provider.provider}`}
+                className="rounded-full border border-zinc-700 bg-zinc-900 px-2.5 py-1 text-xs font-black text-zinc-300 transition hover:border-blue-500/40 hover:text-blue-200"
+              >
+                Workspace
+              </Link>
               <button
                 type="button"
                 onClick={() => setStatusOpen((open) => !open)}
@@ -927,9 +934,11 @@ function PanelLabel({ children }: { children: React.ReactNode }) {
 export function AdminProviderHealthPanel({
   initialDashboard,
   canManageCredits,
+  providerFilter,
 }: {
   initialDashboard: ProviderHealthDashboard;
   canManageCredits: boolean;
+  providerFilter?: AiProvider;
 }) {
   const [dashboard, setDashboard] = useState(initialDashboard);
   const [refreshing, setRefreshing] = useState(false);
@@ -948,7 +957,11 @@ export function AdminProviderHealthPanel({
         throw new Error(`Provider API returned ${response.status}.`);
       }
       const nextDashboard = (await response.json()) as ProviderHealthDashboard;
-      setDashboard(nextDashboard);
+      setDashboard(
+        providerFilter
+          ? { ...nextDashboard, providers: nextDashboard.providers.filter((row) => row.provider === providerFilter) }
+          : nextDashboard
+      );
       setError(null);
     } catch (refreshError) {
       setError(
@@ -959,7 +972,7 @@ export function AdminProviderHealthPanel({
     } finally {
       setRefreshing(false);
     }
-  }, []);
+  }, [providerFilter]);
 
   const saveProviderCredit = useCallback<SaveCredit>(
     async (provider, creditUsd, note) => {
@@ -984,7 +997,12 @@ export function AdminProviderHealthPanel({
               : `Credit API returned ${response.status}.`
           );
         }
-        setDashboard(data as ProviderHealthDashboard);
+        const nextDashboard = data as ProviderHealthDashboard;
+        setDashboard(
+          providerFilter
+            ? { ...nextDashboard, providers: nextDashboard.providers.filter((row) => row.provider === providerFilter) }
+            : nextDashboard
+        );
         setError(null);
         return true;
       } catch (saveError) {
@@ -998,7 +1016,7 @@ export function AdminProviderHealthPanel({
         setSavingProvider(null);
       }
     },
-    []
+    [providerFilter]
   );
 
   const saveProviderBilling = useCallback<SaveBilling>(
@@ -1028,7 +1046,12 @@ export function AdminProviderHealthPanel({
               : `Billing profile API returned ${response.status}.`
           );
         }
-        setDashboard(data as ProviderHealthDashboard);
+        const nextDashboard = data as ProviderHealthDashboard;
+        setDashboard(
+          providerFilter
+            ? { ...nextDashboard, providers: nextDashboard.providers.filter((row) => row.provider === providerFilter) }
+            : nextDashboard
+        );
         setError(null);
         return true;
       } catch (saveError) {
@@ -1042,7 +1065,7 @@ export function AdminProviderHealthPanel({
         setSavingBillingProvider(null);
       }
     },
-    []
+    [providerFilter]
   );
 
   useEffect(() => {
@@ -1052,6 +1075,7 @@ export function AdminProviderHealthPanel({
     const initialRefresh = window.setTimeout(refreshWhenVisible, 0);
     const interval = window.setInterval(refreshWhenVisible, REFRESH_INTERVAL_MS);
     window.addEventListener("tomverse:provider-health-refresh", refreshWhenVisible);
+    window.addEventListener("admin:refresh", refreshWhenVisible);
     window.addEventListener("focus", refreshWhenVisible);
     return () => {
       window.clearInterval(interval);
@@ -1060,6 +1084,7 @@ export function AdminProviderHealthPanel({
         "tomverse:provider-health-refresh",
         refreshWhenVisible
       );
+      window.removeEventListener("admin:refresh", refreshWhenVisible);
       window.removeEventListener("focus", refreshWhenVisible);
     };
   }, [refreshDashboard]);

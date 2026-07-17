@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Archive,
   CheckCircle2,
@@ -31,13 +32,19 @@ type EnvironmentStatus = {
 
 type AdminModel = AiModel & { environment: EnvironmentStatus };
 
+type RegistrySecurityFinding = {
+  id: string;
+  provider: string;
+  issue: "unsupported_provider" | "api_base_url_mismatch" | "api_key_env_mismatch";
+  configuredValue: string;
+  expectedValue: string | null;
+};
+
 type FormState = {
   id: string;
   name: string;
   apiModel: string;
   provider: AiProvider;
-  apiBaseUrl: string;
-  apiKeyEnvName: string;
   icon: string;
   bestFor: string;
   minimumPlan: ModelMinimumPlan;
@@ -67,8 +74,6 @@ const emptyForm = (): FormState => ({
   name: "",
   apiModel: "",
   provider: "openai",
-  apiBaseUrl: PROVIDER_API_CONFIGURATION.openai.baseUrl,
-  apiKeyEnvName: PROVIDER_API_CONFIGURATION.openai.apiKeyEnvName,
   icon: "",
   bestFor: "",
   minimumPlan: "Guest",
@@ -98,8 +103,6 @@ const formFromModel = (model: AdminModel): FormState => ({
   name: model.name,
   apiModel: model.apiModel,
   provider: model.provider,
-  apiBaseUrl: model.apiBaseUrl || PROVIDER_API_CONFIGURATION[model.provider].baseUrl,
-  apiKeyEnvName: model.apiKeyEnvName || PROVIDER_API_CONFIGURATION[model.provider].apiKeyEnvName,
   icon: model.icon,
   bestFor: model.bestFor,
   minimumPlan: model.minimumPlan,
@@ -140,9 +143,18 @@ const duplicateRegistryId = (sourceId: string, models: AdminModel[]) => {
 };
 
 export function AdminModelRegistryPanel() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const requestedProvider = searchParams.get("provider");
   const [models, setModels] = useState<AdminModel[]>([]);
-  const [query, setQuery] = useState("");
-  const [provider, setProvider] = useState<"all" | AiProvider>("all");
+  const [securityFindings, setSecurityFindings] = useState<RegistrySecurityFinding[]>([]);
+  const [query, setQuery] = useState(() => searchParams.get("q") || "");
+  const [provider, setProvider] = useState<"all" | AiProvider>(() =>
+    requestedProvider && AI_PROVIDERS.includes(requestedProvider as AiProvider)
+      ? (requestedProvider as AiProvider)
+      : "all"
+  );
   const [editingId, setEditingId] = useState<string | "new" | null>(null);
   const [copySourceId, setCopySourceId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
@@ -154,9 +166,14 @@ export function AdminModelRegistryPanel() {
     setLoading(true);
     try {
       const response = await fetch("/api/admin/models", { cache: "no-store" });
-      const data = (await response.json().catch(() => null)) as { models?: AdminModel[]; error?: string } | null;
+      const data = (await response.json().catch(() => null)) as {
+        models?: AdminModel[];
+        securityFindings?: RegistrySecurityFinding[];
+        error?: string;
+      } | null;
       if (!response.ok || !data?.models) throw new Error(data?.error || "Failed to load model registry.");
       setModels(data.models);
+      setSecurityFindings(data.securityFindings || []);
     } catch (error) {
       dispatchAppToast(error instanceof Error ? error.message : "Failed to load model registry.", "error");
     } finally {
@@ -180,25 +197,25 @@ export function AdminModelRegistryPanel() {
     });
   }, [models, provider, query]);
 
+  const updateLocation = (nextQuery: string, nextProvider: typeof provider) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (nextQuery.trim()) params.set("q", nextQuery);
+    else params.delete("q");
+    if (nextProvider === "all") params.delete("provider");
+    else params.set("provider", nextProvider);
+    const suffix = params.toString();
+    router.replace(suffix ? `${pathname}?${suffix}` : pathname, { scroll: false });
+  };
+
   const setField = <K extends keyof FormState>(key: K, value: FormState[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
     setValidation(null);
   };
 
   const selectProvider = (nextProvider: AiProvider) => {
-    const previousDefault = PROVIDER_API_CONFIGURATION[form.provider];
-    const nextDefault = PROVIDER_API_CONFIGURATION[nextProvider];
     setForm((current) => ({
       ...current,
       provider: nextProvider,
-      apiBaseUrl:
-        !current.apiBaseUrl || current.apiBaseUrl === previousDefault.baseUrl
-          ? nextDefault.baseUrl
-          : current.apiBaseUrl,
-      apiKeyEnvName:
-        !current.apiKeyEnvName || current.apiKeyEnvName === previousDefault.apiKeyEnvName
-          ? nextDefault.apiKeyEnvName
-          : current.apiKeyEnvName,
     }));
     setValidation(null);
   };
@@ -310,7 +327,7 @@ export function AdminModelRegistryPanel() {
           <p className="text-xs font-black uppercase tracking-[0.2em] text-blue-300">DB Model Registry</p>
           <h2 className="mt-2 text-2xl font-black text-white">Model catalogue and API configuration</h2>
           <p className="mt-2 max-w-4xl text-sm leading-6 text-zinc-400">
-            Add and edit model identity, endpoint, plan access, credits, capabilities, context, and token prices without a code deployment. Secrets remain in Railway environment variables and are never stored here.
+            Add and edit model identity, plan access, credits, capabilities, context, and token prices without a code deployment. Provider endpoints and API-key environment names are fixed in server code and cannot be changed from this console.
           </p>
         </div>
         <div className="flex gap-2">
@@ -323,12 +340,45 @@ export function AdminModelRegistryPanel() {
         </div>
       </div>
 
+      {securityFindings.length > 0 ? (
+        <div className="border-b border-red-900/60 bg-red-950/40 p-4 text-sm text-red-100" role="alert">
+          <p className="font-black">Blocked model-registry connection overrides detected</p>
+          <p className="mt-1 text-red-200/80">
+            {securityFindings.length} stored value{securityFindings.length === 1 ? "" : "s"} do not match the server allowlist. These entries are excluded from runtime use. Apply the security migration and rotate any secret that may have been exposed.
+          </p>
+          <ul className="mt-2 list-disc space-y-1 pl-5 font-mono text-xs">
+            {securityFindings.slice(0, 8).map((finding) => (
+              <li key={`${finding.id}:${finding.issue}`}>
+                {finding.id}: {finding.issue} ({finding.configuredValue})
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
       <div className="grid gap-3 border-b border-zinc-800 p-4 md:grid-cols-[1fr_220px]">
         <label className="relative">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name, model ID, API ID, provider, or purpose" className={`${inputClass} pl-10`} />
+          <input
+            value={query}
+            onChange={(event) => {
+              const value = event.target.value;
+              setQuery(value);
+              updateLocation(value, provider);
+            }}
+            placeholder="Search name, model ID, API ID, provider, or purpose"
+            className={`${inputClass} pl-10`}
+          />
         </label>
-        <select value={provider} onChange={(event) => setProvider(event.target.value as "all" | AiProvider)} className={inputClass}>
+        <select
+          value={provider}
+          onChange={(event) => {
+            const value = event.target.value as "all" | AiProvider;
+            setProvider(value);
+            updateLocation(query, value);
+          }}
+          className={inputClass}
+        >
           <option value="all">All providers</option>
           {AI_PROVIDERS.map((item) => <option key={item} value={item}>{item}</option>)}
         </select>
@@ -400,8 +450,12 @@ export function AdminModelRegistryPanel() {
                 <label className={labelClass}>Display name<input value={form.name} onChange={(e) => setField("name", e.target.value)} className={inputClass} /></label>
                 <label className={labelClass}>Provider<select value={form.provider} onChange={(e) => selectProvider(e.target.value as AiProvider)} className={inputClass}>{AI_PROVIDERS.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
                 <label className={labelClass}>Provider API model ID<input value={form.apiModel} onChange={(e) => setField("apiModel", e.target.value)} className={inputClass} placeholder="Exact model ID sent to provider" /></label>
-                <label className={`${labelClass} md:col-span-2`}>API Base URL<input value={form.apiBaseUrl} onChange={(e) => setField("apiBaseUrl", e.target.value)} className={inputClass} /></label>
-                <label className={labelClass}>API key environment variable<input value={form.apiKeyEnvName} onChange={(e) => setField("apiKeyEnvName", e.target.value.toUpperCase())} className={inputClass} /></label>
+                <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3 md:col-span-2">
+                  <p className="text-xs font-black uppercase tracking-[0.12em] text-emerald-200">Server-enforced provider connection</p>
+                  <p className="mt-2 break-all font-mono text-xs text-zinc-300">{PROVIDER_API_CONFIGURATION[form.provider].baseUrl}</p>
+                  <p className="mt-1 font-mono text-xs text-zinc-400">{PROVIDER_API_CONFIGURATION[form.provider].apiKeyEnvName}</p>
+                  <p className="mt-2 text-xs leading-5 text-zinc-400">These values are allowlisted in server code. Model registry requests cannot override the destination or select another server secret.</p>
+                </div>
                 <label className={labelClass}>Icon / short mark<input value={form.icon} onChange={(e) => setField("icon", e.target.value)} className={inputClass} /></label>
                 <label className={`${labelClass} md:col-span-2`}>Model-specific purpose<input value={form.bestFor} onChange={(e) => setField("bestFor", e.target.value)} className={inputClass} placeholder="One concise line shown in the model picker" /></label>
               </fieldset>

@@ -58,9 +58,65 @@ export const authOptions: NextAuthOptions = {
         updateAge: SESSION_UPDATE_AGE_SECONDS,
     },
     callbacks: {
+        async signIn({ user }) {
+            if (!user.id) return false;
+            try {
+                const security = await prisma.user.findUnique({
+                    where: { id: user.id },
+                    select: {
+                        accountStatus: true,
+                        accountSuspendedUntil: true,
+                    },
+                });
+                if (!security || security.accountStatus === "active") {
+                    return true;
+                }
+                if (
+                    security.accountStatus === "suspended" &&
+                    security.accountSuspendedUntil &&
+                    security.accountSuspendedUntil <= new Date()
+                ) {
+                    await prisma.user.update({
+                        where: { id: user.id },
+                        data: {
+                            accountStatus: "active",
+                            accountSuspendedAt: null,
+                            accountSuspendedUntil: null,
+                            accountSuspensionReason: null,
+                            accountSuspendedById: null,
+                            accountSuspendedByEmail: null,
+                        },
+                    });
+                    return true;
+                }
+                logAuthAuditEvent("auth.sign_in_denied_suspended", {
+                    userId: user.id,
+                });
+                return false;
+            } catch (error) {
+                console.error("Account suspension check failed during sign-in:", error);
+                return false;
+            }
+        },
         async session({ session, user }) {
             if (session.user && user.id) {
                 session.user.id = user.id;
+                const expiresAt = new Date(session.expires);
+                if (Number.isFinite(expiresAt.getTime())) {
+                    const matchingSession = await prisma.session.findFirst({
+                        where: {
+                            userId: user.id,
+                            expires: {
+                                gte: new Date(expiresAt.getTime() - 5_000),
+                                lte: new Date(expiresAt.getTime() + 5_000),
+                            },
+                        },
+                        orderBy: { createdAt: "desc" },
+                        select: { createdAt: true },
+                    });
+                    session.user.authenticatedAt =
+                        matchingSession?.createdAt.toISOString();
+                }
                 const analyticsUser = user as typeof user & {
                     plan?: unknown;
                     createdAt?: unknown;
@@ -88,6 +144,14 @@ export const authOptions: NextAuthOptions = {
             });
         },
         async signIn({ user, account, isNewUser }) {
+            await prisma.user
+                .update({
+                    where: { id: user.id },
+                    data: { lastLoginAt: new Date() },
+                })
+                .catch((error) => {
+                    console.error("Failed to record last login time:", error);
+                });
             logAuthAuditEvent("auth.sign_in", {
                 userId: user.id,
                 provider: account?.provider,

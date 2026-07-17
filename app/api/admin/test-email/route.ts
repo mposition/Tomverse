@@ -2,8 +2,10 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
+import type { Session } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { isAdminSession } from "@/lib/adminAuth";
+import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
+import { writeAdminAuditLog } from "@/lib/adminAudit";
 import {
   apiSecurityResponse,
   consumeApiRateLimit,
@@ -11,15 +13,29 @@ import {
 import { sendTransactionalEmail } from "@/lib/email";
 
 export async function POST(req: Request) {
+  let auditSession: Session | null = null;
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id || !session.user.email || !isAdminSession(session)) {
       return NextResponse.json({ error: "Not found." }, { status: 404 });
     }
+    if (!hasAdminPermission(session, "ops:write")) {
+      return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+    }
+    auditSession = session;
 
     await consumeApiRateLimit(req, session.user.id, "admin-test-email", {
       minute: 5,
       day: 30,
+    });
+
+    await writeAdminAuditLog({
+      session,
+      request: req,
+      action: "email.test.send_started",
+      targetType: "Email",
+      targetId: session.user.email,
+      summary: `Started a test email delivery to ${session.user.email}.`,
     });
 
     const result = await sendTransactionalEmail({
@@ -37,6 +53,21 @@ export async function POST(req: Request) {
         </div>
       `,
     });
+    await writeAdminAuditLog({
+      session,
+      request: req,
+      action: "email.test.sent",
+      targetType: "Email",
+      targetId: session.user.email,
+      summary: result.sent
+        ? `Sent a test email to ${session.user.email}.`
+        : `Test email to ${session.user.email} was skipped.`,
+      metadata: {
+        sent: result.sent,
+        skipped: result.skipped,
+        providerMessageId: result.id || null,
+      },
+    });
 
     return NextResponse.json({
       ok: true,
@@ -45,6 +76,21 @@ export async function POST(req: Request) {
       id: result.id || null,
     });
   } catch (error) {
+    if (auditSession) {
+      await writeAdminAuditLog({
+        session: auditSession,
+        request: req,
+        action: "email.test.failed",
+        targetType: "Email",
+        targetId: auditSession.user?.email || null,
+        summary: `Test email failed: ${
+          error instanceof Error ? error.message : "Unknown email provider error"
+        }`,
+        metadata: {
+          errorName: error instanceof Error ? error.name : "UnknownError",
+        },
+      }).catch(() => undefined);
+    }
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
     console.error("Admin test email failed:", error);

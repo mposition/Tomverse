@@ -80,6 +80,18 @@ export const isAiProvider = (value: string): value is AiProvider =>
 
 export const normalizeApiBaseUrl = (value: string) => value.trim().replace(/\/$/, "");
 
+export const isApprovedProviderApiBaseUrl = (
+  provider: AiProvider,
+  value: string | null | undefined
+) =>
+  normalizeApiBaseUrl(value || "") ===
+  PROVIDER_API_CONFIGURATION[provider].baseUrl;
+
+export const isApprovedProviderApiKeyEnvName = (
+  provider: AiProvider,
+  value: string | null | undefined
+) => value === PROVIDER_API_CONFIGURATION[provider].apiKeyEnvName;
+
 const isPrivateIpv4 = (hostname: string) => {
   const parts = hostname.split(".").map(Number);
   if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part))) return false;
