@@ -1412,6 +1412,23 @@ const checks = [
       );
     },
   },
+  {
+    name: "E2E server keeps NextAuth secret enforcement and installs every configured browser",
+    file: "playwright.config.ts",
+    test: (source) => {
+      const workflow = read(".github/workflows/e2e.yml");
+      return (
+        source.includes("tomverse-e2e-nextauth-secret-only-2026") &&
+        source.includes("NEXTAUTH_SECRET: e2eNextAuthSecret") &&
+        source.includes('name: "mobile-safari"') &&
+        workflow.includes("actions/checkout@v6") &&
+        workflow.includes("actions/setup-node@v6") &&
+        workflow.includes("actions/upload-artifact@v7") &&
+        workflow.includes("playwright install --with-deps chromium webkit") &&
+        !workflow.includes("ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION")
+      );
+    },
+  },
 ];
 
 const failures = [];

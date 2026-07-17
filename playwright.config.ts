@@ -2,6 +2,10 @@ import { defineConfig, devices } from "@playwright/test";
 import { resolve } from "node:path";
 
 const baseURL = "http://127.0.0.1:3100";
+// This key is scoped to the isolated E2E server. It never protects production
+// sessions, and keeps NextAuth's production secret requirement enabled.
+const e2eNextAuthSecret =
+  process.env.NEXTAUTH_SECRET || "tomverse-e2e-nextauth-secret-only-2026";
 const networkGuard = resolve(process.cwd(), "tests/e2e/block-external-network.cjs").replaceAll("\\", "/");
 const nodeOptions = [process.env.NODE_OPTIONS, `--require "${networkGuard}"`]
   .filter(Boolean)
@@ -41,6 +45,7 @@ export default defineConfig({
         "postgresql://e2e:e2e@127.0.0.1:1/e2e?connect_timeout=1",
       E2E_AUTH_BYPASS: "true",
       E2E_DISABLE_DATABASE: "true",
+      NEXTAUTH_SECRET: e2eNextAuthSecret,
       NODE_OPTIONS: nodeOptions,
       REQUIRE_CLOUDFLARE_ORIGIN_SECRET: "false",
     },
