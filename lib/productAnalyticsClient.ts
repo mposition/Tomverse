@@ -79,7 +79,14 @@ let ga4ConsentInitialized = false;
 const applyGa4ConsentMode = (analyticsStorage: "granted" | "denied") => {
   window.dataLayer = window.dataLayer || [];
   window.gtag =
-    window.gtag || ((...args: unknown[]) => window.dataLayer?.push(args));
+    window.gtag ||
+    function gtag() {
+      // gtag.js expects its command queue entries to be Arguments objects.
+      // Pushing a rest-parameter array prevents the loaded tag from processing
+      // the queued consent/config/event commands in some runtimes.
+      // eslint-disable-next-line prefer-rest-params -- required by the gtag.js command protocol
+      window.dataLayer?.push(arguments);
+    };
   window.gtag(
     "consent",
     ga4ConsentInitialized ? "update" : "default",
