@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowRight, ExternalLink, Menu, X } from "lucide-react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { MarketingLanguageSwitcher } from "./MarketingLanguageSwitcher";
@@ -57,18 +57,14 @@ const resourceLinks: Record<Language, Array<{ label: string; path: string }>> = 
 
 const chrome = {
   en: {
-    app: "Open app",
+    app: "Chat",
     menu: "Menu",
     close: "Close menu",
     topMenu: [
-      { label: "About", href: "/about" },
-      { label: "Features", href: "/#features" },
+      { label: "Features", href: "/#how-it-works" },
       { label: "Models", href: "/models" },
-      { label: "Status", href: "/status" },
       { label: "Pricing", href: "/pricing" },
-      { label: "Security", href: "/safety" },
       { label: "FAQ", href: "/faq" },
-      { label: "Support", href: "/support" },
     ],
     footerMenu: [
       { label: "Terms", href: "/terms" },
@@ -79,18 +75,14 @@ const chrome = {
     ],
   },
   ko: {
-    app: "앱 열기",
+    app: "채팅하기",
     menu: "메뉴",
     close: "메뉴 닫기",
     topMenu: [
-      { label: "소개", href: "/about" },
-      { label: "기능", href: "/#features" },
+      { label: "기능", href: "/#how-it-works" },
       { label: "모델", href: "/models" },
-      { label: "상태", href: "/status" },
       { label: "요금", href: "/pricing" },
-      { label: "보안", href: "/safety" },
       { label: "FAQ", href: "/faq" },
-      { label: "지원", href: "/support" },
     ],
     footerMenu: [
       { label: "이용약관", href: "/terms" },
@@ -101,18 +93,14 @@ const chrome = {
     ],
   },
   zh: {
-    app: "打开应用",
+    app: "开始聊天",
     menu: "菜单",
     close: "关闭菜单",
     topMenu: [
-      { label: "介绍", href: "/about" },
-      { label: "功能", href: "/#features" },
+      { label: "功能", href: "/#how-it-works" },
       { label: "模型", href: "/models" },
-      { label: "服务状态", href: "/status" },
       { label: "价格", href: "/pricing" },
-      { label: "安全", href: "/safety" },
       { label: "FAQ", href: "/faq" },
-      { label: "支持", href: "/support" },
     ],
     footerMenu: [
       { label: "条款", href: "/terms" },
@@ -123,18 +111,14 @@ const chrome = {
     ],
   },
   fr: {
-    app: "Ouvrir l'app",
+    app: "Discuter",
     menu: "Menu",
     close: "Fermer le menu",
     topMenu: [
-      { label: "A propos", href: "/about" },
-      { label: "Fonctionnalites", href: "/#features" },
+      { label: "Fonctionnalites", href: "/#how-it-works" },
       { label: "Modeles", href: "/models" },
-      { label: "Statut", href: "/status" },
       { label: "Tarifs", href: "/pricing" },
-      { label: "Securite", href: "/safety" },
       { label: "FAQ", href: "/faq" },
-      { label: "Support", href: "/support" },
     ],
     footerMenu: [
       { label: "Conditions", href: "/terms" },
@@ -145,18 +129,14 @@ const chrome = {
     ],
   },
   de: {
-    app: "App offnen",
+    app: "Chatten",
     menu: "Menu",
     close: "Menu schliessen",
     topMenu: [
-      { label: "Uber uns", href: "/about" },
-      { label: "Funktionen", href: "/#features" },
+      { label: "Funktionen", href: "/#how-it-works" },
       { label: "Modelle", href: "/models" },
-      { label: "Status", href: "/status" },
       { label: "Preise", href: "/pricing" },
-      { label: "Sicherheit", href: "/safety" },
       { label: "FAQ", href: "/faq" },
-      { label: "Support", href: "/support" },
     ],
     footerMenu: [
       { label: "Bedingungen", href: "/terms" },
@@ -167,18 +147,14 @@ const chrome = {
     ],
   },
   es: {
-    app: "Abrir app",
+    app: "Chatear",
     menu: "Menu",
     close: "Cerrar menu",
     topMenu: [
-      { label: "Acerca de", href: "/about" },
-      { label: "Funciones", href: "/#features" },
+      { label: "Funciones", href: "/#how-it-works" },
       { label: "Modelos", href: "/models" },
-      { label: "Estado", href: "/status" },
       { label: "Precios", href: "/pricing" },
-      { label: "Seguridad", href: "/safety" },
       { label: "FAQ", href: "/faq" },
-      { label: "Soporte", href: "/support" },
     ],
     footerMenu: [
       { label: "Terminos", href: "/terms" },
@@ -189,18 +165,14 @@ const chrome = {
     ],
   },
   pt: {
-    app: "Abrir app",
+    app: "Conversar",
     menu: "Menu",
     close: "Fechar menu",
     topMenu: [
-      { label: "Sobre", href: "/about" },
-      { label: "Recursos", href: "/#features" },
+      { label: "Recursos", href: "/#how-it-works" },
       { label: "Modelos", href: "/models" },
-      { label: "Status", href: "/status" },
       { label: "Precos", href: "/pricing" },
-      { label: "Seguranca", href: "/safety" },
       { label: "FAQ", href: "/faq" },
-      { label: "Suporte", href: "/support" },
     ],
     footerMenu: [
       { label: "Termos", href: "/terms" },
@@ -231,7 +203,24 @@ export function MarketingHeader({
   const { lang } = useLanguage();
   const labels = chrome[lang] ?? chrome.en;
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isHeroCtaVisible, setIsHeroCtaVisible] = useState(false);
   const chatHref = `/chat?lang=${encodeURIComponent(lang)}`;
+
+  useEffect(() => {
+    const heroCta = document.getElementById("landing-hero-primary");
+    if (!heroCta) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => setIsHeroCtaVisible(entry.isIntersecting),
+      { threshold: 0.35 }
+    );
+    observer.observe(heroCta);
+    return () => observer.disconnect();
+  }, []);
+
+  const headerCtaClass = isHeroCtaVisible
+    ? "bg-zinc-950 text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200"
+    : "bg-blue-600 text-white shadow-sm shadow-blue-950/20 hover:bg-blue-500";
 
   return (
     <>
@@ -279,7 +268,7 @@ export function MarketingHeader({
                 cta_location: "marketing_header",
               })
             }
-            className="hidden h-10 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-bold text-white shadow-sm shadow-blue-950/20 transition hover:bg-blue-500 sm:inline-flex"
+            className={`hidden h-10 items-center gap-2 rounded-xl px-4 text-sm font-bold transition sm:inline-flex ${headerCtaClass}`}
           >
             {labels.app}
             <ArrowRight className="h-4 w-4" />
@@ -323,17 +312,6 @@ export function MarketingHeader({
                 )}
               </Link>
             ))}
-            <div className="my-2 h-px bg-zinc-200 dark:bg-zinc-800" />
-            {labels.footerMenu.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={() => setIsMenuOpen(false)}
-                className="rounded-xl px-3 py-2 text-sm font-bold text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-white"
-              >
-                {item.label}
-              </Link>
-            ))}
             <Link
               href={chatHref}
               onClick={() => {
@@ -342,7 +320,7 @@ export function MarketingHeader({
                   cta_location: "marketing_mobile_menu",
                 });
               }}
-              className="mt-3 inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-black text-white transition hover:bg-blue-500"
+              className={`mt-3 inline-flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-black transition ${headerCtaClass}`}
             >
               {labels.app}
               <ArrowRight className="h-4 w-4" />

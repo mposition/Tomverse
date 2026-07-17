@@ -1,29 +1,7 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
-import chatgptIcon from "@/public/model-icons/chatgpt.png";
-import claudeIcon from "@/public/model-icons/claude.png";
-import deepseekIcon from "@/public/model-icons/deepseek.png";
-import geminiIcon from "@/public/model-icons/gemini.png";
-import grokIcon from "@/public/model-icons/grok.png";
-import kimiIcon from "@/public/model-icons/kimi.png";
-import llamaIcon from "@/public/model-icons/llama.png";
-import mistralIcon from "@/public/model-icons/mistral.png";
-import perplexityIcon from "@/public/model-icons/perplexity.png";
-import qwenIcon from "@/public/model-icons/qwen.png";
-import {
-  ArrowRight,
-  Bot,
-  ExternalLink,
-  FileText,
-  FolderKanban,
-  LockKeyhole,
-  MessageSquareMore,
-  Share2,
-  ShieldCheck,
-  Sparkles,
-} from "lucide-react";
+import { ArrowRight, Bot, Sparkles } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { useEffect, useRef } from "react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
@@ -31,7 +9,6 @@ import { usePublicBilling } from "@/components/marketing/usePublicBilling";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
 import { ProductProofSection } from "./ProductProofSection";
-import { statusLinkLabel, statusNewTabCopy } from "./statusLinkCopy";
 
 type CardCopy = { title: string; description: string };
 type PlanCopy = CardCopy & { id: "free" | "pro" | "max"; fallbackPrice: string };
@@ -74,28 +51,15 @@ type LandingCopy = {
   ctaDescription: string;
 };
 
-const supportedModels = [
-  { name: "GPT", provider: "OpenAI", image: chatgptIcon, mark: "O" },
-  { name: "Claude", provider: "Anthropic", image: claudeIcon, mark: "A" },
-  { name: "Gemini", provider: "Google", image: geminiIcon, mark: "G" },
-  { name: "Llama", provider: "Groq", image: llamaIcon, mark: "L" },
-  { name: "DeepSeek", provider: "DeepSeek", image: deepseekIcon, mark: "D" },
-  { name: "Mistral", provider: "Mistral AI", image: mistralIcon, mark: "M" },
-  { name: "Grok", provider: "xAI", image: grokIcon, mark: "X" },
-  { name: "Kimi", provider: "Moonshot", image: kimiIcon, mark: "K" },
-  { name: "Qwen", provider: "Alibaba", image: qwenIcon, mark: "Q" },
-  { name: "Perplexity", provider: "Sonar", image: perplexityIcon, mark: "P" },
-];
-
 const englishCopy: LandingCopy = {
-  app: "Open app",
+  app: "Chat",
   badge: "Multi-model comparison + AI cross-review",
-  title: "Ask once. Compare answers. Review what they missed.",
+  title: "Ask once.\nCompare answers from multiple AIs.",
   description:
-    "Send one question to several leading AI models. Compare their answers side by side, then let Tomverse AI Review organize common ground, contradictions, missing points, and claims that still need independent verification.",
-  primaryCta: "Start comparing multiple AIs free",
-  signedInCta: "Open your comparison workspace",
-  guestCta: "Try one free model without signing in",
+    "Compare GPT, Claude, and Gemini in one place,\nthen use AI Review to find the differences and what each answer missed.",
+  primaryCta: "Compare multiple AIs free",
+  signedInCta: "Continue chatting",
+  guestCta: "Try it first without signing up",
   pricingCta: "See pricing",
   modelFinderLead: "Not sure which AI fits your work?",
   modelFinderCta: "Get a one-minute recommendation after sign-up.",
@@ -150,13 +114,13 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
   en: englishCopy,
   ko: {
     ...englishCopy,
-    app: "앱 열기",
+    app: "채팅하기",
     badge: "멀티모델 비교 + AI 답변 교차검토",
-    title: "한 번 질문하고, 여러 AI 답변을 비교하고, 놓친 부분까지 검토하세요.",
-    description: "하나의 질문을 여러 주요 AI 모델에 보내 나란히 비교하세요. Tomverse AI Review가 합의점, 모순, 누락과 독립적인 추가 검증이 필요한 주장을 구조화합니다.",
-    primaryCta: "여러 AI 무료 비교 시작하기",
-    signedInCta: "내 비교 워크스페이스 열기",
-    guestCta: "로그인 없이 무료 모델 1개 체험",
+    title: "한 번 질문하고,\n여러 AI 답변을 비교하세요.",
+    description: "GPT, Claude, Gemini의 답변을 한 화면에서 비교하고,\nAI Review로 차이와 놓친 부분을 확인하세요.",
+    primaryCta: "무료로 여러 AI 비교하기",
+    signedInCta: "채팅 계속하기",
+    guestCta: "가입 없이 먼저 체험",
     pricingCta: "요금 보기",
     modelFinderLead: "어떤 AI가 내 작업에 맞는지 모르시겠나요?",
     modelFinderCta: "가입 후 1분 추천을 받아보세요.",
@@ -205,13 +169,13 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
   },
   zh: {
     ...englishCopy,
-    app: "打开应用",
+    app: "开始聊天",
     badge: "多模型比较 + AI 交叉审查",
-    title: "问一次，比较多个回答，再检查遗漏。",
-    description: "将同一问题发送给多个主流 AI 模型并排比较。Tomverse AI Review 会整理共识、矛盾、遗漏以及仍需独立核实的说法。",
-    primaryCta: "免费开始比较多个 AI",
-    signedInCta: "打开比较工作区",
-    guestCta: "无需登录试用一个免费模型",
+    title: "问一次，\n比较多个 AI 的回答。",
+    description: "在一个页面比较 GPT、Claude 和 Gemini，再用 AI Review 找出差异与遗漏。",
+    primaryCta: "免费比较多个 AI",
+    signedInCta: "继续聊天",
+    guestCta: "无需注册先体验",
     pricingCta: "查看价格",
     modelFinderLead: "不确定哪种 AI 适合你的工作？",
     modelFinderCta: "注册后获取一分钟推荐。",
@@ -259,13 +223,13 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
   },
   fr: {
     ...englishCopy,
-    app: "Ouvrir l’app",
+    app: "Discuter",
     badge: "Comparaison multi-modèles + revue croisée IA",
-    title: "Une question. Plusieurs réponses. Une revue des oublis.",
-    description: "Envoyez la même question à plusieurs modèles IA, comparez leurs réponses, puis structurez avec Tomverse AI Review les accords, contradictions, omissions et points à vérifier indépendamment.",
+    title: "Posez une question.\nComparez plusieurs réponses IA.",
+    description: "Comparez GPT, Claude et Gemini au même endroit, puis repérez les différences et les oublis avec AI Review.",
     primaryCta: "Comparer plusieurs IA gratuitement",
-    signedInCta: "Ouvrir mon espace de comparaison",
-    guestCta: "Essayer un modèle gratuit sans connexion",
+    signedInCta: "Continuer la discussion",
+    guestCta: "Essayer sans s’inscrire",
     pricingCta: "Voir les tarifs",
     modelFinderLead: "Vous ne savez pas quelle IA choisir ?",
     modelFinderCta: "Obtenez une recommandation en une minute après inscription.",
@@ -313,13 +277,13 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
   },
   de: {
     ...englishCopy,
-    app: "App öffnen",
+    app: "Chatten",
     badge: "Multi-Modell-Vergleich + KI-Gegenprüfung",
-    title: "Einmal fragen. Antworten vergleichen. Lücken prüfen.",
-    description: "Senden Sie eine Frage an mehrere führende KI-Modelle. Vergleichen Sie die Antworten und strukturieren Sie mit Tomverse AI Review Gemeinsamkeiten, Widersprüche, Lücken und externen Prüfbedarf.",
+    title: "Einmal fragen.\nAntworten mehrerer KIs vergleichen.",
+    description: "Vergleichen Sie GPT, Claude und Gemini an einem Ort und erkennen Sie mit AI Review Unterschiede und Lücken.",
     primaryCta: "Mehrere KIs kostenlos vergleichen",
-    signedInCta: "Vergleichs-Workspace öffnen",
-    guestCta: "Ein Gratis-Modell ohne Anmeldung testen",
+    signedInCta: "Chat fortsetzen",
+    guestCta: "Ohne Anmeldung testen",
     pricingCta: "Preise ansehen",
     modelFinderLead: "Unsicher, welche KI passt?",
     modelFinderCta: "Nach der Anmeldung in einer Minute empfehlen lassen.",
@@ -367,13 +331,13 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
   },
   es: {
     ...englishCopy,
-    app: "Abrir app",
+    app: "Chatear",
     badge: "Comparación multimodelo + revisión cruzada de IA",
-    title: "Pregunta una vez. Compara respuestas. Revisa lo omitido.",
-    description: "Envía una pregunta a varios modelos líderes, compara las respuestas y usa Tomverse AI Review para ordenar acuerdos, contradicciones, omisiones y puntos que aún requieren verificación independiente.",
+    title: "Pregunta una vez.\nCompara respuestas de varias IA.",
+    description: "Compara GPT, Claude y Gemini en un solo lugar y usa AI Review para detectar diferencias y omisiones.",
     primaryCta: "Comparar varias IA gratis",
-    signedInCta: "Abrir mi espacio de comparación",
-    guestCta: "Probar un modelo gratis sin iniciar sesión",
+    signedInCta: "Continuar el chat",
+    guestCta: "Probar sin registrarse",
     pricingCta: "Ver precios",
     modelFinderLead: "¿No sabes qué IA encaja contigo?",
     modelFinderCta: "Recibe una recomendación de un minuto tras registrarte.",
@@ -421,13 +385,13 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
   },
   pt: {
     ...englishCopy,
-    app: "Abrir app",
+    app: "Conversar",
     badge: "Comparação multimodelo + revisão cruzada por IA",
-    title: "Pergunte uma vez. Compare respostas. Revise o que faltou.",
-    description: "Envie uma pergunta a vários modelos líderes, compare as respostas e use o Tomverse AI Review para organizar consensos, contradições, omissões e pontos que ainda exigem verificação independente.",
+    title: "Pergunte uma vez.\nCompare respostas de várias IAs.",
+    description: "Compare GPT, Claude e Gemini em um só lugar e use o AI Review para encontrar diferenças e omissões.",
     primaryCta: "Comparar várias IAs gratuitamente",
-    signedInCta: "Abrir meu workspace de comparação",
-    guestCta: "Testar um modelo grátis sem entrar",
+    signedInCta: "Continuar a conversa",
+    guestCta: "Testar sem se cadastrar",
     pricingCta: "Ver preços",
     modelFinderLead: "Não sabe qual IA combina com seu trabalho?",
     modelFinderCta: "Receba uma recomendação de um minuto após criar a conta.",
@@ -475,15 +439,13 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
   },
 };
 
-const supportIcons = [FileText, MessageSquareMore, FolderKanban, Share2];
-const trustIcons = [ShieldCheck, LockKeyhole, Share2];
-
 export function LandingPageContent() {
   const { lang } = useLanguage();
   const { status } = useSession();
   const content = copy[lang] ?? englishCopy;
   const billing = usePublicBilling();
   const chatHref = `/chat?lang=${encodeURIComponent(lang)}`;
+  const guestChatHref = `${chatHref}&entry=guest-preview`;
   const signInHref = `/auth/signin?callbackUrl=${encodeURIComponent(chatHref)}`;
   const comparisonHref = status === "authenticated" ? chatHref : signInHref;
   const landingTrackedRef = useRef(false);
@@ -505,13 +467,14 @@ export function LandingPageContent() {
               <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
               {content.badge}
             </div>
-            <h1 className="mt-6 max-w-4xl text-4xl font-black leading-[1.05] tracking-tight sm:text-6xl lg:text-7xl">
+            <h1 className="mt-6 max-w-4xl whitespace-pre-line text-4xl font-black leading-[1.05] tracking-tight sm:text-6xl lg:text-7xl">
               {content.title}
             </h1>
-            <p className="mt-6 max-w-2xl text-lg leading-8 text-zinc-600 dark:text-zinc-300">{content.description}</p>
+            <p className="mt-6 max-w-2xl whitespace-pre-line text-lg leading-8 text-zinc-600 dark:text-zinc-300">{content.description}</p>
 
             <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
               <Link
+                id="landing-hero-primary"
                 href={comparisonHref}
                 data-testid="landing-primary-cta"
                 onClick={() => trackProductEvent("cta_start_click", 0, { cta_location: "landing_hero_compare" })}
@@ -520,33 +483,17 @@ export function LandingPageContent() {
                 {status === "authenticated" ? content.signedInCta : content.primaryCta}
                 <ArrowRight className="h-4 w-4" aria-hidden="true" />
               </Link>
-              <Link
-                href={chatHref}
-                data-testid="landing-guest-cta"
-                onClick={() => trackProductEvent("cta_start_click", 0, { cta_location: "landing_hero_guest" })}
-                className="inline-flex min-h-12 items-center justify-center rounded-xl border border-zinc-300 px-5 text-center text-sm font-black text-zinc-800 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-zinc-900"
-              >
-                {content.guestCta}
-              </Link>
+              {status === "unauthenticated" && (
+                <Link
+                  href={guestChatHref}
+                  data-testid="landing-guest-cta"
+                  onClick={() => trackProductEvent("cta_start_click", 0, { cta_location: "landing_hero_guest" })}
+                  className="inline-flex min-h-10 items-center justify-center px-2 text-center text-sm font-bold text-zinc-600 underline decoration-zinc-300 underline-offset-4 transition hover:text-zinc-950 dark:text-zinc-300 dark:hover:text-white"
+                >
+                  {content.guestCta}
+                </Link>
+              )}
             </div>
-
-            <p className="mt-4 text-sm text-zinc-500 dark:text-zinc-400">
-              <span className="font-bold text-zinc-700 dark:text-zinc-200">{content.modelFinderLead}</span>{" "}
-              <Link href={signInHref} className="font-black text-blue-600 hover:text-blue-500 dark:text-blue-400">
-                {content.modelFinderCta}
-              </Link>
-            </p>
-            <div className="mt-7 grid max-w-2xl gap-3 sm:grid-cols-3">
-              {content.steps.map((step, index) => (
-                <div key={step} className="flex items-center gap-2 text-sm font-semibold text-zinc-600 dark:text-zinc-300">
-                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-black dark:bg-zinc-900">{index + 1}</span>
-                  {step}
-                </div>
-              ))}
-            </div>
-            <Link href="/pricing" className="mt-5 inline-flex items-center gap-1 text-sm font-bold text-zinc-500 hover:text-blue-600 dark:hover:text-blue-400">
-              {content.pricingCta}<ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
-            </Link>
           </div>
 
           <div className="overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-950 p-2 shadow-2xl shadow-zinc-300/60 dark:shadow-black/50 md:p-3">
@@ -558,9 +505,9 @@ export function LandingPageContent() {
               <div className="grid gap-2 p-3 sm:grid-cols-3">
                 {["GPT", "Claude", "Gemini"].map((model, index) => (
                   <article key={model} className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-3">
-                    <div className="flex items-center justify-between"><span className="text-sm font-black">{model}</span><span className="h-2 w-2 rounded-full bg-blue-400" /></div>
+                    <div className="flex items-center justify-between"><span className="text-sm font-black">{model}</span><span className="h-2 w-2 rounded-full bg-zinc-500" /></div>
                     <div className="mt-4 space-y-2"><div className="h-2 w-4/5 rounded-full bg-zinc-700" /><div className="h-2 w-full rounded-full bg-zinc-800" /></div>
-                    <p className="mt-4 rounded-xl bg-blue-600/90 p-2.5 text-xs font-bold leading-5">{content.previewAnswers[index]}</p>
+                    <p className="mt-4 rounded-xl border border-zinc-700 bg-zinc-800 p-2.5 text-xs font-bold leading-5 text-zinc-200">{content.previewAnswers[index]}</p>
                   </article>
                 ))}
               </div>
@@ -578,66 +525,11 @@ export function LandingPageContent() {
           </div>
         </div>
 
-        <div className="mx-auto max-w-7xl px-4 pb-10 sm:px-6 lg:px-8">
-          <p className="text-center text-xs font-black uppercase tracking-[0.18em] text-zinc-400">{content.modelStripLabel}</p>
-          <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-            {supportedModels.map((model) => (
-              <span key={model.name} title={model.provider} className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-black dark:border-zinc-800 dark:bg-zinc-900">
-                <span className="relative flex h-5.5 w-5.5 shrink-0 items-center justify-center rounded-md bg-zinc-200 text-[9px] font-black text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300" aria-hidden="true">
-                  {model.mark}
-                  <Image
-                    unoptimized
-                    src={model.image}
-                    alt=""
-                    width={22}
-                    height={22}
-                    data-testid="home-provider-logo"
-                    className="absolute inset-0 h-5.5 w-5.5 rounded-md bg-white object-contain"
-                    onError={(event) => {
-                      event.currentTarget.hidden = true;
-                    }}
-                  />
-                </span>
-                {model.name}
-              </span>
-            ))}
-          </div>
-          <div className="mt-4 flex flex-wrap items-center justify-center gap-4 text-sm font-bold">
-            <Link href="/models" className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-500 dark:text-blue-400">{content.modelCatalogue}<ArrowRight className="h-3.5 w-3.5" /></Link>
-            <Link href="/status" target="_blank" rel="noopener noreferrer" data-testid="home-model-status-link" aria-label={statusLinkLabel(content.status, lang)} className="inline-flex items-center gap-1 text-zinc-500 hover:text-blue-600 dark:hover:text-blue-400">
-              {content.status}<ExternalLink className="h-3.5 w-3.5" /><span className="sr-only">({statusNewTabCopy[lang]})</span>
-            </Link>
-          </div>
-        </div>
       </section>
 
       <ProductProofSection />
 
-      <section id="features" className="border-y border-zinc-200 bg-zinc-50 py-16 dark:border-zinc-800 dark:bg-zinc-900/30 sm:py-20">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="max-w-3xl"><h2 className="text-3xl font-black sm:text-4xl">{content.supportTitle}</h2><p className="mt-4 text-base leading-7 text-zinc-600 dark:text-zinc-300">{content.supportDescription}</p></div>
-          <div className="mt-9 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {content.supportItems.map((item, index) => {
-              const Icon = supportIcons[index];
-              return <article key={item.title} className="rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-950"><Icon className="h-5 w-5 text-blue-600 dark:text-blue-400" /><h3 className="mt-4 font-black">{item.title}</h3><p className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-400">{item.description}</p></article>;
-            })}
-          </div>
-        </div>
-      </section>
-
-      <section className="bg-zinc-950 py-16 text-white sm:py-20">
-        <div className="mx-auto grid max-w-7xl gap-8 px-4 sm:px-6 lg:grid-cols-[0.9fr_1.1fr] lg:items-start lg:px-8">
-          <div><h2 className="text-3xl font-black sm:text-4xl">{content.trustTitle}</h2><p className="mt-4 text-base leading-7 text-zinc-300">{content.trustDescription}</p><Link href="/safety" className="mt-6 inline-flex items-center gap-2 text-sm font-black text-blue-300 hover:text-blue-200">{content.safetyCta}<ArrowRight className="h-4 w-4" /></Link></div>
-          <div className="divide-y divide-zinc-800 rounded-3xl border border-zinc-800 bg-zinc-900/50 px-5">
-            {content.trustItems.map((item, index) => {
-              const Icon = trustIcons[index];
-              return <article key={item.title} className="flex gap-4 py-5"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-500/10 text-blue-300"><Icon className="h-5 w-5" /></span><div><h3 className="font-black">{item.title}</h3><p className="mt-2 text-sm leading-6 text-zinc-400">{item.description}</p></div></article>;
-            })}
-          </div>
-        </div>
-      </section>
-
-      <section id="pricing" className="border-b border-zinc-200 py-16 dark:border-zinc-800 sm:py-20">
+      <section id="pricing" className="border-y border-zinc-200 bg-zinc-50 py-16 dark:border-zinc-800 dark:bg-zinc-900/30 sm:py-20">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="max-w-3xl"><h2 className="text-3xl font-black sm:text-4xl">{content.pricingTitle}</h2><p className="mt-4 text-base leading-7 text-zinc-600 dark:text-zinc-300">{content.pricingDescription}</p></div>
           <div className="mt-9 grid gap-4 md:grid-cols-3">
@@ -647,18 +539,13 @@ export function LandingPageContent() {
             })}
           </div>
           <Link href="/pricing" className="mt-7 inline-flex items-center gap-2 rounded-xl bg-zinc-950 px-5 py-3 text-sm font-black text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200">{content.pricingDetails}<ArrowRight className="h-4 w-4" /></Link>
-        </div>
-      </section>
-
-      <section className="py-16 sm:py-20">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <h2 className="text-3xl font-black sm:text-4xl">{content.faqTitle}</h2>
+          <h2 className="mt-16 text-3xl font-black sm:text-4xl">{content.faqTitle}</h2>
           <div className="mt-8 grid gap-4 lg:grid-cols-3">
             {content.faqs.map((item) => <details key={item.question} className="group rounded-2xl border border-zinc-200 p-5 dark:border-zinc-800"><summary className="cursor-pointer list-none font-black">{item.question}</summary><p className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-400">{item.answer}</p></details>)}
           </div>
-          <div className="mt-12 flex flex-col items-start justify-between gap-6 rounded-3xl bg-blue-600 p-7 text-white sm:p-9 lg:flex-row lg:items-center">
-            <div className="max-w-2xl"><h2 className="text-3xl font-black">{content.ctaTitle}</h2><p className="mt-3 leading-7 text-blue-100">{content.ctaDescription}</p></div>
-            <Link href={comparisonHref} onClick={() => trackProductEvent("cta_start_click", 0, { cta_location: "landing_final_compare" })} className="inline-flex min-h-12 shrink-0 items-center justify-center gap-2 rounded-xl bg-white px-6 text-sm font-black text-blue-700 hover:bg-blue-50">{status === "authenticated" ? content.app : content.primaryCta}<ArrowRight className="h-4 w-4" /></Link>
+          <div className="mt-12 flex flex-col items-start justify-between gap-6 rounded-3xl bg-zinc-950 p-7 text-white sm:p-9 lg:flex-row lg:items-center dark:border dark:border-zinc-800">
+            <div className="max-w-2xl"><h2 className="text-3xl font-black">{content.ctaTitle}</h2><p className="mt-3 leading-7 text-zinc-300">{content.ctaDescription}</p></div>
+            <Link href={comparisonHref} onClick={() => trackProductEvent("cta_start_click", 0, { cta_location: "landing_final_compare" })} className="inline-flex min-h-12 shrink-0 items-center justify-center gap-2 rounded-xl bg-white px-6 text-sm font-black text-zinc-950 hover:bg-zinc-200">{status === "authenticated" ? content.signedInCta : content.primaryCta}<ArrowRight className="h-4 w-4" /></Link>
           </div>
         </div>
       </section>

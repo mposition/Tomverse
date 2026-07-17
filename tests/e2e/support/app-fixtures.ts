@@ -114,7 +114,7 @@ export async function prepareGuestPage(page: Page, language: QaLanguage = "ko") 
     route.fulfill(json({ generatedAt: "2099-01-01T00:00:00.000Z", models: [] }))
   );
   await page.route("**/api/auth/session**", (route) =>
-    route.fulfill(json({ user: null, expires: null }))
+    route.fulfill(json(null))
   );
 
   await page.addInitScript((lang) => {

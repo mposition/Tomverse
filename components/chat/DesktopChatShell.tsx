@@ -40,6 +40,7 @@ type DesktopChatShellProps = {
   isSending: boolean;
   focusToken: number;
   isGuestMode: boolean;
+  guestPreviewMode?: boolean;
   guestMessageCount: number;
   maxGuestMessages: number;
   isPrivateMode: boolean;
@@ -78,6 +79,7 @@ export function DesktopChatShell({
   isSending,
   focusToken,
   isGuestMode,
+  guestPreviewMode = false,
   guestMessageCount,
   maxGuestMessages,
   isPrivateMode,
@@ -304,6 +306,7 @@ export function DesktopChatShell({
           onAttachmentsChange={setAttachments}
           canAttach={!isGuestMode}
           isGuestMode={isGuestMode}
+          guestPreviewMode={guestPreviewMode}
           isGuestLimitReached={isGuestMode && guestMessageCount >= maxGuestMessages}
         />
       </section>

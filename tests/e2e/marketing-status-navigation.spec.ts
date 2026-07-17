@@ -8,30 +8,12 @@ const expectSafeNewTabLink = async (locator: Locator) => {
   await expect(locator).toHaveAttribute("rel", /noreferrer/);
 };
 
-test("public status is discoverable from marketing navigation and the model section", async ({
-  page,
-}) => {
+test("public status remains discoverable from the marketing footer", async ({ page }) => {
   await prepareGuestPage(page, "en");
   await page.goto("/");
 
-  await expectSafeNewTabLink(page.getByTestId("header-status-link"));
-  await expectSafeNewTabLink(page.getByTestId("home-model-status-link"));
   await expectSafeNewTabLink(page.getByTestId("footer-status-link"));
 
-  await page.context().route("**/status", (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: "text/html",
-      body: "<title>Tomverse status</title>",
-    })
-  );
-  const popupPromise = page.waitForEvent("popup");
-  await page.getByTestId("home-model-status-link").click();
-  const statusPage = await popupPromise;
-  await statusPage.waitForLoadState();
-  expect(new URL(page.url()).pathname).toBe("/");
-  expect(new URL(statusPage.url()).pathname).toBe("/status");
-  await statusPage.close();
 });
 
 test("the model catalogue links to live service status", async ({ page }) => {
@@ -41,7 +23,7 @@ test("the model catalogue links to live service status", async ({ page }) => {
   await expectSafeNewTabLink(page.getByTestId("models-status-link"));
 });
 
-test("mobile marketing menu exposes public status", async ({ page }) => {
+test("mobile marketing menu stays focused on the four primary destinations", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await prepareGuestPage(page, "en");
   await page.goto("/");
@@ -49,52 +31,12 @@ test("mobile marketing menu exposes public status", async ({ page }) => {
   const menuButton = page.getByRole("button", { name: "Menu" });
   await expect(menuButton).toBeVisible();
   await menuButton.click();
-  await expect(page.getByTestId("mobile-status-link")).toBeVisible();
-  await expectSafeNewTabLink(page.getByTestId("mobile-status-link"));
-});
-
-test("the homepage serves provider logos without the failing image optimizer", async ({
-  page,
-}) => {
-  await prepareGuestPage(page, "en");
-  const failedImages: string[] = [];
-  page.on("response", (response) => {
-    if (
-      response.request().resourceType() === "image" &&
-      response.url().includes("/_next/static/media/") &&
-      response.status() >= 400
-    ) {
-      failedImages.push(`${response.status()} ${response.url()}`);
-    }
-  });
-
-  await page.goto("/");
-  const providerLogos = page.getByTestId("home-provider-logo");
-  await expect(providerLogos).toHaveCount(10);
-  for (let index = 0; index < 10; index += 1) {
-    const logo = providerLogos.nth(index);
-    await logo.scrollIntoViewIfNeeded();
-    await expect
-      .poll(() =>
-        logo.evaluate((element) => (element as HTMLImageElement).naturalWidth)
-      )
-      .toBeGreaterThan(0);
-  }
-  const imageState = await providerLogos.evaluateAll((elements) =>
-    elements.map((element) => {
-      const image = element as HTMLImageElement;
-      return {
-        src: image.currentSrc || image.src,
-        complete: image.complete,
-        naturalWidth: image.naturalWidth,
-      };
-    })
-  );
-
-  expect(failedImages).toEqual([]);
-  expect(imageState.every((image) => image.complete && image.naturalWidth > 0)).toBe(true);
-  expect(imageState.every((image) => image.src.includes("/_next/static/media/"))).toBe(true);
-  expect(imageState.every((image) => !image.src.includes("/_next/image"))).toBe(true);
+  const menu = page.locator("header nav").filter({ hasText: "Features" });
+  await expect(menu.getByRole("link", { name: "Features" })).toBeVisible();
+  await expect(menu.getByRole("link", { name: "Models" })).toBeVisible();
+  await expect(menu.getByRole("link", { name: "Pricing" })).toBeVisible();
+  await expect(menu.getByRole("link", { name: "FAQ" })).toBeVisible();
+  await expect(menu.getByRole("link", { name: "Status" })).toHaveCount(0);
 });
 
 test("ChatGPT vs Claude guide serves every comparison image", async ({ page }) => {

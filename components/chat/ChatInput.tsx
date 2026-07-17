@@ -221,6 +221,7 @@ type ChatInputProps = {
   onAttachmentsChange: (attachments: ChatAttachment[]) => void;
   canAttach?: boolean;
   isGuestMode?: boolean;
+  guestPreviewMode?: boolean;
 };
 
 type GooglePickerConfig = {
@@ -312,6 +313,7 @@ export function ChatInput({
   onAttachmentsChange,
   canAttach: canAttachProp = true,
   isGuestMode = false,
+  guestPreviewMode = false,
 }: ChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -527,6 +529,7 @@ export function ChatInput({
       if (cancelled) return;
       const shouldShow =
         isGuestMode &&
+        !guestPreviewMode &&
         window.localStorage.getItem(GUEST_QUICK_START_STORAGE_KEY) !== "1";
 
       guestQuickStartActiveRef.current = shouldShow;
@@ -550,7 +553,7 @@ export function ChatInput({
         announceGuestQuickStart(false);
       }
     };
-  }, [announceGuestQuickStart, isGuestMode]);
+  }, [announceGuestQuickStart, guestPreviewMode, isGuestMode]);
 
   const getMenuFocusableElements = useCallback(() => {
     const popover = menuPopoverRef.current;
@@ -1320,7 +1323,7 @@ export function ChatInput({
                   {personalizedPrompt}
                 </button>
               )}
-              {PROMPT_SUGGESTIONS.map((suggestion) => (
+              {PROMPT_SUGGESTIONS.slice(0, guestPreviewMode ? 3 : undefined).map((suggestion) => (
                 <button
                   key={suggestion}
                   type="button"
