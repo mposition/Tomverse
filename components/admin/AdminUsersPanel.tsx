@@ -710,9 +710,21 @@ export function AdminUsersPanel({
             {items.map((user) => (
               <tr key={user.id} className="rounded-2xl bg-zinc-900/70 text-zinc-200">
                 <td className="rounded-l-2xl px-3 py-3">
-                  <div className="font-bold">{user.email || user.name || "No email"}</div>
-                  <div className="mt-1 text-xs text-zinc-500">{user.id}</div>
-                  <div className="mt-1 text-xs text-zinc-600">{user.stripeCustomerId || "No Stripe customer"}</div>
+                  <div className="font-bold text-zinc-100">
+                    {user.name || "Name not provided"}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => loadUserDetail(user.id)}
+                    disabled={loadingDetailId === user.id}
+                    className="mt-1 inline-flex cursor-pointer items-center gap-1.5 text-left text-xs font-bold text-blue-300 underline-offset-4 transition hover:text-blue-200 hover:underline disabled:cursor-wait disabled:opacity-60"
+                    aria-label={`View details for ${user.email || user.name || "user"}`}
+                  >
+                    {loadingDetailId === user.id ? (
+                      <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+                    ) : null}
+                    {user.email || "No email · View details"}
+                  </button>
                 </td>
                 <td className="px-3 py-3">
                   <span className={`rounded-full border px-2.5 py-1 text-xs font-black ${planClass(user.plan)}`}>
@@ -747,17 +759,6 @@ export function AdminUsersPanel({
                 </td>
                 <td className="rounded-r-2xl px-3 py-3">
                   <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => loadUserDetail(user.id)}
-                      disabled={loadingDetailId === user.id}
-                      className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-200 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {loadingDetailId === user.id ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : null}
-                      Details
-                    </button>
                     <AdminUserDeleteButton
                       userId={user.id}
                       currentUserId={currentUserId}
@@ -815,9 +816,11 @@ export function AdminUsersPanel({
                   Customer detail
                 </p>
                 <h3 className="mt-2 text-2xl font-black text-white">
-                  {detailUser.email || detailUser.name || "No email"}
+                  {detailUser.name || "Name not provided"}
                 </h3>
-                <p className="mt-1 text-xs text-zinc-500">{detailUser.id}</p>
+                <p className="mt-1 text-sm font-medium text-zinc-400">
+                  {detailUser.email || "No email address"}
+                </p>
               </div>
               <div className="flex gap-2">
                 <button
