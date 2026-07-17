@@ -68,7 +68,6 @@ import { AdminUsersPanel } from "@/components/admin/AdminUsersPanel";
 import { AdminWebhookPanel } from "@/components/admin/AdminWebhookPanel";
 import { BillingAdminPanel } from "@/components/admin/BillingAdminPanel";
 import { FeedbackInboxPanel, type FeedbackRow } from "@/components/admin/FeedbackInboxPanel";
-import { ModelOverridesPanel } from "@/components/admin/ModelOverridesPanel";
 import { AdminModelRegistryPanel } from "@/components/admin/AdminModelRegistryPanel";
 import { PlatformSettingsPanel } from "@/components/admin/PlatformSettingsPanel";
 import { RefundRequestsPanel, type RefundRequestRow } from "@/components/admin/RefundRequestsPanel";
@@ -83,7 +82,6 @@ import {
     getProviderHealthDashboard,
     type ProviderHealthStatus,
 } from "@/lib/providerMonitoring";
-import { getModelOverrides } from "@/lib/modelOverrides";
 import { getProductAnalyticsDashboard } from "@/lib/productAnalyticsDashboard";
 
 const money = (microUsd: number) => `$${(microUsd / 1_000_000).toFixed(2)}`;
@@ -373,7 +371,6 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         promotionRedemptions,
         approvedRefundCount,
         rejectedRefundCount,
-        modelOverrides,
         notificationLogs,
         providerIncidents,
         providerChecks,
@@ -462,7 +459,6 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         prisma.billingPromotionRedemption.count(),
         prisma.refundRequest.count({ where: { status: "approved" } }),
         prisma.refundRequest.count({ where: { status: "rejected" } }),
-        getModelOverrides(),
         prisma.adminNotificationLog.findMany({
             orderBy: { createdAt: "desc" },
             take: 50,
@@ -1201,7 +1197,11 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                     {activeTab === "providers" && (
                     <AdminProviderTabs
                         activeIncidentCount={providerIncidentRows.filter((incident) => incident.status !== "resolved").length}
-                        blockedModelCount={modelOverrides.filter((override) => override.status !== "available").length}
+                        blockedModelCount={modelRegistryModels.filter(
+                            (model) =>
+                                !model.catalogDeleted &&
+                                model.status !== "enabled"
+                        ).length}
                         healthContent={
                             <section className="flex flex-col gap-4">
                                 <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1241,13 +1241,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                             />
                         }
                         controlsContent={
-                            <section className="flex flex-col gap-4">
-                                <AdminModelRegistryPanel />
-                                <ModelOverridesPanel
-                                    models={modelRegistryModels.filter((model) => !model.catalogDeleted)}
-                                    overrides={modelOverrides}
-                                />
-                            </section>
+                            <AdminModelRegistryPanel />
                         }
                     />
                     )}

@@ -12,7 +12,7 @@ export type AiProvider =
     | "perplexity";
 
 export type ModelTier = "Free" | "Pro" | "Max";
-export type ModelStatus = "enabled" | "disabled" | "coming-soon";
+export type ModelStatus = "enabled" | "limited" | "disabled" | "coming-soon";
 export type ModelUsageClass =
     | "standard"
     | "advanced"
@@ -93,6 +93,10 @@ export type AiModel = {
     publiclyListed?: boolean;
     enabled: boolean;
     status: ModelStatus;
+    /** Private operational explanation shown only to administrators. */
+    operationalReason?: string;
+    /** Safe status explanation that may be shown to end users. */
+    userVisibleNote?: string;
     reasoning?: "none" | "low" | "medium" | "high";
     /** Published context window for catalogue metadata and request validation. */
     contextWindowTokens?: number;

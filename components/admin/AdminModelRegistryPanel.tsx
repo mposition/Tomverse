@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Archive,
   CheckCircle2,
+  Copy,
   Database,
   KeyRound,
   Loader2,
@@ -44,6 +45,8 @@ type FormState = {
   creditWeight: number;
   publiclyListed: boolean;
   status: ModelStatus;
+  operationalReason: string;
+  userVisibleNote: string;
   replacementModelId: string;
   reasoning: "none" | "low" | "medium" | "high";
   contextWindowTokens: number | null;
@@ -73,6 +76,8 @@ const emptyForm = (): FormState => ({
   creditWeight: 1,
   publiclyListed: true,
   status: "disabled",
+  operationalReason: "",
+  userVisibleNote: "",
   replacementModelId: "",
   reasoning: "none",
   contextWindowTokens: null,
@@ -102,6 +107,8 @@ const formFromModel = (model: AdminModel): FormState => ({
   creditWeight: model.creditWeight || 1,
   publiclyListed: model.publiclyListed !== false,
   status: model.status,
+  operationalReason: model.operationalReason || "",
+  userVisibleNote: model.userVisibleNote || "",
   replacementModelId: model.replacementModelId || "",
   reasoning: model.reasoning || "none",
   contextWindowTokens: model.contextWindowTokens || null,
@@ -123,11 +130,21 @@ const labelClass = "grid gap-1.5 text-xs font-bold uppercase tracking-[0.12em] t
 
 const numericValue = (value: string) => (value === "" ? null : Number(value));
 
+const duplicateRegistryId = (sourceId: string, models: AdminModel[]) => {
+  const base = `${sourceId}-copy`;
+  const existing = new Set(models.map((model) => model.id));
+  if (!existing.has(base)) return base;
+  let suffix = 2;
+  while (existing.has(`${base}-${suffix}`)) suffix += 1;
+  return `${base}-${suffix}`;
+};
+
 export function AdminModelRegistryPanel() {
   const [models, setModels] = useState<AdminModel[]>([]);
   const [query, setQuery] = useState("");
   const [provider, setProvider] = useState<"all" | AiProvider>("all");
   const [editingId, setEditingId] = useState<string | "new" | null>(null);
+  const [copySourceId, setCopySourceId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -226,6 +243,7 @@ export function AdminModelRegistryPanel() {
         return [...next, data.model!].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
       });
       setEditingId(null);
+      setCopySourceId(null);
       setValidation(null);
       window.dispatchEvent(new Event("tomverse:model-registry-updated"));
       dispatchAppToast(isNew ? "Model added to the DB registry." : "Model registry updated.", "success");
@@ -245,6 +263,7 @@ export function AdminModelRegistryPanel() {
       if (!response.ok || !data?.model) throw new Error(data?.error || "Failed to archive model.");
       await load();
       setEditingId(null);
+      setCopySourceId(null);
       window.dispatchEvent(new Event("tomverse:model-registry-updated"));
       dispatchAppToast("Model removed from the active catalogue.", "success");
     } catch (error) {
@@ -257,12 +276,30 @@ export function AdminModelRegistryPanel() {
   const beginCreate = () => {
     setForm(emptyForm());
     setEditingId("new");
+    setCopySourceId(null);
+    setValidation(null);
+  };
+
+  const beginDuplicate = (model: AdminModel) => {
+    setForm({
+      ...formFromModel(model),
+      id: duplicateRegistryId(model.id, models),
+      name: `${model.name} Copy`,
+      status: "disabled",
+      publiclyListed: false,
+      operationalReason: `Copied from ${model.id}; review before enabling.`,
+      userVisibleNote: "",
+      replacementModelId: "",
+    });
+    setEditingId("new");
+    setCopySourceId(model.id);
     setValidation(null);
   };
 
   const beginEdit = (model: AdminModel) => {
     setForm(formFromModel(model));
     setEditingId(model.id);
+    setCopySourceId(null);
     setValidation(model.environment);
   };
 
@@ -305,7 +342,7 @@ export function AdminModelRegistryPanel() {
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <h3 className="font-black text-white">{model.name}</h3>
-                  <span className={`rounded-full border px-2 py-0.5 text-[10px] font-black uppercase ${model.enabled && !model.catalogDeleted ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" : "border-zinc-700 bg-zinc-950 text-zinc-400"}`}>
+                  <span className={`rounded-full border px-2 py-0.5 text-[10px] font-black uppercase ${model.status === "limited" ? "border-amber-500/30 bg-amber-500/10 text-amber-200" : model.enabled && !model.catalogDeleted ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" : "border-zinc-700 bg-zinc-950 text-zinc-400"}`}>
                     {model.catalogDeleted ? "Archived" : model.status}
                   </span>
                   <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-black text-amber-200">{model.creditWeight || 1} credits</span>
@@ -320,10 +357,21 @@ export function AdminModelRegistryPanel() {
                     <KeyRound className="h-3 w-3" /> {model.environment.apiKeyEnvName}
                   </span>
                 </div>
+                {model.operationalReason ? (
+                  <p className="mt-3 line-clamp-2 text-xs text-amber-200/80">
+                    Internal: {model.operationalReason}
+                  </p>
+                ) : null}
               </div>
-              <button type="button" onClick={() => beginEdit(model)} className="rounded-xl border border-zinc-700 p-2 text-zinc-300 hover:bg-zinc-800" aria-label={`Edit ${model.name}`}>
-                <Pencil className="h-4 w-4" />
-              </button>
+              <div className="flex shrink-0 gap-2">
+                <button type="button" onClick={() => beginDuplicate(model)} className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 p-2 text-zinc-300 hover:bg-zinc-800" aria-label={`Duplicate ${model.name}`} title="Duplicate as a new disabled model">
+                  <Copy className="h-4 w-4" />
+                  <span className="hidden text-xs font-bold 2xl:inline">Copy</span>
+                </button>
+                <button type="button" onClick={() => beginEdit(model)} className="rounded-xl border border-zinc-700 p-2 text-zinc-300 hover:bg-zinc-800" aria-label={`Edit ${model.name}`}>
+                  <Pencil className="h-4 w-4" />
+                </button>
+              </div>
             </div>
           </article>
         ))}
@@ -334,10 +382,15 @@ export function AdminModelRegistryPanel() {
           <div className="my-auto w-full max-w-5xl overflow-hidden rounded-3xl border border-zinc-700 bg-zinc-950 shadow-2xl">
             <div className="sticky top-0 z-10 flex items-center justify-between border-b border-zinc-800 bg-zinc-950/95 p-5 backdrop-blur">
               <div>
-                <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-300">{editingId === "new" ? "New registry entry" : "Edit registry entry"}</p>
+                <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-300">{copySourceId ? "Duplicate registry entry" : editingId === "new" ? "New registry entry" : "Edit registry entry"}</p>
                 <h3 className="mt-1 text-xl font-black text-white">{form.name || "Untitled model"}</h3>
+                {copySourceId ? (
+                  <p className="mt-1 text-xs text-amber-200">
+                    Copied from {copySourceId}. Confirm the new Registry ID and Provider API model ID before enabling it.
+                  </p>
+                ) : null}
               </div>
-              <button type="button" onClick={() => setEditingId(null)} className="rounded-xl border border-zinc-700 p-2 text-zinc-300 hover:bg-zinc-800"><X className="h-5 w-5" /></button>
+              <button type="button" onClick={() => { setEditingId(null); setCopySourceId(null); }} className="rounded-xl border border-zinc-700 p-2 text-zinc-300 hover:bg-zinc-800"><X className="h-5 w-5" /></button>
             </div>
 
             <div className="grid gap-6 p-5">
@@ -358,10 +411,12 @@ export function AdminModelRegistryPanel() {
                 <label className={labelClass}>Minimum plan<select value={form.minimumPlan} onChange={(e) => setField("minimumPlan", e.target.value as ModelMinimumPlan)} className={inputClass}><option>Guest</option><option>Free</option><option>Pro</option></select></label>
                 <label className={labelClass}>Internal usage class<select value={form.usageClass} onChange={(e) => setField("usageClass", e.target.value as ModelUsageClass)} className={inputClass}>{["standard","advanced","premium","reasoning","premium-reasoning","research","deep-research"].map((item) => <option key={item}>{item}</option>)}</select></label>
                 <label className={labelClass}>Base credit weight<input type="number" min={1} max={1000} value={form.creditWeight} onChange={(e) => setField("creditWeight", Number(e.target.value))} className={inputClass} /></label>
-                <label className={labelClass}>Runtime status<select value={form.status} onChange={(e) => setField("status", e.target.value as ModelStatus)} className={inputClass}><option value="enabled">Enabled</option><option value="disabled">Disabled</option><option value="coming-soon">Coming soon</option></select></label>
+                <label className={labelClass}>Runtime status<select value={form.status} onChange={(e) => setField("status", e.target.value as ModelStatus)} className={inputClass}><option value="enabled">Enabled</option><option value="limited">Limited</option><option value="disabled">Disabled</option><option value="coming-soon">Coming soon</option></select></label>
                 <label className="flex items-center gap-2 text-sm font-bold text-zinc-300"><input type="checkbox" checked={form.publiclyListed} onChange={(e) => setField("publiclyListed", e.target.checked)} className="h-4 w-4" /> Publicly listed</label>
                 <label className={`${labelClass} md:col-span-2`}>Replacement model<select value={form.replacementModelId} onChange={(e) => setField("replacementModelId", e.target.value)} className={inputClass}><option value="">None</option>{models.filter((model) => model.id !== form.id && !model.catalogDeleted).map((model) => <option key={model.id} value={model.id}>{model.name} ({model.id})</option>)}</select></label>
                 <label className={labelClass}>Sort order<input type="number" value={form.sortOrder} onChange={(e) => setField("sortOrder", Number(e.target.value))} className={inputClass} /></label>
+                <label className={`${labelClass} md:col-span-2`}>Internal operational reason<textarea rows={3} value={form.operationalReason} onChange={(e) => setField("operationalReason", e.target.value)} className={inputClass} placeholder="Visible only to administrators" /></label>
+                <label className={`${labelClass} md:col-span-2`}>User-visible status note<textarea rows={3} value={form.userVisibleNote} onChange={(e) => setField("userVisibleNote", e.target.value)} className={inputClass} placeholder="Safe explanation shown when this model is limited or unavailable" /></label>
               </fieldset>
 
               <fieldset className="grid gap-4 rounded-2xl border border-zinc-800 p-4 md:grid-cols-4">

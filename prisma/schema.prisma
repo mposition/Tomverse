@@ -679,6 +679,8 @@ model ModelRegistryEntry {
   publiclyListed                  Boolean  @default(true)
   enabled                         Boolean  @default(true)
   status                          String   @default("enabled")
+  operationalReason               String?
+  userVisibleNote                 String?
   replacementModelId              String?
   catalogDeleted                  Boolean  @default(false)
   reasoning                       String?
@@ -753,6 +755,7 @@ model AdminProviderIncident {
   title            String
   message          String?
   fallbackModelIds String    @default("[]")
+  previousModelStates Json?
   createdById      String?
   createdByEmail   String?
   resolvedById     String?

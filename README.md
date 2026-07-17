@@ -144,12 +144,23 @@ stored in `ProviderBillingConfig`; changes are rate-limited and audit logged.
 
 ## Database Model Registry
 
-The Admin Console **Providers > Model Registry / Runtime** tab is the source of
+The Admin Console **Providers > Model Registry** tab is the source of
 truth for the live model catalogue. It manages the Tomverse model ID, provider
 API model ID, API Base URL, API-key environment-variable name, plan access,
 credit weight, image/PDF support, context window, token limits, and token-price
 snapshot. API secrets are never stored in the database; only the environment
 variable name is stored and its configured/missing state is displayed.
+
+Live availability (`enabled`, `limited`, `disabled`, or `coming-soon`), the
+private operational reason, and the safe user-visible status note are managed
+in the same registry. The former Model Controls override panel is no longer a
+separate source of truth. Its saved values are copied into the registry by
+`20260717213000_consolidate_model_runtime_controls`.
+
+Use the Copy action on any model card to prefill a new entry with the existing
+provider, endpoint, plan, credit, capability, context, and pricing settings. A
+copy receives a unique draft ID and starts disabled and hidden so its new API
+model ID can be verified before it becomes callable.
 
 The checked-in `AVAILABLE_MODELS` array is retained only as the first-deploy
 bootstrap and a rolling-migration fallback. Existing rows are never overwritten
@@ -158,7 +169,7 @@ by the bootstrap. Removing a model from the Admin Console archives it
 physically deleting the ID, so historical conversations remain readable. A
 saved archived entry is restored to the active catalogue.
 
-Apply `20260717180000_add_model_registry` before using the editor:
+Apply the Model Registry migrations before using the editor:
 
 ```bash
 npm run db:migrate

@@ -23,7 +23,7 @@ import {
     discardPerplexityUsage,
     perplexityUsageHeaders,
 } from "@/lib/perplexityUsageCapture";
-import { assertModelNotAdminDisabled } from "@/lib/modelOverrides";
+import { assertModelRuntimeAvailable } from "@/lib/modelAvailability";
 import { parseOfficeSafely } from "@/lib/officeSecurity";
 import {
     extractPdfTextSafely,
@@ -654,7 +654,7 @@ export async function POST(req: Request) {
                 traceId
             );
         }
-        const adminModelAccess = await assertModelNotAdminDisabled(requestedModelId);
+        const adminModelAccess = await assertModelRuntimeAvailable(requestedModelId);
         if (!adminModelAccess.allowed) {
             return tracedJsonError(
                 adminModelAccess.reason || "This model is temporarily unavailable.",

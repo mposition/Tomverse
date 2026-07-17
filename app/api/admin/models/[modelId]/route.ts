@@ -132,11 +132,12 @@ export async function DELETE(
         publiclyListed: false,
         enabled: false,
         status: "disabled",
+        operationalReason: "Removed from the active catalogue.",
+        userVisibleNote: null,
         updatedById: session.user.id,
         updatedByEmail: session.user.email || null,
       },
     });
-    await prisma.modelOverride.deleteMany({ where: { modelId } });
     await writeAdminAuditLog({
       session,
       request: req,

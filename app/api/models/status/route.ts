@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { getPublicRuntimeModels } from "@/lib/modelRegistry";
-import { getModelOverrideMap, resolveModelOverrideStatus } from "@/lib/modelOverrides";
+import { resolveModelRuntimeAvailability } from "@/lib/modelAvailability";
 import { getProviderHealthDashboard } from "@/lib/providerMonitoring";
 import { getTrustedClientIp } from "@/lib/clientIp";
 import {
@@ -30,10 +30,7 @@ const fallbackModelStatus = (publicModels: Awaited<ReturnType<typeof getPublicRu
   models: publicModels.map((model) => ({
     id: model.id,
     provider: model.provider,
-    status:
-      model.enabled && model.status === "enabled"
-        ? ("available" as const)
-        : ("unavailable" as const),
+    status: resolveModelRuntimeAvailability(model),
     fallbackModelIds: model.replacementModelId
       ? [model.replacementModelId]
       : [],
@@ -72,7 +69,6 @@ export async function GET(req: Request) {
     const providerStatus = new Map(
       dashboard.providers.map((provider) => [provider.provider, provider])
     );
-    const overrideMap = await getModelOverrideMap().catch(() => new Map());
     const modelIncidents = new Map(
       dashboard.providers.flatMap((provider) =>
         provider.modelIncidents.map((incident) => [incident.modelId, incident])
@@ -83,11 +79,9 @@ export async function GET(req: Request) {
     const models = publicModels.map((model) => {
       const replacementModelId = model.replacementModelId;
       const provider = providerStatus.get(model.provider);
-      const override = overrideMap.get(model.id);
       const incident = modelIncidents.get(model.id);
-      const overrideStatus = resolveModelOverrideStatus(model, override);
-      let status: "available" | "unavailable" =
-        overrideStatus === "unavailable" ? "unavailable" : "available";
+      let status: "available" | "limited" | "unavailable" =
+        resolveModelRuntimeAvailability(model);
       if (status !== "unavailable" && incident && incident.failureCount5m >= 3) {
         status = "unavailable";
       } else if (status !== "unavailable" && provider?.status === "outage") {

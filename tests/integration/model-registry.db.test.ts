@@ -7,12 +7,12 @@ import {
   getEnabledRuntimeModel,
   getRuntimeModel,
 } from "../../lib/modelRegistry";
+import { assertModelRuntimeAvailable } from "../../lib/modelAvailability";
 import { getModelBillingProfile, getModelUsageProfile } from "../../lib/models";
 
 const modelId = `integration/model-${randomUUID()}`;
 
 after(async () => {
-  await prisma.modelOverride.deleteMany({ where: { modelId } });
   await prisma.modelRegistryEntry.deleteMany({ where: { id: modelId } });
   await prisma.$disconnect();
 });
@@ -60,6 +60,28 @@ test("persists and resolves a newly registered model without a source catalogue 
     inputUsdPerMillionTokens: 2.5,
     outputUsdPerMillionTokens: 8.5,
     cachedInputPriceMultiplier: 0.5,
+  });
+});
+
+test("stores limited availability and operational notes in the registry", async () => {
+  await prisma.modelRegistryEntry.update({
+    where: { id: modelId },
+    data: {
+      status: "limited",
+      enabled: true,
+      operationalReason: "Integration-test provider throttling",
+      userVisibleNote: "This model is temporarily limited.",
+    },
+  });
+
+  const model = await getEnabledRuntimeModel(modelId);
+  assert.ok(model);
+  assert.equal(model.status, "limited");
+  assert.equal(model.operationalReason, "Integration-test provider throttling");
+  assert.equal(model.userVisibleNote, "This model is temporarily limited.");
+  assert.deepEqual(await assertModelRuntimeAvailable(modelId), {
+    allowed: true,
+    reason: "This model is temporarily limited.",
   });
 });
 

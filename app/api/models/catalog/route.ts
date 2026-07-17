@@ -12,6 +12,7 @@ export async function GET() {
           const publicModel = { ...model };
           delete publicModel.apiBaseUrl;
           delete publicModel.apiKeyEnvName;
+          delete publicModel.operationalReason;
           return publicModel;
         }),
       },

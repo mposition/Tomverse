@@ -51,7 +51,7 @@ import {
   conversationLockedResponse,
   hasConversationUnlockGrant,
 } from "@/lib/conversationLock";
-import { assertModelNotAdminDisabled } from "@/lib/modelOverrides";
+import { assertModelRuntimeAvailable } from "@/lib/modelAvailability";
 import { getModelUsageProfile, type AiModel } from "@/lib/models";
 import { prisma } from "@/lib/prisma";
 import {
@@ -131,7 +131,7 @@ const accessibleCandidates = async (
   for (const candidate of candidates) {
     try {
       assertModelAccess(access, candidate);
-      const override = await assertModelNotAdminDisabled(candidate.id);
+      const override = await assertModelRuntimeAvailable(candidate.id);
       if (override.allowed) available.push(candidate);
     } catch {
       // A configured fallback can be outside this plan's model tier.
