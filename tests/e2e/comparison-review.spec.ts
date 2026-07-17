@@ -250,7 +250,8 @@ for (const viewport of [
     await page.getByRole("button", { name: "AI 답변 교차검토" }).click();
     const dialog = page.getByRole("dialog", { name: "AI 답변 교차검토" });
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByText("4 크레딧").first()).toBeVisible();
+    await expect(dialog.getByTestId("ai-review-estimated-credits")).toContainText("4");
+    await expect(dialog.getByTestId("ai-review-estimated-credits").getByTestId("credit-coin-icon")).toBeVisible();
     await dialog.getByRole("button", { name: /근거 중심/ }).click();
     await dialog.getByText("신중한 종합안 포함").click();
     await dialog.getByRole("button", { name: /교차검토 실행/ }).click();
@@ -281,7 +282,8 @@ test("quick comparison performs a structured AI analysis on mobile", async ({
   await page.goto("/chat");
 
   const quickButton = page.getByTestId("quick-comparison-button");
-  await expect(quickButton).toContainText("1×");
+  await expect(quickButton.getByTestId("quick-comparison-credit-cost")).toContainText("1");
+  await expect(quickButton.getByTestId("credit-coin-icon")).toBeVisible();
   await quickButton.click();
   await expect(page.getByTestId("quick-comparison-setup")).toHaveCount(0);
   const dialog = page.getByTestId("quick-comparison-dialog");

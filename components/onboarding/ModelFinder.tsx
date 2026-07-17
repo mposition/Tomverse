@@ -11,6 +11,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { ModelLogo } from "@/components/chat/ModelLogo";
+import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import { useLanguage } from "@/components/LanguageProvider";
 import {
   getModelFinderPromptKey,
@@ -75,7 +76,7 @@ const stageNumber = (stage: Stage) =>
   stage === "tasks" ? 1 : stage === "priority" ? 2 : 3;
 
 export function ModelFinder({ enabled, userId, onComplete }: ModelFinderProps) {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
   const [isOpen, setIsOpen] = useState(false);
   const [stage, setStage] = useState<Stage>("intro");
   const [tasks, setTasks] = useState<ModelFinderTask[]>([]);
@@ -359,6 +360,7 @@ export function ModelFinder({ enabled, userId, onComplete }: ModelFinderProps) {
                   const isSelected =
                     recommendation.modelId === selectedRecommendation?.modelId;
                   if (!model) return null;
+                  const usageProfile = getModelUsageProfile(model);
                   return (
                     <button
                       key={model.id}
@@ -385,10 +387,13 @@ export function ModelFinder({ enabled, userId, onComplete }: ModelFinderProps) {
                           <span className="block truncate text-sm font-black text-zinc-950 dark:text-white">
                             {model.name}
                           </span>
-                          <span className="block text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
-                            {t("modelFinder.standardBadge")}
-                          </span>
                         </span>
+                        <CreditCostBadge
+                          credits={usageProfile.credits}
+                          size="xs"
+                          label={lang === "ko" ? `기본 ${usageProfile.credits}크레딧 차감` : `Base cost ${usageProfile.credits} credits`}
+                          testId="model-finder-credit-cost"
+                        />
                         {isSelected && <Check className="h-5 w-5 text-blue-500" />}
                       </span>
                       <span className="mt-3 block text-xs leading-5 text-zinc-500 dark:text-zinc-400">
@@ -419,9 +424,13 @@ export function ModelFinder({ enabled, userId, onComplete }: ModelFinderProps) {
                               : "modelFinder.optionalDeep"
                           )}
                         </p>
-                        <p className="mt-1 text-[11px] font-bold text-amber-700 dark:text-amber-300">
-                          {optionalProfile.category} · {optionalProfile.credits} credits
-                        </p>
+                        <CreditCostBadge
+                          credits={optionalProfile.credits}
+                          size="xs"
+                          className="mt-1"
+                          label={lang === "ko" ? `기본 ${optionalProfile.credits}크레딧 차감` : `Base cost ${optionalProfile.credits} credits`}
+                          testId="model-finder-credit-cost"
+                        />
                       </div>
                     </div>
                     <button

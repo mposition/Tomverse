@@ -90,6 +90,7 @@ test("model picker prioritizes exact credits and shows the final input estimate"
   );
   await expect(gptMini).toBeVisible();
   await expect(gptMini.getByTestId("model-credit-badge")).toContainText("1");
+  await expect(gptMini.getByTestId("model-credit-badge").getByTestId("credit-coin-icon")).toBeVisible();
   await expect(gptMini).not.toContainText("Available");
   await expect(gptMini).not.toContainText("Standard ·");
   await expect(gptMini).not.toContainText("Best for");
@@ -100,6 +101,8 @@ test("model picker prioritizes exact credits and shows the final input estimate"
   const estimate = page.getByTestId("request-credit-estimate");
   await expect(estimate).toContainText("1.5×");
   await expect(estimate).toContainText("2");
+  await expect(page.getByTestId("send-credit-cost")).toContainText("2");
+  await expect(page.getByTestId("send-credit-cost").getByTestId("credit-coin-icon")).toBeVisible();
 });
 
 test("action and model popovers remain visible and keyboard closable", async ({ page }) => {

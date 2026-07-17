@@ -10,6 +10,7 @@ import {
   X,
 } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
+import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 
 type ReviewMode = "balanced" | "evidence" | "action";
@@ -310,11 +311,18 @@ export function ComparisonReviewDialog({
           ) : review ? (
             <div className="space-y-5">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-black text-emerald-600 dark:text-emerald-300">
-                  {review.cached
-                    ? t("chat.aiReviewCached")
-                    : `${review.usageCredits} ${t("chat.aiReviewCreditsUsed")}`}
-                </span>
+                {review.cached ? (
+                  <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-black text-emerald-600 dark:text-emerald-300">
+                    {t("chat.aiReviewCached")}
+                  </span>
+                ) : (
+                  <CreditCostBadge
+                    credits={review.usageCredits}
+                    size="md"
+                    label={`${review.usageCredits} ${t("chat.aiReviewCreditsUsed")}`}
+                    testId="ai-review-used-credits"
+                  />
+                )}
                 <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-bold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
                   {t("chat.aiReviewConfidence")}: {review.result.confidence}
                 </span>
@@ -498,9 +506,13 @@ export function ComparisonReviewDialog({
                         <p className="text-xs font-bold uppercase tracking-wide text-zinc-500">
                           {t("chat.aiReviewEstimatedCost")}
                         </p>
-                        <p className="mt-1 text-lg font-black">
-                          {setup.estimatedCredits} {t("chat.aiReviewCredits")}
-                        </p>
+                        <CreditCostBadge
+                          credits={setup.estimatedCredits || 0}
+                          size="md"
+                          className="mt-1"
+                          label={`${setup.estimatedCredits || 0} ${t("chat.aiReviewCredits")}`}
+                          testId="ai-review-estimated-credits"
+                        />
                       </div>
                       <div className="text-right text-xs leading-5 text-zinc-500">
                         <p>{setup.reviewerClass} reviewer</p>
@@ -541,12 +553,20 @@ export function ComparisonReviewDialog({
               type="button"
               onClick={runReview}
               disabled={running}
-              className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 text-sm font-black text-white hover:bg-blue-500 disabled:cursor-wait disabled:opacity-60 sm:ml-auto sm:w-auto"
+              className="flex h-11 w-full items-center justify-between gap-3 rounded-xl bg-blue-600 px-4 text-sm font-black text-white hover:bg-blue-500 disabled:cursor-wait disabled:opacity-60 sm:ml-auto sm:w-auto sm:min-w-48"
             >
-              {running ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-              {running
-                ? t("chat.aiReviewRunning")
-                : `${t("chat.aiReviewRun")} · ${setup.estimatedCredits} ${t("chat.aiReviewCredits")}`}
+              <span className="flex min-w-0 items-center gap-2">
+                {running ? <LoaderCircle className="h-4 w-4 shrink-0 animate-spin" /> : <Sparkles className="h-4 w-4 shrink-0" />}
+                <span className="truncate">{running ? t("chat.aiReviewRunning") : t("chat.aiReviewRun")}</span>
+              </span>
+              <CreditCostBadge
+                credits={setup.estimatedCredits || 0}
+                size="xs"
+                tone="onColor"
+                label={`${setup.estimatedCredits || 0} ${t("chat.aiReviewCredits")}`}
+                testId="ai-review-run-credit-cost"
+                className="border-0 bg-white/20"
+              />
             </button>
           </footer>
         )}

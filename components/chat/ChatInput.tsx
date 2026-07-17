@@ -9,7 +9,6 @@ import {
   Braces,
   ChevronDown,
   Code2,
-  Coins,
   File as FileIcon,
   FileText,
   HardDrive,
@@ -26,6 +25,7 @@ import {
   Star,
   X,
 } from "lucide-react";
+import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import {
   AVAILABLE_MODELS,
   PUBLIC_MODELS,
@@ -1877,13 +1877,11 @@ export function ChatInput({
                                   {getModelPickerDescription(model, lang)}
                                 </span>
                               </span>
-                              <span
-                                className="inline-flex shrink-0 items-center gap-1 text-[10px] font-black text-amber-700 dark:text-amber-300"
-                                aria-label={lang === "ko" ? `기본 ${usageProfile.credits}크레딧 차감` : `Base cost ${usageProfile.credits} credits`}
-                              >
-                                <Coins className="h-3 w-3" aria-hidden="true" />
-                                {usageProfile.credits}
-                              </span>
+                              <CreditCostBadge
+                                credits={usageProfile.credits}
+                                size="xs"
+                                label={lang === "ko" ? `기본 ${usageProfile.credits}크레딧 차감` : `Base cost ${usageProfile.credits} credits`}
+                              />
                               <span
                                 className={`shrink-0 rounded-full px-2 py-1 text-[9px] font-black ${
                                   isSelected
@@ -2121,14 +2119,11 @@ export function ChatInput({
                                   )}
                                 </span>
                                 <span className="flex shrink-0 flex-col items-end gap-2">
-                                  <span
-                                    data-testid="model-credit-badge"
-                                    className="inline-flex items-center gap-1 rounded-full bg-amber-400/15 px-2 py-1 text-[10px] font-black text-amber-700 dark:text-amber-300"
-                                    aria-label={lang === "ko" ? `기본 ${usageProfile.credits}크레딧 차감` : `Base cost ${usageProfile.credits} credits`}
-                                  >
-                                    <Coins className="h-3 w-3" aria-hidden="true" />
-                                    {usageProfile.credits}
-                                  </span>
+                                  <CreditCostBadge
+                                    credits={usageProfile.credits}
+                                    testId="model-credit-badge"
+                                    label={lang === "ko" ? `기본 ${usageProfile.credits}크레딧 차감` : `Base cost ${usageProfile.credits} credits`}
+                                  />
                                   <span className={`h-4 w-8 rounded-full p-0.5 transition-colors ${isSelected ? "bg-blue-500" : "bg-zinc-300 dark:bg-zinc-700"}`}>
                                     <span className={`block h-3 w-3 rounded-full bg-white transition-transform ${isSelected ? "translate-x-4" : ""}`} />
                                   </span>
@@ -2148,13 +2143,11 @@ export function ChatInput({
                   <div data-testid="model-selection-summary" className="mt-2 flex shrink-0 items-center gap-2 border-t border-zinc-200 px-1 pt-2 dark:border-zinc-700">
                     <p className="min-w-0 flex-1 text-[11px] font-bold text-zinc-600 dark:text-zinc-300">
                       {selectedModels.length} {t("chat.modelsSelected")} · {pickerCopy.baseEstimate}{" "}
-                      <span
-                        className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-300"
-                        aria-label={lang === "ko" ? `기본 예상 ${selectedBaseCredits}크레딧` : `Base estimate ${selectedBaseCredits} credits`}
-                      >
-                        <Coins className="h-3 w-3" aria-hidden="true" />
-                        {selectedBaseCredits}
-                      </span>
+                      <CreditCostBadge
+                        credits={selectedBaseCredits}
+                        size="xs"
+                        label={lang === "ko" ? `기본 예상 ${selectedBaseCredits}크레딧` : `Base estimate ${selectedBaseCredits} credits`}
+                      />
                     </p>
                     <button
                       type="button"
@@ -2216,11 +2209,19 @@ export function ChatInput({
               onSubmit();
             }}
             disabled={isDisabled || (!value.trim() && attachments.length === 0)}
-            className="order-3 ml-auto flex h-9 w-9 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-blue-600 text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500 dark:disabled:bg-zinc-700 dark:disabled:text-zinc-400 md:h-9 md:w-9"
-            title={t("chat.send")}
-            aria-label={t("chat.send")}
+            className="order-3 ml-auto flex h-9 min-w-9 shrink-0 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-full bg-blue-600 px-2 text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500 dark:disabled:bg-zinc-700 dark:disabled:text-zinc-400 md:h-9"
+            title={`${t("chat.send")} · ${estimatedRequestCredits} credits`}
+            aria-label={`${t("chat.send")} · ${estimatedRequestCredits} credits`}
           >
             <ArrowUp className="h-4 w-4" />
+            <CreditCostBadge
+              credits={estimatedRequestCredits}
+              size="xs"
+              tone="onColor"
+              label={lang === "ko" ? `예상 ${estimatedRequestCredits}크레딧 차감` : `Estimated deduction ${estimatedRequestCredits} credits`}
+              testId="send-credit-cost"
+              className="border-0 bg-white/20 px-1.5"
+            />
           </button>
         )}
         {selectedModels.length > 0 && (
@@ -2231,13 +2232,11 @@ export function ChatInput({
             <span>
               {selectedModels.length} {t("chat.modelsSelected")} · {pickerCopy.estimatedUsage}
             </span>
-            <span
-              className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-300"
-              aria-label={lang === "ko" ? `예상 ${estimatedRequestCredits}크레딧` : `Estimated ${estimatedRequestCredits} credits`}
-            >
-              <Coins className="h-3 w-3" aria-hidden="true" />
-              {estimatedRequestCredits}
-            </span>
+            <CreditCostBadge
+              credits={estimatedRequestCredits}
+              size="xs"
+              label={lang === "ko" ? `예상 ${estimatedRequestCredits}크레딧` : `Estimated ${estimatedRequestCredits} credits`}
+            />
             {inputCreditMultiplier > 1 && (
               <span className="inline-flex items-center gap-1">
                 {inputCreditMultiplier}× · {pickerCopy.multiplierApplied}

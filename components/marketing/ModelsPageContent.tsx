@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Activity, ExternalLink } from "lucide-react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
+import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import { ENABLED_MODELS, getModelUsageProfile } from "@/lib/models";
 import { getModelBrand } from "@/lib/modelBranding";
 import { getModelBestFor, getModelExperienceStatus, getModelExperienceTags } from "@/lib/modelExperience";
@@ -200,9 +201,13 @@ export function ModelsPageContent() {
                 </div>
                 <div>
                   <p className="text-[10px] font-bold uppercase text-zinc-500">{content.baseCharge}</p>
-                  <p className="mt-1 text-sm font-black">
-                    {usageProfile.credits} {content.creditUnit}
-                  </p>
+                  <CreditCostBadge
+                    credits={usageProfile.credits}
+                    size="md"
+                    className="mt-1"
+                    label={`${content.baseCharge}: ${usageProfile.credits} ${content.creditUnit}`}
+                    testId="model-page-credit-cost"
+                  />
                 </div>
                 <div>
                   <p className="text-[10px] font-bold uppercase text-zinc-500">{content.status}</p>

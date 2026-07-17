@@ -1014,7 +1014,11 @@ const checks = [
     name: "Chat model picker hides internal classes and shows exact credit costs",
     file: "components/chat/ChatInput.tsx",
     test: (source) =>
-      source.includes('data-testid="model-credit-badge"') &&
+      source.includes('testId="model-credit-badge"') &&
+      source.includes("CreditCostBadge") &&
+      read("components/credits/CreditCostBadge.tsx").includes(
+        'data-testid="credit-coin-icon"'
+      ) &&
       source.includes("getModelPickerDescription") &&
       source.includes("getModelPickerFeatures") &&
       source.includes('data-testid="model-recommendations"') &&
