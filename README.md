@@ -34,11 +34,11 @@ CHAT_USER_TOKENS_PER_DAY=1000000
 CHAT_USER_TOKENS_PER_MONTH=20000000
 CHAT_GUEST_COST_MICROUSD_PER_DAY=20000
 CHAT_GUEST_COST_MICROUSD_PER_MONTH=100000
-CHAT_FREE_COST_MICROUSD_PER_DAY=100000
+CHAT_FREE_COST_MICROUSD_PER_DAY=250000
 CHAT_FREE_COST_MICROUSD_PER_MONTH=500000
-CHAT_PRO_COST_MICROUSD_PER_DAY=750000
+CHAT_PRO_COST_MICROUSD_PER_DAY=1500000
 CHAT_PRO_COST_MICROUSD_PER_MONTH=4500000
-CHAT_MAX_COST_MICROUSD_PER_DAY=1500000
+CHAT_MAX_COST_MICROUSD_PER_DAY=3000000
 CHAT_MAX_COST_MICROUSD_PER_MONTH=9000000
 CHAT_FREE_PRO_MODEL_RESPONSES_PER_MONTH=30
 CHAT_PROVIDER_OPENAI_COST_MICROUSD_PER_MONTH=100000000
@@ -59,7 +59,15 @@ settles proportionally while estimated provider cost accounting remains separate
 CHAT_MODEL_GPT_5_5_INPUT_USD_PER_MILLION=15
 CHAT_MODEL_GPT_5_5_OUTPUT_USD_PER_MILLION=60
 CHAT_MODEL_GPT_5_5_MAX_OUTPUT_TOKENS=8192
+CHAT_MODEL_GPT_5_5_RESERVATION_OUTPUT_TOKENS=2048
 ```
+
+`MAX_OUTPUT_TOKENS` remains the provider response ceiling. The separate
+`RESERVATION_OUTPUT_TOKENS` value is the realistic output allowance reserved by
+Tomverse's internal cost guard before a request starts; it is clamped to the
+provider ceiling. Multi-model sends are preflighted as one comparison against
+the user's credits, concurrency, token, internal-cost, and provider-cost limits
+before any provider request is dispatched.
 
 Application limits are a second line of defense. Configure billing alerts and
 hard spending limits in each AI provider dashboard as well.

@@ -298,6 +298,7 @@ export default function Home() {
   const promptCountsRef = useRef<Map<string, number>>(new Map());
   const comparisonPresetAppliedRef = useRef(false);
   const comparisonPresetRequestedRef = useRef(false);
+  const comparisonPreflightInFlightRef = useRef(false);
 
   const [isPrivateMode, setIsPrivateMode] = useState(false);
 
@@ -407,6 +408,82 @@ export default function Home() {
       toastTimerRef.current = null;
     }, 3200);
   }, []);
+
+  const runComparisonPreflight = useCallback(
+    async ({
+      comparisonId,
+      conversationId,
+      prompt,
+      promptAttachments,
+    }: {
+      comparisonId: string;
+      conversationId: string;
+      prompt: string;
+      promptAttachments: ChatAttachment[];
+    }) => {
+      const modelIds = selectedModels.filter(
+        (modelId) => !effectiveDisabledPanels.includes(modelId)
+      );
+      if (isGuestMode || modelIds.length < 2) return true;
+      if (comparisonPreflightInFlightRef.current) return false;
+
+      comparisonPreflightInFlightRef.current = true;
+      try {
+        const response = await fetch("/api/chat/preflight", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            comparisonId,
+            conversationId,
+            modelIds,
+            prompt,
+            attachments: promptAttachments.map((attachment) => ({
+              mediaType: attachment.mediaType,
+              size: attachment.size,
+            })),
+          }),
+        });
+        if (response.ok) return true;
+
+        const errorBody = await response.json().catch(() => null);
+        const code =
+          typeof errorBody?.code === "string" ? errorBody.code : "";
+        const localizedMessage =
+          code === "CREDIT_BALANCE_INSUFFICIENT" ||
+          code === "CREDIT_COST_ALLOWANCE_INSUFFICIENT"
+            ? t("chat.comparisonCreditsInsufficient")
+            : code === "INTERNAL_DAILY_COST_SAFETY_LIMIT"
+              ? t("chat.internalDailyCostSafetyLimit")
+              : code === "INTERNAL_MONTHLY_COST_SAFETY_LIMIT"
+                ? t("chat.internalMonthlyCostSafetyLimit")
+                : code === "PROVIDER_DAILY_SPEND_LIMIT_REACHED" ||
+                    code === "PROVIDER_SPEND_LIMIT_REACHED"
+                  ? t("chat.providerCostSafetyLimit")
+                  : code === "CHAT_QUOTA_EXCEEDED"
+                    ? t("chat.comparisonDailyCreditsInsufficient")
+                    : code === "CHAT_CONCURRENCY_EXCEEDED"
+                      ? t("chat.comparisonConcurrencyLimit")
+                      : code === "FREE_PRO_MODEL_QUOTA_EXCEEDED"
+                        ? t("chat.comparisonHigherCostQuotaExceeded")
+                        : t("chat.comparisonPreflightFailed");
+        const traceId =
+          typeof errorBody?.traceId === "string"
+            ? errorBody.traceId
+            : response.headers.get("X-Request-ID");
+        showToast(
+          traceId
+            ? `${localizedMessage} (${t("chat.traceId")}: ${traceId})`
+            : localizedMessage,
+          "error"
+        );
+        return false;
+      } catch {
+        showToast(t("chat.comparisonPreflightFailed"), "error");
+        return false;
+      } finally {
+        comparisonPreflightInFlightRef.current = false;
+      }
+    }, [effectiveDisabledPanels, isGuestMode, selectedModels, showToast, t]);
 
   useEffect(() => {
     return () => {
@@ -1040,6 +1117,14 @@ export default function Home() {
     }
 
     if (isPrivateMode) {
+      const comparisonId = Date.now().toString();
+      const preflightAllowed = await runComparisonPreflight({
+        comparisonId,
+        conversationId: "private-chat",
+        prompt: trimmed,
+        promptAttachments,
+      });
+      if (!preflightAllowed) return;
       const previousCount = promptCountsRef.current.get("private-chat") || 0;
       trackProductEvent(
         previousCount === 0 ? "chat_started" : "followup_sent",
@@ -1048,7 +1133,7 @@ export default function Home() {
       );
       promptCountsRef.current.set("private-chat", previousCount + 1);
       setPromptPayload({ 
-        id: Date.now().toString(), 
+        id: comparisonId,
         text: trimmed, 
         chatId: "private-chat",
         userMessageId: crypto.randomUUID(),
@@ -1091,6 +1176,14 @@ export default function Home() {
     }
     
     if (activeChatId) {
+      const comparisonId = Date.now().toString();
+      const preflightAllowed = await runComparisonPreflight({
+        comparisonId,
+        conversationId: activeChatId,
+        prompt: trimmed,
+        promptAttachments,
+      });
+      if (!preflightAllowed) return;
 	  const userMsgId = crypto.randomUUID();
       const conversation = conversations.find((item) => item.id === activeChatId);
       const previousCount =
@@ -1125,7 +1218,7 @@ export default function Home() {
     }
 
       setPromptPayload({ 
-        id: Date.now().toString(), 
+        id: comparisonId,
         text: trimmed, 
         chatId: activeChatId,
         userMessageId: userMsgId,

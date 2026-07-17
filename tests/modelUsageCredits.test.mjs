@@ -6,6 +6,7 @@ import {
   getEnabledModel,
   getInputCreditMultiplier,
   getModel,
+  getModelBillingProfile,
   getModelUsageProfile,
   getSettledUsageCredits,
   getTypicalShortRequestCapacities,
@@ -160,4 +161,15 @@ test("credit settlement refunds failures and empty responses", () => {
     outcome: "cancelled",
   });
   assert.ok(partial > 0 && partial < 16);
+});
+
+test("cost reservations use realistic output while preserving provider output caps", () => {
+  const premium = getModelBillingProfile(getModel("gpt-5-5"));
+  assert.equal(premium.maxOutputTokens, 8_192);
+  assert.equal(premium.reservationOutputTokens, 2_048);
+
+  const threePremiumOutputReservationMicroUsd =
+    3 * premium.reservationOutputTokens * premium.outputUsdPerMillionTokens;
+  assert.equal(threePremiumOutputReservationMicroUsd, 368_640);
+  assert.ok(threePremiumOutputReservationMicroUsd < 1_500_000);
 });

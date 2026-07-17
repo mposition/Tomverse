@@ -61,6 +61,7 @@ export type ChatBudget = {
     usageCredits: number;
     inputTokens: number;
     maxOutputTokens: number;
+    reservedOutputTokens: number;
     inputUsdPerMillionTokens: number;
     outputUsdPerMillionTokens: number;
     cachedInputPriceMultiplier: number;
@@ -86,6 +87,7 @@ export type ChatUsageReservation = {
     usageCredits: number;
     inputTokens: number;
     maxOutputTokens: number;
+    reservedOutputTokens: number;
     inputUsdPerMillionTokens: number;
     outputUsdPerMillionTokens: number;
     cachedInputPriceMultiplier: number;
@@ -123,6 +125,7 @@ const durableReservationPayloadSchema = z
         usageCredits: z.number().int().positive(),
         inputTokens: z.number().int().nonnegative(),
         maxOutputTokens: z.number().int().nonnegative(),
+        reservedOutputTokens: z.number().int().nonnegative().optional(),
         inputUsdPerMillionTokens: z.number().nonnegative(),
         outputUsdPerMillionTokens: z.number().nonnegative(),
         cachedInputPriceMultiplier: z.number().min(0).max(1).default(1),
@@ -159,6 +162,8 @@ const deserializeReservation = (payload: Prisma.JsonValue) => {
     const parsed = durableReservationPayloadSchema.parse(payload);
     return {
         ...parsed,
+        reservedOutputTokens:
+            parsed.reservedOutputTokens ?? parsed.maxOutputTokens,
         provider: parsed.provider as AiModel["provider"],
         entries: parsed.entries.map((entry) => ({
             ...entry,
@@ -189,16 +194,16 @@ export const getPlanEstimatedCostLimits = (plan: ModelTier) => ({
         plan === "Max"
             ? positiveInteger(
                   process.env.CHAT_MAX_COST_MICROUSD_PER_DAY,
-                  1_500_000
+                  3_000_000
               )
             : plan === "Pro"
               ? positiveInteger(
                     process.env.CHAT_PRO_COST_MICROUSD_PER_DAY,
-                    750_000
+                    1_500_000
                 )
               : positiveInteger(
                     process.env.CHAT_FREE_COST_MICROUSD_PER_DAY,
-                    100_000
+                    250_000
                 ),
     month:
         plan === "Max"
@@ -240,6 +245,19 @@ export const assertModelAccess = (access: Pick<ChatAccess, "kind" | "plan">, mod
 const microdollarsFor = (tokens: number, usdPerMillionTokens: number) =>
     Math.ceil(tokens * usdPerMillionTokens);
 
+export const getChatBudgetReservedTokens = (budget: ChatBudget) =>
+    budget.inputTokens + budget.reservedOutputTokens;
+
+export const getChatBudgetReservedCostMicroUsd = (budget: ChatBudget) =>
+    microdollarsFor(
+        budget.inputTokens,
+        budget.inputUsdPerMillionTokens
+    ) +
+    microdollarsFor(
+        budget.reservedOutputTokens,
+        budget.outputUsdPerMillionTokens
+    );
+
 export const createChatBudget = (
     kind: AccessKind,
     model: AiModel,
@@ -270,6 +288,7 @@ export const createChatBudget = (
         usageCredits: getWeightedUsageCredits(model, estimatedInputTokens),
         inputTokens: estimatedInputTokens,
         maxOutputTokens: profile.maxOutputTokens,
+        reservedOutputTokens: profile.reservationOutputTokens,
         inputUsdPerMillionTokens: profile.inputUsdPerMillionTokens,
         outputUsdPerMillionTokens: profile.outputUsdPerMillionTokens,
         cachedInputPriceMultiplier: profile.cachedInputPriceMultiplier,
@@ -473,6 +492,449 @@ const incrementUsage = async (
     return rows.length > 0;
 };
 
+const readUsageCount = async (
+    tx: Prisma.TransactionClient,
+    key: string,
+    period: string,
+    start: Date
+) => {
+    const bucket = await tx.chatUsageBucket.findUnique({
+        where: {
+            key_period_periodStart: {
+                key,
+                period,
+                periodStart: start,
+            },
+        },
+        select: { count: true },
+    });
+    return bucket?.count || 0;
+};
+
+const safeBigIntNumber = (value: bigint) => {
+    const number = Number(value);
+    if (!Number.isSafeInteger(number) || number < 0) {
+        throw new Error("Credit cost allowance exceeds the supported range.");
+    }
+    return number;
+};
+
+export const preflightChatComparisonAccess = async (
+    access: ChatAccess,
+    budgets: ChatBudget[]
+) => {
+    if (access.kind !== "user" || !access.userId) {
+        throw new ChatAccessError(
+            401,
+            "COMPARISON_AUTHENTICATION_REQUIRED",
+            "Sign in before comparing multiple models."
+        );
+    }
+    if (budgets.length < 2 || budgets.length > 3) {
+        throw new ChatAccessError(
+            400,
+            "INVALID_COMPARISON_MODELS",
+            "Choose two or three models for a comparison."
+        );
+    }
+    if (new Set(budgets.map((budget) => budget.modelId)).size !== budgets.length) {
+        throw new ChatAccessError(
+            400,
+            "DUPLICATE_COMPARISON_MODELS",
+            "Comparison models must be unique."
+        );
+    }
+
+    const now = new Date();
+    const plan = access.plan || "Free";
+    const costLimits = getPlanEstimatedCostLimits(plan);
+    const totalCredits = budgets.reduce(
+        (sum, budget) => sum + budget.usageCredits,
+        0
+    );
+    const totalReservedTokens = budgets.reduce(
+        (sum, budget) => sum + getChatBudgetReservedTokens(budget),
+        0
+    );
+    const totalReservedCost = budgets.reduce(
+        (sum, budget) => sum + getChatBudgetReservedCostMicroUsd(budget),
+        0
+    );
+
+    await prisma.$transaction(async (tx) => {
+        await lockCreditAccount(tx, access.userId!);
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${access.subjectKey}))`;
+
+        const billingRisk = await tx.user.findUniqueOrThrow({
+            where: { id: access.userId! },
+            select: { billingRiskStatus: true },
+        });
+        if (billingRisk.billingRiskStatus === "disputed_hold") {
+            throw new ChatAccessError(
+                403,
+                "BILLING_DISPUTE_HOLD",
+                "AI access is temporarily paused while a payment dispute is reviewed."
+            );
+        }
+
+        const concurrentLimit = positiveInteger(
+            process.env.CHAT_USER_CONCURRENT,
+            3
+        );
+        await tx.$executeRaw`
+            DELETE FROM "ChatRequestLease"
+            WHERE "subjectKey" = ${access.subjectKey} AND "expiresAt" <= NOW()
+        `;
+        const activeLeaseRows = await tx.$queryRaw<Array<{ count: bigint }>>`
+            SELECT COUNT(*)::bigint AS "count"
+            FROM "ChatRequestLease"
+            WHERE "subjectKey" = ${access.subjectKey}
+        `;
+        const activeLeaseCount = Number(activeLeaseRows[0]?.count || 0);
+        if (activeLeaseCount + budgets.length > concurrentLimit) {
+            throw new ChatAccessError(
+                429,
+                "CHAT_CONCURRENCY_EXCEEDED",
+                "The selected comparison would exceed the number of chats that can run at once. Wait for the current response to finish and try again.",
+                5,
+                {
+                    activeRequests: activeLeaseCount,
+                    requestedModels: budgets.length,
+                    concurrentLimit,
+                }
+            );
+        }
+
+        const planRules = limitsFor(access);
+        const minuteRule = planRules.find((rule) => rule.period === "minute");
+        if (minuteRule) {
+            const start = periodStart("minute", now);
+            const used = await readUsageCount(
+                tx,
+                access.subjectKey,
+                "minute",
+                start
+            );
+            if (used + budgets.length > minuteRule.limit) {
+                throw new ChatAccessError(
+                    429,
+                    "CHAT_RATE_LIMITED",
+                    "The selected comparison would exceed the current request rate limit. Wait briefly and try again.",
+                    retryAfterFor("minute", now)
+                );
+            }
+        }
+        const dailyCreditRule = planRules.find((rule) => rule.period === "day");
+        if (dailyCreditRule) {
+            const start = periodStart("day", now);
+            const used = await readUsageCount(
+                tx,
+                access.subjectKey,
+                "day",
+                start
+            );
+            if (used + totalCredits > dailyCreditRule.limit) {
+                throw new ChatAccessError(
+                    429,
+                    "CHAT_QUOTA_EXCEEDED",
+                    "This comparison needs more daily AI credits than are currently available.",
+                    retryAfterFor("day", now),
+                    {
+                        scope: "daily",
+                        requiredCredits: totalCredits,
+                        availableCredits: Math.max(0, dailyCreditRule.limit - used),
+                    }
+                );
+            }
+        }
+
+        const monthlyCreditRule = planRules.find(
+            (rule) => rule.period === "month"
+        );
+        if (!monthlyCreditRule) {
+            throw new ChatAccessError(
+                503,
+                "CHAT_PLAN_NOT_CONFIGURED",
+                "Monthly plan credits are not configured."
+            );
+        }
+        const monthStart = periodStart("month", now);
+        const usedPlanCredits = await readUsageCount(
+            tx,
+            access.subjectKey,
+            "month",
+            monthStart
+        );
+        let planCreditsRemaining = Math.max(
+            0,
+            monthlyCreditRule.limit - usedPlanCredits
+        );
+        const lots = await tx.creditLot.findMany({
+            where: {
+                userId: access.userId!,
+                status: "active",
+                expiresAt: { gt: now },
+                OR: [
+                    { remainingCredits: { gt: 0 } },
+                    { remainingFundedCostMicroUsd: { gt: 0 } },
+                ],
+            },
+            select: {
+                remainingCredits: true,
+                remainingFundedCostMicroUsd: true,
+            },
+        });
+        const purchasedCreditsAvailable = lots.reduce(
+            (sum, lot) => sum + lot.remainingCredits,
+            0
+        );
+        const purchasedCostAvailable = lots.reduce(
+            (sum, lot) =>
+                sum + safeBigIntNumber(lot.remainingFundedCostMicroUsd),
+            0
+        );
+        if (totalCredits > planCreditsRemaining + purchasedCreditsAvailable) {
+            throw new ChatAccessError(
+                402,
+                "CREDIT_BALANCE_INSUFFICIENT",
+                "The selected models need more credits than are currently available.",
+                undefined,
+                {
+                    requiredCredits: totalCredits,
+                    planCreditsAvailable: planCreditsRemaining,
+                    purchasedCreditsAvailable,
+                    shortfallCredits: Math.max(
+                        0,
+                        totalCredits - planCreditsRemaining - purchasedCreditsAvailable
+                    ),
+                }
+            );
+        }
+
+        let planReservedCost = 0;
+        let purchasedReservedCost = 0;
+        for (const budget of budgets) {
+            const reservedCost = getChatBudgetReservedCostMicroUsd(budget);
+            const planCredits = Math.min(
+                planCreditsRemaining,
+                budget.usageCredits
+            );
+            planCreditsRemaining -= planCredits;
+            const purchasedCredits = budget.usageCredits - planCredits;
+            const purchasedCost =
+                purchasedCredits > 0
+                    ? Math.ceil(
+                          (reservedCost * purchasedCredits) /
+                              budget.usageCredits
+                      )
+                    : 0;
+            purchasedReservedCost += purchasedCost;
+            planReservedCost += reservedCost - purchasedCost;
+        }
+        if (purchasedReservedCost > purchasedCostAvailable) {
+            throw new ChatAccessError(
+                402,
+                "CREDIT_COST_ALLOWANCE_INSUFFICIENT",
+                "Purchased credits do not include enough remaining AI cost allowance for this comparison.",
+                undefined,
+                {
+                    requiredCostMicroUsd: purchasedReservedCost,
+                    availableCostMicroUsd: purchasedCostAvailable,
+                }
+            );
+        }
+
+        if (plan === "Free") {
+            const higherCostModelCount = budgets.filter(
+                (budget) =>
+                    budget.minimumPlan === "Free" &&
+                    budget.modelUsageClass !== "standard"
+            ).length;
+            if (higherCostModelCount > 0) {
+                const freeHigherCostMonthlyLimit = positiveInteger(
+                    process.env.CHAT_FREE_PRO_MODEL_RESPONSES_PER_MONTH,
+                    30
+                );
+                const used = await readUsageCount(
+                    tx,
+                    access.subjectKey,
+                    "pro-model-month",
+                    monthStart
+                );
+                if (used + higherCostModelCount > freeHigherCostMonthlyLimit) {
+                    throw new ChatAccessError(
+                        429,
+                        "FREE_PRO_MODEL_QUOTA_EXCEEDED",
+                        "The selected comparison needs more higher-cost model responses than remain in the Free plan this month.",
+                        retryAfterFor("month", now),
+                        {
+                            requiredResponses: higherCostModelCount,
+                            availableResponses: Math.max(
+                                0,
+                                freeHigherCostMonthlyLimit - used
+                            ),
+                        }
+                    );
+                }
+            }
+        }
+
+        const costChecks = [
+            {
+                period: "cost-day",
+                start: periodStart("day", now),
+                limit: costLimits.day,
+                required: totalReservedCost,
+                code: "INTERNAL_DAILY_COST_SAFETY_LIMIT",
+                scope: "daily",
+            },
+            {
+                period: "cost-month",
+                start: monthStart,
+                limit: costLimits.month,
+                required: planReservedCost,
+                code: "INTERNAL_MONTHLY_COST_SAFETY_LIMIT",
+                scope: "monthly",
+            },
+        ] as const;
+        for (const check of costChecks) {
+            const used = await readUsageCount(
+                tx,
+                access.subjectKey,
+                check.period,
+                check.start
+            );
+            if (check.required > 0 && used + check.required > check.limit) {
+                throw new ChatAccessError(
+                    429,
+                    check.code,
+                    check.scope === "daily"
+                        ? "This model comparison exceeds the remaining internal daily cost safety allowance. Choose fewer high-cost models or try again after the daily reset."
+                        : "This model comparison exceeds the remaining internal monthly cost safety allowance. Choose lower-cost models or wait for the monthly reset.",
+                    retryAfterFor(check.scope === "daily" ? "day" : "month", now),
+                    {
+                        scope: check.scope,
+                        requiredCostMicroUsd: check.required,
+                        availableCostMicroUsd: Math.max(0, check.limit - used),
+                    }
+                );
+            }
+        }
+
+        const tokenLimits = [
+            {
+                period: "tokens-day",
+                start: periodStart("day", now),
+                limit: positiveInteger(
+                    process.env.CHAT_USER_TOKENS_PER_DAY,
+                    1_000_000
+                ),
+                retryPeriod: "day" as const,
+            },
+            {
+                period: "tokens-month",
+                start: monthStart,
+                limit: positiveInteger(
+                    process.env.CHAT_USER_TOKENS_PER_MONTH,
+                    20_000_000
+                ),
+                retryPeriod: "month" as const,
+            },
+        ];
+        for (const rule of tokenLimits) {
+            const used = await readUsageCount(
+                tx,
+                access.subjectKey,
+                rule.period,
+                rule.start
+            );
+            if (used + totalReservedTokens > rule.limit) {
+                throw new ChatAccessError(
+                    429,
+                    "CHAT_TOKEN_QUOTA_EXCEEDED",
+                    "The selected models need more token capacity than is currently available.",
+                    retryAfterFor(rule.retryPeriod, now),
+                    {
+                        scope: rule.retryPeriod,
+                        requiredTokens: totalReservedTokens,
+                        availableTokens: Math.max(0, rule.limit - used),
+                    }
+                );
+            }
+        }
+
+        const providerGroups = new Map<
+            AiModel["provider"],
+            { daily: number; monthly: number }
+        >();
+        for (const budget of budgets) {
+            const cost = getChatBudgetReservedCostMicroUsd(budget);
+            const current = providerGroups.get(budget.provider) || {
+                daily: 0,
+                monthly: 0,
+            };
+            current.daily += cost;
+            current.monthly += cost;
+            providerGroups.set(budget.provider, current);
+        }
+        for (const [provider, required] of providerGroups) {
+            const providerKey = `provider:${provider}`;
+            const dailyLimit = positiveInteger(
+                process.env[
+                    `CHAT_PROVIDER_${provider.toUpperCase()}_COST_MICROUSD_PER_DAY`
+                ],
+                10_000_000
+            );
+            const monthlyLimit = positiveInteger(
+                process.env[
+                    `CHAT_PROVIDER_${provider.toUpperCase()}_COST_MICROUSD_PER_MONTH`
+                ],
+                100_000_000
+            );
+            const providerChecks = [
+                {
+                    period: "provider-cost-day",
+                    start: periodStart("day", now),
+                    limit: dailyLimit,
+                    required: required.daily,
+                    code: "PROVIDER_DAILY_SPEND_LIMIT_REACHED",
+                },
+                {
+                    period: "provider-cost-month",
+                    start: monthStart,
+                    limit: monthlyLimit,
+                    required: required.monthly,
+                    code: "PROVIDER_SPEND_LIMIT_REACHED",
+                },
+            ];
+            for (const check of providerChecks) {
+                const used = await readUsageCount(
+                    tx,
+                    providerKey,
+                    check.period,
+                    check.start
+                );
+                if (used + check.required > check.limit) {
+                    throw new ChatAccessError(
+                        503,
+                        check.code,
+                        `The ${provider} provider cost safety limit is currently reached. Choose another provider or try again later.`,
+                        undefined,
+                        { provider }
+                    );
+                }
+            }
+        }
+    });
+
+    return {
+        modelCount: budgets.length,
+        requiredCredits: totalCredits,
+        reservedTokens: totalReservedTokens,
+        reservedCostMicroUsd: totalReservedCost,
+    };
+};
+
 export const acquireChatAccess = async (
     access: ChatAccess,
     budget: ChatBudget,
@@ -511,16 +973,8 @@ export const acquireChatAccess = async (
             ? positiveInteger(process.env.CHAT_USER_CONCURRENT, 3)
             : positiveInteger(process.env.CHAT_GUEST_CONCURRENT, 3);
     const ipPerMinute = positiveInteger(process.env.CHAT_IP_PER_MINUTE, 40);
-    const reservedTokens = budget.inputTokens + budget.maxOutputTokens;
-    const reservedCost =
-        microdollarsFor(
-            budget.inputTokens,
-            budget.inputUsdPerMillionTokens
-        ) +
-        microdollarsFor(
-            budget.maxOutputTokens,
-            budget.outputUsdPerMillionTokens
-        );
+    const reservedTokens = getChatBudgetReservedTokens(budget);
+    const reservedCost = getChatBudgetReservedCostMicroUsd(budget);
     const tokenLimits =
         access.kind === "user"
             ? [
@@ -959,14 +1413,24 @@ export const acquireChatAccess = async (
                 reservedRuleCost
             );
             if (!allowed) {
+                const isDailySafetyLimit = rule.period === "cost-day";
                 throw new ChatAccessError(
                     429,
-                    "CHAT_COST_QUOTA_EXCEEDED",
-                    "Chat cost quota exceeded.",
+                    isDailySafetyLimit
+                        ? "INTERNAL_DAILY_COST_SAFETY_LIMIT"
+                        : "INTERNAL_MONTHLY_COST_SAFETY_LIMIT",
+                    isDailySafetyLimit
+                        ? "This request exceeds the remaining internal daily cost safety allowance. Choose fewer high-cost models or try again after the daily reset."
+                        : "This request exceeds the remaining internal monthly cost safety allowance. Choose lower-cost models or wait for the monthly reset.",
                     retryAfterFor(
-                        rule.period === "cost-day" ? "day" : "month",
+                        isDailySafetyLimit ? "day" : "month",
                         now
-                    )
+                    ),
+                    {
+                        scope: isDailySafetyLimit ? "daily" : "monthly",
+                        reservedCostMicroUsd: reservedRuleCost,
+                        limitMicroUsd: rule.limit,
+                    }
                 );
             }
             reservationEntries.push({
@@ -1098,6 +1562,7 @@ export const acquireChatAccess = async (
             usageCredits: budget.usageCredits,
             inputTokens: budget.inputTokens,
             maxOutputTokens: budget.maxOutputTokens,
+            reservedOutputTokens: budget.reservedOutputTokens,
             inputUsdPerMillionTokens: budget.inputUsdPerMillionTokens,
             outputUsdPerMillionTokens: budget.outputUsdPerMillionTokens,
             cachedInputPriceMultiplier: budget.cachedInputPriceMultiplier,
@@ -1187,7 +1652,7 @@ export const settleChatUsage = async (
             : canonical.inputTokens;
         const actualOutput = Number.isSafeInteger(usage.outputTokens)
             ? Math.max(0, usage.outputTokens!)
-            : canonical.maxOutputTokens;
+            : canonical.reservedOutputTokens;
         const actualCachedInput = Math.min(
             actualInput,
             Number.isSafeInteger(usage.cachedInputTokens)
@@ -1198,7 +1663,7 @@ export const settleChatUsage = async (
         const actualCredits = getSettledUsageCredits({
             reservedCredits: canonical.usageCredits,
             reservedInputTokens: canonical.inputTokens,
-            reservedOutputTokens: canonical.maxOutputTokens,
+            reservedOutputTokens: canonical.reservedOutputTokens,
             actualInputTokens: actualInput,
             actualOutputTokens: actualOutput,
             outcome: usage.outcome,

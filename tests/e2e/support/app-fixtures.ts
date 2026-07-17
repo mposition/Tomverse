@@ -285,6 +285,25 @@ export async function mockAuthenticatedApi(
     route.fulfill(json({ models: [] }))
   );
 
+  await page.route("**/api/chat/preflight", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.fallback();
+      return;
+    }
+    const body = route.request().postDataJSON() as {
+      comparisonId?: string;
+      modelIds?: string[];
+    };
+    await route.fulfill(
+      json({
+        ok: true,
+        comparisonId: body.comparisonId || "qa-comparison",
+        modelCount: body.modelIds?.length || 0,
+        requiredCredits: body.modelIds?.length || 0,
+      })
+    );
+  });
+
   await page.route("**/api/user/usage**", (route) =>
     route.fulfill(
       json({

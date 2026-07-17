@@ -158,4 +158,33 @@ test.describe("value-moment upgrade prompt", () => {
       )
       .toBe("1");
   });
+
+  test("comparison preflight rejection prevents every provider request", async ({
+    page,
+  }) => {
+    let providerRequestCount = 0;
+    await page.unroute("**/api/chat/preflight");
+    await page.route("**/api/chat/preflight", (route) =>
+      route.fulfill({
+        status: 429,
+        contentType: "application/json",
+        headers: { "X-Request-ID": "qa-preflight-limit" },
+        body: JSON.stringify({
+          error: "Internal daily cost safety limit reached.",
+          code: "INTERNAL_DAILY_COST_SAFETY_LIMIT",
+        }),
+      })
+    );
+    await page.unroute("**/api/chat");
+    await page.route("**/api/chat", (route) => {
+      providerRequestCount += 1;
+      return route.fulfill({ status: 200, body: "Unexpected response" });
+    });
+
+    await page.getByTestId("chat-textarea").fill("Compare safely");
+    await page.getByTestId("chat-textarea").press("Enter");
+
+    await expect(page.getByRole("status")).toContainText("비용 안전 한도");
+    await expect.poll(() => providerRequestCount).toBe(0);
+  });
 });
