@@ -73,8 +73,10 @@ import {
   type ModelFinderTask,
 } from "@/lib/modelFinder";
 import { CreditPackPurchaseButton } from "@/components/billing/CreditPackPurchaseButton";
+import { UpgradeCtaLink } from "@/components/billing/UpgradeCtaLink";
 import { FeatureHelpPopover } from "@/components/chat/FeatureHelpPopover";
 import { chatHelpCopy } from "@/components/chat/chatHelpCopy";
+import { getChatCreditAllocation } from "@/lib/chatCreditAllocation";
 
 type PublicModelStatus = "available" | "limited" | "unavailable";
 type PublicModelStatusRecord = {
@@ -96,6 +98,14 @@ const GUEST_QUICK_START_ACTIVE_KEY = "tomverse_guest_quick_start_active_v2";
 const GUEST_QUICK_START_EVENT = "tomverse:guest-quick-start";
 const PROVIDER_DISPLAY_ORDER = ["openai", "google", "anthropic", "deepseek", "mistral"];
 const PUBLIC_MODEL_IDS = new Set(PUBLIC_MODELS.map((model) => model.id));
+const interpolateCopy = (
+  template: string,
+  values: Record<string, string | number>
+) =>
+  Object.entries(values).reduce(
+    (copy, [key, value]) => copy.replaceAll(`{${key}}`, String(value)),
+    template
+  );
 const TEXT_FILE_TYPES = new Set([
   "text/plain",
   "text/markdown",
@@ -414,22 +424,47 @@ export function ChatInput({
     return sum + (model ? getWeightedUsageCredits(model, estimatedInputTokens) : 0);
   }, 0);
   const dailyCreditLimit = accountUsage?.limits.creditsDay || 0;
-  const totalAvailableCredits = accountUsage
-    ? accountUsage.balances.planRemainingCredits +
-      accountUsage.balances.purchasedRemainingCredits
-    : 0;
+  const planCreditsRemaining = accountUsage?.balances.planRemainingCredits || 0;
+  const purchasedCreditsRemaining =
+    accountUsage?.balances.purchasedRemainingCredits || 0;
+  const dailyPlanCreditsRemaining =
+    dailyCreditLimit > 0
+      ? Math.max(0, dailyCreditLimit - (accountUsage?.usage.creditsDay || 0))
+      : null;
+  const creditAllocation = getChatCreditAllocation({
+    requiredCredits: estimatedRequestCredits,
+    monthlyPlanCreditsRemaining: planCreditsRemaining,
+    dailyPlanCreditsRemaining,
+    purchasedCreditsRemaining,
+  });
+  const totalAvailableCredits = creditAllocation.totalAccountCredits;
   const isAccountDailyLimitReached =
     !isGuestMode &&
-    dailyCreditLimit > 0 &&
     Boolean(accountUsage) &&
-    (accountUsage?.usage.creditsDay || 0) + estimatedRequestCredits > dailyCreditLimit;
+    creditAllocation.dailyPlanGuardrailBlocked;
   const isAccountMonthlyLimitReached =
     !isGuestMode &&
     Boolean(accountUsage) &&
-    estimatedRequestCredits > totalAvailableCredits;
+    creditAllocation.balanceInsufficient;
   const isUsageLimitReached =
     isGuestLimitReached || isAccountDailyLimitReached || isAccountMonthlyLimitReached;
   const creditShortfall = Math.max(0, estimatedRequestCredits - totalAvailableCredits);
+  const addOnCreditsForRequest =
+    !isGuestMode &&
+    Boolean(accountUsage) &&
+    !isAccountDailyLimitReached &&
+    !isAccountMonthlyLimitReached
+      ? creditAllocation.addOnCreditsRequired
+      : 0;
+  const dailyResetLabel = accountUsage?.balances.dailyResetsAt
+    ? new Intl.DateTimeFormat(lang, {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        timeZone: accountUsage.timeZone || "UTC",
+      }).format(new Date(accountUsage.balances.dailyResetsAt))
+    : "";
   const limitScope: "guest" | "daily" | "monthly" | null =
     isGuestLimitReached
       ? "guest"
@@ -545,12 +580,38 @@ export function ChatInput({
     trackedLimitScopeRef.current = limitScope;
     trackProductEvent("credit_limit_hit", selectedModels.length, {
       limit_scope: limitScope,
+      current_plan: accountUsage?.plan.toLowerCase() as
+        | "free"
+        | "pro"
+        | "max"
+        | undefined,
+      plan_credits_remaining: planCreditsRemaining,
+      addon_credits_remaining: purchasedCreditsRemaining,
+      daily_plan_credits_remaining: dailyPlanCreditsRemaining,
+      required_credits: estimatedRequestCredits,
+      reset_at: accountUsage?.balances.dailyResetsAt,
     });
     trackProductEvent("upgrade_prompt_view", selectedModels.length, {
       cta_location: "credit_limit_banner",
       limit_scope: limitScope,
+      current_plan: accountUsage?.plan.toLowerCase() as
+        | "free"
+        | "pro"
+        | "max"
+        | undefined,
+      plan_credits_remaining: planCreditsRemaining,
+      addon_credits_remaining: purchasedCreditsRemaining,
     });
-  }, [limitScope, selectedModels.length]);
+  }, [
+    accountUsage?.balances.dailyResetsAt,
+    accountUsage?.plan,
+    dailyPlanCreditsRemaining,
+    estimatedRequestCredits,
+    limitScope,
+    planCreditsRemaining,
+    purchasedCreditsRemaining,
+    selectedModels.length,
+  ]);
 
   const announceGuestQuickStart = useCallback((visible: boolean) => {
     if (visible) {
@@ -1364,23 +1425,51 @@ export function ChatInput({
               </div>
             </div>
           )}
+          {addOnCreditsForRequest > 0 && (
+            <div className="mb-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold leading-5 text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-100">
+              {interpolateCopy(t("chat.addOnCreditsWillBeUsed"), {
+                credits: addOnCreditsForRequest,
+              })}
+            </div>
+          )}
           {isUsageLimitReached && (
             <div className="mb-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
-              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <span className="font-black">
                   {isGuestMode ? t("chat.guestLimitReachedTitle") : t("chat.accountLimitReachedTitle")}
                 </span>
-                <span className="flex flex-wrap items-center gap-3">
-                  <a
-                    href={isGuestMode ? `/auth/signin?callbackUrl=${encodeURIComponent(signInCallbackUrl)}` : "/pricing?trigger=limit_hit"}
-                    className="font-black text-amber-900 underline underline-offset-2 dark:text-amber-100"
-                  >
-                    {isGuestMode ? t("auth.login") : t("billing.joinWaitlist")}
-                  </a>
-                  {!isGuestMode && isAccountMonthlyLimitReached && (
-                    <CreditPackPurchaseButton trigger="limit_hit">
-                      {lang === "ko" ? "추가 크레딧 구매" : "Buy additional credits"}
-                    </CreditPackPurchaseButton>
+                <span className="flex flex-wrap items-center gap-2">
+                  {isGuestMode ? (
+                    <a
+                      href={`/auth/signin?callbackUrl=${encodeURIComponent(signInCallbackUrl)}`}
+                      className="font-black text-amber-900 underline underline-offset-2 dark:text-amber-100"
+                    >
+                      {t("auth.login")}
+                    </a>
+                  ) : (
+                    <>
+                      <CreditPackPurchaseButton
+                        trigger="limit_hit"
+                        className="rounded-lg bg-amber-900 px-3 py-1.5 font-black text-white transition hover:bg-amber-800 dark:bg-amber-200 dark:text-amber-950 dark:hover:bg-amber-100"
+                      >
+                        {t("chat.continueWithAdditionalCredits")}
+                      </CreditPackPurchaseButton>
+                      {accountUsage?.plan !== "Max" && (
+                        <UpgradeCtaLink
+                          targetPlan={accountUsage?.plan === "Pro" ? "Max" : "Pro"}
+                          currentPlan={accountUsage?.plan || "Free"}
+                          trigger="limit_hit"
+                          ctaLocation="credit_limit_banner"
+                          planCreditsRemaining={planCreditsRemaining}
+                          addonCreditsRemaining={purchasedCreditsRemaining}
+                          className="rounded-lg border border-amber-300 px-3 py-1.5 font-black text-amber-950 transition hover:bg-amber-100 dark:border-amber-700 dark:text-amber-100 dark:hover:bg-amber-900/50"
+                        >
+                          {accountUsage?.plan === "Pro"
+                            ? t("chat.viewMaxPlan")
+                            : t("chat.viewProPlan")}
+                        </UpgradeCtaLink>
+                      )}
+                    </>
                   )}
                 </span>
               </div>
@@ -1389,7 +1478,11 @@ export function ChatInput({
                   ? t("chat.guestLimitReachedBody")
                   : isAccountMonthlyLimitReached
                     ? t("chat.monthlyLimitReachedBody")
-                    : t("chat.dailyLimitReachedBody")}
+                    : interpolateCopy(t("chat.dailyPlanLimitReachedBody"), {
+                        limit: dailyCreditLimit,
+                        monthly: planCreditsRemaining,
+                        reset: dailyResetLabel,
+                      })}
               </p>
               {!isGuestMode && isAccountMonthlyLimitReached && (
                 <p className="mt-1 font-semibold leading-5">
@@ -1801,7 +1894,7 @@ export function ChatInput({
                       </span>
                     </div>
                   </div>
-                  <div className="mb-2 shrink-0 space-y-2 px-1">
+                  <div className="mb-2 shrink-0 px-1">
                     <div className="relative">
                       <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
                       <input
@@ -1813,6 +1906,11 @@ export function ChatInput({
                         className="h-9 w-full rounded-lg border border-zinc-200 bg-zinc-50 pl-9 pr-3 text-xs text-zinc-800 outline-none transition placeholder:text-zinc-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:focus:border-blue-500"
                       />
                     </div>
+                  </div>
+                  <div
+                    data-testid="model-picker-scroll-region"
+                    className="min-h-0 flex-1 touch-pan-y space-y-2 overflow-y-auto overscroll-contain px-1 pb-2 pr-2 [-webkit-overflow-scrolling:touch]"
+                  >
 
                     {!modelSearchQuery.trim() && (
                       <section
@@ -1982,8 +2080,7 @@ export function ChatInput({
                         ))}
                       </div>
                     )}
-                  </div>
-                  <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pr-1">
+                  <div className="space-y-3">
                     {groupedModels.map((group) => (
                       <div key={group.provider} className="space-y-1">
                         <div className="px-2 text-[10px] font-bold uppercase tracking-wide text-zinc-400">
@@ -2139,6 +2236,7 @@ export function ChatInput({
                         {t("chat.noModelsFound")}
                       </div>
                     )}
+                  </div>
                   </div>
                   <div data-testid="model-selection-summary" className="mt-2 flex shrink-0 items-center gap-2 border-t border-zinc-200 px-1 pt-2 dark:border-zinc-700">
                     <p className="min-w-0 flex-1 text-[11px] font-bold text-zinc-600 dark:text-zinc-300">

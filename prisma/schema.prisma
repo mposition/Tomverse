@@ -71,6 +71,9 @@ model UserSettings {
   usesFilesFrequently    String?
   modelFinderCompletedAt DateTime?
   modelFinderDismissedAt DateTime?
+  timeZone              String    @default("UTC")
+  timeZoneInitializedAt DateTime?
+  timeZoneChangedAt     DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

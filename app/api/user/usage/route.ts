@@ -17,6 +17,7 @@ import { effectivePlanModelLimit } from "@/lib/billingEntitlements";
 import { getPurchasedCreditSummary } from "@/lib/creditLedger";
 import { recommendCreditAction } from "@/lib/creditPacks";
 import { effectivePlanForAccess } from "@/lib/foundingTesterPassCore";
+import { getZonedDayWindow } from "@/lib/userTimeZone";
 
 const positiveInteger = (value: string | undefined, fallback: number) => {
   const parsed = Number(value);
@@ -26,10 +27,8 @@ const positiveInteger = (value: string | undefined, fallback: number) => {
 const normalizePlan = (value: unknown) =>
   value === "Pro" || value === "Max" || value === "Free" ? value : "Free";
 
-const periodStart = (period: "day" | "month", now = new Date()) =>
-  period === "day"
-    ? new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
-    : new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+const monthStartUtc = (now = new Date()) =>
+  new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 
 export async function GET(req: Request) {
   try {
@@ -56,12 +55,16 @@ export async function GET(req: Request) {
         billingRiskStatus: true,
         billingRiskReason: true,
         billingRiskAt: true,
+        settings: {
+          select: { timeZone: true },
+        },
       },
     });
     const key = getUserChatUsageKey(session.user.id);
     const now = new Date();
-    const dayStart = periodStart("day", now);
-    const monthStart = periodStart("month", now);
+    const dayWindow = getZonedDayWindow(user?.settings?.timeZone, now);
+    const dayStart = dayWindow.start;
+    const monthStart = monthStartUtc(now);
     const historyStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 2, 1));
     const [rows, monthlyRows, purchasedBalance, addOnPurchasesLast90Days] = await Promise.all([
       prisma.chatUsageBucket.findMany({
@@ -144,10 +147,10 @@ export async function GET(req: Request) {
     const nextMonthStart = new Date(
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)
     );
-    const nextDayStart = new Date(dayStart.getTime() + 86_400_000);
 
     return NextResponse.json({
       plan,
+      timeZone: dayWindow.timeZone,
       subscription: {
         status: user?.subscriptionStatus || null,
         billingInterval: user?.subscriptionBillingInterval || null,
@@ -169,7 +172,7 @@ export async function GET(req: Request) {
           limits.creditsDay > 0
             ? Math.max(0, limits.creditsDay - count("day"))
             : null,
-        dailyResetsAt: nextDayStart.toISOString(),
+        dailyResetsAt: dayWindow.end.toISOString(),
         planRemainingCredits: Math.max(
           0,
           limits.creditsMonth - count("month") - (user?.creditDebtCredits || 0)

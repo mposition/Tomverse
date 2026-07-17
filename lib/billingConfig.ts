@@ -80,7 +80,7 @@ const DEFAULT_PLANS: Record<BillingPlanId, BillingPlanConfig> = {
     stripeProductId: null,
     stripePriceId: null,
     stripeAnnualPriceId: null,
-    dailyMessageLimit: 150,
+    dailyMessageLimit: 300,
     monthlyMessageLimit: 3_000,
     maxModels: 3,
     allowAttachments: true,

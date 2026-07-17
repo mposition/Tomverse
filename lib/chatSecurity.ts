@@ -27,6 +27,8 @@ import { lockCreditAccount, offsetCreditDebt } from "@/lib/creditDebt";
 import { calculateProviderUsageCost } from "@/lib/providerUsageCost";
 import type { PerplexityUsageCostSnapshot } from "@/lib/perplexityUsageCore";
 import { notifyProviderCreditIfNeeded } from "@/lib/providerMonitoring";
+import { getUserDayWindow } from "@/lib/userDailyUsage";
+import { getChatCreditAllocation } from "@/lib/chatCreditAllocation";
 
 const GUEST_COOKIE_NAME = "tomverse_guest";
 const GUEST_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
@@ -327,10 +329,7 @@ const limitsFor = (access: Pick<ChatAccess, "kind" | "plan" | "planLimits">): Li
         (plan === "Max"
             ? 0
             : plan === "Pro"
-              ? positiveInteger(
-                    process.env.CHAT_PRO_PER_DAY,
-                    positiveInteger(process.env.CHAT_USER_PER_DAY, 150)
-                )
+              ? positiveInteger(process.env.CHAT_PRO_PER_DAY, 300)
               : positiveInteger(process.env.CHAT_FREE_PER_DAY, 30));
 
     if (dayLimit > 0) {
@@ -456,12 +455,12 @@ const periodStart = (period: Period, now: Date) => {
     return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 };
 
-const retryAfterFor = (period: Period, now: Date) => {
+const retryAfterFor = (period: Period, now: Date, dailyEnd?: Date) => {
     let end: Date;
     if (period === "minute") {
         end = new Date(periodStart(period, now).getTime() + 60_000);
     } else if (period === "day") {
-        end = new Date(periodStart(period, now).getTime() + 86_400_000);
+        end = dailyEnd || new Date(periodStart(period, now).getTime() + 86_400_000);
     } else {
         end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
     }
@@ -564,6 +563,7 @@ export const preflightChatComparisonAccess = async (
     await prisma.$transaction(async (tx) => {
         await lockCreditAccount(tx, access.userId!);
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${access.subjectKey}))`;
+        const userDayWindow = await getUserDayWindow(tx, access.userId!, now);
 
         const billingRisk = await tx.user.findUniqueOrThrow({
             where: { id: access.userId! },
@@ -625,27 +625,20 @@ export const preflightChatComparisonAccess = async (
             }
         }
         const dailyCreditRule = planRules.find((rule) => rule.period === "day");
+        let dailyPlanCreditsUsed = 0;
+        let dailyPlanCreditsRemaining: number | null = null;
         if (dailyCreditRule) {
-            const start = periodStart("day", now);
-            const used = await readUsageCount(
+            const start = userDayWindow.start;
+            dailyPlanCreditsUsed = await readUsageCount(
                 tx,
                 access.subjectKey,
                 "day",
                 start
             );
-            if (used + totalCredits > dailyCreditRule.limit) {
-                throw new ChatAccessError(
-                    429,
-                    "CHAT_QUOTA_EXCEEDED",
-                    "This comparison needs more daily AI credits than are currently available.",
-                    retryAfterFor("day", now),
-                    {
-                        scope: "daily",
-                        requiredCredits: totalCredits,
-                        availableCredits: Math.max(0, dailyCreditRule.limit - used),
-                    }
-                );
-            }
+            dailyPlanCreditsRemaining = Math.max(
+                0,
+                dailyCreditRule.limit - dailyPlanCreditsUsed
+            );
         }
 
         const monthlyCreditRule = planRules.find(
@@ -693,7 +686,31 @@ export const preflightChatComparisonAccess = async (
                 sum + safeBigIntNumber(lot.remainingFundedCostMicroUsd),
             0
         );
-        if (totalCredits > planCreditsRemaining + purchasedCreditsAvailable) {
+        const creditAllocation = getChatCreditAllocation({
+            requiredCredits: totalCredits,
+            monthlyPlanCreditsRemaining: planCreditsRemaining,
+            dailyPlanCreditsRemaining,
+            purchasedCreditsRemaining: purchasedCreditsAvailable,
+        });
+        if (creditAllocation.dailyPlanGuardrailBlocked) {
+            throw new ChatAccessError(
+                429,
+                "PLAN_DAILY_CREDIT_LIMIT_REACHED",
+                "The daily plan-credit guardrail is reached. Purchased credits can be used now, or plan credits will be available again after the account-local reset.",
+                retryAfterFor("day", now, userDayWindow.end),
+                {
+                    scope: "daily_plan_credits",
+                    requiredCredits: totalCredits,
+                    dailyPlanLimit: dailyCreditRule?.limit ?? 0,
+                    dailyPlanUsed: dailyPlanCreditsUsed,
+                    dailyPlanRemaining: dailyPlanCreditsRemaining ?? 0,
+                    monthlyPlanRemaining: planCreditsRemaining,
+                    purchasedCreditsAvailable,
+                    resetAt: userDayWindow.end.toISOString(),
+                }
+            );
+        }
+        if (creditAllocation.balanceInsufficient) {
             throw new ChatAccessError(
                 402,
                 "CREDIT_BALANCE_INSUFFICIENT",
@@ -713,6 +730,7 @@ export const preflightChatComparisonAccess = async (
 
         let planReservedCost = 0;
         let purchasedReservedCost = 0;
+        planCreditsRemaining = creditAllocation.planCreditsAvailableNow;
         for (const budget of budgets) {
             const reservedCost = getChatBudgetReservedCostMicroUsd(budget);
             const planCredits = Math.min(
@@ -782,7 +800,7 @@ export const preflightChatComparisonAccess = async (
         const costChecks = [
             {
                 period: "cost-day",
-                start: periodStart("day", now),
+                start: userDayWindow.start,
                 limit: costLimits.day,
                 required: totalReservedCost,
                 code: "INTERNAL_DAILY_COST_SAFETY_LIMIT",
@@ -811,7 +829,11 @@ export const preflightChatComparisonAccess = async (
                     check.scope === "daily"
                         ? "This model comparison exceeds the remaining internal daily cost safety allowance. Choose fewer high-cost models or try again after the daily reset."
                         : "This model comparison exceeds the remaining internal monthly cost safety allowance. Choose lower-cost models or wait for the monthly reset.",
-                    retryAfterFor(check.scope === "daily" ? "day" : "month", now),
+                    retryAfterFor(
+                        check.scope === "daily" ? "day" : "month",
+                        now,
+                        check.scope === "daily" ? userDayWindow.end : undefined
+                    ),
                     {
                         scope: check.scope,
                         requiredCostMicroUsd: check.required,
@@ -824,7 +846,7 @@ export const preflightChatComparisonAccess = async (
         const tokenLimits = [
             {
                 period: "tokens-day",
-                start: periodStart("day", now),
+                start: userDayWindow.start,
                 limit: positiveInteger(
                     process.env.CHAT_USER_TOKENS_PER_DAY,
                     1_000_000
@@ -853,7 +875,11 @@ export const preflightChatComparisonAccess = async (
                     429,
                     "CHAT_TOKEN_QUOTA_EXCEEDED",
                     "The selected models need more token capacity than is currently available.",
-                    retryAfterFor(rule.retryPeriod, now),
+                    retryAfterFor(
+                        rule.retryPeriod,
+                        now,
+                        rule.retryPeriod === "day" ? userDayWindow.end : undefined
+                    ),
                     {
                         scope: rule.retryPeriod,
                         requiredTokens: totalReservedTokens,
@@ -975,78 +1001,8 @@ export const acquireChatAccess = async (
     const ipPerMinute = positiveInteger(process.env.CHAT_IP_PER_MINUTE, 40);
     const reservedTokens = getChatBudgetReservedTokens(budget);
     const reservedCost = getChatBudgetReservedCostMicroUsd(budget);
-    const tokenLimits =
-        access.kind === "user"
-            ? [
-                  {
-                      period: "tokens-day",
-                      start: periodStart("day", now),
-                      limit: positiveInteger(
-                          process.env.CHAT_USER_TOKENS_PER_DAY,
-                          1_000_000
-                      ),
-                  },
-                  {
-                      period: "tokens-month",
-                      start: periodStart("month", now),
-                      limit: positiveInteger(
-                          process.env.CHAT_USER_TOKENS_PER_MONTH,
-                          20_000_000
-                      ),
-                  },
-              ]
-            : [
-                  {
-                      period: "tokens-day",
-                      start: periodStart("day", now),
-                      limit: positiveInteger(
-                          process.env.CHAT_GUEST_TOKENS_PER_DAY,
-                          40_000
-                      ),
-                  },
-                  {
-                      period: "tokens-month",
-                      start: periodStart("month", now),
-                      limit: positiveInteger(
-                          process.env.CHAT_GUEST_TOKENS_PER_MONTH,
-                          200_000
-                      ),
-                  },
-              ];
     const plan = access.plan || "Free";
     const estimatedCostLimits = getPlanEstimatedCostLimits(plan);
-    const costLimits =
-        access.kind === "user"
-            ? [
-                  {
-                      period: "cost-day",
-                      start: periodStart("day", now),
-                      limit: estimatedCostLimits.day,
-                  },
-                  {
-                      period: "cost-month",
-                      start: periodStart("month", now),
-                      limit: estimatedCostLimits.month,
-                  },
-              ]
-            : [
-                  {
-                      period: "cost-day",
-                      start: periodStart("day", now),
-                      limit: positiveInteger(
-                          process.env.CHAT_GUEST_COST_MICROUSD_PER_DAY,
-                          20_000
-                      ),
-                  },
-                  {
-                      period: "cost-month",
-                      start: periodStart("month", now),
-                      limit: positiveInteger(
-                          process.env.CHAT_GUEST_COST_MICROUSD_PER_MONTH,
-                          100_000
-                      ),
-                  },
-              ];
     const providerMonthlyEnvKey = `CHAT_PROVIDER_${budget.provider.toUpperCase()}_COST_MICROUSD_PER_MONTH`;
     const providerMonthlyLimit = positiveInteger(
         process.env[providerMonthlyEnvKey],
@@ -1066,6 +1022,85 @@ export const acquireChatAccess = async (
             await lockCreditAccount(tx, access.userId);
         }
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${access.subjectKey}))`;
+        const accessDayWindow =
+            access.kind === "user"
+                ? await getUserDayWindow(tx, access.userId!, now)
+                : {
+                      start: periodStart("day", now),
+                      end: new Date(periodStart("day", now).getTime() + 86_400_000),
+                  };
+        const accessPeriodStart = (period: Period) =>
+            period === "day" ? accessDayWindow.start : periodStart(period, now);
+        const tokenLimits =
+            access.kind === "user"
+                ? [
+                      {
+                          period: "tokens-day",
+                          start: accessDayWindow.start,
+                          limit: positiveInteger(
+                              process.env.CHAT_USER_TOKENS_PER_DAY,
+                              1_000_000
+                          ),
+                      },
+                      {
+                          period: "tokens-month",
+                          start: periodStart("month", now),
+                          limit: positiveInteger(
+                              process.env.CHAT_USER_TOKENS_PER_MONTH,
+                              20_000_000
+                          ),
+                      },
+                  ]
+                : [
+                      {
+                          period: "tokens-day",
+                          start: accessDayWindow.start,
+                          limit: positiveInteger(
+                              process.env.CHAT_GUEST_TOKENS_PER_DAY,
+                              40_000
+                          ),
+                      },
+                      {
+                          period: "tokens-month",
+                          start: periodStart("month", now),
+                          limit: positiveInteger(
+                              process.env.CHAT_GUEST_TOKENS_PER_MONTH,
+                              200_000
+                          ),
+                      },
+                  ];
+        const costLimits =
+            access.kind === "user"
+                ? [
+                      {
+                          period: "cost-day",
+                          start: accessDayWindow.start,
+                          limit: estimatedCostLimits.day,
+                      },
+                      {
+                          period: "cost-month",
+                          start: periodStart("month", now),
+                          limit: estimatedCostLimits.month,
+                      },
+                  ]
+                : [
+                      {
+                          period: "cost-day",
+                          start: accessDayWindow.start,
+                          limit: positiveInteger(
+                              process.env.CHAT_GUEST_COST_MICROUSD_PER_DAY,
+                              20_000
+                          ),
+                      },
+                      {
+                          period: "cost-month",
+                          start: periodStart("month", now),
+                          limit: positiveInteger(
+                              process.env.CHAT_GUEST_COST_MICROUSD_PER_MONTH,
+                              100_000
+                          ),
+                      },
+                  ];
         if (access.kind === "user") {
             const billingRisk = await tx.user.findUniqueOrThrow({
                 where: { id: access.userId! },
@@ -1126,13 +1161,18 @@ export const acquireChatAccess = async (
             }
         }
         for (const rule of limitsFor(access)) {
-            if (access.kind === "user" && rule.period === "month") continue;
+            if (
+                access.kind === "user" &&
+                (rule.period === "day" || rule.period === "month")
+            ) {
+                continue;
+            }
             const amount = rule.period === "minute" ? 1 : budget.usageCredits;
             const allowed = await incrementUsage(
                 tx,
                 access.subjectKey,
                 rule.period,
-                periodStart(rule.period, now),
+                accessPeriodStart(rule.period),
                 rule.limit,
                 amount
             );
@@ -1141,14 +1181,18 @@ export const acquireChatAccess = async (
                     429,
                     "CHAT_QUOTA_EXCEEDED",
                     "AI response credit limit exceeded.",
-                    retryAfterFor(rule.period, now)
+                    retryAfterFor(
+                        rule.period,
+                        now,
+                        rule.period === "day" ? accessDayWindow.end : undefined
+                    )
                 );
             }
             if (rule.period !== "minute") {
                 reservationEntries.push({
                     key: access.subjectKey,
                     period: rule.period,
-                    periodStart: periodStart(rule.period, now),
+                    periodStart: accessPeriodStart(rule.period),
                     amount,
                     metric: "credits",
                 });
@@ -1204,9 +1248,53 @@ export const acquireChatAccess = async (
                 }
             }
             const planRemaining = rawPlanRemaining - debtOffset.offsetCredits;
-            planReservedCredits = Math.min(planRemaining, budget.usageCredits);
-            addOnReservedCredits = budget.usageCredits - planReservedCredits;
+            const dailyRule = limitsFor(access).find(
+                (rule) => rule.period === "day"
+            );
+            const dailyPlanUsed = dailyRule
+                ? await readUsageCount(
+                      tx,
+                      access.subjectKey,
+                      "day",
+                      accessDayWindow.start
+                  )
+                : 0;
+            const dailyPlanRemaining = dailyRule
+                ? Math.max(0, dailyRule.limit - dailyPlanUsed)
+                : null;
+            const creditAllocation = getChatCreditAllocation({
+                requiredCredits: budget.usageCredits,
+                monthlyPlanCreditsRemaining: planRemaining,
+                dailyPlanCreditsRemaining: dailyPlanRemaining,
+                purchasedCreditsRemaining: 0,
+            });
+            planReservedCredits = creditAllocation.planReservedCredits;
+            addOnReservedCredits = creditAllocation.addOnCreditsRequired;
             if (planReservedCredits > 0) {
+                if (dailyRule) {
+                    const dailyAllowed = await incrementUsage(
+                        tx,
+                        access.subjectKey,
+                        "day",
+                        accessDayWindow.start,
+                        dailyRule.limit,
+                        planReservedCredits
+                    );
+                    if (!dailyAllowed) {
+                        throw new ChatAccessError(
+                            409,
+                            "CREDIT_RESERVATION_CONFLICT",
+                            "Daily plan credit balance changed. Please retry."
+                        );
+                    }
+                    reservationEntries.push({
+                        key: access.subjectKey,
+                        period: "day",
+                        periodStart: accessDayWindow.start,
+                        amount: planReservedCredits,
+                        metric: "plan-credits",
+                    });
+                }
                 const allowed = await incrementUsage(
                     tx,
                     access.subjectKey,
@@ -1240,6 +1328,45 @@ export const acquireChatAccess = async (
                     });
                 } catch (error) {
                     if (error instanceof AddOnCreditError) {
+                        if (error.code === "ADDON_COST_ALLOWANCE_INSUFFICIENT") {
+                            throw new ChatAccessError(
+                                402,
+                                "CREDIT_COST_ALLOWANCE_INSUFFICIENT",
+                                "Purchased credits do not include enough remaining AI cost allowance for this request.",
+                                undefined,
+                                {
+                                    requiredCostMicroUsd: addOnReservedCost,
+                                    availableCostMicroUsd:
+                                        error.availableFundedCostMicroUsd,
+                                }
+                            );
+                        }
+                        const currentAllocation = getChatCreditAllocation({
+                            requiredCredits: budget.usageCredits,
+                            monthlyPlanCreditsRemaining: planRemaining,
+                            dailyPlanCreditsRemaining: dailyPlanRemaining,
+                            purchasedCreditsRemaining: error.availableCredits,
+                        });
+                        if (currentAllocation.dailyPlanGuardrailBlocked) {
+                            throw new ChatAccessError(
+                                429,
+                                "PLAN_DAILY_CREDIT_LIMIT_REACHED",
+                                "The daily plan-credit guardrail is reached. Buy additional credits to continue now, or wait for the account-local reset.",
+                                retryAfterFor("day", now, accessDayWindow.end),
+                                {
+                                    scope: "daily_plan_credits",
+                                    requiredCredits: budget.usageCredits,
+                                    dailyPlanLimit: dailyRule?.limit ?? 0,
+                                    dailyPlanUsed,
+                                    dailyPlanRemaining:
+                                        dailyPlanRemaining ?? 0,
+                                    monthlyPlanRemaining: planRemaining,
+                                    purchasedCreditsAvailable:
+                                        error.availableCredits,
+                                    resetAt: accessDayWindow.end.toISOString(),
+                                }
+                            );
+                        }
                         throw new ChatAccessError(
                             402,
                             "CREDIT_BALANCE_INSUFFICIENT",
@@ -1247,11 +1374,13 @@ export const acquireChatAccess = async (
                             undefined,
                             {
                                 requiredCredits: budget.usageCredits,
-                                planCreditsAvailable: planRemaining,
+                                planCreditsAvailable:
+                                    currentAllocation.planCreditsAvailableNow,
                                 purchasedCreditsAvailable: error.availableCredits,
                                 shortfallCredits: Math.max(
                                     0,
-                                    budget.usageCredits - planRemaining - error.availableCredits
+                                    budget.usageCredits -
+                                        currentAllocation.totalCreditsAvailableNow
                                 ),
                             }
                         );
@@ -1356,7 +1485,10 @@ export const acquireChatAccess = async (
                     "Chat token quota exceeded.",
                     retryAfterFor(
                         rule.period === "tokens-day" ? "day" : "month",
-                        now
+                        now,
+                        rule.period === "tokens-day"
+                            ? accessDayWindow.end
+                            : undefined
                     )
                 );
             }
@@ -1384,7 +1516,10 @@ export const acquireChatAccess = async (
                         "Guest token quota exceeded.",
                         retryAfterFor(
                             rule.period === "tokens-day" ? "day" : "month",
-                            now
+                            now,
+                            rule.period === "tokens-day"
+                                ? accessDayWindow.end
+                                : undefined
                         )
                     );
                 }
@@ -1424,7 +1559,8 @@ export const acquireChatAccess = async (
                         : "This request exceeds the remaining internal monthly cost safety allowance. Choose lower-cost models or wait for the monthly reset.",
                     retryAfterFor(
                         isDailySafetyLimit ? "day" : "month",
-                        now
+                        now,
+                        isDailySafetyLimit ? accessDayWindow.end : undefined
                     ),
                     {
                         scope: isDailySafetyLimit ? "daily" : "monthly",
@@ -1460,7 +1596,10 @@ export const acquireChatAccess = async (
                         "Guest cost quota exceeded.",
                         retryAfterFor(
                             rule.period === "cost-day" ? "day" : "month",
-                            now
+                            now,
+                            rule.period === "cost-day"
+                                ? accessDayWindow.end
+                                : undefined
                         )
                     );
                 }

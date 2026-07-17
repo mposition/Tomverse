@@ -175,6 +175,9 @@ export type AuthenticatedQaState = {
   shared: boolean;
   title: string;
   theme: "dark" | "light" | "system";
+  timeZone: string;
+  timeZoneInitializedAt: string | null;
+  timeZoneChangedAt: string | null;
   userSettingsReads: number;
 };
 
@@ -205,6 +208,9 @@ export async function mockAuthenticatedApi(
     shared: false,
     title: "QA conversation",
     theme: "dark",
+    timeZone: "UTC",
+    timeZoneInitializedAt: "2026-05-01T00:00:00.000Z",
+    timeZoneChangedAt: "2026-05-01T00:00:00.000Z",
     userSettingsReads: 0,
   };
 
@@ -239,9 +245,18 @@ export async function mockAuthenticatedApi(
         theme?: unknown;
         language?: unknown;
         defaultModel?: unknown;
+        timeZone?: unknown;
+        timeZoneSource?: unknown;
       };
       if (body.theme === "dark" || body.theme === "light" || body.theme === "system") {
         state.theme = body.theme;
+      }
+      if (typeof body.timeZone === "string") {
+        state.timeZone = body.timeZone;
+        state.timeZoneInitializedAt ||= "2026-05-01T00:00:00.000Z";
+        if (body.timeZoneSource !== "browser") {
+          state.timeZoneChangedAt ||= "2026-05-01T00:00:00.000Z";
+        }
       }
       return route.fulfill(
         json({
@@ -253,6 +268,10 @@ export async function mockAuthenticatedApi(
               typeof body.defaultModel === "string"
                 ? body.defaultModel
                 : "gpt-5-4-mini",
+            timeZone: state.timeZone,
+            timeZoneInitializedAt: state.timeZoneInitializedAt,
+            timeZoneChangedAt: state.timeZoneChangedAt,
+            timeZoneChangeAllowedAt: "2026-05-31T00:00:00.000Z",
           },
         })
       );
@@ -260,7 +279,15 @@ export async function mockAuthenticatedApi(
 
     state.userSettingsReads += 1;
     return route.fulfill(
-      json({ theme: state.theme, language: "ko", defaultModel: "gpt-5-4-mini" })
+      json({
+        theme: state.theme,
+        language: "ko",
+        defaultModel: "gpt-5-4-mini",
+        timeZone: state.timeZone,
+        timeZoneInitializedAt: state.timeZoneInitializedAt,
+        timeZoneChangedAt: state.timeZoneChangedAt,
+        timeZoneChangeAllowedAt: "2026-05-31T00:00:00.000Z",
+      })
     );
   });
 

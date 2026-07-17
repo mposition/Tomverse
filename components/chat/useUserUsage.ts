@@ -14,6 +14,7 @@ export type UserPlan = "Free" | "Pro" | "Max";
 
 export type UserUsageResponse = {
   plan: UserPlan;
+  timeZone: string;
   subscription?: {
     status: string | null;
     billingInterval: string | null;
