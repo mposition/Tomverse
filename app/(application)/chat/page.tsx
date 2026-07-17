@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { AlertCircle, ArrowRight, CheckCircle2, Info, Sparkles, X } from "lucide-react";
+import { AlertCircle, ArrowRight, CheckCircle2, Info, Loader2, Sparkles, X } from "lucide-react";
 import { DesktopChatShell } from "@/components/chat/DesktopChatShell";
 import { MobileChatShell } from "@/components/chat/MobileChatShell";
 import { ComparisonReviewDialog } from "@/components/chat/ComparisonReviewDialog";
@@ -252,8 +252,27 @@ export default function Home() {
   const [billingSuccess, setBillingSuccess] = useState<BillingSuccessState | null>(null);
   const [compareSummary, setCompareSummary] = useState<{
     title: string;
-    note: string;
-    items: Array<{ modelId: string; modelName: string; summary: string }>;
+    result: {
+      commonConclusions: string[];
+      importantDifferences: string[];
+      modelKeyClaims: Array<{ responseId: "A" | "B" | "C"; claims: string[] }>;
+      verificationNeeded: string[];
+    };
+    responseMap: Array<{
+      responseId: "A" | "B" | "C";
+      messageId: string;
+      modelId: string;
+      modelName: string;
+    }>;
+    usageCredits: number;
+    originalUsageCredits?: number;
+    cached: boolean;
+  } | null>(null);
+  const [isCompareSummaryLoading, setIsCompareSummaryLoading] = useState(false);
+  const [quickCompareSetup, setQuickCompareSetup] = useState<{
+    conversationId: string;
+    estimatedCredits: number;
+    responseCount: number;
   } | null>(null);
   const [showComparisonReview, setShowComparisonReview] = useState(false);
   const [upgradeModelPrompt, setUpgradeModelPrompt] = useState<AiModel | null>(null);
@@ -1463,52 +1482,77 @@ export default function Home() {
         showToast(t("sidebar.shareRevoked"), "success");
     };
 
-    const handleCompareSummary = async () => {
-      if (!currentChatId) return;
-      if (isGuestMode || currentChatId === "private-chat") {
-        const promptId = latestLocalComparisonPromptRef.current;
-        const responses = promptId
-          ? localComparisonResponsesRef.current.get(promptId)
-          : null;
-        const items = selectedModels
-          .map((modelId) => {
-            const content = responses?.get(modelId);
-            if (!content) return null;
-            return {
-              modelId,
-              modelName: getModel(modelId)?.name || modelId,
-              summary: content.replace(/\s+/g, " ").trim().slice(0, 220),
-            };
-          })
-          .filter(
-            (item): item is {
-              modelId: string;
-              modelName: string;
-              summary: string;
-            } => Boolean(item)
-          );
-        setCompareSummary({
-          title: t("chat.quickDifferenceSummary"),
-          items,
-          note:
-            items.length < 2
+    const executeCompareSummary = async (conversationId: string) => {
+      setQuickCompareSetup(null);
+      setIsCompareSummaryLoading(true);
+      try {
+        const response = await fetch(
+          `/api/conversations/${conversationId}/compare-summary`,
+          { method: "POST", cache: "no-store" }
+        );
+        if (!response.ok) {
+          const payload = (await response.json().catch(() => null)) as
+            | { code?: string }
+            | null;
+          showToast(
+            payload?.code === "COMPARISON_RESPONSES_REQUIRED"
               ? t("chat.aiReviewResponsesRequired")
-              : t("chat.quickDifferenceSummaryNote"),
-        });
+              : t("chat.compareUnavailable"),
+            "error"
+          );
+          return;
+        }
+        setCompareSummary(await response.json());
+        maybeShowValueUpgradePrompt("comparison");
+      } catch {
+        showToast(t("chat.compareUnavailable"), "error");
+      } finally {
+        setIsCompareSummaryLoading(false);
+      }
+    };
+
+    const handleCompareSummary = async () => {
+      if (!currentChatId || isCompareSummaryLoading) return;
+      if (isGuestMode || currentChatId === "private-chat") {
+        showToast(t("chat.quickDifferenceSummarySavedChatRequired"), "info");
         return;
       }
+      setIsCompareSummaryLoading(true);
       try {
         const response = await fetch(
           `/api/conversations/${currentChatId}/compare-summary`,
           { cache: "no-store" }
         );
         if (!response.ok) {
-          showToast(t("chat.compareUnavailable"), "error");
+          const payload = (await response.json().catch(() => null)) as
+            | { code?: string }
+            | null;
+          showToast(
+            payload?.code === "COMPARISON_RESPONSES_REQUIRED"
+              ? t("chat.aiReviewResponsesRequired")
+              : t("chat.compareUnavailable"),
+            "error"
+          );
           return;
         }
-        setCompareSummary(await response.json());
+        const setup = (await response.json()) as {
+          estimatedCredits: number;
+          responseCount: number;
+          cached: boolean;
+        };
+        if (setup.cached) {
+          await executeCompareSummary(currentChatId);
+          return;
+        }
+        setQuickCompareSetup({
+          conversationId: currentChatId,
+          estimatedCredits: setup.estimatedCredits,
+          responseCount: setup.responseCount,
+        });
       } catch {
         showToast(t("chat.compareUnavailable"), "error");
+      } finally {
+        setIsCompareSummaryLoading(false);
       }
     };
 
@@ -1867,10 +1911,70 @@ export default function Home() {
         }}
       />
     )}
+    {quickCompareSetup && (
+      <div className="fixed inset-0 z-[78] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+        <section
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="quick-comparison-setup-title"
+          data-testid="quick-comparison-setup"
+          className="w-full max-w-md rounded-3xl border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900 sm:p-6"
+        >
+          <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-500/10 text-blue-600 dark:text-blue-300">
+            <Sparkles className="h-5 w-5" aria-hidden="true" />
+          </span>
+          <h2 id="quick-comparison-setup-title" className="mt-4 text-lg font-black text-zinc-950 dark:text-white">
+            {t("chat.quickDifferenceSummary")}
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+            {formatCopy("chat.quickDifferenceSummarySetup", {
+              responses: String(quickCompareSetup.responseCount),
+              credits: String(quickCompareSetup.estimatedCredits),
+            })}
+          </p>
+          <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+            {t("chat.quickSummaryDisclaimer")}
+          </p>
+          <div className="mt-5 grid gap-2 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={() => void executeCompareSummary(quickCompareSetup.conversationId)}
+              data-testid="quick-comparison-run"
+              className="min-h-11 rounded-xl bg-blue-600 px-4 py-2 text-sm font-black text-white hover:bg-blue-500"
+            >
+              {formatCopy("chat.quickDifferenceSummaryRun", {
+                credits: String(quickCompareSetup.estimatedCredits),
+              })}
+            </button>
+            <button
+              type="button"
+              onClick={() => setQuickCompareSetup(null)}
+              className="min-h-11 rounded-xl border border-zinc-200 px-4 py-2 text-sm font-bold text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              {t("auth.cancel")}
+            </button>
+          </div>
+        </section>
+      </div>
+    )}
+    {isCompareSummaryLoading && (
+      <div className="fixed inset-0 z-[79] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+        <div
+          role="status"
+          data-testid="quick-comparison-loading"
+          aria-live="polite"
+          className="flex items-center gap-3 rounded-2xl border border-zinc-200 bg-white px-5 py-4 text-sm font-bold text-zinc-900 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
+        >
+          <Loader2 className="h-5 w-5 animate-spin text-blue-600" aria-hidden="true" />
+          {t("chat.quickDifferenceSummaryLoading")}
+        </div>
+      </div>
+    )}
     {compareSummary && (
       <div className="fixed inset-x-0 top-0 z-50 flex h-[100dvh] items-center justify-center overflow-hidden bg-black/60 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-[max(0.75rem,env(safe-area-inset-top))] sm:p-4">
         <section
           role="dialog"
+          data-testid="quick-comparison-dialog"
           aria-modal="true"
           aria-labelledby="model-comparison-title"
           aria-describedby="model-comparison-note"
@@ -1882,7 +1986,13 @@ export default function Home() {
                 {t("chat.quickDifferenceSummary")}
               </h2>
               <p id="model-comparison-note" className="mt-1 text-sm leading-5 text-zinc-500">
-                {compareSummary.note}
+                {compareSummary.cached
+                  ? formatCopy("chat.quickDifferenceSummaryCachedNote", {
+                      credits: String(compareSummary.originalUsageCredits || 0),
+                    })
+                  : formatCopy("chat.quickDifferenceSummaryNote", {
+                      credits: String(compareSummary.usageCredits),
+                    })}
               </p>
             </div>
             <button
@@ -1893,20 +2003,90 @@ export default function Home() {
               {t("auth.cancel")}
             </button>
           </div>
-          <div className="grid min-h-0 flex-1 touch-pan-y gap-3 overflow-y-auto overscroll-contain p-4 [scrollbar-gutter:stable] sm:p-5">
-            {compareSummary.items.map((item) => (
-              <article
-                key={item.modelId}
-                className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950"
-              >
-                <h3 className="text-sm font-black text-zinc-900 dark:text-zinc-100">
-                  {item.modelName}
-                </h3>
-                <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-                  {item.summary || t("chat.noResponseContent")}
-                </p>
-              </article>
-            ))}
+          <div className="grid min-h-0 flex-1 touch-pan-y gap-4 overflow-y-auto overscroll-contain p-4 [scrollbar-gutter:stable] sm:p-5">
+            <section data-testid="quick-summary-consensus" className="rounded-xl border border-blue-200 bg-blue-50/70 p-4 dark:border-blue-900/70 dark:bg-blue-950/30">
+              <h3 className="text-sm font-black text-blue-950 dark:text-blue-100">
+                {t("chat.quickSummaryCommonConclusions")}
+              </h3>
+              <ul className="mt-3 grid gap-2 text-sm leading-6 text-zinc-700 dark:text-zinc-200">
+                {compareSummary.result.commonConclusions.map((item, index) => (
+                  <li key={`${index}-${item}`} className="flex gap-2">
+                    <span className="font-black text-blue-600" aria-hidden="true">•</span>
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+
+            <section data-testid="quick-summary-differences" className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950">
+              <h3 className="text-sm font-black text-zinc-900 dark:text-zinc-100">
+                {t("chat.quickSummaryImportantDifferences")}
+              </h3>
+              {compareSummary.result.importantDifferences.length ? (
+                <ol className="mt-3 grid gap-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+                  {compareSummary.result.importantDifferences.map((item, index) => (
+                    <li key={`${index}-${item}`} className="flex gap-3">
+                      <span className="font-black text-zinc-400">{index + 1}.</span>
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <p className="mt-2 text-sm text-zinc-500">{t("chat.quickSummaryNoMeaningfulDifferences")}</p>
+              )}
+            </section>
+
+            <section data-testid="quick-summary-model-claims">
+              <h3 className="text-sm font-black text-zinc-900 dark:text-zinc-100">
+                {t("chat.quickSummaryModelClaims")}
+              </h3>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                {compareSummary.result.modelKeyClaims.map((assessment) => {
+                  const model = compareSummary.responseMap.find(
+                    (item) => item.responseId === assessment.responseId
+                  );
+                  return (
+                    <article
+                      key={assessment.responseId}
+                      className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950"
+                    >
+                      <h4 className="text-sm font-black text-zinc-900 dark:text-zinc-100">
+                        {model?.modelName || assessment.responseId}
+                      </h4>
+                      <ul className="mt-2 grid gap-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+                        {assessment.claims.map((claim, index) => (
+                          <li key={`${index}-${claim}`} className="flex gap-2">
+                            <span className="text-zinc-400" aria-hidden="true">•</span>
+                            <span>{claim}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+
+            <section data-testid="quick-summary-verification" className="rounded-xl border border-amber-200 bg-amber-50/70 p-4 dark:border-amber-900/70 dark:bg-amber-950/20">
+              <h3 className="text-sm font-black text-amber-950 dark:text-amber-100">
+                {t("chat.quickSummaryVerificationNeeded")}
+              </h3>
+              {compareSummary.result.verificationNeeded.length ? (
+                <ul className="mt-3 grid gap-2 text-sm leading-6 text-zinc-700 dark:text-zinc-200">
+                  {compareSummary.result.verificationNeeded.map((item, index) => (
+                    <li key={`${index}-${item}`} className="flex gap-2">
+                      <span className="font-black text-amber-600" aria-hidden="true">!</span>
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-2 text-sm text-zinc-500">{t("chat.quickSummaryNoVerificationItems")}</p>
+              )}
+              <p className="mt-3 border-t border-amber-200 pt-3 text-xs leading-5 text-amber-900/75 dark:border-amber-900/60 dark:text-amber-100/70">
+                {t("chat.quickSummaryDisclaimer")}
+              </p>
+            </section>
           </div>
         </section>
       </div>

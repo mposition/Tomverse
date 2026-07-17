@@ -141,6 +141,77 @@ async function mockComparisonReview(
   };
 }
 
+async function mockQuickComparison(page: Page) {
+  let requestMethod: string | null = null;
+  await page.route(
+    "**/api/conversations/qa-conversation/compare-summary",
+    async (route) => {
+      requestMethod = route.request().method();
+      if (requestMethod === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            available: true,
+            title: "QA conversation",
+            responseCount: 3,
+            estimatedCredits: 1,
+            cached: false,
+          }),
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          id: "quick-review-1",
+          title: "QA conversation",
+          result: {
+            commonConclusions: ["All answers recommend a staged rollout."],
+            importantDifferences: [
+              "The answers prioritize security, usability, and cost differently.",
+              "Only one answer defines a measurable success threshold.",
+            ],
+            modelKeyClaims: [
+              { responseId: "A", claims: ["Start with a security review."] },
+              { responseId: "B", claims: ["Validate usability before launch."] },
+              { responseId: "C", claims: ["Track cost and latency together."] },
+            ],
+            verificationNeeded: [
+              "Confirm current provider pricing in an external source.",
+            ],
+          },
+          responseMap: [
+            {
+              responseId: "A",
+              messageId: "answer-a",
+              modelId: reviewModels[0],
+              modelName: "GPT-5.4 mini",
+            },
+            {
+              responseId: "B",
+              messageId: "answer-b",
+              modelId: reviewModels[1],
+              modelName: "Claude Haiku 4.5",
+            },
+            {
+              responseId: "C",
+              messageId: "answer-c",
+              modelId: reviewModels[2],
+              modelName: "Gemini 3.1 Flash-Lite",
+            },
+          ],
+          reviewerModelId: "gpt-5-4-mini",
+          usageCredits: 1,
+          cached: false,
+        }),
+      });
+    }
+  );
+  return { getRequestMethod: () => requestMethod };
+}
+
 test("AI comparison review does not flash an unavailable setup before loading", async ({
   page,
 }) => {
@@ -199,3 +270,39 @@ for (const viewport of [
     await expectNoHorizontalOverflow(page);
   });
 }
+
+test("quick comparison performs a structured AI analysis on mobile", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await prepareGuestPage(page, "ko");
+  await mockAuthenticatedApi(page, { selectedModels: reviewModels });
+  const quickApi = await mockQuickComparison(page);
+  await page.goto("/chat");
+
+  await page.getByTestId("quick-comparison-button").click();
+  const setup = page.getByTestId("quick-comparison-setup");
+  await expect(setup).toBeVisible();
+  await expect(setup).toContainText("1");
+  await setup.getByTestId("quick-comparison-run").click();
+  const dialog = page.getByTestId("quick-comparison-dialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByTestId("quick-summary-consensus")).toContainText(
+    "staged rollout"
+  );
+  await expect(dialog.getByTestId("quick-summary-differences")).toContainText(
+    "success threshold"
+  );
+  await expect(dialog.getByTestId("quick-summary-model-claims")).toContainText(
+    "Claude Haiku 4.5"
+  );
+  await expect(dialog.getByTestId("quick-summary-verification")).toContainText(
+    "provider pricing"
+  );
+  expect(quickApi.getRequestMethod()).toBe("POST");
+
+  const box = await dialog.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.height).toBeLessThanOrEqual(844);
+  await expectNoHorizontalOverflow(page);
+});
