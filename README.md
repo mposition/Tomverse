@@ -438,12 +438,30 @@ R2 analytics, and application database inventory without exposing API tokens to
 the browser. Add these server-side Railway Variables to enable external metrics:
 
 ```text
+# Recommended: project-specific monitoring
+RAILWAY_PROJECT_ID=<project ID from Project Settings>
+RAILWAY_PROJECT_TOKEN=<project token from Project Settings > Tokens>
+
+# Alternative: workspace/account token authentication
 RAILWAY_API_TOKEN=<workspace or account token>
-RAILWAY_WORKSPACE_ID=<workspace ID>
-# RAILWAY_PROJECT_ID is used automatically when no workspace ID is set.
+RAILWAY_WORKSPACE_ID=<workspace ID; only used when RAILWAY_PROJECT_ID is absent>
 
 CLOUDFLARE_API_TOKEN=<Account Analytics Read token>
+
+PRISMA_MANAGEMENT_API_TOKEN=<workspace service token>
+PRISMA_DATABASE_ID=<database ID from Prisma Console>
+PRISMA_OPERATIONS_LIMIT=1000000
 ```
+
+Railway project tokens use the `Project-Access-Token` header. Account and
+workspace tokens use `Authorization: Bearer`. The dashboard supports both and
+prefers project scope when both project and workspace IDs are configured. This
+prevents a stale `RAILWAY_WORKSPACE_ID` from masking a valid project setup.
+
+Create the Prisma token from Prisma Console under Workspace Settings > Service
+Tokens. The database usage endpoint supplies the current month's operations and
+storage values. Set `PRISMA_OPERATIONS_LIMIT` to the allowance shown for the
+active Prisma plan; the dashboard defaults to 1,000,000 and warns at 80%.
 
 The existing `R2_ACCOUNT_ID`, `R2_BUCKET_NAME`, `R2_ACCESS_KEY_ID`, and
 `R2_SECRET_ACCESS_KEY` configure object access, but the separate

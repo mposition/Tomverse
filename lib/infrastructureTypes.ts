@@ -59,9 +59,24 @@ export type DatabaseInfrastructureSnapshot = {
   checkedAt: string;
 };
 
+export type PrismaUsageInfrastructureSnapshot = {
+  status: InfrastructureStatus;
+  message: string;
+  tokenConfigured: boolean;
+  databaseIdConfigured: boolean;
+  operationsUsed: number | null;
+  operationsLimit: number;
+  operationsAllowancePercent: number | null;
+  storageGiB: number | null;
+  periodStart: string | null;
+  periodEnd: string | null;
+  checkedAt: string;
+};
+
 export type InfrastructureDashboard = {
   generatedAt: string;
   railway: RailwayInfrastructureSnapshot;
   r2: R2InfrastructureSnapshot;
   database: DatabaseInfrastructureSnapshot;
+  prismaUsage: PrismaUsageInfrastructureSnapshot;
 };

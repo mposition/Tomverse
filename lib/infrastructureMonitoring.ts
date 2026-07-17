@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import type {
   DatabaseInfrastructureSnapshot,
   InfrastructureDashboard,
+  PrismaUsageInfrastructureSnapshot,
   R2InfrastructureSnapshot,
   RailwayInfrastructureSnapshot,
   RailwayUsageMeasurement,
@@ -11,6 +12,7 @@ import type {
 
 const RAILWAY_GRAPHQL_URL = "https://backboard.railway.com/graphql/v2";
 const CLOUDFLARE_GRAPHQL_URL = "https://api.cloudflare.com/client/v4/graphql";
+const PRISMA_MANAGEMENT_API_URL = "https://api.prisma.io/v1";
 const MAX_EXTERNAL_RESPONSE_BYTES = 1_000_000;
 const EXTERNAL_TIMEOUT_MS = 8_000;
 const R2_STORAGE_ALLOWANCE_BYTES = 10 * 1024 * 1024 * 1024;
@@ -70,6 +72,11 @@ const headerNumber = (value: string | null) => {
 const percent = (value: number, allowance: number) =>
   Math.round((value / allowance) * 1_000) / 10;
 
+const positiveInteger = (value: string | undefined, fallback: number) => {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+};
+
 const safeExternalMessage = (value: unknown) =>
   typeof value === "string"
     ? value.replace(/\s+/g, " ").trim().slice(0, 240)
@@ -104,10 +111,17 @@ const railwaySnapshot = async (
   credit: { creditMicroUsd: bigint; note: string | null } | null
 ): Promise<RailwayInfrastructureSnapshot> => {
   const checkedAt = new Date().toISOString();
-  const token = process.env.RAILWAY_API_TOKEN?.trim();
+  const accountOrWorkspaceToken = process.env.RAILWAY_API_TOKEN?.trim();
+  const projectToken = process.env.RAILWAY_PROJECT_TOKEN?.trim();
   const workspaceId = process.env.RAILWAY_WORKSPACE_ID?.trim();
   const projectId = process.env.RAILWAY_PROJECT_ID?.trim();
-  const scope = workspaceId ? "workspace" : projectId ? "project" : "none";
+  // Project usage is the intended scope for this application. Prefer it when
+  // both identifiers exist instead of allowing a stale workspace ID to win.
+  const scope = projectId ? "project" : workspaceId ? "workspace" : "none";
+  const token =
+    scope === "project"
+      ? projectToken || accountOrWorkspaceToken
+      : accountOrWorkspaceToken;
   const configuredCreditMicroUsd = credit ? Number(credit.creditMicroUsd) : null;
   const base = {
     tokenConfigured: Boolean(token),
@@ -124,7 +138,7 @@ const railwaySnapshot = async (
       ...base,
       status: "unconfigured",
       message: !token
-        ? "Add RAILWAY_API_TOKEN to read Railway usage."
+        ? "Add RAILWAY_API_TOKEN or RAILWAY_PROJECT_TOKEN to read Railway usage."
         : "Add RAILWAY_WORKSPACE_ID or RAILWAY_PROJECT_ID to select a billing scope.",
       projectedMonthCostMicroUsd: null,
       projectedBalanceMicroUsd: null,
@@ -138,7 +152,9 @@ const railwaySnapshot = async (
       signal: AbortSignal.timeout(EXTERNAL_TIMEOUT_MS),
       headers: {
         Accept: "application/json",
-        Authorization: `Bearer ${token}`,
+        ...(scope === "project" && projectToken
+          ? { "Project-Access-Token": projectToken }
+          : { Authorization: `Bearer ${token}` }),
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -162,8 +178,8 @@ const railwaySnapshot = async (
         `,
         variables: {
           measurements: RAILWAY_MEASUREMENTS,
-          workspaceId: workspaceId || null,
-          projectId: workspaceId ? null : projectId || null,
+          workspaceId: scope === "workspace" ? workspaceId || null : null,
+          projectId: scope === "project" ? projectId || null : null,
         },
       }),
     });
@@ -233,6 +249,102 @@ const railwaySnapshot = async (
       message: safeExternalMessage(error instanceof Error ? error.message : error),
       projectedMonthCostMicroUsd: null,
       projectedBalanceMicroUsd: null,
+    };
+  }
+};
+
+const prismaUsageSnapshot = async (): Promise<PrismaUsageInfrastructureSnapshot> => {
+  const checkedAt = new Date().toISOString();
+  const token = process.env.PRISMA_MANAGEMENT_API_TOKEN?.trim();
+  const databaseId = process.env.PRISMA_DATABASE_ID?.trim();
+  const operationsLimit = positiveInteger(
+    process.env.PRISMA_OPERATIONS_LIMIT,
+    1_000_000
+  );
+  const base = {
+    tokenConfigured: Boolean(token),
+    databaseIdConfigured: Boolean(databaseId),
+    operationsUsed: null,
+    operationsLimit,
+    operationsAllowancePercent: null,
+    storageGiB: null,
+    periodStart: null,
+    periodEnd: null,
+    checkedAt,
+  };
+  if (!token || !databaseId) {
+    return {
+      ...base,
+      status: "unconfigured",
+      message: !token
+        ? "Add PRISMA_MANAGEMENT_API_TOKEN to read Prisma Postgres usage."
+        : "Add PRISMA_DATABASE_ID to select the monitored database.",
+    };
+  }
+
+  const now = new Date();
+  const monthStart = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)
+  );
+  try {
+    const url = new URL(
+      `/v1/databases/${encodeURIComponent(databaseId)}/usage`,
+      PRISMA_MANAGEMENT_API_URL
+    );
+    url.searchParams.set("startDate", monthStart.toISOString());
+    url.searchParams.set("endDate", now.toISOString());
+    const response = await fetch(url, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(EXTERNAL_TIMEOUT_MS),
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const payload = (await readBoundedJson(response)) as {
+      period?: { start?: unknown; end?: unknown };
+      metrics?: {
+        operations?: { used?: unknown };
+        storage?: { used?: unknown };
+      };
+      error?: { message?: unknown };
+    };
+    if (!response.ok) {
+      throw new Error(
+        safeExternalMessage(
+          payload?.error?.message || `Prisma Management API returned ${response.status}.`
+        )
+      );
+    }
+    const operationsUsed = numeric(payload.metrics?.operations?.used);
+    const storageGiB = numeric(payload.metrics?.storage?.used);
+    if (operationsUsed === null) {
+      throw new Error("Prisma usage response did not contain operations.used.");
+    }
+    const operationsAllowancePercent = percent(
+      operationsUsed,
+      operationsLimit
+    );
+    return {
+      ...base,
+      status: operationsAllowancePercent >= 80 ? "warning" : "healthy",
+      message:
+        operationsAllowancePercent >= 80
+          ? "Prisma Postgres operations are above 80% of the configured monthly limit."
+          : "Prisma Postgres operation usage was synchronized.",
+      operationsUsed,
+      operationsAllowancePercent,
+      storageGiB,
+      periodStart:
+        typeof payload.period?.start === "string" ? payload.period.start : null,
+      periodEnd:
+        typeof payload.period?.end === "string" ? payload.period.end : null,
+    };
+  } catch (error) {
+    return {
+      ...base,
+      status: "error",
+      message: safeExternalMessage(error instanceof Error ? error.message : error),
     };
   }
 };
@@ -472,15 +584,17 @@ export async function getInfrastructureDashboard(): Promise<InfrastructureDashbo
       select: { creditMicroUsd: true, note: true },
     })
     .catch(() => null);
-  const [railway, r2, database] = await Promise.all([
+  const [railway, r2, database, prismaUsage] = await Promise.all([
     railwaySnapshot(credit),
     r2Snapshot(),
     databaseSnapshot(),
+    prismaUsageSnapshot(),
   ]);
   return {
     generatedAt: new Date().toISOString(),
     railway,
     r2,
     database,
+    prismaUsage,
   };
 }
