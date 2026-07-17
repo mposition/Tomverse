@@ -40,6 +40,7 @@ try {
     console.log("Daily provider usage sync completed:", {
       date: result?.date,
       notification: result?.notification,
+      infrastructureNotification: result?.infrastructureNotification,
     });
   }
 } catch (error) {

@@ -1,5 +1,6 @@
 import "server-only";
 
+import { sendManagedSlackMessage } from "@/lib/managedSlack";
 import type { ProviderHealthDashboard } from "@/lib/providerMonitoring";
 import type { ProviderUsageSyncResult } from "@/lib/providerUsageSync";
 
@@ -31,24 +32,13 @@ export async function sendDailyProviderUsageSlackReport({
   date,
   results,
   dashboard,
+  test,
 }: {
   date: string;
   results: ProviderUsageSyncResult[];
   dashboard: ProviderHealthDashboard;
+  test?: boolean;
 }) {
-  const webhookUrl =
-    process.env.PROVIDER_USAGE_SLACK_WEBHOOK_URL ||
-    process.env.SLACK_WEBHOOK_URL;
-  if (!webhookUrl) {
-    throw new Error(
-      "PROVIDER_USAGE_SLACK_WEBHOOK_URL or SLACK_WEBHOOK_URL is required for the daily provider report."
-    );
-  }
-  const target = new URL(webhookUrl);
-  if (target.protocol !== "https:") {
-    throw new Error("The provider usage Slack webhook must use HTTPS.");
-  }
-
   const rows = dashboard.providers.map((provider) => {
     const result = results.find((item) => item.provider === provider.provider);
     const usage = result?.reportedCostMicroUsd ?? result?.internalCostMicroUsd;
@@ -58,32 +48,25 @@ export async function sendDailyProviderUsageSlackReport({
         : provider.status === "limited" || result?.status === "failed"
           ? ":large_orange_circle:"
           : ":large_green_circle:";
-    return `${marker} *${provider.displayName}* · ${balanceLabel(provider)} · usage ${microUsd(usage)} · sync ${result?.status || "missing"}`;
+    return `${marker} *${provider.displayName}* · ${balanceLabel(provider)} · usage ${microUsd(usage)} · sync ${result?.status || "not run"}`;
   });
   const failed = results.filter((result) => result.status === "failed").length;
   const skipped = results.filter((result) => result.status === "skipped").length;
-  const text = [
-    `*Tomverse daily provider usage · ${date} UTC*`,
-    ...rows,
-    `*Summary* · failed ${failed} · skipped ${skipped} · generated ${dashboard.generatedAt.slice(0, 16).replace("T", " ")} UTC`,
-  ].join("\n");
-
-  const response = await fetch(target, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      text: `Tomverse daily provider usage · ${date} UTC`,
-      blocks: [
-        {
-          type: "section",
-          text: { type: "mrkdwn", text },
-        },
-      ],
-    }),
-    signal: AbortSignal.timeout(10_000),
+  const delivery = await sendManagedSlackMessage({
+    key: "provider_usage_daily",
+    variables: {
+      date,
+      providerRows: rows.join("\n"),
+      failed,
+      skipped,
+      generatedAt: dashboard.generatedAt.slice(0, 16).replace("T", " "),
+    },
+    webhookUrl:
+      process.env.PROVIDER_USAGE_SLACK_WEBHOOK_URL ||
+      process.env.SLACK_WEBHOOK_URL,
+    targetType: "ProviderUsage",
+    targetId: date,
+    test,
   });
-  if (!response.ok) {
-    throw new Error(`Daily provider usage Slack webhook returned ${response.status}.`);
-  }
-  return { delivered: true, failed, skipped };
+  return { ...delivery, failed, skipped };
 }

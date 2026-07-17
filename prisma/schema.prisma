@@ -747,6 +747,21 @@ model AdminAlertPolicy {
   @@index([provider])
 }
 
+model AdminSlackTemplate {
+  key            String   @id
+  name           String
+  description    String
+  enabled        Boolean  @default(true)
+  titleTemplate  String
+  bodyTemplate   String
+  updatedById    String?
+  updatedByEmail String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([enabled])
+}
+
 model AdminProviderIncident {
   id               String    @id @default(cuid())
   provider         String?

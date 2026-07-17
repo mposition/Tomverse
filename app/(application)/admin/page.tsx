@@ -40,6 +40,7 @@ import { prisma } from "@/lib/prisma";
 import { AdminProviderHealthPanel } from "@/components/admin/AdminProviderHealthPanel";
 import { AdminAuditPanel, type AdminAuditRow } from "@/components/admin/AdminAuditPanel";
 import { AdminAlertPolicyPanel } from "@/components/admin/AdminAlertPolicyPanel";
+import { AdminSlackTemplatesPanel } from "@/components/admin/AdminSlackTemplatesPanel";
 import { AdminApprovalsPanel } from "@/components/admin/AdminApprovalsPanel";
 import { AdminBillingLifecyclePanel } from "@/components/admin/AdminBillingLifecyclePanel";
 import { AdminGlobalSearchPanel } from "@/components/admin/AdminGlobalSearchPanel";
@@ -1274,6 +1275,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                     {activeTab === "alerts" && (
                         <section className="flex flex-col gap-4">
                             <AdminAlertPolicyPanel />
+                            <AdminSlackTemplatesPanel />
                             <AdminNotificationsPanel rows={notificationRows} />
                             <AdminWebhookPanel />
                             <AdminReportsPanel />
