@@ -11,7 +11,8 @@ import {
   consumeApiRateLimit,
   readLimitedJson,
 } from "@/lib/apiSecurity";
-import { AVAILABLE_MODELS, type AiProvider } from "@/lib/models";
+import type { AiProvider } from "@/lib/models";
+import { getRuntimeModel } from "@/lib/modelRegistry";
 import {
   PROVIDER_API_KEY_ENV,
   PROVIDER_DISPLAY_NAMES,
@@ -19,10 +20,6 @@ import {
 import { prisma } from "@/lib/prisma";
 
 const providers = Object.keys(PROVIDER_DISPLAY_NAMES) as [AiProvider, ...AiProvider[]];
-const modelIds: ReadonlySet<string> = new Set<string>(
-  AVAILABLE_MODELS.map((model) => model.id)
-);
-
 const providerTestSchema = z
   .object({
     provider: z.enum(providers),
@@ -30,10 +27,7 @@ const providerTestSchema = z
       .string()
       .trim()
       .max(120)
-      .optional()
-      .refine((value) => !value || modelIds.has(value), {
-        message: "Unknown model.",
-      }),
+      .optional(),
   })
   .strict();
 
@@ -85,11 +79,14 @@ export async function POST(req: Request) {
 
     const started = Date.now();
     const body = await readLimitedJson(req, 2 * 1024, providerTestSchema);
-    const envNames = PROVIDER_API_KEY_ENV[body.provider] || [];
+    const model = body.modelId ? await getRuntimeModel(body.modelId) : null;
+    if (body.modelId && !model) {
+      return NextResponse.json({ error: "Unknown model." }, { status: 400 });
+    }
+    const envNames = model?.apiKeyEnvName
+      ? [model.apiKeyEnvName]
+      : PROVIDER_API_KEY_ENV[body.provider] || [];
     const hasKey = envNames.some((name) => isConfigured(process.env[name]));
-    const model = body.modelId
-      ? AVAILABLE_MODELS.find((candidate) => candidate.id === body.modelId)
-      : null;
     const providerMatchesModel = !model || model.provider === body.provider;
 
     const status = hasKey && providerMatchesModel ? "ok" : "failed";

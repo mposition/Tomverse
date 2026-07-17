@@ -662,6 +662,47 @@ model ModelOverride {
   @@index([status])
 }
 
+/// Database-backed source of truth for AI models. Rows are retired instead of
+/// physically removed so historical conversations can still resolve model IDs.
+model ModelRegistryEntry {
+  id                              String   @id
+  name                            String
+  apiModel                        String
+  provider                        String
+  apiBaseUrl                      String
+  apiKeyEnvName                   String
+  icon                            String   @default("")
+  bestFor                         String   @default("")
+  minimumPlan                     String
+  usageClass                      String
+  creditWeight                    Int
+  publiclyListed                  Boolean  @default(true)
+  enabled                         Boolean  @default(true)
+  status                          String   @default("enabled")
+  replacementModelId              String?
+  catalogDeleted                  Boolean  @default(false)
+  reasoning                       String?
+  contextWindowTokens             Int?
+  supportsImage                   Boolean  @default(false)
+  supportsNativePdf               Boolean  @default(false)
+  maxImages                       Int?
+  maxBase64ImagePayloadBytes      Int?
+  maxOutputTokens                 Int?
+  reservationOutputTokens        Int?
+  inputUsdPerMillionTokens        Float?
+  outputUsdPerMillionTokens       Float?
+  cachedInputPriceMultiplier      Float?
+  sortOrder                       Int      @default(0)
+  updatedById                     String?
+  updatedByEmail                  String?
+  createdAt                       DateTime @default(now())
+  updatedAt                       DateTime @updatedAt
+
+  @@index([provider, sortOrder])
+  @@index([status, catalogDeleted])
+  @@index([publiclyListed, enabled, catalogDeleted])
+}
+
 model AdminNotificationLog {
   id                  String    @id @default(cuid())
   channel             String

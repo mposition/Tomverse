@@ -2,6 +2,7 @@ import "server-only";
 
 import { prisma } from "@/lib/prisma";
 import { AVAILABLE_MODELS, type AiProvider, type ModelTier } from "@/lib/models";
+import { getRuntimeModel, getRuntimeModels } from "@/lib/modelRegistry";
 import {
   getProviderCreditSummaries,
   type ProviderCreditSummary,
@@ -667,7 +668,7 @@ export const recordModelFailure = async (
   code: string
 ) => {
   if (!modelId || isNonProviderHealthDiagnostic(code)) return;
-  const model = AVAILABLE_MODELS.find((item) => item.id === modelId);
+  const model = await getRuntimeModel(modelId);
   const resolvedProvider = provider || model?.provider;
   const sanitizedCode = code.replace(/[^A-Za-z0-9_.-]/g, "_").slice(0, 80) || "UNKNOWN";
   const windowStart = periodStart("five-minute");
@@ -935,7 +936,7 @@ export const getProviderHealthDashboard = async (
   const dayStart = periodStart("day", now);
   const monthStart = periodStart("month", now);
   const fiveMinuteStart = periodStart("five-minute", now);
-  const [rows, usageRows, errorEvents, excludedHealthEvents] = await Promise.all([
+  const [rows, usageRows, errorEvents, excludedHealthEvents, runtimeModels] = await Promise.all([
     prisma.chatUsageBucket.findMany({
       where: {
         OR: [
@@ -994,6 +995,7 @@ export const getProviderHealthDashboard = async (
         createdAt: true,
       },
     }),
+    getRuntimeModels(),
   ]);
 
   const [balanceEntries, creditByProvider, billingByProvider] = await Promise.all([
@@ -1138,7 +1140,9 @@ export const getProviderHealthDashboard = async (
       environmentManualBalanceUsd;
     const balanceAmount = automaticBalance?.amount ?? balanceUsd;
     const balanceCurrency = automaticBalance?.currency ?? "USD";
-    const providerModels = AVAILABLE_MODELS.filter((model) => model.provider === provider);
+    const providerModels = runtimeModels.filter(
+      (model) => model.provider === provider && !model.catalogDeleted
+    );
     const modelIncidents = providerModels
       .map((model) => {
         const failure = latestFor(rows, `model:${model.id}:failure`);

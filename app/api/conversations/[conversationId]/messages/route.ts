@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
-import { isEnabledModelId } from "@/lib/models";
+import { isEnabledRuntimeModelId } from "@/lib/modelRegistry";
 import {
   conversationLockedResponse,
   hasConversationUnlockGrant,
@@ -18,10 +18,7 @@ import {
 const modelIdSchema = z
   .string()
   .min(1)
-  .max(100)
-  .refine(isEnabledModelId, {
-    message: "Unsupported model.",
-  });
+  .max(120);
 const userMessageSchema = z
   .object({
     id: z.string().uuid(),
@@ -79,6 +76,13 @@ export async function POST(
       }
 
     const body = await readLimitedJson(req, 160 * 1024, saveMessagesSchema);
+    const requestedModelIds = Array.from(
+      new Set(body.messages.flatMap((message) => (message.modelId ? [message.modelId] : [])))
+    );
+    const validModelFlags = await Promise.all(requestedModelIds.map(isEnabledRuntimeModelId));
+    if (validModelFlags.some((valid) => !valid)) {
+      return NextResponse.json({ error: "Unsupported model." }, { status: 400 });
+    }
     const contentBytes = body.messages.reduce(
       (total, message) => total + Buffer.byteLength(message.content, "utf8"),
       0
@@ -161,7 +165,7 @@ export async function DELETE(
             return NextResponse.json({ error: "Missing required parameter." }, { status: 400 });
         }
         const parsedModelId = modelIdSchema.safeParse(modelId);
-        if (!parsedModelId.success) {
+        if (!parsedModelId.success || !(await isEnabledRuntimeModelId(parsedModelId.data))) {
             return NextResponse.json({ error: "Unsupported model." }, { status: 400 });
         }
 

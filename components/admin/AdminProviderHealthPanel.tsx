@@ -12,7 +12,8 @@ import {
   Settings2,
 } from "lucide-react";
 import { ModelLogo } from "@/components/chat/ModelLogo";
-import { getEnabledModel, type AiProvider } from "@/lib/models";
+import type { AiProvider } from "@/lib/models";
+import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import type {
   ProviderHealthDashboard,
   ProviderHealthRow,
@@ -142,6 +143,7 @@ function ProviderRow({
   onSaveCredit: SaveCredit;
   onSaveBilling: SaveBilling;
 }) {
+  const { getEnabledModel } = useModelCatalog();
   const [statusOpen, setStatusOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [creditEditorOpen, setCreditEditorOpen] = useState(false);

@@ -11,6 +11,7 @@ import {
   type Language,
 } from "@/components/LanguageProvider";
 import { isAppLanguage } from "@/lib/localizedCallbackUrl";
+import { ModelCatalogProvider } from "@/components/ModelCatalogProvider";
 
 const localeAliases: Record<string, Language> = { kr: "ko", cn: "zh" };
 const supportedLocales = new Set<Language>([
@@ -88,7 +89,7 @@ function SessionAwareMarketingProviders({
         nonce={null}
         userCreatedAt={session?.user?.createdAt || null}
       >
-        {children}
+        <ModelCatalogProvider>{children}</ModelCatalogProvider>
       </AnalyticsProvider>
     </LanguageProvider>
   );

@@ -4,8 +4,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { APP_DEFAULTS, clampSelectedModels } from "@/lib/appDefaults";
-import { isEnabledModelId } from "@/lib/models";
+import { APP_DEFAULTS } from "@/lib/appDefaults";
+import { clampRuntimeSelectedModels } from "@/lib/modelRegistry";
 import { z } from "zod";
 import {
   conversationLockedResponse,
@@ -23,7 +23,7 @@ import {
   modelLimitResponse,
 } from "@/lib/billingEntitlements";
 
-const modelSchema = z.string().max(100).refine(isEnabledModelId);
+const modelSchema = z.string().min(1).max(120);
 const createConversationSchema = z
   .object({
     title: z.string().trim().min(1).max(120).optional(),
@@ -127,9 +127,12 @@ export async function POST(req: Request) {
     const billingPlan = await getUserBillingPlan(userId);
     const maxModels = effectivePlanModelLimit(billingPlan);
 
-    const normalizedModels = clampSelectedModels(
+    const normalizedModels = await clampRuntimeSelectedModels(
       body.selectedModels || [defaultEngine]
     );
+    if (body.selectedModels && normalizedModels.length !== new Set(body.selectedModels).size) {
+      return NextResponse.json({ error: "One or more selected models are unavailable." }, { status: 400 });
+    }
     const activeModels =
       normalizedModels.length > 0 ? normalizedModels : [defaultEngine];
     if (activeModels.length > maxModels) {

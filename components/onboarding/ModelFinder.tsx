@@ -23,7 +23,8 @@ import {
   type ModelFinderTask,
 } from "@/lib/modelFinder";
 import { MODEL_FINDER_OPEN_EVENT } from "@/lib/modelFinderEvents";
-import { getModel, getModelUsageProfile } from "@/lib/models";
+import { getModelUsageProfile } from "@/lib/models";
+import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import {
   trackProductEvent,
   trackProductEventOnce,
@@ -76,6 +77,7 @@ const stageNumber = (stage: Stage) =>
   stage === "tasks" ? 1 : stage === "priority" ? 2 : 3;
 
 export function ModelFinder({ enabled, userId, onComplete }: ModelFinderProps) {
+  const { getModel } = useModelCatalog();
   const { t, lang } = useLanguage();
   const [isOpen, setIsOpen] = useState(false);
   const [stage, setStage] = useState<Stage>("intro");

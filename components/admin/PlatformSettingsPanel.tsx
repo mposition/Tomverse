@@ -1,12 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Bot, Database, Loader2, RefreshCw, Save, Settings2 } from "lucide-react";
 import {
-  AVAILABLE_MODELS,
   canUseModelWithPlan,
   getModelUsageProfile,
 } from "@/lib/models";
+import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import type { PublicAppSettings } from "@/lib/appSettings";
 import { dispatchAppToast } from "@/lib/appToast";
 import { ModelLogo } from "@/components/chat/ModelLogo";
@@ -20,14 +20,18 @@ type Props = {
   settings: PublicAppSettings;
 };
 
-const guestModels = AVAILABLE_MODELS.filter(
-  (model) =>
-    model.enabled &&
-    canUseModelWithPlan("Guest", model) &&
-    getModelUsageProfile(model).category === "Standard"
-);
-
 export function PlatformSettingsPanel({ settings }: Props) {
+  const { models } = useModelCatalog();
+  const guestModels = useMemo(
+    () =>
+      models.filter(
+        (model) =>
+          model.enabled &&
+          canUseModelWithPlan("Guest", model) &&
+          getModelUsageProfile(model).category === "Standard"
+      ),
+    [models]
+  );
   const [guestDefaultModelId, setGuestDefaultModelId] = useState(
     settings.guestDefaultModelId
   );

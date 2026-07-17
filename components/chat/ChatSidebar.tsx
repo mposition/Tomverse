@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import { Conversation } from "./types";
-import { getModel } from "@/components/chat/types";
+import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { AuthButton } from "@/components/auth/AuthButton";
 import { useCallback, useState, useEffect, useId, useRef, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
@@ -108,6 +108,7 @@ export function ChatSidebar({
     attachmentCount = 0,
     isMobileDrawer = false,
 }: ChatSidebarProps) {
+    const { getModel } = useModelCatalog();
     const [openMenuId, setOpenMenuId] = useState<string | null>(null);
     const [conversationMenuPosition, setConversationMenuPosition] = useState<ConversationMenuPosition | null>(null);
     const [showPrivateNotice, setShowPrivateNotice] = useState(false);

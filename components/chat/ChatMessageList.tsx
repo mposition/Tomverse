@@ -21,9 +21,10 @@ import {
   Sheet,
   UserRound,
 } from "lucide-react";
-import { Message, AVAILABLE_MODELS, type ChatAttachment } from "@/components/chat/types";
+import { Message, type ChatAttachment } from "@/components/chat/types";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { useLanguage } from "@/components/LanguageProvider";
+import { useModelCatalog } from "@/components/ModelCatalogProvider";
 
 type ChatMessageListProps = {
   messages: Message[];
@@ -102,6 +103,7 @@ export function ChatMessageList({
   onRetryLast,
   onRetryWithoutAttachments,
 }: ChatMessageListProps) {
+  const { models: AVAILABLE_MODELS } = useModelCatalog();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const previousLastMessageIdRef = useRef<string | null>(null);
   const previousMessageCountRef = useRef(0);

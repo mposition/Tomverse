@@ -11,17 +11,13 @@ import {
   consumeApiRateLimit,
   readLimitedJson,
 } from "@/lib/apiSecurity";
-import { AVAILABLE_MODELS } from "@/lib/models";
+import { getRuntimeModel, getRuntimeModels } from "@/lib/modelRegistry";
 import { getModelOverrides } from "@/lib/modelOverrides";
 import { prisma } from "@/lib/prisma";
 
-const modelIds = new Set<string>(AVAILABLE_MODELS.map((model) => model.id));
-
 const updateModelOverrideSchema = z
   .object({
-    modelId: z.string().trim().min(1).max(120).refine((value) => modelIds.has(value), {
-      message: "Unknown model.",
-    }),
+    modelId: z.string().trim().min(1).max(120),
     status: z.enum(["available", "limited", "disabled", "coming-soon"]),
     reason: z.string().trim().max(500).optional(),
     visibleNote: z.string().trim().max(500).optional(),
@@ -41,7 +37,7 @@ export async function GET(req: Request) {
     });
 
     return NextResponse.json({
-      models: AVAILABLE_MODELS,
+      models: await getRuntimeModels({ includeCatalogDeleted: true }),
       overrides: await getModelOverrides(),
     });
   } catch (error) {
@@ -71,6 +67,10 @@ export async function PATCH(req: Request) {
     });
 
     const body = await readLimitedJson(req, 4 * 1024, updateModelOverrideSchema);
+    const model = await getRuntimeModel(body.modelId);
+    if (!model || model.catalogDeleted) {
+      return NextResponse.json({ error: "Unknown model." }, { status: 400 });
+    }
     const reason = body.reason?.trim() || null;
     const visibleNote = body.visibleNote?.trim() || null;
 

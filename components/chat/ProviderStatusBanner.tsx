@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Info, RefreshCw, Shuffle } from "lucide-react";
-import { AVAILABLE_MODELS, PUBLIC_MODELS } from "@/components/chat/types";
 import { useLanguage } from "@/components/LanguageProvider";
+import { useModelCatalog } from "@/components/ModelCatalogProvider";
 
 type PublicModelStatus = "available" | "limited" | "unavailable";
 
@@ -20,16 +20,20 @@ type ProviderStatusBannerProps = {
   onToggleModel?: (modelId: string) => void;
 };
 
-const PUBLIC_MODEL_IDS = new Set(PUBLIC_MODELS.map((model) => model.id));
-
-const modelName = (id: string) =>
-  AVAILABLE_MODELS.find((model) => model.id === id)?.name || id;
-
 export function ProviderStatusBanner({
   selectedModels = [],
   compact = false,
   onToggleModel,
 }: ProviderStatusBannerProps) {
+  const { models: AVAILABLE_MODELS, publicModels: PUBLIC_MODELS } = useModelCatalog();
+  const PUBLIC_MODEL_IDS = useMemo(
+    () => new Set(PUBLIC_MODELS.map((model) => model.id)),
+    [PUBLIC_MODELS]
+  );
+  const modelName = useCallback(
+    (id: string) => AVAILABLE_MODELS.find((model) => model.id === id)?.name || id,
+    [AVAILABLE_MODELS]
+  );
   const { t } = useLanguage();
   const [models, setModels] = useState<PublicModelStatusRecord[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -80,7 +84,7 @@ export function ProviderStatusBanner({
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [PUBLIC_MODEL_IDS]);
 
   useEffect(() => {
     const initialTimer = window.setTimeout(() => void loadStatus(), 0);
@@ -113,7 +117,7 @@ export function ProviderStatusBanner({
       fallbackNames,
       isSelectedOnly: selectedUnavailable.length > 0,
     };
-  }, [models, selectedModels]);
+  }, [modelName, models, selectedModels]);
 
   if (models.length === 0) return null;
 
