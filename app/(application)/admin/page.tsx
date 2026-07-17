@@ -887,6 +887,23 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             description: "Server-only Measurement Protocol secret for purchase and cancellation events.",
         },
         {
+            name: "RAILWAY_USAGE_API",
+            configured:
+                (isConfigured(process.env.RAILWAY_PROJECT_ID) &&
+                    (isConfigured(process.env.RAILWAY_PROJECT_TOKEN) ||
+                        isConfigured(process.env.RAILWAY_API_TOKEN))) ||
+                (isConfigured(process.env.RAILWAY_WORKSPACE_ID) &&
+                    isConfigured(process.env.RAILWAY_API_TOKEN)),
+            description: "Railway project ID plus project/account token, or workspace ID plus workspace/account token.",
+        },
+        {
+            name: "PRISMA_USAGE_API",
+            configured:
+                isConfigured(process.env.PRISMA_MANAGEMENT_API_TOKEN) &&
+                isConfigured(process.env.PRISMA_DATABASE_ID),
+            description: "Prisma service token and database ID used for monthly operations monitoring.",
+        },
+        {
             name: "RESEND_API_KEY",
             configured: isConfigured(process.env.RESEND_API_KEY),
             description: "Required for Tomverse transactional email.",
@@ -1109,6 +1126,8 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                                             "SLACK_WEBHOOK_URL",
                                             "PROVIDER_USAGE_SLACK_WEBHOOK_URL",
                                             "SENTRY_DSN",
+                                            "RAILWAY_USAGE_API",
+                                            "PRISMA_USAGE_API",
                                             "OPS_ALERT_CHANNEL",
                                             "OPENAI_ADMIN_API_KEY",
                                             "ANTHROPIC_ADMIN_API_KEY",

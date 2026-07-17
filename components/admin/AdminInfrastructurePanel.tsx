@@ -9,6 +9,7 @@ import {
   Coins,
   Database,
   HardDrive,
+  Gauge,
   Loader2,
   RefreshCw,
   Save,
@@ -214,7 +215,7 @@ export function AdminInfrastructurePanel({
       </div>
 
       {data ? (
-        <div className="grid gap-4 xl:grid-cols-3">
+        <div className="grid gap-4 xl:grid-cols-2 2xl:grid-cols-4">
           <article className="rounded-3xl border border-zinc-800 bg-zinc-950/80 p-5">
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-3">
@@ -439,6 +440,72 @@ export function AdminInfrastructurePanel({
                   logs remain separately available under the Audit tab.
                 </p>
               </div>
+            </div>
+          </article>
+
+          <article className="rounded-3xl border border-zinc-800 bg-zinc-950/80 p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-500/10 text-cyan-200">
+                  <Gauge className="h-5 w-5" />
+                </span>
+                <div>
+                  <h3 className="font-black text-white">Prisma Postgres</h3>
+                  <p className="text-xs text-zinc-500">Monthly operations</p>
+                </div>
+              </div>
+              <StatusBadge status={data.prismaUsage.status} />
+            </div>
+            <p className="mt-4 text-xs leading-5 text-zinc-400">
+              {data.prismaUsage.message}
+            </p>
+            <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                Total operations
+              </p>
+              <div className="mt-2 flex items-end justify-between gap-3">
+                <p className="text-2xl font-black text-white">
+                  {numberLabel(data.prismaUsage.operationsUsed)}
+                </p>
+                <p className="text-xs text-zinc-400">
+                  of {numberLabel(data.prismaUsage.operationsLimit)}
+                </p>
+              </div>
+              <AllowanceBar value={data.prismaUsage.operationsAllowancePercent} />
+              <p className="mt-2 text-right text-xs font-bold text-zinc-300">
+                {data.prismaUsage.operationsAllowancePercent === null
+                  ? "-"
+                  : `${data.prismaUsage.operationsAllowancePercent}% used`}
+              </p>
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+              <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3">
+                <p className="text-zinc-500">Storage</p>
+                <p className="mt-1 text-lg font-black text-white">
+                  {data.prismaUsage.storageGiB === null
+                    ? "-"
+                    : `${data.prismaUsage.storageGiB.toFixed(3)} GiB`}
+                </p>
+              </div>
+              <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3">
+                <p className="text-zinc-500">Period start</p>
+                <p className="mt-1 font-black text-white">
+                  {data.prismaUsage.periodStart
+                    ? data.prismaUsage.periodStart.slice(0, 10)
+                    : "-"}
+                </p>
+              </div>
+            </div>
+            <div className="mt-4 rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-3 text-xs leading-5 text-zinc-400">
+              <p>
+                Management token: {data.prismaUsage.tokenConfigured ? "configured" : "missing"}
+              </p>
+              <p>
+                Database ID: {data.prismaUsage.databaseIdConfigured ? "configured" : "missing"}
+              </p>
+              <p className="mt-2 text-zinc-500">
+                The limit is configurable because Prisma plan allowances can change.
+              </p>
             </div>
           </article>
         </div>
