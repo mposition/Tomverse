@@ -42,6 +42,23 @@ test("mobile model picker scrolls from recommendations through the full model li
   await expect(scrollRegion).toBeVisible();
   await expect(summary).toBeVisible();
 
+  const mobileLayout = await dialog.evaluate((element) => {
+    const scrollRegionElement = element.querySelector(
+      '[data-testid="model-picker-scroll-region"]'
+    );
+    const styles = scrollRegionElement
+      ? getComputedStyle(scrollRegionElement)
+      : null;
+    return {
+      portalAtDocumentRoot: element.parentElement === document.body,
+      overflowY: styles?.overflowY || "",
+      touchAction: styles?.touchAction || "",
+    };
+  });
+  expect(mobileLayout.portalAtDocumentRoot).toBe(true);
+  expect(mobileLayout.overflowY).toBe("scroll");
+  expect(mobileLayout.touchAction).toBe("pan-y");
+
   const dimensions = await scrollRegion.evaluate((element) => ({
     clientHeight: element.clientHeight,
     scrollHeight: element.scrollHeight,

@@ -1,6 +1,15 @@
 ﻿"use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
+import { createPortal } from "react-dom";
 import {
   ArrowLeft,
   ArrowUp,
@@ -98,6 +107,35 @@ const GUEST_QUICK_START_ACTIVE_KEY = "tomverse_guest_quick_start_active_v2";
 const GUEST_QUICK_START_EVENT = "tomverse:guest-quick-start";
 const PROVIDER_DISPLAY_ORDER = ["openai", "google", "anthropic", "deepseek", "mistral"];
 const PUBLIC_MODEL_IDS = new Set(PUBLIC_MODELS.map((model) => model.id));
+const MOBILE_MODEL_MENU_QUERY = "(max-width: 767px)";
+const subscribeToMobileModelMenu = (onChange: () => void) => {
+  const mediaQuery = window.matchMedia(MOBILE_MODEL_MENU_QUERY);
+  mediaQuery.addEventListener("change", onChange);
+  return () => mediaQuery.removeEventListener("change", onChange);
+};
+const getMobileModelMenuSnapshot = () =>
+  window.matchMedia(MOBILE_MODEL_MENU_QUERY).matches;
+const getServerMobileModelMenuSnapshot = () => false;
+
+function MobileModelMenuPortal({ children }: { children: ReactNode }) {
+  const isMobile = useSyncExternalStore(
+    subscribeToMobileModelMenu,
+    getMobileModelMenuSnapshot,
+    getServerMobileModelMenuSnapshot
+  );
+
+  useEffect(() => {
+    if (!isMobile) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isMobile]);
+
+  return isMobile ? createPortal(children, document.body) : children;
+}
+
 const interpolateCopy = (
   template: string,
   values: Record<string, string | number>
@@ -906,7 +944,12 @@ export function ChatInput({
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (
+        menuRef.current &&
+        !menuRef.current.contains(target) &&
+        !menuPopoverRef.current?.contains(target)
+      ) {
         closeMenu(false);
       }
     };
@@ -1778,10 +1821,11 @@ export function ChatInput({
           </button>
 
           {isMenuOpen && (
+            <MobileModelMenuPortal>
             <>
             <button
               type="button"
-              className="fixed inset-0 z-40 bg-black/25 backdrop-blur-[1px] md:hidden"
+              className="fixed inset-0 z-[90] bg-black/35 backdrop-blur-[1px] md:hidden"
               onClick={() => closeMenu(true)}
               aria-label={t("auth.cancel")}
             />
@@ -1792,7 +1836,11 @@ export function ChatInput({
               aria-modal="false"
               aria-label={menuView === "models" ? t("chat.modelSelect") : t("chat.moreActions")}
               tabIndex={-1}
-              className="fixed inset-x-2 bottom-[calc(9rem+env(safe-area-inset-bottom))] z-50 flex max-h-[min(34rem,calc(100dvh-10.5rem))] max-w-[calc(100%_-_1rem)] flex-col overflow-hidden rounded-3xl border border-zinc-200 bg-white p-2 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900 md:absolute md:inset-x-auto md:bottom-12 md:left-0 md:max-h-[calc(100dvh-8rem)] md:w-80 md:max-w-[calc(100vw_-_2rem)] md:rounded-2xl"
+              className={`fixed inset-x-2 z-[100] flex max-w-[calc(100%_-_1rem)] flex-col overflow-hidden rounded-3xl border border-zinc-200 bg-white p-2 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900 md:absolute md:inset-x-auto md:bottom-12 md:left-0 md:top-auto md:max-h-[calc(100dvh-8rem)] md:w-80 md:max-w-[calc(100vw_-_2rem)] md:rounded-2xl ${
+                menuView === "models"
+                  ? "bottom-[calc(0.5rem+env(safe-area-inset-bottom))] top-[calc(0.5rem+env(safe-area-inset-top))] max-h-none"
+                  : "bottom-[calc(0.5rem+env(safe-area-inset-bottom))] max-h-[calc(100dvh-2rem)]"
+              }`}
             >
               <div className="mx-auto mb-2 mt-0.5 h-1 w-10 rounded-full bg-zinc-300 dark:bg-zinc-700 md:hidden" aria-hidden="true" />
               <div className="mb-2 flex items-center justify-between border-b border-zinc-200 px-2 pb-2 pt-1 dark:border-zinc-800 md:hidden">
@@ -1878,7 +1926,7 @@ export function ChatInput({
                 </div>
               ) : (
                 <>
-                  <div className="mb-2 flex items-center gap-2 px-1 py-1">
+                  <div className="mb-2 hidden items-center gap-2 px-1 py-1 md:flex">
                     <button
                       type="button"
                       onClick={() => setMenuView("actions")}
@@ -1909,7 +1957,7 @@ export function ChatInput({
                   </div>
                   <div
                     data-testid="model-picker-scroll-region"
-                    className="min-h-0 flex-1 touch-pan-y space-y-2 overflow-y-auto overscroll-contain px-1 pb-2 pr-2 [-webkit-overflow-scrolling:touch]"
+                    className="h-0 min-h-0 flex-1 touch-pan-y space-y-2 overflow-x-hidden overflow-y-scroll overscroll-y-contain px-1 pb-4 pr-2 [scrollbar-gutter:stable] [-webkit-overflow-scrolling:touch]"
                   >
 
                     {!modelSearchQuery.trim() && (
@@ -2259,6 +2307,7 @@ export function ChatInput({
               )}
             </div>
             </>
+            </MobileModelMenuPortal>
           )}
         </div>
 
