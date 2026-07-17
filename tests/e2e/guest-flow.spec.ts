@@ -65,13 +65,15 @@ test("guest cannot activate a paid model", async ({ page }) => {
   await page.goto("/chat");
 
   await modelSelectorTrigger(page).click();
+  await page.getByTestId("show-all-models").click();
   const paidModel = page
-    .locator('[data-testid="model-option"][disabled]')
-    .filter({ hasText: /Pro|Max/ })
+    .locator(
+      '[data-testid="model-option"][data-model-plan-locked="true"]:not([disabled])'
+    )
     .first();
 
   await expect(paidModel).toBeVisible();
-  await expect(paidModel).toBeDisabled();
-  await paidModel.click({ force: true });
+  await paidModel.click();
+  await expect(page.getByRole("dialog").last()).toBeVisible();
   await expect(page.locator('[data-testid="model-option"][aria-pressed="true"]')).toHaveCount(1);
 });

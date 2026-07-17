@@ -37,7 +37,7 @@ test("account controls remain fully visible at a 150 percent scaled viewport", a
   expect(accountBox!.y + accountBox!.height).toBeLessThanOrEqual(720);
 });
 
-test("desktop model selector adds a second free model panel", async ({ page }) => {
+test("guest model selector keeps one panel and explains sign-in for comparison", async ({ page }) => {
   await expect(page.getByTestId("desktop-model-panel")).toHaveCount(1);
 
   await modelMenuTrigger(page).click();
@@ -52,13 +52,15 @@ test("desktop model selector adds a second free model panel", async ({ page }) =
   await expect(freeUnselectedModel).toBeVisible();
   await freeUnselectedModel.click();
 
-  await expect(page.getByTestId("desktop-model-panel")).toHaveCount(2);
+  await expect(page.getByRole("dialog").last()).toBeVisible();
+  await expect(page.getByTestId("desktop-model-panel")).toHaveCount(1);
   await expectNoHorizontalOverflow(page);
 });
 
 test("model names remain readable in the narrow selector", async ({ page }) => {
   await modelMenuTrigger(page).click();
   const dialog = page.locator("#chat-input-popover");
+  await dialog.getByTestId("show-all-models").click();
   const longName = dialog
     .locator('[data-model-id="perplexity/sonar-deep-research"]')
     .getByTestId("model-option-name");
@@ -75,6 +77,30 @@ test("model names remain readable in the narrow selector", async ({ page }) => {
   expect(styles.whiteSpace).toBe("normal");
   expect(styles.textOverflow).not.toBe("ellipsis");
   expect(styles.overflow).not.toBe("hidden");
+});
+
+test("model picker prioritizes exact credits and shows the final input estimate", async ({ page }) => {
+  await modelMenuTrigger(page).click();
+  const dialog = page.locator("#chat-input-popover");
+
+  await expect(dialog.getByTestId("model-option")).toHaveCount(3);
+  await dialog.getByTestId("show-all-models").click();
+
+  const gptMini = dialog.locator(
+    '[data-testid="model-option"][data-model-id="gpt-5-4-mini"]'
+  );
+  await expect(gptMini).toBeVisible();
+  await expect(gptMini.getByTestId("model-credit-badge")).toContainText("1");
+  await expect(gptMini).not.toContainText("Available");
+  await expect(gptMini).not.toContainText("Standard ·");
+  await expect(gptMini).not.toContainText("Best for");
+  await expect(dialog.getByTestId("model-selection-summary")).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await page.getByTestId("chat-textarea").fill("x".repeat(64_004));
+  const estimate = page.getByTestId("request-credit-estimate");
+  await expect(estimate).toContainText("1.5×");
+  await expect(estimate).toContainText("2");
 });
 
 test("action and model popovers remain visible and keyboard closable", async ({ page }) => {
