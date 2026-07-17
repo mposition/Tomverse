@@ -28,6 +28,11 @@ const RAILWAY_MEASUREMENTS = [
   "NETWORK_RX_GB",
   "NETWORK_TX_GB",
 ] as const;
+const MINUTES_PER_30_DAY_MONTH = 30 * 24 * 60;
+const RAILWAY_CPU_USD_PER_VCPU_MINUTE = 20 / MINUTES_PER_30_DAY_MONTH;
+const RAILWAY_MEMORY_USD_PER_GB_MINUTE = 10 / MINUTES_PER_30_DAY_MONTH;
+const RAILWAY_VOLUME_USD_PER_GB_MINUTE = 0.15 / MINUTES_PER_30_DAY_MONTH;
+const RAILWAY_NETWORK_EGRESS_USD_PER_GB = 0.05;
 
 const R2_CLASS_A_ACTIONS = new Set([
   "listbuckets",
@@ -128,6 +133,7 @@ const railwaySnapshot = async (
     scope: scope as RailwayInfrastructureSnapshot["scope"],
     configuredCreditMicroUsd,
     creditNote: credit?.note || null,
+    warningReasons: [] as RailwayInfrastructureSnapshot["warningReasons"],
     measurements: [] as RailwayUsageMeasurement[],
     apiRateLimit: { limit: null, remaining: null, resetAt: null },
     checkedAt,
@@ -205,14 +211,81 @@ const railwaySnapshot = async (
       return [{
         measurement: record.measurement.slice(0, 80),
         estimatedValue,
+        unit: "usage units",
+        estimatedCostMicroUsd: null,
         projectId: typeof record.projectId === "string" ? record.projectId : null,
       }];
     });
-    const projectedUsd = measurements.reduce(
-      (sum, measurement) => sum + Math.max(0, measurement.estimatedValue),
+    const values = new Map<string, number>();
+    for (const measurement of measurements) {
+      values.set(
+        measurement.measurement,
+        (values.get(measurement.measurement) || 0) +
+          Math.max(0, measurement.estimatedValue)
+      );
+    }
+    const cpuMeasurement = (values.get("CPU_USAGE_2") || 0) > 0
+      ? "CPU_USAGE_2"
+      : "CPU_USAGE";
+    const pricedMeasurements = measurements.map((measurement) => {
+      const value = Math.max(0, measurement.estimatedValue);
+      if (measurement.measurement === cpuMeasurement) {
+        return {
+          ...measurement,
+          unit: "vCPU-min",
+          estimatedCostMicroUsd: Math.round(
+            value * RAILWAY_CPU_USD_PER_VCPU_MINUTE * 1_000_000
+          ),
+        };
+      }
+      if (measurement.measurement === "MEMORY_USAGE_GB") {
+        return {
+          ...measurement,
+          unit: "GB-min",
+          estimatedCostMicroUsd: Math.round(
+            value * RAILWAY_MEMORY_USD_PER_GB_MINUTE * 1_000_000
+          ),
+        };
+      }
+      if (measurement.measurement === "NETWORK_TX_GB") {
+        return {
+          ...measurement,
+          unit: "GB egress",
+          estimatedCostMicroUsd: Math.round(
+            value * RAILWAY_NETWORK_EGRESS_USD_PER_GB * 1_000_000
+          ),
+        };
+      }
+      if (measurement.measurement === "NETWORK_RX_GB") {
+        return { ...measurement, unit: "GB ingress" };
+      }
+      if (measurement.measurement === "DISK_USAGE_GB") {
+        return {
+          ...measurement,
+          unit: "GB-min",
+          estimatedCostMicroUsd: Math.round(
+            value * RAILWAY_VOLUME_USD_PER_GB_MINUTE * 1_000_000
+          ),
+        };
+      }
+      if (
+        measurement.measurement === "CPU_USAGE" ||
+        measurement.measurement === "CPU_USAGE_2"
+      ) {
+        return { ...measurement, unit: "vCPU-min (alternate)" };
+      }
+      if (
+        measurement.measurement.includes("DISK") ||
+        measurement.measurement.includes("BACKUP")
+      ) {
+        return { ...measurement, unit: "GB-min" };
+      }
+      return measurement;
+    });
+    const projectedMonthCostMicroUsd = pricedMeasurements.reduce(
+      (sum, measurement) => sum + (measurement.estimatedCostMicroUsd || 0),
       0
     );
-    const projectedMonthCostMicroUsd = Math.round(projectedUsd * 1_000_000);
     const projectedBalanceMicroUsd =
       configuredCreditMicroUsd === null
         ? null
@@ -235,7 +308,25 @@ const railwaySnapshot = async (
             : "Railway projected billing usage was synchronized.",
       projectedMonthCostMicroUsd,
       projectedBalanceMicroUsd,
-      measurements,
+      measurements: pricedMeasurements,
+      warningReasons:
+        configuredCreditMicroUsd === null
+          ? [
+              {
+                code: "OPENING_CREDIT_NOT_CONFIGURED",
+                detail:
+                  "Usage synchronization succeeded, but no opening credit is saved, so projected balance cannot be calculated.",
+              },
+            ]
+          : lowCredit
+            ? [
+                {
+                  code: "PROJECTED_BALANCE_LOW",
+                  detail:
+                    "Projected remaining credit is negative or below 20% of the saved opening credit.",
+                },
+              ]
+            : [],
       apiRateLimit: {
         limit: headerNumber(response.headers.get("x-ratelimit-limit")),
         remaining: headerNumber(response.headers.get("x-ratelimit-remaining")),
@@ -243,10 +334,12 @@ const railwaySnapshot = async (
       },
     };
   } catch (error) {
+    const message = safeExternalMessage(error instanceof Error ? error.message : error);
     return {
       ...base,
       status: "error",
-      message: safeExternalMessage(error instanceof Error ? error.message : error),
+      message,
+      warningReasons: [{ code: "RAILWAY_API_ERROR", detail: message }],
       projectedMonthCostMicroUsd: null,
       projectedBalanceMicroUsd: null,
     };
