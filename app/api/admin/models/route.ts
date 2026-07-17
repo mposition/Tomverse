@@ -111,7 +111,9 @@ export async function PUT(req: Request) {
       creditWeight: body.creditWeight,
       publiclyListed: body.publiclyListed,
       status: body.status,
-      enabled: body.status === "enabled",
+      enabled: body.status === "enabled" || body.status === "limited",
+      operationalReason: body.operationalReason || undefined,
+      userVisibleNote: body.userVisibleNote || undefined,
       replacementModelId: body.replacementModelId || undefined,
       reasoning:
         body.reasoning && body.reasoning !== "none"

@@ -1,5 +1,9 @@
 import * as Sentry from "@sentry/nextjs";
-import { sanitizeOperationalText } from "@/lib/operationalMonitoringCore";
+import {
+  isNextNoFallbackError,
+  isNextNoFallbackSentryEvent,
+  sanitizeOperationalText,
+} from "@/lib/operationalMonitoringCore";
 
 const tracesSampleRate = Number(process.env.SENTRY_TRACES_SAMPLE_RATE || "0");
 
@@ -19,7 +23,14 @@ Sentry.init({
     Number.isFinite(tracesSampleRate) && tracesSampleRate >= 0
       ? Math.min(1, tracesSampleRate)
       : 0,
-  beforeSend(event) {
+  ignoreErrors: ["Internal: NoFallbackError"],
+  beforeSend(event, hint) {
+    if (
+      isNextNoFallbackError(hint?.originalException) ||
+      isNextNoFallbackSentryEvent(event)
+    ) {
+      return null;
+    }
     if (event.message) event.message = sanitizeOperationalText(event.message);
     for (const exception of event.exception?.values || []) {
       if (exception.value) {

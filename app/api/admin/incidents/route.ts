@@ -53,6 +53,16 @@ const incidentOverrideReason = (incidentId: string, title: string) =>
 const incidentOverrideNote = (status: string, message: string | null) =>
   (message || (status === "disabled" ? "This model is temporarily unavailable." : "This model is temporarily limited.")).slice(0, 500);
 
+const previousModelStatesSchema = z.array(
+  z.object({
+    id: z.string(),
+    status: z.enum(["enabled", "limited", "disabled", "coming-soon"]),
+    enabled: z.boolean(),
+    operationalReason: z.string().nullable(),
+    userVisibleNote: z.string().nullable(),
+  })
+);
+
 export async function GET(req: Request) {
   try {
     const session = await getServerSession(authOptions);
@@ -119,26 +129,26 @@ export async function POST(req: Request) {
           title: body.title,
           message: body.message?.trim() || null,
           fallbackModelIds: JSON.stringify(body.fallbackModelIds || []),
+          previousModelStates: targetModels.map((model) => ({
+            id: model.id,
+            status: model.status,
+            enabled: model.enabled,
+            operationalReason: model.operationalReason || null,
+            userVisibleNote: model.userVisibleNote || null,
+          })),
           createdById: session.user.id,
           createdByEmail: session.user.email || null,
         },
       });
 
       for (const model of targetModels) {
-        await tx.modelOverride.upsert({
-          where: { modelId: model.id },
-          create: {
-            modelId: model.id,
+        await tx.modelRegistryEntry.update({
+          where: { id: model.id },
+          data: {
             status: body.status,
-            reason: incidentOverrideReason(created.id, body.title),
-            visibleNote: incidentOverrideNote(body.status, body.message || null),
-            updatedById: session.user.id,
-            updatedByEmail: session.user.email || null,
-          },
-          update: {
-            status: body.status,
-            reason: incidentOverrideReason(created.id, body.title),
-            visibleNote: incidentOverrideNote(body.status, body.message || null),
+            enabled: body.status === "limited",
+            operationalReason: incidentOverrideReason(created.id, body.title),
+            userVisibleNote: incidentOverrideNote(body.status, body.message || null),
             updatedById: session.user.id,
             updatedByEmail: session.user.email || null,
           },
@@ -208,11 +218,27 @@ export async function PATCH(req: Request) {
           resolvedByEmail: session.user.email || null,
         },
       });
-      await tx.modelOverride.deleteMany({
-        where: {
-          reason: { startsWith: `[incident:${incident.id}]` },
-        },
-      });
+      const previousStates = previousModelStatesSchema.safeParse(
+        incident.previousModelStates
+      );
+      if (previousStates.success) {
+        for (const state of previousStates.data) {
+          await tx.modelRegistryEntry.updateMany({
+            where: {
+              id: state.id,
+              operationalReason: { startsWith: `[incident:${incident.id}]` },
+            },
+            data: {
+              status: state.status,
+              enabled: state.enabled,
+              operationalReason: state.operationalReason,
+              userVisibleNote: state.userVisibleNote,
+              updatedById: session.user.id,
+              updatedByEmail: session.user.email || null,
+            },
+          });
+        }
+      }
       return resolved;
     });
 

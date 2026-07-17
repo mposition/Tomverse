@@ -867,7 +867,7 @@ export function ChatInput({
           ) {
             const isUnavailable = record.status === "unavailable";
             next[record.id] = {
-              status: isUnavailable ? "unavailable" : "available",
+              status: record.status,
               fallbackModelIds: isUnavailable && Array.isArray(record.fallbackModelIds)
                 ? record.fallbackModelIds
                     .filter((id): id is string => typeof id === "string")

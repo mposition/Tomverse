@@ -34,8 +34,8 @@ const tabs: Array<{
   },
   {
     id: "controls",
-    label: "Model Registry / Runtime",
-    description: "Add or edit model specifications, then control live availability",
+    label: "Model Registry",
+    description: "Specifications, API configuration, credits, and live availability",
     icon: SlidersHorizontal,
   },
 ];

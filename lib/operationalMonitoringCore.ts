@@ -1,5 +1,69 @@
 export type OperationalSeverity = "warning" | "error" | "fatal";
 
+const NEXT_NO_FALLBACK_ERROR_MESSAGE = "Internal: NoFallbackError";
+
+type SentryLikeEvent = {
+  message?: unknown;
+  exception?: {
+    values?: Array<{
+      type?: unknown;
+      value?: unknown;
+    }>;
+  };
+};
+
+const isNoFallbackMarker = (value: unknown) => {
+  if (typeof value !== "string") return false;
+  const normalized = value.trim();
+  return (
+    normalized === NEXT_NO_FALLBACK_ERROR_MESSAGE ||
+    normalized === `Error: ${NEXT_NO_FALLBACK_ERROR_MESSAGE}` ||
+    normalized === "NoFallbackError"
+  );
+};
+
+/**
+ * Next.js throws NoFallbackError as an internal routing control signal. The
+ * value passed to instrumentation hooks is not guaranteed to retain the
+ * original Error prototype, so this check intentionally supports processed
+ * and cross-realm error-like objects as well as Error instances.
+ */
+export const isNextNoFallbackError = (value: unknown) => {
+  const visited = new Set<object>();
+
+  const inspect = (candidate: unknown, depth: number): boolean => {
+    if (isNoFallbackMarker(candidate)) return true;
+    if (!candidate || typeof candidate !== "object" || depth > 3) return false;
+    if (visited.has(candidate)) return false;
+    visited.add(candidate);
+
+    const errorLike = candidate as {
+      name?: unknown;
+      message?: unknown;
+      digest?: unknown;
+      cause?: unknown;
+    };
+    return (
+      isNoFallbackMarker(errorLike.name) ||
+      isNoFallbackMarker(errorLike.message) ||
+      isNoFallbackMarker(errorLike.digest) ||
+      inspect(errorLike.cause, depth + 1)
+    );
+  };
+
+  return inspect(value, 0);
+};
+
+export const isNextNoFallbackSentryEvent = (event: SentryLikeEvent) =>
+  isNextNoFallbackError(event.message) ||
+  Boolean(
+    event.exception?.values?.some(
+      (exception) =>
+        isNextNoFallbackError(exception.type) ||
+        isNextNoFallbackError(exception.value)
+    )
+  );
+
 const SECRET_KEY_PATTERN =
   /(authorization|cookie|password|secret|token|api[-_]?key|dsn|database[-_]?url)/i;
 

@@ -303,6 +303,50 @@ const sessionId = () => {
   return created;
 };
 
+const INTERNAL_DELIVERY_RETRY_DELAYS_MS = [500, 2_000] as const;
+const RETRYABLE_INTERNAL_DELIVERY_STATUSES = new Set([
+  408,
+  425,
+  429,
+  500,
+  502,
+  503,
+  504,
+]);
+
+const deliverInternalAnalyticsEvent = (
+  payload: ReturnType<typeof analyticsClientEventSchema.parse>,
+  attempt = 0
+) => {
+  void fetch("/api/analytics/events", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    keepalive: true,
+    cache: "no-store",
+  })
+    .then((response) => {
+      if (
+        !response.ok &&
+        RETRYABLE_INTERNAL_DELIVERY_STATUSES.has(response.status) &&
+        attempt < INTERNAL_DELIVERY_RETRY_DELAYS_MS.length
+      ) {
+        window.setTimeout(
+          () => deliverInternalAnalyticsEvent(payload, attempt + 1),
+          INTERNAL_DELIVERY_RETRY_DELAYS_MS[attempt]
+        );
+      }
+    })
+    .catch(() => {
+      if (attempt < INTERNAL_DELIVERY_RETRY_DELAYS_MS.length) {
+        window.setTimeout(
+          () => deliverInternalAnalyticsEvent(payload, attempt + 1),
+          INTERNAL_DELIVERY_RETRY_DELAYS_MS[attempt]
+        );
+      }
+    });
+};
+
 const sendIntent = (intent: EventIntent) => {
   if (!runtime) return;
   const storedVariant = window.localStorage.getItem(
@@ -356,13 +400,7 @@ const sendIntent = (intent: EventIntent) => {
     });
   }
 
-  void fetch("/api/analytics/events", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-    keepalive: true,
-    cache: "no-store",
-  }).catch(() => undefined);
+  deliverInternalAnalyticsEvent(payload);
 };
 
 export const analyticsConsent = () =>

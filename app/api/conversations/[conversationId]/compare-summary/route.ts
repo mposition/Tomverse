@@ -35,7 +35,7 @@ import {
   conversationLockedResponse,
   hasConversationUnlockGrant,
 } from "@/lib/conversationLock";
-import { assertModelNotAdminDisabled } from "@/lib/modelOverrides";
+import { assertModelRuntimeAvailable } from "@/lib/modelAvailability";
 import type { AiModel } from "@/lib/models";
 import {
   consumePerplexityUsage,
@@ -79,7 +79,7 @@ const accessibleQuickReviewers = async (
   for (const candidate of candidates) {
     try {
       assertModelAccess(access, candidate);
-      const override = await assertModelNotAdminDisabled(candidate.id);
+      const override = await assertModelRuntimeAvailable(candidate.id);
       if (override.allowed) available.push(candidate);
     } catch {
       // Try the next configured Standard reviewer.

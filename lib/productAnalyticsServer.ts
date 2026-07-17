@@ -16,6 +16,10 @@ import {
   type ProductAnalyticsProperties,
 } from "@/lib/productAnalyticsShared";
 import { localeMarketingAnalyticsProperties } from "@/lib/localeLaunchPolicy";
+import {
+  isRetryableDatabaseError,
+  isUniqueConstraintDatabaseError,
+} from "@/lib/databaseError";
 
 type RecordProductAnalyticsEventInput = {
   eventName: ProductAnalyticsEventName;
@@ -148,35 +152,42 @@ export async function recordProductAnalyticsEvent(
   const properties = analyticsPropertiesForInput(input);
   const occurredAt = input.occurredAt || new Date();
 
-  try {
-    await prisma.productAnalyticsEvent.create({
-      data: {
-        dedupeKey: privateDigest("dedupe", input.dedupeKey),
-        eventName: input.eventName,
-        source: input.source,
-        userId: input.userId || null,
-        anonymousIdHash: privateDigest(
-          "client",
-          input.attribution.client_id
-        ),
-        sessionIdHash: privateDigest(
-          "session",
-          input.attribution.session_id
-        ),
-        utmSource: input.attribution.utm_source,
-        utmMedium: input.attribution.utm_medium,
-        utmCampaign: input.attribution.utm_campaign,
-        language: input.attribution.language,
-        country: input.attribution.country,
-        modelCount: Math.max(0, Math.min(3, Math.trunc(input.modelCount))),
-        plan: normalizeAnalyticsPlan(input.plan),
-        properties: properties as Prisma.InputJsonValue,
-        occurredAt,
-      },
-    });
-  } catch (error) {
-    if ((error as { code?: string })?.code === "P2002") return false;
-    throw error;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await prisma.productAnalyticsEvent.create({
+        data: {
+          dedupeKey: privateDigest("dedupe", input.dedupeKey),
+          eventName: input.eventName,
+          source: input.source,
+          userId: input.userId || null,
+          anonymousIdHash: privateDigest(
+            "client",
+            input.attribution.client_id
+          ),
+          sessionIdHash: privateDigest(
+            "session",
+            input.attribution.session_id
+          ),
+          utmSource: input.attribution.utm_source,
+          utmMedium: input.attribution.utm_medium,
+          utmCampaign: input.attribution.utm_campaign,
+          language: input.attribution.language,
+          country: input.attribution.country,
+          modelCount: Math.max(0, Math.min(3, Math.trunc(input.modelCount))),
+          plan: normalizeAnalyticsPlan(input.plan),
+          properties: properties as Prisma.InputJsonValue,
+          occurredAt,
+        },
+      });
+      break;
+    } catch (error) {
+      if (isUniqueConstraintDatabaseError(error)) return false;
+      if (attempt === 0 && isRetryableDatabaseError(error)) {
+        await new Promise((resolve) => setTimeout(resolve, 75));
+        continue;
+      }
+      throw error;
+    }
   }
 
   if (input.sendToGa4) {
