@@ -99,7 +99,7 @@ test("test campaign retains first-touch UTM through consent, chat, signup, and c
   await page.goto(
     "/?utm_source=qa-search&utm_medium=cpc&utm_campaign=launch-validation"
   );
-  await page.getByTestId("landing-guest-cta").click();
+  await page.getByTestId("landing-primary-cta").click();
   await expect(page).toHaveURL(/\/chat/);
 
   // A full reload proves queued events and the first-touch UTM do not depend on
