@@ -4,12 +4,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowUp,
+  Brain,
   Boxes,
   Braces,
   ChevronDown,
+  Code2,
+  Coins,
   File as FileIcon,
   FileText,
   HardDrive,
+  Globe2,
+  Image as ImageIcon,
+  LockKeyhole,
   Paperclip,
   Plus,
   Presentation,
@@ -29,9 +35,25 @@ import {
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { useLanguage } from "@/components/LanguageProvider";
 import { dispatchAppToast } from "@/lib/appToast";
-import { getModelBestFor, getModelExperienceStatus, getModelExperienceTags } from "@/lib/modelExperience";
+import { getModelExperienceStatus } from "@/lib/modelExperience";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
-import { canUseModelWithPlan, modelSupportsImageInput } from "@/lib/models";
+import {
+  canUseModelWithPlan,
+  getInputCreditMultiplier,
+  getWeightedUsageCredits,
+  modelSupportsImageInput,
+} from "@/lib/models";
+import {
+  RECOMMENDED_MODEL_IDS,
+  getModelPickerDescription,
+  getModelPickerFeatures,
+  getModelPickerUsageBand,
+  modelMatchesCapability,
+  modelPickerCopy,
+  modelPickerFeatureLabels,
+  type ModelPickerCapability,
+  type ModelPickerUsageBand,
+} from "@/lib/modelPickerPresentation";
 import { useUserUsage } from "@/components/chat/useUserUsage";
 import { withChatLanguage } from "@/lib/localizedCallbackUrl";
 import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
@@ -59,6 +81,7 @@ const GOOGLE_WORKSPACE_TYPES = [
   "application/vnd.google-apps.presentation",
 ].join(",");
 const RECENT_MODEL_STORAGE_KEY = "recent_model_ids";
+const MODEL_PICKER_ALL_STORAGE_KEY = "tomverse_model_picker_all_v1";
 const GUEST_QUICK_START_STORAGE_KEY = "tomverse_guest_quick_start_seen_v2";
 const GUEST_QUICK_START_ACTIVE_KEY = "tomverse_guest_quick_start_active_v2";
 const GUEST_QUICK_START_EVENT = "tomverse:guest-quick-start";
@@ -328,6 +351,8 @@ export function ChatInput({
   const [showGuestQuickStart, setShowGuestQuickStart] = useState(false);
   const [dismissedSuggestionKey, setDismissedSuggestionKey] = useState<string | null>(null);
     const { t, lang } = useLanguage();
+    const pickerCopy = modelPickerCopy[lang];
+    const pickerFeatureLabels = modelPickerFeatureLabels[lang];
     const helpCopy = chatHelpCopy[lang];
     const signInCallbackUrl = withChatLanguage("/chat", lang);
     const accountUsage = useUserUsage(!isGuestMode);
@@ -358,11 +383,28 @@ export function ChatInput({
     [hasImageAttachments, selectedModels]
   );
 
-  const dailyCreditLimit = accountUsage?.limits.creditsDay || 0;
-  const estimatedRequestCredits = selectedModels.reduce((sum, modelId) => {
+  const estimatedInputTokens = useMemo(() => {
+    const textParts = [
+      value,
+      ...attachments
+        .filter((attachment) => attachment.kind === "text" && attachment.data)
+        .map((attachment) => attachment.data || ""),
+    ];
+    const textBytes = new TextEncoder().encode(textParts.join("\n\n")).byteLength;
+    const binaryAttachmentTokens =
+      attachments.filter((attachment) => attachment.kind === "file").length * 16_000;
+    return Math.max(1, Math.ceil(textBytes / 4) + binaryAttachmentTokens);
+  }, [attachments, value]);
+  const inputCreditMultiplier = getInputCreditMultiplier(estimatedInputTokens);
+  const selectedBaseCredits = selectedModels.reduce((sum, modelId) => {
     const model = AVAILABLE_MODELS.find((item) => item.id === modelId);
     return sum + (model ? getModelUsageProfile(model).credits : 0);
   }, 0);
+  const estimatedRequestCredits = selectedModels.reduce((sum, modelId) => {
+    const model = AVAILABLE_MODELS.find((item) => item.id === modelId);
+    return sum + (model ? getWeightedUsageCredits(model, estimatedInputTokens) : 0);
+  }, 0);
+  const dailyCreditLimit = accountUsage?.limits.creditsDay || 0;
   const totalAvailableCredits = accountUsage
     ? accountUsage.balances.planRemainingCredits +
       accountUsage.balances.purchasedRemainingCredits
@@ -398,7 +440,12 @@ export function ChatInput({
   const [menuView, setMenuView] = useState<"actions" | "models">("actions");
   const [modelSearchQuery, setModelSearchQuery] = useState("");
   const [providerFilter, setProviderFilter] = useState("all");
-  const [usageClassFilter, setUsageClassFilter] = useState("all");
+  const [usageBandFilter, setUsageBandFilter] = useState<ModelPickerUsageBand>("all");
+  const [capabilityFilter, setCapabilityFilter] = useState<ModelPickerCapability>("all");
+  const [showAllModels, setShowAllModels] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem(MODEL_PICKER_ALL_STORAGE_KEY) === "1";
+  });
   const [liveModelStatuses, setLiveModelStatuses] = useState<Record<string, PublicModelStatusRecord>>({});
   const [favoriteModelIds, setFavoriteModelIds] = useState<string[]>(() => {
     if (typeof window === "undefined") return [];
@@ -598,22 +645,43 @@ export function ChatInput({
     const normalizedQuery = modelSearchQuery.trim().toLowerCase();
 
     return PUBLIC_MODELS.filter((model) => {
-      const usageCategory = getModelUsageProfile(model).category;
+      const usageProfile = getModelUsageProfile(model);
+      const description = getModelPickerDescription(model, lang).toLowerCase();
       const matchesQuery =
         !normalizedQuery ||
         model.name.toLowerCase().includes(normalizedQuery) ||
         model.provider.toLowerCase().includes(normalizedQuery) ||
-        usageCategory.toLowerCase().includes(normalizedQuery);
+        description.includes(normalizedQuery);
       const matchesProvider =
         providerFilter === "all" || model.provider === providerFilter;
-      const matchesUsageClass =
-        usageClassFilter === "all" || usageCategory === usageClassFilter;
+      const matchesUsageBand =
+        usageBandFilter === "all" ||
+        getModelPickerUsageBand(usageProfile.credits) === usageBandFilter;
+      const matchesCapability = modelMatchesCapability(model, capabilityFilter);
 
-      return matchesQuery && matchesProvider && matchesUsageClass;
+      return (
+        matchesQuery &&
+        matchesProvider &&
+        matchesUsageBand &&
+        matchesCapability
+      );
     });
-  }, [modelSearchQuery, providerFilter, usageClassFilter]);
+  }, [capabilityFilter, lang, modelSearchQuery, providerFilter, usageBandFilter]);
 
   const groupedModels = useMemo(() => {
+    if (!showAllModels) {
+      const recommendedIds = Array.from(
+        new Set<string>([...selectedModels, ...RECOMMENDED_MODEL_IDS])
+      ).slice(0, 3);
+      return [
+        {
+          provider: pickerCopy.recommendedModels,
+          models: recommendedIds
+            .map((modelId) => PUBLIC_MODELS.find((model) => model.id === modelId))
+            .filter((model): model is (typeof PUBLIC_MODELS)[number] => Boolean(model)),
+        },
+      ];
+    }
     const favoriteSet = new Set(favoriteModelIds);
     const recentSet = new Set(recentModelIds);
     const sortedModels = [...filteredModels].sort((a, b) => {
@@ -642,7 +710,7 @@ export function ChatInput({
       },
       []
     );
-  }, [favoriteModelIds, filteredModels, recentModelIds, t]);
+  }, [favoriteModelIds, filteredModels, pickerCopy.recommendedModels, recentModelIds, selectedModels, showAllModels, t]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1654,59 +1722,83 @@ export function ChatInput({
                       </span>
                     </div>
                   </div>
-                  <div className="mb-2 space-y-2 px-1">
-                    <div className="relative">
-                      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                      <input
-                        ref={modelSearchInputRef}
-                        value={modelSearchQuery}
-                        onChange={(event) => setModelSearchQuery(event.target.value)}
-                        placeholder={t("chat.searchModels")}
-                        className="h-9 w-full rounded-lg border border-zinc-200 bg-zinc-50 pl-9 pr-3 text-xs text-zinc-800 outline-none transition placeholder:text-zinc-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:focus:border-blue-500"
-                      />
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <select
-                        value={providerFilter}
-                        onChange={(event) => setProviderFilter(event.target.value)}
-                        className="h-9 rounded-lg border border-zinc-200 bg-zinc-50 px-2 text-xs font-medium text-zinc-700 outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
+                  {!showAllModels ? (
+                    <div className="mb-2 rounded-xl border border-blue-200 bg-blue-50/70 px-3 py-2 dark:border-blue-900/60 dark:bg-blue-950/20">
+                      <p className="text-xs font-black text-zinc-900 dark:text-white">
+                        {pickerCopy.recommendedModels}
+                      </p>
+                      <button
+                        type="button"
+                        data-testid="show-all-models"
+                        onClick={() => {
+                          localStorage.setItem(MODEL_PICKER_ALL_STORAGE_KEY, "1");
+                          setShowAllModels(true);
+                        }}
+                        className="mt-1 text-[11px] font-black text-blue-600 underline underline-offset-2 dark:text-blue-300"
                       >
-                        <option value="all">{t("chat.allProviders")}</option>
-                        {modelProviders.map((provider) => (
-                          <option key={provider} value={provider}>
-                            {provider}
-                          </option>
+                        {pickerCopy.showAllModels}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="mb-2 space-y-2 px-1">
+                      <div className="relative">
+                        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                        <input
+                          ref={modelSearchInputRef}
+                          value={modelSearchQuery}
+                          onChange={(event) => setModelSearchQuery(event.target.value)}
+                          placeholder={t("chat.searchModels")}
+                          className="h-9 w-full rounded-lg border border-zinc-200 bg-zinc-50 pl-9 pr-3 text-xs text-zinc-800 outline-none transition placeholder:text-zinc-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:focus:border-blue-500"
+                        />
+                      </div>
+                      <div className="flex gap-1 overflow-x-auto pb-0.5">
+                        {([
+                          ["recommended", pickerCopy.recommended],
+                          ["fast", pickerCopy.fast],
+                          ["reasoning", pickerCopy.deepReasoning],
+                          ["search", pickerCopy.webSearch],
+                        ] as const).map(([value, label]) => (
+                          <button
+                            key={value}
+                            type="button"
+                            aria-pressed={capabilityFilter === value}
+                            onClick={() =>
+                              setCapabilityFilter((current) =>
+                                current === value ? "all" : value
+                              )
+                            }
+                            className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black transition ${capabilityFilter === value ? "border-blue-500 bg-blue-500 text-white" : "border-zinc-200 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"}`}
+                          >
+                            {label}
+                          </button>
                         ))}
-                      </select>
-                      <select
-                        value={usageClassFilter}
-                        onChange={(event) => setUsageClassFilter(event.target.value)}
-                        className="h-9 rounded-lg border border-zinc-200 bg-zinc-50 px-2 text-xs font-medium text-zinc-700 outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
-                      >
-                        <option value="all">{t("chat.allTiers")}</option>
-                        <option value="Standard">{t("modelUsageClasses.standard")}</option>
-                        <option value="Advanced">{t("modelUsageClasses.advanced")}</option>
-                        <option value="Premium">{t("modelUsageClasses.premium")}</option>
-                        <option value="Reasoning">{t("modelUsageClasses.reasoning")}</option>
-                        <option value="Research">{t("modelUsageClasses.research")}</option>
-                      </select>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <select
+                          value={providerFilter}
+                          onChange={(event) => setProviderFilter(event.target.value)}
+                          className="h-9 rounded-lg border border-zinc-200 bg-zinc-50 px-2 text-xs font-medium text-zinc-700 outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
+                        >
+                          <option value="all">{t("chat.allProviders")}</option>
+                          {modelProviders.map((provider) => (
+                            <option key={provider} value={provider}>{provider}</option>
+                          ))}
+                        </select>
+                        <select
+                          value={usageBandFilter}
+                          onChange={(event) => setUsageBandFilter(event.target.value as ModelPickerUsageBand)}
+                          aria-label={pickerCopy.usageAll}
+                          className="h-9 rounded-lg border border-zinc-200 bg-zinc-50 px-2 text-xs font-medium text-zinc-700 outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
+                        >
+                          <option value="all">{pickerCopy.usageAll}</option>
+                          <option value="light">{pickerCopy.light}</option>
+                          <option value="medium">{pickerCopy.medium}</option>
+                          <option value="heavy">{pickerCopy.heavy}</option>
+                          <option value="intensive">{pickerCopy.intensive}</option>
+                        </select>
+                      </div>
                     </div>
-                  </div>
-                  <div className="flex items-start gap-1 px-2">
-                    <p className="min-w-0 flex-1 text-[10px] leading-4 text-zinc-400">
-                      {t("usage.creditWeightNotice")}
-                    </p>
-                    <FeatureHelpPopover
-                      title={helpCopy.modelCreditsTitle}
-                      description={helpCopy.modelCreditsDescription}
-                      buttonLabel={helpCopy.helpAboutModelCredits}
-                      learnMoreLabel={helpCopy.learnMore}
-                      topic="credits"
-                      href={chatWorkspaceGuideHref(lang, "credits-and-plans")}
-                      align="right"
-                      testId="model-credits-help"
-                    />
-                  </div>
+                  )}
                   <div className="min-h-0 space-y-3 overflow-y-auto overscroll-contain pr-1">
                     {groupedModels.map((group) => (
                       <div key={group.provider} className="space-y-1">
@@ -1716,7 +1808,6 @@ export function ChatInput({
                         {group.models.map((model) => {
                           const isSelected = selectedModels.includes(model.id);
                           const isFavorite = favoriteModelIds.includes(model.id);
-                          const modelTags = getModelExperienceTags(model);
                           const liveStatus = liveModelStatuses[model.id];
                           const modelStatus = liveStatus?.status || getModelExperienceStatus(model);
                           const fallbackModels = (liveStatus?.fallbackModelIds || [])
@@ -1730,11 +1821,6 @@ export function ChatInput({
                           const isPlanLocked = !canUseModelWithPlan(currentPlan, model);
                           const imageIncompatible =
                             hasImageAttachments && !modelSupportsImageInput(model);
-                          const unavailable =
-                            !model.enabled ||
-                            modelStatus === "unavailable" ||
-                            isPlanLocked ||
-                            imageIncompatible;
                           const selectionDisabled =
                             !model.enabled ||
                             modelStatus === "unavailable" ||
@@ -1750,7 +1836,9 @@ export function ChatInput({
                               ? t("modelStatusReasons.unavailable")
                               : model.status !== "enabled" || modelStatus === "limited"
                                 ? t("modelStatusReasons.limited")
-                                : t(getModelBestFor(model));
+                                : null;
+                          const modelDescription = getModelPickerDescription(model, lang);
+                          const modelFeatures = getModelPickerFeatures(model);
                           return (
                             <div
                               key={model.id}
@@ -1779,7 +1867,7 @@ export function ChatInput({
                                   onToggleModel(model.id);
                                 }}
                                 aria-pressed={isSelected}
-                                className="flex min-w-0 flex-1 items-start gap-2 rounded-lg py-1 text-sm disabled:cursor-not-allowed disabled:opacity-45"
+                                className="flex min-w-0 flex-1 items-start gap-2 rounded-lg py-0.5 text-sm disabled:cursor-not-allowed disabled:opacity-45"
                               >
                                 <ModelLogo model={model} size="md" />
                                 <span className="min-w-0 flex-1 text-left">
@@ -1798,36 +1886,43 @@ export function ChatInput({
                                             ? "bg-amber-500"
                                             : "bg-zinc-400"
                                       }`}
-                                      title={modelStatus}
+                                      title={modelStatus === "available" ? undefined : statusReason || modelStatus}
+                                      aria-label={statusReason || modelStatus}
                                     />
                                   </span>
-                                  <span className="block truncate text-[10px] font-medium text-zinc-400">
-                                    {model.provider} - {unavailable ? t("chat.unavailableModel") : t("chat.availableModel")}
+                                  <span className="mt-0.5 block text-[10px] leading-4 text-zinc-500 dark:text-zinc-400">
+                                    {modelDescription}
                                   </span>
-                                  <span className="block truncate text-[10px] text-zinc-500 dark:text-zinc-400">
-                                    {statusReason}
-                                  </span>
-                                  <span className="mt-1 flex max-w-full flex-wrap gap-1">
-                                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${usageProfile.category === "Standard" ? "bg-emerald-500/10 text-emerald-500" : usageProfile.category === "Advanced" ? "bg-blue-500/10 text-blue-500" : usageProfile.category === "Premium" ? "bg-purple-500/10 text-purple-500" : usageProfile.category === "Reasoning" ? "bg-amber-500/10 text-amber-500" : "bg-cyan-500/10 text-cyan-500"}`}>
-                                      {t(`modelUsageClasses.${usageProfile.category.toLowerCase()}`)} · {usageProfile.credits}
+                                  {statusReason && (
+                                    <span className={`mt-0.5 flex items-center gap-1 text-[10px] font-bold ${modelStatus === "unavailable" || !model.enabled ? "text-red-500" : modelStatus === "limited" ? "text-amber-500" : "text-blue-500"}`}>
+                                      {isPlanLocked && <LockKeyhole className="h-3 w-3" aria-hidden="true" />}
+                                      {statusReason}
                                     </span>
-                                    <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[9px] font-bold text-zinc-500 dark:bg-zinc-800 dark:text-zinc-300">
-                                      {t(
-                                        modelSupportsImageInput(model)
-                                          ? "modelTags.imageInput"
-                                          : "modelTags.textOnly"
-                                      )}
+                                  )}
+                                  {modelFeatures.length > 0 && (
+                                    <span className="mt-1 flex max-w-full flex-wrap gap-x-2 gap-y-1">
+                                      {modelFeatures.map((feature) => {
+                                        const Icon =
+                                          feature === "image"
+                                            ? ImageIcon
+                                            : feature === "reasoning"
+                                              ? Brain
+                                              : feature === "search"
+                                                ? Globe2
+                                                : Code2;
+                                        const label = pickerFeatureLabels[feature];
+                                        return (
+                                          <span
+                                            key={feature}
+                                            className="inline-flex items-center gap-1 text-[9px] font-bold text-zinc-500 dark:text-zinc-300"
+                                          >
+                                            <Icon className="h-3 w-3" aria-hidden="true" />
+                                            {label}
+                                          </span>
+                                        );
+                                      })}
                                     </span>
-                                    {modelTags.map((tag) => (
-                                      <span
-                                        key={tag}
-                                        className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[9px] font-bold text-zinc-500 dark:bg-zinc-800 dark:text-zinc-300"
-                                      >
-                                        {t(`modelTags.${tag}`)}
-                                      </span>
-                                    ))}
-                                  </span>
-                                  <span className="sr-only">{t(getModelBestFor(model))}</span>
+                                  )}
                                   {(modelStatus === "limited" || modelStatus === "unavailable") && fallbackModels.length > 0 && (
                                     <span className="mt-1 flex flex-wrap items-center gap-1 text-[10px] text-zinc-500">
                                       <span>{t("chat.trySimilarModel")}</span>
@@ -1842,8 +1937,18 @@ export function ChatInput({
                                     </span>
                                   )}
                                 </span>
-                                <span className={`mt-0.5 h-4 w-8 shrink-0 rounded-full p-0.5 transition-colors ${isSelected ? "bg-blue-500" : "bg-zinc-300 dark:bg-zinc-700"}`}>
-                                  <span className={`block h-3 w-3 rounded-full bg-white transition-transform ${isSelected ? "translate-x-4" : ""}`} />
+                                <span className="flex shrink-0 flex-col items-end gap-2">
+                                  <span
+                                    data-testid="model-credit-badge"
+                                    className="inline-flex items-center gap-1 rounded-full bg-amber-400/15 px-2 py-1 text-[10px] font-black text-amber-700 dark:text-amber-300"
+                                    aria-label={lang === "ko" ? `기본 ${usageProfile.credits}크레딧 차감` : `Base cost ${usageProfile.credits} credits`}
+                                  >
+                                    <Coins className="h-3 w-3" aria-hidden="true" />
+                                    {usageProfile.credits}
+                                  </span>
+                                  <span className={`h-4 w-8 rounded-full p-0.5 transition-colors ${isSelected ? "bg-blue-500" : "bg-zinc-300 dark:bg-zinc-700"}`}>
+                                    <span className={`block h-3 w-3 rounded-full bg-white transition-transform ${isSelected ? "translate-x-4" : ""}`} />
+                                  </span>
                                 </span>
                               </button>
                             </div>
@@ -1856,6 +1961,25 @@ export function ChatInput({
                         {t("chat.noModelsFound")}
                       </div>
                     )}
+                  </div>
+                  <div data-testid="model-selection-summary" className="mt-2 flex shrink-0 items-center gap-2 border-t border-zinc-200 px-1 pt-2 dark:border-zinc-700">
+                    <p className="min-w-0 flex-1 text-[11px] font-bold text-zinc-600 dark:text-zinc-300">
+                      {selectedModels.length} {t("chat.modelsSelected")} · {pickerCopy.baseEstimate}{" "}
+                      <span
+                        className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-300"
+                        aria-label={lang === "ko" ? `기본 예상 ${selectedBaseCredits}크레딧` : `Base estimate ${selectedBaseCredits} credits`}
+                      >
+                        <Coins className="h-3 w-3" aria-hidden="true" />
+                        {selectedBaseCredits}
+                      </span>
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => closeMenu(true)}
+                      className="shrink-0 rounded-xl bg-blue-600 px-3 py-2 text-xs font-black text-white transition hover:bg-blue-500"
+                    >
+                      {pickerCopy.done}
+                    </button>
                   </div>
                 </>
               )}
@@ -1916,7 +2040,38 @@ export function ChatInput({
             <ArrowUp className="h-4 w-4" />
           </button>
         )}
-		
+        {selectedModels.length > 0 && (
+          <div
+            data-testid="request-credit-estimate"
+            className="order-4 flex w-full flex-wrap items-center justify-end gap-x-2 gap-y-1 px-1 text-[10px] font-bold text-zinc-500 dark:text-zinc-400"
+          >
+            <span>
+              {selectedModels.length} {t("chat.modelsSelected")} · {pickerCopy.estimatedUsage}
+            </span>
+            <span
+              className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-300"
+              aria-label={lang === "ko" ? `예상 ${estimatedRequestCredits}크레딧` : `Estimated ${estimatedRequestCredits} credits`}
+            >
+              <Coins className="h-3 w-3" aria-hidden="true" />
+              {estimatedRequestCredits}
+            </span>
+            {inputCreditMultiplier > 1 && (
+              <span className="inline-flex items-center gap-1">
+                {inputCreditMultiplier}× · {pickerCopy.multiplierApplied}
+                <FeatureHelpPopover
+                  title={helpCopy.modelCreditsTitle}
+                  description={helpCopy.modelCreditsDescription}
+                  buttonLabel={helpCopy.helpAboutModelCredits}
+                  learnMoreLabel={helpCopy.learnMore}
+                  topic="credits"
+                  href={chatWorkspaceGuideHref(lang, "credits")}
+                  mobile
+                  align="right"
+                />
+              </span>
+            )}
+          </div>
+        )}
       </div>
       </div>
     </div>

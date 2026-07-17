@@ -150,6 +150,8 @@ test.describe("attachment UX", () => {
       .getByRole("button", { name: /모델 선택|Select model|选择模型/ })
       .click();
 
+    await page.getByTestId("show-all-models").click();
+
     const textOnlyLlama = page.locator(
       '[data-testid="model-option"][data-model-id="llama-3-1"]'
     );
@@ -168,6 +170,7 @@ test.describe("attachment UX", () => {
       .getByRole("dialog", { name: /더 많은 작업|More actions|更多操作/ })
       .getByRole("button", { name: /모델 선택|Select model|选择模型/ })
       .click();
+    await page.getByTestId("show-all-models").click();
     await page
       .locator('[data-testid="model-option"][data-model-id="llama-3-1"]')
       .click();
