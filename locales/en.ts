@@ -169,6 +169,7 @@ export const en = {
         providerCostSafetyLimit: "One selected AI provider has reached its cost safety limit. Choose a model from another provider or try again later.",
         summarizeModelDifferences: "Summarize model differences",
         quickDifferenceSummary: "Quick difference summary",
+        quickDifferenceSummaryCreditCost: "Uses 1 AI credit for a typical short comparison. Long answers may use more.",
         quickDifferenceSummaryNote: "AI analysis of the latest question · {credits} credits used",
         quickDifferenceSummaryCachedNote: "Saved AI analysis · 0 credits (originally {credits})",
         quickDifferenceSummaryLoading: "Analyzing the latest model answers...",

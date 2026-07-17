@@ -169,6 +169,7 @@ export const zh = {
         providerCostSafetyLimit: "某个所选 AI 提供商已达到成本安全限制。请选择其他提供商的模型或稍后重试。",
         summarizeModelDifferences: "总结模型差异",
         quickDifferenceSummary: "快速差异摘要",
+        quickDifferenceSummaryCreditCost: "一般的简短比较使用 1 个 AI 积分，较长的回答可能使用更多。",
         quickDifferenceSummaryNote: "对最新问题的 AI 分析 · 使用 {credits} 积分",
         quickDifferenceSummaryCachedNote: "已保存的 AI 分析 · 0 积分（首次使用 {credits}）",
         quickDifferenceSummaryLoading: "正在分析最新的模型回答...",
