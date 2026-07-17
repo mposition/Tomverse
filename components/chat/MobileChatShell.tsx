@@ -396,9 +396,17 @@ export function MobileChatShell({
               <button
                 type="button"
                 onClick={onComparisonReview}
-                className="h-8 min-w-0 flex-1 rounded-xl bg-blue-600 px-2 text-[11px] font-black text-white"
+                className="flex h-8 min-w-0 flex-1 items-center justify-between gap-1.5 rounded-xl bg-blue-600 px-2 text-[11px] font-black text-white"
               >
-                {t("chat.aiReviewButton")}
+                <span className="truncate">{t("chat.aiReviewButton")}</span>
+                <CreditCostBadge
+                  credits={4}
+                  size="xs"
+                  tone="onColor"
+                  label={`4 ${t("chat.aiReviewCredits")}`}
+                  testId="ai-review-entry-credit-cost"
+                  className="border-0 bg-white/20"
+                />
               </button>
               <FeatureHelpPopover
                 title={helpCopy.aiReviewTitle}

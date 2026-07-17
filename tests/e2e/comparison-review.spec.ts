@@ -223,6 +223,8 @@ test("AI comparison review does not flash an unavailable setup before loading", 
 
   const reviewButton = page.getByRole("button", { name: "AI 답변 교차검토" });
   await expect(reviewButton).toBeVisible({ timeout: 30_000 });
+  await expect(reviewButton.getByTestId("ai-review-entry-credit-cost")).toContainText("4");
+  await expect(reviewButton.getByTestId("credit-coin-icon")).toBeVisible();
   await reviewButton.click();
   const dialog = page.getByRole("dialog", { name: "AI 답변 교차검토" });
   await expect(dialog.getByTestId("comparison-review-loading")).toBeVisible();
@@ -247,7 +249,9 @@ for (const viewport of [
     const reviewApi = await mockComparisonReview(page);
     await page.goto("/chat");
 
-    await page.getByRole("button", { name: "AI 답변 교차검토" }).click();
+    const reviewEntryButton = page.getByRole("button", { name: "AI 답변 교차검토" });
+    await expect(reviewEntryButton.getByTestId("ai-review-entry-credit-cost")).toContainText("4");
+    await reviewEntryButton.click();
     const dialog = page.getByRole("dialog", { name: "AI 답변 교차검토" });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByTestId("ai-review-estimated-credits")).toContainText("4");
