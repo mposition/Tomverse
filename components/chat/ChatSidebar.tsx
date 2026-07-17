@@ -4,6 +4,7 @@ import { Conversation } from "./types";
 import { getModel } from "@/components/chat/types";
 import { AuthButton } from "@/components/auth/AuthButton";
 import { useCallback, useState, useEffect, useId, useRef, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import { useLanguage } from "@/components/LanguageProvider";
 import Link from "next/link";
 import { AlertTriangle, Check, ChevronDown, CircleHelp, CloudUpload, Crown, Database, Download, Folder, FolderPlus, Link2Off, Lock, MessageSquare, MoreVertical, Pencil, Pin, Search, Send, Share2, ShieldCheck, SlidersHorizontal, Sparkles, Star, Tag, Trash2, Unlock, X } from "lucide-react";
@@ -44,6 +45,14 @@ type ConversationProject = {
     id: string;
     name: string;
     conversationCount?: number;
+};
+
+type ConversationMenuPosition = {
+    left: number;
+    maxHeight: number;
+    placement: "above" | "below";
+    verticalOffset: number;
+    width: number;
 };
 
 const SIDEBAR_TOUR_STORAGE_KEY = "tomverse_sidebar_tour_v1";
@@ -100,6 +109,7 @@ export function ChatSidebar({
     isMobileDrawer = false,
 }: ChatSidebarProps) {
     const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+    const [conversationMenuPosition, setConversationMenuPosition] = useState<ConversationMenuPosition | null>(null);
     const [showPrivateNotice, setShowPrivateNotice] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
     const [conversationFilter, setConversationFilter] = useState<ConversationFilter>("all");
@@ -159,6 +169,8 @@ export function ChatSidebar({
     const [lockError, setLockError] = useState("");
     const privateModeButtonRef = useRef<HTMLButtonElement | null>(null);
     const privateNoticeDialogRef = useRef<HTMLDivElement | null>(null);
+    const conversationMenuAnchorRef = useRef<HTMLButtonElement | null>(null);
+    const conversationMenuPanelRef = useRef<HTMLDivElement | null>(null);
     const helpMenuRef = useRef<HTMLSpanElement | null>(null);
     const [showHelpMenu, setShowHelpMenu] = useState(false);
     const [sidebarTourStep, setSidebarTourStep] = useState<number | null>(null);
@@ -583,6 +595,56 @@ export function ChatSidebar({
         }
     }, []);
 
+    const closeConversationMenu = useCallback(() => {
+        setOpenMenuId(null);
+        setConversationMenuPosition(null);
+        conversationMenuAnchorRef.current = null;
+    }, []);
+
+    const toggleConversationMenu = (conversationId: string, anchor: HTMLButtonElement) => {
+        if (openMenuId === conversationId) {
+            closeConversationMenu();
+            return;
+        }
+
+        const viewportPadding = 8;
+        const menuGap = 4;
+        const menuWidth = Math.min(224, Math.max(0, window.innerWidth - viewportPadding * 2));
+        const anchorRect = anchor.getBoundingClientRect();
+        const availableBelow = Math.max(
+            0,
+            window.innerHeight - anchorRect.bottom - menuGap - viewportPadding
+        );
+        const availableAbove = Math.max(
+            0,
+            anchorRect.top - menuGap - viewportPadding
+        );
+        const preferredMenuHeight = Math.min(360, window.innerHeight - viewportPadding * 2);
+        const placement =
+            availableBelow >= preferredMenuHeight || availableBelow >= availableAbove
+                ? "below"
+                : "above";
+        const availableHeight = placement === "below" ? availableBelow : availableAbove;
+        const maximumLeft = Math.max(viewportPadding, window.innerWidth - menuWidth - viewportPadding);
+        const left = Math.min(
+            Math.max(viewportPadding, anchorRect.right - menuWidth),
+            maximumLeft
+        );
+
+        conversationMenuAnchorRef.current = anchor;
+        setConversationMenuPosition({
+            left,
+            maxHeight: availableHeight,
+            placement,
+            verticalOffset:
+                placement === "below"
+                    ? anchorRect.bottom + menuGap
+                    : window.innerHeight - anchorRect.top + menuGap,
+            width: menuWidth,
+        });
+        setOpenMenuId(conversationId);
+    };
+
     const startSidebarTour = () => {
         setShowHelpMenu(false);
         setSidebarTourStep(0);
@@ -628,12 +690,39 @@ export function ChatSidebar({
         function handleClickOutside(event: MouseEvent) {
             const target = event.target as HTMLElement;
             if (!target.closest('.context-menu-wrapper')) {
-                setOpenMenuId(null);
+                closeConversationMenu();
             }
         }
         document.addEventListener("mousedown", handleClickOutside);
         return () => document.removeEventListener("mousedown", handleClickOutside);
-    }, []);
+    }, [closeConversationMenu]);
+
+    useEffect(() => {
+        if (!openMenuId) return;
+
+        const closeOnEscape = (event: KeyboardEvent) => {
+            if (event.key !== "Escape") return;
+            const anchor = conversationMenuAnchorRef.current;
+            closeConversationMenu();
+            requestAnimationFrame(() => anchor?.focus());
+        };
+        const closeOnViewportChange = (event: Event) => {
+            const target = event.target;
+            if (target instanceof Node && conversationMenuPanelRef.current?.contains(target)) {
+                return;
+            }
+            closeConversationMenu();
+        };
+
+        document.addEventListener("keydown", closeOnEscape);
+        document.addEventListener("scroll", closeOnViewportChange, true);
+        window.addEventListener("resize", closeOnViewportChange);
+        return () => {
+            document.removeEventListener("keydown", closeOnEscape);
+            document.removeEventListener("scroll", closeOnViewportChange, true);
+            window.removeEventListener("resize", closeOnViewportChange);
+        };
+    }, [closeConversationMenu, openMenuId]);
 
     useEffect(() => {
         if (!showPrivateNotice) return;
@@ -1256,22 +1345,35 @@ export function ChatSidebar({
                                     type="button"
                                     data-testid="conversation-menu"
                                     data-conversation-id={conv.id}
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        setOpenMenuId(openMenuId === conv.id ? null : conv.id);
-                                    }}
-                                    className="cursor-pointer p-1 text-zinc-500 hover:text-zinc-200 transition-colors"
-                                    title={t("chat.moreActions")}
-                                    aria-label={`${t("chat.moreActions")}: ${conv.title}`}
-                                >
-                                    <MoreVertical className="h-4 w-4" />
-                                </button>
-
-                                {isMenuOpen && (
-                                    <div
-                                        data-testid="conversation-menu-panel"
-                                        className="absolute right-0 top-6 z-50 w-56 rounded-lg border border-zinc-800 bg-zinc-900 p-1.5 shadow-xl flex flex-col text-xs text-zinc-300 animate-fadeIn"
-                                    >
+                                     onClick={(e) => {
+                                         e.stopPropagation();
+                                         toggleConversationMenu(conv.id, e.currentTarget);
+                                     }}
+                                     className="cursor-pointer p-1 text-zinc-500 hover:text-zinc-200 transition-colors"
+                                     title={t("chat.moreActions")}
+                                     aria-label={`${t("chat.moreActions")}: ${conv.title}`}
+                                     aria-expanded={isMenuOpen}
+                                     aria-haspopup="menu"
+                                 >
+                                     <MoreVertical className="h-4 w-4" />
+                                 </button>
+ 
+                                 {isMenuOpen && conversationMenuPosition && typeof document !== "undefined" ? createPortal(
+                                     <div
+                                         ref={conversationMenuPanelRef}
+                                         data-testid="conversation-menu-panel"
+                                         role="menu"
+                                         onClick={(event) => event.stopPropagation()}
+                                         className="context-menu-wrapper fixed z-[120] flex flex-col overflow-y-auto overscroll-contain rounded-lg border border-zinc-800 bg-zinc-900 p-1.5 text-xs text-zinc-300 shadow-2xl animate-fadeIn"
+                                         style={{
+                                             left: conversationMenuPosition.left,
+                                             width: conversationMenuPosition.width,
+                                             maxHeight: conversationMenuPosition.maxHeight,
+                                             ...(conversationMenuPosition.placement === "below"
+                                                 ? { top: conversationMenuPosition.verticalOffset }
+                                                 : { bottom: conversationMenuPosition.verticalOffset }),
+                                         }}
+                                     >
                                         <button
                                             type="button"
                                             onClick={(e) => {
@@ -1524,9 +1626,10 @@ export function ChatSidebar({
                                                 </span>
                                             </button>
                                         )}
-                                    </div>
-                                )}
-                            </div>
+                                     </div>,
+                                     document.body
+                                 ) : null}
+                             </div>
                         </div>
                     );
                 })}
