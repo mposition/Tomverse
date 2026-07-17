@@ -7,6 +7,7 @@ import { ModelLogo } from "@/components/chat/ModelLogo";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { ProviderStatusBanner } from "@/components/chat/ProviderStatusBanner";
 import { FeatureHelpPopover } from "@/components/chat/FeatureHelpPopover";
+import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import { chatHelpCopy } from "@/components/chat/chatHelpCopy";
 import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
 import {
@@ -380,16 +381,15 @@ export function MobileChatShell({
             type="button"
             data-testid="quick-comparison-button"
             onClick={onCompareSummary}
-            className="h-8 w-full rounded-xl border border-blue-200 bg-blue-50 text-[11px] font-black text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200"
+            className="flex h-8 w-full items-center justify-between gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-2 text-[11px] font-black text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200"
           >
-            <span>{t("chat.quickDifferenceSummary")}</span>
-            <span
-              className="ml-1 rounded-full bg-blue-600 px-1.5 py-0.5 text-[9px] font-black leading-none text-white dark:bg-blue-500"
-              aria-label={t("chat.quickDifferenceSummaryCreditCost")}
-              title={t("chat.quickDifferenceSummaryCreditCost")}
-            >
-              1×
-            </span>
+            <span className="truncate">{t("chat.quickDifferenceSummary")}</span>
+            <CreditCostBadge
+              credits={1}
+              size="xs"
+              label={t("chat.quickDifferenceSummaryCreditCost")}
+              testId="quick-comparison-credit-cost"
+            />
           </button>
           {!isGuestMode && currentChatId !== "private-chat" && (
             <div className="flex min-w-0 items-center gap-0.5">

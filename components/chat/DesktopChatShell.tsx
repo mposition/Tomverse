@@ -7,6 +7,7 @@ import { ModelLogo } from "@/components/chat/ModelLogo";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { ProviderStatusBanner } from "@/components/chat/ProviderStatusBanner";
 import { FeatureHelpPopover } from "@/components/chat/FeatureHelpPopover";
+import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import { chatHelpCopy } from "@/components/chat/chatHelpCopy";
 import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
 import {
@@ -166,7 +167,16 @@ export function DesktopChatShell({
                     {isPanelDisabled ? (
                       <span className="flex min-w-0 select-none flex-col truncate">
                         <span className="truncate text-sm font-semibold text-zinc-600 dark:text-zinc-300">{modelInfo?.name}</span>
-                        <span className="truncate text-[10px] font-medium text-zinc-400">{modelInfo?.provider}</span>
+                        <span className="flex items-center gap-1.5 text-[10px] font-medium text-zinc-400">
+                          <span className="truncate">{modelInfo?.provider}</span>
+                          {usageProfile && (
+                            <CreditCostBadge
+                              credits={usageProfile.credits}
+                              size="xs"
+                              label={lang === "ko" ? `기본 ${usageProfile.credits}크레딧 차감` : `Base cost ${usageProfile.credits} credits`}
+                            />
+                          )}
+                        </span>
                       </span>
                     ) : (
                       <span className="flex min-w-0 flex-col">
@@ -190,11 +200,15 @@ export function DesktopChatShell({
                             );
                           })}
                         </select>
-                        <span className="truncate text-[10px] font-medium text-zinc-400">
-                          {modelInfo?.provider}
-                          {usageProfile
-                            ? ` · ${t(`modelUsageClasses.${usageProfile.category.toLowerCase()}`)} · ${usageProfile.credits}`
-                            : ""}
+                        <span className="flex items-center gap-1.5 text-[10px] font-medium text-zinc-400">
+                          <span className="truncate">{modelInfo?.provider}</span>
+                          {usageProfile && (
+                            <CreditCostBadge
+                              credits={usageProfile.credits}
+                              size="xs"
+                              label={lang === "ko" ? `기본 ${usageProfile.credits}크레딧 차감` : `Base cost ${usageProfile.credits} credits`}
+                            />
+                          )}
                         </span>
                       </span>
                     )}
@@ -257,16 +271,15 @@ export function DesktopChatShell({
               type="button"
               data-testid="quick-comparison-button"
               onClick={onCompareSummary}
-              className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-xs font-black text-blue-700 hover:bg-blue-100 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200 dark:hover:bg-blue-950"
+              className="flex items-center justify-between gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-xs font-black text-blue-700 hover:bg-blue-100 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200 dark:hover:bg-blue-950"
             >
               <span>{t("chat.quickDifferenceSummary")}</span>
-              <span
-                className="ml-1.5 rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-black leading-none text-white dark:bg-blue-500"
-                aria-label={t("chat.quickDifferenceSummaryCreditCost")}
-                title={t("chat.quickDifferenceSummaryCreditCost")}
-              >
-                1×
-              </span>
+              <CreditCostBadge
+                credits={1}
+                size="xs"
+                label={t("chat.quickDifferenceSummaryCreditCost")}
+                testId="quick-comparison-credit-cost"
+              />
             </button>
             {!isGuestMode && currentChatId !== "private-chat" && (
               <div className="flex items-center gap-1">
