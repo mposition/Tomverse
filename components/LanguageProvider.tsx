@@ -32,6 +32,25 @@ const isLanguage = (value: unknown): value is Language =>
     value === "es" ||
     value === "pt";
 
+const detectBrowserLanguage = (): Language | null => {
+    if (typeof navigator === "undefined") return null;
+
+    const candidates = [
+        ...(Array.isArray(navigator.languages) ? navigator.languages : []),
+        navigator.language,
+    ];
+
+    for (const candidate of candidates) {
+        const normalized = candidate?.trim().toLowerCase();
+        if (!normalized) continue;
+
+        const baseLanguage = normalized.split("-")[0];
+        if (isLanguage(baseLanguage)) return baseLanguage;
+    }
+
+    return null;
+};
+
 export function LanguageProvider({
     children,
     initialLang = "en",
@@ -75,6 +94,17 @@ export function LanguageProvider({
             if (isLanguage(savedLanguage)) {
                 setLangState(savedLanguage);
                 document.documentElement.lang = savedLanguage;
+                return;
+            }
+
+            // Private browsing intentionally starts with isolated storage. On that
+            // first visit, use the browser preference instead of silently falling
+            // back to English and carrying `lang=en` into the chat CTA.
+            const browserLanguage = detectBrowserLanguage();
+            if (browserLanguage) {
+                setLangState(browserLanguage);
+                window.localStorage.setItem(LANGUAGE_STORAGE_KEY, browserLanguage);
+                document.documentElement.lang = browserLanguage;
             }
         }, 0);
 
