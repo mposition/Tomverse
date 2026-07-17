@@ -808,6 +808,40 @@ Run `npm run db:migrate` after deploying the Slack template migration. Critical
 DB-outage alerts intentionally remain environment-backed and independent from
 these DB templates so they still work during a database outage.
 
+## Daily Security Audit
+
+GitHub Actions runs the full Tomverse security gate every day at 07:00
+Australia/Brisbane (`21:00 UTC` on the previous day). It also remains a required
+PR and `main` push check. The daily gate includes repository-history secret
+scanning, `npm audit --omit=dev`, security regression checks, unit/API policy
+tests, strict encoding validation, lint/type validation, and a production build.
+
+Scheduled and manually dispatched runs send a result summary to both Slack and
+email. PR and push runs write only to the GitHub Actions summary so normal
+development does not spam operations channels. The Slack message always includes
+`<!channel>`, and the JSON evidence is retained as a workflow artifact for 30
+days. This is a GitHub Actions schedule, so no additional Railway Cron service is
+required.
+
+Configure these GitHub repository **Actions secrets** (Railway variables are not
+automatically available to GitHub Actions):
+
+```text
+SECURITY_AUDIT_SLACK_WEBHOOK_URL=<Slack incoming webhook URL>
+SECURITY_AUDIT_EMAILS=security@example.com,owner@example.com
+SECURITY_AUDIT_EMAIL_FROM=Tomverse Security <hello@tomverse.app>
+RESEND_API_KEY=<Resend API key>
+```
+
+The Slack webhook can fall back to `OPS_ALERT_SLACK_WEBHOOK_URL` or
+`SLACK_WEBHOOK_URL`. Email recipients can fall back to `OPS_ALERT_EMAIL` or
+`ADMIN_ALERT_EMAIL`, and the sender can fall back to
+`TRANSACTIONAL_EMAIL_FROM` or `EMAIL_FROM`. Both Slack and email delivery are
+required for scheduled/manual reports; a missing or failed channel marks the
+workflow as failed rather than silently dropping the report. Use **Run workflow**
+on the Daily Security Audit workflow once after adding the secrets to verify both
+deliveries.
+
 ## Railway Healthcheck
 
 When host protection is enabled, keep Railway's deployment Healthcheck Path on

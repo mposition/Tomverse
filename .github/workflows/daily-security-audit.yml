@@ -1,0 +1,148 @@
+name: Daily Security Audit
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    # 07:00 Australia/Brisbane (21:00 UTC on the previous day, no DST).
+    - cron: "0 21 * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+
+concurrency:
+  # A push or PR check must not cancel the scheduled report run.
+  group: security-audit-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: Security audit and daily report
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Scan repository history for secrets
+        id: gitleaks
+        continue-on-error: true
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: "false"
+
+      - name: Setup Node.js
+        id: setup_node
+        continue-on-error: true
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        id: install
+        if: steps.setup_node.outcome == 'success'
+        continue-on-error: true
+        run: npm ci
+
+      - name: Dependency vulnerability audit
+        id: dependency_audit
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          mkdir -p security-audit
+          npm audit --omit=dev --json > security-audit/npm-audit.json
+
+      - name: Security regression checks
+        id: security_regression
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        run: npm run security:regression
+
+      - name: Unit and API policy tests
+        id: unit_tests
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        run: npm run test:unit
+
+      - name: Strict encoding validation
+        id: encoding
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        run: npm run check:encoding:strict
+
+      - name: Type, lint, and production build
+        id: production_check
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        run: npm run check
+
+      - name: Deliver security audit report
+        id: report
+        if: always()
+        env:
+          SECURITY_AUDIT_SEND_NOTIFICATIONS: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && 'true' || 'false' }}
+          SECURITY_AUDIT_SLACK_WEBHOOK_URL: ${{ secrets.SECURITY_AUDIT_SLACK_WEBHOOK_URL || secrets.OPS_ALERT_SLACK_WEBHOOK_URL || secrets.SLACK_WEBHOOK_URL }}
+          SECURITY_AUDIT_EMAILS: ${{ secrets.SECURITY_AUDIT_EMAILS || secrets.OPS_ALERT_EMAIL || secrets.ADMIN_ALERT_EMAIL }}
+          SECURITY_AUDIT_EMAIL_FROM: ${{ secrets.SECURITY_AUDIT_EMAIL_FROM || secrets.TRANSACTIONAL_EMAIL_FROM || secrets.EMAIL_FROM }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          SECURITY_AUDIT_OUTPUT_PATH: security-audit/daily-report.json
+          SECURITY_AUDIT_GITLEAKS_STATUS: ${{ steps.gitleaks.outcome }}
+          SECURITY_AUDIT_SETUP_NODE_STATUS: ${{ steps.setup_node.outcome }}
+          SECURITY_AUDIT_INSTALL_STATUS: ${{ steps.install.outcome }}
+          SECURITY_AUDIT_DEPENDENCY_STATUS: ${{ steps.dependency_audit.outcome }}
+          SECURITY_AUDIT_REGRESSION_STATUS: ${{ steps.security_regression.outcome }}
+          SECURITY_AUDIT_UNIT_STATUS: ${{ steps.unit_tests.outcome }}
+          SECURITY_AUDIT_ENCODING_STATUS: ${{ steps.encoding.outcome }}
+          SECURITY_AUDIT_PRODUCTION_STATUS: ${{ steps.production_check.outcome }}
+        run: node scripts/send-security-audit-report.mjs
+
+      - name: Upload daily audit evidence
+        if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        uses: actions/upload-artifact@v7
+        with:
+          name: security-audit-${{ github.run_id }}
+          path: security-audit
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Enforce security audit result
+        if: always()
+        shell: bash
+        env:
+          GITLEAKS_STATUS: ${{ steps.gitleaks.outcome }}
+          SETUP_NODE_STATUS: ${{ steps.setup_node.outcome }}
+          INSTALL_STATUS: ${{ steps.install.outcome }}
+          DEPENDENCY_STATUS: ${{ steps.dependency_audit.outcome }}
+          REGRESSION_STATUS: ${{ steps.security_regression.outcome }}
+          UNIT_STATUS: ${{ steps.unit_tests.outcome }}
+          ENCODING_STATUS: ${{ steps.encoding.outcome }}
+          PRODUCTION_STATUS: ${{ steps.production_check.outcome }}
+          REPORT_STATUS: ${{ steps.report.outcome }}
+        run: |
+          failed=0
+          for result in \
+            "$GITLEAKS_STATUS" \
+            "$SETUP_NODE_STATUS" \
+            "$INSTALL_STATUS" \
+            "$DEPENDENCY_STATUS" \
+            "$REGRESSION_STATUS" \
+            "$UNIT_STATUS" \
+            "$ENCODING_STATUS" \
+            "$PRODUCTION_STATUS" \
+            "$REPORT_STATUS"; do
+            if [ "$result" != "success" ]; then
+              failed=1
+            fi
+          done
+          exit "$failed"

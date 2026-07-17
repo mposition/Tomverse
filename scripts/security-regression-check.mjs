@@ -1382,6 +1382,36 @@ const checks = [
       source.includes("new ReadableStream") &&
       source.includes('"X-Accel-Buffering": "no"'),
   },
+  {
+    name: "Daily security audit reports every Brisbane morning through Slack and email",
+    file: ".github/workflows/daily-security-audit.yml",
+    test: (source) => {
+      const reporter = read("scripts/send-security-audit-report.mjs");
+      const financeWorkflow = read(
+        ".github/workflows/credit-finance-db-integration.yml"
+      );
+      return (
+        source.includes("name: Daily Security Audit") &&
+        source.includes('cron: "0 21 * * *"') &&
+        source.includes("actions: read") &&
+        source.includes("pull-requests: read") &&
+        source.includes("gitleaks/gitleaks-action@v3") &&
+        source.includes("actions/checkout@v6") &&
+        source.includes("actions/setup-node@v6") &&
+        source.includes("actions/upload-artifact@v7") &&
+        source.includes("node scripts/send-security-audit-report.mjs") &&
+        source.includes("SECURITY_AUDIT_SLACK_WEBHOOK_URL") &&
+        source.includes("SECURITY_AUDIT_EMAILS") &&
+        source.includes("RESEND_API_KEY") &&
+        reporter.includes("<!channel>") &&
+        reporter.includes("https://api.resend.com/emails") &&
+        reporter.includes("Australia/Brisbane") &&
+        financeWorkflow.includes("actions/checkout@v6") &&
+        financeWorkflow.includes("actions/setup-node@v6") &&
+        !source.includes("ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION")
+      );
+    },
+  },
 ];
 
 const failures = [];
