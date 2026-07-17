@@ -3,6 +3,10 @@ import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import {
+    databaseErrorMetadata,
+    isRetryableDatabaseError,
+} from "@/lib/databaseError";
+import {
     apiSecurityResponse,
     consumeApiRateLimit,
     readLimitedJson,
@@ -245,7 +249,32 @@ export async function POST(request: Request) {
             accessResponse.headers.set("X-Request-ID", traceId);
             return accessResponse;
         }
-        console.error("Chat comparison preflight failed", { traceId, error });
+        const databaseDiagnostic = databaseErrorMetadata(error);
+        console.error(
+            JSON.stringify({
+                event: "chat_comparison_preflight_failed",
+                traceId,
+                ...databaseDiagnostic,
+                timestamp: new Date().toISOString(),
+            })
+        );
+        if (isRetryableDatabaseError(error)) {
+            return Response.json(
+                {
+                    error: "The model comparison check is temporarily unavailable.",
+                    code: "COMPARISON_PREFLIGHT_TEMPORARILY_UNAVAILABLE",
+                    traceId,
+                },
+                {
+                    status: 503,
+                    headers: {
+                        "Cache-Control": "no-store",
+                        "Retry-After": "1",
+                        "X-Request-ID": traceId,
+                    },
+                }
+            );
+        }
         return Response.json(
             {
                 error: "The model comparison could not be checked before sending.",

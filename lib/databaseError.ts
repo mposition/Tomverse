@@ -97,3 +97,27 @@ export const isUniqueConstraintDatabaseError = (error: unknown) => {
     metadata.driverCode === "23505"
   );
 };
+
+const MISSING_SCHEMA_PRISMA_CODES = new Set(["P2021", "P2022"]);
+const MISSING_SCHEMA_DRIVER_KINDS = new Set([
+  "TableDoesNotExist",
+  "ColumnNotFound",
+]);
+const MISSING_SCHEMA_POSTGRES_CODES = new Set(["42P01", "42703"]);
+
+/**
+ * Detects an unavailable table or column during a rolling deployment. Callers
+ * must only use this for data that has a safe compatibility fallback; it must
+ * not be used to hide general database failures.
+ */
+export const isMissingDatabaseSchemaError = (error: unknown) => {
+  const metadata = databaseErrorMetadata(error);
+  return Boolean(
+    (metadata.errorCode &&
+      MISSING_SCHEMA_PRISMA_CODES.has(metadata.errorCode)) ||
+      (metadata.driverKind &&
+        MISSING_SCHEMA_DRIVER_KINDS.has(metadata.driverKind)) ||
+      (metadata.driverCode &&
+        MISSING_SCHEMA_POSTGRES_CODES.has(metadata.driverCode))
+  );
+};

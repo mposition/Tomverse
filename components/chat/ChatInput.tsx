@@ -293,6 +293,7 @@ type ChatInputProps = {
   isSending?: boolean;
   focusToken?: number;
   selectedModels: string[];
+  disabledModelIds?: string[];
   isGuestLimitReached?: boolean;
   onToggleModel: (modelId: string) => boolean;
   attachments: ChatAttachment[];
@@ -385,6 +386,7 @@ export function ChatInput({
   isSending = false,
   focusToken,
   selectedModels,
+  disabledModelIds = [],
   isGuestLimitReached = false,
   onToggleModel,
   attachments,
@@ -426,7 +428,15 @@ export function ChatInput({
   const maxSelectableModels = isGuestMode
       ? APP_DEFAULTS.maxGuestSelectedModels
       : accountUsage?.limits.maxModels || MAX_SELECTED_MODELS;
-  const activeModelNames = selectedModels
+  const disabledModelIdSet = useMemo(
+    () => new Set(disabledModelIds),
+    [disabledModelIds]
+  );
+  const activeSelectedModels = useMemo(
+    () => selectedModels.filter((modelId) => !disabledModelIdSet.has(modelId)),
+    [disabledModelIdSet, selectedModels]
+  );
+  const activeModelNames = activeSelectedModels
     .map(id => AVAILABLE_MODELS.find(m => m.id === id)?.name)
     .filter(Boolean);
   const hasImageAttachments = useMemo(
@@ -436,14 +446,14 @@ export function ChatInput({
   const imageUnsupportedSelectedModels = useMemo(
     () =>
       hasImageAttachments
-        ? selectedModels
+        ? activeSelectedModels
             .map((id) => AVAILABLE_MODELS.find((model) => model.id === id))
             .filter(
               (model): model is NonNullable<typeof model> =>
                 model !== undefined && !modelSupportsImageInput(model)
             )
         : [],
-    [AVAILABLE_MODELS, hasImageAttachments, selectedModels]
+    [AVAILABLE_MODELS, activeSelectedModels, hasImageAttachments]
   );
 
   const estimatedInputTokens = useMemo(() => {
@@ -459,11 +469,11 @@ export function ChatInput({
     return Math.max(1, Math.ceil(textBytes / 4) + binaryAttachmentTokens);
   }, [attachments, value]);
   const inputCreditMultiplier = getInputCreditMultiplier(estimatedInputTokens);
-  const selectedBaseCredits = selectedModels.reduce((sum, modelId) => {
+  const selectedBaseCredits = activeSelectedModels.reduce((sum, modelId) => {
     const model = AVAILABLE_MODELS.find((item) => item.id === modelId);
     return sum + (model ? getModelUsageProfile(model).credits : 0);
   }, 0);
-  const estimatedRequestCredits = selectedModels.reduce((sum, modelId) => {
+  const estimatedRequestCredits = activeSelectedModels.reduce((sum, modelId) => {
     const model = AVAILABLE_MODELS.find((item) => item.id === modelId);
     return sum + (model ? getWeightedUsageCredits(model, estimatedInputTokens) : 0);
   }, 0);
@@ -606,7 +616,7 @@ export function ChatInput({
     trackProductEventOnce(
       `contextual_model_${contextualSuggestion.key}_v1`,
       "advanced_model_suggested",
-      selectedModels.length,
+      activeSelectedModels.length,
       {
         model_id: contextualModel.id,
         suggestion_reason: contextualSuggestion.reason,
@@ -615,14 +625,14 @@ export function ChatInput({
   }, [
     contextualModel,
     contextualSuggestion,
-    selectedModels.length,
+    activeSelectedModels.length,
     showContextualSuggestion,
   ]);
 
   useEffect(() => {
     if (!limitScope || trackedLimitScopeRef.current === limitScope) return;
     trackedLimitScopeRef.current = limitScope;
-    trackProductEvent("credit_limit_hit", selectedModels.length, {
+    trackProductEvent("credit_limit_hit", activeSelectedModels.length, {
       limit_scope: limitScope,
       current_plan: accountUsage?.plan.toLowerCase() as
         | "free"
@@ -635,7 +645,7 @@ export function ChatInput({
       required_credits: estimatedRequestCredits,
       reset_at: accountUsage?.balances.dailyResetsAt,
     });
-    trackProductEvent("upgrade_prompt_view", selectedModels.length, {
+    trackProductEvent("upgrade_prompt_view", activeSelectedModels.length, {
       cta_location: "credit_limit_banner",
       limit_scope: limitScope,
       current_plan: accountUsage?.plan.toLowerCase() as
@@ -654,7 +664,7 @@ export function ChatInput({
     limitScope,
     planCreditsRemaining,
     purchasedCreditsRemaining,
-    selectedModels.length,
+    activeSelectedModels.length,
   ]);
 
   const announceGuestQuickStart = useCallback((visible: boolean) => {
@@ -2362,7 +2372,11 @@ export function ChatInput({
               dismissGuestQuickStart();
               onSubmit();
             }}
-            disabled={isDisabled || (!value.trim() && attachments.length === 0)}
+            disabled={
+              isDisabled ||
+              activeSelectedModels.length === 0 ||
+              (!value.trim() && attachments.length === 0)
+            }
             className="order-3 ml-auto flex h-9 min-w-9 shrink-0 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-full bg-blue-600 px-2 text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500 dark:disabled:bg-zinc-700 dark:disabled:text-zinc-400 md:h-9"
             title={`${t("chat.send")} · ${estimatedRequestCredits} credits`}
             aria-label={`${t("chat.send")} · ${estimatedRequestCredits} credits`}
@@ -2378,13 +2392,13 @@ export function ChatInput({
             />
           </button>
         )}
-        {selectedModels.length > 0 && (
+        {activeSelectedModels.length > 0 && (
           <div
             data-testid="request-credit-estimate"
             className="order-4 flex w-full flex-wrap items-center justify-end gap-x-2 gap-y-1 px-1 text-[10px] font-bold text-zinc-500 dark:text-zinc-400"
           >
             <span>
-              {selectedModels.length} {t("chat.modelsSelected")} · {pickerCopy.estimatedUsage}
+              {activeSelectedModels.length} {t("chat.modelsSelected")} · {pickerCopy.estimatedUsage}
             </span>
             <CreditCostBadge
               credits={estimatedRequestCredits}

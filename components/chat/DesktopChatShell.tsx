@@ -325,6 +325,7 @@ export function DesktopChatShell({
           isSending={isSending}
           focusToken={focusToken}
           selectedModels={selectedModels}
+          disabledModelIds={disabledPanels}
           onToggleModel={onToggleModel}
           attachments={attachments}
           onAttachmentsChange={setAttachments}

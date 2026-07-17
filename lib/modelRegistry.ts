@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { ModelRegistryEntry, Prisma } from "@prisma/client";
+import { isMissingDatabaseSchemaError } from "@/lib/databaseError";
 import { prisma } from "@/lib/prisma";
 import {
   AVAILABLE_MODELS,
@@ -75,17 +76,6 @@ const staticSeedRows = () =>
     sortOrder: model.sortOrder || 0,
   }));
 
-const isMissingRegistryTable = (error: unknown) => {
-  if (!error || typeof error !== "object") return false;
-  const candidate = error as { code?: unknown; message?: unknown };
-  return (
-    candidate.code === "P2021" ||
-    (typeof candidate.message === "string" &&
-      candidate.message.includes("ModelRegistryEntry") &&
-      candidate.message.toLowerCase().includes("does not exist"))
-  );
-};
-
 const inputCapabilitiesFromRow = (
   row: ModelRegistryEntry
 ): ModelInputCapabilities | undefined => {
@@ -139,6 +129,7 @@ export const registryRowToModel = (row: ModelRegistryEntry): AiModel => {
 };
 
 let bootstrapPromise: Promise<void> | null = null;
+let didWarnAboutRegistrySchema = false;
 
 export async function ensureModelRegistrySeeded() {
   if (E2E_DATABASE_DISABLED) return;
@@ -181,10 +172,15 @@ export async function getRuntimeModels(options?: {
       }
     });
   } catch (error) {
-    // Allows a rolling deploy to start before the migration has reached the DB.
-    // Other database failures are deliberately not hidden.
-    if (isMissingRegistryTable(error)) {
-      console.warn("Model registry table is not migrated yet; using static bootstrap catalog.");
+    // Allows a rolling deploy to start before all registry migrations have
+    // reached the DB. Other database failures are deliberately not hidden.
+    if (isMissingDatabaseSchemaError(error)) {
+      if (!didWarnAboutRegistrySchema) {
+        didWarnAboutRegistrySchema = true;
+        console.warn(
+          "Model registry schema is not migrated yet; using the static bootstrap catalog."
+        );
+      }
       return STATIC_RUNTIME_MODELS;
     }
     throw error;
