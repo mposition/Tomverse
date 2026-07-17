@@ -82,12 +82,6 @@ const billingSourceCopy: Record<ProviderHealthRow["billingProfile"]["source"], s
   admin_verified: "Admin verified",
   documented_default: "Documented default",
 };
-const budgetClass = (value: number) => {
-  if (value >= 95) return "text-red-300";
-  if (value >= 80) return "text-amber-300";
-  if (value >= 50) return "text-sky-300";
-  return "text-emerald-300";
-};
 const creditAlertClass = (level: ProviderHealthRow["creditAlertLevel"]) => {
   if (level === "5") return "text-red-300";
   if (level === "20") return "text-amber-300";
@@ -132,6 +126,7 @@ function ProviderRow({
   onSaveBilling: SaveBilling;
 }) {
   const [statusOpen, setStatusOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [creditEditorOpen, setCreditEditorOpen] = useState(false);
   const [billingEditorOpen, setBillingEditorOpen] = useState(false);
   const [selectedErrorCode, setSelectedErrorCode] = useState<string | null>(null);
@@ -176,6 +171,13 @@ function ProviderRow({
     provider.provider === "zhipu" ||
     provider.billingProfile.settlementModel === "prepaid" ||
     provider.billingProfile.settlementModel === "hybrid";
+  const compactBalance = tracksCredit
+    ? provider.balanceAmount !== null
+      ? balanceMoney(provider.balanceAmount, provider.balanceCurrency)
+      : estimatedBalance !== null
+        ? money(estimatedBalance)
+        : "Not available"
+    : money(provider.internalBudgetHeadroomMicroUsd);
   const billingBasisMicroUsd =
     provider.providerReportedMonthCostMicroUsd ?? provider.monthCostMicroUsd;
   const providerBillingLimitMicroUsd = provider.billingProfile.monthlyLimitMicroUsd;
@@ -308,25 +310,38 @@ function ProviderRow({
             </p>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4 lg:min-w-[520px]">
-          <Metric
-            label="Success rate"
-            value={
-              provider.successRate24h === null
-                ? "No traffic"
-                : `${provider.successRate24h}%`
-            }
-          />
-          <Metric
-            label="24h calls"
-            value={`${provider.successCount24h} / ${provider.failureCount24h}`}
-          />
-          <Metric label="Recent error" value={provider.recentErrorCode || "None"} />
-          <Metric
-            label="Budget used"
-            value={`${provider.budgetUsagePercent}%`}
-            valueClass={budgetClass(provider.budgetUsagePercent)}
-          />
+        <div className="flex flex-col gap-3 lg:min-w-[600px]">
+          <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+            <Metric label="Today usage" value={money(provider.todayCostMicroUsd)} />
+            <Metric
+              label={tracksCredit ? "Estimated balance" : "Budget headroom"}
+              value={compactBalance}
+              valueClass={
+                tracksCredit
+                  ? creditAlertClass(provider.creditAlertLevel)
+                  : provider.internalBudgetHeadroomMicroUsd < 0
+                    ? "text-red-300"
+                    : "text-emerald-300"
+              }
+            />
+            <Metric label="Month usage" value={money(billingBasisMicroUsd)} />
+            <Metric
+              label="Recent error"
+              value={provider.recentErrorCode || "None"}
+              valueClass={provider.recentErrorCode ? "text-amber-300" : "text-emerald-300"}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => setDetailsOpen((open) => !open)}
+            aria-expanded={detailsOpen}
+            className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 self-end rounded-xl border border-zinc-700 bg-zinc-900 px-3 text-xs font-bold text-zinc-200 transition hover:bg-zinc-800"
+          >
+            {detailsOpen ? "Hide details" : "Details"}
+            <ChevronDown
+              className={`h-3.5 w-3.5 transition-transform ${detailsOpen ? "rotate-180" : ""}`}
+            />
+          </button>
         </div>
       </div>
 
@@ -369,6 +384,8 @@ function ProviderRow({
         </div>
       )}
 
+      {detailsOpen && (
+        <>
       <div className="mt-5 grid gap-4 border-t border-zinc-800 pt-5 lg:grid-cols-3">
         <div>
           <PanelLabel>Usage / Cost</PanelLabel>
@@ -844,6 +861,8 @@ function ProviderRow({
           )}
         </div>
       </div>
+        </>
+      )}
     </section>
   );
 }
