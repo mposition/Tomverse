@@ -1405,6 +1405,34 @@ const checks = [
     },
   },
   {
+    name: "Secret history scan uses Node 24 actions with least-privilege PR access",
+    file: ".github/workflows/secret-history-scan.yml",
+    test: (source) => {
+      const workflowSources = [
+        source,
+        read(".github/workflows/weekly-security-audit.yml"),
+        read(".github/workflows/e2e.yml"),
+        read(".github/workflows/credit-finance-db-integration.yml"),
+        read(".github/workflows/codeql.yml"),
+      ];
+      return (
+        source.includes("pull-requests: read") &&
+        source.includes("actions/checkout@v6") &&
+        source.includes("gitleaks/gitleaks-action@v3") &&
+        source.includes('GITLEAKS_ENABLE_COMMENTS: "false"') &&
+        workflowSources.every(
+          (workflow) =>
+            !workflow.includes("actions/checkout@v4") &&
+            !workflow.includes("actions/setup-node@v4") &&
+            !workflow.includes("actions/upload-artifact@v4") &&
+            !workflow.includes("github/codeql-action/init@v3") &&
+            !workflow.includes("github/codeql-action/analyze@v3") &&
+            !workflow.includes("ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION")
+        )
+      );
+    },
+  },
+  {
     name: "Unassigned administrators fail closed and billing cannot write support",
     file: "lib/adminAuthCore.ts",
     test: (source) =>
