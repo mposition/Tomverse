@@ -26,6 +26,10 @@ import {
   type ReviewSourceResponse,
 } from "@/lib/comparisonReview";
 import {
+  latestComparableConversationTurn,
+  requestedComparableConversationTurn,
+} from "@/lib/comparisonReviewTurn";
+import {
   releaseFreeComparisonReview,
   reserveFreeComparisonReview,
   getFreeComparisonReviewLimit,
@@ -48,7 +52,7 @@ import {
   hasConversationUnlockGrant,
 } from "@/lib/conversationLock";
 import { assertModelNotAdminDisabled } from "@/lib/modelOverrides";
-import { getModel, getModelUsageProfile, type AiModel } from "@/lib/models";
+import { getModelUsageProfile, type AiModel } from "@/lib/models";
 import { prisma } from "@/lib/prisma";
 import {
   recordModelFailure,
@@ -79,14 +83,6 @@ const reviewRequestSchema = z
       });
     }
   });
-
-type StoredMessage = {
-  id: string;
-  role: string;
-  content: string;
-  modelId: string | null;
-  createdAt: Date;
-};
 
 const jsonError = (
   error: string,
@@ -122,116 +118,6 @@ const authorizeConversation = async (
     return { response: conversationLockedResponse() };
   }
   return { conversation };
-};
-
-const toSourceResponse = (message: StoredMessage): ReviewSourceResponse | null => {
-  if (message.role !== "assistant" || !message.modelId) return null;
-  const model = getModel(message.modelId);
-  if (!model) return null;
-  return {
-    messageId: message.id,
-    modelId: model.id,
-    modelName: model.name,
-    provider: model.provider,
-    content: message.content,
-  };
-};
-
-const latestComparableTurn = async (conversationId: string) => {
-  const recent = (
-    await prisma.message.findMany({
-      where: { conversationId },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: 160,
-      select: {
-        id: true,
-        role: true,
-        content: true,
-        modelId: true,
-        createdAt: true,
-      },
-    })
-  ).reverse();
-
-  for (let promptIndex = recent.length - 1; promptIndex >= 0; promptIndex -= 1) {
-    const prompt = recent[promptIndex];
-    if (prompt.role !== "user") continue;
-    const byModel = new Map<string, ReviewSourceResponse>();
-    for (let index = promptIndex + 1; index < recent.length; index += 1) {
-      const message = recent[index];
-      if (message.role === "user") break;
-      const response = toSourceResponse(message);
-      if (response) byModel.set(response.modelId, response);
-    }
-    const responses = Array.from(byModel.values()).slice(0, 3);
-    if (responses.length >= 2) return { prompt, responses };
-  }
-  return null;
-};
-
-const requestedComparableTurn = async (
-  conversationId: string,
-  promptMessageId: string,
-  assistantMessageIds: string[]
-) => {
-  const prompt = await prisma.message.findUnique({
-    where: { id: promptMessageId },
-    select: {
-      id: true,
-      role: true,
-      content: true,
-      modelId: true,
-      conversationId: true,
-      createdAt: true,
-    },
-  });
-  if (
-    !prompt ||
-    prompt.conversationId !== conversationId ||
-    prompt.role !== "user"
-  ) {
-    return null;
-  }
-  const nextPrompt = await prisma.message.findFirst({
-    where: {
-      conversationId,
-      role: "user",
-      createdAt: { gt: prompt.createdAt },
-    },
-    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    select: { createdAt: true },
-  });
-  const messages = await prisma.message.findMany({
-    where: {
-      id: { in: assistantMessageIds },
-      conversationId,
-      role: "assistant",
-      createdAt: {
-        gte: prompt.createdAt,
-        ...(nextPrompt ? { lt: nextPrompt.createdAt } : {}),
-      },
-    },
-    select: {
-      id: true,
-      role: true,
-      content: true,
-      modelId: true,
-      createdAt: true,
-    },
-  });
-  const byId = new Map(messages.map((message) => [message.id, message]));
-  const responses = assistantMessageIds
-    .map((id) => byId.get(id))
-    .map((message) => (message ? toSourceResponse(message) : null))
-    .filter((response): response is ReviewSourceResponse => Boolean(response));
-  if (
-    responses.length !== assistantMessageIds.length ||
-    new Set(responses.map((response) => response.modelId)).size !==
-      responses.length
-  ) {
-    return null;
-  }
-  return { prompt, responses };
 };
 
 const accessibleCandidates = async (
@@ -299,7 +185,7 @@ export async function GET(
     );
     if ("response" in authorization) return authorization.response;
 
-    const turn = await latestComparableTurn(conversationId);
+    const turn = await latestComparableConversationTurn(conversationId);
     if (!turn) {
       return Response.json(
         {
@@ -407,7 +293,7 @@ export async function POST(
       16 * 1024,
       reviewRequestSchema
     );
-    const turn = await requestedComparableTurn(
+    const turn = await requestedComparableConversationTurn(
       conversationId,
       payload.promptMessageId,
       payload.assistantMessageIds

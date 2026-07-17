@@ -253,6 +253,7 @@ export function DesktopChatShell({
           <div className="flex gap-2 border-t border-zinc-200 bg-white px-4 py-2 dark:border-zinc-800 dark:bg-zinc-950">
             <button
               type="button"
+              data-testid="quick-comparison-button"
               onClick={onCompareSummary}
               className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-xs font-black text-blue-700 hover:bg-blue-100 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200 dark:hover:bg-blue-950"
             >

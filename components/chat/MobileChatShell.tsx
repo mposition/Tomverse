@@ -376,6 +376,7 @@ export function MobileChatShell({
         <div className={`grid shrink-0 gap-2 border-b border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950 ${!isGuestMode && currentChatId !== "private-chat" ? "grid-cols-2" : "grid-cols-1"}`}>
           <button
             type="button"
+            data-testid="quick-comparison-button"
             onClick={onCompareSummary}
             className="h-8 w-full rounded-xl border border-blue-200 bg-blue-50 text-[11px] font-black text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200"
           >
