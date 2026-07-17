@@ -506,25 +506,39 @@ export default function Home() {
 
       comparisonPreflightInFlightRef.current = true;
       try {
-        const response = await fetch("/api/chat/preflight", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            comparisonId,
-            conversationId,
-            modelIds,
-            prompt,
-            attachments: promptAttachments.map((attachment) => ({
-              mediaType: attachment.mediaType,
-              size: attachment.size,
-            })),
-          }),
+        const requestBody = JSON.stringify({
+          comparisonId,
+          conversationId,
+          modelIds,
+          prompt,
+          attachments: promptAttachments.map((attachment) => ({
+            mediaType: attachment.mediaType,
+            size: attachment.size,
+          })),
         });
+        const requestPreflight = () =>
+          fetch("/api/chat/preflight", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: requestBody,
+          });
+
+        let response = await requestPreflight();
         if (response.ok) return true;
 
-        const errorBody = await response.json().catch(() => null);
-        const code =
+        let errorBody = await response.json().catch(() => null);
+        let code =
           typeof errorBody?.code === "string" ? errorBody.code : "";
+        if (
+          response.status === 503 &&
+          code === "COMPARISON_PREFLIGHT_TEMPORARILY_UNAVAILABLE"
+        ) {
+          await new Promise((resolve) => window.setTimeout(resolve, 350));
+          response = await requestPreflight();
+          if (response.ok) return true;
+          errorBody = await response.json().catch(() => null);
+          code = typeof errorBody?.code === "string" ? errorBody.code : "";
+        }
         const localizedMessage =
           code === "CREDIT_BALANCE_INSUFFICIENT" ||
           code === "CREDIT_COST_ALLOWANCE_INSUFFICIENT"
@@ -1206,6 +1220,10 @@ export default function Home() {
   const handleGlobalSubmit = async () => {
     const trimmed = inputValue.trim();
     if ((!trimmed && attachments.length === 0) || selectedModels.length === 0) return;
+    if (activeModelCount === 0) {
+      showToast(t("chat.chooseModel"), "error");
+      return;
+    }
     const promptAttachments = await cloneAttachmentPreviews(attachments);
 	
     if (isGuestMode) {

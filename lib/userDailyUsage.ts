@@ -1,23 +1,40 @@
 import "server-only";
 
 import type { Prisma } from "@prisma/client";
+import { isMissingDatabaseSchemaError } from "@/lib/databaseError";
 import {
   getZonedDayWindow,
   type UserDayWindow,
 } from "@/lib/userTimeZone";
 
 const DAILY_USAGE_PERIODS = ["day", "tokens-day", "cost-day"] as const;
+let didWarnAboutTimeZoneSchema = false;
 
 export const getUserDayWindow = async (
   tx: Prisma.TransactionClient,
   userId: string,
   now = new Date()
 ): Promise<UserDayWindow> => {
-  const settings = await tx.userSettings.findUnique({
-    where: { userId },
-    select: { timeZone: true },
-  });
-  return getZonedDayWindow(settings?.timeZone, now);
+  try {
+    const settings = await tx.userSettings.findUnique({
+      where: { userId },
+      select: { timeZone: true },
+    });
+    return getZonedDayWindow(settings?.timeZone, now);
+  } catch (error) {
+    // UTC was the policy before the time-zone migration, so it is the only
+    // safe fallback while old and new application instances overlap.
+    if (isMissingDatabaseSchemaError(error)) {
+      if (!didWarnAboutTimeZoneSchema) {
+        didWarnAboutTimeZoneSchema = true;
+        console.warn(
+          "User time-zone schema is not migrated yet; using UTC daily windows."
+        );
+      }
+      return getZonedDayWindow("UTC", now);
+    }
+    throw error;
+  }
 };
 
 export const migrateCurrentDailyUsageBuckets = async (
