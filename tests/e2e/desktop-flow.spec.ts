@@ -60,7 +60,6 @@ test("guest model selector keeps one panel and explains sign-in for comparison",
 test("model names remain readable in the narrow selector", async ({ page }) => {
   await modelMenuTrigger(page).click();
   const dialog = page.locator("#chat-input-popover");
-  await dialog.getByTestId("show-all-models").click();
   const longName = dialog
     .locator('[data-model-id="perplexity/sonar-deep-research"]')
     .getByTestId("model-option-name");
@@ -83,8 +82,8 @@ test("model picker prioritizes exact credits and shows the final input estimate"
   await modelMenuTrigger(page).click();
   const dialog = page.locator("#chat-input-popover");
 
-  await expect(dialog.getByTestId("model-option")).toHaveCount(3);
-  await dialog.getByTestId("show-all-models").click();
+  await expect(dialog.getByTestId("recommended-model-option")).toHaveCount(3);
+  await expect.poll(() => dialog.getByTestId("model-option").count()).toBeGreaterThan(3);
 
   const gptMini = dialog.locator(
     '[data-testid="model-option"][data-model-id="gpt-5-4-mini"]'

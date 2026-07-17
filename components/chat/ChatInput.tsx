@@ -21,6 +21,7 @@ import {
   Presentation,
   Search,
   Sheet,
+  SlidersHorizontal,
   Square,
   Star,
   X,
@@ -61,7 +62,16 @@ import {
   trackProductEvent,
   trackProductEventOnce,
 } from "@/lib/productAnalyticsClient";
-import { getContextualModelSuggestion } from "@/lib/modelFinder";
+import {
+  getContextualModelSuggestion,
+  getModelFinderRecommendations,
+  MODEL_FINDER_FILE_USAGE,
+  MODEL_FINDER_PRIORITIES,
+  MODEL_FINDER_TASKS,
+  type ModelFinderFileUsage,
+  type ModelFinderPriority,
+  type ModelFinderTask,
+} from "@/lib/modelFinder";
 import { CreditPackPurchaseButton } from "@/components/billing/CreditPackPurchaseButton";
 import { FeatureHelpPopover } from "@/components/chat/FeatureHelpPopover";
 import { chatHelpCopy } from "@/components/chat/chatHelpCopy";
@@ -81,7 +91,6 @@ const GOOGLE_WORKSPACE_TYPES = [
   "application/vnd.google-apps.presentation",
 ].join(",");
 const RECENT_MODEL_STORAGE_KEY = "recent_model_ids";
-const MODEL_PICKER_ALL_STORAGE_KEY = "tomverse_model_picker_all_v1";
 const GUEST_QUICK_START_STORAGE_KEY = "tomverse_guest_quick_start_seen_v2";
 const GUEST_QUICK_START_ACTIVE_KEY = "tomverse_guest_quick_start_active_v2";
 const GUEST_QUICK_START_EVENT = "tomverse:guest-quick-start";
@@ -442,10 +451,11 @@ export function ChatInput({
   const [providerFilter, setProviderFilter] = useState("all");
   const [usageBandFilter, setUsageBandFilter] = useState<ModelPickerUsageBand>("all");
   const [capabilityFilter, setCapabilityFilter] = useState<ModelPickerCapability>("all");
-  const [showAllModels, setShowAllModels] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return localStorage.getItem(MODEL_PICKER_ALL_STORAGE_KEY) === "1";
-  });
+  const [showAdvancedModelFilters, setShowAdvancedModelFilters] = useState(false);
+  const [imageInputOnly, setImageInputOnly] = useState(false);
+  const [availableOnPlanOnly, setAvailableOnPlanOnly] = useState(false);
+  const [personalizedRecommendationIds, setPersonalizedRecommendationIds] = useState<string[]>([]);
+  const hasRequestedPickerRecommendationsRef = useRef(false);
   const [liveModelStatuses, setLiveModelStatuses] = useState<Record<string, PublicModelStatusRecord>>({});
   const [favoriteModelIds, setFavoriteModelIds] = useState<string[]>(() => {
     if (typeof window === "undefined") return [];
@@ -641,6 +651,18 @@ export function ChatInput({
     []
   );
 
+  const currentPlan = isGuestMode ? "Guest" : accountUsage?.plan ?? "Free";
+
+  const recommendationModels = useMemo(() => {
+    const ids = personalizedRecommendationIds.length
+      ? personalizedRecommendationIds
+      : [...RECOMMENDED_MODEL_IDS];
+    return ids
+      .map((modelId) => PUBLIC_MODELS.find((model) => model.id === modelId))
+      .filter((model): model is (typeof PUBLIC_MODELS)[number] => Boolean(model?.enabled))
+      .slice(0, 3);
+  }, [personalizedRecommendationIds]);
+
   const filteredModels = useMemo(() => {
     const normalizedQuery = modelSearchQuery.trim().toLowerCase();
 
@@ -658,51 +680,50 @@ export function ChatInput({
         usageBandFilter === "all" ||
         getModelPickerUsageBand(usageProfile.credits) === usageBandFilter;
       const matchesCapability = modelMatchesCapability(model, capabilityFilter);
+      const matchesImageInput = !imageInputOnly || modelSupportsImageInput(model);
+      const matchesCurrentPlan =
+        !availableOnPlanOnly || canUseModelWithPlan(currentPlan, model);
 
       return (
         matchesQuery &&
         matchesProvider &&
         matchesUsageBand &&
-        matchesCapability
+        matchesCapability &&
+        matchesImageInput &&
+        matchesCurrentPlan
       );
     });
-  }, [capabilityFilter, lang, modelSearchQuery, providerFilter, usageBandFilter]);
+  }, [
+    availableOnPlanOnly,
+    capabilityFilter,
+    currentPlan,
+    imageInputOnly,
+    lang,
+    modelSearchQuery,
+    providerFilter,
+    usageBandFilter,
+  ]);
 
   const groupedModels = useMemo(() => {
-    if (!showAllModels) {
-      const recommendedIds = Array.from(
-        new Set<string>([...selectedModels, ...RECOMMENDED_MODEL_IDS])
-      ).slice(0, 3);
-      return [
-        {
-          provider: pickerCopy.recommendedModels,
-          models: recommendedIds
-            .map((modelId) => PUBLIC_MODELS.find((model) => model.id === modelId))
-            .filter((model): model is (typeof PUBLIC_MODELS)[number] => Boolean(model)),
-        },
-      ];
-    }
     const favoriteSet = new Set(favoriteModelIds);
     const recentSet = new Set(recentModelIds);
     const sortedModels = [...filteredModels].sort((a, b) => {
+      const providerDelta =
+        getProviderSortRank(a.provider) - getProviderSortRank(b.provider);
+      if (providerDelta !== 0) return providerDelta;
+      const providerNameDelta = a.provider.localeCompare(b.provider);
+      if (providerNameDelta !== 0) return providerNameDelta;
       const favoriteDelta =
         Number(favoriteSet.has(b.id)) - Number(favoriteSet.has(a.id));
       if (favoriteDelta !== 0) return favoriteDelta;
       const recentDelta = Number(recentSet.has(b.id)) - Number(recentSet.has(a.id));
       if (recentDelta !== 0) return recentDelta;
-      const providerDelta =
-        getProviderSortRank(a.provider) - getProviderSortRank(b.provider);
-      if (providerDelta !== 0) return providerDelta;
-      return a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name);
+      return a.name.localeCompare(b.name);
     });
 
     return sortedModels.reduce<Array<{ provider: string; models: typeof filteredModels }>>(
       (groups, model) => {
-        const provider = favoriteSet.has(model.id)
-          ? t("chat.favoriteModels")
-          : recentSet.has(model.id)
-            ? t("chat.recentModels")
-          : model.provider;
+        const provider = model.provider;
         const group = groups.find((item) => item.provider === provider);
         if (group) group.models.push(model);
         else groups.push({ provider, models: [model] });
@@ -710,7 +731,7 @@ export function ChatInput({
       },
       []
     );
-  }, [favoriteModelIds, filteredModels, pickerCopy.recommendedModels, recentModelIds, selectedModels, showAllModels, t]);
+  }, [favoriteModelIds, filteredModels, recentModelIds]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -755,6 +776,64 @@ export function ChatInput({
       .catch(() => {});
     return () => controller.abort();
   }, []);
+
+  useEffect(() => {
+    if (
+      !isMenuOpen ||
+      menuView !== "models" ||
+      isGuestMode ||
+      hasRequestedPickerRecommendationsRef.current
+    ) {
+      return;
+    }
+
+    hasRequestedPickerRecommendationsRef.current = true;
+    const controller = new AbortController();
+    void fetch("/api/user/model-finder", {
+      signal: controller.signal,
+      cache: "no-store",
+    })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: unknown) => {
+        if (!data || typeof data !== "object") return;
+        const settings = (data as { settings?: unknown }).settings;
+        if (!settings || typeof settings !== "object") return;
+        const record = settings as Record<string, unknown>;
+        if (typeof record.modelFinderCompletedAt !== "string") return;
+
+        const tasks = Array.isArray(record.preferredTasks)
+          ? record.preferredTasks.filter(
+              (task): task is ModelFinderTask =>
+                typeof task === "string" &&
+                (MODEL_FINDER_TASKS as readonly string[]).includes(task)
+            )
+          : [];
+        const priority =
+          typeof record.preferredPriority === "string" &&
+          (MODEL_FINDER_PRIORITIES as readonly string[]).includes(
+            record.preferredPriority
+          )
+            ? (record.preferredPriority as ModelFinderPriority)
+            : null;
+        const fileUsage =
+          typeof record.usesFilesFrequently === "string" &&
+          (MODEL_FINDER_FILE_USAGE as readonly string[]).includes(
+            record.usesFilesFrequently
+          )
+            ? (record.usesFilesFrequently as ModelFinderFileUsage)
+            : null;
+
+        if (!tasks.length || !priority || !fileUsage) return;
+        setPersonalizedRecommendationIds(
+          getModelFinderRecommendations({ tasks, priority, fileUsage }).map(
+            (recommendation) => recommendation.modelId
+          )
+        );
+      })
+      .catch(() => {});
+
+    return () => controller.abort();
+  }, [isGuestMode, isMenuOpen, menuView]);
 
   const rememberRecentModel = (modelId: string) => {
     setRecentModelIds((current) => {
@@ -1722,88 +1801,195 @@ export function ChatInput({
                       </span>
                     </div>
                   </div>
-                  {!showAllModels ? (
-                    <div className="mb-2 rounded-xl border border-blue-200 bg-blue-50/70 px-3 py-2 dark:border-blue-900/60 dark:bg-blue-950/20">
-                      <p className="text-xs font-black text-zinc-900 dark:text-white">
-                        {pickerCopy.recommendedModels}
+                  <div className="mb-2 shrink-0 space-y-2 px-1">
+                    <div className="relative">
+                      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                      <input
+                        ref={modelSearchInputRef}
+                        data-testid="model-search-input"
+                        value={modelSearchQuery}
+                        onChange={(event) => setModelSearchQuery(event.target.value)}
+                        placeholder={pickerCopy.searchPlaceholder}
+                        className="h-9 w-full rounded-lg border border-zinc-200 bg-zinc-50 pl-9 pr-3 text-xs text-zinc-800 outline-none transition placeholder:text-zinc-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:focus:border-blue-500"
+                      />
+                    </div>
+
+                    {!modelSearchQuery.trim() && (
+                      <section
+                        data-testid="model-recommendations"
+                        aria-label={
+                          personalizedRecommendationIds.length
+                            ? pickerCopy.personalizedRecommendations
+                            : pickerCopy.tomverseRecommendations
+                        }
+                        className="space-y-1 rounded-xl border border-blue-200 bg-blue-50/60 p-2 dark:border-blue-900/60 dark:bg-blue-950/20"
+                      >
+                        <p className="px-1 text-[11px] font-black text-zinc-900 dark:text-white">
+                          {personalizedRecommendationIds.length
+                            ? pickerCopy.personalizedRecommendations
+                            : pickerCopy.tomverseRecommendations}
+                        </p>
+                        {recommendationModels.map((model, recommendationIndex) => {
+                          const isSelected = selectedModels.includes(model.id);
+                          const liveStatus = liveModelStatuses[model.id];
+                          const modelStatus =
+                            liveStatus?.status || getModelExperienceStatus(model);
+                          const imageIncompatible =
+                            hasImageAttachments && !modelSupportsImageInput(model);
+                          const selectionDisabled =
+                            !model.enabled ||
+                            modelStatus === "unavailable" ||
+                            imageIncompatible;
+                          const usageProfile = getModelUsageProfile(model);
+                          const isPlanLocked = !canUseModelWithPlan(currentPlan, model);
+
+                          return (
+                            <button
+                              key={model.id}
+                              type="button"
+                              data-testid="recommended-model-option"
+                              data-model-id={model.id}
+                              data-model-plan-locked={isPlanLocked}
+                              disabled={selectionDisabled && !isSelected}
+                              aria-pressed={isSelected}
+                              onClick={() => {
+                                rememberRecentModel(model.id);
+                                if (!isSelected) {
+                                  trackProductEvent(
+                                    "recommended_model_accepted",
+                                    Math.min(maxSelectableModels, selectedModels.length + 1),
+                                    {
+                                      model_id: model.id,
+                                      recommendation_rank: recommendationIndex + 1,
+                                    }
+                                  );
+                                }
+                                onToggleModel(model.id);
+                              }}
+                              className="flex min-h-12 w-full items-center gap-2 rounded-lg bg-white px-2 py-1.5 text-left shadow-sm transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-45 dark:bg-zinc-900 dark:hover:bg-zinc-800"
+                            >
+                              <ModelLogo model={model} size="sm" />
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-xs font-bold text-zinc-900 dark:text-zinc-100">
+                                  {model.name}
+                                </span>
+                                <span className="block truncate text-[10px] text-zinc-500 dark:text-zinc-400">
+                                  {getModelPickerDescription(model, lang)}
+                                </span>
+                              </span>
+                              <span
+                                className="inline-flex shrink-0 items-center gap-1 text-[10px] font-black text-amber-700 dark:text-amber-300"
+                                aria-label={lang === "ko" ? `기본 ${usageProfile.credits}크레딧 차감` : `Base cost ${usageProfile.credits} credits`}
+                              >
+                                <Coins className="h-3 w-3" aria-hidden="true" />
+                                {usageProfile.credits}
+                              </span>
+                              <span
+                                className={`shrink-0 rounded-full px-2 py-1 text-[9px] font-black ${
+                                  isSelected
+                                    ? "bg-blue-600 text-white"
+                                    : "border border-zinc-200 text-zinc-600 dark:border-zinc-700 dark:text-zinc-300"
+                                }`}
+                              >
+                                {isSelected ? pickerCopy.selected : pickerCopy.select}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </section>
+                    )}
+
+                    <div className="flex items-center justify-between gap-2 px-1 pt-0.5">
+                      <p className="text-[11px] font-black text-zinc-900 dark:text-white">
+                        {pickerCopy.allModels}
                       </p>
                       <button
                         type="button"
-                        data-testid="show-all-models"
-                        onClick={() => {
-                          localStorage.setItem(MODEL_PICKER_ALL_STORAGE_KEY, "1");
-                          setShowAllModels(true);
-                        }}
-                        className="mt-1 text-[11px] font-black text-blue-600 underline underline-offset-2 dark:text-blue-300"
+                        data-testid="advanced-model-filters"
+                        aria-expanded={showAdvancedModelFilters}
+                        onClick={() => setShowAdvancedModelFilters((current) => !current)}
+                        className="inline-flex items-center gap-1 rounded-full border border-zinc-200 px-2 py-1 text-[9px] font-black text-zinc-500 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
                       >
-                        {pickerCopy.showAllModels}
+                        <SlidersHorizontal className="h-3 w-3" aria-hidden="true" />
+                        {pickerCopy.filters}
+                        {(imageInputOnly || availableOnPlanOnly) && (
+                          <span className="rounded-full bg-blue-600 px-1.5 text-white">
+                            {Number(imageInputOnly) + Number(availableOnPlanOnly)}
+                          </span>
+                        )}
                       </button>
                     </div>
-                  ) : (
-                    <div className="mb-2 space-y-2 px-1">
-                      <div className="relative">
-                        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                        <input
-                          ref={modelSearchInputRef}
-                          value={modelSearchQuery}
-                          onChange={(event) => setModelSearchQuery(event.target.value)}
-                          placeholder={t("chat.searchModels")}
-                          className="h-9 w-full rounded-lg border border-zinc-200 bg-zinc-50 pl-9 pr-3 text-xs text-zinc-800 outline-none transition placeholder:text-zinc-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:focus:border-blue-500"
-                        />
-                      </div>
-                      <div className="flex gap-1 overflow-x-auto pb-0.5">
+                    <div className="flex gap-1 overflow-x-auto pb-0.5">
+                      {([
+                        ["recommended", pickerCopy.recommended],
+                        ["fast", pickerCopy.fast],
+                        ["reasoning", pickerCopy.deepReasoning],
+                        ["search", pickerCopy.webSearch],
+                      ] as const).map(([filterValue, label]) => (
+                        <button
+                          key={filterValue}
+                          type="button"
+                          aria-pressed={capabilityFilter === filterValue}
+                          onClick={() =>
+                            setCapabilityFilter((current) =>
+                              current === filterValue ? "all" : filterValue
+                            )
+                          }
+                          className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black transition ${capabilityFilter === filterValue ? "border-blue-500 bg-blue-500 text-white" : "border-zinc-200 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"}`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <select
+                        value={providerFilter}
+                        onChange={(event) => setProviderFilter(event.target.value)}
+                        aria-label={pickerCopy.providerAll}
+                        className="h-9 min-w-0 rounded-lg border border-zinc-200 bg-zinc-50 px-2 text-xs font-medium text-zinc-700 outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
+                      >
+                        <option value="all">{pickerCopy.providerAll}</option>
+                        {modelProviders.map((provider) => (
+                          <option key={provider} value={provider}>{provider}</option>
+                        ))}
+                      </select>
+                      <select
+                        value={usageBandFilter}
+                        onChange={(event) => setUsageBandFilter(event.target.value as ModelPickerUsageBand)}
+                        aria-label={pickerCopy.usageAll}
+                        className="h-9 min-w-0 rounded-lg border border-zinc-200 bg-zinc-50 px-2 text-xs font-medium text-zinc-700 outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
+                      >
+                        <option value="all">{pickerCopy.usageAll}</option>
+                        <option value="light">{pickerCopy.light}</option>
+                        <option value="medium">{pickerCopy.medium}</option>
+                        <option value="heavy">{pickerCopy.heavy}</option>
+                        <option value="intensive">{pickerCopy.intensive}</option>
+                      </select>
+                    </div>
+                    {showAdvancedModelFilters && (
+                      <div className="flex flex-wrap gap-1 rounded-lg bg-zinc-100 p-1.5 dark:bg-zinc-950">
                         {([
-                          ["recommended", pickerCopy.recommended],
-                          ["fast", pickerCopy.fast],
-                          ["reasoning", pickerCopy.deepReasoning],
-                          ["search", pickerCopy.webSearch],
-                        ] as const).map(([value, label]) => (
+                          [imageInputOnly, setImageInputOnly, pickerCopy.imageInputOnly],
+                          [availableOnPlanOnly, setAvailableOnPlanOnly, pickerCopy.availableOnPlan],
+                        ] as const).map(([pressed, setPressed, label]) => (
                           <button
-                            key={value}
+                            key={label}
                             type="button"
-                            aria-pressed={capabilityFilter === value}
-                            onClick={() =>
-                              setCapabilityFilter((current) =>
-                                current === value ? "all" : value
-                              )
-                            }
-                            className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black transition ${capabilityFilter === value ? "border-blue-500 bg-blue-500 text-white" : "border-zinc-200 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"}`}
+                            aria-pressed={pressed}
+                            onClick={() => setPressed(!pressed)}
+                            className={`rounded-full px-2 py-1 text-[9px] font-black transition ${pressed ? "bg-blue-600 text-white" : "bg-white text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"}`}
                           >
                             {label}
                           </button>
                         ))}
                       </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <select
-                          value={providerFilter}
-                          onChange={(event) => setProviderFilter(event.target.value)}
-                          className="h-9 rounded-lg border border-zinc-200 bg-zinc-50 px-2 text-xs font-medium text-zinc-700 outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
-                        >
-                          <option value="all">{t("chat.allProviders")}</option>
-                          {modelProviders.map((provider) => (
-                            <option key={provider} value={provider}>{provider}</option>
-                          ))}
-                        </select>
-                        <select
-                          value={usageBandFilter}
-                          onChange={(event) => setUsageBandFilter(event.target.value as ModelPickerUsageBand)}
-                          aria-label={pickerCopy.usageAll}
-                          className="h-9 rounded-lg border border-zinc-200 bg-zinc-50 px-2 text-xs font-medium text-zinc-700 outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
-                        >
-                          <option value="all">{pickerCopy.usageAll}</option>
-                          <option value="light">{pickerCopy.light}</option>
-                          <option value="medium">{pickerCopy.medium}</option>
-                          <option value="heavy">{pickerCopy.heavy}</option>
-                          <option value="intensive">{pickerCopy.intensive}</option>
-                        </select>
-                      </div>
-                    </div>
-                  )}
-                  <div className="min-h-0 space-y-3 overflow-y-auto overscroll-contain pr-1">
+                    )}
+                  </div>
+                  <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pr-1">
                     {groupedModels.map((group) => (
                       <div key={group.provider} className="space-y-1">
                         <div className="px-2 text-[10px] font-bold uppercase tracking-wide text-zinc-400">
-                          {group.provider}
+                          {group.provider.toUpperCase()}
                         </div>
                         {group.models.map((model) => {
                           const isSelected = selectedModels.includes(model.id);
@@ -1815,9 +2001,6 @@ export function ChatInput({
                             .filter((item): item is (typeof PUBLIC_MODELS)[number] => Boolean(item))
                             .filter((item) => item.enabled && item.id !== model.id)
                             .slice(0, 2);
-                          const currentPlan = isGuestMode
-                            ? "Guest"
-                            : accountUsage?.plan ?? "Free";
                           const isPlanLocked = !canUseModelWithPlan(currentPlan, model);
                           const imageIncompatible =
                             hasImageAttachments && !modelSupportsImageInput(model);
