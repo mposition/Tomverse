@@ -142,6 +142,33 @@ permission verifies the account-specific contract. Mistral defaults to
 credits. A verified profile, optional provider-side monthly limit, and note are
 stored in `ProviderBillingConfig`; changes are rate-limited and audit logged.
 
+## Database Model Registry
+
+The Admin Console **Providers > Model Registry / Runtime** tab is the source of
+truth for the live model catalogue. It manages the Tomverse model ID, provider
+API model ID, API Base URL, API-key environment-variable name, plan access,
+credit weight, image/PDF support, context window, token limits, and token-price
+snapshot. API secrets are never stored in the database; only the environment
+variable name is stored and its configured/missing state is displayed.
+
+The checked-in `AVAILABLE_MODELS` array is retained only as the first-deploy
+bootstrap and a rolling-migration fallback. Existing rows are never overwritten
+by the bootstrap. Removing a model from the Admin Console archives it
+(`catalogDeleted=true`, `enabled=false`, `publiclyListed=false`) instead of
+physically deleting the ID, so historical conversations remain readable. A
+saved archived entry is restored to the active catalogue.
+
+Apply `20260717180000_add_model_registry` before using the editor:
+
+```bash
+npm run db:migrate
+```
+
+Custom API Base URLs must be public HTTPS endpoints. Localhost, private/link-local
+addresses, embedded credentials, query strings, and fragments are rejected to
+prevent server-side request forgery. Registry writes are permission checked,
+rate limited, and recorded in the Admin audit log.
+
 Prepaid and hybrid panels expose the optional DB credit checkpoint. Postpaid
 and invoice panels instead show month-to-date accrued cost, projected month-end
 cost, and remaining headroom. Provider-reported usage is preferred when it has

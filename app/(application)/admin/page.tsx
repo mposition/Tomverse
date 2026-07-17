@@ -35,7 +35,7 @@ import {
     getAdminUserStats,
 } from "@/lib/adminUsers";
 import { getPublicAppSettings } from "@/lib/appSettings";
-import { AVAILABLE_MODELS } from "@/lib/models";
+import { getRuntimeModels } from "@/lib/modelRegistry";
 import { prisma } from "@/lib/prisma";
 import { AdminProviderHealthPanel } from "@/components/admin/AdminProviderHealthPanel";
 import { AdminAuditPanel, type AdminAuditRow } from "@/components/admin/AdminAuditPanel";
@@ -69,6 +69,7 @@ import { AdminWebhookPanel } from "@/components/admin/AdminWebhookPanel";
 import { BillingAdminPanel } from "@/components/admin/BillingAdminPanel";
 import { FeedbackInboxPanel, type FeedbackRow } from "@/components/admin/FeedbackInboxPanel";
 import { ModelOverridesPanel } from "@/components/admin/ModelOverridesPanel";
+import { AdminModelRegistryPanel } from "@/components/admin/AdminModelRegistryPanel";
 import { PlatformSettingsPanel } from "@/components/admin/PlatformSettingsPanel";
 import { RefundRequestsPanel, type RefundRequestRow } from "@/components/admin/RefundRequestsPanel";
 import {
@@ -379,6 +380,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         checkoutStartedCount,
         usersWithConversations,
         productAnalyticsDashboard,
+        modelRegistryModels,
     ] = await Promise.all([
         getProviderHealthDashboard({ includeErrorEvents: true }),
         getBillingPlans(),
@@ -481,6 +483,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             _count: { _all: true },
         }),
         getProductAnalyticsDashboard(),
+        getRuntimeModels({ includeCatalogDeleted: true }),
     ]);
     const availableCount = dashboard.providers.filter(
         (provider) => provider.status === "available"
@@ -739,7 +742,9 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     const providerStatusById = new Map(
         dashboard.providers.map((provider) => [provider.provider, provider.status])
     );
-    const modelMetricRows: AdminModelMetricRow[] = AVAILABLE_MODELS.map((model) => {
+    const modelMetricRows: AdminModelMetricRow[] = modelRegistryModels
+      .filter((model) => !model.catalogDeleted)
+      .map((model) => {
         const incident = incidentByModel.get(model.id);
         const check = latestCheckByModel.get(model.id) || latestCheckByProvider.get(model.provider);
         return {
@@ -1230,16 +1235,19 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                         }
                         operationsContent={
                             <AdminProviderOpsPanel
-                                models={AVAILABLE_MODELS}
+                                models={modelRegistryModels.filter((model) => !model.catalogDeleted)}
                                 incidents={providerIncidentRows}
                                 checks={providerCheckRows}
                             />
                         }
                         controlsContent={
-                            <ModelOverridesPanel
-                                models={AVAILABLE_MODELS}
-                                overrides={modelOverrides}
-                            />
+                            <section className="flex flex-col gap-4">
+                                <AdminModelRegistryPanel />
+                                <ModelOverridesPanel
+                                    models={modelRegistryModels.filter((model) => !model.catalogDeleted)}
+                                    overrides={modelOverrides}
+                                />
+                            </section>
                         }
                     />
                     )}

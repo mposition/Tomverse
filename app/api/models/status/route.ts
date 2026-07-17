@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import { PUBLIC_MODELS, getModel } from "@/lib/models";
+import { getPublicRuntimeModels } from "@/lib/modelRegistry";
 import { getModelOverrideMap, resolveModelOverrideStatus } from "@/lib/modelOverrides";
 import { getProviderHealthDashboard } from "@/lib/providerMonitoring";
 import { getTrustedClientIp } from "@/lib/clientIp";
@@ -25,17 +25,17 @@ const isTransientStatusDbError = (error: unknown) => {
   );
 };
 
-const fallbackModelStatus = () => ({
+const fallbackModelStatus = (publicModels: Awaited<ReturnType<typeof getPublicRuntimeModels>>) => ({
   generatedAt: new Date().toISOString(),
-  models: PUBLIC_MODELS.map((model) => ({
+  models: publicModels.map((model) => ({
     id: model.id,
     provider: model.provider,
     status:
       model.enabled && model.status === "enabled"
         ? ("available" as const)
         : ("unavailable" as const),
-    fallbackModelIds: getModel(model.id)?.replacementModelId
-      ? [getModel(model.id)!.replacementModelId!]
+    fallbackModelIds: model.replacementModelId
+      ? [model.replacementModelId]
       : [],
     recentFailureCount5m: 0,
     recentErrorCode: null,
@@ -44,6 +44,7 @@ const fallbackModelStatus = () => ({
 
 export async function GET(req: Request) {
   try {
+    const publicModels = await getPublicRuntimeModels();
     const subject = `public:${getTrustedClientIp(req)}`;
     try {
       await consumeApiRateLimit(req, subject, "public-model-status", {
@@ -62,7 +63,7 @@ export async function GET(req: Request) {
       return null;
     });
     if (!dashboard) {
-      return NextResponse.json(fallbackModelStatus(), {
+      return NextResponse.json(fallbackModelStatus(publicModels), {
         headers: {
           "Cache-Control": "public, max-age=30, stale-while-revalidate=120",
         },
@@ -78,9 +79,9 @@ export async function GET(req: Request) {
       )
     );
 
-    const publicModelIds = new Set(PUBLIC_MODELS.map((model) => model.id));
-    const models = PUBLIC_MODELS.map((model) => {
-      const replacementModelId = getModel(model.id)?.replacementModelId;
+    const publicModelIds = new Set(publicModels.map((model) => model.id));
+    const models = publicModels.map((model) => {
+      const replacementModelId = model.replacementModelId;
       const provider = providerStatus.get(model.provider);
       const override = overrideMap.get(model.id);
       const incident = modelIncidents.get(model.id);

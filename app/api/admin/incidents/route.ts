@@ -11,15 +11,12 @@ import {
   consumeApiRateLimit,
   readLimitedJson,
 } from "@/lib/apiSecurity";
-import { AVAILABLE_MODELS, type AiProvider } from "@/lib/models";
+import type { AiProvider } from "@/lib/models";
+import { getRuntimeModels } from "@/lib/modelRegistry";
 import { PROVIDER_DISPLAY_NAMES } from "@/lib/providerMonitoring";
 import { prisma } from "@/lib/prisma";
 
 const providers = Object.keys(PROVIDER_DISPLAY_NAMES) as [AiProvider, ...AiProvider[]];
-const modelIds: ReadonlySet<string> = new Set<string>(
-  AVAILABLE_MODELS.map((model) => model.id)
-);
-
 const createIncidentSchema = z
   .object({
     provider: z.enum(providers).optional(),
@@ -27,18 +24,13 @@ const createIncidentSchema = z
       .string()
       .trim()
       .max(120)
-      .optional()
-      .refine((value) => !value || modelIds.has(value), {
-        message: "Unknown model.",
-      }),
+      .optional(),
     status: z.enum(["limited", "disabled"]),
     title: z.string().trim().min(3).max(120),
     message: z.string().trim().max(500).optional(),
     fallbackModelIds: z
       .array(
-        z.string().trim().refine((value) => modelIds.has(value), {
-          message: "Unknown fallback model.",
-        })
+        z.string().trim().min(1).max(120)
       )
       .max(5)
       .optional(),
@@ -106,9 +98,17 @@ export async function POST(req: Request) {
     });
 
     const body = await readLimitedJson(req, 6 * 1024, createIncidentSchema);
+    const runtimeModels = await getRuntimeModels();
+    const modelIds = new Set(runtimeModels.map((model) => model.id));
+    if (body.modelId && !modelIds.has(body.modelId)) {
+      return NextResponse.json({ error: "Unknown model." }, { status: 400 });
+    }
+    if ((body.fallbackModelIds || []).some((modelId) => !modelIds.has(modelId))) {
+      return NextResponse.json({ error: "Unknown fallback model." }, { status: 400 });
+    }
     const targetModels = body.modelId
-      ? AVAILABLE_MODELS.filter((model) => model.id === body.modelId)
-      : AVAILABLE_MODELS.filter((model) => model.provider === body.provider);
+      ? runtimeModels.filter((model) => model.id === body.modelId)
+      : runtimeModels.filter((model) => model.provider === body.provider);
 
     const incident = await prisma.$transaction(async (tx) => {
       const created = await tx.adminProviderIncident.create({

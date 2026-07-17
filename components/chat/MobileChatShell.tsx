@@ -11,11 +11,11 @@ import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import { chatHelpCopy } from "@/components/chat/chatHelpCopy";
 import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
 import {
-  AVAILABLE_MODELS,
   type ChatAttachment,
   type Conversation,
 } from "@/components/chat/types";
 import { useLanguage } from "@/components/LanguageProvider";
+import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import {
   CheckCircle2,
   Lock,
@@ -108,6 +108,7 @@ export function MobileChatShell({
   onResponseComplete,
   onFollowupSent,
 }: MobileChatShellProps) {
+  const { models: AVAILABLE_MODELS } = useModelCatalog();
   const { t, lang } = useLanguage();
   const helpCopy = chatHelpCopy[lang];
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -222,7 +223,7 @@ export function MobileChatShell({
 
   const activeModel = useMemo(
     () => AVAILABLE_MODELS.find((model) => model.id === resolvedActiveModelId),
-    [resolvedActiveModelId]
+    [AVAILABLE_MODELS, resolvedActiveModelId]
   );
   const currentConversation = conversations.find(
     (conversation) => conversation.id === currentChatId

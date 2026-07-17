@@ -4,9 +4,9 @@
 import { signIn, signOut, useSession } from "next-auth/react";
 import { useCallback, useState, useEffect, useMemo, useRef } from "react";
 import {
-    ENABLED_MODELS,
     getModelUsageProfile,
 } from "@/components/chat/types";
+import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import {
     Bot,
     BarChart3,
@@ -56,6 +56,7 @@ import {
 import { openAnalyticsPreferences } from "@/lib/analyticsPreferencesEvents";
 
 export function AuthButton() {
+    const { enabledModels: ENABLED_MODELS } = useModelCatalog();
   const { data: session, status } = useSession();
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);

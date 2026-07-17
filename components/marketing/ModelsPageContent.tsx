@@ -4,7 +4,8 @@ import Link from "next/link";
 import { Activity, ExternalLink } from "lucide-react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
-import { ENABLED_MODELS, getModelUsageProfile } from "@/lib/models";
+import { getModelUsageProfile } from "@/lib/models";
+import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { getModelBrand } from "@/lib/modelBranding";
 import { getModelBestFor, getModelExperienceStatus, getModelExperienceTags } from "@/lib/modelExperience";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
@@ -112,6 +113,7 @@ const copy = {
 } satisfies Record<Language, Record<string, string>>;
 
 export function ModelsPageContent() {
+  const { enabledModels: ENABLED_MODELS } = useModelCatalog();
   const { lang, t } = useLanguage();
   const content = copy[lang];
 

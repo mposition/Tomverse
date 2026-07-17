@@ -7,7 +7,8 @@ import { MobileChatShell } from "@/components/chat/MobileChatShell";
 import { ComparisonReviewDialog } from "@/components/chat/ComparisonReviewDialog";
 import { UpgradeCtaLink } from "@/components/billing/UpgradeCtaLink";
 import { ModelFinder } from "@/components/onboarding/ModelFinder";
-import { Conversation, AVAILABLE_MODELS, type ChatAttachment } from "@/components/chat/types";
+import { Conversation, type ChatAttachment } from "@/components/chat/types";
+import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { useSession } from "next-auth/react";
 import {
   useLanguage,
@@ -15,14 +16,10 @@ import {
 } from "@/components/LanguageProvider";
 import {
   APP_DEFAULTS,
-  clampGuestSelectedModels,
-  clampSelectedModels,
 } from "@/lib/appDefaults";
 import {
   canUseModelWithPlan,
-  getModel,
   getModelUsageProfile,
-  isEnabledModelId,
   type AiModel,
 } from "@/lib/models";
 import {
@@ -265,6 +262,11 @@ function ChatShellSkeleton({ label }: { label: string }) {
 }
 
 export default function Home() {
+  const {
+    models: AVAILABLE_MODELS,
+    getModel,
+    isEnabledModelId,
+  } = useModelCatalog();
     const { t, setLang, lang } = useLanguage();
   const formatCopy = (key: string, values: Record<string, string>) =>
     Object.entries(values).reduce(
@@ -368,7 +370,7 @@ export default function Home() {
         const model = getModel(modelId);
         return Boolean(model && !canUseModelWithPlan(currentAccessPlan, model));
       }),
-    [currentAccessPlan, selectedModels]
+    [currentAccessPlan, getModel, selectedModels]
   );
   const effectiveDisabledPanels = useMemo(
     () => uniqueStrings([...disabledPanels, ...planLockedModelIds]),
@@ -401,7 +403,23 @@ export default function Home() {
           getModelUsageProfile(model).category === "Standard"
       );
     },
-    []
+    [getModel]
+  );
+
+  const clampSelectedModels = useCallback(
+    (models: string[]) =>
+      Array.from(new Set(models))
+        .filter(isEnabledModelId)
+        .slice(0, APP_DEFAULTS.maxSelectedModels),
+    [isEnabledModelId]
+  );
+
+  const clampGuestSelectedModels = useCallback(
+    (models: string[]) =>
+      clampSelectedModels(models)
+        .filter(isGuestEligibleModel)
+        .slice(0, APP_DEFAULTS.maxGuestSelectedModels),
+    [clampSelectedModels, isGuestEligibleModel]
   );
 
   useEffect(() => {
@@ -638,7 +656,7 @@ export default function Home() {
                     !recoveredModels.includes(modelId)
             )
         );
-    }, [userDefaultEngine]);
+    }, [clampSelectedModels, userDefaultEngine]);
 
   useEffect(() => {
     if (isGuestMode && !isGuestSettingsLoaded) return;
@@ -790,7 +808,7 @@ export default function Home() {
                 handleSettingsUpdated
             );
         };
-    }, [currentChatId]);
+    }, [currentChatId, isEnabledModelId]);
 
   const fetchConversations = useCallback(async () => {
     if (!sessionUserId) return;
@@ -865,7 +883,7 @@ export default function Home() {
         } else if (status !== "loading") {
             queueMicrotask(() => setIsUserSettingsLoaded(true));
         }
-    }, [fetchConversations, sessionUserId, setLang, status]);
+    }, [fetchConversations, isEnabledModelId, sessionUserId, setLang, status]);
 
     const handleNewChat = () => {
         localComparisonResponsesRef.current.clear();
@@ -1175,10 +1193,13 @@ export default function Home() {
     };
   }, [
     currentChatId,
+    clampGuestSelectedModels,
+    clampSelectedModels,
     isGuestMode,
     isGuestSettingsLoaded,
     isUserSettingsLoaded,
     maxSelectableModels,
+    isEnabledModelId,
     status,
   ]);
   

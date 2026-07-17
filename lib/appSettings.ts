@@ -3,10 +3,9 @@ import "server-only";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import {
   canUseModelWithPlan,
-  getModel,
   getModelUsageProfile,
-  isEnabledModelId,
 } from "@/lib/models";
+import { getEnabledRuntimeModel } from "@/lib/modelRegistry";
 import { prisma } from "@/lib/prisma";
 
 export type PublicAppSettings = {
@@ -15,18 +14,17 @@ export type PublicAppSettings = {
 
 const GUEST_DEFAULT_MODEL_KEY = "guestDefaultModelId";
 
-export const isValidGuestDefaultModel = (modelId: string) => {
-  const model = getModel(modelId);
+export const isValidGuestDefaultModel = async (modelId: string) => {
+  const model = await getEnabledRuntimeModel(modelId);
   return Boolean(
-    isEnabledModelId(modelId) &&
-      model &&
+    model &&
       canUseModelWithPlan("Guest", model) &&
       getModelUsageProfile(model).category === "Standard"
   );
 };
 
-const normalizeGuestDefaultModel = (modelId: string | null | undefined) =>
-  modelId && isValidGuestDefaultModel(modelId)
+const normalizeGuestDefaultModel = async (modelId: string | null | undefined) =>
+  modelId && (await isValidGuestDefaultModel(modelId))
     ? modelId
     : APP_DEFAULTS.guestDefaultModelId;
 
@@ -37,12 +35,12 @@ export async function getPublicAppSettings(): Promise<PublicAppSettings> {
   });
 
   return {
-    guestDefaultModelId: normalizeGuestDefaultModel(row?.value),
+    guestDefaultModelId: await normalizeGuestDefaultModel(row?.value),
   };
 }
 
 export async function updateGuestDefaultModel(modelId: string) {
-  const normalized = normalizeGuestDefaultModel(modelId);
+  const normalized = await normalizeGuestDefaultModel(modelId);
   if (normalized !== modelId) {
     throw new Error(
       "Guest default model must be an enabled guest-accessible Standard model."

@@ -1,9 +1,9 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, Bot, CalendarClock, Clipboard, Clock, Eye, LockKeyhole, Share2, UserRound } from "lucide-react";
-import { getModel } from "@/lib/models";
+import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import type { ShareSnapshot } from "@/lib/shareSnapshot";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { localeLaunchPolicy } from "@/lib/localeLaunchPolicy";
@@ -18,11 +18,6 @@ function formatDate(value: string, locale: string) {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
-}
-
-function getAssistantLabel(modelId: string | null | undefined, fallback: string) {
-  if (!modelId) return fallback;
-  return getModel(modelId)?.name || modelId;
 }
 
 const languageOptions: Array<{ value: Language; label: string }> = [
@@ -40,6 +35,14 @@ export function SharedConversationView({
 }: {
   shareToken: string;
 }) {
+  const { getModel } = useModelCatalog();
+  const getAssistantLabel = useCallback(
+    (modelId: string | null | undefined, fallback: string) => {
+      if (!modelId) return fallback;
+      return getModel(modelId)?.name || modelId;
+    },
+    [getModel]
+  );
   const [data, setData] = useState<SharedConversationData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [modelFilter, setModelFilter] = useState("all");
@@ -58,7 +61,7 @@ export function SharedConversationView({
       id: modelId,
       name: getAssistantLabel(modelId, t("share.assistant")),
     }));
-  }, [snapshot, t]);
+  }, [getAssistantLabel, snapshot, t]);
   const visibleMessages = useMemo(() => {
     if (!snapshot) return [];
     return snapshot.messages.filter(

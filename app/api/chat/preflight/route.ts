@@ -23,7 +23,7 @@ import {
     effectivePlanModelLimit,
     getUserBillingPlan,
 } from "@/lib/billingEntitlements";
-import { getEnabledModel } from "@/lib/models";
+import { getRuntimeModels } from "@/lib/modelRegistry";
 import { prisma } from "@/lib/prisma";
 
 const preflightSchema = z
@@ -122,8 +122,11 @@ export async function POST(request: Request) {
                 monthlyMessageLimit: billingPlan.monthlyMessageLimit,
             }
         );
+        const runtimeModels = await getRuntimeModels();
+        const runtimeModelMap = new Map(runtimeModels.map((model) => [model.id, model]));
         const models = uniqueModelIds.map((modelId) => {
-            const model = getEnabledModel(modelId);
+            const candidate = runtimeModelMap.get(modelId);
+            const model = candidate?.enabled && !candidate.catalogDeleted ? candidate : undefined;
             if (!model) {
                 throw new ChatAccessError(
                     400,

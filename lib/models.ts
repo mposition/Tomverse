@@ -98,6 +98,18 @@ export type AiModel = {
     contextWindowTokens?: number;
     /** Explicit per-model native input support. Omitted means text-only. */
     inputCapabilities?: ModelInputCapabilities;
+    /** Provider API endpoint. Credentials always remain in environment variables. */
+    apiBaseUrl?: string;
+    apiKeyEnvName?: string;
+    /** Explicit DB-managed base credit cost. Falls back to usageClass defaults. */
+    creditWeight?: number;
+    catalogDeleted?: boolean;
+    sortOrder?: number;
+    maxOutputTokens?: number;
+    reservationOutputTokens?: number;
+    inputUsdPerMillionTokens?: number;
+    outputUsdPerMillionTokens?: number;
+    cachedInputPriceMultiplier?: number;
 };
 
 const FULL_BINARY_INPUT = {
@@ -203,28 +215,32 @@ export const canUseModelWithPlan = (
 ) => MODEL_ACCESS_RANK[plan] >= MODEL_ACCESS_RANK[model.minimumPlan];
 
 export const getModelUsageProfile = (
-    model: Pick<AiModel, "usageClass">
+    model: Pick<AiModel, "usageClass" | "creditWeight">
 ): { category: ModelUsageCategory; credits: number } => {
+    const explicitCredits =
+        Number.isInteger(model.creditWeight) && (model.creditWeight || 0) > 0
+            ? model.creditWeight
+            : undefined;
     switch (model.usageClass) {
         case "standard":
-            return { category: "Standard", credits: MODEL_USAGE_CREDIT_WEIGHTS.standard };
+            return { category: "Standard", credits: explicitCredits ?? MODEL_USAGE_CREDIT_WEIGHTS.standard };
         case "advanced":
-            return { category: "Advanced", credits: MODEL_USAGE_CREDIT_WEIGHTS.advanced };
+            return { category: "Advanced", credits: explicitCredits ?? MODEL_USAGE_CREDIT_WEIGHTS.advanced };
         case "premium":
-            return { category: "Premium", credits: MODEL_USAGE_CREDIT_WEIGHTS.premium };
+            return { category: "Premium", credits: explicitCredits ?? MODEL_USAGE_CREDIT_WEIGHTS.premium };
         case "reasoning":
-            return { category: "Reasoning", credits: MODEL_USAGE_CREDIT_WEIGHTS.reasoning };
+            return { category: "Reasoning", credits: explicitCredits ?? MODEL_USAGE_CREDIT_WEIGHTS.reasoning };
         case "premium-reasoning":
-            return { category: "Reasoning", credits: MODEL_USAGE_CREDIT_WEIGHTS.premiumReasoning };
+            return { category: "Reasoning", credits: explicitCredits ?? MODEL_USAGE_CREDIT_WEIGHTS.premiumReasoning };
         case "research":
-            return { category: "Research", credits: MODEL_USAGE_CREDIT_WEIGHTS.search };
+            return { category: "Research", credits: explicitCredits ?? MODEL_USAGE_CREDIT_WEIGHTS.search };
         case "deep-research":
-            return { category: "Research", credits: MODEL_USAGE_CREDIT_WEIGHTS.deepResearch };
+            return { category: "Research", credits: explicitCredits ?? MODEL_USAGE_CREDIT_WEIGHTS.deepResearch };
     }
 };
 
 export const getModelUsageCredits = (
-    model: Pick<AiModel, "usageClass">
+    model: Pick<AiModel, "usageClass" | "creditWeight">
 ) => getModelUsageProfile(model).credits;
 
 export const getInputCreditMultiplier = (estimatedInputTokens: number) => {
@@ -238,7 +254,7 @@ export const getInputCreditMultiplier = (estimatedInputTokens: number) => {
 };
 
 export const getWeightedUsageCredits = (
-    model: Pick<AiModel, "usageClass">,
+    model: Pick<AiModel, "usageClass" | "creditWeight">,
     estimatedInputTokens: number
 ) =>
     Math.ceil(
@@ -374,22 +390,20 @@ const priceMultiplier = (value: string | undefined, fallback: number) => {
 };
 
 export const getModelBillingProfile = (
-    model: Pick<AiModel, "id" | "usageClass" | "provider">
+    model: Pick<AiModel, "id" | "usageClass" | "provider" | "maxOutputTokens" | "reservationOutputTokens" | "inputUsdPerMillionTokens" | "outputUsdPerMillionTokens" | "cachedInputPriceMultiplier">
 ): ModelBillingProfile => {
     const defaults = {
         ...BILLING_DEFAULTS[getModelCostClass(model.usageClass)],
         ...MODEL_BILLING_DEFAULTS[model.id],
     };
-    const maxOutputTokens = Math.floor(
-        positiveNumber(
-            process.env[modelEnvKey(model.id, "MAX_OUTPUT_TOKENS")],
-            defaults.maxOutputTokens
-        )
-    );
+    const maxOutputTokens = Math.floor(model.maxOutputTokens ?? positiveNumber(
+        process.env[modelEnvKey(model.id, "MAX_OUTPUT_TOKENS")],
+        defaults.maxOutputTokens
+    ));
     const reservationOutputTokens = Math.min(
         maxOutputTokens,
         Math.floor(
-            positiveNumber(
+            model.reservationOutputTokens ?? positiveNumber(
                 process.env[
                     modelEnvKey(model.id, "RESERVATION_OUTPUT_TOKENS")
                 ],
@@ -400,15 +414,15 @@ export const getModelBillingProfile = (
     return {
         maxOutputTokens,
         reservationOutputTokens,
-        inputUsdPerMillionTokens: positiveNumber(
+        inputUsdPerMillionTokens: model.inputUsdPerMillionTokens ?? positiveNumber(
             process.env[modelEnvKey(model.id, "INPUT_USD_PER_MILLION")],
             defaults.inputUsdPerMillionTokens
         ),
-        outputUsdPerMillionTokens: positiveNumber(
+        outputUsdPerMillionTokens: model.outputUsdPerMillionTokens ?? positiveNumber(
             process.env[modelEnvKey(model.id, "OUTPUT_USD_PER_MILLION")],
             defaults.outputUsdPerMillionTokens
         ),
-        cachedInputPriceMultiplier: priceMultiplier(
+        cachedInputPriceMultiplier: model.cachedInputPriceMultiplier ?? priceMultiplier(
             process.env[
                 modelEnvKey(model.id, "CACHED_INPUT_PRICE_MULTIPLIER")
             ],

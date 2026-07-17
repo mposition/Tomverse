@@ -18,14 +18,7 @@ import {
 
 const updateAppSettingsSchema = z
   .object({
-    guestDefaultModelId: z
-      .string()
-      .trim()
-      .min(1)
-      .max(100)
-      .refine(isValidGuestDefaultModel, {
-        message: "Guest default model must be an enabled Free model.",
-      }),
+    guestDefaultModelId: z.string().trim().min(1).max(120),
   })
   .strict();
 
@@ -70,6 +63,12 @@ export async function PATCH(req: Request) {
     });
 
     const body = await readLimitedJson(req, 4 * 1024, updateAppSettingsSchema);
+    if (!(await isValidGuestDefaultModel(body.guestDefaultModelId))) {
+      return NextResponse.json(
+        { error: "Guest default model must be an enabled guest-accessible Standard model." },
+        { status: 400 }
+      );
+    }
     await updateGuestDefaultModel(body.guestDefaultModelId);
 
     const settings = await getPublicAppSettings();

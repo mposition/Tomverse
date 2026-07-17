@@ -10,10 +10,11 @@ export type ComparableStoredMessage = {
 };
 
 export const toComparisonSourceResponse = (
-  message: ComparableStoredMessage
+  message: ComparableStoredMessage,
+  modelLookup: (modelId: string) => ReturnType<typeof getModel> = getModel
 ): ReviewSourceResponse | null => {
   if (message.role !== "assistant" || !message.modelId) return null;
-  const model = getModel(message.modelId);
+  const model = modelLookup(message.modelId);
   if (!model) return null;
   return {
     messageId: message.id,
@@ -25,7 +26,8 @@ export const toComparisonSourceResponse = (
 };
 
 export const selectLatestComparableTurn = (
-  chronologicalMessages: ComparableStoredMessage[]
+  chronologicalMessages: ComparableStoredMessage[],
+  modelLookup: (modelId: string) => ReturnType<typeof getModel> = getModel
 ) => {
   const promptIndex = chronologicalMessages.findLastIndex(
     (message) => message.role === "user"
@@ -41,7 +43,7 @@ export const selectLatestComparableTurn = (
   ) {
     const message = chronologicalMessages[index];
     if (message.role === "user") break;
-    const response = toComparisonSourceResponse(message);
+    const response = toComparisonSourceResponse(message, modelLookup);
     if (response) byModel.set(response.modelId, response);
   }
   const responses = Array.from(byModel.values()).slice(0, 3);

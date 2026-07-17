@@ -11,13 +11,12 @@ import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import { chatHelpCopy } from "@/components/chat/chatHelpCopy";
 import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
 import {
-  AVAILABLE_MODELS,
-  ENABLED_MODELS,
   getModelUsageProfile,
   type ChatAttachment,
   type Conversation,
 } from "@/components/chat/types";
 import { useLanguage } from "@/components/LanguageProvider";
+import { useModelCatalog } from "@/components/ModelCatalogProvider";
 
 type PromptPayload = {
   id: string;
@@ -104,6 +103,10 @@ export function DesktopChatShell({
   onResponseComplete,
   onFollowupSent,
 }: DesktopChatShellProps) {
+  const {
+    models: AVAILABLE_MODELS,
+    enabledModels: ENABLED_MODELS,
+  } = useModelCatalog();
   const { t, lang } = useLanguage();
   const helpCopy = chatHelpCopy[lang];
 

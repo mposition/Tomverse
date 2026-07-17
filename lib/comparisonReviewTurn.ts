@@ -6,6 +6,7 @@ import {
   selectLatestComparableTurn,
   toComparisonSourceResponse,
 } from "@/lib/comparisonReviewTurnCore";
+import { getRuntimeModels } from "@/lib/modelRegistry";
 
 /**
  * Returns answers belonging to the latest user question only.
@@ -33,7 +34,9 @@ export const latestComparableConversationTurn = async (
     })
   ).reverse();
 
-  return selectLatestComparableTurn(recent);
+  const models = await getRuntimeModels({ includeCatalogDeleted: true });
+  const modelMap = new Map(models.map((model) => [model.id, model]));
+  return selectLatestComparableTurn(recent, (modelId) => modelMap.get(modelId));
 };
 
 export const requestedComparableConversationTurn = async (
@@ -87,10 +90,14 @@ export const requestedComparableConversationTurn = async (
     },
   });
   const byId = new Map(messages.map((message) => [message.id, message]));
+  const models = await getRuntimeModels({ includeCatalogDeleted: true });
+  const modelMap = new Map(models.map((model) => [model.id, model]));
   const responses = assistantMessageIds
     .map((id) => byId.get(id))
     .map((message) =>
-      message ? toComparisonSourceResponse(message) : null
+      message
+        ? toComparisonSourceResponse(message, (modelId) => modelMap.get(modelId))
+        : null
     )
     .filter((response): response is ReviewSourceResponse => Boolean(response));
   if (

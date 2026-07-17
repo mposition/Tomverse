@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
-import { isEnabledModelId } from "@/lib/models";
+import { isEnabledRuntimeModelId } from "@/lib/modelRegistry";
 import { getUserChatUsageKey } from "@/lib/chatSecurity";
 import { migrateCurrentDailyUsageBuckets } from "@/lib/userDailyUsage";
 import {
@@ -26,7 +26,7 @@ const settingsSchema = z
     .object({
         theme: z.enum(["dark", "light", "system"]).optional(),
         language: z.enum(["en", "ko", "zh", "fr", "de", "es", "pt"]).optional(),
-        defaultModel: z.string().max(100).refine(isEnabledModelId).optional(),
+        defaultModel: z.string().min(1).max(120).optional(),
         timeZone: z
             .string()
             .trim()
@@ -103,7 +103,7 @@ export async function GET(req: Request) {
             }).catch((error) => {
                 console.error("Account welcome email failed:", error);
             });
-        } else if (!isEnabledModelId(settings.defaultModel)) {
+        } else if (!(await isEnabledRuntimeModelId(settings.defaultModel))) {
             settings = await prisma.userSettings.update({
                 where: { userId },
                 data: { defaultModel: APP_DEFAULTS.defaultModelId },
@@ -147,6 +147,9 @@ export async function POST(req: Request) {
             4 * 1024,
             settingsSchema
         );
+        if (defaultModel && !(await isEnabledRuntimeModelId(defaultModel))) {
+            return NextResponse.json({ error: "Unsupported default model." }, { status: 400 });
+        }
         const requestedTimeZone =
             timeZone === undefined
                 ? undefined

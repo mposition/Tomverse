@@ -34,8 +34,8 @@ const tabs: Array<{
   },
   {
     id: "controls",
-    label: "Block / Recover Models",
-    description: "Limit, disable, restore, or mark models as coming soon",
+    label: "Model Registry / Runtime",
+    description: "Add or edit model specifications, then control live availability",
     icon: SlidersHorizontal,
   },
 ];

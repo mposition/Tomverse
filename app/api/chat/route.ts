@@ -1,5 +1,5 @@
 import { streamText, type FilePart, type ModelMessage } from "ai";
-import { APP_DEFAULTS, clampSelectedModels } from "@/lib/appDefaults";
+import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { createHash, randomUUID } from "node:crypto";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
@@ -12,12 +12,11 @@ import {
 } from "@/lib/r2";
 import { prisma } from "@/lib/prisma";
 import {
-    getEnabledModel,
-    getModel,
     modelSupportsImageInput,
     modelSupportsNativePdfInput,
     type AiModel,
 } from "@/lib/models";
+import { getRuntimeModels } from "@/lib/modelRegistry";
 import { getActiveAiModel } from "@/lib/activeAiModel";
 import {
     consumePerplexityUsage,
@@ -628,10 +627,12 @@ export async function POST(req: Request) {
         } = validateChatPayload(body);
         const requestedModelId = modelId || APP_DEFAULTS.defaultModelId;
         requestedModelIdForLog = requestedModelId;
-        const catalogModel = getModel(requestedModelId);
+        const runtimeModels = await getRuntimeModels({ includeCatalogDeleted: true });
+        const runtimeModelMap = new Map(runtimeModels.map((model) => [model.id, model]));
+        const catalogModel = runtimeModelMap.get(requestedModelId);
         if (catalogModel && !catalogModel.enabled) {
             const replacement = catalogModel.replacementModelId
-                ? getEnabledModel(catalogModel.replacementModelId)
+                ? runtimeModelMap.get(catalogModel.replacementModelId)
                 : undefined;
             return tracedJsonError(
                 replacement
@@ -642,7 +643,9 @@ export async function POST(req: Request) {
                 traceId
             );
         }
-        const modelConfig = getEnabledModel(requestedModelId);
+        const modelConfig = catalogModel?.enabled && !catalogModel.catalogDeleted
+            ? catalogModel
+            : undefined;
         if (!modelConfig) {
             return tracedJsonError(
                 "Unknown or disabled model.",
@@ -766,9 +769,14 @@ export async function POST(req: Request) {
             ) {
                 return conversationLockedResponse();
             }
-            const selectedConversationModels = clampSelectedModels(
-                parseStoredModelIds(conversation.selectedModels)
-            );
+            const selectedConversationModels = Array.from(
+                new Set(parseStoredModelIds(conversation.selectedModels))
+            )
+                .filter((selectedModelId) => {
+                    const selectedModel = runtimeModelMap.get(selectedModelId);
+                    return selectedModel?.enabled && !selectedModel.catalogDeleted;
+                })
+                .slice(0, APP_DEFAULTS.maxSelectedModels);
             const maxModels = billingPlan
                 ? effectivePlanModelLimit(billingPlan)
                 : 1;

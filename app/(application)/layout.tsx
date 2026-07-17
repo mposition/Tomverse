@@ -11,6 +11,9 @@ import {
   resolveAnalyticsConsentPolicy,
 } from "@/lib/analyticsConsentPolicy";
 import { authOptions } from "@/lib/auth";
+import { ModelCatalogProvider } from "@/components/ModelCatalogProvider";
+import { getRuntimeModels } from "@/lib/modelRegistry";
+import { AVAILABLE_MODELS } from "@/lib/models";
 
 const detectInitialLanguage = (acceptLanguage: string | null): Language => {
   const candidates =
@@ -59,6 +62,10 @@ export default async function ApplicationLayout({
     analyticsCountry,
     process.env.ANALYTICS_DEFAULT_ENABLED_COUNTRIES
   );
+  const initialModels = await getRuntimeModels({ includeCatalogDeleted: true }).catch((error) => {
+    console.error("Application model registry fetch error:", error);
+    return [...AVAILABLE_MODELS];
+  });
 
   try {
     const e2eCookies =
@@ -107,7 +114,9 @@ export default async function ApplicationLayout({
             process.env.E2E_AUTH_BYPASS === "true" && !e2eAnalyticsEnabled
           }
         >
-          {children}
+          <ModelCatalogProvider initialModels={initialModels}>
+            {children}
+          </ModelCatalogProvider>
         </AnalyticsProvider>
       </LanguageProvider>
     </SessionProviderWrapper>

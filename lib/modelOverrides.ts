@@ -1,7 +1,8 @@
 import "server-only";
 
 import { prisma } from "@/lib/prisma";
-import { getModel, type AiModel } from "@/lib/models";
+import type { AiModel } from "@/lib/models";
+import { getRuntimeModel } from "@/lib/modelRegistry";
 
 export type AdminModelOverrideStatus = "available" | "limited" | "disabled" | "coming-soon";
 
@@ -50,7 +51,7 @@ export function resolveModelOverrideStatus(
 }
 
 export async function assertModelNotAdminDisabled(modelId: string) {
-  const model = getModel(modelId);
+  const model = await getRuntimeModel(modelId);
   if (!model) return { allowed: false, reason: "Unknown model." };
   const override = (await getModelOverrideMap()).get(modelId);
   const status = resolveModelOverrideStatus(model, override);

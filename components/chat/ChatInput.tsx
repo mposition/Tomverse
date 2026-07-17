@@ -36,12 +36,11 @@ import {
 } from "lucide-react";
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import {
-  AVAILABLE_MODELS,
-  PUBLIC_MODELS,
   MAX_SELECTED_MODELS,
   getModelUsageProfile,
   type ChatAttachment,
 } from "@/components/chat/types";
+import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { useLanguage } from "@/components/LanguageProvider";
 import { dispatchAppToast } from "@/lib/appToast";
@@ -106,7 +105,6 @@ const GUEST_QUICK_START_STORAGE_KEY = "tomverse_guest_quick_start_seen_v2";
 const GUEST_QUICK_START_ACTIVE_KEY = "tomverse_guest_quick_start_active_v2";
 const GUEST_QUICK_START_EVENT = "tomverse:guest-quick-start";
 const PROVIDER_DISPLAY_ORDER = ["openai", "google", "anthropic", "deepseek", "mistral"];
-const PUBLIC_MODEL_IDS = new Set(PUBLIC_MODELS.map((model) => model.id));
 const MOBILE_MODEL_MENU_QUERY = "(max-width: 767px)";
 const subscribeToMobileModelMenu = (onChange: () => void) => {
   const mediaQuery = window.matchMedia(MOBILE_MODEL_MENU_QUERY);
@@ -395,6 +393,14 @@ export function ChatInput({
   isGuestMode = false,
   guestPreviewMode = false,
 }: ChatInputProps) {
+  const {
+    models: AVAILABLE_MODELS,
+    publicModels: PUBLIC_MODELS,
+  } = useModelCatalog();
+  const PUBLIC_MODEL_IDS = useMemo(
+    () => new Set(PUBLIC_MODELS.map((model) => model.id)),
+    [PUBLIC_MODELS]
+  );
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const previousAttachmentsRef = useRef<ChatAttachment[]>([]);
@@ -433,11 +439,11 @@ export function ChatInput({
         ? selectedModels
             .map((id) => AVAILABLE_MODELS.find((model) => model.id === id))
             .filter(
-              (model): model is (typeof AVAILABLE_MODELS)[number] =>
+              (model): model is NonNullable<typeof model> =>
                 model !== undefined && !modelSupportsImageInput(model)
             )
         : [],
-    [hasImageAttachments, selectedModels]
+    [AVAILABLE_MODELS, hasImageAttachments, selectedModels]
   );
 
   const estimatedInputTokens = useMemo(() => {
@@ -747,7 +753,7 @@ export function ChatInput({
           getProviderSortRank(a) - getProviderSortRank(b) ||
           a.localeCompare(b)
       ),
-    []
+    [PUBLIC_MODELS]
   );
 
   const currentPlan = isGuestMode ? "Guest" : accountUsage?.plan ?? "Free";
@@ -760,7 +766,7 @@ export function ChatInput({
       .map((modelId) => PUBLIC_MODELS.find((model) => model.id === modelId))
       .filter((model): model is (typeof PUBLIC_MODELS)[number] => Boolean(model?.enabled))
       .slice(0, 3);
-  }, [personalizedRecommendationIds]);
+  }, [PUBLIC_MODELS, personalizedRecommendationIds]);
 
   const filteredModels = useMemo(() => {
     const normalizedQuery = modelSearchQuery.trim().toLowerCase();
@@ -799,6 +805,7 @@ export function ChatInput({
     imageInputOnly,
     lang,
     modelSearchQuery,
+    PUBLIC_MODELS,
     providerFilter,
     usageBandFilter,
   ]);
@@ -874,7 +881,7 @@ export function ChatInput({
       })
       .catch(() => {});
     return () => controller.abort();
-  }, []);
+  }, [PUBLIC_MODEL_IDS]);
 
   useEffect(() => {
     if (

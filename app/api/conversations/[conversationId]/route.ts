@@ -5,8 +5,11 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { APP_DEFAULTS, clampSelectedModels } from "@/lib/appDefaults";
-import { isEnabledModelId } from "@/lib/models";
+import { APP_DEFAULTS } from "@/lib/appDefaults";
+import {
+  clampRuntimeSelectedModels,
+  isEnabledRuntimeModelId,
+} from "@/lib/modelRegistry";
 import { z } from "zod";
 import {
     apiSecurityResponse,
@@ -33,7 +36,7 @@ import {
     modelLimitResponse,
 } from "@/lib/billingEntitlements";
 
-const modelSchema = z.string().max(100).refine(isEnabledModelId);
+const modelSchema = z.string().min(1).max(120);
 const updateConversationSchema = z
   .object({
     title: z.string().trim().min(1).max(120).optional(),
@@ -138,7 +141,7 @@ export async function GET(
         { status: 400 }
       );
     }
-    if (requestedModelId && !isEnabledModelId(requestedModelId)) {
+    if (requestedModelId && !(await isEnabledRuntimeModelId(requestedModelId))) {
       return NextResponse.json(
         { error: "Invalid model ID." },
         { status: 400 }
@@ -201,6 +204,9 @@ export async function GET(
       ? messagePage.slice(0, MESSAGE_PAGE_SIZE)
       : messagePage;
 
+    const selectedModels = await clampRuntimeSelectedModels(
+      safeParse(conversation.selectedModels, [defaultEngine])
+    );
     return NextResponse.json({
       ...conversation,
         messages,
@@ -209,14 +215,9 @@ export async function GET(
           hasMore: hasMoreMessages,
           nextCursor: hasMoreMessages ? messages.at(-1)?.id || null : null,
         },
-        selectedModels: clampSelectedModels(
-          safeParse(conversation.selectedModels, [defaultEngine])
-        ),
+        selectedModels,
         disabledPanels: safeParse(conversation.disabledPanels, []).filter(
-          (modelId: string) =>
-            clampSelectedModels(
-              safeParse(conversation.selectedModels, [defaultEngine])
-            ).includes(modelId)
+          (modelId: string) => selectedModels.includes(modelId)
         ),
         isLocked: !!conversation.password,
         shareEnabled:
@@ -386,12 +387,22 @@ export async function PATCH(
           }
       }
 
-    const normalizedModels =
+    const normalizedModels = await (
       body.selectedModels !== undefined
-        ? clampSelectedModels(body.selectedModels)
-        : clampSelectedModels(
+        ? clampRuntimeSelectedModels(body.selectedModels)
+        : clampRuntimeSelectedModels(
             safeParse(existingConv.selectedModels, [defaultEngine])
-          );
+          ));
+
+    if (
+      body.selectedModels !== undefined &&
+      normalizedModels.length !== new Set(body.selectedModels).size
+    ) {
+      return NextResponse.json(
+        { error: "One or more selected models are unavailable." },
+        { status: 400 }
+      );
+    }
 
     if (body.selectedModels !== undefined && normalizedModels.length > maxModels) {
       return modelLimitResponse(maxModels);
@@ -450,17 +461,15 @@ export async function PATCH(
       });
     }
 
+    const responseSelectedModels = await clampRuntimeSelectedModels(
+      safeParse(updatedConversation.selectedModels, [defaultEngine])
+    );
 	const response = NextResponse.json({
       ...updatedConversation,
         projectId: updatedConversation.projectId || null,
-        selectedModels: clampSelectedModels(
-          safeParse(updatedConversation.selectedModels, [defaultEngine])
-        ),
+        selectedModels: responseSelectedModels,
       disabledPanels: safeParse(updatedConversation.disabledPanels, []).filter(
-        (modelId: string) =>
-          clampSelectedModels(
-            safeParse(updatedConversation.selectedModels, [defaultEngine])
-          ).includes(modelId)
+        (modelId: string) => responseSelectedModels.includes(modelId)
       ),
         isLocked: !!updatedConversation.password,
         shareEnabled:
