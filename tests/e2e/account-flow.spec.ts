@@ -144,6 +144,36 @@ test("authenticated selector blocks a fourth model", async ({ page }) => {
   await expect(selectedModels).toHaveCount(3);
 });
 
+test("conversation menu stays above the compact account area", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name.startsWith("mobile"), "Compact desktop sidebar regression");
+  await page.setViewportSize({ width: 900, height: 600 });
+  await openConversationMenu(page);
+
+  const panel = page.getByTestId("conversation-menu-panel");
+  await expect(panel).toHaveCSS("position", "fixed");
+
+  const layout = await panel.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const hitTarget = document.elementFromPoint(
+      rect.left + Math.min(16, rect.width / 2),
+      rect.bottom - 2
+    );
+
+    return {
+      bottom: rect.bottom,
+      isBodyPortal: element.parentElement === document.body,
+      top: rect.top,
+      viewportHeight: window.innerHeight,
+      visibleAboveAccountLayer: hitTarget === element || element.contains(hitTarget),
+    };
+  });
+
+  expect(layout.isBodyPortal).toBe(true);
+  expect(layout.top).toBeGreaterThanOrEqual(7);
+  expect(layout.bottom).toBeLessThanOrEqual(layout.viewportHeight - 7);
+  expect(layout.visibleAboveAccountLayer).toBe(true);
+});
+
 test("share uses product toast and copies the canonical URL", async ({ page }) => {
   await openConversationMenu(page);
   await page
