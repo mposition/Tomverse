@@ -795,6 +795,10 @@ channel, or it falls back to `SLACK_WEBHOOK_URL`. Infrastructure reports use
 `INFRASTRUCTURE_SLACK_WEBHOOK_URL` when configured and otherwise use
 `SLACK_WEBHOOK_URL`.
 
+All Tomverse Slack deliveries, including Admin test messages and DB-independent
+operational alerts, automatically include `<!channel>` so the destination channel
+receives an explicit notification.
+
 The Admin **Alerts** tab contains the managed Slack templates for daily
 Infrastructure, daily Provider Usage, and Provider Incident messages. Operators
 with `ops:write` permission can enable or disable scheduled delivery, edit only

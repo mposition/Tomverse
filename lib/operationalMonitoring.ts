@@ -8,6 +8,7 @@ import {
   sanitizeOperationalText,
   type OperationalSeverity,
 } from "@/lib/operationalMonitoringCore";
+import { SLACK_ALERT_MENTION } from "@/lib/slackMessageTemplateCore";
 
 type OperationalIncident = {
   code: string;
@@ -110,13 +111,21 @@ const notifyExternalChannels = async ({
     process.env.OPS_ALERT_SLACK_WEBHOOK_URL || process.env.SLACK_WEBHOOK_URL;
   const discordUrl =
     process.env.OPS_ALERT_DISCORD_WEBHOOK_URL || process.env.DISCORD_WEBHOOK_URL;
+  const slackText = `${SLACK_ALERT_MENTION}\n${prefix} ${title}\n${detail}`;
+  const slackBlockText = `${SLACK_ALERT_MENTION}\n*${prefix} ${title}*\n${detail}`.slice(
+    0,
+    3_000
+  );
   const results = await Promise.allSettled([
     postJson(slackUrl, {
-      text: `${prefix} ${title}`,
+      text: slackText,
       blocks: [
         {
           type: "section",
-          text: { type: "mrkdwn", text: `*${prefix} ${title}*\n${detail}` },
+          text: {
+            type: "mrkdwn",
+            text: slackBlockText,
+          },
         },
       ],
     }),

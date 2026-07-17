@@ -23,17 +23,57 @@ export async function GET(req: Request) {
     });
 
     const url = new URL(req.url);
-    const take = Math.min(Math.max(Number(url.searchParams.get("take") || 50), 1), 100);
-    const logs = await prisma.adminNotificationLog.findMany({
-      orderBy: { createdAt: "desc" },
-      take,
-    });
+    const take = Math.min(
+      Math.max(Math.trunc(Number(url.searchParams.get("take") || 20)), 1),
+      50
+    );
+    const cursor = (url.searchParams.get("cursor") || "").trim() || null;
+    const requestedStatus = (url.searchParams.get("status") || "all").trim();
+    const status = ["sent", "failed", "skipped"].includes(requestedStatus)
+      ? requestedStatus
+      : null;
+    const where = status ? { status } : {};
+    const [records, statusGroups, unacknowledgedCount, totalCount, filteredCount] =
+      await Promise.all([
+        prisma.adminNotificationLog.findMany({
+          where,
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          take: take + 1,
+          ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        }),
+        prisma.adminNotificationLog.groupBy({
+          by: ["status"],
+          _count: { _all: true },
+        }),
+        prisma.adminNotificationLog.count({
+          where: { status: "failed", acknowledgedAt: null },
+        }),
+        prisma.adminNotificationLog.count(),
+        status
+          ? prisma.adminNotificationLog.count({ where: { status } })
+          : prisma.adminNotificationLog.count(),
+      ]);
+    const hasMore = records.length > take;
+    const logs = hasMore ? records.slice(0, take) : records;
+    const statusCounts = Object.fromEntries(
+      statusGroups.map((group) => [group.status, group._count._all])
+    );
 
     return NextResponse.json({
       logs: logs.map((log) => ({
         ...log,
         createdAt: log.createdAt.toISOString(),
       })),
+      nextCursor: hasMore ? logs.at(-1)?.id || null : null,
+      pageSize: take,
+      filteredCount,
+      stats: {
+        total: totalCount,
+        sent: statusCounts.sent || 0,
+        failed: statusCounts.failed || 0,
+        skipped: statusCounts.skipped || 0,
+        unacknowledged: unacknowledgedCount,
+      },
     });
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
