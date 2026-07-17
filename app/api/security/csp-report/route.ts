@@ -85,6 +85,29 @@ const shouldSample = () => {
   return randomInt(0, 1_000_000) < rate * 1_000_000;
 };
 
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+
+const extractCspReports = (value: unknown) => {
+  const payloads = Array.isArray(value) ? value.slice(0, 10) : [value];
+  return payloads.flatMap((payload) => {
+    const record = asRecord(payload);
+    if (!record) return [];
+
+    const legacyReport = asRecord(record["csp-report"]);
+    if (legacyReport) return [legacyReport];
+
+    // Reporting API requests wrap CSPViolationReportBody in `body` and can
+    // batch several reports in one JSON array.
+    const reportingApiBody = asRecord(record.body);
+    if (reportingApiBody) return [reportingApiBody];
+
+    return [record];
+  });
+};
+
 export async function POST(req: Request) {
   const clientIp = getTrustedClientIp(req);
   if (!allowReportFromIp(clientIp)) return noContent();
@@ -119,26 +142,26 @@ export async function POST(req: Request) {
   }
 
   try {
-    const payload = JSON.parse(text) as Record<string, unknown>;
-    const report =
-      payload["csp-report"] && typeof payload["csp-report"] === "object"
-        ? (payload["csp-report"] as Record<string, unknown>)
-        : payload;
+    const reports = extractCspReports(JSON.parse(text));
     if (!shouldSample()) return noContent();
 
-    console.warn("CSP violation", {
-      documentUri: sanitizeReportedUrl(
-        report["document-uri"] || report.documentURL || ""
-      ),
-      violatedDirective: removeControlCharacters(
-        report["violated-directive"] || report.effectiveDirective || "",
-        120
-      ),
-      blockedUri: sanitizeReportedUrl(
-        report["blocked-uri"] || report.blockedURL || ""
-      ),
-      disposition: removeControlCharacters(report.disposition, 30),
-    });
+    for (const report of reports) {
+      const normalized = {
+        documentUri: sanitizeReportedUrl(
+          report["document-uri"] || report.documentURL || ""
+        ),
+        violatedDirective: removeControlCharacters(
+          report["violated-directive"] || report.effectiveDirective || "",
+          120
+        ),
+        blockedUri: sanitizeReportedUrl(
+          report["blocked-uri"] || report.blockedURL || ""
+        ),
+        disposition: removeControlCharacters(report.disposition, 30),
+      };
+      if (!Object.values(normalized).some(Boolean)) continue;
+      console.warn("CSP violation", normalized);
+    }
   } catch {
     return new Response(null, { status: 400 });
   }

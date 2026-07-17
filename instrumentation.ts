@@ -9,4 +9,18 @@ export async function register() {
   }
 }
 
-export const onRequestError = Sentry.captureRequestError;
+export const onRequestError: typeof Sentry.captureRequestError = (
+  error,
+  request,
+  context
+) => {
+  // Next.js uses this as an internal route-fallback control signal. It is not
+  // an application failure and should not be reported as an incident.
+  if (
+    error instanceof Error &&
+    error.message === "Internal: NoFallbackError"
+  ) {
+    return;
+  }
+  Sentry.captureRequestError(error, request, context);
+};
