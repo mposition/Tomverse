@@ -1,0 +1,4 @@
+ALTER TABLE "UserSettings"
+ADD COLUMN "timeZone" TEXT NOT NULL DEFAULT 'UTC',
+ADD COLUMN "timeZoneInitializedAt" TIMESTAMP(3),
+ADD COLUMN "timeZoneChangedAt" TIMESTAMP(3);

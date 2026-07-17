@@ -432,7 +432,7 @@ export const infoPages = {
         {
           title: "Plans, limits, and upgrades",
           body: "Guest mode is intended for quick trials. Free, Pro, and Max plans unlock more model access and higher usage limits. If a model or feature is unavailable, the app will show the reason in the model picker or plan area.",
-          bullets: ["Guest: 100 monthly and 20 daily credits, Standard usage-class models only, no attachments.", "Free: 300 monthly and 30 daily credits, with up to 30 selected higher-cost model responses.", "Pro: 3,000 monthly and 150 daily credits. Max: 10,000 monthly credits; Standard models have no daily limit, while Premium usage follows monthly credits and fair-use."],
+          bullets: ["Guest: 100 monthly and 20 daily credits, Standard usage-class models only, no attachments.", "Free: 300 monthly and 30 daily plan credits, with up to 30 selected higher-cost model responses.", "Pro: 3,000 monthly and 300 daily plan credits. Purchased credits remain usable beyond the daily plan guardrail. Max: 10,000 monthly credits; Standard models have no daily limit, while Premium usage follows monthly credits and fair-use."],
         },
         {
           title: "Files and Google Drive",
@@ -475,7 +475,7 @@ export const infoPages = {
         {
           title: "플랜, 제한, 업그레이드",
           body: "게스트 모드는 빠른 체험용입니다. Free, Pro, Max 플랜은 더 넓은 모델 접근과 더 높은 사용량을 제공합니다. 모델이나 기능이 제한되면 모델 선택창 또는 플랜 영역에서 이유를 확인할 수 있습니다.",
-          bullets: ["Guest: 월 100 · 일 20 크레딧, Standard 사용량 클래스 모델만 사용, 첨부파일 불가.", "Free: 월 300 · 일 30 크레딧, 선별된 고비용 모델 월 30응답.", "Pro: 월 3,000 · 일 150 크레딧. Max: 월 10,000 크레딧, Standard 모델 일일 제한 없음, Premium 사용량은 월 크레딧 및 공정사용 정책 적용."],
+          bullets: ["Guest: 월 100 · 일 20 크레딧, Standard 사용량 클래스 모델만 사용, 첨부파일 불가.", "Free: 월 300 · 일일 플랜 크레딧 30개, 선별된 고비용 모델 월 30응답.", "Pro: 월 3,000 · 일일 플랜 크레딧 300개. 구매 크레딧은 일일 플랜 가드레일을 넘어 사용할 수 있습니다. Max: 월 10,000 크레딧, Standard 모델 일일 제한 없음, Premium 사용량은 월 크레딧 및 공정사용 정책 적용."],
         },
         {
           title: "파일과 Google Drive",
@@ -518,7 +518,7 @@ export const infoPages = {
         {
           title: "套餐、限制和升级",
           body: "Guest 模式用于快速体验。Free、Pro 和 Max 套餐提供更广的模型访问和更高的使用量。如果某个模型或功能不可用，应用会在模型选择器或套餐区域显示原因。",
-          bullets: ["Guest：每月 100、每日 20 积分，仅限 Standard 用量类别模型，不可使用附件。", "Free：每月 300、每日 30 积分，每月 30 次精选高成本模型回复。", "Pro：每月 3,000、每日 150 积分。Max：每月 10,000 积分，Standard 模型无每日限制，Premium 用量适用月度积分和公平使用政策。"],
+          bullets: ["Guest：每月 100、每日 20 积分，仅限 Standard 用量类别模型，不可使用附件。", "Free：每月 300、每日 30 个套餐积分，每月 30 次精选高成本模型回复。", "Pro：每月 3,000、每日 300 个套餐积分。已购买积分可在超过每日套餐保护额度后继续使用。Max：每月 10,000 积分，Standard 模型无每日限制，Premium 用量适用月度积分和公平使用政策。"],
         },
         {
           title: "文件和 Google Drive",

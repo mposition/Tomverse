@@ -2,7 +2,7 @@
 "use client";
 
 import { signIn, signOut, useSession } from "next-auth/react";
-import { useCallback, useState, useEffect, useRef } from "react";
+import { useCallback, useState, useEffect, useMemo, useRef } from "react";
 import {
     ENABLED_MODELS,
     getModelUsageProfile,
@@ -12,6 +12,7 @@ import {
     BarChart3,
     Check,
     ChevronDown,
+    Clock3,
     CreditCard,
     Crown,
     Database,
@@ -34,7 +35,10 @@ import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { localeLaunchPolicy } from "@/lib/localeLaunchPolicy";
 import { dispatchAppToast } from "@/lib/appToast";
 import { notifyUserSettingsUpdated } from "@/lib/userSettingsEvents";
-import { useUserUsage } from "@/components/chat/useUserUsage";
+import {
+    notifyUserUsageChanged,
+    useUserUsage,
+} from "@/components/chat/useUserUsage";
 import {
     getAnalyticsAttributionSnapshot,
     trackProductEvent,
@@ -72,6 +76,9 @@ export function AuthButton() {
     const [theme, setTheme] = useState<ThemePreference>(APP_DEFAULTS.defaultTheme);
     const [language, setLanguage] = useState<Language>(APP_DEFAULTS.defaultLanguage);
     const [defaultModel, setDefaultModel] = useState<string>(APP_DEFAULTS.defaultModelId);
+    const [timeZone, setTimeZone] = useState("UTC");
+    const [timeZoneChangeAllowedAt, setTimeZoneChangeAllowedAt] = useState<string | null>(null);
+    const [timeZoneChangeLocked, setTimeZoneChangeLocked] = useState(false);
     const [isDeletingChats, setIsDeletingChats] = useState(false);
     const [isDeleteAllArmed, setIsDeleteAllArmed] = useState(false);
     const [isRequestingDeletion, setIsRequestingDeletion] = useState(false);
@@ -101,6 +108,7 @@ export function AuthButton() {
             day: "numeric",
             hour: "numeric",
             minute: "2-digit",
+            timeZone: accountUsage?.timeZone || timeZone,
         }).format(new Date(accountUsage.balances.dailyResetsAt))
         : null;
     const planPeriodEnd = accountUsage?.subscription?.currentPeriodEnd;
@@ -119,6 +127,23 @@ export function AuthButton() {
                 : null;
     const mobileUpgradePlan =
         accountPlan === "Free" ? "Pro" : accountPlan === "Pro" ? "Max" : null;
+    const timeZoneOptions = useMemo(() => {
+        const intl = Intl as typeof Intl & {
+            supportedValuesOf?: (key: "timeZone") => string[];
+        };
+        const supported = intl.supportedValuesOf?.("timeZone") || [];
+        return Array.from(new Set(["UTC", timeZone, ...supported])).sort((a, b) =>
+            a.localeCompare(b)
+        );
+    }, [timeZone]);
+    const timeZoneChangeAllowedLabel = timeZoneChangeAllowedAt
+        ? new Intl.DateTimeFormat(globalLang, {
+              year: "numeric",
+              month: "short",
+              day: "numeric",
+              timeZone,
+          }).format(new Date(timeZoneChangeAllowedAt))
+        : null;
 
     useEffect(() => {
         queueMicrotask(() => {
@@ -171,6 +196,15 @@ export function AuthButton() {
                         );
                         setLanguage(data.language || globalLang);
                         setDefaultModel(data.defaultModel || APP_DEFAULTS.defaultModelId);
+                        setTimeZone(data.timeZone || "UTC");
+                        const allowedAt = data.timeZoneChangeAllowedAt || null;
+                        setTimeZoneChangeAllowedAt(allowedAt);
+                        setTimeZoneChangeLocked(
+                            Boolean(
+                                allowedAt &&
+                                Date.parse(allowedAt) > new Date().getTime()
+                            )
+                        );
                     }
                 });
 
@@ -278,10 +312,23 @@ export function AuthButton() {
             const res = await fetch("/api/user/settings", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ theme, language, defaultModel }),
+                body: JSON.stringify({ theme, language, defaultModel, timeZone }),
             });
 
+            const data = await res.json().catch(() => null);
+
             if (res.ok) {
+                setTimeZone(data?.settings?.timeZone || timeZone);
+                setTimeZoneChangeAllowedAt(
+                    data?.settings?.timeZoneChangeAllowedAt || null
+                );
+                setTimeZoneChangeLocked(
+                    Boolean(
+                        data?.settings?.timeZoneChangeAllowedAt &&
+                        Date.parse(data.settings.timeZoneChangeAllowedAt) >
+                            new Date().getTime()
+                    )
+                );
                 closeSettingsModal();
                 dispatchAppToast(t("auth.saveMessage"), "success");
 
@@ -290,6 +337,23 @@ export function AuthButton() {
                 storeAndApplyThemePreference(theme);
 
                 notifyUserSettingsUpdated({ defaultModel, theme });
+                notifyUserUsageChanged();
+            } else if (
+                data?.code === "TIME_ZONE_CHANGE_COOLDOWN" &&
+                typeof data.retryAt === "string"
+            ) {
+                const retryLabel = new Intl.DateTimeFormat(globalLang, {
+                    year: "numeric",
+                    month: "short",
+                    day: "numeric",
+                    timeZone,
+                }).format(new Date(data.retryAt));
+                setTimeZoneChangeAllowedAt(data.retryAt);
+                setTimeZoneChangeLocked(true);
+                dispatchAppToast(
+                    formatCopy("auth.timeZoneChangeLocked", { date: retryLabel }),
+                    "error"
+                );
             } else {
                 dispatchAppToast(t("auth.failedMessage"), "error");
             }
@@ -767,6 +831,32 @@ export function AuthButton() {
                                                     <option className="bg-white text-zinc-900" value="es">{t("auth.languageSpanish")}</option>
                                                     <option className="bg-white text-zinc-900" value="pt">{t("auth.languagePortuguese")}</option>
                                                 </select>
+                                            </span>
+                                        </label>
+
+                                        <label className="flex items-start gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950/60">
+                                            <Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-zinc-500" />
+                                            <span className="min-w-0 flex-1">
+                                                <span className="block text-xs font-semibold text-zinc-500">{t("auth.timeZone")}</span>
+                                                <select
+                                                    value={timeZone}
+                                                    onChange={(e) => setTimeZone(e.target.value)}
+                                                    disabled={timeZoneChangeLocked}
+                                                    className="mt-1 w-full cursor-pointer bg-transparent text-sm font-semibold text-zinc-900 outline-none disabled:cursor-not-allowed disabled:opacity-60 dark:text-zinc-100"
+                                                >
+                                                    {timeZoneOptions.map((zone) => (
+                                                        <option className="bg-white text-zinc-900" key={zone} value={zone}>
+                                                            {zone}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                                <span className="mt-1 block text-xs leading-5 text-zinc-500">
+                                                    {timeZoneChangeLocked && timeZoneChangeAllowedLabel
+                                                        ? formatCopy("auth.timeZoneChangeLocked", {
+                                                              date: timeZoneChangeAllowedLabel,
+                                                          })
+                                                        : t("auth.timeZoneDescription")}
+                                                </span>
                                             </span>
                                         </label>
 

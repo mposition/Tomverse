@@ -440,7 +440,9 @@ function ChatAppComponent({
                 : errorCode === "PROVIDER_DAILY_SPEND_LIMIT_REACHED" ||
                     errorCode === "PROVIDER_SPEND_LIMIT_REACHED"
                   ? t("chat.providerCostSafetyLimit")
-                  : errorCode === "CHAT_CONCURRENCY_EXCEEDED"
+                  : errorCode === "PLAN_DAILY_CREDIT_LIMIT_REACHED"
+                    ? t("chat.dailyPlanCreditsUnavailable")
+                    : errorCode === "CHAT_CONCURRENCY_EXCEEDED"
                     ? t("chat.comparisonConcurrencyLimit")
                     : errorCode === "FREE_PRO_MODEL_QUOTA_EXCEEDED"
                       ? t("chat.comparisonHigherCostQuotaExceeded")

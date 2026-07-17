@@ -103,6 +103,15 @@ export const analyticsPropertiesSchema = z
     trigger: purchaseAnalyticsTriggerSchema.optional(),
     plan_credits_remaining: z.number().int().min(0).max(1_000_000).optional(),
     addon_credits_remaining: z.number().int().min(0).max(1_000_000).optional(),
+    daily_plan_credits_remaining: z
+      .number()
+      .int()
+      .min(0)
+      .max(1_000_000)
+      .nullable()
+      .optional(),
+    required_credits: z.number().int().min(0).max(1_000_000).optional(),
+    reset_at: z.string().datetime().optional(),
     value: z.number().finite().min(0).max(1_000_000).optional(),
     currency: z.enum(BILLING_CURRENCIES).optional(),
     transaction_id: z.string().trim().min(1).max(100).optional(),

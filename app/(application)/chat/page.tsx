@@ -46,6 +46,7 @@ import {
   isThemePreference,
   storeAndApplyThemePreference,
 } from "@/lib/theme";
+import { detectBrowserTimeZone } from "@/lib/userTimeZone";
 
 const normalizeStringArray = (value: unknown, fallback: string[]) => {
   let parsed = value;
@@ -517,7 +518,9 @@ export default function Home() {
                 : code === "PROVIDER_DAILY_SPEND_LIMIT_REACHED" ||
                     code === "PROVIDER_SPEND_LIMIT_REACHED"
                   ? t("chat.providerCostSafetyLimit")
-                  : code === "CHAT_QUOTA_EXCEEDED"
+                  : code === "PLAN_DAILY_CREDIT_LIMIT_REACHED"
+                    ? t("chat.dailyPlanCreditsUnavailable")
+                    : code === "CHAT_QUOTA_EXCEEDED"
                     ? t("chat.comparisonDailyCreditsInsufficient")
                     : code === "CHAT_CONCURRENCY_EXCEEDED"
                       ? t("chat.comparisonConcurrencyLimit")
@@ -831,6 +834,24 @@ export default function Home() {
 
                     if (!isLanguage(urlLanguage) && data && isLanguage(data.language)) {
                         setLang(data.language);
+                    }
+
+                    const detectedTimeZone = detectBrowserTimeZone();
+                    if (detectedTimeZone && !data?.timeZoneInitializedAt) {
+                        void fetch("/api/user/settings", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                timeZone: detectedTimeZone,
+                                timeZoneSource: "browser",
+                            }),
+                        })
+                            .then((response) => {
+                                if (response.ok) notifyUserUsageChanged();
+                            })
+                            .catch((error) => {
+                                console.error("Failed to initialize account time zone:", error);
+                            });
                     }
                 })
                 .catch((err) => {

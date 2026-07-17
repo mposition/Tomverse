@@ -54,7 +54,8 @@ const createUser = (plan: "Free" | "Pro" | "Max" = "Free") =>
 
 const chatAccess = (
   user: { id: string; plan: string },
-  monthlyMessageLimit: number
+  monthlyMessageLimit: number,
+  dailyMessageLimit = 10_000
 ): ChatAccess => ({
   kind: "user",
   userId: user.id,
@@ -63,7 +64,7 @@ const chatAccess = (
   subjectKey: `integration:user:${user.id}`,
   ipKey: `integration:ip:${user.id}`,
   planLimits: {
-    dailyMessageLimit: 10_000,
+    dailyMessageLimit,
     monthlyMessageLimit,
   },
 });
@@ -550,4 +551,51 @@ test("preflights and reserves three premium models without full-output quota col
       process.env.CHAT_MAX_COST_MICROUSD_PER_DAY = previousDailyLimit;
     }
   }
+});
+
+test("uses add-on credits beyond the plan daily guardrail", async () => {
+  const user = await createUser("Pro");
+  const access = chatAccess(user, 3_000, 300);
+  const now = new Date();
+  const dayStart = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+  );
+  await prisma.chatUsageBucket.create({
+    data: {
+      key: access.subjectKey,
+      period: "day",
+      periodStart: dayStart,
+      count: 300,
+    },
+  });
+  const lot = await createAddOnLot(user.id, 10);
+
+  const acquired = await acquireChatAccess(
+    access,
+    chatBudget({ credits: 5, inputTokens: 1, outputTokens: 0 })
+  );
+
+  assert.equal(acquired.usageReservation.planReservedCredits, 0);
+  assert.equal(acquired.usageReservation.addOnReservedCredits, 5);
+  const dailyUsage = await prisma.chatUsageBucket.findUniqueOrThrow({
+    where: {
+      key_period_periodStart: {
+        key: access.subjectKey,
+        period: "day",
+        periodStart: dayStart,
+      },
+    },
+  });
+  assert.equal(dailyUsage.count, 300);
+  const reservedLot = await prisma.creditLot.findUniqueOrThrow({
+    where: { id: lot.id },
+  });
+  assert.equal(reservedLot.remainingCredits, 5);
+
+  await settleChatUsage(acquired.usageReservation, {
+    inputTokens: 1,
+    outputTokens: 0,
+    outcome: "completed",
+  });
+  await releaseChatAccess(acquired.leaseId);
 });
