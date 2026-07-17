@@ -1102,17 +1102,14 @@ export function ChatSidebar({
                     )}
                     <div className="mt-2 space-y-1">
                         {projects.length === 0 ? (
-                            <div className="rounded-lg bg-zinc-50 p-2.5 dark:bg-zinc-900">
-                                <p className="text-[11px] font-medium leading-5 text-zinc-500 dark:text-zinc-400">
-                                    {helpCopy.emptyProject}
-                                </p>
+                            <div className="rounded-lg bg-zinc-50 px-2.5 py-2 dark:bg-zinc-900">
                                 <button
                                     type="button"
                                     onClick={() => {
                                         setShowProjectForm(true);
                                         setProjectName("");
                                     }}
-                                    className="mt-2 inline-flex items-center gap-1 text-[11px] font-black text-blue-600 hover:text-blue-500 dark:text-blue-300"
+                                    className="inline-flex items-center gap-1 text-[11px] font-black text-blue-600 hover:text-blue-500 dark:text-blue-300"
                                 >
                                     <FolderPlus className="h-3.5 w-3.5" aria-hidden="true" />
                                     {helpCopy.createProject}

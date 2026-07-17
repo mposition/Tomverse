@@ -22,7 +22,6 @@ export type ChatHelpCopy = {
   emptyLabels: Record<"work" | "research" | "personal", string>;
   emptyLabelBody: string;
   labelGuide: string;
-  emptyProject: string;
   createProject: string;
   privateTitle: string;
   privateDescription: string;
@@ -74,7 +73,6 @@ export const chatHelpCopy: Record<Language, ChatHelpCopy> = {
     },
     emptyLabelBody: "Open a conversation's ⋮ menu to assign a label.",
     labelGuide: "How to assign labels",
-    emptyProject: "Projects organize related chats like folders. Chats in a project do not share their content with each other.",
     createProject: "Create first project",
     privateTitle: "Private Mode",
     privateDescription: "Tomverse does not save the chat history, but questions, context, and attachments may still be sent to the selected AI provider to generate an answer.",
@@ -128,7 +126,6 @@ export const chatHelpCopy: Record<Language, ChatHelpCopy> = {
     },
     emptyLabelBody: "대화의 ⋮ 메뉴에서 라벨을 지정할 수 있습니다.",
     labelGuide: "대화 라벨 지정 방법 보기",
-    emptyProject: "프로젝트는 관련 대화를 폴더처럼 정리합니다. 프로젝트 안의 대화가 서로 내용을 공유하지는 않습니다.",
     createProject: "첫 프로젝트 만들기",
     privateTitle: "Private Mode",
     privateDescription: "Tomverse 대화 기록에는 저장하지 않지만, 답변 생성을 위해 선택한 AI 제공업체에는 질문, 대화 맥락과 첨부 내용이 전송될 수 있습니다.",
@@ -178,7 +175,6 @@ export const chatHelpCopy: Record<Language, ChatHelpCopy> = {
     emptyLabels: { work: "尚无带“工作”标签的对话。", research: "尚无带“研究”标签的对话。", personal: "尚无带“个人”标签的对话。" },
     emptyLabelBody: "请从对话的 ⋮ 菜单指定标签。",
     labelGuide: "查看标签使用方法",
-    emptyProject: "项目像文件夹一样整理相关对话，但项目内的对话不会互相共享内容。",
     createProject: "创建第一个项目",
     privateTitle: "Private Mode",
     privateDescription: "Tomverse 不保存聊天记录，但为生成回答，问题、上下文和附件仍可能发送给所选 AI 提供商。",
@@ -228,7 +224,6 @@ export const chatHelpCopy: Record<Language, ChatHelpCopy> = {
     emptyLabels: { work: "Aucune conversation n’a encore le libellé Travail.", research: "Aucune conversation n’a encore le libellé Recherche.", personal: "Aucune conversation n’a encore le libellé Personnel." },
     emptyLabelBody: "Attribuez un libellé depuis le menu ⋮ d’une conversation.",
     labelGuide: "Voir comment attribuer un libellé",
-    emptyProject: "Les projets organisent les conversations comme des dossiers, sans partager leur contenu entre elles.",
     createProject: "Créer le premier projet",
     privateTitle: "Mode privé",
     privateDescription: "Tomverse ne conserve pas l’historique, mais la question, le contexte et les pièces jointes peuvent être envoyés au fournisseur IA sélectionné.",
@@ -278,7 +273,6 @@ export const chatHelpCopy: Record<Language, ChatHelpCopy> = {
     emptyLabels: { work: "Noch kein Chat trägt das Label Arbeit.", research: "Noch kein Chat trägt das Label Recherche.", personal: "Noch kein Chat trägt das Label Persönlich." },
     emptyLabelBody: "Weisen Sie ein Label über das ⋮-Menü eines Chats zu.",
     labelGuide: "So werden Labels zugewiesen",
-    emptyProject: "Projekte ordnen verwandte Chats wie Ordner, ohne Inhalte zwischen Chats zu teilen.",
     createProject: "Erstes Projekt erstellen",
     privateTitle: "Privatmodus",
     privateDescription: "Tomverse speichert den Verlauf nicht, doch Frage, Kontext und Anhänge können zur Antworterzeugung an den gewählten KI-Anbieter gesendet werden.",
@@ -328,7 +322,6 @@ export const chatHelpCopy: Record<Language, ChatHelpCopy> = {
     emptyLabels: { work: "Aún no hay chats con la etiqueta Trabajo.", research: "Aún no hay chats con la etiqueta Investigación.", personal: "Aún no hay chats con la etiqueta Personal." },
     emptyLabelBody: "Asigna una etiqueta desde el menú ⋮ de una conversación.",
     labelGuide: "Cómo asignar etiquetas",
-    emptyProject: "Los proyectos organizan chats como carpetas sin compartir contenido entre conversaciones.",
     createProject: "Crear el primer proyecto",
     privateTitle: "Modo privado",
     privateDescription: "Tomverse no guarda el historial, pero la pregunta, el contexto y los adjuntos pueden enviarse al proveedor de IA seleccionado para generar la respuesta.",
@@ -378,7 +371,6 @@ export const chatHelpCopy: Record<Language, ChatHelpCopy> = {
     emptyLabels: { work: "Ainda não há chats com a etiqueta Trabalho.", research: "Ainda não há chats com a etiqueta Pesquisa.", personal: "Ainda não há chats com a etiqueta Pessoal." },
     emptyLabelBody: "Atribua uma etiqueta no menu ⋮ da conversa.",
     labelGuide: "Como atribuir etiquetas",
-    emptyProject: "Os projetos organizam chats como pastas sem partilhar conteúdo entre conversas.",
     createProject: "Criar o primeiro projeto",
     privateTitle: "Modo privado",
     privateDescription: "O Tomverse não guarda o histórico, mas a pergunta, o contexto e os anexos podem ser enviados ao fornecedor de IA selecionado.",
