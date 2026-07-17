@@ -909,6 +909,13 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             description: "Optional incident notification channel.",
         },
         {
+            name: "PROVIDER_USAGE_SLACK_WEBHOOK_URL",
+            configured:
+                isConfigured(process.env.PROVIDER_USAGE_SLACK_WEBHOOK_URL) ||
+                isConfigured(process.env.SLACK_WEBHOOK_URL),
+            description: "Daily provider usage and estimated-balance report channel. Falls back to SLACK_WEBHOOK_URL.",
+        },
+        {
             name: "DISCORD_WEBHOOK_URL",
             configured: isConfigured(process.env.DISCORD_WEBHOOK_URL),
             description: "Optional secondary incident notification channel.",
@@ -1099,6 +1106,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                                             "STRIPE_SECRET_KEY",
                                             "STRIPE_WEBHOOK_SECRET",
                                             "SLACK_WEBHOOK_URL",
+                                            "PROVIDER_USAGE_SLACK_WEBHOOK_URL",
                                             "SENTRY_DSN",
                                             "OPS_ALERT_CHANNEL",
                                             "OPENAI_ADMIN_API_KEY",

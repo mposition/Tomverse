@@ -24,6 +24,7 @@
     "db:migrate": "node scripts/require-direct-database-url.mjs && prisma migrate deploy",
     "maintenance:cleanup": "node scripts/run-maintenance.mjs",
     "maintenance:credit-reservations": "node scripts/run-credit-reconciliation.mjs",
+    "maintenance:provider-usage": "node scripts/run-provider-usage-sync.mjs",
     "postinstall": "prisma generate"
   },
   "dependencies": {

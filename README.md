@@ -721,6 +721,20 @@ Do not schedule this job less frequently than every five minutes. The daily
 cleanup also runs the reconciler as a fallback, but it is not a substitute for
 the five-minute Cron service.
 
+Create a third Railway Cron service for the daily provider usage summary and
+set its Config File Path to `/railway.provider-usage-sync.json`. It runs at
+00:30 UTC (10:30 Australia/Brisbane) and posts the previous UTC day's synced
+usage plus the latest estimated balance or budget headroom to Slack:
+
+```text
+npm run maintenance:provider-usage
+```
+
+Set `PROVIDER_USAGE_SYNC_SECRET` on both the web and Cron services. The Cron
+service also needs `PROVIDER_USAGE_SYNC_URL=https://tomverse.app`. Configure
+`PROVIDER_USAGE_SLACK_WEBHOOK_URL` on the web service for a dedicated report
+channel, or it falls back to `SLACK_WEBHOOK_URL`.
+
 ## Railway Healthcheck
 
 When host protection is enabled, keep Railway's deployment Healthcheck Path on

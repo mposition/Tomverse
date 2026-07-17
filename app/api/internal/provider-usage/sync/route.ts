@@ -1,10 +1,13 @@
 export const dynamic = "force-dynamic";
+export const maxDuration = 180;
 
 import { NextResponse } from "next/server";
 import {
   defaultProviderUsageSyncDate,
   syncProviderUsageForDate,
 } from "@/lib/providerUsageSync";
+import { getProviderHealthDashboard } from "@/lib/providerMonitoring";
+import { sendDailyProviderUsageSlackReport } from "@/lib/providerDailyUsageReport";
 
 const authorized = (req: Request) => {
   const secret = process.env.PROVIDER_USAGE_SYNC_SECRET;
@@ -32,9 +35,18 @@ export async function POST(req: Request) {
   try {
     const date = dateFromUrl(req);
     const results = await syncProviderUsageForDate(date);
+    const notifySlack = new URL(req.url).searchParams.get("notify") === "slack";
+    const notification = notifySlack
+      ? await sendDailyProviderUsageSlackReport({
+          date: date.toISOString().slice(0, 10),
+          results,
+          dashboard: await getProviderHealthDashboard(),
+        })
+      : null;
     return NextResponse.json({
       date: date.toISOString().slice(0, 10),
       results,
+      notification,
     });
   } catch (error) {
     console.error("Internal provider usage sync failed:", error);
