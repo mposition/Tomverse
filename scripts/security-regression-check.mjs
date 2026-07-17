@@ -1011,21 +1011,16 @@ const checks = [
       !source.includes("Discounts apply to the first month of Pro and Max"),
   },
   {
-    name: "Public model UI separates usage classes from subscription tiers",
-    file: "components/marketing/ModelsPageContent.tsx",
+    name: "Chat model picker hides internal classes and shows exact credit costs",
+    file: "components/chat/ChatInput.tsx",
     test: (source) =>
-      source.includes("getModelUsageProfile(model)") &&
-      source.includes('usageClass: "Usage class"') &&
-      source.includes('baseCharge: "Base charge"') &&
-      source.includes("usageProfile.credits") &&
-      source.includes("modelUsageClasses") &&
-      !source.includes("modelTiers") &&
-      read("components/chat/ChatInput.tsx").includes(
-        'option value="Research"'
-      ) &&
-      read("components/chat/ChatInput.tsx").includes(
-        "usageClassFilter"
-      ) &&
+      source.includes('data-testid="model-credit-badge"') &&
+      source.includes("getModelPickerDescription") &&
+      source.includes("getModelPickerFeatures") &&
+      source.includes('data-testid="model-selection-summary"') &&
+      source.includes('data-testid="request-credit-estimate"') &&
+      !source.includes('option value="Research"') &&
+      !source.includes("usageClassFilter") &&
       read("components/auth/AuthButton.tsx").includes(
         "getModelUsageProfile(model)"
       ),
@@ -1106,15 +1101,16 @@ const checks = [
       source.includes('"proactive"'),
   },
   {
-    name: "Landing entry copy separates guest access from signed-in features",
+    name: "Landing uses one state-aware chat CTA and defers signup until after value",
     file: "components/marketing/LandingPageContent.tsx",
     test: (source) =>
-      source.includes('primaryCta: "Start comparing multiple AIs free"') &&
-      source.includes('primaryCta: "여러 AI 무료 비교 시작하기"') &&
-      source.includes('data-testid="landing-guest-cta"') &&
-      source.includes("const comparisonHref =") &&
-      source.includes('cta_location: "landing_hero_compare"') &&
-      source.includes('cta_location: "landing_hero_guest"') &&
+      source.includes('primaryCta: "Start chatting free"') &&
+      source.includes('primaryCta: "무료로 채팅 시작하기"') &&
+      source.includes('guestNote: "No sign-up required to try a free model."') &&
+      source.includes('data-testid="landing-guest-note"') &&
+      !source.includes('data-testid="landing-guest-cta"') &&
+      source.includes("const primaryChatHref =") &&
+      source.includes('cta_location: "landing_hero_chat"') &&
       source.includes("Get a one-minute recommendation after sign-up"),
   },
   {

@@ -20,7 +20,7 @@ type LandingCopy = {
   description: string;
   primaryCta: string;
   signedInCta: string;
-  guestCta: string;
+  guestNote: string;
   pricingCta: string;
   modelFinderLead: string;
   modelFinderCta: string;
@@ -54,12 +54,12 @@ type LandingCopy = {
 const englishCopy: LandingCopy = {
   app: "Chat",
   badge: "Multi-model comparison + AI cross-review",
-  title: "Ask once.\nCompare answers from multiple AIs.",
+  title: "Ask once.\nCompare multiple AI answers.",
   description:
-    "Compare GPT, Claude, and Gemini in one place,\nthen use AI Review to find the differences and what each answer missed.",
-  primaryCta: "Compare multiple AIs free",
+    "Compare GPT, Claude, and Gemini side by side,\nthen use AI Review to find differences and missing points.",
+  primaryCta: "Start chatting free",
   signedInCta: "Continue chatting",
-  guestCta: "Try it first without signing up",
+  guestNote: "No sign-up required to try a free model.",
   pricingCta: "See pricing",
   modelFinderLead: "Not sure which AI fits your work?",
   modelFinderCta: "Get a one-minute recommendation after sign-up.",
@@ -118,9 +118,9 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     badge: "멀티모델 비교 + AI 답변 교차검토",
     title: "한 번 질문하고,\n여러 AI 답변을 비교하세요.",
     description: "GPT, Claude, Gemini의 답변을 한 화면에서 비교하고,\nAI Review로 차이와 놓친 부분을 확인하세요.",
-    primaryCta: "무료로 여러 AI 비교하기",
+    primaryCta: "무료로 채팅 시작하기",
     signedInCta: "채팅 계속하기",
-    guestCta: "가입 없이 먼저 체험",
+    guestNote: "회원가입 없이 무료 모델로 먼저 체험할 수 있습니다.",
     pricingCta: "요금 보기",
     modelFinderLead: "어떤 AI가 내 작업에 맞는지 모르시겠나요?",
     modelFinderCta: "가입 후 1분 추천을 받아보세요.",
@@ -173,9 +173,9 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     badge: "多模型比较 + AI 交叉审查",
     title: "问一次，\n比较多个 AI 的回答。",
     description: "在一个页面比较 GPT、Claude 和 Gemini，再用 AI Review 找出差异与遗漏。",
-    primaryCta: "免费比较多个 AI",
+    primaryCta: "免费开始聊天",
     signedInCta: "继续聊天",
-    guestCta: "无需注册先体验",
+    guestNote: "无需注册即可先体验免费模型。",
     pricingCta: "查看价格",
     modelFinderLead: "不确定哪种 AI 适合你的工作？",
     modelFinderCta: "注册后获取一分钟推荐。",
@@ -227,9 +227,9 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     badge: "Comparaison multi-modèles + revue croisée IA",
     title: "Posez une question.\nComparez plusieurs réponses IA.",
     description: "Comparez GPT, Claude et Gemini au même endroit, puis repérez les différences et les oublis avec AI Review.",
-    primaryCta: "Comparer plusieurs IA gratuitement",
+    primaryCta: "Commencer à discuter gratuitement",
     signedInCta: "Continuer la discussion",
-    guestCta: "Essayer sans s’inscrire",
+    guestNote: "Aucune inscription requise pour essayer un modèle gratuit.",
     pricingCta: "Voir les tarifs",
     modelFinderLead: "Vous ne savez pas quelle IA choisir ?",
     modelFinderCta: "Obtenez une recommandation en une minute après inscription.",
@@ -281,9 +281,9 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     badge: "Multi-Modell-Vergleich + KI-Gegenprüfung",
     title: "Einmal fragen.\nAntworten mehrerer KIs vergleichen.",
     description: "Vergleichen Sie GPT, Claude und Gemini an einem Ort und erkennen Sie mit AI Review Unterschiede und Lücken.",
-    primaryCta: "Mehrere KIs kostenlos vergleichen",
+    primaryCta: "Kostenlos chatten",
     signedInCta: "Chat fortsetzen",
-    guestCta: "Ohne Anmeldung testen",
+    guestNote: "Testen Sie ein kostenloses Modell ohne Anmeldung.",
     pricingCta: "Preise ansehen",
     modelFinderLead: "Unsicher, welche KI passt?",
     modelFinderCta: "Nach der Anmeldung in einer Minute empfehlen lassen.",
@@ -335,9 +335,9 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     badge: "Comparación multimodelo + revisión cruzada de IA",
     title: "Pregunta una vez.\nCompara respuestas de varias IA.",
     description: "Compara GPT, Claude y Gemini en un solo lugar y usa AI Review para detectar diferencias y omisiones.",
-    primaryCta: "Comparar varias IA gratis",
+    primaryCta: "Empezar a chatear gratis",
     signedInCta: "Continuar el chat",
-    guestCta: "Probar sin registrarse",
+    guestNote: "Prueba un modelo gratuito sin registrarte.",
     pricingCta: "Ver precios",
     modelFinderLead: "¿No sabes qué IA encaja contigo?",
     modelFinderCta: "Recibe una recomendación de un minuto tras registrarte.",
@@ -389,9 +389,9 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     badge: "Comparação multimodelo + revisão cruzada por IA",
     title: "Pergunte uma vez.\nCompare respostas de várias IAs.",
     description: "Compare GPT, Claude e Gemini em um só lugar e use o AI Review para encontrar diferenças e omissões.",
-    primaryCta: "Comparar várias IAs gratuitamente",
+    primaryCta: "Começar a conversar grátis",
     signedInCta: "Continuar a conversa",
-    guestCta: "Testar sem se cadastrar",
+    guestNote: "Experimente um modelo gratuito sem precisar se cadastrar.",
     pricingCta: "Ver preços",
     modelFinderLead: "Não sabe qual IA combina com seu trabalho?",
     modelFinderCta: "Receba uma recomendação de um minuto após criar a conta.",
@@ -446,8 +446,7 @@ export function LandingPageContent() {
   const billing = usePublicBilling();
   const chatHref = `/chat?lang=${encodeURIComponent(lang)}`;
   const guestChatHref = `${chatHref}&entry=guest-preview`;
-  const signInHref = `/auth/signin?callbackUrl=${encodeURIComponent(chatHref)}`;
-  const comparisonHref = status === "authenticated" ? chatHref : signInHref;
+  const primaryChatHref = status === "authenticated" ? chatHref : guestChatHref;
   const landingTrackedRef = useRef(false);
 
   useEffect(() => {
@@ -472,26 +471,21 @@ export function LandingPageContent() {
             </h1>
             <p className="mt-6 max-w-2xl whitespace-pre-line text-lg leading-8 text-zinc-600 dark:text-zinc-300">{content.description}</p>
 
-            <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="mt-8 flex flex-col items-start gap-3">
               <Link
                 id="landing-hero-primary"
-                href={comparisonHref}
+                href={primaryChatHref}
                 data-testid="landing-primary-cta"
-                onClick={() => trackProductEvent("cta_start_click", 0, { cta_location: "landing_hero_compare" })}
+                onClick={() => trackProductEvent("cta_start_click", 0, { cta_location: "landing_hero_chat" })}
                 className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-blue-600 px-6 text-sm font-black text-white shadow-lg shadow-blue-950/20 transition hover:bg-blue-500"
               >
                 {status === "authenticated" ? content.signedInCta : content.primaryCta}
                 <ArrowRight className="h-4 w-4" aria-hidden="true" />
               </Link>
               {status === "unauthenticated" && (
-                <Link
-                  href={guestChatHref}
-                  data-testid="landing-guest-cta"
-                  onClick={() => trackProductEvent("cta_start_click", 0, { cta_location: "landing_hero_guest" })}
-                  className="inline-flex min-h-10 items-center justify-center px-2 text-center text-sm font-bold text-zinc-600 underline decoration-zinc-300 underline-offset-4 transition hover:text-zinc-950 dark:text-zinc-300 dark:hover:text-white"
-                >
-                  {content.guestCta}
-                </Link>
+                <p data-testid="landing-guest-note" className="text-sm font-medium text-zinc-500 dark:text-zinc-400">
+                  {content.guestNote}
+                </p>
               )}
             </div>
           </div>
@@ -545,7 +539,7 @@ export function LandingPageContent() {
           </div>
           <div className="mt-12 flex flex-col items-start justify-between gap-6 rounded-3xl bg-zinc-950 p-7 text-white sm:p-9 lg:flex-row lg:items-center dark:border dark:border-zinc-800">
             <div className="max-w-2xl"><h2 className="text-3xl font-black">{content.ctaTitle}</h2><p className="mt-3 leading-7 text-zinc-300">{content.ctaDescription}</p></div>
-            <Link href={comparisonHref} onClick={() => trackProductEvent("cta_start_click", 0, { cta_location: "landing_final_compare" })} className="inline-flex min-h-12 shrink-0 items-center justify-center gap-2 rounded-xl bg-white px-6 text-sm font-black text-zinc-950 hover:bg-zinc-200">{status === "authenticated" ? content.signedInCta : content.primaryCta}<ArrowRight className="h-4 w-4" /></Link>
+            <Link href={primaryChatHref} onClick={() => trackProductEvent("cta_start_click", 0, { cta_location: "landing_final_chat" })} className="inline-flex min-h-12 shrink-0 items-center justify-center gap-2 rounded-xl bg-white px-6 text-sm font-black text-zinc-950 hover:bg-zinc-200">{status === "authenticated" ? content.signedInCta : content.primaryCta}<ArrowRight className="h-4 w-4" /></Link>
           </div>
         </div>
       </section>
