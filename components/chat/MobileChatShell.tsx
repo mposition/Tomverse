@@ -380,7 +380,14 @@ export function MobileChatShell({
             onClick={onCompareSummary}
             className="h-8 w-full rounded-xl border border-blue-200 bg-blue-50 text-[11px] font-black text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200"
           >
-            {t("chat.quickDifferenceSummary")}
+            <span>{t("chat.quickDifferenceSummary")}</span>
+            <span
+              className="ml-1 rounded-full bg-blue-600 px-1.5 py-0.5 text-[9px] font-black leading-none text-white dark:bg-blue-500"
+              aria-label={t("chat.quickDifferenceSummaryCreditCost")}
+              title={t("chat.quickDifferenceSummaryCreditCost")}
+            >
+              1×
+            </span>
           </button>
           {!isGuestMode && currentChatId !== "private-chat" && (
             <div className="flex min-w-0 items-center gap-0.5">

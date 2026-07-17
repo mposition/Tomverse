@@ -94,6 +94,7 @@ export const de = {
     chat: {
         ...en.chat,
         quickDifferenceSummary: "Schnelle Unterschiedsanalyse",
+        quickDifferenceSummaryCreditCost: "Ein typischer kurzer Vergleich verwendet 1 KI-Credit. Lange Antworten können mehr verbrauchen.",
         quickDifferenceSummaryNote: "KI-Analyse der neuesten Frage · {credits} Credits verwendet",
         quickDifferenceSummaryCachedNote: "Gespeicherte KI-Analyse · 0 Credits (ursprünglich {credits})",
         quickDifferenceSummaryLoading: "Die neuesten Modellantworten werden analysiert...",

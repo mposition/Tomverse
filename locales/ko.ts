@@ -169,6 +169,7 @@ export const ko = {
         providerCostSafetyLimit: "선택한 AI 공급자 중 하나가 비용 안전 한도에 도달했습니다. 다른 공급자의 모델을 선택하거나 나중에 다시 시도해 주세요.",
         summarizeModelDifferences: "모델 답변 차이 요약",
         quickDifferenceSummary: "빠른 차이 요약",
+        quickDifferenceSummaryCreditCost: "일반적인 짧은 비교에는 AI 크레딧 1개가 사용되며, 긴 답변은 더 사용할 수 있습니다.",
         quickDifferenceSummaryNote: "최신 질문의 AI 비교 분석 · {credits}크레딧 사용",
         quickDifferenceSummaryCachedNote: "저장된 AI 분석 · 0크레딧 (최초 {credits}크레딧)",
         quickDifferenceSummaryLoading: "최신 모델 답변을 분석하는 중...",

@@ -269,11 +269,6 @@ export default function Home() {
     cached: boolean;
   } | null>(null);
   const [isCompareSummaryLoading, setIsCompareSummaryLoading] = useState(false);
-  const [quickCompareSetup, setQuickCompareSetup] = useState<{
-    conversationId: string;
-    estimatedCredits: number;
-    responseCount: number;
-  } | null>(null);
   const [showComparisonReview, setShowComparisonReview] = useState(false);
   const [upgradeModelPrompt, setUpgradeModelPrompt] = useState<AiModel | null>(null);
   const [valueUpgradeSource, setValueUpgradeSource] = useState<
@@ -1576,7 +1571,6 @@ export default function Home() {
     };
 
     const executeCompareSummary = async (conversationId: string) => {
-      setQuickCompareSetup(null);
       setIsCompareSummaryLoading(true);
       try {
         const response = await fetch(
@@ -1610,43 +1604,7 @@ export default function Home() {
         showToast(t("chat.quickDifferenceSummarySavedChatRequired"), "info");
         return;
       }
-      setIsCompareSummaryLoading(true);
-      try {
-        const response = await fetch(
-          `/api/conversations/${currentChatId}/compare-summary`,
-          { cache: "no-store" }
-        );
-        if (!response.ok) {
-          const payload = (await response.json().catch(() => null)) as
-            | { code?: string }
-            | null;
-          showToast(
-            payload?.code === "COMPARISON_RESPONSES_REQUIRED"
-              ? t("chat.aiReviewResponsesRequired")
-              : t("chat.compareUnavailable"),
-            "error"
-          );
-          return;
-        }
-        const setup = (await response.json()) as {
-          estimatedCredits: number;
-          responseCount: number;
-          cached: boolean;
-        };
-        if (setup.cached) {
-          await executeCompareSummary(currentChatId);
-          return;
-        }
-        setQuickCompareSetup({
-          conversationId: currentChatId,
-          estimatedCredits: setup.estimatedCredits,
-          responseCount: setup.responseCount,
-        });
-      } catch {
-        showToast(t("chat.compareUnavailable"), "error");
-      } finally {
-        setIsCompareSummaryLoading(false);
-      }
+      await executeCompareSummary(currentChatId);
     };
 
   const pendingRemoveModel = pendingRemoveModelId
@@ -2003,52 +1961,6 @@ export default function Home() {
           await executeDelete(id);
         }}
       />
-    )}
-    {quickCompareSetup && (
-      <div className="fixed inset-0 z-[78] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-        <section
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="quick-comparison-setup-title"
-          data-testid="quick-comparison-setup"
-          className="w-full max-w-md rounded-3xl border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900 sm:p-6"
-        >
-          <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-500/10 text-blue-600 dark:text-blue-300">
-            <Sparkles className="h-5 w-5" aria-hidden="true" />
-          </span>
-          <h2 id="quick-comparison-setup-title" className="mt-4 text-lg font-black text-zinc-950 dark:text-white">
-            {t("chat.quickDifferenceSummary")}
-          </h2>
-          <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-            {formatCopy("chat.quickDifferenceSummarySetup", {
-              responses: String(quickCompareSetup.responseCount),
-              credits: String(quickCompareSetup.estimatedCredits),
-            })}
-          </p>
-          <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
-            {t("chat.quickSummaryDisclaimer")}
-          </p>
-          <div className="mt-5 grid gap-2 sm:grid-cols-2">
-            <button
-              type="button"
-              onClick={() => void executeCompareSummary(quickCompareSetup.conversationId)}
-              data-testid="quick-comparison-run"
-              className="min-h-11 rounded-xl bg-blue-600 px-4 py-2 text-sm font-black text-white hover:bg-blue-500"
-            >
-              {formatCopy("chat.quickDifferenceSummaryRun", {
-                credits: String(quickCompareSetup.estimatedCredits),
-              })}
-            </button>
-            <button
-              type="button"
-              onClick={() => setQuickCompareSetup(null)}
-              className="min-h-11 rounded-xl border border-zinc-200 px-4 py-2 text-sm font-bold text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-            >
-              {t("auth.cancel")}
-            </button>
-          </div>
-        </section>
-      </div>
     )}
     {isCompareSummaryLoading && (
       <div className="fixed inset-0 z-[79] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">

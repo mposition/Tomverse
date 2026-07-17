@@ -94,6 +94,7 @@ export const fr = {
     chat: {
         ...en.chat,
         quickDifferenceSummary: "Résumé rapide des différences",
+        quickDifferenceSummaryCreditCost: "Une comparaison courte classique utilise 1 crédit IA. Les réponses longues peuvent en utiliser davantage.",
         quickDifferenceSummaryNote: "Analyse IA de la dernière question · {credits} crédits utilisés",
         quickDifferenceSummaryCachedNote: "Analyse IA enregistrée · 0 crédit (initialement {credits})",
         quickDifferenceSummaryLoading: "Analyse des dernières réponses des modèles...",

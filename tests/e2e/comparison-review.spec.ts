@@ -280,11 +280,10 @@ test("quick comparison performs a structured AI analysis on mobile", async ({
   const quickApi = await mockQuickComparison(page);
   await page.goto("/chat");
 
-  await page.getByTestId("quick-comparison-button").click();
-  const setup = page.getByTestId("quick-comparison-setup");
-  await expect(setup).toBeVisible();
-  await expect(setup).toContainText("1");
-  await setup.getByTestId("quick-comparison-run").click();
+  const quickButton = page.getByTestId("quick-comparison-button");
+  await expect(quickButton).toContainText("1×");
+  await quickButton.click();
+  await expect(page.getByTestId("quick-comparison-setup")).toHaveCount(0);
   const dialog = page.getByTestId("quick-comparison-dialog");
   await expect(dialog).toBeVisible();
   await expect(dialog.getByTestId("quick-summary-consensus")).toContainText(
