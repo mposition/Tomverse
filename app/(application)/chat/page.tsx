@@ -505,6 +505,7 @@ export default function Home() {
       if (comparisonPreflightInFlightRef.current) return false;
 
       comparisonPreflightInFlightRef.current = true;
+      const clientTraceId = crypto.randomUUID();
       try {
         const requestBody = JSON.stringify({
           comparisonId,
@@ -519,25 +520,68 @@ export default function Home() {
         const requestPreflight = () =>
           fetch("/api/chat/preflight", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+              "X-Client-Request-ID": clientTraceId,
+            },
             body: requestBody,
           });
 
-        let response = await requestPreflight();
-        if (response.ok) return true;
+        let response: Response | null = null;
+        let errorBody: { code?: unknown; traceId?: unknown } | null = null;
+        let code = "";
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          try {
+            response = await requestPreflight();
+          } catch (error) {
+            if (attempt === 0) {
+              await new Promise((resolve) => window.setTimeout(resolve, 500));
+              continue;
+            }
+            console.error(
+              JSON.stringify({
+                event: "chat_comparison_preflight_request_failed",
+                traceId: clientTraceId,
+                errorName: error instanceof Error ? error.name : "UnknownError",
+              })
+            );
+            showToast(
+              `${t("chat.comparisonPreflightFailed")} (${t("chat.traceId")}: ${clientTraceId})`,
+              "error"
+            );
+            return false;
+          }
 
-        let errorBody = await response.json().catch(() => null);
-        let code =
-          typeof errorBody?.code === "string" ? errorBody.code : "";
-        if (
-          response.status === 503 &&
-          code === "COMPARISON_PREFLIGHT_TEMPORARILY_UNAVAILABLE"
-        ) {
-          await new Promise((resolve) => window.setTimeout(resolve, 350));
-          response = await requestPreflight();
           if (response.ok) return true;
           errorBody = await response.json().catch(() => null);
           code = typeof errorBody?.code === "string" ? errorBody.code : "";
+
+          const retryableResponse =
+            response.status === 502 ||
+            response.status === 504 ||
+            (response.status === 503 &&
+              code === "COMPARISON_PREFLIGHT_TEMPORARILY_UNAVAILABLE");
+          if (attempt === 0 && retryableResponse) {
+            const retryAfterSeconds = Number(
+              response.headers.get("Retry-After")
+            );
+            const retryDelayMs = Number.isFinite(retryAfterSeconds)
+              ? Math.min(2_000, Math.max(250, retryAfterSeconds * 1_000))
+              : 500;
+            await new Promise((resolve) =>
+              window.setTimeout(resolve, retryDelayMs)
+            );
+            continue;
+          }
+          break;
+        }
+
+        if (!response) {
+          showToast(
+            `${t("chat.comparisonPreflightFailed")} (${t("chat.traceId")}: ${clientTraceId})`,
+            "error"
+          );
+          return false;
         }
         const localizedMessage =
           code === "CREDIT_BALANCE_INSUFFICIENT" ||
@@ -562,7 +606,7 @@ export default function Home() {
         const traceId =
           typeof errorBody?.traceId === "string"
             ? errorBody.traceId
-            : response.headers.get("X-Request-ID");
+            : response.headers.get("X-Request-ID") || clientTraceId;
         showToast(
           traceId
             ? `${localizedMessage} (${t("chat.traceId")}: ${traceId})`
@@ -570,8 +614,18 @@ export default function Home() {
           "error"
         );
         return false;
-      } catch {
-        showToast(t("chat.comparisonPreflightFailed"), "error");
+      } catch (error) {
+        console.error(
+          JSON.stringify({
+            event: "chat_comparison_preflight_client_failed",
+            traceId: clientTraceId,
+            errorName: error instanceof Error ? error.name : "UnknownError",
+          })
+        );
+        showToast(
+          `${t("chat.comparisonPreflightFailed")} (${t("chat.traceId")}: ${clientTraceId})`,
+          "error"
+        );
         return false;
       } finally {
         comparisonPreflightInFlightRef.current = false;
