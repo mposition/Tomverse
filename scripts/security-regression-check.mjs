@@ -1428,6 +1428,16 @@ const checks = [
     },
   },
   {
+    name: "CodeQL can read workflow metadata and upload code-scanning results",
+    file: ".github/workflows/codeql.yml",
+    test: (source) =>
+      source.includes("actions: read") &&
+      source.includes("contents: read") &&
+      source.includes("security-events: write") &&
+      source.includes("github/codeql-action/init@v4") &&
+      source.includes("github/codeql-action/analyze@v4"),
+  },
+  {
     name: "PR, main, and nightly workflows split browser coverage without rebuilding E2E",
     file: "playwright.config.ts",
     test: (source) => {
