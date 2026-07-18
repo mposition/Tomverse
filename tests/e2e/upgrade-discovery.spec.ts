@@ -187,4 +187,47 @@ test.describe("value-moment upgrade prompt", () => {
     await expect(page.getByRole("status")).toContainText("비용 안전 한도");
     await expect.poll(() => providerRequestCount).toBe(0);
   });
+
+  test("comparison preflight retries one transient network failure", async ({
+    page,
+  }) => {
+    let preflightAttempts = 0;
+    const clientTraceIds = new Set<string>();
+    await page.unroute("**/api/chat/preflight");
+    await page.route("**/api/chat/preflight", async (route) => {
+      preflightAttempts += 1;
+      const clientTraceId =
+        (await route.request().headerValue("X-Client-Request-ID")) || "";
+      clientTraceIds.add(clientTraceId);
+      if (preflightAttempts === 1) {
+        await route.abort("connectionfailed");
+        return;
+      }
+      const body = route.request().postDataJSON() as {
+        comparisonId?: string;
+        modelIds?: string[];
+      };
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        headers: { "X-Request-ID": clientTraceId },
+        body: JSON.stringify({
+          ok: true,
+          comparisonId: body.comparisonId,
+          modelCount: body.modelIds?.length || 0,
+          requiredCredits: body.modelIds?.length || 0,
+        }),
+      });
+    });
+
+    await page.getByTestId("chat-textarea").fill("Retry this comparison");
+    await page.getByTestId("chat-textarea").press("Enter");
+
+    await expect.poll(() => preflightAttempts).toBe(2);
+    expect(clientTraceIds.size).toBe(1);
+    expect([...clientTraceIds][0]).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+    );
+    await expect(page.getByTestId("value-upgrade-prompt")).toBeVisible();
+  });
 });

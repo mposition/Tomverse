@@ -66,8 +66,16 @@ const parseStoredModelIds = (value: unknown) => {
 const estimateTextTokens = (text: string) =>
     text ? Math.max(1, Math.ceil(Buffer.byteLength(text, "utf8") / 4)) : 0;
 
+const comparisonTraceId = (request: Request) => {
+    const suppliedTraceId = request.headers
+        .get("X-Client-Request-ID")
+        ?.trim();
+    const parsedTraceId = z.string().uuid().safeParse(suppliedTraceId);
+    return parsedTraceId.success ? parsedTraceId.data : randomUUID();
+};
+
 export async function POST(request: Request) {
-    const traceId = randomUUID();
+    const traceId = comparisonTraceId(request);
     try {
         const session = await getServerSession(authOptions);
         if (!session?.user?.id) {
