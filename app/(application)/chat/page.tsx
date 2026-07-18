@@ -58,6 +58,11 @@ const normalizeStringArray = (value: unknown, fallback: string[]) => {
 };
 
 const uniqueStrings = (values: string[]) => Array.from(new Set(values));
+type PendingModelSettingsSync = {
+  targetChatId: string;
+  models: string[];
+  disabled: string[];
+};
 const isLanguage = (value: unknown): value is Language =>
   value === "en" ||
   value === "ko" ||
@@ -343,6 +348,7 @@ export default function Home() {
   const [disabledPanels, setDisabledPanels] = useState<string[]>([]);
   const modelSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const modelSyncAbortRef = useRef<AbortController | null>(null);
+  const pendingModelSyncRef = useRef<PendingModelSettingsSync | null>(null);
   const comparisonCompletionsRef = useRef<Map<string, Set<string>>>(new Map());
   const comparisonTrackedRef = useRef<Set<string>>(new Set());
   const localComparisonResponsesRef = useRef<
@@ -1164,42 +1170,83 @@ export default function Home() {
     setPendingDeleteId(id);
   };
   
-  const syncModelSettingsToServer = (targetChatId: string, updatedModels: string[], updatedDisabled: string[]) => {
-    if (!targetChatId || targetChatId === "private-chat") return;
-    if (!sessionUserId) return;
-
-    if (modelSyncTimerRef.current) {
-      clearTimeout(modelSyncTimerRef.current);
-    }
+  const persistModelSettingsToServer = async (
+    pending: PendingModelSettingsSync
+  ) => {
     modelSyncAbortRef.current?.abort();
-
-    modelSyncTimerRef.current = setTimeout(async () => {
-      const controller = new AbortController();
-      modelSyncAbortRef.current = controller;
-      try {
-        const models = clampSelectedModels(updatedModels);
-        const disabled = uniqueStrings(updatedDisabled).filter((modelId) =>
-          models.includes(modelId)
-        );
-        const response = await fetch(`/api/conversations/${targetChatId}`, {
+    const controller = new AbortController();
+    modelSyncAbortRef.current = controller;
+    try {
+      const response = await fetch(
+        `/api/conversations/${pending.targetChatId}`,
+        {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            selectedModels: models,
-            disabledPanels: disabled,
+            selectedModels: pending.models,
+            disabledPanels: pending.disabled,
           }),
           signal: controller.signal,
-        });
-        if (!response.ok) {
-          throw new Error(`Model settings sync failed: ${response.status}`);
         }
-      } catch (error: unknown) {
-        if (!(error instanceof Error) || error.name !== "AbortError") {
-          console.error("Failed to sync model settings:", error);
-        }
+      );
+      if (!response.ok) {
+        throw new Error(`Model settings sync failed: ${response.status}`);
       }
+      if (pendingModelSyncRef.current === pending) {
+        pendingModelSyncRef.current = null;
+      }
+      return true;
+    } catch (error: unknown) {
+      if (!(error instanceof Error) || error.name !== "AbortError") {
+        console.error("Failed to sync model settings:", error);
+      }
+      return false;
+    } finally {
+      if (modelSyncAbortRef.current === controller) {
+        modelSyncAbortRef.current = null;
+      }
+    }
+  };
+
+  const syncModelSettingsToServer = (
+    targetChatId: string,
+    updatedModels: string[],
+    updatedDisabled: string[]
+  ) => {
+    if (!targetChatId || targetChatId === "private-chat" || !sessionUserId) {
+      return;
+    }
+
+    if (modelSyncTimerRef.current) {
+      clearTimeout(modelSyncTimerRef.current);
+      modelSyncTimerRef.current = null;
+    }
+    modelSyncAbortRef.current?.abort();
+
+    const models = clampSelectedModels(updatedModels);
+    const pending: PendingModelSettingsSync = {
+      targetChatId,
+      models,
+      disabled: uniqueStrings(updatedDisabled).filter((modelId) =>
+        models.includes(modelId)
+      ),
+    };
+    pendingModelSyncRef.current = pending;
+    modelSyncTimerRef.current = setTimeout(() => {
+      modelSyncTimerRef.current = null;
+      void persistModelSettingsToServer(pending);
     }, 250);
-  };  
+  };
+
+  const flushModelSettingsToServer = async (targetChatId: string) => {
+    const pending = pendingModelSyncRef.current;
+    if (!pending || pending.targetChatId !== targetChatId) return true;
+    if (modelSyncTimerRef.current) {
+      clearTimeout(modelSyncTimerRef.current);
+      modelSyncTimerRef.current = null;
+    }
+    return persistModelSettingsToServer(pending);
+  };
 
   useEffect(() => {
     if (
@@ -1358,6 +1405,23 @@ export default function Home() {
     }
     
     if (activeChatId) {
+      if (!isGuestMode) {
+        const modelSettingsReady = await flushModelSettingsToServer(activeChatId);
+        if (!modelSettingsReady) {
+          const traceId = crypto.randomUUID();
+          console.error(
+            JSON.stringify({
+              event: "chat_model_settings_flush_failed",
+              traceId,
+            })
+          );
+          showToast(
+            `${t("chat.comparisonPreflightFailed")} (${t("chat.traceId")}: ${traceId})`,
+            "error"
+          );
+          return;
+        }
+      }
       const comparisonId = Date.now().toString();
       const preflightAllowed = await runComparisonPreflight({
         comparisonId,
