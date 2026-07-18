@@ -1387,6 +1387,9 @@ const checks = [
     file: ".github/workflows/daily-security-audit.yml",
     test: (source) => {
       const reporter = read("scripts/send-security-audit-report.mjs");
+      const resendEndpoint = reporter.match(
+        /const sendEmails[\s\S]*?fetch\(\s*"([^"]+)"\s*,/
+      )?.[1];
       return (
         source.includes("name: Daily Security Audit") &&
         source.includes('cron: "0 21 * * *"') &&
@@ -1415,7 +1418,7 @@ const checks = [
         reporter.includes("<!channel>") &&
         reporter.includes("SECURITY_AUDIT_TYPECHECK_STATUS") &&
         reporter.includes("SECURITY_AUDIT_E2E_STATUS") &&
-        reporter.includes("https://api.resend.com/emails") &&
+        resendEndpoint === "https://api.resend.com/emails" &&
         reporter.includes("Australia/Brisbane") &&
         read("package.json").includes(
           '"test:unit": "node scripts/run-unit-tests.mjs"'
