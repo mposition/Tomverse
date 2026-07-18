@@ -2,6 +2,9 @@ import { defineConfig, devices } from "@playwright/test";
 import { resolve } from "node:path";
 
 const baseURL = "http://127.0.0.1:3100";
+const e2eTurnstileSiteKey =
+  process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ||
+  "tomverse-playwright-turnstile-site-key";
 // This key is scoped to the isolated E2E server. It never protects production
 // sessions, and keeps NextAuth's production secret requirement enabled.
 const e2eNextAuthSecret =
@@ -45,7 +48,9 @@ export default defineConfig({
         "postgresql://e2e:e2e@127.0.0.1:1/e2e?connect_timeout=1",
       E2E_AUTH_BYPASS: "true",
       E2E_DISABLE_DATABASE: "true",
+      NEXTAUTH_URL: baseURL,
       NEXTAUTH_SECRET: e2eNextAuthSecret,
+      NEXT_PUBLIC_TURNSTILE_SITE_KEY: e2eTurnstileSiteKey,
       NODE_OPTIONS: nodeOptions,
       REQUIRE_CLOUDFLARE_ORIGIN_SECRET: "false",
     },

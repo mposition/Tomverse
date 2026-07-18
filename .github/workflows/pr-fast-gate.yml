@@ -17,6 +17,11 @@ jobs:
     name: Security, unit, build, and Chromium smoke tests
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    # NEXT_PUBLIC values are embedded by `next build`. Guest E2E tests mock
+    # Turnstile in the browser, but the client still requires a configured key.
+    env:
+      NEXTAUTH_URL: http://127.0.0.1:3100
+      NEXT_PUBLIC_TURNSTILE_SITE_KEY: tomverse-playwright-turnstile-site-key
 
     steps:
       - name: Checkout

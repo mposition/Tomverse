@@ -18,6 +18,11 @@ jobs:
     name: Chromium desktop and mobile regression
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # Keep the production client bundle on the same deterministic Turnstile
+    # configuration used by the isolated Playwright server.
+    env:
+      NEXTAUTH_URL: http://127.0.0.1:3100
+      NEXT_PUBLIC_TURNSTILE_SITE_KEY: tomverse-playwright-turnstile-site-key
 
     steps:
       - name: Checkout

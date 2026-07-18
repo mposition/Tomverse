@@ -19,6 +19,11 @@ jobs:
     name: Security audit and daily report
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    # The full E2E suite runs against this build. The public test key is not a
+    # credential; it only lets the browser-side Turnstile mock execute in CI.
+    env:
+      NEXTAUTH_URL: http://127.0.0.1:3100
+      NEXT_PUBLIC_TURNSTILE_SITE_KEY: tomverse-playwright-turnstile-site-key
 
     steps:
       - name: Checkout complete Git history
