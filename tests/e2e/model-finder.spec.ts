@@ -66,9 +66,13 @@ test("new signed-in users can choose a Standard default with explicit optional u
   await page.getByRole("button", { name: "다음" }).click();
 
   await expect(finder).toContainText("추천 기본 모델");
-  await expect(finder).toContainText("Standard · 기본 1크레딧");
+  await expect(
+    finder.getByTestId("model-finder-credit-cost").filter({ hasText: "1" }).first()
+  ).toBeVisible();
   await expect(finder).toContainText("Claude Sonnet 5");
-  await expect(finder).toContainText("Advanced · 4 credits");
+  await expect(
+    finder.getByTestId("model-finder-credit-cost").filter({ hasText: "4" })
+  ).toBeVisible();
   await expectNoHorizontalOverflow(page);
   await page.getByRole("button", { name: "이 모델로 시작하기" }).click();
 

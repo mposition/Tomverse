@@ -9,7 +9,10 @@ const CHECKS = [
   ["Security regression checks", "SECURITY_AUDIT_REGRESSION_STATUS"],
   ["Unit and API policy tests", "SECURITY_AUDIT_UNIT_STATUS"],
   ["Strict encoding validation", "SECURITY_AUDIT_ENCODING_STATUS"],
-  ["Lint, type, and production build", "SECURITY_AUDIT_PRODUCTION_STATUS"],
+  ["Independent TypeScript validation", "SECURITY_AUDIT_TYPECHECK_STATUS"],
+  ["ESLint and production build", "SECURITY_AUDIT_PRODUCTION_STATUS"],
+  ["Playwright browser setup", "SECURITY_AUDIT_BROWSER_INSTALL_STATUS"],
+  ["Full desktop and mobile E2E", "SECURITY_AUDIT_E2E_STATUS"],
 ];
 
 const normalizeStatus = (value) => {

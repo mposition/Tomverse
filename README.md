@@ -810,18 +810,54 @@ these DB templates so they still work during a database outage.
 
 ## Daily Security Audit
 
-GitHub Actions runs the full Tomverse security gate every day at 07:00
-Australia/Brisbane (`21:00 UTC` on the previous day). It also remains a required
-PR and `main` push check. The daily gate includes repository-history secret
-scanning, `npm audit --omit=dev`, security regression checks, unit/API policy
-tests, strict encoding validation, lint/type validation, and a production build.
+GitHub Actions runs the full Tomverse security audit every day at 07:00
+Australia/Brisbane (`21:00 UTC` on the previous day), with an additional manual
+dispatch option. It is intentionally not triggered by pull requests or `main`
+pushes. The daily audit includes the complete Git-history Gitleaks scan,
+`npm audit --omit=dev`, security regression checks, unit/API policy tests,
+strict encoding validation, an independent `next typegen` + `tsc` check, ESLint,
+one production build, and the full Chromium/WebKit desktop/mobile Playwright
+suite. The already-built `.next` output is reused by Playwright.
 
-Scheduled and manually dispatched runs send a result summary to both Slack and
-email. PR and push runs write only to the GitHub Actions summary so normal
-development does not spam operations channels. The Slack message always includes
-`<!channel>`, and the JSON evidence is retained as a workflow artifact for 30
-days. This is a GitHub Actions schedule, so no additional Railway Cron service is
-required.
+Every scheduled or manually dispatched run sends a result summary to both Slack
+and email. The Slack message always includes `<!channel>`, and the JSON report,
+Playwright traces, screenshots, and HTML report are retained as workflow
+artifacts for 30 days. This is a GitHub Actions schedule, so no additional
+Railway Cron service is required.
+
+### Pull request and main CI gates
+
+The `PR Fast Gate` workflow keeps pull-request feedback focused and fast. A
+single job installs dependencies once, runs the current-change security
+secret scan and security regression checks, unit/API policy tests, strict
+encoding validation, ESLint and one Next.js production build, then reuses that
+build for the desktop Chromium smoke suite. Gitleaks evaluates the pull-request
+commit range rather than using the daily full-history audit, and WebKit is not
+installed.
+
+The `Main Chromium Regression` workflow runs on every `main` push and manual
+dispatch. It builds once and runs all configured Chromium coverage: full-size
+desktop, compact desktop, and mobile Chromium. WebKit and Mobile Safari coverage
+remain in the daily full audit.
+
+The PostgreSQL financial integration workflow is always available for `main`
+pushes and manual runs. On pull requests it runs only when Prisma, credit,
+billing, Stripe, billing/refund API, integration-test, lockfile, or workflow
+paths change. User-facing code outside those paths continues through the PR Fast
+Gate without waiting for a PostgreSQL service.
+
+The workflows use the setup-node npm cache, `.next/cache`, and the Playwright
+browser cache. Cache restore failures are non-blocking; each job can regenerate
+or download everything it needs. Relevant local commands are:
+
+```text
+npm run check             # ESLint + one production build
+npm run typecheck         # next typegen + standalone tsc validation
+npm run test:e2e:pr       # existing build, desktop Chromium only
+npm run test:e2e:chromium # existing build, all Chromium projects
+npm run test:e2e:run      # existing build, every configured browser project
+npm run test:e2e          # local convenience: build, then full E2E
+```
 
 Configure these GitHub repository **Actions secrets** (Railway variables are not
 automatically available to GitHub Actions):

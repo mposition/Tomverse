@@ -1383,28 +1383,38 @@ const checks = [
       source.includes('"X-Accel-Buffering": "no"'),
   },
   {
-    name: "Daily security audit reports every Brisbane morning through Slack and email",
+    name: "Daily full security audit is isolated from pull requests and main pushes",
     file: ".github/workflows/daily-security-audit.yml",
     test: (source) => {
       const reporter = read("scripts/send-security-audit-report.mjs");
-      const financeWorkflow = read(
-        ".github/workflows/credit-finance-db-integration.yml"
-      );
       return (
         source.includes("name: Daily Security Audit") &&
         source.includes('cron: "0 21 * * *"') &&
+        source.includes("workflow_dispatch:") &&
+        !source.includes("pull_request:") &&
+        !source.includes("push:") &&
         source.includes("actions: read") &&
-        source.includes("pull-requests: read") &&
         source.includes("gitleaks/gitleaks-action@v3") &&
         source.includes("actions/checkout@v6") &&
         source.includes("actions/setup-node@v6") &&
+        source.includes("actions/cache@v5") &&
         source.includes("actions/upload-artifact@v7") &&
+        source.includes("fetch-depth: 0") &&
+        source.includes("npm audit --omit=dev --json") &&
+        source.includes("npm run typecheck") &&
+        source.includes("npm run check") &&
+        source.includes("playwright install --with-deps chromium webkit") &&
+        source.includes("npm run test:e2e:run") &&
         source.includes("node scripts/send-security-audit-report.mjs") &&
         source.includes('check_result "Unit and API policy tests"') &&
+        source.includes('check_result "Independent TypeScript validation"') &&
+        source.includes('check_result "Full desktop and mobile E2E"') &&
         source.includes("SECURITY_AUDIT_SLACK_WEBHOOK_URL") &&
         source.includes("SECURITY_AUDIT_EMAILS") &&
         source.includes("RESEND_API_KEY") &&
         reporter.includes("<!channel>") &&
+        reporter.includes("SECURITY_AUDIT_TYPECHECK_STATUS") &&
+        reporter.includes("SECURITY_AUDIT_E2E_STATUS") &&
         reporter.includes("https://api.resend.com/emails") &&
         reporter.includes("Australia/Brisbane") &&
         read("package.json").includes(
@@ -1413,28 +1423,75 @@ const checks = [
         read("scripts/run-unit-tests.mjs").includes(
           'name.endsWith(".test.mjs") || name.endsWith(".test.ts")'
         ) &&
-        financeWorkflow.includes("actions/checkout@v6") &&
-        financeWorkflow.includes("actions/setup-node@v6") &&
         !source.includes("ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION")
       );
     },
   },
   {
-    name: "E2E server keeps NextAuth secret enforcement and installs every configured browser",
+    name: "PR, main, and nightly workflows split browser coverage without rebuilding E2E",
     file: "playwright.config.ts",
     test: (source) => {
-      const workflow = read(".github/workflows/e2e.yml");
+      const packageSource = read("package.json");
+      const prWorkflow = read(".github/workflows/pr-fast-gate.yml");
+      const mainWorkflow = read(".github/workflows/e2e.yml");
+      const dailyWorkflow = read(".github/workflows/daily-security-audit.yml");
       return (
         source.includes("tomverse-e2e-nextauth-secret-only-2026") &&
         source.includes("NEXTAUTH_SECRET: e2eNextAuthSecret") &&
         source.includes('name: "mobile-safari"') &&
-        workflow.includes("actions/checkout@v6") &&
-        workflow.includes("actions/setup-node@v6") &&
-        workflow.includes("actions/upload-artifact@v7") &&
-        workflow.includes("playwright install --with-deps chromium webkit") &&
-        !workflow.includes("ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION")
+        packageSource.includes(
+          '"test:e2e:run": "playwright test"'
+        ) &&
+        packageSource.includes(
+          '"test:e2e:pr": "playwright test --project=desktop-chromium"'
+        ) &&
+        packageSource.includes(
+          '"check": "eslint . --max-warnings=0 && next build"'
+        ) &&
+        packageSource.includes(
+          '"typecheck": "next typegen && tsc --noEmit --incremental false"'
+        ) &&
+        prWorkflow.includes("pull_request:") &&
+        !prWorkflow.includes("push:") &&
+        prWorkflow.includes("actions: read") &&
+        prWorkflow.includes("pull-requests: read") &&
+        prWorkflow.includes("gitleaks/gitleaks-action@v3") &&
+        prWorkflow.includes('GITLEAKS_ENABLE_COMMENTS: "false"') &&
+        prWorkflow.includes("npm run security:regression") &&
+        prWorkflow.includes("npm run test:unit") &&
+        prWorkflow.includes("npm run check") &&
+        prWorkflow.includes("npm run test:e2e:pr") &&
+        prWorkflow.includes("playwright install --with-deps chromium") &&
+        !prWorkflow.includes("chromium webkit") &&
+        mainWorkflow.includes("push:") &&
+        !mainWorkflow.includes("pull_request:") &&
+        mainWorkflow.includes("npm run build") &&
+        mainWorkflow.includes("npm run test:e2e:chromium") &&
+        dailyWorkflow.includes("npm run test:e2e:run") &&
+        dailyWorkflow.includes("chromium webkit") &&
+        !prWorkflow.includes("ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION") &&
+        !mainWorkflow.includes("ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION")
       );
     },
+  },
+  {
+    name: "Financial DB gate is path-scoped on PRs but always available on main and manual runs",
+    file: ".github/workflows/credit-finance-db-integration.yml",
+    test: (source) =>
+      source.includes("pull_request:") &&
+      source.includes("paths:") &&
+      source.includes('"prisma/**"') &&
+      source.includes('"lib/chatSecurity.ts"') &&
+      source.includes('"lib/credit*.ts"') &&
+      source.includes('"lib/billing*.ts"') &&
+      source.includes('"lib/stripe*.ts"') &&
+      source.includes('"app/api/billing/**"') &&
+      source.includes('"tests/integration/**"') &&
+      source.includes("push:") &&
+      source.includes("- main") &&
+      source.includes("workflow_dispatch:") &&
+      source.includes("actions/checkout@v6") &&
+      source.includes("actions/setup-node@v6"),
   },
 ];
 
