@@ -21,17 +21,51 @@ const blockedOriginResponse = () =>
     },
   });
 
-const blockedMutationOriginResponse = () =>
-  NextResponse.json(
-    { error: "Cross-site mutation request rejected.", code: "INVALID_REQUEST_ORIGIN" },
+const TRACE_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const safeHeaderHost = (value: string | null) => {
+  if (!value) return null;
+  try {
+    return new URL(value).host.toLowerCase();
+  } catch {
+    return null;
+  }
+};
+
+const blockedMutationOriginResponse = (request: NextRequest) => {
+  const providedTraceId = request.headers.get("x-request-id")?.trim() || "";
+  const traceId = TRACE_ID_PATTERN.test(providedTraceId)
+    ? providedTraceId
+    : crypto.randomUUID();
+
+  console.warn("Mutation origin rejected", {
+    traceId,
+    pathname: request.nextUrl.pathname,
+    method: request.method,
+    requestHost: request.headers.get("host"),
+    requestUrlHost: request.nextUrl.host,
+    originHost: safeHeaderHost(request.headers.get("origin")),
+    forwardedProtocol: request.headers.get("x-forwarded-proto"),
+    fetchSite: request.headers.get("sec-fetch-site"),
+  });
+
+  return NextResponse.json(
+    {
+      error: "Cross-site mutation request rejected.",
+      code: "INVALID_REQUEST_ORIGIN",
+      traceId,
+    },
     {
       status: 403,
       headers: {
         "Cache-Control": "no-store",
         "X-Content-Type-Options": "nosniff",
+        "X-Request-ID": traceId,
       },
     }
   );
+};
 
 export function proxy(request: NextRequest) {
   if (
@@ -53,7 +87,7 @@ export function proxy(request: NextRequest) {
     requiresMutationOriginCheck(request.method, request.nextUrl.pathname) &&
     !hasValidMutationOrigin(request)
   ) {
-    return blockedMutationOriginResponse();
+    return blockedMutationOriginResponse(request);
   }
 
   const isStaticMarketingRequest = isStaticMarketingPathname(
