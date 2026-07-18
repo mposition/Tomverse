@@ -254,6 +254,22 @@ export async function POST(request: Request) {
         }
         const accessResponse = chatErrorResponse(error);
         if (accessResponse) {
+            if (
+                error instanceof ChatAccessError &&
+                (error.code === "MODEL_NOT_SELECTED" ||
+                    error.code === "MODEL_NOT_AVAILABLE" ||
+                    error.code === "MODEL_ACCESS_FORBIDDEN")
+            ) {
+                console.warn(
+                    JSON.stringify({
+                        event: "chat_comparison_preflight_denied",
+                        traceId,
+                        code: error.code,
+                        status: error.status,
+                        timestamp: new Date().toISOString(),
+                    })
+                );
+            }
             accessResponse.headers.set("X-Request-ID", traceId);
             return accessResponse;
         }

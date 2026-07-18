@@ -230,4 +230,59 @@ test.describe("value-moment upgrade prompt", () => {
     );
     await expect(page.getByTestId("value-upgrade-prompt")).toBeVisible();
   });
+
+  test("pending model selection is persisted before comparison preflight", async ({
+    page,
+  }) => {
+    let modelPatchCompleted = false;
+    let preflightAfterPatch = false;
+    await page.route(
+      /.*\/api\/conversations\/qa-conversation(\?.*)?$/,
+      async (route) => {
+        if (route.request().method() !== "PATCH") {
+          await route.fallback();
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        modelPatchCompleted = true;
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ id: "qa-conversation" }),
+        });
+      }
+    );
+    await page.unroute("**/api/chat/preflight");
+    await page.route("**/api/chat/preflight", async (route) => {
+      preflightAfterPatch = modelPatchCompleted;
+      await route.fulfill({
+        status: preflightAfterPatch ? 200 : 409,
+        contentType: "application/json",
+        body: JSON.stringify(
+          preflightAfterPatch
+            ? { ok: true, modelCount: 3, requiredCredits: 3 }
+            : {
+                error: "Model selection was not persisted.",
+                code: "MODEL_NOT_SELECTED",
+              }
+        ),
+      });
+    });
+
+    await modelMenuTrigger(page).click();
+    const availableRecommendation = page
+      .locator(
+        '[data-testid="recommended-model-option"][aria-pressed="false"][data-model-plan-locked="false"]:not([disabled])'
+      )
+      .first();
+    await expect(availableRecommendation).toBeVisible();
+    await availableRecommendation.click();
+    await page.keyboard.press("Escape");
+    await page.getByTestId("chat-textarea").fill("Persist then compare");
+    await page.getByTestId("chat-textarea").press("Enter");
+
+    await expect.poll(() => modelPatchCompleted).toBe(true);
+    await expect.poll(() => preflightAfterPatch).toBe(true);
+    await expect(page.getByTestId("value-upgrade-prompt")).toBeVisible();
+  });
 });
