@@ -5,10 +5,13 @@ import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
+import { writeAdminAuditLog } from "@/lib/adminAudit";
+import { adminApprovalErrorResponse } from "@/lib/adminApproval";
+import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import {
   getPublicAppSettings,
   isValidGuestDefaultModel,
-  updateGuestDefaultModel,
+  updatePublicAppSettings,
 } from "@/lib/appSettings";
 import {
   apiSecurityResponse,
@@ -19,6 +22,9 @@ import {
 const updateAppSettingsSchema = z
   .object({
     guestDefaultModelId: z.string().trim().min(1).max(120),
+    aiChatEnabled: z.boolean(),
+    attachmentsEnabled: z.boolean(),
+    publicSharingEnabled: z.boolean(),
   })
   .strict();
 
@@ -56,6 +62,7 @@ export async function PATCH(req: Request) {
     if (!hasAdminPermission(session, "ops:write")) {
       return NextResponse.json({ error: "Forbidden." }, { status: 403 });
     }
+    await assertRecentAdminAuthentication(req, session);
 
     await consumeApiRateLimit(req, session.user.id, "admin-app-settings-write", {
       minute: 10,
@@ -69,11 +76,29 @@ export async function PATCH(req: Request) {
         { status: 400 }
       );
     }
-    await updateGuestDefaultModel(body.guestDefaultModelId);
-
-    const settings = await getPublicAppSettings();
+    await writeAdminAuditLog({
+      session,
+      request: req,
+      action: "app_settings.update_started",
+      targetType: "AppSettings",
+      targetId: "public",
+      summary: "Started platform defaults and feature-flag update.",
+      metadata: body,
+    });
+    const settings = await updatePublicAppSettings(body);
+    await writeAdminAuditLog({
+      session,
+      request: req,
+      action: "app_settings.guest_default_model.updated",
+      targetType: "AppSettings",
+      targetId: "public",
+      summary: `Updated platform defaults and operational feature flags.`,
+      metadata: body,
+    });
     return NextResponse.json({ settings });
   } catch (error) {
+    const approvalResponse = adminApprovalErrorResponse(error);
+    if (approvalResponse) return approvalResponse;
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
     console.error("Failed to update admin app settings:", error);

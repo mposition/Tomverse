@@ -4,6 +4,10 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
+import {
+  adminApprovalErrorResponse,
+  runWithAdminApproval,
+} from "@/lib/adminApproval";
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { sendAdminPlanChangedEmail } from "@/lib/billingEmails";
@@ -66,36 +70,50 @@ export async function PATCH(req: Request, context: RouteContext) {
       return NextResponse.json({ error: "User not found." }, { status: 404 });
     }
 
-    const user = await prisma.user.update({
-      where: { id: userId },
-      data: {
-        plan: body.plan,
-        subscriptionStatus: body.subscriptionStatus || "manually_adjusted",
-        subscriptionCurrentPeriodEnd: body.periodEnd ? new Date(body.periodEnd) : null,
-        subscriptionBillingInterval: body.billingInterval || null,
-        subscriptionCancelAtPeriodEnd: body.cancelAtPeriodEnd || false,
-        ...(body.plan === "Free"
-          ? {
-              stripePriceId: null,
-              subscriptionBillingInterval: null,
-              subscriptionCurrentPeriodEnd: null,
-              subscriptionCancelAtPeriodEnd: false,
-            }
-          : {}),
+    const user = await runWithAdminApproval(
+      {
+        session,
+        request: req,
+        action: "user.plan_adjust",
+        targetType: "User",
+        targetId: userId,
+        payload: body,
+        reason: body.reason,
       },
-      select: {
-        id: true,
-        email: true,
-        plan: true,
-        subscriptionStatus: true,
-        subscriptionCurrentPeriodEnd: true,
-        subscriptionBillingInterval: true,
-        subscriptionCancelAtPeriodEnd: true,
-        stripeCustomerId: true,
-        stripeSubscriptionId: true,
-        stripePriceId: true,
-      },
-    });
+      () =>
+        prisma.user.update({
+          where: { id: userId },
+          data: {
+            plan: body.plan,
+            subscriptionStatus: body.subscriptionStatus || "manually_adjusted",
+            subscriptionCurrentPeriodEnd: body.periodEnd
+              ? new Date(body.periodEnd)
+              : null,
+            subscriptionBillingInterval: body.billingInterval || null,
+            subscriptionCancelAtPeriodEnd: body.cancelAtPeriodEnd || false,
+            ...(body.plan === "Free"
+              ? {
+                  stripePriceId: null,
+                  subscriptionBillingInterval: null,
+                  subscriptionCurrentPeriodEnd: null,
+                  subscriptionCancelAtPeriodEnd: false,
+                }
+              : {}),
+          },
+          select: {
+            id: true,
+            email: true,
+            plan: true,
+            subscriptionStatus: true,
+            subscriptionCurrentPeriodEnd: true,
+            subscriptionBillingInterval: true,
+            subscriptionCancelAtPeriodEnd: true,
+            stripeCustomerId: true,
+            stripeSubscriptionId: true,
+            stripePriceId: true,
+          },
+        })
+    );
 
     await sendAdminPlanChangedEmail({
       to: user.email,
@@ -137,6 +155,8 @@ export async function PATCH(req: Request, context: RouteContext) {
 
     return NextResponse.json({ success: true, user });
   } catch (error) {
+    const approvalResponse = adminApprovalErrorResponse(error);
+    if (approvalResponse) return approvalResponse;
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
     console.error("Admin plan adjustment failed:", error);

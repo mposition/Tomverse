@@ -7,6 +7,7 @@ declare module "next-auth" {
             id: string;
             plan?: "Free" | "Pro" | "Max";
             createdAt?: string;
+            authenticatedAt?: string;
         } & DefaultSession["user"];
     }
 }

@@ -2,6 +2,11 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { after } from "next/server";
 import { cleanupExpiredData } from "@/lib/maintenance";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
+import {
+  completeScheduledJob,
+  failScheduledJob,
+  startScheduledJob,
+} from "@/lib/scheduledJobs";
 
 const isAuthorized = (request: Request) => {
   const configured = process.env.MAINTENANCE_SECRET;
@@ -27,13 +32,24 @@ export async function POST(request: Request) {
     );
   }
 
+  const run = await startScheduledJob("retention_cleanup");
   try {
     const deleted = await cleanupExpiredData();
+    const processedCount = Object.values(deleted).reduce<number>(
+      (sum, value) => sum + (typeof value === "number" ? value : 0),
+      0
+    );
+    await completeScheduledJob({
+      runId: run?.id,
+      processedCount,
+      result: JSON.parse(JSON.stringify(deleted)),
+    });
     return Response.json(
       { success: true, deleted },
       { headers: { "Cache-Control": "no-store" } }
     );
   } catch (error) {
+    await failScheduledJob({ runId: run?.id, error });
     after(() =>
       reportOperationalIncident({
         code: "SCHEDULED_MAINTENANCE_CLEANUP_FAILED",

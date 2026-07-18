@@ -22,6 +22,7 @@ type WebhookConfiguration = Record<SlackTemplateKey, boolean>;
 const EMPTY_WEBHOOK_CONFIGURATION: WebhookConfiguration = {
   infrastructure_daily: false,
   provider_usage_daily: false,
+  provider_model_catalog_daily: false,
   provider_alert: false,
 };
 
@@ -32,7 +33,7 @@ export function AdminSlackTemplatesPanel() {
   const [testingKey, setTestingKey] = useState<string | null>(null);
   const [webhookConfigured, setWebhookConfigured] =
     useState<WebhookConfiguration>(EMPTY_WEBHOOK_CONFIGURATION);
-  const [schedule, setSchedule] = useState("10:30 Australia/Brisbane");
+  const [schedule, setSchedule] = useState("10:00 / 10:30 Australia/Brisbane");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -54,7 +55,9 @@ export function AdminSlackTemplatesPanel() {
         ...EMPTY_WEBHOOK_CONFIGURATION,
         ...data.webhookConfiguredByTemplate,
       });
-      setSchedule(data.schedule?.localTime || "10:30 Australia/Brisbane");
+      setSchedule(
+        data.schedule?.localTime || "10:00 / 10:30 Australia/Brisbane"
+      );
     } catch (error) {
       dispatchAppToast(
         error instanceof Error ? error.message : "Could not load Slack templates.",

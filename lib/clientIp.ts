@@ -34,5 +34,9 @@ export function getTrustedClientIp(request: Request) {
     return normalizeIp(request.headers.get(CLOUDFLARE_IP_HEADER)) || "unknown";
   }
 
+  // Production traffic must be authenticated as Cloudflare-origin traffic.
+  // Never trust a client-controlled x-real-ip fallback on the public service.
+  if (process.env.NODE_ENV === "production") return "unknown";
+
   return normalizeIp(request.headers.get(RAILWAY_IP_HEADER)) || "unknown";
 }

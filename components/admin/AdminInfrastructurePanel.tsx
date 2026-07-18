@@ -128,7 +128,12 @@ export function AdminInfrastructurePanel({
   useEffect(() => {
     queueMicrotask(() => void load());
     const timer = window.setInterval(() => void load(), REFRESH_INTERVAL_MS);
-    return () => window.clearInterval(timer);
+    const refresh = () => void load();
+    window.addEventListener("admin:refresh", refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("admin:refresh", refresh);
+    };
   }, [load]);
 
   const parsedCredit = Number(creditUsd);

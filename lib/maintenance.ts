@@ -16,10 +16,31 @@ import {
   FOUNDING_TESTER_PASS_EXPIRED_STATUS,
   FOUNDING_TESTER_PASS_STATUS,
 } from "@/lib/foundingTesterPassCore";
+import { deleteTomverseAccount } from "@/lib/accountDeletion";
 
 const OAUTH_ACCOUNT_BATCH_SIZE = 200;
 const TESTER_PASS_BATCH_SIZE = 100;
 const TESTER_PASS_REMINDER_WINDOW_MS = 7 * 86_400_000;
+
+const deleteScheduledAccounts = async (now: Date) => {
+  const users = await prisma.user.findMany({
+    where: {
+      accountStatus: "pending_deletion",
+      accountDeletionScheduledFor: { lte: now },
+    },
+    orderBy: { accountDeletionScheduledFor: "asc" },
+    select: { id: true },
+    take: 50,
+  });
+  let deleted = 0;
+  for (const user of users) {
+    const result = await deleteTomverseAccount(user.id, {
+      cancelSubscription: false,
+    });
+    if (result.deleted) deleted += 1;
+  }
+  return deleted;
+};
 
 const resetReminderClaim = (id: string, claimedAt: Date) =>
   prisma.billingPromotionRedemption.updateMany({
@@ -250,6 +271,7 @@ export async function cleanupExpiredData() {
   const testerPassReminders = await sendFoundingTesterPassReminders(now);
   const testerPassExpirations = await expireFoundingTesterPasses(now);
   const testerPassEndedNotices = await sendFoundingTesterPassEndedNotices(now);
+  const scheduledAccountsDeleted = await deleteScheduledAccounts(now);
 
   const sessions = await prisma.session.deleteMany({
     where: { expires: { lte: new Date() } },
@@ -354,5 +376,6 @@ export async function cleanupExpiredData() {
     testerPassReminders,
     testerPassExpirations,
     testerPassEndedNotices,
+    scheduledAccountsDeleted,
   };
 }

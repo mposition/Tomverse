@@ -42,6 +42,11 @@ const fallbackModelStatus = (publicModels: Awaited<ReturnType<typeof getPublicRu
 export async function GET(req: Request) {
   try {
     const publicModels = await getPublicRuntimeModels();
+    if (process.env.E2E_DISABLE_DATABASE === "true") {
+      return NextResponse.json(fallbackModelStatus(publicModels), {
+        headers: cacheHeaders,
+      });
+    }
     const subject = `public:${getTrustedClientIp(req)}`;
     try {
       await consumeApiRateLimit(req, subject, "public-model-status", {

@@ -90,6 +90,7 @@ run(
     "--test-concurrency=1",
     "tests/integration/credit-finance.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
+    "tests/integration/admin-security.db.test.ts",
   ],
-  "Running financial, credit, and model-registry transaction scenarios"
+  "Running financial, credit, model-registry, and admin-security transaction scenarios"
 );

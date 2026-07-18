@@ -5,6 +5,7 @@ import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
+import { writeAdminAuditLog } from "@/lib/adminAudit";
 import {
   apiSecurityResponse,
   consumeApiRateLimit,
@@ -40,9 +41,28 @@ export async function PATCH(req: Request, context: RouteContext) {
     const { feedbackId } = await context.params;
     const body = await readLimitedJson(req, 2 * 1024, updateFeedbackSchema);
 
+    await writeAdminAuditLog({
+      session,
+      request: req,
+      action: "feedback.status.update_started",
+      targetType: "Feedback",
+      targetId: feedbackId,
+      summary: `Started feedback status change to ${body.status}.`,
+      metadata: { status: body.status },
+    });
+
     const feedback = await prisma.feedback.update({
       where: { id: feedbackId },
       data: { status: body.status },
+    });
+    await writeAdminAuditLog({
+      session,
+      request: req,
+      action: "feedback.status.updated",
+      targetType: "Feedback",
+      targetId: feedbackId,
+      summary: `Changed feedback status to ${body.status}.`,
+      metadata: { status: body.status },
     });
 
     return NextResponse.json({ success: true, feedback });

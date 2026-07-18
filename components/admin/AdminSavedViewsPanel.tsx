@@ -5,13 +5,13 @@ import { useState } from "react";
 import { Bookmark, Star } from "lucide-react";
 
 const views = [
-  { id: "overview", label: "Launch overview", href: "/admin" },
-  { id: "users", label: "Customer ops", href: "/admin?tab=users" },
-  { id: "billing", label: "Billing control", href: "/admin?tab=billing" },
-  { id: "refunds", label: "Refund queue", href: "/admin?tab=refunds" },
-  { id: "providers", label: "Provider health", href: "/admin?tab=providers" },
-  { id: "alerts", label: "Alerts and webhooks", href: "/admin?tab=alerts" },
-  { id: "feedback", label: "Support inbox", href: "/admin?tab=feedback" },
+  { id: "overview", label: "Launch overview", href: "/admin/overview" },
+  { id: "users", label: "Customer ops", href: "/admin/users" },
+  { id: "billing", label: "Billing control", href: "/admin/billing" },
+  { id: "refunds", label: "Refund queue", href: "/admin/refunds" },
+  { id: "providers", label: "Provider health", href: "/admin/providers" },
+  { id: "alerts", label: "Alerts", href: "/admin/alerts" },
+  { id: "feedback", label: "Support inbox", href: "/admin/feedback" },
 ] as const;
 
 export function AdminSavedViewsPanel({ activeTab }: { activeTab: string }) {

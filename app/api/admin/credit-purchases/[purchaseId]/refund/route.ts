@@ -4,6 +4,11 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
+import {
+  adminApprovalErrorResponse,
+  runWithAdminApproval,
+} from "@/lib/adminApproval";
+import { refundApprovalThresholdCents } from "@/lib/adminApprovalCore";
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import {
@@ -140,18 +145,50 @@ export async function POST(req: Request, context: RouteContext) {
         remainingFundedCostMicroUsd -
         Number(purchase.revokedCostMicroUsd)
     );
-    const refund = await stripe.refunds.create(
-      {
-        charge: charge.id,
-        amount,
-        reason: "requested_by_customer",
-        metadata: {
-          tomverseCreditPurchaseId: purchase.id,
-          reviewedByUserId: session.user.id,
+    const createRefund = async () => {
+      await writeAdminAuditLog({
+        session,
+        request: req,
+        action: "credit_purchase.refund_started",
+        targetType: "CreditPurchase",
+        targetId: purchase.id,
+        summary: `Started Stripe refund for credit purchase ${purchase.id}.`,
+        metadata: { amount, currency: charge.currency.toUpperCase(), chargeId: charge.id },
+      });
+      return stripe.refunds.create(
+        {
+          charge: charge.id,
+          amount,
+          reason: "requested_by_customer",
+          metadata: {
+            tomverseCreditPurchaseId: purchase.id,
+            reviewedByUserId: session.user.id,
+          },
         },
-      },
-      { idempotencyKey: `credit-purchase-refund:${purchase.id}:remaining` }
-    );
+        { idempotencyKey: `credit-purchase-refund:${purchase.id}:remaining` }
+      );
+    };
+    const refund =
+      amount >=
+      refundApprovalThresholdCents(process.env.ADMIN_REFUND_APPROVAL_THRESHOLD_CENTS)
+        ? await runWithAdminApproval(
+            {
+              session,
+              request: req,
+              action: "credit_purchase.refund",
+              targetType: "CreditPurchase",
+              targetId: purchase.id,
+              payload: {
+                ...body,
+                refundAmountCents: amount,
+                refundCurrency: charge.currency.toUpperCase(),
+                stripeChargeId: charge.id,
+              },
+              reason: body.reason,
+            },
+            createRefund
+          )
+        : await createRefund();
 
     const refreshedCharge = await stripe.charges.retrieve(charge.id);
     await handleCreditPackRefund(refreshedCharge);
@@ -196,6 +233,8 @@ export async function POST(req: Request, context: RouteContext) {
       },
     });
   } catch (error) {
+    const approvalResponse = adminApprovalErrorResponse(error);
+    if (approvalResponse) return approvalResponse;
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
     console.error("Admin credit purchase refund failed:", error);

@@ -1,0 +1,207 @@
+name: Daily Security Audit
+
+on:
+  schedule:
+    # 07:00 Australia/Brisbane (21:00 UTC on the previous day, no DST).
+    - cron: "0 21 * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: daily-security-audit-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: Security audit and daily report
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    # The full E2E suite runs against this build. The public test key is not a
+    # credential; it only lets the browser-side Turnstile mock execute in CI.
+    env:
+      NEXTAUTH_URL: http://127.0.0.1:3100
+      NEXT_PUBLIC_TURNSTILE_SITE_KEY: tomverse-playwright-turnstile-site-key
+
+    steps:
+      - name: Checkout complete Git history
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Scan repository history for secrets
+        id: gitleaks
+        continue-on-error: true
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: "false"
+
+      - name: Setup Node.js
+        id: setup_node
+        continue-on-error: true
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Restore Next.js build cache
+        if: steps.setup_node.outcome == 'success'
+        continue-on-error: true
+        uses: actions/cache@v5
+        with:
+          path: .next/cache
+          key: ${{ runner.os }}-next-daily-${{ hashFiles('package-lock.json') }}-${{ hashFiles('app/**/*.ts', 'app/**/*.tsx', 'components/**/*.ts', 'components/**/*.tsx', 'lib/**/*.ts', 'lib/**/*.tsx', 'next.config.ts', 'tsconfig.json') }}
+          restore-keys: |
+            ${{ runner.os }}-next-daily-${{ hashFiles('package-lock.json') }}-
+            ${{ runner.os }}-next-
+
+      - name: Install dependencies
+        id: install
+        if: steps.setup_node.outcome == 'success'
+        continue-on-error: true
+        run: npm ci
+
+      - name: Dependency vulnerability audit
+        id: dependency_audit
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          mkdir -p security-audit
+          npm audit --omit=dev --json > security-audit/npm-audit.json
+
+      - name: Security regression checks
+        id: security_regression
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        run: npm run security:regression
+
+      - name: Unit and API policy tests
+        id: unit_tests
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        run: npm run test:unit
+
+      - name: Strict encoding validation
+        id: encoding
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        run: npm run check:encoding:strict
+
+      - name: Independent TypeScript validation
+        id: typecheck
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        run: npm run typecheck
+
+      - name: ESLint and production build
+        id: production_check
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        run: npm run check
+
+      - name: Restore Playwright browser cache
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}-chromium-webkit
+          restore-keys: |
+            ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}-
+
+      - name: Install Chromium and WebKit
+        id: browser_install
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        run: npx playwright install --with-deps chromium webkit
+
+      - name: Run full desktop and mobile E2E suite
+        id: e2e
+        if: steps.production_check.outcome == 'success' && steps.browser_install.outcome == 'success'
+        continue-on-error: true
+        run: npm run test:e2e:run
+
+      - name: Deliver security audit report
+        id: report
+        if: always()
+        env:
+          SECURITY_AUDIT_SEND_NOTIFICATIONS: "true"
+          SECURITY_AUDIT_SLACK_WEBHOOK_URL: ${{ secrets.SECURITY_AUDIT_SLACK_WEBHOOK_URL || secrets.OPS_ALERT_SLACK_WEBHOOK_URL || secrets.SLACK_WEBHOOK_URL }}
+          SECURITY_AUDIT_EMAILS: ${{ secrets.SECURITY_AUDIT_EMAILS || secrets.OPS_ALERT_EMAIL || secrets.ADMIN_ALERT_EMAIL }}
+          SECURITY_AUDIT_EMAIL_FROM: ${{ secrets.SECURITY_AUDIT_EMAIL_FROM || secrets.TRANSACTIONAL_EMAIL_FROM || secrets.EMAIL_FROM }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          SECURITY_AUDIT_OUTPUT_PATH: security-audit/daily-report.json
+          SECURITY_AUDIT_GITLEAKS_STATUS: ${{ steps.gitleaks.outcome }}
+          SECURITY_AUDIT_SETUP_NODE_STATUS: ${{ steps.setup_node.outcome }}
+          SECURITY_AUDIT_INSTALL_STATUS: ${{ steps.install.outcome }}
+          SECURITY_AUDIT_DEPENDENCY_STATUS: ${{ steps.dependency_audit.outcome }}
+          SECURITY_AUDIT_REGRESSION_STATUS: ${{ steps.security_regression.outcome }}
+          SECURITY_AUDIT_UNIT_STATUS: ${{ steps.unit_tests.outcome }}
+          SECURITY_AUDIT_ENCODING_STATUS: ${{ steps.encoding.outcome }}
+          SECURITY_AUDIT_TYPECHECK_STATUS: ${{ steps.typecheck.outcome }}
+          SECURITY_AUDIT_PRODUCTION_STATUS: ${{ steps.production_check.outcome }}
+          SECURITY_AUDIT_BROWSER_INSTALL_STATUS: ${{ steps.browser_install.outcome }}
+          SECURITY_AUDIT_E2E_STATUS: ${{ steps.e2e.outcome }}
+        run: node scripts/send-security-audit-report.mjs
+
+      - name: Upload daily audit evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: security-audit-${{ github.run_id }}
+          path: |
+            security-audit
+            test-results
+            playwright-report
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Enforce security audit result
+        if: always()
+        shell: bash
+        env:
+          GITLEAKS_STATUS: ${{ steps.gitleaks.outcome }}
+          SETUP_NODE_STATUS: ${{ steps.setup_node.outcome }}
+          INSTALL_STATUS: ${{ steps.install.outcome }}
+          DEPENDENCY_STATUS: ${{ steps.dependency_audit.outcome }}
+          REGRESSION_STATUS: ${{ steps.security_regression.outcome }}
+          UNIT_STATUS: ${{ steps.unit_tests.outcome }}
+          ENCODING_STATUS: ${{ steps.encoding.outcome }}
+          TYPECHECK_STATUS: ${{ steps.typecheck.outcome }}
+          PRODUCTION_STATUS: ${{ steps.production_check.outcome }}
+          BROWSER_INSTALL_STATUS: ${{ steps.browser_install.outcome }}
+          E2E_STATUS: ${{ steps.e2e.outcome }}
+          REPORT_STATUS: ${{ steps.report.outcome }}
+        run: |
+          failed=0
+          check_result() {
+            name="$1"
+            result="$2"
+            if [ "$result" != "success" ]; then
+              echo "::error title=Security audit check failed::${name} finished with status ${result:-unknown}. Review that step's log."
+              failed=1
+            else
+              echo "PASS: ${name}"
+            fi
+          }
+          check_result "Secret history scan" "$GITLEAKS_STATUS"
+          check_result "Node runtime setup" "$SETUP_NODE_STATUS"
+          check_result "Dependency installation" "$INSTALL_STATUS"
+          check_result "Production dependency audit" "$DEPENDENCY_STATUS"
+          check_result "Security regression checks" "$REGRESSION_STATUS"
+          check_result "Unit and API policy tests" "$UNIT_STATUS"
+          check_result "Strict encoding validation" "$ENCODING_STATUS"
+          check_result "Independent TypeScript validation" "$TYPECHECK_STATUS"
+          check_result "ESLint and production build" "$PRODUCTION_STATUS"
+          check_result "Playwright browser setup" "$BROWSER_INSTALL_STATUS"
+          check_result "Full desktop and mobile E2E" "$E2E_STATUS"
+          check_result "Daily report generation/delivery" "$REPORT_STATUS"
+          if [ "$failed" -ne 0 ]; then
+            echo "One or more security audit checks failed. See the named annotations above."
+            exit 1
+          fi
+          echo "All security audit checks passed."

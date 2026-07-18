@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Bot, Database, Loader2, RefreshCw, Save, Settings2 } from "lucide-react";
+import { Bot, Database, Loader2, RefreshCw, Save, Settings2, ShieldAlert } from "lucide-react";
 import {
   canUseModelWithPlan,
   getModelUsageProfile,
@@ -35,6 +35,9 @@ export function PlatformSettingsPanel({ settings }: Props) {
   const [guestDefaultModelId, setGuestDefaultModelId] = useState(
     settings.guestDefaultModelId
   );
+  const [aiChatEnabled, setAiChatEnabled] = useState(settings.aiChatEnabled);
+  const [attachmentsEnabled, setAttachmentsEnabled] = useState(settings.attachmentsEnabled);
+  const [publicSharingEnabled, setPublicSharingEnabled] = useState(settings.publicSharingEnabled);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -43,6 +46,9 @@ export function PlatformSettingsPanel({ settings }: Props) {
 
   const applySettings = (nextSettings: PublicAppSettings) => {
     setGuestDefaultModelId(nextSettings.guestDefaultModelId);
+    setAiChatEnabled(nextSettings.aiChatEnabled);
+    setAttachmentsEnabled(nextSettings.attachmentsEnabled);
+    setPublicSharingEnabled(nextSettings.publicSharingEnabled);
     setLastSyncedAt(new Date().toLocaleTimeString());
   };
 
@@ -75,7 +81,12 @@ export function PlatformSettingsPanel({ settings }: Props) {
       const response = await fetch("/api/admin/app-settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ guestDefaultModelId }),
+        body: JSON.stringify({
+          guestDefaultModelId,
+          aiChatEnabled,
+          attachmentsEnabled,
+          publicSharingEnabled,
+        }),
       });
       const data = (await response.json().catch(() => null)) as
         | AdminAppSettingsResponse
@@ -141,6 +152,37 @@ export function PlatformSettingsPanel({ settings }: Props) {
       </div>
 
       <div className="grid gap-5 p-5 xl:grid-cols-[1fr_0.8fr]">
+        <div className="rounded-2xl border border-red-500/30 bg-red-500/5 p-5 xl:col-span-2">
+          <div className="flex items-start gap-4">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-red-500/30 bg-red-500/10 text-red-300">
+              <ShieldAlert className="h-5 w-5" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-red-300">Emergency kill switches</p>
+              <h3 className="mt-2 text-xl font-black text-white">Operational feature controls</h3>
+              <p className="mt-2 text-sm leading-6 text-zinc-400">
+                Disabled features are blocked by the server immediately. Attachment deletion and share revocation remain available for safe cleanup.
+              </p>
+              <div className="mt-4 grid gap-2 md:grid-cols-3">
+                {([
+                  ["AI chat", aiChatEnabled, setAiChatEnabled],
+                  ["Attachments", attachmentsEnabled, setAttachmentsEnabled],
+                  ["Public sharing", publicSharingEnabled, setPublicSharingEnabled],
+                ] as const).map(([label, enabled, setEnabled]) => (
+                  <label key={label} className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm font-black text-white">
+                    <span>{label}</span>
+                    <input
+                      type="checkbox"
+                      checked={enabled}
+                      onChange={(event) => setEnabled(event.target.checked)}
+                      className="h-5 w-5 accent-blue-600"
+                    />
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
         <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5">
           <div className="flex items-start gap-4">
             <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-blue-500/30 bg-blue-500/10 text-blue-300">

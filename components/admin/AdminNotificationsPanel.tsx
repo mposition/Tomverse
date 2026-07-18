@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Bell,
   CheckCircle2,
@@ -45,6 +46,32 @@ const PAGE_SIZE = 20;
 const STATUSES = ["all", "sent", "failed", "skipped"] as const;
 type StatusFilter = (typeof STATUSES)[number];
 
+const readNavigationState = (searchParams: URLSearchParams) => {
+  const requestedStatus = searchParams.get("status");
+  const status = STATUSES.includes(requestedStatus as StatusFilter)
+    ? (requestedStatus as StatusFilter)
+    : "all";
+  const requestedPage = Number.parseInt(searchParams.get("page") || "0", 10);
+  const page = Number.isFinite(requestedPage) && requestedPage > 0 ? requestedPage : 0;
+  const cursor = searchParams.get("cursor");
+  let cursors: Array<string | null> = [null];
+  try {
+    const parsed = JSON.parse(searchParams.get("cursors") || "[]") as unknown;
+    if (
+      Array.isArray(parsed) &&
+      parsed.every((value) => value === null || typeof value === "string")
+    ) {
+      cursors = parsed as Array<string | null>;
+    }
+  } catch {
+    // Invalid shared URL state falls back to the first page.
+  }
+  if (!cursors.length) cursors = [null];
+  while (cursors.length <= page) cursors.push(null);
+  cursors[page] = cursor || cursors[page] || null;
+  return { status, page, cursor: cursors[page], cursors };
+};
+
 const dateLabel = (value: string) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "-";
@@ -67,18 +94,45 @@ const escapeCsv = (value: unknown) => {
 };
 
 export function AdminNotificationsPanel() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const [initialNavigation] = useState(() =>
+    readNavigationState(new URLSearchParams(searchParams.toString()))
+  );
   const [items, setItems] = useState<AdminNotificationRow[]>([]);
   const [stats, setStats] = useState<NotificationStats>(EMPTY_STATS);
   const [filteredCount, setFilteredCount] = useState(0);
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(
+    initialNavigation.status
+  );
   const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [cursorHistory, setCursorHistory] = useState<Array<string | null>>([
-    null,
-  ]);
-  const [pageIndex, setPageIndex] = useState(0);
+  const [cursorHistory, setCursorHistory] = useState<Array<string | null>>(
+    initialNavigation.cursors
+  );
+  const [pageIndex, setPageIndex] = useState(initialNavigation.page);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const requestVersion = useRef(0);
+
+  const updateLocation = (
+    status: StatusFilter,
+    cursor: string | null,
+    page: number,
+    cursors: Array<string | null>
+  ) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (status === "all") params.delete("status");
+    else params.set("status", status);
+    if (cursor) params.set("cursor", cursor);
+    else params.delete("cursor");
+    if (page > 0) params.set("page", String(page));
+    else params.delete("page");
+    if (page > 0) params.set("cursors", JSON.stringify(cursors));
+    else params.delete("cursors");
+    const suffix = params.toString();
+    router.replace(suffix ? `${pathname}?${suffix}` : pathname, { scroll: false });
+  };
 
   const loadPage = useCallback(
     async (status: StatusFilter, cursor: string | null, targetPage: number) => {
@@ -127,29 +181,46 @@ export function AdminNotificationsPanel() {
   );
 
   useEffect(() => {
-    queueMicrotask(() => void loadPage("all", null, 0));
-  }, [loadPage]);
+    queueMicrotask(() =>
+      void loadPage(
+        initialNavigation.status,
+        initialNavigation.cursor,
+        initialNavigation.page
+      )
+    );
+  }, [initialNavigation, loadPage]);
+
+  useEffect(() => {
+    const refresh = () => void loadPage(statusFilter, cursorHistory[pageIndex] || null, pageIndex);
+    window.addEventListener("admin:refresh", refresh);
+    return () => window.removeEventListener("admin:refresh", refresh);
+  }, [cursorHistory, loadPage, pageIndex, statusFilter]);
 
   const selectStatus = (status: StatusFilter) => {
     setStatusFilter(status);
     setCursorHistory([null]);
+    updateLocation(status, null, 0, [null]);
     void loadPage(status, null, 0);
   };
 
   const goNext = () => {
     if (!nextCursor || loading) return;
     const targetPage = pageIndex + 1;
-    setCursorHistory((current) => [
-      ...current.slice(0, targetPage),
+    const nextHistory = [
+      ...cursorHistory.slice(0, targetPage),
       nextCursor,
-    ]);
+    ];
+    setCursorHistory(nextHistory);
+    updateLocation(statusFilter, nextCursor, targetPage, nextHistory);
     void loadPage(statusFilter, nextCursor, targetPage);
   };
 
   const goPrevious = () => {
     if (pageIndex <= 0 || loading) return;
     const targetPage = pageIndex - 1;
-    void loadPage(statusFilter, cursorHistory[targetPage] || null, targetPage);
+    const cursor = cursorHistory[targetPage] || null;
+    updateLocation(statusFilter, cursor, targetPage, cursorHistory);
+    void loadPage(statusFilter, cursor, targetPage);
   };
 
   const refresh = () => {

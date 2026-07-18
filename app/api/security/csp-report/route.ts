@@ -1,5 +1,7 @@
 import { randomInt } from "node:crypto";
+import { after } from "next/server";
 import { getTrustedClientIp } from "@/lib/clientIp";
+import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 
 const MAX_REPORT_BYTES = 16 * 1024;
 const MAX_IP_BUCKETS = 10_000;
@@ -160,7 +162,22 @@ export async function POST(req: Request) {
         disposition: removeControlCharacters(report.disposition, 30),
       };
       if (!Object.values(normalized).some(Boolean)) continue;
-      console.warn("CSP violation", normalized);
+      after(() =>
+        reportOperationalIncident({
+          code: "CSP_VIOLATION_DETECTED",
+          title: "Content Security Policy violation detected",
+          error: `${normalized.violatedDirective || "unknown directive"} blocked ${normalized.blockedUri || "unknown resource"}`,
+          severity: "warning",
+          cooldownMs: 15 * 60 * 1_000,
+          context: {
+            component: "csp-report",
+            documentUri: normalized.documentUri,
+            violatedDirective: normalized.violatedDirective,
+            blockedUri: normalized.blockedUri,
+            disposition: normalized.disposition,
+          },
+        })
+      );
     }
   } catch {
     return new Response(null, { status: 400 });

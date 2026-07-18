@@ -2368,6 +2368,7 @@ export function ChatInput({
         ) : (
           <button
             type="button"
+            data-testid="chat-send-button"
             onClick={() => {
               dismissGuestQuickStart();
               onSubmit();

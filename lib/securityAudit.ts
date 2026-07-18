@@ -6,6 +6,7 @@ import { getTrustedClientIp } from "@/lib/clientIp";
 type AuthAuditEvent =
     | "auth.create_user"
     | "auth.sign_in"
+    | "auth.sign_in_denied_suspended"
     | "auth.sign_out"
     | "auth.link_account";
 export type SecurityAuditEvent =
@@ -16,7 +17,8 @@ export type SecurityAuditEvent =
     | "conversation.lock.change"
     | "conversation.lock.remove"
     | "conversation.lock.verify"
-    | "conversation.delete";
+    | "conversation.delete"
+    | "account.deletion.schedule";
 type AuditOutcome = "attempt" | "success" | "denied" | "rate_limited" | "failure";
 
 const auditValue = (

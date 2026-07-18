@@ -74,6 +74,7 @@ import {
     featureNotIncludedResponse,
     getUserBillingPlan,
 } from "@/lib/billingEntitlements";
+import { getOperationalFeatureFlags } from "@/lib/appSettings";
 
 const MAX_ATTACHMENTS = 5;
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
@@ -343,6 +344,12 @@ export async function GET() {
     if (!session?.user?.email || !session.user.id) {
         return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
+    if (!(await getOperationalFeatureFlags()).attachmentsEnabled) {
+        return Response.json(
+            { error: "Attachments are temporarily disabled for operational maintenance." },
+            { status: 503 }
+        );
+    }
     const billingPlan = await getUserBillingPlan(session.user.id);
     if (!billingPlan.allowAttachments) {
         return featureNotIncludedResponse("attachments");
@@ -369,6 +376,12 @@ export async function PUT(req: Request) {
     }
 
     try {
+        if (!(await getOperationalFeatureFlags()).attachmentsEnabled) {
+            return Response.json(
+                { error: "Attachments are temporarily disabled for operational maintenance." },
+                { status: 503 }
+            );
+        }
         const billingPlan = await getUserBillingPlan(userId);
         if (!billingPlan.allowAttachments) {
             return featureNotIncludedResponse("attachments");
@@ -517,6 +530,12 @@ export async function PATCH(req: Request) {
     }
 
     try {
+        if (!(await getOperationalFeatureFlags()).attachmentsEnabled) {
+            return Response.json(
+                { error: "Attachments are temporarily disabled for operational maintenance." },
+                { status: 503 }
+            );
+        }
         const billingPlan = await getUserBillingPlan(userId);
         if (!billingPlan.allowAttachments) {
             return featureNotIncludedResponse("attachments");
@@ -711,6 +730,14 @@ export async function POST(req: Request) {
             : null;
         const userPlan = billingPlan?.tier;
         if (requestAttachments.length > 0) {
+            if (!(await getOperationalFeatureFlags()).attachmentsEnabled) {
+                return tracedJsonError(
+                    "Attachments are temporarily disabled for operational maintenance.",
+                    "ATTACHMENTS_DISABLED_BY_ADMIN",
+                    503,
+                    traceId
+                );
+            }
             if (!session?.user?.id) {
                 return tracedJsonError(
                     "Authentication is required for attachments.",

@@ -8,7 +8,12 @@ import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 import { prisma } from "@/lib/prisma";
 import { createModelRegistrySchema, registryInputToData, validateProviderConfiguration } from "@/lib/modelRegistryAdmin";
-import { ensureModelRegistrySeeded, getRuntimeModels, registryRowToModel } from "@/lib/modelRegistry";
+import {
+  ensureModelRegistrySeeded,
+  getModelRegistrySecurityFindings,
+  getRuntimeModels,
+  registryRowToModel,
+} from "@/lib/modelRegistry";
 import type { AiModel } from "@/lib/models";
 
 const adminModel = (model: Awaited<ReturnType<typeof getRuntimeModels>>[number]) => ({
@@ -26,8 +31,14 @@ export async function GET(req: Request) {
       minute: 60,
       day: 1500,
     });
-    const models = await getRuntimeModels({ includeCatalogDeleted: true });
-    return NextResponse.json({ models: models.map(adminModel) });
+    const [models, securityFindings] = await Promise.all([
+      getRuntimeModels({ includeCatalogDeleted: true }),
+      getModelRegistrySecurityFindings(),
+    ]);
+    return NextResponse.json({
+      models: models.map(adminModel),
+      securityFindings,
+    });
   } catch (error) {
     const response = apiSecurityResponse(error);
     if (response) return response;
@@ -58,6 +69,15 @@ export async function POST(req: Request) {
       }
     }
     const { id, ...fields } = body;
+    await writeAdminAuditLog({
+      session,
+      request: req,
+      action: "model.registry.create_started",
+      targetType: "Model",
+      targetId: id,
+      summary: `Started model registry creation for ${id}.`,
+      metadata: { provider: body.provider, status: body.status },
+    });
     const row = await prisma.modelRegistryEntry.create({
       data: {
         id,
@@ -102,8 +122,8 @@ export async function PUT(req: Request) {
       name: body.name,
       apiModel: body.apiModel,
       provider: body.provider,
-      apiBaseUrl: body.apiBaseUrl,
-      apiKeyEnvName: body.apiKeyEnvName,
+      apiBaseUrl: undefined,
+      apiKeyEnvName: undefined,
       icon: body.icon,
       bestFor: body.bestFor,
       minimumPlan: body.minimumPlan,

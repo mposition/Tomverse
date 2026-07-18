@@ -70,7 +70,7 @@ test("authenticated user opens settings and starts Private Mode", async ({ page 
   await openAccountMenu(page);
   await page
     .getByTestId("account-menu")
-    .getByRole("button", { name: /설정|Settings|设置/ })
+    .getByRole("button", { name: /^(설정|Settings|设置)$/ })
     .click();
   const settingsDialog = page.getByRole("dialog", {
     name: /사용자 설정|User Settings|用户设置/,
@@ -95,7 +95,7 @@ test("theme preference changes immediately and follows the system setting", asyn
   await openAccountMenu(page);
   await page
     .getByTestId("account-menu")
-    .getByRole("button", { name: /설정|Settings|设置/ })
+    .getByRole("button", { name: /^(설정|Settings|设置)$/ })
     .click();
   let settingsDialog = page.getByRole("dialog", {
     name: /사용자 설정|User Settings|用户设置/,
@@ -113,7 +113,7 @@ test("theme preference changes immediately and follows the system setting", asyn
   await openAccountMenu(page);
   await page
     .getByTestId("account-menu")
-    .getByRole("button", { name: /설정|Settings|设置/ })
+    .getByRole("button", { name: /^(설정|Settings|设置)$/ })
     .click();
   settingsDialog = page.getByRole("dialog", {
     name: /사용자 설정|User Settings|用户设置/,

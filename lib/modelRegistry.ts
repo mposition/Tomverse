@@ -15,9 +15,9 @@ import {
 } from "@/lib/models";
 import {
   PROVIDER_API_CONFIGURATION,
+  isApprovedProviderApiBaseUrl,
+  isApprovedProviderApiKeyEnvName,
   isAiProvider,
-  isSafeProviderApiBaseUrl,
-  normalizeApiBaseUrl,
 } from "@/lib/modelRegistryShared";
 
 const E2E_DATABASE_DISABLED = process.env.E2E_DISABLE_DATABASE === "true";
@@ -30,8 +30,8 @@ const staticModelWithRuntimeDefaults = (
   const billing = getModelBillingProfile(model);
   return {
     ...model,
-    apiBaseUrl: model.apiBaseUrl || providerConfig.baseUrl,
-    apiKeyEnvName: model.apiKeyEnvName || providerConfig.apiKeyEnvName,
+    apiBaseUrl: providerConfig.baseUrl,
+    apiKeyEnvName: providerConfig.apiKeyEnvName,
     creditWeight: getModelUsageProfile(model).credits,
     catalogDeleted: false,
     sortOrder,
@@ -94,16 +94,20 @@ export const registryRowToModel = (row: ModelRegistryEntry): AiModel => {
   if (!isAiProvider(row.provider)) {
     throw new Error(`Model registry entry ${row.id} has an unsupported provider.`);
   }
-  if (!isSafeProviderApiBaseUrl(row.apiBaseUrl)) {
-    throw new Error(`Model registry entry ${row.id} has an unsafe API Base URL.`);
+  if (!isApprovedProviderApiBaseUrl(row.provider, row.apiBaseUrl)) {
+    throw new Error(`Model registry entry ${row.id} has a non-allowlisted API Base URL.`);
   }
+  if (!isApprovedProviderApiKeyEnvName(row.provider, row.apiKeyEnvName)) {
+    throw new Error(`Model registry entry ${row.id} has a non-allowlisted API key reference.`);
+  }
+  const providerConfiguration = PROVIDER_API_CONFIGURATION[row.provider];
   return {
     id: row.id,
     name: row.name,
     apiModel: row.apiModel,
     provider: row.provider,
-    apiBaseUrl: normalizeApiBaseUrl(row.apiBaseUrl),
-    apiKeyEnvName: row.apiKeyEnvName,
+    apiBaseUrl: providerConfiguration.baseUrl,
+    apiKeyEnvName: providerConfiguration.apiKeyEnvName,
     icon: row.icon,
     bestFor: row.bestFor,
     minimumPlan: row.minimumPlan as ModelMinimumPlan,
@@ -227,16 +231,14 @@ export function modelRegistryCreateData(
   model: AiModel,
   actor: { id?: string | null; email?: string | null }
 ): Prisma.ModelRegistryEntryCreateInput {
+  const providerConfiguration = PROVIDER_API_CONFIGURATION[model.provider];
   return {
     id: model.id,
     name: model.name,
     apiModel: model.apiModel,
     provider: model.provider,
-    apiBaseUrl:
-      model.apiBaseUrl || PROVIDER_API_CONFIGURATION[model.provider].baseUrl,
-    apiKeyEnvName:
-      model.apiKeyEnvName ||
-      PROVIDER_API_CONFIGURATION[model.provider].apiKeyEnvName,
+    apiBaseUrl: providerConfiguration.baseUrl,
+    apiKeyEnvName: providerConfiguration.apiKeyEnvName,
     icon: model.icon,
     bestFor: model.bestFor,
     minimumPlan: model.minimumPlan,
@@ -268,12 +270,67 @@ export function modelRegistryCreateData(
 }
 
 export function modelRegistryEnvironmentStatus(model: AiModel) {
-  const apiKeyEnvName =
-    model.apiKeyEnvName ||
-    PROVIDER_API_CONFIGURATION[model.provider].apiKeyEnvName;
+  const apiKeyEnvName = PROVIDER_API_CONFIGURATION[model.provider].apiKeyEnvName;
   return {
     apiKeyEnvName,
     apiKeyConfigured: Boolean(process.env[apiKeyEnvName]?.trim()),
     protocol: PROVIDER_API_CONFIGURATION[model.provider].protocol,
   };
+}
+
+export type ModelRegistrySecurityFinding = {
+  id: string;
+  provider: string;
+  issue: "unsupported_provider" | "api_base_url_mismatch" | "api_key_env_mismatch";
+  configuredValue: string;
+  expectedValue: string | null;
+};
+
+export async function getModelRegistrySecurityFindings(): Promise<
+  ModelRegistrySecurityFinding[]
+> {
+  if (E2E_DATABASE_DISABLED) return [];
+  const rows = await prisma.modelRegistryEntry.findMany({
+    select: {
+      id: true,
+      provider: true,
+      apiBaseUrl: true,
+      apiKeyEnvName: true,
+    },
+    orderBy: { id: "asc" },
+  });
+
+  return rows.flatMap((row) => {
+    if (!isAiProvider(row.provider)) {
+      return [{
+        id: row.id,
+        provider: row.provider,
+        issue: "unsupported_provider" as const,
+        configuredValue: row.provider,
+        expectedValue: null,
+      }];
+    }
+
+    const expected = PROVIDER_API_CONFIGURATION[row.provider];
+    const findings: ModelRegistrySecurityFinding[] = [];
+    if (!isApprovedProviderApiBaseUrl(row.provider, row.apiBaseUrl)) {
+      findings.push({
+        id: row.id,
+        provider: row.provider,
+        issue: "api_base_url_mismatch",
+        configuredValue: row.apiBaseUrl,
+        expectedValue: expected.baseUrl,
+      });
+    }
+    if (!isApprovedProviderApiKeyEnvName(row.provider, row.apiKeyEnvName)) {
+      findings.push({
+        id: row.id,
+        provider: row.provider,
+        issue: "api_key_env_mismatch",
+        configuredValue: row.apiKeyEnvName,
+        expectedValue: expected.apiKeyEnvName,
+      });
+    }
+    return findings;
+  });
 }

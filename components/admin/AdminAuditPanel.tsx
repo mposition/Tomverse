@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Clipboard, Eye, Loader2, Search, ShieldCheck, X } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
 
@@ -39,8 +40,16 @@ const actionTone = (action: string) => {
 };
 
 export function AdminAuditPanel({ rows }: Props) {
-  const [query, setQuery] = useState("");
-  const [targetFilter, setTargetFilter] = useState("all");
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const requestedTarget = searchParams.get("target");
+  const [query, setQuery] = useState(() => searchParams.get("q") || "");
+  const [targetFilter, setTargetFilter] = useState(() =>
+    requestedTarget && rows.some((row) => row.targetType === requestedTarget)
+      ? requestedTarget
+      : "all"
+  );
   const [detail, setDetail] = useState<AdminAuditRow | null>(null);
   const [loadingDetailId, setLoadingDetailId] = useState<string | null>(null);
 
@@ -73,6 +82,16 @@ export function AdminAuditPanel({ rows }: Props) {
     (row) => row.action.includes("delete") || row.action.includes("refund.approve")
   ).length;
   const uniqueActors = new Set(rows.map((row) => row.actorEmail || row.actorUserId).filter(Boolean)).size;
+
+  const updateLocation = (nextQuery: string, nextTarget: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (nextQuery.trim()) params.set("q", nextQuery);
+    else params.delete("q");
+    if (nextTarget === "all") params.delete("target");
+    else params.set("target", nextTarget);
+    const suffix = params.toString();
+    router.replace(suffix ? `${pathname}?${suffix}` : pathname, { scroll: false });
+  };
 
   const copyAudit = async (row: AdminAuditRow) => {
     const text = [
@@ -193,14 +212,22 @@ export function AdminAuditPanel({ rows }: Props) {
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
           <input
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              const value = event.target.value;
+              setQuery(value);
+              updateLocation(value, targetFilter);
+            }}
             placeholder="Search actor, action, target, summary, IP..."
             className="h-11 w-full rounded-xl border border-zinc-800 bg-zinc-950 pl-10 pr-3 text-sm text-white outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
           />
         </label>
         <select
           value={targetFilter}
-          onChange={(event) => setTargetFilter(event.target.value)}
+          onChange={(event) => {
+            const value = event.target.value;
+            setTargetFilter(value);
+            updateLocation(query, value);
+          }}
           className="h-11 rounded-xl border border-zinc-800 bg-zinc-950 px-3 text-sm font-bold text-white outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
         >
           {targets.map((target) => (

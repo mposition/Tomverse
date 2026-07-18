@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   CheckCircle2,
   Clipboard,
@@ -55,10 +56,30 @@ const escapeCsv = (value: unknown) => {
 };
 
 export function FeedbackInboxPanel({ rows }: Props) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const requestedStatus = searchParams.get("status");
+  const initialStatus =
+    requestedStatus && statuses.includes(requestedStatus as (typeof statuses)[number])
+      ? (requestedStatus as (typeof statuses)[number])
+      : "all";
   const [items, setItems] = useState(rows);
-  const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | typeof statuses[number]>("all");
+  const [query, setQuery] = useState(() => searchParams.get("q") || "");
+  const [statusFilter, setStatusFilter] = useState<"all" | typeof statuses[number]>(
+    initialStatus
+  );
   const [busyId, setBusyId] = useState<string | null>(null);
+
+  const updateLocation = (nextQuery: string, nextStatus: typeof statusFilter) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (nextQuery.trim()) params.set("q", nextQuery);
+    else params.delete("q");
+    if (nextStatus === "all") params.delete("status");
+    else params.set("status", nextStatus);
+    const suffix = params.toString();
+    router.replace(suffix ? `${pathname}?${suffix}` : pathname, { scroll: false });
+  };
 
   const filteredItems = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -226,7 +247,11 @@ export function FeedbackInboxPanel({ rows }: Props) {
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
           <input
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              const value = event.target.value;
+              setQuery(value);
+              updateLocation(value, statusFilter);
+            }}
             placeholder="Search email, trace ID, model, path, message..."
             className="h-11 w-full rounded-xl border border-zinc-800 bg-zinc-950 pl-10 pr-3 text-sm text-white outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
           />
@@ -236,7 +261,10 @@ export function FeedbackInboxPanel({ rows }: Props) {
             <button
               key={status}
               type="button"
-              onClick={() => setStatusFilter(status)}
+              onClick={() => {
+                setStatusFilter(status);
+                updateLocation(query, status);
+              }}
               className={`rounded-xl border px-3 py-2 text-xs font-black capitalize transition ${
                 statusFilter === status
                   ? "border-blue-500/40 bg-blue-500/20 text-blue-100"

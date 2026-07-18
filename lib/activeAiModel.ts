@@ -10,10 +10,12 @@ import { perplexityUsageFetch } from "@/lib/perplexityUsageCapture";
 
 const runtimeConfiguration = (model: AiModel) => {
   const defaults = PROVIDER_API_CONFIGURATION[model.provider];
-  const apiKeyEnvName = model.apiKeyEnvName || defaults.apiKeyEnvName;
   return {
-    baseURL: model.apiBaseUrl || defaults.baseUrl,
-    apiKey: process.env[apiKeyEnvName],
+    // These values deliberately never come from the model registry. Allowing a
+    // DB-controlled URL or environment-variable name would turn a compromised
+    // operator account into arbitrary server-secret exfiltration.
+    baseURL: defaults.baseUrl,
+    apiKey: process.env[defaults.apiKeyEnvName],
   };
 };
 

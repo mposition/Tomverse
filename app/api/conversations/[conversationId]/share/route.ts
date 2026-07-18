@@ -24,6 +24,7 @@ import {
   featureNotIncludedResponse,
   getUserBillingPlan,
 } from "@/lib/billingEntitlements";
+import { getOperationalFeatureFlags } from "@/lib/appSettings";
 
 const getShareTtlDays = () => {
   const configured = Number(process.env.SHARE_LINK_TTL_DAYS);
@@ -61,6 +62,12 @@ export async function POST(
   const params = await context.params;
   const conversationId = params.conversationId;
   const userId = session.user.id;
+  if (!(await getOperationalFeatureFlags()).publicSharingEnabled) {
+    return NextResponse.json(
+      { error: "Public sharing is temporarily disabled for operational maintenance." },
+      { status: 503 }
+    );
+  }
   const billingPlan = await getUserBillingPlan(userId);
   if (!billingPlan.allowSharing) {
     return featureNotIncludedResponse("sharing");

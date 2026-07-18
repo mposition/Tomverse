@@ -9,6 +9,11 @@ import {
 import { getProviderHealthDashboard } from "@/lib/providerMonitoring";
 import { sendDailyProviderUsageSlackReport } from "@/lib/providerDailyUsageReport";
 import { sendDailyInfrastructureSlackReport } from "@/lib/infrastructureSlackReport";
+import {
+  completeScheduledJob,
+  failScheduledJob,
+  startScheduledJob,
+} from "@/lib/scheduledJobs";
 
 const authorized = (req: Request) => {
   const secret = process.env.PROVIDER_USAGE_SYNC_SECRET;
@@ -34,6 +39,7 @@ export async function POST(req: Request) {
   }
 
   const date = dateFromUrl(req);
+  const run = await startScheduledJob("provider_usage_sync");
   const notifySlack = new URL(req.url).searchParams.get("notify") === "slack";
   const infrastructureNotification = notifySlack
     ? await sendDailyInfrastructureSlackReport().catch((error) => {
@@ -58,6 +64,19 @@ export async function POST(req: Request) {
           dashboard: await getProviderHealthDashboard(),
         })
       : null;
+    await completeScheduledJob({
+      runId: run?.id,
+      processedCount: results.length,
+      result: {
+        date: date.toISOString().slice(0, 10),
+        synced: results.filter((result) => result.status === "synced").length,
+        skipped: results.filter((result) => result.status === "skipped").length,
+        failed: results.filter((result) => result.status === "failed").length,
+        slackDelivered: notification?.delivered ?? null,
+        infrastructureSlackDelivered:
+          infrastructureNotification?.delivered ?? null,
+      },
+    });
     return NextResponse.json({
       date: date.toISOString().slice(0, 10),
       results,
@@ -65,6 +84,7 @@ export async function POST(req: Request) {
       infrastructureNotification,
     });
   } catch (error) {
+    await failScheduledJob({ runId: run?.id, error });
     console.error("Internal provider usage sync failed:", error);
     return NextResponse.json(
       {

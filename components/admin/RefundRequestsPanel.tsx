@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { CheckCircle2, Download, Loader2, RotateCcw, XCircle } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
 import { formatBillingMinor, normalizeBillingCurrency } from "@/lib/billingMarkets";
@@ -76,11 +77,22 @@ const escapeCsv = (value: unknown) => {
 };
 
 export function RefundRequestsPanel({ rows }: Props) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const requestedStatus = searchParams.get("status");
+  const initialStatus = ["all", "pending", "approved", "rejected"].includes(
+    requestedStatus || ""
+  )
+    ? (requestedStatus as "all" | "pending" | "approved" | "rejected")
+    : "pending";
   const [items, setItems] = useState(rows);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [creditReviewConfirmed, setCreditReviewConfirmed] = useState<Record<string, boolean>>({});
-  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "approved" | "rejected">("pending");
+  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "approved" | "rejected">(
+    initialStatus
+  );
   const visiblePendingCount = items.filter((item) => item.status === "pending").length;
   const approvedCount = items.filter((item) => item.status === "approved").length;
   const rejectedCount = items.filter((item) => item.status === "rejected").length;
@@ -89,6 +101,15 @@ export function RefundRequestsPanel({ rows }: Props) {
       ? items
       : items.filter((item) => item.status === statusFilter);
   const pendingLabel = visiblePendingCount === 1 ? "pending" : "pending";
+
+  const selectStatus = (status: typeof statusFilter) => {
+    setStatusFilter(status);
+    const params = new URLSearchParams(searchParams.toString());
+    if (status === "pending") params.delete("status");
+    else params.set("status", status);
+    const suffix = params.toString();
+    router.replace(suffix ? `${pathname}?${suffix}` : pathname, { scroll: false });
+  };
 
   const exportCsv = () => {
     const csv = [
@@ -208,7 +229,7 @@ export function RefundRequestsPanel({ rows }: Props) {
             <button
               key={value}
               type="button"
-              onClick={() => setStatusFilter(value as typeof statusFilter)}
+              onClick={() => selectStatus(value as typeof statusFilter)}
               className={`cursor-pointer rounded-xl border px-3 py-2 text-xs font-black transition ${
                 statusFilter === value
                   ? "border-blue-500/40 bg-blue-500/20 text-blue-100"
