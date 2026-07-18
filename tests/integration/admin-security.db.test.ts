@@ -25,16 +25,39 @@ after(async () => {
   await prisma.$disconnect();
 });
 
-const createAdminSession = async (label: string): Promise<Session> => {
+type AdminTestActor = {
+  session: Session;
+  request: Request;
+};
+
+const createAdminSession = async (label: string): Promise<AdminTestActor> => {
   const user = await prisma.user.create({
     data: {
       email: `${label}-${randomUUID()}@example.test`,
       lastLoginAt: new Date(),
     },
   });
-  return {
+  const sessionToken = `integration-${randomUUID()}`;
+  const expires = new Date(Date.now() + 60 * 60 * 1_000);
+  await prisma.session.create({
+    data: {
+      sessionToken,
+      userId: user.id,
+      expires,
+    },
+  });
+
+  const session: Session = {
     user: { id: user.id, email: user.email, name: label },
-    expires: new Date(Date.now() + 60 * 60 * 1_000).toISOString(),
+    expires: expires.toISOString(),
+  };
+  return {
+    session,
+    request: new Request("https://tomverse.test/admin", {
+      headers: {
+        cookie: `next-auth.session-token=${encodeURIComponent(sessionToken)}`,
+      },
+    }),
   };
 };
 
@@ -43,7 +66,8 @@ test("an exact approval payload is consumed once", async () => {
   const reviewer = await createAdminSession("reviewer");
   let executions = 0;
   const input = {
-    session: requester,
+    session: requester.session,
+    request: requester.request,
     action: "user.plan_adjust",
     targetType: "User",
     targetId: "target-user",
@@ -63,8 +87,8 @@ test("an exact approval payload is consumed once", async () => {
     data: {
       status: "approved",
       reviewedAt: new Date(),
-      reviewedById: reviewer.user?.id,
-      reviewedByEmail: reviewer.user?.email,
+      reviewedById: reviewer.session.user?.id,
+      reviewedByEmail: reviewer.session.user?.email,
     },
   });
 
@@ -96,7 +120,8 @@ test("an exact approval payload is consumed once", async () => {
 test("a changed payload cannot reuse a previously approved action", async () => {
   const requester = await createAdminSession("requester");
   const base = {
-    session: requester,
+    session: requester.session,
+    request: requester.request,
     action: "model.disable",
     targetType: "Model",
     targetId: "model-a",
