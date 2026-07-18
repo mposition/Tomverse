@@ -60,6 +60,7 @@ const RETRYABLE_DRIVER_KINDS = new Set([
   "SocketTimeout",
   "TooManyConnections",
   "TransactionWriteConflict",
+  "TransactionAlreadyClosed",
 ]);
 
 const RETRYABLE_POSTGRES_CODES = new Set([

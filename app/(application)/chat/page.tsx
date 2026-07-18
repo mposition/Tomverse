@@ -534,7 +534,11 @@ export default function Home() {
           });
 
         let response: Response | null = null;
-        let errorBody: { code?: unknown; traceId?: unknown } | null = null;
+        let errorBody: {
+          code?: unknown;
+          error?: unknown;
+          traceId?: unknown;
+        } | null = null;
         let code = "";
         for (let attempt = 0; attempt < 2; attempt += 1) {
           try {
@@ -566,7 +570,9 @@ export default function Home() {
             response.status === 502 ||
             response.status === 504 ||
             (response.status === 503 &&
-              code === "COMPARISON_PREFLIGHT_TEMPORARILY_UNAVAILABLE");
+              code === "COMPARISON_PREFLIGHT_TEMPORARILY_UNAVAILABLE") ||
+            (response.status === 500 &&
+              code === "COMPARISON_PREFLIGHT_FAILED");
           if (attempt === 0 && retryableResponse) {
             const retryAfterSeconds = Number(
               response.headers.get("Retry-After")
@@ -589,6 +595,31 @@ export default function Home() {
           );
           return false;
         }
+        if (
+          response.status === 500 &&
+          code === "COMPARISON_PREFLIGHT_FAILED"
+        ) {
+          const traceId =
+            typeof errorBody?.traceId === "string"
+              ? errorBody.traceId
+              : response.headers.get("X-Request-ID") || clientTraceId;
+          // The comparison preflight is an all-or-nothing UX guard, not the
+          // security boundary. Every /api/chat request revalidates the model,
+          // conversation ownership, plan, credits, and cost limits before a
+          // provider call. If only this aggregate check fails unexpectedly,
+          // continue through those authoritative per-model checks.
+          console.warn(
+            JSON.stringify({
+              event: "chat_comparison_preflight_degraded",
+              traceId,
+            })
+          );
+          window.localStorage.setItem(
+            "tomverse_last_preflight_trace_id",
+            traceId
+          );
+          return true;
+        }
         const localizedMessage =
           code === "CREDIT_BALANCE_INSUFFICIENT" ||
           code === "CREDIT_COST_ALLOWANCE_INSUFFICIENT"
@@ -608,7 +639,10 @@ export default function Home() {
                       ? t("chat.comparisonConcurrencyLimit")
                       : code === "FREE_PRO_MODEL_QUOTA_EXCEEDED"
                         ? t("chat.comparisonHigherCostQuotaExceeded")
-                        : t("chat.comparisonPreflightFailed");
+                        : typeof errorBody?.error === "string" &&
+                            errorBody.error.trim()
+                          ? errorBody.error.trim()
+                          : t("chat.comparisonPreflightFailed");
         const traceId =
           typeof errorBody?.traceId === "string"
             ? errorBody.traceId

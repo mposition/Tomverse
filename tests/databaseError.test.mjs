@@ -22,6 +22,16 @@ test("recognizes retryable Prisma and driver adapter database errors", () => {
     }),
     true
   );
+  assert.equal(
+    isRetryableDatabaseError({
+      name: "DriverAdapterError",
+      cause: {
+        kind: "TransactionAlreadyClosed",
+        message: "Transaction is no longer valid. Last state: 'Expired'.",
+      },
+    }),
+    true
+  );
 });
 
 test("recognizes adapter-level unique constraint errors as deduplicated", () => {

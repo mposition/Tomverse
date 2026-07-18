@@ -979,6 +979,9 @@ export const preflightChatComparisonAccess = async (
                 }
             }
         }
+    }, {
+        maxWait: 5_000,
+        timeout: 15_000,
     });
 
     return {

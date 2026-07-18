@@ -231,6 +231,36 @@ test.describe("value-moment upgrade prompt", () => {
     await expect(page.getByTestId("value-upgrade-prompt")).toBeVisible();
   });
 
+  test("unexpected aggregate preflight failure falls back to authoritative chat checks", async ({
+    page,
+  }) => {
+    let preflightAttempts = 0;
+    await page.unroute("**/api/chat/preflight");
+    await page.route("**/api/chat/preflight", async (route) => {
+      preflightAttempts += 1;
+      const traceId =
+        (await route.request().headerValue("X-Client-Request-ID")) ||
+        "qa-degraded-preflight";
+      await route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        headers: { "X-Request-ID": traceId },
+        body: JSON.stringify({
+          error: "Aggregate preflight failed.",
+          code: "COMPARISON_PREFLIGHT_FAILED",
+          traceId,
+        }),
+      });
+    });
+
+    await page.getByTestId("chat-textarea").fill("Use authoritative checks");
+    await page.getByTestId("chat-textarea").press("Enter");
+
+    await expect.poll(() => preflightAttempts).toBe(2);
+    await expect(page.getByTestId("value-upgrade-prompt")).toBeVisible();
+    await expect(page.getByRole("status")).toHaveCount(0);
+  });
+
   test("pending model selection is persisted before comparison preflight", async ({
     page,
   }) => {
