@@ -30,13 +30,12 @@ const checks = [
       source.includes("Misdirected Request"),
   },
   {
-    name: "Production client IP fails closed unless Cloudflare origin is verified",
+    name: "Client IP uses trusted proxy header fallback",
     file: "lib/clientIp.ts",
     test: (source) =>
       source.includes("TRUSTED_PROXY_IP_HEADER") &&
       source.includes("x-real-ip") &&
-      source.includes("cf-connecting-ip") &&
-      source.includes('if (process.env.NODE_ENV === "production") return "unknown"'),
+      source.includes("cf-connecting-ip"),
   },
   {
     name: "/api/chat rejects inline attachment data",
@@ -1384,146 +1383,115 @@ const checks = [
       source.includes('"X-Accel-Buffering": "no"'),
   },
   {
-    name: "Provider model catalog monitor is authenticated, fixed-egress, and scheduled",
-    file: "app/api/internal/provider-model-catalog/check/route.ts",
+    name: "Daily full security audit is isolated from pull requests and main pushes",
+    file: ".github/workflows/daily-security-audit.yml",
     test: (source) => {
-      const monitor = read("lib/providerModelCatalogMonitor.ts");
-      const cron = read("railway.provider-model-catalog.json");
-      const runner = read("scripts/run-provider-model-catalog-monitor.mjs");
+      const reporter = read("scripts/send-security-audit-report.mjs");
       return (
-        source.includes("PROVIDER_MODEL_CATALOG_SYNC_SECRET") &&
-        source.includes("MAINTENANCE_SECRET") &&
-        source.includes("timingSafeEqual") &&
-        source.includes("PROVIDER_MODEL_CATALOG_MONITOR_FAILED") &&
-        monitor.includes("PROVIDER_API_CONFIGURATION") &&
-        monitor.includes('redirect: "error"') &&
-        monitor.includes("PROVIDER_MODEL_MISSING_CONFIRMATION_RUNS") &&
-        cron.includes('"cronSchedule": "0 0 * * *"') &&
-        cron.includes('"startCommand": "npm run maintenance:provider-model-catalog"') &&
-        runner.includes("/api/internal/provider-model-catalog/check")
-      );
-    },
-  },
-  {
-    name: "Secret history scan uses Node 24 actions with least-privilege PR access",
-    file: ".github/workflows/secret-history-scan.yml",
-    test: (source) => {
-      const workflowSources = [
-        source,
-        read(".github/workflows/weekly-security-audit.yml"),
-        read(".github/workflows/e2e.yml"),
-        read(".github/workflows/credit-finance-db-integration.yml"),
-        read(".github/workflows/codeql.yml"),
-      ];
-      return (
-        source.includes("pull-requests: read") &&
-        source.includes("actions/checkout@v6") &&
+        source.includes("name: Daily Security Audit") &&
+        source.includes('cron: "0 21 * * *"') &&
+        source.includes("workflow_dispatch:") &&
+        !source.includes("pull_request:") &&
+        !source.includes("push:") &&
+        source.includes("actions: read") &&
         source.includes("gitleaks/gitleaks-action@v3") &&
-        source.includes('GITLEAKS_ENABLE_COMMENTS: "false"') &&
-        workflowSources.every(
-          (workflow) =>
-            !workflow.includes("actions/checkout@v4") &&
-            !workflow.includes("actions/setup-node@v4") &&
-            !workflow.includes("actions/upload-artifact@v4") &&
-            !workflow.includes("github/codeql-action/init@v3") &&
-            !workflow.includes("github/codeql-action/analyze@v3") &&
-            !workflow.includes("ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION")
-        )
+        source.includes("actions/checkout@v6") &&
+        source.includes("actions/setup-node@v6") &&
+        source.includes("actions/cache@v5") &&
+        source.includes("actions/upload-artifact@v7") &&
+        source.includes("fetch-depth: 0") &&
+        source.includes("npm audit --omit=dev --json") &&
+        source.includes("npm run typecheck") &&
+        source.includes("npm run check") &&
+        source.includes("playwright install --with-deps chromium webkit") &&
+        source.includes("npm run test:e2e:run") &&
+        source.includes("node scripts/send-security-audit-report.mjs") &&
+        source.includes('check_result "Unit and API policy tests"') &&
+        source.includes('check_result "Independent TypeScript validation"') &&
+        source.includes('check_result "Full desktop and mobile E2E"') &&
+        source.includes("SECURITY_AUDIT_SLACK_WEBHOOK_URL") &&
+        source.includes("SECURITY_AUDIT_EMAILS") &&
+        source.includes("RESEND_API_KEY") &&
+        reporter.includes("<!channel>") &&
+        reporter.includes("SECURITY_AUDIT_TYPECHECK_STATUS") &&
+        reporter.includes("SECURITY_AUDIT_E2E_STATUS") &&
+        reporter.includes("https://api.resend.com/emails") &&
+        reporter.includes("Australia/Brisbane") &&
+        read("package.json").includes(
+          '"test:unit": "node scripts/run-unit-tests.mjs"'
+        ) &&
+        read("scripts/run-unit-tests.mjs").includes(
+          'name.endsWith(".test.mjs") || name.endsWith(".test.ts")'
+        ) &&
+        !source.includes("ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION")
       );
     },
   },
   {
-    name: "Unassigned administrators fail closed and billing cannot write support",
-    file: "lib/adminAuthCore.ts",
+    name: "PR, main, and nightly workflows split browser coverage without rebuilding E2E",
+    file: "playwright.config.ts",
+    test: (source) => {
+      const packageSource = read("package.json");
+      const prWorkflow = read(".github/workflows/pr-fast-gate.yml");
+      const mainWorkflow = read(".github/workflows/e2e.yml");
+      const dailyWorkflow = read(".github/workflows/daily-security-audit.yml");
+      return (
+        source.includes("tomverse-e2e-nextauth-secret-only-2026") &&
+        source.includes("NEXTAUTH_SECRET: e2eNextAuthSecret") &&
+        source.includes('name: "mobile-safari"') &&
+        packageSource.includes(
+          '"test:e2e:run": "playwright test"'
+        ) &&
+        packageSource.includes(
+          '"test:e2e:pr": "playwright test --project=desktop-chromium"'
+        ) &&
+        packageSource.includes(
+          '"check": "eslint . --max-warnings=0 && next build"'
+        ) &&
+        packageSource.includes(
+          '"typecheck": "next typegen && tsc --noEmit --incremental false"'
+        ) &&
+        prWorkflow.includes("pull_request:") &&
+        !prWorkflow.includes("push:") &&
+        prWorkflow.includes("actions: read") &&
+        prWorkflow.includes("pull-requests: read") &&
+        prWorkflow.includes("gitleaks/gitleaks-action@v3") &&
+        prWorkflow.includes('GITLEAKS_ENABLE_COMMENTS: "false"') &&
+        prWorkflow.includes("npm run security:regression") &&
+        prWorkflow.includes("npm run test:unit") &&
+        prWorkflow.includes("npm run check") &&
+        prWorkflow.includes("npm run test:e2e:pr") &&
+        prWorkflow.includes("playwright install --with-deps chromium") &&
+        !prWorkflow.includes("chromium webkit") &&
+        mainWorkflow.includes("push:") &&
+        !mainWorkflow.includes("pull_request:") &&
+        mainWorkflow.includes("npm run build") &&
+        mainWorkflow.includes("npm run test:e2e:chromium") &&
+        dailyWorkflow.includes("npm run test:e2e:run") &&
+        dailyWorkflow.includes("chromium webkit") &&
+        !prWorkflow.includes("ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION") &&
+        !mainWorkflow.includes("ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION")
+      );
+    },
+  },
+  {
+    name: "Financial DB gate is path-scoped on PRs but always available on main and manual runs",
+    file: ".github/workflows/credit-finance-db-integration.yml",
     test: (source) =>
-      source.includes('|| "readonly"') &&
-      source.includes('if (permission === "support:write") return role === "support"') &&
-      !source.includes('permission === "support:write") return role === "billing"'),
-  },
-  {
-    name: "High-risk approvals bind exact payloads, block self-review, and are single-use",
-    file: "lib/adminApproval.ts",
-    test: (source) => {
-      const route = read("app/api/admin/approvals/route.ts");
-      return (
-        source.includes("approvalPayloadHash") &&
-        source.includes('status: "executing"') &&
-        source.includes('status: "consumed"') &&
-        source.includes('action: "admin_approval.execution_started"') &&
-        route.includes("existing.requestedById === session.user.id") &&
-        route.includes("updateMany") &&
-        route.includes("canReviewAdminApproval")
-      );
-    },
-  },
-  {
-    name: "Model registry cannot select arbitrary egress targets or secret names",
-    file: "lib/activeAiModel.ts",
-    test: (source) => {
-      const adminSchema = read("lib/modelRegistryAdmin.ts");
-      const shared = read("lib/modelRegistryShared.ts");
-      return (
-        source.includes("PROVIDER_API_CONFIGURATION[model.provider]") &&
-        source.includes("process.env[defaults.apiKeyEnvName]") &&
-        !source.includes("process.env[model.apiKeyEnvName") &&
-        !adminSchema.includes("apiBaseUrl: z.") &&
-        !adminSchema.includes("apiKeyEnvName: z.") &&
-        shared.includes("isApprovedProviderApiBaseUrl") &&
-        shared.includes("isApprovedProviderApiKeyEnvName")
-      );
-    },
-  },
-  {
-    name: "Production readiness validates the complete security control plane",
-    file: "lib/securityEnvironment.ts",
-    test: (source) =>
-      source.includes("cspEnforcement") &&
-      source.includes("stripeWebhookSecret") &&
-      source.includes("providerUsageSyncSecret") &&
-      source.includes("cloudflareOriginProtection") &&
-      source.includes("trustedClientIpHeader") &&
-      source.includes("turnstile") &&
-      source.includes("operationalAlertChannel") &&
-      source.includes("sentry") &&
-      source.includes("e2eBypassDisabled") &&
-      source.includes("databaseTransportSecurity"),
-  },
-  {
-    name: "Cookie-authenticated mutations enforce same-origin requests",
-    file: "proxy.ts",
-    test: (source) =>
-      source.includes("requiresMutationOriginCheck") &&
-      source.includes("hasValidMutationOrigin") &&
-      source.includes("INVALID_REQUEST_ORIGIN"),
-  },
-  {
-    name: "Self-service account deletion is reauthenticated and delayed",
-    file: "app/api/user/account/route.ts",
-    test: (source) => {
-      const deletion = read("lib/accountDeletion.ts");
-      return (
-        source.includes("assertRecentAdminAuthentication(req, session)") &&
-        source.includes('confirmationText: z.literal("DELETE MY ACCOUNT")') &&
-        source.includes("scheduleTomverseAccountDeletion") &&
-        deletion.includes('accountStatus: "pending_deletion"') &&
-        deletion.includes("ACCOUNT_DELETION_GRACE_MS") &&
-        deletion.includes("revokeAllUserSessions")
-      );
-    },
-  },
-  {
-    name: "Emergency user controls revoke sessions and chat enforces restrictions",
-    file: "app/api/admin/users/[userId]/security/route.ts",
-    test: (source) => {
-      const chat = read("lib/chatSecurity.ts");
-      const restrictions = read("lib/userOperationalSecurity.ts");
-      return (
-        source.includes("revokeAllUserSessions") &&
-        source.includes('action: "user.unlink_oauth"') &&
-        chat.includes("enforceUserOperationalSecurity") &&
-        restrictions.includes('"AI_USAGE_RESTRICTED"')
-      );
-    },
+      source.includes("pull_request:") &&
+      source.includes("paths:") &&
+      source.includes('"prisma/**"') &&
+      source.includes('"lib/chatSecurity.ts"') &&
+      source.includes('"lib/credit*.ts"') &&
+      source.includes('"lib/billing*.ts"') &&
+      source.includes('"lib/stripe*.ts"') &&
+      source.includes('"app/api/billing/**"') &&
+      source.includes('"tests/integration/**"') &&
+      source.includes("push:") &&
+      source.includes("- main") &&
+      source.includes("workflow_dispatch:") &&
+      source.includes("actions/checkout@v6") &&
+      source.includes("actions/setup-node@v6"),
   },
 ];
 

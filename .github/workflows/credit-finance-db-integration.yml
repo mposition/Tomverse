@@ -2,6 +2,20 @@ name: Credit Finance DB Integration
 
 on:
   pull_request:
+    paths:
+      - "prisma/**"
+      - "lib/chatSecurity.ts"
+      - "lib/credit*.ts"
+      - "lib/billing*.ts"
+      - "lib/stripe*.ts"
+      - "app/api/billing/**"
+      - "app/api/admin/**/refund/**"
+      - "app/api/admin/refund*/**"
+      - "tests/integration/**"
+      - "scripts/run-db-integration-tests.mjs"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/credit-finance-db-integration.yml"
   push:
     branches:
       - main

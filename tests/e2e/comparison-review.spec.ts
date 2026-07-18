@@ -143,6 +143,11 @@ async function mockComparisonReview(
   };
 }
 
+async function openDesktopReviewConversation(page: Page) {
+  await page.getByText("QA conversation", { exact: true }).click();
+  await expect(page.getByRole("button", { name: "모델 선택" })).toContainText("3");
+}
+
 async function mockQuickComparison(page: Page) {
   let requestMethod: string | null = null;
   await page.route(
@@ -222,6 +227,7 @@ test("AI comparison review does not flash an unavailable setup before loading", 
   await mockAuthenticatedApi(page, { selectedModels: reviewModels });
   const reviewApi = await mockComparisonReview(page, { deferSetup: true });
   await page.goto("/chat");
+  await openDesktopReviewConversation(page);
 
   const reviewButton = page.getByRole("button", { name: "AI 답변 교차검토" });
   await expect(reviewButton).toBeVisible({ timeout: 30_000 });
@@ -239,7 +245,7 @@ test("AI comparison review does not flash an unavailable setup before loading", 
 });
 
 for (const viewport of [
-  { name: "desktop", width: 1280, height: 720 },
+  { name: "desktop", width: 1366, height: 720 },
   { name: "mobile", width: 390, height: 844 },
 ]) {
   test(`AI comparison review is usable and scrollable on ${viewport.name}`, async ({
@@ -250,6 +256,9 @@ for (const viewport of [
     await mockAuthenticatedApi(page, { selectedModels: reviewModels });
     const reviewApi = await mockComparisonReview(page);
     await page.goto("/chat");
+    if (viewport.name === "desktop") {
+      await openDesktopReviewConversation(page);
+    }
 
     const reviewEntryButton = page.getByRole("button", { name: "AI 답변 교차검토" });
     await expect(reviewEntryButton.getByTestId("ai-review-entry-credit-cost")).toContainText("4");

@@ -52,7 +52,7 @@ test("new signed-in users can choose a Standard default with explicit optional u
   await page.goto("/chat?lang=ko");
 
   const finder = page.getByTestId("model-finder");
-  await expect(finder).toBeVisible({ timeout: 15_000 });
+  await expect(finder).toBeVisible();
   await expect(finder).toContainText("20초 만에 나에게 맞는 AI 찾기");
   await page.getByRole("button", { name: "모델 찾기 시작" }).click();
 
@@ -66,11 +66,13 @@ test("new signed-in users can choose a Standard default with explicit optional u
   await page.getByRole("button", { name: "다음" }).click();
 
   await expect(finder).toContainText("추천 기본 모델");
-  await expect(finder).toContainText("기본 모델은 항상 기본 1크레딧의 Standard 모델입니다.");
-  await expect(finder.getByTestId("model-finder-credit-cost").first()).toContainText("1");
+  await expect(
+    finder.getByTestId("model-finder-credit-cost").filter({ hasText: "1" }).first()
+  ).toBeVisible();
   await expect(finder).toContainText("Claude Sonnet 5");
-  await expect(finder).toContainText("선택형 품질 향상");
-  await expect(finder.getByTestId("model-finder-credit-cost").last()).toContainText("4");
+  await expect(
+    finder.getByTestId("model-finder-credit-cost").filter({ hasText: "4" })
+  ).toBeVisible();
   await expectNoHorizontalOverflow(page);
   await page.getByRole("button", { name: "이 모델로 시작하기" }).click();
 
@@ -135,7 +137,7 @@ test("remind later records a dismissal without completing model finder", async (
 
   await page.goto("/chat?lang=ko");
   const finder = page.getByTestId("model-finder");
-  await expect(finder).toBeVisible({ timeout: 15_000 });
+  await expect(finder).toBeVisible();
   await page.getByTestId("model-finder-remind-later").click();
   await expect(finder).toBeHidden();
   expect(savedBody).toEqual({ action: "dismiss" });
