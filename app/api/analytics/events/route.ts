@@ -33,6 +33,7 @@ const singletonEvents = new Set([
 export async function POST(req: Request) {
   const traceId = randomUUID();
   let stage = "session";
+  let eventName: string | null = null;
   try {
     const session = await getServerSession(authOptions);
     const userId = session?.user?.id || null;
@@ -48,6 +49,7 @@ export async function POST(req: Request) {
       8 * 1024,
       analyticsClientEventSchema
     );
+    eventName = body.event_name;
     stage = "user-plan";
     const user = userId
       ? await prisma.user.findUnique({
@@ -112,6 +114,7 @@ export async function POST(req: Request) {
         component: "product-analytics",
         route: "/api/analytics/events",
         stage,
+        eventName: eventName || "unknown",
         traceId,
         retryable,
         errorName: diagnostic.errorName,
@@ -123,6 +126,7 @@ export async function POST(req: Request) {
     console.error("Product analytics event failed.", {
       ...diagnostic,
       stage,
+      eventName: eventName || "unknown",
       traceId,
       retryable,
     });

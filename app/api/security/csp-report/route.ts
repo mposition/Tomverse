@@ -1,6 +1,10 @@
 import { randomInt } from "node:crypto";
 import { after } from "next/server";
 import { getTrustedClientIp } from "@/lib/clientIp";
+import {
+  isTrustedCspDocumentUri,
+  sanitizeCspReportedUrl,
+} from "@/lib/cspReportCore";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 
 const MAX_REPORT_BYTES = 16 * 1024;
@@ -62,23 +66,6 @@ const removeControlCharacters = (value: unknown, maxLength: number) =>
   String(value || "")
     .replace(/[\u0000-\u001f\u007f]/g, "")
     .slice(0, maxLength);
-
-const sanitizeReportedUrl = (value: unknown) => {
-  const raw = removeControlCharacters(value, 2_048).trim();
-  if (!raw) return "";
-
-  const scheme = raw.match(/^([a-z][a-z0-9+.-]*):/i)?.[1]?.toLowerCase();
-  if (scheme && !["http", "https"].includes(scheme)) {
-    return `${scheme}:`;
-  }
-
-  try {
-    const url = new URL(raw);
-    return `${url.origin}${url.pathname}`.slice(0, 500);
-  } catch {
-    return raw.split(/[?#]/, 1)[0].slice(0, 500);
-  }
-};
 
 const shouldSample = () => {
   const rate = sampleRate();
@@ -148,15 +135,17 @@ export async function POST(req: Request) {
     if (!shouldSample()) return noContent();
 
     for (const report of reports) {
+      const rawDocumentUri =
+        report["document-uri"] || report.documentURL || "";
+      if (!isTrustedCspDocumentUri(rawDocumentUri)) continue;
+
       const normalized = {
-        documentUri: sanitizeReportedUrl(
-          report["document-uri"] || report.documentURL || ""
-        ),
+        documentUri: sanitizeCspReportedUrl(rawDocumentUri),
         violatedDirective: removeControlCharacters(
           report["violated-directive"] || report.effectiveDirective || "",
           120
         ),
-        blockedUri: sanitizeReportedUrl(
+        blockedUri: sanitizeCspReportedUrl(
           report["blocked-uri"] || report.blockedURL || ""
         ),
         disposition: removeControlCharacters(report.disposition, 30),
