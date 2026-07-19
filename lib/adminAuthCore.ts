@@ -4,6 +4,10 @@ export type AdminPermission =
   | "billing:write"
   | "ops:write"
   | "user:delete";
+export type AdminSessionAccessState =
+  | "authorized"
+  | "reauthentication-required"
+  | "not-authorized";
 
 export const ADMIN_ROLE_ORDER: AdminRole[] = [
   "owner",
@@ -52,7 +56,8 @@ export const roleHasPermission = (
 
 export const configuredAdminAccessExpiry = (
   identity: string | null | undefined,
-  raw: string | undefined
+  raw: string | undefined,
+  now = new Date()
 ) => {
   if (!identity || !raw?.trim()) return { expiresAt: null, active: true };
   try {
@@ -62,8 +67,57 @@ export const configuredAdminAccessExpiry = (
     if (typeof value !== "string") return { expiresAt: null, active: false };
     const expiresAt = new Date(value);
     if (Number.isNaN(expiresAt.getTime())) return { expiresAt: null, active: false };
-    return { expiresAt: expiresAt.toISOString(), active: expiresAt > new Date() };
+    return { expiresAt: expiresAt.toISOString(), active: expiresAt > now };
   } catch {
     return { expiresAt: null, active: false };
   }
+};
+
+export const resolveAdminSessionAccessState = ({
+  userId,
+  email,
+  authenticatedAt,
+  adminUserIds,
+  adminEmails,
+  accessExpiryJson,
+  sessionMaxAgeMs,
+  now = new Date(),
+}: {
+  userId?: string | null;
+  email?: string | null;
+  authenticatedAt?: string | null;
+  adminUserIds: string[];
+  adminEmails: string[];
+  accessExpiryJson?: string;
+  sessionMaxAgeMs: number;
+  now?: Date;
+}): AdminSessionAccessState => {
+  const normalizedUserId = userId?.trim().toLowerCase() || null;
+  const normalizedEmail = email?.trim().toLowerCase() || null;
+  const authorizedById = Boolean(
+    normalizedUserId && adminUserIds.includes(normalizedUserId)
+  );
+  const authorizedByEmail = Boolean(
+    normalizedEmail && adminEmails.includes(normalizedEmail)
+  );
+  if (!authorizedById && !authorizedByEmail) return "not-authorized";
+
+  const identity = authorizedByEmail ? normalizedEmail : normalizedUserId;
+  if (
+    !configuredAdminAccessExpiry(identity, accessExpiryJson, now).active
+  ) {
+    return "not-authorized";
+  }
+
+  const authenticatedAtMs = Date.parse(authenticatedAt || "");
+  const nowMs = now.getTime();
+  if (
+    !Number.isFinite(authenticatedAtMs) ||
+    authenticatedAtMs > nowMs + 60_000 ||
+    nowMs - authenticatedAtMs > sessionMaxAgeMs
+  ) {
+    return "reauthentication-required";
+  }
+
+  return "authorized";
 };

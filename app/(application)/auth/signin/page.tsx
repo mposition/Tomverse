@@ -17,6 +17,8 @@ function SignInButtons() {
     const { t, lang } = useLanguage();
     const callbackUrl = withChatLanguage(searchParams.get("callbackUrl"), lang);
     const [acceptedTerms, setAcceptedTerms] = useState(false);
+    const adminReauthentication =
+        searchParams.get("reason") === "admin-session-expired";
     const pageViewTrackedRef = useRef(false);
 
     useEffect(() => {
@@ -30,6 +32,12 @@ function SignInButtons() {
 
     return (
         <div className="mt-8 space-y-4">
+            {adminReauthentication ? (
+                <div role="status" className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm leading-6 text-blue-900 dark:border-blue-500/30 dark:bg-blue-950/30 dark:text-blue-100">
+                    Your previous administrator session was ended. Sign in again
+                    to open the Tomverse Admin Console.
+                </div>
+            ) : null}
             <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-left text-xs leading-5 text-zinc-600 transition hover:border-blue-300 hover:bg-blue-50/40 dark:border-zinc-800 dark:bg-zinc-950/60 dark:text-zinc-300 dark:hover:border-blue-500/60 dark:hover:bg-blue-950/20">
                 <input
                     type="checkbox"

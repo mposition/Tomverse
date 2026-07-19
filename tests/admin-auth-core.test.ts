@@ -4,8 +4,12 @@ import {
   resolveConfiguredAdminRole,
   roleHasPermission,
   configuredAdminAccessExpiry,
+  resolveAdminSessionAccessState,
   type AdminRole,
 } from "../lib/adminAuthCore.ts";
+import {
+  normalizeAdminCallbackPath,
+} from "../lib/adminReauthenticationCore.ts";
 
 const roles = (overrides?: Partial<Record<AdminRole, string[]>>) => ({
   owner: [],
@@ -82,4 +86,75 @@ test("every administrator role has only its documented write permissions", () =>
       role
     );
   }
+});
+
+test("registered administrators with an expired admin session require reauthentication", () => {
+  const now = new Date("2026-07-19T00:00:00.000Z");
+  const common = {
+    userId: "admin-user",
+    email: "admin@example.com",
+    adminUserIds: [],
+    adminEmails: ["admin@example.com"],
+    sessionMaxAgeMs: 8 * 60 * 60 * 1_000,
+    now,
+  };
+
+  assert.equal(
+    resolveAdminSessionAccessState({
+      ...common,
+      authenticatedAt: "2026-07-18T15:59:59.000Z",
+    }),
+    "reauthentication-required"
+  );
+  assert.equal(
+    resolveAdminSessionAccessState({
+      ...common,
+      authenticatedAt: "2026-07-18T16:00:01.000Z",
+    }),
+    "authorized"
+  );
+});
+
+test("unregistered or access-expired identities remain hidden as not authorized", () => {
+  const now = new Date("2026-07-19T00:00:00.000Z");
+  const common = {
+    userId: "ordinary-user",
+    email: "ordinary@example.com",
+    authenticatedAt: "2026-07-18T23:00:00.000Z",
+    adminUserIds: [],
+    sessionMaxAgeMs: 8 * 60 * 60 * 1_000,
+    now,
+  };
+
+  assert.equal(
+    resolveAdminSessionAccessState({
+      ...common,
+      adminEmails: ["admin@example.com"],
+    }),
+    "not-authorized"
+  );
+  assert.equal(
+    resolveAdminSessionAccessState({
+      ...common,
+      email: "admin@example.com",
+      adminEmails: ["admin@example.com"],
+      accessExpiryJson: JSON.stringify({
+        "admin@example.com": "2026-07-18T23:59:59.000Z",
+      }),
+    }),
+    "not-authorized"
+  );
+});
+
+test("administrator reauthentication callbacks remain on an admin route", () => {
+  assert.equal(
+    normalizeAdminCallbackPath("/admin/providers/openai?view=usage"),
+    "/admin/providers/openai?view=usage"
+  );
+  assert.equal(
+    normalizeAdminCallbackPath("https://evil.example/admin/overview"),
+    "/admin/overview"
+  );
+  assert.equal(normalizeAdminCallbackPath("//evil.example/admin"), "/admin/overview");
+  assert.equal(normalizeAdminCallbackPath("/chat"), "/admin/overview");
 });
