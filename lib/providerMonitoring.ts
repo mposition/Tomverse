@@ -20,6 +20,10 @@ import {
   parseMoonshotBalance,
   type ProviderBalanceSnapshot,
 } from "@/lib/providerBalanceCore";
+import {
+  evaluateProviderFailureHealth,
+  isEmptyResponseDiagnostic,
+} from "@/lib/providerHealthPolicyCore";
 
 export type ProviderHealthStatus = "available" | "limited" | "outage";
 
@@ -58,6 +62,11 @@ export type ProviderHealthRow = {
   successCount24h: number;
   failureCount24h: number;
   successRate24h: number | null;
+  healthWindowMinutes: number;
+  windowSuccessCount: number;
+  windowFailureCount: number;
+  windowFailureRatePercent: number | null;
+  consecutiveSuccesses: number;
   recentErrorCode: string | null;
   recentErrors: Array<{
     code: string;
@@ -152,6 +161,9 @@ export const PROVIDER_API_KEY_ENV: Record<AiProvider, string[]> = {
 const NON_PROVIDER_HEALTH_DIAGNOSTIC_CODES = new Set([
   "AI_STREAM_FAILED.ERR_INVALID_STATE",
 ]);
+
+const PROVIDER_HEALTH_WINDOW_MINUTES = 15;
+const PROVIDER_HEALTH_RECOVERY_SUCCESSES = 3;
 
 const isNonProviderHealthDiagnostic = (code: string | null | undefined) =>
   Boolean(code && NON_PROVIDER_HEALTH_DIAGNOSTIC_CODES.has(code));
@@ -264,6 +276,9 @@ const balanceUsdFor = (provider: AiProvider) =>
 
 const errorExplanationFor = (code: string | null) => {
   if (!code) return "No provider error code was recorded.";
+  if (isEmptyResponseDiagnostic(code)) {
+    return "The model stream completed without producing displayable text. This is tracked as a model-level transient warning and does not by itself limit the entire provider.";
+  }
   if (/429|RATE.?LIMIT/i.test(code)) {
     return "The provider rejected the request because a rate or quota limit was reached.";
   }
@@ -311,6 +326,22 @@ const incrementBucket = async (
     ON CONFLICT ("key", "period", "periodStart")
     DO UPDATE SET
       "count" = "ChatUsageBucket"."count" + ${amount},
+      "updatedAt" = NOW()
+  `;
+};
+
+const setBucketCount = async (
+  key: string,
+  period: string,
+  count: number,
+  start = periodStart("day")
+) => {
+  await prisma.$executeRaw`
+    INSERT INTO "ChatUsageBucket" ("key", "period", "periodStart", "count", "updatedAt")
+    VALUES (${key}, ${period}, ${start}, ${Math.max(0, Math.floor(count))}, NOW())
+    ON CONFLICT ("key", "period", "periodStart")
+    DO UPDATE SET
+      "count" = EXCLUDED."count",
       "updatedAt" = NOW()
   `;
 };
@@ -668,7 +699,19 @@ export const notifyProviderCreditIfNeeded = async (provider: AiProvider) => {
 const moneyMicroUsd = (value: number) => `$${(value / 1_000_000).toFixed(2)}`;
 
 export const recordProviderSuccess = async (provider: AiProvider) => {
-  await incrementBucket(`provider:${provider}:success`, "provider-health-day");
+  await Promise.all([
+    incrementBucket(`provider:${provider}:success`, "provider-health-day"),
+    incrementBucket(
+      `provider:${provider}:success`,
+      "provider-health-5m",
+      1,
+      periodStart("five-minute")
+    ),
+    incrementBucket(
+      `provider:${provider}:recovery-successes`,
+      "provider-health-day"
+    ),
+  ]);
 };
 
 export const recordModelSuccess = async (modelId: string) => {
@@ -740,6 +783,7 @@ export const recordProviderFailure = async (
 ) => {
   if (!provider || isNonProviderHealthDiagnostic(code)) return;
   const sanitizedCode = code.replace(/[^A-Za-z0-9_.-]/g, "_").slice(0, 80) || "UNKNOWN";
+  const modelScopedTransient = isEmptyResponseDiagnostic(sanitizedCode);
   const safeText = (value: string | undefined, maxLength: number) => {
     if (!value) return null;
     return value
@@ -753,7 +797,7 @@ export const recordProviderFailure = async (
       .trim()
       .slice(0, maxLength) || null;
   };
-  await Promise.all([
+  const writes: Array<Promise<unknown>> = [
     incrementBucket(`provider:${provider}:failure`, "provider-health-day"),
     incrementBucket(`provider:${provider}:error:${sanitizedCode}`, "provider-error-day"),
     event
@@ -775,8 +819,26 @@ export const recordProviderFailure = async (
           },
         })
       : Promise.resolve(null),
-  ]);
-  await maybeNotifyProviderFailure(provider, sanitizedCode);
+  ];
+  if (!modelScopedTransient) {
+    writes.push(
+      incrementBucket(
+        `provider:${provider}:failure`,
+        "provider-health-5m",
+        1,
+        periodStart("five-minute")
+      ),
+      setBucketCount(
+        `provider:${provider}:recovery-successes`,
+        "provider-health-day",
+        0
+      )
+    );
+  }
+  await Promise.all(writes);
+  if (!modelScopedTransient) {
+    await maybeNotifyProviderFailure(provider, sanitizedCode);
+  }
 };
 
 const valueAtPath = (data: unknown, path: string) => {
@@ -893,6 +955,28 @@ const latestFor = (rows: BucketRow[], prefix: string) =>
 const countFor = (rows: BucketRow[], key: string, period: string) =>
   rows.find((row) => row.key === key && row.period === period)?.count || 0;
 
+const sumFor = (rows: BucketRow[], key: string, period: string) =>
+  rows
+    .filter((row) => row.key === key && row.period === period)
+    .reduce((total, row) => total + row.count, 0);
+
+const eventContextFor = (event: ProviderErrorEventRow | undefined) => {
+  if (!event) return "No event-level diagnostic was retained for this failure.";
+  const retryability =
+    event.retryable === null
+      ? "Retryability unknown"
+      : event.retryable
+        ? "Retryable"
+        : "Not marked retryable";
+  return [
+    `Model: ${event.modelId || "provider-level"}.`,
+    `Phase: ${event.phase}.`,
+    `Time: ${event.createdAt.replace("T", " ").replace("Z", " UTC")}.`,
+    `${retryability}.`,
+    `Trace: ${event.traceId}.`,
+  ].join(" ");
+};
+
 const sumInternalCost = (
   rows: ProviderDailyUsageRow[],
   provider: AiProvider,
@@ -955,11 +1039,19 @@ export const getProviderHealthDashboard = async (
   const dayStart = periodStart("day", now);
   const monthStart = periodStart("month", now);
   const fiveMinuteStart = periodStart("five-minute", now);
+  const healthWindowStart = new Date(
+    fiveMinuteStart.getTime() -
+      (PROVIDER_HEALTH_WINDOW_MINUTES - 5) * 60 * 1_000
+  );
   const [rows, usageRows, errorEvents, excludedHealthEvents, runtimeModels] = await Promise.all([
     prisma.chatUsageBucket.findMany({
       where: {
         OR: [
           { period: "provider-health-day", periodStart: dayStart },
+          {
+            period: "provider-health-5m",
+            periodStart: { gte: healthWindowStart, lte: fiveMinuteStart },
+          },
           { period: "provider-error-day", periodStart: dayStart },
           { period: "provider-cost-month", periodStart: monthStart },
           { period: "provider-cost-day", periodStart: dayStart },
@@ -1000,7 +1092,14 @@ export const getProviderHealthDashboard = async (
           orderBy: { createdAt: "desc" },
           take: 200,
         })
-      : Promise.resolve([]),
+      : prisma.providerErrorEvent.findMany({
+          where: {
+            provider: { in: MONITORED_PROVIDERS },
+            createdAt: { gte: healthWindowStart },
+          },
+          orderBy: { createdAt: "desc" },
+          take: 50,
+        }),
     prisma.providerErrorEvent.findMany({
       where: {
         createdAt: { gte: dayStart },
@@ -1043,6 +1142,19 @@ export const getProviderHealthDashboard = async (
     );
     const total = successCount24h + failureCount24h;
     const successRate24h = total > 0 ? Math.round((successCount24h / total) * 1000) / 10 : null;
+    const windowSuccessCount = sumFor(rows, successKey, "provider-health-5m");
+    const windowFailureCount = sumFor(rows, failureKey, "provider-health-5m");
+    const consecutiveSuccesses = countFor(
+      rows,
+      `provider:${provider}:recovery-successes`,
+      "provider-health-day"
+    );
+    const failureHealth = evaluateProviderFailureHealth({
+      successCount: windowSuccessCount,
+      failureCount: windowFailureCount,
+      consecutiveSuccesses,
+      recoverySuccesses: PROVIDER_HEALTH_RECOVERY_SUCCESSES,
+    });
     const providerErrorRows = rows.filter((row) => {
       const prefix = `provider:${provider}:error:`;
       return (
@@ -1081,6 +1193,16 @@ export const getProviderHealthDashboard = async (
         message: event.message,
         createdAt: event.createdAt.toISOString(),
       }));
+    const latestHealthFailureEvent = recentErrorEvents.find(
+      (event) =>
+        new Date(event.createdAt).getTime() >= healthWindowStart.getTime() &&
+        !isEmptyResponseDiagnostic(event.diagnosticCode)
+    );
+    const latestEmptyResponseEvent = recentErrorEvents.find(
+      (event) =>
+        new Date(event.createdAt).getTime() >= healthWindowStart.getTime() &&
+        isEmptyResponseDiagnostic(event.diagnosticCode)
+    );
     const internalMonthCost = sumInternalCost(usageRows, provider, monthStart);
     const bucketMonthCost = countFor(rows, `provider:${provider}`, "provider-cost-month");
     const monthCostMicroUsd = internalMonthCost || bucketMonthCost;
@@ -1197,14 +1319,15 @@ export const getProviderHealthDashboard = async (
       .sort((a, b) => b.failureCount5m - a.failureCount5m)
       .slice(0, 5);
     const apiKeyConfigured = PROVIDER_API_KEY_ENV[provider].some((key) => !!process.env[key]);
-    const failureOutageThreshold = Math.max(5, successCount24h);
+    const latestHealthCode =
+      latestHealthFailureEvent?.diagnosticCode || "UNKNOWN";
     const status: ProviderHealthStatus =
       !apiKeyConfigured ||
       automaticBalance?.available === false ||
       budgetUsagePercent >= 100 ||
-      failureCount24h >= failureOutageThreshold
+      failureHealth.outage
         ? "outage"
-        : failureCount24h > 0 || budgetUsagePercent >= 80
+        : failureHealth.limited || budgetUsagePercent >= 80
           ? "limited"
           : "available";
     const statusReasons: ProviderStatusReason[] = [];
@@ -1231,19 +1354,19 @@ export const getProviderHealthDashboard = async (
           detail: `Estimated usage is ${budgetUsagePercent}% of the configured monthly budget.`,
         });
       }
-      if (failureCount24h >= failureOutageThreshold) {
+      if (failureHealth.outage) {
         statusReasons.push({
           code: "FAILURE_OUTAGE_THRESHOLD",
           title: "Provider failure threshold reached",
-          detail: `${failureCount24h} failures reached the outage threshold of ${failureOutageThreshold}. Latest code: ${recentErrorCode || "UNKNOWN"}. ${errorExplanationFor(recentErrorCode)}`,
+          detail: `${windowFailureCount} of ${failureHealth.totalCount} calls failed in the last ${PROVIDER_HEALTH_WINDOW_MINUTES} minutes (${failureHealth.failureRatePercent}%). Outage requires at least 5 failures and an 80% failure rate. Latest code: ${latestHealthCode}. ${errorExplanationFor(latestHealthCode)} ${eventContextFor(latestHealthFailureEvent)}`,
         });
       }
     } else if (status === "limited") {
-      if (failureCount24h > 0) {
+      if (failureHealth.limited) {
         statusReasons.push({
           code: "RECENT_PROVIDER_FAILURES",
-          title: "Recent provider failures were recorded",
-          detail: `${failureCount24h} of ${total} recorded calls failed. The current policy marks any provider failure as Limited until the health bucket resets. Latest code: ${recentErrorCode || "UNKNOWN"}. ${errorExplanationFor(recentErrorCode)}`,
+          title: "Recent provider failure rate is elevated",
+          detail: `${windowFailureCount} of ${failureHealth.totalCount} calls failed in the last ${PROVIDER_HEALTH_WINDOW_MINUTES} minutes (${failureHealth.failureRatePercent}%). Limited requires at least 5 samples, 3 failures, and a 50% failure rate. Latest code: ${latestHealthCode}. ${errorExplanationFor(latestHealthCode)} ${eventContextFor(latestHealthFailureEvent)}`,
         });
       }
       if (budgetUsagePercent >= 80) {
@@ -1254,11 +1377,33 @@ export const getProviderHealthDashboard = async (
         });
       }
     } else {
-      statusReasons.push({
-        code: "HEALTHY",
-        title: "No limiting condition is active",
-        detail: "The API key is configured, no provider failures are recorded, and internal budget usage is below 80%.",
-      });
+      if (failureHealth.recovered && windowFailureCount > 0) {
+        statusReasons.push({
+          code: "PROVIDER_RECOVERED_AFTER_SUCCESSES",
+          title: "Provider recovered after successful calls",
+          detail: `${consecutiveSuccesses} consecutive successful calls restored Available status before the ${PROVIDER_HEALTH_WINDOW_MINUTES}-minute health window expired.`,
+        });
+      } else if (windowFailureCount > 0) {
+        statusReasons.push({
+          code: "FAILURES_BELOW_HEALTH_THRESHOLD",
+          title: "Failures remain below the provider limiting threshold",
+          detail: `${windowFailureCount} of ${failureHealth.totalCount} calls failed in the last ${PROVIDER_HEALTH_WINDOW_MINUTES} minutes (${failureHealth.failureRatePercent}%). Available status is retained until there are at least 5 samples, 3 failures, and a 50% failure rate. Latest code: ${latestHealthCode}. ${eventContextFor(latestHealthFailureEvent)}`,
+        });
+      }
+      if (latestEmptyResponseEvent) {
+        statusReasons.push({
+          code: "MODEL_TRANSIENT_EMPTY_RESPONSE",
+          title: "A model returned an empty response",
+          detail: `${errorExplanationFor(latestEmptyResponseEvent.diagnosticCode)} ${eventContextFor(latestEmptyResponseEvent)}`,
+        });
+      }
+      if (statusReasons.length === 0) {
+        statusReasons.push({
+          code: "HEALTHY",
+          title: "No limiting condition is active",
+          detail: `The API key is configured, the recent ${PROVIDER_HEALTH_WINDOW_MINUTES}-minute failure policy is clear, and internal budget usage is below 80%.`,
+        });
+      }
     }
     const alertLevel =
       budgetUsagePercent >= 95
@@ -1278,6 +1423,11 @@ export const getProviderHealthDashboard = async (
       successCount24h,
       failureCount24h,
       successRate24h,
+      healthWindowMinutes: PROVIDER_HEALTH_WINDOW_MINUTES,
+      windowSuccessCount,
+      windowFailureCount,
+      windowFailureRatePercent: failureHealth.failureRatePercent,
+      consecutiveSuccesses,
       recentErrorCode,
       recentErrors,
       recentErrorEvents,

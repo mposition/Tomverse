@@ -413,9 +413,11 @@ function ProviderRow({
             ))}
           </div>
           <p className="mt-3 text-[11px] leading-5 text-zinc-500">
-            Policy: Limited when any provider failure is recorded or monthly
-            internal budget reaches 80%. Outage when the API key is missing,
-            budget reaches 100%, or failures reach max(5, successful calls).
+            Policy: the recent {provider.healthWindowMinutes}-minute window needs at
+            least 5 calls, 3 failures, and a 50% failure rate before a provider is
+            Limited. Five failures at an 80% rate indicate Outage. Three consecutive
+            successes restore Available status. Empty model output remains a model-level
+            diagnostic. Monthly budget warnings still apply at 80% and 100%.
           </p>
         </div>
       )}
