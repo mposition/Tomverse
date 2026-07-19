@@ -44,6 +44,7 @@ type DesktopChatShellProps = {
   guestMessageCount: number;
   maxGuestMessages: number;
   isPrivateMode: boolean;
+  isModelSelectionReady: boolean;
   onNewChat: () => void;
   onSelectConversation: (id: string) => void;
   onRename: (id: string, title: string) => void;
@@ -84,6 +85,7 @@ export function DesktopChatShell({
   guestMessageCount,
   maxGuestMessages,
   isPrivateMode,
+  isModelSelectionReady,
   onNewChat,
   onSelectConversation,
   onRename,
@@ -188,7 +190,8 @@ export function DesktopChatShell({
                         <select
                           value={modelId}
                           onChange={(event) => onChangePanelModel(modelId, event.target.value)}
-                          disabled={isPanelDisabled}
+                          disabled={isPanelDisabled || !isModelSelectionReady}
+                          aria-busy={!isModelSelectionReady}
                           className="min-w-0 cursor-pointer truncate bg-transparent text-sm font-semibold text-zinc-800 outline-none hover:text-zinc-950 dark:text-zinc-100 dark:hover:text-white"
                         >
                           {ENABLED_MODELS.map((model) => {
