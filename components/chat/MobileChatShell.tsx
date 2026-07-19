@@ -67,6 +67,7 @@ type MobileChatShellProps = {
   onTogglePrivateMode: () => void;
   onToggleModel: (modelId: string) => boolean;
   onSubmit: () => void;
+  onBeforeModelSend: (chatId: string) => Promise<boolean>;
   onCompareSummary: () => void;
   onComparisonReview: () => void;
   onResponseComplete: (promptId: string | null, modelId: string, responseText: string) => void;
@@ -103,6 +104,7 @@ export function MobileChatShell({
   onTogglePrivateMode,
   onToggleModel,
   onSubmit,
+  onBeforeModelSend,
   onCompareSummary,
   onComparisonReview,
   onResponseComplete,
@@ -242,9 +244,10 @@ export function MobileChatShell({
   ).length;
   const isAnyResponding = respondingCount > 0;
   const isAnyError = errorCount > 0;
-  const isAnyWorkingOrError = Object.values(modelStatuses).some(
-    (status) => status === "responding" || status === "loading"
-  ) || isAnyError;
+  const isAnyWorkingOrError = selectedModels.some((modelId) => {
+    const status = modelStatuses[modelId];
+    return status === "responding" || status === "loading" || status === "error";
+  });
 
   return (
     <main
@@ -447,12 +450,12 @@ export function MobileChatShell({
         }}
       >
         {selectedModels.length > 0 ? (
-          selectedModels.map((modelId) => {
+          selectedModels.map((modelId, panelIndex) => {
             const isActive = resolvedActiveModelId === modelId;
 
             return (
               <div
-                key={`${modelId}:${currentChatId || "new"}`}
+                key={`${currentChatId || "new"}:panel:${panelIndex}`}
                 className={`min-h-0 flex-1 flex-col overflow-hidden ${
                   isActive ? "flex" : "hidden"
                 }`}
@@ -465,6 +468,7 @@ export function MobileChatShell({
                   promptPayload={promptPayload}
                   isPanelDisabled={disabledPanels.includes(modelId)}
                   isGuestMode={isGuestMode}
+                  onBeforeSend={onBeforeModelSend}
                   hideModelOnlyInput
                   onStatusChange={handleModelStatusChange}
                   onResponseComplete={onResponseComplete}

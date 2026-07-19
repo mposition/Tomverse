@@ -821,6 +821,16 @@ export async function POST(req: Request) {
                 selectedConversationModels.length > 0 &&
                 !selectedConversationModels.includes(requestedModelId)
             ) {
+                console.warn(JSON.stringify({
+                    event: "chat_model_selection_denied",
+                    code: "MODEL_NOT_SELECTED",
+                    status: 403,
+                    traceId,
+                    conversationId,
+                    requestedModelId,
+                    selectedModelIds: selectedConversationModels,
+                    timestamp: new Date().toISOString(),
+                }));
                 return tracedJsonError(
                     "The requested model is not selected for this conversation.",
                     "MODEL_NOT_SELECTED",

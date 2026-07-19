@@ -56,6 +56,7 @@ type DesktopChatShellProps = {
   onTogglePrivateMode: () => void;
   onToggleModel: (modelId: string) => boolean;
   onSubmit: () => void;
+  onBeforeModelSend: (chatId: string) => Promise<boolean>;
   onChangePanelModel: (oldModelId: string, newModelId: string) => void;
   onTogglePanelDisable: (modelId: string) => void;
   onRemoveModel: (modelId: string) => void;
@@ -95,6 +96,7 @@ export function DesktopChatShell({
   onTogglePrivateMode,
   onToggleModel,
   onSubmit,
+  onBeforeModelSend,
   onChangePanelModel,
   onTogglePanelDisable,
   onRemoveModel,
@@ -147,7 +149,7 @@ export function DesktopChatShell({
             </div>
           )}
 
-          {selectedModels.map((modelId) => {
+          {selectedModels.map((modelId, panelIndex) => {
             const modelInfo = AVAILABLE_MODELS.find((model) => model.id === modelId);
             const usageProfile = modelInfo
               ? getModelUsageProfile(modelInfo)
@@ -156,7 +158,7 @@ export function DesktopChatShell({
 
             return (
               <div
-                key={modelId}
+                key={`${currentChatId || "new"}:panel:${panelIndex}`}
                 data-testid="desktop-model-panel"
                 data-model-id={modelId}
                 className={`relative flex flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm shadow-zinc-200/60 transition-all duration-300 ease-in-out dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/20 ${
@@ -254,12 +256,12 @@ export function DesktopChatShell({
                 </div>
 
                 <ChatApp
-                  key={`${modelId}:${currentChatId || "new"}`}
                   modelId={modelId}
                   initialConversationId={currentChatId}
                   promptPayload={promptPayload}
                   isPanelDisabled={isPanelDisabled}
                   isGuestMode={isGuestMode}
+                  onBeforeSend={onBeforeModelSend}
                   onResponseComplete={onResponseComplete}
                   onFollowupSent={onFollowupSent}
                 />

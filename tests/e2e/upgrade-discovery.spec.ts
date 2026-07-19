@@ -315,4 +315,91 @@ test.describe("value-moment upgrade prompt", () => {
     await expect.poll(() => preflightAfterPatch).toBe(true);
     await expect(page.getByTestId("value-upgrade-prompt")).toBeVisible();
   });
+
+  test("panel-only send waits for a changed model selection to persist", async ({
+    page,
+  }) => {
+    let modelPatchCompleted = false;
+    let messageSavedAfterPatch = false;
+    await page.route(
+      /.*\/api\/conversations\/qa-conversation(\?.*)?$/,
+      async (route) => {
+        if (route.request().method() !== "PATCH") {
+          await route.fallback();
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        modelPatchCompleted = true;
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ id: "qa-conversation" }),
+        });
+      }
+    );
+    await page.route(
+      "**/api/conversations/qa-conversation/messages**",
+      async (route) => {
+        if (route.request().method() === "POST") {
+          messageSavedAfterPatch = modelPatchCompleted;
+        }
+        await route.fulfill({
+          status: route.request().method() === "POST" ? 201 : 200,
+          contentType: "application/json",
+          body: "{}",
+        });
+      }
+    );
+
+    const firstPanel = page.getByTestId("desktop-model-panel").first();
+    await firstPanel.locator("select").selectOption("gemini-2-5-flash");
+    await expect(firstPanel).toHaveAttribute("data-model-id", "gemini-2-5-flash");
+    await firstPanel.locator("textarea").fill("Send only to the changed model");
+    await firstPanel.locator("textarea").press("Enter");
+
+    await expect.poll(() => modelPatchCompleted).toBe(true);
+    await expect.poll(() => messageSavedAfterPatch).toBe(true);
+  });
+
+  test("changing a panel model keeps the conversation's shared user history", async ({
+    page,
+  }) => {
+    await page.route(
+      /.*\/api\/conversations\/qa-conversation\?.*modelId=.*/,
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            id: "qa-conversation",
+            selectedModels: ["gemini-3-5-flash", "claude-haiku-4-5"],
+            disabledPanels: [],
+            messages: [
+              {
+                id: "shared-user-message",
+                role: "user",
+                content: "Shared conversation question",
+                modelId: null,
+              },
+              {
+                id: "old-model-answer",
+                role: "assistant",
+                content: "Answer from the previous model",
+                modelId: "gpt-5-4-mini",
+                status: "normal",
+              },
+            ],
+            messagePage: { hasMore: false, nextCursor: null },
+          }),
+        });
+      }
+    );
+
+    const firstPanel = page.getByTestId("desktop-model-panel").first();
+    await firstPanel.locator("select").selectOption("gemini-3-5-flash");
+    await expect(firstPanel).toHaveAttribute("data-model-id", "gemini-3-5-flash");
+
+    await expect(firstPanel.getByText("Shared conversation question")).toBeVisible();
+    await expect(firstPanel.getByText("Answer from the previous model")).toHaveCount(0);
+  });
 });
