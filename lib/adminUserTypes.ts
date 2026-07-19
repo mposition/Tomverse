@@ -45,7 +45,9 @@ export type AdminUserRow = {
   subscriptionCancelAtPeriodEnd: boolean;
   stripeCustomerId: string | null;
   stripeSubscriptionId: string | null;
-  usageToday: number;
+  timeZone: string;
+  messagesToday: number;
+  creditsToday: number;
   creditDebtCredits: number;
   creditDebtCostMicroUsd: number;
   billingRiskStatus: string;

@@ -75,6 +75,8 @@ import {
     getUserBillingPlan,
 } from "@/lib/billingEntitlements";
 import { getOperationalFeatureFlags } from "@/lib/appSettings";
+import { estimateNativeAttachmentTokens } from "@/lib/chatAttachmentTokens";
+import { isChatCostSafetyCode } from "@/lib/chatCostSafetyCore";
 
 const MAX_ATTACHMENTS = 5;
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
@@ -1151,7 +1153,8 @@ export async function POST(req: Request) {
                 .filter(Boolean)
                 .join("\n\n");
             estimatedInputTokens +=
-                estimateTextTokens(text) + fileParts.length * 16_000;
+                estimateTextTokens(text) +
+                estimateNativeAttachmentTokens(fileParts.length);
 
             formattedMessages.push({
                 role: "user",
@@ -1717,6 +1720,23 @@ export async function POST(req: Request) {
         }
         const accessError = chatErrorResponse(error);
         if (accessError) {
+            if (
+                error instanceof ChatAccessError &&
+                isChatCostSafetyCode(error.code)
+            ) {
+                console.warn(
+                    JSON.stringify({
+                        event: "chat_cost_safety_rejected",
+                        phase: "chat_request",
+                        traceId,
+                        code: error.code,
+                        status: error.status,
+                        modelId: requestedModelIdForLog,
+                        ...(error.details || {}),
+                        timestamp: new Date().toISOString(),
+                    })
+                );
+            }
             accessError.headers.set("X-Request-ID", traceId);
             return accessError;
         }

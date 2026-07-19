@@ -44,6 +44,10 @@ import {
   storeAndApplyThemePreference,
 } from "@/lib/theme";
 import { detectBrowserTimeZone } from "@/lib/userTimeZone";
+import {
+  formatChatCostSafetyDetails,
+  isChatCostSafetyCode,
+} from "@/lib/chatCostSafetyCore";
 
 const normalizeStringArray = (value: unknown, fallback: string[]) => {
   let parsed = value;
@@ -538,6 +542,7 @@ export default function Home() {
           code?: unknown;
           error?: unknown;
           traceId?: unknown;
+          details?: unknown;
         } | null = null;
         let code = "";
         for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -647,10 +652,15 @@ export default function Home() {
           typeof errorBody?.traceId === "string"
             ? errorBody.traceId
             : response.headers.get("X-Request-ID") || clientTraceId;
+        const costSafetyDetails = isChatCostSafetyCode(code)
+          ? formatChatCostSafetyDetails(errorBody?.details)
+          : "";
         showToast(
-          traceId
-            ? `${localizedMessage} (${t("chat.traceId")}: ${traceId})`
-            : localizedMessage,
+          `${localizedMessage}${
+            costSafetyDetails ? ` ${costSafetyDetails}` : ""
+          }${
+            traceId ? ` (${t("chat.traceId")}: ${traceId})` : ""
+          }`,
           "error"
         );
         return false;

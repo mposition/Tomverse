@@ -5,6 +5,7 @@ import { unstable_cache } from "next/cache";
 import { FOUNDING_TESTER_PASS_STATUS, INTERNAL_PASS_FULFILLMENT } from "@/lib/foundingTesterPassCore";
 import { getUserChatUsageKey } from "@/lib/chatSecurity";
 import { prisma } from "@/lib/prisma";
+import { getZonedDayWindow } from "@/lib/userTimeZone";
 import type {
   AdminUserRow,
   AdminUserSegment,
@@ -27,6 +28,11 @@ const adminUserListSelect = {
   creditDebtCredits: true,
   creditDebtCostMicroUsd: true,
   billingRiskStatus: true,
+  settings: {
+    select: {
+      timeZone: true,
+    },
+  },
   _count: {
     select: {
       conversations: true,
@@ -137,41 +143,116 @@ const combineWhere = (
 
 const serializeAdminUser = (
   user: AdminUserRecord,
-  usageToday: number
-): AdminUserRow => ({
-  ...user,
-  createdAt: user.createdAt?.toISOString() || null,
-  subscriptionCurrentPeriodEnd:
-    user.subscriptionCurrentPeriodEnd?.toISOString() || null,
-  creditDebtCostMicroUsd: Number(user.creditDebtCostMicroUsd),
-  usageToday,
-});
+  metrics: AdminUserDailyMetrics
+): AdminUserRow => {
+  const { settings: _settings, ...publicUser } = user;
+  void _settings;
+  return {
+    ...publicUser,
+    createdAt: user.createdAt?.toISOString() || null,
+    subscriptionCurrentPeriodEnd:
+      user.subscriptionCurrentPeriodEnd?.toISOString() || null,
+    creditDebtCostMicroUsd: Number(user.creditDebtCostMicroUsd),
+    timeZone: metrics.timeZone,
+    messagesToday: metrics.messagesToday,
+    creditsToday: metrics.creditsToday,
+  };
+};
 
-const getUsageTodayByUserId = async (
+type AdminUserDailyMetrics = {
+  timeZone: string;
+  messagesToday: number;
+  creditsToday: number;
+};
+
+const getDailyMetricsByUserId = async (
   users: AdminUserRecord[],
   now: Date
 ) => {
-  const usageKeys = new Map(
-    users.map((user) => [user.id, getUserChatUsageKey(user.id)])
-  );
-  if (usageKeys.size === 0) return new Map<string, number>();
+  if (users.length === 0) return new Map<string, AdminUserDailyMetrics>();
 
-  const periodStart = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
-  );
-  const usageRows = await prisma.chatUsageBucket.findMany({
-    where: {
-      key: { in: Array.from(usageKeys.values()) },
-      period: "day",
-      periodStart,
-    },
-    select: { key: true, count: true },
+  const descriptors = users.map((user) => {
+    const window = getZonedDayWindow(user.settings?.timeZone, now);
+    return {
+      userId: user.id,
+      usageKey: getUserChatUsageKey(user.id),
+      ...window,
+    };
   });
+
+  const windows = new Map<
+    string,
+    { start: Date; end: Date; userIds: string[] }
+  >();
+  for (const descriptor of descriptors) {
+    const key = `${descriptor.start.toISOString()}:${descriptor.end.toISOString()}`;
+    const existing = windows.get(key);
+    if (existing) existing.userIds.push(descriptor.userId);
+    else {
+      windows.set(key, {
+        start: descriptor.start,
+        end: descriptor.end,
+        userIds: [descriptor.userId],
+      });
+    }
+  }
+
+  const [usageRows, messageGroups] = await Promise.all([
+    prisma.chatUsageBucket.findMany({
+      where: {
+        period: "day",
+        OR: descriptors.map((descriptor) => ({
+          key: descriptor.usageKey,
+          periodStart: descriptor.start,
+        })),
+      },
+      select: { key: true, periodStart: true, count: true },
+    }),
+    Promise.all(
+      Array.from(windows.values()).map(async (window) => ({
+        window,
+        conversations: await prisma.conversation.findMany({
+          where: {
+            userId: { in: window.userIds },
+            messages: {
+              some: { createdAt: { gte: window.start, lt: window.end } },
+            },
+          },
+          select: {
+            userId: true,
+            _count: {
+              select: {
+                messages: {
+                  where: { createdAt: { gte: window.start, lt: window.end } },
+                },
+              },
+            },
+          },
+        }),
+      }))
+    ),
+  ]);
+
   const usageByKey = new Map(usageRows.map((row) => [row.key, row.count]));
+  const messagesByUserId = new Map<string, number>();
+  for (const group of messageGroups) {
+    for (const conversation of group.conversations) {
+      messagesByUserId.set(
+        conversation.userId,
+        (messagesByUserId.get(conversation.userId) || 0) +
+          conversation._count.messages
+      );
+    }
+  }
+
   return new Map(
-    users.map((user) => [
-      user.id,
-      usageByKey.get(usageKeys.get(user.id) || "") || 0,
+    descriptors.map((descriptor) => [
+      descriptor.userId,
+      {
+        timeZone: descriptor.timeZone,
+        messagesToday: messagesByUserId.get(descriptor.userId) || 0,
+        creditsToday: usageByKey.get(descriptor.usageKey) || 0,
+      },
     ])
   );
 };
@@ -264,11 +345,18 @@ export const getAdminUsersPage = async ({
   const hasMore = records.length > pageSize;
   const pageRecords = hasMore ? records.slice(0, pageSize) : records;
 
-  const usageByUserId = await getUsageTodayByUserId(pageRecords, now);
+  const metricsByUserId = await getDailyMetricsByUserId(pageRecords, now);
 
   return {
     users: pageRecords.map((user) =>
-      serializeAdminUser(user, usageByUserId.get(user.id) || 0)
+      serializeAdminUser(
+        user,
+        metricsByUserId.get(user.id) || {
+          timeZone: "UTC",
+          messagesToday: 0,
+          creditsToday: 0,
+        }
+      )
     ),
     nextCursor: hasMore ? pageRecords.at(-1)?.id || null : null,
   };
@@ -297,11 +385,18 @@ export const getAdminUsersExportBatch = async ({
   });
   const hasMore = records.length > batchSize;
   const batchRecords = hasMore ? records.slice(0, batchSize) : records;
-  const usageByUserId = await getUsageTodayByUserId(batchRecords, now);
+  const metricsByUserId = await getDailyMetricsByUserId(batchRecords, now);
 
   return {
     users: batchRecords.map((user) =>
-      serializeAdminUser(user, usageByUserId.get(user.id) || 0)
+      serializeAdminUser(
+        user,
+        metricsByUserId.get(user.id) || {
+          timeZone: "UTC",
+          messagesToday: 0,
+          creditsToday: 0,
+        }
+      )
     ),
     nextCursor: hasMore ? batchRecords.at(-1)?.id || null : null,
   };

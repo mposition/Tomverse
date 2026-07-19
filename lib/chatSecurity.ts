@@ -475,6 +475,9 @@ const retryAfterFor = (period: Period, now: Date, dailyEnd?: Date) => {
     return Math.max(1, Math.ceil((end.getTime() - now.getTime()) / 1000));
 };
 
+const monthlyResetAt = (now: Date) =>
+    new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+
 const incrementUsage = async (
     tx: Prisma.TransactionClient,
     key: string,
@@ -864,8 +867,20 @@ export const preflightChatComparisonAccess = async (
                     ),
                     {
                         scope: check.scope,
+                        plan,
+                        usedCostMicroUsd: used,
+                        newEstimatedCostMicroUsd: check.required,
+                        limitCostMicroUsd: check.limit,
                         requiredCostMicroUsd: check.required,
                         availableCostMicroUsd: Math.max(0, check.limit - used),
+                        resetAt:
+                            check.scope === "daily"
+                                ? userDayWindow.end.toISOString()
+                                : monthlyResetAt(now).toISOString(),
+                        timeZone:
+                            check.scope === "daily"
+                                ? userDayWindow.timeZone
+                                : "UTC",
                     }
                 );
             }
@@ -1079,6 +1094,7 @@ export const acquireChatAccess = async (
             access.kind === "user"
                 ? await getUserDayWindow(tx, access.userId!, now)
                 : {
+                      timeZone: "UTC",
                       start: periodStart("day", now),
                       end: new Date(periodStart("day", now).getTime() + 86_400_000),
                   };
@@ -1602,6 +1618,12 @@ export const acquireChatAccess = async (
             );
             if (!allowed) {
                 const isDailySafetyLimit = rule.period === "cost-day";
+                const usedCost = await readUsageCount(
+                    tx,
+                    access.subjectKey,
+                    rule.period,
+                    rule.start
+                );
                 throw new ChatAccessError(
                     429,
                     isDailySafetyLimit
@@ -1617,8 +1639,23 @@ export const acquireChatAccess = async (
                     ),
                     {
                         scope: isDailySafetyLimit ? "daily" : "monthly",
+                        plan: access.kind === "guest" ? "Guest" : plan,
+                        usedCostMicroUsd: usedCost,
+                        newEstimatedCostMicroUsd: reservedRuleCost,
+                        requiredCostMicroUsd: reservedRuleCost,
+                        availableCostMicroUsd: Math.max(
+                            0,
+                            rule.limit - usedCost
+                        ),
                         reservedCostMicroUsd: reservedRuleCost,
                         limitMicroUsd: rule.limit,
+                        limitCostMicroUsd: rule.limit,
+                        resetAt: isDailySafetyLimit
+                            ? accessDayWindow.end.toISOString()
+                            : monthlyResetAt(now).toISOString(),
+                        timeZone: isDailySafetyLimit
+                            ? accessDayWindow.timeZone
+                            : "UTC",
                     }
                 );
             }

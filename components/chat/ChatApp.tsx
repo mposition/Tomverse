@@ -7,6 +7,10 @@ import { useSession } from "next-auth/react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { useTurnstile } from "@/components/chat/useTurnstile";
 import { ArrowUp, PauseCircle } from "lucide-react";
+import {
+  formatChatCostSafetyDetails,
+  isChatCostSafetyCode,
+} from "@/lib/chatCostSafetyCore";
 
 const processedPromptKeys = new Set<string>();
 const CHAT_STREAM_IDLE_TIMEOUT_MS = 90_000;
@@ -361,6 +365,8 @@ function ChatAppComponent({
           typeof errorBody?.code === "string" ? errorBody.code : undefined;
         (requestError as Error & { publicMessage?: string }).publicMessage =
           typeof errorBody?.error === "string" ? errorBody.error : undefined;
+        (requestError as Error & { details?: unknown }).details =
+          errorBody?.details;
         throw requestError;
       }
 
@@ -408,6 +414,7 @@ function ChatAppComponent({
               code?: unknown;
               traceId?: unknown;
               publicMessage?: unknown;
+              details?: unknown;
             })
           : {};
       if (requestError.name === "AbortError") {
@@ -449,6 +456,9 @@ function ChatAppComponent({
                   : errorCode === "CHAT_QUOTA_EXCEEDED"
                     ? t("chat.comparisonDailyCreditsInsufficient")
                     : null;
+        const costSafetyDetails = isChatCostSafetyCode(errorCode)
+          ? formatChatCostSafetyDetails(requestError.details)
+          : "";
         setAssistantMessage(
           assistantMessageId,
           `${errorCode === "MODEL_RETIRED"
@@ -456,6 +466,8 @@ function ChatAppComponent({
             : localizedRequestError || typeof requestError.publicMessage === "string"
               ? localizedRequestError || requestError.publicMessage
               : t("chat.responseError")}${
+            costSafetyDetails ? `\n${costSafetyDetails}` : ""
+          }${
             traceId ? `\n${t("chat.traceId")}: ${traceId}` : ""
           }`,
           "error"

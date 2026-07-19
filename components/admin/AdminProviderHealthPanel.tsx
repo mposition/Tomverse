@@ -426,7 +426,7 @@ function ProviderRow({
         <div>
           <PanelLabel>Usage / Cost</PanelLabel>
           <p className="mt-2 text-sm font-semibold text-zinc-200">
-            Today internal {money(provider.todayCostMicroUsd)}
+            Today internal (UTC) {money(provider.todayCostMicroUsd)}
           </p>
           <p className="mt-1 text-xs text-zinc-500">
             Month internal {money(provider.monthCostMicroUsd)} of{" "}
