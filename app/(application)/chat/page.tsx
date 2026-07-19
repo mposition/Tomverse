@@ -284,6 +284,8 @@ export default function Home() {
       t(key)
     );
   const [isConversationsLoaded, setIsConversationsLoaded] = useState(false);  
+  const [isInitialConversationResolved, setIsInitialConversationResolved] =
+    useState(false);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const { data: session, status } = useSession();
@@ -818,6 +820,7 @@ export default function Home() {
       }
 
       setIsConversationsLoaded(true);      
+      setIsInitialConversationResolved(true);
       });
       return () => {
         cancelled = true;
@@ -852,6 +855,7 @@ export default function Home() {
                 setSelectedModels([userDefaultEngine]);
                 setDisabledPanels([]);
                 setPromptPayload(null);
+                setIsInitialConversationResolved(true);
             });
             return;
         }
@@ -880,6 +884,7 @@ export default function Home() {
                 applyConversationSettings(data, firstConversation.id);
                 completed = true;
                 setCurrentChatId(firstConversation.id);
+                setIsInitialConversationResolved(true);
             } catch (error) {
                 if (!cancelled) {
                     console.error("Failed to open initial conversation:", error);
@@ -887,6 +892,7 @@ export default function Home() {
                     applyConversationSettings(firstConversation, firstConversation.id);
                     completed = true;
                     setCurrentChatId(firstConversation.id);
+                    setIsInitialConversationResolved(true);
                 }
             }
         };
@@ -906,6 +912,23 @@ export default function Home() {
         isGuestMode,
         isUserSettingsLoaded,
         userDefaultEngine,
+    ]);
+
+    useEffect(() => {
+        if (
+            isGuestMode ||
+            !isUserSettingsLoaded ||
+            !isConversationsLoaded ||
+            conversations.length > 0
+        ) {
+            return;
+        }
+        queueMicrotask(() => setIsInitialConversationResolved(true));
+    }, [
+        conversations.length,
+        isConversationsLoaded,
+        isGuestMode,
+        isUserSettingsLoaded,
     ]);
 
     useEffect(() => {
@@ -940,12 +963,16 @@ export default function Home() {
       if (res.ok) setConversations(await res.json());
     } catch (error) {
       console.error("Failed to load conversations:", error);
+    } finally {
+      setIsConversationsLoaded(true);
     }
     }, [sessionUserId]);
 
     useEffect(() => {
         if (sessionUserId) {
             queueMicrotask(() => setIsUserSettingsLoaded(false));
+            queueMicrotask(() => setIsConversationsLoaded(false));
+            queueMicrotask(() => setIsInitialConversationResolved(false));
             queueMicrotask(() => {
                 void fetchConversations();
             });
@@ -1030,6 +1057,7 @@ export default function Home() {
     setDisabledPanels([]);
     setInputValue("");
       setPromptPayload(null);
+      setIsInitialConversationResolved(true);
 
       setFocusToken((prev) => prev + 1);
   };
@@ -2025,6 +2053,12 @@ export default function Home() {
           guestMessageCount={guestMessageCount}
           maxGuestMessages={MAX_GUEST_MESSAGES}
           isPrivateMode={isPrivateMode}
+          isModelSelectionReady={
+            isGuestMode ||
+            (isUserSettingsLoaded &&
+              isConversationsLoaded &&
+              isInitialConversationResolved)
+          }
           onNewChat={handleNewChat}
           onSelectConversation={handleSelectConversation}
           onRename={handleRename}
