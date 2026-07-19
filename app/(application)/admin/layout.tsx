@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { getServerSession } from "next-auth/next";
 import { AdminConsoleShell } from "@/components/admin/AdminConsoleShell";
 import { authOptions } from "@/lib/auth";
-import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
+import { getAdminRole, getAdminSessionAccessState } from "@/lib/adminAuth";
+import { adminReauthenticationHref } from "@/lib/adminReauthenticationCore";
 import { prisma } from "@/lib/prisma";
 import { getScheduledJobsDashboard } from "@/lib/scheduledJobs";
 
@@ -15,7 +17,16 @@ export const metadata: Metadata = {
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) redirect("/auth/signin?callbackUrl=/admin/overview");
-  if (!isAdminSession(session)) notFound();
+  const accessState = getAdminSessionAccessState(session);
+  if (accessState === "not-authorized") notFound();
+  if (accessState === "reauthentication-required") {
+    const requestHeaders = await headers();
+    redirect(
+      adminReauthenticationHref(
+        requestHeaders.get("x-tomverse-pathname") || "/admin/overview"
+      )
+    );
+  }
   const role = getAdminRole(session) || "readonly";
   const [jobsResult, alertsResult] = await Promise.allSettled([
     getScheduledJobsDashboard(),

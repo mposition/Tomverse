@@ -798,6 +798,14 @@ administrators must sign in again after the security migration. Recent-auth
 checks use the current database session's creation time, not a user-wide last
 login timestamp.
 
+The general database session can remain valid for seven days while
+`ADMIN_SESSION_MAX_HOURS` applies a shorter administrator window. When that
+window expires, an allow-listed administrator is sent to the dedicated
+reauthentication screen and must fully sign out and sign in again; refreshing
+the browser does not renew it. Accounts that are not present in
+`ADMIN_EMAILS`/`ADMIN_USER_IDS`, or whose configured access has expired, still
+receive a hidden 404 response.
+
 New admin audit records are serialized into an HMAC chain. A dedicated secret
 is recommended; when omitted, `NEXTAUTH_SECRET` is used:
 

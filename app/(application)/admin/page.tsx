@@ -17,9 +17,10 @@ import {
 import { authOptions } from "@/lib/auth";
 import {
     getAdminRole,
+    getAdminSessionAccessState,
     getConfiguredAdminAccessWithActivity,
-    isAdminSession,
 } from "@/lib/adminAuth";
+import { adminReauthenticationHref } from "@/lib/adminReauthenticationCore";
 import {
     getAdminActivePaidWhere,
     getAdminUsersPage,
@@ -228,8 +229,12 @@ export async function AdminWorkspace({ activeView }: { activeView: AdminWorkspac
     if (!session?.user?.id) {
         redirect("/auth/signin?callbackUrl=/admin");
     }
-    if (!isAdminSession(session)) {
+    const accessState = getAdminSessionAccessState(session);
+    if (accessState === "not-authorized") {
         notFound();
+    }
+    if (accessState === "reauthentication-required") {
+        redirect(adminReauthenticationHref("/admin"));
     }
 
     const activeTab = activeView;

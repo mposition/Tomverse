@@ -5,10 +5,12 @@ import {
   ADMIN_ROLE_ORDER,
   normalizeAdminList,
   configuredAdminAccessExpiry,
+  resolveAdminSessionAccessState,
   resolveConfiguredAdminRole,
   roleHasPermission,
   type AdminPermission,
   type AdminRole,
+  type AdminSessionAccessState,
 } from "@/lib/adminAuthCore";
 import { prisma } from "@/lib/prisma";
 
@@ -22,29 +24,24 @@ const adminSessionMaxAgeMs = () => {
   return hours * 60 * 60 * 1_000;
 };
 
-export const isAdminSession = (session: Session | null | undefined) => {
-  const userId = session?.user?.id?.toLowerCase();
-  const email = session?.user?.email?.toLowerCase();
+export const getAdminSessionAccessState = (
+  session: Session | null | undefined
+): AdminSessionAccessState => {
   const adminUserIds = normalizeAdminList(process.env.ADMIN_USER_IDS);
   const adminEmails = normalizeAdminList(process.env.ADMIN_EMAILS);
-
-  const authorizedById = !!userId && adminUserIds.includes(userId);
-  const authorizedByEmail = !!email && adminEmails.includes(email);
-  if (!authorizedById && !authorizedByEmail) return false;
-  const authenticatedAt = Date.parse(session?.user?.authenticatedAt || "");
-  if (
-    !Number.isFinite(authenticatedAt) ||
-    authenticatedAt > Date.now() + 60_000 ||
-    Date.now() - authenticatedAt > adminSessionMaxAgeMs()
-  ) {
-    return false;
-  }
-  const identity = authorizedByEmail ? email : userId;
-  return configuredAdminAccessExpiry(
-    identity,
-    process.env.ADMIN_ACCESS_EXPIRY_JSON
-  ).active;
+  return resolveAdminSessionAccessState({
+    userId: session?.user?.id,
+    email: session?.user?.email,
+    authenticatedAt: session?.user?.authenticatedAt,
+    adminUserIds,
+    adminEmails,
+    accessExpiryJson: process.env.ADMIN_ACCESS_EXPIRY_JSON,
+    sessionMaxAgeMs: adminSessionMaxAgeMs(),
+  });
 };
+
+export const isAdminSession = (session: Session | null | undefined) =>
+  getAdminSessionAccessState(session) === "authorized";
 
 const roleEnvKey: Record<AdminRole, string> = {
   owner: "ADMIN_OWNER_EMAILS",
