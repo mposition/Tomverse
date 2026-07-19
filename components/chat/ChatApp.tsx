@@ -47,6 +47,7 @@ type ChatAppProps = {
     responseText: string
   ) => void;
   onFollowupSent?: (modelId: string) => void;
+  onBeforeSend?: (chatId: string) => Promise<boolean>;
 };
 
 function ChatAppComponent({
@@ -59,8 +60,10 @@ function ChatAppComponent({
   onStatusChange,
   onResponseComplete,
   onFollowupSent,
+  onBeforeSend,
 }: ChatAppProps) {
   const [isMessagesLoaded, setIsMessagesLoaded] = useState(false);
+  const [loadedMessageViewKey, setLoadedMessageViewKey] = useState<string | null>(null);
   const { data: session, status } = useSession();
   const sessionUserId = session?.user?.id || null;
     const { t } = useLanguage();
@@ -79,7 +82,11 @@ function ChatAppComponent({
   ]);
   
     const [isSending, setIsSending] = useState(false);
-    const [modelInput, setModelInput] = useState("");
+    const [modelInputs, setModelInputs] = useState<Record<string, string>>({});
+    const modelInput = modelInputs[modelId] || "";
+    const setModelInput = (value: string) => {
+      setModelInputs((current) => ({ ...current, [modelId]: value }));
+    };
   
   const isSendingRef = useRef(false);
   const streamingChatIdRef = useRef<string | null>(null);
@@ -93,6 +100,11 @@ function ChatAppComponent({
   } | null>(null);
 
   const isPrivate = initialConversationId === "private-chat";
+  const expectedMessageViewKey = `${
+    isPrivate ? "private" : isGuestMode ? "guest" : sessionUserId || "account"
+  }:${initialConversationId || "new"}:${modelId}`;
+  const isCurrentMessageViewLoaded =
+    isMessagesLoaded && loadedMessageViewKey === expectedMessageViewKey;
 
   useEffect(() => {
     if (isPanelDisabled) {
@@ -130,6 +142,8 @@ function ChatAppComponent({
 
     if (isPrivate) {
       lastFetchedConversationKeyRef.current = "private-chat";
+      setIsMessagesLoaded(true);
+      setLoadedMessageViewKey(expectedMessageViewKey);
       return;
     }
 
@@ -158,6 +172,7 @@ function ChatAppComponent({
       }
 
       setIsMessagesLoaded(true);
+      setLoadedMessageViewKey(expectedMessageViewKey);
       return;
     }
 
@@ -165,6 +180,7 @@ function ChatAppComponent({
       const conversationKey = `${sessionUserId || "guest"}:${initialConversationId}:${modelId}`;
       if (conversationKey === lastFetchedConversationKeyRef.current) return;
       lastFetchedConversationKeyRef.current = conversationKey;
+	  setIsMessagesLoaded(false);
 	  
       const fetchPastMessages = async () => {
         try {
@@ -192,28 +208,15 @@ function ChatAppComponent({
               data.messagePage = pageData.messagePage;
               nextCursor = pageData.messagePage?.nextCursor;
             }
-			    if (isMounted) {              
-              if (isSendingRef.current && streamingChatIdRef.current === initialConversationId) {
-                return; 
-              }
-          }
+			    if (!isMounted) return;
+            if (isSendingRef.current && streamingChatIdRef.current === initialConversationId) {
+              return;
+            }
 
           if (data.messages && data.messages.length > 0) {
             const filteredMessages: Message[] = [];
             const seenUserIds = new Set();
-				    let hasMyAssistantMsg = false;
-
             for (const msg of data.messages) {
-              if (msg.role === "assistant" && (!msg.modelId || msg.modelId === modelId)) {
-                hasMyAssistantMsg = true;
-                break;
-              }
-            }
-
-            if (!hasMyAssistantMsg) {
-              setMessages([{ id: "welcome", role: "assistant", content: t("chat.welcome"), status: "normal" }]);
-            } else {				
-              for (const msg of data.messages) {
                 if (msg.role === "user") {
                     if ((!msg.modelId || msg.modelId === modelId) && !seenUserIds.has(msg.id)) {
                         seenUserIds.add(msg.id);
@@ -223,16 +226,22 @@ function ChatAppComponent({
                 else if (msg.role === "assistant" && msg.modelId === modelId) {
                   filteredMessages.push(msg);
 					      }
-					    }
 				    }
 				
               setMessages(filteredMessages.length > 0 ? filteredMessages : [{ id: "welcome", role: "assistant", content: t("chat.welcome"), status: "normal" }]);
           } else {
               setMessages([{ id: "welcome", role: "assistant", content: t("chat.welcome"), status: "normal" }]);
           }
+        } else {
+          throw new Error(`Conversation message load failed: ${response.status}`);
         }
       } catch (error) {
         console.error("Failed to load conversation messages:", error);
+      } finally {
+        if (isMounted) {
+          setIsMessagesLoaded(true);
+          setLoadedMessageViewKey(expectedMessageViewKey);
+        }
       }
     };
 
@@ -249,6 +258,8 @@ function ChatAppComponent({
           status: "normal",
         },
         ]);
+        setIsMessagesLoaded(true);
+        setLoadedMessageViewKey(expectedMessageViewKey);
     }
     });
 	
@@ -262,6 +273,7 @@ function ChatAppComponent({
     modelId,
     sessionUserId,
     t,
+    expectedMessageViewKey,
   ]);
   
   useEffect(() => {
@@ -558,24 +570,31 @@ function ChatAppComponent({
         const trimmed = modelInput.trim();
         if (!trimmed || isSendingRef.current || isPanelDisabled || !initialConversationId) return;
 
+        const settingsReady = await onBeforeSend?.(initialConversationId) ?? true;
+        if (!settingsReady) return;
+
         const userMsgId = crypto.randomUUID();
-        setModelInput("");
-        onFollowupSent?.(modelId);
 
         if (!isPrivate && !isGuestMode) {
             try {
-                await fetch(`/api/conversations/${initialConversationId}/messages`, {
+                const response = await fetch(`/api/conversations/${initialConversationId}/messages`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         messages: [{ id: userMsgId, role: "user", content: trimmed, modelId }],
                     }),
                 });
+                if (!response.ok) {
+                  throw new Error(`Model-only user message save failed: ${response.status}`);
+                }
             } catch (error) {
                 console.error("model-only user message save failed:", error);
+                return;
             }
         }
 
+        setModelInput("");
+        onFollowupSent?.(modelId);
         await handleSendPrompt(trimmed, initialConversationId, userMsgId);
     };
 
@@ -584,13 +603,17 @@ function ChatAppComponent({
       {!isPanelDisabled ? (
               <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
                   <div className="min-h-0 flex-1 overflow-hidden">
-      <ChatMessageList
+      {!isCurrentMessageViewLoaded ? (
+        <div className="flex h-full items-center justify-center text-xs text-zinc-500">
+          {t("auth.loading")}
+        </div>
+      ) : <ChatMessageList
         messages={messages}
         isPrivate={isPrivate}
         isGuestMode={isGuestMode}
         onRetryLast={handleRetryLast}
         onRetryWithoutAttachments={handleRetryWithoutAttachments}
-      />
+      />}
                   </div>
                   {isGuestMode ? (
                     <div

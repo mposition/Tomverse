@@ -67,6 +67,7 @@ type PendingModelSettingsSync = {
   models: string[];
   disabled: string[];
 };
+type ConfirmedModelSettings = PendingModelSettingsSync;
 const isLanguage = (value: unknown): value is Language =>
   value === "en" ||
   value === "ko" ||
@@ -353,6 +354,7 @@ export default function Home() {
   const modelSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const modelSyncAbortRef = useRef<AbortController | null>(null);
   const pendingModelSyncRef = useRef<PendingModelSettingsSync | null>(null);
+  const confirmedModelSettingsRef = useRef<ConfirmedModelSettings | null>(null);
   const comparisonCompletionsRef = useRef<Map<string, Set<string>>>(new Map());
   const comparisonTrackedRef = useRef<Set<string>>(new Set());
   const localComparisonResponsesRef = useRef<
@@ -753,27 +755,22 @@ export default function Home() {
         selectedModels?: unknown;
         disabledPanels?: unknown;
         messages?: Array<{ role?: string; modelId?: string | null }>;
-    }) => {
+    }, targetChatId?: string) => {
         const savedModels = normalizeStringArray(data.selectedModels, [userDefaultEngine]);
-        const messageModels = Array.isArray(data.messages)
-            ? data.messages
-                .map((message) => (message.role === "assistant" ? message.modelId : null))
-                .filter((modelId): modelId is string => !!modelId)
-            : [];
-
-        const nextModels = clampSelectedModels(
-            uniqueStrings([...savedModels, ...messageModels])
+        const nextModels = clampSelectedModels(uniqueStrings(savedModels));
+        const nextDisabled = normalizeStringArray(data.disabledPanels, []).filter(
+            (modelId) => nextModels.includes(modelId)
         );
-        const recoveredModels = messageModels.filter((modelId) => !savedModels.includes(modelId));
 
         setSelectedModels(nextModels.length > 0 ? nextModels : [userDefaultEngine]);
-        setDisabledPanels(
-            normalizeStringArray(data.disabledPanels, []).filter(
-                (modelId) =>
-                    nextModels.includes(modelId) &&
-                    !recoveredModels.includes(modelId)
-            )
-        );
+        setDisabledPanels(nextDisabled);
+        if (targetChatId) {
+          confirmedModelSettingsRef.current = {
+            targetChatId,
+            models: nextModels.length > 0 ? nextModels : [userDefaultEngine],
+            disabled: nextDisabled,
+          };
+        }
     }, [clampSelectedModels, userDefaultEngine]);
 
   useEffect(() => {
@@ -880,14 +877,14 @@ export default function Home() {
                 // replace a restored multi-model selection with the account's
                 // single default model.
                 currentChatIdRef.current = firstConversation.id;
-                applyConversationSettings(data);
+                applyConversationSettings(data, firstConversation.id);
                 completed = true;
                 setCurrentChatId(firstConversation.id);
             } catch (error) {
                 if (!cancelled) {
                     console.error("Failed to open initial conversation:", error);
                     currentChatIdRef.current = firstConversation.id;
-                    applyConversationSettings(firstConversation);
+                    applyConversationSettings(firstConversation, firstConversation.id);
                     completed = true;
                     setCurrentChatId(firstConversation.id);
                 }
@@ -1092,7 +1089,7 @@ export default function Home() {
 	  const res = await fetch(`/api/conversations/${id}`, { cache: "no-store" });
       if (res.ok) {
         const data = await res.json();
-          applyConversationSettings(data);
+          applyConversationSettings(data, id);
 	  }
     } catch (error) {
       console.error("Failed to load conversation settings:", error);
@@ -1236,13 +1233,23 @@ export default function Home() {
       if (!response.ok) {
         throw new Error(`Model settings sync failed: ${response.status}`);
       }
+      confirmedModelSettingsRef.current = pending;
       if (pendingModelSyncRef.current === pending) {
         pendingModelSyncRef.current = null;
       }
       return true;
     } catch (error: unknown) {
-      if (!(error instanceof Error) || error.name !== "AbortError") {
+      const wasAborted = error instanceof Error && error.name === "AbortError";
+      if (!wasAborted) {
         console.error("Failed to sync model settings:", error);
+        if (pendingModelSyncRef.current === pending) {
+          const confirmed = confirmedModelSettingsRef.current;
+          if (confirmed?.targetChatId === pending.targetChatId) {
+            setSelectedModels(confirmed.models);
+            setDisabledPanels(confirmed.disabled);
+          }
+          pendingModelSyncRef.current = null;
+        }
       }
       return false;
     } finally {
@@ -1290,6 +1297,30 @@ export default function Home() {
       modelSyncTimerRef.current = null;
     }
     return persistModelSettingsToServer(pending);
+  };
+
+  const ensureModelSettingsReady = async (targetChatId: string) => {
+    if (
+      isGuestMode ||
+      targetChatId === "private-chat" ||
+      !sessionUserId
+    ) {
+      return true;
+    }
+    const ready = await flushModelSettingsToServer(targetChatId);
+    if (ready) return true;
+
+    const traceId = crypto.randomUUID();
+    console.error(JSON.stringify({
+      event: "chat_model_settings_flush_failed",
+      traceId,
+      conversationId: targetChatId,
+    }));
+    showToast(
+      `${t("chat.comparisonPreflightFailed")} (${t("chat.traceId")}: ${traceId})`,
+      "error"
+    );
+    return false;
   };
 
   useEffect(() => {
@@ -1438,6 +1469,13 @@ export default function Home() {
         if (res.ok) {
           const data = await res.json();
           activeChatId = data.id;
+          confirmedModelSettingsRef.current = {
+            targetChatId: data.id,
+            models: clampSelectedModels(selectedModels),
+            disabled: uniqueStrings(disabledPanels).filter((modelId) =>
+              selectedModels.includes(modelId)
+            ),
+          };
           setCurrentChatId(activeChatId);
           fetchConversations();
         }
@@ -1450,21 +1488,8 @@ export default function Home() {
     
     if (activeChatId) {
       if (!isGuestMode) {
-        const modelSettingsReady = await flushModelSettingsToServer(activeChatId);
-        if (!modelSettingsReady) {
-          const traceId = crypto.randomUUID();
-          console.error(
-            JSON.stringify({
-              event: "chat_model_settings_flush_failed",
-              traceId,
-            })
-          );
-          showToast(
-            `${t("chat.comparisonPreflightFailed")} (${t("chat.traceId")}: ${traceId})`,
-            "error"
-          );
-          return;
-        }
+        const modelSettingsReady = await ensureModelSettingsReady(activeChatId);
+        if (!modelSettingsReady) return;
       }
       const comparisonId = Date.now().toString();
       const preflightAllowed = await runComparisonPreflight({
@@ -1975,6 +2000,7 @@ export default function Home() {
           onTogglePrivateMode={togglePrivateModeGlobal}
           onToggleModel={toggleModel}
           onSubmit={handleGlobalSubmit}
+          onBeforeModelSend={ensureModelSettingsReady}
           onCompareSummary={handleCompareSummary}
           onComparisonReview={() => setShowComparisonReview(true)}
           onResponseComplete={handleResponseComplete}
@@ -2011,6 +2037,7 @@ export default function Home() {
           onTogglePrivateMode={togglePrivateModeGlobal}
           onToggleModel={toggleModel}
           onSubmit={handleGlobalSubmit}
+          onBeforeModelSend={ensureModelSettingsReady}
           onChangePanelModel={changePanelModel}
           onTogglePanelDisable={togglePanelDisable}
           onRemoveModel={handleRemoveModel}
