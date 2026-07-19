@@ -24,7 +24,9 @@ export const ADMIN_USERS_CSV_HEADER = [
   "linkedAccounts",
   "refundRequests",
   "promotionRedemptions",
-  "usageToday",
+  "timeZone",
+  "messagesToday",
+  "creditsToday",
 ] as const;
 
 const serializeCsvRows = (rows: unknown[][]) =>
@@ -53,7 +55,9 @@ export const adminUsersCsvRows = (users: AdminUserRow[]) => {
       user._count.accounts,
       user._count.refundRequests,
       user._count.promotionRedemptions,
-      user.usageToday,
+      user.timeZone,
+      user.messagesToday,
+      user.creditsToday,
     ]);
 
   return `${serializeCsvRows(rows)}\r\n`;

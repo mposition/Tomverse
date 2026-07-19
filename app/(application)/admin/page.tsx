@@ -889,9 +889,9 @@ export async function AdminWorkspace({ activeView }: { activeView: AdminWorkspac
                                     icon={<Users className="h-4 w-4" />}
                                 />
                                 <MetricCard
-                                    label="Messages"
+                                    label="Plan credits (UTC ops)"
                                     value={String(todayUsage._sum.count || 0)}
-                                    detail={`${monthlyUsage._sum.count || 0} this month, ${messageCount} total`}
+                                    detail={`${monthlyUsage._sum.count || 0} monthly credits (UTC), ${messageCount} messages total`}
                                     icon={<MessageSquare className="h-4 w-4" />}
                                 />
                                 <MetricCard

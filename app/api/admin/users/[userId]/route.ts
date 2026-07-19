@@ -18,6 +18,7 @@ import {
   readLimitedJson,
 } from "@/lib/apiSecurity";
 import { prisma } from "@/lib/prisma";
+import { getZonedDayWindow } from "@/lib/userTimeZone";
 
 const deleteUserSchema = z
   .object({
@@ -44,11 +45,15 @@ export async function GET(req: Request, context: RouteContext) {
 
     const { userId } = await context.params;
     const now = new Date();
-    const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const userTimeZone = await prisma.userSettings.findUnique({
+      where: { userId },
+      select: { timeZone: true },
+    });
+    const dayWindow = getZonedDayWindow(userTimeZone?.timeZone, now);
     const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
     const usageKey = getUserChatUsageKey(userId);
 
-    const [user, usageRows, recentConversations, auditEvents] = await Promise.all([
+    const [user, usageRows, recentConversations, auditEvents, messagesToday] = await Promise.all([
       prisma.user.findUnique({
         where: { id: userId },
         select: {
@@ -84,6 +89,7 @@ export async function GET(req: Request, context: RouteContext) {
               language: true,
               theme: true,
               defaultModel: true,
+              timeZone: true,
               updatedAt: true,
             },
           },
@@ -226,7 +232,7 @@ export async function GET(req: Request, context: RouteContext) {
         where: {
           key: usageKey,
           OR: [
-            { period: "day", periodStart: dayStart },
+            { period: "day", periodStart: dayWindow.start },
             { period: "month", periodStart: monthStart },
           ],
         },
@@ -260,6 +266,12 @@ export async function GET(req: Request, context: RouteContext) {
           summary: true,
           actorEmail: true,
           createdAt: true,
+        },
+      }),
+      prisma.message.count({
+        where: {
+          conversation: { userId },
+          createdAt: { gte: dayWindow.start, lt: dayWindow.end },
         },
       }),
     ]);
@@ -388,9 +400,13 @@ export async function GET(req: Request, context: RouteContext) {
           }] : []),
         ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()).slice(0, 20),
         usage: {
-          today:
+          timeZone: dayWindow.timeZone,
+          dayStart: dayWindow.start.toISOString(),
+          dayEnd: dayWindow.end.toISOString(),
+          messagesToday,
+          creditsToday:
             usageRows.find((row) => row.period === "day")?.count || 0,
-          month:
+          creditsMonth:
             usageRows.find((row) => row.period === "month")?.count || 0,
         },
       },

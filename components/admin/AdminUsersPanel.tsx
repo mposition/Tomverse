@@ -73,6 +73,7 @@ type AdminUserDetail = {
     language: string;
     theme: string;
     defaultModel: string;
+    timeZone: string;
     updatedAt: string;
   } | null;
   accounts: Array<{
@@ -165,8 +166,12 @@ type AdminUserDetail = {
     _count: { messages: number };
   }>;
   usage: {
-    today: number;
-    month: number;
+    timeZone: string;
+    dayStart: string;
+    dayEnd: string;
+    messagesToday: number;
+    creditsToday: number;
+    creditsMonth: number;
   };
   timeline: Array<{
     id: string;
@@ -192,11 +197,27 @@ const planClass = (plan: string | null | undefined) => {
   return "border-emerald-500/30 bg-emerald-500/10 text-emerald-200";
 };
 
-const dateTimeLabel = (value: string | null | undefined) => {
+const dateTimeLabel = (
+  value: string | null | undefined,
+  timeZone = "UTC"
+) => {
   if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "-";
-  return date.toISOString().replace("T", " ").slice(0, 16);
+  try {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+      timeZoneName: "short",
+    }).format(date);
+  } catch {
+    return date.toISOString().replace("T", " ").slice(0, 16) + " UTC";
+  }
 };
 
 const segmentLabels: Record<AdminUserSegment, string> = {
@@ -412,8 +433,11 @@ export function AdminUsersPanel({
       `Plan: ${user.plan}`,
       `Subscription: ${user.subscriptionStatus || "-"}`,
       `Billing: ${user.subscriptionBillingInterval || "-"}`,
-      `Period end: ${dateTimeLabel(user.subscriptionCurrentPeriodEnd)}`,
-      `Usage: ${user.usage.today} today / ${user.usage.month} month`,
+      `Period end: ${dateTimeLabel(user.subscriptionCurrentPeriodEnd, user.usage.timeZone)}`,
+      `Time zone: ${user.usage.timeZone}`,
+      `Messages today: ${user.usage.messagesToday}`,
+      `Plan credits today: ${user.usage.creditsToday}`,
+      `Plan credits this month: ${user.usage.creditsMonth}`,
       `Credit debt: ${user.creditDebtCredits} credits / $${(user.creditDebtCostMicroUsd / 1_000_000).toFixed(2)} funded cost`,
       `Billing risk: ${user.billingRiskStatus}`,
       `Stripe customer: ${user.stripeCustomerId || "-"}`,
@@ -656,7 +680,7 @@ export function AdminUsersPanel({
             <h2 className="mt-2 text-xl font-black text-white">All-database account statistics</h2>
           </div>
           <div className="flex items-center gap-2 text-xs text-zinc-500">
-            <span>Last aggregated {dateTimeLabel(statsSnapshot.generatedAt)} UTC</span>
+            <span>Last aggregated {dateTimeLabel(statsSnapshot.generatedAt)}</span>
             <button
               type="button"
               onClick={() =>
@@ -817,7 +841,7 @@ export function AdminUsersPanel({
               <th className="px-3 py-2">User</th>
               <th className="px-3 py-2">Plan</th>
               <th className="px-3 py-2">Subscription</th>
-              <th className="px-3 py-2">Usage today</th>
+              <th className="px-3 py-2">Today (user time zone)</th>
               <th className="px-3 py-2">Data</th>
               <th className="px-3 py-2">Actions</th>
             </tr>
@@ -845,14 +869,21 @@ export function AdminUsersPanel({
                 <td className="px-3 py-3 text-xs text-zinc-400">
                   <div>{user.subscriptionStatus || "none"}</div>
                   <div>{user.subscriptionBillingInterval || "-"}</div>
-                  <div>{dateTimeLabel(user.subscriptionCurrentPeriodEnd)}</div>
+                  <div>{dateTimeLabel(user.subscriptionCurrentPeriodEnd, user.timeZone)}</div>
                   {user.subscriptionCancelAtPeriodEnd ? (
                     <div className="mt-1 text-amber-300">Cancels at period end</div>
                   ) : null}
                 </td>
                 <td className="px-3 py-3 text-xs text-zinc-400">
-                  <span className="font-bold text-zinc-200">{user.usageToday ?? "-"}</span>
-                  <span className="ml-1">messages</span>
+                  <div>
+                    <span className="font-bold text-zinc-200">{user.messagesToday.toLocaleString()}</span>
+                    <span className="ml-1">messages</span>
+                  </div>
+                  <div className="mt-1">
+                    <span className="font-bold text-amber-200">{user.creditsToday.toLocaleString()}</span>
+                    <span className="ml-1">plan credits</span>
+                  </div>
+                  <div className="mt-1 text-[11px] text-zinc-500">{user.timeZone}</div>
                   {(user.creditDebtCredits || 0) > 0 ? (
                     <div className="mt-1 font-bold text-red-300">
                       Debt {user.creditDebtCredits?.toLocaleString()} credits
@@ -978,7 +1009,7 @@ export function AdminUsersPanel({
                 <div className="mt-3 space-y-1 text-xs text-zinc-400">
                   <div>Status: {detailUser.subscriptionStatus || "-"}</div>
                   <div>Billing: {detailUser.subscriptionBillingInterval || "-"}</div>
-                  <div>Period end: {dateTimeLabel(detailUser.subscriptionCurrentPeriodEnd)}</div>
+                  <div>Period end: {dateTimeLabel(detailUser.subscriptionCurrentPeriodEnd, detailUser.usage.timeZone)}</div>
                 </div>
                 <button
                   type="button"
@@ -995,16 +1026,23 @@ export function AdminUsersPanel({
                 <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500">
                   Usage
                 </p>
-                <div className="mt-3 grid grid-cols-2 gap-3">
+                <div className="mt-3 grid grid-cols-3 gap-3">
                   <div>
-                    <div className="text-2xl font-black text-white">{detailUser.usage.today}</div>
-                    <div className="text-xs text-zinc-500">today</div>
+                    <div className="text-2xl font-black text-white">{detailUser.usage.messagesToday}</div>
+                    <div className="text-xs text-zinc-500">messages today</div>
                   </div>
                   <div>
-                    <div className="text-2xl font-black text-white">{detailUser.usage.month}</div>
-                    <div className="text-xs text-zinc-500">this month</div>
+                    <div className="text-2xl font-black text-amber-200">{detailUser.usage.creditsToday}</div>
+                    <div className="text-xs text-zinc-500">plan credits today</div>
+                  </div>
+                  <div>
+                    <div className="text-2xl font-black text-white">{detailUser.usage.creditsMonth}</div>
+                    <div className="text-xs text-zinc-500">plan credits this month</div>
                   </div>
                 </div>
+                <p className="mt-3 text-xs text-zinc-500">
+                  Daily window: {detailUser.usage.timeZone} · resets at {dateTimeLabel(detailUser.usage.dayEnd, detailUser.usage.timeZone)}
+                </p>
               </div>
 
               <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
@@ -1029,7 +1067,7 @@ export function AdminUsersPanel({
                   <div>
                     <h4 className="font-black text-white">Account security controls</h4>
                     <p className="mt-1 text-xs text-zinc-400">
-                      Last login: {dateTimeLabel(detailUser.lastLoginAt)} UTC · Active sessions: {detailUser._count.sessions}
+                      Last login: {dateTimeLabel(detailUser.lastLoginAt, detailUser.usage.timeZone)} · Active sessions: {detailUser._count.sessions}
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2 text-xs font-black">
@@ -1052,10 +1090,10 @@ export function AdminUsersPanel({
                 {detailUser.accountSuspensionReason || detailUser.aiUsageRestrictionReason ? (
                   <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-950 p-3 text-xs text-zinc-400">
                     {detailUser.accountSuspensionReason ? (
-                      <p>Suspension: {detailUser.accountSuspensionReason} · until {dateTimeLabel(detailUser.accountSuspendedUntil)} UTC</p>
+                      <p>Suspension: {detailUser.accountSuspensionReason} · until {dateTimeLabel(detailUser.accountSuspendedUntil, detailUser.usage.timeZone)}</p>
                     ) : null}
                     {detailUser.aiUsageRestrictionReason ? (
-                      <p>AI restriction: {detailUser.aiUsageRestrictionReason} · until {dateTimeLabel(detailUser.aiUsageRestrictedUntil)} UTC</p>
+                      <p>AI restriction: {detailUser.aiUsageRestrictionReason} · until {dateTimeLabel(detailUser.aiUsageRestrictedUntil, detailUser.usage.timeZone)}</p>
                     ) : null}
                     {detailUser.securityIncidentNote ? <p className="mt-1 text-zinc-300">Incident note: {detailUser.securityIncidentNote}</p> : null}
                   </div>
@@ -1190,7 +1228,7 @@ export function AdminUsersPanel({
                     <div key={purchase.id} className="rounded-xl border border-zinc-800 bg-zinc-950 p-3 text-xs text-zinc-400">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <p className="font-black text-white">{purchase.packId} / {purchase.status}</p>
-                        <p>{dateTimeLabel(purchase.purchasedAt)} UTC</p>
+                        <p>{dateTimeLabel(purchase.purchasedAt, detailUser.usage.timeZone)}</p>
                       </div>
                       <p className="mt-2 font-bold text-zinc-200">
                         Paid: {formatBillingMinor(
@@ -1267,13 +1305,13 @@ export function AdminUsersPanel({
                           <strong className="text-white">{reservation.provider} / {reservation.modelId}</strong>
                           <span>{reservation.source}</span>
                         </div>
-                        <span>{dateTimeLabel(reservation.createdAt)} UTC</span>
+                        <span>{dateTimeLabel(reservation.createdAt, detailUser.usage.timeZone)}</span>
                       </div>
                       <div className="mt-2 grid gap-1 sm:grid-cols-2 lg:grid-cols-4">
                         <span>Credits: {reservation.reservedCredits} reserved / {reservation.settledCredits} settled</span>
                         <span>Cost: ${(reservation.reservedCostMicroUsd / 1_000_000).toFixed(4)} / ${(reservation.settledCostMicroUsd / 1_000_000).toFixed(4)}</span>
                         <span>Outcome: {reservation.outcome || "-"}</span>
-                        <span>{reservation.reconciledAt ? `Auto-refunded ${dateTimeLabel(reservation.reconciledAt)}` : `Expires ${dateTimeLabel(reservation.expiresAt)}`}</span>
+                        <span>{reservation.reconciledAt ? `Auto-refunded ${dateTimeLabel(reservation.reconciledAt, detailUser.usage.timeZone)}` : `Expires ${dateTimeLabel(reservation.expiresAt, detailUser.usage.timeZone)}`}</span>
                       </div>
                       <div className="mt-2 break-all text-zinc-600">
                         Reservation: {reservation.id} / Trace: {reservation.traceId} / Provider request: {reservation.providerRequestId || "-"} / Response: {reservation.providerResponseId || "-"}
@@ -1310,6 +1348,7 @@ export function AdminUsersPanel({
                   <div>Language: {detailUser.settings?.language || "-"}</div>
                   <div>Theme: {detailUser.settings?.theme || "-"}</div>
                   <div>Default model: {detailUser.settings?.defaultModel || "-"}</div>
+                  <div>Time zone: {detailUser.usage.timeZone}</div>
                   <div>Sessions: {detailUser._count.sessions}</div>
                 </div>
               </section>
@@ -1324,7 +1363,7 @@ export function AdminUsersPanel({
                       <div key={conversation.id} className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-400">
                         <div className="font-bold text-zinc-200">{conversation.title}</div>
                         <div className="mt-1">
-                          {conversation._count.messages} messages / updated {dateTimeLabel(conversation.updatedAt)}
+                          {conversation._count.messages} messages / updated {dateTimeLabel(conversation.updatedAt, detailUser.usage.timeZone)}
                           {conversation.shareEnabled ? " / shared" : ""}
                         </div>
                       </div>
@@ -1338,12 +1377,12 @@ export function AdminUsersPanel({
                 <div className="mt-3 grid gap-2">
                   {detailUser.promotionRedemptions.map((redemption) => (
                     <div key={redemption.id} className="rounded-xl border border-blue-500/20 bg-blue-500/10 px-3 py-2 text-xs text-blue-100">
-                      Promo {redemption.promotion.code} / {redemption.planId} / {dateTimeLabel(redemption.redeemedAt)}
+                      Promo {redemption.promotion.code} / {redemption.planId} / {dateTimeLabel(redemption.redeemedAt, detailUser.usage.timeZone)}
                     </div>
                   ))}
                   {detailUser.refundRequests.map((request) => (
                     <div key={request.id} className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
-                      Refund {request.status} / {request.plan || "-"} / {dateTimeLabel(request.requestedAt)}
+                      Refund {request.status} / {request.plan || "-"} / {dateTimeLabel(request.requestedAt, detailUser.usage.timeZone)}
                     </div>
                   ))}
                   {detailUser.promotionRedemptions.length === 0 && detailUser.refundRequests.length === 0 ? (
@@ -1407,7 +1446,7 @@ export function AdminUsersPanel({
                             {event.type}
                           </span>
                           <span className="font-black text-zinc-200">{event.title}</span>
-                          <span className="text-zinc-600">{dateTimeLabel(event.at)} UTC</span>
+                          <span className="text-zinc-600">{dateTimeLabel(event.at, detailUser.usage.timeZone)}</span>
                         </div>
                         {event.detail ? <p className="mt-1 text-zinc-500">{event.detail}</p> : null}
                       </div>

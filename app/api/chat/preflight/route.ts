@@ -29,6 +29,8 @@ import {
 } from "@/lib/billingEntitlements";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { prisma } from "@/lib/prisma";
+import { estimatePreflightAttachmentTokens } from "@/lib/chatAttachmentTokens";
+import { isChatCostSafetyCode } from "@/lib/chatCostSafetyCore";
 
 const preflightSchema = z
     .object({
@@ -76,6 +78,12 @@ const comparisonTraceId = (request: Request) => {
 
 export async function POST(request: Request) {
     const traceId = comparisonTraceId(request);
+    let modelIdsForLog: string[] = [];
+    const inputTokensByModelForLog: Array<{
+        modelId: string;
+        inputTokens: number;
+        attachmentTokens: number;
+    }> = [];
     try {
         const session = await getServerSession(authOptions);
         if (!session?.user?.id) {
@@ -209,15 +217,6 @@ export async function POST(request: Request) {
             history = conversation.messages.reverse();
         }
 
-        const imageCount = payload.attachments.filter((attachment) =>
-            attachment.mediaType.startsWith("image/")
-        ).length;
-        const nonImageBytes = payload.attachments
-            .filter((attachment) => !attachment.mediaType.startsWith("image/"))
-            .reduce((sum, attachment) => sum + attachment.size, 0);
-        const attachmentTokens =
-            imageCount * 16_000 +
-            Math.min(75_000, Math.ceil(nonImageBytes / 4));
         const promptTokens = estimateTextTokens(payload.prompt);
         const budgets = models.map((model) => {
             const historyTokens = history.reduce((sum, message) => {
@@ -229,12 +228,25 @@ export async function POST(request: Request) {
                     ? sum + estimateTextTokens(message.content)
                     : sum;
             }, 0);
+            const attachmentTokens = estimatePreflightAttachmentTokens(
+                model,
+                payload.attachments
+            );
+            inputTokensByModelForLog.push({
+                modelId: model.id,
+                inputTokens: Math.max(
+                    1,
+                    historyTokens + promptTokens + attachmentTokens
+                ),
+                attachmentTokens,
+            });
             return createChatBudget(
                 access.kind,
                 model,
                 Math.max(1, historyTokens + promptTokens + attachmentTokens)
             );
         });
+        modelIdsForLog = models.map((model) => model.id);
         const result = await preflightChatComparisonAccess(access, budgets);
 
         return Response.json(
@@ -254,6 +266,24 @@ export async function POST(request: Request) {
         }
         const accessResponse = chatErrorResponse(error);
         if (accessResponse) {
+            if (
+                error instanceof ChatAccessError &&
+                isChatCostSafetyCode(error.code)
+            ) {
+                console.warn(
+                    JSON.stringify({
+                        event: "chat_cost_safety_rejected",
+                        phase: "comparison_preflight",
+                        traceId,
+                        code: error.code,
+                        status: error.status,
+                        modelIds: modelIdsForLog,
+                        inputTokensByModel: inputTokensByModelForLog,
+                        ...(error.details || {}),
+                        timestamp: new Date().toISOString(),
+                    })
+                );
+            }
             if (
                 error instanceof ChatAccessError &&
                 (error.code === "MODEL_NOT_SELECTED" ||

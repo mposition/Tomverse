@@ -30,7 +30,9 @@ test("admin user CSV neutralizes spreadsheet formulas and includes audit fields"
       subscriptionCancelAtPeriodEnd: false,
       stripeCustomerId: "cus_1",
       stripeSubscriptionId: "sub_1",
-      usageToday: 4,
+      timeZone: "Australia/Brisbane",
+      messagesToday: 6,
+      creditsToday: 4,
       creditDebtCredits: 0,
       creditDebtCostMicroUsd: 0,
       billingRiskStatus: "normal",
@@ -46,7 +48,10 @@ test("admin user CSV neutralizes spreadsheet formulas and includes audit fields"
   assert.match(csv, /"'=IMPORTXML\(""https:\/\/example\.test""\)"/);
   assert.match(csv, /"'\+cmd"/);
   assert.match(csv, /"billingRiskStatus"/);
-  assert.match(csv, /"usageToday"/);
+  assert.match(csv, /"timeZone"/);
+  assert.match(csv, /"messagesToday"/);
+  assert.match(csv, /"creditsToday"/);
+  assert.match(csv, /"Australia\/Brisbane","6","4"/);
 
   const headerChunk = adminUsersCsvHeader();
   const rowChunk = adminUsersCsvRows([user]);
