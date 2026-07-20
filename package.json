@@ -27,6 +27,7 @@
     "check:encoding:strict": "node scripts/check-text-encoding.mjs --strict",
     "security:regression": "node scripts/security-regression-check.mjs",
     "db:migrate": "node scripts/require-direct-database-url.mjs && prisma migrate deploy",
+    "db:refresh-test": "node scripts/refresh-test-database.mjs",
     "maintenance:cleanup": "node scripts/run-maintenance.mjs",
     "maintenance:credit-reservations": "node scripts/run-credit-reconciliation.mjs",
     "maintenance:provider-usage": "node scripts/run-provider-usage-sync.mjs",
