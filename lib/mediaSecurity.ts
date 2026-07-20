@@ -1,6 +1,30 @@
 import "server-only";
 
 import { Worker } from "node:worker_threads";
+import path from "node:path";
+
+// pdfjs-dist needs a base path for its bundled standard (non-embedded) font
+// metrics and CJK CMaps. Without these, parsing throws for any PDF that uses
+// a standard font without embedding it — which is true of most real-world
+// PDFs (receipts, exports, scans), even though a hand-built minimal PDF with
+// no font resources at all can succeed without them. These must be plain
+// filesystem paths, not "file://" URLs: pdfjs concatenates them with a
+// filename via string interpolation (not `new URL()`) before handing the
+// result to `fs.readFile`, and `fs.readFile` only parses `file://` when given
+// an actual URL instance, not a string that merely looks like one.
+//
+// Resolved from process.cwd() rather than require.resolve()/import.meta.url:
+// this module is bundled by Next.js's server build, and resolving a package
+// path through the bundler's own module graph at runtime does not yield a
+// real filesystem path (it broke the production build entirely). next start
+// always runs with cwd at the project root, where node_modules lives.
+const toPosixDirUrl = (dir: string) =>
+    `${path
+        .join(process.cwd(), "node_modules/pdfjs-dist", dir)
+        .split(path.sep)
+        .join("/")}/`;
+const PDF_STANDARD_FONT_DATA_URL = toPosixDirUrl("standard_fonts");
+const PDF_CMAP_URL = toPosixDirUrl("cmaps");
 
 const MEDIA_PARSE_TIMEOUT_MS = 12_000;
 const MAX_IMAGE_PIXELS = 40_000_000;
@@ -89,6 +113,9 @@ const { parentPort, workerData } = require("node:worker_threads");
             isEvalSupported: false,
             useSystemFonts: false,
             stopAtErrors: false,
+            standardFontDataUrl: workerData.standardFontDataUrl,
+            cMapUrl: workerData.cMapUrl,
+            cMapPacked: true,
         });
         document = await loadingTask.promise;
         if (
@@ -101,12 +128,12 @@ const { parentPort, workerData } = require("node:worker_threads");
 
         const firstPage = await document.getPage(1);
         firstPage.cleanup();
-        await document.destroy();
+        await loadingTask.destroy();
         parentPort.postMessage({ ok: true });
     } catch {
         if (document) {
             try {
-                await document.destroy();
+                await document.cleanup();
             } catch {}
         }
         parentPort.postMessage({ ok: false });
@@ -119,14 +146,18 @@ const { parentPort, workerData } = require("node:worker_threads");
 
 (async () => {
     let document;
+    let loadingTask;
     try {
         const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-        const loadingTask = pdfjs.getDocument({
+        loadingTask = pdfjs.getDocument({
             data: new Uint8Array(workerData.buffer),
             disableWorker: true,
             isEvalSupported: false,
             useSystemFonts: false,
             stopAtErrors: false,
+            standardFontDataUrl: workerData.standardFontDataUrl,
+            cMapUrl: workerData.cMapUrl,
+            cMapPacked: true,
         });
         document = await loadingTask.promise;
         if (
@@ -161,12 +192,12 @@ const { parentPort, workerData } = require("node:worker_threads");
             }
             page.cleanup();
         }
-        await document.destroy();
+        await loadingTask.destroy();
         parentPort.postMessage({ ok: true, text });
     } catch {
         if (document) {
             try {
-                await document.destroy();
+                await document.cleanup();
             } catch {}
         }
         parentPort.postMessage({ ok: false });
@@ -264,6 +295,8 @@ export async function validatePdfSafely(buffer: Buffer) {
         {
             buffer: transferableBuffer,
             maxPages: MAX_PDF_PAGES,
+            standardFontDataUrl: PDF_STANDARD_FONT_DATA_URL,
+            cMapUrl: PDF_CMAP_URL,
         },
         [transferableBuffer]
     );
@@ -282,6 +315,8 @@ export async function extractPdfTextSafely(
             buffer: transferableBuffer,
             maxPages: MAX_PDF_PAGES,
             maxCharacters,
+            standardFontDataUrl: PDF_STANDARD_FONT_DATA_URL,
+            cMapUrl: PDF_CMAP_URL,
         },
         [transferableBuffer]
     );

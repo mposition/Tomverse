@@ -79,6 +79,11 @@ import { estimateNativeAttachmentTokens } from "@/lib/chatAttachmentTokens";
 import { isChatCostSafetyCode } from "@/lib/chatCostSafetyCore";
 
 const MAX_ATTACHMENTS = 5;
+// Every request resends the full conversation history (including past
+// attachments, which get re-fetched from R2 and re-parsed on every turn), so
+// this is a generous safety ceiling on total reprocessing cost, not a
+// per-message limit — see MAX_ATTACHMENTS for the per-send cap.
+const MAX_CONVERSATION_ATTACHMENTS = 30;
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
 const MAX_TOTAL_ATTACHMENT_SIZE = 25 * 1024 * 1024;
 const MAX_EXTRACTED_ATTACHMENT_CHARACTERS = 300_000;
@@ -690,11 +695,24 @@ export async function POST(req: Request) {
                 ? (message.attachments as IncomingAttachment[])
                 : []
         );
-        if (requestAttachments.length > MAX_ATTACHMENTS) {
+        const latestMessage = messages[messages.length - 1];
+        const latestMessageAttachmentCount = Array.isArray(
+            latestMessage?.attachments
+        )
+            ? latestMessage.attachments.length
+            : 0;
+        if (latestMessageAttachmentCount > MAX_ATTACHMENTS) {
             throw new ChatAccessError(
                 413,
                 "TOO_MANY_ATTACHMENTS",
                 "A chat request can contain at most 5 attachments."
+            );
+        }
+        if (requestAttachments.length > MAX_CONVERSATION_ATTACHMENTS) {
+            throw new ChatAccessError(
+                413,
+                "TOO_MANY_CONVERSATION_ATTACHMENTS",
+                "This conversation has reached its attachment limit. Start a new chat to attach more files."
             );
         }
         const objectKeys = new Set<string>();
@@ -720,11 +738,11 @@ export async function POST(req: Request) {
                 objectKeys.add(objectKey);
             }
         }
-        if (objectKeys.size > MAX_ATTACHMENTS) {
+        if (objectKeys.size > MAX_CONVERSATION_ATTACHMENTS) {
             throw new ChatAccessError(
                 413,
                 "TOO_MANY_ATTACHMENT_OBJECTS",
-                "A chat request can reference at most 5 attachment objects."
+                "This conversation has reached its attachment limit. Start a new chat to attach more files."
             );
         }
         const billingPlan = session?.user?.id
