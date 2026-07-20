@@ -768,7 +768,15 @@ export function ChatInput({
 
   const currentPlan = isGuestMode ? "Guest" : accountUsage?.plan ?? "Free";
 
+  const favoriteRecommendationModels = useMemo(() => {
+    return favoriteModelIds
+      .map((modelId) => PUBLIC_MODELS.find((model) => model.id === modelId))
+      .filter((model): model is (typeof PUBLIC_MODELS)[number] => Boolean(model?.enabled))
+      .slice(0, 3);
+  }, [PUBLIC_MODELS, favoriteModelIds]);
+
   const recommendationModels = useMemo(() => {
+    if (favoriteRecommendationModels.length) return favoriteRecommendationModels;
     const ids = personalizedRecommendationIds.length
       ? personalizedRecommendationIds
       : [...RECOMMENDED_MODEL_IDS];
@@ -776,7 +784,7 @@ export function ChatInput({
       .map((modelId) => PUBLIC_MODELS.find((model) => model.id === modelId))
       .filter((model): model is (typeof PUBLIC_MODELS)[number] => Boolean(model?.enabled))
       .slice(0, 3);
-  }, [PUBLIC_MODELS, personalizedRecommendationIds]);
+  }, [PUBLIC_MODELS, favoriteRecommendationModels, personalizedRecommendationIds]);
 
   const filteredModels = useMemo(() => {
     const normalizedQuery = modelSearchQuery.trim().toLowerCase();
@@ -1981,16 +1989,20 @@ export function ChatInput({
                       <section
                         data-testid="model-recommendations"
                         aria-label={
-                          personalizedRecommendationIds.length
-                            ? pickerCopy.personalizedRecommendations
-                            : pickerCopy.tomverseRecommendations
+                          favoriteRecommendationModels.length
+                            ? t("chat.favoriteModels")
+                            : personalizedRecommendationIds.length
+                              ? pickerCopy.personalizedRecommendations
+                              : pickerCopy.tomverseRecommendations
                         }
                         className="space-y-1 rounded-xl border border-blue-200 bg-blue-50/60 p-2 dark:border-blue-900/60 dark:bg-blue-950/20"
                       >
                         <p className="px-1 text-[11px] font-black text-zinc-900 dark:text-white">
-                          {personalizedRecommendationIds.length
-                            ? pickerCopy.personalizedRecommendations
-                            : pickerCopy.tomverseRecommendations}
+                          {favoriteRecommendationModels.length
+                            ? t("chat.favoriteModels")
+                            : personalizedRecommendationIds.length
+                              ? pickerCopy.personalizedRecommendations
+                              : pickerCopy.tomverseRecommendations}
                         </p>
                         {recommendationModels.map((model, recommendationIndex) => {
                           const isSelected = selectedModels.includes(model.id);
@@ -2080,7 +2092,7 @@ export function ChatInput({
                         )}
                       </button>
                     </div>
-                    <div className="flex gap-1 overflow-x-auto pb-0.5">
+                    <div className="flex touch-pan-x gap-1 overflow-x-auto pb-0.5 [-webkit-overflow-scrolling:touch]">
                       {([
                         ["recommended", pickerCopy.recommended],
                         ["fast", pickerCopy.fast],

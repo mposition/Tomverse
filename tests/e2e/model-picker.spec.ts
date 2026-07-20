@@ -146,6 +146,41 @@ test("completed model finder answers personalize the recommendation shortcuts", 
   ).toBeVisible();
 });
 
+test("favorited models replace Tomverse recommendations", async ({ page }) => {
+  await modelMenuTrigger(page).click();
+  const dialog = page.locator("#chat-input-popover");
+  await expect(dialog.getByTestId("model-recommendations")).toHaveAttribute(
+    "aria-label",
+    /Tomverse recommends|Tomverse 추천/
+  );
+
+  await page.evaluate(() => {
+    localStorage.setItem(
+      "favorite_model_ids",
+      JSON.stringify(["claude-sonnet-5", "deepseek-r1"])
+    );
+  });
+  await page.reload();
+  await modelMenuTrigger(page).click();
+
+  const recommendations = dialog.getByTestId("model-recommendations");
+  await expect(recommendations).toHaveAttribute(
+    "aria-label",
+    /Favorites|즐겨찾기/
+  );
+  await expect(dialog.getByTestId("recommended-model-option")).toHaveCount(2);
+  await expect(
+    recommendations.locator(
+      '[data-testid="recommended-model-option"][data-model-id="claude-sonnet-5"]'
+    )
+  ).toBeVisible();
+  await expect(
+    recommendations.locator(
+      '[data-testid="recommended-model-option"][data-model-id="deepseek-r1"]'
+    )
+  ).toBeVisible();
+});
+
 test("long input explains its multiplier beside the send controls", async ({ page }) => {
   await page.getByTestId("chat-textarea").fill("x".repeat(64_004));
   const estimate = page.getByTestId("request-credit-estimate");
