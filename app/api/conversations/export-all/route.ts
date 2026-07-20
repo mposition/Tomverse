@@ -17,6 +17,7 @@ import {
 } from "@/lib/billingEntitlements";
 
 const MESSAGE_PAGE_SIZE = 20;
+const MAX_EXPORTED_CONVERSATIONS = 2_000;
 
 export async function GET(req: Request) {
     try {
@@ -41,6 +42,7 @@ export async function GET(req: Request) {
         const conversations = await prisma.conversation.findMany({
             where: { userId },
             orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+            take: MAX_EXPORTED_CONVERSATIONS,
             select: {
                 id: true,
                 title: true,

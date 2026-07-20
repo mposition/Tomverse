@@ -40,3 +40,26 @@ export function getTrustedClientIp(request: Request) {
 
   return normalizeIp(request.headers.get(RAILWAY_IP_HEADER)) || "unknown";
 }
+
+/**
+ * Identity to use for rate-limiting requests that have no authenticated user.
+ * Falling back to the bare "unknown" sentinel from getTrustedClientIp would
+ * collapse every anonymous caller (across the whole deployment) into a single
+ * shared bucket whenever the trusted-proxy IP header isn't resolvable. Mix in
+ * a couple of low-entropy client-supplied signals so distinct legitimate
+ * clients don't collide with each other; this does not add protection against
+ * a deliberate attacker (who can spoof these headers too), it only prevents
+ * unrelated users from throttling one another under that misconfiguration.
+ */
+export function getAnonymousClientKey(request: Request) {
+  const trustedIp = getTrustedClientIp(request);
+  if (trustedIp !== "unknown") return trustedIp;
+
+  const userAgent = request.headers.get("user-agent") || "";
+  const acceptLanguage = request.headers.get("accept-language") || "";
+  const fingerprint = createHash("sha256")
+    .update(`${userAgent}|${acceptLanguage}`)
+    .digest("hex")
+    .slice(0, 16);
+  return `unknown:${fingerprint}`;
+}

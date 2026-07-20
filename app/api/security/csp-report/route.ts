@@ -1,6 +1,6 @@
 import { randomInt } from "node:crypto";
 import { after } from "next/server";
-import { getTrustedClientIp } from "@/lib/clientIp";
+import { getAnonymousClientKey } from "@/lib/clientIp";
 import {
   isTrustedCspDocumentUri,
   sanitizeCspReportedUrl,
@@ -98,7 +98,7 @@ const extractCspReports = (value: unknown) => {
 };
 
 export async function POST(req: Request) {
-  const clientIp = getTrustedClientIp(req);
+  const clientIp = getAnonymousClientKey(req);
   if (!allowReportFromIp(clientIp)) return noContent();
 
   const declaredLength = Number(req.headers.get("content-length"));

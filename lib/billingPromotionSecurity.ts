@@ -13,7 +13,7 @@ import {
   promotionEligibilityFailure,
   type PromotionValidationReason,
 } from "@/lib/billingPromotionCore";
-import { getTrustedClientIp } from "@/lib/clientIp";
+import { getAnonymousClientKey } from "@/lib/clientIp";
 import { prisma } from "@/lib/prisma";
 
 export type BillingInterval = "monthly" | "annual";
@@ -41,7 +41,7 @@ const hashPromotionValue = (scope: string, value: string) =>
     .digest("hex");
 
 export const getPromotionClientIpHash = (request: Request) =>
-  hashPromotionValue("ip", getTrustedClientIp(request));
+  hashPromotionValue("ip", getAnonymousClientKey(request));
 
 export const hashPaymentMethodFingerprint = (fingerprint: string) =>
   hashPromotionValue("payment-method", fingerprint);

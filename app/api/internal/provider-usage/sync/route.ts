@@ -1,6 +1,7 @@
 export const dynamic = "force-dynamic";
 export const maxDuration = 180;
 
+import { createHash, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import {
   defaultProviderUsageSyncDate,
@@ -15,12 +16,24 @@ import {
   startScheduledJob,
 } from "@/lib/scheduledJobs";
 
+const secretsMatch = (expected: string, provided: string) => {
+  const expectedDigest = createHash("sha256").update(expected).digest();
+  const providedDigest = createHash("sha256").update(provided).digest();
+  return timingSafeEqual(expectedDigest, providedDigest);
+};
+
 const authorized = (req: Request) => {
   const secret = process.env.PROVIDER_USAGE_SYNC_SECRET;
-  if (!secret) return false;
+  if (!secret || secret.length < 32) return false;
+
   const auth = req.headers.get("authorization");
+  const provided = auth?.startsWith("Bearer ") ? auth.slice(7) : "";
+  if (provided && secretsMatch(secret, provided)) return true;
+
   const headerSecret = req.headers.get("x-internal-secret");
-  return auth === `Bearer ${secret}` || headerSecret === secret;
+  if (headerSecret && secretsMatch(secret, headerSecret)) return true;
+
+  return false;
 };
 
 const dateFromUrl = (req: Request) => {
