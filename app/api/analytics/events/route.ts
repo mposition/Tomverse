@@ -10,7 +10,7 @@ import {
   consumeApiRateLimit,
   readLimitedJson,
 } from "@/lib/apiSecurity";
-import { getTrustedClientIp } from "@/lib/clientIp";
+import { getAnonymousClientKey } from "@/lib/clientIp";
 import { prisma } from "@/lib/prisma";
 import { analyticsClientEventSchema } from "@/lib/productAnalyticsShared";
 import {
@@ -37,7 +37,7 @@ export async function POST(req: Request) {
   try {
     const session = await getServerSession(authOptions);
     const userId = session?.user?.id || null;
-    const subject = userId || `anonymous:${getTrustedClientIp(req)}`;
+    const subject = userId || `anonymous:${getAnonymousClientKey(req)}`;
     stage = "rate-limit";
     await consumeApiRateLimit(req, subject, "product-analytics-event", {
       minute: 120,

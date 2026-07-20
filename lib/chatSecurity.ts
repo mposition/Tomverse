@@ -15,7 +15,7 @@ import {
     type ModelTier,
     type ModelUsageClass,
 } from "@/lib/models";
-import { getTrustedClientIp } from "@/lib/clientIp";
+import { getAnonymousClientKey } from "@/lib/clientIp";
 import { recordInternalProviderUsage } from "@/lib/providerUsageAccounting";
 import {
     AddOnCreditError,
@@ -421,7 +421,7 @@ export const identifyChatCaller = (
     plan?: ModelTier,
     planLimits?: ChatAccess["planLimits"]
 ): ChatAccess => {
-    const ipKey = `ip:${hashKey("ip", getTrustedClientIp(request))}`;
+    const ipKey = `ip:${hashKey("ip", getAnonymousClientKey(request))}`;
     if (userId) {
         return {
             kind: "user",

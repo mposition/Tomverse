@@ -37,10 +37,12 @@ type PublicBillingConfig<TConfig> = Omit<TConfig, "plans" | "creditPacks"> & {
   exchangeRateUpdatedAt: null;
 };
 
+// Only edge-injected headers belong here: Cloudflare and Vercel overwrite these
+// on the way in, so a client cannot forge them. Do not add client-settable
+// headers (e.g. a generic "x-country-code") without a proxy that strips them.
 const trustedCountryFromHeaders = (headers: Headers) =>
   normalizeBillingCountry(headers.get("cf-ipcountry")) ||
-  normalizeBillingCountry(headers.get("x-vercel-ip-country")) ||
-  normalizeBillingCountry(headers.get("x-country-code"));
+  normalizeBillingCountry(headers.get("x-vercel-ip-country"));
 
 export class BillingMarketValidationError extends Error {
   readonly code = "BILLING_MARKET_MISMATCH";

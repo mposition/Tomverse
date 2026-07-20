@@ -1,3 +1,4 @@
+import { cookies } from "next/headers";
 import { NextAuthOptions } from "next-auth";
 import type { Adapter, AdapterAccount } from "next-auth/adapters";
 import GoogleProvider from "next-auth/providers/google";
@@ -11,6 +12,10 @@ import { effectivePlanForAccess } from "@/lib/foundingTesterPassCore";
 
 const SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
 const SESSION_UPDATE_AGE_SECONDS = 24 * 60 * 60;
+const SESSION_COOKIE_NAMES = [
+    "__Secure-next-auth.session-token",
+    "next-auth.session-token",
+];
 const azureTenantId = process.env.AZURE_AD_TENANT_ID?.trim();
 const hasCompleteAzureConfiguration = [
     process.env.AZURE_AD_CLIENT_ID,
@@ -101,21 +106,25 @@ export const authOptions: NextAuthOptions = {
         async session({ session, user }) {
             if (session.user && user.id) {
                 session.user.id = user.id;
-                const expiresAt = new Date(session.expires);
-                if (Number.isFinite(expiresAt.getTime())) {
-                    const matchingSession = await prisma.session.findFirst({
-                        where: {
-                            userId: user.id,
-                            expires: {
-                                gte: new Date(expiresAt.getTime() - 5_000),
-                                lte: new Date(expiresAt.getTime() + 5_000),
-                            },
-                        },
-                        orderBy: { createdAt: "desc" },
-                        select: { createdAt: true },
-                    });
+                try {
+                    const cookieStore = await cookies();
+                    const sessionToken = SESSION_COOKIE_NAMES.reduce<string | undefined>(
+                        (found, name) => found ?? cookieStore.get(name)?.value,
+                        undefined
+                    );
+                    const activeSession = sessionToken
+                        ? await prisma.session.findUnique({
+                              where: { sessionToken },
+                              select: { userId: true, createdAt: true },
+                          })
+                        : null;
                     session.user.authenticatedAt =
-                        matchingSession?.createdAt.toISOString();
+                        activeSession && activeSession.userId === user.id
+                            ? activeSession.createdAt.toISOString()
+                            : undefined;
+                } catch (error) {
+                    console.error("Failed to resolve session token for authenticatedAt:", error);
+                    session.user.authenticatedAt = undefined;
                 }
                 const analyticsUser = user as typeof user & {
                     plan?: unknown;

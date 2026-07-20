@@ -11,7 +11,7 @@ import {
 } from "@/lib/apiSecurity";
 import { validatePromotionForCheckout } from "@/lib/billingPromotionSecurity";
 import { promotionValidationError } from "@/lib/billingPromotionCore";
-import { getTrustedClientIp } from "@/lib/clientIp";
+import { getAnonymousClientKey } from "@/lib/clientIp";
 
 const validationSchema = z
   .object({
@@ -31,7 +31,7 @@ export async function POST(req: Request) {
   try {
     const session = await getServerSession(authOptions);
     const subject =
-      session?.user?.id || `guest:${getTrustedClientIp(req)}`;
+      session?.user?.id || `guest:${getAnonymousClientKey(req)}`;
     await consumeApiRateLimit(req, subject, "billing-promotion-validate", {
       minute: 10,
       day: 50,

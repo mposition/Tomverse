@@ -9,7 +9,7 @@ import {
 } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { getTrustedClientIp } from "@/lib/clientIp";
+import { getAnonymousClientKey } from "@/lib/clientIp";
 import { logSecurityAuditEvent } from "@/lib/securityAudit";
 
 const HASH_PREFIX = "scrypt";
@@ -290,7 +290,7 @@ export const consumeLockVerificationAttempt = async (
     const userKey = rateKey("user", userId, conversationId);
     const ipKey = rateKey(
         "ip",
-        getTrustedClientIp(request),
+        getAnonymousClientKey(request),
         conversationId
     );
 

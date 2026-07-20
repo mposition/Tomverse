@@ -93,7 +93,16 @@ export async function consumeApiRateLimit(
 ) {
   const now = new Date();
   const userKey = `api:${hashKey(scope, "user", userId)}`;
-  const ipKey = `api:${hashKey(scope, "ip", getTrustedClientIp(request))}`;
+  const clientIp = getTrustedClientIp(request);
+  // A resolvable IP is checked as a secondary, coarser bucket on top of the
+  // per-user one. When it's not resolvable (misconfigured trusted-proxy
+  // header), skip that leg instead of keying it on the shared "unknown"
+  // sentinel, which would collapse every caller across the deployment into
+  // one bucket and let them throttle each other.
+  const ipKey =
+    clientIp === "unknown"
+      ? null
+      : `api:${hashKey(scope, "ip", clientIp)}`;
 
   await prisma.$transaction(async (tx) => {
     for (const period of ["minute", "day"] as const) {
@@ -106,14 +115,16 @@ export async function consumeApiRateLimit(
         1,
         limits[period]
       );
-      const ipAllowed = await incrementBucket(
-        tx,
-        ipKey,
-        `api-${scope}-${period}`,
-        start,
-        1,
-        limits[period] * 3
-      );
+      const ipAllowed = ipKey
+        ? await incrementBucket(
+            tx,
+            ipKey,
+            `api-${scope}-${period}`,
+            start,
+            1,
+            limits[period] * 3
+          )
+        : true;
       if (!allowed || !ipAllowed) {
         throw new ApiSecurityError(
           429,

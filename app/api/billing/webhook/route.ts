@@ -21,6 +21,18 @@ export async function POST(req: Request) {
   try {
     const rawBody = await req.text();
     event = getStripe().webhooks.constructEvent(rawBody, signature, webhookSecret);
+
+    // Stripe delivers events at-least-once. Skip re-running processing for an
+    // event we've already fully processed instead of relying solely on each
+    // individual handler's own idempotency.
+    const existing = await prisma.stripeWebhookEventLog.findUnique({
+      where: { stripeEventId: event.id },
+      select: { status: true },
+    });
+    if (existing?.status === "processed") {
+      return NextResponse.json({ received: true, duplicate: true });
+    }
+
     const log = await prisma.stripeWebhookEventLog.upsert({
       where: { stripeEventId: event.id },
       create: {

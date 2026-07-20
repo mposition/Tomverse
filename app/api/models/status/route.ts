@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { getPublicRuntimeModels } from "@/lib/modelRegistry";
 import { resolveModelRuntimeAvailability } from "@/lib/modelAvailability";
 import { getProviderHealthDashboard } from "@/lib/providerMonitoring";
-import { getTrustedClientIp } from "@/lib/clientIp";
+import { getAnonymousClientKey } from "@/lib/clientIp";
 import {
   apiSecurityResponse,
   consumeApiRateLimit,
@@ -47,7 +47,7 @@ export async function GET(req: Request) {
         headers: cacheHeaders,
       });
     }
-    const subject = `public:${getTrustedClientIp(req)}`;
+    const subject = `public:${getAnonymousClientKey(req)}`;
     try {
       await consumeApiRateLimit(req, subject, "public-model-status", {
         minute: 30,
