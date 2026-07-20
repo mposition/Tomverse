@@ -112,6 +112,8 @@ export const en = {
         traceId: "Trace ID",
         retry: "Retry",
         copyErrorDetails: "Copy details",
+        copyResponse: "Copy response",
+        responseCopied: "Copied",
         tryAnotherModelHint: "You can also select another model and try again.",
         send: "Send",
         cancel: "Cancel",

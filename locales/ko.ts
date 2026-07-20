@@ -112,6 +112,8 @@ export const ko = {
         traceId: "추적 ID",
         retry: "다시 시도",
         copyErrorDetails: "상세 정보 복사",
+        copyResponse: "답변 복사",
+        responseCopied: "복사됨",
         tryAnotherModelHint: "다른 모델을 선택해 다시 시도할 수도 있습니다.",
         send: "전송",
         cancel: "취소",

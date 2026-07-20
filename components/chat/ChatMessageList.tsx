@@ -11,7 +11,9 @@ import {
   ArrowDown,
   Bot,
   Braces,
+  Check,
   Clipboard,
+  Copy,
   File as FileIcon,
   FileText,
   Image as ImageIcon,
@@ -112,6 +114,8 @@ export function ChatMessageList({
   const [isNearBottom, setIsNearBottom] = useState(true);
   const showScrollButton = !isNearBottom;
     const { t } = useLanguage();
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const copiedResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const copyErrorDetails = async (content: string) => {
     try {
@@ -120,6 +124,24 @@ export function ChatMessageList({
       console.error("Failed to copy error details:", error);
     }
   };
+
+  const copyMessageContent = async (messageId: string, content: string) => {
+    try {
+      await navigator.clipboard.writeText(content);
+    } catch (error) {
+      console.error("Failed to copy response:", error);
+      return;
+    }
+    if (copiedResetRef.current) clearTimeout(copiedResetRef.current);
+    setCopiedMessageId(messageId);
+    copiedResetRef.current = setTimeout(() => setCopiedMessageId(null), 1_500);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (copiedResetRef.current) clearTimeout(copiedResetRef.current);
+    };
+  }, []);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     const container = containerRef.current;
@@ -303,8 +325,23 @@ export function ChatMessageList({
                 <div
                   className={`relative max-w-[94%] break-words rounded-2xl px-3 py-2 text-[13px] leading-[1.55] shadow-sm md:max-w-[88%] md:px-4 md:py-3 md:text-[15px] md:leading-relaxed ${
                     isUser ? `${userBoxClass} rounded-br-md` : `${assistantBoxClass} rounded-bl-md`
-                  }`}
+                  } ${!isUser && msg.content && msg.status !== "error" ? "pr-8 md:pr-9" : ""}`}
                 >
+                  {!isUser && msg.content && msg.status !== "error" && (
+                    <button
+                      type="button"
+                      onClick={() => void copyMessageContent(String(msg.id ?? idx), msg.content)}
+                      title={t("chat.copyResponse")}
+                      aria-label={t("chat.copyResponse")}
+                      className="absolute right-1.5 top-1.5 inline-flex h-6 w-6 items-center justify-center rounded-full text-zinc-400 transition-colors hover:bg-zinc-200/70 hover:text-zinc-700 dark:text-zinc-500 dark:hover:bg-zinc-700/60 dark:hover:text-zinc-100"
+                    >
+                      {copiedMessageId === String(msg.id ?? idx) ? (
+                        <Check className="h-3.5 w-3.5" />
+                      ) : (
+                        <Copy className="h-3.5 w-3.5" />
+                      )}
+                    </button>
+                  )}
                   {isUser && msg.attachments && msg.attachments.length > 0 && (
                     <div className={`flex flex-wrap gap-2 ${msg.content ? "mb-3" : ""}`}>
                       {msg.attachments.map((attachment) => (
