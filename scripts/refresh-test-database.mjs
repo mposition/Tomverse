@@ -53,18 +53,15 @@ const parseDirectUrl = (raw, label) => {
 const source = parseDirectUrl(sourceRaw, "DIRECT_DATABASE_URL");
 const target = parseDirectUrl(targetRaw, "TEST_DATABASE_URL");
 
-const isolationMarker = `${target.database}_${target.schema}`;
-if (!/(?:^|[_-])(?:test|testing|ci)(?:[_-]|$)/i.test(isolationMarker)) {
+// Prisma Postgres always reports the database name as "postgres" for every
+// project (AIHub and AIHub-Test both connect to host/db "db.prisma.io/postgres").
+// The unique identity of a Prisma Postgres database is its generated username,
+// not the host or database path, so that's what must differ here.
+if (targetRaw === sourceRaw || target.user === source.user) {
   fail(
-    "TEST_DATABASE_URL's database name or schema must contain a test marker such as tomverse_test.",
-    { database: target.database, schema: target.schema || null }
+    "TEST_DATABASE_URL uses the same Prisma Postgres credentials as DIRECT_DATABASE_URL, which means they are the same database. Refusing to overwrite production.",
+    { sourceUserPrefix: source.user.slice(0, 6), targetUserPrefix: target.user.slice(0, 6) }
   );
-}
-if (
-  targetRaw === sourceRaw ||
-  (target.host === source.host && target.database === source.database && target.schema === source.schema)
-) {
-  fail("TEST_DATABASE_URL must not point at the same database/schema as DIRECT_DATABASE_URL.");
 }
 
 const requireBinary = (command) => {
@@ -123,8 +120,11 @@ const dumpFile = join(tmpdir(), `tomverse-db-refresh-${randomUUID()}.dump`);
 console.log(
   JSON.stringify({
     stage: "refresh-test-database",
-    source: { host: source.host, database: source.database, schema: source.schema || null },
-    target: { host: target.host, database: target.database, schema: target.schema || null },
+    // host/database look identical for every Prisma Postgres project (both are
+    // always db.prisma.io/postgres) — the credential prefix is what actually
+    // distinguishes AIHub from AIHub-Test, so surface it here for a sanity check.
+    source: { host: source.host, database: source.database, userPrefix: source.user.slice(0, 6) },
+    target: { host: target.host, database: target.database, userPrefix: target.user.slice(0, 6) },
   })
 );
 
