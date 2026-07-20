@@ -249,6 +249,8 @@ test("OpenAI Costs parser rejects invalid currency and non-numeric amount", () =
 });
 
 test("provider diagnostics redact bearer, OpenAI, Anthropic, and xAI keys", () => {
+  // Fake, non-functional key fixtures used only to exercise the redaction
+  // regexes below — not real credentials. gitleaks:allow
   const diagnostic = redactProviderDiagnostic(
     "Authorization Bearer sk-admin-secret123456 and sk-project987654 with sk-ant-admin01-secret987654 plus xai-managementSecret987654"
   );

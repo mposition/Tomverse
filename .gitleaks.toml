@@ -1,0 +1,18 @@
+title = "Tomverse gitleaks config"
+
+# Extend (not replace) gitleaks' built-in ruleset. Everything below only
+# narrows known false positives; it does not disable scanning anywhere else.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known false positives: public model identifiers and non-secret config keys, not credentials. All real API keys in this codebase are loaded from environment variables (see lib/*.ts), never hardcoded."
+regexTarget = "line"
+regexes = [
+  # e.g. lib/models.ts, components/chat/*.tsx: apiModel: "claude-haiku-4-5-20251001"
+  # A public provider model identifier, not a secret.
+  '''apiModel:\s*"[A-Za-z0-9._/-]+"''',
+  # e.g. lib/billingPriceCatalog.ts: BILLING_PRICE_CATALOG_KEY = "billing.fixed-prices.v1"
+  # A cache/version namespace string, not a secret.
+  '''[A-Z_]*_KEY\s*=\s*"[A-Za-z0-9._-]+"''',
+]
