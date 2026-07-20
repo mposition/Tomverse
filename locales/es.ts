@@ -130,6 +130,8 @@ export const es = {
         traceId: "ID de seguimiento",
         retry: "Reintentar",
         copyErrorDetails: "Copiar detalles",
+        copyResponse: "Copiar respuesta",
+        responseCopied: "Copiado",
         tryAnotherModelHint: "También puedes seleccionar otro modelo e intentarlo de nuevo.",
         send: "Enviar",
         cancel: "Cancelar",

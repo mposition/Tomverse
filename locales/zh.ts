@@ -112,6 +112,8 @@ export const zh = {
         traceId: "追踪 ID",
         retry: "重试",
         copyErrorDetails: "复制详情",
+        copyResponse: "复制回答",
+        responseCopied: "已复制",
         tryAnotherModelHint: "你也可以选择其他模型后再试。",
         send: "发送",
         cancel: "取消",

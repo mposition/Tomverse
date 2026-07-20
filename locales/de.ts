@@ -130,6 +130,8 @@ export const de = {
         traceId: "Trace-ID",
         retry: "Erneut versuchen",
         copyErrorDetails: "Details kopieren",
+        copyResponse: "Antwort kopieren",
+        responseCopied: "Kopiert",
         tryAnotherModelHint: "Sie können auch ein anderes Modell auswählen und es erneut versuchen.",
         send: "Senden",
         cancel: "Abbrechen",
