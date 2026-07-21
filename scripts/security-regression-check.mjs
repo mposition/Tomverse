@@ -97,7 +97,7 @@ const checks = [
     file: "lib/auth.ts",
     test: (source) =>
       source.includes("encryptOAuthAccountTokens") &&
-      source.includes("strategy: \"database\"") &&
+      source.includes("strategy: \"jwt\"") &&
       source.includes("maxAge: SESSION_MAX_AGE_SECONDS"),
   },
   {
@@ -1039,7 +1039,7 @@ const checks = [
     test: (source) => {
       const guide = source.slice(
         source.indexOf('data-testid="guest-quick-start"'),
-        source.indexOf("{!value.trim() && attachments.length === 0")
+        source.indexOf("isNewConversation && !value.trim() && attachments.length === 0")
       );
       return (
         guide.includes('t("onboarding.compareTitle")') &&
@@ -1349,7 +1349,7 @@ const checks = [
     },
   },
   {
-    name: "Provider correlation and five-minute reservation reconciliation are wired",
+    name: "Provider correlation and fifteen-minute reservation reconciliation are wired",
     file: "app/api/internal/maintenance/credit-reservations/route.ts",
     test: (source) => {
       const chat = read("app/api/chat/route.ts");
@@ -1365,7 +1365,7 @@ const checks = [
         chat.includes("linkChatReservationProviderRequest") &&
         chat.includes('responseHeaders?.["x-request-id"]') &&
         review.includes("linkChatReservationProviderRequest") &&
-        cron.includes('"cronSchedule": "*/5 * * * *"') &&
+        cron.includes('"cronSchedule": "*/15 * * * *"') &&
         cron.includes('"startCommand": "npm run maintenance:credit-reservations"') &&
         runner.includes("/api/internal/maintenance/credit-reservations")
       );

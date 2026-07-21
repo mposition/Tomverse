@@ -1574,13 +1574,14 @@ export function ChatInput({
           {isGuestMode && showGuestQuickStart && (
             <div
               data-testid="guest-quick-start"
-              className="mb-2 flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50/90 py-1.5 pl-3 pr-1.5 text-zinc-900 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-zinc-100"
+              className="mb-2 flex flex-col gap-1 rounded-2xl border border-blue-200 bg-blue-50/90 px-3 py-2 text-zinc-900 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-zinc-100"
             >
-              <p className="min-w-0 flex-1 truncate text-[11px] font-semibold text-blue-700 dark:text-blue-300">
-                <span className="font-black">{t("onboarding.compareTitle")}</span>
-                {" — "}
-                {t("onboarding.compareBody")}
-              </p>
+              <div className="flex items-center gap-2">
+                <p className="min-w-0 flex-1 truncate text-[11px] font-semibold text-blue-700 dark:text-blue-300">
+                  <span className="font-black">{t("onboarding.compareTitle")}</span>
+                  {" — "}
+                  {t("onboarding.compareBody")}
+                </p>
               <button
                 type="button"
                 onClick={() => dismissGuestQuickStart("skipped")}
@@ -1588,6 +1589,17 @@ export function ChatInput({
               >
                 {t("modelFinder.dismissTips")}
               </button>
+              </div>
+              <p className="truncate text-[10px] leading-4 text-blue-600/80 dark:text-blue-300/70">
+                {t("onboarding.privateBody")}{" "}
+                <a
+                  href={`/auth/signin?callbackUrl=${encodeURIComponent(signInCallbackUrl)}`}
+                  onClick={() => dismissGuestQuickStart("completed")}
+                  className="font-black underline underline-offset-2"
+                >
+                  {t("auth.login")}
+                </a>
+              </p>
             </div>
           )}
           {isNewConversation && !value.trim() && attachments.length === 0 && (
