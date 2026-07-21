@@ -267,6 +267,7 @@ export function DesktopChatShell({
                   onBeforeSend={onBeforeModelSend}
                   onResponseComplete={onResponseComplete}
                   onFollowupSent={onFollowupSent}
+                  hideModelOnlyInput={selectedModels.length <= 1}
                 />
               </div>
             );
