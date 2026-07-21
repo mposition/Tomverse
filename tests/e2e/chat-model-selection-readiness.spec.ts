@@ -13,7 +13,7 @@ import {
 // select (and marks it aria-busy) until that resolves.
 
 test.describe("desktop model selection readiness", () => {
-  test.beforeEach(async ({ page }, testInfo) => {
+  test.beforeEach(async ({}, testInfo) => {
     test.skip(
       !testInfo.project.name.startsWith("desktop"),
       "Per-panel model <select> only renders in the desktop chat shell."
