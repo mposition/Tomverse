@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import { memo, useCallback, useEffect, useRef, useState } from "react";
-import { ChatMessageList, ModeDisclosureBanner } from "@/components/chat/ChatMessageList";
+import { ChatMessageList } from "@/components/chat/ChatMessageList";
 import { Message, type ChatAttachment } from "@/components/chat/types";
 import { useSession } from "next-auth/react";
 import { useLanguage } from "@/components/LanguageProvider";
@@ -39,6 +39,7 @@ type ChatAppProps = {
   hideModelOnlyInput?: boolean;
   useCenteredWelcome?: boolean;
   onEmptyStateChange?: (modelId: string, isEmpty: boolean) => void;
+  onAnswerStateChange?: (modelId: string, hasAnswer: boolean) => void;
   onStatusChange?: (
     modelId: string,
     status: "idle" | "loading" | "responding" | "error" | "paused"
@@ -61,6 +62,7 @@ function ChatAppComponent({
   hideModelOnlyInput = false,
   useCenteredWelcome = false,
   onEmptyStateChange,
+  onAnswerStateChange,
   onStatusChange,
   onResponseComplete,
   onFollowupSent,
@@ -135,11 +137,20 @@ function ChatAppComponent({
     onEmptyStateChange?.(modelId, isConversationEmpty);
   }, [isCurrentMessageViewLoaded, isConversationEmpty, modelId, onEmptyStateChange]);
 
-  const welcomeGreeting = (() => {
-    if (isGuestMode) return t("chat.guestWelcome");
-    const firstName = session?.user?.name?.split(" ")[0];
-    return firstName ? t("chat.welcomeBack").replace("{name}", firstName) : t("chat.welcome");
-  })();
+  const hasCompletedAnswer = messages.some(
+    (message) =>
+      message.role === "assistant" &&
+      message.id !== "welcome" &&
+      message.status === "normal" &&
+      message.content.trim().length > 0
+  );
+
+  useEffect(() => {
+    if (!isCurrentMessageViewLoaded) return;
+    onAnswerStateChange?.(modelId, hasCompletedAnswer);
+  }, [isCurrentMessageViewLoaded, hasCompletedAnswer, modelId, onAnswerStateChange]);
+
+  const welcomeGreeting = session?.user ? t("chat.welcomeBack") : t("chat.welcome");
 
   const setAssistantMessage = useCallback((id: string, content: string, status?: Message["status"]) => {
     setMessages((prev) =>
@@ -630,7 +641,6 @@ function ChatAppComponent({
           data-testid="chat-empty-state"
           className="flex h-full flex-col items-center justify-center px-6 text-center"
         >
-          <ModeDisclosureBanner isPrivate={isPrivate} isGuestMode={isGuestMode} />
           <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-3xl bg-blue-500/10 text-blue-500">
             <Bot className="h-6 w-6" />
           </div>
@@ -640,8 +650,6 @@ function ChatAppComponent({
         </div>
       ) : <ChatMessageList
         messages={useCenteredWelcome ? messages.filter((message) => message.id !== "welcome") : messages}
-        isPrivate={isPrivate}
-        isGuestMode={isGuestMode}
         onRetryLast={handleRetryLast}
         onRetryWithoutAttachments={handleRetryWithoutAttachments}
       />}

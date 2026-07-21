@@ -418,6 +418,8 @@ export function ChatInput({
   const [showGuestQuickStart, setShowGuestQuickStart] = useState(false);
   const [dismissedSuggestionKey, setDismissedSuggestionKey] = useState<string | null>(null);
     const { t, lang } = useLanguage();
+    const modelsSelectedLabel = (count: number) =>
+      `${count} ${count === 1 ? t("chat.modelsSelectedOne") : t("chat.modelsSelectedOther")}`;
     const pickerCopy = modelPickerCopy[lang];
     const pickerFeatureLabels = modelPickerFeatureLabels[lang];
     const helpCopy = chatHelpCopy[lang];
@@ -1564,60 +1566,23 @@ export function ChatInput({
             </div>
           )}
           {isGuestMode && showGuestQuickStart && (
-            <section
+            <div
               data-testid="guest-quick-start"
-              aria-label={t("onboarding.title")}
-              className="mb-2 rounded-xl border border-blue-200 bg-blue-50/90 px-2.5 py-2 text-zinc-900 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-zinc-100"
+              className="mb-2 flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50/90 py-1.5 pl-3 pr-1.5 text-zinc-900 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-zinc-100"
             >
-              <div className="flex items-start gap-2">
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-black text-blue-700 dark:text-blue-300">
-                    {t("onboarding.title")}
-                  </p>
-                  <p className="mt-0.5 text-[11px] leading-4 text-zinc-600 dark:text-zinc-400">
-                    {t("onboarding.description")}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => dismissGuestQuickStart("skipped")}
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-zinc-500 transition hover:bg-white/80 hover:text-zinc-900 dark:hover:bg-zinc-900 dark:hover:text-white"
-                  aria-label={t("auth.cancel")}
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </div>
-              <ol className="mt-2 flex max-w-full gap-1.5 overflow-x-auto overscroll-x-contain pb-0.5 sm:grid sm:grid-cols-3 sm:overflow-visible sm:pb-0">
-                <li className="flex min-w-48 items-start gap-2 rounded-lg bg-white/80 px-2 py-1.5 dark:bg-zinc-950/60 sm:min-w-0">
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[10px] font-black text-white">1</span>
-                  <span className="min-w-0">
-                    <span className="block text-[11px] font-black">{t("onboarding.compareTitle")}</span>
-                    <span className="block text-[10px] leading-4 text-zinc-500 dark:text-zinc-400">{t("onboarding.compareBody")}</span>
-                  </span>
-                </li>
-                <li className="flex min-w-48 items-start gap-2 rounded-lg bg-white/80 px-2 py-1.5 dark:bg-zinc-950/60 sm:min-w-0">
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[10px] font-black text-white">2</span>
-                  <span className="min-w-0">
-                    <span className="block text-[11px] font-black">{t("onboarding.filesTitle")}</span>
-                    <span className="block text-[10px] leading-4 text-zinc-500 dark:text-zinc-400">{t("onboarding.filesBody")}</span>
-                  </span>
-                </li>
-                <li className="flex min-w-56 items-start gap-2 rounded-lg bg-white/80 px-2 py-1.5 dark:bg-zinc-950/60 sm:min-w-0">
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-zinc-900 text-[10px] font-black text-white dark:bg-white dark:text-zinc-950">3</span>
-                  <span className="min-w-0">
-                    <span className="block text-[11px] font-black">{t("onboarding.privateTitle")}</span>
-                    <span className="block text-[10px] leading-4 text-zinc-500 dark:text-zinc-400">{t("onboarding.privateBody")}</span>
-                    <a
-                      href={`/auth/signin?callbackUrl=${encodeURIComponent(signInCallbackUrl)}`}
-                      onClick={() => dismissGuestQuickStart("completed")}
-                      className="mt-0.5 inline-flex text-[10px] font-black text-blue-700 underline underline-offset-2 dark:text-blue-300"
-                    >
-                      {t("auth.login")}
-                    </a>
-                  </span>
-                </li>
-              </ol>
-            </section>
+              <p className="min-w-0 flex-1 truncate text-[11px] font-semibold text-blue-700 dark:text-blue-300">
+                <span className="font-black">{t("onboarding.compareTitle")}</span>
+                {" — "}
+                {t("onboarding.compareBody")}
+              </p>
+              <button
+                type="button"
+                onClick={() => dismissGuestQuickStart("skipped")}
+                className="shrink-0 rounded-full bg-white px-2.5 py-1 text-[11px] font-black text-blue-700 shadow-sm transition hover:bg-blue-100 dark:bg-zinc-900 dark:text-blue-300 dark:hover:bg-zinc-800"
+              >
+                {t("modelFinder.dismissTips")}
+              </button>
+            </div>
           )}
           {isNewConversation && !value.trim() && attachments.length === 0 && (
             <div className="mb-2 flex max-w-full gap-2 overflow-x-auto overscroll-x-contain pb-1 md:flex-wrap md:overflow-visible md:pb-0">
@@ -1633,7 +1598,11 @@ export function ChatInput({
                   {personalizedPrompt}
                 </button>
               )}
-              {PROMPT_SUGGESTIONS.slice(0, guestPreviewMode ? 3 : undefined).map((suggestion) => (
+              {PROMPT_SUGGESTIONS.filter(
+                (suggestion) => canAttach || suggestion !== "chat.promptSummarizeDocument"
+              )
+                .slice(0, guestPreviewMode ? 3 : undefined)
+                .map((suggestion) => (
                 <button
                   key={suggestion}
                   type="button"
@@ -1842,7 +1811,7 @@ export function ChatInput({
               })}
             </span>
             <span className="min-w-0 truncate whitespace-nowrap">
-              {selectedModels.length} {t("chat.modelsSelected")}
+              {modelsSelectedLabel(selectedModels.length)}
             </span>
             <ChevronDown className="h-3.5 w-3.5 text-zinc-400" />
           </button>
@@ -1877,7 +1846,7 @@ export function ChatInput({
                   </p>
                   <p className="text-xs text-zinc-500">
                     {menuView === "models"
-                      ? `${selectedModels.length}/${maxSelectableModels} ${t("chat.modelsSelected")}`
+                      ? `${selectedModels.length}/${maxSelectableModels} ${selectedModels.length === 1 ? t("chat.modelsSelectedOne") : t("chat.modelsSelectedOther")}`
                       : t("chat.uploadFromComputer")}
                   </p>
                 </div>
@@ -1965,7 +1934,7 @@ export function ChatInput({
                     <div className="min-w-0 flex-1">
                       <span className="block text-sm font-semibold text-zinc-900 dark:text-zinc-100">{t("chat.modelSelect")}</span>
                       <span className="block text-xs text-zinc-500">
-                        {selectedModels.length}/{maxSelectableModels} {t("chat.modelsSelected")}
+                        {selectedModels.length}/{maxSelectableModels} {selectedModels.length === 1 ? t("chat.modelsSelectedOne") : t("chat.modelsSelectedOther")}
                       </span>
                     </div>
                   </div>
@@ -2319,7 +2288,7 @@ export function ChatInput({
                   </div>
                   <div data-testid="model-selection-summary" className="mt-2 flex shrink-0 items-center gap-2 border-t border-zinc-200 px-1 pt-2 dark:border-zinc-700">
                     <p className="min-w-0 flex-1 text-[11px] font-bold text-zinc-600 dark:text-zinc-300">
-                      {selectedModels.length} {t("chat.modelsSelected")} · {pickerCopy.baseEstimate}{" "}
+                      {modelsSelectedLabel(selectedModels.length)} · {pickerCopy.baseEstimate}{" "}
                       <CreditCostBadge
                         credits={selectedBaseCredits}
                         size="xs"
@@ -2392,19 +2361,11 @@ export function ChatInput({
               activeSelectedModels.length === 0 ||
               (!value.trim() && attachments.length === 0)
             }
-            className="order-3 ml-auto flex h-9 min-w-9 shrink-0 cursor-pointer touch-manipulation items-center justify-center gap-1.5 rounded-full bg-blue-600 px-2 text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500 dark:disabled:bg-zinc-700 dark:disabled:text-zinc-400 md:h-9"
+            className="order-3 ml-auto flex h-9 w-9 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-blue-600 text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500 dark:disabled:bg-zinc-700 dark:disabled:text-zinc-400 md:h-9"
             title={`${t("chat.send")} · ${estimatedRequestCredits} credits`}
             aria-label={`${t("chat.send")} · ${estimatedRequestCredits} credits`}
           >
             <ArrowUp className="h-4 w-4" />
-            <CreditCostBadge
-              credits={estimatedRequestCredits}
-              size="xs"
-              tone="onColor"
-              label={lang === "ko" ? `예상 ${estimatedRequestCredits}크레딧 차감` : `Estimated deduction ${estimatedRequestCredits} credits`}
-              testId="send-credit-cost"
-              className="border-0 bg-white/20 px-1.5"
-            />
           </button>
         )}
         {activeSelectedModels.length > 0 && (
@@ -2413,7 +2374,7 @@ export function ChatInput({
             className="order-4 flex w-full flex-wrap items-center justify-end gap-x-2 gap-y-1 px-1 text-[10px] font-bold text-zinc-500 dark:text-zinc-400"
           >
             <span>
-              {activeSelectedModels.length} {t("chat.modelsSelected")} · {pickerCopy.estimatedUsage}
+              {modelsSelectedLabel(activeSelectedModels.length)} · {pickerCopy.estimatedUsage}
             </span>
             <CreditCostBadge
               credits={estimatedRequestCredits}
