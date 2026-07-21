@@ -2354,7 +2354,7 @@ export function ChatInput({
           placeholder={placeholderText}
           disabled={isDisabled}
           rows={1}
-                  className="min-w-[80px] max-h-[96px] min-h-[36px] flex-1 resize-none overflow-y-auto border-0 bg-transparent px-1 py-1.5 text-base leading-5 text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-500 md:max-h-[160px] md:min-h-[40px] md:py-2 md:text-sm md:leading-6"
+                  className="order-first w-full max-h-[92px] min-h-[36px] resize-none overflow-y-auto border-0 bg-transparent px-1 py-1.5 text-base leading-5 text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-500 md:order-none md:w-auto md:min-w-[80px] md:max-h-[160px] md:min-h-[40px] md:flex-1 md:py-2 md:text-sm md:leading-6"
               />
 
         {activeSelectedModels.length > 0 && (
