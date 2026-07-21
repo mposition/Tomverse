@@ -1,0 +1,61 @@
+name: Auto PR to Develop
+
+on:
+  push:
+    branches-ignore:
+      - main
+      - develop
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: auto-pr-to-develop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  auto-pr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ secrets.GH_AUTOMATION_PAT }}
+      BRANCH: ${{ github.ref_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Skip if branch has no diff against develop
+        id: diff-check
+        run: |
+          git fetch origin develop --depth=1
+          if git diff --quiet origin/develop...HEAD; then
+            echo "has_diff=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_diff=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create PR to develop if missing
+        if: steps.diff-check.outputs.has_diff == 'true'
+        run: |
+          existing=$(gh pr list --head "$BRANCH" --base develop --state open --json number --jq '.[0].number')
+          if [ -z "$existing" ]; then
+            gh pr create \
+              --head "$BRANCH" \
+              --base develop \
+              --title "$BRANCH -> develop" \
+              --body "Auto-created by the Auto PR to Develop workflow. Will merge automatically once required checks pass."
+            echo "Created PR for $BRANCH -> develop"
+          else
+            echo "PR #$existing already open for $BRANCH -> develop"
+          fi
+
+      - name: Enable auto-merge
+        if: steps.diff-check.outputs.has_diff == 'true'
+        run: |
+          pr_number=$(gh pr list --head "$BRANCH" --base develop --state open --json number --jq '.[0].number')
+          if [ -n "$pr_number" ]; then
+            gh pr merge "$pr_number" --squash --auto
+          fi
