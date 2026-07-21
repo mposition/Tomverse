@@ -242,7 +242,7 @@ export function AdminConsoleShell({
 
   useEffect(() => {
     if (!autoRefresh) return;
-    const interval = window.setInterval(() => refresh("automatic"), 60_000);
+    const interval = window.setInterval(() => refresh("automatic"), 180_000);
     return () => window.clearInterval(interval);
   }, [autoRefresh, refresh]);
 
