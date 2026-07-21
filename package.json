@@ -31,6 +31,7 @@
     "maintenance:cleanup": "node scripts/run-maintenance.mjs",
     "maintenance:credit-reservations": "node scripts/run-credit-reconciliation.mjs",
     "maintenance:provider-usage": "node scripts/run-provider-usage-sync.mjs",
+    "maintenance:provider-model-catalog": "node scripts/run-provider-model-catalog-monitor.mjs",
     "postinstall": "prisma generate"
   },
   "dependencies": {
