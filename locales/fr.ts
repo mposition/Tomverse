@@ -117,6 +117,8 @@ export const fr = {
         inUsed: " (utilisé)",
         onPrivateMode: "Mode privé activé",
         privateModeMessage: "L'historique n'est pas stocké dans Tomverse, mais les prompts, le contexte et les pièces jointes sont envoyés au fournisseur IA sélectionné. Les pièces jointes peuvent être conservées temporairement environ un jour.",
+        privateModePlaceholder: "Chat privé, non enregistré...",
+        privateModeEndedNotice: "Le chat privé est terminé. Rien n'a été enregistré.",
         onGuestMode: "Mode invité activé",
         guestModeMessage: "En mode invité, les données du chat sont enregistrées dans votre navigateur et non sur le serveur.",
         guestModeLimitMessage: "(limite maximale de 20 par jour)",

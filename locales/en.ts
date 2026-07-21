@@ -99,6 +99,8 @@ export const en = {
         inUsed: " (In Use)",
         onPrivateMode: "Private Security Mode Enabled",
         privateModeMessage: "Chat history is not stored in the Tomverse database, but prompts, conversation context, and attachments are sent to the selected AI provider to generate responses. Attachments may be retained temporarily for processing for up to approximately one day.",
+        privateModePlaceholder: "Private chat, not saved...",
+        privateModeEndedNotice: "Private chat ended. Nothing from it was saved.",
         onGuestMode: "Guest Mode Enabled",
         guestModeMessage: "As you are in guest mode, all chat information is saved in your web browser and is not recorded on the server.",
         guestModeLimitMessage: "(Maximum limit of 20 per day)",

@@ -99,6 +99,8 @@ export const ko = {
         inUsed: " (사용 중)",
         onPrivateMode: "Private 보안 모드 활성화",
         privateModeMessage: "대화 기록은 Tomverse 데이터베이스에 저장되지 않지만, 질문, 대화 맥락, 첨부파일은 응답 생성을 위해 선택한 AI 공급자에게 전송됩니다. 첨부파일은 처리를 위해 최대 약 하루 동안 임시 보관될 수 있습니다.",
+        privateModePlaceholder: "저장되지 않는 프라이빗 대화...",
+        privateModeEndedNotice: "프라이빗 대화가 종료되었습니다. 저장된 내용은 없습니다.",
         onGuestMode: "게스트 모드 활성화",
         guestModeMessage: "게스트 모드에서는 모든 대화 정보가 웹 브라우저에 저장되며 서버에는 기록되지 않습니다.",
         guestModeLimitMessage: "(일일 최대 20회 제한)",

@@ -248,6 +248,14 @@ export function MobileChatShell({
   const isActiveConversationEmpty = resolvedActiveModelId
     ? modelEmptyStates[emptyStateKey(resolvedActiveModelId)] ?? true
     : true;
+  const recentConversations = useMemo(
+    () =>
+      conversations
+        .filter((conversation) => !conversation.isLocked)
+        .slice(0, 3)
+        .map((conversation) => ({ id: conversation.id, title: conversation.title })),
+    [conversations]
+  );
   const currentConversation = conversations.find(
     (conversation) => conversation.id === currentChatId
   );
@@ -503,6 +511,8 @@ export function MobileChatShell({
                   hideModelOnlyInput
                   useCenteredWelcome
                   onEmptyStateChange={handleEmptyStateChange}
+                  recentConversations={recentConversations}
+                  onSelectConversation={onSelectConversation}
                   onStatusChange={handleModelStatusChange}
                   onResponseComplete={onResponseComplete}
                   onFollowupSent={onFollowupSent}
@@ -537,6 +547,7 @@ export function MobileChatShell({
         isSending={isSending}
         focusToken={focusToken}
         isNewConversation={isActiveConversationEmpty}
+        isPrivateMode={isPrivateMode}
         selectedModels={selectedModels}
         disabledModelIds={disabledPanels}
         onToggleModel={onToggleModel}

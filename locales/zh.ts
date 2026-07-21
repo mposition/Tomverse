@@ -99,6 +99,8 @@ export const zh = {
         inUsed: "（使用中）",
         onPrivateMode: "Private 安全模式已启用",
         privateModeMessage: "聊天记录不会保存到 Tomverse 数据库中，但提示词、对话上下文和附件会发送给所选 AI 提供商以生成回复。附件可能会为处理目的临时保留最多约一天。",
+        privateModePlaceholder: "私密对话，不会保存...",
+        privateModeEndedNotice: "私密对话已结束，未保存任何内容。",
         onGuestMode: "访客模式已启用",
         guestModeMessage: "在访客模式下，所有聊天信息保存在你的浏览器中，不会记录到服务器。",
         guestModeLimitMessage: "（每日最多 20 次）",

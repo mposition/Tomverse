@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useMemo } from "react";
 import { ChatApp } from "@/components/chat/ChatApp";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { ModelLogo } from "@/components/chat/ModelLogo";
@@ -113,6 +113,14 @@ export function DesktopChatShell({
   } = useModelCatalog();
   const { t, lang } = useLanguage();
   const helpCopy = chatHelpCopy[lang];
+  const recentConversations = useMemo(
+    () =>
+      conversations
+        .filter((conversation) => !conversation.isLocked)
+        .slice(0, 3)
+        .map((conversation) => ({ id: conversation.id, title: conversation.title })),
+    [conversations]
+  );
 
   return (
     <main
@@ -268,6 +276,9 @@ export function DesktopChatShell({
                   onResponseComplete={onResponseComplete}
                   onFollowupSent={onFollowupSent}
                   hideModelOnlyInput={selectedModels.length <= 1}
+                  useCenteredWelcome
+                  recentConversations={recentConversations}
+                  onSelectConversation={onSelectConversation}
                 />
               </div>
             );
@@ -330,6 +341,7 @@ export function DesktopChatShell({
           onCancel={() => {}}
           isSending={isSending}
           focusToken={focusToken}
+          isPrivateMode={isPrivateMode}
           selectedModels={selectedModels}
           disabledModelIds={disabledPanels}
           onToggleModel={onToggleModel}

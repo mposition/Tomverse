@@ -117,6 +117,8 @@ export const de = {
         inUsed: " (in Verwendung)",
         onPrivateMode: "Privater Modus aktiviert",
         privateModeMessage: "Der Chatverlauf wird nicht in Tomverse gespeichert, aber Prompts, Kontext und Anhänge werden an den ausgewählten KI-Anbieter gesendet. Anhänge können zur Verarbeitung etwa einen Tag vorübergehend gespeichert werden.",
+        privateModePlaceholder: "Privater Chat, wird nicht gespeichert...",
+        privateModeEndedNotice: "Privater Chat beendet. Es wurde nichts gespeichert.",
         onGuestMode: "Gastmodus aktiviert",
         guestModeMessage: "Im Gastmodus werden Chatdaten im Browser gespeichert und nicht auf dem Server aufgezeichnet.",
         guestModeLimitMessage: "(maximal 20 pro Tag)",

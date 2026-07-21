@@ -28,6 +28,7 @@ import {
 } from "@/lib/userSettingsEvents";
 import {
   APP_TOAST_EVENT,
+  dispatchAppToast,
   type AppToastEventDetail,
   type AppToastTone,
 } from "@/lib/appToast";
@@ -800,9 +801,6 @@ export default function Home() {
         try {
           const parsed = JSON.parse(savedConversations);
           setConversations(parsed);
-          if (parsed.length > 0) {
-            setCurrentChatId((currentId) => currentId || parsed[0].id);
-          }
         } catch (e) {
           console.error("Failed to parse guest conversations:", e);
         }
@@ -846,73 +844,13 @@ export default function Home() {
             new URLSearchParams(window.location.search).has("prompt")
         ) return;
 
-        const firstConversation = conversations[0];
+        // Returning users land on the welcome-home screen instead of having
+        // their most recent conversation auto-opened (privacy + lets them
+        // choose continue-vs-new rather than deciding for them). Existing
+        // conversations remain one tap away via the sidebar / recent cards.
         isInitialSelectedRef.current = true;
-
-        if (firstConversation.isLocked) {
-            queueMicrotask(() => {
-                setCurrentChatId(null);
-                setSelectedModels([userDefaultEngine]);
-                setDisabledPanels([]);
-                setPromptPayload(null);
-                setIsInitialConversationResolved(true);
-            });
-            return;
-        }
-
-        let cancelled = false;
-        let completed = false;
-
-        const openInitialConversation = async () => {
-            try {
-                const res = await fetch(`/api/conversations/${firstConversation.id}`, {
-                    cache: "no-store",
-                });
-
-                if (!res.ok) {
-                    throw new Error(`Initial conversation load failed: ${res.status}`);
-                }
-                if (cancelled) return;
-
-                const data = await res.json();
-                // Keep the synchronous guard in step with the conversation we
-                // are about to render. The settings request can resolve in the
-                // same frame; without this assignment it may incorrectly
-                // replace a restored multi-model selection with the account's
-                // single default model.
-                currentChatIdRef.current = firstConversation.id;
-                applyConversationSettings(data, firstConversation.id);
-                completed = true;
-                setCurrentChatId(firstConversation.id);
-                setIsInitialConversationResolved(true);
-            } catch (error) {
-                if (!cancelled) {
-                    console.error("Failed to open initial conversation:", error);
-                    currentChatIdRef.current = firstConversation.id;
-                    applyConversationSettings(firstConversation, firstConversation.id);
-                    completed = true;
-                    setCurrentChatId(firstConversation.id);
-                    setIsInitialConversationResolved(true);
-                }
-            }
-        };
-
-        openInitialConversation();
-
-        return () => {
-            cancelled = true;
-            if (!completed) {
-                isInitialSelectedRef.current = false;
-            }
-        };
-    }, [
-        applyConversationSettings,
-        conversations,
-        currentChatId,
-        isGuestMode,
-        isUserSettingsLoaded,
-        userDefaultEngine,
-    ]);
+        queueMicrotask(() => setIsInitialConversationResolved(true));
+    }, [conversations, currentChatId, isGuestMode, isUserSettingsLoaded]);
 
     useEffect(() => {
         if (
@@ -1685,6 +1623,7 @@ export default function Home() {
 
   const togglePrivateModeGlobal = () => {
     if (isPrivateMode) {
+      dispatchAppToast(t("chat.privateModeEndedNotice"), "info");
       handleNewChat();
     } else {
       localComparisonResponsesRef.current.clear();

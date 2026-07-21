@@ -39,6 +39,8 @@ type ChatAppProps = {
   hideModelOnlyInput?: boolean;
   useCenteredWelcome?: boolean;
   onEmptyStateChange?: (modelId: string, isEmpty: boolean) => void;
+  recentConversations?: { id: string; title: string }[];
+  onSelectConversation?: (id: string) => void;
   onStatusChange?: (
     modelId: string,
     status: "idle" | "loading" | "responding" | "error" | "paused"
@@ -61,6 +63,8 @@ function ChatAppComponent({
   hideModelOnlyInput = false,
   useCenteredWelcome = false,
   onEmptyStateChange,
+  recentConversations = [],
+  onSelectConversation,
   onStatusChange,
   onResponseComplete,
   onFollowupSent,
@@ -632,6 +636,24 @@ function ChatAppComponent({
           <p className="text-xl font-bold text-zinc-800 dark:text-zinc-100 sm:text-2xl">
             {welcomeGreeting}
           </p>
+          {recentConversations.length > 0 && (
+            <div className="mt-5 flex w-full max-w-xs flex-col gap-2">
+              {recentConversations.map((conversation) => (
+                <button
+                  key={conversation.id}
+                  type="button"
+                  data-testid="recent-conversation-card"
+                  onClick={() => onSelectConversation?.(conversation.id)}
+                  className="flex items-center gap-2.5 rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-left text-sm text-zinc-700 shadow-sm transition hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                >
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-blue-500/10 text-blue-500">
+                    <Bot className="h-3.5 w-3.5" />
+                  </span>
+                  <span className="min-w-0 flex-1 truncate font-medium">{conversation.title}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       ) : <ChatMessageList
         messages={useCenteredWelcome ? messages.filter((message) => message.id !== "welcome") : messages}
