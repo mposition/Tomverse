@@ -58,7 +58,6 @@ type ConversationMenuPosition = {
 const SIDEBAR_TOUR_STORAGE_KEY = "tomverse_sidebar_tour_v1";
 const ORGANIZER_STORAGE_KEY = "tomverse_sidebar_organizer_v1";
 const ORGANIZER_CHANGE_EVENT = "tomverse-sidebar-organizer-change";
-const SHORT_SIDEBAR_MEDIA_QUERY = "(max-height: 860px)";
 
 type OrganizerPreference = "auto" | "expanded" | "collapsed";
 
@@ -77,15 +76,6 @@ const getOrganizerPreference = (): OrganizerPreference => {
 };
 
 const getServerOrganizerPreference = (): OrganizerPreference => "auto";
-
-const subscribeShortSidebar = (onStoreChange: () => void) => {
-    const mediaQuery = window.matchMedia(SHORT_SIDEBAR_MEDIA_QUERY);
-    mediaQuery.addEventListener("change", onStoreChange);
-    return () => mediaQuery.removeEventListener("change", onStoreChange);
-};
-
-const getShortSidebarSnapshot = () => window.matchMedia(SHORT_SIDEBAR_MEDIA_QUERY).matches;
-const getServerShortSidebarSnapshot = () => false;
 
 export function ChatSidebar({
     conversations,
@@ -180,11 +170,6 @@ export function ChatSidebar({
         getOrganizerPreference,
         getServerOrganizerPreference
     );
-    const hasShortSidebar = useSyncExternalStore(
-        subscribeShortSidebar,
-        getShortSidebarSnapshot,
-        getServerShortSidebarSnapshot
-    );
     const { t, lang } = useLanguage();
     const helpCopy = chatHelpCopy[lang];
     const tooltipIdPrefix = useId();
@@ -205,9 +190,7 @@ export function ChatSidebar({
         "cursor-not-allowed bg-zinc-900/50 text-zinc-600";
 
     const organizerExpanded =
-        sidebarTourStep !== null ||
-        organizerPreference === "expanded" ||
-        (organizerPreference === "auto" && !hasShortSidebar && !isMobileDrawer);
+        sidebarTourStep !== null || organizerPreference === "expanded";
 
     const toggleOrganizer = () => {
         const nextPreference: OrganizerPreference = organizerExpanded ? "collapsed" : "expanded";
