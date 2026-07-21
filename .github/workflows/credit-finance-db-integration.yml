@@ -8,6 +8,8 @@ on:
       - "lib/credit*.ts"
       - "lib/billing*.ts"
       - "lib/stripe*.ts"
+      - "lib/adminUsers.ts"
+      - "lib/userTimeZone.ts"
       - "app/api/billing/**"
       - "app/api/admin/**/refund/**"
       - "app/api/admin/refund*/**"

@@ -91,6 +91,7 @@ run(
     "tests/integration/credit-finance.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     "tests/integration/admin-security.db.test.ts",
+    "tests/integration/admin-users.db.test.ts",
   ],
-  "Running financial, credit, model-registry, and admin-security transaction scenarios"
+  "Running financial, credit, model-registry, admin-security, and admin-users transaction scenarios"
 );
