@@ -22,7 +22,7 @@ import type {
   InfrastructureStatus,
 } from "@/lib/infrastructureTypes";
 
-const REFRESH_INTERVAL_MS = 5 * 60_000;
+const REFRESH_INTERVAL_MS = 10 * 60_000;
 
 const statusStyle: Record<InfrastructureStatus, string> = {
   healthy: "border-emerald-500/30 bg-emerald-500/10 text-emerald-200",

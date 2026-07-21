@@ -1,0 +1,240 @@
+name: Cron Auto-Fix
+
+on:
+  schedule:
+    # 00:15 and 01:15 UTC, shortly after Provider Model Catalog Monitor (00:00)
+    # and Provider Usage Sync (00:30) run.
+    - cron: "15 0,1 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: cron-auto-fix
+  cancel-in-progress: false
+
+env:
+  TOMVERSE_APP_URL: https://tomverse.app
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      runs: ${{ steps.poll.outputs.runs }}
+      has_runs: ${{ steps.poll.outputs.has_runs }}
+    steps:
+      - name: Poll for unattempted auto-fix-eligible failures
+        id: poll
+        env:
+          AUTO_FIX_SYNC_SECRET: ${{ secrets.AUTO_FIX_SYNC_SECRET }}
+        run: |
+          response=$(curl -sS -f \
+            -H "Authorization: Bearer ${AUTO_FIX_SYNC_SECRET}" \
+            "${TOMVERSE_APP_URL}/api/internal/scheduled-jobs/auto-fix/pending")
+          runs=$(echo "$response" | jq -c '.runs')
+          count=$(echo "$runs" | jq 'length')
+          echo "Found $count pending run(s)."
+          echo "runs=$runs" >> "$GITHUB_OUTPUT"
+          if [ "$count" -gt 0 ]; then
+            echo "has_runs=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_runs=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  attempt-fix:
+    needs: discover
+    if: needs.discover.outputs.has_runs == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        run: ${{ fromJson(needs.discover.outputs.runs) }}
+    env:
+      GH_TOKEN: ${{ secrets.GH_AUTOMATION_PAT }}
+      AUTO_FIX_SYNC_SECRET: ${{ secrets.AUTO_FIX_SYNC_SECRET }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      RUN_ID: ${{ matrix.run.id }}
+      JOB_KEY: ${{ matrix.run.jobKey }}
+      RUN_ERROR: ${{ matrix.run.error }}
+      NEXTAUTH_URL: http://127.0.0.1:3100
+      NEXT_PUBLIC_TURNSTILE_SITE_KEY: tomverse-playwright-turnstile-site-key
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GH_AUTOMATION_PAT }}
+
+      - name: Configure git identity
+        run: |
+          git config user.name "tomverse-auto-fix[bot]"
+          git config user.email "tomverse-auto-fix-bot@users.noreply.github.com"
+
+      - name: Resolve allowed file scope for this job
+        id: scope
+        run: |
+          case "$JOB_KEY" in
+            provider_model_catalog_monitor)
+              echo "paths=lib/providerModelCatalogMonitor.ts lib/providerModelCatalogReport.ts app/api/internal/provider-model-catalog" >> "$GITHUB_OUTPUT"
+              ;;
+            provider_usage_sync)
+              echo "paths=lib/providerUsageSync.ts lib/providerDailyUsageReport.ts lib/infrastructureSlackReport.ts app/api/internal/provider-usage" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Unknown or non-eligible jobKey: $JOB_KEY"
+              exit 1
+              ;;
+          esac
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Write incident context
+        env:
+          INCIDENT_JSON: ${{ toJson(matrix.run) }}
+        run: |
+          printf '%s' "$INCIDENT_JSON" > /tmp/incident.txt
+
+      - name: Run Claude Code to analyze and fix
+        id: claude
+        run: |
+          ALLOWED_PATHS="${{ steps.scope.outputs.paths }}"
+          claude -p "A scheduled job failed in the Tomverse repo. Job key: ${JOB_KEY}. Run id: ${RUN_ID}. Failure details (raw JSON) are in /tmp/incident.txt.
+
+          Investigate the root cause and, if you can produce a safe, minimal, well-understood fix, apply it. You may ONLY edit files under these paths: ${ALLOWED_PATHS}. Do not touch any other file, do not modify dependencies, do not modify database schema or migrations. If the failure looks like a transient third-party/network issue with no code defect (e.g. the provider API was temporarily down), or you are not confident about a safe fix within this scope, make NO changes and exit without editing anything.
+
+          After making a change (if any), briefly explain your diagnosis and fix in your final message." \
+            --allowedTools "Read,Edit,Grep,Glob,Bash(npm run *)" \
+            --permission-mode acceptEdits \
+            --output-format json > /tmp/claude-output.json || true
+          cat /tmp/claude-output.json
+
+      - name: Check for out-of-scope changes
+        id: diff-check
+        run: |
+          changed=$(git status --porcelain | awk '{print $2}')
+          if [ -z "$changed" ]; then
+            echo "has_diff=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "has_diff=true" >> "$GITHUB_OUTPUT"
+          ALLOWED_PATHS="${{ steps.scope.outputs.paths }}"
+          for file in $changed; do
+            ok=false
+            for prefix in $ALLOWED_PATHS; do
+              case "$file" in
+                "$prefix"|"$prefix"/*) ok=true ;;
+              esac
+            done
+            if [ "$ok" = false ]; then
+              echo "out_of_scope=true" >> "$GITHUB_OUTPUT"
+              echo "Out-of-scope file changed: $file"
+            fi
+          done
+
+      - name: Report no action needed
+        if: steps.diff-check.outputs.has_diff != 'true'
+        run: |
+          curl -sS -f -X POST \
+            -H "Authorization: Bearer ${AUTO_FIX_SYNC_SECRET}" \
+            -H "Content-Type: application/json" \
+            -d "{\"runId\":\"${RUN_ID}\",\"jobKey\":\"${JOB_KEY}\",\"outcome\":\"no_action_needed\",\"detail\":\"Claude made no changes.\"}" \
+            "${TOMVERSE_APP_URL}/api/internal/scheduled-jobs/auto-fix/result"
+
+      - name: Discard out-of-scope changes and report needs_human
+        if: steps.diff-check.outputs.has_diff == 'true' && steps.diff-check.outputs.out_of_scope == 'true'
+        run: |
+          git checkout -- .
+          git clean -fd
+          curl -sS -f -X POST \
+            -H "Authorization: Bearer ${AUTO_FIX_SYNC_SECRET}" \
+            -H "Content-Type: application/json" \
+            -d "{\"runId\":\"${RUN_ID}\",\"jobKey\":\"${JOB_KEY}\",\"outcome\":\"needs_human\",\"detail\":\"Claude changed files outside the allowed scope; discarded.\"}" \
+            "${TOMVERSE_APP_URL}/api/internal/scheduled-jobs/auto-fix/result"
+
+      - name: Security regression checks
+        id: gate-security
+        if: steps.diff-check.outputs.has_diff == 'true' && steps.diff-check.outputs.out_of_scope != 'true'
+        run: npm run security:regression
+
+      - name: Unit and API policy tests
+        id: gate-unit
+        if: steps.diff-check.outputs.has_diff == 'true' && steps.diff-check.outputs.out_of_scope != 'true'
+        run: npm run test:unit
+
+      - name: Strict encoding validation
+        id: gate-encoding
+        if: steps.diff-check.outputs.has_diff == 'true' && steps.diff-check.outputs.out_of_scope != 'true'
+        run: npm run check:encoding:strict
+
+      - name: ESLint and production build
+        id: gate-build
+        if: steps.diff-check.outputs.has_diff == 'true' && steps.diff-check.outputs.out_of_scope != 'true'
+        run: npm run check
+
+      - name: Install Chromium
+        if: steps.diff-check.outputs.has_diff == 'true' && steps.diff-check.outputs.out_of_scope != 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Run desktop Chromium PR smoke tests
+        id: gate-e2e
+        if: steps.diff-check.outputs.has_diff == 'true' && steps.diff-check.outputs.out_of_scope != 'true'
+        run: npm run test:e2e:pr
+
+      - name: Report gate failure as needs_human
+        if: >
+          steps.diff-check.outputs.has_diff == 'true' &&
+          steps.diff-check.outputs.out_of_scope != 'true' &&
+          (failure() && (steps.gate-security.outcome == 'failure' || steps.gate-unit.outcome == 'failure' || steps.gate-encoding.outcome == 'failure' || steps.gate-build.outcome == 'failure' || steps.gate-e2e.outcome == 'failure'))
+        run: |
+          git checkout -- .
+          git clean -fd
+          curl -sS -f -X POST \
+            -H "Authorization: Bearer ${AUTO_FIX_SYNC_SECRET}" \
+            -H "Content-Type: application/json" \
+            -d "{\"runId\":\"${RUN_ID}\",\"jobKey\":\"${JOB_KEY}\",\"outcome\":\"needs_human\",\"detail\":\"Claude's fix did not pass the CI gate.\"}" \
+            "${TOMVERSE_APP_URL}/api/internal/scheduled-jobs/auto-fix/result"
+
+      - name: Commit, push branch, and open PR to main
+        if: >
+          steps.diff-check.outputs.has_diff == 'true' &&
+          steps.diff-check.outputs.out_of_scope != 'true' &&
+          steps.gate-security.outcome == 'success' &&
+          steps.gate-unit.outcome == 'success' &&
+          steps.gate-encoding.outcome == 'success' &&
+          steps.gate-build.outcome == 'success' &&
+          steps.gate-e2e.outcome == 'success'
+        run: |
+          branch="autofix/${JOB_KEY}-${RUN_ID}"
+          git checkout -b "$branch"
+          git add -A -- ${{ steps.scope.outputs.paths }}
+          git commit -m "Auto-fix: ${JOB_KEY} failure (run ${RUN_ID})
+
+          Automated fix generated by the cron-auto-fix pipeline after this
+          scheduled job failed. All existing CI gates passed before this
+          branch was pushed."
+          git push origin "$branch"
+          gh pr create \
+            --head "$branch" \
+            --base main \
+            --title "Auto-fix: ${JOB_KEY} failure (run ${RUN_ID})" \
+            --body "Auto-created by the Cron Auto-Fix workflow after \`${JOB_KEY}\` (run \`${RUN_ID}\`) failed. Security, unit, encoding, build, and E2E gates already passed in the automation run before this PR was opened. Will auto-merge once required checks pass."
+          gh pr merge "$branch" --squash --auto
+          curl -sS -f -X POST \
+            -H "Authorization: Bearer ${AUTO_FIX_SYNC_SECRET}" \
+            -H "Content-Type: application/json" \
+            -d "{\"runId\":\"${RUN_ID}\",\"jobKey\":\"${JOB_KEY}\",\"outcome\":\"fixed_and_merged\",\"detail\":\"Branch ${branch} opened as a PR to main and auto-merge enabled.\"}" \
+            "${TOMVERSE_APP_URL}/api/internal/scheduled-jobs/auto-fix/result"

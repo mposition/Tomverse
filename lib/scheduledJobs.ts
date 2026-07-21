@@ -96,6 +96,62 @@ export async function failScheduledJob(input: {
   }
 }
 
+export const AUTO_FIX_ELIGIBLE_JOB_KEYS = [
+  "provider_model_catalog_monitor",
+  "provider_usage_sync",
+] as const satisfies readonly ScheduledJobKey[];
+
+export type AutoFixEligibleJobKey = (typeof AUTO_FIX_ELIGIBLE_JOB_KEYS)[number];
+
+export type AutoFixOutcome = "fixed_and_merged" | "needs_human" | "no_action_needed";
+
+/**
+ * Claims failed runs of the auto-fix-eligible jobs by stamping autoFixAttemptedAt,
+ * so a concurrent or retried poll never hands the same run to two workflow runs.
+ */
+export async function claimPendingAutoFixRuns(limit = 5) {
+  const candidates = await prisma.scheduledJobRun.findMany({
+    where: {
+      jobKey: { in: [...AUTO_FIX_ELIGIBLE_JOB_KEYS] },
+      status: "failed",
+      autoFixAttemptedAt: null,
+    },
+    orderBy: { startedAt: "asc" },
+    take: limit,
+  });
+  if (!candidates.length) return [];
+
+  const claimedAt = new Date();
+  await prisma.scheduledJobRun.updateMany({
+    where: { id: { in: candidates.map((run) => run.id) }, autoFixAttemptedAt: null },
+    data: { autoFixAttemptedAt: claimedAt },
+  });
+
+  return prisma.scheduledJobRun.findMany({
+    where: { id: { in: candidates.map((run) => run.id) }, autoFixAttemptedAt: claimedAt },
+    orderBy: { startedAt: "asc" },
+  });
+}
+
+export async function recordAutoFixResult(input: {
+  runId: string;
+  outcome: AutoFixOutcome;
+  detail?: string;
+}) {
+  await prisma.scheduledJobRun.update({
+    where: { id: input.runId },
+    data: {
+      result: {
+        autoFix: {
+          outcome: input.outcome,
+          detail: input.detail?.slice(0, 2_000) || null,
+          at: new Date().toISOString(),
+        },
+      },
+    },
+  });
+}
+
 const nextFiveMinuteBoundary = (now: Date) => {
   const result = new Date(now);
   result.setUTCSeconds(0, 0);

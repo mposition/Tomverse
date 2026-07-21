@@ -91,6 +91,7 @@ export const ko = {
     },
     chat: {
         welcome: "안녕하세요! 무엇을 도와드릴까요?",
+        welcomeBack: "다시 만나 반가워요. 무엇을 도와드릴까요?",
         guestWelcome: "안녕하세요! 현재 게스트 모드입니다. 질문을 입력해 주세요.",
         inputPlaceholder: "무엇을 도와드릴까요?",
         inactivePanel: "활성화된 AI 패널이 없습니다.",
@@ -139,7 +140,8 @@ export const ko = {
         googleDriveError: "Google Drive 파일을 첨부하지 못했습니다. 다시 시도해 주세요.",
         moreActions: "더 많은 작업",
         uploadFromComputer: "컴퓨터에서 선택",
-        modelsSelected: "개 모델",
+        modelsSelectedOne: "개 모델",
+        modelsSelectedOther: "개 모델",
         maxModelsDescription: "최대 3개 모델 비교",
         maxGuestModelsDescription: "게스트는 최대 3개 모델 비교",
         searchModels: "모델 검색",

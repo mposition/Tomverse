@@ -2,7 +2,7 @@
   "$schema": "https://railway.com/railway.schema.json",
   "deploy": {
     "startCommand": "npm run maintenance:credit-reservations",
-    "cronSchedule": "*/5 * * * *",
+    "cronSchedule": "*/15 * * * *",
     "restartPolicyType": "NEVER"
   }
 }

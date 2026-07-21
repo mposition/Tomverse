@@ -91,6 +91,7 @@ export const en = {
     },
     chat: {
         welcome: "Hello! How can I help you today?",
+        welcomeBack: "Welcome back. What can I help with?",
         guestWelcome: "Hello! You are currently in guest mode. Please enter your question.",
         inputPlaceholder: "Ask anything...",
         inactivePanel: "No active AI panel.",
@@ -139,7 +140,8 @@ export const en = {
         googleDriveError: "The Google Drive file could not be attached. Please try again.",
         moreActions: "More actions",
         uploadFromComputer: "Choose from your computer",
-        modelsSelected: "models",
+        modelsSelectedOne: "AI",
+        modelsSelectedOther: "AIs",
         maxModelsDescription: "Compare up to 3 models",
         maxGuestModelsDescription: "Guest comparison up to 3 models",
         searchModels: "Search models",

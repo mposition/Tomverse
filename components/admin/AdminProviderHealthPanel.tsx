@@ -25,7 +25,7 @@ import type {
   ProviderSettlementModel,
 } from "@/lib/providerBillingTypes";
 
-const REFRESH_INTERVAL_MS = 30_000;
+const REFRESH_INTERVAL_MS = 120_000;
 
 const providerConsoleHref: Record<AiProvider, string> = {
   openai: "https://platform.openai.com/settings/organization/billing/overview",

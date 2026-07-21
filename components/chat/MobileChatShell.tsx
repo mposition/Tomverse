@@ -7,6 +7,7 @@ import { ModelLogo } from "@/components/chat/ModelLogo";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { ProviderStatusBanner } from "@/components/chat/ProviderStatusBanner";
 import { FeatureHelpPopover } from "@/components/chat/FeatureHelpPopover";
+import { ModeInfoSheet } from "@/components/chat/ModeInfoSheet";
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import { chatHelpCopy } from "@/components/chat/chatHelpCopy";
 import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
@@ -20,10 +21,10 @@ import {
   CheckCircle2,
   Lock,
   Menu,
-  Plus,
   Share2,
   Shield,
   Sparkles,
+  SquarePen,
   X,
 } from "lucide-react";
 
@@ -122,10 +123,17 @@ export function MobileChatShell({
     selectedModels[0] || null
   );
   const [modelStatuses, setModelStatuses] = useState<Record<string, ModelRuntimeStatus>>({});
+  const [modelEmptyStates, setModelEmptyStates] = useState<Record<string, boolean>>({});
+  const [modeSheet, setModeSheet] = useState<"guest" | "private" | null>(null);
   const resolvedActiveModelId =
     activeModelId && selectedModels.includes(activeModelId)
       ? activeModelId
       : selectedModels[0] || null;
+  const conversationStateKey = currentChatId || "new";
+  const emptyStateKey = useCallback(
+    (modelId: string) => `${conversationStateKey}:${modelId}`,
+    [conversationStateKey]
+  );
 
   const handleModelStatusChange = useCallback(
     (modelId: string, nextStatus: ModelRuntimeStatus) => {
@@ -136,6 +144,16 @@ export function MobileChatShell({
       );
     },
     []
+  );
+
+  const handleEmptyStateChange = useCallback(
+    (modelId: string, isEmpty: boolean) => {
+      const key = emptyStateKey(modelId);
+      setModelEmptyStates((current) =>
+        current[key] === isEmpty ? current : { ...current, [key]: isEmpty }
+      );
+    },
+    [emptyStateKey]
   );
 
   const activeModelIndex = resolvedActiveModelId
@@ -227,6 +245,9 @@ export function MobileChatShell({
     () => AVAILABLE_MODELS.find((model) => model.id === resolvedActiveModelId),
     [AVAILABLE_MODELS, resolvedActiveModelId]
   );
+  const isActiveConversationEmpty = resolvedActiveModelId
+    ? modelEmptyStates[emptyStateKey(resolvedActiveModelId)] ?? true
+    : true;
   const currentConversation = conversations.find(
     (conversation) => conversation.id === currentChatId
   );
@@ -273,27 +294,37 @@ export function MobileChatShell({
             {activeModel?.name || t("chat.modelSelect")}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onNewChat}
-          className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm shadow-blue-950/20"
-          aria-label={t("sidebar.newChat")}
-        >
-          <Plus className="h-5 w-5" />
-        </button>
+        {!isActiveConversationEmpty && (
+          <button
+            type="button"
+            onClick={onNewChat}
+            className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm shadow-blue-950/20"
+            aria-label={t("sidebar.newChat")}
+          >
+            <SquarePen className="h-5 w-5" />
+          </button>
+        )}
         </div>
         <div className="mt-1.5 flex min-h-6 max-w-full gap-1.5 overflow-x-auto overscroll-x-contain">
           {isPrivateMode && (
-            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-purple-500/10 px-2 py-1 text-[10px] font-bold text-purple-600 dark:text-purple-300">
+            <button
+              type="button"
+              onClick={() => setModeSheet("private")}
+              className="inline-flex shrink-0 items-center gap-1 rounded-full bg-purple-500/10 px-2 py-1 text-[10px] font-bold text-purple-600 dark:text-purple-300"
+            >
               <Shield className="h-3 w-3" />
               Private
-            </span>
+            </button>
           )}
           {isGuestMode && (
-            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-blue-500/10 px-2 py-1 text-[10px] font-bold text-blue-600 dark:text-blue-300">
+            <button
+              type="button"
+              onClick={() => setModeSheet("guest")}
+              className="inline-flex shrink-0 items-center gap-1 rounded-full bg-blue-500/10 px-2 py-1 text-[10px] font-bold text-blue-600 dark:text-blue-300"
+            >
               <Sparkles className="h-3 w-3" />
               {t("modelTiers.guest")} {guestMessageCount}/{maxGuestMessages}
-            </span>
+            </button>
           )}
           {isCurrentLocked && (
             <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/10 px-2 py-1 text-[10px] font-bold text-amber-600 dark:text-amber-300">
@@ -470,6 +501,8 @@ export function MobileChatShell({
                   isGuestMode={isGuestMode}
                   onBeforeSend={onBeforeModelSend}
                   hideModelOnlyInput
+                  useCenteredWelcome
+                  onEmptyStateChange={handleEmptyStateChange}
                   onStatusChange={handleModelStatusChange}
                   onResponseComplete={onResponseComplete}
                   onFollowupSent={onFollowupSent}
@@ -503,6 +536,7 @@ export function MobileChatShell({
         onCancel={() => {}}
         isSending={isSending}
         focusToken={focusToken}
+        isNewConversation={isActiveConversationEmpty}
         selectedModels={selectedModels}
         disabledModelIds={disabledPanels}
         onToggleModel={onToggleModel}
@@ -571,6 +605,13 @@ export function MobileChatShell({
           </div>
         </div>
       )}
+
+      <ModeInfoSheet
+        mode={modeSheet}
+        onClose={() => setModeSheet(null)}
+        guestMessageCount={guestMessageCount}
+        maxGuestMessages={maxGuestMessages}
+      />
     </main>
   );
 }

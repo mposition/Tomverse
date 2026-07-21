@@ -91,6 +91,7 @@ export const zh = {
     },
     chat: {
         welcome: "你好！我能帮你做些什么？",
+        welcomeBack: "欢迎回来，有什么可以帮你的？",
         guestWelcome: "你好！你当前正在使用访客模式。请输入你的问题。",
         inputPlaceholder: "我能帮你做些什么？",
         inactivePanel: "没有启用的 AI 面板。",
@@ -139,7 +140,8 @@ export const zh = {
         googleDriveError: "无法添加 Google Drive 文件，请重试。",
         moreActions: "更多操作",
         uploadFromComputer: "从电脑选择",
-        modelsSelected: "个模型",
+        modelsSelectedOne: "个模型",
+        modelsSelectedOther: "个模型",
         maxModelsDescription: "最多比较 3 个模型",
         maxGuestModelsDescription: "访客最多比较 3 个模型",
         searchModels: "搜索模型",

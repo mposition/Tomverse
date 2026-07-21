@@ -88,7 +88,7 @@ export function ProviderStatusBanner({
 
   useEffect(() => {
     const initialTimer = window.setTimeout(() => void loadStatus(), 0);
-    const timer = window.setInterval(() => void loadStatus(), 120_000);
+    const timer = window.setInterval(() => void loadStatus(), 300_000);
     return () => {
       window.clearTimeout(initialTimer);
       window.clearInterval(timer);
