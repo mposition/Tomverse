@@ -989,20 +989,22 @@ model AdminOperationReport {
 }
 
 model ScheduledJobRun {
-  id             String    @id @default(cuid())
-  jobKey         String
-  status         String    @default("running")
-  source         String    @default("internal_api")
-  processedCount Int?
-  result         Json?
-  error          String?
-  startedAt      DateTime  @default(now())
-  completedAt    DateTime?
-  createdAt      DateTime  @default(now())
+  id                 String    @id @default(cuid())
+  jobKey             String
+  status             String    @default("running")
+  source             String    @default("internal_api")
+  processedCount     Int?
+  result             Json?
+  error              String?
+  startedAt          DateTime  @default(now())
+  completedAt        DateTime?
+  createdAt          DateTime  @default(now())
+  autoFixAttemptedAt DateTime?
 
   @@index([jobKey, startedAt])
   @@index([jobKey, status, startedAt])
   @@index([status, startedAt])
+  @@index([jobKey, status, autoFixAttemptedAt])
 }
 
 model AdminOperationalCheckpoint {
