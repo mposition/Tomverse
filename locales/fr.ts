@@ -109,6 +109,7 @@ export const fr = {
         quickSummaryNoVerificationItems: "Aucun point précis à vérifier n’a été identifié.",
         quickSummaryDisclaimer: "Cette analyse IA compare uniquement les réponses fournies. Elle ne recherche pas sur le Web, ne vérifie pas les faits auprès de sources externes et ne garantit pas la bonne réponse.",
         welcome: "Bonjour ! Comment puis-je vous aider aujourd'hui ?",
+        welcomeBack: "Content de vous revoir, {name}",
         guestWelcome: "Bonjour ! Vous êtes en mode invité. Posez votre question.",
         inputPlaceholder: "Posez votre question...",
         inactivePanel: "Aucun panneau IA actif.",

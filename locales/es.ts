@@ -109,6 +109,7 @@ export const es = {
         quickSummaryNoVerificationItems: "No se identificó ningún elemento específico que verificar.",
         quickSummaryDisclaimer: "Este análisis de IA solo compara las respuestas proporcionadas. No busca en la web, no verifica hechos externamente ni garantiza la respuesta correcta.",
         welcome: "¡Hola! ¿En qué puedo ayudarte hoy?",
+        welcomeBack: "Qué bueno verte de nuevo, {name}",
         guestWelcome: "¡Hola! Estás en modo invitado. Escribe tu pregunta.",
         inputPlaceholder: "Pregunta lo que quieras...",
         inactivePanel: "No hay panel de IA activo.",

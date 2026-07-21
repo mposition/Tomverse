@@ -37,6 +37,44 @@ type ChatMessageListProps = {
 };
 type MarkdownCodeProps = ComponentPropsWithoutRef<"code"> & ExtraProps;
 
+export function ModeDisclosureBanner({
+  isPrivate,
+  isGuestMode,
+}: {
+  isPrivate?: boolean;
+  isGuestMode?: boolean;
+}) {
+  const { t } = useLanguage();
+
+  return (
+    <>
+      {isPrivate && (
+        <div className="mb-3 rounded-2xl border border-purple-200 bg-purple-50/80 p-3 text-center text-xs text-purple-700 shadow-sm animate-fadeIn dark:border-purple-800/50 dark:bg-purple-950/30 dark:text-purple-300 md:mb-4 md:p-4 md:text-sm">
+          <p className="mb-1.5 flex items-center justify-center gap-2 font-bold text-purple-800 dark:text-purple-200">
+            <Lock className="h-4 w-4" /> {t("chat.onPrivateMode")}
+          </p>
+          <p className="break-keep text-xs opacity-90 dark:opacity-80">
+            {t("chat.privateModeMessage")}
+          </p>
+        </div>
+      )}
+
+      {isGuestMode && (
+        <div className="mb-3 rounded-2xl border border-blue-200 bg-blue-50/80 p-3 text-center text-xs text-blue-700 shadow-sm animate-fadeIn dark:border-blue-800/50 dark:bg-blue-950/30 dark:text-blue-300 md:mb-4 md:p-4 md:text-sm">
+          <p className="mb-1.5 flex items-center justify-center gap-2 font-bold text-blue-800 dark:text-blue-200">
+            <UserRound className="h-4 w-4" /> {t("chat.onGuestMode")}
+          </p>
+          <p className="break-keep text-xs opacity-90 dark:opacity-80">
+            {t("chat.guestModeMessage")}
+            <br />
+            <span className="font-semibold text-blue-600 dark:text-blue-400">{t("chat.guestModeLimitMessage")}</span>
+          </p>
+        </div>
+      )}
+    </>
+  );
+}
+
 const getAttachmentLabel = (attachment: ChatAttachment) => {
   const extension = attachment.name.split(".").pop();
   return extension && extension !== attachment.name
@@ -249,28 +287,7 @@ export function ChatMessageList({
       >
         <div className="mx-auto flex w-full max-w-4xl flex-col gap-3.5 pb-3 md:gap-5 md:pb-4">
           
-          {isPrivate && (
-            <div className="mb-3 rounded-2xl border border-purple-200 bg-purple-50/80 p-3 text-center text-xs text-purple-700 shadow-sm animate-fadeIn dark:border-purple-800/50 dark:bg-purple-950/30 dark:text-purple-300 md:mb-4 md:p-4 md:text-sm">
-                <p className="mb-1.5 flex items-center justify-center gap-2 font-bold text-purple-800 dark:text-purple-200">
-                              <Lock className="h-4 w-4" /> {t("chat.onPrivateMode")}
-              </p>
-              <p className="break-keep text-xs opacity-90 dark:opacity-80">
-                              {t("chat.privateModeMessage")}
-              </p>
-            </div>
-          )}
-
-          {isGuestMode && (
-            <div className="mb-3 rounded-2xl border border-blue-200 bg-blue-50/80 p-3 text-center text-xs text-blue-700 shadow-sm animate-fadeIn dark:border-blue-800/50 dark:bg-blue-950/30 dark:text-blue-300 md:mb-4 md:p-4 md:text-sm">
-              <p className="mb-1.5 flex items-center justify-center gap-2 font-bold text-blue-800 dark:text-blue-200">
-                              <UserRound className="h-4 w-4" /> {t("chat.onGuestMode")}
-              </p>
-              <p className="break-keep text-xs opacity-90 dark:opacity-80">
-                              {t("chat.guestModeMessage")}<br/>
-                              <span className="font-semibold text-blue-600 dark:text-blue-400">{t("chat.guestModeLimitMessage")}</span>
-              </p>
-            </div>
-          )}          
+          <ModeDisclosureBanner isPrivate={isPrivate} isGuestMode={isGuestMode} />
 
           {messages.map((msg, idx) => {
             const isUser = msg.role === "user";

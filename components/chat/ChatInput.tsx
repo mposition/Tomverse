@@ -292,6 +292,7 @@ type ChatInputProps = {
   disabled?: boolean;
   isSending?: boolean;
   focusToken?: number;
+  isNewConversation?: boolean;
   selectedModels: string[];
   disabledModelIds?: string[];
   isGuestLimitReached?: boolean;
@@ -385,6 +386,7 @@ export function ChatInput({
   disabled = false,
   isSending = false,
   focusToken,
+  isNewConversation = true,
   selectedModels,
   disabledModelIds = [],
   isGuestLimitReached = false,
@@ -1617,7 +1619,7 @@ export function ChatInput({
               </ol>
             </section>
           )}
-          {!value.trim() && attachments.length === 0 && (
+          {isNewConversation && !value.trim() && attachments.length === 0 && (
             <div className="mb-2 flex max-w-full gap-2 overflow-x-auto overscroll-x-contain pb-1 md:flex-wrap md:overflow-visible md:pb-0">
               {personalizedPrompt && (
                 <button

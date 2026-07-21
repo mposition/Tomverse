@@ -91,6 +91,7 @@ export const ko = {
     },
     chat: {
         welcome: "안녕하세요! 무엇을 도와드릴까요?",
+        welcomeBack: "{name}님, 다시 오셨군요",
         guestWelcome: "안녕하세요! 현재 게스트 모드입니다. 질문을 입력해 주세요.",
         inputPlaceholder: "무엇을 도와드릴까요?",
         inactivePanel: "활성화된 AI 패널이 없습니다.",

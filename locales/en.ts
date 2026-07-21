@@ -91,6 +91,7 @@ export const en = {
     },
     chat: {
         welcome: "Hello! How can I help you today?",
+        welcomeBack: "Back at it, {name}",
         guestWelcome: "Hello! You are currently in guest mode. Please enter your question.",
         inputPlaceholder: "Ask anything...",
         inactivePanel: "No active AI panel.",

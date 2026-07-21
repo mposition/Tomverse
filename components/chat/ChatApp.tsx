@@ -1,12 +1,12 @@
 ﻿"use client";
 
 import { memo, useCallback, useEffect, useRef, useState } from "react";
-import { ChatMessageList } from "@/components/chat/ChatMessageList";
+import { ChatMessageList, ModeDisclosureBanner } from "@/components/chat/ChatMessageList";
 import { Message, type ChatAttachment } from "@/components/chat/types";
 import { useSession } from "next-auth/react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { useTurnstile } from "@/components/chat/useTurnstile";
-import { ArrowUp, PauseCircle } from "lucide-react";
+import { ArrowUp, Bot, PauseCircle } from "lucide-react";
 import {
   formatChatCostSafetyDetails,
   isChatCostSafetyCode,
@@ -37,6 +37,8 @@ type ChatAppProps = {
   isPanelDisabled?: boolean;
   isGuestMode?: boolean;
   hideModelOnlyInput?: boolean;
+  useCenteredWelcome?: boolean;
+  onEmptyStateChange?: (modelId: string, isEmpty: boolean) => void;
   onStatusChange?: (
     modelId: string,
     status: "idle" | "loading" | "responding" | "error" | "paused"
@@ -57,6 +59,8 @@ function ChatAppComponent({
   isPanelDisabled = false,
   isGuestMode = false,
   hideModelOnlyInput = false,
+  useCenteredWelcome = false,
+  onEmptyStateChange,
   onStatusChange,
   onResponseComplete,
   onFollowupSent,
@@ -122,6 +126,20 @@ function ChatAppComponent({
     );
     onStatusChange?.(modelId, hasError ? "error" : "idle");
   }, [isPanelDisabled, isSending, messages, modelId, onStatusChange]);
+
+  const isConversationEmpty =
+    messages.length === 0 || (messages.length === 1 && messages[0]?.id === "welcome");
+
+  useEffect(() => {
+    if (!isCurrentMessageViewLoaded) return;
+    onEmptyStateChange?.(modelId, isConversationEmpty);
+  }, [isCurrentMessageViewLoaded, isConversationEmpty, modelId, onEmptyStateChange]);
+
+  const welcomeGreeting = (() => {
+    if (isGuestMode) return t("chat.guestWelcome");
+    const firstName = session?.user?.name?.split(" ")[0];
+    return firstName ? t("chat.welcomeBack").replace("{name}", firstName) : t("chat.welcome");
+  })();
 
   const setAssistantMessage = useCallback((id: string, content: string, status?: Message["status"]) => {
     setMessages((prev) =>
@@ -607,8 +625,21 @@ function ChatAppComponent({
         <div className="flex h-full items-center justify-center text-xs text-zinc-500">
           {t("auth.loading")}
         </div>
+      ) : useCenteredWelcome && isConversationEmpty ? (
+        <div
+          data-testid="chat-empty-state"
+          className="flex h-full flex-col items-center justify-center px-6 text-center"
+        >
+          <ModeDisclosureBanner isPrivate={isPrivate} isGuestMode={isGuestMode} />
+          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-3xl bg-blue-500/10 text-blue-500">
+            <Bot className="h-6 w-6" />
+          </div>
+          <p className="text-xl font-bold text-zinc-800 dark:text-zinc-100 sm:text-2xl">
+            {welcomeGreeting}
+          </p>
+        </div>
       ) : <ChatMessageList
-        messages={messages}
+        messages={useCenteredWelcome ? messages.filter((message) => message.id !== "welcome") : messages}
         isPrivate={isPrivate}
         isGuestMode={isGuestMode}
         onRetryLast={handleRetryLast}

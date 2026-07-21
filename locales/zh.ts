@@ -91,6 +91,7 @@ export const zh = {
     },
     chat: {
         welcome: "你好！我能帮你做些什么？",
+        welcomeBack: "欢迎回来，{name}",
         guestWelcome: "你好！你当前正在使用访客模式。请输入你的问题。",
         inputPlaceholder: "我能帮你做些什么？",
         inactivePanel: "没有启用的 AI 面板。",

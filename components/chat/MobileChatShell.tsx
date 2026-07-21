@@ -122,6 +122,7 @@ export function MobileChatShell({
     selectedModels[0] || null
   );
   const [modelStatuses, setModelStatuses] = useState<Record<string, ModelRuntimeStatus>>({});
+  const [modelEmptyStates, setModelEmptyStates] = useState<Record<string, boolean>>({});
   const resolvedActiveModelId =
     activeModelId && selectedModels.includes(activeModelId)
       ? activeModelId
@@ -133,6 +134,15 @@ export function MobileChatShell({
         current[modelId] === nextStatus
           ? current
           : { ...current, [modelId]: nextStatus }
+      );
+    },
+    []
+  );
+
+  const handleEmptyStateChange = useCallback(
+    (modelId: string, isEmpty: boolean) => {
+      setModelEmptyStates((current) =>
+        current[modelId] === isEmpty ? current : { ...current, [modelId]: isEmpty }
       );
     },
     []
@@ -227,6 +237,9 @@ export function MobileChatShell({
     () => AVAILABLE_MODELS.find((model) => model.id === resolvedActiveModelId),
     [AVAILABLE_MODELS, resolvedActiveModelId]
   );
+  const isActiveConversationEmpty = resolvedActiveModelId
+    ? modelEmptyStates[resolvedActiveModelId] ?? true
+    : true;
   const currentConversation = conversations.find(
     (conversation) => conversation.id === currentChatId
   );
@@ -470,6 +483,8 @@ export function MobileChatShell({
                   isGuestMode={isGuestMode}
                   onBeforeSend={onBeforeModelSend}
                   hideModelOnlyInput
+                  useCenteredWelcome
+                  onEmptyStateChange={handleEmptyStateChange}
                   onStatusChange={handleModelStatusChange}
                   onResponseComplete={onResponseComplete}
                   onFollowupSent={onFollowupSent}
@@ -503,6 +518,7 @@ export function MobileChatShell({
         onCancel={() => {}}
         isSending={isSending}
         focusToken={focusToken}
+        isNewConversation={isActiveConversationEmpty}
         selectedModels={selectedModels}
         disabledModelIds={disabledPanels}
         onToggleModel={onToggleModel}

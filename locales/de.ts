@@ -109,6 +109,7 @@ export const de = {
         quickSummaryNoVerificationItems: "Es wurde kein konkreter Prüfpunkt festgestellt.",
         quickSummaryDisclaimer: "Diese KI-Analyse vergleicht nur die bereitgestellten Antworten. Sie durchsucht nicht das Web, prüft Fakten nicht extern und garantiert keine richtige Antwort.",
         welcome: "Hallo! Wie kann ich Ihnen heute helfen?",
+        welcomeBack: "Schön, dich wiederzusehen, {name}",
         guestWelcome: "Hallo! Sie nutzen den Gastmodus. Stellen Sie Ihre Frage.",
         inputPlaceholder: "Fragen Sie alles...",
         inactivePanel: "Kein aktives KI-Panel.",
