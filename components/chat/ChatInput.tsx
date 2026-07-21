@@ -1591,6 +1591,9 @@ export function ChatInput({
               </button>
               </div>
               <p className="truncate text-[10px] leading-4 text-blue-600/80 dark:text-blue-300/70">
+                {t("onboarding.filesBody")}
+              </p>
+              <p className="truncate text-[10px] leading-4 text-blue-600/80 dark:text-blue-300/70">
                 {t("onboarding.privateBody")}{" "}
                 <a
                   href={`/auth/signin?callbackUrl=${encodeURIComponent(signInCallbackUrl)}`}
@@ -1616,11 +1619,7 @@ export function ChatInput({
                   {personalizedPrompt}
                 </button>
               )}
-              {PROMPT_SUGGESTIONS.filter(
-                (suggestion) => canAttach || suggestion !== "chat.promptSummarizeDocument"
-              )
-                .slice(0, guestPreviewMode ? 3 : undefined)
-                .map((suggestion) => (
+              {PROMPT_SUGGESTIONS.slice(0, guestPreviewMode ? 3 : undefined).map((suggestion) => (
                 <button
                   key={suggestion}
                   type="button"

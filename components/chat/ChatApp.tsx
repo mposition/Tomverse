@@ -39,7 +39,6 @@ type ChatAppProps = {
   hideModelOnlyInput?: boolean;
   useCenteredWelcome?: boolean;
   onEmptyStateChange?: (modelId: string, isEmpty: boolean) => void;
-  onAnswerStateChange?: (modelId: string, hasAnswer: boolean) => void;
   onStatusChange?: (
     modelId: string,
     status: "idle" | "loading" | "responding" | "error" | "paused"
@@ -62,7 +61,6 @@ function ChatAppComponent({
   hideModelOnlyInput = false,
   useCenteredWelcome = false,
   onEmptyStateChange,
-  onAnswerStateChange,
   onStatusChange,
   onResponseComplete,
   onFollowupSent,
@@ -136,19 +134,6 @@ function ChatAppComponent({
     if (!isCurrentMessageViewLoaded) return;
     onEmptyStateChange?.(modelId, isConversationEmpty);
   }, [isCurrentMessageViewLoaded, isConversationEmpty, modelId, onEmptyStateChange]);
-
-  const hasCompletedAnswer = messages.some(
-    (message) =>
-      message.role === "assistant" &&
-      message.id !== "welcome" &&
-      message.status === "normal" &&
-      message.content.trim().length > 0
-  );
-
-  useEffect(() => {
-    if (!isCurrentMessageViewLoaded) return;
-    onAnswerStateChange?.(modelId, hasCompletedAnswer);
-  }, [isCurrentMessageViewLoaded, hasCompletedAnswer, modelId, onAnswerStateChange]);
 
   const welcomeGreeting = session?.user ? t("chat.welcomeBack") : t("chat.welcome");
 

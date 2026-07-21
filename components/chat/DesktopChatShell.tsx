@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useState } from "react";
+import React from "react";
 import { ChatApp } from "@/components/chat/ChatApp";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { ModelLogo } from "@/components/chat/ModelLogo";
@@ -113,24 +113,6 @@ export function DesktopChatShell({
   } = useModelCatalog();
   const { t, lang } = useLanguage();
   const helpCopy = chatHelpCopy[lang];
-  const [modelAnswerStates, setModelAnswerStates] = useState<Record<string, boolean>>({});
-  const conversationStateKey = currentChatId || "new";
-  const answerStateKey = useCallback(
-    (modelId: string) => `${conversationStateKey}:${modelId}`,
-    [conversationStateKey]
-  );
-  const handleAnswerStateChange = useCallback(
-    (modelId: string, hasAnswer: boolean) => {
-      const key = answerStateKey(modelId);
-      setModelAnswerStates((current) =>
-        current[key] === hasAnswer ? current : { ...current, [key]: hasAnswer }
-      );
-    },
-    [answerStateKey]
-  );
-  const completedAnswerCount = selectedModels.filter(
-    (modelId) => modelAnswerStates[answerStateKey(modelId)]
-  ).length;
 
   return (
     <main
@@ -284,7 +266,6 @@ export function DesktopChatShell({
                   isGuestMode={isGuestMode}
                   onBeforeSend={onBeforeModelSend}
                   onResponseComplete={onResponseComplete}
-                  onAnswerStateChange={handleAnswerStateChange}
                   onFollowupSent={onFollowupSent}
                   hideModelOnlyInput={selectedModels.length <= 1}
                 />
@@ -293,7 +274,7 @@ export function DesktopChatShell({
           })}
         </div>
 
-        {selectedModels.length > 1 && currentChatId && completedAnswerCount >= 2 && (
+        {selectedModels.length > 1 && currentChatId && (
           <div className="flex gap-2 border-t border-zinc-200 bg-white px-4 py-2 dark:border-zinc-800 dark:bg-zinc-950">
             <button
               type="button"

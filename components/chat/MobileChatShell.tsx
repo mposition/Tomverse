@@ -124,7 +124,6 @@ export function MobileChatShell({
   );
   const [modelStatuses, setModelStatuses] = useState<Record<string, ModelRuntimeStatus>>({});
   const [modelEmptyStates, setModelEmptyStates] = useState<Record<string, boolean>>({});
-  const [modelAnswerStates, setModelAnswerStates] = useState<Record<string, boolean>>({});
   const [modeSheet, setModeSheet] = useState<"guest" | "private" | null>(null);
   const resolvedActiveModelId =
     activeModelId && selectedModels.includes(activeModelId)
@@ -152,16 +151,6 @@ export function MobileChatShell({
       const key = emptyStateKey(modelId);
       setModelEmptyStates((current) =>
         current[key] === isEmpty ? current : { ...current, [key]: isEmpty }
-      );
-    },
-    [emptyStateKey]
-  );
-
-  const handleAnswerStateChange = useCallback(
-    (modelId: string, hasAnswer: boolean) => {
-      const key = emptyStateKey(modelId);
-      setModelAnswerStates((current) =>
-        current[key] === hasAnswer ? current : { ...current, [key]: hasAnswer }
       );
     },
     [emptyStateKey]
@@ -259,9 +248,6 @@ export function MobileChatShell({
   const isActiveConversationEmpty = resolvedActiveModelId
     ? modelEmptyStates[emptyStateKey(resolvedActiveModelId)] ?? true
     : true;
-  const completedAnswerCount = selectedModels.filter(
-    (modelId) => modelAnswerStates[emptyStateKey(modelId)]
-  ).length;
   const currentConversation = conversations.find(
     (conversation) => conversation.id === currentChatId
   );
@@ -424,7 +410,7 @@ export function MobileChatShell({
         </div>
       )}
 
-      {selectedModels.length > 1 && currentChatId && completedAnswerCount >= 2 && (
+      {selectedModels.length > 1 && currentChatId && (
         <div className={`grid shrink-0 gap-2 border-b border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950 ${!isGuestMode && currentChatId !== "private-chat" ? "grid-cols-2" : "grid-cols-1"}`}>
           <button
             type="button"
@@ -517,7 +503,6 @@ export function MobileChatShell({
                   hideModelOnlyInput
                   useCenteredWelcome
                   onEmptyStateChange={handleEmptyStateChange}
-                  onAnswerStateChange={handleAnswerStateChange}
                   onStatusChange={handleModelStatusChange}
                   onResponseComplete={onResponseComplete}
                   onFollowupSent={onFollowupSent}
