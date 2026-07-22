@@ -380,8 +380,27 @@ export default function Home() {
   const maxSelectableModels = isGuestMode
     ? APP_DEFAULTS.maxGuestSelectedModels
     : accountUsage?.limits.maxModels || APP_DEFAULTS.maxSelectedModels;
-  const [guestMessageCount, setGuestMessageCount] = useState(0);
-  const MAX_GUEST_MESSAGES = 20;
+  // Server-authoritative: mirrors the exact day-bucket acquireChatAccess
+  // enforces, refreshed after every completed response (see
+  // refreshGuestUsage below) instead of a client-only counter that could
+  // show "plenty left" while the server's real bucket was already spent.
+  const [guestUsage, setGuestUsage] = useState<{ used: number; limit: number } | null>(null);
+  const guestMessageCount = guestUsage?.used ?? 0;
+  const MAX_GUEST_MESSAGES = guestUsage?.limit ?? 20;
+  const refreshGuestUsage = useCallback(() => {
+    if (!isGuestMode) return;
+    fetch("/api/user/guest-usage", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && typeof data.used === "number" && typeof data.limit === "number") {
+          setGuestUsage({ used: data.used, limit: data.limit });
+        }
+      })
+      .catch(() => {
+        // Keep the last known snapshot; the next successful refresh (after
+        // the next response, or the periodic one below) will correct it.
+      });
+  }, [isGuestMode]);
   const currentAccessPlan = isGuestMode ? "Guest" : accountUsage?.plan ?? "Free";
   const planLockedModelIds = useMemo(
     () =>
@@ -869,17 +888,7 @@ export default function Home() {
       if (cancelled) return;
       setUserDefaultEngine(guestDefaultModelId);
       setSelectedModels(guestDefaultSelectedModels);
-      const today = new Date().toDateString();
-      const storedDate = localStorage.getItem("guest_date");
-      
-      if (storedDate !== today) {
-        localStorage.setItem("guest_date", today);
-        localStorage.setItem("guest_count", "0");
-        setGuestMessageCount(0);
-      } else {
-        const count = parseInt(localStorage.getItem("guest_count") || "0", 10);
-        setGuestMessageCount(count);
-      }
+      refreshGuestUsage();
 
       const savedConversations = localStorage.getItem("guest_conversations");
       if (savedConversations) {
@@ -909,7 +918,14 @@ export default function Home() {
         cancelled = true;
       };
     }
-  }, [guestDefaultModelId, guestDefaultSelectedModels, isGuestMode, isGuestSettingsLoaded, t]);  
+  }, [
+    guestDefaultModelId,
+    guestDefaultSelectedModels,
+    isGuestMode,
+    isGuestSettingsLoaded,
+    refreshGuestUsage,
+    t,
+  ]);
 
   useEffect(() => {
     if (isGuestMode && isConversationsLoaded && conversations.length > 0) {
@@ -1696,15 +1712,7 @@ export default function Home() {
         latestLocalComparisonPromptRef.current = promptId;
       }
       if (isGuestMode) {
-        const respondingModel = AVAILABLE_MODELS.find((item) => item.id === modelId);
-        const modelCredits = respondingModel
-          ? getModelUsageProfile(respondingModel).credits
-          : 1;
-        setGuestMessageCount((current) => {
-          const next = Math.min(MAX_GUEST_MESSAGES, current + modelCredits);
-          localStorage.setItem("guest_count", next.toString());
-          return next;
-        });
+        refreshGuestUsage();
         if (
           isGuestPreviewEntry &&
           responseText.trim() &&
@@ -1750,11 +1758,11 @@ export default function Home() {
     },
     [
       activeModelCount,
-      AVAILABLE_MODELS,
       awaitingPostResponseTips,
       isGuestPreviewEntry,
       isGuestMode,
       maybeShowValueUpgradePrompt,
+      refreshGuestUsage,
     ]
   );
 

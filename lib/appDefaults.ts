@@ -56,10 +56,6 @@ export const APP_DEFAULTS = {
   maxGuestSelectedModels: 3,
   maxGuestMessages: 20,
 
-  guestDateStorageKey: "guest_date",
-  guestCountStorageKey: "guest_count",
-
-  guestChatId: "guest-chat",
   privateChatId: "private-chat",
 } as const;
 

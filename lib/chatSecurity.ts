@@ -443,6 +443,35 @@ export const identifyChatCaller = (
     };
 };
 
+// Server-authoritative guest usage snapshot: reads the exact same
+// ChatUsageBucket day-period row that acquireChatAccess enforces, keyed by
+// the same signed guest cookie, instead of a client-only counter that can
+// drift arbitrarily from what the server actually allows.
+export const getGuestUsageSnapshot = async (request: Request) => {
+    const access = identifyChatCaller(request, null);
+    const now = new Date();
+    const dayStart = periodStart("day", now);
+    const dayLimit = limitsFor(access).find((rule) => rule.period === "day")?.limit ?? 0;
+    const bucket = await prisma.chatUsageBucket.findUnique({
+        where: {
+            key_period_periodStart: {
+                key: access.subjectKey,
+                period: "day",
+                periodStart: dayStart,
+            },
+        },
+        select: { count: true },
+    });
+    const used = bucket?.count || 0;
+    return {
+        used,
+        limit: dayLimit,
+        remaining: Math.max(0, dayLimit - used),
+        resetsAt: new Date(dayStart.getTime() + 86_400_000).toISOString(),
+        setCookie: access.setCookie,
+    };
+};
+
 const periodStart = (period: Period, now: Date) => {
     if (period === "minute") {
         return new Date(
