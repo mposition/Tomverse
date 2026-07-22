@@ -9,7 +9,7 @@ test("desktop exposes stable QA contracts", async ({ page }) => {
   await expect(page.getByTestId("desktop-chat-shell")).toBeVisible();
   await expect(page.getByTestId("chat-input")).toBeVisible();
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
-  await expect(page.getByTestId("chat-empty-state")).toBeVisible();
+  await expect(page.getByTestId("chat-empty-state").first()).toBeVisible();
 
   const guestGuide = page.getByTestId("guest-quick-start");
   await expect(guestGuide).toContainText("up to 3 free models");

@@ -622,6 +622,7 @@ export function MobileChatShell({
         onClose={() => setModeSheet(null)}
         guestMessageCount={guestMessageCount}
         maxGuestMessages={maxGuestMessages}
+        activeModelCount={selectedModels.length}
       />
     </main>
   );
