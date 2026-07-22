@@ -22,7 +22,6 @@ import {
   Lock,
   Menu,
   Share2,
-  Shield,
   Sparkles,
   SquarePen,
   X,
@@ -67,6 +66,7 @@ type MobileChatShellProps = {
   onDownload: (id: string, title: string) => void;
   onTogglePrivateMode: () => void;
   onToggleModel: (modelId: string) => boolean;
+  onQuickCompare?: () => void;
   onSubmit: () => void;
   onBeforeModelSend: (chatId: string) => Promise<boolean>;
   onCompareSummary: () => void;
@@ -104,6 +104,7 @@ export function MobileChatShell({
   onDownload,
   onTogglePrivateMode,
   onToggleModel,
+  onQuickCompare,
   onSubmit,
   onBeforeModelSend,
   onCompareSummary,
@@ -314,16 +315,6 @@ export function MobileChatShell({
         )}
         </div>
         <div className="mt-1.5 flex min-h-6 max-w-full gap-1.5 overflow-x-auto overscroll-x-contain">
-          {isPrivateMode && (
-            <button
-              type="button"
-              onClick={() => setModeSheet("private")}
-              className="inline-flex shrink-0 items-center gap-1 rounded-full bg-purple-500/10 px-2 py-1 text-[10px] font-bold text-purple-600 dark:text-purple-300"
-            >
-              <Shield className="h-3 w-3" />
-              Private
-            </button>
-          )}
           {isGuestMode && (
             <button
               type="button"
@@ -374,6 +365,24 @@ export function MobileChatShell({
           )}
         </div>
       </header>
+
+      {isPrivateMode && (
+        <div className="flex shrink-0 items-center justify-between gap-2 bg-purple-500/10 px-3 py-1.5 text-purple-700 dark:text-purple-300">
+          <span className="flex min-w-0 items-center gap-1.5 text-[11px] font-semibold">
+            <Lock className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">
+              {t("chat.privateModeHeaderTitle")} · {t("chat.privateModeHeaderNotice")}
+            </span>
+          </span>
+          <button
+            type="button"
+            onClick={onTogglePrivateMode}
+            className="shrink-0 rounded-full border border-purple-300 px-2 py-0.5 text-[10px] font-bold text-purple-700 dark:border-purple-700 dark:text-purple-300"
+          >
+            {t("chat.privateModeExit")}
+          </button>
+        </div>
+      )}
 
       <ProviderStatusBanner selectedModels={selectedModels} compact onToggleModel={onToggleModel} />
 
@@ -551,6 +560,7 @@ export function MobileChatShell({
         selectedModels={selectedModels}
         disabledModelIds={disabledPanels}
         onToggleModel={onToggleModel}
+        onQuickCompare={onQuickCompare}
         attachments={attachments}
         onAttachmentsChange={setAttachments}
         canAttach={!isGuestMode}

@@ -296,6 +296,7 @@ type ChatInputProps = {
   disabledModelIds?: string[];
   isGuestLimitReached?: boolean;
   onToggleModel: (modelId: string) => boolean;
+  onQuickCompare?: () => void;
   attachments: ChatAttachment[];
   onAttachmentsChange: (attachments: ChatAttachment[]) => void;
   canAttach?: boolean;
@@ -391,6 +392,7 @@ export function ChatInput({
   disabledModelIds = [],
   isGuestLimitReached = false,
   onToggleModel,
+  onQuickCompare,
   attachments,
   onAttachmentsChange,
   canAttach: canAttachProp = true,
@@ -1630,6 +1632,9 @@ export function ChatInput({
                   onClick={() => {
                     dismissGuestQuickStart();
                     onChange(t(suggestion));
+                    if (suggestion === "chat.promptCompareModels") {
+                      onQuickCompare?.();
+                    }
                   }}
                   className="shrink-0 touch-manipulation rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs font-semibold text-zinc-600 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800"
                 >
