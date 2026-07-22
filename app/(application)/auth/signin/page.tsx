@@ -1,7 +1,7 @@
 "use client";
 
-import { signIn } from "next-auth/react";
-import { useSearchParams } from "next/navigation";
+import { signIn, useSession } from "next-auth/react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { useTurnstile } from "@/components/chat/useTurnstile";
@@ -20,12 +20,20 @@ const PROVIDER_ERROR_KEYS: Record<string, string> = {
 
 function SignInButtons() {
     const searchParams = useSearchParams();
+    const router = useRouter();
+    const { status } = useSession();
     const { t, lang } = useLanguage();
     const callbackUrl = withChatLanguage(searchParams.get("callbackUrl"), lang);
     const adminReauthentication =
         searchParams.get("reason") === "admin-session-expired";
     const providerError = searchParams.get("error");
     const pageViewTrackedRef = useRef(false);
+
+    useEffect(() => {
+        if (status === "authenticated") {
+            router.replace(callbackUrl);
+        }
+    }, [callbackUrl, router, status]);
 
     const [step, setStep] = useState<"email" | "code">("email");
     const [email, setEmail] = useState("");
@@ -106,6 +114,14 @@ function SignInButtons() {
             setIsVerifyingCode(false);
         }
     };
+
+    if (status === "authenticated" || status === "loading") {
+        return (
+            <div className="mt-8 text-center text-sm text-zinc-400 dark:text-zinc-500">
+                {t("auth.loading")}
+            </div>
+        );
+    }
 
     return (
         <div className="mt-8 space-y-4">
