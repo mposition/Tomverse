@@ -254,14 +254,6 @@ export function MobileChatShell({
   const isConversationEmpty =
     selectedModels.length > 0 &&
     selectedModels.every((modelId) => modelEmptyStates[emptyStateKey(modelId)] ?? true);
-  const recentConversations = useMemo(
-    () =>
-      conversations
-        .filter((conversation) => !conversation.isLocked)
-        .slice(0, 3)
-        .map((conversation) => ({ id: conversation.id, title: conversation.title })),
-    [conversations]
-  );
   const currentConversation = conversations.find(
     (conversation) => conversation.id === currentChatId
   );
@@ -511,7 +503,7 @@ export function MobileChatShell({
           <div className="absolute inset-0 z-10 bg-zinc-50 dark:bg-zinc-950">
             <ChatWelcomeScreen
               isPrivate={isPrivateMode}
-              recentConversations={recentConversations}
+              recentConversations={[]}
               onSelectConversation={onSelectConversation}
               inputSlotRef={setWelcomeInputSlot}
             />
@@ -592,9 +584,17 @@ export function MobileChatShell({
             guestMessageCount={guestMessageCount}
             maxGuestMessages={maxGuestMessages}
             variant={isConversationEmpty ? "floating" : "bar"}
+            hideDisclaimer
           />,
           inputPortalTarget
         )}
+
+      <p
+        data-testid="chat-ai-disclaimer-mobile"
+        className="shrink-0 px-2 pb-[calc(0.4rem+env(safe-area-inset-bottom))] pt-1 text-center text-[10px] leading-4 text-zinc-400 dark:text-zinc-500"
+      >
+        {t("chat.aiDisclaimer")}
+      </p>
 
       {isDrawerOpen && (
         <div

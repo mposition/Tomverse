@@ -303,6 +303,10 @@ type ChatInputProps = {
   isGuestMode?: boolean;
   guestPreviewMode?: boolean;
   variant?: "bar" | "floating";
+  // MobileChatShell renders its own copy pinned to the true screen bottom
+  // (independent of the composer's floating/docked position) instead of
+  // this one, which always sits directly under the input box.
+  hideDisclaimer?: boolean;
 };
 
 type GooglePickerConfig = {
@@ -401,6 +405,7 @@ export function ChatInput({
   isGuestMode = false,
   guestPreviewMode = false,
   variant = "bar",
+  hideDisclaimer = false,
 }: ChatInputProps) {
   const {
     models: AVAILABLE_MODELS,
@@ -2400,12 +2405,14 @@ export function ChatInput({
         />
 
       </div>
-      <p
-        data-testid="chat-ai-disclaimer"
-        className="mt-1.5 px-2 text-center text-[10px] leading-4 text-zinc-400 dark:text-zinc-500 md:text-[11px]"
-      >
-        {t("chat.aiDisclaimer")}
-      </p>
+      {!hideDisclaimer && (
+        <p
+          data-testid="chat-ai-disclaimer"
+          className="mt-1.5 px-2 text-center text-[10px] leading-4 text-zinc-400 dark:text-zinc-500 md:text-[11px]"
+        >
+          {t("chat.aiDisclaimer")}
+        </p>
+      )}
       </div>
       <CreditBreakdownSheet
         open={isCreditBreakdownOpen}
