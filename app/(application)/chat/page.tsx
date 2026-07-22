@@ -1541,9 +1541,26 @@ export default function Home() {
 
     if (!activeChatId) {
       if (isGuestMode) {
-        activeChatId = "guest-chat";
+        // Reuse the conversation the guest-bootstrap effect already created
+        // (and put in the sidebar's `conversations`/`guest_conversations`)
+        // instead of a hardcoded id disconnected from it -- otherwise this
+        // send saves its messages under a different key than the sidebar
+        // entry points at, so clicking that entry after a refresh only ever
+        // finds the placeholder welcome message.
+        activeChatId = conversations[0]?.id;
+        if (!activeChatId) {
+          activeChatId = `guest_${Date.now()}`;
+          const initialChat = {
+            id: activeChatId,
+            title: t("sidebar.newChat"),
+            selectedModels,
+            disabledPanels,
+          };
+          setConversations([initialChat]);
+          localStorage.setItem("guest_conversations", JSON.stringify([initialChat]));
+        }
         setCurrentChatId(activeChatId);
-      } else {      
+      } else {
       try {
         const res = await fetch("/api/conversations", {
           method: "POST",
