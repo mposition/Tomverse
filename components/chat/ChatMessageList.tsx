@@ -12,7 +12,6 @@ import {
   Bot,
   Braces,
   Check,
-  Clipboard,
   Copy,
   File as FileIcon,
   FileText,
@@ -26,13 +25,42 @@ import { Message, type ChatAttachment } from "@/components/chat/types";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { useLanguage } from "@/components/LanguageProvider";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
+import { FeedbackButton } from "@/components/chat/FeedbackButton";
 
 type ChatMessageListProps = {
   messages: Message[];
   onRetryLast?: () => void;
   onRetryWithoutAttachments?: () => void;
+  onRequestCloseModel?: () => void;
+  hasMultipleActiveModels?: boolean;
+  currentModelId?: string | null;
+  currentPlan?: string | null;
 };
 type MarkdownCodeProps = ComponentPropsWithoutRef<"code"> & ExtraProps;
+
+// Codes where the fix is changing what's being asked for (fewer/cheaper
+// models, a different model) rather than repeating the same request.
+const QUOTA_ERROR_CODES = new Set([
+  "CREDIT_BALANCE_INSUFFICIENT",
+  "CREDIT_COST_ALLOWANCE_INSUFFICIENT",
+  "PLAN_DAILY_CREDIT_LIMIT_REACHED",
+  "CHAT_QUOTA_EXCEEDED",
+  "FREE_PRO_MODEL_QUOTA_EXCEEDED",
+  "INTERNAL_DAILY_COST_SAFETY_LIMIT",
+  "INTERNAL_MONTHLY_COST_SAFETY_LIMIT",
+  "PROVIDER_DAILY_SPEND_LIMIT_REACHED",
+  "PROVIDER_SPEND_LIMIT_REACHED",
+  "CHAT_CONCURRENCY_EXCEEDED",
+]);
+
+type ErrorCategory = "quota" | "model_retired" | "attachment" | "generic";
+
+const classifyError = (message: Message): ErrorCategory => {
+  if (message.errorCode === "MODEL_RETIRED") return "model_retired";
+  if (message.errorCode && QUOTA_ERROR_CODES.has(message.errorCode)) return "quota";
+  if (message.errorHadAttachments && isFileParsingError(message.content)) return "attachment";
+  return "generic";
+};
 
 const getAttachmentLabel = (attachment: ChatAttachment) => {
   const extension = attachment.name.split(".").pop();
@@ -99,6 +127,10 @@ export function ChatMessageList({
   messages,
   onRetryLast,
   onRetryWithoutAttachments,
+  onRequestCloseModel,
+  hasMultipleActiveModels = false,
+  currentModelId,
+  currentPlan,
 }: ChatMessageListProps) {
   const { models: AVAILABLE_MODELS } = useModelCatalog();
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -111,14 +143,6 @@ export function ChatMessageList({
     const { t } = useLanguage();
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const copiedResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const copyErrorDetails = async (content: string) => {
-    try {
-      await navigator.clipboard.writeText(content);
-    } catch (error) {
-      console.error("Failed to copy error details:", error);
-    }
-  };
 
   const copyMessageContent = async (messageId: string, content: string) => {
     try {
@@ -400,59 +424,82 @@ export function ChatMessageList({
                   ) : (
                     <p className="whitespace-pre-wrap">{msg.content}</p>
                   )}
-                  {!isUser && msg.status === "error" && (
-                    <div className="mt-3 border-t border-red-200 pt-3 dark:border-red-800">
-                      {isFileParsingError(msg.content) && (
-                        <div className="mb-3 rounded-xl border border-red-200 bg-white/80 p-3 text-xs leading-5 text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-100">
-                          <p className="font-black">{t("chat.fileErrorHelpTitle")}</p>
-                          <ul className="mt-1 list-disc space-y-1 pl-4">
-                            <li>{t("chat.fileErrorHelpResave")}</li>
-                            <li>{t("chat.fileErrorHelpLimit")}</li>
-                            <li>{t("chat.fileErrorHelpRetry")}</li>
-                          </ul>
-                          <Link
-                            href="/support/help-centre"
-                            className="mt-2 inline-flex font-black text-red-700 underline underline-offset-2 dark:text-red-100"
-                          >
-                            {t("chat.fileErrorHelpLink")}
-                          </Link>
+                  {!isUser && msg.status === "error" && (() => {
+                    const errorCategory = classifyError(msg);
+                    const secondaryButtonClass =
+                      "inline-flex items-center gap-2 rounded-full border border-red-200 bg-white px-3 py-1.5 text-xs font-bold text-red-700 transition-colors hover:bg-red-50 dark:border-red-800 dark:bg-red-950 dark:text-red-100 dark:hover:bg-red-900";
+                    const primaryButtonClass =
+                      "inline-flex items-center gap-2 rounded-full bg-red-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition-colors hover:bg-red-500";
+                    return (
+                      <div className="mt-3 border-t border-red-200 pt-3 dark:border-red-800">
+                        {errorCategory === "attachment" && (
+                          <div className="mb-3 rounded-xl border border-red-200 bg-white/80 p-3 text-xs leading-5 text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-100">
+                            <p className="font-black">{t("chat.fileErrorHelpTitle")}</p>
+                            <ul className="mt-1 list-disc space-y-1 pl-4">
+                              <li>{t("chat.fileErrorHelpResave")}</li>
+                              <li>{t("chat.fileErrorHelpLimit")}</li>
+                              <li>{t("chat.fileErrorHelpRetry")}</li>
+                            </ul>
+                            <Link
+                              href="/support/help-centre"
+                              className="mt-2 inline-flex font-black text-red-700 underline underline-offset-2 dark:text-red-100"
+                            >
+                              {t("chat.fileErrorHelpLink")}
+                            </Link>
+                          </div>
+                        )}
+                        <div className="flex flex-wrap items-center gap-2">
+                          {(errorCategory === "quota" || errorCategory === "model_retired") &&
+                            onRequestCloseModel && (
+                              <button
+                                type="button"
+                                onClick={onRequestCloseModel}
+                                className={primaryButtonClass}
+                              >
+                                <RotateCcw className="h-3.5 w-3.5" />
+                                {errorCategory === "quota" && hasMultipleActiveModels
+                                  ? t("chat.reduceModelCount")
+                                  : t("chat.chooseAnotherModel")}
+                              </button>
+                            )}
+                          {(errorCategory === "generic" || errorCategory === "attachment") &&
+                            onRetryLast && (
+                              <button
+                                type="button"
+                                onClick={onRetryLast}
+                                className={primaryButtonClass}
+                              >
+                                <RotateCcw className="h-3.5 w-3.5" />
+                                {t("chat.retry")}
+                              </button>
+                            )}
+                          {errorCategory === "attachment" && onRetryWithoutAttachments && (
+                            <button
+                              type="button"
+                              onClick={onRetryWithoutAttachments}
+                              className={secondaryButtonClass}
+                            >
+                              <RotateCcw className="h-3.5 w-3.5" />
+                              {t("chat.retryWithoutFiles")}
+                            </button>
+                          )}
+                          <FeedbackButton
+                            currentModelId={currentModelId}
+                            currentPlan={currentPlan}
+                            attachmentCount={msg.errorHadAttachments ? 1 : 0}
+                            rawErrorDetails={msg.content}
+                            triggerLabel={t("chat.reportError")}
+                            triggerClassName={secondaryButtonClass}
+                          />
+                          {(errorCategory === "generic" || errorCategory === "attachment") && (
+                            <span className="flex items-center text-xs font-semibold text-red-600/80 dark:text-red-200/80">
+                              {t("chat.tryAnotherModelHint")}
+                            </span>
+                          )}
                         </div>
-                      )}
-                      <div className="flex flex-wrap gap-2">
-                      {onRetryLast && (
-                        <button
-                          type="button"
-                          onClick={onRetryLast}
-                          className="inline-flex items-center gap-2 rounded-full bg-red-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition-colors hover:bg-red-500"
-                        >
-                          <RotateCcw className="h-3.5 w-3.5" />
-                          {t("chat.retry")}
-                        </button>
-                      )}
-                      {onRetryWithoutAttachments && (
-                        <button
-                          type="button"
-                          onClick={onRetryWithoutAttachments}
-                          className="inline-flex items-center gap-2 rounded-full border border-red-200 bg-white px-3 py-1.5 text-xs font-bold text-red-700 transition-colors hover:bg-red-50 dark:border-red-800 dark:bg-red-950 dark:text-red-100 dark:hover:bg-red-900"
-                        >
-                          <RotateCcw className="h-3.5 w-3.5" />
-                          {t("chat.retryWithoutFiles")}
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => void copyErrorDetails(msg.content)}
-                        className="inline-flex items-center gap-2 rounded-full border border-red-200 bg-white px-3 py-1.5 text-xs font-bold text-red-700 transition-colors hover:bg-red-50 dark:border-red-800 dark:bg-red-950 dark:text-red-100 dark:hover:bg-red-900"
-                      >
-                        <Clipboard className="h-3.5 w-3.5" />
-                        {t("chat.copyErrorDetails")}
-                      </button>
-                      <span className="flex items-center text-xs font-semibold text-red-600/80 dark:text-red-200/80">
-                        {t("chat.tryAnotherModelHint")}
-                      </span>
                       </div>
-                    </div>
-                  )}
+                    );
+                  })()}
                 </div>
               </div>
             );

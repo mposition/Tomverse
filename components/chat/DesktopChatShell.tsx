@@ -340,6 +340,8 @@ export function DesktopChatShell({
                   hideModelOnlyInput={selectedModels.length <= 1}
                   useCenteredWelcome
                   onEmptyStateChange={handleEmptyStateChange}
+                  onRequestCloseModel={() => onToggleModel(modelId)}
+                  hasMultipleActiveModels={selectedModels.length > 1}
                 />
               </div>
             );

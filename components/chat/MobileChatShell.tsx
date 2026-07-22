@@ -543,6 +543,8 @@ export function MobileChatShell({
                   onStatusChange={handleModelStatusChange}
                   onResponseComplete={onResponseComplete}
                   onFollowupSent={onFollowupSent}
+                  onRequestCloseModel={() => onToggleModel(modelId)}
+                  hasMultipleActiveModels={selectedModels.length > 1}
                 />
               </div>
             );

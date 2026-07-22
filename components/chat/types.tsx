@@ -15,6 +15,8 @@ export type Message = {
   status?: "normal" | "error" | "cancelled";
   attachments?: ChatAttachment[];
   modelId?: string;
+  errorCode?: string;
+  errorHadAttachments?: boolean;
 };
 
 export type Conversation = {

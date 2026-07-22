@@ -57,6 +57,9 @@ type ChatAppProps = {
   ) => void;
   onFollowupSent?: (modelId: string) => void;
   onBeforeSend?: (chatId: string) => Promise<boolean>;
+  onRequestCloseModel?: () => void;
+  hasMultipleActiveModels?: boolean;
+  currentPlan?: string | null;
 };
 
 function ChatAppComponent({
@@ -72,6 +75,9 @@ function ChatAppComponent({
   onResponseComplete,
   onFollowupSent,
   onBeforeSend,
+  onRequestCloseModel,
+  hasMultipleActiveModels = false,
+  currentPlan,
 }: ChatAppProps) {
   const [isMessagesLoaded, setIsMessagesLoaded] = useState(false);
   const [loadedMessageViewKey, setLoadedMessageViewKey] = useState<string | null>(null);
@@ -142,10 +148,15 @@ function ChatAppComponent({
     onEmptyStateChange?.(modelId, isConversationEmpty);
   }, [isCurrentMessageViewLoaded, isConversationEmpty, modelId, onEmptyStateChange]);
 
-  const setAssistantMessage = useCallback((id: string, content: string, status?: Message["status"]) => {
+  const setAssistantMessage = useCallback((
+    id: string,
+    content: string,
+    status?: Message["status"],
+    errorMeta?: { errorCode?: string; errorHadAttachments?: boolean }
+  ) => {
     setMessages((prev) =>
       prev.map((message) =>
-        message.id === id ? { ...message, content, status } : message
+        message.id === id ? { ...message, content, status, ...errorMeta } : message
       )
     );
   }, []);
@@ -473,7 +484,8 @@ function ChatAppComponent({
               ? `\n${t("chat.traceId")}: ${requestTraceId}`
               : ""
           }`,
-          "error"
+          "error",
+          { errorCode: "EMPTY_RESPONSE", errorHadAttachments: attachments.length > 0 }
         );
       } else {
         onResponseComplete?.(analyticsPromptId, modelId, assistantText);
@@ -542,7 +554,8 @@ function ChatAppComponent({
           }${
             traceId ? `\n${t("chat.traceId")}: ${traceId}` : ""
           }`,
-          "error"
+          "error",
+          { errorCode: errorCode || "UNKNOWN_ERROR", errorHadAttachments: attachments.length > 0 }
         );
       }	
     } finally {
@@ -671,6 +684,10 @@ function ChatAppComponent({
         messages={useCenteredWelcome ? messages.filter((message) => message.id !== "welcome") : messages}
         onRetryLast={handleRetryLast}
         onRetryWithoutAttachments={handleRetryWithoutAttachments}
+        onRequestCloseModel={onRequestCloseModel}
+        hasMultipleActiveModels={hasMultipleActiveModels}
+        currentModelId={modelId}
+        currentPlan={currentPlan}
       />}
                   </div>
                   {isGuestMode ? (
