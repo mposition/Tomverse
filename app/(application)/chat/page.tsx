@@ -494,6 +494,34 @@ export default function Home() {
     return clampGuestSelectedModels(trio);
   }, [clampGuestSelectedModels, guestDefaultModelId, isGuestEligibleModel]);
 
+  const isNewAccountEligibleModel = useCallback(
+    (modelId: string) => {
+      const model = getModel(modelId);
+      return Boolean(
+        model?.enabled &&
+          canUseModelWithPlan("Free", model) &&
+          getModelUsageProfile(model).category === "Standard"
+      );
+    },
+    [getModel]
+  );
+
+  // Shown the first time a freshly created account loads chat, so a new
+  // signed-in user starts with the same 3-model side-by-side comparison a
+  // guest already sees instead of a single panel. Same brand-trio-plus-
+  // fallback selection as guestDefaultSelectedModels above, just checked
+  // against "Free" (every guest-eligible model is Free-eligible too).
+  const newAccountDefaultSelectedModels = useMemo(() => {
+    const candidates = [...GUEST_BRAND_TRIO_MODEL_IDS, ...GUEST_FALLBACK_MODEL_IDS];
+    const trio: string[] = [];
+    for (const modelId of candidates) {
+      if (trio.includes(modelId) || !isNewAccountEligibleModel(modelId)) continue;
+      trio.push(modelId);
+      if (trio.length >= APP_DEFAULTS.maxSelectedModels) break;
+    }
+    return clampSelectedModels(trio);
+  }, [clampSelectedModels, isNewAccountEligibleModel]);
+
   useEffect(() => {
     if (!isGuestMode) {
       queueMicrotask(() => setIsGuestSettingsLoaded(true));
@@ -1013,7 +1041,11 @@ export default function Home() {
                     if (data && isEnabledModelId(data.defaultModel)) {
                         setUserDefaultEngine(data.defaultModel);
                         if (!currentChatIdRef.current) {
-                            setSelectedModels([data.defaultModel]);
+                            setSelectedModels(
+                                data.isNewAccount
+                                    ? newAccountDefaultSelectedModels
+                                    : [data.defaultModel]
+                            );
                         }
                     }
 
@@ -1054,7 +1086,14 @@ export default function Home() {
         } else if (status !== "loading") {
             queueMicrotask(() => setIsUserSettingsLoaded(true));
         }
-    }, [fetchConversations, isEnabledModelId, sessionUserId, setLang, status]);
+    }, [
+        fetchConversations,
+        isEnabledModelId,
+        newAccountDefaultSelectedModels,
+        sessionUserId,
+        setLang,
+        status,
+    ]);
 
     const handleNewChat = () => {
         localComparisonResponsesRef.current.clear();

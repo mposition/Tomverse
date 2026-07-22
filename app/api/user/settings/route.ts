@@ -88,6 +88,11 @@ export async function GET(req: Request) {
             : APP_DEFAULTS.defaultLanguage;
 
         let settings = await prisma.userSettings.findUnique({ where: { userId } });
+        // Only true for the exact request that creates the row -- the one
+        // moment the server can tell "brand new account" apart from
+        // "existing account whose default model happens to still be the
+        // seeded one." Drives the client's first-load model-panel count.
+        let isNewAccount = false;
         if (!settings) {
             settings = await prisma.userSettings.create({
                 data: {
@@ -96,6 +101,7 @@ export async function GET(req: Request) {
                     defaultModel: APP_DEFAULTS.defaultModelId,
                 }
             });
+            isNewAccount = true;
             await sendAccountWelcomeEmail({
                 to: session.user.email,
                 name: session.user.name,
@@ -115,6 +121,7 @@ export async function GET(req: Request) {
             language: settings.language,
             defaultModel: settings.defaultModel,
             defaultModelId: settings.defaultModel,
+            isNewAccount,
             preferredTasks: settings.preferredTasks,
             preferredPriority: settings.preferredPriority,
             usesFilesFrequently: settings.usesFilesFrequently,
