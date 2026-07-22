@@ -5,6 +5,7 @@ import { LanguageProvider, type Language } from "@/components/LanguageProvider";
 import {
   SEO_LOCALES,
   createPageMetadata,
+  homeOgCopy,
   homeSeoCopy,
   localizedPath,
 } from "@/lib/seo";
@@ -50,12 +51,15 @@ export async function generateMetadata({
   if (!normalizedLocale) return {};
 
   const copy = homeSeoCopy[normalizedLocale];
+  const ogCopy = homeOgCopy[normalizedLocale];
   return createPageMetadata({
     title: copy.title,
     description: copy.description,
     path: localizedPath(normalizedLocale, "/"),
     locale: normalizedLocale,
     localizedBasePath: "/",
+    ogTitle: ogCopy.title,
+    ogDescription: ogCopy.description,
   });
 }
 

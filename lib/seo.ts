@@ -68,6 +68,8 @@ type PageMetadataOptions = {
   locale?: Language;
   localizedBasePath?: string;
   noIndex?: boolean;
+  ogTitle?: string;
+  ogDescription?: string;
 };
 
 export const createPageMetadata = ({
@@ -77,6 +79,8 @@ export const createPageMetadata = ({
   locale = "en",
   localizedBasePath,
   noIndex = false,
+  ogTitle,
+  ogDescription,
 }: PageMetadataOptions): Metadata => ({
   title,
   description,
@@ -89,8 +93,8 @@ export const createPageMetadata = ({
   openGraph: {
     type: "website",
     siteName: SITE_NAME,
-    title,
-    description,
+    title: ogTitle ?? title,
+    description: ogDescription ?? description,
     url: `${SITE_ORIGIN}${path}`,
     locale: openGraphLocaleByLanguage[locale],
     alternateLocale: SEO_LOCALES.filter((item) => item !== locale).map(
@@ -101,18 +105,18 @@ export const createPageMetadata = ({
         url: "/opengraph-image",
         width: 1200,
         height: 630,
-        alt: "Tomverse AI — compare leading AI models in one workspace",
+        alt: "Tomverse Insight by Tomverse — compare GPT, Claude, and Gemini side by side",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title,
-    description,
+    title: ogTitle ?? title,
+    description: ogDescription ?? description,
     images: [
       {
         url: "/twitter-image",
-        alt: "Tomverse AI — compare leading AI models in one workspace",
+        alt: "Tomverse Insight by Tomverse — compare GPT, Claude, and Gemini side by side",
       },
     ],
   },
@@ -170,5 +174,46 @@ export const homeSeoCopy: Record<
     title: "Compare respostas de IA e revise o que ficou de fora",
     description:
       "Pergunte uma vez a vários modelos, compare respostas e use o Tomverse AI Review para organizar consensos, contradições, omissões e verificações.",
+  },
+};
+
+export const homeOgCopy: Record<
+  Language,
+  { title: string; description: string }
+> = {
+  en: {
+    title: "Tomverse Insight by Tomverse | Multi-AI Comparison & Review",
+    description:
+      "Compare GPT, Claude, and Gemini side by side, then use AI Review to identify differences, omissions, and points that need verification.",
+  },
+  ko: {
+    title: "Tomverse Insight (by Tomverse) | 멀티 AI 비교 및 검토",
+    description:
+      "GPT, Claude, Gemini의 답변을 나란히 비교하고, AI Review로 차이점과 누락, 추가 검증이 필요한 부분을 확인하세요.",
+  },
+  zh: {
+    title: "Tomverse Insight（by Tomverse）| 多 AI 比较与审查",
+    description:
+      "并排比较 GPT、Claude 和 Gemini 的回答，再用 AI Review 找出差异、遗漏和待核实的要点。",
+  },
+  fr: {
+    title: "Tomverse Insight (par Tomverse) | Comparaison et revue multi-IA",
+    description:
+      "Comparez GPT, Claude et Gemini côte à côte, puis utilisez AI Review pour repérer les différences, les omissions et les points à vérifier.",
+  },
+  de: {
+    title: "Tomverse Insight (von Tomverse) | Multi-KI-Vergleich und -Prüfung",
+    description:
+      "Vergleichen Sie GPT, Claude und Gemini direkt nebeneinander und nutzen Sie AI Review, um Unterschiede, Lücken und zu prüfende Punkte zu erkennen.",
+  },
+  es: {
+    title: "Tomverse Insight (de Tomverse) | Comparación y revisión multi-IA",
+    description:
+      "Compara GPT, Claude y Gemini en paralelo y usa AI Review para identificar diferencias, omisiones y puntos que requieren verificación.",
+  },
+  pt: {
+    title: "Tomverse Insight (da Tomverse) | Comparação e revisão multi-IA",
+    description:
+      "Compare GPT, Claude e Gemini lado a lado e use o AI Review para identificar diferenças, omissões e pontos que precisam de verificação.",
   },
 };

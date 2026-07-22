@@ -1,7 +1,7 @@
 import { ImageResponse } from "next/og";
 
 export const alt =
-  "Tomverse AI — compare leading AI models in one workspace";
+  "Tomverse Insight by Tomverse — compare GPT, Claude, and Gemini side by side";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -43,16 +43,16 @@ export default function OpenGraphImage() {
           <div
             style={{
               maxWidth: 980,
-              fontSize: 68,
+              fontSize: 60,
               lineHeight: 1.08,
               fontWeight: 900,
               letterSpacing: "-2px",
             }}
           >
-            Compare leading AI models in one workspace
+            Tomverse Insight · Multi-AI Comparison & Review
           </div>
           <div style={{ fontSize: 28, color: "#bfdbfe" }}>
-            Side-by-side answers · File analysis · Organized conversations
+            Compare GPT, Claude, and Gemini side by side, then use AI Review to catch what&apos;s missing
           </div>
         </div>
       </div>

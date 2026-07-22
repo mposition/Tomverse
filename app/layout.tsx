@@ -18,11 +18,11 @@ export const metadata: Metadata = {
   metadataBase: new URL(SITE_ORIGIN),
   applicationName: SITE_NAME,
   title: {
-    default: "Tomverse AI | Compare Leading AI Models",
+    default: "Tomverse Insight by Tomverse | Multi-AI Comparison & Review",
     template: "%s | Tomverse AI",
   },
   description:
-    "Tomverse AI helps you compare leading AI models, work with files, and organize useful conversations in one workspace.",
+    "Compare GPT, Claude, and Gemini side by side, then use AI Review to identify differences, omissions, and points that need verification.",
   authors: [{ name: "Tomverse AI", url: SITE_ORIGIN }],
   creator: "Tomverse AI",
   publisher: "Tomverse AI",
@@ -35,9 +35,9 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     siteName: SITE_NAME,
-    title: "Tomverse AI | Compare Leading AI Models",
+    title: "Tomverse Insight by Tomverse | Multi-AI Comparison & Review",
     description:
-      "Compare leading AI models side by side, analyze files, and organize useful conversations in one workspace.",
+      "Compare GPT, Claude, and Gemini side by side, then use AI Review to identify differences, omissions, and points that need verification.",
     url: SITE_ORIGIN,
     locale: "en_AU",
     images: [
@@ -45,19 +45,19 @@ export const metadata: Metadata = {
         url: "/opengraph-image",
         width: 1200,
         height: 630,
-        alt: "Tomverse AI — compare leading AI models in one workspace",
+        alt: "Tomverse Insight by Tomverse — compare GPT, Claude, and Gemini side by side",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Tomverse AI | Compare Leading AI Models",
+    title: "Tomverse Insight by Tomverse | Multi-AI Comparison & Review",
     description:
-      "Compare leading AI models side by side, analyze files, and organize useful conversations in one workspace.",
+      "Compare GPT, Claude, and Gemini side by side, then use AI Review to identify differences, omissions, and points that need verification.",
     images: [
       {
         url: "/twitter-image",
-        alt: "Tomverse AI — compare leading AI models in one workspace",
+        alt: "Tomverse Insight by Tomverse — compare GPT, Claude, and Gemini side by side",
       },
     ],
   },
