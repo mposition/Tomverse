@@ -122,8 +122,13 @@ export async function requestEmailLoginCode(
 ): Promise<{ ok: true }> {
   const email = normalizeEmailLoginAddress(rawEmail);
 
+  // 2 per minute, not 1: once challengeCount exceeds
+  // TURNSTILE_CHALLENGE_THRESHOLD below, the caller's token-less probe and its
+  // token-bearing retry are two calls to this same action within the same
+  // minute. A limit of 1 would let the probe consume the only unit and make
+  // every subsequent legitimate request fail with API_RATE_LIMITED.
   await consumeApiRateLimit(request, `email-otp:${email}`, "email-otp-request", {
-    minute: 1,
+    minute: 2,
     day: DAILY_REQUEST_LIMIT,
   });
   const anonymousKey = getAnonymousClientKey(request);
