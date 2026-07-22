@@ -455,6 +455,7 @@ export const pt = {
         planTab: "Plano",
         securityStatus: "Segurança da conta",
         securityStatusDescription: "Seu login é gerenciado pelo provedor de identidade conectado. Proteja essas contas com autenticação forte.",
+        accountDangerZoneDescription: "A exclusão da conta se torna permanente após um período de segurança de 7 dias.",
         dataExportTitle: "Exportar suas conversas",
         dataExportDescription: "Baixe seu histórico disponível como arquivo de texto. Chats bloqueados são excluídos até serem desbloqueados.",
         currentPlan: "Plano atual",

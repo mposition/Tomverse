@@ -451,6 +451,7 @@ export const zh = {
         planTab: "方案",
         securityStatus: "账号安全",
         securityStatusDescription: "登录由你连接的身份提供商处理。请在提供商账号中启用并保持强身份验证。",
+        accountDangerZoneDescription: "账号删除在 7 天安全期后将永久生效，无法恢复。",
         dataExportTitle: "导出对话",
         dataExportDescription: "将可用聊天记录下载为文本归档。锁定的对话会在解锁前被排除。",
         currentPlan: "当前方案",

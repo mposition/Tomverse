@@ -559,6 +559,7 @@ export const en = {
         planTab: "Plan",
         securityStatus: "Account security",
         securityStatusDescription: "Your sign-in is handled by your connected identity provider. Keep provider accounts protected with strong authentication.",
+        accountDangerZoneDescription: "Deleting your account is permanent after a 7-day safety period.",
         dataExportTitle: "Export your conversations",
         dataExportDescription: "Download your available chat history as a text archive. Locked chats are excluded until unlocked.",
         currentPlan: "Current plan",

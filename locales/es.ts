@@ -455,6 +455,7 @@ export const es = {
         planTab: "Plan",
         securityStatus: "Seguridad de la cuenta",
         securityStatusDescription: "Tu inicio de sesión lo gestiona el proveedor de identidad conectado. Protege esas cuentas con autenticación fuerte.",
+        accountDangerZoneDescription: "Eliminar tu cuenta es permanente tras un período de seguridad de 7 días.",
         dataExportTitle: "Exportar tus conversaciones",
         dataExportDescription: "Descarga tu historial disponible como archivo de texto. Los chats bloqueados se excluyen hasta desbloquearse.",
         currentPlan: "Plan actual",

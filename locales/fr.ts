@@ -455,6 +455,7 @@ export const fr = {
         planTab: "Abonnement",
         securityStatus: "Sécurité du compte",
         securityStatusDescription: "Votre connexion est gérée par le fournisseur d'identité connecté. Protégez ces comptes avec une authentification forte.",
+        accountDangerZoneDescription: "La suppression du compte devient définitive après un délai de sécurité de 7 jours.",
         dataExportTitle: "Exporter vos conversations",
         dataExportDescription: "Téléchargez l'historique disponible sous forme d'archive texte. Les chats verrouillés sont exclus jusqu'à leur déverrouillage.",
         currentPlan: "Abonnement actuel",

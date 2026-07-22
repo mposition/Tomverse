@@ -86,6 +86,7 @@ export function AuthButton() {
     const [isAccountDeleteArmed, setIsAccountDeleteArmed] = useState(false);
     const [accountDeletionConsent, setAccountDeletionConsent] = useState(false);
     const [accountDeletionConfirmation, setAccountDeletionConfirmation] = useState("");
+    const [isDeleteAccountModalOpen, setIsDeleteAccountModalOpen] = useState(false);
     const [isRequestingRefund, setIsRequestingRefund] = useState(false);
     const [isCancellingSubscription, setIsCancellingSubscription] = useState(false);
     const [subscriptionCancelAtPeriodEnd, setSubscriptionCancelAtPeriodEnd] = useState(false);
@@ -156,6 +157,13 @@ export function AuthButton() {
     const closeSettingsModal = useCallback(() => {
         setIsModalOpen(false);
         requestAnimationFrame(() => accountMenuButtonRef.current?.focus());
+    }, []);
+
+    const closeDeleteAccountModal = useCallback(() => {
+        setIsDeleteAccountModalOpen(false);
+        setIsAccountDeleteArmed(false);
+        setAccountDeletionConsent(false);
+        setAccountDeletionConfirmation("");
     }, []);
 
     const openSettingsTab = useCallback(
@@ -250,11 +258,15 @@ export function AuthButton() {
         const handleKeyDown = (event: KeyboardEvent) => {
             if (event.key === "Escape") {
                 event.preventDefault();
-                closeSettingsModal();
+                if (isDeleteAccountModalOpen) {
+                    closeDeleteAccountModal();
+                } else {
+                    closeSettingsModal();
+                }
                 return;
             }
 
-            if (event.key !== "Tab") return;
+            if (event.key !== "Tab" || isDeleteAccountModalOpen) return;
 
             const focusableElements = getSettingsFocusableElements();
             if (focusableElements.length === 0) {
@@ -280,7 +292,7 @@ export function AuthButton() {
 
         document.addEventListener("keydown", handleKeyDown, true);
         return () => document.removeEventListener("keydown", handleKeyDown, true);
-    }, [closeSettingsModal, getSettingsFocusableElements, isModalOpen]);
+    }, [closeDeleteAccountModal, closeSettingsModal, getSettingsFocusableElements, isModalOpen, isDeleteAccountModalOpen]);
 
     useEffect(() => {
         if (!isAccountMenuOpen) return;
@@ -422,7 +434,19 @@ export function AuthButton() {
                     confirmationText: accountDeletionConfirmation,
                 }),
             });
-            if (!response.ok) throw new Error(`Delete failed: ${response.status}`);
+            const data = (await response.json().catch(() => null)) as
+                | { code?: string; error?: string }
+                | null;
+            if (!response.ok) {
+                if (response.status === 428 && data?.code === "ACCOUNT_REAUTHENTICATION_REQUIRED") {
+                    dispatchAppToast(t("auth.deleteAccountReauthRequired"), "error");
+                    await signOut({
+                        callbackUrl: `/auth/signin?callbackUrl=${encodeURIComponent(chatCallbackUrl)}`,
+                    });
+                    return;
+                }
+                throw new Error(data?.error || `Delete failed: ${response.status}`);
+            }
             localStorage.removeItem("tomverse_refund_requested_at");
             dispatchAppToast(t("auth.deleteAccountSuccess"), "success");
             await signOut({ callbackUrl: chatCallbackUrl });
@@ -815,6 +839,18 @@ export function AuthButton() {
                                                 </div>
                                             </div>
                                         </section>
+                                        <section className="rounded-2xl border border-red-200 bg-red-50 p-4 dark:border-red-950/70 dark:bg-red-950/20">
+                                            <h4 className="text-sm font-bold text-red-700 dark:text-red-300">{t("auth.dangerZone")}</h4>
+                                            <p className="mt-1 text-sm leading-6 text-red-700/80 dark:text-red-200/80">{t("auth.accountDangerZoneDescription")}</p>
+                                            <button
+                                                type="button"
+                                                onClick={() => setIsDeleteAccountModalOpen(true)}
+                                                className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-red-300 bg-white px-3 py-3 text-sm font-semibold text-red-600 transition-colors hover:bg-red-50 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200 dark:hover:bg-red-950/70"
+                                            >
+                                                <Trash2 className="h-4 w-4" />
+                                                {t("auth.deleteAccount")}
+                                            </button>
+                                        </section>
                                     </div>
                                 )}
 
@@ -944,70 +980,19 @@ export function AuthButton() {
                                         <section className="rounded-2xl border border-red-200 bg-red-50 p-4 dark:border-red-950/70 dark:bg-red-950/20">
                                             <h4 className="text-sm font-bold text-red-700 dark:text-red-300">{t("auth.dangerZone")}</h4>
                                             <p className="mt-1 text-sm leading-6 text-red-700/80 dark:text-red-200/80">{t("auth.dangerZoneDescription")}</p>
-                                            <div className="mt-4 grid gap-2 sm:grid-cols-2">
-                                                <button
-                                                    type="button"
-                                                    onClick={handleDeleteAllConversations}
-                                                    disabled={isDeletingChats}
-                                                    className="flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-white px-3 py-3 text-sm font-semibold text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200 dark:hover:bg-red-950/70"
-                                                >
-                                                    <Trash2 className="h-4 w-4" />
-                                                    {isDeletingChats
-                                                        ? t("auth.deleting")
-                                                        : isDeleteAllArmed
-                                                            ? t("auth.confirmDeleteAllChats")
-                                                            : t("auth.deleteAllChats")}
-                                                </button>
-                                                <div className="rounded-xl border border-red-300 bg-white p-3 dark:border-red-900/70 dark:bg-red-950/30 sm:col-span-2">
-                                                    <p className="text-sm font-black text-red-700 dark:text-red-200">
-                                                        {t("auth.deleteAccountImmediateTitle")}
-                                                    </p>
-                                                    <p className="mt-1 text-xs leading-5 text-red-700/80 dark:text-red-100/80">
-                                                        {t("auth.deleteAccountImmediateDescription")}
-                                                    </p>
-                                                    <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-800 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-100">
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={accountDeletionConsent}
-                                                            onChange={(event) => {
-                                                                setAccountDeletionConsent(event.target.checked);
-                                                                setIsAccountDeleteArmed(false);
-                                                            }}
-                                                            className="mt-0.5 h-4 w-4 cursor-pointer accent-red-600"
-                                                        />
-                                                        <span>
-                                                            {t("auth.deleteAccountConsent")}
-                                                        </span>
-                                                    </label>
-                                                    <label className="mt-3 block text-xs font-bold text-red-800 dark:text-red-100">
-                                                        {t("auth.deleteAccountConfirmationPrompt")}
-                                                        <input
-                                                            value={accountDeletionConfirmation}
-                                                            onChange={(event) => {
-                                                                setAccountDeletionConfirmation(event.target.value);
-                                                                setIsAccountDeleteArmed(false);
-                                                            }}
-                                                            autoComplete="off"
-                                                            spellCheck={false}
-                                                            className="mt-2 h-10 w-full rounded-lg border border-red-300 bg-white px-3 font-mono text-sm text-zinc-950 outline-none focus:border-red-500 focus:ring-4 focus:ring-red-500/10 dark:border-red-900 dark:bg-zinc-950 dark:text-white"
-                                                            placeholder="DELETE MY ACCOUNT"
-                                                        />
-                                                    </label>
-                                                    <button
-                                                        type="button"
-                                                        onClick={handleDeleteAccount}
-                                                        disabled={isRequestingDeletion || !accountDeletionConsent || accountDeletionConfirmation !== "DELETE MY ACCOUNT"}
-                                                        className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-red-300 bg-red-600 px-3 py-3 text-sm font-black text-white transition-colors hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-800"
-                                                    >
-                                                        <Trash2 className="h-4 w-4" />
-                                                        {isRequestingDeletion
-                                                            ? t("auth.deletingAccount")
-                                                            : isAccountDeleteArmed
-                                                                ? t("auth.confirmPermanentDelete")
-                                                                : t("auth.deleteAccount")}
-                                                    </button>
-                                                </div>
-                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={handleDeleteAllConversations}
+                                                disabled={isDeletingChats}
+                                                className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-red-200 bg-white px-3 py-3 text-sm font-semibold text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200 dark:hover:bg-red-950/70"
+                                            >
+                                                <Trash2 className="h-4 w-4" />
+                                                {isDeletingChats
+                                                    ? t("auth.deleting")
+                                                    : isDeleteAllArmed
+                                                        ? t("auth.confirmDeleteAllChats")
+                                                        : t("auth.deleteAllChats")}
+                                            </button>
                                         </section>
                                     </div>
                                 )}
@@ -1232,6 +1217,87 @@ export function AuthButton() {
                                     {t("auth.ok")}
                                 </button>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {isModalOpen && isDeleteAccountModalOpen && (
+                <div
+                    className="fixed inset-0 z-[95] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+                    onClick={(event) => {
+                        if (event.target === event.currentTarget) closeDeleteAccountModal();
+                    }}
+                >
+                    <div
+                        className="w-full max-w-md rounded-2xl border border-red-300 bg-white p-5 shadow-2xl dark:border-red-900/70 dark:bg-zinc-900"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="delete-account-modal-title"
+                    >
+                        <div className="flex items-start justify-between gap-4">
+                            <h3 id="delete-account-modal-title" className="text-sm font-black text-red-700 dark:text-red-200">
+                                {t("auth.deleteAccountImmediateTitle")}
+                            </h3>
+                            <button
+                                type="button"
+                                onClick={closeDeleteAccountModal}
+                                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-white"
+                                aria-label={t("auth.cancel")}
+                            >
+                                <X className="h-4 w-4" />
+                            </button>
+                        </div>
+                        <p className="mt-2 text-xs leading-5 text-red-700/80 dark:text-red-100/80">
+                            {t("auth.deleteAccountImmediateDescription")}
+                        </p>
+                        <label className="mt-4 flex cursor-pointer items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-800 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-100">
+                            <input
+                                type="checkbox"
+                                checked={accountDeletionConsent}
+                                onChange={(event) => {
+                                    setAccountDeletionConsent(event.target.checked);
+                                    setIsAccountDeleteArmed(false);
+                                }}
+                                className="mt-0.5 h-4 w-4 cursor-pointer accent-red-600"
+                            />
+                            <span>{t("auth.deleteAccountConsent")}</span>
+                        </label>
+                        <label className="mt-3 block text-xs font-bold text-red-800 dark:text-red-100">
+                            {t("auth.deleteAccountConfirmationPrompt")}
+                            <input
+                                value={accountDeletionConfirmation}
+                                onChange={(event) => {
+                                    setAccountDeletionConfirmation(event.target.value);
+                                    setIsAccountDeleteArmed(false);
+                                }}
+                                autoComplete="off"
+                                spellCheck={false}
+                                className="mt-2 h-10 w-full rounded-lg border border-red-300 bg-white px-3 font-mono text-sm text-zinc-950 outline-none focus:border-red-500 focus:ring-4 focus:ring-red-500/10 dark:border-red-900 dark:bg-zinc-950 dark:text-white"
+                                placeholder="DELETE MY ACCOUNT"
+                            />
+                        </label>
+                        <div className="mt-4 flex justify-end gap-2">
+                            <button
+                                type="button"
+                                onClick={closeDeleteAccountModal}
+                                className="rounded-lg px-4 py-2 text-sm font-semibold text-zinc-600 transition-colors hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                            >
+                                {t("auth.cancel")}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleDeleteAccount}
+                                disabled={isRequestingDeletion || !accountDeletionConsent || accountDeletionConfirmation !== "DELETE MY ACCOUNT"}
+                                className="flex items-center justify-center gap-2 rounded-xl border border-red-300 bg-red-600 px-4 py-2 text-sm font-black text-white transition-colors hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-800"
+                            >
+                                <Trash2 className="h-4 w-4" />
+                                {isRequestingDeletion
+                                    ? t("auth.deletingAccount")
+                                    : isAccountDeleteArmed
+                                        ? t("auth.confirmPermanentDelete")
+                                        : t("auth.deleteAccount")}
+                            </button>
                         </div>
                     </div>
                 </div>

@@ -455,6 +455,7 @@ export const de = {
         planTab: "Tarif",
         securityStatus: "Kontosicherheit",
         securityStatusDescription: "Ihre Anmeldung wird vom verbundenen Identitätsanbieter verwaltet. Schützen Sie diese Konten mit starker Authentifizierung.",
+        accountDangerZoneDescription: "Die Kontolöschung wird nach einer 7-tägigen Sicherheitsfrist endgültig.",
         dataExportTitle: "Unterhaltungen exportieren",
         dataExportDescription: "Laden Sie Ihren verfügbaren Chatverlauf als Textarchiv herunter. Gesperrte Chats sind bis zur Entsperrung ausgeschlossen.",
         currentPlan: "Aktueller Tarif",

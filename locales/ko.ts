@@ -559,6 +559,7 @@ export const ko = {
         planTab: "플랜",
         securityStatus: "계정 보안",
         securityStatusDescription: "로그인은 연결된 인증 제공자를 통해 처리됩니다. 해당 계정의 보안 인증을 안전하게 유지해 주세요.",
+        accountDangerZoneDescription: "계정 삭제는 7일의 유예기간이 지나면 되돌릴 수 없습니다.",
         dataExportTitle: "대화 내보내기",
         dataExportDescription: "사용 가능한 대화 기록을 텍스트 파일로 다운로드합니다. 잠긴 대화는 잠금 해제 전까지 제외됩니다.",
         currentPlan: "현재 플랜",
