@@ -59,7 +59,7 @@ const checks = [
     test: (source) =>
       source.includes("assertModelAccess(access, modelConfig)") &&
       source.includes("getUserBillingPlan") &&
-      source.includes("verifyGuestTurnstile"),
+      source.includes("ensureGuestVerified"),
   },
   {
     name: "/api/chat treats retired models and empty provider streams as failures",
