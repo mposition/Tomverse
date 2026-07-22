@@ -102,7 +102,7 @@ const englishCopy: LandingCopy = {
   pricingDetails: "Compare plans and credit usage",
   faqTitle: "Three quick questions",
   faqs: [
-    { question: "Can I use Tomverse for free?", answer: "Yes. You can try one supported free model without signing in. A Free account adds multi-model comparison and other signed-in workflows within the plan limits." },
+    { question: "Can I use Tomverse for free?", answer: "Yes. Without signing in, you can already compare 3 AI models side by side on the same question. A Free account adds more models, higher daily limits, and other signed-in workflows within the plan limits." },
     { question: "Which models can I compare?", answer: "The available catalogue spans providers such as OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Mistral, Moonshot, Alibaba, and Perplexity. Availability can change, so the live status page is the source of current service state." },
     { question: "How is my data handled?", answer: "Tomverse applies attachment limits, locked-chat controls, read-only share snapshots, and Private Mode. Selected AI providers still receive the request content needed to answer; review the Safety page for the complete boundaries." },
   ],
@@ -160,7 +160,7 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     pricingDetails: "플랜과 크레딧 사용량 비교",
     faqTitle: "빠르게 확인하는 세 가지",
     faqs: [
-      { question: "Tomverse를 무료로 사용할 수 있나요?", answer: "네. 로그인 없이 지원되는 무료 모델 1개를 체험할 수 있습니다. Free 계정을 만들면 플랜 한도 안에서 멀티모델 비교와 로그인 전용 기능을 사용할 수 있습니다." },
+      { question: "Tomverse를 무료로 사용할 수 있나요?", answer: "네. 로그인 없이도 3개의 AI 모델로 같은 질문에 대한 답변을 바로 비교해볼 수 있습니다. Free 계정을 만들면 더 많은 모델과 높은 일일 한도, 로그인 전용 기능을 사용할 수 있습니다." },
       { question: "어떤 모델을 비교할 수 있나요?", answer: "OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Mistral, Moonshot, Alibaba, Perplexity 등의 모델을 지원합니다. 제공 상태는 바뀔 수 있으므로 실시간 상태 페이지에서 현재 상태를 확인할 수 있습니다." },
       { question: "데이터는 어떻게 처리되나요?", answer: "첨부파일 제한, 대화 잠금, 읽기 전용 공유 스냅샷과 Private Mode를 적용합니다. 선택한 AI 공급자는 답변에 필요한 요청 내용을 처리하므로 전체 범위는 안전 페이지에서 확인하세요." },
     ],
@@ -214,7 +214,7 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     pricingDetails: "比较套餐与积分用量",
     faqTitle: "三个常见问题",
     faqs: [
-      { question: "可以免费使用 Tomverse 吗？", answer: "可以。无需登录即可试用一个受支持的免费模型；Free 账户可在套餐限制内使用多模型比较等功能。" },
+      { question: "可以免费使用 Tomverse 吗？", answer: "可以。无需登录即可同时比较 3 个 AI 模型对同一问题的回答；Free 账户可在套餐限制内使用更多模型、更高的每日额度等功能。" },
       { question: "可以比较哪些模型？", answer: "模型目录覆盖 OpenAI、Anthropic、Google、Groq、DeepSeek、xAI、Mistral、Moonshot、Alibaba 和 Perplexity 等供应商；当前状态请查看实时状态页。" },
       { question: "数据如何处理？", answer: "Tomverse 提供附件限制、对话锁、只读分享快照和 Private Mode。所选 AI 供应商仍会处理生成回答所需的内容；完整边界请查看安全页。" },
     ],
@@ -268,7 +268,7 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     pricingDetails: "Comparer les plans et crédits",
     faqTitle: "Trois questions rapides",
     faqs: [
-      { question: "Puis-je utiliser Tomverse gratuitement ?", answer: "Oui. Un modèle gratuit est accessible sans connexion. Un compte Free ajoute la comparaison multi-modèles dans les limites du plan." },
+      { question: "Puis-je utiliser Tomverse gratuitement ?", answer: "Oui. Sans connexion, vous pouvez déjà comparer 3 modèles d'IA côte à côte sur la même question. Un compte Free ajoute plus de modèles, des limites quotidiennes plus élevées et d'autres fonctionnalités réservées aux comptes." },
       { question: "Quels modèles puis-je comparer ?", answer: "Le catalogue couvre notamment OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Mistral, Moonshot, Alibaba et Perplexity. Consultez la page d’état pour la disponibilité actuelle." },
       { question: "Comment mes données sont-elles traitées ?", answer: "Tomverse applique limites de pièces jointes, verrouillage, instantanés en lecture seule et Private Mode. Les fournisseurs sélectionnés traitent toujours le contenu nécessaire à la réponse." },
     ],
@@ -322,7 +322,7 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     pricingDetails: "Pläne und Kreditverbrauch vergleichen",
     faqTitle: "Drei kurze Fragen",
     faqs: [
-      { question: "Kann ich Tomverse kostenlos nutzen?", answer: "Ja. Ein unterstütztes Gratis-Modell ist ohne Anmeldung nutzbar. Ein Free-Konto ermöglicht Multi-Modell-Vergleiche innerhalb der Planlimits." },
+      { question: "Kann ich Tomverse kostenlos nutzen?", answer: "Ja. Ohne Anmeldung können Sie bereits 3 KI-Modelle direkt bei derselben Frage vergleichen. Ein Free-Konto bietet mehr Modelle, höhere Tageslimits und weitere Funktionen innerhalb der Planlimits." },
       { question: "Welche Modelle kann ich vergleichen?", answer: "Der Katalog umfasst unter anderem OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Mistral, Moonshot, Alibaba und Perplexity. Aktuelle Verfügbarkeit zeigt die Statusseite." },
       { question: "Wie werden meine Daten verarbeitet?", answer: "Tomverse nutzt Anhangslimits, Chatsperren, schreibgeschützte Snapshots und Private Mode. Ausgewählte KI-Anbieter verarbeiten weiterhin die für Antworten nötigen Inhalte." },
     ],
@@ -376,7 +376,7 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     pricingDetails: "Comparar planes y créditos",
     faqTitle: "Tres preguntas rápidas",
     faqs: [
-      { question: "¿Puedo usar Tomverse gratis?", answer: "Sí. Puedes probar un modelo gratuito compatible sin iniciar sesión. Una cuenta Free añade comparación multimodelo dentro de los límites del plan." },
+      { question: "¿Puedo usar Tomverse gratis?", answer: "Sí. Sin iniciar sesión ya puedes comparar 3 modelos de IA lado a lado en la misma pregunta. Una cuenta Free añade más modelos, límites diarios más altos y otras funciones dentro de los límites del plan." },
       { question: "¿Qué modelos puedo comparar?", answer: "El catálogo incluye proveedores como OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Mistral, Moonshot, Alibaba y Perplexity. Consulta el estado en vivo para la disponibilidad actual." },
       { question: "¿Cómo se tratan mis datos?", answer: "Tomverse aplica límites de archivos, bloqueo de chats, instantáneas de solo lectura y Private Mode. Los proveedores elegidos siguen procesando el contenido necesario para responder." },
     ],
@@ -430,7 +430,7 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     pricingDetails: "Comparar planos e créditos",
     faqTitle: "Três perguntas rápidas",
     faqs: [
-      { question: "Posso usar o Tomverse gratuitamente?", answer: "Sim. Você pode testar um modelo gratuito compatível sem entrar. Uma conta Free adiciona comparação multimodelo dentro dos limites do plano." },
+      { question: "Posso usar o Tomverse gratuitamente?", answer: "Sim. Sem entrar, você já pode comparar 3 modelos de IA lado a lado na mesma pergunta. Uma conta Free adiciona mais modelos, limites diários maiores e outros recursos dentro dos limites do plano." },
       { question: "Quais modelos posso comparar?", answer: "O catálogo inclui provedores como OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Mistral, Moonshot, Alibaba e Perplexity. Veja a página de status para a disponibilidade atual." },
       { question: "Como meus dados são tratados?", answer: "O Tomverse aplica limites de anexos, bloqueio, snapshots somente leitura e Private Mode. Os provedores escolhidos continuam processando o conteúdo necessário para responder." },
     ],

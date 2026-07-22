@@ -291,10 +291,12 @@ type ChatInputProps = {
   isSending?: boolean;
   focusToken?: number;
   isNewConversation?: boolean;
+  isPrivateMode?: boolean;
   selectedModels: string[];
   disabledModelIds?: string[];
   isGuestLimitReached?: boolean;
   onToggleModel: (modelId: string) => boolean;
+  onQuickCompare?: () => void;
   attachments: ChatAttachment[];
   onAttachmentsChange: (attachments: ChatAttachment[]) => void;
   canAttach?: boolean;
@@ -385,10 +387,12 @@ export function ChatInput({
   isSending = false,
   focusToken,
   isNewConversation = true,
+  isPrivateMode = false,
   selectedModels,
   disabledModelIds = [],
   isGuestLimitReached = false,
   onToggleModel,
+  onQuickCompare,
   attachments,
   onAttachmentsChange,
   canAttach: canAttachProp = true,
@@ -540,7 +544,9 @@ export function ChatInput({
 
   const placeholderText = isUsageLimitReached
     ? t("chat.exceedDailyLimit")
-    : t("chat.inputPlaceholder");
+    : isPrivateMode
+      ? t("chat.privateModePlaceholder")
+      : t("chat.inputPlaceholder");
   
   const isDisabled = disabled || isSending || isUploading || isUsageLimitReached;
   
@@ -1626,6 +1632,9 @@ export function ChatInput({
                   onClick={() => {
                     dismissGuestQuickStart();
                     onChange(t(suggestion));
+                    if (suggestion === "chat.promptCompareModels") {
+                      onQuickCompare?.();
+                    }
                   }}
                   className="shrink-0 touch-manipulation rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs font-semibold text-zinc-600 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800"
                 >

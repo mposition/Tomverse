@@ -10,6 +10,7 @@ type ModeInfoSheetProps = {
   onClose: () => void;
   guestMessageCount?: number;
   maxGuestMessages?: number;
+  activeModelCount?: number;
 };
 
 export function ModeInfoSheet({
@@ -17,6 +18,7 @@ export function ModeInfoSheet({
   onClose,
   guestMessageCount = 0,
   maxGuestMessages = 20,
+  activeModelCount = 1,
 }: ModeInfoSheetProps) {
   const { t } = useLanguage();
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -40,6 +42,10 @@ export function ModeInfoSheet({
   if (!mode) return null;
 
   const isGuest = mode === "guest";
+  const remainingComparisons = Math.max(
+    0,
+    Math.floor((maxGuestMessages - guestMessageCount) / Math.max(1, activeModelCount))
+  );
 
   return (
     <div
@@ -81,6 +87,11 @@ export function ModeInfoSheet({
         {isGuest && (
           <p className="mt-1 text-sm font-semibold text-blue-600 dark:text-blue-400">
             {t("chat.guestModeLimitMessage")} · {guestMessageCount}/{maxGuestMessages}
+          </p>
+        )}
+        {isGuest && (
+          <p className="mt-1 text-sm text-blue-500 dark:text-blue-300">
+            {t("chat.guestComparisonsRemaining").replace("{count}", String(remainingComparisons))}
           </p>
         )}
         {isGuest && (

@@ -73,7 +73,7 @@ test("signed-in homepage keeps the page visible and offers one continue action",
   await expect(page.getByTestId("landing-guest-cta")).toHaveCount(0);
 });
 
-test("guest preview opens a simplified one-model chat", async ({ page }) => {
+test("guest preview opens a 3-model comparison chat by default", async ({ page }) => {
   await prepareGuestPage(page, "en");
   await mockChatStream(page, "Guest preview answer");
   await page.goto("/chat?lang=en&entry=guest-preview");
@@ -94,13 +94,18 @@ test("guest preview opens a simplified one-model chat", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Review this code" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Draft an email" })).toHaveCount(0);
 
+  // Guests now default to a 3-model comparison (Gemini/GPT/Claude) instead of
+  // a single model, so Tomverse's core value is visible on the first question.
+  if ((page.viewportSize()?.width ?? 1024) < 768) {
+    await expect(page.getByTestId("mobile-model-tab")).toHaveCount(3);
+  } else {
+    await expect(page.getByTestId("desktop-model-panel")).toHaveCount(3);
+  }
+
   await page.getByTestId("chat-textarea").fill("Show me how Tomverse works");
   await page.getByTestId("chat-textarea").press("Enter");
-  await expect(page.getByText("Guest preview answer", { exact: true })).toBeVisible();
-  const hint = page.getByTestId("guest-compare-hint");
-  await expect(hint).toContainText("You are currently trying one free model.");
   await expect(
-    hint.getByRole("link", { name: "Create a free account and compare" })
+    page.locator(":visible", { hasText: "Guest preview answer" }).first()
   ).toBeVisible();
 });
 

@@ -16,7 +16,9 @@ import {
 } from "@/components/LanguageProvider";
 import {
   APP_DEFAULTS,
+  GUEST_COMPANION_MODEL_IDS,
 } from "@/lib/appDefaults";
+import { RECOMMENDED_MODEL_IDS } from "@/lib/modelPickerPresentation";
 import {
   canUseModelWithPlan,
   getModelUsageProfile,
@@ -28,6 +30,7 @@ import {
 } from "@/lib/userSettingsEvents";
 import {
   APP_TOAST_EVENT,
+  dispatchAppToast,
   type AppToastEventDetail,
   type AppToastTone,
 } from "@/lib/appToast";
@@ -395,6 +398,7 @@ export default function Home() {
   ).length;
 
   const isInitialSelectedRef = useRef(false);
+  const guestCarryoverAppliedRef = useRef(false);
   const currentChatIdRef = useRef(currentChatId);
 
   useEffect(() => {
@@ -434,6 +438,12 @@ export default function Home() {
         .filter(isGuestEligibleModel)
         .slice(0, APP_DEFAULTS.maxGuestSelectedModels),
     [clampSelectedModels, isGuestEligibleModel]
+  );
+
+  const guestDefaultSelectedModels = useMemo(
+    () =>
+      clampGuestSelectedModels([guestDefaultModelId, ...GUEST_COMPANION_MODEL_IDS]),
+    [clampGuestSelectedModels, guestDefaultModelId]
   );
 
   useEffect(() => {
@@ -782,7 +792,7 @@ export default function Home() {
       queueMicrotask(() => {
       if (cancelled) return;
       setUserDefaultEngine(guestDefaultModelId);
-      setSelectedModels([guestDefaultModelId]);
+      setSelectedModels(guestDefaultSelectedModels);
       const today = new Date().toDateString();
       const storedDate = localStorage.getItem("guest_date");
       
@@ -800,9 +810,6 @@ export default function Home() {
         try {
           const parsed = JSON.parse(savedConversations);
           setConversations(parsed);
-          if (parsed.length > 0) {
-            setCurrentChatId((currentId) => currentId || parsed[0].id);
-          }
         } catch (e) {
           console.error("Failed to parse guest conversations:", e);
         }
@@ -811,7 +818,7 @@ export default function Home() {
         const initialChat = {
           id: initialChatId,
           title: t("sidebar.newChat"),
-            selectedModels: [guestDefaultModelId],
+            selectedModels: guestDefaultSelectedModels,
           disabledPanels: []
         };
         setConversations([initialChat]);
@@ -826,7 +833,7 @@ export default function Home() {
         cancelled = true;
       };
     }
-  }, [guestDefaultModelId, isGuestMode, isGuestSettingsLoaded, t]);  
+  }, [guestDefaultModelId, guestDefaultSelectedModels, isGuestMode, isGuestSettingsLoaded, t]);  
 
   useEffect(() => {
     if (isGuestMode && isConversationsLoaded && conversations.length > 0) {
@@ -846,73 +853,13 @@ export default function Home() {
             new URLSearchParams(window.location.search).has("prompt")
         ) return;
 
-        const firstConversation = conversations[0];
+        // Returning users land on the welcome-home screen instead of having
+        // their most recent conversation auto-opened (privacy + lets them
+        // choose continue-vs-new rather than deciding for them). Existing
+        // conversations remain one tap away via the sidebar / recent cards.
         isInitialSelectedRef.current = true;
-
-        if (firstConversation.isLocked) {
-            queueMicrotask(() => {
-                setCurrentChatId(null);
-                setSelectedModels([userDefaultEngine]);
-                setDisabledPanels([]);
-                setPromptPayload(null);
-                setIsInitialConversationResolved(true);
-            });
-            return;
-        }
-
-        let cancelled = false;
-        let completed = false;
-
-        const openInitialConversation = async () => {
-            try {
-                const res = await fetch(`/api/conversations/${firstConversation.id}`, {
-                    cache: "no-store",
-                });
-
-                if (!res.ok) {
-                    throw new Error(`Initial conversation load failed: ${res.status}`);
-                }
-                if (cancelled) return;
-
-                const data = await res.json();
-                // Keep the synchronous guard in step with the conversation we
-                // are about to render. The settings request can resolve in the
-                // same frame; without this assignment it may incorrectly
-                // replace a restored multi-model selection with the account's
-                // single default model.
-                currentChatIdRef.current = firstConversation.id;
-                applyConversationSettings(data, firstConversation.id);
-                completed = true;
-                setCurrentChatId(firstConversation.id);
-                setIsInitialConversationResolved(true);
-            } catch (error) {
-                if (!cancelled) {
-                    console.error("Failed to open initial conversation:", error);
-                    currentChatIdRef.current = firstConversation.id;
-                    applyConversationSettings(firstConversation, firstConversation.id);
-                    completed = true;
-                    setCurrentChatId(firstConversation.id);
-                    setIsInitialConversationResolved(true);
-                }
-            }
-        };
-
-        openInitialConversation();
-
-        return () => {
-            cancelled = true;
-            if (!completed) {
-                isInitialSelectedRef.current = false;
-            }
-        };
-    }, [
-        applyConversationSettings,
-        conversations,
-        currentChatId,
-        isGuestMode,
-        isUserSettingsLoaded,
-        userDefaultEngine,
-    ]);
+        queueMicrotask(() => setIsInitialConversationResolved(true));
+    }, [conversations, currentChatId, isGuestMode, isUserSettingsLoaded]);
 
     useEffect(() => {
         if (
@@ -923,8 +870,35 @@ export default function Home() {
         ) {
             return;
         }
+
+        // A brand-new account (never had a conversation) inherits whatever
+        // model configuration this browser's guest session was using, so
+        // signing up doesn't feel like a downgrade from a 3-model comparison
+        // back to a single default model. Only ever applied once.
+        if (!guestCarryoverAppliedRef.current) {
+            guestCarryoverAppliedRef.current = true;
+            try {
+                const savedGuestConversations = localStorage.getItem("guest_conversations");
+                const parsedGuestConversations = savedGuestConversations
+                    ? JSON.parse(savedGuestConversations)
+                    : null;
+                const lastGuestModels = Array.isArray(parsedGuestConversations)
+                    ? parsedGuestConversations[0]?.selectedModels
+                    : null;
+                const carriedOverModels = Array.isArray(lastGuestModels)
+                    ? clampSelectedModels(lastGuestModels.filter((id): id is string => typeof id === "string"))
+                    : [];
+                if (carriedOverModels.length > 0) {
+                    queueMicrotask(() => setSelectedModels(carriedOverModels));
+                }
+            } catch (error) {
+                console.error("Failed to read guest model configuration for carryover:", error);
+            }
+        }
+
         queueMicrotask(() => setIsInitialConversationResolved(true));
     }, [
+        clampSelectedModels,
         conversations.length,
         isConversationsLoaded,
         isGuestMode,
@@ -1042,7 +1016,7 @@ export default function Home() {
       const newGuestChat = {
         id: `guest_${Date.now()}`,
           title: t("sidebar.autoGeneratedNewRoom"),
-          selectedModels: [guestDefaultModelId],
+          selectedModels: guestDefaultSelectedModels,
         disabledPanels: []
       };
         setConversations((prev) => [newGuestChat, ...prev]);
@@ -1094,13 +1068,13 @@ export default function Home() {
           const restoredModels = clampGuestSelectedModels(
             normalizeStringArray(
               targetConv.selectedModels,
-              [guestDefaultModelId]
+              guestDefaultSelectedModels
             )
           );
           setSelectedModels(
             restoredModels.length
               ? restoredModels
-              : [guestDefaultModelId]
+              : guestDefaultSelectedModels
           );
           setDisabledPanels(
             normalizeStringArray(targetConv.disabledPanels, []).filter(
@@ -1626,6 +1600,7 @@ export default function Home() {
         if (
           isGuestPreviewEntry &&
           responseText.trim() &&
+          activeModelCount === 1 &&
           localStorage.getItem("tomverse_guest_compare_hint_seen_v1") !== "1"
         ) {
           localStorage.setItem("tomverse_guest_compare_hint_seen_v1", "1");
@@ -1685,6 +1660,7 @@ export default function Home() {
 
   const togglePrivateModeGlobal = () => {
     if (isPrivateMode) {
+      dispatchAppToast(t("chat.privateModeEndedNotice"), "info");
       handleNewChat();
     } else {
       localComparisonResponsesRef.current.clear();
@@ -1745,6 +1721,20 @@ export default function Home() {
       syncModelSettingsToServer(currentChatId, nextModels, nextDisabled);
     }
     return true;
+  };
+
+  const handleQuickCompare = () => {
+    // Guests already default to a 3-model comparison; the existing
+    // sign-in-gated toggleModel() already covers "guest wants to add more",
+    // so this quick action only needs to act for signed-in users.
+    if (isGuestMode) return;
+    const nextModels = clampSelectedModels(
+      uniqueStrings([...selectedModels, ...RECOMMENDED_MODEL_IDS])
+    ).slice(0, maxSelectableModels);
+    setSelectedModels(nextModels);
+    if (currentChatId && currentChatId !== "private-chat") {
+      syncModelSettingsToServer(currentChatId, nextModels, disabledPanels);
+    }
   };
 
   const handleModelFinderComplete = ({
@@ -2027,6 +2017,7 @@ export default function Home() {
           onDownload={handleDownloadConversation}
           onTogglePrivateMode={togglePrivateModeGlobal}
           onToggleModel={toggleModel}
+          onQuickCompare={handleQuickCompare}
           onSubmit={handleGlobalSubmit}
           onBeforeModelSend={ensureModelSettingsReady}
           onCompareSummary={handleCompareSummary}
@@ -2070,6 +2061,7 @@ export default function Home() {
           onDownload={handleDownloadConversation}
           onTogglePrivateMode={togglePrivateModeGlobal}
           onToggleModel={toggleModel}
+          onQuickCompare={handleQuickCompare}
           onSubmit={handleGlobalSubmit}
           onBeforeModelSend={ensureModelSettingsReady}
           onChangePanelModel={changePanelModel}
