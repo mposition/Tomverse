@@ -34,7 +34,7 @@ test("home renders the marketing site", async ({ page }) => {
     "/chat?lang=en&entry=guest-preview"
   );
   await expect(page.getByTestId("landing-guest-note")).toHaveText(
-    "No sign-up required to try a free model."
+    "No sign-up required—compare GPT, Claude, and Gemini side by side."
   );
   await expect(page.getByTestId("landing-guest-cta")).toHaveCount(0);
 
@@ -98,9 +98,11 @@ test("guest preview opens a simplified one-model chat", async ({ page }) => {
   await page.getByTestId("chat-textarea").press("Enter");
   await expect(page.getByText("Guest preview answer", { exact: true })).toBeVisible();
   const hint = page.getByTestId("guest-compare-hint");
-  await expect(hint).toContainText("You are currently trying one free model.");
+  await expect(hint).toContainText(
+    "Create a free account to access a broader model catalogue, save conversations, and unlock signed-in features."
+  );
   await expect(
-    hint.getByRole("link", { name: "Create a free account and compare" })
+    hint.getByRole("link", { name: "Create a free account" })
   ).toBeVisible();
 });
 
