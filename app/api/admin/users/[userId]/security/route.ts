@@ -103,7 +103,7 @@ export async function POST(req: Request, context: RouteContext) {
         }
       );
     } else {
-      await assertRecentAdminAuthentication(req, session);
+      await assertRecentAdminAuthentication(session);
       await writeAdminAuditLog({
         session,
         request: req,

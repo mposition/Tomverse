@@ -45,6 +45,8 @@ model User {
   accountDeletionScheduledFor   DateTime?
   lastLoginAt                   DateTime?
   createdAt                     DateTime?     @default(now())
+  emailLoginEnabled             Boolean       @default(true)
+  sessionsInvalidatedAt         DateTime?
   settings                      UserSettings?
 
   accounts               Account[]
@@ -137,6 +139,26 @@ model VerificationToken {
   expires    DateTime
 
   @@unique([identifier, token])
+}
+
+// Passwordless email login: one row per outstanding "we sent you a code and
+// a link" request. Not related to VerificationToken above (that table's
+// token column is globally unique, a poor fit for a human-typed 6-digit
+// code, and it has no consumed/invalidated columns for single-use +
+// explicit-invalidation semantics). No relation to User: at request time the
+// email may not correspond to any existing account yet.
+model EmailLoginAttempt {
+  id            String    @id @default(cuid())
+  email         String
+  codeHash      String
+  linkTokenHash String    @unique
+  expiresAt     DateTime
+  consumedAt    DateTime?
+  invalidatedAt DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([email, consumedAt, invalidatedAt, expiresAt])
+  @@index([expiresAt])
 }
 
 // ==========================================

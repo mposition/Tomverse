@@ -11,6 +11,10 @@ type AuthAuditEvent =
     | "auth.link_account";
 export type SecurityAuditEvent =
     | AuthAuditEvent
+    | "auth.email_code.request"
+    | "auth.email_code.verify"
+    | "auth.login_method.link"
+    | "auth.login_method.remove"
     | "conversation.share.create"
     | "conversation.share.revoke"
     | "conversation.lock.set"

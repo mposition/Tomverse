@@ -17,9 +17,11 @@ import {
     Crown,
     Database,
     Download,
+    KeyRound,
     LifeBuoy,
     Languages,
     LogOut,
+    Mail,
     Palette,
     ShieldCheck,
     Settings,
@@ -55,6 +57,10 @@ import {
 } from "@/lib/theme";
 import { openAnalyticsPreferences } from "@/lib/analyticsPreferencesEvents";
 
+type LoginMethod =
+    | { type: "oauth"; provider: "google" | "azure-ad"; linked: boolean }
+    | { type: "email"; address: string; enabled: boolean };
+
 export function AuthButton() {
     const { enabledModels: ENABLED_MODELS } = useModelCatalog();
   const { data: session, status } = useSession();
@@ -87,6 +93,15 @@ export function AuthButton() {
     const [accountDeletionConsent, setAccountDeletionConsent] = useState(false);
     const [accountDeletionConfirmation, setAccountDeletionConfirmation] = useState("");
     const [isDeleteAccountModalOpen, setIsDeleteAccountModalOpen] = useState(false);
+    const [loginMethods, setLoginMethods] = useState<LoginMethod[]>([]);
+    const [canRemoveLoginMethod, setCanRemoveLoginMethod] = useState(false);
+    const [armedRemoveMethod, setArmedRemoveMethod] = useState<string | null>(null);
+    const [isRemovingLoginMethod, setIsRemovingLoginMethod] = useState(false);
+    const [isAddEmailModalOpen, setIsAddEmailModalOpen] = useState(false);
+    const [addEmailCodeSent, setAddEmailCodeSent] = useState(false);
+    const [addEmailCode, setAddEmailCode] = useState("");
+    const [isSendingAddEmailCode, setIsSendingAddEmailCode] = useState(false);
+    const [isVerifyingAddEmailCode, setIsVerifyingAddEmailCode] = useState(false);
     const [isRequestingRefund, setIsRequestingRefund] = useState(false);
     const [isCancellingSubscription, setIsCancellingSubscription] = useState(false);
     const [subscriptionCancelAtPeriodEnd, setSubscriptionCancelAtPeriodEnd] = useState(false);
@@ -174,6 +189,153 @@ export function AuthButton() {
         },
         []
     );
+
+    const fetchLoginMethods = useCallback(async () => {
+        try {
+            const response = await fetch("/api/user/login-methods");
+            if (!response.ok) return;
+            const data = await response.json();
+            setLoginMethods(Array.isArray(data.methods) ? data.methods : []);
+            setCanRemoveLoginMethod(Boolean(data.canRemove));
+        } catch (error) {
+            console.error("Failed to load login methods:", error);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (isModalOpen && activeSettingsTab === "account" && session?.user) {
+            queueMicrotask(() => {
+                void fetchLoginMethods();
+            });
+        }
+    }, [isModalOpen, activeSettingsTab, session?.user, fetchLoginMethods]);
+
+    // Picks up the redirect from /api/user/login-methods/oauth/callback (the
+    // custom OAuth-provider-linking flow) and surfaces a toast, since that
+    // flow can't show one directly from a server redirect.
+    useEffect(() => {
+        if (typeof window === "undefined") return;
+        const params = new URLSearchParams(window.location.search);
+        const linked = params.get("loginMethodLinked");
+        const linkError = params.get("loginMethodLinkError");
+        if (!linked && !linkError) return;
+
+        if (linked) {
+            dispatchAppToast(t("auth.loginMethodLinkedSuccess"), "success");
+        } else if (linkError === "ALREADY_LINKED_ELSEWHERE") {
+            dispatchAppToast(t("auth.loginMethodAlreadyLinkedElsewhere"), "error");
+        } else {
+            dispatchAppToast(t("auth.loginMethodLinkFailed"), "error");
+        }
+        params.delete("loginMethodLinked");
+        params.delete("loginMethodLinkError");
+        const nextSearch = params.toString();
+        window.history.replaceState(
+            null,
+            "",
+            `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}`
+        );
+        queueMicrotask(() => {
+            setIsAccountMenuOpen(false);
+            setActiveSettingsTab("account");
+            setIsModalOpen(true);
+        });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    const handleAddOAuthLoginMethod = useCallback((provider: "google" | "azure-ad") => {
+        window.location.href = `/api/user/login-methods/oauth/start?provider=${provider}`;
+    }, []);
+
+    const handleRemoveLoginMethod = async (method: "google" | "azure-ad" | "email") => {
+        if (isRemovingLoginMethod) return;
+        if (armedRemoveMethod !== method) {
+            setArmedRemoveMethod(method);
+            dispatchAppToast(t("auth.confirmRemoveLoginMethod"), "info");
+            return;
+        }
+        setIsRemovingLoginMethod(true);
+        try {
+            const response = await fetch("/api/user/login-methods", {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ method }),
+            });
+            if (!response.ok) {
+                if (response.status === 428) {
+                    dispatchAppToast(t("auth.deleteAccountReauthRequired"), "error");
+                    await signOut({
+                        callbackUrl: `/auth/signin?callbackUrl=${encodeURIComponent(chatCallbackUrl)}`,
+                    });
+                    return;
+                }
+                if (response.status === 409) {
+                    dispatchAppToast(t("auth.removeLoginMethodBlocked"), "error");
+                    return;
+                }
+                throw new Error(`Remove failed: ${response.status}`);
+            }
+            dispatchAppToast(t("auth.removeLoginMethodSuccess"), "success");
+            await fetchLoginMethods();
+        } catch {
+            dispatchAppToast(t("auth.removeLoginMethodFailed"), "error");
+        } finally {
+            setIsRemovingLoginMethod(false);
+            setArmedRemoveMethod(null);
+        }
+    };
+
+    const closeAddEmailModal = useCallback(() => {
+        setIsAddEmailModalOpen(false);
+        setAddEmailCodeSent(false);
+        setAddEmailCode("");
+    }, []);
+
+    const handleRequestAddEmailCode = async () => {
+        if (isSendingAddEmailCode) return;
+        setIsSendingAddEmailCode(true);
+        try {
+            const response = await fetch("/api/user/login-methods/email/request", {
+                method: "POST",
+            });
+            if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+            setAddEmailCodeSent(true);
+            dispatchAppToast(t("auth.emailLoginCodeSentTitle"), "info");
+        } catch {
+            dispatchAppToast(t("auth.emailLoginRequestFailed"), "error");
+        } finally {
+            setIsSendingAddEmailCode(false);
+        }
+    };
+
+    const handleVerifyAddEmailCode = async () => {
+        if (isVerifyingAddEmailCode || addEmailCode.trim().length !== 6) return;
+        setIsVerifyingAddEmailCode(true);
+        try {
+            const response = await fetch("/api/user/login-methods/email/verify", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ code: addEmailCode.trim() }),
+            });
+            const data = await response.json().catch(() => null);
+            if (!response.ok || !data?.ok) {
+                dispatchAppToast(
+                    data?.code === "EMAIL_CODE_LOCKED"
+                        ? t("auth.emailLoginLocked")
+                        : t("auth.emailLoginInvalidCode"),
+                    "error"
+                );
+                return;
+            }
+            dispatchAppToast(t("auth.addEmailLoginSuccess"), "success");
+            closeAddEmailModal();
+            await fetchLoginMethods();
+        } catch {
+            dispatchAppToast(t("auth.emailLoginInvalidCode"), "error");
+        } finally {
+            setIsVerifyingAddEmailCode(false);
+        }
+    };
 
     const getSettingsFocusableElements = useCallback(() => {
         const dialog = settingsDialogRef.current;
@@ -839,6 +1001,71 @@ export function AuthButton() {
                                                 </div>
                                             </div>
                                         </section>
+                                        <section className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60">
+                                            <h4 className="text-sm font-bold">{t("auth.manageLoginMethods")}</h4>
+                                            <p className="mt-1 text-sm leading-6 text-zinc-500">{t("auth.manageLoginMethodsDescription")}</p>
+                                            <div className="mt-3 space-y-2">
+                                                {loginMethods.map((method) => {
+                                                    const key = method.type === "email" ? "email" : method.provider;
+                                                    const label =
+                                                        method.type === "email"
+                                                            ? t("auth.loginMethodEmail")
+                                                            : method.provider === "google"
+                                                                ? t("auth.google")
+                                                                : t("auth.microsoft");
+                                                    const isEnabled = method.type === "email" ? method.enabled : method.linked;
+                                                    const Icon = method.type === "email" ? Mail : KeyRound;
+                                                    const canRemoveThis = isEnabled && canRemoveLoginMethod;
+                                                    return (
+                                                        <div
+                                                            key={key}
+                                                            className="flex items-center justify-between gap-3 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-950/60"
+                                                        >
+                                                            <div className="flex min-w-0 items-center gap-2.5">
+                                                                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-zinc-500 ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-700">
+                                                                    <Icon className="h-4 w-4" />
+                                                                </span>
+                                                                <div className="min-w-0">
+                                                                    <p className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">{label}</p>
+                                                                    {method.type === "email" && (
+                                                                        <p className="truncate text-xs text-zinc-500">{method.address}</p>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                            {isEnabled ? (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleRemoveLoginMethod(method.type === "email" ? "email" : method.provider)}
+                                                                    disabled={isRemovingLoginMethod || !canRemoveThis}
+                                                                    title={!canRemoveThis ? t("auth.removeLoginMethodBlocked") : ""}
+                                                                    className="shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-bold text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-red-950/40"
+                                                                >
+                                                                    {armedRemoveMethod === (method.type === "email" ? "email" : method.provider)
+                                                                        ? t("auth.confirmRemoveLoginMethodButton")
+                                                                        : t("auth.removeLoginMethod")}
+                                                                </button>
+                                                            ) : method.type === "email" ? (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setIsAddEmailModalOpen(true)}
+                                                                    className="shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-bold text-blue-600 transition-colors hover:bg-blue-50 dark:hover:bg-blue-950/40"
+                                                                >
+                                                                    {t("auth.addLoginMethod")}
+                                                                </button>
+                                                            ) : (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleAddOAuthLoginMethod(method.provider)}
+                                                                    className="shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-bold text-blue-600 transition-colors hover:bg-blue-50 dark:hover:bg-blue-950/40"
+                                                                >
+                                                                    {t("auth.addLoginMethod")}
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </section>
                                         <section className="rounded-2xl border border-red-200 bg-red-50 p-4 dark:border-red-950/70 dark:bg-red-950/20">
                                             <h4 className="text-sm font-bold text-red-700 dark:text-red-300">{t("auth.dangerZone")}</h4>
                                             <p className="mt-1 text-sm leading-6 text-red-700/80 dark:text-red-200/80">{t("auth.accountDangerZoneDescription")}</p>
@@ -1299,6 +1526,86 @@ export function AuthButton() {
                                         : t("auth.deleteAccount")}
                             </button>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {isModalOpen && isAddEmailModalOpen && (
+                <div
+                    className="fixed inset-0 z-[95] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+                    onClick={(event) => {
+                        if (event.target === event.currentTarget) closeAddEmailModal();
+                    }}
+                >
+                    <div
+                        className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="add-email-modal-title"
+                    >
+                        <div className="flex items-start justify-between gap-4">
+                            <h3 id="add-email-modal-title" className="text-sm font-black">
+                                {t("auth.addLoginMethod")}
+                            </h3>
+                            <button
+                                type="button"
+                                onClick={closeAddEmailModal}
+                                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-white"
+                                aria-label={t("auth.cancel")}
+                            >
+                                <X className="h-4 w-4" />
+                            </button>
+                        </div>
+                        {!addEmailCodeSent ? (
+                            <>
+                                <p className="mt-2 text-sm leading-6 text-zinc-500">
+                                    {formatCopy("auth.emailLoginCodeSentBody", { email: session.user.email || "" })}
+                                </p>
+                                <button
+                                    type="button"
+                                    onClick={handleRequestAddEmailCode}
+                                    disabled={isSendingAddEmailCode}
+                                    className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-3 text-sm font-bold text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                    {t("auth.emailLoginButton")}
+                                </button>
+                            </>
+                        ) : (
+                            <>
+                                <p className="mt-2 text-sm leading-6 text-zinc-500">
+                                    {formatCopy("auth.emailLoginCodeSentBody", { email: session.user.email || "" })}
+                                </p>
+                                <label className="mt-3 block text-xs font-bold text-zinc-600 dark:text-zinc-300">
+                                    {t("auth.emailLoginCodeInputLabel")}
+                                    <input
+                                        value={addEmailCode}
+                                        onChange={(event) => setAddEmailCode(event.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
+                                        autoComplete="off"
+                                        inputMode="numeric"
+                                        spellCheck={false}
+                                        className="mt-2 h-10 w-full rounded-lg border border-zinc-300 bg-white px-3 font-mono text-lg tracking-widest text-zinc-950 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 dark:border-zinc-700 dark:bg-zinc-950 dark:text-white"
+                                        placeholder="000000"
+                                    />
+                                </label>
+                                <div className="mt-4 flex justify-end gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={closeAddEmailModal}
+                                        className="rounded-lg px-4 py-2 text-sm font-semibold text-zinc-600 transition-colors hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                                    >
+                                        {t("auth.cancel")}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleVerifyAddEmailCode}
+                                        disabled={isVerifyingAddEmailCode || addEmailCode.trim().length !== 6}
+                                        className="flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-black text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                                    >
+                                        {t("auth.emailLoginVerifyButton")}
+                                    </button>
+                                </div>
+                            </>
+                        )}
                     </div>
                 </div>
             )}

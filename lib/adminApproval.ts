@@ -117,7 +117,7 @@ export async function runWithAdminApproval<T>(
   input: ApprovalInput,
   operation: () => Promise<T>
 ): Promise<T> {
-  await assertRecentAdminAuthentication(input.request, input.session);
+  await assertRecentAdminAuthentication(input.session);
   const claim = await claimApproval(input);
   if (!claim.claimed) {
     if (claim.created) {

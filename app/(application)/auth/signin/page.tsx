@@ -1,9 +1,10 @@
-﻿"use client";
+"use client";
 
 import { signIn } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
+import { useTurnstile } from "@/components/chat/useTurnstile";
 import Link from "next/link";
 import { ShieldCheck } from "lucide-react";
 import { withChatLanguage } from "@/lib/localizedCallbackUrl";
@@ -12,6 +13,11 @@ import {
     trackProductEvent,
 } from "@/lib/productAnalyticsClient";
 
+const PROVIDER_ERROR_KEYS: Record<string, string> = {
+    OAuthAccountNotLinked: "auth.errorAccountNotLinked",
+    AccessDenied: "auth.errorAccessDenied",
+};
+
 function SignInButtons() {
     const searchParams = useSearchParams();
     const { t, lang } = useLanguage();
@@ -19,7 +25,18 @@ function SignInButtons() {
     const [acceptedTerms, setAcceptedTerms] = useState(false);
     const adminReauthentication =
         searchParams.get("reason") === "admin-session-expired";
+    const providerError = searchParams.get("error");
     const pageViewTrackedRef = useRef(false);
+
+    const [step, setStep] = useState<"email" | "code">("email");
+    const [email, setEmail] = useState("");
+    const [code, setCode] = useState("");
+    const [isSendingCode, setIsSendingCode] = useState(false);
+    const [isVerifyingCode, setIsVerifyingCode] = useState(false);
+    const [formError, setFormError] = useState<string | null>(null);
+    const [needsTurnstile, setNeedsTurnstile] = useState(false);
+    const { containerRef: turnstileContainerRef, getToken: getTurnstileToken } =
+        useTurnstile(true, "email_login_request");
 
     useEffect(() => {
         if (pageViewTrackedRef.current) return;
@@ -30,12 +47,78 @@ function SignInButtons() {
     const providerButtonClass =
         "flex w-full items-center justify-center gap-3 rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm transition-all hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-white dark:border-zinc-700 dark:hover:bg-zinc-100 dark:disabled:hover:bg-white";
 
+    const requestCode = (turnstileToken?: string) =>
+        fetch("/api/auth/email-login/request", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: email.trim(), turnstileToken }),
+        });
+
+    const handleSendCode = async () => {
+        if (isSendingCode || !email.trim()) return;
+        setIsSendingCode(true);
+        setFormError(null);
+        try {
+            let response = await requestCode();
+            if (response.status === 403) {
+                const data = await response.json().catch(() => null);
+                if (data?.code === "TURNSTILE_REQUIRED") {
+                    setNeedsTurnstile(true);
+                    const token = await getTurnstileToken();
+                    response = await requestCode(token);
+                }
+            }
+            if (!response.ok) {
+                setFormError(t("auth.emailLoginRequestFailed"));
+                return;
+            }
+            markSignupStarted("email-code");
+            setStep("code");
+        } catch {
+            setFormError(t("auth.emailLoginRequestFailed"));
+        } finally {
+            setIsSendingCode(false);
+        }
+    };
+
+    const handleVerifyCode = async () => {
+        if (isVerifyingCode || code.trim().length !== 6) return;
+        setIsVerifyingCode(true);
+        setFormError(null);
+        try {
+            const result = await signIn("email-code", {
+                redirect: false,
+                email: email.trim(),
+                code: code.trim(),
+                callbackUrl,
+            });
+            // next-auth v4 collapses every authorize() rejection into the
+            // generic "CredentialsSignin" code, so a specific "locked" vs
+            // "invalid" distinction can't reach the client here -- show one
+            // generic message and let the user request a fresh code.
+            if (result?.error) {
+                setFormError(t("auth.emailLoginInvalidCode"));
+                return;
+            }
+            window.location.href = result?.url || callbackUrl;
+        } catch {
+            setFormError(t("auth.emailLoginInvalidCode"));
+        } finally {
+            setIsVerifyingCode(false);
+        }
+    };
+
     return (
         <div className="mt-8 space-y-4">
             {adminReauthentication ? (
                 <div role="status" className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm leading-6 text-blue-900 dark:border-blue-500/30 dark:bg-blue-950/30 dark:text-blue-100">
                     Your previous administrator session was ended. Sign in again
                     to open the Tomverse Admin Console.
+                </div>
+            ) : null}
+            {providerError && !adminReauthentication ? (
+                <div role="status" className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm leading-6 text-red-900 dark:border-red-500/30 dark:bg-red-950/30 dark:text-red-100">
+                    {t(PROVIDER_ERROR_KEYS[providerError] || "auth.errorGeneric")}
                 </div>
             ) : null}
             <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-left text-xs leading-5 text-zinc-600 transition hover:border-blue-300 hover:bg-blue-50/40 dark:border-zinc-800 dark:bg-zinc-950/60 dark:text-zinc-300 dark:hover:border-blue-500/60 dark:hover:bg-blue-950/20">
@@ -99,22 +182,80 @@ function SignInButtons() {
                     <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
                     <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
                 </svg>
-                {t("auth.microsoft") }
+                {t("auth.microsoft")}
             </button>
 
-            {/* Naver */}
-            <button
-                type="button"
-                disabled={!acceptedTerms}
-                onClick={() => {
-                    markSignupStarted("naver");
-                    void signIn("naver", { callbackUrl });
-                }}
-                className="flex w-full items-center justify-center gap-3 rounded-xl bg-[#03C75A] px-4 py-3 text-sm font-semibold text-white transition-all hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-                <span className="font-black text-white">N</span>
-                {t("auth.naver")}
-            </button>
+            <div className="flex items-center gap-3 py-1">
+                <div className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
+                <span className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+                    {t("auth.orDivider")}
+                </span>
+                <div className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
+            </div>
+
+            {step === "email" ? (
+                <div className="space-y-2">
+                    <input
+                        type="email"
+                        value={email}
+                        onChange={(event) => setEmail(event.target.value)}
+                        disabled={!acceptedTerms}
+                        placeholder={t("auth.emailLoginPlaceholder")}
+                        autoComplete="email"
+                        className="w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-white"
+                    />
+                    <div
+                        ref={turnstileContainerRef}
+                        className={needsTurnstile ? "flex justify-center py-1" : "hidden"}
+                    />
+                    <button
+                        type="button"
+                        disabled={!acceptedTerms || !email.trim() || isSendingCode}
+                        onClick={handleSendCode}
+                        className={providerButtonClass}
+                    >
+                        {isSendingCode ? t("auth.loading") : t("auth.emailLoginButton")}
+                    </button>
+                </div>
+            ) : (
+                <div className="space-y-2">
+                    <p className="text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                        {t("auth.emailLoginCodeSentBody").replace("{email}", email)}
+                    </p>
+                    <input
+                        value={code}
+                        onChange={(event) => setCode(event.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                        placeholder="000000"
+                        className="w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-center font-mono text-lg tracking-widest text-zinc-950 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 dark:border-zinc-700 dark:bg-zinc-950 dark:text-white"
+                    />
+                    <button
+                        type="button"
+                        disabled={isVerifyingCode || code.trim().length !== 6}
+                        onClick={handleVerifyCode}
+                        className={providerButtonClass}
+                    >
+                        {isVerifyingCode ? t("auth.loading") : t("auth.emailLoginVerifyButton")}
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setStep("email");
+                            setCode("");
+                            setFormError(null);
+                        }}
+                        className="w-full text-center text-xs font-semibold text-zinc-500 hover:underline dark:text-zinc-400"
+                    >
+                        {t("auth.emailLoginBackButton")}
+                    </button>
+                </div>
+            )}
+            {formError ? (
+                <p role="alert" className="text-center text-xs font-semibold text-red-600 dark:text-red-400">
+                    {formError}
+                </p>
+            ) : null}
         </div>
     );
 }

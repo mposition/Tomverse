@@ -62,7 +62,7 @@ export async function PATCH(req: Request) {
     if (!hasAdminPermission(session, "ops:write")) {
       return NextResponse.json({ error: "Forbidden." }, { status: 403 });
     }
-    await assertRecentAdminAuthentication(req, session);
+    await assertRecentAdminAuthentication(session);
 
     await consumeApiRateLimit(req, session.user.id, "admin-app-settings-write", {
       minute: 10,

@@ -40,7 +40,7 @@ export async function DELETE(req: Request) {
       day: 3,
     });
 
-    await assertRecentAdminAuthentication(req, session);
+    await assertRecentAdminAuthentication(session);
     await readLimitedJson(req, 1024, deleteAccountSchema);
     const deletion = await scheduleTomverseAccountDeletion(session.user.id);
     if (!deletion.scheduled) {
