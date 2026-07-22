@@ -68,7 +68,7 @@ import {
     readLimitedJson,
     reserveDailyUploadBytes,
 } from "@/lib/apiSecurity";
-import { verifyGuestTurnstile } from "@/lib/turnstile";
+import { ensureGuestVerified } from "@/lib/turnstile";
 import {
     effectivePlanModelLimit,
     featureNotIncludedResponse,
@@ -640,6 +640,7 @@ export async function POST(req: Request) {
     let usageReservation: ChatUsageReservation | null = null;
     let requestedModelIdForLog: string | undefined;
     let requestedProviderForLog: AiModel["provider"] | undefined;
+    let turnstileGrantCookie: string | undefined;
     try {
         assertChatRequestSize(req);
         const session = await getServerSession(authOptions);
@@ -783,7 +784,7 @@ export async function POST(req: Request) {
         );
         assertModelAccess(access, modelConfig);
         if (access.kind === "guest") {
-            await verifyGuestTurnstile(req, turnstileToken);
+            turnstileGrantCookie = await ensureGuestVerified(req, turnstileToken);
         }
         if (conversationId && assistantMessageId) {
             if (!session?.user?.id) {
@@ -1710,7 +1711,10 @@ export async function POST(req: Request) {
             "X-Request-ID": traceId,
         });
         if (accessGrant.setCookie) {
-            headers.set("Set-Cookie", accessGrant.setCookie);
+            headers.append("Set-Cookie", accessGrant.setCookie);
+        }
+        if (turnstileGrantCookie) {
+            headers.append("Set-Cookie", turnstileGrantCookie);
         }
 
         return new Response(protectedStream.pipeThrough(new TextEncoderStream()), {

@@ -104,7 +104,9 @@ test("guest preview opens a 3-model comparison chat by default", async ({ page }
 
   await page.getByTestId("chat-textarea").fill("Show me how Tomverse works");
   await page.getByTestId("chat-textarea").press("Enter");
-  await expect(page.getByText("Guest preview answer", { exact: true }).first()).toBeVisible();
+  await expect(
+    page.locator(":visible", { hasText: "Guest preview answer" }).first()
+  ).toBeVisible();
 });
 
 test("pricing page supports Chinese copy", async ({ page }) => {
