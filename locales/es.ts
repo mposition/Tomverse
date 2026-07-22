@@ -112,7 +112,7 @@ export const es = {
         welcomeBack: "Qué bueno verte de nuevo. ¿En qué puedo ayudarte?",
         guestWelcome: "¡Hola! Estás en modo invitado. Escribe tu pregunta.",
         inputPlaceholder: "Pregunta lo que quieras...",
-        aiDisclaimer: "Tomverse puede cometer errores. Verifica la información importante.",
+        aiDisclaimer: "Las respuestas de la IA pueden contener errores. Verifica la información importante.",
         inactivePanel: "No hay panel de IA activo.",
         chooseModel: "Selecciona un modelo a la derecha del campo de entrada inferior.",
         inUsed: " (en uso)",

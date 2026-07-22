@@ -94,7 +94,7 @@ export const ko = {
         welcomeBack: "다시 만나 반가워요. 무엇을 도와드릴까요?",
         guestWelcome: "안녕하세요! 현재 게스트 모드입니다. 질문을 입력해 주세요.",
         inputPlaceholder: "무엇을 도와드릴까요?",
-        aiDisclaimer: "Tomverse는 실수를 할 수 있습니다. 중요한 정보는 반드시 확인하세요.",
+        aiDisclaimer: "AI 답변에는 오류가 있을 수 있습니다. 중요한 정보는 반드시 확인하세요.",
         inactivePanel: "활성화된 AI 패널이 없습니다.",
         chooseModel: "아래 입력창 오른쪽에서 사용할 모델을 선택해 주세요.",
         inUsed: " (사용 중)",

@@ -94,7 +94,7 @@ export const zh = {
         welcomeBack: "欢迎回来，有什么可以帮你的？",
         guestWelcome: "你好！你当前正在使用访客模式。请输入你的问题。",
         inputPlaceholder: "我能帮你做些什么？",
-        aiDisclaimer: "Tomverse 也可能出错，请核实重要信息。",
+        aiDisclaimer: "AI 回答可能存在错误，请核实重要信息。",
         inactivePanel: "没有启用的 AI 面板。",
         chooseModel: "请在下方输入框右侧选择模型。",
         inUsed: "（使用中）",
