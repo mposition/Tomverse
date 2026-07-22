@@ -5,7 +5,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getAnonymousClientKey } from "@/lib/clientIp";
 import { getPublicAppOrigin } from "@/lib/publicUrl";
-import { consumeApiRateLimit } from "@/lib/apiSecurity";
+import { consumeApiRateLimit, releaseApiRateLimit } from "@/lib/apiSecurity";
 import { verifyGuestTurnstile } from "@/lib/turnstile";
 import { ChatAccessError } from "@/lib/chatSecurity";
 import { logSecurityAuditEvent } from "@/lib/securityAudit";
@@ -19,6 +19,14 @@ const LOCKOUT_WINDOW_MS =
 const TURNSTILE_CHALLENGE_THRESHOLD = clamp(
   Number(process.env.EMAIL_LOGIN_TURNSTILE_THRESHOLD) || 3,
   1,
+  50
+);
+// Requests per email per day. Successful sign-ins release their unit back
+// (see releaseApiRateLimit calls below), so this mainly bounds abandoned or
+// abusive requests rather than genuine repeated logins.
+const DAILY_REQUEST_LIMIT = clamp(
+  Number(process.env.EMAIL_LOGIN_DAILY_REQUEST_LIMIT) || 12,
+  3,
   50
 );
 
@@ -100,6 +108,13 @@ const clearLockoutBucket = async (key: string, start: Date) => {
 const lockoutWindowStart = (now: Date) =>
   new Date(Math.floor(now.getTime() / LOCKOUT_WINDOW_MS) * LOCKOUT_WINDOW_MS);
 
+// Called once mailbox control for `email` has actually been proven (code or
+// link consumed successfully), so this day's daily-request quota isn't
+// spent by a login the owner completed -- only by requests that were never
+// followed through.
+const releaseEmailRequestQuota = (email: string) =>
+  releaseApiRateLimit(`email-otp:${email}`, "email-otp-request", "day");
+
 export async function requestEmailLoginCode(
   request: Request,
   rawEmail: string,
@@ -109,7 +124,7 @@ export async function requestEmailLoginCode(
 
   await consumeApiRateLimit(request, `email-otp:${email}`, "email-otp-request", {
     minute: 1,
-    day: 8,
+    day: DAILY_REQUEST_LIMIT,
   });
   const anonymousKey = getAnonymousClientKey(request);
   await consumeApiRateLimit(request, `ip:${anonymousKey}`, "email-otp-request-ip", {
@@ -285,6 +300,7 @@ async function consumeCodeForEmail(
   }
 
   await clearLockoutBucket(lockoutKey, windowStart);
+  await releaseEmailRequestQuota(email);
   return { ok: true };
 }
 
@@ -374,6 +390,7 @@ export async function verifyEmailLoginLink(
     });
     return { ok: false, reason: "invalid_or_expired" };
   }
+  await releaseEmailRequestQuota(attempt.email);
   logSecurityAuditEvent("auth.email_code.verify", {
     request,
     userId: resolved.userId,
