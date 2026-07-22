@@ -114,7 +114,7 @@ export const de = {
         welcomeBack: "Schön, dich wiederzusehen. Womit kann ich helfen?",
         guestWelcome: "Hallo! Sie nutzen den Gastmodus. Stellen Sie Ihre Frage.",
         inputPlaceholder: "Fragen Sie alles...",
-        aiDisclaimer: "Tomverse kann Fehler machen. Bitte überprüfen Sie wichtige Informationen.",
+        aiDisclaimer: "KI-Antworten können Fehler enthalten. Bitte überprüfen Sie wichtige Informationen.",
         inactivePanel: "Kein aktives KI-Panel.",
         chooseModel: "Bitte wählen Sie rechts neben dem Eingabefeld ein Modell aus.",
         inUsed: " (in Verwendung)",

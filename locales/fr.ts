@@ -114,7 +114,7 @@ export const fr = {
         welcomeBack: "Content de vous revoir. Comment puis-je vous aider ?",
         guestWelcome: "Bonjour ! Vous êtes en mode invité. Posez votre question.",
         inputPlaceholder: "Posez votre question...",
-        aiDisclaimer: "Tomverse peut se tromper. Vérifiez les informations importantes.",
+        aiDisclaimer: "Les réponses de l'IA peuvent contenir des erreurs. Vérifiez les informations importantes.",
         inactivePanel: "Aucun panneau IA actif.",
         chooseModel: "Sélectionnez un modèle à droite du champ de saisie ci-dessous.",
         inUsed: " (utilisé)",
