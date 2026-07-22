@@ -15,6 +15,13 @@ import {
 const processedPromptKeys = new Set<string>();
 const CHAT_STREAM_IDLE_TIMEOUT_MS = 90_000;
 
+// Shared across every mounted ChatApp instance (one per selected model panel)
+// so that when several panels need guest verification at once, only one of
+// them actually runs the interactive Turnstile challenge; the rest just wait
+// for it to finish, then retry — by then the server's grant cookie already
+// covers them too, so they never show their own checkbox.
+let pendingGuestVerification: Promise<void> | null = null;
+
 const toChatRequestMessage = (message: Message): Message => {
   if (!message.attachments?.length) return message;
 
@@ -415,8 +422,27 @@ function ChatAppComponent({
             ? (error as { code?: string }).code
             : undefined;
         if (isGuestMode && code === "TURNSTILE_REQUIRED") {
-          const turnstileToken = await getTurnstileToken();
-          response = await sendChatRequest(turnstileToken);
+          if (pendingGuestVerification) {
+            // Another panel is already running the interactive challenge —
+            // wait for it instead of popping a second checkbox, then retry
+            // without a token; the grant cookie it sets covers this panel too.
+            await pendingGuestVerification.catch(() => {});
+            response = await sendChatRequest();
+          } else {
+            const verifyAndRetry: Promise<Response> = (async () => {
+              const turnstileToken = await getTurnstileToken();
+              return sendChatRequest(turnstileToken);
+            })();
+            pendingGuestVerification = verifyAndRetry.then(
+              () => undefined,
+              () => undefined
+            );
+            try {
+              response = await verifyAndRetry;
+            } finally {
+              pendingGuestVerification = null;
+            }
+          }
         } else {
           throw error;
         }
