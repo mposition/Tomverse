@@ -96,6 +96,7 @@ export const en = {
         welcomeBack: "Welcome back. What can I help with?",
         guestWelcome: "Hello! You are currently in guest mode. Please enter your question.",
         inputPlaceholder: "Ask anything...",
+        aiDisclaimer: "Tomverse can make mistakes. Please verify important information.",
         inactivePanel: "No active AI panel.",
         chooseModel: "Please select a model on the right side of the input field below.",
         inUsed: " (In Use)",
