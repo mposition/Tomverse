@@ -476,6 +476,7 @@ export const de = {
         purchasedCreditsRemaining: "Verbleibendes Zusatzguthaben",
         planCreditsCompact: "Monatlich: {count} Guthaben übrig",
         analyticsSettings: "Analyse-Einstellungen",
+        analyticsCookieSettings: "Analyse-Cookie-Einstellungen",
         profileImage: "Profilbild",
         userSettings: "Benutzereinstellungen",
         theme: "Design",

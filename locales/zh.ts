@@ -472,6 +472,7 @@ export const zh = {
         purchasedCreditsRemaining: "额外购买积分剩余",
         planCreditsCompact: "本月剩余 {count} 积分",
         analyticsSettings: "分析设置",
+        analyticsCookieSettings: "分析 Cookie 设置",
         profileImage: "头像",
         userSettings: "用户设置",
         theme: "主题",

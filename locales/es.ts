@@ -476,6 +476,7 @@ export const es = {
         purchasedCreditsRemaining: "Créditos comprados restantes",
         planCreditsCompact: "Mensual: quedan {count} créditos",
         analyticsSettings: "Ajustes de analítica",
+        analyticsCookieSettings: "Ajustes de cookies analíticas",
         profileImage: "Imagen de perfil",
         userSettings: "Configuración de usuario",
         theme: "Tema",

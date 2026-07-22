@@ -61,7 +61,15 @@ type LoginMethod =
     | { type: "oauth"; provider: "google" | "azure-ad"; linked: boolean }
     | { type: "email"; address: string; enabled: boolean };
 
-export function AuthButton() {
+export function AuthButton({
+    showAnalyticsCookieButton = false,
+}: {
+    // Guests have no account menu to reach analytics preferences from, so
+    // the mobile shell (which drops the floating settings button to
+    // declutter the screen) passes this to put an inline substitute right
+    // next to the guest login button instead of removing the path entirely.
+    showAnalyticsCookieButton?: boolean;
+} = {}) {
     const { enabledModels: ENABLED_MODELS } = useModelCatalog();
   const { data: session, status } = useSession();
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -1636,17 +1644,29 @@ export function AuthButton() {
           )}
         </select>
       </label>
-      <button
-        onClick={() => {
-          trackProductEvent("cta_start_click", 0, {
-            cta_location: "account_login",
-          });
-          void signIn(undefined, { callbackUrl: chatCallbackUrl });
-        }}
-        className="cursor-pointer w-full rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-blue-950/20 transition-all hover:bg-blue-500"
-      >
-        {t("auth.login")}
-      </button>
+      <div className="flex gap-2">
+        <button
+          onClick={() => {
+            trackProductEvent("cta_start_click", 0, {
+              cta_location: "account_login",
+            });
+            void signIn(undefined, { callbackUrl: chatCallbackUrl });
+          }}
+          className="cursor-pointer flex-1 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-blue-950/20 transition-all hover:bg-blue-500"
+        >
+          {t("auth.login")}
+        </button>
+        {showAnalyticsCookieButton && (
+          <button
+            type="button"
+            data-testid="guest-analytics-cookie-settings"
+            onClick={() => openAnalyticsPreferences()}
+            className="shrink-0 rounded-xl border border-zinc-200 bg-zinc-100 px-3 py-2.5 text-xs font-bold text-zinc-600 transition-colors hover:bg-zinc-200 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          >
+            {t("auth.analyticsCookieSettings")}
+          </button>
+        )}
+      </div>
     </div>
   );
 }

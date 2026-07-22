@@ -580,6 +580,7 @@ export const en = {
         purchasedCreditsRemaining: "Purchased credits remaining",
         planCreditsCompact: "Monthly: {count} credits left",
         analyticsSettings: "Analytics settings",
+        analyticsCookieSettings: "Analytics cookie settings",
         profileImage: "Profile image",
         userSettings: "User Settings",
         theme: "Theme",

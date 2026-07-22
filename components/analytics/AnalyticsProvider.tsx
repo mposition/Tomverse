@@ -497,7 +497,14 @@ export function AnalyticsProvider({
           data-testid="analytics-settings-button"
           onClick={() => setShowPreferences(true)}
           className={`fixed right-2 z-[60] rounded-full border border-zinc-700 bg-zinc-950/90 px-2.5 py-1 text-[10px] font-bold text-zinc-400 shadow-lg backdrop-blur hover:text-zinc-100 ${
-            pathname === "/chat" ? "bottom-[5.5rem] md:bottom-2" : "bottom-2"
+            pathname === "/chat"
+              ? // The chat sidebar/drawer offers its own path back to this
+                // (the account menu for signed-in users, an inline button
+                // next to "Login" for guests), so this floating overlay
+                // only needs to cover desktop, where it doesn't compete
+                // with the composer for space.
+                "hidden bottom-[5.5rem] md:inline-flex md:bottom-2"
+              : "bottom-2"
           }`}
         >
           {copy.settings}

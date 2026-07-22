@@ -580,6 +580,7 @@ export const ko = {
         purchasedCreditsRemaining: "추가 구매 크레딧 남음",
         planCreditsCompact: "월간 {count} 크레딧 남음",
         analyticsSettings: "분석 설정",
+        analyticsCookieSettings: "분석 쿠키 설정",
         profileImage: "프로필 이미지",
         userSettings: "사용자 설정",
         theme: "테마",

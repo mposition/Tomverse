@@ -1726,7 +1726,7 @@ export function ChatSidebar({
                     </div>
                 ) : null}
                 <div className="shrink-0" data-testid="sidebar-account-controls">
-                    <AuthButton />
+                    <AuthButton showAnalyticsCookieButton={isMobileDrawer} />
                 </div>
                 <div className="shrink-0">
                     <FeedbackButton
