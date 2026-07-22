@@ -16,10 +16,12 @@ type PlanCopy = CardCopy & { id: "free" | "pro" | "max"; fallbackPrice: string }
 type LandingCopy = {
   app: string;
   badge: string;
+  brandNote: string;
   title: string;
   description: string;
   primaryCta: string;
   signedInCta: string;
+  heroSignupNote: string;
   guestNote: string;
   pricingCta: string;
   modelFinderLead: string;
@@ -53,13 +55,15 @@ type LandingCopy = {
 
 const englishCopy: LandingCopy = {
   app: "Chat",
-  badge: "Multi-model comparison + AI cross-review",
+  badge: "Tomverse Insight · Multi-AI Comparison & Review",
+  brandNote: "Tomverse Insight is the multi-AI comparison and review experience from Tomverse.",
   title: "Ask once.\nCompare multiple AI answers.",
   description:
     "Compare GPT, Claude, and Gemini side by side,\nthen use AI Review to find differences and missing points.",
   primaryCta: "Start chatting free",
   signedInCta: "Continue chatting",
-  guestNote: "No sign-up required to try a free model.",
+  heroSignupNote: "No sign-up required—start with three models.",
+  guestNote: "No sign-up required—compare GPT, Claude, and Gemini side by side.",
   pricingCta: "See pricing",
   modelFinderLead: "Not sure which AI fits your work?",
   modelFinderCta: "Get a one-minute recommendation after sign-up.",
@@ -102,7 +106,7 @@ const englishCopy: LandingCopy = {
   pricingDetails: "Compare plans and credit usage",
   faqTitle: "Three quick questions",
   faqs: [
-    { question: "Can I use Tomverse for free?", answer: "Yes. Without signing in, you can already compare 3 AI models side by side on the same question. A Free account adds more models, higher daily limits, and other signed-in workflows within the plan limits." },
+    { question: "Can I use Tomverse for free?", answer: "Yes. Without signing in, you can already compare 3 AI models side by side on the same question. A Free account unlocks a broader model catalogue, higher usage limits, saved conversations, and other signed-in workflows within the plan limits." },
     { question: "Which models can I compare?", answer: "The available catalogue spans providers such as OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Mistral, Moonshot, Alibaba, and Perplexity. Availability can change, so the live status page is the source of current service state." },
     { question: "How is my data handled?", answer: "Tomverse applies attachment limits, locked-chat controls, read-only share snapshots, and Private Mode. Selected AI providers still receive the request content needed to answer; review the Safety page for the complete boundaries." },
   ],
@@ -115,12 +119,14 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
   ko: {
     ...englishCopy,
     app: "채팅하기",
-    badge: "멀티모델 비교 + AI 답변 교차검토",
+    badge: "Tomverse Insight · 멀티 AI 비교 및 검토",
+    brandNote: "Tomverse Insight는 Tomverse에서 제공하는 멀티 AI 비교 및 검토 경험입니다.",
     title: "한 번 질문하고,\n여러 AI 답변을 비교하세요.",
     description: "GPT, Claude, Gemini의 답변을 한 화면에서 비교하고,\nAI Review로 차이와 놓친 부분을 확인하세요.",
     primaryCta: "무료로 채팅 시작하기",
     signedInCta: "채팅 계속하기",
-    guestNote: "회원가입 없이 무료 모델로 먼저 체험할 수 있습니다.",
+    heroSignupNote: "회원가입 없이 3개 모델로 바로 시작할 수 있습니다.",
+    guestNote: "회원가입 없이 GPT, Claude, Gemini의 답변을 바로 비교해 보세요.",
     pricingCta: "요금 보기",
     modelFinderLead: "어떤 AI가 내 작업에 맞는지 모르시겠나요?",
     modelFinderCta: "가입 후 1분 추천을 받아보세요.",
@@ -160,7 +166,7 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     pricingDetails: "플랜과 크레딧 사용량 비교",
     faqTitle: "빠르게 확인하는 세 가지",
     faqs: [
-      { question: "Tomverse를 무료로 사용할 수 있나요?", answer: "네. 로그인 없이도 3개의 AI 모델로 같은 질문에 대한 답변을 바로 비교해볼 수 있습니다. Free 계정을 만들면 더 많은 모델과 높은 일일 한도, 로그인 전용 기능을 사용할 수 있습니다." },
+      { question: "Tomverse를 무료로 사용할 수 있나요?", answer: "네. 로그인 없이도 3개의 AI 모델로 같은 질문에 대한 답변을 바로 비교해볼 수 있습니다. Free 계정을 만들면 더 넓은 모델 카탈로그, 높은 사용량 한도, 대화 저장 및 로그인 전용 기능을 사용할 수 있습니다." },
       { question: "어떤 모델을 비교할 수 있나요?", answer: "OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Mistral, Moonshot, Alibaba, Perplexity 등의 모델을 지원합니다. 제공 상태는 바뀔 수 있으므로 실시간 상태 페이지에서 현재 상태를 확인할 수 있습니다." },
       { question: "데이터는 어떻게 처리되나요?", answer: "첨부파일 제한, 대화 잠금, 읽기 전용 공유 스냅샷과 Private Mode를 적용합니다. 선택한 AI 공급자는 답변에 필요한 요청 내용을 처리하므로 전체 범위는 안전 페이지에서 확인하세요." },
     ],
@@ -170,12 +176,14 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
   zh: {
     ...englishCopy,
     app: "开始聊天",
-    badge: "多模型比较 + AI 交叉审查",
+    badge: "Tomverse Insight · 多 AI 比较与审查",
+    brandNote: "Tomverse Insight 是 Tomverse 提供的多 AI 比较与审查体验。",
     title: "问一次，\n比较多个 AI 的回答。",
     description: "在一个页面比较 GPT、Claude 和 Gemini，再用 AI Review 找出差异与遗漏。",
     primaryCta: "免费开始聊天",
     signedInCta: "继续聊天",
-    guestNote: "无需注册即可先体验免费模型。",
+    heroSignupNote: "无需注册，即可用 3 个模型直接开始。",
+    guestNote: "无需注册，即可直接比较 GPT、Claude 和 Gemini 的回答。",
     pricingCta: "查看价格",
     modelFinderLead: "不确定哪种 AI 适合你的工作？",
     modelFinderCta: "注册后获取一分钟推荐。",
@@ -214,7 +222,7 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     pricingDetails: "比较套餐与积分用量",
     faqTitle: "三个常见问题",
     faqs: [
-      { question: "可以免费使用 Tomverse 吗？", answer: "可以。无需登录即可同时比较 3 个 AI 模型对同一问题的回答；Free 账户可在套餐限制内使用更多模型、更高的每日额度等功能。" },
+      { question: "可以免费使用 Tomverse 吗？", answer: "可以。无需登录即可同时比较 3 个 AI 模型对同一问题的回答；Free 账户可解锁更广泛的模型库、更高的使用额度、对话保存以及其他登录专属功能。" },
       { question: "可以比较哪些模型？", answer: "模型目录覆盖 OpenAI、Anthropic、Google、Groq、DeepSeek、xAI、Mistral、Moonshot、Alibaba 和 Perplexity 等供应商；当前状态请查看实时状态页。" },
       { question: "数据如何处理？", answer: "Tomverse 提供附件限制、对话锁、只读分享快照和 Private Mode。所选 AI 供应商仍会处理生成回答所需的内容；完整边界请查看安全页。" },
     ],
@@ -224,12 +232,14 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
   fr: {
     ...englishCopy,
     app: "Discuter",
-    badge: "Comparaison multi-modèles + revue croisée IA",
+    badge: "Tomverse Insight · Comparaison et revue multi-IA",
+    brandNote: "Tomverse Insight est l’expérience de comparaison et de revue multi-IA proposée par Tomverse.",
     title: "Posez une question.\nComparez plusieurs réponses IA.",
     description: "Comparez GPT, Claude et Gemini au même endroit, puis repérez les différences et les oublis avec AI Review.",
     primaryCta: "Commencer à discuter gratuitement",
     signedInCta: "Continuer la discussion",
-    guestNote: "Aucune inscription requise pour essayer un modèle gratuit.",
+    heroSignupNote: "Aucune inscription requise : commencez avec trois modèles.",
+    guestNote: "Aucune inscription requise : comparez GPT, Claude et Gemini côte à côte.",
     pricingCta: "Voir les tarifs",
     modelFinderLead: "Vous ne savez pas quelle IA choisir ?",
     modelFinderCta: "Obtenez une recommandation en une minute après inscription.",
@@ -268,7 +278,7 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     pricingDetails: "Comparer les plans et crédits",
     faqTitle: "Trois questions rapides",
     faqs: [
-      { question: "Puis-je utiliser Tomverse gratuitement ?", answer: "Oui. Sans connexion, vous pouvez déjà comparer 3 modèles d'IA côte à côte sur la même question. Un compte Free ajoute plus de modèles, des limites quotidiennes plus élevées et d'autres fonctionnalités réservées aux comptes." },
+      { question: "Puis-je utiliser Tomverse gratuitement ?", answer: "Oui. Sans connexion, vous pouvez déjà comparer 3 modèles d'IA côte à côte sur la même question. Un compte Free débloque un catalogue de modèles plus large, des limites d'utilisation plus élevées, la sauvegarde des conversations et d'autres fonctionnalités réservées aux comptes connectés." },
       { question: "Quels modèles puis-je comparer ?", answer: "Le catalogue couvre notamment OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Mistral, Moonshot, Alibaba et Perplexity. Consultez la page d’état pour la disponibilité actuelle." },
       { question: "Comment mes données sont-elles traitées ?", answer: "Tomverse applique limites de pièces jointes, verrouillage, instantanés en lecture seule et Private Mode. Les fournisseurs sélectionnés traitent toujours le contenu nécessaire à la réponse." },
     ],
@@ -278,12 +288,14 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
   de: {
     ...englishCopy,
     app: "Chatten",
-    badge: "Multi-Modell-Vergleich + KI-Gegenprüfung",
+    badge: "Tomverse Insight · Multi-KI-Vergleich und -Prüfung",
+    brandNote: "Tomverse Insight ist das Multi-KI-Vergleichs- und Prüferlebnis von Tomverse.",
     title: "Einmal fragen.\nAntworten mehrerer KIs vergleichen.",
     description: "Vergleichen Sie GPT, Claude und Gemini an einem Ort und erkennen Sie mit AI Review Unterschiede und Lücken.",
     primaryCta: "Kostenlos chatten",
     signedInCta: "Chat fortsetzen",
-    guestNote: "Testen Sie ein kostenloses Modell ohne Anmeldung.",
+    heroSignupNote: "Keine Anmeldung nötig – starten Sie direkt mit drei Modellen.",
+    guestNote: "Keine Anmeldung nötig – vergleichen Sie GPT, Claude und Gemini direkt nebeneinander.",
     pricingCta: "Preise ansehen",
     modelFinderLead: "Unsicher, welche KI passt?",
     modelFinderCta: "Nach der Anmeldung in einer Minute empfehlen lassen.",
@@ -322,7 +334,7 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     pricingDetails: "Pläne und Kreditverbrauch vergleichen",
     faqTitle: "Drei kurze Fragen",
     faqs: [
-      { question: "Kann ich Tomverse kostenlos nutzen?", answer: "Ja. Ohne Anmeldung können Sie bereits 3 KI-Modelle direkt bei derselben Frage vergleichen. Ein Free-Konto bietet mehr Modelle, höhere Tageslimits und weitere Funktionen innerhalb der Planlimits." },
+      { question: "Kann ich Tomverse kostenlos nutzen?", answer: "Ja. Ohne Anmeldung können Sie bereits 3 KI-Modelle direkt bei derselben Frage vergleichen. Ein Free-Konto schaltet einen breiteren Modellkatalog, höhere Nutzungslimits, gespeicherte Unterhaltungen und weitere Funktionen für angemeldete Nutzer frei." },
       { question: "Welche Modelle kann ich vergleichen?", answer: "Der Katalog umfasst unter anderem OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Mistral, Moonshot, Alibaba und Perplexity. Aktuelle Verfügbarkeit zeigt die Statusseite." },
       { question: "Wie werden meine Daten verarbeitet?", answer: "Tomverse nutzt Anhangslimits, Chatsperren, schreibgeschützte Snapshots und Private Mode. Ausgewählte KI-Anbieter verarbeiten weiterhin die für Antworten nötigen Inhalte." },
     ],
@@ -332,12 +344,14 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
   es: {
     ...englishCopy,
     app: "Chatear",
-    badge: "Comparación multimodelo + revisión cruzada de IA",
+    badge: "Tomverse Insight · Comparación y revisión multi-IA",
+    brandNote: "Tomverse Insight es la experiencia de comparación y revisión multi-IA de Tomverse.",
     title: "Pregunta una vez.\nCompara respuestas de varias IA.",
     description: "Compara GPT, Claude y Gemini en un solo lugar y usa AI Review para detectar diferencias y omisiones.",
     primaryCta: "Empezar a chatear gratis",
     signedInCta: "Continuar el chat",
-    guestNote: "Prueba un modelo gratuito sin registrarte.",
+    heroSignupNote: "No se requiere registro: empieza con tres modelos.",
+    guestNote: "No se requiere registro: compara GPT, Claude y Gemini en paralelo.",
     pricingCta: "Ver precios",
     modelFinderLead: "¿No sabes qué IA encaja contigo?",
     modelFinderCta: "Recibe una recomendación de un minuto tras registrarte.",
@@ -376,7 +390,7 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     pricingDetails: "Comparar planes y créditos",
     faqTitle: "Tres preguntas rápidas",
     faqs: [
-      { question: "¿Puedo usar Tomverse gratis?", answer: "Sí. Sin iniciar sesión ya puedes comparar 3 modelos de IA lado a lado en la misma pregunta. Una cuenta Free añade más modelos, límites diarios más altos y otras funciones dentro de los límites del plan." },
+      { question: "¿Puedo usar Tomverse gratis?", answer: "Sí. Sin iniciar sesión ya puedes comparar 3 modelos de IA lado a lado en la misma pregunta. Una cuenta Free desbloquea un catálogo de modelos más amplio, límites de uso más altos, conversaciones guardadas y otras funciones exclusivas para usuarios con sesión iniciada." },
       { question: "¿Qué modelos puedo comparar?", answer: "El catálogo incluye proveedores como OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Mistral, Moonshot, Alibaba y Perplexity. Consulta el estado en vivo para la disponibilidad actual." },
       { question: "¿Cómo se tratan mis datos?", answer: "Tomverse aplica límites de archivos, bloqueo de chats, instantáneas de solo lectura y Private Mode. Los proveedores elegidos siguen procesando el contenido necesario para responder." },
     ],
@@ -386,12 +400,14 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
   pt: {
     ...englishCopy,
     app: "Conversar",
-    badge: "Comparação multimodelo + revisão cruzada por IA",
+    badge: "Tomverse Insight · Comparação e revisão multi-IA",
+    brandNote: "Tomverse Insight é a experiência de comparação e revisão multi-IA da Tomverse.",
     title: "Pergunte uma vez.\nCompare respostas de várias IAs.",
     description: "Compare GPT, Claude e Gemini em um só lugar e use o AI Review para encontrar diferenças e omissões.",
     primaryCta: "Começar a conversar grátis",
     signedInCta: "Continuar a conversa",
-    guestNote: "Experimente um modelo gratuito sem precisar se cadastrar.",
+    heroSignupNote: "Não é necessário cadastro — comece com três modelos.",
+    guestNote: "Não é necessário cadastro — compare GPT, Claude e Gemini lado a lado.",
     pricingCta: "Ver preços",
     modelFinderLead: "Não sabe qual IA combina com seu trabalho?",
     modelFinderCta: "Receba uma recomendação de um minuto após criar a conta.",
@@ -430,7 +446,7 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     pricingDetails: "Comparar planos e créditos",
     faqTitle: "Três perguntas rápidas",
     faqs: [
-      { question: "Posso usar o Tomverse gratuitamente?", answer: "Sim. Sem entrar, você já pode comparar 3 modelos de IA lado a lado na mesma pergunta. Uma conta Free adiciona mais modelos, limites diários maiores e outros recursos dentro dos limites do plano." },
+      { question: "Posso usar o Tomverse gratuitamente?", answer: "Sim. Sem entrar, você já pode comparar 3 modelos de IA lado a lado na mesma pergunta. Uma conta Free desbloqueia um catálogo de modelos mais amplo, limites de uso mais altos, conversas salvas e outros recursos exclusivos para quem está conectado." },
       { question: "Quais modelos posso comparar?", answer: "O catálogo inclui provedores como OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Mistral, Moonshot, Alibaba e Perplexity. Veja a página de status para a disponibilidade atual." },
       { question: "Como meus dados são tratados?", answer: "O Tomverse aplica limites de anexos, bloqueio, snapshots somente leitura e Private Mode. Os provedores escolhidos continuam processando o conteúdo necessário para responder." },
     ],
@@ -466,10 +482,18 @@ export function LandingPageContent() {
               <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
               {content.badge}
             </div>
+            <p data-testid="landing-brand-note" className="mt-2 max-w-xl text-sm font-medium text-zinc-500 dark:text-zinc-400">
+              {content.brandNote}
+            </p>
             <h1 className="mt-6 max-w-4xl whitespace-pre-line text-4xl font-black leading-[1.05] tracking-tight sm:text-6xl lg:text-7xl">
               {content.title}
             </h1>
             <p className="mt-6 max-w-2xl whitespace-pre-line text-lg leading-8 text-zinc-600 dark:text-zinc-300">{content.description}</p>
+            {status === "unauthenticated" && (
+              <p data-testid="landing-hero-signup-note" className="mt-3 max-w-2xl text-base font-semibold text-zinc-700 dark:text-zinc-200">
+                {content.heroSignupNote}
+              </p>
+            )}
 
             <div className="mt-8 flex flex-col items-start gap-3">
               <Link

@@ -1114,12 +1114,24 @@ const checks = [
     test: (source) =>
       source.includes('primaryCta: "Start chatting free"') &&
       source.includes('primaryCta: "무료로 채팅 시작하기"') &&
-      source.includes('guestNote: "No sign-up required to try a free model."') &&
+      source.includes('guestNote: "No sign-up required—compare GPT, Claude, and Gemini side by side."') &&
       source.includes('data-testid="landing-guest-note"') &&
       !source.includes('data-testid="landing-guest-cta"') &&
       source.includes("const primaryChatHref =") &&
       source.includes('cta_location: "landing_hero_chat"') &&
       source.includes("Get a one-minute recommendation after sign-up"),
+  },
+  {
+    name: "Landing hero carries Tomverse Insight brand messaging and no stale single-model guest copy",
+    file: "components/marketing/LandingPageContent.tsx",
+    test: (source) =>
+      source.includes('badge: "Tomverse Insight · Multi-AI Comparison & Review"') &&
+      source.includes('brandNote: "Tomverse Insight is the multi-AI comparison and review experience from Tomverse."') &&
+      source.includes('heroSignupNote: "No sign-up required—start with three models."') &&
+      source.includes('data-testid="landing-brand-note"') &&
+      source.includes('data-testid="landing-hero-signup-note"') &&
+      !source.includes("try a free model") &&
+      !source.includes("adds more models, higher daily limits"),
   },
   {
     name: "ChatGPT versus Claude search page contains a full comparison guide and prepared CTA",
