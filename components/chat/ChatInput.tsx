@@ -2417,6 +2417,12 @@ export function ChatInput({
           </button>
         )}
       </div>
+      <p
+        data-testid="chat-ai-disclaimer"
+        className="mt-1.5 px-2 text-center text-[10px] leading-4 text-zinc-400 dark:text-zinc-500 md:text-[11px]"
+      >
+        {t("chat.aiDisclaimer")}
+      </p>
       </div>
       <CreditBreakdownSheet
         open={isCreditBreakdownOpen}

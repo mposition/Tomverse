@@ -112,6 +112,7 @@ export const pt = {
         welcomeBack: "Que bom te ver de novo. Em que posso ajudar?",
         guestWelcome: "Olá! Você está no modo convidado. Digite sua pergunta.",
         inputPlaceholder: "Pergunte qualquer coisa...",
+        aiDisclaimer: "As respostas de IA podem conter erros. Verifique informações importantes.",
         inactivePanel: "Nenhum painel de IA ativo.",
         chooseModel: "Selecione um modelo à direita do campo de entrada abaixo.",
         inUsed: " (em uso)",
