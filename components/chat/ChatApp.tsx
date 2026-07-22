@@ -354,46 +354,68 @@ function ChatAppComponent({
     let requestTraceId: string | null = null;
 	
     try {
-      const turnstileToken = isGuestMode
-        ? await getTurnstileToken()
-        : undefined;
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          messages: [...messages, userMessage].map(toChatRequestMessage),
-          modelId: modelId,
-          ...(turnstileToken ? { turnstileToken } : {}),
-          ...(!isPrivate && !isGuestMode
-            ? {
-                conversationId: targetChatId,
-                assistantMessageId,
-              }
-            : {}),
-        }),
-        signal: controller.signal,
-      });
-      resetIdleTimeout();
-      requestTraceId = response.headers.get("X-Request-ID");
+      const sendChatRequest = async (turnstileToken?: string) => {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            messages: [...messages, userMessage].map(toChatRequestMessage),
+            modelId: modelId,
+            ...(turnstileToken ? { turnstileToken } : {}),
+            ...(!isPrivate && !isGuestMode
+              ? {
+                  conversationId: targetChatId,
+                  assistantMessageId,
+                }
+              : {}),
+          }),
+          signal: controller.signal,
+        });
+        resetIdleTimeout();
+        requestTraceId = res.headers.get("X-Request-ID");
 
-      if (!response.ok) {
-        const errorBody = await response.json().catch(() => null);
-        requestTraceId =
-          typeof errorBody?.traceId === "string"
-            ? errorBody.traceId
-            : requestTraceId;
-        const requestError = new Error(`Chat request failed: ${response.status}`);
-        (requestError as Error & { traceId?: string }).traceId =
-          requestTraceId || undefined;
-        (requestError as Error & { code?: string }).code =
-          typeof errorBody?.code === "string" ? errorBody.code : undefined;
-        (requestError as Error & { publicMessage?: string }).publicMessage =
-          typeof errorBody?.error === "string" ? errorBody.error : undefined;
-        (requestError as Error & { details?: unknown }).details =
-          errorBody?.details;
-        throw requestError;
+        if (!res.ok) {
+          const errorBody = await res.json().catch(() => null);
+          requestTraceId =
+            typeof errorBody?.traceId === "string"
+              ? errorBody.traceId
+              : requestTraceId;
+          const requestError = new Error(`Chat request failed: ${res.status}`);
+          (requestError as Error & { traceId?: string }).traceId =
+            requestTraceId || undefined;
+          (requestError as Error & { code?: string }).code =
+            typeof errorBody?.code === "string" ? errorBody.code : undefined;
+          (requestError as Error & { publicMessage?: string }).publicMessage =
+            typeof errorBody?.error === "string" ? errorBody.error : undefined;
+          (requestError as Error & { details?: unknown }).details =
+            errorBody?.details;
+          throw requestError;
+        }
+
+        return res;
+      };
+
+      // Guests no longer solve Turnstile proactively on every send (each
+      // panel independently doing so was tripping Cloudflare's risk engine
+      // into showing a checkbox on nearly every message). Try without a
+      // token first; the server only asks for one when its short-lived
+      // "already verified" grant is missing or has expired.
+      let response: Response;
+      try {
+        response = await sendChatRequest();
+      } catch (error) {
+        const code =
+          error && typeof error === "object"
+            ? (error as { code?: string }).code
+            : undefined;
+        if (isGuestMode && code === "TURNSTILE_REQUIRED") {
+          const turnstileToken = await getTurnstileToken();
+          response = await sendChatRequest(turnstileToken);
+        } else {
+          throw error;
+        }
       }
 
       if (!response.body) {

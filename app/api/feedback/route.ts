@@ -12,7 +12,7 @@ import {
   consumeApiRateLimit,
   readLimitedJson,
 } from "@/lib/apiSecurity";
-import { verifyGuestTurnstile } from "@/lib/turnstile";
+import { ensureGuestVerified } from "@/lib/turnstile";
 
 const feedbackSchema = z
   .object({
@@ -58,8 +58,13 @@ export async function POST(req: Request) {
       day: 30,
     });
     const body = await readLimitedJson(req, 8 * 1024, feedbackSchema);
+    let turnstileGrantCookie: string | undefined;
     if (!session?.user?.id) {
-      await verifyGuestTurnstile(req, body.turnstileToken, "support_request");
+      turnstileGrantCookie = await ensureGuestVerified(
+        req,
+        body.turnstileToken,
+        "support_request"
+      );
     }
     const email = session?.user?.email || body.email || null;
     const feedback = await prisma.feedback.create({
@@ -142,7 +147,11 @@ export async function POST(req: Request) {
         attachmentCount: body.attachmentCount || 0,
       })
     );
-    return NextResponse.json({ success: true });
+    const response = NextResponse.json({ success: true });
+    if (turnstileGrantCookie) {
+      response.headers.append("Set-Cookie", turnstileGrantCookie);
+    }
+    return response;
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
