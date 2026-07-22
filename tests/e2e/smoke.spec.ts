@@ -96,9 +96,10 @@ test("guest preview opens a 3-model comparison chat by default", async ({ page }
 
   // Guests now default to a 3-model comparison (Gemini/GPT/Claude) instead of
   // a single model, so Tomverse's core value is visible on the first question.
-  if ((page.viewportSize()?.width ?? 1024) < 768) {
-    await expect(page.getByTestId("mobile-model-tab")).toHaveCount(3);
-  } else {
+  // A single shared welcome screen covers all panels until the first message
+  // is sent; the mobile tab switcher only appears once it's gone.
+  await expect(page.getByTestId("chat-empty-state")).toBeVisible();
+  if ((page.viewportSize()?.width ?? 1024) >= 768) {
     await expect(page.getByTestId("desktop-model-panel")).toHaveCount(3);
   }
 
@@ -107,6 +108,10 @@ test("guest preview opens a 3-model comparison chat by default", async ({ page }
   await expect(
     page.locator(":visible", { hasText: "Guest preview answer" }).first()
   ).toBeVisible();
+  await expect(page.getByTestId("chat-empty-state")).toHaveCount(0);
+  if ((page.viewportSize()?.width ?? 1024) < 768) {
+    await expect(page.getByTestId("mobile-model-tab")).toHaveCount(3);
+  }
 });
 
 test("pricing page supports Chinese copy", async ({ page }) => {

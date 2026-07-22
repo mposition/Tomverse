@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { ChatApp } from "@/components/chat/ChatApp";
 import { ChatInput } from "@/components/chat/ChatInput";
+import { ChatWelcomeScreen } from "@/components/chat/ChatWelcomeScreen";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { ProviderStatusBanner } from "@/components/chat/ProviderStatusBanner";
@@ -123,6 +124,25 @@ export function DesktopChatShell({
         .map((conversation) => ({ id: conversation.id, title: conversation.title })),
     [conversations]
   );
+  const [modelEmptyStates, setModelEmptyStates] = useState<Record<string, boolean>>({});
+  const conversationStateKey = currentChatId || "new";
+  const emptyStateKey = useCallback(
+    (modelId: string) => `${conversationStateKey}:${modelId}`,
+    [conversationStateKey]
+  );
+  const handleEmptyStateChange = useCallback(
+    (modelId: string, isEmpty: boolean) => {
+      const key = emptyStateKey(modelId);
+      setModelEmptyStates((current) =>
+        current[key] === isEmpty ? current : { ...current, [key]: isEmpty }
+      );
+    },
+    [emptyStateKey]
+  );
+  const isConversationEmpty =
+    selectedModels.length > 0 &&
+    selectedModels.every((modelId) => modelEmptyStates[emptyStateKey(modelId)] ?? true);
+  const isPrivate = currentChatId === "private-chat";
 
   return (
     <main
@@ -152,7 +172,16 @@ export function DesktopChatShell({
 
       <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <ProviderStatusBanner selectedModels={selectedModels} compact onToggleModel={onToggleModel} />
-        <div className="flex min-h-0 flex-1 gap-4 overflow-hidden bg-zinc-100/80 px-4 pb-4 pt-3 dark:bg-zinc-950">
+        <div className="relative flex min-h-0 flex-1 gap-4 overflow-hidden bg-zinc-100/80 px-4 pb-4 pt-3 dark:bg-zinc-950">
+          {isConversationEmpty && (
+            <div className="absolute inset-0 z-10 bg-zinc-100/80 dark:bg-zinc-950">
+              <ChatWelcomeScreen
+                isPrivate={isPrivate}
+                recentConversations={recentConversations}
+                onSelectConversation={onSelectConversation}
+              />
+            </div>
+          )}
           {selectedModels.length === 0 && (
             <div className="flex flex-1 select-none flex-col items-center justify-center text-zinc-500">
               <div className="mb-4 text-4xl opacity-50">AI</div>
@@ -279,15 +308,14 @@ export function DesktopChatShell({
                   onFollowupSent={onFollowupSent}
                   hideModelOnlyInput={selectedModels.length <= 1}
                   useCenteredWelcome
-                  recentConversations={recentConversations}
-                  onSelectConversation={onSelectConversation}
+                  onEmptyStateChange={handleEmptyStateChange}
                 />
               </div>
             );
           })}
         </div>
 
-        {selectedModels.length > 1 && currentChatId && (
+        {!isConversationEmpty && selectedModels.length > 1 && currentChatId && (
           <div className="flex gap-2 border-t border-zinc-200 bg-white px-4 py-2 dark:border-zinc-800 dark:bg-zinc-950">
             <button
               type="button"

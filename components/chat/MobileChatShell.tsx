@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChatApp } from "@/components/chat/ChatApp";
 import { ChatInput } from "@/components/chat/ChatInput";
+import { ChatWelcomeScreen } from "@/components/chat/ChatWelcomeScreen";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { ProviderStatusBanner } from "@/components/chat/ProviderStatusBanner";
@@ -249,6 +250,9 @@ export function MobileChatShell({
   const isActiveConversationEmpty = resolvedActiveModelId
     ? modelEmptyStates[emptyStateKey(resolvedActiveModelId)] ?? true
     : true;
+  const isConversationEmpty =
+    selectedModels.length > 0 &&
+    selectedModels.every((modelId) => modelEmptyStates[emptyStateKey(modelId)] ?? true);
   const recentConversations = useMemo(
     () =>
       conversations
@@ -386,7 +390,7 @@ export function MobileChatShell({
 
       <ProviderStatusBanner selectedModels={selectedModels} compact onToggleModel={onToggleModel} />
 
-      {selectedModels.length > 1 && (
+      {!isConversationEmpty && selectedModels.length > 1 && (
         <div className="min-w-0 shrink-0 overflow-x-auto overscroll-x-contain border-b border-zinc-200 bg-zinc-50 px-3 py-1.5 dark:border-zinc-800 dark:bg-zinc-900/60">
           <div className="flex min-w-max gap-2" role="tablist" aria-label={t("chat.modelSelect")}>
             {selectedModels.map((modelId) => {
@@ -427,7 +431,7 @@ export function MobileChatShell({
         </div>
       )}
 
-      {selectedModels.length > 1 && currentChatId && (
+      {!isConversationEmpty && selectedModels.length > 1 && currentChatId && (
         <div className={`grid shrink-0 gap-2 border-b border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950 ${!isGuestMode && currentChatId !== "private-chat" ? "grid-cols-2" : "grid-cols-1"}`}>
           <button
             type="button"
@@ -477,7 +481,7 @@ export function MobileChatShell({
       )}
 
       <section
-        className="flex min-h-0 flex-1 flex-col overflow-hidden bg-zinc-50 dark:bg-zinc-950"
+        className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-zinc-50 dark:bg-zinc-950"
         onTouchStart={(event) => {
           const touch = event.touches[0];
           touchStartXRef.current = touch.clientX;
@@ -497,6 +501,15 @@ export function MobileChatShell({
           switchModelByOffset(deltaX < 0 ? 1 : -1);
         }}
       >
+        {isConversationEmpty && selectedModels.length > 0 && (
+          <div className="absolute inset-0 z-10 bg-zinc-50 dark:bg-zinc-950">
+            <ChatWelcomeScreen
+              isPrivate={isPrivateMode}
+              recentConversations={recentConversations}
+              onSelectConversation={onSelectConversation}
+            />
+          </div>
+        )}
         {selectedModels.length > 0 ? (
           selectedModels.map((modelId, panelIndex) => {
             const isActive = resolvedActiveModelId === modelId;
@@ -520,8 +533,6 @@ export function MobileChatShell({
                   hideModelOnlyInput
                   useCenteredWelcome
                   onEmptyStateChange={handleEmptyStateChange}
-                  recentConversations={recentConversations}
-                  onSelectConversation={onSelectConversation}
                   onStatusChange={handleModelStatusChange}
                   onResponseComplete={onResponseComplete}
                   onFollowupSent={onFollowupSent}

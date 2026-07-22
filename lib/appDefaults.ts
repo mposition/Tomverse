@@ -14,6 +14,11 @@ const GUEST_DEFAULT_MODEL_ID = "gemini-2-5-flash";
 // still leads the trio — see getGuestDefaultSelectedModels.
 export const GUEST_COMPANION_MODEL_IDS = ["gpt-5-4-mini", "claude-haiku-4-5"];
 
+// Used only when the admin-configured primary model collides with one of the
+// companions above, so the guest trio still comes out to 3 distinct models
+// instead of silently collapsing to 2 via Set dedup.
+const GUEST_FALLBACK_MODEL_IDS = ["llama-3-1", "grok-3-mini", "deepseek-v4-flash"];
+
 const isGuestEligibleModel = (modelId: string) => {
   const model = getModel(modelId);
   return Boolean(
@@ -30,6 +35,12 @@ if (!isEnabledModelId(GUEST_DEFAULT_MODEL_ID) || !isGuestEligibleModel(GUEST_DEF
 for (const modelId of GUEST_COMPANION_MODEL_IDS) {
   if (!isEnabledModelId(modelId) || !isGuestEligibleModel(modelId)) {
     throw new Error(`Guest companion model must be an enabled guest-accessible Standard model: ${modelId}`);
+  }
+}
+
+for (const modelId of GUEST_FALLBACK_MODEL_IDS) {
+  if (!isEnabledModelId(modelId) || !isGuestEligibleModel(modelId)) {
+    throw new Error(`Guest fallback model must be an enabled guest-accessible Standard model: ${modelId}`);
   }
 }
 
@@ -64,7 +75,15 @@ export const clampGuestSelectedModels = (models: string[]) =>
 
 export const getGuestDefaultSelectedModels = (
   primaryModelId: string = APP_DEFAULTS.guestDefaultModelId
-) =>
-  clampGuestSelectedModels(
-    Array.from(new Set([primaryModelId, ...GUEST_COMPANION_MODEL_IDS]))
-  );
+) => {
+  const trio: string[] = [];
+  for (const modelId of [
+    primaryModelId,
+    ...GUEST_COMPANION_MODEL_IDS,
+    ...GUEST_FALLBACK_MODEL_IDS,
+  ]) {
+    if (!trio.includes(modelId)) trio.push(modelId);
+    if (trio.length >= 3) break;
+  }
+  return clampGuestSelectedModels(trio);
+};
