@@ -23,7 +23,7 @@ test("mobile analytics consent stays compact with one-row actions", async ({
   );
   await page.goto("/");
 
-  const banner = page.getByRole("dialog", {
+  const banner = page.getByRole("region", {
     name: "Privacy-safe product analytics",
   });
   await expect(banner).toBeVisible();
@@ -114,7 +114,7 @@ test("authenticated chat moves analytics settings into the account menu", async 
   await expect(analyticsSettings).toBeVisible();
   await analyticsSettings.click();
   await expect(
-    page.getByRole("dialog", { name: "Privacy-safe product analytics" })
+    page.getByRole("region", { name: "Privacy-safe product analytics" })
   ).toBeVisible();
 });
 
@@ -148,7 +148,7 @@ test("Australia starts privacy-minimized analytics with an immediate opt-out", a
   });
   await page.goto("/?utm_source=regional-qa");
 
-  const notice = page.getByRole("dialog", {
+  const notice = page.getByRole("region", {
     name: "Privacy-safe analytics is on",
   });
   await expect(notice).toBeVisible();
@@ -191,7 +191,7 @@ test("UK visitors do not load GA4 before explicit consent", async ({
   });
 
   await page.goto("/");
-  const banner = page.getByRole("dialog", {
+  const banner = page.getByRole("region", {
     name: "Privacy-safe product analytics",
   });
   await expect(banner).toBeVisible();

@@ -447,7 +447,7 @@ export function AnalyticsProvider({
       consentPromptReady &&
       (consent === "unset" || showPreferences) ? (
         <aside
-          role="dialog"
+          role="region"
           aria-label={promptCopy.title}
           className="fixed bottom-[max(0.5rem,env(safe-area-inset-bottom))] left-1/2 z-[100] w-[min(46rem,calc(100vw-1rem))] -translate-x-1/2 rounded-xl border border-zinc-700 bg-zinc-950/95 p-2 text-zinc-100 shadow-2xl shadow-black/40 backdrop-blur sm:p-3"
         >
