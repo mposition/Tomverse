@@ -23,6 +23,7 @@ import { RECOMMENDED_MODEL_IDS } from "@/lib/modelPickerPresentation";
 import {
   canUseModelWithPlan,
   getModelUsageProfile,
+  getWeightedUsageCredits,
   type AiModel,
 } from "@/lib/models";
 import {
@@ -397,6 +398,36 @@ export default function Home() {
   const activeModelCount = selectedModels.filter(
     (modelId) => !effectiveDisabledPanels.includes(modelId)
   ).length;
+
+  // Mirrors ChatInput's own estimate so the guest daily-credit gate and
+  // display reflect each selected model's real weighted cost (Standard=1,
+  // Advanced=4, Premium=8, ...) instead of a flat 1-per-model count, which
+  // let combinations of higher-tier models pass this client-side check
+  // while the server's weighted day-credit bucket still rejected them.
+  const estimateWeightedRequestCredits = useCallback(
+    (text: string, attachments: ChatAttachment[]) => {
+      const textParts = [
+        text,
+        ...attachments
+          .filter((attachment) => attachment.kind === "text" && attachment.data)
+          .map((attachment) => attachment.data || ""),
+      ];
+      const textBytes = new TextEncoder().encode(textParts.join("\n\n")).byteLength;
+      const binaryAttachmentTokens =
+        attachments.filter((attachment) => attachment.kind === "file").length * 16_000;
+      const estimatedInputTokens = Math.max(
+        1,
+        Math.ceil(textBytes / 4) + binaryAttachmentTokens
+      );
+      return selectedModels
+        .filter((modelId) => !effectiveDisabledPanels.includes(modelId))
+        .reduce((sum, modelId) => {
+          const model = AVAILABLE_MODELS.find((item) => item.id === modelId);
+          return sum + (model ? getWeightedUsageCredits(model, estimatedInputTokens) : 0);
+        }, 0);
+    },
+    [AVAILABLE_MODELS, effectiveDisabledPanels, selectedModels]
+  );
 
   const isInitialSelectedRef = useRef(false);
   const guestCarryoverAppliedRef = useRef(false);
@@ -1432,7 +1463,7 @@ export default function Home() {
     const promptAttachments = await cloneAttachmentPreviews(attachments);
 	
     if (isGuestMode) {
-      const requestCredits = Math.max(1, activeModelCount);
+      const requestCredits = estimateWeightedRequestCredits(trimmed, promptAttachments);
       if (guestMessageCount + requestCredits > MAX_GUEST_MESSAGES) {
           showToast(t("sidebar.exceedDailyLimit"), "error");
         return;
@@ -1609,8 +1640,12 @@ export default function Home() {
         latestLocalComparisonPromptRef.current = promptId;
       }
       if (isGuestMode) {
+        const respondingModel = AVAILABLE_MODELS.find((item) => item.id === modelId);
+        const modelCredits = respondingModel
+          ? getModelUsageProfile(respondingModel).credits
+          : 1;
         setGuestMessageCount((current) => {
-          const next = Math.min(MAX_GUEST_MESSAGES, current + 1);
+          const next = Math.min(MAX_GUEST_MESSAGES, current + modelCredits);
           localStorage.setItem("guest_count", next.toString());
           return next;
         });
@@ -1659,6 +1694,7 @@ export default function Home() {
     },
     [
       activeModelCount,
+      AVAILABLE_MODELS,
       awaitingPostResponseTips,
       isGuestPreviewEntry,
       isGuestMode,

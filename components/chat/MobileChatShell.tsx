@@ -587,7 +587,8 @@ export function MobileChatShell({
             canAttach={!isGuestMode}
             isGuestMode={isGuestMode}
             guestPreviewMode={guestPreviewMode}
-            isGuestLimitReached={isGuestMode && guestMessageCount >= maxGuestMessages}
+            guestMessageCount={guestMessageCount}
+            maxGuestMessages={maxGuestMessages}
             variant={isConversationEmpty ? "floating" : "bar"}
           />,
           inputPortalTarget

@@ -415,7 +415,8 @@ export function DesktopChatShell({
               canAttach={!isGuestMode}
               isGuestMode={isGuestMode}
               guestPreviewMode={guestPreviewMode}
-              isGuestLimitReached={isGuestMode && guestMessageCount >= maxGuestMessages}
+              guestMessageCount={guestMessageCount}
+              maxGuestMessages={maxGuestMessages}
               variant={isConversationEmpty ? "floating" : "bar"}
             />,
             inputPortalTarget

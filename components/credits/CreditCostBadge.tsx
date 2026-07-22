@@ -70,6 +70,7 @@ export function CreditCostBadge({
   tone = "default",
   testId = "credit-cost-badge",
   className = "",
+  title,
   ...props
 }: CreditCostBadgeProps) {
   const accessibleLabel = label || `${formatCredits(credits)} credits`;
@@ -79,7 +80,7 @@ export function CreditCostBadge({
       {...props}
       data-testid={testId}
       aria-label={accessibleLabel}
-      title={props.title || accessibleLabel}
+      title={title === undefined ? accessibleLabel : title}
       className={`inline-flex shrink-0 items-center justify-center rounded-full border font-black tabular-nums leading-none ${sizeClasses[size]} ${toneClasses[tone]} ${className}`}
     >
       <CreditCoinIcon />

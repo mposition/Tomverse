@@ -293,7 +293,8 @@ type ChatInputProps = {
   isPrivateMode?: boolean;
   selectedModels: string[];
   disabledModelIds?: string[];
-  isGuestLimitReached?: boolean;
+  guestMessageCount?: number;
+  maxGuestMessages?: number;
   onToggleModel: (modelId: string) => boolean;
   onQuickCompare?: () => void;
   attachments: ChatAttachment[];
@@ -390,7 +391,8 @@ export function ChatInput({
   isPrivateMode = false,
   selectedModels,
   disabledModelIds = [],
-  isGuestLimitReached = false,
+  guestMessageCount = 0,
+  maxGuestMessages = 20,
   onToggleModel,
   onQuickCompare,
   attachments,
@@ -508,6 +510,13 @@ export function ChatInput({
     purchasedCreditsRemaining,
   });
   const totalAvailableCredits = creditAllocation.totalAccountCredits;
+  // Matches the pre-submit gate in the page-level handler: the modal opens
+  // as soon as *this* request would push the guest over the cap, not only
+  // once the cumulative counter has already reached it. The two used to
+  // disagree, so a request could be silently rejected (toast/inline error)
+  // with no login-prompt modal shown.
+  const isGuestLimitReached =
+    isGuestMode && guestMessageCount + estimatedRequestCredits > maxGuestMessages;
   const isAccountDailyLimitReached =
     !isGuestMode &&
     Boolean(accountUsage) &&
@@ -1846,6 +1855,7 @@ export function ChatInput({
                 size="xs"
                 tone="plain"
                 label={String(estimatedRequestCredits)}
+                title=""
                 className="px-0"
               />
               {inputCreditMultiplier > 1 && (
