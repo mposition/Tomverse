@@ -250,7 +250,15 @@ export function ChatMessageList({
               ? AVAILABLE_MODELS.find(m => m.id === msg.modelId) 
               : null;
 
-              const assistantBoxClass = msg.status === "error"
+              // Technical detail lines (trace IDs, internal cost figures) are
+            // appended to msg.content after a newline for support purposes,
+            // but only the first line is meant for the user to read.
+            const displayContent =
+              !isUser && msg.status === "error"
+                ? msg.content.split("\n")[0]
+                : msg.content;
+
+            const assistantBoxClass = msg.status === "error"
                   ? "bg-red-50 text-red-800 border border-red-200 dark:bg-red-950 dark:text-red-100 dark:border-red-800"
                   : msg.status === "cancelled"
                       ? "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-300 italic"
@@ -387,7 +395,7 @@ export function ChatMessageList({
                         ),
                       }}
                     >
-                      {msg.content}
+                      {displayContent}
                     </ReactMarkdown>
                   ) : (
                     <p className="whitespace-pre-wrap">{msg.content}</p>

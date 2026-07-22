@@ -22,7 +22,6 @@ function SignInButtons() {
     const searchParams = useSearchParams();
     const { t, lang } = useLanguage();
     const callbackUrl = withChatLanguage(searchParams.get("callbackUrl"), lang);
-    const [acceptedTerms, setAcceptedTerms] = useState(false);
     const adminReauthentication =
         searchParams.get("reason") === "admin-session-expired";
     const providerError = searchParams.get("error");
@@ -121,40 +120,30 @@ function SignInButtons() {
                     {t(PROVIDER_ERROR_KEYS[providerError] || "auth.errorGeneric")}
                 </div>
             ) : null}
-            <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-left text-xs leading-5 text-zinc-600 transition hover:border-blue-300 hover:bg-blue-50/40 dark:border-zinc-800 dark:bg-zinc-950/60 dark:text-zinc-300 dark:hover:border-blue-500/60 dark:hover:bg-blue-950/20">
-                <input
-                    type="checkbox"
-                    checked={acceptedTerms}
-                    onChange={(event) => setAcceptedTerms(event.target.checked)}
-                    className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded border-zinc-300 text-blue-600 focus:ring-blue-500 dark:border-zinc-700 dark:bg-zinc-900"
-                    aria-describedby="signin-agreement-description"
-                />
-                <span id="signin-agreement-description">
-                    {t("auth.privacy")}{" "}
-                    <Link
-                        href="/terms"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="font-semibold text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
-                    >
-                        Terms and Conditions
-                    </Link>
-                    {" / "}
-                    <Link
-                        href="/privacy"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="font-semibold text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
-                    >
-                        {t("auth.privacyPolicyLink")}
-                    </Link>
-                </span>
-            </label>
+            <p className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-left text-xs leading-5 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950/60 dark:text-zinc-300">
+                {t("auth.privacy")}{" "}
+                <Link
+                    href="/terms"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-semibold text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
+                >
+                    Terms and Conditions
+                </Link>
+                {" / "}
+                <Link
+                    href="/privacy"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-semibold text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
+                >
+                    {t("auth.privacyPolicyLink")}
+                </Link>
+            </p>
 
             {/* Google */}
             <button
                 type="button"
-                disabled={!acceptedTerms}
                 onClick={() => {
                     markSignupStarted("google");
                     void signIn("google", { callbackUrl });
@@ -169,7 +158,6 @@ function SignInButtons() {
             {/* Microsoft */}
             <button
                 type="button"
-                disabled={!acceptedTerms}
                 onClick={() => {
                     markSignupStarted("azure-ad");
                     void signIn("azure-ad", { callbackUrl });
@@ -199,7 +187,6 @@ function SignInButtons() {
                         type="email"
                         value={email}
                         onChange={(event) => setEmail(event.target.value)}
-                        disabled={!acceptedTerms}
                         placeholder={t("auth.emailLoginPlaceholder")}
                         autoComplete="email"
                         className="w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-white"
@@ -210,7 +197,7 @@ function SignInButtons() {
                     />
                     <button
                         type="button"
-                        disabled={!acceptedTerms || !email.trim() || isSendingCode}
+                        disabled={!email.trim() || isSendingCode}
                         onClick={handleSendCode}
                         className={providerButtonClass}
                     >

@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ChatMessageList } from "@/components/chat/ChatMessageList";
 import { Message, type ChatAttachment } from "@/components/chat/types";
 import { useSession } from "next-auth/react";
@@ -137,7 +137,7 @@ function ChatAppComponent({
   const isConversationEmpty =
     messages.length === 0 || (messages.length === 1 && messages[0]?.id === "welcome");
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!isCurrentMessageViewLoaded) return;
     onEmptyStateChange?.(modelId, isConversationEmpty);
   }, [isCurrentMessageViewLoaded, isConversationEmpty, modelId, onEmptyStateChange]);

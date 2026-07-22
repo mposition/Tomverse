@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useCallback, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
+import { Lock } from "lucide-react";
 import { ChatApp } from "@/components/chat/ChatApp";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { ChatWelcomeScreen } from "@/components/chat/ChatWelcomeScreen";
@@ -143,6 +145,11 @@ export function DesktopChatShell({
     selectedModels.length > 0 &&
     selectedModels.every((modelId) => modelEmptyStates[emptyStateKey(modelId)] ?? true);
   const isPrivate = currentChatId === "private-chat";
+  const [welcomeInputSlot, setWelcomeInputSlot] = useState<HTMLDivElement | null>(null);
+  const [bottomInputSlot, setBottomInputSlot] = useState<HTMLDivElement | null>(null);
+  const inputPortalTarget = isConversationEmpty
+    ? welcomeInputSlot ?? bottomInputSlot
+    : bottomInputSlot ?? welcomeInputSlot;
 
   return (
     <main
@@ -171,6 +178,23 @@ export function DesktopChatShell({
       />
 
       <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        {isPrivate && (
+          <div className="flex shrink-0 items-center justify-between gap-3 bg-purple-500/10 px-4 py-2 text-purple-700 dark:text-purple-300">
+            <span className="flex min-w-0 items-center gap-2 text-xs font-semibold">
+              <Lock className="h-4 w-4 shrink-0" />
+              <span className="truncate">
+                {t("chat.privateModeHeaderTitle")} · {t("chat.privateModeHeaderNotice")}
+              </span>
+            </span>
+            <button
+              type="button"
+              onClick={onTogglePrivateMode}
+              className="shrink-0 rounded-full border border-purple-300 px-3 py-1 text-xs font-bold text-purple-700 transition hover:bg-purple-100 dark:border-purple-700 dark:text-purple-300 dark:hover:bg-purple-950/40"
+            >
+              {t("chat.privateModeExit")}
+            </button>
+          </div>
+        )}
         <ProviderStatusBanner selectedModels={selectedModels} compact onToggleModel={onToggleModel} />
         <div className="relative flex min-h-0 flex-1 gap-4 overflow-hidden bg-zinc-100/80 px-4 pb-4 pt-3 dark:bg-zinc-950">
           {isConversationEmpty && (
@@ -179,6 +203,7 @@ export function DesktopChatShell({
                 isPrivate={isPrivate}
                 recentConversations={recentConversations}
                 onSelectConversation={onSelectConversation}
+                inputSlotRef={setWelcomeInputSlot}
               />
             </div>
           )}
@@ -202,11 +227,17 @@ export function DesktopChatShell({
                 key={`${currentChatId || "new"}:panel:${panelIndex}`}
                 data-testid="desktop-model-panel"
                 data-model-id={modelId}
-                className={`relative flex flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm shadow-zinc-200/60 transition-all duration-300 ease-in-out dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/20 ${
-                  isPanelDisabled ? "w-44 shrink-0" : "min-w-0 flex-1"
-                }`}
+                className={`relative flex flex-col overflow-hidden rounded-2xl border shadow-sm transition-all duration-300 ease-in-out ${
+                  isPrivate
+                    ? "border-purple-200 bg-white shadow-purple-200/40 dark:border-purple-900/50 dark:bg-zinc-950 dark:shadow-black/20"
+                    : "border-zinc-200 bg-white shadow-zinc-200/60 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/20"
+                } ${isPanelDisabled ? "w-44 shrink-0" : "min-w-0 flex-1"}`}
               >
-                <div className="flex min-h-12 shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-400">
+                <div className={`flex min-h-12 shrink-0 items-center justify-between px-3 py-2 text-xs font-semibold ${
+                  isPrivate
+                    ? "border-b border-purple-100 bg-purple-50/50 text-purple-500 dark:border-purple-900/40 dark:bg-purple-950/10 dark:text-purple-300"
+                    : "border-b border-zinc-200 bg-white text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-400"
+                }`}>
                   <div className={`flex min-w-0 flex-1 items-center gap-2 transition-opacity ${isPanelDisabled ? "opacity-50" : ""}`}>
                     <ModelLogo model={modelInfo} size="md" />
 
@@ -363,26 +394,32 @@ export function DesktopChatShell({
           </div>
         )}
 
-        <ChatInput
-          value={inputValue}
-          onChange={setInputValue}
-          personalizedPrompt={personalizedPrompt}
-          onSubmit={onSubmit}
-          onCancel={() => {}}
-          isSending={isSending}
-          focusToken={focusToken}
-          isPrivateMode={isPrivateMode}
-          selectedModels={selectedModels}
-          disabledModelIds={disabledPanels}
-          onToggleModel={onToggleModel}
-          onQuickCompare={onQuickCompare}
-          attachments={attachments}
-          onAttachmentsChange={setAttachments}
-          canAttach={!isGuestMode}
-          isGuestMode={isGuestMode}
-          guestPreviewMode={guestPreviewMode}
-          isGuestLimitReached={isGuestMode && guestMessageCount >= maxGuestMessages}
-        />
+        <div ref={setBottomInputSlot} />
+        {inputPortalTarget &&
+          createPortal(
+            <ChatInput
+              value={inputValue}
+              onChange={setInputValue}
+              personalizedPrompt={personalizedPrompt}
+              onSubmit={onSubmit}
+              onCancel={() => {}}
+              isSending={isSending}
+              focusToken={focusToken}
+              isPrivateMode={isPrivateMode}
+              selectedModels={selectedModels}
+              disabledModelIds={disabledPanels}
+              onToggleModel={onToggleModel}
+              onQuickCompare={onQuickCompare}
+              attachments={attachments}
+              onAttachmentsChange={setAttachments}
+              canAttach={!isGuestMode}
+              isGuestMode={isGuestMode}
+              guestPreviewMode={guestPreviewMode}
+              isGuestLimitReached={isGuestMode && guestMessageCount >= maxGuestMessages}
+              variant={isConversationEmpty ? "floating" : "bar"}
+            />,
+            inputPortalTarget
+          )}
       </section>
     </main>
   );

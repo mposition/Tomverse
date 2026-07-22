@@ -16,7 +16,8 @@ import {
 } from "@/components/LanguageProvider";
 import {
   APP_DEFAULTS,
-  GUEST_COMPANION_MODEL_IDS,
+  GUEST_BRAND_TRIO_MODEL_IDS,
+  GUEST_FALLBACK_MODEL_IDS,
 } from "@/lib/appDefaults";
 import { RECOMMENDED_MODEL_IDS } from "@/lib/modelPickerPresentation";
 import {
@@ -440,11 +441,27 @@ export default function Home() {
     [clampSelectedModels, isGuestEligibleModel]
   );
 
-  const guestDefaultSelectedModels = useMemo(
-    () =>
-      clampGuestSelectedModels([guestDefaultModelId, ...GUEST_COMPANION_MODEL_IDS]),
-    [clampGuestSelectedModels, guestDefaultModelId]
-  );
+  const guestDefaultSelectedModels = useMemo(() => {
+    // The GPT/Claude/Gemini brand trio is always guaranteed for guests;
+    // the admin-configured guestDefaultModelId only reorders which of the
+    // three leads, and is ignored if it names a model outside the trio.
+    // A brand-trio model that's currently ineligible falls through to the
+    // fallback pool instead of silently collapsing the default to 2 models.
+    const orderedTrio = GUEST_BRAND_TRIO_MODEL_IDS.includes(guestDefaultModelId)
+      ? [
+          guestDefaultModelId,
+          ...GUEST_BRAND_TRIO_MODEL_IDS.filter((id) => id !== guestDefaultModelId),
+        ]
+      : GUEST_BRAND_TRIO_MODEL_IDS;
+    const candidates = [...orderedTrio, ...GUEST_FALLBACK_MODEL_IDS];
+    const trio: string[] = [];
+    for (const modelId of candidates) {
+      if (trio.includes(modelId) || !isGuestEligibleModel(modelId)) continue;
+      trio.push(modelId);
+      if (trio.length >= APP_DEFAULTS.maxGuestSelectedModels) break;
+    }
+    return clampGuestSelectedModels(trio);
+  }, [clampGuestSelectedModels, guestDefaultModelId, isGuestEligibleModel]);
 
   useEffect(() => {
     if (!isGuestMode) {

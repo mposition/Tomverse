@@ -6,6 +6,7 @@ import {
   canUseModelWithPlan,
   getModelUsageProfile,
 } from "@/lib/models";
+import { GUEST_BRAND_TRIO_MODEL_IDS } from "@/lib/appDefaults";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import type { PublicAppSettings } from "@/lib/appSettings";
 import { dispatchAppToast } from "@/lib/appToast";
@@ -26,6 +27,7 @@ export function PlatformSettingsPanel({ settings }: Props) {
     () =>
       models.filter(
         (model) =>
+          GUEST_BRAND_TRIO_MODEL_IDS.includes(model.id) &&
           model.enabled &&
           canUseModelWithPlan("Guest", model) &&
           getModelUsageProfile(model).category === "Standard"
@@ -196,13 +198,14 @@ export function PlatformSettingsPanel({ settings }: Props) {
                 게스트 모드 기본 대화 엔진
               </h3>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-400">
-                로그인하지 않은 사용자가 새 대화를 시작할 때 자동으로 선택되는
-                Free 모델입니다. 게스트 비용과 첫 사용 경험에 직접 영향을 줍니다.
+                로그인하지 않은 게스트에게는 항상 GPT · Claude · Gemini 3개 모델이
+                함께 제공됩니다. 여기서 고르는 모델은 그중 어느 모델을 맨 앞(리딩
+                슬롯)에 둘지만 결정하며, 게스트 첫 사용 경험에 영향을 줍니다.
               </p>
 
               <label className="mt-5 block">
                 <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
-                  Default engine
+                  Leading engine
                 </span>
                 <select
                   value={guestDefaultModelId}

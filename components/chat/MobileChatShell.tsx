@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ChatApp } from "@/components/chat/ChatApp";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { ChatWelcomeScreen } from "@/components/chat/ChatWelcomeScreen";
@@ -264,6 +265,11 @@ export function MobileChatShell({
   const currentConversation = conversations.find(
     (conversation) => conversation.id === currentChatId
   );
+  const [welcomeInputSlot, setWelcomeInputSlot] = useState<HTMLDivElement | null>(null);
+  const [bottomInputSlot, setBottomInputSlot] = useState<HTMLDivElement | null>(null);
+  const inputPortalTarget = isConversationEmpty
+    ? welcomeInputSlot ?? bottomInputSlot
+    : bottomInputSlot ?? welcomeInputSlot;
   const isCurrentLocked = Boolean(currentConversation?.isLocked);
   const isCurrentShared = Boolean(currentConversation?.shareEnabled);
   const activeStatus = resolvedActiveModelId
@@ -507,6 +513,7 @@ export function MobileChatShell({
               isPrivate={isPrivateMode}
               recentConversations={recentConversations}
               onSelectConversation={onSelectConversation}
+              inputSlotRef={setWelcomeInputSlot}
             />
           </div>
         )}
@@ -558,27 +565,33 @@ export function MobileChatShell({
         )}
       </section>
 
-      <ChatInput
-        value={inputValue}
-        onChange={setInputValue}
-        personalizedPrompt={personalizedPrompt}
-        onSubmit={onSubmit}
-        onCancel={() => {}}
-        isSending={isSending}
-        focusToken={focusToken}
-        isNewConversation={isActiveConversationEmpty}
-        isPrivateMode={isPrivateMode}
-        selectedModels={selectedModels}
-        disabledModelIds={disabledPanels}
-        onToggleModel={onToggleModel}
-        onQuickCompare={onQuickCompare}
-        attachments={attachments}
-        onAttachmentsChange={setAttachments}
-        canAttach={!isGuestMode}
-        isGuestMode={isGuestMode}
-        guestPreviewMode={guestPreviewMode}
-        isGuestLimitReached={isGuestMode && guestMessageCount >= maxGuestMessages}
-      />
+      <div ref={setBottomInputSlot} />
+      {inputPortalTarget &&
+        createPortal(
+          <ChatInput
+            value={inputValue}
+            onChange={setInputValue}
+            personalizedPrompt={personalizedPrompt}
+            onSubmit={onSubmit}
+            onCancel={() => {}}
+            isSending={isSending}
+            focusToken={focusToken}
+            isNewConversation={isActiveConversationEmpty}
+            isPrivateMode={isPrivateMode}
+            selectedModels={selectedModels}
+            disabledModelIds={disabledPanels}
+            onToggleModel={onToggleModel}
+            onQuickCompare={onQuickCompare}
+            attachments={attachments}
+            onAttachmentsChange={setAttachments}
+            canAttach={!isGuestMode}
+            isGuestMode={isGuestMode}
+            guestPreviewMode={guestPreviewMode}
+            isGuestLimitReached={isGuestMode && guestMessageCount >= maxGuestMessages}
+            variant={isConversationEmpty ? "floating" : "bar"}
+          />,
+          inputPortalTarget
+        )}
 
       {isDrawerOpen && (
         <div

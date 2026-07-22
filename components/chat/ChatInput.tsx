@@ -79,9 +79,8 @@ import {
   type ModelFinderPriority,
   type ModelFinderTask,
 } from "@/lib/modelFinder";
-import { CreditPackPurchaseButton } from "@/components/billing/CreditPackPurchaseButton";
-import { UpgradeCtaLink } from "@/components/billing/UpgradeCtaLink";
 import { CreditBreakdownSheet } from "@/components/chat/CreditBreakdownSheet";
+import { UsageLimitModal } from "@/components/chat/UsageLimitModal";
 import { getChatCreditAllocation } from "@/lib/chatCreditAllocation";
 
 type PublicModelStatus = "available" | "limited" | "unavailable";
@@ -302,6 +301,7 @@ type ChatInputProps = {
   canAttach?: boolean;
   isGuestMode?: boolean;
   guestPreviewMode?: boolean;
+  variant?: "bar" | "floating";
 };
 
 type GooglePickerConfig = {
@@ -398,6 +398,7 @@ export function ChatInput({
   canAttach: canAttachProp = true,
   isGuestMode = false,
   guestPreviewMode = false,
+  variant = "bar",
 }: ChatInputProps) {
   const {
     models: AVAILABLE_MODELS,
@@ -420,6 +421,7 @@ export function ChatInput({
   const [showGuestQuickStart, setShowGuestQuickStart] = useState(false);
   const [dismissedSuggestionKey, setDismissedSuggestionKey] = useState<string | null>(null);
   const [isCreditBreakdownOpen, setIsCreditBreakdownOpen] = useState(false);
+  const [isUsageLimitModalOpen, setIsUsageLimitModalOpen] = useState(false);
     const { t, lang } = useLanguage();
     const modelsSelectedLabel = (count: number) =>
       `${count} ${count === 1 ? t("chat.modelsSelectedOne") : t("chat.modelsSelectedOther")}`;
@@ -648,6 +650,7 @@ export function ChatInput({
   useEffect(() => {
     if (!limitScope || trackedLimitScopeRef.current === limitScope) return;
     trackedLimitScopeRef.current = limitScope;
+    setIsUsageLimitModalOpen(true);
     trackProductEvent("credit_limit_hit", activeSelectedModels.length, {
       limit_scope: limitScope,
       current_plan: accountUsage?.plan.toLowerCase() as
@@ -1479,7 +1482,10 @@ export function ChatInput({
   };
 
   return (
-      <div className="w-full max-w-full shrink-0 overflow-hidden border-t border-zinc-200 bg-zinc-50/95 px-2 py-1 pb-[calc(0.3rem+env(safe-area-inset-bottom))] transition-colors dark:border-zinc-800 dark:bg-zinc-950 md:overflow-visible md:px-6 md:py-3 md:pb-3">
+      <div className={variant === "floating"
+        ? "w-full max-w-full shrink-0 overflow-hidden px-0 py-0 md:overflow-visible"
+        : "w-full max-w-full shrink-0 overflow-hidden border-t border-zinc-200 bg-zinc-50/95 px-2 py-1 pb-[calc(0.3rem+env(safe-area-inset-bottom))] transition-colors dark:border-zinc-800 dark:bg-zinc-950 md:overflow-visible md:px-6 md:py-3 md:pb-3"
+      }>
           <div
             data-testid="chat-input"
             onDragEnter={handleDropZoneDragEnter}
@@ -1517,64 +1523,18 @@ export function ChatInput({
             </div>
           )}
           {isUsageLimitReached && (
-            <div className="mb-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <span className="font-black">
-                  {isGuestMode ? t("chat.guestLimitReachedTitle") : t("chat.accountLimitReachedTitle")}
-                </span>
-                <span className="flex flex-wrap items-center gap-2">
-                  {isGuestMode ? (
-                    <a
-                      href={`/auth/signin?callbackUrl=${encodeURIComponent(signInCallbackUrl)}`}
-                      className="font-black text-amber-900 underline underline-offset-2 dark:text-amber-100"
-                    >
-                      {t("auth.login")}
-                    </a>
-                  ) : (
-                    <>
-                      <CreditPackPurchaseButton
-                        trigger="limit_hit"
-                        className="rounded-lg bg-amber-900 px-3 py-1.5 font-black text-white transition hover:bg-amber-800 dark:bg-amber-200 dark:text-amber-950 dark:hover:bg-amber-100"
-                      >
-                        {t("chat.continueWithAdditionalCredits")}
-                      </CreditPackPurchaseButton>
-                      {accountUsage?.plan !== "Max" && (
-                        <UpgradeCtaLink
-                          targetPlan={accountUsage?.plan === "Pro" ? "Max" : "Pro"}
-                          currentPlan={accountUsage?.plan || "Free"}
-                          trigger="limit_hit"
-                          ctaLocation="credit_limit_banner"
-                          planCreditsRemaining={planCreditsRemaining}
-                          addonCreditsRemaining={purchasedCreditsRemaining}
-                          className="rounded-lg border border-amber-300 px-3 py-1.5 font-black text-amber-950 transition hover:bg-amber-100 dark:border-amber-700 dark:text-amber-100 dark:hover:bg-amber-900/50"
-                        >
-                          {accountUsage?.plan === "Pro"
-                            ? t("chat.viewMaxPlan")
-                            : t("chat.viewProPlan")}
-                        </UpgradeCtaLink>
-                      )}
-                    </>
-                  )}
-                </span>
-              </div>
-              <p className="mt-1 leading-5 opacity-90">
-                {isGuestMode
-                  ? t("chat.guestLimitReachedBody")
-                  : isAccountMonthlyLimitReached
-                    ? t("chat.monthlyLimitReachedBody")
-                    : interpolateCopy(t("chat.dailyPlanLimitReachedBody"), {
-                        limit: dailyCreditLimit,
-                        monthly: planCreditsRemaining,
-                        reset: dailyResetLabel,
-                      })}
-              </p>
-              {!isGuestMode && isAccountMonthlyLimitReached && (
-                <p className="mt-1 font-semibold leading-5">
-                  {lang === "ko"
-                    ? `예상 차감 ${estimatedRequestCredits} · 현재 잔액 ${totalAvailableCredits} · ${creditShortfall} 크레딧 부족`
-                    : `Estimated ${estimatedRequestCredits} · Balance ${totalAvailableCredits} · ${creditShortfall} credits short`}
-                </p>
-              )}
+            <div className="mb-2 flex items-center justify-between gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+              <span className="font-black">
+                {isGuestMode ? t("chat.guestLimitReachedTitle") : t("chat.accountLimitReachedTitle")}
+              </span>
+              <button
+                type="button"
+                data-testid="usage-limit-view-options"
+                onClick={() => setIsUsageLimitModalOpen(true)}
+                className="shrink-0 font-black text-amber-900 underline underline-offset-2 dark:text-amber-100"
+              >
+                {t("chat.viewOptions")}
+              </button>
             </div>
           )}
           {isGuestMode && showGuestQuickStart && (
@@ -1779,8 +1739,26 @@ export function ChatInput({
               </button>
             </div>
           )}
-          <div className="flex max-w-full flex-wrap items-end gap-1.5">
-        <div className="relative flex shrink-0 items-center gap-1.5" ref={menuRef}>
+          <div className="flex flex-col gap-2">
+        <textarea
+          data-testid="chat-textarea"
+          ref={textareaRef}
+          value={value}
+          onFocus={() => dismissGuestQuickStart("completed")}
+          onChange={(e) => {
+            if (e.target.value) dismissGuestQuickStart();
+            onChange(e.target.value);
+          }}
+          onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
+          aria-label={placeholderText}
+          placeholder={placeholderText}
+          disabled={isDisabled}
+          rows={1}
+          className="w-full max-h-[92px] min-h-[36px] resize-none overflow-y-auto border-0 bg-transparent px-1 py-1.5 text-base leading-5 text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-500 md:max-h-[200px] md:min-h-[52px] md:py-2 md:text-sm md:leading-6"
+        />
+        <div className="relative flex items-center justify-between gap-1.5" ref={menuRef}>
+        <div className="flex shrink-0 items-center gap-1.5">
           <button
             ref={actionMenuButtonRef}
             type="button"
@@ -1807,7 +1785,9 @@ export function ChatInput({
               <Plus className="h-5 w-5" />
             )}
           </button>
+        </div>
 
+        <div className="flex shrink-0 items-center gap-1.5">
           <button
             ref={modelMenuButtonRef}
             type="button"
@@ -1844,6 +1824,67 @@ export function ChatInput({
             <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
           </button>
 
+          {activeSelectedModels.length > 0 && (
+            <button
+              type="button"
+              data-testid="request-credit-estimate"
+              onClick={() => setIsCreditBreakdownOpen(true)}
+              className="flex h-9 shrink-0 items-center gap-1 rounded-full border border-zinc-200 bg-zinc-50 px-2 text-[11px] font-bold text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              title={
+                lang === "ko"
+                  ? `예상 ${estimatedRequestCredits}크레딧${inputCreditMultiplier > 1 ? ` · ${inputCreditMultiplier}×` : ""}`
+                  : `Estimated ${estimatedRequestCredits} credits${inputCreditMultiplier > 1 ? ` · ${inputCreditMultiplier}×` : ""}`
+              }
+              aria-label={
+                lang === "ko"
+                  ? `예상 ${estimatedRequestCredits}크레딧, 상세 보기`
+                  : `Estimated ${estimatedRequestCredits} credits, view breakdown`
+              }
+            >
+              <CreditCostBadge
+                credits={estimatedRequestCredits}
+                size="xs"
+                tone="plain"
+                label={String(estimatedRequestCredits)}
+                className="px-0"
+              />
+              {inputCreditMultiplier > 1 && (
+                <span className="text-amber-600 dark:text-amber-400">{inputCreditMultiplier}×</span>
+              )}
+            </button>
+          )}
+          {isSending ? (
+            <button
+              type="button"
+              onClick={onCancel}
+              className="flex h-9 w-9 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-red-600 text-white hover:bg-red-500"
+              title={t("chat.cancel")}
+              aria-label={t("chat.cancel")}
+            >
+              <Square className="h-3.5 w-3.5 fill-current" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              data-testid="chat-send-button"
+              onClick={() => {
+                dismissGuestQuickStart();
+                onSubmit();
+              }}
+              disabled={
+                isDisabled ||
+                activeSelectedModels.length === 0 ||
+                (!value.trim() && attachments.length === 0)
+              }
+              className="flex h-9 w-9 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-blue-600 text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500 dark:disabled:bg-zinc-700 dark:disabled:text-zinc-400"
+              title={`${t("chat.send")} · ${estimatedRequestCredits} credits`}
+              aria-label={`${t("chat.send")} · ${estimatedRequestCredits} credits`}
+            >
+              <ArrowUp className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+
           {isMenuOpen && (
             <MobileModelMenuPortal>
             <>
@@ -1860,10 +1901,10 @@ export function ChatInput({
               aria-modal="false"
               aria-label={menuView === "models" ? t("chat.modelSelect") : t("chat.moreActions")}
               tabIndex={-1}
-              className={`fixed inset-x-2 z-[100] flex max-w-[calc(100%_-_1rem)] flex-col overflow-hidden rounded-3xl border border-zinc-200 bg-white p-2 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900 md:absolute md:inset-x-auto md:bottom-12 md:left-0 md:top-auto md:max-h-[calc(100dvh-8rem)] md:w-80 md:max-w-[calc(100vw_-_2rem)] md:rounded-2xl ${
+              className={`fixed inset-x-2 z-[100] flex max-w-[calc(100%_-_1rem)] flex-col overflow-hidden rounded-3xl border border-zinc-200 bg-white p-2 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900 md:absolute md:inset-x-auto md:bottom-12 md:top-auto md:max-h-[calc(100dvh-8rem)] md:w-80 md:max-w-[calc(100vw_-_2rem)] md:rounded-2xl ${
                 menuView === "models"
-                  ? "bottom-[calc(0.5rem+env(safe-area-inset-bottom))] top-[calc(0.5rem+env(safe-area-inset-top))] max-h-none"
-                  : "bottom-[calc(0.5rem+env(safe-area-inset-bottom))] max-h-[calc(100dvh-2rem)]"
+                  ? "md:left-auto md:right-0 bottom-[calc(0.5rem+env(safe-area-inset-bottom))] top-[calc(0.5rem+env(safe-area-inset-top))] max-h-none"
+                  : "md:left-0 md:right-auto bottom-[calc(0.5rem+env(safe-area-inset-bottom))] max-h-[calc(100dvh-2rem)]"
               }`}
             >
               <div className="mx-auto mb-2 mt-0.5 h-1 w-10 rounded-full bg-zinc-300 dark:bg-zinc-700 md:hidden" aria-hidden="true" />
@@ -2348,83 +2389,6 @@ export function ChatInput({
           className="hidden"
         />
 
-        <textarea
-          data-testid="chat-textarea"
-          ref={textareaRef}
-          value={value}
-          onFocus={() => dismissGuestQuickStart("completed")}
-          onChange={(e) => {
-            if (e.target.value) dismissGuestQuickStart();
-            onChange(e.target.value);
-          }}
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
-          aria-label={placeholderText}
-          placeholder={placeholderText}
-          disabled={isDisabled}
-          rows={1}
-                  className="order-first w-full max-h-[92px] min-h-[36px] resize-none overflow-y-auto border-0 bg-transparent px-1 py-1.5 text-base leading-5 text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-500 md:order-none md:w-auto md:min-w-[80px] md:max-h-[160px] md:min-h-[40px] md:flex-1 md:py-2 md:text-sm md:leading-6"
-              />
-
-        {activeSelectedModels.length > 0 && (
-          <button
-            type="button"
-            data-testid="request-credit-estimate"
-            onClick={() => setIsCreditBreakdownOpen(true)}
-            className="flex h-9 shrink-0 items-center gap-1 rounded-full border border-zinc-200 bg-zinc-50 px-2 text-[11px] font-bold text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800"
-            title={
-              lang === "ko"
-                ? `예상 ${estimatedRequestCredits}크레딧${inputCreditMultiplier > 1 ? ` · ${inputCreditMultiplier}×` : ""}`
-                : `Estimated ${estimatedRequestCredits} credits${inputCreditMultiplier > 1 ? ` · ${inputCreditMultiplier}×` : ""}`
-            }
-            aria-label={
-              lang === "ko"
-                ? `예상 ${estimatedRequestCredits}크레딧, 상세 보기`
-                : `Estimated ${estimatedRequestCredits} credits, view breakdown`
-            }
-          >
-            <CreditCostBadge
-              credits={estimatedRequestCredits}
-              size="xs"
-              tone="plain"
-              label={String(estimatedRequestCredits)}
-              className="px-0"
-            />
-            {inputCreditMultiplier > 1 && (
-              <span className="text-amber-600 dark:text-amber-400">{inputCreditMultiplier}×</span>
-            )}
-          </button>
-        )}
-        {isSending ? (
-          <button
-            type="button"
-            onClick={onCancel}
-            className="flex h-9 w-9 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-red-600 text-white hover:bg-red-500"
-            title={t("chat.cancel")}
-            aria-label={t("chat.cancel")}
-          >
-            <Square className="h-3.5 w-3.5 fill-current" />
-          </button>
-        ) : (
-          <button
-            type="button"
-            data-testid="chat-send-button"
-            onClick={() => {
-              dismissGuestQuickStart();
-              onSubmit();
-            }}
-            disabled={
-              isDisabled ||
-              activeSelectedModels.length === 0 ||
-              (!value.trim() && attachments.length === 0)
-            }
-            className="flex h-9 w-9 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-blue-600 text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500 dark:disabled:bg-zinc-700 dark:disabled:text-zinc-400"
-            title={`${t("chat.send")} · ${estimatedRequestCredits} credits`}
-            aria-label={`${t("chat.send")} · ${estimatedRequestCredits} credits`}
-          >
-            <ArrowUp className="h-4 w-4" />
-          </button>
-        )}
       </div>
       </div>
       <CreditBreakdownSheet
@@ -2433,6 +2397,21 @@ export function ChatInput({
         items={creditBreakdown}
         total={estimatedRequestCredits}
         multiplier={inputCreditMultiplier}
+      />
+      <UsageLimitModal
+        open={isUsageLimitModalOpen && isUsageLimitReached}
+        onClose={() => setIsUsageLimitModalOpen(false)}
+        isGuestMode={isGuestMode}
+        isAccountMonthlyLimitReached={isAccountMonthlyLimitReached}
+        accountPlan={accountUsage?.plan}
+        dailyCreditLimit={dailyCreditLimit}
+        planCreditsRemaining={planCreditsRemaining}
+        purchasedCreditsRemaining={purchasedCreditsRemaining}
+        dailyResetLabel={dailyResetLabel}
+        estimatedRequestCredits={estimatedRequestCredits}
+        totalAvailableCredits={totalAvailableCredits}
+        creditShortfall={creditShortfall}
+        signInCallbackUrl={signInCallbackUrl}
       />
     </div>
   );

@@ -7,7 +7,7 @@ import { useCallback, useState, useEffect, useId, useRef, useSyncExternalStore }
 import { createPortal } from "react-dom";
 import { useLanguage } from "@/components/LanguageProvider";
 import Link from "next/link";
-import { AlertTriangle, Check, ChevronDown, CircleHelp, CloudUpload, Crown, Database, Download, Folder, FolderPlus, Link2Off, Lock, MessageSquare, MoreVertical, Pencil, Pin, Search, Send, Share2, ShieldCheck, SlidersHorizontal, Sparkles, Star, Tag, Trash2, Unlock, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, CircleHelp, CloudUpload, Crown, Database, Download, Folder, FolderPlus, Link2Off, Lock, MessageSquare, MoreVertical, PanelLeftClose, PanelLeftOpen, Pencil, Pin, Plus, Search, Send, Share2, ShieldCheck, SlidersHorizontal, Sparkles, Star, Tag, Trash2, Unlock, X } from "lucide-react";
 import { FeedbackButton } from "@/components/chat/FeedbackButton";
 import { UserUsageSummary } from "@/components/chat/UserUsageSummary";
 import { FeatureHelpPopover } from "@/components/chat/FeatureHelpPopover";
@@ -76,6 +76,23 @@ const getOrganizerPreference = (): OrganizerPreference => {
 };
 
 const getServerOrganizerPreference = (): OrganizerPreference => "auto";
+
+const SIDEBAR_COLLAPSED_STORAGE_KEY = "tomverse_sidebar_collapsed_v1";
+const SIDEBAR_COLLAPSED_CHANGE_EVENT = "tomverse-sidebar-collapsed-change";
+
+const subscribeSidebarCollapsed = (onStoreChange: () => void) => {
+    window.addEventListener("storage", onStoreChange);
+    window.addEventListener(SIDEBAR_COLLAPSED_CHANGE_EVENT, onStoreChange);
+    return () => {
+        window.removeEventListener("storage", onStoreChange);
+        window.removeEventListener(SIDEBAR_COLLAPSED_CHANGE_EVENT, onStoreChange);
+    };
+};
+
+const getSidebarCollapsed = (): boolean =>
+    localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "1";
+
+const getServerSidebarCollapsed = (): boolean => false;
 
 export function ChatSidebar({
     conversations,
@@ -170,6 +187,15 @@ export function ChatSidebar({
         getOrganizerPreference,
         getServerOrganizerPreference
     );
+    const isSidebarCollapsed = useSyncExternalStore(
+        subscribeSidebarCollapsed,
+        getSidebarCollapsed,
+        getServerSidebarCollapsed
+    );
+    const toggleSidebarCollapsed = () => {
+        localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, isSidebarCollapsed ? "0" : "1");
+        window.dispatchEvent(new Event(SIDEBAR_COLLAPSED_CHANGE_EVENT));
+    };
     const { t, lang } = useLanguage();
     const helpCopy = chatHelpCopy[lang];
     const tooltipIdPrefix = useId();
@@ -752,6 +778,52 @@ export function ChatSidebar({
         return () => document.removeEventListener("keydown", handleKeyDown, true);
     }, [closePrivateNotice, getPrivateNoticeFocusableElements, showPrivateNotice]);
 
+    if (isSidebarCollapsed && !isMobileDrawer) {
+        return (
+            <aside
+                data-testid="chat-sidebar-rail"
+                className="relative hidden h-full w-16 shrink-0 select-none flex-col items-center border-r border-zinc-200 bg-zinc-50 py-3 dark:border-zinc-800 dark:bg-zinc-950 md:flex"
+            >
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white ring-1 ring-zinc-200 shadow-sm dark:ring-zinc-800">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                        src="/tomverse-logo.png"
+                        alt="Tomverse AI"
+                        className="h-full w-full object-cover"
+                    />
+                </span>
+                <button
+                    type="button"
+                    data-testid="sidebar-expand-button"
+                    onClick={toggleSidebarCollapsed}
+                    title={t("sidebar.expand")}
+                    aria-label={t("sidebar.expand")}
+                    className="mt-4 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-zinc-500 transition hover:bg-zinc-200/70 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-white"
+                >
+                    <PanelLeftOpen className="h-5 w-5" aria-hidden="true" />
+                </button>
+                <button
+                    type="button"
+                    onClick={onNewChat}
+                    title={t("sidebar.newChat")}
+                    aria-label={t("sidebar.newChat")}
+                    className="mt-2 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-zinc-900 text-white transition hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200"
+                >
+                    <Plus className="h-4 w-4" aria-hidden="true" />
+                </button>
+                <button
+                    type="button"
+                    onClick={toggleSidebarCollapsed}
+                    title={t("sidebar.title")}
+                    aria-label={t("sidebar.title")}
+                    className="mt-2 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-zinc-500 transition hover:bg-zinc-200/70 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-white"
+                >
+                    <Search className="h-4 w-4" aria-hidden="true" />
+                </button>
+            </aside>
+        );
+    }
+
     return (
         <>
         <aside className={`relative flex h-full w-full shrink-0 select-none flex-col border-r border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 ${isMobileDrawer ? "" : "md:w-80"}`}>
@@ -768,7 +840,20 @@ export function ChatSidebar({
                 <h1 className={`${isMobileDrawer ? "text-sm" : "text-base"} font-bold tracking-tight text-zinc-800 dark:text-zinc-100`}>
                     Tomverse AI
                 </h1>
-                <span ref={helpMenuRef} className="group/help relative ml-auto inline-flex">
+                <div className="ml-auto flex items-center gap-1">
+                {!isMobileDrawer && (
+                    <button
+                        type="button"
+                        data-testid="sidebar-collapse-button"
+                        onClick={toggleSidebarCollapsed}
+                        title={t("sidebar.collapse")}
+                        aria-label={t("sidebar.collapse")}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-full text-zinc-500 transition hover:bg-blue-50 hover:text-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-zinc-400 dark:hover:bg-blue-950/50 dark:hover:text-blue-300"
+                    >
+                        <PanelLeftClose className="h-5 w-5" aria-hidden="true" />
+                    </button>
+                )}
+                <span ref={helpMenuRef} className="group/help relative inline-flex">
                     <button
                         type="button"
                         aria-label={t("sidebar.helpAndGuides")}
@@ -830,6 +915,7 @@ export function ChatSidebar({
                         </span>
                     ) : null}
                 </span>
+                </div>
             </div>
 
             <div className={`${isMobileDrawer ? "p-2.5" : "p-3"} border-b border-zinc-200/60 dark:border-zinc-800/40`}>

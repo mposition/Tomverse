@@ -8,16 +8,18 @@ import {
 
 const GUEST_DEFAULT_MODEL_ID = "gemini-2-5-flash";
 
-// The two other most recognizable frontier brands, so a guest's first chat
-// immediately shows Tomverse's core comparison value instead of a single
-// generic answer. The admin-configurable guestDefaultModelId (AppSetting)
-// still leads the trio — see getGuestDefaultSelectedModels.
-export const GUEST_COMPANION_MODEL_IDS = ["gpt-5-4-mini", "claude-haiku-4-5"];
+// The three most recognizable frontier brands, shown for every guest so
+// their first chat immediately demonstrates Tomverse's core comparison
+// value. This trio is always guaranteed regardless of the admin-configured
+// guestDefaultModelId (AppSetting) below — that setting only controls which
+// of these three leads (see getGuestDefaultSelectedModels); it has no effect
+// if it names a model outside the trio.
+export const GUEST_BRAND_TRIO_MODEL_IDS = ["gpt-5-4-mini", "claude-haiku-4-5", "gemini-2-5-flash"];
 
-// Used only when the admin-configured primary model collides with one of the
-// companions above, so the guest trio still comes out to 3 distinct models
-// instead of silently collapsing to 2 via Set dedup.
-const GUEST_FALLBACK_MODEL_IDS = ["llama-3-1", "grok-3-mini", "deepseek-v4-flash"];
+// Backstops used only if one of the brand trio above is itself disabled or
+// ineligible, so the guest default still comes out to 3 distinct models
+// instead of silently collapsing via Set dedup.
+export const GUEST_FALLBACK_MODEL_IDS = ["llama-3-1", "grok-3-mini", "deepseek-v4-flash"];
 
 const isGuestEligibleModel = (modelId: string) => {
   const model = getModel(modelId);
@@ -32,9 +34,9 @@ if (!isEnabledModelId(GUEST_DEFAULT_MODEL_ID) || !isGuestEligibleModel(GUEST_DEF
   throw new Error("Guest default model must be an enabled guest-accessible Standard model.");
 }
 
-for (const modelId of GUEST_COMPANION_MODEL_IDS) {
+for (const modelId of GUEST_BRAND_TRIO_MODEL_IDS) {
   if (!isEnabledModelId(modelId) || !isGuestEligibleModel(modelId)) {
-    throw new Error(`Guest companion model must be an enabled guest-accessible Standard model: ${modelId}`);
+    throw new Error(`Guest brand-trio model must be an enabled guest-accessible Standard model: ${modelId}`);
   }
 }
 
@@ -73,16 +75,21 @@ export const clampGuestSelectedModels = (models: string[]) =>
     isGuestEligibleModel
   ).slice(0, APP_DEFAULTS.maxGuestSelectedModels);
 
+// Always includes the GPT/Claude/Gemini brand trio, backfilling from
+// GUEST_FALLBACK_MODEL_IDS if one of them is disabled. leadModelId (the
+// admin-configured guestDefaultModelId) only reorders which of the three
+// appears first, and is ignored if it names a model outside the trio.
 export const getGuestDefaultSelectedModels = (
-  primaryModelId: string = APP_DEFAULTS.guestDefaultModelId
+  leadModelId: string = APP_DEFAULTS.guestDefaultModelId
 ) => {
+  const orderedTrio = GUEST_BRAND_TRIO_MODEL_IDS.includes(leadModelId)
+    ? [leadModelId, ...GUEST_BRAND_TRIO_MODEL_IDS.filter((id) => id !== leadModelId)]
+    : GUEST_BRAND_TRIO_MODEL_IDS;
+
   const trio: string[] = [];
-  for (const modelId of [
-    primaryModelId,
-    ...GUEST_COMPANION_MODEL_IDS,
-    ...GUEST_FALLBACK_MODEL_IDS,
-  ]) {
-    if (!trio.includes(modelId)) trio.push(modelId);
+  for (const modelId of [...orderedTrio, ...GUEST_FALLBACK_MODEL_IDS]) {
+    if (trio.includes(modelId) || !isGuestEligibleModel(modelId)) continue;
+    trio.push(modelId);
     if (trio.length >= 3) break;
   }
   return clampGuestSelectedModels(trio);
