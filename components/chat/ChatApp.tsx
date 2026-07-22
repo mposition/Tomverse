@@ -688,6 +688,7 @@ function ChatAppComponent({
         hasMultipleActiveModels={hasMultipleActiveModels}
         currentModelId={modelId}
         currentPlan={currentPlan}
+        isGuestMode={isGuestMode}
       />}
                   </div>
                   {isGuestMode ? (

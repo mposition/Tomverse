@@ -35,6 +35,7 @@ type ChatMessageListProps = {
   hasMultipleActiveModels?: boolean;
   currentModelId?: string | null;
   currentPlan?: string | null;
+  isGuestMode?: boolean;
 };
 type MarkdownCodeProps = ComponentPropsWithoutRef<"code"> & ExtraProps;
 
@@ -131,6 +132,7 @@ export function ChatMessageList({
   hasMultipleActiveModels = false,
   currentModelId,
   currentPlan,
+  isGuestMode = false,
 }: ChatMessageListProps) {
   const { models: AVAILABLE_MODELS } = useModelCatalog();
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -449,7 +451,16 @@ export function ChatMessageList({
                           </div>
                         )}
                         <div className="flex flex-wrap items-center gap-2">
-                          {(errorCategory === "quota" || errorCategory === "model_retired") &&
+                          {errorCategory === "quota" && isGuestMode && (
+                            <Link
+                              href={`/auth/signin?callbackUrl=${encodeURIComponent("/chat")}`}
+                              className={primaryButtonClass}
+                            >
+                              {t("auth.login")}
+                            </Link>
+                          )}
+                          {(errorCategory === "model_retired" ||
+                            (errorCategory === "quota" && !isGuestMode)) &&
                             onRequestCloseModel && (
                               <button
                                 type="button"
@@ -462,6 +473,18 @@ export function ChatMessageList({
                                   : t("chat.chooseAnotherModel")}
                               </button>
                             )}
+                          {errorCategory === "quota" && isGuestMode && onRequestCloseModel && (
+                            <button
+                              type="button"
+                              onClick={onRequestCloseModel}
+                              className={secondaryButtonClass}
+                            >
+                              <RotateCcw className="h-3.5 w-3.5" />
+                              {hasMultipleActiveModels
+                                ? t("chat.reduceModelCount")
+                                : t("chat.chooseAnotherModel")}
+                            </button>
+                          )}
                           {(errorCategory === "generic" || errorCategory === "attachment") &&
                             onRetryLast && (
                               <button
