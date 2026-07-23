@@ -152,6 +152,7 @@ export const ko = {
         modelSelect: "AI 모델 선택",
         swapModelTitle: "{model} 교체",
         swapModelBody: "이미 최대 개수만큼 모델을 선택했습니다. 아래에서 교체할 모델을 선택하세요.",
+        swapModelFailed: "모델을 교체하지 못했습니다. 다시 시도해주세요.",
         noFavoriteModelsTitle: "즐겨찾는 모델이 없습니다",
         noFavoriteModelsHint: "자주 사용하는 모델의 별표를 눌러 여기에서 빠르게 찾아보세요.",
         maxModelCompare: "최대 3개 모델까지 비교할 수 있습니다.",

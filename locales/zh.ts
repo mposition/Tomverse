@@ -152,6 +152,7 @@ export const zh = {
         modelSelect: "选择 AI 模型",
         swapModelTitle: "替换为 {model}",
         swapModelBody: "你已选择最多数量的模型。请选择要替换的模型。",
+        swapModelFailed: "无法切换模型，请重试。",
         noFavoriteModelsTitle: "还没有收藏的模型",
         noFavoriteModelsHint: "点击常用模型旁的星标，即可在这里快速找到它们。",
         maxModelCompare: "最多可比较 3 个模型。",

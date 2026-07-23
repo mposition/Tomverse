@@ -2481,6 +2481,7 @@ export function ChatInput({
                     aria-label={t("chat.swapModelTitle").replace("{model}", candidate.name)}
                     className="w-full max-w-sm rounded-t-3xl bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] dark:bg-zinc-900 md:rounded-3xl"
                     onClick={(event) => event.stopPropagation()}
+                    onMouseDown={(event) => event.stopPropagation()}
                   >
                     <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-zinc-200 dark:bg-zinc-700 md:hidden" />
                     <p className="text-base font-bold text-zinc-900 dark:text-zinc-100">
@@ -2497,8 +2498,12 @@ export function ChatInput({
                             key={modelId}
                             type="button"
                             onClick={() => {
-                              onSwapModel(modelId, candidate.id);
-                              rememberRecentModel(candidate.id);
+                              const swapped = onSwapModel(modelId, candidate.id);
+                              if (swapped) {
+                                rememberRecentModel(candidate.id);
+                              } else {
+                                dispatchAppToast(t("chat.swapModelFailed"), "error");
+                              }
                               setReplaceModelCandidate(null);
                             }}
                             className="flex w-full items-center gap-2 rounded-xl border border-zinc-200 px-3 py-2.5 text-left text-sm font-semibold text-zinc-800 transition hover:border-blue-400 hover:bg-blue-50 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-blue-950/30"

@@ -170,6 +170,7 @@ export const de = {
         modelSelect: "Modelle auswählen",
         swapModelTitle: "{model} einwechseln",
         swapModelBody: "Sie haben bereits die maximale Anzahl an Modellen ausgewählt. Wählen Sie unten aus, welches ersetzt werden soll.",
+        swapModelFailed: "Modellwechsel fehlgeschlagen. Bitte erneut versuchen.",
         noFavoriteModelsTitle: "Noch keine Favoriten",
         noFavoriteModelsHint: "Tippen Sie auf den Stern bei Modellen, die Sie oft nutzen, um sie hier schnell wiederzufinden.",
         maxModelCompare: "Sie können bis zu 3 Modelle vergleichen.",

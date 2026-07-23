@@ -170,6 +170,7 @@ export const fr = {
         modelSelect: "Choisir des modèles",
         swapModelTitle: "Remplacer par {model}",
         swapModelBody: "Vous avez déjà sélectionné le nombre maximum de modèles. Choisissez lequel remplacer ci-dessous.",
+        swapModelFailed: "Impossible de changer de modèle. Veuillez réessayer.",
         noFavoriteModelsTitle: "Aucun modèle favori pour l'instant",
         noFavoriteModelsHint: "Appuyez sur l'étoile des modèles que vous utilisez souvent pour les retrouver ici rapidement.",
         maxModelCompare: "Vous pouvez comparer jusqu'à 3 modèles.",

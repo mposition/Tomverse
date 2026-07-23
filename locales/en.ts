@@ -152,6 +152,7 @@ export const en = {
         modelSelect: "Choose AI models",
         swapModelTitle: "Swap in {model}",
         swapModelBody: "You've already selected the maximum number of models. Choose one below to replace.",
+        swapModelFailed: "Couldn't switch models. Please try again.",
         noFavoriteModelsTitle: "No favorite models yet",
         noFavoriteModelsHint: "Tap the star on models you use often to find them here quickly.",
         maxModelCompare: "You can compare up to 3 models.",
