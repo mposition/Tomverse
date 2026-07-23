@@ -15,7 +15,7 @@ import { FeatureHelpPopover } from "@/components/chat/FeatureHelpPopover";
 import { chatHelpCopy } from "@/components/chat/chatHelpCopy";
 import { useUserUsage, type UserPlan } from "@/components/chat/useUserUsage";
 import { dispatchAppToast } from "@/lib/appToast";
-import { trackProductEvent, trackProductEventOnce } from "@/lib/productAnalyticsClient";
+import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
 
 type ChatSidebarProps = {
@@ -302,23 +302,6 @@ export function ChatSidebar({
             document.removeEventListener("keydown", closeOnEscape);
         };
     }, [showHelpMenu]);
-
-    useEffect(() => {
-        if (isGuestMode || !conversations.some((conversation) => conversation.id !== "private-chat")) {
-            return;
-        }
-        const desktopViewport = window.matchMedia("(min-width: 768px)").matches;
-        const visibleSidebar = isMobileDrawer ? !desktopViewport : desktopViewport;
-        if (!visibleSidebar || localStorage.getItem(SIDEBAR_TOUR_STORAGE_KEY)) return;
-        const timer = window.setTimeout(() => {
-            setSidebarTourStep((current) => current ?? 0);
-            trackProductEventOnce(
-                "sidebar_tour_started:auto:v1",
-                "sidebar_tour_started"
-            );
-        }, 500);
-        return () => window.clearTimeout(timer);
-    }, [conversations, isGuestMode, isMobileDrawer]);
 
     useEffect(() => {
         if (!showProjectForm && !editingProjectId && !deleteProjectArmedId) return;
