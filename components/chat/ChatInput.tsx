@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -1038,6 +1039,44 @@ export function ChatInput({
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [closeMenu]);
+
+  // The desktop popover is anchored to the bottom of the toolbar row via
+  // `bottom: 3rem`, so its bottom edge never moves — only its height does.
+  // `getBoundingClientRect().bottom` therefore tells us exactly how much
+  // vertical space is actually available above it on screen (accounting for
+  // the real input-bar height, browser zoom, and short viewports), which a
+  // static `calc(100dvh - 8rem)` cap can't know. Runs before paint so an
+  // oversized first layout never flashes.
+  useLayoutEffect(() => {
+    if (!isMenuOpen) return;
+
+    const popover = menuPopoverRef.current;
+    if (!popover) return;
+
+    const desktopQuery = window.matchMedia("(min-width: 768px)");
+
+    const clampPopoverHeight = () => {
+      if (!desktopQuery.matches) {
+        popover.style.maxHeight = "";
+        return;
+      }
+
+      const topMargin = 16;
+      const minHeight = 240;
+      const available = popover.getBoundingClientRect().bottom - topMargin;
+      popover.style.maxHeight = `${Math.max(minHeight, available)}px`;
+    };
+
+    clampPopoverHeight();
+    window.addEventListener("resize", clampPopoverHeight);
+    desktopQuery.addEventListener("change", clampPopoverHeight);
+
+    return () => {
+      window.removeEventListener("resize", clampPopoverHeight);
+      desktopQuery.removeEventListener("change", clampPopoverHeight);
+      popover.style.maxHeight = "";
+    };
+  }, [isMenuOpen, menuView]);
 
   useEffect(() => {
     if (!isMenuOpen) return;
