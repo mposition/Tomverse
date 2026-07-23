@@ -53,6 +53,13 @@ import {
   isChatCostSafetyCode,
 } from "@/lib/chatCostSafetyCore";
 
+// Persists which conversation is open in *this tab* so an F5 / crash
+// recovery restores it instead of falling back to the welcome screen --
+// while a brand-new tab (no sessionStorage) still lands on welcome as
+// intended. Deliberately sessionStorage, not localStorage: closing the
+// browser and coming back should still default to welcome.
+const ACTIVE_CHAT_STORAGE_KEY = "tomverse_active_chat_id";
+
 const normalizeStringArray = (value: unknown, fallback: string[]) => {
   let parsed = value;
   for (let i = 0; i < 2 && typeof parsed === "string"; i++) {
@@ -455,6 +462,24 @@ export default function Home() {
   useEffect(() => {
     currentChatIdRef.current = currentChatId;
   }, [currentChatId]);
+
+  // Private-mode conversations are intentionally excluded: a refresh from
+  // private mode should land on welcome, not silently resume whatever
+  // regular conversation was open before switching into it.
+  //
+  // Gated on isInitialConversationResolved so this doesn't run before the
+  // welcome-vs-restore decision below has had a chance to read the saved
+  // id: currentChatId starts out null on every mount (restored or not)
+  // until that decision resolves it, and this effect would otherwise wipe
+  // the very value that decision needs to read.
+  useEffect(() => {
+    if (typeof window === "undefined" || !isInitialConversationResolved) return;
+    if (!currentChatId || currentChatId === "private-chat") {
+      window.sessionStorage.removeItem(ACTIVE_CHAT_STORAGE_KEY);
+      return;
+    }
+    window.sessionStorage.setItem(ACTIVE_CHAT_STORAGE_KEY, currentChatId);
+  }, [currentChatId, isInitialConversationResolved]);
 
   useEffect(() => {
     if (!isGuestPreviewEntry) return;
@@ -899,6 +924,32 @@ export default function Home() {
         try {
           const parsed = JSON.parse(savedConversations);
           setConversations(parsed);
+
+          // Restore the tab's previously open conversation (F5, crash
+          // recovery) if it's still there -- inlined rather than calling
+          // handleSelectConversation because `conversations` state from
+          // setConversations above hasn't committed yet in this closure.
+          const savedChatId = window.sessionStorage.getItem(ACTIVE_CHAT_STORAGE_KEY);
+          const restoredConversation = savedChatId && Array.isArray(parsed)
+            ? parsed.find((conversation) => conversation?.id === savedChatId)
+            : null;
+          if (restoredConversation) {
+            setCurrentChatId(restoredConversation.id);
+            const restoredModels = clampGuestSelectedModels(
+              normalizeStringArray(
+                restoredConversation.selectedModels,
+                guestDefaultSelectedModels
+              )
+            );
+            setSelectedModels(
+              restoredModels.length ? restoredModels : guestDefaultSelectedModels
+            );
+            setDisabledPanels(
+              normalizeStringArray(restoredConversation.disabledPanels, []).filter(
+                (modelId: string) => restoredModels.includes(modelId)
+              )
+            );
+          }
         } catch (e) {
           console.error("Failed to parse guest conversations:", e);
         }
@@ -923,6 +974,7 @@ export default function Home() {
       };
     }
   }, [
+    clampGuestSelectedModels,
     guestDefaultModelId,
     guestDefaultSelectedModels,
     isGuestMode,
@@ -935,27 +987,7 @@ export default function Home() {
     if (isGuestMode && isConversationsLoaded && conversations.length > 0) {
       localStorage.setItem("guest_conversations", JSON.stringify(conversations));
     }
-  }, [conversations, isGuestMode, isConversationsLoaded]);  
-
-    useEffect(() => {
-        if (
-            isGuestMode ||
-            !isUserSettingsLoaded ||
-            conversations.length === 0 ||
-            currentChatId ||
-            isInitialSelectedRef.current ||
-            comparisonPresetRequestedRef.current ||
-            new URLSearchParams(window.location.search).has("models") ||
-            new URLSearchParams(window.location.search).has("prompt")
-        ) return;
-
-        // Returning users land on the welcome-home screen instead of having
-        // their most recent conversation auto-opened (privacy + lets them
-        // choose continue-vs-new rather than deciding for them). Existing
-        // conversations remain one tap away via the sidebar / recent cards.
-        isInitialSelectedRef.current = true;
-        queueMicrotask(() => setIsInitialConversationResolved(true));
-    }, [conversations, currentChatId, isGuestMode, isUserSettingsLoaded]);
+  }, [conversations, isGuestMode, isConversationsLoaded]);
 
     useEffect(() => {
         if (
@@ -1207,6 +1239,48 @@ export default function Home() {
         setFocusToken((prev) => prev + 1);
 
     };
+
+    useEffect(() => {
+        if (
+            isGuestMode ||
+            !isUserSettingsLoaded ||
+            conversations.length === 0 ||
+            currentChatId ||
+            isInitialSelectedRef.current ||
+            comparisonPresetRequestedRef.current ||
+            new URLSearchParams(window.location.search).has("models") ||
+            new URLSearchParams(window.location.search).has("prompt")
+        ) return;
+
+        isInitialSelectedRef.current = true;
+
+        // A same-tab reload (F5, crash recovery) should return to whatever
+        // conversation was open, not send the user back through the welcome
+        // screen the way an actual new tab/session does. Only restore if the
+        // saved id still belongs to this user's just-loaded conversation
+        // list -- covers a deleted conversation, another user's leftover id
+        // after a sign-out/sign-in in the same tab, etc. -- and
+        // handleSelectConversation itself still re-prompts for a locked
+        // conversation's password rather than silently opening it.
+        const savedChatId = window.sessionStorage.getItem(ACTIVE_CHAT_STORAGE_KEY);
+        const restorableChatId =
+            savedChatId && conversations.some((conversation) => conversation.id === savedChatId)
+                ? savedChatId
+                : null;
+
+        // Returning users with nothing to restore land on the welcome-home
+        // screen instead of having their most recent conversation
+        // auto-opened (privacy + lets them choose continue-vs-new rather
+        // than deciding for them). Existing conversations remain one tap
+        // away via the sidebar / recent cards.
+        queueMicrotask(() => {
+            if (restorableChatId) {
+                void handleSelectConversation(restorableChatId);
+            }
+            setIsInitialConversationResolved(true);
+        });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [conversations, currentChatId, isGuestMode, isUserSettingsLoaded]);
 
     const handleLock = async (id: string, password: string) => {
         try {
