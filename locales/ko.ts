@@ -270,6 +270,8 @@ export const ko = {
         aiReviewChangeCriteria: "검토 기준 변경",
         close: "닫기",
         compareUnavailable: "비교 요약을 사용할 수 없습니다.",
+        compareRateLimited: "요청이 너무 많습니다. 잠시 후 다시 시도해주세요.",
+        compareServiceUnavailable: "비교 요약을 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도해주세요.",
         noResponseContent: "응답 내용을 찾을 수 없습니다.",
         promptSummarizeDocument: "이 문서 요약하기",
         promptCompareModels: "모델 답변 비교하기",

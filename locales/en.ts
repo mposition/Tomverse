@@ -270,6 +270,8 @@ export const en = {
         aiReviewChangeCriteria: "Change review criteria",
         close: "Close",
         compareUnavailable: "Comparison summary is unavailable.",
+        compareRateLimited: "Too many requests. Please try again in a moment.",
+        compareServiceUnavailable: "Comparison summary is temporarily unavailable. Please try again shortly.",
         noResponseContent: "No response content found.",
         promptSummarizeDocument: "Summarize this document",
         promptCompareModels: "Compare these models",

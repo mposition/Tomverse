@@ -2346,12 +2346,15 @@ export default function Home() {
           const payload = (await response.json().catch(() => null)) as
             | { code?: string }
             | null;
-          showToast(
+          const message =
             payload?.code === "COMPARISON_RESPONSES_REQUIRED"
               ? t("chat.aiReviewResponsesRequired")
-              : t("chat.compareUnavailable"),
-            "error"
-          );
+              : payload?.code === "API_RATE_LIMITED"
+                ? t("chat.compareRateLimited")
+                : payload?.code === "QUICK_COMPARISON_REVIEWER_UNAVAILABLE"
+                  ? t("chat.compareServiceUnavailable")
+                  : t("chat.compareUnavailable");
+          showToast(message, "error");
           return;
         }
         setCompareSummary(await response.json());
@@ -2445,6 +2448,7 @@ export default function Home() {
           onSubmit={handleGlobalSubmit}
           onBeforeModelSend={ensureModelSettingsReady}
           onCompareSummary={handleCompareSummary}
+          isCompareSummaryLoading={isCompareSummaryLoading}
           onComparisonReview={() => setShowComparisonReview(true)}
           onResponseComplete={handleResponseComplete}
           onFollowupSent={handleModelFollowupSent}
@@ -2492,6 +2496,7 @@ export default function Home() {
           onTogglePanelDisable={togglePanelDisable}
           onRemoveModel={handleRemoveModel}
           onCompareSummary={handleCompareSummary}
+          isCompareSummaryLoading={isCompareSummaryLoading}
           onComparisonReview={() => setShowComparisonReview(true)}
           onResponseComplete={handleResponseComplete}
           onFollowupSent={handleModelFollowupSent}

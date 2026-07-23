@@ -134,9 +134,13 @@ function ChatAppComponent({
       return;
     }
 
-    const hasError = messages.some(
-      (message) => message.role === "assistant" && message.status === "error"
-    );
+    // Only the most recent assistant reply should count -- otherwise a
+    // successful retry after an earlier failure could never clear the
+    // "error" status, since that old failed message never leaves history.
+    const lastAssistantMessage = [...messages]
+      .reverse()
+      .find((message) => message.role === "assistant");
+    const hasError = lastAssistantMessage?.status === "error";
     onStatusChange?.(modelId, hasError ? "error" : "idle");
   }, [isPanelDisabled, isSending, messages, modelId, onStatusChange]);
 

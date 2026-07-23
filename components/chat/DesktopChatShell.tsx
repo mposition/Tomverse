@@ -66,6 +66,7 @@ type DesktopChatShellProps = {
   onTogglePanelDisable: (modelId: string) => void;
   onRemoveModel: (modelId: string) => void;
   onCompareSummary: () => void;
+  isCompareSummaryLoading: boolean;
   onComparisonReview: () => void;
   onResponseComplete: (promptId: string | null, modelId: string, responseText: string) => void;
   onFollowupSent: (modelId: string) => void;
@@ -108,6 +109,7 @@ export function DesktopChatShell({
   onTogglePanelDisable,
   onRemoveModel,
   onCompareSummary,
+  isCompareSummaryLoading,
   onComparisonReview,
   onResponseComplete,
   onFollowupSent,
@@ -144,6 +146,30 @@ export function DesktopChatShell({
   const isConversationEmpty =
     selectedModels.length > 0 &&
     selectedModels.every((modelId) => modelEmptyStates[emptyStateKey(modelId)] ?? true);
+  const [modelStatuses, setModelStatuses] = useState<
+    Record<string, "idle" | "loading" | "responding" | "error" | "paused">
+  >({});
+  const handleModelStatusChange = useCallback(
+    (modelId: string, nextStatus: "idle" | "loading" | "responding" | "error" | "paused") => {
+      setModelStatuses((current) =>
+        current[modelId] === nextStatus
+          ? current
+          : { ...current, [modelId]: nextStatus }
+      );
+    },
+    []
+  );
+  // A quick-comparison summary needs at least two models that have actually
+  // finished responding (not still streaming, not paused/off) -- the
+  // request only ever counted selectedModels.length > 1 and an otherwise
+  // non-empty conversation, so the button was clickable the instant a
+  // message was sent, well before any model had a real answer to compare.
+  const readyForCompareCount = selectedModels.filter(
+    (modelId) =>
+      !disabledPanels.includes(modelId) && modelStatuses[modelId] === "idle"
+  ).length;
+  const isCompareSummaryDisabled =
+    isCompareSummaryLoading || readyForCompareCount < 2;
   const isPrivate = currentChatId === "private-chat";
   const [welcomeInputSlot, setWelcomeInputSlot] = useState<HTMLDivElement | null>(null);
   const [bottomInputSlot, setBottomInputSlot] = useState<HTMLDivElement | null>(null);
@@ -340,6 +366,7 @@ export function DesktopChatShell({
                   hideModelOnlyInput={selectedModels.length <= 1}
                   useCenteredWelcome
                   onEmptyStateChange={handleEmptyStateChange}
+                  onStatusChange={handleModelStatusChange}
                   onRequestCloseModel={() => onToggleModel(modelId)}
                   hasMultipleActiveModels={selectedModels.length > 1}
                 />
@@ -354,7 +381,9 @@ export function DesktopChatShell({
               type="button"
               data-testid="quick-comparison-button"
               onClick={onCompareSummary}
-              className="flex items-center justify-between gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-xs font-black text-blue-700 hover:bg-blue-100 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200 dark:hover:bg-blue-950"
+              disabled={isCompareSummaryDisabled}
+              title={readyForCompareCount < 2 ? t("chat.aiReviewResponsesRequired") : undefined}
+              className="flex items-center justify-between gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-xs font-black text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-blue-50 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200 dark:hover:bg-blue-950 dark:disabled:hover:bg-blue-950/30"
             >
               <span>{t("chat.quickDifferenceSummary")}</span>
               <CreditCostBadge

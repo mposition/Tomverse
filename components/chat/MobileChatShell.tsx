@@ -72,6 +72,7 @@ type MobileChatShellProps = {
   onSubmit: () => void;
   onBeforeModelSend: (chatId: string) => Promise<boolean>;
   onCompareSummary: () => void;
+  isCompareSummaryLoading: boolean;
   onComparisonReview: () => void;
   onResponseComplete: (promptId: string | null, modelId: string, responseText: string) => void;
   onFollowupSent: (modelId: string) => void;
@@ -111,6 +112,7 @@ export function MobileChatShell({
   onSubmit,
   onBeforeModelSend,
   onCompareSummary,
+  isCompareSummaryLoading,
   onComparisonReview,
   onResponseComplete,
   onFollowupSent,
@@ -284,8 +286,17 @@ export function MobileChatShell({
   const errorCount = selectedModels.filter(
     (modelId) => modelStatuses[modelId] === "error"
   ).length;
-  const isAnyResponding = respondingCount > 0;
   const isAnyError = errorCount > 0;
+  // Mirrors DesktopChatShell's fix: the button used to be clickable the
+  // instant a message was sent, well before any model had finished --
+  // require at least two active (non-paused) models to have actually
+  // reached "idle" (finished, no error) before allowing a comparison.
+  const readyForCompareCount = selectedModels.filter(
+    (modelId) =>
+      !disabledPanels.includes(modelId) && modelStatuses[modelId] === "idle"
+  ).length;
+  const isCompareSummaryDisabled =
+    isCompareSummaryLoading || readyForCompareCount < 2;
   const isAnyWorkingOrError = selectedModels.some((modelId) => {
     const status = modelStatuses[modelId];
     return status === "responding" || status === "loading" || status === "error";
@@ -453,7 +464,9 @@ export function MobileChatShell({
             type="button"
             data-testid="quick-comparison-button"
             onClick={onCompareSummary}
-            className="flex h-8 w-full items-center justify-between gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-2 text-[11px] font-black text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200"
+            disabled={isCompareSummaryDisabled}
+            title={readyForCompareCount < 2 ? t("chat.aiReviewResponsesRequired") : undefined}
+            className="flex h-8 w-full items-center justify-between gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-2 text-[11px] font-black text-blue-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200"
           >
             <span className="truncate">{t("chat.quickDifferenceSummary")}</span>
             <CreditCostBadge
