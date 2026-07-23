@@ -1567,6 +1567,16 @@ export function ChatInput({
     }
   };
 
+  // Drives which model-picker layout renders below: the original compact,
+  // single-scroll mobile sheet (filters scroll away together with the
+  // list, matching this same breakpoint's MobileModelMenuPortal decision
+  // above) vs. the wider two-pane modal on desktop.
+  const isMobileModelMenu = useSyncExternalStore(
+    subscribeToMobileModelMenu,
+    getMobileModelMenuSnapshot,
+    getServerMobileModelMenuSnapshot
+  );
+
   return (
       <div className={variant === "floating"
         ? "w-full max-w-full shrink-0 overflow-hidden px-0 py-0 md:overflow-visible"
@@ -2137,9 +2147,9 @@ export function ChatInput({
                       </div>
                     </div>
                   )}
-                  <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden md:flex-row md:gap-4">
-                    <div className="flex shrink-0 flex-col gap-3 overflow-y-auto px-1 md:w-44 md:shrink-0 md:border-r md:border-zinc-200 md:pr-3 dark:md:border-zinc-800">
-                      {favoriteModelIds.length > 0 && (
+                  {(() => {
+                    const favoritesButton = (mobileStyle: boolean) =>
+                      favoriteModelIds.length > 0 && (
                         <button
                           type="button"
                           aria-pressed={capabilityFilter === "favorites"}
@@ -2148,35 +2158,43 @@ export function ChatInput({
                               current === "favorites" ? "all" : "favorites"
                             )
                           }
-                          className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[10px] font-black transition ${capabilityFilter === "favorites" ? "border-blue-500 bg-blue-500 text-white" : "border-zinc-200 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"}`}
+                          className={
+                            mobileStyle
+                              ? `inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-black transition ${capabilityFilter === "favorites" ? "border-blue-500 bg-blue-500 text-white" : "border-zinc-200 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"}`
+                              : `flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[10px] font-black transition ${capabilityFilter === "favorites" ? "border-blue-500 bg-blue-500 text-white" : "border-zinc-200 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"}`
+                          }
                         >
                           <Star className={`h-3 w-3 ${capabilityFilter === "favorites" ? "fill-current" : ""}`} aria-hidden="true" />
                           {t("chat.favoriteModels")}
                         </button>
-                      )}
-                      <div className="flex flex-col gap-1">
-                        {([
-                          ["recommended", pickerCopy.recommended],
-                          ["fast", pickerCopy.fast],
-                          ["reasoning", pickerCopy.deepReasoning],
-                          ["search", pickerCopy.webSearch],
-                        ] as const).map(([filterValue, label]) => (
-                          <button
-                            key={filterValue}
-                            type="button"
-                            aria-pressed={capabilityFilter === filterValue}
-                            onClick={() =>
-                              setCapabilityFilter((current) =>
-                                current === filterValue ? "all" : filterValue
-                              )
-                            }
-                            className={`rounded-full border px-2.5 py-1 text-left text-[10px] font-black transition ${capabilityFilter === filterValue ? "border-blue-500 bg-blue-500 text-white" : "border-zinc-200 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"}`}
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                      <div className="flex flex-col gap-2">
+                      );
+                    const capabilityChips = (mobileStyle: boolean) =>
+                      ([
+                        ["recommended", pickerCopy.recommended],
+                        ["fast", pickerCopy.fast],
+                        ["reasoning", pickerCopy.deepReasoning],
+                        ["search", pickerCopy.webSearch],
+                      ] as const).map(([filterValue, label]) => (
+                        <button
+                          key={filterValue}
+                          type="button"
+                          aria-pressed={capabilityFilter === filterValue}
+                          onClick={() =>
+                            setCapabilityFilter((current) =>
+                              current === filterValue ? "all" : filterValue
+                            )
+                          }
+                          className={
+                            mobileStyle
+                              ? `shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black transition ${capabilityFilter === filterValue ? "border-blue-500 bg-blue-500 text-white" : "border-zinc-200 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"}`
+                              : `rounded-full border px-2.5 py-1 text-left text-[10px] font-black transition ${capabilityFilter === filterValue ? "border-blue-500 bg-blue-500 text-white" : "border-zinc-200 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"}`
+                          }
+                        >
+                          {label}
+                        </button>
+                      ));
+                    const providerUsageSelects = (mobileStyle: boolean) => (
+                      <div className={mobileStyle ? "grid grid-cols-2 gap-2" : "flex flex-col gap-2"}>
                         <select
                           value={providerFilter}
                           onChange={(event) => setProviderFilter(event.target.value)}
@@ -2201,6 +2219,26 @@ export function ChatInput({
                           <option value="intensive">{pickerCopy.intensive}</option>
                         </select>
                       </div>
+                    );
+                    const advancedFiltersPanel = showAdvancedModelFilters && (
+                      <div className="flex flex-wrap gap-1 rounded-lg bg-zinc-100 p-1.5 dark:bg-zinc-950">
+                        {([
+                          [imageInputOnly, setImageInputOnly, pickerCopy.imageInputOnly],
+                          [availableOnPlanOnly, setAvailableOnPlanOnly, pickerCopy.availableOnPlan],
+                        ] as const).map(([pressed, setPressed, label]) => (
+                          <button
+                            key={label}
+                            type="button"
+                            aria-pressed={pressed}
+                            onClick={() => setPressed(!pressed)}
+                            className={`rounded-full px-2 py-1 text-[9px] font-black transition ${pressed ? "bg-blue-600 text-white" : "bg-white text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"}`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    );
+                    const advancedFiltersToggle = (
                       <button
                         type="button"
                         data-testid="advanced-model-filters"
@@ -2216,34 +2254,8 @@ export function ChatInput({
                           </span>
                         )}
                       </button>
-                      {showAdvancedModelFilters && (
-                        <div className="flex flex-wrap gap-1 rounded-lg bg-zinc-100 p-1.5 dark:bg-zinc-950">
-                          {([
-                            [imageInputOnly, setImageInputOnly, pickerCopy.imageInputOnly],
-                            [availableOnPlanOnly, setAvailableOnPlanOnly, pickerCopy.availableOnPlan],
-                          ] as const).map(([pressed, setPressed, label]) => (
-                            <button
-                              key={label}
-                              type="button"
-                              aria-pressed={pressed}
-                              onClick={() => setPressed(!pressed)}
-                              className={`rounded-full px-2 py-1 text-[9px] font-black transition ${pressed ? "bg-blue-600 text-white" : "bg-white text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"}`}
-                            >
-                              {label}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex min-h-0 min-w-0 flex-1 flex-col @container/list">
-                      <p className="mb-1 shrink-0 px-1 text-[11px] font-black text-zinc-900 dark:text-white">
-                        {pickerCopy.allModels}
-                      </p>
-                      <div
-                        data-testid="model-picker-scroll-region"
-                        className="h-0 min-h-0 flex-1 touch-pan-y space-y-3 overflow-x-hidden overflow-y-scroll overscroll-y-contain px-1 pb-4 pr-2 [scrollbar-gutter:stable] [-webkit-overflow-scrolling:touch]"
-                      >
-                        {!modelSearchQuery.trim() &&
+                    );
+                    const recommendationsSection = !modelSearchQuery.trim() &&
                           selectedModels.length < maxSelectableModels &&
                           recommendationModels.length > 0 && (
                           <section
@@ -2322,9 +2334,10 @@ export function ChatInput({
                               );
                             })}
                           </section>
-                        )}
-                        <div className="space-y-3">
-                          {groupedModels.map((group) => (
+                        );
+                    const groupedModelsSection = (
+                      <div className="space-y-3">
+                        {groupedModels.map((group) => (
                             <div key={group.provider} className="space-y-1">
                               <div className="px-2 text-[10px] font-bold uppercase tracking-wide text-zinc-400">
                                 {group.provider.toUpperCase()}
@@ -2493,10 +2506,53 @@ export function ChatInput({
                               {t("chat.noModelsFound")}
                             </div>
                           )}
+                      </div>
+                    );
+
+                    return isMobileModelMenu ? (
+                      <div
+                        data-testid="model-picker-scroll-region"
+                        className="h-0 min-h-0 flex-1 touch-pan-y space-y-2 overflow-x-hidden overflow-y-scroll overscroll-y-contain px-1 pb-4 pr-2 [scrollbar-gutter:stable] [-webkit-overflow-scrolling:touch]"
+                      >
+                        {recommendationsSection}
+                        <div className="flex items-center justify-between gap-2 px-1 pt-0.5">
+                          <p className="text-[11px] font-black text-zinc-900 dark:text-white">
+                            {pickerCopy.allModels}
+                          </p>
+                          {advancedFiltersToggle}
+                        </div>
+                        <div className="flex touch-pan-x gap-1 overflow-x-auto pb-0.5 [-webkit-overflow-scrolling:touch]">
+                          {favoritesButton(true)}
+                          {capabilityChips(true)}
+                        </div>
+                        {providerUsageSelects(true)}
+                        {advancedFiltersPanel}
+                        {groupedModelsSection}
+                      </div>
+                    ) : (
+                      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden md:flex-row md:gap-4">
+                        <div className="flex shrink-0 flex-col gap-3 overflow-y-auto px-1 md:w-44 md:shrink-0 md:border-r md:border-zinc-200 md:pr-3 dark:md:border-zinc-800">
+                          {favoritesButton(false)}
+                          <div className="flex flex-col gap-1">{capabilityChips(false)}</div>
+                          {providerUsageSelects(false)}
+                          {advancedFiltersToggle}
+                          {advancedFiltersPanel}
+                        </div>
+                        <div className="flex min-h-0 min-w-0 flex-1 flex-col @container/list">
+                          <p className="mb-1 shrink-0 px-1 text-[11px] font-black text-zinc-900 dark:text-white">
+                            {pickerCopy.allModels}
+                          </p>
+                          <div
+                            data-testid="model-picker-scroll-region"
+                            className="h-0 min-h-0 flex-1 touch-pan-y space-y-3 overflow-x-hidden overflow-y-scroll overscroll-y-contain px-1 pb-4 pr-2 [scrollbar-gutter:stable] [-webkit-overflow-scrolling:touch]"
+                          >
+                            {recommendationsSection}
+                            {groupedModelsSection}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  </div>
+                    );
+                  })()}
                   <div data-testid="model-selection-summary" className="mt-2 flex shrink-0 items-center gap-2 border-t border-zinc-200 px-1 pt-2 dark:border-zinc-700">
                     <p className="min-w-0 flex-1 text-[11px] font-bold text-zinc-600 dark:text-zinc-300">
                       {modelsSelectedLabel(selectedModels.length)} · {pickerCopy.baseEstimate}{" "}
