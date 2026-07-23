@@ -1976,7 +1976,7 @@ export function ChatInput({
             <>
             <button
               type="button"
-              className="fixed inset-0 z-[90] bg-black/35 backdrop-blur-[1px] md:hidden"
+              className={`fixed inset-0 z-[90] bg-black/35 backdrop-blur-[1px] ${menuView === "models" ? "" : "md:hidden"}`}
               onClick={() => closeMenu(true)}
               aria-label={t("auth.cancel")}
             />
@@ -1987,10 +1987,10 @@ export function ChatInput({
               aria-modal="false"
               aria-label={menuView === "models" ? t("chat.modelSelect") : t("chat.moreActions")}
               tabIndex={-1}
-              className={`fixed inset-x-2 z-[100] flex max-w-[calc(100%_-_1rem)] flex-col overflow-hidden rounded-3xl border border-zinc-200 bg-white p-2 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900 md:absolute md:inset-x-auto md:bottom-12 md:top-auto md:max-h-[calc(100dvh-8rem)] md:w-80 md:max-w-[calc(100vw_-_2rem)] md:rounded-2xl ${
+              className={`fixed inset-x-2 z-[100] flex max-w-[calc(100%_-_1rem)] flex-col overflow-hidden rounded-3xl border border-zinc-200 bg-white p-2 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900 md:rounded-2xl ${
                 menuView === "models"
-                  ? "md:left-auto md:right-0 bottom-[calc(0.5rem+env(safe-area-inset-bottom))] top-[calc(0.5rem+env(safe-area-inset-top))] max-h-none"
-                  : "md:left-0 md:right-auto bottom-[calc(0.5rem+env(safe-area-inset-bottom))] max-h-[calc(100dvh-2rem)]"
+                  ? "bottom-[calc(0.5rem+env(safe-area-inset-bottom))] top-[calc(0.5rem+env(safe-area-inset-top))] max-h-none md:inset-x-auto md:left-1/2 md:right-auto md:-translate-x-1/2 md:top-[5vh] md:bottom-[5vh] md:h-[90vh] md:max-h-[900px] md:w-[min(94vw,1000px)] md:max-w-[min(94vw,1000px)]"
+                  : "md:left-0 md:right-auto bottom-[calc(0.5rem+env(safe-area-inset-bottom))] max-h-[calc(100dvh-2rem)] md:absolute md:inset-x-auto md:bottom-12 md:top-auto md:max-h-[calc(100dvh-8rem)] md:w-80 md:max-w-[calc(100vw_-_2rem)]"
               }`}
             >
               <div className="mx-auto mb-2 mt-0.5 h-1 w-10 rounded-full bg-zinc-300 dark:bg-zinc-700 md:hidden" aria-hidden="true" />
@@ -2137,113 +2137,8 @@ export function ChatInput({
                       </div>
                     </div>
                   )}
-                  <div
-                    data-testid="model-picker-scroll-region"
-                    className="h-0 min-h-0 flex-1 touch-pan-y space-y-2 overflow-x-hidden overflow-y-scroll overscroll-y-contain px-1 pb-4 pr-2 [scrollbar-gutter:stable] [-webkit-overflow-scrolling:touch]"
-                  >
-
-                    {!modelSearchQuery.trim() &&
-                      selectedModels.length < maxSelectableModels &&
-                      recommendationModels.length > 0 && (
-                      <section
-                        data-testid="model-recommendations"
-                        aria-label={
-                          favoriteRecommendationModels.length
-                            ? t("chat.favoriteModels")
-                            : personalizedRecommendationIds.length
-                              ? pickerCopy.personalizedRecommendations
-                              : pickerCopy.tomverseRecommendations
-                        }
-                        className="space-y-1 rounded-xl border border-blue-200 bg-blue-50/60 p-2 dark:border-blue-900/60 dark:bg-blue-950/20"
-                      >
-                        <p className="px-1 text-[11px] font-black text-zinc-900 dark:text-white">
-                          {favoriteRecommendationModels.length
-                            ? t("chat.favoriteModels")
-                            : personalizedRecommendationIds.length
-                              ? pickerCopy.personalizedRecommendations
-                              : pickerCopy.tomverseRecommendations}
-                        </p>
-                        {recommendationModels.map((model, recommendationIndex) => {
-                          const isSelected = selectedModels.includes(model.id);
-                          const liveStatus = liveModelStatuses[model.id];
-                          const modelStatus =
-                            liveStatus?.status || getModelExperienceStatus(model);
-                          const imageIncompatible =
-                            hasImageAttachments && !modelSupportsImageInput(model);
-                          const selectionDisabled =
-                            !model.enabled ||
-                            modelStatus === "unavailable" ||
-                            imageIncompatible;
-                          const usageProfile = getModelUsageProfile(model);
-                          const isPlanLocked = !canUseModelWithPlan(currentPlan, model);
-
-                          return (
-                            <button
-                              key={model.id}
-                              type="button"
-                              data-testid="recommended-model-option"
-                              data-model-id={model.id}
-                              data-model-plan-locked={isPlanLocked}
-                              disabled={selectionDisabled && !isSelected}
-                              aria-pressed={isSelected}
-                              onClick={() => {
-                                rememberRecentModel(model.id);
-                                if (!isSelected) {
-                                  trackProductEvent(
-                                    "recommended_model_accepted",
-                                    Math.min(maxSelectableModels, selectedModels.length + 1),
-                                    {
-                                      model_id: model.id,
-                                      recommendation_rank: recommendationIndex + 1,
-                                    }
-                                  );
-                                }
-                                onToggleModel(model.id);
-                              }}
-                              className="flex min-h-12 w-full items-center gap-2 rounded-lg bg-white px-2 py-1.5 text-left shadow-sm transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-45 dark:bg-zinc-900 dark:hover:bg-zinc-800"
-                            >
-                              <ModelLogo model={model} size="sm" />
-                              <span className="min-w-0 flex-1">
-                                <span className="block truncate text-xs font-bold text-zinc-900 dark:text-zinc-100">
-                                  {model.name}
-                                </span>
-                                <span className="block truncate text-[10px] text-zinc-500 dark:text-zinc-400">
-                                  {getModelPickerDescription(model, lang)}
-                                </span>
-                              </span>
-                              <CreditCostBadge
-                                credits={usageProfile.credits}
-                                size="xs"
-                                label={lang === "ko" ? `기본 ${usageProfile.credits}크레딧 차감` : `Base cost ${usageProfile.credits} credits`}
-                              />
-                              <ModelSelectionBadge isSelected={isSelected} isLocked={isPlanLocked} />
-                            </button>
-                          );
-                        })}
-                      </section>
-                    )}
-
-                    <div className="flex items-center justify-between gap-2 px-1 pt-0.5">
-                      <p className="text-[11px] font-black text-zinc-900 dark:text-white">
-                        {pickerCopy.allModels}
-                      </p>
-                      <button
-                        type="button"
-                        data-testid="advanced-model-filters"
-                        aria-expanded={showAdvancedModelFilters}
-                        onClick={() => setShowAdvancedModelFilters((current) => !current)}
-                        className="inline-flex items-center gap-1 rounded-full border border-zinc-200 px-2 py-1 text-[9px] font-black text-zinc-500 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                      >
-                        <SlidersHorizontal className="h-3 w-3" aria-hidden="true" />
-                        {pickerCopy.filters}
-                        {(imageInputOnly || availableOnPlanOnly) && (
-                          <span className="rounded-full bg-blue-600 px-1.5 text-white">
-                            {Number(imageInputOnly) + Number(availableOnPlanOnly)}
-                          </span>
-                        )}
-                      </button>
-                    </div>
-                    <div className="flex touch-pan-x gap-1 overflow-x-auto pb-0.5 [-webkit-overflow-scrolling:touch]">
+                  <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden md:flex-row md:gap-4">
+                    <div className="flex shrink-0 flex-col gap-3 overflow-y-auto px-1 md:w-44 md:shrink-0 md:border-r md:border-zinc-200 md:pr-3 dark:md:border-zinc-800">
                       {favoriteModelIds.length > 0 && (
                         <button
                           type="button"
@@ -2253,245 +2148,354 @@ export function ChatInput({
                               current === "favorites" ? "all" : "favorites"
                             )
                           }
-                          className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-black transition ${capabilityFilter === "favorites" ? "border-blue-500 bg-blue-500 text-white" : "border-zinc-200 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"}`}
+                          className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[10px] font-black transition ${capabilityFilter === "favorites" ? "border-blue-500 bg-blue-500 text-white" : "border-zinc-200 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"}`}
                         >
                           <Star className={`h-3 w-3 ${capabilityFilter === "favorites" ? "fill-current" : ""}`} aria-hidden="true" />
                           {t("chat.favoriteModels")}
                         </button>
                       )}
-                      {([
-                        ["recommended", pickerCopy.recommended],
-                        ["fast", pickerCopy.fast],
-                        ["reasoning", pickerCopy.deepReasoning],
-                        ["search", pickerCopy.webSearch],
-                      ] as const).map(([filterValue, label]) => (
-                        <button
-                          key={filterValue}
-                          type="button"
-                          aria-pressed={capabilityFilter === filterValue}
-                          onClick={() =>
-                            setCapabilityFilter((current) =>
-                              current === filterValue ? "all" : filterValue
-                            )
-                          }
-                          className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black transition ${capabilityFilter === filterValue ? "border-blue-500 bg-blue-500 text-white" : "border-zinc-200 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"}`}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <select
-                        value={providerFilter}
-                        onChange={(event) => setProviderFilter(event.target.value)}
-                        aria-label={pickerCopy.providerAll}
-                        className="h-9 min-w-0 rounded-lg border border-zinc-200 bg-zinc-50 px-2 text-xs font-medium text-zinc-700 outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
-                      >
-                        <option value="all">{pickerCopy.providerAll}</option>
-                        {modelProviders.map((provider) => (
-                          <option key={provider} value={provider}>{provider}</option>
-                        ))}
-                      </select>
-                      <select
-                        value={usageBandFilter}
-                        onChange={(event) => setUsageBandFilter(event.target.value as ModelPickerUsageBand)}
-                        aria-label={pickerCopy.usageAll}
-                        className="h-9 min-w-0 rounded-lg border border-zinc-200 bg-zinc-50 px-2 text-xs font-medium text-zinc-700 outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
-                      >
-                        <option value="all">{pickerCopy.usageAll}</option>
-                        <option value="light">{pickerCopy.light}</option>
-                        <option value="medium">{pickerCopy.medium}</option>
-                        <option value="heavy">{pickerCopy.heavy}</option>
-                        <option value="intensive">{pickerCopy.intensive}</option>
-                      </select>
-                    </div>
-                    {showAdvancedModelFilters && (
-                      <div className="flex flex-wrap gap-1 rounded-lg bg-zinc-100 p-1.5 dark:bg-zinc-950">
+                      <div className="flex flex-col gap-1">
                         {([
-                          [imageInputOnly, setImageInputOnly, pickerCopy.imageInputOnly],
-                          [availableOnPlanOnly, setAvailableOnPlanOnly, pickerCopy.availableOnPlan],
-                        ] as const).map(([pressed, setPressed, label]) => (
+                          ["recommended", pickerCopy.recommended],
+                          ["fast", pickerCopy.fast],
+                          ["reasoning", pickerCopy.deepReasoning],
+                          ["search", pickerCopy.webSearch],
+                        ] as const).map(([filterValue, label]) => (
                           <button
-                            key={label}
+                            key={filterValue}
                             type="button"
-                            aria-pressed={pressed}
-                            onClick={() => setPressed(!pressed)}
-                            className={`rounded-full px-2 py-1 text-[9px] font-black transition ${pressed ? "bg-blue-600 text-white" : "bg-white text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"}`}
+                            aria-pressed={capabilityFilter === filterValue}
+                            onClick={() =>
+                              setCapabilityFilter((current) =>
+                                current === filterValue ? "all" : filterValue
+                              )
+                            }
+                            className={`rounded-full border px-2.5 py-1 text-left text-[10px] font-black transition ${capabilityFilter === filterValue ? "border-blue-500 bg-blue-500 text-white" : "border-zinc-200 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"}`}
                           >
                             {label}
                           </button>
                         ))}
                       </div>
-                    )}
-                  <div className="space-y-3">
-                    {groupedModels.map((group) => (
-                      <div key={group.provider} className="space-y-1">
-                        <div className="px-2 text-[10px] font-bold uppercase tracking-wide text-zinc-400">
-                          {group.provider.toUpperCase()}
-                        </div>
-                        {group.models.map((model) => {
-                          const isSelected = selectedModels.includes(model.id);
-                          const isFavorite = favoriteModelIds.includes(model.id);
-                          const liveStatus = liveModelStatuses[model.id];
-                          const modelStatus = liveStatus?.status || getModelExperienceStatus(model);
-                          const fallbackModels = (liveStatus?.fallbackModelIds || [])
-                            .map((id) => PUBLIC_MODELS.find((item) => item.id === id))
-                            .filter((item): item is (typeof PUBLIC_MODELS)[number] => Boolean(item))
-                            .filter((item) => item.enabled && item.id !== model.id)
-                            .slice(0, 2);
-                          const isPlanLocked = !canUseModelWithPlan(currentPlan, model);
-                          const imageIncompatible =
-                            hasImageAttachments && !modelSupportsImageInput(model);
-                          const selectionDisabled =
-                            !model.enabled ||
-                            modelStatus === "unavailable" ||
-                            imageIncompatible;
-                          const usageProfile = getModelUsageProfile(model);
-                          const statusReason = isPlanLocked
-                            ? isGuestMode
-                              ? t("modelStatusReasons.loginRequired")
-                              : t("modelStatusReasons.upgradeRequired")
-                            : imageIncompatible
-                              ? t("modelStatusReasons.imageUnsupported")
-                            : !model.enabled || modelStatus === "unavailable"
-                              ? t("modelStatusReasons.unavailable")
-                              : model.status !== "enabled" || modelStatus === "limited"
-                                ? t("modelStatusReasons.limited")
-                                : null;
-                          const modelDescription = getModelPickerDescription(model, lang);
-                          const modelFeatures = getModelPickerFeatures(model);
-                          return (
-                            <div
-                              key={model.id}
-                              className={`flex w-full items-start gap-2 rounded-xl border px-2 py-1.5 transition ${
-                                isSelected
-                                  ? "border-blue-200 bg-blue-50/70 dark:border-blue-900/50 dark:bg-blue-950/20"
-                                  : "border-transparent hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                              }`}
+                      <div className="flex flex-col gap-2">
+                        <select
+                          value={providerFilter}
+                          onChange={(event) => setProviderFilter(event.target.value)}
+                          aria-label={pickerCopy.providerAll}
+                          className="h-9 w-full min-w-0 rounded-lg border border-zinc-200 bg-zinc-50 px-2 text-xs font-medium text-zinc-700 outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
+                        >
+                          <option value="all">{pickerCopy.providerAll}</option>
+                          {modelProviders.map((provider) => (
+                            <option key={provider} value={provider}>{provider}</option>
+                          ))}
+                        </select>
+                        <select
+                          value={usageBandFilter}
+                          onChange={(event) => setUsageBandFilter(event.target.value as ModelPickerUsageBand)}
+                          aria-label={pickerCopy.usageAll}
+                          className="h-9 w-full min-w-0 rounded-lg border border-zinc-200 bg-zinc-50 px-2 text-xs font-medium text-zinc-700 outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
+                        >
+                          <option value="all">{pickerCopy.usageAll}</option>
+                          <option value="light">{pickerCopy.light}</option>
+                          <option value="medium">{pickerCopy.medium}</option>
+                          <option value="heavy">{pickerCopy.heavy}</option>
+                          <option value="intensive">{pickerCopy.intensive}</option>
+                        </select>
+                      </div>
+                      <button
+                        type="button"
+                        data-testid="advanced-model-filters"
+                        aria-expanded={showAdvancedModelFilters}
+                        onClick={() => setShowAdvancedModelFilters((current) => !current)}
+                        className="inline-flex items-center gap-1 self-start rounded-full border border-zinc-200 px-2 py-1 text-[9px] font-black text-zinc-500 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                      >
+                        <SlidersHorizontal className="h-3 w-3" aria-hidden="true" />
+                        {pickerCopy.filters}
+                        {(imageInputOnly || availableOnPlanOnly) && (
+                          <span className="rounded-full bg-blue-600 px-1.5 text-white">
+                            {Number(imageInputOnly) + Number(availableOnPlanOnly)}
+                          </span>
+                        )}
+                      </button>
+                      {showAdvancedModelFilters && (
+                        <div className="flex flex-wrap gap-1 rounded-lg bg-zinc-100 p-1.5 dark:bg-zinc-950">
+                          {([
+                            [imageInputOnly, setImageInputOnly, pickerCopy.imageInputOnly],
+                            [availableOnPlanOnly, setAvailableOnPlanOnly, pickerCopy.availableOnPlan],
+                          ] as const).map(([pressed, setPressed, label]) => (
+                            <button
+                              key={label}
+                              type="button"
+                              aria-pressed={pressed}
+                              onClick={() => setPressed(!pressed)}
+                              className={`rounded-full px-2 py-1 text-[9px] font-black transition ${pressed ? "bg-blue-600 text-white" : "bg-white text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"}`}
                             >
-                              <button
-                                type="button"
-                                onClick={() => toggleFavoriteModel(model.id)}
-                                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition ${isFavorite ? "text-amber-400" : "text-zinc-400 hover:text-amber-400"}`}
-                                aria-pressed={isFavorite}
-                                aria-label={t("chat.favoriteModels")}
-                              >
-                                <Star className={`h-4 w-4 ${isFavorite ? "fill-current" : ""}`} />
-                              </button>
-                              <button
-                                type="button"
-                                data-testid="model-option"
-                                data-model-id={model.id}
-                                data-model-usage-class={usageProfile.category}
-                                data-model-minimum-plan={model.minimumPlan}
-                                data-model-image-input={modelSupportsImageInput(model)}
-                                data-model-plan-locked={isPlanLocked}
-                                disabled={selectionDisabled && !isSelected}
-                                onClick={() => {
-                                  rememberRecentModel(model.id);
-                                  if (!isSelected && !isPlanLocked && selectedModels.length >= maxSelectableModels) {
-                                    setReplaceModelCandidate(model);
-                                    return;
-                                  }
-                                  onToggleModel(model.id);
-                                }}
-                                aria-pressed={isSelected}
-                                className="flex min-w-0 flex-1 items-start gap-2 rounded-lg py-0.5 text-sm disabled:cursor-not-allowed disabled:opacity-45"
-                              >
-                                <ModelLogo model={model} size="md" />
-                                <span className="min-w-0 flex-1 text-left">
-                                  <span className="flex min-w-0 items-start gap-1.5">
-                                    <span
-                                      data-testid="model-option-name"
-                                      className="min-w-0 whitespace-normal break-words font-semibold leading-5 text-zinc-800 dark:text-zinc-100"
-                                    >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex min-h-0 min-w-0 flex-1 flex-col @container/list">
+                      <p className="mb-1 shrink-0 px-1 text-[11px] font-black text-zinc-900 dark:text-white">
+                        {pickerCopy.allModels}
+                      </p>
+                      <div
+                        data-testid="model-picker-scroll-region"
+                        className="h-0 min-h-0 flex-1 touch-pan-y space-y-3 overflow-x-hidden overflow-y-scroll overscroll-y-contain px-1 pb-4 pr-2 [scrollbar-gutter:stable] [-webkit-overflow-scrolling:touch]"
+                      >
+                        {!modelSearchQuery.trim() &&
+                          selectedModels.length < maxSelectableModels &&
+                          recommendationModels.length > 0 && (
+                          <section
+                            data-testid="model-recommendations"
+                            aria-label={
+                              favoriteRecommendationModels.length
+                                ? t("chat.favoriteModels")
+                                : personalizedRecommendationIds.length
+                                  ? pickerCopy.personalizedRecommendations
+                                  : pickerCopy.tomverseRecommendations
+                            }
+                            className="space-y-1 rounded-xl border border-blue-200 bg-blue-50/60 p-2 dark:border-blue-900/60 dark:bg-blue-950/20"
+                          >
+                            <p className="px-1 text-[11px] font-black text-zinc-900 dark:text-white">
+                              {favoriteRecommendationModels.length
+                                ? t("chat.favoriteModels")
+                                : personalizedRecommendationIds.length
+                                  ? pickerCopy.personalizedRecommendations
+                                  : pickerCopy.tomverseRecommendations}
+                            </p>
+                            {recommendationModels.map((model, recommendationIndex) => {
+                              const isSelected = selectedModels.includes(model.id);
+                              const liveStatus = liveModelStatuses[model.id];
+                              const modelStatus =
+                                liveStatus?.status || getModelExperienceStatus(model);
+                              const imageIncompatible =
+                                hasImageAttachments && !modelSupportsImageInput(model);
+                              const selectionDisabled =
+                                !model.enabled ||
+                                modelStatus === "unavailable" ||
+                                imageIncompatible;
+                              const usageProfile = getModelUsageProfile(model);
+                              const isPlanLocked = !canUseModelWithPlan(currentPlan, model);
+
+                              return (
+                                <button
+                                  key={model.id}
+                                  type="button"
+                                  data-testid="recommended-model-option"
+                                  data-model-id={model.id}
+                                  data-model-plan-locked={isPlanLocked}
+                                  disabled={selectionDisabled && !isSelected}
+                                  aria-pressed={isSelected}
+                                  onClick={() => {
+                                    rememberRecentModel(model.id);
+                                    if (!isSelected) {
+                                      trackProductEvent(
+                                        "recommended_model_accepted",
+                                        Math.min(maxSelectableModels, selectedModels.length + 1),
+                                        {
+                                          model_id: model.id,
+                                          recommendation_rank: recommendationIndex + 1,
+                                        }
+                                      );
+                                    }
+                                    onToggleModel(model.id);
+                                  }}
+                                  className="flex min-h-12 w-full items-center gap-2 rounded-lg bg-white px-2 py-1.5 text-left shadow-sm transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-45 dark:bg-zinc-900 dark:hover:bg-zinc-800"
+                                >
+                                  <ModelLogo model={model} size="sm" />
+                                  <span className="min-w-0 flex-1">
+                                    <span className="block truncate text-xs font-bold text-zinc-900 dark:text-zinc-100">
                                       {model.name}
                                     </span>
-                                    <span
-                                      className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${
-                                        modelStatus === "available"
-                                          ? "bg-emerald-500"
-                                          : modelStatus === "limited"
-                                            ? "bg-amber-500"
-                                            : "bg-zinc-400"
-                                      }`}
-                                      title={modelStatus === "available" ? undefined : statusReason || modelStatus}
-                                      aria-label={statusReason || modelStatus}
-                                    />
+                                    <span className="block truncate text-[10px] text-zinc-500 dark:text-zinc-400">
+                                      {getModelPickerDescription(model, lang)}
+                                    </span>
                                   </span>
-                                  <span className="mt-0.5 block text-[10px] leading-4 text-zinc-500 dark:text-zinc-400">
-                                    {modelDescription}
-                                  </span>
-                                  {statusReason && (
-                                    <span className={`mt-0.5 flex items-center gap-1 text-[10px] font-bold ${modelStatus === "unavailable" || !model.enabled ? "text-red-500" : modelStatus === "limited" ? "text-amber-500" : "text-blue-500"}`}>
-                                      {isPlanLocked && <LockKeyhole className="h-3 w-3" aria-hidden="true" />}
-                                      {statusReason}
-                                    </span>
-                                  )}
-                                  {modelFeatures.length > 0 && (
-                                    <span className="mt-1 flex max-w-full flex-wrap gap-x-2 gap-y-1">
-                                      {modelFeatures.map((feature) => {
-                                        const Icon =
-                                          feature === "image"
-                                            ? ImageIcon
-                                            : feature === "reasoning"
-                                              ? Brain
-                                              : feature === "search"
-                                                ? Globe2
-                                                : Code2;
-                                        const label = pickerFeatureLabels[feature];
-                                        return (
-                                          <span
-                                            key={feature}
-                                            className="inline-flex items-center gap-1 text-[9px] font-bold text-zinc-500 dark:text-zinc-300"
-                                          >
-                                            <Icon className="h-3 w-3" aria-hidden="true" />
-                                            {label}
-                                          </span>
-                                        );
-                                      })}
-                                    </span>
-                                  )}
-                                  {(modelStatus === "limited" || modelStatus === "unavailable") && fallbackModels.length > 0 && (
-                                    <span className="mt-1 flex flex-wrap items-center gap-1 text-[10px] text-zinc-500">
-                                      <span>{t("chat.trySimilarModel")}</span>
-                                      {fallbackModels.map((fallback) => (
-                                        <span
-                                          key={fallback.id}
-                                          className="rounded-full bg-blue-500/10 px-1.5 py-0.5 font-bold text-blue-500"
-                                        >
-                                          {fallback.name}
-                                        </span>
-                                      ))}
-                                    </span>
-                                  )}
-                                </span>
-                                <span className="flex shrink-0 flex-col items-end gap-2">
                                   <CreditCostBadge
                                     credits={usageProfile.credits}
-                                    testId="model-credit-badge"
+                                    size="xs"
                                     label={lang === "ko" ? `기본 ${usageProfile.credits}크레딧 차감` : `Base cost ${usageProfile.credits} credits`}
                                   />
                                   <ModelSelectionBadge isSelected={isSelected} isLocked={isPlanLocked} />
-                                </span>
-                              </button>
+                                </button>
+                              );
+                            })}
+                          </section>
+                        )}
+                        <div className="space-y-3">
+                          {groupedModels.map((group) => (
+                            <div key={group.provider} className="space-y-1">
+                              <div className="px-2 text-[10px] font-bold uppercase tracking-wide text-zinc-400">
+                                {group.provider.toUpperCase()}
+                              </div>
+                              <div className="grid grid-cols-1 gap-2 @[760px]/list:grid-cols-2">
+                                {group.models.map((model) => {
+                                  const isSelected = selectedModels.includes(model.id);
+                                  const isFavorite = favoriteModelIds.includes(model.id);
+                                  const liveStatus = liveModelStatuses[model.id];
+                                  const modelStatus = liveStatus?.status || getModelExperienceStatus(model);
+                                  const fallbackModels = (liveStatus?.fallbackModelIds || [])
+                                    .map((id) => PUBLIC_MODELS.find((item) => item.id === id))
+                                    .filter((item): item is (typeof PUBLIC_MODELS)[number] => Boolean(item))
+                                    .filter((item) => item.enabled && item.id !== model.id)
+                                    .slice(0, 2);
+                                  const isPlanLocked = !canUseModelWithPlan(currentPlan, model);
+                                  const imageIncompatible =
+                                    hasImageAttachments && !modelSupportsImageInput(model);
+                                  const selectionDisabled =
+                                    !model.enabled ||
+                                    modelStatus === "unavailable" ||
+                                    imageIncompatible;
+                                  const usageProfile = getModelUsageProfile(model);
+                                  const statusReason = isPlanLocked
+                                    ? isGuestMode
+                                      ? t("modelStatusReasons.loginRequired")
+                                      : t("modelStatusReasons.upgradeRequired")
+                                    : imageIncompatible
+                                      ? t("modelStatusReasons.imageUnsupported")
+                                    : !model.enabled || modelStatus === "unavailable"
+                                      ? t("modelStatusReasons.unavailable")
+                                      : model.status !== "enabled" || modelStatus === "limited"
+                                        ? t("modelStatusReasons.limited")
+                                        : null;
+                                  const modelDescription = getModelPickerDescription(model, lang);
+                                  const modelFeatures = getModelPickerFeatures(model);
+                                  return (
+                                    <div
+                                      key={model.id}
+                                      className={`flex w-full items-start gap-2 rounded-xl border px-2 py-1.5 transition ${
+                                        isSelected
+                                          ? "border-blue-200 bg-blue-50/70 dark:border-blue-900/50 dark:bg-blue-950/20"
+                                          : "border-transparent hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                                      }`}
+                                    >
+                                      <button
+                                        type="button"
+                                        onClick={() => toggleFavoriteModel(model.id)}
+                                        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition ${isFavorite ? "text-amber-400" : "text-zinc-400 hover:text-amber-400"}`}
+                                        aria-pressed={isFavorite}
+                                        aria-label={t("chat.favoriteModels")}
+                                      >
+                                        <Star className={`h-4 w-4 ${isFavorite ? "fill-current" : ""}`} />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        data-testid="model-option"
+                                        data-model-id={model.id}
+                                        data-model-usage-class={usageProfile.category}
+                                        data-model-minimum-plan={model.minimumPlan}
+                                        data-model-image-input={modelSupportsImageInput(model)}
+                                        data-model-plan-locked={isPlanLocked}
+                                        disabled={selectionDisabled && !isSelected}
+                                        onClick={() => {
+                                          rememberRecentModel(model.id);
+                                          if (!isSelected && !isPlanLocked && selectedModels.length >= maxSelectableModels) {
+                                            setReplaceModelCandidate(model);
+                                            return;
+                                          }
+                                          onToggleModel(model.id);
+                                        }}
+                                        aria-pressed={isSelected}
+                                        className="flex min-w-0 flex-1 items-start gap-2 rounded-lg py-0.5 text-sm disabled:cursor-not-allowed disabled:opacity-45"
+                                      >
+                                        <ModelLogo model={model} size="md" />
+                                        <span className="min-w-0 flex-1 text-left">
+                                          <span className="flex min-w-0 items-start gap-1.5">
+                                            <span
+                                              data-testid="model-option-name"
+                                              className="min-w-0 whitespace-normal break-words font-semibold leading-5 text-zinc-800 dark:text-zinc-100"
+                                            >
+                                              {model.name}
+                                            </span>
+                                            <span
+                                              className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${
+                                                modelStatus === "available"
+                                                  ? "bg-emerald-500"
+                                                  : modelStatus === "limited"
+                                                    ? "bg-amber-500"
+                                                    : "bg-zinc-400"
+                                              }`}
+                                              title={modelStatus === "available" ? undefined : statusReason || modelStatus}
+                                              aria-label={statusReason || modelStatus}
+                                            />
+                                          </span>
+                                          <span className="mt-0.5 block text-[10px] leading-4 text-zinc-500 dark:text-zinc-400">
+                                            {modelDescription}
+                                          </span>
+                                          {statusReason && (
+                                            <span className={`mt-0.5 flex items-center gap-1 text-[10px] font-bold ${modelStatus === "unavailable" || !model.enabled ? "text-red-500" : modelStatus === "limited" ? "text-amber-500" : "text-blue-500"}`}>
+                                              {isPlanLocked && <LockKeyhole className="h-3 w-3" aria-hidden="true" />}
+                                              {statusReason}
+                                            </span>
+                                          )}
+                                          {modelFeatures.length > 0 && (
+                                            <span className="mt-1 flex max-w-full flex-wrap gap-x-2 gap-y-1">
+                                              {modelFeatures.map((feature) => {
+                                                const Icon =
+                                                  feature === "image"
+                                                    ? ImageIcon
+                                                    : feature === "reasoning"
+                                                      ? Brain
+                                                      : feature === "search"
+                                                        ? Globe2
+                                                        : Code2;
+                                                const label = pickerFeatureLabels[feature];
+                                                return (
+                                                  <span
+                                                    key={feature}
+                                                    className="inline-flex items-center gap-1 text-[9px] font-bold text-zinc-500 dark:text-zinc-300"
+                                                  >
+                                                    <Icon className="h-3 w-3" aria-hidden="true" />
+                                                    {label}
+                                                  </span>
+                                                );
+                                              })}
+                                            </span>
+                                          )}
+                                          {(modelStatus === "limited" || modelStatus === "unavailable") && fallbackModels.length > 0 && (
+                                            <span className="mt-1 flex flex-wrap items-center gap-1 text-[10px] text-zinc-500">
+                                              <span>{t("chat.trySimilarModel")}</span>
+                                              {fallbackModels.map((fallback) => (
+                                                <span
+                                                  key={fallback.id}
+                                                  className="rounded-full bg-blue-500/10 px-1.5 py-0.5 font-bold text-blue-500"
+                                                >
+                                                  {fallback.name}
+                                                </span>
+                                              ))}
+                                            </span>
+                                          )}
+                                        </span>
+                                        <span className="flex shrink-0 flex-col items-end gap-2">
+                                          <CreditCostBadge
+                                            credits={usageProfile.credits}
+                                            testId="model-credit-badge"
+                                            label={lang === "ko" ? `기본 ${usageProfile.credits}크레딧 차감` : `Base cost ${usageProfile.credits} credits`}
+                                          />
+                                          <ModelSelectionBadge isSelected={isSelected} isLocked={isPlanLocked} />
+                                        </span>
+                                      </button>
+                                    </div>
+                                  );
+                                })}
+                              </div>
                             </div>
-                          );
-                        })}
+                          ))}
+                          {filteredModels.length === 0 && capabilityFilter === "favorites" && (
+                            <div className="rounded-xl border border-dashed border-zinc-200 px-4 py-8 text-center text-xs text-zinc-400 dark:border-zinc-700">
+                              <p className="font-bold text-zinc-500 dark:text-zinc-300">{t("chat.noFavoriteModelsTitle")}</p>
+                              <p className="mt-1">{t("chat.noFavoriteModelsHint")}</p>
+                            </div>
+                          )}
+                          {filteredModels.length === 0 && capabilityFilter !== "favorites" && (
+                            <div className="rounded-xl border border-dashed border-zinc-200 px-4 py-8 text-center text-xs text-zinc-400 dark:border-zinc-700">
+                              {t("chat.noModelsFound")}
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    ))}
-                    {filteredModels.length === 0 && capabilityFilter === "favorites" && (
-                      <div className="rounded-xl border border-dashed border-zinc-200 px-4 py-8 text-center text-xs text-zinc-400 dark:border-zinc-700">
-                        <p className="font-bold text-zinc-500 dark:text-zinc-300">{t("chat.noFavoriteModelsTitle")}</p>
-                        <p className="mt-1">{t("chat.noFavoriteModelsHint")}</p>
-                      </div>
-                    )}
-                    {filteredModels.length === 0 && capabilityFilter !== "favorites" && (
-                      <div className="rounded-xl border border-dashed border-zinc-200 px-4 py-8 text-center text-xs text-zinc-400 dark:border-zinc-700">
-                        {t("chat.noModelsFound")}
-                      </div>
-                    )}
-                  </div>
+                    </div>
                   </div>
                   <div data-testid="model-selection-summary" className="mt-2 flex shrink-0 items-center gap-2 border-t border-zinc-200 px-1 pt-2 dark:border-zinc-700">
                     <p className="min-w-0 flex-1 text-[11px] font-bold text-zinc-600 dark:text-zinc-300">
