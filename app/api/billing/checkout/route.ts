@@ -262,7 +262,7 @@ function buildCheckoutLineItem(
         product_data: plan.stripeProductId
           ? undefined
           : {
-              name: `Tomverse AI ${plan.name}`,
+              name: `Tomverse Insight ${plan.name}`,
               metadata: {
                 planId: plan.id,
                 tier: plan.tier,
@@ -288,7 +288,7 @@ function buildCheckoutLineItem(
       product_data: plan.stripeProductId
         ? undefined
         : {
-            name: `Tomverse AI ${plan.name}`,
+            name: `Tomverse Insight ${plan.name}`,
             metadata: {
               planId: plan.id,
               tier: plan.tier,

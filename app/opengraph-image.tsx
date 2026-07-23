@@ -37,7 +37,7 @@ export default function OpenGraphImage() {
           >
             T
           </div>
-          <div style={{ fontSize: 34, fontWeight: 800 }}>Tomverse AI</div>
+          <div style={{ fontSize: 34, fontWeight: 800 }}>Tomverse Insight</div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
           <div

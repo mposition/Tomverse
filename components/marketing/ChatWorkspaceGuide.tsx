@@ -183,7 +183,7 @@ export function ChatWorkspaceGuide() {
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src="/tomverse-logo.png" alt="" className="h-full w-full object-cover" />
                 </span>
-                <span className="font-black">Tomverse AI</span>
+                <span className="font-black">Tomverse Insight</span>
                 <HelpCircle className="ml-auto h-5 w-5 text-blue-300" aria-hidden="true" />
               </div>
               <div className="mt-5 grid gap-3">
@@ -267,7 +267,7 @@ export function ChatWorkspaceGuide() {
         <div className="mt-10 flex flex-col gap-3 rounded-3xl bg-zinc-950 p-6 text-white sm:flex-row sm:items-center sm:justify-between sm:p-8">
           <div className="flex items-center gap-3">
             <Sparkles className="h-6 w-6 text-blue-300" aria-hidden="true" />
-            <span className="text-lg font-black">Tomverse AI</span>
+            <span className="text-lg font-black">Tomverse Insight</span>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row">
             <Link

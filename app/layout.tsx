@@ -19,13 +19,13 @@ export const metadata: Metadata = {
   applicationName: SITE_NAME,
   title: {
     default: "Tomverse Insight by Tomverse | Multi-AI Comparison & Review",
-    template: "%s | Tomverse AI",
+    template: "%s | Tomverse Insight",
   },
   description:
     "Compare GPT, Claude, and Gemini side by side, then use AI Review to identify differences, omissions, and points that need verification.",
-  authors: [{ name: "Tomverse AI", url: SITE_ORIGIN }],
-  creator: "Tomverse AI",
-  publisher: "Tomverse AI",
+  authors: [{ name: "Tomverse Insight", url: SITE_ORIGIN }],
+  creator: "Tomverse Insight",
+  publisher: "Tomverse Insight",
   category: "technology",
   formatDetection: {
     email: false,

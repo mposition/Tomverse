@@ -5,7 +5,7 @@ import { createPageMetadata } from "@/lib/seo";
 export const metadata = createPageMetadata({
   title: "About",
   description:
-    "Learn how Tomverse AI brings multi-model comparison, file analysis, conversation organization, and privacy controls into one workspace.",
+    "Learn how Tomverse Insight brings multi-model comparison, file analysis, conversation organization, and privacy controls into one workspace.",
   path: "/about",
 });
 

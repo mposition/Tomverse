@@ -231,7 +231,7 @@ export function MarketingHeader({
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/tomverse-logo.png" alt="Tomverse" className="h-full w-full object-cover" />
           </span>
-          <span className="truncate text-sm font-black">Tomverse AI</span>
+          <span className="truncate text-sm font-black">Tomverse Insight</span>
         </Link>
         <nav className="hidden items-center gap-5 text-sm font-semibold text-zinc-600 dark:text-zinc-300 lg:flex">
           {labels.topMenu.map((item) => (
@@ -349,7 +349,7 @@ export function MarketingFooter({ maxWidth = "max-w-7xl" }: { maxWidth?: string 
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/tomverse-logo.png" alt="Tomverse" className="h-full w-full object-cover" />
           </span>
-          <span className="font-bold text-zinc-700 dark:text-zinc-300">Tomverse AI</span>
+          <span className="font-bold text-zinc-700 dark:text-zinc-300">Tomverse Insight</span>
           <span>© 2026</span>
         </div>
         <nav className="flex flex-wrap gap-4">

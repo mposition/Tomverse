@@ -10,7 +10,7 @@ type SendEmailInput = {
 const fromAddress = () =>
   process.env.TRANSACTIONAL_EMAIL_FROM ||
   process.env.EMAIL_FROM ||
-  "Tomverse AI <hello@tomverse.app>";
+  "Tomverse Insight <hello@tomverse.app>";
 
 export async function sendTransactionalEmail(input: SendEmailInput) {
   if (!input.to) {

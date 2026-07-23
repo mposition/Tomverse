@@ -76,7 +76,7 @@ export default function EmailLoginVerifyPage() {
                     <img src="/tomverse-logo.png" alt="Tomverse" className="h-full w-full object-cover" />
                 </div>
                 <h1 className="mt-5 text-xl font-bold text-zinc-900 dark:text-white">
-                    Tomverse AI
+                    Tomverse Insight
                 </h1>
                 <div className="mt-4">
                     <Suspense fallback={<p className="text-sm text-zinc-400 dark:text-zinc-500">{t("auth.loading")}</p>}>

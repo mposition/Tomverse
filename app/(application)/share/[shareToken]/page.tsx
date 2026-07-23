@@ -5,7 +5,7 @@ import { isStrongShareToken } from "@/lib/shareTokens";
 
 export const metadata: Metadata = {
   title: "Shared Conversation",
-  description: "A read-only Tomverse AI conversation shared by its owner.",
+  description: "A read-only Tomverse Insight conversation shared by its owner.",
   robots: {
     index: false,
     follow: false,

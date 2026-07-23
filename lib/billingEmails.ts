@@ -72,10 +72,10 @@ const localeForLanguage: Record<EmailLanguage, string> = {
 
 const emailCopy = {
   en: {
-    billingLabel: "Tomverse AI Billing",
+    billingLabel: "Tomverse Insight Billing",
     openTomverse: "Open Tomverse",
     footer:
-      "This message was sent about your Tomverse AI billing account. If you did not request this, contact support.",
+      "This message was sent about your Tomverse Insight billing account. If you did not request this, contact support.",
     notAvailable: "Not available",
     interval: {
       annual: "Annual",
@@ -83,33 +83,33 @@ const emailCopy = {
       subscription: "Subscription",
     },
     welcome: {
-      subject: (plan: string) => `Welcome to Tomverse AI ${plan}`,
-      title: "Welcome to Tomverse AI",
+      subject: (plan: string) => `Welcome to Tomverse Insight ${plan}`,
+      title: "Welcome to Tomverse Insight",
       text: (
         plan: string,
         billingInterval: string,
         periodEnd: string
       ) => [
-        "Your Tomverse AI payment was successful.",
-        "Welcome to the Tomverse AI family.",
+        "Your Tomverse Insight payment was successful.",
+        "Welcome to the Tomverse Insight family.",
         `Plan: ${plan}`,
         `Billing: ${billingInterval}`,
         `Plan valid until: ${periodEnd}`,
         "Checkout is charged in USD. You can manage your plan in Settings > Plan.",
       ],
       body: (plan: string, billingInterval: string, periodEnd: string) => `
-        <p>Your payment was successful. Welcome to the Tomverse AI family.</p>
+        <p>Your payment was successful. Welcome to the Tomverse Insight family.</p>
         <div style="margin:20px 0;padding:18px;border:1px solid #dbeafe;border-radius:16px;background:#eff6ff;color:#1e3a8a;">
           <div style="margin-bottom:8px;"><strong>Plan:</strong> ${plan}</div>
           <div style="margin-bottom:8px;"><strong>Billing:</strong> ${billingInterval}</div>
           <div><strong>Plan valid until:</strong> ${periodEnd}</div>
         </div>
-        <p>You can now use the paid Tomverse AI workspace features included with your plan. Manage billing and plan details anytime from <strong>Settings &gt; Plan</strong>.</p>
+        <p>You can now use the paid Tomverse Insight workspace features included with your plan. Manage billing and plan details anytime from <strong>Settings &gt; Plan</strong>.</p>
         <p style="color:#6b7280;">Displayed local prices are converted for convenience. Checkout and billing are charged in USD.</p>
       `,
     },
     refundReceived: {
-      subject: "We received your Tomverse AI refund request",
+      subject: "We received your Tomverse Insight refund request",
       title: "Refund request received",
       text: (plan: string, requestId: string) => [
         "We received your refund and plan cancellation request.",
@@ -127,18 +127,18 @@ const emailCopy = {
       `,
     },
     refundApproved: {
-      subject: "Your Tomverse AI refund request was approved",
+      subject: "Your Tomverse Insight refund request was approved",
       title: "Refund request approved",
       text: (requestId: string, adminNote: string) => [
         "Your refund and plan cancellation request has been approved.",
-        "Your Tomverse AI membership has been moved back to Free.",
+        "Your Tomverse Insight membership has been moved back to Free.",
         adminNote ? `Admin note: ${adminNote}` : "",
         `Request ID: ${requestId}`,
       ],
       body: (requestId: string, adminNote: string) => `
         <p>Your refund and plan cancellation request has been approved.</p>
         <div style="margin:20px 0;padding:16px;border:1px solid #d1fae5;border-radius:14px;background:#ecfdf5;color:#065f46;">
-          <strong>Your Tomverse AI membership has been moved back to Free.</strong>
+          <strong>Your Tomverse Insight membership has been moved back to Free.</strong>
         </div>
         ${adminNote ? `<p><strong>Note from Tomverse:</strong> ${adminNote}</p>` : ""}
         <p>If a payment refund is applicable, processing time may depend on Stripe, your card issuer, Apple Pay, or Google Pay.</p>
@@ -146,7 +146,7 @@ const emailCopy = {
       `,
     },
     refundRejected: {
-      subject: "Update on your Tomverse AI refund request",
+      subject: "Update on your Tomverse Insight refund request",
       title: "Refund request reviewed",
       fallback: "Please contact support if you need more information about this decision.",
       text: (requestId: string, adminNote: string) => [
@@ -162,36 +162,36 @@ const emailCopy = {
     },
   },
   ko: {
-    billingLabel: "Tomverse AI 결제",
+    billingLabel: "Tomverse Insight 결제",
     openTomverse: "Tomverse 열기",
     footer:
-      "이 메일은 Tomverse AI 결제 계정과 관련해 발송되었습니다. 직접 요청하지 않은 내용이라면 지원팀에 문의해 주세요.",
+      "이 메일은 Tomverse Insight 결제 계정과 관련해 발송되었습니다. 직접 요청하지 않은 내용이라면 지원팀에 문의해 주세요.",
     notAvailable: "확인 불가",
     interval: { annual: "연간", monthly: "월간", subscription: "구독" },
     welcome: {
-      subject: (plan: string) => `Tomverse AI ${plan} 플랜에 오신 것을 환영합니다`,
-      title: "Tomverse AI에 오신 것을 환영합니다",
+      subject: (plan: string) => `Tomverse Insight ${plan} 플랜에 오신 것을 환영합니다`,
+      title: "Tomverse Insight에 오신 것을 환영합니다",
       text: (plan: string, billingInterval: string, periodEnd: string) => [
-        "Tomverse AI 결제가 성공적으로 완료되었습니다.",
-        "Tomverse AI의 새로운 가족이 되신 것을 환영합니다.",
+        "Tomverse Insight 결제가 성공적으로 완료되었습니다.",
+        "Tomverse Insight의 새로운 가족이 되신 것을 환영합니다.",
         `플랜: ${plan}`,
         `결제 주기: ${billingInterval}`,
         `플랜 만료일: ${periodEnd}`,
         "결제는 USD로 청구됩니다. 설정 > 플랜에서 플랜을 관리할 수 있습니다.",
       ],
       body: (plan: string, billingInterval: string, periodEnd: string) => `
-        <p>Tomverse AI 결제가 성공적으로 완료되었습니다. Tomverse AI의 새로운 가족이 되신 것을 환영합니다.</p>
+        <p>Tomverse Insight 결제가 성공적으로 완료되었습니다. Tomverse Insight의 새로운 가족이 되신 것을 환영합니다.</p>
         <div style="margin:20px 0;padding:18px;border:1px solid #dbeafe;border-radius:16px;background:#eff6ff;color:#1e3a8a;">
           <div style="margin-bottom:8px;"><strong>플랜:</strong> ${plan}</div>
           <div style="margin-bottom:8px;"><strong>결제 주기:</strong> ${billingInterval}</div>
           <div><strong>플랜 만료일:</strong> ${periodEnd}</div>
         </div>
-        <p>이제 현재 플랜에 포함된 Tomverse AI의 유료 워크스페이스 기능을 사용할 수 있습니다. 결제와 플랜 정보는 언제든 <strong>설정 &gt; 플랜</strong>에서 확인하실 수 있습니다.</p>
+        <p>이제 현재 플랜에 포함된 Tomverse Insight의 유료 워크스페이스 기능을 사용할 수 있습니다. 결제와 플랜 정보는 언제든 <strong>설정 &gt; 플랜</strong>에서 확인하실 수 있습니다.</p>
         <p style="color:#6b7280;">현지 통화 가격은 참고용 환산 금액이며, 실제 결제와 청구는 USD 기준으로 처리됩니다.</p>
       `,
     },
     refundReceived: {
-      subject: "Tomverse AI 환불 요청이 접수되었습니다",
+      subject: "Tomverse Insight 환불 요청이 접수되었습니다",
       title: "환불 요청이 접수되었습니다",
       text: (plan: string, requestId: string) => [
         "환불 및 플랜 취소 요청이 접수되었습니다.",
@@ -209,18 +209,18 @@ const emailCopy = {
       `,
     },
     refundApproved: {
-      subject: "Tomverse AI 환불 요청이 승인되었습니다",
+      subject: "Tomverse Insight 환불 요청이 승인되었습니다",
       title: "환불 요청이 승인되었습니다",
       text: (requestId: string, adminNote: string) => [
         "환불 및 플랜 취소 요청이 승인되었습니다.",
-        "Tomverse AI 멤버십이 Free 플랜으로 변경되었습니다.",
+        "Tomverse Insight 멤버십이 Free 플랜으로 변경되었습니다.",
         adminNote ? `관리자 메모: ${adminNote}` : "",
         `요청 ID: ${requestId}`,
       ],
       body: (requestId: string, adminNote: string) => `
         <p>환불 및 플랜 취소 요청이 승인되었습니다.</p>
         <div style="margin:20px 0;padding:16px;border:1px solid #d1fae5;border-radius:14px;background:#ecfdf5;color:#065f46;">
-          <strong>Tomverse AI 멤버십이 Free 플랜으로 변경되었습니다.</strong>
+          <strong>Tomverse Insight 멤버십이 Free 플랜으로 변경되었습니다.</strong>
         </div>
         ${adminNote ? `<p><strong>Tomverse 메모:</strong> ${adminNote}</p>` : ""}
         <p>환불이 적용되는 경우, 처리 시간은 Stripe, 카드사, Apple Pay 또는 Google Pay 정책에 따라 달라질 수 있습니다.</p>
@@ -228,7 +228,7 @@ const emailCopy = {
       `,
     },
     refundRejected: {
-      subject: "Tomverse AI 환불 요청 검토 결과 안내",
+      subject: "Tomverse Insight 환불 요청 검토 결과 안내",
       title: "환불 요청 검토가 완료되었습니다",
       fallback: "결정에 대해 추가 안내가 필요하시면 지원팀에 문의해 주세요.",
       text: (requestId: string, adminNote: string) => [
@@ -244,36 +244,36 @@ const emailCopy = {
     },
   },
   zh: {
-    billingLabel: "Tomverse AI 账单",
+    billingLabel: "Tomverse Insight 账单",
     openTomverse: "打开 Tomverse",
     footer:
-      "此邮件与您的 Tomverse AI 账单账户有关。如果这不是您本人请求的操作，请联系支持团队。",
+      "此邮件与您的 Tomverse Insight 账单账户有关。如果这不是您本人请求的操作，请联系支持团队。",
     notAvailable: "不可用",
     interval: { annual: "年度", monthly: "月度", subscription: "订阅" },
     welcome: {
-      subject: (plan: string) => `欢迎使用 Tomverse AI ${plan}`,
-      title: "欢迎使用 Tomverse AI",
+      subject: (plan: string) => `欢迎使用 Tomverse Insight ${plan}`,
+      title: "欢迎使用 Tomverse Insight",
       text: (plan: string, billingInterval: string, periodEnd: string) => [
-        "您的 Tomverse AI 付款已成功完成。",
-        "欢迎加入 Tomverse AI。",
+        "您的 Tomverse Insight 付款已成功完成。",
+        "欢迎加入 Tomverse Insight。",
         `套餐：${plan}`,
         `账单周期：${billingInterval}`,
         `套餐有效期至：${periodEnd}`,
         "结账将以 USD 收费。您可以在设置 > 套餐中管理订阅。",
       ],
       body: (plan: string, billingInterval: string, periodEnd: string) => `
-        <p>您的付款已成功完成。欢迎加入 Tomverse AI。</p>
+        <p>您的付款已成功完成。欢迎加入 Tomverse Insight。</p>
         <div style="margin:20px 0;padding:18px;border:1px solid #dbeafe;border-radius:16px;background:#eff6ff;color:#1e3a8a;">
           <div style="margin-bottom:8px;"><strong>套餐：</strong> ${plan}</div>
           <div style="margin-bottom:8px;"><strong>账单周期：</strong> ${billingInterval}</div>
           <div><strong>套餐有效期至：</strong> ${periodEnd}</div>
         </div>
-        <p>您现在可以使用当前套餐包含的 Tomverse AI 付费工作区功能。您可以随时在 <strong>设置 &gt; 套餐</strong> 中管理账单和套餐信息。</p>
+        <p>您现在可以使用当前套餐包含的 Tomverse Insight 付费工作区功能。您可以随时在 <strong>设置 &gt; 套餐</strong> 中管理账单和套餐信息。</p>
         <p style="color:#6b7280;">本地货币价格仅供参考，实际结账和账单均以 USD 收取。</p>
       `,
     },
     refundReceived: {
-      subject: "我们已收到您的 Tomverse AI 退款请求",
+      subject: "我们已收到您的 Tomverse Insight 退款请求",
       title: "退款请求已收到",
       text: (plan: string, requestId: string) => [
         "我们已收到您的退款和套餐取消请求。",
@@ -291,18 +291,18 @@ const emailCopy = {
       `,
     },
     refundApproved: {
-      subject: "您的 Tomverse AI 退款请求已获批准",
+      subject: "您的 Tomverse Insight 退款请求已获批准",
       title: "退款请求已批准",
       text: (requestId: string, adminNote: string) => [
         "您的退款和套餐取消请求已获批准。",
-        "您的 Tomverse AI 会员资格已切换回 Free。",
+        "您的 Tomverse Insight 会员资格已切换回 Free。",
         adminNote ? `管理员备注：${adminNote}` : "",
         `请求 ID：${requestId}`,
       ],
       body: (requestId: string, adminNote: string) => `
         <p>您的退款和套餐取消请求已获批准。</p>
         <div style="margin:20px 0;padding:16px;border:1px solid #d1fae5;border-radius:14px;background:#ecfdf5;color:#065f46;">
-          <strong>您的 Tomverse AI 会员资格已切换回 Free。</strong>
+          <strong>您的 Tomverse Insight 会员资格已切换回 Free。</strong>
         </div>
         ${adminNote ? `<p><strong>Tomverse 备注：</strong> ${adminNote}</p>` : ""}
         <p>如适用退款，处理时间可能取决于 Stripe、发卡行、Apple Pay 或 Google Pay。</p>
@@ -310,7 +310,7 @@ const emailCopy = {
       `,
     },
     refundRejected: {
-      subject: "您的 Tomverse AI 退款请求更新",
+      subject: "您的 Tomverse Insight 退款请求更新",
       title: "退款请求已审核",
       fallback: "如需了解更多信息，请联系支持团队。",
       text: (requestId: string, adminNote: string) => [
@@ -326,25 +326,25 @@ const emailCopy = {
     },
   },
   fr: {
-    billingLabel: "Facturation Tomverse AI",
+    billingLabel: "Facturation Tomverse Insight",
     openTomverse: "Ouvrir Tomverse",
     footer:
-      "Ce message concerne votre compte de facturation Tomverse AI. Si vous n'êtes pas à l'origine de cette demande, contactez le support.",
+      "Ce message concerne votre compte de facturation Tomverse Insight. Si vous n'êtes pas à l'origine de cette demande, contactez le support.",
     notAvailable: "Non disponible",
     interval: { annual: "Annuel", monthly: "Mensuel", subscription: "Abonnement" },
     welcome: {
-      subject: (plan: string) => `Bienvenue sur Tomverse AI ${plan}`,
-      title: "Bienvenue sur Tomverse AI",
+      subject: (plan: string) => `Bienvenue sur Tomverse Insight ${plan}`,
+      title: "Bienvenue sur Tomverse Insight",
       text: (plan: string, billingInterval: string, periodEnd: string) => [
-        "Votre paiement Tomverse AI a bien été effectué.",
-        "Bienvenue dans la famille Tomverse AI.",
+        "Votre paiement Tomverse Insight a bien été effectué.",
+        "Bienvenue dans la famille Tomverse Insight.",
         `Plan : ${plan}`,
         `Facturation : ${billingInterval}`,
         `Plan valable jusqu'au : ${periodEnd}`,
         "Le paiement est facturé en USD. Vous pouvez gérer votre plan dans Paramètres > Plan.",
       ],
       body: (plan: string, billingInterval: string, periodEnd: string) => `
-        <p>Votre paiement a bien été effectué. Bienvenue dans la famille Tomverse AI.</p>
+        <p>Votre paiement a bien été effectué. Bienvenue dans la famille Tomverse Insight.</p>
         <div style="margin:20px 0;padding:18px;border:1px solid #dbeafe;border-radius:16px;background:#eff6ff;color:#1e3a8a;">
           <div style="margin-bottom:8px;"><strong>Plan :</strong> ${plan}</div>
           <div style="margin-bottom:8px;"><strong>Facturation :</strong> ${billingInterval}</div>
@@ -355,7 +355,7 @@ const emailCopy = {
       `,
     },
     refundReceived: {
-      subject: "Nous avons reçu votre demande de remboursement Tomverse AI",
+      subject: "Nous avons reçu votre demande de remboursement Tomverse Insight",
       title: "Demande de remboursement reçue",
       text: (plan: string, requestId: string) => [
         "Nous avons reçu votre demande de remboursement et d'annulation de plan.",
@@ -373,18 +373,18 @@ const emailCopy = {
       `,
     },
     refundApproved: {
-      subject: "Votre demande de remboursement Tomverse AI a été approuvée",
+      subject: "Votre demande de remboursement Tomverse Insight a été approuvée",
       title: "Demande de remboursement approuvée",
       text: (requestId: string, adminNote: string) => [
         "Votre demande de remboursement et d'annulation de plan a été approuvée.",
-        "Votre abonnement Tomverse AI est repassé au plan Free.",
+        "Votre abonnement Tomverse Insight est repassé au plan Free.",
         adminNote ? `Note : ${adminNote}` : "",
         `ID de demande : ${requestId}`,
       ],
       body: (requestId: string, adminNote: string) => `
         <p>Votre demande de remboursement et d'annulation de plan a été approuvée.</p>
         <div style="margin:20px 0;padding:16px;border:1px solid #d1fae5;border-radius:14px;background:#ecfdf5;color:#065f46;">
-          <strong>Votre abonnement Tomverse AI est repassé au plan Free.</strong>
+          <strong>Votre abonnement Tomverse Insight est repassé au plan Free.</strong>
         </div>
         ${adminNote ? `<p><strong>Note de Tomverse :</strong> ${adminNote}</p>` : ""}
         <p>Si un remboursement est applicable, le délai de traitement peut dépendre de Stripe, de votre banque, d’Apple Pay ou de Google Pay.</p>
@@ -392,7 +392,7 @@ const emailCopy = {
       `,
     },
     refundRejected: {
-      subject: "Mise à jour de votre demande de remboursement Tomverse AI",
+      subject: "Mise à jour de votre demande de remboursement Tomverse Insight",
       title: "Demande de remboursement examinée",
       fallback: "Contactez le support si vous souhaitez plus d'informations sur cette décision.",
       text: (requestId: string, adminNote: string) => [
@@ -408,25 +408,25 @@ const emailCopy = {
     },
   },
   de: {
-    billingLabel: "Tomverse AI Abrechnung",
+    billingLabel: "Tomverse Insight Abrechnung",
     openTomverse: "Tomverse öffnen",
     footer:
-      "Diese Nachricht betrifft Ihr Tomverse AI Abrechnungskonto. Wenn Sie dies nicht angefordert haben, kontaktieren Sie bitte den Support.",
+      "Diese Nachricht betrifft Ihr Tomverse Insight Abrechnungskonto. Wenn Sie dies nicht angefordert haben, kontaktieren Sie bitte den Support.",
     notAvailable: "Nicht verfügbar",
     interval: { annual: "Jährlich", monthly: "Monatlich", subscription: "Abonnement" },
     welcome: {
-      subject: (plan: string) => `Willkommen bei Tomverse AI ${plan}`,
-      title: "Willkommen bei Tomverse AI",
+      subject: (plan: string) => `Willkommen bei Tomverse Insight ${plan}`,
+      title: "Willkommen bei Tomverse Insight",
       text: (plan: string, billingInterval: string, periodEnd: string) => [
-        "Ihre Tomverse AI Zahlung war erfolgreich.",
-        "Willkommen in der Tomverse AI Familie.",
+        "Ihre Tomverse Insight Zahlung war erfolgreich.",
+        "Willkommen in der Tomverse Insight Familie.",
         `Plan: ${plan}`,
         `Abrechnung: ${billingInterval}`,
         `Plan gültig bis: ${periodEnd}`,
         "Der Checkout wird in USD berechnet. Sie können Ihren Plan unter Einstellungen > Plan verwalten.",
       ],
       body: (plan: string, billingInterval: string, periodEnd: string) => `
-        <p>Ihre Zahlung war erfolgreich. Willkommen in der Tomverse AI Familie.</p>
+        <p>Ihre Zahlung war erfolgreich. Willkommen in der Tomverse Insight Familie.</p>
         <div style="margin:20px 0;padding:18px;border:1px solid #dbeafe;border-radius:16px;background:#eff6ff;color:#1e3a8a;">
           <div style="margin-bottom:8px;"><strong>Plan:</strong> ${plan}</div>
           <div style="margin-bottom:8px;"><strong>Abrechnung:</strong> ${billingInterval}</div>
@@ -437,7 +437,7 @@ const emailCopy = {
       `,
     },
     refundReceived: {
-      subject: "Wir haben Ihre Tomverse AI Rückerstattungsanfrage erhalten",
+      subject: "Wir haben Ihre Tomverse Insight Rückerstattungsanfrage erhalten",
       title: "Rückerstattungsanfrage erhalten",
       text: (plan: string, requestId: string) => [
         "Wir haben Ihre Anfrage zur Rückerstattung und Kündigung des Plans erhalten.",
@@ -455,18 +455,18 @@ const emailCopy = {
       `,
     },
     refundApproved: {
-      subject: "Ihre Tomverse AI Rückerstattungsanfrage wurde genehmigt",
+      subject: "Ihre Tomverse Insight Rückerstattungsanfrage wurde genehmigt",
       title: "Rückerstattungsanfrage genehmigt",
       text: (requestId: string, adminNote: string) => [
         "Ihre Anfrage zur Rückerstattung und Kündigung des Plans wurde genehmigt.",
-        "Ihre Tomverse AI Mitgliedschaft wurde auf Free zurückgesetzt.",
+        "Ihre Tomverse Insight Mitgliedschaft wurde auf Free zurückgesetzt.",
         adminNote ? `Hinweis: ${adminNote}` : "",
         `Anfrage-ID: ${requestId}`,
       ],
       body: (requestId: string, adminNote: string) => `
         <p>Ihre Anfrage zur Rückerstattung und Kündigung des Plans wurde genehmigt.</p>
         <div style="margin:20px 0;padding:16px;border:1px solid #d1fae5;border-radius:14px;background:#ecfdf5;color:#065f46;">
-          <strong>Ihre Tomverse AI Mitgliedschaft wurde auf Free zurückgesetzt.</strong>
+          <strong>Ihre Tomverse Insight Mitgliedschaft wurde auf Free zurückgesetzt.</strong>
         </div>
         ${adminNote ? `<p><strong>Hinweis von Tomverse:</strong> ${adminNote}</p>` : ""}
         <p>Falls eine Rückerstattung gilt, kann die Bearbeitungszeit von Stripe, Ihrer Bank, Apple Pay oder Google Pay abhängen.</p>
@@ -474,7 +474,7 @@ const emailCopy = {
       `,
     },
     refundRejected: {
-      subject: "Update zu Ihrer Tomverse AI Rückerstattungsanfrage",
+      subject: "Update zu Ihrer Tomverse Insight Rückerstattungsanfrage",
       title: "Rückerstattungsanfrage geprüft",
       fallback: "Bitte kontaktieren Sie den Support, wenn Sie weitere Informationen benötigen.",
       text: (requestId: string, adminNote: string) => [
@@ -490,25 +490,25 @@ const emailCopy = {
     },
   },
   es: {
-    billingLabel: "Facturación de Tomverse AI",
+    billingLabel: "Facturación de Tomverse Insight",
     openTomverse: "Abrir Tomverse",
     footer:
-      "Este mensaje se envió sobre tu cuenta de facturación de Tomverse AI. Si no solicitaste esto, contacta con soporte.",
+      "Este mensaje se envió sobre tu cuenta de facturación de Tomverse Insight. Si no solicitaste esto, contacta con soporte.",
     notAvailable: "No disponible",
     interval: { annual: "Anual", monthly: "Mensual", subscription: "Suscripción" },
     welcome: {
-      subject: (plan: string) => `Bienvenido a Tomverse AI ${plan}`,
-      title: "Bienvenido a Tomverse AI",
+      subject: (plan: string) => `Bienvenido a Tomverse Insight ${plan}`,
+      title: "Bienvenido a Tomverse Insight",
       text: (plan: string, billingInterval: string, periodEnd: string) => [
-        "Tu pago de Tomverse AI se completó correctamente.",
-        "Bienvenido a la familia Tomverse AI.",
+        "Tu pago de Tomverse Insight se completó correctamente.",
+        "Bienvenido a la familia Tomverse Insight.",
         `Plan: ${plan}`,
         `Facturación: ${billingInterval}`,
         `Plan válido hasta: ${periodEnd}`,
         "El checkout se cobra en USD. Puedes gestionar tu plan en Configuración > Plan.",
       ],
       body: (plan: string, billingInterval: string, periodEnd: string) => `
-        <p>Tu pago se completó correctamente. Bienvenido a la familia Tomverse AI.</p>
+        <p>Tu pago se completó correctamente. Bienvenido a la familia Tomverse Insight.</p>
         <div style="margin:20px 0;padding:18px;border:1px solid #dbeafe;border-radius:16px;background:#eff6ff;color:#1e3a8a;">
           <div style="margin-bottom:8px;"><strong>Plan:</strong> ${plan}</div>
           <div style="margin-bottom:8px;"><strong>Facturación:</strong> ${billingInterval}</div>
@@ -519,7 +519,7 @@ const emailCopy = {
       `,
     },
     refundReceived: {
-      subject: "Recibimos tu solicitud de reembolso de Tomverse AI",
+      subject: "Recibimos tu solicitud de reembolso de Tomverse Insight",
       title: "Solicitud de reembolso recibida",
       text: (plan: string, requestId: string) => [
         "Recibimos tu solicitud de reembolso y cancelación del plan.",
@@ -537,18 +537,18 @@ const emailCopy = {
       `,
     },
     refundApproved: {
-      subject: "Tu solicitud de reembolso de Tomverse AI fue aprobada",
+      subject: "Tu solicitud de reembolso de Tomverse Insight fue aprobada",
       title: "Solicitud de reembolso aprobada",
       text: (requestId: string, adminNote: string) => [
         "Tu solicitud de reembolso y cancelación del plan fue aprobada.",
-        "Tu membresía de Tomverse AI volvió al plan Free.",
+        "Tu membresía de Tomverse Insight volvió al plan Free.",
         adminNote ? `Nota: ${adminNote}` : "",
         `ID de solicitud: ${requestId}`,
       ],
       body: (requestId: string, adminNote: string) => `
         <p>Tu solicitud de reembolso y cancelación del plan fue aprobada.</p>
         <div style="margin:20px 0;padding:16px;border:1px solid #d1fae5;border-radius:14px;background:#ecfdf5;color:#065f46;">
-          <strong>Tu membresía de Tomverse AI volvió al plan Free.</strong>
+          <strong>Tu membresía de Tomverse Insight volvió al plan Free.</strong>
         </div>
         ${adminNote ? `<p><strong>Nota de Tomverse:</strong> ${adminNote}</p>` : ""}
         <p>Si corresponde un reembolso, el tiempo de procesamiento puede depender de Stripe, tu banco, Apple Pay o Google Pay.</p>
@@ -556,7 +556,7 @@ const emailCopy = {
       `,
     },
     refundRejected: {
-      subject: "Actualización sobre tu solicitud de reembolso de Tomverse AI",
+      subject: "Actualización sobre tu solicitud de reembolso de Tomverse Insight",
       title: "Solicitud de reembolso revisada",
       fallback: "Contacta con soporte si necesitas más información sobre esta decisión.",
       text: (requestId: string, adminNote: string) => [
@@ -572,25 +572,25 @@ const emailCopy = {
     },
   },
   pt: {
-    billingLabel: "Cobrança Tomverse AI",
+    billingLabel: "Cobrança Tomverse Insight",
     openTomverse: "Abrir Tomverse",
     footer:
-      "Esta mensagem foi enviada sobre a sua conta de cobrança Tomverse AI. Se não solicitou isto, contacte o suporte.",
+      "Esta mensagem foi enviada sobre a sua conta de cobrança Tomverse Insight. Se não solicitou isto, contacte o suporte.",
     notAvailable: "Indisponível",
     interval: { annual: "Anual", monthly: "Mensal", subscription: "Subscrição" },
     welcome: {
-      subject: (plan: string) => `Bem-vindo ao Tomverse AI ${plan}`,
-      title: "Bem-vindo ao Tomverse AI",
+      subject: (plan: string) => `Bem-vindo ao Tomverse Insight ${plan}`,
+      title: "Bem-vindo ao Tomverse Insight",
       text: (plan: string, billingInterval: string, periodEnd: string) => [
-        "O seu pagamento Tomverse AI foi concluído com sucesso.",
-        "Bem-vindo à família Tomverse AI.",
+        "O seu pagamento Tomverse Insight foi concluído com sucesso.",
+        "Bem-vindo à família Tomverse Insight.",
         `Plano: ${plan}`,
         `Cobrança: ${billingInterval}`,
         `Plano válido até: ${periodEnd}`,
         "O checkout é cobrado em USD. Pode gerir o plano em Definições > Plano.",
       ],
       body: (plan: string, billingInterval: string, periodEnd: string) => `
-        <p>O seu pagamento foi concluído com sucesso. Bem-vindo à família Tomverse AI.</p>
+        <p>O seu pagamento foi concluído com sucesso. Bem-vindo à família Tomverse Insight.</p>
         <div style="margin:20px 0;padding:18px;border:1px solid #dbeafe;border-radius:16px;background:#eff6ff;color:#1e3a8a;">
           <div style="margin-bottom:8px;"><strong>Plano:</strong> ${plan}</div>
           <div style="margin-bottom:8px;"><strong>Cobrança:</strong> ${billingInterval}</div>
@@ -601,7 +601,7 @@ const emailCopy = {
       `,
     },
     refundReceived: {
-      subject: "Recebemos o seu pedido de reembolso Tomverse AI",
+      subject: "Recebemos o seu pedido de reembolso Tomverse Insight",
       title: "Pedido de reembolso recebido",
       text: (plan: string, requestId: string) => [
         "Recebemos o seu pedido de reembolso e cancelamento do plano.",
@@ -619,18 +619,18 @@ const emailCopy = {
       `,
     },
     refundApproved: {
-      subject: "O seu pedido de reembolso Tomverse AI foi aprovado",
+      subject: "O seu pedido de reembolso Tomverse Insight foi aprovado",
       title: "Pedido de reembolso aprovado",
       text: (requestId: string, adminNote: string) => [
         "O seu pedido de reembolso e cancelamento do plano foi aprovado.",
-        "A sua subscrição Tomverse AI voltou para o plano Free.",
+        "A sua subscrição Tomverse Insight voltou para o plano Free.",
         adminNote ? `Nota: ${adminNote}` : "",
         `ID do pedido: ${requestId}`,
       ],
       body: (requestId: string, adminNote: string) => `
         <p>O seu pedido de reembolso e cancelamento do plano foi aprovado.</p>
         <div style="margin:20px 0;padding:16px;border:1px solid #d1fae5;border-radius:14px;background:#ecfdf5;color:#065f46;">
-          <strong>A sua subscrição Tomverse AI voltou para o plano Free.</strong>
+          <strong>A sua subscrição Tomverse Insight voltou para o plano Free.</strong>
         </div>
         ${adminNote ? `<p><strong>Nota da Tomverse:</strong> ${adminNote}</p>` : ""}
         <p>Se houver reembolso aplicável, o tempo de processamento pode depender da Stripe, do emissor do cartão, Apple Pay ou Google Pay.</p>
@@ -638,7 +638,7 @@ const emailCopy = {
       `,
     },
     refundRejected: {
-      subject: "Atualização sobre o seu pedido de reembolso Tomverse AI",
+      subject: "Atualização sobre o seu pedido de reembolso Tomverse Insight",
       title: "Pedido de reembolso analisado",
       fallback: "Contacte o suporte se precisar de mais informações sobre esta decisão.",
       text: (requestId: string, adminNote: string) => [
@@ -712,7 +712,7 @@ export async function sendBillingWelcomeEmail(input: BillingWelcomeEmailInput) {
   if (!input.to) return;
   const language = normalizeLanguage(input.language);
   const copy = getCopy(input.language);
-  const plan = escapeHtml(input.plan || "Tomverse AI");
+  const plan = escapeHtml(input.plan || "Tomverse Insight");
   const billingInterval = formatBillingInterval(input.billingInterval, language);
   const resolvedPeriodEnd =
     input.periodEnd || addBillingPeriod(new Date(), input.billingInterval);
@@ -977,9 +977,9 @@ export async function sendAdminPlanChangedEmail(input: {
   const periodEnd = formatDate(input.periodEnd, "en");
   const billingInterval = escapeHtml(input.billingInterval || "manual update");
   const reason = input.reason ? escapeHtml(input.reason) : "";
-  const subject = `Your Tomverse AI plan was updated to ${plan}`;
+  const subject = `Your Tomverse Insight plan was updated to ${plan}`;
   const text = [
-    `Your Tomverse AI plan was updated to ${plan}.`,
+    `Your Tomverse Insight plan was updated to ${plan}.`,
     `Billing: ${billingInterval}`,
     `Plan valid until: ${periodEnd}`,
     reason ? `Reason: ${reason}` : "",
@@ -988,9 +988,9 @@ export async function sendAdminPlanChangedEmail(input: {
     .filter(Boolean)
     .join("\n");
   const html = shell(
-    "Your Tomverse AI plan was updated",
+    "Your Tomverse Insight plan was updated",
     `
-      <p>Your Tomverse AI plan was updated by the Tomverse team.</p>
+      <p>Your Tomverse Insight plan was updated by the Tomverse team.</p>
       <div style="margin:20px 0;padding:18px;border:1px solid #dbeafe;border-radius:16px;background:#eff6ff;color:#1e3a8a;">
         <div style="margin-bottom:8px;"><strong>Plan:</strong> ${plan}</div>
         <div style="margin-bottom:8px;"><strong>Billing:</strong> ${billingInterval}</div>

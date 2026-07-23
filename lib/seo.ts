@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import type { Language } from "@/components/LanguageProvider";
 
 export const SITE_ORIGIN = "https://tomverse.app";
-export const SITE_NAME = "Tomverse AI";
+export const SITE_NAME = "Tomverse Insight";
 
 export const SEO_LOCALES: readonly Language[] = [
   "en",
@@ -143,37 +143,37 @@ export const homeSeoCopy: Record<
   en: {
     title: "Compare AI Answers and Cross-Review What They Missed",
     description:
-      "Ask multiple AI models once, compare their answers, and use Tomverse AI Review to organize agreements, contradictions, omissions, and verification needs.",
+      "Ask multiple AI models once, compare their answers, and use AI Review to organize agreements, contradictions, omissions, and verification needs.",
   },
   ko: {
     title: "여러 AI 답변을 비교하고 놓친 부분까지 교차검토하세요",
     description:
-      "한 번 질문해 여러 AI 답변을 비교하고 Tomverse AI Review로 합의점, 모순, 누락과 추가 검증 항목을 구조화하세요.",
+      "한 번 질문해 여러 AI 답변을 비교하고 AI Review로 합의점, 모순, 누락과 추가 검증 항목을 구조화하세요.",
   },
   zh: {
     title: "比较多个 AI 回答并交叉审查遗漏",
     description:
-      "一次向多个 AI 提问、比较回答，并使用 Tomverse AI Review 整理共识、矛盾、遗漏和待核实项目。",
+      "一次向多个 AI 提问、比较回答，并使用 AI Review 整理共识、矛盾、遗漏和待核实项目。",
   },
   fr: {
     title: "Comparez les réponses IA et examinez leurs omissions",
     description:
-      "Posez une question à plusieurs modèles, comparez leurs réponses et utilisez Tomverse AI Review pour structurer accords, contradictions et points à vérifier.",
+      "Posez une question à plusieurs modèles, comparez leurs réponses et utilisez AI Review pour structurer accords, contradictions et points à vérifier.",
   },
   de: {
     title: "KI-Antworten vergleichen und Auslassungen gegenprüfen",
     description:
-      "Fragen Sie mehrere KI-Modelle einmal, vergleichen Sie Antworten und ordnen Sie mit Tomverse AI Review Gemeinsamkeiten, Widersprüche und Prüfbedarf.",
+      "Fragen Sie mehrere KI-Modelle einmal, vergleichen Sie Antworten und ordnen Sie mit AI Review Gemeinsamkeiten, Widersprüche und Prüfbedarf.",
   },
   es: {
     title: "Compara respuestas de IA y revisa lo que dejaron fuera",
     description:
-      "Pregunta una vez a varios modelos, compara sus respuestas y usa Tomverse AI Review para organizar acuerdos, contradicciones, omisiones y verificaciones.",
+      "Pregunta una vez a varios modelos, compara sus respuestas y usa AI Review para organizar acuerdos, contradicciones, omisiones y verificaciones.",
   },
   pt: {
     title: "Compare respostas de IA e revise o que ficou de fora",
     description:
-      "Pergunte uma vez a vários modelos, compare respostas e use o Tomverse AI Review para organizar consensos, contradições, omissões e verificações.",
+      "Pergunte uma vez a vários modelos, compare respostas e use o AI Review para organizar consensos, contradições, omissões e verificações.",
   },
 };
 

@@ -1148,7 +1148,7 @@ export function UpgradeInterestButton({
                     {copy.orderSummary}
                   </p>
                   <h3 className="mt-2 text-xl font-black text-zinc-950 dark:text-white">
-                    Tomverse AI {plan}
+                    Tomverse Insight {plan}
                   </h3>
                 </div>
                 <span className="rounded-full bg-blue-600 px-3 py-1 text-xs font-black text-white">

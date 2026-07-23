@@ -1,6 +1,6 @@
 export const zh = {
     sidebar: {
-        title: "Tomverse AI",
+        title: "Tomverse Insight",
         newChat: "新建对话",
         collapse: "收起侧边栏",
         expand: "展开侧边栏",
@@ -301,7 +301,7 @@ export const zh = {
         close: "关闭",
         paymentSuccessfulEyebrow: "付款成功",
         paymentSuccessfulTitle: "付款已成功完成。",
-        paymentSuccessfulWelcome: "欢迎加入 Tomverse AI。你现在可以在 {plan} 工作区使用更高额度和高级功能。",
+        paymentSuccessfulWelcome: "欢迎加入 Tomverse Insight。你现在可以在 {plan} 工作区使用更高额度和高级功能。",
         testerPassActivatedEyebrow: "测试通行证已激活",
         testerPassActivatedTitle: "您的 60 天创始测试通行证已生效。",
         testerPassActivatedWelcome: "您现在可以作为创始测试用户使用 {plan} 工作区。",

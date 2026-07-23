@@ -2,7 +2,7 @@ import { en } from "./en";
 
 export const pt = {
     sidebar: {
-        title: "Tomverse AI",
+        title: "Tomverse Insight",
         newChat: "Novo chat",
         collapse: "Recolher barra lateral",
         expand: "Expandir barra lateral",
@@ -304,7 +304,7 @@ export const pt = {
         close: "Fechar",
         paymentSuccessfulEyebrow: "Pagamento concluído",
         paymentSuccessfulTitle: "Seu pagamento foi concluído com sucesso.",
-        paymentSuccessfulWelcome: "Bem-vindo à família Tomverse AI. Agora você pode usar limites maiores e recursos avançados no workspace {plan}.",
+        paymentSuccessfulWelcome: "Bem-vindo à família Tomverse Insight. Agora você pode usar limites maiores e recursos avançados no workspace {plan}.",
         testerPassActivatedEyebrow: "Passe de teste ativado",
         testerPassActivatedTitle: "O seu passe Founding Tester de 60 dias está ativo.",
         testerPassActivatedWelcome: "Já pode usar o workspace {plan} como Founding Tester.",

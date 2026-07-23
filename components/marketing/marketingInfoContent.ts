@@ -6,9 +6,9 @@ export const infoPages = {
     en: {
       eyebrow: "FAQ",
       title: "Frequently asked questions",
-      description: "Quick answers about Tomverse AI, accounts, models, files, sharing, and Private Mode.",
+      description: "Quick answers about Tomverse Insight, accounts, models, files, sharing, and Private Mode.",
       sections: [
-        { title: "What is Tomverse AI?", body: "Tomverse AI is a multi-model AI workspace that lets you compare answers from several AI models, attach files, and organize conversations in one place." },
+        { title: "What is Tomverse Insight?", body: "Tomverse Insight is a multi-model AI workspace that lets you compare answers from several AI models, attach files, and organize conversations in one place." },
         { title: "Can I use more than one model at once?", body: "Yes. You can compare up to three models in a single conversation so the experience stays readable and cost-controlled." },
         { title: "What does Private Mode mean?", body: "Private Mode means Tomverse does not save the conversation to the Tomverse database. Your prompt may still be sent to the selected AI provider to generate a response." },
         { title: "Can I share a conversation?", body: "Logged-in users can create read-only public share links or download conversations as text files. Locked conversations require unlock verification before sharing." },
@@ -17,9 +17,9 @@ export const infoPages = {
     ko: {
       eyebrow: "FAQ",
       title: "자주 묻는 질문",
-      description: "Tomverse AI, 계정, 모델, 파일, 공유, Private Mode에 대한 빠른 답변입니다.",
+      description: "Tomverse Insight, 계정, 모델, 파일, 공유, Private Mode에 대한 빠른 답변입니다.",
       sections: [
-        { title: "Tomverse AI는 무엇인가요?", body: "Tomverse AI는 여러 AI 모델의 답변을 비교하고, 파일을 첨부하며, 대화를 한곳에서 정리할 수 있는 멀티 모델 AI 워크스페이스입니다." },
+        { title: "Tomverse Insight는 무엇인가요?", body: "Tomverse Insight는 여러 AI 모델의 답변을 비교하고, 파일을 첨부하며, 대화를 한곳에서 정리할 수 있는 멀티 모델 AI 워크스페이스입니다." },
         { title: "여러 모델을 동시에 사용할 수 있나요?", body: "네. 한 대화에서 최대 3개 모델까지 비교할 수 있습니다. 가독성과 비용 통제를 위해 3개로 제한합니다." },
         { title: "Private Mode는 어떤 의미인가요?", body: "Private Mode는 Tomverse 데이터베이스에 대화를 저장하지 않는다는 뜻입니다. 답변 생성을 위해 선택한 AI 공급자에게 질문이 전송될 수 있습니다." },
         { title: "대화를 공유할 수 있나요?", body: "로그인 사용자는 읽기 전용 공개 링크를 만들거나 대화를 텍스트 파일로 다운로드할 수 있습니다. 잠긴 대화는 공유 전 잠금 해제가 필요합니다." },
@@ -28,9 +28,9 @@ export const infoPages = {
     zh: {
       eyebrow: "FAQ",
       title: "常见问题",
-      description: "关于 Tomverse AI、账户、模型、文件、分享和 Private Mode 的快速说明。",
+      description: "关于 Tomverse Insight、账户、模型、文件、分享和 Private Mode 的快速说明。",
       sections: [
-        { title: "Tomverse AI 是什么？", body: "Tomverse AI 是一个多模型 AI 工作区，可在一个地方比较多个 AI 模型的回答、附加文件并整理对话。" },
+        { title: "Tomverse Insight 是什么？", body: "Tomverse Insight 是一个多模型 AI 工作区，可在一个地方比较多个 AI 模型的回答、附加文件并整理对话。" },
         { title: "可以同时使用多个模型吗？", body: "可以。单个对话最多可比较三个模型，以保持界面清晰并控制成本。" },
         { title: "Private Mode 是什么意思？", body: "Private Mode 表示 Tomverse 不会把对话保存到 Tomverse 数据库。为了生成回答，提示仍可能发送给所选 AI 供应商。" },
         { title: "可以分享对话吗？", body: "登录用户可以创建只读公开链接，或将对话下载为文本文件。锁定对话在分享前需要完成解锁验证。" },
@@ -41,12 +41,12 @@ export const infoPages = {
     en: {
       eyebrow: "Legal",
       title: "Terms and Conditions",
-      description: "These terms govern free and paid use of Tomverse AI, including accounts, AI providers, subscriptions, monthly and additional credits, cancellation, and disputes.",
+      description: "These terms govern free and paid use of Tomverse Insight, including accounts, AI providers, subscriptions, monthly and additional credits, cancellation, and disputes.",
       updated: "Last updated: July 15, 2026",
       sections: [
         {
           title: "Agreement, operator, and contact",
-          body: "Tomverse AI is the service and operating name used for tomverse.app (\"Tomverse\", \"we\", \"us\"). The legal seller or contracting operator for a paid transaction is the entity identified on the Stripe Checkout page, receipt, or invoice for that transaction. Billing and legal notices can be sent to support@tomverse.app or through the support form at tomverse.app/support.",
+          body: "Tomverse is the service and operating name used for tomverse.app (\"we\", \"us\"), which hosts Tomverse Insight and other Tomverse products. The legal seller or contracting operator for a paid transaction is the entity identified on the Stripe Checkout page, receipt, or invoice for that transaction. Billing and legal notices can be sent to support@tomverse.app or through the support form at tomverse.app/support.",
         },
         {
           title: "Accounts and use of the service",
@@ -98,12 +98,12 @@ export const infoPages = {
     ko: {
       eyebrow: "법적 고지",
       title: "이용약관",
-      description: "계정, AI 제공자, 구독, 월 크레딧과 추가 크레딧, 취소 및 분쟁을 포함한 Tomverse AI의 무료·유료 서비스 이용 조건입니다.",
+      description: "계정, AI 제공자, 구독, 월 크레딧과 추가 크레딧, 취소 및 분쟁을 포함한 Tomverse Insight의 무료·유료 서비스 이용 조건입니다.",
       updated: "최종 업데이트: 2026년 7월 15일",
       sections: [
         {
           title: "약관 동의, 운영 주체 및 연락처",
-          body: "Tomverse AI는 tomverse.app에서 제공되는 서비스 및 운영 명칭입니다(이하 ‘Tomverse’ 또는 ‘당사’). 유료 거래의 법적 판매자 또는 계약 운영 주체는 해당 Stripe 결제 화면, 영수증 또는 인보이스에 표시된 사업자입니다. 결제·법률 관련 문의는 support@tomverse.app 또는 tomverse.app/support의 지원 폼으로 접수할 수 있습니다.",
+          body: "Tomverse는 tomverse.app에서 제공되는 서비스 및 운영 명칭입니다(이하 ‘당사’), Tomverse Insight를 비롯한 Tomverse의 제품들을 운영합니다. 유료 거래의 법적 판매자 또는 계약 운영 주체는 해당 Stripe 결제 화면, 영수증 또는 인보이스에 표시된 사업자입니다. 결제·법률 관련 문의는 support@tomverse.app 또는 tomverse.app/support의 지원 폼으로 접수할 수 있습니다.",
         },
         {
           title: "계정 및 서비스 이용",
@@ -155,10 +155,10 @@ export const infoPages = {
     zh: {
       eyebrow: "法律",
       title: "条款与条件",
-      description: "这些条款适用于 Tomverse AI 的免费和付费服务，包括账户、AI 提供商、订阅、月度积分、附加积分、取消和争议。",
+      description: "这些条款适用于 Tomverse Insight 的免费和付费服务，包括账户、AI 提供商、订阅、月度积分、附加积分、取消和争议。",
       updated: "最后更新：2026 年 7 月 15 日",
       sections: [
-        { title: "协议、运营方和联系方式", body: "Tomverse AI 是 tomverse.app 使用的服务和运营名称（‘Tomverse’或‘我们’）。付费交易的法定销售方或合同运营方，是相应 Stripe 结账页、收据或发票上标明的实体。账单和法律通知可发送至 support@tomverse.app，或通过 tomverse.app/support 的支持表单提交。" },
+        { title: "协议、运营方和联系方式", body: "Tomverse 是 tomverse.app 使用的服务和运营名称（‘我们’），旗下运营 Tomverse Insight 等 Tomverse 产品。付费交易的法定销售方或合同运营方，是相应 Stripe 结账页、收据或发票上标明的实体。账单和法律通知可发送至 support@tomverse.app，或通过 tomverse.app/support 的支持表单提交。" },
         { title: "账户和服务使用", body: "你必须提供准确的账户信息、保护账户访问，并对账户活动、提示词、上传文件以及使用或分享的内容负责。为处理滥用、安全风险、未付款、法律要求或重大违约，我们可在合理必要范围内限制、暂停或终止访问。" },
         { title: "第三方 AI 提供商和输出", body: "Tomverse 会把提示词和所选上下文发送给第三方 AI 提供商并显示其响应。AI 输出可能不准确、不完整、过时、不安全或不适合你的情况，也不构成法律、医疗、金融、安全或其他专业建议。" },
         { title: "方案、AI 积分和公平使用", body: "Free、Pro 和 Max 适用价格页及账户页显示的功能和月度积分额度。积分消耗因模型、推理方式和输入规模而异。月度积分在每个自然月开始时按 UTC 重置，不结转、不可转让且无现金价值。公平使用、防滥用、模型、提供商成本、文件和上下文限制仍然适用。" },
@@ -227,7 +227,7 @@ export const infoPages = {
         },
         {
           title: "Operator and disputes",
-          body: "Tomverse AI operates tomverse.app, and the legal seller for a transaction is identified on its Stripe receipt or invoice. Questions or disputes can be sent to support@tomverse.app or tomverse.app/support. You may also use any regulator, tribunal, or court process available under applicable law.",
+          body: "Tomverse operates tomverse.app, and the legal seller for a transaction is identified on its Stripe receipt or invoice. Questions or disputes can be sent to support@tomverse.app or tomverse.app/support. You may also use any regulator, tribunal, or court process available under applicable law.",
         },
       ],
       cta: { label: "Contact billing support", href: "/support" },
@@ -285,7 +285,7 @@ export const infoPages = {
         },
         {
           title: "운영 주체와 분쟁",
-          body: "Tomverse AI는 tomverse.app을 운영하며 각 거래의 법적 판매자는 Stripe 영수증 또는 인보이스에 표시됩니다. 문의나 분쟁은 support@tomverse.app 또는 tomverse.app/support로 접수할 수 있고, 적용 법률에 따라 이용 가능한 규제기관, 재판소 또는 법원 절차를 이용할 수 있습니다.",
+          body: "Tomverse는 tomverse.app을 운영하며 각 거래의 법적 판매자는 Stripe 영수증 또는 인보이스에 표시됩니다. 문의나 분쟁은 support@tomverse.app 또는 tomverse.app/support로 접수할 수 있고, 적용 법률에 따라 이용 가능한 규제기관, 재판소 또는 법원 절차를 이용할 수 있습니다.",
         },
       ],
       cta: { label: "결제 지원 문의", href: "/support" },
@@ -307,7 +307,7 @@ export const infoPages = {
         { title: "提供商故障和积分恢复", body: "AI 提供商在生成可用回答前失败或返回空响应时，Tomverse 通常会自动释放预留积分。可用输出开始后由用户取消时，可能保留按生成量计算的积分消耗。若积分似乎错误扣除，请附 trace ID 联系支持。" },
         { title: "税费、汇率和付款币种", body: "退款不超过 Stripe 实际收取的金额和币种。本地价格换算可能因税费、汇率或第三方费用与最终金额不同。实际金额和销售方身份以 Stripe 收据或发票为准。" },
         { title: "如何申请和处理", body: "订阅或积分包购买者可从账户账单区域申请退款审查，或联系 support@tomverse.app。请提供账户邮箱、方案、适用时的积分包名称、收费日期、交易或收据编号、原因和相关 trace ID。批准后，Tomverse 会向 Stripe 提交退款。订阅退款可能取消或降级相关付费方案；积分包退款只撤销对应积分包权益，不会因此自动取消订阅。到账时间取决于 Stripe 和付款服务商。" },
-        { title: "运营方和争议", body: "Tomverse AI 运营 tomverse.app，每笔交易的法定销售方标示在 Stripe 收据或发票上。问题或争议可发送至 support@tomverse.app 或 tomverse.app/support，也可使用适用法律提供的监管机构、仲裁庭或法院程序。" },
+        { title: "运营方和争议", body: "Tomverse 运营 tomverse.app，每笔交易的法定销售方标示在 Stripe 收据或发票上。问题或争议可发送至 support@tomverse.app 或 tomverse.app/support，也可使用适用法律提供的监管机构、仲裁庭或法院程序。" },
       ],
       cta: { label: "联系账单支持", href: "/support" },
     },
@@ -347,35 +347,35 @@ export const infoPages = {
   about: {
     en: {
       eyebrow: "Company",
-      title: "About Tomverse AI",
-      description: "Tomverse AI is built for people who want to compare the fast-moving AI model market without rebuilding their workflow every week.",
+      title: "About Tomverse Insight",
+      description: "Tomverse Insight is built for people who want to compare the fast-moving AI model market without rebuilding their workflow every week.",
       sections: [
         { title: "Our mission", body: "Make AI model choice practical, transparent, and useful for everyday work." },
         { title: "Product philosophy", body: "We prefer calm, focused tools over flashy demos: compare models, use real context, protect sensitive conversations, and keep useful outputs portable." },
         { title: "Plans and operations", body: "Tomverse currently offers Free, Pro, and Max plans, with monthly and annual paid subscriptions processed through Stripe. We continue to improve account controls, provider coverage, reliability, and support workflows for individual and commercial users." },
-        { title: "Operator and contact", body: "Tomverse AI is the service and operating name for tomverse.app. The legal seller for a paid transaction is identified on the Stripe Checkout page, receipt, or invoice. Contact support@tomverse.app or use tomverse.app/support for account, billing, legal, or product enquiries." },
+        { title: "Operator and contact", body: "Tomverse is the service and operating name for tomverse.app, which hosts Tomverse Insight and other Tomverse products. The legal seller for a paid transaction is identified on the Stripe Checkout page, receipt, or invoice. Contact support@tomverse.app or use tomverse.app/support for account, billing, legal, or product enquiries." },
       ],
     },
     ko: {
       eyebrow: "회사",
-      title: "Tomverse AI 소개",
-      description: "Tomverse AI는 빠르게 변하는 AI 모델 시장을 매주 새로 익히지 않아도 비교하고 활용할 수 있게 만든 제품입니다.",
+      title: "Tomverse Insight 소개",
+      description: "Tomverse Insight는 빠르게 변하는 AI 모델 시장을 매주 새로 익히지 않아도 비교하고 활용할 수 있게 만든 제품입니다.",
       sections: [
         { title: "미션", body: "AI 모델 선택을 실용적이고 투명하며 일상 업무에 도움이 되는 경험으로 만드는 것입니다." },
         { title: "제품 철학", body: "화려한 데모보다 차분하고 집중된 도구를 지향합니다. 모델 비교, 실제 맥락 활용, 민감한 대화 보호, 결과물 이동성을 중요하게 봅니다." },
         { title: "플랜과 운영", body: "Tomverse는 현재 Free, Pro, Max 플랜을 제공하며 월간·연간 유료 구독은 Stripe를 통해 처리됩니다. 개인 및 상업 사용자를 위해 계정 제어, 제공자 범위, 안정성과 지원 흐름을 계속 개선하고 있습니다." },
-        { title: "운영 주체와 연락처", body: "Tomverse AI는 tomverse.app의 서비스 및 운영 명칭입니다. 유료 거래의 법적 판매자는 Stripe 결제 화면, 영수증 또는 인보이스에 표시됩니다. 계정, 결제, 법률 또는 제품 관련 문의는 support@tomverse.app 또는 tomverse.app/support로 접수할 수 있습니다." },
+        { title: "운영 주체와 연락처", body: "Tomverse는 tomverse.app의 서비스 및 운영 명칭이며, Tomverse Insight를 비롯한 Tomverse의 제품들을 운영합니다. 유료 거래의 법적 판매자는 Stripe 결제 화면, 영수증 또는 인보이스에 표시됩니다. 계정, 결제, 법률 또는 제품 관련 문의는 support@tomverse.app 또는 tomverse.app/support로 접수할 수 있습니다." },
       ],
     },
     zh: {
       eyebrow: "公司",
-      title: "关于 Tomverse AI",
-      description: "Tomverse AI 面向希望比较快速变化的 AI 模型市场、但不想每周重建工作流程的用户。",
+      title: "关于 Tomverse Insight",
+      description: "Tomverse Insight 面向希望比较快速变化的 AI 模型市场、但不想每周重建工作流程的用户。",
       sections: [
         { title: "我们的使命", body: "让 AI 模型选择更实用、更透明，并真正服务于日常工作。" },
         { title: "产品理念", body: "我们更偏好冷静、专注的工具，而不是炫目的演示：比较模型、使用真实上下文、保护敏感对话，并保持输出可移植。" },
         { title: "方案和运营", body: "Tomverse 目前提供 Free、Pro 和 Max 方案，月付和年付订阅由 Stripe 处理。我们会继续改进账户控制、提供商覆盖、可靠性以及面向个人和商业用户的支持流程。" },
-        { title: "运营方和联系方式", body: "Tomverse AI 是 tomverse.app 的服务和运营名称。付费交易的法定销售方标示在 Stripe 结账页、收据或发票上。账户、账单、法律或产品问题可发送至 support@tomverse.app 或 tomverse.app/support。" },
+        { title: "运营方和联系方式", body: "Tomverse 是 tomverse.app 的服务和运营名称，旗下运营 Tomverse Insight 等 Tomverse 产品。付费交易的法定销售方标示在 Stripe 结账页、收据或发票上。账户、账单、法律或产品问题可发送至 support@tomverse.app 或 tomverse.app/support。" },
       ],
     },
   },

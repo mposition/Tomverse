@@ -133,7 +133,7 @@ export const chatWorkspaceGuideContent: Record<
       },
       {
         id: sectionIds.review,
-        title: "7. Use Tomverse AI Review",
+        title: "7. Use AI Review",
         description: "After two or three model answers complete, open AI Review, choose a review mode, check the estimated credits, and run the review.",
         items: [
           { term: "Balanced", detail: "Organizes agreements, important differences, omissions, contradictions, and practical usefulness." },

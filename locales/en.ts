@@ -1,6 +1,6 @@
 export const en = {
     sidebar: {
-        title: "Tomverse AI",
+        title: "Tomverse Insight",
         newChat: "New Chat",
         collapse: "Collapse sidebar",
         expand: "Expand sidebar",
@@ -340,7 +340,7 @@ export const en = {
         close: "Close",
         paymentSuccessfulEyebrow: "Payment successful",
         paymentSuccessfulTitle: "Your payment was completed successfully.",
-        paymentSuccessfulWelcome: "Welcome to the Tomverse AI family. You can now use broader allowances and advanced features in your {plan} workspace.",
+        paymentSuccessfulWelcome: "Welcome to the Tomverse Insight family. You can now use broader allowances and advanced features in your {plan} workspace.",
         testerPassActivatedEyebrow: "Tester Pass activated",
         testerPassActivatedTitle: "Your 60-day Founding Tester Pass is active.",
         testerPassActivatedWelcome: "You can now use the {plan} workspace as a Founding Tester.",

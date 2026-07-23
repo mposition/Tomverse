@@ -788,7 +788,7 @@ export function ChatSidebar({
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                         src="/tomverse-logo.png"
-                        alt="Tomverse AI"
+                        alt="Tomverse Insight"
                         className="h-full w-full object-cover"
                     />
                 </span>
@@ -833,12 +833,12 @@ export function ChatSidebar({
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                         src="/tomverse-logo.png"
-                        alt="Tomverse AI"
+                        alt="Tomverse Insight"
                         className="h-full w-full object-cover"
                     />
                 </span>
                 <h1 className={`${isMobileDrawer ? "text-sm" : "text-base"} font-bold tracking-tight text-zinc-800 dark:text-zinc-100`}>
-                    Tomverse AI
+                    Tomverse Insight
                 </h1>
                 <div className="ml-auto flex items-center gap-1">
                 {!isMobileDrawer && (

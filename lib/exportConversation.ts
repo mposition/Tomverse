@@ -34,7 +34,7 @@ export function formatConversationHeader(
     conversation: Pick<ExportConversation, "title" | "createdAt">
 ) {
     return [
-        "Tomverse AI Export",
+        "Tomverse Insight Export",
         `Conversation: ${conversation.title}`,
         `Created: ${formatDate(conversation.createdAt)}`,
         "",

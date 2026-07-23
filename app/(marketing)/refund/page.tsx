@@ -5,7 +5,7 @@ import { createPageMetadata } from "@/lib/seo";
 export const metadata = createPageMetadata({
   title: "Refund Policy",
   description:
-    "Review Tomverse AI refund eligibility, billing correction, cancellation, and support request guidance.",
+    "Review Tomverse Insight refund eligibility, billing correction, cancellation, and support request guidance.",
   path: "/refund",
 });
 
