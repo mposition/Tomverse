@@ -1,6 +1,13 @@
 export const ko = {
     sidebar: {
         title: "Tomverse Insight",
+        accountTooltip: "계정 및 플랜",
+        accountTooltipGuest: "로그인 또는 회원가입",
+        guestMenuTitle: "게스트 모드",
+        guestMenuDescription: "로그인하면 대화와 프로젝트를 여러 기기에서 이용할 수 있습니다.",
+        guestMenuCreateAccount: "무료 계정 만들기",
+        guestMenuViewPlans: "플랜 보기",
+        languageAndDisplay: "언어 및 화면 설정",
         newChat: "새 대화",
         collapse: "사이드바 접기",
         expand: "사이드바 펼치기",
@@ -248,6 +255,8 @@ export const ko = {
         promptReviewCode: "이 코드 검토하기",
         promptDraftEmail: "이메일 작성하기",
         promptAnalyzeImage: "이 이미지 분석하기",
+        formatPreserved: "서식 유지",
+        convertToPlainText: "일반 텍스트로 전환",
         guestLimitReachedTitle: "게스트 한도에 도달했습니다",
         guestLimitReachedBody: "저장된 대화, 공유, 다운로드, 첨부파일을 계속 사용하려면 로그인해 주세요.",
         accountLimitReachedTitle: "플랜 한도에 도달했습니다",

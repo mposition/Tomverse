@@ -1,6 +1,13 @@
 export const en = {
     sidebar: {
         title: "Tomverse Insight",
+        accountTooltip: "Account & plan",
+        accountTooltipGuest: "Log in or sign up",
+        guestMenuTitle: "Guest mode",
+        guestMenuDescription: "Log in to use your conversations and projects across devices.",
+        guestMenuCreateAccount: "Create a free account",
+        guestMenuViewPlans: "View plans",
+        languageAndDisplay: "Language & display",
         newChat: "New Chat",
         collapse: "Collapse sidebar",
         expand: "Expand sidebar",
@@ -248,6 +255,8 @@ export const en = {
         promptReviewCode: "Review this code",
         promptDraftEmail: "Draft an email",
         promptAnalyzeImage: "Analyze this image",
+        formatPreserved: "Format preserved",
+        convertToPlainText: "Switch to plain text",
         guestLimitReachedTitle: "Guest limit reached",
         guestLimitReachedBody: "Log in to continue with saved chats, sharing, downloads, and attachments.",
         accountLimitReachedTitle: "Plan limit reached",

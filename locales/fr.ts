@@ -3,6 +3,13 @@ import { en } from "./en";
 export const fr = {
     sidebar: {
         title: "Tomverse Insight",
+        accountTooltip: "Compte et forfait",
+        accountTooltipGuest: "Se connecter ou s'inscrire",
+        guestMenuTitle: "Mode invité",
+        guestMenuDescription: "Connectez-vous pour retrouver vos conversations et projets sur tous vos appareils.",
+        guestMenuCreateAccount: "Créer un compte gratuit",
+        guestMenuViewPlans: "Voir les forfaits",
+        languageAndDisplay: "Langue et affichage",
         newChat: "Nouveau chat",
         collapse: "Réduire la barre latérale",
         expand: "Développer la barre latérale",
@@ -212,6 +219,8 @@ export const fr = {
         promptReviewCode: "Relire ce code",
         promptDraftEmail: "Rédiger un e-mail",
         promptAnalyzeImage: "Analyser cette image",
+        formatPreserved: "Mise en forme conservée",
+        convertToPlainText: "Passer en texte brut",
         guestLimitReachedTitle: "Limite invité atteinte",
         guestLimitReachedBody: "Connectez-vous pour continuer avec les chats enregistrés, le partage, les téléchargements et les pièces jointes.",
         accountLimitReachedTitle: "Limite du forfait atteinte",

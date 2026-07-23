@@ -56,6 +56,10 @@ import {
     type ThemePreference,
 } from "@/lib/theme";
 import { openAnalyticsPreferences } from "@/lib/analyticsPreferencesEvents";
+import {
+    ACCOUNT_SETTINGS_OPEN_EVENT,
+    type AccountSettingsTab,
+} from "@/lib/accountSettingsEvents";
 
 type LoginMethod =
     | { type: "oauth"; provider: "google" | "azure-ad"; linked: boolean }
@@ -197,6 +201,18 @@ export function AuthButton({
         },
         []
     );
+
+    // Lets the collapsed sidebar rail's compact account button (which has no
+    // room for the full settings modal) open this same modal remotely.
+    useEffect(() => {
+        const handleOpenAccountSettings = (event: Event) => {
+            const tab = (event as CustomEvent<AccountSettingsTab>).detail || "account";
+            openSettingsTab(tab);
+        };
+        window.addEventListener(ACCOUNT_SETTINGS_OPEN_EVENT, handleOpenAccountSettings);
+        return () =>
+            window.removeEventListener(ACCOUNT_SETTINGS_OPEN_EVENT, handleOpenAccountSettings);
+    }, [openSettingsTab]);
 
     const fetchLoginMethods = useCallback(async () => {
         try {

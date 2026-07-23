@@ -82,6 +82,7 @@ import {
 import { CreditBreakdownSheet } from "@/components/chat/CreditBreakdownSheet";
 import { UsageLimitModal } from "@/components/chat/UsageLimitModal";
 import { getChatCreditAllocation } from "@/lib/chatCreditAllocation";
+import { looksLikeStructuredText } from "@/lib/structuredPasteDetection";
 
 type PublicModelStatus = "available" | "limited" | "unavailable";
 type PublicModelStatusRecord = {
@@ -415,6 +416,11 @@ export function ChatInput({
   );
   const [isUploading, setIsUploading] = useState(false);
   const [isDragActive, setIsDragActive] = useState(false);
+  const [preserveFormatting, setPreserveFormatting] = useState(false);
+  useEffect(() => {
+    if (value.trim()) return;
+    queueMicrotask(() => setPreserveFormatting(false));
+  }, [value]);
   const [showGuestQuickStart, setShowGuestQuickStart] = useState(false);
   const [dismissedSuggestionKey, setDismissedSuggestionKey] = useState<string | null>(null);
   const [isCreditBreakdownOpen, setIsCreditBreakdownOpen] = useState(false);
@@ -1319,7 +1325,13 @@ export function ChatInput({
     ) => {
         const pastedFiles = Array.from(event.clipboardData.files);
 
-        if (pastedFiles.length === 0) return;
+        if (pastedFiles.length === 0) {
+            const pastedText = event.clipboardData.getData("text/plain");
+            if (looksLikeStructuredText(pastedText)) {
+                setPreserveFormatting(true);
+            }
+            return;
+        }
 
         event.preventDefault();
 
@@ -1726,10 +1738,24 @@ export function ChatInput({
             </div>
           )}
           <div className="flex flex-col gap-2">
+        {preserveFormatting && (
+          <div className="flex items-center justify-between gap-2 rounded-lg bg-zinc-100 px-2 py-1 text-[11px] font-semibold text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
+            <span>{t("chat.formatPreserved")}</span>
+            <button
+              type="button"
+              data-testid="convert-to-plain-text"
+              onClick={() => setPreserveFormatting(false)}
+              className="shrink-0 rounded-md px-1.5 py-0.5 text-blue-600 transition hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/40"
+            >
+              {t("chat.convertToPlainText")}
+            </button>
+          </div>
+        )}
         <textarea
           data-testid="chat-textarea"
           ref={textareaRef}
           value={value}
+          wrap={preserveFormatting ? "off" : "soft"}
           onFocus={() => dismissGuestQuickStart("completed")}
           onChange={(e) => {
             if (e.target.value) dismissGuestQuickStart();
@@ -1741,7 +1767,7 @@ export function ChatInput({
           placeholder={placeholderText}
           disabled={isDisabled}
           rows={1}
-          className="w-full max-h-[92px] min-h-[36px] resize-none overflow-y-auto border-0 bg-transparent px-1 py-1.5 text-base leading-5 text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-500 md:max-h-[200px] md:min-h-[52px] md:py-2 md:text-sm md:leading-6"
+          className={`w-full max-h-[92px] min-h-[36px] resize-none overflow-y-auto border-0 bg-transparent px-1 py-1.5 text-base leading-5 text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-500 md:max-h-[200px] md:min-h-[52px] md:py-2 md:text-sm md:leading-6 ${preserveFormatting ? "overflow-x-auto whitespace-pre font-mono" : ""}`}
         />
         <div className="relative flex items-center justify-between gap-1.5" ref={menuRef}>
         <div className="flex shrink-0 items-center gap-1.5">

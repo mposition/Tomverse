@@ -3,6 +3,7 @@
 import { Conversation } from "./types";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { AuthButton } from "@/components/auth/AuthButton";
+import { SidebarAccountRailButton } from "@/components/chat/SidebarAccountRailButton";
 import { useCallback, useState, useEffect, useId, useRef, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { useLanguage } from "@/components/LanguageProvider";
@@ -820,6 +821,9 @@ export function ChatSidebar({
                 >
                     <Search className="h-4 w-4" aria-hidden="true" />
                 </button>
+                <div className="mt-auto w-8 border-t border-zinc-200 pt-3 dark:border-zinc-800">
+                    <SidebarAccountRailButton accountUsage={accountUsage} />
+                </div>
             </aside>
         );
     }

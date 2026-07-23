@@ -1,6 +1,13 @@
 export const zh = {
     sidebar: {
         title: "Tomverse Insight",
+        accountTooltip: "账户与套餐",
+        accountTooltipGuest: "登录或注册",
+        guestMenuTitle: "访客模式",
+        guestMenuDescription: "登录后可在多台设备上使用你的对话和项目。",
+        guestMenuCreateAccount: "创建免费账户",
+        guestMenuViewPlans: "查看套餐",
+        languageAndDisplay: "语言与显示设置",
         newChat: "新建对话",
         collapse: "收起侧边栏",
         expand: "展开侧边栏",
@@ -209,6 +216,8 @@ export const zh = {
         promptReviewCode: "审查这段代码",
         promptDraftEmail: "撰写邮件",
         promptAnalyzeImage: "分析这张图片",
+        formatPreserved: "已保留格式",
+        convertToPlainText: "切换为纯文本",
         guestLimitReachedTitle: "已达到访客限额",
         guestLimitReachedBody: "登录后可继续使用已保存对话、分享、下载和附件。",
         accountLimitReachedTitle: "已达到方案限额",
