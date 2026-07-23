@@ -2098,10 +2098,6 @@ export default function Home() {
   const toggleModel = (modelId: string) => {
     const model = getModel(modelId);
     const isSelected = selectedModels.includes(modelId);
-    if (isGuestMode && !isSelected && selectedModels.length >= 1) {
-      setShowGuestSignInPrompt(true);
-      return false;
-    }
     if (
       !isSelected &&
       (!model || !canUseModelWithPlan(currentAccessPlan, model))

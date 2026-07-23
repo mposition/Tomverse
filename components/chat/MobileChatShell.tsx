@@ -129,28 +129,17 @@ export function MobileChatShell({
   const [modelStatuses, setModelStatuses] = useState<Record<string, ModelRuntimeStatus>>({});
   const [modelEmptyStates, setModelEmptyStates] = useState<Record<string, boolean>>({});
   const [modeSheet, setModeSheet] = useState<"guest" | "private" | null>(null);
-  // Guests can't freely re-add a model once removed (toggleModel in
-  // chat/page.tsx sends any guest "add" attempt straight to the sign-in
-  // prompt once they already have one model selected, which is virtually
-  // always), so removal needs an explicit confirmation for them. Signed-in
-  // users can always re-add a model, so they get an immediate remove with
-  // an Undo toast instead.
-  const [guestRemoveModelId, setGuestRemoveModelId] = useState<string | null>(null);
 
   const handleTabRemoveClick = useCallback(
     (modelId: string) => {
-      if (!isGuestMode) {
-        const model = AVAILABLE_MODELS.find((item) => item.id === modelId);
-        onToggleModel(modelId);
-        onRequestUndoToast(
-          t("chat.modelRemovedUndo").replace("{model}", model?.name || modelId),
-          () => onToggleModel(modelId)
-        );
-        return;
-      }
-      setGuestRemoveModelId(modelId);
+      const model = AVAILABLE_MODELS.find((item) => item.id === modelId);
+      onToggleModel(modelId);
+      onRequestUndoToast(
+        t("chat.modelRemovedUndo").replace("{model}", model?.name || modelId),
+        () => onToggleModel(modelId)
+      );
     },
-    [AVAILABLE_MODELS, isGuestMode, onRequestUndoToast, onToggleModel, t]
+    [AVAILABLE_MODELS, onRequestUndoToast, onToggleModel, t]
   );
   const resolvedActiveModelId =
     activeModelId && selectedModels.includes(activeModelId)
@@ -457,50 +446,6 @@ export function MobileChatShell({
           </div>
         </div>
       )}
-      {guestRemoveModelId && (() => {
-        const removeModel = AVAILABLE_MODELS.find((item) => item.id === guestRemoveModelId);
-        return (
-          <div
-            className="fixed inset-0 z-[80] flex items-end justify-center bg-black/50"
-            onClick={() => setGuestRemoveModelId(null)}
-          >
-            <div
-              role="dialog"
-              aria-modal="true"
-              aria-label={t("chat.confirmRemoveModelTitle").replace("{model}", removeModel?.name || guestRemoveModelId)}
-              className="w-full max-w-md rounded-t-3xl bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] dark:bg-zinc-900"
-              onClick={(event) => event.stopPropagation()}
-            >
-              <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-zinc-200 dark:bg-zinc-700" />
-              <p className="text-base font-bold text-zinc-900 dark:text-zinc-100">
-                {t("chat.confirmRemoveModelTitle").replace("{model}", removeModel?.name || guestRemoveModelId)}
-              </p>
-              <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-                {t("chat.confirmRemoveModelGuestBody")}
-              </p>
-              <div className="mt-4 flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setGuestRemoveModelId(null)}
-                  className="flex-1 rounded-xl border border-zinc-200 py-2.5 text-sm font-bold text-zinc-700 dark:border-zinc-700 dark:text-zinc-200"
-                >
-                  {t("chat.keepModel")}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onToggleModel(guestRemoveModelId);
-                    setGuestRemoveModelId(null);
-                  }}
-                  className="flex-1 rounded-xl bg-red-600 py-2.5 text-sm font-bold text-white"
-                >
-                  {t("chat.removeModelFromComparison")}
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
 
       {!isConversationEmpty && selectedModels.length > 1 && currentChatId && (
         <div className={`grid shrink-0 gap-2 border-b border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950 ${!isGuestMode && currentChatId !== "private-chat" ? "grid-cols-2" : "grid-cols-1"}`}>
