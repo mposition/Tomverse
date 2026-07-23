@@ -607,7 +607,7 @@ export function AuthButton({
                 throw new Error(data?.error || `Delete failed: ${response.status}`);
             }
             dispatchAppToast(t("auth.deleteAllChatsSuccess"), "success");
-            window.location.href = "/chat";
+            window.location.href = chatCallbackUrl;
         } catch {
             dispatchAppToast(t("auth.deleteAllChatsFailed"), "error");
         } finally {
