@@ -20,7 +20,6 @@ import {
 import { useLanguage } from "@/components/LanguageProvider";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import {
-  CheckCircle2,
   Lock,
   Menu,
   Share2,
@@ -126,6 +125,44 @@ export function MobileChatShell({
   const [modelStatuses, setModelStatuses] = useState<Record<string, ModelRuntimeStatus>>({});
   const [modelEmptyStates, setModelEmptyStates] = useState<Record<string, boolean>>({});
   const [modeSheet, setModeSheet] = useState<"guest" | "private" | null>(null);
+  // Guests can't freely re-add a model once removed (toggleModel in
+  // chat/page.tsx sends any guest "add" attempt straight to the sign-in
+  // prompt once they already have one model selected, which is virtually
+  // always), so removing a tab is a one-way door for them for the rest of
+  // the session. Require a second tap within a few seconds before it
+  // actually happens; signed-in users (who can always re-add) remove on
+  // the first tap.
+  const [armedRemoveModelId, setArmedRemoveModelId] = useState<string | null>(null);
+  const armedRemoveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (armedRemoveTimeoutRef.current) clearTimeout(armedRemoveTimeoutRef.current);
+    };
+  }, []);
+
+  const handleTabRemoveClick = useCallback(
+    (modelId: string) => {
+      if (!isGuestMode) {
+        onToggleModel(modelId);
+        return;
+      }
+      if (armedRemoveTimeoutRef.current) {
+        clearTimeout(armedRemoveTimeoutRef.current);
+        armedRemoveTimeoutRef.current = null;
+      }
+      if (armedRemoveModelId === modelId) {
+        setArmedRemoveModelId(null);
+        onToggleModel(modelId);
+        return;
+      }
+      setArmedRemoveModelId(modelId);
+      armedRemoveTimeoutRef.current = setTimeout(() => {
+        setArmedRemoveModelId(null);
+      }, 3000);
+    },
+    [armedRemoveModelId, isGuestMode, onToggleModel]
+  );
   const resolvedActiveModelId =
     activeModelId && selectedModels.includes(activeModelId)
       ? activeModelId
@@ -262,9 +299,6 @@ export function MobileChatShell({
     : bottomInputSlot ?? welcomeInputSlot;
   const isCurrentLocked = Boolean(currentConversation?.isLocked);
   const isCurrentShared = Boolean(currentConversation?.shareEnabled);
-  const activeStatus = resolvedActiveModelId
-    ? modelStatuses[resolvedActiveModelId]
-    : "idle";
   const respondingCount = selectedModels.filter((modelId) => {
     const status = modelStatuses[modelId];
     return status === "responding" || status === "loading";
@@ -337,18 +371,6 @@ export function MobileChatShell({
               {t("sidebar.sharedBadge")}
             </span>
           )}
-          {resolvedActiveModelId && selectedModels.length > 1 && (
-            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-zinc-100 px-2 py-1 text-[10px] font-bold text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
-              {isAnyResponding ? (
-                <span className="h-2 w-2 animate-pulse rounded-full bg-blue-500" />
-              ) : activeStatus === "error" ? (
-                <span className="h-2 w-2 rounded-full bg-red-500" />
-              ) : (
-                <CheckCircle2 className="h-3 w-3" />
-              )}
-              {activeModel?.name || t("chat.modelSelect")}
-            </span>
-          )}
           {isAnyWorkingOrError && selectedModels.length > 1 && (
             <span
               className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-[10px] font-bold ${
@@ -387,43 +409,71 @@ export function MobileChatShell({
       <ProviderStatusBanner selectedModels={selectedModels} compact onToggleModel={onToggleModel} />
 
       {!isConversationEmpty && selectedModels.length > 1 && (
-        <div className="min-w-0 shrink-0 overflow-x-auto overscroll-x-contain border-b border-zinc-200 bg-zinc-50 px-3 py-1.5 dark:border-zinc-800 dark:bg-zinc-900/60">
-          <div className="flex min-w-max gap-2" role="tablist" aria-label={t("chat.modelSelect")}>
+        <div className="shrink-0 border-b border-zinc-200 bg-zinc-50 px-2 py-1.5 dark:border-zinc-800 dark:bg-zinc-900/60">
+          <div className="flex min-w-0 gap-1.5" role="tablist" aria-label={t("chat.modelSelect")}>
             {selectedModels.map((modelId) => {
               const model = AVAILABLE_MODELS.find((item) => item.id === modelId);
               const isActive = resolvedActiveModelId === modelId;
               const isDisabled = disabledPanels.includes(modelId);
               const status = isDisabled ? "paused" : modelStatuses[modelId] || "idle";
+              const isArmed = armedRemoveModelId === modelId;
 
               return (
-                <button
+                <div
                   key={modelId}
-                  type="button"
-                  data-testid="mobile-model-tab"
-                  data-model-id={modelId}
-                  onClick={() => setActiveModelId(modelId)}
                   role="tab"
                   aria-selected={isActive}
-                  aria-label={`${model?.name || modelId} ${status}`}
-                  className={`relative flex h-8 max-w-[72vw] touch-manipulation items-center gap-2 rounded-full border px-2.5 text-[11px] font-semibold shadow-sm transition-colors ${
+                  className={`relative flex h-9 min-w-0 flex-1 touch-manipulation items-center rounded-full border shadow-sm transition-colors ${
                     isActive
                       ? "border-blue-500 bg-blue-600 text-white"
                       : "border-zinc-200 bg-white text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300"
                   } ${isDisabled ? "opacity-50" : ""}`}
                 >
-                  <ModelLogo model={model} size="xs" />
-                  <span className="truncate">{model?.name || modelId}</span>
-                  {status === "responding" || status === "loading" ? (
-                    <span className={`h-2 w-2 animate-pulse rounded-full ${isActive ? "bg-white" : "bg-blue-500"}`} />
-                  ) : status === "error" ? (
-                    <span className="h-2 w-2 rounded-full bg-red-500" />
-                  ) : status === "paused" ? (
-                    <span className="text-[10px]">OFF</span>
-                  ) : null}
-                </button>
+                  <button
+                    type="button"
+                    data-testid="mobile-model-tab"
+                    data-model-id={modelId}
+                    onClick={() => setActiveModelId(modelId)}
+                    aria-label={`${model?.name || modelId} ${status}`}
+                    className="flex min-w-0 flex-1 items-center gap-1 py-1 pl-2.5 pr-1 text-left text-[11px] font-semibold"
+                  >
+                    <ModelLogo model={model} size="xs" />
+                    <span className="min-w-0 flex-1 truncate">{model?.name || modelId}</span>
+                    {status === "responding" || status === "loading" ? (
+                      <span className={`h-2 w-2 shrink-0 animate-pulse rounded-full ${isActive ? "bg-white" : "bg-blue-500"}`} />
+                    ) : status === "error" ? (
+                      <span className="h-2 w-2 shrink-0 rounded-full bg-red-500" />
+                    ) : status === "paused" ? (
+                      <span className="shrink-0 text-[9px]">OFF</span>
+                    ) : null}
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="mobile-model-tab-remove"
+                    aria-label={t("chat.removeModelFromComparison")}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      handleTabRemoveClick(modelId);
+                    }}
+                    className={`mr-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full transition-colors ${
+                      isArmed
+                        ? "bg-red-600 text-white"
+                        : isActive
+                          ? "text-white/80 hover:bg-white/20"
+                          : "text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800"
+                    }`}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
               );
             })}
           </div>
+          {armedRemoveModelId && (
+            <p className="mt-1 text-center text-[10px] font-semibold text-red-600 dark:text-red-300">
+              {t("chat.confirmRemoveModelFromComparison")}
+            </p>
+          )}
         </div>
       )}
 

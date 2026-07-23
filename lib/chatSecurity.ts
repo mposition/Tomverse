@@ -1275,15 +1275,27 @@ export const acquireChatAccess = async (
                 amount
             );
             if (!allowed) {
+                const retryAfterSeconds = retryAfterFor(
+                    rule.period,
+                    now,
+                    rule.period === "day" ? accessDayWindow.end : undefined
+                );
+                // A brief per-minute rate limit and a genuine day/month quota
+                // exhaustion need different client responses (wait-and-retry
+                // vs. a login/upgrade prompt for guests), so they get distinct
+                // codes here -- matching the CHAT_RATE_LIMITED naming already
+                // used for the same distinction in preflightChatComparisonAccess
+                // above -- instead of collapsing everything into
+                // CHAT_QUOTA_EXCEEDED regardless of which period tripped.
+                const isRateLimit = rule.period === "minute";
                 throw new ChatAccessError(
                     429,
-                    "CHAT_QUOTA_EXCEEDED",
-                    "AI response credit limit exceeded.",
-                    retryAfterFor(
-                        rule.period,
-                        now,
-                        rule.period === "day" ? accessDayWindow.end : undefined
-                    )
+                    isRateLimit ? "CHAT_RATE_LIMITED" : "CHAT_QUOTA_EXCEEDED",
+                    isRateLimit
+                        ? "Chat request rate limit exceeded."
+                        : "AI response credit limit exceeded.",
+                    retryAfterSeconds,
+                    { period: rule.period, retryAfterSeconds }
                 );
             }
             if (rule.period !== "minute") {

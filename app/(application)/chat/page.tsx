@@ -1807,6 +1807,7 @@ export default function Home() {
     }
     if (
       isGuestMode &&
+      !isSelected &&
       !clampGuestSelectedModels([modelId]).includes(modelId)
     ) {
       return false;

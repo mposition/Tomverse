@@ -520,6 +520,11 @@ export function ChatMessageList({
                             </span>
                           )}
                         </div>
+                        {errorCategory === "quota" && isGuestMode && (
+                          <p className="mt-2 text-xs leading-5 text-red-600/80 dark:text-red-200/80">
+                            {t("chat.guestQuotaLoginBenefitHint")}
+                          </p>
+                        )}
                       </div>
                     );
                   })()}

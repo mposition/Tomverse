@@ -520,8 +520,19 @@ function ChatAppComponent({
         }
         const errorCode =
           typeof requestError.code === "string" ? requestError.code : "";
+        const retryAfterSeconds =
+          requestError.details &&
+          typeof requestError.details === "object" &&
+          typeof (requestError.details as Record<string, unknown>).retryAfterSeconds === "number"
+            ? (requestError.details as Record<string, number>).retryAfterSeconds
+            : null;
         const localizedRequestError =
-          errorCode === "CREDIT_BALANCE_INSUFFICIENT" ||
+          errorCode === "CHAT_RATE_LIMITED"
+            ? t("chat.tooManyRequestsRetry").replace(
+                "{seconds}",
+                String(Math.max(1, retryAfterSeconds ?? 5))
+              )
+            : errorCode === "CREDIT_BALANCE_INSUFFICIENT" ||
           errorCode === "CREDIT_COST_ALLOWANCE_INSUFFICIENT"
             ? t("chat.comparisonCreditsInsufficient")
             : errorCode === "INTERNAL_DAILY_COST_SAFETY_LIMIT"
