@@ -297,10 +297,29 @@ export function AuthButton({
                     dispatchAppToast(t("auth.removeLoginMethodBlocked"), "error");
                     return;
                 }
+                if (response.status === 401) {
+                    // A previous removal (this tab or another) already
+                    // invalidated every session for this account, so this
+                    // request never even reached the remove logic -- there's
+                    // no live session left to keep working with.
+                    dispatchAppToast(t("auth.removeLoginMethodSignedOut"), "info");
+                    await signOut({
+                        callbackUrl: `/auth/signin?callbackUrl=${encodeURIComponent(chatCallbackUrl)}`,
+                    });
+                    return;
+                }
                 throw new Error(`Remove failed: ${response.status}`);
             }
+            // A successful removal (whether this request performed it or a
+            // concurrent one beat it to it) just invalidated every session
+            // for this account, including this browser's own. Sign out
+            // immediately instead of making another authenticated call
+            // (e.g. fetchLoginMethods) that would now 401 and look like the
+            // removal itself failed.
             dispatchAppToast(t("auth.removeLoginMethodSuccess"), "success");
-            await fetchLoginMethods();
+            await signOut({
+                callbackUrl: `/auth/signin?callbackUrl=${encodeURIComponent(chatCallbackUrl)}`,
+            });
         } catch {
             dispatchAppToast(t("auth.removeLoginMethodFailed"), "error");
         } finally {

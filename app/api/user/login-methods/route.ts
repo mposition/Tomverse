@@ -14,12 +14,10 @@ import {
   assertRecentAdminAuthentication,
   isAdminReauthenticationError,
 } from "@/lib/adminReauthentication";
-import { revokeAllUserSessions } from "@/lib/sessionSecurity";
 import { logSecurityAuditEvent } from "@/lib/securityAudit";
 import { sendLoginMethodChangedEmail } from "@/lib/emailLoginEmails";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
-
-type LoginMethodProvider = "google" | "azure-ad" | "email";
+import { removeLoginMethod, type LoginMethodProvider } from "@/lib/loginMethodsCore";
 
 export async function GET(req: Request) {
   try {
@@ -84,42 +82,23 @@ export async function DELETE(req: Request) {
     });
     await assertRecentAdminAuthentication(session);
     const body = await readLimitedJson(req, 1_024, removeSchema);
+    const userId = session.user.id;
 
-    const [accounts, user] = await Promise.all([
-      prisma.account.findMany({
-        where: { userId: session.user.id },
-        select: { provider: true },
-      }),
-      prisma.user.findUnique({
-        where: { id: session.user.id },
-        select: { emailLoginEnabled: true, email: true },
-      }),
-    ]);
-    const linkedProviders = new Set(accounts.map((account) => account.provider));
-    const enabledCount = linkedProviders.size + (user?.emailLoginEnabled && user.email ? 1 : 0);
-    const removingEnabledMethod =
-      body.method === "email" ? Boolean(user?.emailLoginEnabled) : linkedProviders.has(body.method);
-    if (removingEnabledMethod && enabledCount <= 1) {
+    const outcome = await removeLoginMethod(userId, body.method);
+
+    if (outcome === "blocked") {
       return NextResponse.json(
         { error: "At least one login method is required." },
         { status: 409 }
       );
     }
 
-    if (body.method === "email") {
-      await prisma.user.update({
-        where: { id: session.user.id },
-        data: { emailLoginEnabled: false },
-      });
-    } else {
-      await prisma.account.deleteMany({
-        where: { userId: session.user.id, provider: body.method },
-      });
+    if (outcome === "already-removed") {
+      return NextResponse.json({ success: true, changed: false });
     }
-    await revokeAllUserSessions(session.user.id);
 
     logSecurityAuditEvent("auth.login_method.remove", {
-      userId: session.user.id,
+      userId,
       provider: body.method,
       outcome: "success",
     });
@@ -142,7 +121,7 @@ export async function DELETE(req: Request) {
       }
     });
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, changed: true });
   } catch (error) {
     if (isAdminReauthenticationError(error)) {
       return NextResponse.json(
