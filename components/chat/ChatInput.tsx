@@ -171,14 +171,6 @@ const ACCEPTED_FILE_TYPES = [
   ...Object.keys(OFFICE_EXTENSION_TYPES).map((extension) => `.${extension}`),
 ].join(",");
 
-const PROMPT_SUGGESTIONS = [
-  "chat.promptSummarizeDocument",
-  "chat.promptCompareModels",
-  "chat.promptReviewCode",
-  "chat.promptDraftEmail",
-  "chat.promptAnalyzeImage",
-];
-
 const getProviderSortRank = (provider: string) => {
   const priorityIndex = PROVIDER_DISPLAY_ORDER.indexOf(provider);
   return priorityIndex === -1 ? PROVIDER_DISPLAY_ORDER.length : priorityIndex;
@@ -296,7 +288,6 @@ type ChatInputProps = {
   guestMessageCount?: number;
   maxGuestMessages?: number;
   onToggleModel: (modelId: string) => boolean;
-  onQuickCompare?: () => void;
   attachments: ChatAttachment[];
   onAttachmentsChange: (attachments: ChatAttachment[]) => void;
   canAttach?: boolean;
@@ -398,7 +389,6 @@ export function ChatInput({
   guestMessageCount = 0,
   maxGuestMessages = 20,
   onToggleModel,
-  onQuickCompare,
   attachments,
   onAttachmentsChange,
   canAttach: canAttachProp = true,
@@ -1585,36 +1575,18 @@ export function ChatInput({
               </p>
             </div>
           )}
-          {isNewConversation && !value.trim() && attachments.length === 0 && (
+          {isNewConversation && !value.trim() && attachments.length === 0 && personalizedPrompt && (
             <div className="mb-2 flex max-w-full gap-2 overflow-x-auto overscroll-x-contain pb-1 md:flex-wrap md:overflow-visible md:pb-0">
-              {personalizedPrompt && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    dismissGuestQuickStart();
-                    onChange(personalizedPrompt);
-                  }}
-                  className="shrink-0 touch-manipulation rounded-full border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700 transition-colors hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-200 dark:hover:bg-blue-950/60"
-                >
-                  {personalizedPrompt}
-                </button>
-              )}
-              {PROMPT_SUGGESTIONS.slice(0, guestPreviewMode ? 3 : undefined).map((suggestion) => (
-                <button
-                  key={suggestion}
-                  type="button"
-                  onClick={() => {
-                    dismissGuestQuickStart();
-                    onChange(t(suggestion));
-                    if (suggestion === "chat.promptCompareModels") {
-                      onQuickCompare?.();
-                    }
-                  }}
-                  className="shrink-0 touch-manipulation rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs font-semibold text-zinc-600 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                >
-                  {t(suggestion)}
-                </button>
-              ))}
+              <button
+                type="button"
+                onClick={() => {
+                  dismissGuestQuickStart();
+                  onChange(personalizedPrompt);
+                }}
+                className="shrink-0 touch-manipulation rounded-full border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700 transition-colors hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-200 dark:hover:bg-blue-950/60"
+              >
+                {personalizedPrompt}
+              </button>
             </div>
           )}
           {showContextualSuggestion &&

@@ -59,7 +59,6 @@ type DesktopChatShellProps = {
   onDownload: (id: string, title: string) => void;
   onTogglePrivateMode: () => void;
   onToggleModel: (modelId: string) => boolean;
-  onQuickCompare?: () => void;
   onSubmit: () => void;
   onBeforeModelSend: (chatId: string) => Promise<boolean>;
   onChangePanelModel: (oldModelId: string, newModelId: string) => void;
@@ -101,7 +100,6 @@ export function DesktopChatShell({
   onDownload,
   onTogglePrivateMode,
   onToggleModel,
-  onQuickCompare,
   onSubmit,
   onBeforeModelSend,
   onChangePanelModel,
@@ -411,7 +409,6 @@ export function DesktopChatShell({
               selectedModels={selectedModels}
               disabledModelIds={disabledPanels}
               onToggleModel={onToggleModel}
-              onQuickCompare={onQuickCompare}
               attachments={attachments}
               onAttachmentsChange={setAttachments}
               canAttach={!isGuestMode}

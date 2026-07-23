@@ -68,7 +68,6 @@ type MobileChatShellProps = {
   onDownload: (id: string, title: string) => void;
   onTogglePrivateMode: () => void;
   onToggleModel: (modelId: string) => boolean;
-  onQuickCompare?: () => void;
   onSubmit: () => void;
   onBeforeModelSend: (chatId: string) => Promise<boolean>;
   onCompareSummary: () => void;
@@ -106,7 +105,6 @@ export function MobileChatShell({
   onDownload,
   onTogglePrivateMode,
   onToggleModel,
-  onQuickCompare,
   onSubmit,
   onBeforeModelSend,
   onCompareSummary,
@@ -575,7 +573,6 @@ export function MobileChatShell({
             selectedModels={selectedModels}
             disabledModelIds={disabledPanels}
             onToggleModel={onToggleModel}
-            onQuickCompare={onQuickCompare}
             attachments={attachments}
             onAttachmentsChange={setAttachments}
             canAttach={!isGuestMode}

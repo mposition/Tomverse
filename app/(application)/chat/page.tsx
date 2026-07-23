@@ -19,7 +19,6 @@ import {
   GUEST_BRAND_TRIO_MODEL_IDS,
   GUEST_FALLBACK_MODEL_IDS,
 } from "@/lib/appDefaults";
-import { RECOMMENDED_MODEL_IDS } from "@/lib/modelPickerPresentation";
 import {
   canUseModelWithPlan,
   getModelUsageProfile,
@@ -1840,20 +1839,6 @@ export default function Home() {
     return true;
   };
 
-  const handleQuickCompare = () => {
-    // Guests already default to a 3-model comparison; the existing
-    // sign-in-gated toggleModel() already covers "guest wants to add more",
-    // so this quick action only needs to act for signed-in users.
-    if (isGuestMode) return;
-    const nextModels = clampSelectedModels(
-      uniqueStrings([...selectedModels, ...RECOMMENDED_MODEL_IDS])
-    ).slice(0, maxSelectableModels);
-    setSelectedModels(nextModels);
-    if (currentChatId && currentChatId !== "private-chat") {
-      syncModelSettingsToServer(currentChatId, nextModels, disabledPanels);
-    }
-  };
-
   const handleModelFinderComplete = ({
       defaultModelId,
       optionalModelId,
@@ -2134,7 +2119,6 @@ export default function Home() {
           onDownload={handleDownloadConversation}
           onTogglePrivateMode={togglePrivateModeGlobal}
           onToggleModel={toggleModel}
-          onQuickCompare={handleQuickCompare}
           onSubmit={handleGlobalSubmit}
           onBeforeModelSend={ensureModelSettingsReady}
           onCompareSummary={handleCompareSummary}
@@ -2178,7 +2162,6 @@ export default function Home() {
           onDownload={handleDownloadConversation}
           onTogglePrivateMode={togglePrivateModeGlobal}
           onToggleModel={toggleModel}
-          onQuickCompare={handleQuickCompare}
           onSubmit={handleGlobalSubmit}
           onBeforeModelSend={ensureModelSettingsReady}
           onChangePanelModel={changePanelModel}
