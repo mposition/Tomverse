@@ -531,6 +531,8 @@ export const fr = {
         accountDangerZoneDescription: "La suppression du compte devient définitive après un délai de sécurité de 7 jours.",
         dataExportTitle: "Exporter vos conversations",
         dataExportDescription: "Téléchargez l'historique disponible sous forme d'archive texte. Les chats verrouillés sont exclus jusqu'à leur déverrouillage.",
+        guestImportSectionTitle: "Importer les conversations invité de ce navigateur",
+        guestImportSectionDisclaimer: "Si vous effacez les données de votre navigateur ou utilisez un autre navigateur ou appareil, les conversations invité ne pourront pas être récupérées.",
         currentPlan: "Abonnement actuel",
         freePlan: "Espace gratuit",
         proPlan: "Espace Pro",

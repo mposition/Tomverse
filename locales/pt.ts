@@ -531,6 +531,8 @@ export const pt = {
         accountDangerZoneDescription: "A exclusão da conta se torna permanente após um período de segurança de 7 dias.",
         dataExportTitle: "Exportar suas conversas",
         dataExportDescription: "Baixe seu histórico disponível como arquivo de texto. Chats bloqueados são excluídos até serem desbloqueados.",
+        guestImportSectionTitle: "Importar as conversas de convidado deste navegador",
+        guestImportSectionDisclaimer: "Se você limpar os dados do navegador ou usar outro navegador ou dispositivo, as conversas de convidado não poderão ser recuperadas.",
         currentPlan: "Plano atual",
         freePlan: "Workspace gratuito",
         proPlan: "Workspace Pro",

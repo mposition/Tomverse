@@ -60,6 +60,8 @@ import {
     ACCOUNT_SETTINGS_OPEN_EVENT,
     type AccountSettingsTab,
 } from "@/lib/accountSettingsEvents";
+import { listImportableGuestConversations } from "@/lib/guestImport";
+import { openGuestImportModal } from "@/lib/guestImportModalEvents";
 
 type LoginMethod =
     | { type: "oauth"; provider: "google" | "azure-ad"; linked: boolean }
@@ -1224,6 +1226,20 @@ export function AuthButton({
 
                                 {activeSettingsTab === "data" && (
                                     <div className="space-y-4">
+                                        {listImportableGuestConversations().length > 0 && (
+                                            <section className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950/60">
+                                                <h4 className="text-sm font-bold">{t("auth.guestImportSectionTitle")}</h4>
+                                                <p className="mt-1 text-sm leading-6 text-zinc-500">{t("auth.guestImportSectionDisclaimer")}</p>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => openGuestImportModal()}
+                                                    className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-3 text-sm font-semibold text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                                                >
+                                                    <Database className="h-4 w-4" />
+                                                    {t("auth.guestImportSectionTitle")}
+                                                </button>
+                                            </section>
+                                        )}
                                         <section className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950/60">
                                             <h4 className="text-sm font-bold">{t("auth.dataExportTitle")}</h4>
                                             <p className="mt-1 text-sm leading-6 text-zinc-500">{t("auth.dataExportDescription")}</p>

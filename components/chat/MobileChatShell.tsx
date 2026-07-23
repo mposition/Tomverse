@@ -645,6 +645,7 @@ export function MobileChatShell({
             focusToken={focusToken}
             isNewConversation={isActiveConversationEmpty}
             isPrivateMode={isPrivateMode}
+            currentChatId={currentChatId}
             selectedModels={selectedModels}
             disabledModelIds={disabledPanels}
             onToggleModel={onToggleModel}

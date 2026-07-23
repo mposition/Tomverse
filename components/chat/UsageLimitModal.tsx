@@ -6,6 +6,7 @@ import { useLanguage } from "@/components/LanguageProvider";
 import { CreditPackPurchaseButton } from "@/components/billing/CreditPackPurchaseButton";
 import { UpgradeCtaLink } from "@/components/billing/UpgradeCtaLink";
 import type { UserPlan } from "@/components/chat/useUserUsage";
+import { writePendingGuestImportIntent } from "@/lib/guestImport";
 
 const interpolateCopy = (
   template: string,
@@ -30,6 +31,7 @@ type UsageLimitModalProps = {
   totalAvailableCredits: number;
   creditShortfall: number;
   signInCallbackUrl: string;
+  currentChatId?: string | null;
 };
 
 export function UsageLimitModal({
@@ -46,6 +48,7 @@ export function UsageLimitModal({
   totalAvailableCredits,
   creditShortfall,
   signInCallbackUrl,
+  currentChatId,
 }: UsageLimitModalProps) {
   const { t, lang } = useLanguage();
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -127,9 +130,13 @@ export function UsageLimitModal({
           {isGuestMode ? (
             <a
               href={`/auth/signin?callbackUrl=${encodeURIComponent(signInCallbackUrl)}`}
-              className="flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-black text-white transition hover:bg-blue-500"
+              onClick={() => currentChatId && writePendingGuestImportIntent(currentChatId)}
+              className="flex flex-col items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-center text-white transition hover:bg-blue-500"
             >
-              {t("auth.login")}
+              <span className="text-sm font-black">{t("chat.continueConversationCta")}</span>
+              <span className="mt-0.5 text-xs font-medium text-blue-100">
+                {t("chat.continueConversationCtaSubtext")}
+              </span>
             </a>
           ) : (
             <>

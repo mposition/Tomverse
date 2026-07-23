@@ -531,6 +531,8 @@ export const es = {
         accountDangerZoneDescription: "Eliminar tu cuenta es permanente tras un período de seguridad de 7 días.",
         dataExportTitle: "Exportar tus conversaciones",
         dataExportDescription: "Descarga tu historial disponible como archivo de texto. Los chats bloqueados se excluyen hasta desbloquearse.",
+        guestImportSectionTitle: "Importar las conversaciones de invitado de este navegador",
+        guestImportSectionDisclaimer: "Si borras los datos del navegador o usas otro navegador o dispositivo, las conversaciones de invitado no se podrán recuperar.",
         currentPlan: "Plan actual",
         freePlan: "Espacio gratuito",
         proPlan: "Espacio Pro",

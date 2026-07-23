@@ -46,6 +46,7 @@ import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { useLanguage } from "@/components/LanguageProvider";
 import { dispatchAppToast } from "@/lib/appToast";
+import { writePendingGuestImportIntent } from "@/lib/guestImport";
 import { getModelExperienceStatus } from "@/lib/modelExperience";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import {
@@ -302,6 +303,7 @@ type ChatInputProps = {
   focusToken?: number;
   isNewConversation?: boolean;
   isPrivateMode?: boolean;
+  currentChatId?: string | null;
   selectedModels: string[];
   disabledModelIds?: string[];
   guestMessageCount?: number;
@@ -404,6 +406,7 @@ export function ChatInput({
   focusToken,
   isNewConversation = true,
   isPrivateMode = false,
+  currentChatId = null,
   selectedModels,
   disabledModelIds = [],
   guestMessageCount = 0,
@@ -1646,7 +1649,10 @@ export function ChatInput({
                 {t("onboarding.privateBody")}{" "}
                 <a
                   href={`/auth/signin?callbackUrl=${encodeURIComponent(signInCallbackUrl)}`}
-                  onClick={() => dismissGuestQuickStart("completed")}
+                  onClick={() => {
+                    dismissGuestQuickStart("completed");
+                    if (currentChatId) writePendingGuestImportIntent(currentChatId);
+                  }}
                   className="font-black underline underline-offset-2"
                 >
                   {t("auth.login")}
@@ -2609,6 +2615,7 @@ export function ChatInput({
         totalAvailableCredits={totalAvailableCredits}
         creditShortfall={creditShortfall}
         signInCallbackUrl={signInCallbackUrl}
+        currentChatId={currentChatId}
       />
     </div>
   );

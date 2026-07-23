@@ -531,6 +531,8 @@ export const de = {
         accountDangerZoneDescription: "Die Kontolöschung wird nach einer 7-tägigen Sicherheitsfrist endgültig.",
         dataExportTitle: "Unterhaltungen exportieren",
         dataExportDescription: "Laden Sie Ihren verfügbaren Chatverlauf als Textarchiv herunter. Gesperrte Chats sind bis zur Entsperrung ausgeschlossen.",
+        guestImportSectionTitle: "Gastgespräche dieses Browsers importieren",
+        guestImportSectionDisclaimer: "Wenn Sie Ihre Browserdaten löschen oder einen anderen Browser bzw. ein anderes Gerät verwenden, können Gastgespräche nicht wiederhergestellt werden.",
         currentPlan: "Aktueller Tarif",
         freePlan: "Kostenloser Arbeitsbereich",
         proPlan: "Pro-Arbeitsbereich",

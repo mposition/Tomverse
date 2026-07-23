@@ -408,6 +408,7 @@ export function DesktopChatShell({
               isSending={isSending}
               focusToken={focusToken}
               isPrivateMode={isPrivateMode}
+              currentChatId={currentChatId}
               selectedModels={selectedModels}
               disabledModelIds={disabledPanels}
               onToggleModel={onToggleModel}

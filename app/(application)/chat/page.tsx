@@ -52,6 +52,17 @@ import {
   formatChatCostSafetyDetails,
   isChatCostSafetyCode,
 } from "@/lib/chatCostSafetyCore";
+import {
+  buildGuestImportPayload,
+  consumePendingGuestImportIntent,
+  GUEST_IMPORT_SEEN_KEY,
+  importGuestConversation,
+  listImportableGuestConversations,
+  writePendingGuestImportIntent,
+  type GuestConversationSummary,
+} from "@/lib/guestImport";
+import { GuestImportModal } from "@/components/chat/GuestImportModal";
+import { GUEST_IMPORT_MODAL_OPEN_EVENT } from "@/lib/guestImportModalEvents";
 
 // Persists which conversation is open in *this tab* so an F5 / crash
 // recovery restores it instead of falling back to the welcome screen --
@@ -492,6 +503,59 @@ export default function Home() {
     });
   }, []);
 
+  // Consumes the "log in and continue this conversation" CTA's intent flag
+  // (see lib/guestImport.ts) after a fresh, full-page login redirect lands
+  // back here. The effect itself is defined further down (right after
+  // handleSelectConversation, which it calls, is declared -- referencing it
+  // from up here would be a forward reference the React Compiler rejects).
+  // This ref still lives here so the guest-bootstrap/carryover effects
+  // below, which only read it, can bail out without needing to know
+  // anything else about the import flow.
+  const pendingGuestImportRef = useRef(false);
+
+  // Generic (non-CTA) login: if this browser has any guest conversation
+  // data at all, offer the one-time import choice modal. Skipped entirely
+  // when the CTA-path effect (further down) already claimed this mount (it
+  // either already imported, or found nothing to import for that one
+  // specific conversation -- either way, offering the broader "import
+  // everything" modal on the same login would be a confusing double
+  // prompt).
+  const [isGuestImportModalOpen, setIsGuestImportModalOpen] = useState(false);
+  const [guestImportCandidates, setGuestImportCandidates] = useState<GuestConversationSummary[]>([]);
+  const [guestImportDefaultId, setGuestImportDefaultId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isGuestMode || !sessionUserId || !isUserSettingsLoaded) return;
+    if (pendingGuestImportRef.current) return;
+    if (typeof window === "undefined") return;
+    if (window.localStorage.getItem(GUEST_IMPORT_SEEN_KEY) === "1") return;
+
+    const importable = listImportableGuestConversations();
+    if (importable.length === 0) return;
+
+    queueMicrotask(() => {
+      setGuestImportCandidates(importable);
+      setGuestImportDefaultId(window.sessionStorage.getItem(ACTIVE_CHAT_STORAGE_KEY));
+      setIsGuestImportModalOpen(true);
+    });
+  }, [isGuestMode, sessionUserId, isUserSettingsLoaded]);
+
+  const openGuestImportPicker = useCallback(() => {
+    const importable = listImportableGuestConversations();
+    setGuestImportCandidates(importable);
+    setGuestImportDefaultId(
+      typeof window !== "undefined" ? window.sessionStorage.getItem(ACTIVE_CHAT_STORAGE_KEY) : null
+    );
+    setIsGuestImportModalOpen(true);
+  }, []);
+
+  const closeGuestImportModal = useCallback((markSeen: boolean) => {
+    if (markSeen && typeof window !== "undefined") {
+      window.localStorage.setItem(GUEST_IMPORT_SEEN_KEY, "1");
+    }
+    setIsGuestImportModalOpen(false);
+  }, []);
+
   // Gated on isInitialConversationResolved so this doesn't run before the
   // welcome-vs-restore decision below has had a chance to read the saved
   // id: currentChatId starts out null on every mount (restored or not)
@@ -912,6 +976,11 @@ export default function Home() {
     return () => window.removeEventListener(APP_TOAST_EVENT, handleToast);
   }, [showToast]);
 
+  useEffect(() => {
+    window.addEventListener(GUEST_IMPORT_MODAL_OPEN_EVENT, openGuestImportPicker);
+    return () => window.removeEventListener(GUEST_IMPORT_MODAL_OPEN_EVENT, openGuestImportPicker);
+  }, [openGuestImportPicker]);
+
     const applyConversationSettings = useCallback((data: {
         selectedModels?: unknown;
         disabledPanels?: unknown;
@@ -1031,7 +1100,8 @@ export default function Home() {
             isGuestMode ||
             !isUserSettingsLoaded ||
             !isConversationsLoaded ||
-            conversations.length > 0
+            conversations.length > 0 ||
+            pendingGuestImportRef.current
         ) {
             return;
         }
@@ -1283,6 +1353,60 @@ export default function Home() {
         setFocusToken((prev) => prev + 1);
 
     };
+
+  // Consumes the "log in and continue this conversation" CTA's intent flag
+  // (see lib/guestImport.ts) after a fresh, full-page login redirect lands
+  // back here. Declared here (after handleSelectConversation/
+  // fetchConversations/showToast) rather than up near the other early
+  // effects because it calls all three. Still runs before the F5-restore
+  // effect right below -- both fire in the same post-login render pass, and
+  // this one is declared first, so it wins the race for currentChatId /
+  // isInitialConversationResolved the same way the private-mode restore
+  // effect does for private mode. Absence of the pending-intent flag means
+  // either a plain guest session or a generic (non-CTA) login -- the latter
+  // is handled by the modal-trigger effect declared further up.
+  useEffect(() => {
+    if (isGuestMode || !sessionUserId || !isUserSettingsLoaded) return;
+    if (pendingGuestImportRef.current) return;
+
+    const pending = consumePendingGuestImportIntent();
+    if (!pending) return;
+
+    const payload = buildGuestImportPayload(pending.conversationId);
+    if (!payload || payload.messages.length === 0) return;
+
+    pendingGuestImportRef.current = true;
+    isInitialSelectedRef.current = true;
+
+    queueMicrotask(async () => {
+      const result = await importGuestConversation(payload);
+      if (result.success) {
+        await fetchConversations();
+        void handleSelectConversation(result.conversationId);
+        showToast(t("chat.guestImportCurrentSuccess"), "success");
+      } else {
+        showToast(t("chat.guestImportFailed"), "error");
+      }
+      setIsInitialConversationResolved(true);
+      pendingGuestImportRef.current = false;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isGuestMode, sessionUserId, isUserSettingsLoaded]);
+
+  const handleGuestImportComplete = useCallback(
+    async (conversationIdToOpen: string | null) => {
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(GUEST_IMPORT_SEEN_KEY, "1");
+      }
+      await fetchConversations();
+      if (conversationIdToOpen) {
+        void handleSelectConversation(conversationIdToOpen);
+      }
+      setIsGuestImportModalOpen(false);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
 
     useEffect(() => {
         if (
@@ -2247,6 +2371,13 @@ export default function Home() {
         userId={sessionUserId}
         onComplete={handleModelFinderComplete}
       />
+      <GuestImportModal
+        open={isGuestImportModalOpen}
+        conversations={guestImportCandidates}
+        defaultConversationId={guestImportDefaultId}
+        onSkip={() => closeGuestImportModal(true)}
+        onComplete={handleGuestImportComplete}
+      />
       {!isViewportReady ? (
         <ChatShellSkeleton label={t("auth.loading")} />
       ) : isMobileViewport ? (
@@ -2362,15 +2493,19 @@ export default function Home() {
         </div>
         <a
           href={guestCompareSignInHref}
-          onClick={() =>
+          onClick={() => {
             trackProductEvent("signup_started", 1, {
               trigger: "proactive",
               cta_location: "guest_first_response",
-            })
-          }
-          className="mt-3 flex min-h-10 w-full items-center justify-center rounded-xl bg-blue-600 px-3 py-2 text-xs font-black text-white hover:bg-blue-500"
+            });
+            if (currentChatId) writePendingGuestImportIntent(currentChatId);
+          }}
+          className="mt-3 flex min-h-10 w-full flex-col items-center justify-center rounded-xl bg-blue-600 px-3 py-2 text-center text-white hover:bg-blue-500"
         >
-          {trialCopy.action}
+          <span className="text-xs font-black">{t("chat.continueConversationCta")}</span>
+          <span className="text-[10px] font-medium text-blue-100">
+            {t("chat.continueConversationCtaSubtext")}
+          </span>
         </a>
       </aside>
     )}
@@ -2390,15 +2525,19 @@ export default function Home() {
           <div className="mt-5 grid gap-2 sm:grid-cols-2">
             <a
               href={guestCompareSignInHref}
-              onClick={() =>
+              onClick={() => {
                 trackProductEvent("signup_started", 1, {
                   trigger: "proactive",
                   cta_location: "guest_multi_model",
-                })
-              }
-              className="flex min-h-11 items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-center text-sm font-black text-white hover:bg-blue-500"
+                });
+                if (currentChatId) writePendingGuestImportIntent(currentChatId);
+              }}
+              className="flex min-h-11 flex-col items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-center text-white hover:bg-blue-500"
             >
-              {trialCopy.action}
+              <span className="text-sm font-black">{t("chat.continueConversationCta")}</span>
+              <span className="text-[11px] font-medium text-blue-100">
+                {t("chat.continueConversationCtaSubtext")}
+              </span>
             </a>
             <button
               type="button"

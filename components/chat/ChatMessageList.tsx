@@ -26,6 +26,7 @@ import { ModelLogo } from "@/components/chat/ModelLogo";
 import { useLanguage } from "@/components/LanguageProvider";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { FeedbackButton } from "@/components/chat/FeedbackButton";
+import { writePendingGuestImportIntent } from "@/lib/guestImport";
 
 type ChatMessageListProps = {
   messages: Message[];
@@ -36,6 +37,7 @@ type ChatMessageListProps = {
   currentModelId?: string | null;
   currentPlan?: string | null;
   isGuestMode?: boolean;
+  currentChatId?: string | null;
 };
 type MarkdownCodeProps = ComponentPropsWithoutRef<"code"> & ExtraProps;
 
@@ -133,6 +135,7 @@ export function ChatMessageList({
   currentModelId,
   currentPlan,
   isGuestMode = false,
+  currentChatId = null,
 }: ChatMessageListProps) {
   const { models: AVAILABLE_MODELS } = useModelCatalog();
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -454,9 +457,10 @@ export function ChatMessageList({
                           {errorCategory === "quota" && isGuestMode && (
                             <Link
                               href={`/auth/signin?callbackUrl=${encodeURIComponent("/chat")}`}
+                              onClick={() => currentChatId && writePendingGuestImportIntent(currentChatId)}
                               className={primaryButtonClass}
                             >
-                              {t("auth.login")}
+                              {t("chat.continueConversationCta")}
                             </Link>
                           )}
                           {(errorCategory === "model_retired" ||
