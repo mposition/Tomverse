@@ -19,6 +19,38 @@ const PROVIDER_ERROR_KEYS: Record<string, string> = {
     AccessDenied: "auth.errorAccessDenied",
 };
 
+// Maps the specific failure the server reports (lib/emailLogin.ts's
+// EmailLoginError codes, plus the shared ApiSecurityError "INVALID_REQUEST"
+// for a malformed payload) to actionable copy instead of one generic
+// "couldn't send the code" message that covers rate limits, CAPTCHA
+// failures, format errors, and outages alike.
+const emailLoginErrorMessage = (
+    t: (key: string) => string,
+    status: number,
+    code: string | undefined,
+    retryAfterSeconds: number | null
+): string => {
+    switch (code) {
+        case "RATE_LIMITED_MINUTE":
+            return t("auth.emailLoginRateLimitedMinute").replace(
+                "{seconds}",
+                String(retryAfterSeconds ?? 60)
+            );
+        case "RATE_LIMITED_DAY":
+            return t("auth.emailLoginRateLimitedDay");
+        case "TURNSTILE_FAILED":
+            return t("auth.emailLoginTurnstileFailed");
+        case "TURNSTILE_UNAVAILABLE":
+            return t("auth.emailLoginTurnstileUnavailable");
+        case "INVALID_REQUEST":
+            return t("auth.emailLoginInvalidFormat");
+        default:
+            return status >= 500
+                ? t("auth.emailLoginInternalError")
+                : t("auth.emailLoginRequestFailed");
+    }
+};
+
 function SignInButtons() {
     const searchParams = useSearchParams();
     const router = useRouter();
@@ -48,6 +80,40 @@ function SignInButtons() {
     const { containerRef: turnstileContainerRef, getToken: getTurnstileToken } =
         useTurnstile(true, "email_login_request");
 
+    // Drives the "N초 후 다시 시도" countdown on a minute-scoped rate limit:
+    // retryAfterUntil is the fixed deadline from the server's Retry-After
+    // header, retryCountdown is the live seconds-remaining derived from it.
+    // Re-deriving from the deadline each tick (rather than decrementing a
+    // counter directly) keeps the display correct even if a tab was
+    // backgrounded and missed ticks.
+    const [retryAfterUntil, setRetryAfterUntil] = useState<number | null>(null);
+    const [retryCountdown, setRetryCountdown] = useState(0);
+    // Only the minute-scoped rate limit gets a live per-second message
+    // ("45초 후..."); a day-scoped limit still disables the button for the
+    // same duration (via retryCountdown) but shows a static message instead
+    // of a countdown that would otherwise read out tens of thousands of
+    // seconds.
+    const [isMinuteRateLimited, setIsMinuteRateLimited] = useState(false);
+
+    useEffect(() => {
+        if (!retryAfterUntil) return;
+        const tick = () => {
+            const remaining = Math.max(0, Math.ceil((retryAfterUntil - Date.now()) / 1000));
+            setRetryCountdown(remaining);
+            if (remaining <= 0) {
+                setRetryAfterUntil(null);
+                if (isMinuteRateLimited) {
+                    setIsMinuteRateLimited(false);
+                    setFormError(null);
+                }
+            }
+        };
+        tick();
+        const timer = window.setInterval(tick, 1000);
+        return () => window.clearInterval(timer);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [retryAfterUntil]);
+
     useEffect(() => {
         if (pageViewTrackedRef.current) return;
         pageViewTrackedRef.current = true;
@@ -65,7 +131,7 @@ function SignInButtons() {
         });
 
     const handleSendCode = async () => {
-        if (isSendingCode) return;
+        if (isSendingCode || retryCountdown > 0) return;
         if (!isEmailValid) {
             setEmailError(t("auth.emailLoginInvalidFormat"));
             return;
@@ -73,18 +139,33 @@ function SignInButtons() {
         setEmailError(null);
         setIsSendingCode(true);
         setFormError(null);
+        setIsMinuteRateLimited(false);
         try {
             let response = await requestCode();
+            let data: { code?: string } | null = null;
             if (response.status === 403) {
-                const data = await response.json().catch(() => null);
+                data = await response.json().catch(() => null);
                 if (data?.code === "TURNSTILE_REQUIRED") {
                     setNeedsTurnstile(true);
                     const token = await getTurnstileToken();
                     response = await requestCode(token);
+                    data = null;
                 }
             }
             if (!response.ok) {
-                setFormError(t("auth.emailLoginRequestFailed"));
+                if (!data) data = await response.json().catch(() => null);
+                const retryAfterHeader = Number(response.headers.get("Retry-After"));
+                const retryAfterSeconds =
+                    Number.isFinite(retryAfterHeader) && retryAfterHeader > 0
+                        ? retryAfterHeader
+                        : null;
+                setIsMinuteRateLimited(data?.code === "RATE_LIMITED_MINUTE");
+                if (retryAfterSeconds) {
+                    setRetryAfterUntil(Date.now() + retryAfterSeconds * 1_000);
+                }
+                setFormError(
+                    emailLoginErrorMessage(t, response.status, data?.code, retryAfterSeconds)
+                );
                 return;
             }
             markSignupStarted("email-code");
@@ -122,6 +203,14 @@ function SignInButtons() {
             setIsVerifyingCode(false);
         }
     };
+
+    // While a minute-scoped rate limit is counting down, show the live
+    // remaining seconds instead of the frozen number from when the error
+    // first arrived.
+    const displayedFormError =
+        isMinuteRateLimited && retryCountdown > 0
+            ? t("auth.emailLoginRateLimitedMinute").replace("{seconds}", String(retryCountdown))
+            : formError;
 
     if (status === "authenticated" || status === "loading") {
         return (
@@ -241,11 +330,15 @@ function SignInButtons() {
                     />
                     <button
                         type="button"
-                        disabled={!isEmailValid || isSendingCode}
+                        disabled={!isEmailValid || isSendingCode || retryCountdown > 0}
                         onClick={handleSendCode}
                         className={providerButtonClass}
                     >
-                        {isSendingCode ? t("auth.loading") : t("auth.emailLoginButton")}
+                        {isSendingCode
+                            ? t("auth.loading")
+                            : isMinuteRateLimited && retryCountdown > 0
+                              ? `${t("auth.emailLoginButton")} (${retryCountdown})`
+                              : t("auth.emailLoginButton")}
                     </button>
                 </div>
             ) : (
@@ -282,9 +375,9 @@ function SignInButtons() {
                     </button>
                 </div>
             )}
-            {formError ? (
+            {displayedFormError ? (
                 <p role="alert" className="text-center text-xs font-semibold text-red-600 dark:text-red-400">
-                    {formError}
+                    {displayedFormError}
                 </p>
             ) : null}
         </div>

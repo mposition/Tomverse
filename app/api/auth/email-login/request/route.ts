@@ -20,6 +20,14 @@ const requestSchema = z
   })
   .strict();
 
+const EMAIL_LOGIN_ERROR_STATUS: Record<EmailLoginError["code"], number> = {
+  TURNSTILE_REQUIRED: 403,
+  TURNSTILE_FAILED: 403,
+  TURNSTILE_UNAVAILABLE: 503,
+  RATE_LIMITED_MINUTE: 429,
+  RATE_LIMITED_DAY: 429,
+};
+
 export async function POST(req: Request) {
   try {
     const body = await readLimitedJson(req, 2_048, requestSchema);
@@ -27,8 +35,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true });
   } catch (error) {
     if (error instanceof EmailLoginError) {
-      const status = error.code === "TURNSTILE_REQUIRED" ? 403 : 403;
-      return NextResponse.json({ ok: false, code: error.code }, { status });
+      const headers = new Headers({ "Content-Type": "application/json" });
+      if (error.retryAfter) headers.set("Retry-After", String(error.retryAfter));
+      return new Response(
+        JSON.stringify({ ok: false, code: error.code }),
+        { status: EMAIL_LOGIN_ERROR_STATUS[error.code], headers }
+      );
     }
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;

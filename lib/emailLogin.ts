@@ -5,7 +5,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getAnonymousClientKey } from "@/lib/clientIp";
 import { getPublicAppOrigin } from "@/lib/publicUrl";
-import { consumeApiRateLimit, releaseApiRateLimit } from "@/lib/apiSecurity";
+import { ApiSecurityError, consumeApiRateLimit, releaseApiRateLimit } from "@/lib/apiSecurity";
 import { verifyGuestTurnstile } from "@/lib/turnstile";
 import { ChatAccessError } from "@/lib/chatSecurity";
 import { logSecurityAuditEvent } from "@/lib/securityAudit";
@@ -36,8 +36,14 @@ function clamp(value: number, min: number, max: number) {
 
 export class EmailLoginError extends Error {
   constructor(
-    public readonly code: "TURNSTILE_REQUIRED" | "TURNSTILE_FAILED",
-    message: string
+    public readonly code:
+      | "TURNSTILE_REQUIRED"
+      | "TURNSTILE_FAILED"
+      | "TURNSTILE_UNAVAILABLE"
+      | "RATE_LIMITED_MINUTE"
+      | "RATE_LIMITED_DAY",
+    message: string,
+    public readonly retryAfter?: number
   ) {
     super(message);
   }
@@ -122,20 +128,35 @@ export async function requestEmailLoginCode(
 ): Promise<{ ok: true }> {
   const email = normalizeEmailLoginAddress(rawEmail);
 
-  // 2 per minute, not 1: once challengeCount exceeds
-  // TURNSTILE_CHALLENGE_THRESHOLD below, the caller's token-less probe and its
-  // token-bearing retry are two calls to this same action within the same
-  // minute. A limit of 1 would let the probe consume the only unit and make
-  // every subsequent legitimate request fail with API_RATE_LIMITED.
-  await consumeApiRateLimit(request, `email-otp:${email}`, "email-otp-request", {
-    minute: 2,
-    day: DAILY_REQUEST_LIMIT,
-  });
   const anonymousKey = getAnonymousClientKey(request);
-  await consumeApiRateLimit(request, `ip:${anonymousKey}`, "email-otp-request-ip", {
-    minute: 5,
-    day: 60,
-  });
+  try {
+    // 2 per minute, not 1: once challengeCount exceeds
+    // TURNSTILE_CHALLENGE_THRESHOLD below, the caller's token-less probe and
+    // its token-bearing retry are two calls to this same action within the
+    // same minute. A limit of 1 would let the probe consume the only unit
+    // and make every subsequent legitimate request fail with
+    // API_RATE_LIMITED.
+    await consumeApiRateLimit(request, `email-otp:${email}`, "email-otp-request", {
+      minute: 2,
+      day: DAILY_REQUEST_LIMIT,
+    });
+    await consumeApiRateLimit(request, `ip:${anonymousKey}`, "email-otp-request-ip", {
+      minute: 5,
+      day: 60,
+    });
+  } catch (error) {
+    if (error instanceof ApiSecurityError && error.code === "API_RATE_LIMITED") {
+      // consumeApiRateLimit doesn't itself distinguish which of the minute
+      // or day bucket tripped, only how long until it clears. A day-bucket
+      // retryAfter can occasionally be small too (near UTC midnight), so
+      // this is a heuristic, not a guarantee -- the retryAfter value shown
+      // to the user is correct either way, only the wording might say
+      // "too many requests" instead of "daily limit" in that rare window.
+      const code = (error.retryAfter ?? 0) <= 90 ? "RATE_LIMITED_MINUTE" : "RATE_LIMITED_DAY";
+      throw new EmailLoginError(code, error.message, error.retryAfter);
+    }
+    throw error;
+  }
 
   const now = new Date();
   const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
@@ -149,8 +170,16 @@ export async function requestEmailLoginCode(
     try {
       await verifyGuestTurnstile(request, turnstileToken, "email_login_request");
     } catch (error) {
-      if (error instanceof ChatAccessError && error.code === "TURNSTILE_REQUIRED") {
-        throw new EmailLoginError("TURNSTILE_REQUIRED", "Verification is required.");
+      if (error instanceof ChatAccessError) {
+        if (error.code === "TURNSTILE_REQUIRED") {
+          throw new EmailLoginError("TURNSTILE_REQUIRED", "Verification is required.");
+        }
+        if (error.code === "TURNSTILE_UNAVAILABLE" || error.code === "TURNSTILE_NOT_CONFIGURED") {
+          throw new EmailLoginError(
+            "TURNSTILE_UNAVAILABLE",
+            "Verification is temporarily unavailable."
+          );
+        }
       }
       throw new EmailLoginError("TURNSTILE_FAILED", "Verification failed.");
     }
