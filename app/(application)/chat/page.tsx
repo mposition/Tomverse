@@ -60,6 +60,13 @@ import {
 // browser and coming back should still default to welcome.
 const ACTIVE_CHAT_STORAGE_KEY = "tomverse_active_chat_id";
 
+// Tracks only whether private mode is active in this tab -- never its
+// message content, which is never persisted anywhere (server or storage) in
+// the first place. A same-tab refresh should keep private mode active with
+// an empty conversation; closing the tab/browser (or an explicit "End
+// Private Mode") should not.
+const PRIVATE_MODE_STORAGE_KEY = "tomverse_private_mode_active";
+
 const normalizeStringArray = (value: unknown, fallback: string[]) => {
   let parsed = value;
   for (let i = 0; i < 2 && typeof parsed === "string"; i++) {
@@ -458,15 +465,33 @@ export default function Home() {
   const isInitialSelectedRef = useRef(false);
   const guestCarryoverAppliedRef = useRef(false);
   const currentChatIdRef = useRef(currentChatId);
+  const privateModeRestoredRef = useRef(false);
 
   useEffect(() => {
     currentChatIdRef.current = currentChatId;
   }, [currentChatId]);
 
-  // Private-mode conversations are intentionally excluded: a refresh from
-  // private mode should land on welcome, not silently resume whatever
-  // regular conversation was open before switching into it.
-  //
+  // Restores private mode itself (not any message content -- there is
+  // none to restore; private-mode messages are never persisted anywhere)
+  // on a same-tab refresh. Runs before, and takes priority over, the
+  // guest/logged-in conversation-restore effects below: those check
+  // privateModeRestoredRef.current and skip claiming currentChatId /
+  // isPrivateMode when this has already done so. Uses a ref rather than
+  // relying on those effects re-running after this one's setState calls
+  // flush, since several of them run unconditionally in the same initial
+  // commit before that would happen.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (window.sessionStorage.getItem(PRIVATE_MODE_STORAGE_KEY) !== "true") return;
+    privateModeRestoredRef.current = true;
+    isInitialSelectedRef.current = true;
+    queueMicrotask(() => {
+      setIsPrivateMode(true);
+      setCurrentChatId("private-chat");
+      setIsInitialConversationResolved(true);
+    });
+  }, []);
+
   // Gated on isInitialConversationResolved so this doesn't run before the
   // welcome-vs-restore decision below has had a chance to read the saved
   // id: currentChatId starts out null on every mount (restored or not)
@@ -919,12 +944,22 @@ export default function Home() {
       setSelectedModels(guestDefaultSelectedModels);
       refreshGuestUsage();
 
+      // Private mode restoration (see the dedicated effect above) takes
+      // priority over reopening a regular conversation or starting a new
+      // one -- it's already claimed currentChatId/isPrivateMode, so this
+      // effect only needs to still load the conversation list for the
+      // sidebar without touching either.
+      const isRestoringPrivateMode = privateModeRestoredRef.current;
+
       const savedConversations = localStorage.getItem("guest_conversations");
       if (savedConversations) {
         try {
           const parsed = JSON.parse(savedConversations);
           setConversations(parsed);
 
+          if (isRestoringPrivateMode) {
+            // handled by the private-mode restoration effect
+          } else {
           // Restore the tab's previously open conversation (F5, crash
           // recovery) if it's still there -- inlined rather than calling
           // handleSelectConversation because `conversations` state from
@@ -950,10 +985,11 @@ export default function Home() {
               )
             );
           }
+          }
         } catch (e) {
           console.error("Failed to parse guest conversations:", e);
         }
-      } else {
+      } else if (!isRestoringPrivateMode) {
         const initialChatId = `guest_${Date.now()}`;
         const initialChat = {
           id: initialChatId,
@@ -963,10 +999,10 @@ export default function Home() {
         };
         setConversations([initialChat]);
         setCurrentChatId(initialChatId);
-        localStorage.setItem("guest_conversations", JSON.stringify([initialChat]));        
+        localStorage.setItem("guest_conversations", JSON.stringify([initialChat]));
       }
 
-      setIsConversationsLoaded(true);      
+      setIsConversationsLoaded(true);
       setIsInitialConversationResolved(true);
       });
       return () => {
@@ -1151,6 +1187,9 @@ export default function Home() {
         localComparisonResponsesRef.current.clear();
         latestLocalComparisonPromptRef.current = null;
         setIsPrivateMode(false);
+        if (typeof window !== "undefined") {
+            window.sessionStorage.removeItem(PRIVATE_MODE_STORAGE_KEY);
+        }
     if (isGuestMode) {
       const newGuestChat = {
         id: `guest_${Date.now()}`,
@@ -1196,6 +1235,9 @@ export default function Home() {
 
     if (id === "private-chat") {
       setIsPrivateMode(true);
+      if (typeof window !== "undefined") {
+        window.sessionStorage.setItem(PRIVATE_MODE_STORAGE_KEY, "true");
+      }
       return;
     }
 
@@ -1862,6 +1904,9 @@ export default function Home() {
       latestLocalComparisonPromptRef.current = null;
       setIsPrivateMode(true);
       setCurrentChatId("private-chat");
+      if (typeof window !== "undefined") {
+        window.sessionStorage.setItem(PRIVATE_MODE_STORAGE_KEY, "true");
+      }
     }
   };
 

@@ -47,3 +47,4 @@ next-env.d.ts
 .vs
 .local-backups/aihub-clone.dump
 docs
+.playwright-mcp
