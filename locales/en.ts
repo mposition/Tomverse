@@ -560,6 +560,7 @@ export const en = {
         microsoft: "Continue with Microsoft",
         orDivider: "or",
         emailLoginPlaceholder: "you@example.com",
+        emailLoginInvalidFormat: "Enter a valid email address.",
         emailLoginButton: "Get login code",
         emailLoginCodeSentTitle: "Check your email",
         emailLoginCodeSentBody: "We sent a 6-digit code and a sign-in link to {email}.",

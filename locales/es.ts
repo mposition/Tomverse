@@ -456,6 +456,7 @@ export const es = {
         microsoft: "Continuar con Microsoft",
         orDivider: "o",
         emailLoginPlaceholder: "tu@ejemplo.com",
+        emailLoginInvalidFormat: "Introduce una dirección de correo electrónico válida.",
         emailLoginButton: "Obtener código de acceso",
         emailLoginCodeSentTitle: "Revisa tu correo",
         emailLoginCodeSentBody: "Enviamos un código de 6 dígitos y un enlace de acceso a {email}.",

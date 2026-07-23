@@ -4,10 +4,18 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requestEmailLoginCode, EmailLoginError } from "@/lib/emailLogin";
 import { apiSecurityResponse, readLimitedJson } from "@/lib/apiSecurity";
+import { isValidLoginEmail, MAX_LOGIN_EMAIL_LENGTH } from "@/lib/emailValidation";
 
 const requestSchema = z
   .object({
-    email: z.string().trim().toLowerCase().email().max(254),
+    // .refine with the same predicate the sign-in form pre-validates with,
+    // so a request that passed client-side checks never disagrees here.
+    email: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .max(MAX_LOGIN_EMAIL_LENGTH)
+      .refine(isValidLoginEmail, { message: "Invalid email address." }),
     turnstileToken: z.string().trim().min(1).max(2_048).optional(),
   })
   .strict();

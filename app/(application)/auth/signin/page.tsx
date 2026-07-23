@@ -8,6 +8,7 @@ import { useTurnstile } from "@/components/chat/useTurnstile";
 import Link from "next/link";
 import { ShieldCheck } from "lucide-react";
 import { withChatLanguage } from "@/lib/localizedCallbackUrl";
+import { isValidLoginEmail } from "@/lib/emailValidation";
 import {
     markSignupStarted,
     trackProductEvent,
@@ -41,6 +42,8 @@ function SignInButtons() {
     const [isSendingCode, setIsSendingCode] = useState(false);
     const [isVerifyingCode, setIsVerifyingCode] = useState(false);
     const [formError, setFormError] = useState<string | null>(null);
+    const [emailError, setEmailError] = useState<string | null>(null);
+    const isEmailValid = isValidLoginEmail(email);
     const [needsTurnstile, setNeedsTurnstile] = useState(false);
     const { containerRef: turnstileContainerRef, getToken: getTurnstileToken } =
         useTurnstile(true, "email_login_request");
@@ -62,7 +65,12 @@ function SignInButtons() {
         });
 
     const handleSendCode = async () => {
-        if (isSendingCode || !email.trim()) return;
+        if (isSendingCode) return;
+        if (!isEmailValid) {
+            setEmailError(t("auth.emailLoginInvalidFormat"));
+            return;
+        }
+        setEmailError(null);
         setIsSendingCode(true);
         setFormError(null);
         try {
@@ -202,18 +210,38 @@ function SignInButtons() {
                     <input
                         type="email"
                         value={email}
-                        onChange={(event) => setEmail(event.target.value)}
+                        onChange={(event) => {
+                            setEmail(event.target.value);
+                            if (emailError) setEmailError(null);
+                        }}
+                        onBlur={() => {
+                            if (email && !isValidLoginEmail(email)) {
+                                setEmailError(t("auth.emailLoginInvalidFormat"));
+                            }
+                        }}
+                        onKeyDown={(event) => {
+                            if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+                            event.preventDefault();
+                            void handleSendCode();
+                        }}
                         placeholder={t("auth.emailLoginPlaceholder")}
                         autoComplete="email"
-                        className="w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-white"
+                        aria-invalid={emailError ? true : undefined}
+                        aria-describedby={emailError ? "email-login-error" : undefined}
+                        className="w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-white aria-[invalid=true]:border-red-400 aria-[invalid=true]:focus:border-red-500 aria-[invalid=true]:focus:ring-red-500/10"
                     />
+                    {emailError ? (
+                        <p id="email-login-error" role="alert" className="px-1 text-xs font-semibold text-red-600 dark:text-red-400">
+                            {emailError}
+                        </p>
+                    ) : null}
                     <div
                         ref={turnstileContainerRef}
                         className={needsTurnstile ? "flex justify-center py-1" : "hidden"}
                     />
                     <button
                         type="button"
-                        disabled={!email.trim() || isSendingCode}
+                        disabled={!isEmailValid || isSendingCode}
                         onClick={handleSendCode}
                         className={providerButtonClass}
                     >

@@ -560,6 +560,7 @@ export const ko = {
         microsoft: "Microsoft로 계속하기",
         orDivider: "또는",
         emailLoginPlaceholder: "you@example.com",
+        emailLoginInvalidFormat: "올바른 이메일 주소를 입력해 주세요.",
         emailLoginButton: "로그인 코드 받기",
         emailLoginCodeSentTitle: "이메일을 확인해 주세요",
         emailLoginCodeSentBody: "{email} 주소로 6자리 코드와 로그인 링크를 보냈습니다.",

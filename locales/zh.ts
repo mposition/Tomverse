@@ -452,6 +452,7 @@ export const zh = {
         microsoft: "使用 Microsoft 继续",
         orDivider: "或",
         emailLoginPlaceholder: "you@example.com",
+        emailLoginInvalidFormat: "请输入有效的电子邮箱地址。",
         emailLoginButton: "获取登录代码",
         emailLoginCodeSentTitle: "请查收邮件",
         emailLoginCodeSentBody: "我们已向 {email} 发送了 6 位数代码和登录链接。",
