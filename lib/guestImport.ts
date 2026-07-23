@@ -41,6 +41,48 @@ export type GuestImportResult =
   | { success: true; conversationId: string; alreadyImported: boolean }
   | { success: false; error: string };
 
+// A conversation is "empty" if no user message was ever sent in it (in any
+// model panel). The welcome placeholder message (id "welcome") never
+// counts, nor does having changed selectedModels/disabledPanels/title --
+// those are draft-setup actions, not conversation content.
+export function isGuestConversationEmpty(
+  conversation: Pick<Conversation, "id" | "selectedModels" | "disabledPanels">
+): boolean {
+  if (typeof window === "undefined") return true;
+  const modelIds = Array.from(
+    new Set([...(conversation.selectedModels || []), ...(conversation.disabledPanels || [])])
+  );
+  for (const modelId of modelIds) {
+    const raw = window.localStorage.getItem(`guest_messages_${conversation.id}_${modelId}`);
+    if (!raw) continue;
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.some((message: Message) => message.role === "user")) {
+        return false;
+      }
+    } catch {
+      continue;
+    }
+  }
+  return true;
+}
+
+// Removes every per-model guest_messages_{conversationId}_{modelId} entry
+// for a conversation, regardless of which models the conversation's
+// current selectedModels/disabledPanels list -- a conversation may have
+// used other models earlier before the panel selection changed, and this
+// must not leave those orphaned.
+export function removeGuestConversationStorage(conversationId: string): void {
+  if (typeof window === "undefined") return;
+  const prefix = `guest_messages_${conversationId}_`;
+  const keysToRemove: string[] = [];
+  for (let i = 0; i < window.localStorage.length; i++) {
+    const key = window.localStorage.key(i);
+    if (key && key.startsWith(prefix)) keysToRemove.push(key);
+  }
+  keysToRemove.forEach((key) => window.localStorage.removeItem(key));
+}
+
 const readGuestConversations = (): Conversation[] => {
   if (typeof window === "undefined") return [];
   try {
