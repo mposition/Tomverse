@@ -337,15 +337,12 @@ export default function Home() {
 
   const [inputValue, setInputValue] = useState("");
   const [personalizedPrompt, setPersonalizedPrompt] = useState<string | null>(null);
-  const [awaitingPostResponseTips, setAwaitingPostResponseTips] = useState(false);
-  const [showPostResponseTips, setShowPostResponseTips] = useState(false);
   const [isGuestPreviewEntry] = useState(
     () =>
       typeof window !== "undefined" &&
       new URLSearchParams(window.location.search).get("entry") ===
         "guest-preview"
   );
-  const [showGuestCompareHint, setShowGuestCompareHint] = useState(false);
   const [showGuestSignInPrompt, setShowGuestSignInPrompt] = useState(false);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [promptPayload, setPromptPayload] = useState<{ id: string; text: string; chatId: string; userMessageId: string; attachments: ChatAttachment[] } | null>(null);
@@ -2002,9 +1999,9 @@ export default function Home() {
   );
 
   useEffect(() => {
-    if (!valueUpgradeSource || showPostResponseTips) return;
+    if (!valueUpgradeSource) return;
     localStorage.setItem("tomverse_value_upgrade_prompt_seen_v1", "1");
-  }, [showPostResponseTips, valueUpgradeSource]);
+  }, [valueUpgradeSource]);
 
   const handleResponseComplete = useCallback(
     (promptId: string | null, modelId: string, responseText: string) => {
@@ -2018,15 +2015,6 @@ export default function Home() {
       }
       if (isGuestMode) {
         refreshGuestUsage();
-        if (
-          isGuestPreviewEntry &&
-          responseText.trim() &&
-          activeModelCount === 1 &&
-          localStorage.getItem("tomverse_guest_compare_hint_seen_v1") !== "1"
-        ) {
-          localStorage.setItem("tomverse_guest_compare_hint_seen_v1", "1");
-          setShowGuestCompareHint(true);
-        }
       } else {
         notifyUserUsageChanged();
       }
@@ -2036,13 +2024,6 @@ export default function Home() {
         activeModelCount,
         { model_id: modelId }
       );
-      if (
-        awaitingPostResponseTips &&
-        localStorage.getItem("tomverse_post_response_tips_seen_v1") !== "1"
-      ) {
-        setAwaitingPostResponseTips(false);
-        setShowPostResponseTips(true);
-      }
       if (!promptId || activeModelCount < 2) return;
 
       const completedModels =
@@ -2063,8 +2044,6 @@ export default function Home() {
     },
     [
       activeModelCount,
-      awaitingPostResponseTips,
-      isGuestPreviewEntry,
       isGuestMode,
       maybeShowValueUpgradePrompt,
       refreshGuestUsage,
@@ -2196,11 +2175,6 @@ export default function Home() {
       setSelectedModels(nextModels.length ? nextModels : [defaultModelId]);
       setDisabledPanels([]);
       setPersonalizedPrompt(promptExample || null);
-      if (
-        localStorage.getItem("tomverse_post_response_tips_seen_v1") !== "1"
-      ) {
-        setAwaitingPostResponseTips(true);
-      }
       if (currentChatId && currentChatId !== "private-chat") {
         syncModelSettingsToServer(currentChatId, nextModels, []);
       }
@@ -2523,46 +2497,6 @@ export default function Home() {
           onFollowupSent={handleModelFollowupSent}
         />
       )}
-    {showGuestCompareHint && isGuestMode && (
-      <aside
-        data-testid="guest-compare-hint"
-        className="fixed inset-x-3 top-[max(0.75rem,env(safe-area-inset-top))] z-[76] mx-auto w-auto max-w-sm rounded-2xl border border-blue-200 bg-white p-4 shadow-2xl shadow-zinc-900/20 dark:border-blue-900/60 dark:bg-zinc-900 md:inset-x-auto md:right-5 md:top-5 md:w-[22rem]"
-      >
-        <div className="flex items-start gap-3">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white">
-            <Sparkles className="h-4 w-4" aria-hidden="true" />
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-black text-zinc-950 dark:text-white">{trialCopy.title}</p>
-            <p className="mt-1 text-xs leading-5 text-zinc-600 dark:text-zinc-300">{trialCopy.body}</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setShowGuestCompareHint(false)}
-            aria-label={trialCopy.cancel}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-white"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        <a
-          href={guestCompareSignInHref}
-          onClick={() => {
-            trackProductEvent("signup_started", 1, {
-              trigger: "proactive",
-              cta_location: "guest_first_response",
-            });
-            if (currentChatId) writePendingGuestImportIntent(currentChatId);
-          }}
-          className="mt-3 flex min-h-10 w-full flex-col items-center justify-center rounded-xl bg-blue-600 px-3 py-2 text-center text-white hover:bg-blue-500"
-        >
-          <span className="text-xs font-black">{t("chat.continueConversationCta")}</span>
-          <span className="text-[10px] font-medium text-blue-100">
-            {t("chat.continueConversationCtaSubtext")}
-          </span>
-        </a>
-      </aside>
-    )}
     {showGuestSignInPrompt && isGuestMode && (
       <div className="fixed inset-0 z-[78] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
         <section
@@ -2689,35 +2623,7 @@ export default function Home() {
         </section>
       </div>
     )}
-    {showPostResponseTips && (
-      <aside className="fixed bottom-5 right-5 z-[75] w-[min(22rem,calc(100vw-2rem))] rounded-2xl border border-blue-200 bg-white p-4 shadow-2xl shadow-zinc-900/20 dark:border-blue-900/60 dark:bg-zinc-900">
-        <div className="flex items-start gap-3">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white">
-            <Sparkles className="h-4 w-4" aria-hidden="true" />
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-black text-zinc-950 dark:text-white">
-              {t("modelFinder.postResponseTitle")}
-            </p>
-            <p className="mt-1 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
-              {t("modelFinder.postResponseBody")}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              localStorage.setItem("tomverse_post_response_tips_seen_v1", "1");
-              setShowPostResponseTips(false);
-            }}
-            aria-label={t("modelFinder.dismissTips")}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-white"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-      </aside>
-    )}
-    {valueUpgradeSource && !showPostResponseTips && accountUsage?.plan === "Free" && (
+    {valueUpgradeSource && accountUsage?.plan === "Free" && (
       <aside
         data-testid="value-upgrade-prompt"
         className="fixed inset-x-3 top-[max(0.75rem,env(safe-area-inset-top))] z-[76] mx-auto w-auto max-w-sm rounded-2xl border border-blue-200 bg-white p-4 shadow-2xl shadow-zinc-900/20 dark:border-blue-900/60 dark:bg-zinc-900 md:inset-x-auto md:right-5 md:top-5 md:w-[22rem]"

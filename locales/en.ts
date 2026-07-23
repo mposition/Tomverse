@@ -533,8 +533,6 @@ export const en = {
         contextualUse: "Add {model}",
         contextualContinue: "Continue with current models",
         contextualCreditNotice: "This model is {category} · base {credits} credits. It will only be added if you choose it.",
-        postResponseTitle: "Your first answer is ready",
-        postResponseBody: "When you need them, you can attach files from the + button, share a saved chat, or start Private Mode from the sidebar.",
         dismissTips: "Got it",
         reasons: {
             general: "A versatile choice for everyday questions and mixed tasks.",

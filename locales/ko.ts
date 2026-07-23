@@ -533,8 +533,6 @@ export const ko = {
         contextualUse: "{model} 추가",
         contextualContinue: "현재 모델로 계속",
         contextualCreditNotice: "{category} · 기본 {credits}크레딧이며, 직접 선택한 경우에만 추가됩니다.",
-        postResponseTitle: "첫 답변이 준비되었습니다",
-        postResponseBody: "필요한 시점에 + 버튼으로 파일을 첨부하고, 저장된 대화를 공유하거나 사이드바에서 Private Mode를 시작할 수 있습니다.",
         dismissTips: "확인",
         reasons: {
             general: "일상적인 질문과 다양한 작업에 두루 적합합니다.",
