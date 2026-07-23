@@ -6,14 +6,11 @@ import { authOptions } from "@/lib/auth";
 import {
   completeOAuthLink,
   clearOAuthLinkStateCookie,
+  resolveOAuthLinkProviderFromState,
   OAuthLinkError,
-  type LinkableProvider,
 } from "@/lib/oauthLink";
 import { sendLoginMethodChangedEmail } from "@/lib/emailLoginEmails";
 import { getPublicAppOrigin } from "@/lib/publicUrl";
-
-const isLinkableProvider = (value: string | null): value is LinkableProvider =>
-  value === "google" || value === "azure-ad";
 
 export async function GET(req: Request) {
   const origin = getPublicAppOrigin(req);
@@ -32,7 +29,6 @@ export async function GET(req: Request) {
     }
 
     const url = new URL(req.url);
-    const provider = url.searchParams.get("provider");
     const code = url.searchParams.get("code");
     const state = url.searchParams.get("state");
     const providerError = url.searchParams.get("error");
@@ -40,8 +36,12 @@ export async function GET(req: Request) {
     if (providerError) {
       return respond(`loginMethodLinkError=${encodeURIComponent(providerError)}`);
     }
-    if (!isLinkableProvider(provider) || !code || !state) {
-      return respond("loginMethodLinkError=INVALID_CALLBACK");
+
+    // Never trust a "provider" URL query param here -- see
+    // resolveOAuthLinkProviderFromState's comment in lib/oauthLink.ts.
+    const provider = resolveOAuthLinkProviderFromState(req);
+    if (!provider || !code || !state) {
+      return respond("loginMethodLinkError=INVALID_STATE");
     }
 
     await completeOAuthLink(req, session.user.id, provider, code, state);

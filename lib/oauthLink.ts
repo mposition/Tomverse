@@ -167,6 +167,18 @@ export function buildOAuthLinkAuthorizeRedirect(
 export const clearOAuthLinkStateCookie = () =>
     `${STATE_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
 
+// The OAuth callback route must know which provider a request is for before
+// it can call completeOAuthLink -- but that can't come from the callback
+// URL's query string: redirectUriFor() registers a bare callback URL with
+// each provider (no ?provider=...), so Google/Microsoft echo back only
+// code/state/error, never provider, and a URL param would be
+// attacker-controllable anyway. The signed state cookie set when the link
+// flow started already carries the provider tamper-evidently, so that's the
+// only source the callback should trust.
+export function resolveOAuthLinkProviderFromState(request: Request): LinkableProvider | null {
+    return readStateCookie(request)?.provider ?? null;
+}
+
 export async function completeOAuthLink(
     request: Request,
     currentUserId: string,
