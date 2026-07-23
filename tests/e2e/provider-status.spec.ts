@@ -90,7 +90,7 @@ test("retired models stay out of the user model catalogue", async ({ page }) => 
   await expect(page.getByText("Gemini 2.5 Pro", { exact: true })).toHaveCount(0);
   await expect(
     page
-      .getByRole("dialog", { name: "Select model" })
+      .getByRole("dialog", { name: "Choose AI models" })
       .getByTestId("model-option")
       .filter({ hasText: "Gemini 3.1 Pro" })
   ).toBeVisible();

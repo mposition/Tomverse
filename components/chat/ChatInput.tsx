@@ -16,6 +16,7 @@ import {
   Brain,
   Boxes,
   Braces,
+  Check,
   ChevronDown,
   Code2,
   File as FileIcon,
@@ -89,6 +90,22 @@ type PublicModelStatusRecord = {
   status: PublicModelStatus;
   fallbackModelIds: string[];
 };
+
+function ModelSelectionBadge({ isSelected, isLocked }: { isSelected: boolean; isLocked: boolean }) {
+  const Icon = isSelected ? Check : isLocked ? LockKeyhole : Plus;
+  return (
+    <span
+      aria-hidden="true"
+      className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border ${
+        isSelected
+          ? "border-blue-600 bg-blue-600 text-white"
+          : "border-zinc-300 text-zinc-400 dark:border-zinc-600 dark:text-zinc-500"
+      }`}
+    >
+      <Icon className="h-3.5 w-3.5" />
+    </span>
+  );
+}
 
 const MAX_ATTACHMENTS = 5;
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
@@ -289,6 +306,7 @@ type ChatInputProps = {
   guestMessageCount?: number;
   maxGuestMessages?: number;
   onToggleModel: (modelId: string) => boolean;
+  onSwapModel: (removeModelId: string, addModelId: string) => boolean;
   attachments: ChatAttachment[];
   onAttachmentsChange: (attachments: ChatAttachment[]) => void;
   canAttach?: boolean;
@@ -390,6 +408,7 @@ export function ChatInput({
   guestMessageCount = 0,
   maxGuestMessages = 20,
   onToggleModel,
+  onSwapModel,
   attachments,
   onAttachmentsChange,
   canAttach: canAttachProp = true,
@@ -587,6 +606,7 @@ export function ChatInput({
       return [];
     }
   });
+  const [replaceModelCandidate, setReplaceModelCandidate] = useState<(typeof PUBLIC_MODELS)[number] | null>(null);
   const [recentModelIds, setRecentModelIds] = useState<string[]>(() => {
     if (typeof window === "undefined") return [];
     try {
@@ -835,7 +855,10 @@ export function ChatInput({
       const matchesUsageBand =
         usageBandFilter === "all" ||
         getModelPickerUsageBand(usageProfile.credits) === usageBandFilter;
-      const matchesCapability = modelMatchesCapability(model, capabilityFilter);
+      const matchesCapability =
+        capabilityFilter === "favorites"
+          ? favoriteModelIds.includes(model.id)
+          : modelMatchesCapability(model, capabilityFilter);
       const matchesImageInput = !imageInputOnly || modelSupportsImageInput(model);
       const matchesCurrentPlan =
         !availableOnPlanOnly || canUseModelWithPlan(currentPlan, model);
@@ -853,6 +876,7 @@ export function ChatInput({
     availableOnPlanOnly,
     capabilityFilter,
     currentPlan,
+    favoriteModelIds,
     imageInputOnly,
     lang,
     modelSearchQuery,
@@ -2049,15 +2073,16 @@ export function ChatInput({
                             <span
                               key={modelId}
                               data-testid="selected-model-chip"
-                              className="inline-flex max-w-full items-center gap-1 rounded-full bg-blue-600 py-1 pl-2 pr-1 text-[11px] font-bold text-white"
+                              className="inline-flex max-w-full items-center gap-1 rounded-full border border-blue-300 bg-zinc-100 py-1 pl-2 pr-1 text-[11px] font-bold text-zinc-700 dark:border-blue-800 dark:bg-zinc-800 dark:text-zinc-200"
                             >
+                              <Check className="h-3 w-3 shrink-0 text-blue-600 dark:text-blue-400" aria-hidden="true" />
                               <ModelLogo model={model} size="xs" />
                               <span className="max-w-[120px] truncate">{model?.name || modelId}</span>
                               <button
                                 type="button"
                                 aria-label={t("chat.removeModelFromComparison")}
                                 onClick={() => onToggleModel(modelId)}
-                                className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full transition hover:bg-white/20"
+                                className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-300/60 dark:text-zinc-400 dark:hover:bg-zinc-700"
                               >
                                 <X className="h-3 w-3" />
                               </button>
@@ -2146,15 +2171,7 @@ export function ChatInput({
                                 size="xs"
                                 label={lang === "ko" ? `기본 ${usageProfile.credits}크레딧 차감` : `Base cost ${usageProfile.credits} credits`}
                               />
-                              <span
-                                className={`shrink-0 rounded-full px-2 py-1 text-[9px] font-black ${
-                                  isSelected
-                                    ? "bg-blue-600 text-white"
-                                    : "border border-zinc-200 text-zinc-600 dark:border-zinc-700 dark:text-zinc-300"
-                                }`}
-                              >
-                                {isSelected ? pickerCopy.selected : pickerCopy.select}
-                              </span>
+                              <ModelSelectionBadge isSelected={isSelected} isLocked={isPlanLocked} />
                             </button>
                           );
                         })}
@@ -2182,6 +2199,21 @@ export function ChatInput({
                       </button>
                     </div>
                     <div className="flex touch-pan-x gap-1 overflow-x-auto pb-0.5 [-webkit-overflow-scrolling:touch]">
+                      {favoriteModelIds.length > 0 && (
+                        <button
+                          type="button"
+                          aria-pressed={capabilityFilter === "favorites"}
+                          onClick={() =>
+                            setCapabilityFilter((current) =>
+                              current === "favorites" ? "all" : "favorites"
+                            )
+                          }
+                          className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-black transition ${capabilityFilter === "favorites" ? "border-blue-500 bg-blue-500 text-white" : "border-zinc-200 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"}`}
+                        >
+                          <Star className={`h-3 w-3 ${capabilityFilter === "favorites" ? "fill-current" : ""}`} aria-hidden="true" />
+                          {t("chat.favoriteModels")}
+                        </button>
+                      )}
                       {([
                         ["recommended", pickerCopy.recommended],
                         ["fast", pickerCopy.fast],
@@ -2286,7 +2318,11 @@ export function ChatInput({
                           return (
                             <div
                               key={model.id}
-                              className="flex w-full items-start gap-2 rounded-xl px-2 py-1.5 transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                              className={`flex w-full items-start gap-2 rounded-xl border px-2 py-1.5 transition ${
+                                isSelected
+                                  ? "border-blue-200 bg-blue-50/70 dark:border-blue-900/50 dark:bg-blue-950/20"
+                                  : "border-transparent hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                              }`}
                             >
                               <button
                                 type="button"
@@ -2308,6 +2344,10 @@ export function ChatInput({
                                 disabled={selectionDisabled && !isSelected}
                                 onClick={() => {
                                   rememberRecentModel(model.id);
+                                  if (!isSelected && !isPlanLocked && selectedModels.length >= maxSelectableModels) {
+                                    setReplaceModelCandidate(model);
+                                    return;
+                                  }
                                   onToggleModel(model.id);
                                 }}
                                 aria-pressed={isSelected}
@@ -2387,15 +2427,7 @@ export function ChatInput({
                                     testId="model-credit-badge"
                                     label={lang === "ko" ? `기본 ${usageProfile.credits}크레딧 차감` : `Base cost ${usageProfile.credits} credits`}
                                   />
-                                  <span
-                                    className={`shrink-0 rounded-full px-2 py-1 text-[9px] font-black ${
-                                      isSelected
-                                        ? "bg-blue-600 text-white"
-                                        : "border border-zinc-200 text-zinc-600 dark:border-zinc-700 dark:text-zinc-300"
-                                    }`}
-                                  >
-                                    {isSelected ? pickerCopy.selected : pickerCopy.select}
-                                  </span>
+                                  <ModelSelectionBadge isSelected={isSelected} isLocked={isPlanLocked} />
                                 </span>
                               </button>
                             </div>
@@ -2403,7 +2435,13 @@ export function ChatInput({
                         })}
                       </div>
                     ))}
-                    {filteredModels.length === 0 && (
+                    {filteredModels.length === 0 && capabilityFilter === "favorites" && (
+                      <div className="rounded-xl border border-dashed border-zinc-200 px-4 py-8 text-center text-xs text-zinc-400 dark:border-zinc-700">
+                        <p className="font-bold text-zinc-500 dark:text-zinc-300">{t("chat.noFavoriteModelsTitle")}</p>
+                        <p className="mt-1">{t("chat.noFavoriteModelsHint")}</p>
+                      </div>
+                    )}
+                    {filteredModels.length === 0 && capabilityFilter !== "favorites" && (
                       <div className="rounded-xl border border-dashed border-zinc-200 px-4 py-8 text-center text-xs text-zinc-400 dark:border-zinc-700">
                         {t("chat.noModelsFound")}
                       </div>
@@ -2430,6 +2468,58 @@ export function ChatInput({
                 </>
               )}
             </div>
+            {replaceModelCandidate && (() => {
+              const candidate = replaceModelCandidate;
+              return (
+                <div
+                  className="fixed inset-0 z-[110] flex items-end justify-center bg-black/50 md:items-center"
+                  onClick={() => setReplaceModelCandidate(null)}
+                >
+                  <div
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label={t("chat.swapModelTitle").replace("{model}", candidate.name)}
+                    className="w-full max-w-sm rounded-t-3xl bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] dark:bg-zinc-900 md:rounded-3xl"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-zinc-200 dark:bg-zinc-700 md:hidden" />
+                    <p className="text-base font-bold text-zinc-900 dark:text-zinc-100">
+                      {t("chat.swapModelTitle").replace("{model}", candidate.name)}
+                    </p>
+                    <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+                      {t("chat.swapModelBody")}
+                    </p>
+                    <div className="mt-3 space-y-1.5">
+                      {selectedModels.map((modelId) => {
+                        const currentModel = PUBLIC_MODELS.find((item) => item.id === modelId);
+                        return (
+                          <button
+                            key={modelId}
+                            type="button"
+                            onClick={() => {
+                              onSwapModel(modelId, candidate.id);
+                              rememberRecentModel(candidate.id);
+                              setReplaceModelCandidate(null);
+                            }}
+                            className="flex w-full items-center gap-2 rounded-xl border border-zinc-200 px-3 py-2.5 text-left text-sm font-semibold text-zinc-800 transition hover:border-blue-400 hover:bg-blue-50 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-blue-950/30"
+                          >
+                            <ModelLogo model={currentModel} size="sm" />
+                            <span className="min-w-0 flex-1 truncate">{currentModel?.name || modelId}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setReplaceModelCandidate(null)}
+                      className="mt-3 w-full rounded-xl border border-zinc-200 py-2.5 text-sm font-bold text-zinc-700 dark:border-zinc-700 dark:text-zinc-200"
+                    >
+                      {t("auth.cancel")}
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
             </>
             </MobileModelMenuPortal>
           )}

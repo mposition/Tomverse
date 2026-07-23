@@ -67,6 +67,7 @@ type MobileChatShellProps = {
   onDownload: (id: string, title: string) => void;
   onTogglePrivateMode: () => void;
   onToggleModel: (modelId: string) => boolean;
+  onSwapModel: (removeModelId: string, addModelId: string) => boolean;
   onRequestUndoToast: (message: string, undo: () => void) => void;
   onSubmit: () => void;
   onBeforeModelSend: (chatId: string) => Promise<boolean>;
@@ -105,6 +106,7 @@ export function MobileChatShell({
   onDownload,
   onTogglePrivateMode,
   onToggleModel,
+  onSwapModel,
   onRequestUndoToast,
   onSubmit,
   onBeforeModelSend,
@@ -646,6 +648,7 @@ export function MobileChatShell({
             selectedModels={selectedModels}
             disabledModelIds={disabledPanels}
             onToggleModel={onToggleModel}
+            onSwapModel={onSwapModel}
             attachments={attachments}
             onAttachmentsChange={setAttachments}
             canAttach={!isGuestMode}

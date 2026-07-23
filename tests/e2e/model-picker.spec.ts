@@ -17,7 +17,10 @@ test("recommended picker and credit summary fit the active viewport", async ({ p
   await modelMenuTrigger(page).click();
   const dialog = page.locator("#chat-input-popover");
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByTestId("recommended-model-option")).toHaveCount(3);
+  // Guests start with the brand-trio default already at the 3-model cap, so
+  // the recommendations card is hidden (it only shows below capacity) --
+  // see "recommended shortcuts stay synchronized" below for coverage of it.
+  await expect(dialog.getByTestId("recommended-model-option")).toHaveCount(0);
   await expect.poll(() => dialog.getByTestId("model-option").count()).toBeGreaterThan(3);
   await expect(dialog.getByTestId("model-selection-summary")).toBeVisible();
 
@@ -73,6 +76,10 @@ test("mobile model picker scrolls from recommendations through the full model li
 });
 
 test("search hides recommendations and shows matching full-list models", async ({ page }) => {
+  // A single pre-selected model keeps selection below capacity, so the
+  // recommendations card (hidden once at the model cap) stays visible.
+  await mockAuthenticatedApi(page, { selectedModels: ["gpt-5-4-mini"] });
+  await page.reload();
   await modelMenuTrigger(page).click();
   const dialog = page.locator("#chat-input-popover");
   await expect(dialog.getByTestId("model-recommendations")).toBeVisible();
@@ -89,11 +96,16 @@ test("search hides recommendations and shows matching full-list models", async (
 });
 
 test("recommended shortcuts stay synchronized with the full model list", async ({ page }) => {
-  await mockAuthenticatedApi(page);
+  // A single pre-selected model keeps selection below capacity, so the
+  // recommendations card (hidden once at the model cap) stays visible.
+  await mockAuthenticatedApi(page, { selectedModels: ["gpt-5-4-mini"] });
   await page.reload();
   await modelMenuTrigger(page).click();
   const dialog = page.locator("#chat-input-popover");
-  const recommended = dialog.getByTestId("recommended-model-option").nth(1);
+  // Below capacity, the recommendations card is capped to a single
+  // complementary suggestion.
+  await expect(dialog.getByTestId("recommended-model-option")).toHaveCount(1);
+  const recommended = dialog.getByTestId("recommended-model-option").first();
   const modelId = await recommended.getAttribute("data-model-id");
   expect(modelId).toBeTruthy();
   const fullListOption = dialog.locator(
@@ -147,6 +159,10 @@ test("completed model finder answers personalize the recommendation shortcuts", 
 });
 
 test("favorited models replace Tomverse recommendations", async ({ page }) => {
+  // A single pre-selected model keeps selection below capacity, so the
+  // recommendations card (hidden once at the model cap) stays visible.
+  await mockAuthenticatedApi(page, { selectedModels: ["gpt-5-4-mini"] });
+  await page.reload();
   await modelMenuTrigger(page).click();
   const dialog = page.locator("#chat-input-popover");
   await expect(dialog.getByTestId("model-recommendations")).toHaveAttribute(

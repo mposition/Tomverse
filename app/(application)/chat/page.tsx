@@ -1845,6 +1845,38 @@ export default function Home() {
     return true;
   };
 
+  // Swaps one already-selected model for another in a single state update --
+  // used when the picker is already at the model cap, so the two selections
+  // change atomically instead of racing two separate toggleModel() calls
+  // against the same stale selectedModels closure.
+  const swapSelectedModel = (removeModelId: string, addModelId: string) => {
+    const model = getModel(addModelId);
+    if (!model) return false;
+    if (!canUseModelWithPlan(currentAccessPlan, model)) {
+      if (isGuestMode) {
+        setShowGuestSignInPrompt(true);
+      } else {
+        setUpgradeModelPrompt(model);
+      }
+      return false;
+    }
+    if (isGuestMode && !clampGuestSelectedModels([addModelId]).includes(addModelId)) {
+      return false;
+    }
+    let nextModels = selectedModels.filter((id) => id !== removeModelId);
+    nextModels.push(addModelId);
+    nextModels = isGuestMode
+      ? clampGuestSelectedModels(nextModels)
+      : clampSelectedModels(nextModels).slice(0, maxSelectableModels);
+    const nextDisabled = disabledPanels.filter((id) => id !== removeModelId);
+    setSelectedModels(nextModels);
+    setDisabledPanels(nextDisabled);
+    if (currentChatId && currentChatId !== "private-chat") {
+      syncModelSettingsToServer(currentChatId, nextModels, nextDisabled);
+    }
+    return true;
+  };
+
   const handleModelFinderComplete = ({
       defaultModelId,
       optionalModelId,
@@ -2125,6 +2157,7 @@ export default function Home() {
           onDownload={handleDownloadConversation}
           onTogglePrivateMode={togglePrivateModeGlobal}
           onToggleModel={toggleModel}
+          onSwapModel={swapSelectedModel}
           onRequestUndoToast={(message, undo) =>
             showToast(message, "info", { label: t("chat.undo"), onClick: undo })
           }
@@ -2171,6 +2204,7 @@ export default function Home() {
           onDownload={handleDownloadConversation}
           onTogglePrivateMode={togglePrivateModeGlobal}
           onToggleModel={toggleModel}
+          onSwapModel={swapSelectedModel}
           onSubmit={handleGlobalSubmit}
           onBeforeModelSend={ensureModelSettingsReady}
           onChangePanelModel={changePanelModel}

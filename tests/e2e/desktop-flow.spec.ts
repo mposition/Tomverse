@@ -82,7 +82,9 @@ test("model picker prioritizes exact credits and shows the final input estimate"
   await modelMenuTrigger(page).click();
   const dialog = page.locator("#chat-input-popover");
 
-  await expect(dialog.getByTestId("recommended-model-option")).toHaveCount(3);
+  // Guests start with the brand-trio default already at the 3-model cap, so
+  // the recommendations card is hidden (it only shows below capacity).
+  await expect(dialog.getByTestId("recommended-model-option")).toHaveCount(0);
   await expect.poll(() => dialog.getByTestId("model-option").count()).toBeGreaterThan(3);
 
   const gptMini = dialog.locator(

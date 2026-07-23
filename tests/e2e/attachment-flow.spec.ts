@@ -147,7 +147,7 @@ test.describe("attachment UX", () => {
     await actionMenuTrigger(page).click();
     await page
       .getByRole("dialog", { name: /더 많은 작업|More actions|更多操作/ })
-      .getByRole("button", { name: /모델 선택|Select model|选择模型/ })
+      .getByRole("button", { name: /AI 모델 선택|Choose AI models|选择 AI 模型/ })
       .click();
 
     const textOnlyLlama = page.locator(
@@ -166,7 +166,7 @@ test.describe("attachment UX", () => {
     await actionMenuTrigger(page).click();
     await page
       .getByRole("dialog", { name: /더 많은 작업|More actions|更多操作/ })
-      .getByRole("button", { name: /모델 선택|Select model|选择模型/ })
+      .getByRole("button", { name: /AI 모델 선택|Choose AI models|选择 AI 模型/ })
       .click();
     await page
       .locator('[data-testid="model-option"][data-model-id="llama-3-1"]')
