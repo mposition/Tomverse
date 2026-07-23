@@ -335,15 +335,17 @@ function ChatAppComponent({
       content: text,
       attachments,
 	  status: "normal",
+	  createdAt: new Date().toISOString(),
     };
 
     const assistantMessageId = crypto.randomUUID();
-    const assistantMessage: Message = { 
-		id: assistantMessageId, 
-		role: "assistant", 
-		content: "", 
-		status: "normal", 
-		modelId: modelId 
+    const assistantMessage: Message = {
+		id: assistantMessageId,
+		role: "assistant",
+		content: "",
+		status: "normal",
+		modelId: modelId,
+		createdAt: new Date().toISOString(),
 	};
 	
     setMessages((prev) => [

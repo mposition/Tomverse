@@ -17,6 +17,7 @@ export type Message = {
   modelId?: string;
   errorCode?: string;
   errorHadAttachments?: boolean;
+  createdAt?: string;
 };
 
 export type Conversation = {
@@ -29,6 +30,7 @@ export type Conversation = {
     shareEnabled?: boolean;
     shareExpiresAt?: string | null;
     messageCount?: number;
+    createdAt?: string;
 };
 
 export const MAX_SELECTED_MODELS = 3;
