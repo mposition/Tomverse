@@ -162,6 +162,7 @@ type AppToast = {
   id: string;
   message: string;
   tone: AppToastTone;
+  action?: { label: string; onClick: () => void };
 };
 
 type BillingSuccessState = {
@@ -587,22 +588,26 @@ export default function Home() {
     return () => mediaQuery.removeEventListener("change", updateViewport);
   }, []);
 
-  const showToast = useCallback((message: string, tone: AppToast["tone"] = "info") => {
-    if (toastTimerRef.current) {
-      clearTimeout(toastTimerRef.current);
-    }
+  const showToast = useCallback(
+    (message: string, tone: AppToast["tone"] = "info", action?: AppToast["action"]) => {
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+      }
 
-    setToast({
-      id: crypto.randomUUID(),
-      message,
-      tone,
-    });
+      setToast({
+        id: crypto.randomUUID(),
+        message,
+        tone,
+        action,
+      });
 
-    toastTimerRef.current = setTimeout(() => {
-      setToast(null);
-      toastTimerRef.current = null;
-    }, 3200);
-  }, []);
+      toastTimerRef.current = setTimeout(() => {
+        setToast(null);
+        toastTimerRef.current = null;
+      }, action ? 5000 : 3200);
+    },
+    []
+  );
 
   const runComparisonPreflight = useCallback(
     async ({
@@ -2120,6 +2125,9 @@ export default function Home() {
           onDownload={handleDownloadConversation}
           onTogglePrivateMode={togglePrivateModeGlobal}
           onToggleModel={toggleModel}
+          onRequestUndoToast={(message, undo) =>
+            showToast(message, "info", { label: t("chat.undo"), onClick: undo })
+          }
           onSubmit={handleGlobalSubmit}
           onBeforeModelSend={ensureModelSettingsReady}
           onCompareSummary={handleCompareSummary}
@@ -2266,6 +2274,22 @@ export default function Home() {
           <ToastIcon className="h-4 w-4" aria-hidden="true" />
         </span>
         <span className="min-w-0 whitespace-pre-line break-words">{toast.message}</span>
+        {toast.action && (
+          <button
+            type="button"
+            onClick={() => {
+              toast.action?.onClick();
+              setToast(null);
+              if (toastTimerRef.current) {
+                clearTimeout(toastTimerRef.current);
+                toastTimerRef.current = null;
+              }
+            }}
+            className="shrink-0 rounded-lg px-2 py-1 text-sm font-black text-blue-600 hover:bg-blue-500/10 dark:text-blue-400"
+          >
+            {toast.action.label}
+          </button>
+        )}
       </div>
     )}
     {upgradeModelPrompt && accountUsage && (

@@ -801,19 +801,23 @@ export function ChatInput({
     return favoriteModelIds
       .map((modelId) => PUBLIC_MODELS.find((model) => model.id === modelId))
       .filter((model): model is (typeof PUBLIC_MODELS)[number] => Boolean(model?.enabled))
-      .slice(0, 3);
-  }, [PUBLIC_MODELS, favoriteModelIds]);
+      .filter((model) => !selectedModels.includes(model.id));
+  }, [PUBLIC_MODELS, favoriteModelIds, selectedModels]);
 
   const recommendationModels = useMemo(() => {
     if (favoriteRecommendationModels.length) return favoriteRecommendationModels;
     const ids = personalizedRecommendationIds.length
       ? personalizedRecommendationIds
       : [...RECOMMENDED_MODEL_IDS];
-    return ids
+    const pool = ids
       .map((modelId) => PUBLIC_MODELS.find((model) => model.id === modelId))
       .filter((model): model is (typeof PUBLIC_MODELS)[number] => Boolean(model?.enabled))
-      .slice(0, 3);
-  }, [PUBLIC_MODELS, favoriteRecommendationModels, personalizedRecommendationIds]);
+      .filter((model) => !selectedModels.includes(model.id));
+    // Once the user has started picking models, a single well-matched
+    // suggestion is more useful than a fixed panel of three -- the rest of
+    // the picker (Selected, Favorites, All models) already covers browsing.
+    return pool.slice(0, selectedModels.length === 0 ? 3 : 1);
+  }, [PUBLIC_MODELS, favoriteRecommendationModels, personalizedRecommendationIds, selectedModels]);
 
   const filteredModels = useMemo(() => {
     const normalizedQuery = modelSearchQuery.trim().toLowerCase();
@@ -2033,12 +2037,44 @@ export function ChatInput({
                       />
                     </div>
                   </div>
+                  {selectedModels.length > 0 && (
+                    <div className="mb-2 shrink-0 px-1">
+                      <p className="mb-1 px-1 text-[10px] font-black uppercase tracking-wide text-zinc-400">
+                        {pickerCopy.selectedModelsLabel}
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {selectedModels.map((modelId) => {
+                          const model = PUBLIC_MODELS.find((item) => item.id === modelId);
+                          return (
+                            <span
+                              key={modelId}
+                              data-testid="selected-model-chip"
+                              className="inline-flex max-w-full items-center gap-1 rounded-full bg-blue-600 py-1 pl-2 pr-1 text-[11px] font-bold text-white"
+                            >
+                              <ModelLogo model={model} size="xs" />
+                              <span className="max-w-[120px] truncate">{model?.name || modelId}</span>
+                              <button
+                                type="button"
+                                aria-label={t("chat.removeModelFromComparison")}
+                                onClick={() => onToggleModel(modelId)}
+                                className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full transition hover:bg-white/20"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                   <div
                     data-testid="model-picker-scroll-region"
                     className="h-0 min-h-0 flex-1 touch-pan-y space-y-2 overflow-x-hidden overflow-y-scroll overscroll-y-contain px-1 pb-4 pr-2 [scrollbar-gutter:stable] [-webkit-overflow-scrolling:touch]"
                   >
 
-                    {!modelSearchQuery.trim() && (
+                    {!modelSearchQuery.trim() &&
+                      selectedModels.length < maxSelectableModels &&
+                      recommendationModels.length > 0 && (
                       <section
                         data-testid="model-recommendations"
                         aria-label={
@@ -2351,8 +2387,14 @@ export function ChatInput({
                                     testId="model-credit-badge"
                                     label={lang === "ko" ? `기본 ${usageProfile.credits}크레딧 차감` : `Base cost ${usageProfile.credits} credits`}
                                   />
-                                  <span className={`h-4 w-8 rounded-full p-0.5 transition-colors ${isSelected ? "bg-blue-500" : "bg-zinc-300 dark:bg-zinc-700"}`}>
-                                    <span className={`block h-3 w-3 rounded-full bg-white transition-transform ${isSelected ? "translate-x-4" : ""}`} />
+                                  <span
+                                    className={`shrink-0 rounded-full px-2 py-1 text-[9px] font-black ${
+                                      isSelected
+                                        ? "bg-blue-600 text-white"
+                                        : "border border-zinc-200 text-zinc-600 dark:border-zinc-700 dark:text-zinc-300"
+                                    }`}
+                                  >
+                                    {isSelected ? pickerCopy.selected : pickerCopy.select}
                                   </span>
                                 </span>
                               </button>
