@@ -386,6 +386,7 @@ export const fr = {
         limited: "limité",
         tryFallback: "Essayez :",
         switchTo: "Passer à",
+        switchFromTo: "Remplacer {from} par {to}",
         tryLater: "Réessayez plus tard ou choisissez un autre modèle.",
         refresh: "Actualiser l'état des fournisseurs",
     },

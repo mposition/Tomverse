@@ -1,5 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
-import { prepareGuestPage } from "./support/app-fixtures";
+import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
+
+const modelMenuTrigger = (page: Page) =>
+  page.locator('button[aria-controls="chat-input-popover"]').nth(1);
 
 type MockStatus = "limited" | "unavailable";
 
@@ -94,4 +97,62 @@ test("retired models stay out of the user model catalogue", async ({ page }) => 
       .getByTestId("model-option")
       .filter({ hasText: "Gemini 3.1 Pro" })
   ).toBeVisible();
+});
+
+test("clicking the banner's suggestion swaps the failed model instead of silently failing at the cap", async ({
+  page,
+}) => {
+  // Regression test for a reported bug: with 3 models already selected (the
+  // max), the banner's suggestion button used to call the plain add/toggle
+  // handler, which rejects once at the cap -- so clicking it did nothing at
+  // all, and the failed model stayed selected. It must swap instead.
+  await mockAuthenticatedApi(page);
+  await page.route("**/api/models/status", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        generatedAt: new Date().toISOString(),
+        models: [
+          {
+            id: "gpt-5-4-mini",
+            provider: "openai",
+            status: "unavailable",
+            fallbackModelIds: ["mistral-small-4"],
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.goto("/chat?lang=en");
+  await modelMenuTrigger(page).click();
+  await page
+    .locator('[data-testid="model-option"][data-model-id="gemini-2-5-flash"]')
+    .click();
+  await page
+    .locator('[data-testid="model-option"][data-model-id="claude-haiku-4-5"]')
+    .click();
+  await page.keyboard.press("Escape");
+
+  await expect(page.getByTestId("desktop-model-panel")).toHaveCount(3);
+
+  const banner = page.getByTestId("provider-outage-banner");
+  await expect(banner).toBeVisible();
+  const swapButton = banner.getByRole("button", {
+    name: "Switch GPT-5.4 mini for Mistral Small 4",
+  });
+  await expect(swapButton).toBeVisible();
+
+  await swapButton.click();
+
+  await expect(
+    page.locator('[data-testid="desktop-model-panel"][data-model-id="gpt-5-4-mini"]')
+  ).toHaveCount(0);
+  await expect(
+    page.locator('[data-testid="desktop-model-panel"][data-model-id="mistral-small-4"]')
+  ).toBeVisible();
+  // Still exactly 3 panels -- the failed model was replaced in place, not
+  // just added on top (which the cap would have rejected outright).
+  await expect(page.getByTestId("desktop-model-panel")).toHaveCount(3);
 });

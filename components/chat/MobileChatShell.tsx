@@ -385,7 +385,12 @@ export function MobileChatShell({
         </div>
       </header>
 
-      <ProviderStatusBanner selectedModels={selectedModels} compact onToggleModel={onToggleModel} />
+      <ProviderStatusBanner
+        selectedModels={selectedModels}
+        compact
+        onToggleModel={onToggleModel}
+        onSwapModel={onSwapModel}
+      />
 
       {!isConversationEmpty && selectedModels.length > 1 && (
         <div className="shrink-0 border-b border-zinc-200 bg-zinc-50 px-2 py-1.5 dark:border-zinc-800 dark:bg-zinc-900/60">

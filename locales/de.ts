@@ -386,6 +386,7 @@ export const de = {
         limited: "eingeschränkt",
         tryFallback: "Versuchen Sie:",
         switchTo: "Wechseln zu",
+        switchFromTo: "{from} durch {to} ersetzen",
         tryLater: "Bitte später erneut versuchen oder ein anderes Modell wählen.",
         refresh: "Anbieterstatus aktualisieren",
     },

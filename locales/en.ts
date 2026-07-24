@@ -462,6 +462,7 @@ export const en = {
         limited: "limited",
         tryFallback: "Try:",
         switchTo: "Switch to",
+        switchFromTo: "Switch {from} for {to}",
         tryLater: "Please try again later or choose another model.",
         refresh: "Refresh provider status",
     },

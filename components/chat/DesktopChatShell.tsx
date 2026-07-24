@@ -213,7 +213,12 @@ export function DesktopChatShell({
       />
 
       <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        <ProviderStatusBanner selectedModels={selectedModels} compact onToggleModel={onToggleModel} />
+        <ProviderStatusBanner
+          selectedModels={selectedModels}
+          compact
+          onToggleModel={onToggleModel}
+          onSwapModel={onSwapModel}
+        />
         <div className="relative flex min-h-0 flex-1 gap-4 overflow-hidden bg-zinc-100/80 px-4 pb-4 pt-3 dark:bg-zinc-950">
           {isConversationEmpty && (
             <div className="absolute inset-0 z-10 bg-zinc-100/80 dark:bg-zinc-950">

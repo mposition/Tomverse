@@ -18,12 +18,14 @@ type ProviderStatusBannerProps = {
   selectedModels?: string[];
   compact?: boolean;
   onToggleModel?: (modelId: string) => void;
+  onSwapModel?: (removeModelId: string, addModelId: string) => void;
 };
 
 export function ProviderStatusBanner({
   selectedModels = [],
   compact = false,
   onToggleModel,
+  onSwapModel,
 }: ProviderStatusBannerProps) {
   const { models: AVAILABLE_MODELS, publicModels: PUBLIC_MODELS } = useModelCatalog();
   const PUBLIC_MODEL_IDS = useMemo(
@@ -102,8 +104,8 @@ export function ProviderStatusBanner({
       selectedSet.size > 0
         ? unavailable.filter((model) => selectedSet.has(model.id))
         : [];
-    const visibleUnavailable =
-      selectedUnavailable.length > 0 ? selectedUnavailable : unavailable;
+    const isSelectedOnly = selectedUnavailable.length > 0;
+    const visibleUnavailable = isSelectedOnly ? selectedUnavailable : unavailable;
     const fallbackIds = Array.from(
       new Set(visibleUnavailable.flatMap((model) => model.fallbackModelIds))
     )
@@ -111,11 +113,30 @@ export function ProviderStatusBanner({
       .slice(0, 3);
     const fallbackNames = fallbackIds.map(modelName);
 
+    // When the impacted model is actually one of the user's selections, each
+    // gets its own 1:1 replacement pick instead of the flattened fallbackIds
+    // list above -- that's what lets the banner call onSwapModel(impacted,
+    // suggestion) so it works even when selectedModels is already at the cap
+    // (a plain "add" would silently no-op there instead).
+    const swapSuggestions = isSelectedOnly
+      ? selectedUnavailable
+          .map((model) => ({
+            removeModelId: model.id,
+            addModelId: model.fallbackModelIds.find((id) => !selectedSet.has(id)),
+          }))
+          .filter(
+            (suggestion): suggestion is { removeModelId: string; addModelId: string } =>
+              Boolean(suggestion.addModelId)
+          )
+          .slice(0, 3)
+      : [];
+
     return {
       impacted: visibleUnavailable,
       fallbackIds,
       fallbackNames,
-      isSelectedOnly: selectedUnavailable.length > 0,
+      swapSuggestions,
+      isSelectedOnly,
     };
   }, [modelName, models, selectedModels]);
 
@@ -164,20 +185,39 @@ export function ProviderStatusBanner({
             )}
           </button>
         </div>
-        {onToggleModel && bannerState.fallbackIds.length > 0 && (
+        {onSwapModel && bannerState.swapSuggestions.length > 0 ? (
           <div className="mt-1.5 flex gap-1.5 overflow-x-auto overscroll-x-contain pb-0.5">
-            {bannerState.fallbackIds.map((modelId) => (
+            {bannerState.swapSuggestions.map(({ removeModelId, addModelId }) => (
               <button
-                key={modelId}
+                key={removeModelId}
                 type="button"
-                onClick={() => onToggleModel(modelId)}
+                onClick={() => onSwapModel(removeModelId, addModelId)}
                 className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full bg-black/5 px-2 text-[11px] font-black transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
               >
                 <Shuffle className="h-3 w-3" />
-                {modelName(modelId)}
+                {t("providerStatus.switchFromTo")
+                  .replace("{from}", modelName(removeModelId))
+                  .replace("{to}", modelName(addModelId))}
               </button>
             ))}
           </div>
+        ) : (
+          onToggleModel &&
+          bannerState.fallbackIds.length > 0 && (
+            <div className="mt-1.5 flex gap-1.5 overflow-x-auto overscroll-x-contain pb-0.5">
+              {bannerState.fallbackIds.map((modelId) => (
+                <button
+                  key={modelId}
+                  type="button"
+                  onClick={() => onToggleModel(modelId)}
+                  className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full bg-black/5 px-2 text-[11px] font-black transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
+                >
+                  <Shuffle className="h-3 w-3" />
+                  {modelName(modelId)}
+                </button>
+              ))}
+            </div>
+          )
         )}
       </div>
     );
@@ -209,20 +249,39 @@ export function ProviderStatusBanner({
               ? ` ${t("providerStatus.tryFallback")} ${bannerState.fallbackNames.join(", ")}`
               : ` ${t("providerStatus.tryLater")}`}
           </p>
-          {onToggleModel && bannerState.fallbackIds.length > 0 && (
+          {onSwapModel && bannerState.swapSuggestions.length > 0 ? (
             <div className="mt-2 flex flex-wrap gap-1.5">
-              {bannerState.fallbackIds.map((modelId) => (
+              {bannerState.swapSuggestions.map(({ removeModelId, addModelId }) => (
                 <button
-                  key={modelId}
+                  key={removeModelId}
                   type="button"
-                  onClick={() => onToggleModel(modelId)}
+                  onClick={() => onSwapModel(removeModelId, addModelId)}
                   className="inline-flex items-center gap-1 rounded-full bg-black/5 px-2.5 py-1 text-[11px] font-black transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
                 >
                   <Shuffle className="h-3 w-3" />
-                  {t("providerStatus.switchTo")} {modelName(modelId)}
+                  {t("providerStatus.switchFromTo")
+                    .replace("{from}", modelName(removeModelId))
+                    .replace("{to}", modelName(addModelId))}
                 </button>
               ))}
             </div>
+          ) : (
+            onToggleModel &&
+            bannerState.fallbackIds.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {bannerState.fallbackIds.map((modelId) => (
+                  <button
+                    key={modelId}
+                    type="button"
+                    onClick={() => onToggleModel(modelId)}
+                    className="inline-flex items-center gap-1 rounded-full bg-black/5 px-2.5 py-1 text-[11px] font-black transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
+                  >
+                    <Shuffle className="h-3 w-3" />
+                    {t("providerStatus.switchTo")} {modelName(modelId)}
+                  </button>
+                ))}
+              </div>
+            )
           )}
         </div>
         <button

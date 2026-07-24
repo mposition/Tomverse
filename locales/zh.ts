@@ -387,6 +387,7 @@ export const zh = {
         limited: "受限",
         tryFallback: "可尝试：",
         switchTo: "切换到",
+        switchFromTo: "将{from}替换为{to}",
         tryLater: "请稍后再试，或选择其他模型。",
         refresh: "刷新提供商状态",
     },

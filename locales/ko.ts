@@ -462,6 +462,7 @@ export const ko = {
         limited: "제한됨",
         tryFallback: "추천:",
         switchTo: "전환",
+        switchFromTo: "{from}을(를) {to}(으)로 교체",
         tryLater: "잠시 후 다시 시도하거나 다른 모델을 선택해 주세요.",
         refresh: "공급자 상태 새로고침",
     },
