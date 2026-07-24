@@ -153,6 +153,7 @@ export const analyticsPropertiesSchema = z
         "private",
         "ai_review",
         "credits",
+        "guest_trial",
       ])
       .optional(),
     help_article_id: z.enum(["chat_workspace"]).optional(),

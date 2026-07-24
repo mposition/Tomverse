@@ -20,7 +20,8 @@ export type UiHelpTopic =
   | "shared"
   | "private"
   | "ai_review"
-  | "credits";
+  | "credits"
+  | "guest_trial";
 
 type FeatureHelpPopoverProps = {
   title: string;

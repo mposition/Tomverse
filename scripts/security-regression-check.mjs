@@ -1042,9 +1042,8 @@ const checks = [
         source.indexOf("isNewConversation && !value.trim() && attachments.length === 0")
       );
       return (
-        guide.includes('t("onboarding.compareTitle")') &&
-        guide.includes('t("onboarding.privateBody")') &&
-        guide.includes('t("auth.login")') &&
+        guide.includes('t("chat.guestQuickLine")') &&
+        guide.includes('t("chat.guestQuickLineHelpBody")') &&
         !source.includes('t("auth.signIn")') &&
         !guide.includes("fixed inset-0") &&
         !guide.includes('aria-modal="true"') &&

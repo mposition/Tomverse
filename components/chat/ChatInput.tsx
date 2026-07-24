@@ -46,8 +46,9 @@ import {
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { useLanguage } from "@/components/LanguageProvider";
+import { FeatureHelpPopover } from "@/components/chat/FeatureHelpPopover";
+import { chatHelpCopy } from "@/components/chat/chatHelpCopy";
 import { dispatchAppToast } from "@/lib/appToast";
-import { writePendingGuestImportIntent } from "@/lib/guestImport";
 import { getModelExperienceStatus } from "@/lib/modelExperience";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import {
@@ -451,6 +452,7 @@ export function ChatInput({
   const [isCreditBreakdownOpen, setIsCreditBreakdownOpen] = useState(false);
   const [isUsageLimitModalOpen, setIsUsageLimitModalOpen] = useState(false);
     const { t, lang } = useLanguage();
+    const helpCopy = chatHelpCopy[lang];
     const modelsSelectedLabel = (count: number) =>
       `${count} ${count === 1 ? t("chat.modelsSelectedOne") : t("chat.modelsSelectedOther")}`;
     const pickerCopy = modelPickerCopy[lang];
@@ -1655,38 +1657,20 @@ export function ChatInput({
           {isGuestMode && showGuestQuickStart && (
             <div
               data-testid="guest-quick-start"
-              className="mb-2 flex flex-col gap-1 rounded-2xl border border-blue-200 bg-blue-50/90 px-3 py-2 text-zinc-900 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-zinc-100"
+              className="mb-2 flex items-center gap-1.5 px-1"
             >
-              <div className="flex items-center gap-2">
-                <p className="min-w-0 flex-1 truncate text-[11px] font-semibold text-blue-700 dark:text-blue-300">
-                  <span className="font-black">{t("onboarding.compareTitle")}</span>
-                  {" — "}
-                  {t("onboarding.compareBody")}
-                </p>
-              <button
-                type="button"
-                onClick={() => dismissGuestQuickStart("skipped")}
-                className="shrink-0 rounded-full bg-white px-2.5 py-1 text-[11px] font-black text-blue-700 shadow-sm transition hover:bg-blue-100 dark:bg-zinc-900 dark:text-blue-300 dark:hover:bg-zinc-800"
-              >
-                {t("modelFinder.dismissTips")}
-              </button>
-              </div>
-              <p className="truncate text-[10px] leading-4 text-blue-600/80 dark:text-blue-300/70">
-                {t("onboarding.filesBody")}
-              </p>
-              <p className="truncate text-[10px] leading-4 text-blue-600/80 dark:text-blue-300/70">
-                {t("onboarding.privateBody")}{" "}
-                <a
-                  href={`/auth/signin?callbackUrl=${encodeURIComponent(signInCallbackUrl)}`}
-                  onClick={() => {
-                    dismissGuestQuickStart("completed");
-                    if (currentChatId) writePendingGuestImportIntent(currentChatId);
-                  }}
-                  className="font-black underline underline-offset-2"
-                >
-                  {t("auth.login")}
-                </a>
-              </p>
+              <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
+                {t("chat.guestQuickLine")}
+              </span>
+              <FeatureHelpPopover
+                title={t("chat.guestQuickLineHelp")}
+                description={t("chat.guestQuickLineHelpBody")}
+                buttonLabel={t("chat.guestQuickLineHelp")}
+                learnMoreLabel={helpCopy.learnMore}
+                topic="guest_trial"
+                align="right"
+                testId="guest-quick-start-help"
+              />
             </div>
           )}
           {isNewConversation && !value.trim() && attachments.length === 0 && personalizedPrompt && (
