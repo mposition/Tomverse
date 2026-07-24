@@ -222,6 +222,7 @@ const logRequestError = (
             traceId,
             modelId,
             ...safeErrorMetadata(error),
+            message: safeErrorMessage(error)?.slice(0, 1_000),
         })
     );
 };
