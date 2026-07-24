@@ -375,6 +375,14 @@ export default function Home() {
   const [valueUpgradeSource, setValueUpgradeSource] = useState<
     "comparison" | "ai_review" | null
   >(null);
+  // Guest-only equivalent of valueUpgradeSource: shown at most once per
+  // browser, only for guests who entered via the guided preview flow, at
+  // the two moments they've actually seen Tomverse's value -- a full
+  // multi-model comparison finishing, and (for the guest-accessible Quick
+  // Difference Summary) a completed review -- rather than after a single
+  // model's first reply (the removed auto-popup this replaces).
+  const [showGuestSaveCompareCard, setShowGuestSaveCompareCard] = useState(false);
+  const [showGuestSaveReviewCard, setShowGuestSaveReviewCard] = useState(false);
   const [unlockDialog, setUnlockDialog] = useState<{ id: string; password: string; error: string } | null>(null);
   const [lockedSelectDialog, setLockedSelectDialog] = useState<{ id: string; password: string; error: string } | null>(null);
   const [toast, setToast] = useState<AppToast | null>(null);
@@ -2011,6 +2019,28 @@ export default function Home() {
     localStorage.setItem("tomverse_value_upgrade_prompt_seen_v1", "1");
   }, [valueUpgradeSource]);
 
+  const maybeShowGuestSaveCompareCard = useCallback(() => {
+    if (!isGuestMode || !isGuestPreviewEntry) return;
+    if (localStorage.getItem("tomverse_guest_save_compare_seen_v1") === "1") return;
+    setShowGuestSaveCompareCard(true);
+  }, [isGuestMode, isGuestPreviewEntry]);
+
+  useEffect(() => {
+    if (!showGuestSaveCompareCard) return;
+    localStorage.setItem("tomverse_guest_save_compare_seen_v1", "1");
+  }, [showGuestSaveCompareCard]);
+
+  const maybeShowGuestSaveReviewCard = useCallback(() => {
+    if (!isGuestMode || !isGuestPreviewEntry) return;
+    if (localStorage.getItem("tomverse_guest_save_review_seen_v1") === "1") return;
+    setShowGuestSaveReviewCard(true);
+  }, [isGuestMode, isGuestPreviewEntry]);
+
+  useEffect(() => {
+    if (!showGuestSaveReviewCard) return;
+    localStorage.setItem("tomverse_guest_save_review_seen_v1", "1");
+  }, [showGuestSaveReviewCard]);
+
   const handleResponseComplete = useCallback(
     (promptId: string | null, modelId: string, responseText: string) => {
       if (promptId && responseText.trim()) {
@@ -2047,12 +2077,17 @@ export default function Home() {
           "multi_model_compare_completed",
           activeModelCount
         );
-        maybeShowValueUpgradePrompt("comparison");
+        if (isGuestMode) {
+          maybeShowGuestSaveCompareCard();
+        } else {
+          maybeShowValueUpgradePrompt("comparison");
+        }
       }
     },
     [
       activeModelCount,
       isGuestMode,
+      maybeShowGuestSaveCompareCard,
       maybeShowValueUpgradePrompt,
       refreshGuestUsage,
     ]
@@ -2438,6 +2473,7 @@ export default function Home() {
           }
         }
         setCompareSummary(await response.json());
+        maybeShowGuestSaveReviewCard();
       } catch {
         showToast(t("chat.compareUnavailable"), "error");
       } finally {
@@ -2757,6 +2793,58 @@ export default function Home() {
         </UpgradeCtaLink>
       </aside>
     )}
+    {showGuestSaveCompareCard && (
+      <aside
+        data-testid="guest-save-compare-prompt"
+        className="fixed inset-x-3 top-[max(0.75rem,env(safe-area-inset-top))] z-[76] mx-auto w-auto max-w-sm rounded-2xl border border-blue-200 bg-white p-4 shadow-2xl shadow-zinc-900/20 dark:border-blue-900/60 dark:bg-zinc-900 md:inset-x-auto md:right-5 md:top-5 md:w-[22rem]"
+      >
+        <div className="flex items-start gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white">
+            <Sparkles className="h-4 w-4" aria-hidden="true" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-black text-zinc-950 dark:text-white">
+              {t("chat.guestSaveCompareTitle")}
+            </p>
+            <p className="mt-1 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+              {t("chat.guestSaveCompareBody")}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowGuestSaveCompareCard(false)}
+            aria-label={t("auth.cancel")}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-white"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <a
+            href={guestCompareSignInHref}
+            data-testid="guest-save-compare-cta"
+            onClick={() => {
+              trackProductEvent("signup_started", 1, {
+                trigger: "proactive",
+                cta_location: "guest_save_compare",
+              });
+              if (currentChatId) writePendingGuestImportIntent(currentChatId);
+              setShowGuestSaveCompareCard(false);
+            }}
+            className="flex min-h-10 items-center justify-center rounded-xl bg-blue-600 px-3 py-2 text-center text-xs font-black text-white hover:bg-blue-500"
+          >
+            {t("chat.guestSaveCompareCta")}
+          </a>
+          <button
+            type="button"
+            onClick={() => setShowGuestSaveCompareCard(false)}
+            className="min-h-10 rounded-xl border border-zinc-200 px-3 py-2 text-xs font-bold text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          >
+            {t("chat.guestSaveCompareDismiss")}
+          </button>
+        </div>
+      </aside>
+    )}
     {billingSuccess && (
       <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
         <div
@@ -3006,6 +3094,33 @@ export default function Home() {
                 {t("chat.quickSummaryDisclaimer")}
               </p>
             </section>
+            {showGuestSaveReviewCard && (
+              <section
+                data-testid="guest-save-review-prompt"
+                className="rounded-xl border border-blue-200 bg-blue-50/70 p-4 dark:border-blue-900/70 dark:bg-blue-950/30"
+              >
+                <p className="text-sm font-black text-blue-950 dark:text-blue-100">
+                  {t("chat.guestSaveReviewTitle")}
+                </p>
+                <p className="mt-1 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+                  {t("chat.guestSaveReviewBody")}
+                </p>
+                <a
+                  href={guestCompareSignInHref}
+                  data-testid="guest-save-review-cta"
+                  onClick={() => {
+                    trackProductEvent("signup_started", 1, {
+                      trigger: "proactive",
+                      cta_location: "guest_save_review",
+                    });
+                    if (currentChatId) writePendingGuestImportIntent(currentChatId);
+                  }}
+                  className="mt-3 flex min-h-10 w-full items-center justify-center rounded-xl bg-blue-600 px-3 py-2 text-xs font-black text-white hover:bg-blue-500"
+                >
+                  {t("chat.guestSaveReviewCta")}
+                </a>
+              </section>
+            )}
           </div>
         </section>
       </div>
