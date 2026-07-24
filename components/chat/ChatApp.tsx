@@ -48,7 +48,7 @@ type ChatAppProps = {
   onEmptyStateChange?: (modelId: string, isEmpty: boolean) => void;
   onStatusChange?: (
     modelId: string,
-    status: "idle" | "loading" | "responding" | "error" | "paused"
+    status: "idle" | "loading" | "responding" | "error" | "cancelled" | "paused"
   ) => void;
   onResponseComplete?: (
     promptId: string | null,
@@ -60,6 +60,11 @@ type ChatAppProps = {
   onRequestCloseModel?: () => void;
   hasMultipleActiveModels?: boolean;
   currentPlan?: string | null;
+  // Bumped by the parent (e.g. a global "stop all" button) to abort this
+  // panel's in-flight request, if any. A counter rather than a boolean so
+  // every increment reliably re-triggers the effect even if the previous
+  // stop request already completed.
+  stopSignal?: number;
 };
 
 function ChatAppComponent({
@@ -78,6 +83,7 @@ function ChatAppComponent({
   onRequestCloseModel,
   hasMultipleActiveModels = false,
   currentPlan,
+  stopSignal,
 }: ChatAppProps) {
   const [isMessagesLoaded, setIsMessagesLoaded] = useState(false);
   const [loadedMessageViewKey, setLoadedMessageViewKey] = useState<string | null>(null);
@@ -136,13 +142,30 @@ function ChatAppComponent({
 
     // Only the most recent assistant reply should count -- otherwise a
     // successful retry after an earlier failure could never clear the
-    // "error" status, since that old failed message never leaves history.
+    // "error"/"cancelled" status, since that old reply never leaves history.
     const lastAssistantMessage = [...messages]
       .reverse()
       .find((message) => message.role === "assistant");
-    const hasError = lastAssistantMessage?.status === "error";
-    onStatusChange?.(modelId, hasError ? "error" : "idle");
+    // A user-stopped response must not read as "idle"/ready: it's what lets
+    // a comparison-summary or AI Review request wrongly treat a stopped
+    // panel as a real, completed answer.
+    const status =
+      lastAssistantMessage?.status === "error"
+        ? "error"
+        : lastAssistantMessage?.status === "cancelled"
+          ? "cancelled"
+          : "idle";
+    onStatusChange?.(modelId, status);
   }, [isPanelDisabled, isSending, messages, modelId, onStatusChange]);
+
+  // Bumped by the parent to request an abort of this panel's in-flight
+  // request, if any. AbortController.abort() on an already-settled (or
+  // already-null) controller is a safe no-op, so this stays correct even if
+  // clicked repeatedly or after this panel already finished on its own.
+  useEffect(() => {
+    if (stopSignal === undefined) return;
+    abortControllerRef.current?.abort();
+  }, [stopSignal]);
 
   const isConversationEmpty =
     messages.length === 0 || (messages.length === 1 && messages[0]?.id === "welcome");
@@ -374,7 +397,11 @@ function ChatAppComponent({
     };
     resetIdleTimeout();
     let requestTraceId: string | null = null;
-	
+    // Declared here (not inside the try block below) so a stop mid-stream
+    // can still show whatever was generated before the abort, instead of
+    // discarding it -- the catch block needs to read it too.
+    let assistantText = "";
+
     try {
       const sendChatRequest = async (turnstileToken?: string) => {
         const res = await fetch("/api/chat", {
@@ -465,7 +492,6 @@ function ChatAppComponent({
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
-      let assistantText = "";
 
       while (true) {
         const { done, value } = await reader.read();
@@ -508,9 +534,13 @@ function ChatAppComponent({
             })
           : {};
       if (requestError.name === "AbortError") {
+        // Keep whatever was already generated -- a stop mid-answer
+        // shouldn't throw away useful partial content, only mark it as
+        // stopped. Only fall back to the placeholder text if nothing had
+        // streamed in yet (e.g. aborted before the first token).
         setAssistantMessage(
           assistantMessageId,
-          t("chat.responseCancelled"),
+          assistantText.trim() ? assistantText : t("chat.responseCancelled"),
           "cancelled"
         );
       } else {

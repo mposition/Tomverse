@@ -36,7 +36,7 @@ type PromptPayload = {
   attachments: ChatAttachment[];
 };
 
-type ModelRuntimeStatus = "idle" | "loading" | "responding" | "error" | "paused";
+type ModelRuntimeStatus = "idle" | "loading" | "responding" | "error" | "cancelled" | "paused";
 
 type MobileChatShellProps = {
   conversations: Conversation[];
@@ -151,6 +151,12 @@ export function MobileChatShell({
   const emptyStateKey = useCallback(
     (modelId: string) => `${conversationStateKey}:${modelId}`,
     [conversationStateKey]
+  );
+
+  // Bumped to abort every currently-responding panel at once ("stop all").
+  const [stopSignal, setStopSignal] = useState(0);
+  const isAnyModelResponding = Object.values(modelStatuses).some(
+    (status) => status === "responding"
   );
 
   const handleModelStatusChange = useCallback(
@@ -431,6 +437,8 @@ export function MobileChatShell({
                       <span className={`h-2 w-2 shrink-0 animate-pulse rounded-full ${isActive ? "bg-white" : "bg-blue-500"}`} />
                     ) : status === "error" ? (
                       <span className="h-2 w-2 shrink-0 rounded-full bg-red-500" />
+                    ) : status === "cancelled" ? (
+                      <span className={`h-2 w-2 shrink-0 rounded-full ${isActive ? "bg-white/70" : "bg-zinc-400"}`} />
                     ) : status === "paused" ? (
                       <span className="shrink-0 text-[9px]">OFF</span>
                     ) : null}
@@ -568,6 +576,7 @@ export function MobileChatShell({
                   onFollowupSent={onFollowupSent}
                   onRequestCloseModel={() => onToggleModel(modelId)}
                   hasMultipleActiveModels={selectedModels.length > 1}
+                  stopSignal={stopSignal}
                 />
               </div>
             );
@@ -598,8 +607,8 @@ export function MobileChatShell({
             onChange={setInputValue}
             personalizedPrompt={personalizedPrompt}
             onSubmit={onSubmit}
-            onCancel={() => {}}
-            isSending={isSending}
+            onCancel={() => setStopSignal((current) => current + 1)}
+            isSending={isSending || isAnyModelResponding}
             focusToken={focusToken}
             isNewConversation={isActiveConversationEmpty}
             isPrivateMode={isPrivateMode}

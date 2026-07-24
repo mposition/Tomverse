@@ -147,10 +147,13 @@ export function DesktopChatShell({
     selectedModels.length > 0 &&
     selectedModels.every((modelId) => modelEmptyStates[emptyStateKey(modelId)] ?? true);
   const [modelStatuses, setModelStatuses] = useState<
-    Record<string, "idle" | "loading" | "responding" | "error" | "paused">
+    Record<string, "idle" | "loading" | "responding" | "error" | "cancelled" | "paused">
   >({});
   const handleModelStatusChange = useCallback(
-    (modelId: string, nextStatus: "idle" | "loading" | "responding" | "error" | "paused") => {
+    (
+      modelId: string,
+      nextStatus: "idle" | "loading" | "responding" | "error" | "cancelled" | "paused"
+    ) => {
       setModelStatuses((current) =>
         current[modelId] === nextStatus
           ? current
@@ -158,6 +161,14 @@ export function DesktopChatShell({
       );
     },
     []
+  );
+  // Bumped to abort every currently-responding panel at once ("stop all").
+  // A counter, not a boolean, so a second click still re-triggers each
+  // ChatApp panel's abort effect even though the value it flips from/to
+  // would otherwise look unchanged.
+  const [stopSignal, setStopSignal] = useState(0);
+  const isAnyModelResponding = Object.values(modelStatuses).some(
+    (status) => status === "responding"
   );
   // A quick-comparison summary needs at least two models that have actually
   // finished responding (not still streaming, not paused/off) -- the
@@ -369,6 +380,7 @@ export function DesktopChatShell({
                   onStatusChange={handleModelStatusChange}
                   onRequestCloseModel={() => onToggleModel(modelId)}
                   hasMultipleActiveModels={selectedModels.length > 1}
+                  stopSignal={stopSignal}
                 />
               </div>
             );
@@ -433,8 +445,8 @@ export function DesktopChatShell({
               onChange={setInputValue}
               personalizedPrompt={personalizedPrompt}
               onSubmit={onSubmit}
-              onCancel={() => {}}
-              isSending={isSending}
+              onCancel={() => setStopSignal((current) => current + 1)}
+              isSending={isSending || isAnyModelResponding}
               focusToken={focusToken}
               isPrivateMode={isPrivateMode}
               currentChatId={currentChatId}

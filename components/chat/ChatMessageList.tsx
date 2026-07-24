@@ -532,6 +532,23 @@ export function ChatMessageList({
                       </div>
                     );
                   })()}
+                  {!isUser && msg.status === "cancelled" && (
+                    <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-zinc-200 pt-3 dark:border-zinc-700">
+                      <span className="inline-flex items-center rounded-full bg-zinc-200 px-2.5 py-1 text-[11px] font-bold text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300">
+                        {t("chat.stoppedBadge")}
+                      </span>
+                      {onRetryLast && (
+                        <button
+                          type="button"
+                          onClick={onRetryLast}
+                          className="inline-flex items-center gap-2 rounded-full border border-zinc-300 bg-white px-3 py-1.5 text-xs font-bold text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700"
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" />
+                          {t("chat.regenerate")}
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             );

@@ -1954,8 +1954,8 @@ export function ChatInput({
               type="button"
               onClick={onCancel}
               className="flex h-9 w-9 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-red-600 text-white hover:bg-red-500"
-              title={t("chat.cancel")}
-              aria-label={t("chat.cancel")}
+              title={t("chat.stopAllResponses")}
+              aria-label={t("chat.stopAllResponses")}
             >
               <Square className="h-3.5 w-3.5 fill-current" />
             </button>
