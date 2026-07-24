@@ -49,6 +49,30 @@ test("toPlainDeepResearchMessages drops non-text parts and tool/other roles", ()
   ]);
 });
 
+test("toPlainDeepResearchMessages merges consecutive same-role turns for Perplexity's strict alternation rule", () => {
+  // Perplexity's async endpoint (unlike the OpenAI-compatible sync path every
+  // other model uses) 400s on two consecutive same-role messages -- e.g. a
+  // dropped empty assistant turn or a filtered-out tool message can leave two
+  // user turns adjacent in this app's stored history.
+  const result = toPlainDeepResearchMessages([
+    { role: "system", content: "Be concise." },
+    { role: "system", content: "Cite sources." },
+    { role: "user", content: "First question." },
+    { role: "user", content: "Actually, also consider this." },
+    { role: "assistant", content: "" },
+    { role: "tool", content: "tool output" },
+    { role: "user", content: "Follow-up question." },
+  ]);
+
+  assert.deepEqual(result, [
+    { role: "system", content: "Be concise.\n\nCite sources." },
+    {
+      role: "user",
+      content: "First question.\n\nActually, also consider this.\n\nFollow-up question.",
+    },
+  ]);
+});
+
 test("submitDeepResearchJob posts the async endpoint and returns the job id", async () => {
   await withApiKey(() =>
     withMockFetch(

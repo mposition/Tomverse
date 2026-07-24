@@ -44,24 +44,47 @@ const toPlainTextContent = (content: unknown): string => {
   return "";
 };
 
+// Unlike the OpenAI-compatible sync endpoint every other Perplexity model
+// (and every other provider) goes through, the async endpoint strictly
+// rejects two consecutive messages of the same role with a 400 --
+// "user or tool message(s) should alternate with assistant message(s)".
+// This app's stored history isn't guaranteed to already alternate (e.g. a
+// dropped empty assistant turn, or a tool-role message filtered out above
+// leaving two user turns adjacent), so consecutive same-role messages are
+// merged into one instead of sent as-is.
+const collapseConsecutiveSameRole = (
+  messages: PlainChatMessage[]
+): PlainChatMessage[] =>
+  messages.reduce<PlainChatMessage[]>((collapsed, message) => {
+    const previous = collapsed[collapsed.length - 1];
+    if (previous && previous.role === message.role) {
+      previous.content = `${previous.content}\n\n${message.content}`;
+    } else {
+      collapsed.push({ ...message });
+    }
+    return collapsed;
+  }, []);
+
 // Deep research is text-only research, not multimodal -- non-text parts
 // (images, files, tool calls) are dropped rather than causing a request
 // failure, since the model has no way to act on them regardless.
 export const toPlainDeepResearchMessages = (
   messages: ModelMessage[]
 ): PlainChatMessage[] =>
-  messages
-    .filter(
-      (message): message is ModelMessage & { role: "system" | "user" | "assistant" } =>
-        message.role === "system" ||
-        message.role === "user" ||
-        message.role === "assistant"
-    )
-    .map((message) => ({
-      role: message.role,
-      content: toPlainTextContent(message.content),
-    }))
-    .filter((message) => message.content.trim().length > 0);
+  collapseConsecutiveSameRole(
+    messages
+      .filter(
+        (message): message is ModelMessage & { role: "system" | "user" | "assistant" } =>
+          message.role === "system" ||
+          message.role === "user" ||
+          message.role === "assistant"
+      )
+      .map((message) => ({
+        role: message.role,
+        content: toPlainTextContent(message.content),
+      }))
+      .filter((message) => message.content.trim().length > 0)
+  );
 
 const getApiKey = () => {
   const apiKey = process.env.PERPLEXITY_API_KEY;
