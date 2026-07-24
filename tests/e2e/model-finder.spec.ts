@@ -79,4 +79,30 @@ test("the in-picker combo CTA recommends an AI combination and applies only the 
     },
     modelIds: ["gpt-5-4-mini", "gemini-2-5-flash"],
   });
+
+  // Completing the combo should land on a fresh chat rather than swap the
+  // models under the conversation that was active when the finder opened.
+  // The sidebar list is tucked in a drawer on mobile, so only check it
+  // where it's already visible.
+  const sidebarList = page.getByTestId("sidebar-conversation-list");
+  if (await sidebarList.isVisible()) {
+    const sidebarConversation = sidebarList.getByText("QA conversation");
+    await expect(sidebarConversation.locator("..")).not.toHaveClass(/bg-zinc-200/);
+  }
+});
+
+test("the finder can be closed mid-flow without completing it", async ({ page }) => {
+  await mockAuthenticatedApi(page);
+  await page.goto("/chat?lang=ko");
+
+  const finder = page.getByTestId("model-finder");
+  await modelMenuTrigger(page).click();
+  await page.getByTestId("model-combo-finder-cta").click();
+  await expect(finder).toBeVisible();
+
+  await finder.getByRole("button", { name: "시작하기", exact: true }).click();
+  await expect(finder).toContainText("AI를 주로 어디에 사용하시나요?");
+
+  await page.getByTestId("model-finder-close").click();
+  await expect(finder).toBeHidden();
 });

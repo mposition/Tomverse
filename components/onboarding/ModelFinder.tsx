@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Gauge,
   Sparkles,
+  X,
 } from "lucide-react";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
@@ -201,8 +202,17 @@ export function ModelFinder({ enabled, onComplete }: ModelFinderProps) {
         aria-modal="true"
         aria-labelledby="model-finder-title"
         data-testid="model-finder"
-        className="flex max-h-[92dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-950 sm:rounded-3xl"
+        className="relative flex max-h-[92dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-950 sm:rounded-3xl"
       >
+        <button
+          type="button"
+          data-testid="model-finder-close"
+          onClick={() => setIsOpen(false)}
+          aria-label={t("chat.close")}
+          className="absolute right-4 top-4 z-10 flex h-8 w-8 items-center justify-center rounded-full text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+        >
+          <X className="h-4 w-4" />
+        </button>
         <div className="min-h-0 overflow-y-auto overscroll-contain p-5 sm:p-7">
           {stage === "intro" ? (
             <div className="mx-auto max-w-xl py-3 text-center sm:py-8">

@@ -2279,13 +2279,19 @@ export default function Home() {
       ).slice(0, maxSelectableModels);
       const applied = nextModels.length ? nextModels : selectedModels;
 
+      // Land the recommended combination on a fresh chat instead of
+      // swapping the models under an already-active conversation, which
+      // would silently drop whatever models the user had mid-conversation.
+      localComparisonResponsesRef.current.clear();
+      latestLocalComparisonPromptRef.current = null;
+      currentChatIdRef.current = null;
+      setCurrentChatId(null);
       setUserDefaultEngine(applied[0]);
       setSelectedModels(applied);
       setDisabledPanels([]);
       setPersonalizedPrompt(promptExample || null);
-      if (currentChatId && currentChatId !== "private-chat") {
-        syncModelSettingsToServer(currentChatId, applied, []);
-      }
+      setInputValue("");
+      setPromptPayload(null);
       setFocusToken((current) => current + 1);
     };
 
