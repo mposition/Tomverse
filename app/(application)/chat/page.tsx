@@ -429,6 +429,60 @@ export default function Home() {
     getToken: getGuestQuickSummaryTurnstileToken,
   } = useTurnstile(isGuestMode, "guest_quick_summary");
   const accountUsage = useUserUsage(!isGuestMode);
+
+  // The refs above are only ever written live by handleResponseComplete, so
+  // a page reload restores the visible messages (and re-enables the button,
+  // since panel status is derived from the restored message status) but
+  // leaves these refs empty -- clicking Quick difference summary right
+  // after a refresh then silently no-ops instead of sending a request.
+  // Rebuild the latest turn from the same guest_messages_* localStorage the
+  // panels themselves load from, whenever the active guest chat (re)loads.
+  useEffect(() => {
+    if (!isGuestMode || !currentChatId || currentChatId === "private-chat") return;
+    if (typeof window === "undefined") return;
+
+    let latestUserMessage: { id: string; content: string } | null = null;
+    const responses = new Map<string, string>();
+
+    for (const modelId of selectedModels) {
+      const raw = window.localStorage.getItem(
+        `guest_messages_${currentChatId}_${modelId}`
+      );
+      if (!raw) continue;
+      let stored: unknown;
+      try {
+        stored = JSON.parse(raw);
+      } catch {
+        continue;
+      }
+      if (!Array.isArray(stored) || stored.length < 2) continue;
+
+      const lastMessage = stored[stored.length - 1] as
+        | { role?: unknown; status?: unknown; content?: unknown }
+        | undefined;
+      const secondLastMessage = stored[stored.length - 2] as
+        | { id?: unknown; role?: unknown; content?: unknown }
+        | undefined;
+
+      if (
+        lastMessage?.role === "assistant" &&
+        lastMessage.status === "normal" &&
+        typeof lastMessage.content === "string" &&
+        lastMessage.content.trim() &&
+        secondLastMessage?.role === "user" &&
+        typeof secondLastMessage.id === "string" &&
+        typeof secondLastMessage.content === "string"
+      ) {
+        responses.set(modelId, lastMessage.content);
+        latestUserMessage = { id: secondLastMessage.id, content: secondLastMessage.content };
+      }
+    }
+
+    if (!latestUserMessage || responses.size < 2) return;
+    localComparisonQuestionsRef.current.set(latestUserMessage.id, latestUserMessage.content);
+    localComparisonResponsesRef.current.set(latestUserMessage.id, responses);
+    latestLocalComparisonPromptRef.current = latestUserMessage.id;
+  }, [currentChatId, isGuestMode, selectedModels]);
   const maxSelectableModels = isGuestMode
     ? APP_DEFAULTS.maxGuestSelectedModels
     : accountUsage?.limits.maxModels || APP_DEFAULTS.maxSelectedModels;
