@@ -67,8 +67,9 @@ test("the in-picker combo CTA recommends an AI combination and applies only the 
   // All combo cards start selected -- deselect the advanced add-on so only
   // the two Standard picks should be applied.
   await finder.getByRole("button", { name: /Claude Sonnet 5/ }).click();
+  await expect(finder.getByTestId("model-finder-estimated-total")).toContainText("2크레딧");
 
-  await finder.getByRole("button", { name: "이 조합 사용하기" }).click();
+  await finder.getByRole("button", { name: "기본 조합으로 저장" }).click();
   await expect(finder).toBeHidden();
 
   expect(savedBody).toMatchObject({
@@ -105,4 +106,73 @@ test("the finder can be closed mid-flow without completing it", async ({ page })
 
   await page.getByTestId("model-finder-close").click();
   await expect(finder).toBeHidden();
+});
+
+test("using the combination for this conversation only does not save it as the account default", async ({
+  page,
+}) => {
+  await mockAuthenticatedApi(page);
+  let saveRequestCount = 0;
+  await page.route("**/api/user/model-finder", async (route) => {
+    if (route.request().method() === "POST") saveRequestCount += 1;
+    await route.fallback();
+  });
+
+  await page.goto("/chat?lang=ko");
+  const finder = page.getByTestId("model-finder");
+  await modelMenuTrigger(page).click();
+  await page.getByTestId("model-combo-finder-cta").click();
+
+  await finder.getByRole("button", { name: "시작하기", exact: true }).click();
+  await finder.getByRole("button", { name: "문서 요약·분석" }).click();
+  await finder.getByRole("button", { name: "다음" }).click();
+  await finder.getByRole("button", { name: "빠른 답변" }).click();
+  await finder.getByRole("button", { name: "다음" }).click();
+
+  await finder.getByRole("button", { name: "이번 대화에 사용" }).click();
+  await expect(finder).toBeHidden();
+  expect(saveRequestCount).toBe(0);
+});
+
+test("selecting two models suggests one complementary model instead of the full questionnaire", async ({
+  page,
+}) => {
+  await mockAuthenticatedApi(page);
+  await page.goto("/chat?lang=ko");
+
+  await modelMenuTrigger(page).click();
+  await page
+    .locator('[data-testid="model-option"][data-model-id="gemini-2-5-flash"]')
+    .click();
+
+  const suggestion = page.getByTestId("model-combo-complementary-suggestion");
+  await expect(suggestion).toBeVisible();
+  await expect(page.getByTestId("model-combo-finder-cta")).toHaveCount(0);
+
+  await page.getByTestId("model-combo-complementary-add").click();
+  await expect(
+    page.locator('[data-testid="model-option"][data-model-id="deepseek-r1"]')
+  ).toHaveAttribute("aria-pressed", "true");
+});
+
+test("the picker shows a compact re-recommend link once the model cap is reached", async ({
+  page,
+}) => {
+  await mockAuthenticatedApi(page);
+  await page.goto("/chat?lang=ko");
+
+  await modelMenuTrigger(page).click();
+  await page
+    .locator('[data-testid="model-option"][data-model-id="gemini-2-5-flash"]')
+    .click();
+  await page
+    .locator('[data-testid="model-option"][data-model-id="claude-haiku-4-5"]')
+    .click();
+
+  await expect(page.getByTestId("model-combo-finder-cta")).toHaveCount(0);
+  await expect(page.getByTestId("model-combo-complementary-suggestion")).toHaveCount(0);
+
+  const finder = page.getByTestId("model-finder");
+  await page.getByTestId("model-combo-finder-cta-compact").click();
+  await expect(finder).toBeVisible();
 });

@@ -74,6 +74,7 @@ import {
   trackProductEventOnce,
 } from "@/lib/productAnalyticsClient";
 import {
+  getComplementaryModelSuggestion,
   getContextualModelSuggestion,
   getModelFinderRecommendations,
   MODEL_FINDER_PRIORITIES,
@@ -446,6 +447,7 @@ export function ChatInput({
   }, [value]);
   const [showGuestQuickStart, setShowGuestQuickStart] = useState(false);
   const [dismissedSuggestionKey, setDismissedSuggestionKey] = useState<string | null>(null);
+  const [dismissedComplementaryModelId, setDismissedComplementaryModelId] = useState<string | null>(null);
   const [isCreditBreakdownOpen, setIsCreditBreakdownOpen] = useState(false);
   const [isUsageLimitModalOpen, setIsUsageLimitModalOpen] = useState(false);
     const { t, lang } = useLanguage();
@@ -650,6 +652,29 @@ export function ChatInput({
       !selectedModels.includes(contextualModel.id) &&
       contextualLiveStatus !== "unavailable"
   );
+  // Model-picker-only counterpart to the message-content-driven
+  // contextualSuggestion above: nudges toward one complementary model based
+  // on what kind of thinking the *currently selected* models are missing,
+  // shown instead of the full AI-combination questionnaire once the picker
+  // already has 2 of the (guest-capped) 3 model slots filled.
+  const complementarySuggestion =
+    !isGuestMode && selectedModels.length === 2
+      ? getComplementaryModelSuggestion(selectedModels)
+      : null;
+  const complementaryModel = complementarySuggestion
+    ? AVAILABLE_MODELS.find(
+        (model) => model.id === complementarySuggestion.modelId && model.enabled
+      )
+    : undefined;
+  const complementaryProfile = complementaryModel
+    ? getModelUsageProfile(complementaryModel)
+    : null;
+  const showComplementarySuggestion = Boolean(
+    complementarySuggestion &&
+      complementaryModel &&
+      complementarySuggestion.modelId !== dismissedComplementaryModelId
+  );
+
   const menuRef = useRef<HTMLDivElement>(null);
   const menuPopoverRef = useRef<HTMLDivElement>(null);
   const actionMenuButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -2249,19 +2274,86 @@ export function ChatInput({
                         )}
                       </button>
                     );
-                    const comboFinderCta = !isGuestMode && (
-                      <button
-                        type="button"
-                        data-testid="model-combo-finder-cta"
-                        onClick={() => {
-                          closeMenu(false);
-                          openModelFinder();
-                        }}
-                        className="inline-flex items-center justify-center gap-1.5 self-start rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[10px] font-black text-blue-700 transition hover:bg-blue-100 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200 dark:hover:bg-blue-950"
-                      >
-                        <Sparkles className="h-3 w-3" aria-hidden="true" />
-                        {t("modelFinder.pickerCta")}
-                      </button>
+                    const comboFinderArea = !isGuestMode && (
+                      selectedModels.length >= maxSelectableModels ? (
+                        <button
+                          type="button"
+                          data-testid="model-combo-finder-cta-compact"
+                          onClick={() => {
+                            closeMenu(false);
+                            openModelFinder();
+                          }}
+                          className="self-start text-[10px] font-bold text-blue-600 underline decoration-dotted underline-offset-2 hover:text-blue-500 dark:text-blue-300"
+                        >
+                          {t("modelFinder.pickerCtaCompact")}
+                        </button>
+                      ) : showComplementarySuggestion &&
+                          complementarySuggestion &&
+                          complementaryModel &&
+                          complementaryProfile ? (
+                        <div
+                          data-testid="model-combo-complementary-suggestion"
+                          className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 dark:border-amber-900/60 dark:bg-amber-950/20"
+                        >
+                          <p className="text-[11px] font-black text-zinc-900 dark:text-white">
+                            {t("modelFinder.complementaryTitle")}
+                          </p>
+                          <p className="mt-0.5 text-[10px] leading-4 text-zinc-600 dark:text-zinc-300">
+                            {t(
+                              complementarySuggestion.reason === "reasoning"
+                                ? "modelFinder.complementaryReasoning"
+                                : complementarySuggestion.reason === "research"
+                                  ? "modelFinder.complementaryResearch"
+                                  : "modelFinder.complementaryDifferentProvider"
+                            )}
+                          </p>
+                          <div className="mt-2 flex gap-1.5">
+                            <button
+                              type="button"
+                              data-testid="model-combo-complementary-add"
+                              onClick={() => {
+                                const added = onToggleModel(complementaryModel.id);
+                                if (!added) return;
+                                trackProductEvent(
+                                  "advanced_model_selected",
+                                  selectedModels.length + 1,
+                                  { model_id: complementaryModel.id }
+                                );
+                              }}
+                              className="rounded-lg bg-amber-600 px-2.5 py-1.5 text-[10px] font-black text-white hover:bg-amber-500"
+                            >
+                              {t("modelFinder.complementaryAdd").replace(
+                                "{model}",
+                                complementaryModel.name
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setDismissedComplementaryModelId(
+                                  complementarySuggestion.modelId
+                                )
+                              }
+                              className="rounded-lg border border-amber-300 bg-white px-2.5 py-1.5 text-[10px] font-bold text-amber-900 hover:bg-amber-100 dark:border-amber-800 dark:bg-zinc-950 dark:text-amber-200"
+                            >
+                              {t("modelFinder.complementaryDismiss")}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          data-testid="model-combo-finder-cta"
+                          onClick={() => {
+                            closeMenu(false);
+                            openModelFinder();
+                          }}
+                          className="inline-flex items-center justify-center gap-1.5 self-start rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[10px] font-black text-blue-700 transition hover:bg-blue-100 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200 dark:hover:bg-blue-950"
+                        >
+                          <Sparkles className="h-3 w-3" aria-hidden="true" />
+                          {t("modelFinder.pickerCta")}
+                        </button>
+                      )
                     );
                     const recommendationsSection = !modelSearchQuery.trim() &&
                           selectedModels.length < maxSelectableModels &&
@@ -2529,7 +2621,7 @@ export function ChatInput({
                           </p>
                           {advancedFiltersToggle}
                         </div>
-                        {comboFinderCta}
+                        {comboFinderArea}
                         <div className="flex touch-pan-x gap-1 overflow-x-auto pb-0.5 [-webkit-overflow-scrolling:touch]">
                           {favoritesButton(true)}
                           {capabilityChips(true)}
@@ -2546,7 +2638,7 @@ export function ChatInput({
                           {providerUsageSelects(false)}
                           {advancedFiltersToggle}
                           {advancedFiltersPanel}
-                          {comboFinderCta}
+                          {comboFinderArea}
                         </div>
                         <div className="flex min-h-0 min-w-0 flex-1 flex-col @container/list">
                           <p className="mb-1 shrink-0 px-1 text-[11px] font-black text-zinc-900 dark:text-white">

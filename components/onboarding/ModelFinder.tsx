@@ -80,6 +80,16 @@ export function ModelFinder({ enabled, onComplete }: ModelFinderProps) {
     () => (answers ? getModelFinderCombination(answers) : []),
     [answers]
   );
+  const selectedTotalCredits = useMemo(
+    () =>
+      combo
+        .filter((pick) => selectedModelIds.has(pick.modelId))
+        .reduce((total, pick) => {
+          const model = getModel(pick.modelId);
+          return model ? total + getModelUsageProfile(model).credits : total;
+        }, 0),
+    [combo, getModel, selectedModelIds]
+  );
 
   const reset = useCallback(() => {
     setStage("intro");
@@ -161,11 +171,28 @@ export function ModelFinder({ enabled, onComplete }: ModelFinderProps) {
     }
   };
 
-  const handleComplete = async () => {
+  const handleComplete = async (saveAsDefault: boolean) => {
     if (!answers || selectedModelIds.size === 0) return;
     const modelIds = combo
       .filter((pick) => selectedModelIds.has(pick.modelId))
       .map((pick) => pick.modelId);
+    const promptExample = t(
+      getModelFinderPromptKey({ ...answers, fileUsage: "rarely" })
+    );
+
+    // "Use for this conversation" applies the combination locally without
+    // writing it to the account's saved default -- only "Save as default
+    // combination" persists anything server-side.
+    if (!saveAsDefault) {
+      trackProductEvent("model_finder_completed", modelIds.length, {
+        model_id: modelIds[0],
+        method: "once",
+      });
+      onComplete({ modelIds, promptExample });
+      setIsOpen(false);
+      return;
+    }
+
     try {
       const defaultModelId = await saveAction({
         action: "complete",
@@ -174,18 +201,14 @@ export function ModelFinder({ enabled, onComplete }: ModelFinderProps) {
       });
       trackProductEvent("model_finder_completed", modelIds.length, {
         model_id: defaultModelId,
+        method: "save",
       });
       trackProductEvent("recommended_model_accepted", 1, {
         model_id: defaultModelId,
         recommendation_rank: 1,
       });
       notifyUserSettingsUpdated({ defaultModel: defaultModelId });
-      onComplete({
-        modelIds,
-        promptExample: t(
-          getModelFinderPromptKey({ ...answers, fileUsage: "rarely" })
-        ),
-      });
+      onComplete({ modelIds, promptExample });
       setIsOpen(false);
     } catch (saveError) {
       console.error(saveError);
@@ -358,15 +381,35 @@ export function ModelFinder({ enabled, onComplete }: ModelFinderProps) {
                 })}
               </div>
 
-              <button
-                type="button"
-                disabled={isSaving || selectedModelIds.size === 0}
-                onClick={() => void handleComplete()}
-                className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-4 text-sm font-black text-white hover:bg-blue-500 disabled:opacity-50"
+              <p
+                data-testid="model-finder-estimated-total"
+                className="mt-4 text-center text-xs font-bold text-zinc-500 dark:text-zinc-400"
               >
-                {isSaving ? t("modelFinder.saving") : t("modelFinder.useThisModel")}
-                {!isSaving && <ChevronRight className="h-5 w-5" />}
-              </button>
+                {t("modelFinder.estimatedTotal").replace(
+                  "{credits}",
+                  String(selectedTotalCredits)
+                )}
+              </p>
+
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                <button
+                  type="button"
+                  disabled={isSaving || selectedModelIds.size === 0}
+                  onClick={() => void handleComplete(false)}
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-4 text-sm font-black text-white hover:bg-blue-500 disabled:opacity-50"
+                >
+                  {isSaving ? t("modelFinder.saving") : t("modelFinder.useOnce")}
+                  {!isSaving && <ChevronRight className="h-5 w-5" />}
+                </button>
+                <button
+                  type="button"
+                  disabled={isSaving || selectedModelIds.size === 0}
+                  onClick={() => void handleComplete(true)}
+                  className="w-full rounded-2xl border border-zinc-200 px-5 py-4 text-sm font-bold text-zinc-800 transition hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-900"
+                >
+                  {t("modelFinder.saveAsDefault")}
+                </button>
+              </div>
             </div>
           ) : (
             <div>

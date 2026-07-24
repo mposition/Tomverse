@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  getComplementaryModelSuggestion,
   getContextualModelSuggestion,
   getModelFinderCombination,
   getModelFinderRecommendations,
@@ -92,4 +93,43 @@ test("a research-and-sources answer includes an advanced research add-on", () =>
   const advanced = combo.find((pick) => pick.role === "advanced");
   assert.equal(advanced?.modelId, "perplexity/sonar");
   assert.equal(advanced?.reasonKey, "modelFinder.optionalResearch");
+});
+
+test("complementary suggestion fills the missing capability in priority order", () => {
+  const noReasoningOrResearch = getComplementaryModelSuggestion([
+    "gpt-5-4-mini",
+    "gemini-2-5-flash",
+  ]);
+  assert.deepEqual(noReasoningOrResearch, {
+    modelId: "deepseek-r1",
+    reason: "reasoning",
+  });
+
+  const hasReasoningOnly = getComplementaryModelSuggestion([
+    "deepseek-r1",
+    "gemini-2-5-flash",
+  ]);
+  assert.deepEqual(hasReasoningOnly, {
+    modelId: "perplexity/sonar",
+    reason: "research",
+  });
+
+  const hasReasoningAndResearch = getComplementaryModelSuggestion([
+    "deepseek-r1",
+    "perplexity/sonar",
+  ]);
+  assert.deepEqual(hasReasoningAndResearch, {
+    modelId: "gpt-5-4-mini",
+    reason: "different_provider",
+  });
+});
+
+test("complementary suggestion never re-suggests an already-selected model", () => {
+  const suggestion = getComplementaryModelSuggestion([
+    "deepseek-r1",
+    "deepseek-v4-flash",
+  ]);
+  assert.equal(suggestion?.modelId, "perplexity/sonar");
+  assert.notEqual(suggestion?.modelId, "deepseek-r1");
+  assert.notEqual(suggestion?.modelId, "deepseek-v4-flash");
 });

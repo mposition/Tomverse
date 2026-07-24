@@ -291,6 +291,61 @@ export const getModelFinderCombination = (
   return picks;
 };
 
+export type ModelFinderComplementaryReason =
+  | "reasoning"
+  | "research"
+  | "different_provider";
+
+export type ModelFinderComplementarySuggestion = {
+  modelId: string;
+  reason: ModelFinderComplementaryReason;
+};
+
+// For the model picker's "add one complementary model" nudge, shown when the
+// user already has 2 models selected -- a lighter alternative to the full
+// tasks/priority questionnaire in getModelFinderCombination. Looks at what
+// kind of thinking is missing from the current selection (deep reasoning,
+// sourced research) before falling back to "a different provider" for
+// perspective diversity.
+export const getComplementaryModelSuggestion = (
+  selectedModelIds: string[]
+): ModelFinderComplementarySuggestion | null => {
+  const selectedModels = selectedModelIds
+    .map((id) => getModel(id))
+    .filter((model): model is AiModel => Boolean(model));
+  const selectedClasses = new Set(selectedModels.map((model) => model.usageClass));
+  const selectedProviders = new Set(selectedModels.map((model) => model.provider));
+
+  const hasReasoning =
+    selectedClasses.has("reasoning") || selectedClasses.has("premium-reasoning");
+  if (!hasReasoning) {
+    const candidate = getModel("deepseek-r1");
+    if (candidate?.enabled && !selectedModelIds.includes(candidate.id)) {
+      return { modelId: candidate.id, reason: "reasoning" };
+    }
+  }
+
+  const hasResearch =
+    selectedClasses.has("research") || selectedClasses.has("deep-research");
+  if (!hasResearch) {
+    const candidate = getModel("perplexity/sonar");
+    if (candidate?.enabled && !selectedModelIds.includes(candidate.id)) {
+      return { modelId: candidate.id, reason: "research" };
+    }
+  }
+
+  const differentProvider = STANDARD_CANDIDATE_ORDER.map((id) => getModel(id)).find(
+    (model): model is AiModel =>
+      model != null &&
+      model.enabled &&
+      !selectedProviders.has(model.provider) &&
+      !selectedModelIds.includes(model.id)
+  );
+  return differentProvider
+    ? { modelId: differentProvider.id, reason: "different_provider" }
+    : null;
+};
+
 export const getModelFinderPromptKey = (answers: ModelFinderAnswers) => {
   if (answers.tasks.includes("documents")) return "modelFinder.prompts.documents";
   if (answers.tasks.includes("writing")) return "modelFinder.prompts.writing";
