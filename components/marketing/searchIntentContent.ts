@@ -76,7 +76,7 @@ export const searchIntentPages: Record<
         },
         {
           title: "Privacy and cost awareness",
-          body: "Prompts and necessary context are sent to each selected AI provider. Avoid unnecessary sensitive data, review provider terms, and select only the number of models needed for the task. Private Mode changes Tomverse history storage, but it does not prevent provider-side processing.",
+          body: "Prompts and necessary context are sent to each selected AI provider. Avoid unnecessary sensitive data, review provider terms, and select only the number of models needed for the task.",
         },
       ],
     }),
@@ -93,7 +93,7 @@ export const searchIntentPages: Record<
         { title: "재현 가능한 비교 방법", body: "2~3개 모델을 선택하고 같은 질문을 보낸 뒤, 미리 정한 기준으로 각 답변을 평가하세요.", bullets: ["모든 모델에 동일한 지시와 맥락을 제공합니다.", "중요한 사실과 결정은 1차 출처로 다시 확인합니다.", "불명확하거나 빠진 내용은 후속 질문으로 확인합니다."] },
         { title: "나란히 비교한 뒤 AI Review", body: "답변이 완료되면 Tomverse AI Review가 합의점, 중요한 차이, 모순, 누락과 외부 검증이 필요한 주장을 구조화합니다. 제공된 답변끼리만 비교하며 웹 검색, 사실검증 또는 정답 판정을 수행하지 않습니다.", link: { label: "AI 답변 교차검토 방식 보기", href: "/ko/ai-answer-review" } },
         { title: "실제 업무에 활용", body: "리서치 개요, 코드 검토, 글 초안, 요약, 아이디어 발굴과 문서 질의에 활용할 수 있습니다. 모델 가용성과 공급자 동작은 바뀔 수 있으므로 Tomverse는 영구적인 우승 모델을 선언하지 않습니다." },
-        { title: "개인정보와 비용", body: "질문과 필요한 맥락은 선택한 각 AI 공급자에게 전송됩니다. 불필요한 민감정보를 제외하고 작업에 필요한 모델 수만 선택하세요. Private Mode도 공급자 측 처리를 차단하는 기능은 아닙니다." },
+        { title: "개인정보와 비용", body: "질문과 필요한 맥락은 선택한 각 AI 공급자에게 전송됩니다. 불필요한 민감정보를 제외하고 작업에 필요한 모델 수만 선택하세요." },
       ],
     }),
     zh: withCta("zh", {
@@ -107,7 +107,7 @@ export const searchIntentPages: Record<
         { title: "可重复的比较流程", body: "选择两到三个模型，发送相同问题，并按照预先确定的标准评估回答。", bullets: ["向所有模型提供相同指令和上下文。", "用一手来源核实重要事实与决定。", "通过追问澄清遗漏或含糊之处。"] },
         { title: "从并排比较到 AI Review", body: "回答完成后，Tomverse AI Review 可整理共识、重要差异、矛盾、遗漏和需要外部核实的说法。它只比较提供的回答，不浏览网页、不进行事实核验，也不判定唯一正确答案。", link: { label: "了解 AI 回答交叉审查", href: "/zh/ai-answer-review" } },
         { title: "面向实际工作", body: "可用于研究提纲、代码审查、草稿、总结、头脑风暴和文档问答。可用性与模型行为会变化，因此 Tomverse 不宣称存在永久最佳模型。" },
-        { title: "隐私与成本", body: "提示词和必要上下文会发送给每个所选 AI 提供商。请避免不必要的敏感信息，并只选择任务所需的模型数量。Private Mode 不会阻止提供商侧处理。" },
+        { title: "隐私与成本", body: "提示词和必要上下文会发送给每个所选 AI 提供商。请避免不必要的敏感信息，并只选择任务所需的模型数量。" },
       ],
     }),
     fr: withCta("fr", {
@@ -121,7 +121,7 @@ export const searchIntentPages: Record<
         { title: "Une méthode reproductible", body: "Choisissez deux ou trois modèles, envoyez les mêmes instructions et évaluez les réponses selon des critères définis à l’avance.", bullets: ["Fournissez le même contexte à chaque modèle.", "Vérifiez les faits importants auprès de sources primaires.", "Posez des questions de suivi pour clarifier les lacunes."] },
         { title: "Au-delà du côte à côte avec AI Review", body: "Une fois les réponses terminées, Tomverse AI Review structure accords, différences, contradictions, omissions et points à vérifier à l’extérieur. Il compare uniquement les réponses fournies : ce n’est ni une recherche Web, ni une vérification factuelle, ni un verdict.", link: { label: "Découvrir la revue croisée des réponses", href: "/fr/ai-answer-review" } },
         { title: "Pour le travail réel", body: "Comparez des plans de recherche, revues de code, brouillons, résumés et analyses de documents. La disponibilité et le comportement évoluent : Tomverse ne désigne pas de vainqueur permanent." },
-        { title: "Confidentialité et coûts", body: "Le prompt et le contexte nécessaire sont transmis à chaque fournisseur choisi. Évitez les données sensibles inutiles et limitez le nombre de modèles à ce dont vous avez besoin. Private Mode n’empêche pas le traitement par les fournisseurs." },
+        { title: "Confidentialité et coûts", body: "Le prompt et le contexte nécessaire sont transmis à chaque fournisseur choisi. Évitez les données sensibles inutiles et limitez le nombre de modèles à ce dont vous avez besoin." },
       ],
     }),
     de: withCta("de", {
@@ -135,7 +135,7 @@ export const searchIntentPages: Record<
         { title: "Ein wiederholbarer Ablauf", body: "Wählen Sie zwei oder drei Modelle, senden Sie identische Anweisungen und bewerten Sie die Antworten anhand vorher festgelegter Kriterien.", bullets: ["Geben Sie allen Modellen denselben Kontext.", "Prüfen Sie wichtige Aussagen anhand von Primärquellen.", "Klären Sie Lücken mit Folgefragen."] },
         { title: "Nach dem Vergleich: AI Review", body: "Nach Abschluss der Antworten ordnet Tomverse AI Review Gemeinsamkeiten, Unterschiede, Widersprüche, Lücken und extern zu prüfende Aussagen. Es vergleicht nur die gelieferten Antworten und ist weder Websuche noch Faktenprüfung oder endgültiges Urteil.", link: { label: "So funktioniert die Antwort-Gegenprüfung", href: "/de/ai-answer-review" } },
         { title: "Für praktische Aufgaben", body: "Vergleichen Sie Recherchepläne, Code-Reviews, Entwürfe, Zusammenfassungen und Dokumentanalysen. Verfügbarkeit und Verhalten ändern sich; Tomverse erklärt kein Modell zum dauerhaften Sieger." },
-        { title: "Datenschutz und Kosten", body: "Prompt und nötiger Kontext gehen an jeden gewählten Anbieter. Vermeiden Sie unnötige sensible Daten und wählen Sie nur benötigte Modelle. Private Mode verhindert keine Verarbeitung beim Anbieter." },
+        { title: "Datenschutz und Kosten", body: "Prompt und nötiger Kontext gehen an jeden gewählten Anbieter. Vermeiden Sie unnötige sensible Daten und wählen Sie nur benötigte Modelle." },
       ],
     }),
     es: withCta("es", {
@@ -149,7 +149,7 @@ export const searchIntentPages: Record<
         { title: "Un proceso repetible", body: "Elige dos o tres modelos, envía las mismas instrucciones y evalúa las respuestas con criterios definidos de antemano.", bullets: ["Proporciona el mismo contexto a cada modelo.", "Verifica afirmaciones importantes con fuentes primarias.", "Usa preguntas de seguimiento para aclarar vacíos."] },
         { title: "Más allá del paralelo con AI Review", body: "Cuando terminan las respuestas, Tomverse AI Review organiza acuerdos, diferencias, contradicciones, omisiones y afirmaciones que requieren verificación externa. Solo compara lo proporcionado: no navega, no verifica hechos ni declara una respuesta correcta.", link: { label: "Ver cómo funciona la revisión cruzada", href: "/es/ai-answer-review" } },
         { title: "Para trabajo práctico", body: "Compara esquemas de investigación, revisiones de código, borradores, resúmenes y análisis de documentos. La disponibilidad y el comportamiento cambian; Tomverse no declara un ganador permanente." },
-        { title: "Privacidad y costes", body: "El prompt y el contexto necesario se envían a cada proveedor elegido. Evita datos sensibles innecesarios y selecciona solo los modelos necesarios. Private Mode no impide el tratamiento del proveedor." },
+        { title: "Privacidad y costes", body: "El prompt y el contexto necesario se envían a cada proveedor elegido. Evita datos sensibles innecesarios y selecciona solo los modelos necesarios." },
       ],
     }),
     pt: withCta("pt", {
@@ -163,7 +163,7 @@ export const searchIntentPages: Record<
         { title: "Um processo repetível", body: "Escolha dois ou três modelos, envie as mesmas instruções e avalie as respostas com critérios definidos antes do teste.", bullets: ["Forneça o mesmo contexto a cada modelo.", "Verifique afirmações importantes em fontes primárias.", "Use perguntas de acompanhamento para esclarecer lacunas."] },
         { title: "Além da comparação com AI Review", body: "Após as respostas, o Tomverse AI Review organiza consensos, diferenças, contradições, omissões e alegações que exigem verificação externa. Ele compara somente o conteúdo fornecido: não navega, não faz checagem factual nem declara a resposta correta.", link: { label: "Veja como funciona a revisão cruzada", href: "/pt/ai-answer-review" } },
         { title: "Para trabalho prático", body: "Compare planos de pesquisa, revisões de código, rascunhos, resumos e análises de documentos. Disponibilidade e comportamento mudam; o Tomverse não declara um vencedor permanente." },
-        { title: "Privacidade e custos", body: "O prompt e o contexto necessário são enviados a cada provedor escolhido. Evite dados sensíveis desnecessários e selecione apenas os modelos necessários. O Private Mode não impede o processamento pelo provedor." },
+        { title: "Privacidade e custos", body: "O prompt e o contexto necessário são enviados a cada provedor escolhido. Evite dados sensíveis desnecessários e selecione apenas os modelos necessários." },
       ],
     }),
   },
@@ -380,7 +380,7 @@ export const searchIntentPages: Record<
         { title: "Supported analysis workflows", body: "Use readable PDFs, DOCX, XLSX, PPTX, supported text files, and PNG, JPEG, or WebP images. Actual interpretation depends on the selected model and whether the document contains extractable content.", bullets: ["Summarize a report or presentation.", "Compare explanations from two or three models.", "Ask focused questions about tables, text, code, or an image."] },
         { title: "Prepare files for better results", body: "Use clear, non-corrupted files and ask a specific question. Password-protected, scanned, malformed, or very large documents may not contain extractable text. Check important numbers, citations, formulas, and conclusions against the original file." },
         { title: "Security boundaries", body: "Attachments require sign-in, are limited by type, count, and size, and are temporarily processed through private object storage. Files and extracted text are sent only to the selected model providers needed to answer the request. Do not upload content you lack permission to process." },
-        { title: "Retention and provider processing", body: "Temporary attachment objects are removed by lifecycle and maintenance controls, currently after approximately one day. Provider-side processing is governed by each provider’s terms. Private Mode does not eliminate temporary file delivery or provider processing." },
+        { title: "Retention and provider processing", body: "Temporary attachment objects are removed by lifecycle and maintenance controls, currently after approximately one day. Provider-side processing is governed by each provider’s terms." },
       ],
     }),
     ko: withCta("ko", {
@@ -393,7 +393,7 @@ export const searchIntentPages: Record<
         { title: "지원되는 분석 작업", body: "읽을 수 있는 PDF, DOCX, XLSX, PPTX, 지원 텍스트 파일과 PNG·JPEG·WebP 이미지를 사용할 수 있습니다. 실제 해석 범위는 선택한 모델과 문서에서 추출 가능한 내용에 따라 달라집니다.", bullets: ["보고서나 발표자료를 요약합니다.", "2~3개 모델의 설명을 비교합니다.", "표, 텍스트, 코드 또는 이미지에 대해 구체적으로 질문합니다."] },
         { title: "더 좋은 결과를 위한 준비", body: "손상되지 않은 명확한 파일과 구체적인 질문을 사용하세요. 암호화, 스캔, 손상 또는 지나치게 큰 문서는 텍스트를 추출하지 못할 수 있습니다. 중요한 숫자, 출처, 수식과 결론은 원본에서 확인해야 합니다." },
         { title: "보안 경계", body: "첨부파일은 로그인이 필요하며 형식, 개수와 크기가 제한됩니다. 비공개 객체 저장소를 통해 임시 처리되고, 답변에 필요한 선택 모델 공급자에게만 파일 또는 추출 텍스트가 전송됩니다. 처리 권한이 없는 자료는 업로드하면 안 됩니다." },
-        { title: "보관과 공급자 처리", body: "임시 첨부 객체는 현재 약 하루 뒤 수명 주기와 유지관리 정책으로 삭제됩니다. 공급자 측 처리는 각 공급자의 약관을 따르며 Private Mode도 임시 파일 전달이나 공급자 처리를 제거하지 않습니다." },
+        { title: "보관과 공급자 처리", body: "임시 첨부 객체는 현재 약 하루 뒤 수명 주기와 유지관리 정책으로 삭제됩니다. 공급자 측 처리는 각 공급자의 약관을 따릅니다." },
       ],
     }),
     zh: withCta("zh", {
@@ -406,7 +406,7 @@ export const searchIntentPages: Record<
         { title: "支持的分析流程", body: "可使用可读取的 PDF、DOCX、XLSX、PPTX、支持的文本文件以及 PNG、JPEG、WebP 图片。实际理解能力取决于所选模型和可提取内容。", bullets: ["总结报告或演示文稿。", "比较两到三个模型的解释。", "针对表格、文本、代码或图片提问。"] },
         { title: "为更好结果准备文件", body: "请使用清晰、未损坏的文件并提出具体问题。加密、扫描、异常或过大的文档可能无法提取文字。重要数字、引用、公式和结论应对照原文件核实。" },
         { title: "安全边界", body: "附件需要登录，并受到类型、数量和大小限制。文件通过私有对象存储临时处理，仅发送给回答所需的所选模型提供商。请勿上传无权处理的内容。" },
-        { title: "保留与提供商处理", body: "临时附件目前会在约一天后通过生命周期和维护策略删除。提供商侧处理受其条款约束，Private Mode 不会取消临时文件传递或提供商处理。" },
+        { title: "保留与提供商处理", body: "临时附件目前会在约一天后通过生命周期和维护策略删除。提供商侧处理受其条款约束。" },
       ],
     }),
     fr: withCta("fr", {
@@ -419,7 +419,7 @@ export const searchIntentPages: Record<
         { title: "Flux d’analyse pris en charge", body: "Utilisez des PDF lisibles, DOCX, XLSX, PPTX, fichiers texte pris en charge et images PNG, JPEG ou WebP. L’interprétation dépend du modèle et du contenu extractible.", bullets: ["Résumer un rapport ou une présentation.", "Comparer deux ou trois explications.", "Interroger un tableau, du texte, du code ou une image."] },
         { title: "Préparer les fichiers", body: "Utilisez un fichier clair et non corrompu avec une question précise. Les documents protégés, scannés, malformés ou trop volumineux peuvent être illisibles. Vérifiez chiffres, sources, formules et conclusions dans l’original." },
         { title: "Limites de sécurité", body: "Les pièces jointes exigent une connexion et sont limitées par type, nombre et taille. Elles sont traitées temporairement dans un stockage objet privé et transmises uniquement aux fournisseurs sélectionnés nécessaires." },
-        { title: "Conservation", body: "Les objets temporaires sont actuellement supprimés après environ un jour. Le traitement côté fournisseur suit ses propres conditions. Private Mode ne supprime pas la livraison temporaire ni ce traitement." },
+        { title: "Conservation", body: "Les objets temporaires sont actuellement supprimés après environ un jour. Le traitement côté fournisseur suit ses propres conditions." },
       ],
     }),
     de: withCta("de", {
@@ -432,7 +432,7 @@ export const searchIntentPages: Record<
         { title: "Unterstützte Abläufe", body: "Verwenden Sie lesbare PDFs, DOCX, XLSX, PPTX, unterstützte Textdateien sowie PNG-, JPEG- oder WebP-Bilder. Die Interpretation hängt vom Modell und extrahierbaren Inhalt ab.", bullets: ["Berichte oder Präsentationen zusammenfassen.", "Erklärungen von zwei oder drei Modellen vergleichen.", "Gezielt nach Tabellen, Text, Code oder Bildern fragen."] },
         { title: "Dateien vorbereiten", body: "Nutzen Sie klare, unbeschädigte Dateien und konkrete Fragen. Geschützte, gescannte, fehlerhafte oder sehr große Dokumente können unlesbar sein. Prüfen Sie Zahlen, Quellen, Formeln und Schlussfolgerungen im Original." },
         { title: "Sicherheitsgrenzen", body: "Anhänge erfordern eine Anmeldung und sind nach Typ, Anzahl und Größe begrenzt. Sie werden temporär im privaten Objektspeicher verarbeitet und nur an benötigte ausgewählte Anbieter gesendet." },
-        { title: "Aufbewahrung", body: "Temporäre Anhänge werden derzeit nach etwa einem Tag entfernt. Die Verarbeitung beim Anbieter folgt dessen Bedingungen. Private Mode entfernt weder temporäre Übertragung noch Anbieter-Verarbeitung." },
+        { title: "Aufbewahrung", body: "Temporäre Anhänge werden derzeit nach etwa einem Tag entfernt. Die Verarbeitung beim Anbieter folgt dessen Bedingungen." },
       ],
     }),
     es: withCta("es", {
@@ -445,7 +445,7 @@ export const searchIntentPages: Record<
         { title: "Flujos compatibles", body: "Usa PDF legibles, DOCX, XLSX, PPTX, archivos de texto compatibles e imágenes PNG, JPEG o WebP. La interpretación depende del modelo y del contenido extraíble.", bullets: ["Resume un informe o presentación.", "Compara explicaciones de dos o tres modelos.", "Pregunta por tablas, texto, código o imágenes."] },
         { title: "Prepara los archivos", body: "Usa archivos claros y no dañados con una pregunta concreta. Los documentos protegidos, escaneados, malformados o muy grandes pueden no ser legibles. Verifica cifras, citas, fórmulas y conclusiones con el original." },
         { title: "Límites de seguridad", body: "Los adjuntos requieren inicio de sesión y se limitan por tipo, cantidad y tamaño. Se procesan temporalmente en almacenamiento privado y solo se envían a los proveedores seleccionados necesarios." },
-        { title: "Retención", body: "Los objetos temporales se eliminan actualmente tras aproximadamente un día. El tratamiento del proveedor se rige por sus condiciones. Private Mode no elimina la entrega temporal ni ese tratamiento." },
+        { title: "Retención", body: "Los objetos temporales se eliminan actualmente tras aproximadamente un día. El tratamiento del proveedor se rige por sus condiciones." },
       ],
     }),
     pt: withCta("pt", {
@@ -458,7 +458,7 @@ export const searchIntentPages: Record<
         { title: "Fluxos compatíveis", body: "Use PDFs legíveis, DOCX, XLSX, PPTX, arquivos de texto compatíveis e imagens PNG, JPEG ou WebP. A interpretação depende do modelo e do conteúdo extraível.", bullets: ["Resuma um relatório ou apresentação.", "Compare explicações de dois ou três modelos.", "Pergunte sobre tabelas, texto, código ou imagens."] },
         { title: "Prepare os arquivos", body: "Use arquivos claros e não corrompidos com uma pergunta específica. Documentos protegidos, digitalizados, malformados ou muito grandes podem não ser legíveis. Confira números, citações, fórmulas e conclusões no original." },
         { title: "Limites de segurança", body: "Anexos exigem login e são limitados por tipo, quantidade e tamanho. São processados temporariamente em armazenamento privado e enviados apenas aos provedores selecionados necessários." },
-        { title: "Retenção", body: "Objetos temporários são atualmente removidos após cerca de um dia. O processamento do provedor segue seus termos. O Private Mode não elimina a entrega temporária nem esse processamento." },
+        { title: "Retenção", body: "Objetos temporários são atualmente removidos após cerca de um dia. O processamento do provedor segue seus termos." },
       ],
     }),
   },

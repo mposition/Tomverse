@@ -5,7 +5,7 @@ import { createPageMetadata } from "@/lib/seo";
 export const metadata = createPageMetadata({
   title: "Frequently Asked Questions",
   description:
-    "Answers about Tomverse Insight models, accounts, file attachments, sharing, billing, usage limits, and Private Mode.",
+    "Answers about Tomverse Insight models, accounts, file attachments, sharing, billing, and usage limits.",
   path: "/faq",
 });
 

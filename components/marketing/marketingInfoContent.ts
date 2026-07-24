@@ -6,33 +6,30 @@ export const infoPages = {
     en: {
       eyebrow: "FAQ",
       title: "Frequently asked questions",
-      description: "Quick answers about Tomverse Insight, accounts, models, files, sharing, and Private Mode.",
+      description: "Quick answers about Tomverse Insight, accounts, models, files, and sharing.",
       sections: [
         { title: "What is Tomverse Insight?", body: "Tomverse Insight is a multi-model AI workspace that lets you compare answers from several AI models, attach files, and organize conversations in one place." },
         { title: "Can I use more than one model at once?", body: "Yes. You can compare up to three models in a single conversation so the experience stays readable and cost-controlled." },
-        { title: "What does Private Mode mean?", body: "Private Mode means Tomverse does not save the conversation to the Tomverse database. Your prompt may still be sent to the selected AI provider to generate a response." },
         { title: "Can I share a conversation?", body: "Logged-in users can create read-only public share links or download conversations as text files. Locked conversations require unlock verification before sharing." },
       ],
     },
     ko: {
       eyebrow: "FAQ",
       title: "자주 묻는 질문",
-      description: "Tomverse Insight, 계정, 모델, 파일, 공유, Private Mode에 대한 빠른 답변입니다.",
+      description: "Tomverse Insight, 계정, 모델, 파일, 공유에 대한 빠른 답변입니다.",
       sections: [
         { title: "Tomverse Insight는 무엇인가요?", body: "Tomverse Insight는 여러 AI 모델의 답변을 비교하고, 파일을 첨부하며, 대화를 한곳에서 정리할 수 있는 멀티 모델 AI 워크스페이스입니다." },
         { title: "여러 모델을 동시에 사용할 수 있나요?", body: "네. 한 대화에서 최대 3개 모델까지 비교할 수 있습니다. 가독성과 비용 통제를 위해 3개로 제한합니다." },
-        { title: "Private Mode는 어떤 의미인가요?", body: "Private Mode는 Tomverse 데이터베이스에 대화를 저장하지 않는다는 뜻입니다. 답변 생성을 위해 선택한 AI 공급자에게 질문이 전송될 수 있습니다." },
         { title: "대화를 공유할 수 있나요?", body: "로그인 사용자는 읽기 전용 공개 링크를 만들거나 대화를 텍스트 파일로 다운로드할 수 있습니다. 잠긴 대화는 공유 전 잠금 해제가 필요합니다." },
       ],
     },
     zh: {
       eyebrow: "FAQ",
       title: "常见问题",
-      description: "关于 Tomverse Insight、账户、模型、文件、分享和 Private Mode 的快速说明。",
+      description: "关于 Tomverse Insight、账户、模型、文件和分享的快速说明。",
       sections: [
         { title: "Tomverse Insight 是什么？", body: "Tomverse Insight 是一个多模型 AI 工作区，可在一个地方比较多个 AI 模型的回答、附加文件并整理对话。" },
         { title: "可以同时使用多个模型吗？", body: "可以。单个对话最多可比较三个模型，以保持界面清晰并控制成本。" },
-        { title: "Private Mode 是什么意思？", body: "Private Mode 表示 Tomverse 不会把对话保存到 Tomverse 数据库。为了生成回答，提示仍可能发送给所选 AI 供应商。" },
         { title: "可以分享对话吗？", body: "登录用户可以创建只读公开链接，或将对话下载为文本文件。锁定对话在分享前需要完成解锁验证。" },
       ],
     },
@@ -318,8 +315,8 @@ export const infoPages = {
       title: "Safety at Tomverse",
       description: "Our safety work focuses on access control, usage limits, secure file handling, privacy-aware product design, and transparent AI limitations.",
       sections: [
-        { title: "Safety Approach", body: "We design controls before scale: model access tiers, rate limits, file validation, security headers, and public sharing safeguards.", bullets: ["Model and quota controls", "Attachment validation", "Locked and private conversation modes"] },
-        { title: "Security & Privacy", body: "Tomverse separates account access, conversation storage, temporary attachments, and public sharing snapshots to reduce accidental exposure.", bullets: ["Private Mode does not save Tomverse chat history", "Locked conversations require unlock grants", "Public shares are read-only snapshots"] },
+        { title: "Safety Approach", body: "We design controls before scale: model access tiers, rate limits, file validation, security headers, and public sharing safeguards.", bullets: ["Model and quota controls", "Attachment validation", "Locked conversation modes"] },
+        { title: "Security & Privacy", body: "Tomverse separates account access, conversation storage, temporary attachments, and public sharing snapshots to reduce accidental exposure.", bullets: ["Locked conversations require unlock grants", "Public shares are read-only snapshots"] },
         { title: "Trust & Transparency", body: "We communicate model limitations, provider involvement, and data handling clearly so users understand what the product does and does not do." },
       ],
     },
@@ -328,8 +325,8 @@ export const infoPages = {
       title: "Tomverse의 안전 원칙",
       description: "Tomverse는 접근 제어, 사용량 제한, 안전한 파일 처리, 개인정보를 고려한 제품 설계, AI 한계의 투명한 안내에 집중합니다.",
       sections: [
-        { title: "Safety Approach", body: "확장 전에 통제 장치를 먼저 설계합니다. 모델 권한, 사용량 제한, 파일 검증, 보안 헤더, 공개 공유 보호가 포함됩니다.", bullets: ["모델 및 할당량 통제", "첨부파일 검증", "잠금 대화와 Private Mode"] },
-        { title: "Security & Privacy", body: "계정 접근, 대화 저장, 임시 첨부파일, 공개 공유 스냅샷을 분리해 의도치 않은 노출을 줄입니다.", bullets: ["Private Mode는 Tomverse 대화 기록을 저장하지 않음", "잠긴 대화는 잠금 해제 권한 필요", "공개 공유는 읽기 전용 스냅샷"] },
+        { title: "Safety Approach", body: "확장 전에 통제 장치를 먼저 설계합니다. 모델 권한, 사용량 제한, 파일 검증, 보안 헤더, 공개 공유 보호가 포함됩니다.", bullets: ["모델 및 할당량 통제", "첨부파일 검증", "잠금 대화 모드"] },
+        { title: "Security & Privacy", body: "계정 접근, 대화 저장, 임시 첨부파일, 공개 공유 스냅샷을 분리해 의도치 않은 노출을 줄입니다.", bullets: ["잠긴 대화는 잠금 해제 권한 필요", "공개 공유는 읽기 전용 스냅샷"] },
         { title: "Trust & Transparency", body: "모델의 한계, AI 공급자 관여, 데이터 처리 방식을 명확히 안내해 사용자가 제품의 범위를 이해하도록 돕습니다." },
       ],
     },
@@ -338,8 +335,8 @@ export const infoPages = {
       title: "Tomverse 的安全原则",
       description: "我们的安全工作聚焦于访问控制、用量限制、安全文件处理、注重隐私的产品设计和透明的 AI 限制说明。",
       sections: [
-        { title: "Safety Approach", body: "在规模化之前先设计控制措施：模型访问等级、速率限制、文件验证、安全标头和公开分享保护。", bullets: ["模型与额度控制", "附件验证", "锁定对话和 Private Mode"] },
-        { title: "Security & Privacy", body: "Tomverse 将账户访问、对话存储、临时附件和公开分享快照分离，以减少意外暴露。", bullets: ["Private Mode 不保存 Tomverse 聊天历史", "锁定对话需要解锁授权", "公开分享是只读快照"] },
+        { title: "Safety Approach", body: "在规模化之前先设计控制措施：模型访问等级、速率限制、文件验证、安全标头和公开分享保护。", bullets: ["模型与额度控制", "附件验证", "锁定对话模式"] },
+        { title: "Security & Privacy", body: "Tomverse 将账户访问、对话存储、临时附件和公开分享快照分离，以减少意外暴露。", bullets: ["锁定对话需要解锁授权", "公开分享是只读快照"] },
         { title: "Trust & Transparency", body: "我们清楚说明模型限制、供应商参与和数据处理方式，帮助用户理解产品能做什么、不能做什么。" },
       ],
     },
@@ -446,7 +443,7 @@ export const infoPages = {
         },
         {
           title: "Sharing, downloads, and privacy",
-          body: "Shared conversations are read-only snapshots. Private Mode means Tomverse does not save the conversation to the Tomverse database, but your prompt is still sent to the selected AI provider to generate an answer.",
+          body: "Shared conversations are read-only snapshots. Your prompt is always sent to the selected AI provider to generate an answer.",
           bullets: ["Use sharing only for content you are comfortable making available through the link.", "Locked conversations require unlock authorization before protected actions.", "Downloads export conversation content for your own records."],
         },
         {
@@ -489,7 +486,7 @@ export const infoPages = {
         },
         {
           title: "공유, 다운로드, 개인정보",
-          body: "공유된 대화는 읽기 전용 스냅샷입니다. Private Mode는 Tomverse 데이터베이스에 대화를 저장하지 않는다는 뜻이며, 답변 생성을 위해 선택한 AI 제공자에게 프롬프트는 전송됩니다.",
+          body: "공유된 대화는 읽기 전용 스냅샷입니다. 답변 생성을 위해 프롬프트는 항상 선택한 AI 제공자에게 전송됩니다.",
           bullets: ["공유 링크는 외부에 보여도 괜찮은 내용에만 사용하세요.", "잠긴 대화는 보호된 작업 전에 잠금 해제 권한이 필요합니다.", "다운로드는 본인 보관용으로 대화 내용을 내보냅니다."],
         },
         {
@@ -532,7 +529,7 @@ export const infoPages = {
         },
         {
           title: "分享、下载和隐私",
-          body: "分享的对话是只读快照。Private Mode 表示 Tomverse 不把对话保存到 Tomverse 数据库，但为了生成回答，提示仍会发送给所选 AI 提供商。",
+          body: "分享的对话是只读快照。为了生成回答，提示始终会发送给所选 AI 提供商。",
           bullets: ["仅分享你愿意通过链接公开查看的内容。", "锁定对话在执行受保护操作前需要解锁授权。", "下载功能用于导出对话内容供你自行保存。"],
         },
         {

@@ -87,9 +87,8 @@ const englishCopy: LandingCopy = {
   ],
   trustTitle: "Clear controls for private and shared work.",
   trustDescription:
-    "Tomverse makes storage, locks, and sharing behavior visible. AI providers still receive the prompts needed to generate a response, including when Private Mode is used.",
+    "Tomverse makes storage, locks, and sharing behavior visible. AI providers still receive the prompts needed to generate a response.",
   trustItems: [
-    { title: "Private Mode", description: "Tomverse does not save the conversation to chat history while the selected providers still process the request." },
     { title: "Locked conversations", description: "Protect sensitive saved chats and require unlock verification before protected actions." },
     { title: "Read-only sharing", description: "Share a snapshot designed not to expose later conversation updates." },
   ],
@@ -108,7 +107,7 @@ const englishCopy: LandingCopy = {
   faqs: [
     { question: "Can I use Tomverse for free?", answer: "Yes. Without signing in, you can already compare 3 AI models side by side on the same question. A Free account unlocks a broader model catalogue, higher usage limits, saved conversations, and other signed-in workflows within the plan limits." },
     { question: "Which models can I compare?", answer: "The available catalogue spans providers such as OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Mistral, Moonshot, Alibaba, and Perplexity. Availability can change, so the live status page is the source of current service state." },
-    { question: "How is my data handled?", answer: "Tomverse applies attachment limits, locked-chat controls, read-only share snapshots, and Private Mode. Selected AI providers still receive the request content needed to answer; review the Safety page for the complete boundaries." },
+    { question: "How is my data handled?", answer: "Tomverse applies attachment limits, locked-chat controls, and read-only share snapshots. Selected AI providers still receive the request content needed to answer; review the Safety page for the complete boundaries." },
   ],
   ctaTitle: "One clearer view starts with one question.",
   ctaDescription: "Compare several AI answers, then use AI Review to decide what deserves a closer look.",
@@ -148,9 +147,8 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
       { title: "결과 공유", description: "결과가 준비되면 읽기 전용 공유 페이지를 만들거나 깔끔한 텍스트 기록으로 다운로드하세요." },
     ],
     trustTitle: "비공개 작업과 공유를 위한 명확한 제어.",
-    trustDescription: "저장, 잠금, 공유 동작을 분명히 보여드립니다. Private Mode에서도 답변 생성에 필요한 요청은 선택한 AI 공급자에게 전송됩니다.",
+    trustDescription: "저장, 잠금, 공유 동작을 분명히 보여드립니다. 답변 생성에 필요한 요청은 선택한 AI 공급자에게 전송됩니다.",
     trustItems: [
-      { title: "Private Mode", description: "Tomverse 대화 기록에는 저장하지 않지만 선택한 공급자는 요청을 처리합니다." },
       { title: "잠긴 대화", description: "민감한 저장 대화를 보호하고 중요한 작업 전에 잠금 해제 확인을 요구합니다." },
       { title: "읽기 전용 공유", description: "이후 대화 업데이트가 노출되지 않도록 설계된 스냅샷을 공유합니다." },
     ],
@@ -168,7 +166,7 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     faqs: [
       { question: "Tomverse를 무료로 사용할 수 있나요?", answer: "네. 로그인 없이도 3개의 AI 모델로 같은 질문에 대한 답변을 바로 비교해볼 수 있습니다. Free 계정을 만들면 더 넓은 모델 카탈로그, 높은 사용량 한도, 대화 저장 및 로그인 전용 기능을 사용할 수 있습니다." },
       { question: "어떤 모델을 비교할 수 있나요?", answer: "OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Mistral, Moonshot, Alibaba, Perplexity 등의 모델을 지원합니다. 제공 상태는 바뀔 수 있으므로 실시간 상태 페이지에서 현재 상태를 확인할 수 있습니다." },
-      { question: "데이터는 어떻게 처리되나요?", answer: "첨부파일 제한, 대화 잠금, 읽기 전용 공유 스냅샷과 Private Mode를 적용합니다. 선택한 AI 공급자는 답변에 필요한 요청 내용을 처리하므로 전체 범위는 안전 페이지에서 확인하세요." },
+      { question: "데이터는 어떻게 처리되나요?", answer: "첨부파일 제한, 대화 잠금, 읽기 전용 공유 스냅샷을 적용합니다. 선택한 AI 공급자는 답변에 필요한 요청 내용을 처리하므로 전체 범위는 안전 페이지에서 확인하세요." },
     ],
     ctaTitle: "더 명확한 시야는 하나의 질문에서 시작됩니다.",
     ctaDescription: "여러 AI 답변을 비교한 뒤 AI Review로 더 살펴볼 부분을 빠르게 찾으세요.",
@@ -204,9 +202,8 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
       { title: "分享结果", description: "创建只读分享页，或下载整洁的文本记录。" },
     ],
     trustTitle: "为私密与共享工作提供清晰控制。",
-    trustDescription: "存储、锁定和共享行为清晰可见。即使使用 Private Mode，所选 AI 供应商仍会处理生成回答所需的请求。",
+    trustDescription: "存储、锁定和共享行为清晰可见。所选 AI 供应商仍会处理生成回答所需的请求。",
     trustItems: [
-      { title: "Private Mode", description: "不保存到 Tomverse 对话历史，但所选供应商仍会处理请求。" },
       { title: "锁定对话", description: "保护敏感对话，并在受保护操作前要求解锁验证。" },
       { title: "只读分享", description: "分享不会暴露后续对话更新的快照。" },
     ],
@@ -224,7 +221,7 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     faqs: [
       { question: "可以免费使用 Tomverse 吗？", answer: "可以。无需登录即可同时比较 3 个 AI 模型对同一问题的回答；Free 账户可解锁更广泛的模型库、更高的使用额度、对话保存以及其他登录专属功能。" },
       { question: "可以比较哪些模型？", answer: "模型目录覆盖 OpenAI、Anthropic、Google、Groq、DeepSeek、xAI、Mistral、Moonshot、Alibaba 和 Perplexity 等供应商；当前状态请查看实时状态页。" },
-      { question: "数据如何处理？", answer: "Tomverse 提供附件限制、对话锁、只读分享快照和 Private Mode。所选 AI 供应商仍会处理生成回答所需的内容；完整边界请查看安全页。" },
+      { question: "数据如何处理？", answer: "Tomverse 提供附件限制、对话锁和只读分享快照。所选 AI 供应商仍会处理生成回答所需的内容；完整边界请查看安全页。" },
     ],
     ctaTitle: "一个问题，获得更清晰的全貌。",
     ctaDescription: "比较多个 AI 回答，再用 AI Review 找出值得深入核实的部分。",
@@ -260,9 +257,8 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
       { title: "Partager le résultat", description: "Créez une page en lecture seule ou téléchargez une trace texte propre." },
     ],
     trustTitle: "Des contrôles clairs pour le travail privé et partagé.",
-    trustDescription: "Le stockage, le verrouillage et le partage sont visibles. Même en Private Mode, les fournisseurs sélectionnés traitent la demande nécessaire à la réponse.",
+    trustDescription: "Le stockage, le verrouillage et le partage sont visibles. Les fournisseurs sélectionnés traitent la demande nécessaire à la réponse.",
     trustItems: [
-      { title: "Private Mode", description: "La conversation n’est pas enregistrée dans l’historique Tomverse, mais les fournisseurs traitent la demande." },
       { title: "Conversations verrouillées", description: "Protégez les conversations sensibles avant les actions à risque." },
       { title: "Partage en lecture seule", description: "Partagez un instantané qui n’expose pas les mises à jour ultérieures." },
     ],
@@ -280,7 +276,7 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     faqs: [
       { question: "Puis-je utiliser Tomverse gratuitement ?", answer: "Oui. Sans connexion, vous pouvez déjà comparer 3 modèles d'IA côte à côte sur la même question. Un compte Free débloque un catalogue de modèles plus large, des limites d'utilisation plus élevées, la sauvegarde des conversations et d'autres fonctionnalités réservées aux comptes connectés." },
       { question: "Quels modèles puis-je comparer ?", answer: "Le catalogue couvre notamment OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Mistral, Moonshot, Alibaba et Perplexity. Consultez la page d’état pour la disponibilité actuelle." },
-      { question: "Comment mes données sont-elles traitées ?", answer: "Tomverse applique limites de pièces jointes, verrouillage, instantanés en lecture seule et Private Mode. Les fournisseurs sélectionnés traitent toujours le contenu nécessaire à la réponse." },
+      { question: "Comment mes données sont-elles traitées ?", answer: "Tomverse applique limites de pièces jointes, verrouillage et instantanés en lecture seule. Les fournisseurs sélectionnés traitent toujours le contenu nécessaire à la réponse." },
     ],
     ctaTitle: "Une vision plus claire commence par une question.",
     ctaDescription: "Comparez plusieurs réponses puis utilisez AI Review pour cibler ce qui mérite un examen approfondi.",
@@ -316,9 +312,8 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
       { title: "Ergebnis teilen", description: "Schreibgeschützte Freigabe erstellen oder einen sauberen Textverlauf laden." },
     ],
     trustTitle: "Klare Kontrollen für private und geteilte Arbeit.",
-    trustDescription: "Speicherung, Sperren und Freigaben sind sichtbar. Auch im Private Mode verarbeiten ausgewählte KI-Anbieter die für die Antwort nötige Anfrage.",
+    trustDescription: "Speicherung, Sperren und Freigaben sind sichtbar. Ausgewählte KI-Anbieter verarbeiten die für die Antwort nötige Anfrage.",
     trustItems: [
-      { title: "Private Mode", description: "Kein Tomverse-Chatverlauf, während ausgewählte Anbieter die Anfrage verarbeiten." },
       { title: "Gesperrte Unterhaltungen", description: "Sensible Chats schützen und vor geschützten Aktionen entsperren." },
       { title: "Schreibgeschütztes Teilen", description: "Einen Snapshot teilen, der spätere Aktualisierungen nicht offenlegt." },
     ],
@@ -336,7 +331,7 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     faqs: [
       { question: "Kann ich Tomverse kostenlos nutzen?", answer: "Ja. Ohne Anmeldung können Sie bereits 3 KI-Modelle direkt bei derselben Frage vergleichen. Ein Free-Konto schaltet einen breiteren Modellkatalog, höhere Nutzungslimits, gespeicherte Unterhaltungen und weitere Funktionen für angemeldete Nutzer frei." },
       { question: "Welche Modelle kann ich vergleichen?", answer: "Der Katalog umfasst unter anderem OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Mistral, Moonshot, Alibaba und Perplexity. Aktuelle Verfügbarkeit zeigt die Statusseite." },
-      { question: "Wie werden meine Daten verarbeitet?", answer: "Tomverse nutzt Anhangslimits, Chatsperren, schreibgeschützte Snapshots und Private Mode. Ausgewählte KI-Anbieter verarbeiten weiterhin die für Antworten nötigen Inhalte." },
+      { question: "Wie werden meine Daten verarbeitet?", answer: "Tomverse nutzt Anhangslimits, Chatsperren und schreibgeschützte Snapshots. Ausgewählte KI-Anbieter verarbeiten weiterhin die für Antworten nötigen Inhalte." },
     ],
     ctaTitle: "Ein klarerer Blick beginnt mit einer Frage.",
     ctaDescription: "Mehrere Antworten vergleichen und mit AI Review gezielt tiefer prüfen.",
@@ -372,9 +367,8 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
       { title: "Comparte el resultado", description: "Crea una página de solo lectura o descarga un registro de texto limpio." },
     ],
     trustTitle: "Controles claros para trabajo privado y compartido.",
-    trustDescription: "El almacenamiento, bloqueo y uso compartido son visibles. Incluso en Private Mode, los proveedores elegidos procesan la solicitud necesaria para responder.",
+    trustDescription: "El almacenamiento, bloqueo y uso compartido son visibles. Los proveedores elegidos procesan la solicitud necesaria para responder.",
     trustItems: [
-      { title: "Private Mode", description: "No se guarda en el historial de Tomverse, pero los proveedores seleccionados procesan la solicitud." },
       { title: "Conversaciones bloqueadas", description: "Protege chats sensibles antes de acciones protegidas." },
       { title: "Compartir en solo lectura", description: "Comparte una instantánea que no expone cambios posteriores." },
     ],
@@ -392,7 +386,7 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     faqs: [
       { question: "¿Puedo usar Tomverse gratis?", answer: "Sí. Sin iniciar sesión ya puedes comparar 3 modelos de IA lado a lado en la misma pregunta. Una cuenta Free desbloquea un catálogo de modelos más amplio, límites de uso más altos, conversaciones guardadas y otras funciones exclusivas para usuarios con sesión iniciada." },
       { question: "¿Qué modelos puedo comparar?", answer: "El catálogo incluye proveedores como OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Mistral, Moonshot, Alibaba y Perplexity. Consulta el estado en vivo para la disponibilidad actual." },
-      { question: "¿Cómo se tratan mis datos?", answer: "Tomverse aplica límites de archivos, bloqueo de chats, instantáneas de solo lectura y Private Mode. Los proveedores elegidos siguen procesando el contenido necesario para responder." },
+      { question: "¿Cómo se tratan mis datos?", answer: "Tomverse aplica límites de archivos, bloqueo de chats e instantáneas de solo lectura. Los proveedores elegidos siguen procesando el contenido necesario para responder." },
     ],
     ctaTitle: "Una visión más clara empieza con una pregunta.",
     ctaDescription: "Compara varias respuestas y usa AI Review para decidir qué revisar con más detalle.",
@@ -428,9 +422,8 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
       { title: "Compartilhe o resultado", description: "Crie uma página somente leitura ou baixe um registro de texto limpo." },
     ],
     trustTitle: "Controles claros para trabalho privado e compartilhado.",
-    trustDescription: "Armazenamento, bloqueio e compartilhamento ficam visíveis. Mesmo no Private Mode, os provedores escolhidos processam a solicitação necessária para responder.",
+    trustDescription: "Armazenamento, bloqueio e compartilhamento ficam visíveis. Os provedores escolhidos processam a solicitação necessária para responder.",
     trustItems: [
-      { title: "Private Mode", description: "Não salva no histórico do Tomverse, mas os provedores selecionados processam a solicitação." },
       { title: "Conversas bloqueadas", description: "Proteja chats sensíveis antes de ações protegidas." },
       { title: "Compartilhamento somente leitura", description: "Compartilhe um snapshot que não expõe atualizações posteriores." },
     ],
@@ -448,7 +441,7 @@ const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
     faqs: [
       { question: "Posso usar o Tomverse gratuitamente?", answer: "Sim. Sem entrar, você já pode comparar 3 modelos de IA lado a lado na mesma pergunta. Uma conta Free desbloqueia um catálogo de modelos mais amplo, limites de uso mais altos, conversas salvas e outros recursos exclusivos para quem está conectado." },
       { question: "Quais modelos posso comparar?", answer: "O catálogo inclui provedores como OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Mistral, Moonshot, Alibaba e Perplexity. Veja a página de status para a disponibilidade atual." },
-      { question: "Como meus dados são tratados?", answer: "O Tomverse aplica limites de anexos, bloqueio, snapshots somente leitura e Private Mode. Os provedores escolhidos continuam processando o conteúdo necessário para responder." },
+      { question: "Como meus dados são tratados?", answer: "O Tomverse aplica limites de anexos, bloqueio e snapshots somente leitura. Os provedores escolhidos continuam processando o conteúdo necessário para responder." },
     ],
     ctaTitle: "Uma visão mais clara começa com uma pergunta.",
     ctaDescription: "Compare várias respostas e use o AI Review para decidir o que merece análise mais profunda.",

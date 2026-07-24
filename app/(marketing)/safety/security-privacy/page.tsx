@@ -5,7 +5,7 @@ import { createPageMetadata } from "@/lib/seo";
 export const metadata = createPageMetadata({
   title: "Security and Privacy",
   description:
-    "Learn how Tomverse protects accounts, conversations, attachments, shared links, provider requests, and Private Mode data.",
+    "Learn how Tomverse protects accounts, conversations, attachments, shared links, and provider requests.",
   path: "/safety/security-privacy",
 });
 

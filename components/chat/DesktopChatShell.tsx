@@ -46,7 +46,6 @@ type DesktopChatShellProps = {
   guestPreviewMode?: boolean;
   guestMessageCount: number;
   maxGuestMessages: number;
-  isPrivateMode: boolean;
   isModelSelectionReady: boolean;
   onNewChat: () => void;
   onSelectConversation: (id: string) => void;
@@ -57,7 +56,6 @@ type DesktopChatShellProps = {
   onShare: (id: string, title: string) => void;
   onRevokeShare: (id: string) => void;
   onDownload: (id: string, title: string) => void;
-  onTogglePrivateMode: () => void;
   onToggleModel: (modelId: string) => boolean;
   onSwapModel: (removeModelId: string, addModelId: string) => boolean;
   onSubmit: () => void;
@@ -90,7 +88,6 @@ export function DesktopChatShell({
   guestPreviewMode = false,
   guestMessageCount,
   maxGuestMessages,
-  isPrivateMode,
   isModelSelectionReady,
   onNewChat,
   onSelectConversation,
@@ -101,7 +98,6 @@ export function DesktopChatShell({
   onShare,
   onRevokeShare,
   onDownload,
-  onTogglePrivateMode,
   onToggleModel,
   onSwapModel,
   onSubmit,
@@ -186,7 +182,6 @@ export function DesktopChatShell({
   ).length;
   const isCompareSummaryDisabled =
     isCompareSummaryLoading || readyForCompareCount < 2;
-  const isPrivate = currentChatId === "private-chat";
   const [welcomeInputSlot, setWelcomeInputSlot] = useState<HTMLDivElement | null>(null);
   const [bottomInputSlot, setBottomInputSlot] = useState<HTMLDivElement | null>(null);
   const inputPortalTarget = isConversationEmpty
@@ -213,36 +208,16 @@ export function DesktopChatShell({
         onShare={onShare}
         onRevokeShare={onRevokeShare}
         onDownload={onDownload}
-        isPrivateMode={isPrivateMode}
-        onTogglePrivateMode={onTogglePrivateMode}
         currentModelId={selectedModels[0]}
         attachmentCount={attachments.length}
       />
 
       <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        {isPrivate && (
-          <div className="flex shrink-0 items-center justify-between gap-3 bg-purple-500/10 px-4 py-2 text-purple-700 dark:text-purple-300">
-            <span className="flex min-w-0 items-center gap-2 text-xs font-semibold">
-              <Lock className="h-4 w-4 shrink-0" />
-              <span className="truncate">
-                {t("chat.privateModeHeaderTitle")} · {t("chat.privateModeHeaderNotice")}
-              </span>
-            </span>
-            <button
-              type="button"
-              onClick={onTogglePrivateMode}
-              className="shrink-0 rounded-full border border-purple-300 px-3 py-1 text-xs font-bold text-purple-700 transition hover:bg-purple-100 dark:border-purple-700 dark:text-purple-300 dark:hover:bg-purple-950/40"
-            >
-              {t("chat.privateModeExit")}
-            </button>
-          </div>
-        )}
         <ProviderStatusBanner selectedModels={selectedModels} compact onToggleModel={onToggleModel} />
         <div className="relative flex min-h-0 flex-1 gap-4 overflow-hidden bg-zinc-100/80 px-4 pb-4 pt-3 dark:bg-zinc-950">
           {isConversationEmpty && (
             <div className="absolute inset-0 z-10 bg-zinc-100/80 dark:bg-zinc-950">
               <ChatWelcomeScreen
-                isPrivate={isPrivate}
                 recentConversations={recentConversations}
                 onSelectConversation={onSelectConversation}
                 inputSlotRef={setWelcomeInputSlot}
@@ -269,17 +244,9 @@ export function DesktopChatShell({
                 key={`${currentChatId || "new"}:panel:${panelIndex}`}
                 data-testid="desktop-model-panel"
                 data-model-id={modelId}
-                className={`relative flex flex-col overflow-hidden rounded-2xl border shadow-sm transition-all duration-300 ease-in-out ${
-                  isPrivate
-                    ? "border-purple-200 bg-white shadow-purple-200/40 dark:border-purple-900/50 dark:bg-zinc-950 dark:shadow-black/20"
-                    : "border-zinc-200 bg-white shadow-zinc-200/60 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/20"
-                } ${isPanelDisabled ? "w-44 shrink-0" : "min-w-0 flex-1"}`}
+                className={`relative flex flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm shadow-zinc-200/60 transition-all duration-300 ease-in-out dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/20 ${isPanelDisabled ? "w-44 shrink-0" : "min-w-0 flex-1"}`}
               >
-                <div className={`flex min-h-12 shrink-0 items-center justify-between px-3 py-2 text-xs font-semibold ${
-                  isPrivate
-                    ? "border-b border-purple-100 bg-purple-50/50 text-purple-500 dark:border-purple-900/40 dark:bg-purple-950/10 dark:text-purple-300"
-                    : "border-b border-zinc-200 bg-white text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-400"
-                }`}>
+                <div className="flex min-h-12 shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-400">
                   <div className={`flex min-w-0 flex-1 items-center gap-2 transition-opacity ${isPanelDisabled ? "opacity-50" : ""}`}>
                     <ModelLogo model={modelInfo} size="md" />
 
@@ -420,48 +387,46 @@ export function DesktopChatShell({
                 testId="quick-comparison-credit-cost"
               />
             </button>
-            {currentChatId !== "private-chat" && (
-              isGuestMode ? (
+            {isGuestMode ? (
+              <button
+                type="button"
+                data-testid="ai-review-guest-locked"
+                onClick={onGuestSignInPrompt}
+                className="flex items-center justify-between gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2 text-xs font-black text-zinc-600 hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              >
+                <span className="flex items-center gap-1.5">
+                  <Lock className="h-3.5 w-3.5" aria-hidden="true" />
+                  {t("chat.aiReviewLoginToUnlock")}
+                </span>
+              </button>
+            ) : (
+              <div className="flex items-center gap-1">
                 <button
                   type="button"
-                  data-testid="ai-review-guest-locked"
-                  onClick={onGuestSignInPrompt}
-                  className="flex items-center justify-between gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2 text-xs font-black text-zinc-600 hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                  onClick={onComparisonReview}
+                  className="flex items-center justify-between gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-black text-white hover:bg-blue-500"
                 >
-                  <span className="flex items-center gap-1.5">
-                    <Lock className="h-3.5 w-3.5" aria-hidden="true" />
-                    {t("chat.aiReviewLoginToUnlock")}
-                  </span>
-                </button>
-              ) : (
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={onComparisonReview}
-                    className="flex items-center justify-between gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-black text-white hover:bg-blue-500"
-                  >
-                    <span>{t("chat.aiReviewButton")}</span>
-                    <CreditCostBadge
-                      credits={4}
-                      size="xs"
-                      tone="onColor"
-                      label={`4 ${t("chat.aiReviewCredits")}`}
-                      testId="ai-review-entry-credit-cost"
-                      className="border-0 bg-white/20"
-                    />
-                  </button>
-                  <FeatureHelpPopover
-                    title={helpCopy.aiReviewTitle}
-                    description={helpCopy.aiReviewDescription}
-                    buttonLabel={helpCopy.helpAboutAiReview}
-                    learnMoreLabel={helpCopy.learnMore}
-                    topic="ai_review"
-                    href={chatWorkspaceGuideHref(lang, "ai-review")}
-                    align="right"
-                    testId="ai-review-help"
+                  <span>{t("chat.aiReviewButton")}</span>
+                  <CreditCostBadge
+                    credits={4}
+                    size="xs"
+                    tone="onColor"
+                    label={`4 ${t("chat.aiReviewCredits")}`}
+                    testId="ai-review-entry-credit-cost"
+                    className="border-0 bg-white/20"
                   />
-                </div>
-              )
+                </button>
+                <FeatureHelpPopover
+                  title={helpCopy.aiReviewTitle}
+                  description={helpCopy.aiReviewDescription}
+                  buttonLabel={helpCopy.helpAboutAiReview}
+                  learnMoreLabel={helpCopy.learnMore}
+                  topic="ai_review"
+                  href={chatWorkspaceGuideHref(lang, "ai-review")}
+                  align="right"
+                  testId="ai-review-help"
+                />
+              </div>
             )}
           </div>
         )}
@@ -477,7 +442,6 @@ export function DesktopChatShell({
               onCancel={() => setStopSignal((current) => current + 1)}
               isSending={isSending || isAnyModelResponding}
               focusToken={focusToken}
-              isPrivateMode={isPrivateMode}
               currentChatId={currentChatId}
               selectedModels={selectedModels}
               disabledModelIds={disabledPanels}

@@ -57,7 +57,6 @@ export const chatWorkspaceGuideContent: Record<
       "Select a number in the workspace map to jump to its explanation. The map mirrors the current sidebar without showing private conversation content.",
     tourItems: [
       { term: "New chat", detail: "Starts a separate conversation with the currently selected default models." },
-      { term: "Private Mode", detail: "Runs a conversation without saving its room or messages in the Tomverse database. Requests still go to the selected AI provider." },
       { term: "Search conversations", detail: "Searches conversation titles and, for signed-in accounts, matching saved message text." },
       { term: "Status filters", detail: "Shows conversations that are Locked or currently have a Shared link." },
       { term: "Personal labels", detail: "Filters the browser-local Work, Research, and Personal labels." },
@@ -151,7 +150,6 @@ export const chatWorkspaceGuideContent: Record<
           { term: "Supported", detail: "PNG, JPEG, WebP, PDF, text, Word, Excel, PowerPoint, OpenDocument files, and supported Google Drive exports." },
           { term: "Unsupported or failed", detail: "Remove passwords, re-export corrupted documents, reduce size, or paste the key text directly." },
           { term: "Model differences", detail: "Some models handle images or long documents differently; try a file-capable fallback when needed." },
-          { term: "Private Mode", detail: "Tomverse does not save the chat history, but attached content still passes through Tomverse and may be sent to the selected provider." },
           { term: "Sensitive files", detail: "Attach only content you are permitted to process with Tomverse and the selected external AI provider." },
         ],
       },
@@ -197,7 +195,6 @@ export const chatWorkspaceGuideContent: Record<
     tourDescription: "워크스페이스 지도에서 번호를 누르면 해당 설명으로 이동합니다. 개인 대화 내용 없이 현재 사이드바 구조를 재현했습니다.",
     tourItems: [
       { term: "새 대화", detail: "현재 기본 모델 선택으로 서로 독립된 새 대화를 시작합니다." },
-      { term: "Private Mode", detail: "대화방과 메시지를 Tomverse DB에 저장하지 않습니다. 요청은 선택한 AI 공급자에게 계속 전달됩니다." },
       { term: "대화 검색", detail: "대화 제목을 검색하고 로그인 계정에서는 저장된 메시지의 일치 내용도 찾습니다." },
       { term: "상태 필터", detail: "잠겼거나 현재 공유 링크가 활성화된 대화를 표시합니다." },
       { term: "개인 라벨", detail: "현재 브라우저에 저장된 업무·리서치·개인 라벨로 필터링합니다." },
@@ -253,7 +250,6 @@ export const chatWorkspaceGuideContent: Record<
         { term: "지원 형식", detail: "PNG, JPEG, WebP, PDF, 텍스트, Word, Excel, PowerPoint, OpenDocument와 지원되는 Google Drive 내보내기입니다." },
         { term: "실패 시", detail: "암호를 제거하고 손상 문서를 다시 내보내거나 크기를 줄이고 핵심 텍스트를 직접 붙여넣으세요." },
         { term: "모델별 차이", detail: "이미지·긴 문서 처리가 다를 수 있으므로 파일 지원 대체 모델을 시도하세요." },
-        { term: "Private Mode", detail: "대화 기록은 저장하지 않지만 파일 내용은 Tomverse를 거쳐 선택한 공급자에게 전달될 수 있습니다." },
         { term: "민감 파일", detail: "Tomverse와 선택한 외부 AI 공급자에서 처리할 권한이 있는 내용만 첨부하세요." },
       ] },
       { id: sectionIds.credits, title: "9. 크레딧과 플랜", description: "모델 비용과 추론 깊이가 달라도 이해하기 쉽도록 크레딧이라는 공통 사용 단위를 제공합니다.", items: [
@@ -281,7 +277,7 @@ export const chatWorkspaceGuideContent: Record<
   zh: {
     eyebrow: "帮助中心 · Chat 工作区", title: "Tomverse Chat 工作区使用指南", description: "了解对话、项目、个人标签、锁定、分享、模型面板、AI Review、文件和积分。", updated: "更新于 2026 年 7 月 16 日", contents: "本页内容", tourTitle: "1. Chat 界面导览", tourDescription: "选择工作区地图中的编号即可跳到说明。地图不显示任何私人对话内容。",
     tourItems: [
-      { term: "新对话", detail: "使用当前默认模型开始一个独立对话。" }, { term: "Private Mode", detail: "不把房间或消息保存到 Tomverse 数据库，但请求仍会发送给所选 AI 提供商。" }, { term: "搜索对话", detail: "搜索标题；登录后也可搜索已保存消息中的匹配内容。" }, { term: "状态筛选", detail: "显示已锁定或已启用分享链接的对话。" }, { term: "个人标签", detail: "按当前浏览器中的工作、研究和个人标签筛选。" }, { term: "项目", detail: "像文件夹一样整理账户对话。" }, { term: "对话菜单", detail: "重命名、置顶、收藏、加标签、移动、分享、下载、锁定或删除。" },
+      { term: "新对话", detail: "使用当前默认模型开始一个独立对话。" }, { term: "搜索对话", detail: "搜索标题；登录后也可搜索已保存消息中的匹配内容。" }, { term: "状态筛选", detail: "显示已锁定或已启用分享链接的对话。" }, { term: "个人标签", detail: "按当前浏览器中的工作、研究和个人标签筛选。" }, { term: "项目", detail: "像文件夹一样整理账户对话。" }, { term: "对话菜单", detail: "重命名、置顶、收藏、加标签、移动、分享、下载、锁定或删除。" },
     ],
     sections: [
       { id: sectionIds.states, title: "2. 状态、标签和项目", description: "它们可以同时出现，但含义不同。", items: [
@@ -303,7 +299,7 @@ export const chatWorkspaceGuideContent: Record<
         { term: "均衡", detail: "整理共识、差异、遗漏、矛盾和实用性。" }, { term: "证据优先", detail: "突出薄弱依据、冲突和需外部验证的说法。" }, { term: "行动优先", detail: "突出选项、权衡、风险和下一步。" }, { term: "结果", detail: "查看共识、差异、矛盾、遗漏和待验证部分。" },
       ], note: "AI Review 只比较提供的回答，不浏览网页、不独立核验事实，也不保证正确答案。" },
       { id: sectionIds.files, title: "8. 文件和 Google Drive", description: "允许附件的登录方案最多可添加 5 个文件，每个 10 MB，单次请求合计 25 MB。", items: [
-        { term: "支持", detail: "PNG、JPEG、WebP、PDF、文本、Word、Excel、PowerPoint、OpenDocument 和支持的 Drive 导出。" }, { term: "失败时", detail: "移除密码、重新导出损坏文件、减小大小或粘贴关键文本。" }, { term: "模型差异", detail: "图像和长文档能力不同，可改用支持文件的模型。" }, { term: "Private Mode", detail: "不保存聊天历史，但文件仍经 Tomverse 并可能发送给所选提供商。" }, { term: "敏感文件", detail: "只上传你有权交由 Tomverse 和外部 AI 提供商处理的内容。" },
+        { term: "支持", detail: "PNG、JPEG、WebP、PDF、文本、Word、Excel、PowerPoint、OpenDocument 和支持的 Drive 导出。" }, { term: "失败时", detail: "移除密码、重新导出损坏文件、减小大小或粘贴关键文本。" }, { term: "模型差异", detail: "图像和长文档能力不同，可改用支持文件的模型。" }, { term: "敏感文件", detail: "只上传你有权交由 Tomverse 和外部 AI 提供商处理的内容。" },
       ] },
       { id: sectionIds.credits, title: "9. 积分和方案", description: "积分把不同模型成本和推理深度统一为易懂的用量单位。", items: [
         { term: "基础类别", detail: "短请求通常为 Standard 1、Advanced 4、Premium 8、Reasoning 12–16、Research 20–30。" }, { term: "长输入", detail: "超过 16k、50k、100k 估算 token 时可应用 1.5×、2×、3×。" }, { term: "文件", detail: "提取内容计入输入大小。" }, { term: "AI Review", detail: "运行前单独显示预计用量。" }, { term: "两种余额", detail: "方案积分按周期重置；附加积分单独保留并按条款使用或到期。" }, { term: "失败处理", detail: "提供商错误和空回答会退款；取消时仅结算已完成用量并退回未用预留。" },
@@ -317,7 +313,7 @@ export const chatWorkspaceGuideContent: Record<
   fr: {
     eyebrow: "Centre d’aide · Espace Chat", title: "Guide de l’espace Chat Tomverse", description: "Maîtrisez conversations, projets, libellés personnels, verrouillage, partage, panneaux de modèles, AI Review, fichiers et crédits.", updated: "Mis à jour le 16 juillet 2026", contents: "Dans cette page", tourTitle: "1. Découvrir l’écran Chat", tourDescription: "Sélectionnez un numéro dans la carte pour rejoindre son explication, sans afficher de conversation privée.",
     tourItems: [
-      { term: "Nouveau chat", detail: "Démarre une conversation indépendante avec les modèles par défaut." }, { term: "Private Mode", detail: "N’enregistre ni salon ni message dans la base Tomverse, mais envoie toujours la requête au fournisseur choisi." }, { term: "Rechercher", detail: "Recherche les titres et, une fois connecté, le texte correspondant dans les messages enregistrés." }, { term: "États", detail: "Filtre les conversations verrouillées ou avec un lien partagé actif." }, { term: "Libellés personnels", detail: "Filtre Travail, Recherche et Personnel stockés dans ce navigateur." }, { term: "Projets", detail: "Regroupe les conversations du compte comme des dossiers." }, { term: "Menu de conversation", detail: "Renommer, épingler, favoriser, étiqueter, déplacer, partager, télécharger, verrouiller ou supprimer." },
+      { term: "Nouveau chat", detail: "Démarre une conversation indépendante avec les modèles par défaut." }, { term: "Rechercher", detail: "Recherche les titres et, une fois connecté, le texte correspondant dans les messages enregistrés." }, { term: "États", detail: "Filtre les conversations verrouillées ou avec un lien partagé actif." }, { term: "Libellés personnels", detail: "Filtre Travail, Recherche et Personnel stockés dans ce navigateur." }, { term: "Projets", detail: "Regroupe les conversations du compte comme des dossiers." }, { term: "Menu de conversation", detail: "Renommer, épingler, favoriser, étiqueter, déplacer, partager, télécharger, verrouiller ou supprimer." },
     ],
     sections: [
       { id: sectionIds.states, title: "2. États, libellés et projets", description: "Ils peuvent coexister mais n’ont pas le même rôle.", items: [
@@ -339,7 +335,7 @@ export const chatWorkspaceGuideContent: Record<
         { term: "Équilibré", detail: "Accords, différences, omissions, contradictions et utilité." }, { term: "Preuves", detail: "Appuis faibles, conflits et vérifications externes." }, { term: "Action", detail: "Options, compromis, risques et prochaines étapes." }, { term: "Résultat", detail: "Consensus, différences, contradictions, omissions et points à vérifier." },
       ], note: "AI Review compare uniquement les réponses fournies; il ne navigue pas, ne vérifie pas indépendamment les faits et ne garantit pas la bonne réponse." },
       { id: sectionIds.files, title: "8. Fichiers et Google Drive", description: "Jusqu’à 5 fichiers, 10 Mo chacun et 25 Mo au total par requête pour les plans autorisés.", items: [
-        { term: "Pris en charge", detail: "PNG, JPEG, WebP, PDF, texte, Word, Excel, PowerPoint, OpenDocument et exports Drive compatibles." }, { term: "Échec", detail: "Retirez le mot de passe, réexportez, réduisez ou collez le texte essentiel." }, { term: "Selon le modèle", detail: "Images et longs documents peuvent être traités différemment." }, { term: "Private Mode", detail: "L’historique n’est pas stocké, mais le fichier peut être transmis au fournisseur." }, { term: "Données sensibles", detail: "N’envoyez que ce que vous êtes autorisé à faire traiter." },
+        { term: "Pris en charge", detail: "PNG, JPEG, WebP, PDF, texte, Word, Excel, PowerPoint, OpenDocument et exports Drive compatibles." }, { term: "Échec", detail: "Retirez le mot de passe, réexportez, réduisez ou collez le texte essentiel." }, { term: "Selon le modèle", detail: "Images et longs documents peuvent être traités différemment." }, { term: "Données sensibles", detail: "N’envoyez que ce que vous êtes autorisé à faire traiter." },
       ] },
       { id: sectionIds.credits, title: "9. Crédits et offres", description: "Une unité commune malgré les différences de coût et de raisonnement.", items: [
         { term: "Bases", detail: "Standard 1, Advanced 4, Premium 8, Reasoning 12–16, Research 20–30 pour une demande courte typique." }, { term: "Longue entrée", detail: "Au-delà de 16k, 50k et 100k tokens estimés: 1,5×, 2× et 3×." }, { term: "Fichiers", detail: "Le contenu extrait compte dans l’entrée." }, { term: "AI Review", detail: "Affiche sa propre estimation avant exécution." }, { term: "Deux soldes", detail: "Les crédits du plan se réinitialisent; les crédits achetés restent séparés selon leurs conditions." }, { term: "Échecs", detail: "Erreurs fournisseur et réponses vides sont remboursées; l’annulation rend la réservation inutilisée." },
@@ -353,7 +349,7 @@ export const chatWorkspaceGuideContent: Record<
   de: {
     eyebrow: "Hilfe · Chat-Workspace", title: "Leitfaden für den Tomverse Chat-Workspace", description: "Erklärungen zu Chats, Projekten, persönlichen Labels, Sperren, Freigaben, Modell-Panels, AI Review, Dateien und Credits.", updated: "Aktualisiert am 16. Juli 2026", contents: "Auf dieser Seite", tourTitle: "1. Chat-Oberfläche kennenlernen", tourDescription: "Wählen Sie eine Nummer in der Workspace-Karte, ohne private Chatinhalte anzuzeigen.",
     tourItems: [
-      { term: "Neuer Chat", detail: "Startet eine unabhängige Unterhaltung mit den Standardmodellen." }, { term: "Private Mode", detail: "Speichert Raum und Nachrichten nicht in Tomverse, sendet Anfragen aber an den gewählten Anbieter." }, { term: "Chats suchen", detail: "Sucht Titel und angemeldet auch passende gespeicherte Nachrichtentexte." }, { term: "Statusfilter", detail: "Zeigt gesperrte oder aktuell geteilte Chats." }, { term: "Persönliche Labels", detail: "Filtert Arbeit, Recherche und Privat im aktuellen Browser." }, { term: "Projekte", detail: "Ordnet Konto-Chats wie Ordner." }, { term: "Chat-Menü", detail: "Umbenennen, anheften, favorisieren, labeln, verschieben, teilen, laden, sperren oder löschen." },
+      { term: "Neuer Chat", detail: "Startet eine unabhängige Unterhaltung mit den Standardmodellen." }, { term: "Chats suchen", detail: "Sucht Titel und angemeldet auch passende gespeicherte Nachrichtentexte." }, { term: "Statusfilter", detail: "Zeigt gesperrte oder aktuell geteilte Chats." }, { term: "Persönliche Labels", detail: "Filtert Arbeit, Recherche und Privat im aktuellen Browser." }, { term: "Projekte", detail: "Ordnet Konto-Chats wie Ordner." }, { term: "Chat-Menü", detail: "Umbenennen, anheften, favorisieren, labeln, verschieben, teilen, laden, sperren oder löschen." },
     ],
     sections: [
       { id: sectionIds.states, title: "2. Status, Labels und Projekte", description: "Sie können gleichzeitig erscheinen, bedeuten aber Unterschiedliches.", items: [
@@ -375,7 +371,7 @@ export const chatWorkspaceGuideContent: Record<
         { term: "Ausgewogen", detail: "Übereinstimmungen, Unterschiede, Lücken, Widersprüche und Nutzen." }, { term: "Evidenz", detail: "Schwache Belege, Konflikte und externe Prüfung." }, { term: "Aktion", detail: "Optionen, Abwägungen, Risiken und nächste Schritte." }, { term: "Ergebnis", detail: "Konsens, Unterschiede, Widersprüche, Lücken und Prüfbedarf." },
       ], note: "AI Review vergleicht nur bereitgestellte Antworten, durchsucht nicht das Web, prüft Fakten nicht unabhängig und garantiert keine richtige Antwort." },
       { id: sectionIds.files, title: "8. Dateien und Google Drive", description: "Bis zu 5 Dateien, je 10 MB und 25 MB gesamt pro Anfrage bei berechtigten Plänen.", items: [
-        { term: "Unterstützt", detail: "PNG, JPEG, WebP, PDF, Text, Word, Excel, PowerPoint, OpenDocument und unterstützte Drive-Exporte." }, { term: "Fehler", detail: "Passwort entfernen, neu exportieren, verkleinern oder Kerntext einfügen." }, { term: "Modellunterschiede", detail: "Bilder und lange Dokumente können anders verarbeitet werden." }, { term: "Private Mode", detail: "Kein Chatverlauf, Dateiinhalt kann aber an den Anbieter gehen." }, { term: "Sensible Dateien", detail: "Nur Inhalte mit entsprechender Verarbeitungsberechtigung anhängen." },
+        { term: "Unterstützt", detail: "PNG, JPEG, WebP, PDF, Text, Word, Excel, PowerPoint, OpenDocument und unterstützte Drive-Exporte." }, { term: "Fehler", detail: "Passwort entfernen, neu exportieren, verkleinern oder Kerntext einfügen." }, { term: "Modellunterschiede", detail: "Bilder und lange Dokumente können anders verarbeitet werden." }, { term: "Sensible Dateien", detail: "Nur Inhalte mit entsprechender Verarbeitungsberechtigung anhängen." },
       ] },
       { id: sectionIds.credits, title: "9. Credits und Pläne", description: "Gemeinsame Nutzungseinheit trotz unterschiedlicher Modellkosten.", items: [
         { term: "Basis", detail: "Standard 1, Advanced 4, Premium 8, Reasoning 12–16, Research 20–30 für kurze typische Anfragen." }, { term: "Lange Eingabe", detail: "Über 16k, 50k, 100k geschätzte Tokens: 1,5×, 2×, 3×." }, { term: "Dateien", detail: "Extrahierter Inhalt zählt zur Eingabe." }, { term: "AI Review", detail: "Separate Schätzung vor Ausführung." }, { term: "Zwei Guthaben", detail: "Plan-Credits setzen zurück; gekaufte bleiben gemäß Bedingungen separat." }, { term: "Fehler", detail: "Anbieterfehler und leere Antworten werden erstattet; ungenutzte Reservierung bei Abbruch zurückgegeben." },
@@ -389,7 +385,7 @@ export const chatWorkspaceGuideContent: Record<
   es: {
     eyebrow: "Centro de ayuda · Espacio Chat", title: "Guía del espacio Chat de Tomverse", description: "Aprende conversaciones, proyectos, etiquetas personales, bloqueo, compartir, paneles, AI Review, archivos y créditos.", updated: "Actualizado el 16 de julio de 2026", contents: "En esta página", tourTitle: "1. Recorrido por Chat", tourDescription: "Selecciona un número del mapa para ir a su explicación sin mostrar conversaciones privadas.",
     tourItems: [
-      { term: "Nuevo chat", detail: "Inicia una conversación independiente con los modelos predeterminados." }, { term: "Private Mode", detail: "No guarda sala ni mensajes en Tomverse, pero envía la solicitud al proveedor elegido." }, { term: "Buscar", detail: "Busca títulos y, con sesión iniciada, texto coincidente en mensajes guardados." }, { term: "Estados", detail: "Filtra chats bloqueados o con enlace compartido activo." }, { term: "Etiquetas", detail: "Filtra Trabajo, Investigación y Personal guardadas en este navegador." }, { term: "Proyectos", detail: "Agrupa chats de la cuenta como carpetas." }, { term: "Menú", detail: "Renombrar, fijar, marcar favorito, etiquetar, mover, compartir, descargar, bloquear o eliminar." },
+      { term: "Nuevo chat", detail: "Inicia una conversación independiente con los modelos predeterminados." }, { term: "Buscar", detail: "Busca títulos y, con sesión iniciada, texto coincidente en mensajes guardados." }, { term: "Estados", detail: "Filtra chats bloqueados o con enlace compartido activo." }, { term: "Etiquetas", detail: "Filtra Trabajo, Investigación y Personal guardadas en este navegador." }, { term: "Proyectos", detail: "Agrupa chats de la cuenta como carpetas." }, { term: "Menú", detail: "Renombrar, fijar, marcar favorito, etiquetar, mover, compartir, descargar, bloquear o eliminar." },
     ],
     sections: [
       { id: sectionIds.states, title: "2. Estados, etiquetas y proyectos", description: "Pueden coexistir, pero significan cosas distintas.", items: [
@@ -411,7 +407,7 @@ export const chatWorkspaceGuideContent: Record<
         { term: "Equilibrado", detail: "Acuerdos, diferencias, omisiones, contradicciones y utilidad." }, { term: "Evidencia", detail: "Soporte débil, conflictos y verificación externa." }, { term: "Acción", detail: "Opciones, compensaciones, riesgos y próximos pasos." }, { term: "Resultado", detail: "Consenso, diferencias, contradicciones, omisiones y verificación." },
       ], note: "AI Review solo compara las respuestas aportadas; no navega, no verifica hechos de forma independiente ni garantiza la respuesta correcta." },
       { id: sectionIds.files, title: "8. Archivos y Google Drive", description: "Hasta 5 archivos, 10 MB cada uno y 25 MB totales por solicitud en planes habilitados.", items: [
-        { term: "Compatibles", detail: "PNG, JPEG, WebP, PDF, texto, Word, Excel, PowerPoint, OpenDocument y exportaciones Drive." }, { term: "Fallo", detail: "Quita contraseña, reexporta, reduce o pega el texto clave." }, { term: "Por modelo", detail: "Imágenes y documentos largos pueden procesarse distinto." }, { term: "Private Mode", detail: "No guarda historial, pero el archivo puede enviarse al proveedor." }, { term: "Sensible", detail: "Adjunta solo contenido que puedas autorizar para procesamiento." },
+        { term: "Compatibles", detail: "PNG, JPEG, WebP, PDF, texto, Word, Excel, PowerPoint, OpenDocument y exportaciones Drive." }, { term: "Fallo", detail: "Quita contraseña, reexporta, reduce o pega el texto clave." }, { term: "Por modelo", detail: "Imágenes y documentos largos pueden procesarse distinto." }, { term: "Sensible", detail: "Adjunta solo contenido que puedas autorizar para procesamiento." },
       ] },
       { id: sectionIds.credits, title: "9. Créditos y planes", description: "Unidad común pese a costes y razonamiento diferentes.", items: [
         { term: "Bases", detail: "Standard 1, Advanced 4, Premium 8, Reasoning 12–16 y Research 20–30 en solicitudes cortas típicas." }, { term: "Entrada larga", detail: "Más de 16k, 50k y 100k tokens estimados: 1,5×, 2× y 3×." }, { term: "Archivos", detail: "El contenido extraído cuenta como entrada." }, { term: "AI Review", detail: "Muestra estimación separada antes de ejecutar." }, { term: "Dos saldos", detail: "Créditos del plan se reinician; comprados permanecen separados según condiciones." }, { term: "Fallos", detail: "Errores y respuestas vacías se reembolsan; la cancelación devuelve reserva no usada." },
@@ -425,7 +421,7 @@ export const chatWorkspaceGuideContent: Record<
   pt: {
     eyebrow: "Centro de ajuda · Workspace Chat", title: "Guia do workspace Chat do Tomverse", description: "Aprenda conversas, projetos, etiquetas pessoais, bloqueio, partilha, painéis, AI Review, ficheiros e créditos.", updated: "Atualizado em 16 de julho de 2026", contents: "Nesta página", tourTitle: "1. Conhecer o ecrã Chat", tourDescription: "Selecione um número no mapa para ir à explicação, sem mostrar conversas privadas.",
     tourItems: [
-      { term: "Novo chat", detail: "Inicia uma conversa independente com os modelos padrão." }, { term: "Private Mode", detail: "Não guarda sala nem mensagens no Tomverse, mas envia o pedido ao fornecedor escolhido." }, { term: "Pesquisar", detail: "Pesquisa títulos e, com sessão iniciada, texto correspondente nas mensagens guardadas." }, { term: "Estados", detail: "Filtra chats bloqueados ou com ligação partilhada ativa." }, { term: "Etiquetas", detail: "Filtra Trabalho, Pesquisa e Pessoal guardadas neste navegador." }, { term: "Projetos", detail: "Agrupa chats da conta como pastas." }, { term: "Menu", detail: "Renomear, fixar, favoritar, etiquetar, mover, partilhar, descarregar, bloquear ou eliminar." },
+      { term: "Novo chat", detail: "Inicia uma conversa independente com os modelos padrão." }, { term: "Pesquisar", detail: "Pesquisa títulos e, com sessão iniciada, texto correspondente nas mensagens guardadas." }, { term: "Estados", detail: "Filtra chats bloqueados ou com ligação partilhada ativa." }, { term: "Etiquetas", detail: "Filtra Trabalho, Pesquisa e Pessoal guardadas neste navegador." }, { term: "Projetos", detail: "Agrupa chats da conta como pastas." }, { term: "Menu", detail: "Renomear, fixar, favoritar, etiquetar, mover, partilhar, descarregar, bloquear ou eliminar." },
     ],
     sections: [
       { id: sectionIds.states, title: "2. Estados, etiquetas e projetos", description: "Podem coexistir, mas têm significados diferentes.", items: [
@@ -447,7 +443,7 @@ export const chatWorkspaceGuideContent: Record<
         { term: "Equilibrado", detail: "Acordos, diferenças, omissões, contradições e utilidade." }, { term: "Evidência", detail: "Suporte fraco, conflitos e verificação externa." }, { term: "Ação", detail: "Opções, compromissos, riscos e próximos passos." }, { term: "Resultado", detail: "Consenso, diferenças, contradições, omissões e verificação." },
       ], note: "AI Review só compara as respostas fornecidas; não navega, não verifica factos de forma independente nem garante a resposta correta." },
       { id: sectionIds.files, title: "8. Ficheiros e Google Drive", description: "Até 5 ficheiros, 10 MB cada e 25 MB no total por pedido em planos elegíveis.", items: [
-        { term: "Suportados", detail: "PNG, JPEG, WebP, PDF, texto, Word, Excel, PowerPoint, OpenDocument e exportações Drive." }, { term: "Falha", detail: "Retire palavra-passe, reexporte, reduza ou cole o texto essencial." }, { term: "Por modelo", detail: "Imagens e documentos longos podem ser tratados de modo diferente." }, { term: "Private Mode", detail: "Não guarda histórico, mas o ficheiro pode ser enviado ao fornecedor." }, { term: "Sensível", detail: "Anexe apenas conteúdo autorizado para processamento." },
+        { term: "Suportados", detail: "PNG, JPEG, WebP, PDF, texto, Word, Excel, PowerPoint, OpenDocument e exportações Drive." }, { term: "Falha", detail: "Retire palavra-passe, reexporte, reduza ou cole o texto essencial." }, { term: "Por modelo", detail: "Imagens e documentos longos podem ser tratados de modo diferente." }, { term: "Sensível", detail: "Anexe apenas conteúdo autorizado para processamento." },
       ] },
       { id: sectionIds.credits, title: "9. Créditos e planos", description: "Unidade comum apesar de custos e raciocínio diferentes.", items: [
         { term: "Bases", detail: "Standard 1, Advanced 4, Premium 8, Reasoning 12–16 e Research 20–30 em pedidos curtos típicos." }, { term: "Entrada longa", detail: "Mais de 16k, 50k e 100k tokens estimados: 1,5×, 2× e 3×." }, { term: "Ficheiros", detail: "O conteúdo extraído conta como entrada." }, { term: "AI Review", detail: "Mostra estimativa separada antes de executar." }, { term: "Dois saldos", detail: "Créditos do plano reiniciam; comprados ficam separados segundo os termos." }, { term: "Falhas", detail: "Erros e respostas vazias são reembolsados; cancelamento devolve reserva não usada." },

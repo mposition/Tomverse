@@ -31,7 +31,6 @@ import {
 } from "@/lib/userSettingsEvents";
 import {
   APP_TOAST_EVENT,
-  dispatchAppToast,
   type AppToastEventDetail,
   type AppToastTone,
 } from "@/lib/appToast";
@@ -74,11 +73,9 @@ import { useTurnstile } from "@/components/chat/useTurnstile";
 // browser and coming back should still default to welcome.
 const ACTIVE_CHAT_STORAGE_KEY = "tomverse_active_chat_id";
 
-// Tracks only whether private mode is active in this tab -- never its
-// message content, which is never persisted anywhere (server or storage) in
-// the first place. A same-tab refresh should keep private mode active with
-// an empty conversation; closing the tab/browser (or an explicit "End
-// Private Mode") should not.
+// Private Mode has been removed as a product concept. This key is kept only
+// so a one-time effect below can clear it out of any browser that still has
+// it set from before the removal -- it must never be read to restore state.
 const PRIVATE_MODE_STORAGE_KEY = "tomverse_private_mode_active";
 
 const normalizeStringArray = (value: unknown, fallback: string[]) => {
@@ -421,8 +418,6 @@ export default function Home() {
   const comparisonPresetRequestedRef = useRef(false);
   const comparisonPreflightInFlightRef = useRef(false);
 
-  const [isPrivateMode, setIsPrivateMode] = useState(false);
-
   const isGuestMode = status !== "loading" && !sessionUserId;
   const {
     containerRef: guestQuickSummaryTurnstileContainerRef,
@@ -438,7 +433,7 @@ export default function Home() {
   // Rebuild the latest turn from the same guest_messages_* localStorage the
   // panels themselves load from, whenever the active guest chat (re)loads.
   useEffect(() => {
-    if (!isGuestMode || !currentChatId || currentChatId === "private-chat") return;
+    if (!isGuestMode || !currentChatId) return;
     if (typeof window === "undefined") return;
 
     let latestUserMessage: { id: string; content: string } | null = null;
@@ -557,31 +552,16 @@ export default function Home() {
   const isInitialSelectedRef = useRef(false);
   const guestCarryoverAppliedRef = useRef(false);
   const currentChatIdRef = useRef(currentChatId);
-  const privateModeRestoredRef = useRef(false);
 
   useEffect(() => {
     currentChatIdRef.current = currentChatId;
   }, [currentChatId]);
 
-  // Restores private mode itself (not any message content -- there is
-  // none to restore; private-mode messages are never persisted anywhere)
-  // on a same-tab refresh. Runs before, and takes priority over, the
-  // guest/logged-in conversation-restore effects below: those check
-  // privateModeRestoredRef.current and skip claiming currentChatId /
-  // isPrivateMode when this has already done so. Uses a ref rather than
-  // relying on those effects re-running after this one's setState calls
-  // flush, since several of them run unconditionally in the same initial
-  // commit before that would happen.
+  // One-time cleanup for browsers that still have the old Private Mode flag
+  // set from before the feature was removed -- must never be restored from.
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (window.sessionStorage.getItem(PRIVATE_MODE_STORAGE_KEY) !== "true") return;
-    privateModeRestoredRef.current = true;
-    isInitialSelectedRef.current = true;
-    queueMicrotask(() => {
-      setIsPrivateMode(true);
-      setCurrentChatId("private-chat");
-      setIsInitialConversationResolved(true);
-    });
+    window.sessionStorage.removeItem(PRIVATE_MODE_STORAGE_KEY);
   }, []);
 
   // Consumes the "log in and continue this conversation" CTA's intent flag
@@ -644,7 +624,7 @@ export default function Home() {
   // the very value that decision needs to read.
   useEffect(() => {
     if (typeof window === "undefined" || !isInitialConversationResolved) return;
-    if (!currentChatId || currentChatId === "private-chat") {
+    if (!currentChatId) {
       window.sessionStorage.removeItem(ACTIVE_CHAT_STORAGE_KEY);
       return;
     }
@@ -1094,13 +1074,6 @@ export default function Home() {
       setSelectedModels(guestDefaultSelectedModels);
       refreshGuestUsage();
 
-      // Private mode restoration (see the dedicated effect above) takes
-      // priority over reopening a regular conversation or starting a new
-      // one -- it's already claimed currentChatId/isPrivateMode, so this
-      // effect only needs to still load the conversation list for the
-      // sidebar without touching either.
-      const isRestoringPrivateMode = privateModeRestoredRef.current;
-
       const savedConversations = localStorage.getItem("guest_conversations");
       if (savedConversations) {
         try {
@@ -1114,7 +1087,7 @@ export default function Home() {
           // (if it happens to itself be an empty draft, F5-restoring the
           // user onto it is still correct; only the *other*, abandoned
           // empty ones are stale).
-          const keepEmptyId = isRestoringPrivateMode ? null : savedChatId;
+          const keepEmptyId = savedChatId;
           let keptOneEmpty = false;
           const cleaned = Array.isArray(parsed)
             ? parsed.filter((conversation) => {
@@ -1133,9 +1106,6 @@ export default function Home() {
           }
           setConversations(cleaned);
 
-          if (isRestoringPrivateMode) {
-            // handled by the private-mode restoration effect
-          } else {
           // Restore the tab's previously open conversation (F5, crash
           // recovery) if it's still there -- inlined rather than calling
           // handleSelectConversation because `conversations` state from
@@ -1160,11 +1130,10 @@ export default function Home() {
               )
             );
           }
-          }
         } catch (e) {
           console.error("Failed to parse guest conversations:", e);
         }
-      } else if (!isRestoringPrivateMode) {
+      } else {
         const initialChatId = `guest_${Date.now()}`;
         const initialChat = {
           id: initialChatId,
@@ -1363,15 +1332,10 @@ export default function Home() {
     const handleNewChat = () => {
         localComparisonResponsesRef.current.clear();
         latestLocalComparisonPromptRef.current = null;
-        setIsPrivateMode(false);
-        if (typeof window !== "undefined") {
-            window.sessionStorage.removeItem(PRIVATE_MODE_STORAGE_KEY);
-        }
     if (isGuestMode) {
       const existingCurrent = conversations.find((c) => c.id === currentChatIdRef.current);
       if (
         currentChatIdRef.current &&
-        currentChatIdRef.current !== "private-chat" &&
         existingCurrent &&
         isGuestConversationEmpty(existingCurrent)
       ) {
@@ -1429,7 +1393,7 @@ export default function Home() {
 
         if (isGuestMode) {
           const previousId = currentChatIdRef.current;
-          if (previousId && previousId !== id && previousId !== "private-chat") {
+          if (previousId && previousId !== id) {
             const previousConv = conversations.find((c) => c.id === previousId);
             if (previousConv && isGuestConversationEmpty(previousConv)) {
               setConversations((prev) => prev.filter((c) => c.id !== previousId));
@@ -1441,16 +1405,6 @@ export default function Home() {
 	  currentChatIdRef.current = id;
       setCurrentChatId(id);
 	  setPromptPayload(null);
-
-    if (id === "private-chat") {
-      setIsPrivateMode(true);
-      if (typeof window !== "undefined") {
-        window.sessionStorage.setItem(PRIVATE_MODE_STORAGE_KEY, "true");
-      }
-      return;
-    }
-
-    setIsPrivateMode(false);
 
     if (isGuestMode) {
       const targetConv = conversations.find((c) => c.id === id);
@@ -1498,8 +1452,7 @@ export default function Home() {
   // effects because it calls all three. Still runs before the F5-restore
   // effect right below -- both fire in the same post-login render pass, and
   // this one is declared first, so it wins the race for currentChatId /
-  // isInitialConversationResolved the same way the private-mode restore
-  // effect does for private mode. Absence of the pending-intent flag means
+  // isInitialConversationResolved. Absence of the pending-intent flag means
   // either a plain guest session or a generic (non-CTA) login -- the latter
   // is handled by the modal-trigger effect declared further up.
   useEffect(() => {
@@ -1752,7 +1705,7 @@ export default function Home() {
     updatedModels: string[],
     updatedDisabled: string[]
   ) => {
-    if (!targetChatId || targetChatId === "private-chat" || !sessionUserId) {
+    if (!targetChatId || !sessionUserId) {
       return;
     }
 
@@ -1788,11 +1741,7 @@ export default function Home() {
   };
 
   const ensureModelSettingsReady = async (targetChatId: string) => {
-    if (
-      isGuestMode ||
-      targetChatId === "private-chat" ||
-      !sessionUserId
-    ) {
+    if (isGuestMode || !sessionUserId) {
       return true;
     }
     const ready = await flushModelSettingsToServer(targetChatId);
@@ -1908,35 +1857,6 @@ export default function Home() {
       }
     }
 
-    if (isPrivateMode) {
-      const comparisonId = Date.now().toString();
-      const preflightAllowed = await runComparisonPreflight({
-        comparisonId,
-        conversationId: "private-chat",
-        prompt: trimmed,
-        promptAttachments,
-      });
-      if (!preflightAllowed) return;
-      const previousCount = promptCountsRef.current.get("private-chat") || 0;
-      trackProductEvent(
-        previousCount === 0 ? "chat_started" : "followup_sent",
-        activeModelCount,
-        { conversation_mode: "private" }
-      );
-      promptCountsRef.current.set("private-chat", previousCount + 1);
-      localComparisonQuestionsRef.current.set(comparisonId, trimmed);
-      setPromptPayload({
-        id: comparisonId,
-        text: trimmed,
-        chatId: "private-chat",
-        userMessageId: crypto.randomUUID(),
-        attachments: promptAttachments,
-      });
-      setInputValue("");
-      setAttachments([]);
-      return;
-    }	
-	
 	let activeChatId = currentChatId;
 
     if (!activeChatId) {
@@ -2170,21 +2090,6 @@ export default function Home() {
     [activeModelCount]
   );
 
-  const togglePrivateModeGlobal = () => {
-    if (isPrivateMode) {
-      dispatchAppToast(t("chat.privateModeEndedNotice"), "info");
-      handleNewChat();
-    } else {
-      localComparisonResponsesRef.current.clear();
-      latestLocalComparisonPromptRef.current = null;
-      setIsPrivateMode(true);
-      setCurrentChatId("private-chat");
-      if (typeof window !== "undefined") {
-        window.sessionStorage.setItem(PRIVATE_MODE_STORAGE_KEY, "true");
-      }
-    }
-  };
-
   const toggleModel = (modelId: string) => {
     const model = getModel(modelId);
     const isSelected = selectedModels.includes(modelId);
@@ -2229,7 +2134,7 @@ export default function Home() {
       : clampSelectedModels(nextModels).slice(0, maxSelectableModels);
 	setSelectedModels(nextModels);
     setDisabledPanels(nextDisabled);
-    if (currentChatId && currentChatId !== "private-chat") {
+    if (currentChatId) {
       syncModelSettingsToServer(currentChatId, nextModels, nextDisabled);
     }
     return true;
@@ -2261,7 +2166,7 @@ export default function Home() {
     const nextDisabled = disabledPanels.filter((id) => id !== removeModelId);
     setSelectedModels(nextModels);
     setDisabledPanels(nextDisabled);
-    if (currentChatId && currentChatId !== "private-chat") {
+    if (currentChatId) {
       syncModelSettingsToServer(currentChatId, nextModels, nextDisabled);
     }
     return true;
@@ -2558,10 +2463,6 @@ export default function Home() {
 
     const handleCompareSummary = async () => {
       if (!currentChatId || isCompareSummaryLoading) return;
-      if (currentChatId === "private-chat") {
-        showToast(t("chat.quickDifferenceSummarySavedChatRequired"), "info");
-        return;
-      }
       if (isGuestMode) {
         await executeGuestCompareSummary();
         return;
@@ -2628,7 +2529,6 @@ export default function Home() {
           guestPreviewMode={isGuestPreviewEntry}
           guestMessageCount={guestMessageCount}
           maxGuestMessages={MAX_GUEST_MESSAGES}
-          isPrivateMode={isPrivateMode}
           onNewChat={handleNewChat}
           onSelectConversation={handleSelectConversation}
           onRename={handleRename}
@@ -2638,7 +2538,6 @@ export default function Home() {
           onShare={handleShareConversation}
           onRevokeShare={handleRevokeShare}
           onDownload={handleDownloadConversation}
-          onTogglePrivateMode={togglePrivateModeGlobal}
           onToggleModel={toggleModel}
           onSwapModel={swapSelectedModel}
           onRequestUndoToast={(message, undo) =>
@@ -2671,7 +2570,6 @@ export default function Home() {
           guestPreviewMode={isGuestPreviewEntry}
           guestMessageCount={guestMessageCount}
           maxGuestMessages={MAX_GUEST_MESSAGES}
-          isPrivateMode={isPrivateMode}
           isModelSelectionReady={
             isGuestMode ||
             (isUserSettingsLoaded &&
@@ -2687,7 +2585,6 @@ export default function Home() {
           onShare={handleShareConversation}
           onRevokeShare={handleRevokeShare}
           onDownload={handleDownloadConversation}
-          onTogglePrivateMode={togglePrivateModeGlobal}
           onToggleModel={toggleModel}
           onSwapModel={swapSelectedModel}
           onSubmit={handleGlobalSubmit}
@@ -3205,9 +3102,7 @@ export default function Home() {
     )}
     {showComparisonReview && (
       <ComparisonReviewDialog
-        conversationId={
-          currentChatId && currentChatId !== "private-chat" ? currentChatId : null
-        }
+        conversationId={currentChatId ?? null}
         open
         onClose={() => setShowComparisonReview(false)}
         onCompleted={() => maybeShowValueUpgradePrompt("ai_review")}

@@ -8,7 +8,7 @@ import { useCallback, useState, useEffect, useId, useRef, useSyncExternalStore }
 import { createPortal } from "react-dom";
 import { useLanguage } from "@/components/LanguageProvider";
 import Link from "next/link";
-import { AlertTriangle, Check, ChevronDown, CircleHelp, CloudUpload, Crown, Database, Download, Folder, FolderPlus, Link2Off, Lock, MessageSquare, MoreVertical, PanelLeftClose, PanelLeftOpen, Pencil, Pin, Plus, Search, Send, Share2, ShieldCheck, SlidersHorizontal, Sparkles, Star, Tag, Trash2, Unlock, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, CircleHelp, Crown, Download, Folder, FolderPlus, Link2Off, Lock, MessageSquare, MoreVertical, PanelLeftClose, PanelLeftOpen, Pencil, Pin, Plus, Search, Share2, SlidersHorizontal, Sparkles, Star, Tag, Trash2, Unlock, X } from "lucide-react";
 import { FeedbackButton } from "@/components/chat/FeedbackButton";
 import { UserUsageSummary } from "@/components/chat/UserUsageSummary";
 import { FeatureHelpPopover } from "@/components/chat/FeatureHelpPopover";
@@ -32,9 +32,7 @@ type ChatSidebarProps = {
     onUnlock?: (id: string) => void;
     onShare: (id: string, title: string) => void;
     onRevokeShare: (id: string) => void;
-    onDownload: (id: string, title: string) => void;    
-    isPrivateMode?: boolean;
-    onTogglePrivateMode: () => void;
+    onDownload: (id: string, title: string) => void;
     currentModelId?: string | null;
     attachmentCount?: number;
     isMobileDrawer?: boolean;
@@ -109,9 +107,7 @@ export function ChatSidebar({
     onUnlock,
     onShare,
     onRevokeShare,
-    onDownload,    
-    isPrivateMode = false,
-    onTogglePrivateMode,
+    onDownload,
     currentModelId,
     attachmentCount = 0,
     isMobileDrawer = false,
@@ -119,7 +115,6 @@ export function ChatSidebar({
     const { getModel } = useModelCatalog();
     const [openMenuId, setOpenMenuId] = useState<string | null>(null);
     const [conversationMenuPosition, setConversationMenuPosition] = useState<ConversationMenuPosition | null>(null);
-    const [showPrivateNotice, setShowPrivateNotice] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
     const [conversationFilter, setConversationFilter] = useState<ConversationFilter>("all");
     const [showProjectForm, setShowProjectForm] = useState(false);
@@ -176,8 +171,6 @@ export function ChatSidebar({
     const [lockTarget, setLockTarget] = useState<Conversation | null>(null);
     const [lockPassword, setLockPassword] = useState("");
     const [lockError, setLockError] = useState("");
-    const privateModeButtonRef = useRef<HTMLButtonElement | null>(null);
-    const privateNoticeDialogRef = useRef<HTMLDivElement | null>(null);
     const conversationMenuAnchorRef = useRef<HTMLButtonElement | null>(null);
     const conversationMenuPanelRef = useRef<HTMLDivElement | null>(null);
     const helpMenuRef = useRef<HTMLSpanElement | null>(null);
@@ -582,13 +575,6 @@ export function ChatSidebar({
         return `${models[0]} +${models.length - 1}`;
     };
 
-    const closePrivateNotice = useCallback((restoreFocus = true) => {
-        setShowPrivateNotice(false);
-        if (restoreFocus) {
-            requestAnimationFrame(() => privateModeButtonRef.current?.focus());
-        }
-    }, []);
-
     const closeConversationMenu = useCallback(() => {
         setOpenMenuId(null);
         setConversationMenuPosition(null);
@@ -662,24 +648,6 @@ export function ChatSidebar({
         trackProductEvent("sidebar_tour_completed");
     };
 
-    const getPrivateNoticeFocusableElements = useCallback(() => {
-        const dialog = privateNoticeDialogRef.current;
-        if (!dialog) return [];
-
-        return Array.from(
-            dialog.querySelectorAll<HTMLElement>(
-                [
-                    "button:not([disabled])",
-                    "input:not([disabled])",
-                    "select:not([disabled])",
-                    "textarea:not([disabled])",
-                    "a[href]",
-                    '[tabindex]:not([tabindex="-1"])',
-                ].join(",")
-            )
-        ).filter((element) => element.offsetParent !== null);
-    }, []);
-
     useEffect(() => {
         function handleClickOutside(event: MouseEvent) {
             const target = event.target as HTMLElement;
@@ -717,50 +685,6 @@ export function ChatSidebar({
             window.removeEventListener("resize", closeOnViewportChange);
         };
     }, [closeConversationMenu, openMenuId]);
-
-    useEffect(() => {
-        if (!showPrivateNotice) return;
-        const animationFrame = requestAnimationFrame(() => {
-            getPrivateNoticeFocusableElements()[0]?.focus();
-        });
-        return () => cancelAnimationFrame(animationFrame);
-    }, [getPrivateNoticeFocusableElements, showPrivateNotice]);
-
-    useEffect(() => {
-        if (!showPrivateNotice) return;
-        const handleKeyDown = (event: KeyboardEvent) => {
-            if (event.key === "Escape") {
-                event.preventDefault();
-                closePrivateNotice(true);
-                return;
-            }
-
-            if (event.key !== "Tab") return;
-
-            const focusableElements = getPrivateNoticeFocusableElements();
-            if (focusableElements.length === 0) {
-                event.preventDefault();
-                return;
-            }
-
-            const firstElement = focusableElements[0];
-            const lastElement = focusableElements[focusableElements.length - 1];
-            const activeElement = document.activeElement;
-
-            if (event.shiftKey && activeElement === firstElement) {
-                event.preventDefault();
-                lastElement.focus();
-                return;
-            }
-
-            if (!event.shiftKey && activeElement === lastElement) {
-                event.preventDefault();
-                firstElement.focus();
-            }
-        };
-        document.addEventListener("keydown", handleKeyDown, true);
-        return () => document.removeEventListener("keydown", handleKeyDown, true);
-    }, [closePrivateNotice, getPrivateNoticeFocusableElements, showPrivateNotice]);
 
     if (isSidebarCollapsed && !isMobileDrawer) {
         return (
@@ -912,41 +836,6 @@ export function ChatSidebar({
                 >
                     <span className="text-sm">+</span> {t("sidebar.newChat")}
                 </button>
-
-                <div className="mt-2 flex items-center gap-1">
-                    <button
-                        ref={privateModeButtonRef}
-                        onClick={() => {
-                            if (isPrivateMode) {
-                                onTogglePrivateMode();
-                            } else {
-                                setShowPrivateNotice(true);
-                            }
-                        }}
-                        disabled={isGuestMode}
-                        className={`flex min-w-0 flex-1 items-center justify-center gap-2 rounded-lg border px-4 text-xs font-semibold transition-all ${isMobileDrawer ? "py-2" : "py-2.5"} ${isGuestMode
-                                ? "cursor-not-allowed opacity-50 border-zinc-200 bg-white text-zinc-400 dark:border-zinc-700/50 dark:bg-zinc-800/50 dark:text-zinc-500"
-                                : isPrivateMode
-                                    ? "cursor-pointer border-purple-700/70 bg-purple-950/40 text-purple-200 hover:bg-purple-900/50"
-                                    : "cursor-pointer border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700/50 dark:bg-zinc-800/50 dark:text-zinc-300 dark:hover:bg-zinc-700/60 dark:hover:text-white"
-                            }`}
-                        title={isGuestMode ? t("sidebar.loginRequired") : ""}
-                    >
-                        {isPrivateMode ? t("sidebar.privateModeStop") : t("sidebar.privateModeStart")}
-                        {isGuestMode && <Crown className="h-3.5 w-3.5" aria-hidden="true" />}
-                    </button>
-                    <FeatureHelpPopover
-                        title={helpCopy.privateTitle}
-                        description={helpCopy.privateDescription}
-                        buttonLabel={helpCopy.helpAboutPrivate}
-                        learnMoreLabel={helpCopy.learnMore}
-                        topic="private"
-                        href={chatWorkspaceGuideHref(lang, "files-and-drive")}
-                        mobile={isMobileDrawer}
-                        align="right"
-                        testId="private-mode-help"
-                    />
-                </div>
             </div>
 
             <div className={`shrink-0 border-b border-zinc-200/60 px-3 dark:border-zinc-800/40 ${isMobileDrawer ? "py-2" : "py-3"}`}>
@@ -1336,26 +1225,21 @@ export function ChatSidebar({
                 )}
                 {filteredConversations.map((conv) => {
                     const isActive = currentChatId === conv.id;
-                    const isPrivate = conv.id === "private-chat";
                     const isMenuOpen = openMenuId === conv.id;
 
                     return (
                         <div
                             key={conv.id}
                             onClick={() => onSelectConversation(conv.id)}
-                            className={`relative group flex items-center justify-between rounded-xl px-3 py-2.5 text-xs cursor-pointer transition-all border ${isMenuOpen ? "z-20" : "z-10"} ${isPrivate
-                                    ? isActive
-                                    ? "bg-purple-100 border-purple-300 text-purple-700 font-semibold dark:bg-purple-900/30 dark:border-purple-700/60 dark:text-purple-200"
-                                    : "bg-purple-50/50 border-purple-100 text-purple-500 hover:bg-purple-100 dark:bg-purple-950/15 dark:border-purple-900/20 dark:text-purple-400/80 dark:hover:bg-purple-900/20 dark:hover:text-purple-300"
-                                : isActive
+                            className={`relative group flex items-center justify-between rounded-xl px-3 py-2.5 text-xs cursor-pointer transition-all border ${isMenuOpen ? "z-20" : "z-10"} ${isActive
                                     ? "bg-zinc-200 border-zinc-300 text-zinc-900 font-semibold dark:bg-zinc-800 dark:border-zinc-700/80 dark:text-zinc-100"
                                     : "bg-transparent border-transparent text-zinc-600 hover:bg-zinc-200/50 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800/40 dark:hover:text-zinc-200"
                                 }`}
                             title={isGuestMode ? t("sidebar.loginRequired") : ""}
                         >
                             <div className="cursor-pointer flex min-w-0 flex-1 items-center gap-2.5 pr-6">
-                                <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${isPrivate ? "bg-purple-500/10 text-purple-500" : conv.isLocked ? "bg-amber-500/10 text-amber-500" : "bg-blue-500/10 text-blue-500"}`}>
-                                    {isPrivate || conv.isLocked ? (
+                                <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${conv.isLocked ? "bg-amber-500/10 text-amber-500" : "bg-blue-500/10 text-blue-500"}`}>
+                                    {conv.isLocked ? (
                                         <Lock className="h-3.5 w-3.5" />
                                     ) : (
                                         <MessageSquare className="h-3.5 w-3.5" />
@@ -1763,95 +1647,6 @@ export function ChatSidebar({
                 </div>
             ) : null}
         </aside>
-        {showPrivateNotice && (
-            <div
-                className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-                role="presentation"
-                onMouseDown={(event) => {
-                    if (event.target === event.currentTarget) {
-                        closePrivateNotice(true);
-                    }
-                }}
-            >
-                <div
-                    ref={privateNoticeDialogRef}
-                    role="dialog"
-                    aria-modal="true"
-                    aria-labelledby="private-mode-notice-title"
-                    className="w-full max-w-lg rounded-lg border border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900"
-                >
-                    <div className="flex items-start justify-between gap-4 border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
-                        <div className="flex min-w-0 items-center gap-3">
-                            <ShieldCheck className="h-5 w-5 shrink-0 text-purple-500" />
-                            <div>
-                                <h2
-                                    id="private-mode-notice-title"
-                                    className="text-base font-semibold text-zinc-900 dark:text-zinc-100"
-                                >
-                                    {t("sidebar.privateNoticeTitle")}
-                                </h2>
-                                <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-                                    {t("sidebar.privateNoticeIntro")}
-                                </p>
-                            </div>
-                        </div>
-                        <button
-                            type="button"
-                            onClick={() => closePrivateNotice(true)}
-                            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
-                            aria-label={t("auth.cancel")}
-                        >
-                            <X className="h-4 w-4" />
-                        </button>
-                    </div>
-
-                    <div className="space-y-4 px-5 py-4 text-sm text-zinc-700 dark:text-zinc-300">
-                        <div className="flex gap-3">
-                            <Database className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
-                            <p className="leading-6">{t("sidebar.privateNoticeNoSave")}</p>
-                        </div>
-                        <div className="flex gap-3">
-                            <Send className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
-                            <p className="leading-6">{t("sidebar.privateNoticeProvider")}</p>
-                        </div>
-                        <div className="flex gap-3">
-                            <CloudUpload className="mt-0.5 h-4 w-4 shrink-0 text-cyan-500" />
-                            <p className="leading-6">{t("sidebar.privateNoticeAttachment")}</p>
-                        </div>
-                        <div className="flex gap-3 rounded-md bg-amber-50 px-3 py-2.5 text-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
-                            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                            <p className="text-xs leading-5">{t("sidebar.privateNoticeCaution")}</p>
-                        </div>
-                        <Link
-                            href="/privacy"
-                            className="inline-flex text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
-                        >
-                            {t("sidebar.privateNoticePolicy")}
-                        </Link>
-                    </div>
-
-                    <div className="flex justify-end gap-2 border-t border-zinc-200 px-5 py-4 dark:border-zinc-800">
-                        <button
-                            type="button"
-                            onClick={() => closePrivateNotice(true)}
-                            className="rounded-md px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                        >
-                            {t("auth.cancel")}
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => {
-                                closePrivateNotice(false);
-                                onTogglePrivateMode();
-                            }}
-                            className="rounded-md bg-purple-600 px-4 py-2 text-sm font-semibold text-white hover:bg-purple-500"
-                        >
-                            {t("sidebar.privateNoticeContinue")}
-                        </button>
-                    </div>
-                </div>
-            </div>
-        )}
         {renameTarget && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
                 <form

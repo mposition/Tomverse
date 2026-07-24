@@ -12,10 +12,10 @@ test("desktop exposes stable QA contracts", async ({ page }) => {
   await expect(page.getByTestId("chat-empty-state")).toBeVisible();
 
   const guestGuide = page.getByTestId("guest-quick-start");
-  await expect(guestGuide).toContainText("up to 3 free models");
-  await expect(guestGuide).toContainText("Guest usage limits apply");
-  await expect(guestGuide.getByRole("link", { name: "Login / Sign Up" })).toBeVisible();
+  await expect(guestGuide).toContainText("Try 3 free AIs side by side, no login needed.");
   await expect(guestGuide).not.toContainText("auth.signIn");
+  await guestGuide.getByTestId("guest-quick-start-help").click();
+  await expect(page.getByText("Guest chats are stored in this browser only.")).toBeVisible();
 
   await page.getByTestId("sidebar-help-button").click();
   const helpLink = page.getByTestId("sidebar-help-link");

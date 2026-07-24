@@ -304,7 +304,6 @@ type ChatInputProps = {
   isSending?: boolean;
   focusToken?: number;
   isNewConversation?: boolean;
-  isPrivateMode?: boolean;
   currentChatId?: string | null;
   selectedModels: string[];
   disabledModelIds?: string[];
@@ -407,7 +406,6 @@ export function ChatInput({
   isSending = false,
   focusToken,
   isNewConversation = true,
-  isPrivateMode = false,
   currentChatId = null,
   selectedModels,
   disabledModelIds = [],
@@ -583,9 +581,7 @@ export function ChatInput({
 
   const placeholderText = isUsageLimitReached
     ? t("chat.exceedDailyLimit")
-    : isPrivateMode
-      ? t("chat.privateModePlaceholder")
-      : t("chat.inputPlaceholder");
+    : t("chat.inputPlaceholder");
   
   const isDisabled = disabled || isSending || isUploading || isUsageLimitReached;
   

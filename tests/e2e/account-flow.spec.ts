@@ -66,7 +66,7 @@ test("billing success modal respects the explicit return language", async ({ pag
   await expect(successDialog.getByRole("button", { name: "닫기" })).toBeVisible();
 });
 
-test("authenticated user opens settings and starts Private Mode", async ({ page }) => {
+test("authenticated user opens settings", async ({ page }) => {
   await openAccountMenu(page);
   await page
     .getByTestId("account-menu")
@@ -79,15 +79,35 @@ test("authenticated user opens settings and starts Private Mode", async ({ page 
 
   await page.keyboard.press("Escape");
   await expect(settingsDialog).toBeHidden();
+});
 
+test("Private Mode has been removed: no entry points, and New Chat starts a normal conversation immediately", async ({ page }) => {
+  // No trace of the removed feature anywhere in the loaded UI.
+  await expect(page.getByText(/Private Mode/i)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Private Mode/i })).toHaveCount(0);
+
+  // Clicking New Chat goes straight to a normal, ready-to-type conversation --
+  // no intermediate picker/menu/confirmation of any kind.
   await openSidebarOnMobile(page);
-  await page.getByRole("button", { name: /Private Mode/ }).first().click();
-  const privateModeDialog = page.getByRole("dialog").filter({ hasText: /Private Mode/ }).last();
-  await expect(privateModeDialog).toBeVisible();
-  await privateModeDialog.getByRole("button").last().click();
+  await page.getByRole("button", { name: /새 대화|New Chat|新对话/ }).first().click();
+  await expect(page.getByTestId("chat-input")).toBeVisible();
+  await expect(page.getByText(/Private Mode/i)).toHaveCount(0);
+});
+
+test("a stale Private Mode sessionStorage flag from before the removal is ignored on load", async ({ page }) => {
+  // Simulates a browser that still has the old flag set from a session
+  // before Private Mode was removed -- it must not be restored from.
+  await page.evaluate(() => {
+    window.sessionStorage.setItem("tomverse_private_mode_active", "true");
+  });
+  await page.reload();
 
   await expect(page.getByTestId("chat-input")).toBeVisible();
-  await expect(page.getByText(/Private Mode/).first()).toBeVisible();
+  await expect(page.getByText(/Private Mode/i)).toHaveCount(0);
+  const flagAfterLoad = await page.evaluate(() =>
+    window.sessionStorage.getItem("tomverse_private_mode_active")
+  );
+  expect(flagAfterLoad).toBeNull();
 });
 
 test("theme preference changes immediately and follows the system setting", async ({ page }) => {

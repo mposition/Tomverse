@@ -12,7 +12,6 @@ const sections = [
     ["collectedTitle", "collected", UserRound],
     ["purposeTitle", "purpose", Database],
     ["providersTitle", "providers", Send],
-    ["privateTitle", "private", ShieldCheck],
     ["attachmentsTitle", "attachments", FileUp],
     ["analyticsTitle", "analytics", BarChart3],
     ["retentionTitle", "retention", Database],

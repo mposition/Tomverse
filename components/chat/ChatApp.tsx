@@ -122,9 +122,8 @@ function ChatAppComponent({
     attachments: ChatAttachment[];
   } | null>(null);
 
-  const isPrivate = initialConversationId === "private-chat";
   const expectedMessageViewKey = `${
-    isPrivate ? "private" : isGuestMode ? "guest" : sessionUserId || "account"
+    isGuestMode ? "guest" : sessionUserId || "account"
   }:${initialConversationId || "new"}:${modelId}`;
   const isCurrentMessageViewLoaded =
     isMessagesLoaded && loadedMessageViewKey === expectedMessageViewKey;
@@ -195,20 +194,13 @@ function ChatAppComponent({
   }, []);
 
     useEffect(() => {
-        if (!isPrivate && !isGuestMode && !sessionUserId) {
+        if (!isGuestMode && !sessionUserId) {
         return;
     }
 
 	  let isMounted = true;
     queueMicrotask(() => {
     if (!isMounted) return;
-
-    if (isPrivate) {
-      lastFetchedConversationKeyRef.current = "private-chat";
-      setIsMessagesLoaded(true);
-      setLoadedMessageViewKey(expectedMessageViewKey);
-      return;
-    }
 
     if (isGuestMode) {
       setIsMessagesLoaded(false);
@@ -331,7 +323,6 @@ function ChatAppComponent({
     };	
   }, [
     initialConversationId,
-    isPrivate,
     isGuestMode,
     modelId,
     sessionUserId,
@@ -419,7 +410,7 @@ function ChatAppComponent({
             messages: [...messages, userMessage].map(toChatRequestMessage),
             modelId: modelId,
             ...(turnstileToken ? { turnstileToken } : {}),
-            ...(!isPrivate && !isGuestMode
+            ...(!isGuestMode
               ? {
                   conversationId: targetChatId,
                   assistantMessageId,
@@ -624,7 +615,6 @@ function ChatAppComponent({
   }, [
     getTurnstileToken,
     isGuestMode,
-    isPrivate,
     messages,
     modelId,
     onResponseComplete,
@@ -701,7 +691,7 @@ function ChatAppComponent({
 
         const userMsgId = crypto.randomUUID();
 
-        if (!isPrivate && !isGuestMode) {
+        if (!isGuestMode) {
             try {
                 const response = await fetch(`/api/conversations/${initialConversationId}/messages`, {
                     method: "POST",

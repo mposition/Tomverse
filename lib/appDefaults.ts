@@ -55,8 +55,6 @@ export const APP_DEFAULTS = {
   maxSelectedModels: 3,
   maxGuestSelectedModels: 3,
   maxGuestMessages: 20,
-
-  privateChatId: "private-chat",
 } as const;
 
 export const getDefaultSelectedModels = () => [APP_DEFAULTS.defaultModelId];

@@ -56,7 +56,6 @@ type MobileChatShellProps = {
   guestPreviewMode?: boolean;
   guestMessageCount: number;
   maxGuestMessages: number;
-  isPrivateMode: boolean;
   onNewChat: () => void;
   onSelectConversation: (id: string) => void;
   onRename: (id: string, title: string) => void;
@@ -66,7 +65,6 @@ type MobileChatShellProps = {
   onShare: (id: string, title: string) => void;
   onRevokeShare: (id: string) => void;
   onDownload: (id: string, title: string) => void;
-  onTogglePrivateMode: () => void;
   onToggleModel: (modelId: string) => boolean;
   onSwapModel: (removeModelId: string, addModelId: string) => boolean;
   onRequestUndoToast: (message: string, undo: () => void) => void;
@@ -97,7 +95,6 @@ export function MobileChatShell({
   guestPreviewMode = false,
   guestMessageCount,
   maxGuestMessages,
-  isPrivateMode,
   onNewChat,
   onSelectConversation,
   onRename,
@@ -107,7 +104,6 @@ export function MobileChatShell({
   onShare,
   onRevokeShare,
   onDownload,
-  onTogglePrivateMode,
   onToggleModel,
   onSwapModel,
   onRequestUndoToast,
@@ -133,7 +129,7 @@ export function MobileChatShell({
   );
   const [modelStatuses, setModelStatuses] = useState<Record<string, ModelRuntimeStatus>>({});
   const [modelEmptyStates, setModelEmptyStates] = useState<Record<string, boolean>>({});
-  const [modeSheet, setModeSheet] = useState<"guest" | "private" | null>(null);
+  const [modeSheet, setModeSheet] = useState<"guest" | null>(null);
 
   const handleTabRemoveClick = useCallback(
     (modelId: string) => {
@@ -389,24 +385,6 @@ export function MobileChatShell({
         </div>
       </header>
 
-      {isPrivateMode && (
-        <div className="flex shrink-0 items-center justify-between gap-2 bg-purple-500/10 px-3 py-1.5 text-purple-700 dark:text-purple-300">
-          <span className="flex min-w-0 items-center gap-1.5 text-[11px] font-semibold">
-            <Lock className="h-3.5 w-3.5 shrink-0" />
-            <span className="truncate">
-              {t("chat.privateModeHeaderTitle")} · {t("chat.privateModeHeaderNotice")}
-            </span>
-          </span>
-          <button
-            type="button"
-            onClick={onTogglePrivateMode}
-            className="shrink-0 rounded-full border border-purple-300 px-2 py-0.5 text-[10px] font-bold text-purple-700 dark:border-purple-700 dark:text-purple-300"
-          >
-            {t("chat.privateModeExit")}
-          </button>
-        </div>
-      )}
-
       <ProviderStatusBanner selectedModels={selectedModels} compact onToggleModel={onToggleModel} />
 
       {!isConversationEmpty && selectedModels.length > 1 && (
@@ -475,7 +453,7 @@ export function MobileChatShell({
       )}
 
       {!isConversationEmpty && selectedModels.length > 1 && currentChatId && (
-        <div className={`grid shrink-0 gap-2 border-b border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950 ${currentChatId !== "private-chat" ? "grid-cols-2" : "grid-cols-1"}`}>
+        <div className="grid shrink-0 grid-cols-2 gap-2 border-b border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950">
           <button
             type="button"
             data-testid="quick-comparison-button"
@@ -502,47 +480,45 @@ export function MobileChatShell({
               testId="quick-comparison-credit-cost"
             />
           </button>
-          {currentChatId !== "private-chat" && (
-            isGuestMode ? (
+          {isGuestMode ? (
+            <button
+              type="button"
+              data-testid="ai-review-guest-locked"
+              onClick={onGuestSignInPrompt}
+              className="flex h-8 w-full items-center justify-center gap-1.5 rounded-xl border border-zinc-200 bg-zinc-50 px-2 text-[11px] font-black text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
+            >
+              <Lock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span className="truncate">{t("chat.aiReviewLoginToUnlock")}</span>
+            </button>
+          ) : (
+            <div className="flex min-w-0 items-center gap-0.5">
               <button
                 type="button"
-                data-testid="ai-review-guest-locked"
-                onClick={onGuestSignInPrompt}
-                className="flex h-8 w-full items-center justify-center gap-1.5 rounded-xl border border-zinc-200 bg-zinc-50 px-2 text-[11px] font-black text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
+                onClick={onComparisonReview}
+                className="flex h-8 min-w-0 flex-1 items-center justify-between gap-1.5 rounded-xl bg-blue-600 px-2 text-[11px] font-black text-white"
               >
-                <Lock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                <span className="truncate">{t("chat.aiReviewLoginToUnlock")}</span>
-              </button>
-            ) : (
-              <div className="flex min-w-0 items-center gap-0.5">
-                <button
-                  type="button"
-                  onClick={onComparisonReview}
-                  className="flex h-8 min-w-0 flex-1 items-center justify-between gap-1.5 rounded-xl bg-blue-600 px-2 text-[11px] font-black text-white"
-                >
-                  <span className="truncate">{t("chat.aiReviewButton")}</span>
-                  <CreditCostBadge
-                    credits={4}
-                    size="xs"
-                    tone="onColor"
-                    label={`4 ${t("chat.aiReviewCredits")}`}
-                    testId="ai-review-entry-credit-cost"
-                    className="border-0 bg-white/20"
-                  />
-                </button>
-                <FeatureHelpPopover
-                  title={helpCopy.aiReviewTitle}
-                  description={helpCopy.aiReviewDescription}
-                  buttonLabel={helpCopy.helpAboutAiReview}
-                  learnMoreLabel={helpCopy.learnMore}
-                  topic="ai_review"
-                  href={chatWorkspaceGuideHref(lang, "ai-review")}
-                  mobile
-                  align="right"
-                  testId="ai-review-help-mobile"
+                <span className="truncate">{t("chat.aiReviewButton")}</span>
+                <CreditCostBadge
+                  credits={4}
+                  size="xs"
+                  tone="onColor"
+                  label={`4 ${t("chat.aiReviewCredits")}`}
+                  testId="ai-review-entry-credit-cost"
+                  className="border-0 bg-white/20"
                 />
-              </div>
-            )
+              </button>
+              <FeatureHelpPopover
+                title={helpCopy.aiReviewTitle}
+                description={helpCopy.aiReviewDescription}
+                buttonLabel={helpCopy.helpAboutAiReview}
+                learnMoreLabel={helpCopy.learnMore}
+                topic="ai_review"
+                href={chatWorkspaceGuideHref(lang, "ai-review")}
+                mobile
+                align="right"
+                testId="ai-review-help-mobile"
+              />
+            </div>
           )}
         </div>
       )}
@@ -571,7 +547,6 @@ export function MobileChatShell({
         {isConversationEmpty && selectedModels.length > 0 && (
           <div className="absolute inset-0 z-10 bg-zinc-50 dark:bg-zinc-950">
             <ChatWelcomeScreen
-              isPrivate={isPrivateMode}
               recentConversations={[]}
               onSelectConversation={onSelectConversation}
               inputSlotRef={setWelcomeInputSlot}
@@ -641,7 +616,6 @@ export function MobileChatShell({
             isSending={isSending || isAnyModelResponding}
             focusToken={focusToken}
             isNewConversation={isActiveConversationEmpty}
-            isPrivateMode={isPrivateMode}
             currentChatId={currentChatId}
             selectedModels={selectedModels}
             disabledModelIds={disabledPanels}
@@ -706,8 +680,6 @@ export function MobileChatShell({
               onShare={onShare}
               onRevokeShare={onRevokeShare}
               onDownload={onDownload}
-              isPrivateMode={isPrivateMode}
-              onTogglePrivateMode={onTogglePrivateMode}
               currentModelId={resolvedActiveModelId}
               attachmentCount={attachments.length}
               isMobileDrawer
