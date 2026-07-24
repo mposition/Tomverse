@@ -130,6 +130,8 @@ export const ko = {
         responseEmpty: "AI 제공업체가 답변 없이 요청을 종료했습니다. 잠시 후 다시 시도하거나 다른 모델을 선택해 주세요.",
         modelRetired: "이 모델은 AI 제공업체에서 더 이상 사용할 수 없습니다. Gemini 3.1 Pro 또는 다른 최신 모델을 선택해 주세요.",
         responseCancelled: "응답 생성이 중지되었습니다.",
+        connectingStatus: "연결 중…",
+        generatingStatus: "생성 중",
         stoppedBadge: "중단됨",
         regenerate: "다시 생성",
         stopAllResponses: "모든 응답 생성 중지",

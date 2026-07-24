@@ -20,6 +20,7 @@ import {
 import { useLanguage } from "@/components/LanguageProvider";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import {
+  Check,
   Lock,
   Menu,
   Share2,
@@ -441,6 +442,8 @@ export function MobileChatShell({
                       <span className={`h-2 w-2 shrink-0 rounded-full ${isActive ? "bg-white/70" : "bg-zinc-400"}`} />
                     ) : status === "paused" ? (
                       <span className="shrink-0 text-[9px]">OFF</span>
+                    ) : status === "idle" ? (
+                      <Check className={`h-3 w-3 shrink-0 ${isActive ? "text-white" : "text-emerald-500"}`} />
                     ) : null}
                   </button>
                   <button

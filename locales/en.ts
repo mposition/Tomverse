@@ -130,6 +130,8 @@ export const en = {
         responseEmpty: "The AI provider ended the request without an answer. Try again shortly or select another model.",
         modelRetired: "This model is no longer available from the AI provider. Please select Gemini 3.1 Pro or another current model.",
         responseCancelled: "Response generation was stopped.",
+        connectingStatus: "Connecting…",
+        generatingStatus: "Generating",
         stoppedBadge: "Stopped",
         regenerate: "Regenerate",
         stopAllResponses: "Stop all responses",

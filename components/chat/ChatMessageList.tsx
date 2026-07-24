@@ -38,6 +38,11 @@ type ChatMessageListProps = {
   currentPlan?: string | null;
   isGuestMode?: boolean;
   currentChatId?: string | null;
+  // This panel's own in-flight state (not the other panels'), used to show
+  // "connecting" vs "generating" on the message currently streaming in --
+  // distinct from msg.status, which doesn't tell "still streaming" apart
+  // from "finished normally".
+  isSending?: boolean;
 };
 type MarkdownCodeProps = ComponentPropsWithoutRef<"code"> & ExtraProps;
 
@@ -119,9 +124,9 @@ const isFileParsingError = (content: string) => {
 function TypingIndicator() {
   return (
     <div className="flex items-center gap-1 py-1">
-          <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 dark:bg-zinc-500 [animation-delay:-0.2s]" />
-          <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 dark:bg-zinc-500 [animation-delay:-0.1s]" />
-          <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 dark:bg-zinc-500" />
+          <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 motion-reduce:animate-none dark:bg-zinc-500 [animation-delay:-0.2s]" />
+          <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 motion-reduce:animate-none dark:bg-zinc-500 [animation-delay:-0.1s]" />
+          <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 motion-reduce:animate-none dark:bg-zinc-500" />
     </div>
   );
 }
@@ -136,6 +141,7 @@ export function ChatMessageList({
   currentPlan,
   isGuestMode = false,
   currentChatId = null,
+  isSending = false,
 }: ChatMessageListProps) {
   const { models: AVAILABLE_MODELS } = useModelCatalog();
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -275,9 +281,16 @@ export function ChatMessageList({
           {messages.map((msg, idx) => {
             const isUser = msg.role === "user";
 
-            const modelInfo = !isUser && msg.modelId 
-              ? AVAILABLE_MODELS.find(m => m.id === msg.modelId) 
+            const modelInfo = !isUser && msg.modelId
+              ? AVAILABLE_MODELS.find(m => m.id === msg.modelId)
               : null;
+
+            // Only the message this panel is actually streaming right now
+            // (always the last one) gets the connecting/generating status --
+            // msg.status alone can't tell "still streaming" apart from
+            // "finished normally", both are "normal".
+            const isActivelyGenerating =
+              !isUser && isSending && idx === messages.length - 1 && msg.role === "assistant";
 
               // Technical detail lines (trace IDs, internal cost figures) are
             // appended to msg.content after a newline for support purposes,
@@ -309,6 +322,11 @@ export function ChatMessageList({
                     <span className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
                       {modelInfo.name}
                     </span>
+                    {isActivelyGenerating && msg.content && (
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-blue-500 dark:text-blue-400">
+                        {t("chat.generatingStatus")}
+                      </span>
+                    )}
                   </div>
                 )}
                 
@@ -394,8 +412,18 @@ export function ChatMessageList({
                     </div>
                   )}
                   {msg.role === "assistant" && !msg.content ? (
-                    <TypingIndicator />
+                    isActivelyGenerating ? (
+                      <div className="flex items-center gap-2">
+                        <TypingIndicator />
+                        <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                          {t("chat.connectingStatus")}
+                        </span>
+                      </div>
+                    ) : (
+                      <TypingIndicator />
+                    )
                   ) : msg.role === "assistant" ? (
+                    <>
                     <ReactMarkdown
                       remarkPlugins={[remarkGfm]}
                       rehypePlugins={[rehypeHighlight]}
@@ -426,6 +454,13 @@ export function ChatMessageList({
                     >
                       {displayContent}
                     </ReactMarkdown>
+                    {isActivelyGenerating && (
+                      <span
+                        className="ml-0.5 inline-block h-3.5 w-[2px] animate-pulse bg-zinc-400 align-middle motion-reduce:animate-none dark:bg-zinc-500"
+                        aria-hidden="true"
+                      />
+                    )}
+                    </>
                   ) : (
                     <p className="whitespace-pre-wrap">{msg.content}</p>
                   )}

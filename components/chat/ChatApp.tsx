@@ -737,6 +737,7 @@ function ChatAppComponent({
         currentPlan={currentPlan}
         isGuestMode={isGuestMode}
         currentChatId={initialConversationId}
+        isSending={isSending}
       />}
                   </div>
                   {isGuestMode ? (
