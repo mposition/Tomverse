@@ -2268,26 +2268,23 @@ export default function Home() {
   };
 
   const handleModelFinderComplete = ({
-      defaultModelId,
-      optionalModelId,
+      modelIds,
       promptExample,
     }: {
-      defaultModelId: string;
-      optionalModelId?: string;
+      modelIds: string[];
       promptExample?: string;
     }) => {
       const nextModels = clampSelectedModels(
-        [defaultModelId, optionalModelId]
-          .filter((modelId): modelId is string => Boolean(modelId))
-          .filter(isEnabledModelId)
+        modelIds.filter(isEnabledModelId)
       ).slice(0, maxSelectableModels);
+      const applied = nextModels.length ? nextModels : selectedModels;
 
-      setUserDefaultEngine(defaultModelId);
-      setSelectedModels(nextModels.length ? nextModels : [defaultModelId]);
+      setUserDefaultEngine(applied[0]);
+      setSelectedModels(applied);
       setDisabledPanels([]);
       setPersonalizedPrompt(promptExample || null);
       if (currentChatId && currentChatId !== "private-chat") {
-        syncModelSettingsToServer(currentChatId, nextModels, []);
+        syncModelSettingsToServer(currentChatId, applied, []);
       }
       setFocusToken((current) => current + 1);
     };
@@ -2590,7 +2587,6 @@ export default function Home() {
     <>
       <ModelFinder
         enabled={Boolean(sessionUserId && isUserSettingsLoaded)}
-        userId={sessionUserId}
         onComplete={handleModelFinderComplete}
       />
       <GuestImportModal

@@ -32,6 +32,7 @@ import {
   Search,
   Sheet,
   SlidersHorizontal,
+  Sparkles,
   Square,
   Star,
   X,
@@ -75,13 +76,12 @@ import {
 import {
   getContextualModelSuggestion,
   getModelFinderRecommendations,
-  MODEL_FINDER_FILE_USAGE,
   MODEL_FINDER_PRIORITIES,
   MODEL_FINDER_TASKS,
-  type ModelFinderFileUsage,
   type ModelFinderPriority,
   type ModelFinderTask,
 } from "@/lib/modelFinder";
+import { openModelFinder } from "@/lib/modelFinderEvents";
 import { CreditBreakdownSheet } from "@/components/chat/CreditBreakdownSheet";
 import { UsageLimitModal } from "@/components/chat/UsageLimitModal";
 import { getChatCreditAllocation } from "@/lib/chatCreditAllocation";
@@ -1000,19 +1000,13 @@ export function ChatInput({
           )
             ? (record.preferredPriority as ModelFinderPriority)
             : null;
-        const fileUsage =
-          typeof record.usesFilesFrequently === "string" &&
-          (MODEL_FINDER_FILE_USAGE as readonly string[]).includes(
-            record.usesFilesFrequently
-          )
-            ? (record.usesFilesFrequently as ModelFinderFileUsage)
-            : null;
-
-        if (!tasks.length || !priority || !fileUsage) return;
+        if (!tasks.length || !priority) return;
         setPersonalizedRecommendationIds(
-          getModelFinderRecommendations({ tasks, priority, fileUsage }).map(
-            (recommendation) => recommendation.modelId
-          )
+          getModelFinderRecommendations({
+            tasks,
+            priority,
+            fileUsage: "rarely",
+          }).map((recommendation) => recommendation.modelId)
         );
       })
       .catch(() => {});
@@ -2255,6 +2249,20 @@ export function ChatInput({
                         )}
                       </button>
                     );
+                    const comboFinderCta = !isGuestMode && (
+                      <button
+                        type="button"
+                        data-testid="model-combo-finder-cta"
+                        onClick={() => {
+                          closeMenu(false);
+                          openModelFinder();
+                        }}
+                        className="inline-flex items-center justify-center gap-1.5 self-start rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[10px] font-black text-blue-700 transition hover:bg-blue-100 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200 dark:hover:bg-blue-950"
+                      >
+                        <Sparkles className="h-3 w-3" aria-hidden="true" />
+                        {t("modelFinder.pickerCta")}
+                      </button>
+                    );
                     const recommendationsSection = !modelSearchQuery.trim() &&
                           selectedModels.length < maxSelectableModels &&
                           recommendationModels.length > 0 && (
@@ -2521,6 +2529,7 @@ export function ChatInput({
                           </p>
                           {advancedFiltersToggle}
                         </div>
+                        {comboFinderCta}
                         <div className="flex touch-pan-x gap-1 overflow-x-auto pb-0.5 [-webkit-overflow-scrolling:touch]">
                           {favoritesButton(true)}
                           {capabilityChips(true)}
@@ -2537,6 +2546,7 @@ export function ChatInput({
                           {providerUsageSelects(false)}
                           {advancedFiltersToggle}
                           {advancedFiltersPanel}
+                          {comboFinderCta}
                         </div>
                         <div className="flex min-h-0 min-w-0 flex-1 flex-col @container/list">
                           <p className="mb-1 shrink-0 px-1 text-[11px] font-black text-zinc-900 dark:text-white">

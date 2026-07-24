@@ -2,14 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   getContextualModelSuggestion,
+  getModelFinderCombination,
   getModelFinderRecommendations,
   getOptionalModelSuggestion,
   isModelFinderDefaultId,
 } from "../lib/modelFinder.ts";
-import {
-  getModelFinderReappearsAt,
-  shouldAutoShowModelFinder,
-} from "../lib/modelFinderSnooze.ts";
 
 test("model finder returns at most three free Standard defaults", () => {
   const recommendations = getModelFinderRecommendations({
@@ -68,37 +65,31 @@ test("contextual suggestions classify locally without returning prompt content",
   assert.deepEqual(Object.keys(suggestion || {}).sort(), ["key", "modelId", "reason"]);
 });
 
-test("model finder dismissal snoozes automatic onboarding for three days", () => {
-  const dismissedAt = new Date("2026-07-15T10:00:00.000Z");
-  assert.equal(
-    getModelFinderReappearsAt(dismissedAt)?.toISOString(),
-    "2026-07-18T10:00:00.000Z"
-  );
-  assert.equal(
-    shouldAutoShowModelFinder({
-      completedAt: null,
-      dismissedAt,
-      now: new Date("2026-07-18T09:59:59.999Z"),
-    }),
-    false
-  );
-  assert.equal(
-    shouldAutoShowModelFinder({
-      completedAt: null,
-      dismissedAt,
-      now: new Date("2026-07-18T10:00:00.000Z"),
-    }),
-    true
+test("model finder combination always returns 2-3 distinct models with a primary matching the ranked top pick", () => {
+  const answers = { tasks: ["documents", "coding"], priority: "fast" };
+  const combo = getModelFinderCombination(answers);
+  const topRanked = getModelFinderRecommendations({
+    ...answers,
+    fileUsage: "rarely",
+  })[0];
+
+  assert.ok(combo.length === 2 || combo.length === 3);
+  assert.equal(new Set(combo.map((pick) => pick.modelId)).size, combo.length);
+  assert.equal(combo[0].role, "primary");
+  assert.equal(combo[0].modelId, topRanked.modelId);
+  assert.ok(
+    combo
+      .filter((pick) => pick.role !== "advanced")
+      .every((pick) => isModelFinderDefaultId(pick.modelId))
   );
 });
 
-test("completed model finder never auto-opens after a previous dismissal", () => {
-  assert.equal(
-    shouldAutoShowModelFinder({
-      completedAt: new Date("2026-07-16T10:00:00.000Z"),
-      dismissedAt: new Date("2026-07-15T10:00:00.000Z"),
-      now: new Date("2026-07-20T10:00:00.000Z"),
-    }),
-    false
-  );
+test("a research-and-sources answer includes an advanced research add-on", () => {
+  const combo = getModelFinderCombination({
+    tasks: ["research"],
+    priority: "sources",
+  });
+  const advanced = combo.find((pick) => pick.role === "advanced");
+  assert.equal(advanced?.modelId, "perplexity/sonar");
+  assert.equal(advanced?.reasonKey, "modelFinder.optionalResearch");
 });

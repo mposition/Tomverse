@@ -220,6 +220,77 @@ export const getOptionalModelSuggestion = (
   return null;
 };
 
+export type ModelFinderComboRole = "primary" | "specialist" | "advanced";
+
+export type ModelFinderComboPick = {
+  modelId: string;
+  role: ModelFinderComboRole;
+  reasonKey: string;
+};
+
+// "AI 조합 추천": unlike getModelFinderRecommendations (a ranked list the
+// caller picks ONE winner from), this always returns a small combination of
+// 2-3 complementary models meant to be selected together, reusing the same
+// scoring tables so there's no second taxonomy to maintain.
+export const getModelFinderCombination = (
+  answers: { tasks: ModelFinderTask[]; priority: ModelFinderPriority }
+): ModelFinderComboPick[] => {
+  const fullAnswers: ModelFinderAnswers = { ...answers, fileUsage: "rarely" };
+  const ranked = getModelFinderRecommendations(fullAnswers);
+  if (!ranked.length) return [];
+
+  const picks: ModelFinderComboPick[] = [
+    {
+      modelId: ranked[0].modelId,
+      role: "primary",
+      reasonKey: ranked[0].reasonKey,
+    },
+  ];
+  const usedIds = new Set(picks.map((pick) => pick.modelId));
+
+  for (const task of answers.tasks) {
+    if (usedIds.size >= 2) break;
+    const taskScores = Object.entries(TASK_SCORES[task] || {})
+      .filter(([modelId]) => !usedIds.has(modelId) && isModelFinderDefaultId(modelId))
+      .sort(([, left], [, right]) => (right || 0) - (left || 0));
+    const bestModelId = taskScores[0]?.[0];
+    if (bestModelId) {
+      picks.push({
+        modelId: bestModelId,
+        role: "specialist",
+        reasonKey: REASON_BY_MODEL[bestModelId] || "modelFinder.reasons.general",
+      });
+      usedIds.add(bestModelId);
+    }
+  }
+
+  if (usedIds.size < 2) {
+    const backfill = ranked.find((entry) => !usedIds.has(entry.modelId));
+    if (backfill) {
+      picks.push({
+        modelId: backfill.modelId,
+        role: "specialist",
+        reasonKey: backfill.reasonKey,
+      });
+      usedIds.add(backfill.modelId);
+    }
+  }
+
+  const optional = getOptionalModelSuggestion(fullAnswers);
+  if (optional && !usedIds.has(optional.modelId) && picks.length < 3) {
+    picks.push({
+      modelId: optional.modelId,
+      role: "advanced",
+      reasonKey:
+        optional.reason === "research"
+          ? "modelFinder.optionalResearch"
+          : "modelFinder.optionalDeep",
+    });
+  }
+
+  return picks;
+};
+
 export const getModelFinderPromptKey = (answers: ModelFinderAnswers) => {
   if (answers.tasks.includes("documents")) return "modelFinder.prompts.documents";
   if (answers.tasks.includes("writing")) return "modelFinder.prompts.writing";

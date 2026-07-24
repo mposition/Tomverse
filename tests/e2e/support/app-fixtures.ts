@@ -294,15 +294,11 @@ export async function mockAuthenticatedApi(
   await page.route("**/api/user/model-finder", (route) =>
     route.fulfill(
       json({
-        variant: "control",
-        shouldShow: false,
         settings: {
           preferredTasks: [],
           preferredPriority: null,
-          usesFilesFrequently: null,
           defaultModelId: "gpt-5-4-mini",
           modelFinderCompletedAt: null,
-          modelFinderDismissedAt: null,
         },
       })
     )

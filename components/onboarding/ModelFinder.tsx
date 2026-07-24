@@ -1,24 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   Check,
   ChevronRight,
-  FileText,
   Gauge,
-  SearchCheck,
   Sparkles,
 } from "lucide-react";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import { useLanguage } from "@/components/LanguageProvider";
 import {
+  getModelFinderCombination,
   getModelFinderPromptKey,
-  getModelFinderRecommendations,
-  getOptionalModelSuggestion,
-  type ModelFinderAnswers,
-  type ModelFinderFileUsage,
+  type ModelFinderComboPick,
   type ModelFinderPriority,
   type ModelFinderTask,
 } from "@/lib/modelFinder";
@@ -31,19 +27,15 @@ import {
 } from "@/lib/productAnalyticsClient";
 import { notifyUserSettingsUpdated } from "@/lib/userSettingsEvents";
 
-const VARIANT_STORAGE_KEY = "tomverse_model_finder_variant_v1";
-
 type ModelFinderProps = {
   enabled: boolean;
-  userId: string | null;
   onComplete: (result: {
-    defaultModelId: string;
-    optionalModelId?: string;
+    modelIds: string[];
     promptExample?: string;
   }) => void;
 };
 
-type Stage = "intro" | "tasks" | "priority" | "files" | "result";
+type Stage = "intro" | "tasks" | "priority" | "result";
 
 const taskOptions: Array<{ value: ModelFinderTask; label: string }> = [
   { value: "documents", label: "modelFinder.taskDocuments" },
@@ -64,114 +56,37 @@ const priorityOptions: Array<{
   { value: "sources", label: "modelFinder.prioritySources" },
 ];
 
-const fileOptions: Array<{
-  value: ModelFinderFileUsage;
-  label: string;
-}> = [
-  { value: "documents", label: "modelFinder.filesDocuments" },
-  { value: "images", label: "modelFinder.filesImages" },
-  { value: "rarely", label: "modelFinder.filesRarely" },
-];
+const stageNumber = (stage: Stage) => (stage === "tasks" ? 1 : 2);
 
-const stageNumber = (stage: Stage) =>
-  stage === "tasks" ? 1 : stage === "priority" ? 2 : 3;
-
-export function ModelFinder({ enabled, userId, onComplete }: ModelFinderProps) {
+export function ModelFinder({ enabled, onComplete }: ModelFinderProps) {
   const { getModel } = useModelCatalog();
   const { t, lang } = useLanguage();
   const [isOpen, setIsOpen] = useState(false);
   const [stage, setStage] = useState<Stage>("intro");
   const [tasks, setTasks] = useState<ModelFinderTask[]>([]);
   const [priority, setPriority] = useState<ModelFinderPriority | null>(null);
-  const [fileUsage, setFileUsage] = useState<ModelFinderFileUsage | null>(null);
-  const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
-  const [includeOptionalModel, setIncludeOptionalModel] = useState(false);
+  const [selectedModelIds, setSelectedModelIds] = useState<Set<string>>(
+    new Set()
+  );
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
-  const requestedUserIdRef = useRef<string | null>(null);
 
-  const answers = useMemo<ModelFinderAnswers | null>(
-    () =>
-      tasks.length > 0 && priority && fileUsage
-        ? { tasks, priority, fileUsage }
-        : null,
-    [fileUsage, priority, tasks]
+  const answers = useMemo(
+    () => (tasks.length > 0 && priority ? { tasks, priority } : null),
+    [priority, tasks]
   );
-  const recommendations = useMemo(
-    () => (answers ? getModelFinderRecommendations(answers) : []),
+  const combo = useMemo<ModelFinderComboPick[]>(
+    () => (answers ? getModelFinderCombination(answers) : []),
     [answers]
-  );
-  const optionalSuggestion = useMemo(
-    () => (answers ? getOptionalModelSuggestion(answers) : null),
-    [answers]
-  );
-
-  const formatCopy = useCallback(
-    (key: string, values: Record<string, string>) =>
-      Object.entries(values).reduce(
-        (copy, [name, value]) => copy.replaceAll(`{${name}}`, value),
-        t(key)
-      ),
-    [t]
   );
 
   const reset = useCallback(() => {
     setStage("intro");
     setTasks([]);
     setPriority(null);
-    setFileUsage(null);
-    setSelectedModelId(null);
-    setIncludeOptionalModel(false);
+    setSelectedModelIds(new Set());
     setError("");
   }, []);
-
-  useEffect(() => {
-    if (!enabled || !userId || requestedUserIdRef.current === userId) return;
-    requestedUserIdRef.current = userId;
-    let cancelled = false;
-    let completed = false;
-
-    fetch("/api/user/model-finder", { cache: "no-store" })
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`Model finder load failed: ${response.status}`);
-        return response.json() as Promise<{
-          variant?: "control" | "finder";
-          shouldShow?: boolean;
-        }>;
-      })
-      .then((data) => {
-        if (cancelled) return;
-        completed = true;
-        if (data.variant === "control" || data.variant === "finder") {
-          window.localStorage.setItem(VARIANT_STORAGE_KEY, data.variant);
-        }
-        if (data.shouldShow) {
-          reset();
-          setIsOpen(true);
-          trackProductEventOnce(
-            "model_finder_initial_view_v1",
-            "model_finder_viewed",
-            0,
-            { experiment_variant: "finder" }
-          );
-        }
-      })
-      .catch((loadError) => {
-        if (!cancelled && requestedUserIdRef.current === userId) {
-          requestedUserIdRef.current = null;
-        }
-        console.error("Failed to load model finder:", loadError);
-      });
-
-    return () => {
-      cancelled = true;
-      // `enabled` can briefly change while session settings settle. Do not let
-      // a cancelled request permanently suppress onboarding for this user.
-      if (!completed && requestedUserIdRef.current === userId) {
-        requestedUserIdRef.current = null;
-      }
-    };
-  }, [enabled, reset, userId]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -179,7 +94,7 @@ export function ModelFinder({ enabled, userId, onComplete }: ModelFinderProps) {
       reset();
       setIsOpen(true);
       trackProductEvent("model_finder_viewed", 0, {
-        method: "settings",
+        method: "on_demand",
       });
     };
     window.addEventListener(MODEL_FINDER_OPEN_EVENT, handleOpen);
@@ -187,17 +102,21 @@ export function ModelFinder({ enabled, userId, onComplete }: ModelFinderProps) {
   }, [enabled, reset]);
 
   useEffect(() => {
-    if (stage !== "result" || !optionalSuggestion) return;
+    const advanced = combo.find((pick) => pick.role === "advanced");
+    if (stage !== "result" || !advanced) return;
     trackProductEventOnce(
-      `model_finder_optional_${optionalSuggestion.modelId}_v1`,
+      `model_finder_advanced_${advanced.modelId}_v1`,
       "advanced_model_suggested",
       1,
       {
-        model_id: optionalSuggestion.modelId,
-        suggestion_reason: optionalSuggestion.reason,
+        model_id: advanced.modelId,
+        suggestion_reason:
+          advanced.reasonKey === "modelFinder.optionalResearch"
+            ? "research"
+            : "deep_analysis",
       }
     );
-  }, [optionalSuggestion, stage]);
+  }, [combo, stage]);
 
   const saveAction = async (body: Record<string, unknown>) => {
     setIsSaving(true);
@@ -220,24 +139,20 @@ export function ModelFinder({ enabled, userId, onComplete }: ModelFinderProps) {
     }
   };
 
-  const handleSkip = async (method: "later" | "default") => {
+  const handleUseDefault = async () => {
     try {
-      const defaultModelId = await saveAction({
-        action: method === "default" ? "accept_default" : "dismiss",
+      const defaultModelId = await saveAction({ action: "accept_default" });
+      trackProductEvent("model_finder_skipped", 0, { method: "default" });
+      trackProductEvent("recommended_model_accepted", 1, {
+        model_id: defaultModelId,
+        recommendation_rank: 1,
+        method: "default",
       });
-      trackProductEvent("model_finder_skipped", 0, { method });
-      if (method === "default") {
-        trackProductEvent("recommended_model_accepted", 1, {
-          model_id: defaultModelId,
-          recommendation_rank: 1,
-          method: "default",
-        });
-        notifyUserSettingsUpdated({ defaultModel: defaultModelId });
-        onComplete({
-          defaultModelId,
-          promptExample: t("modelFinder.prompts.general"),
-        });
-      }
+      notifyUserSettingsUpdated({ defaultModel: defaultModelId });
+      onComplete({
+        modelIds: [defaultModelId],
+        promptExample: t("modelFinder.prompts.general"),
+      });
       setIsOpen(false);
     } catch (saveError) {
       console.error(saveError);
@@ -246,32 +161,29 @@ export function ModelFinder({ enabled, userId, onComplete }: ModelFinderProps) {
   };
 
   const handleComplete = async () => {
-    if (!answers || !selectedModelId) return;
-    const recommendationRank =
-      recommendations.findIndex(
-        (recommendation) => recommendation.modelId === selectedModelId
-      ) + 1;
+    if (!answers || selectedModelIds.size === 0) return;
+    const modelIds = combo
+      .filter((pick) => selectedModelIds.has(pick.modelId))
+      .map((pick) => pick.modelId);
     try {
       const defaultModelId = await saveAction({
         action: "complete",
         answers,
-        defaultModelId: selectedModelId,
+        modelIds,
       });
-      trackProductEvent("model_finder_completed", 1, {
+      trackProductEvent("model_finder_completed", modelIds.length, {
         model_id: defaultModelId,
-        recommendation_rank: Math.max(1, recommendationRank),
       });
       trackProductEvent("recommended_model_accepted", 1, {
         model_id: defaultModelId,
-        recommendation_rank: Math.max(1, recommendationRank),
+        recommendation_rank: 1,
       });
       notifyUserSettingsUpdated({ defaultModel: defaultModelId });
       onComplete({
-        defaultModelId,
-        ...(includeOptionalModel && optionalSuggestion
-          ? { optionalModelId: optionalSuggestion.modelId }
-          : {}),
-        promptExample: t(getModelFinderPromptKey(answers)),
+        modelIds,
+        promptExample: t(
+          getModelFinderPromptKey({ ...answers, fileUsage: "rarely" })
+        ),
       });
       setIsOpen(false);
     } catch (saveError) {
@@ -281,17 +193,6 @@ export function ModelFinder({ enabled, userId, onComplete }: ModelFinderProps) {
   };
 
   if (!enabled || !isOpen) return null;
-
-  const selectedRecommendation =
-    recommendations.find(
-      (recommendation) => recommendation.modelId === selectedModelId
-    ) || recommendations[0];
-  const optionalModel = optionalSuggestion
-    ? getModel(optionalSuggestion.modelId)
-    : undefined;
-  const optionalProfile = optionalModel
-    ? getModelUsageProfile(optionalModel)
-    : null;
 
   return (
     <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-5">
@@ -332,19 +233,10 @@ export function ModelFinder({ enabled, userId, onComplete }: ModelFinderProps) {
                 <button
                   type="button"
                   disabled={isSaving}
-                  onClick={() => void handleSkip("default")}
+                  onClick={() => void handleUseDefault()}
                   className="w-full rounded-2xl border border-zinc-200 px-5 py-3.5 text-sm font-bold text-zinc-800 transition hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-900"
                 >
                   {t("modelFinder.useDefault")}
-                </button>
-                <button
-                  type="button"
-                  data-testid="model-finder-remind-later"
-                  disabled={isSaving}
-                  onClick={() => void handleSkip("later")}
-                  className="w-full px-5 py-2 text-sm font-semibold text-zinc-500 hover:text-zinc-900 disabled:opacity-50 dark:hover:text-white"
-                >
-                  {t("modelFinder.later")}
                 </button>
               </div>
             </div>
@@ -367,119 +259,98 @@ export function ModelFinder({ enabled, userId, onComplete }: ModelFinderProps) {
               </div>
 
               <div className="mt-6 grid gap-3 sm:grid-cols-3">
-                {recommendations.map((recommendation, index) => {
-                  const model = getModel(recommendation.modelId);
-                  const isSelected =
-                    recommendation.modelId === selectedRecommendation?.modelId;
+                {combo.map((pick) => {
+                  const model = getModel(pick.modelId);
                   if (!model) return null;
+                  const isSelected = selectedModelIds.has(pick.modelId);
+                  const isAdvanced = pick.role === "advanced";
                   const usageProfile = getModelUsageProfile(model);
                   return (
                     <button
-                      key={model.id}
+                      key={pick.modelId}
                       type="button"
                       aria-pressed={isSelected}
                       onClick={() => {
-                        setSelectedModelId(model.id);
-                        if (selectedRecommendation?.modelId !== model.id) {
-                          trackProductEvent("recommended_model_changed", 1, {
-                            model_id: model.id,
-                            recommendation_rank: index + 1,
-                          });
+                        setSelectedModelIds((current) => {
+                          const next = new Set(current);
+                          if (next.has(pick.modelId)) {
+                            next.delete(pick.modelId);
+                          } else {
+                            next.add(pick.modelId);
+                          }
+                          return next;
+                        });
+                        if (!isSelected) {
+                          trackProductEvent(
+                            "advanced_model_selected",
+                            combo.length,
+                            { model_id: pick.modelId }
+                          );
                         }
                       }}
                       className={`rounded-2xl border p-4 text-left transition ${
                         isSelected
-                          ? "border-blue-500 bg-blue-50 ring-2 ring-blue-500/20 dark:bg-blue-950/20"
+                          ? isAdvanced
+                            ? "border-amber-400 bg-amber-50 ring-2 ring-amber-400/20 dark:bg-amber-950/20"
+                            : "border-blue-500 bg-blue-50 ring-2 ring-blue-500/20 dark:bg-blue-950/20"
                           : "border-zinc-200 hover:border-zinc-400 dark:border-zinc-800 dark:hover:border-zinc-600"
                       }`}
                     >
-                      <span className="flex items-center gap-3">
+                      <span className="flex items-start gap-3">
                         <ModelLogo model={model} size="md" />
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-sm font-black text-zinc-950 dark:text-white">
                             {model.name}
                           </span>
+                          <span
+                            className={`mt-0.5 block text-[10px] font-black uppercase tracking-wider ${
+                              isAdvanced ? "text-amber-600" : "text-blue-500"
+                            }`}
+                          >
+                            {t(`modelFinder.roles.${pick.role}`)}
+                          </span>
                         </span>
-                        <CreditCostBadge
-                          credits={usageProfile.credits}
-                          size="xs"
-                          label={lang === "ko" ? `기본 ${usageProfile.credits}크레딧 차감` : `Base cost ${usageProfile.credits} credits`}
-                          testId="model-finder-credit-cost"
-                        />
-                        {isSelected && <Check className="h-5 w-5 text-blue-500" />}
+                        <span
+                          className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black ${
+                            isSelected
+                              ? "bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-200"
+                              : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
+                          }`}
+                        >
+                          {t(
+                            isSelected
+                              ? "modelFinder.includeInSet"
+                              : "modelFinder.excludeFromSet"
+                          )}
+                        </span>
                       </span>
                       <span className="mt-3 block text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-                        {t(recommendation.reasonKey)}
+                        {t(pick.reasonKey)}
                       </span>
+                      <CreditCostBadge
+                        credits={usageProfile.credits}
+                        size="xs"
+                        className="mt-2"
+                        label={
+                          lang === "ko"
+                            ? `기본 ${usageProfile.credits}크레딧 차감`
+                            : `Base cost ${usageProfile.credits} credits`
+                        }
+                        testId="model-finder-credit-cost"
+                      />
+                      {isAdvanced && (
+                        <span className="mt-2 block text-[11px] leading-5 text-amber-700 dark:text-amber-300">
+                          {t("modelFinder.freeAdvancedQuota")}
+                        </span>
+                      )}
                     </button>
                   );
                 })}
               </div>
 
-              {optionalSuggestion && optionalModel && optionalProfile && (
-                <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50/70 p-4 dark:border-amber-900/60 dark:bg-amber-950/20">
-                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-                    <div className="flex min-w-0 flex-1 items-start gap-3">
-                      {optionalSuggestion.reason === "research" ? (
-                        <SearchCheck className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
-                      ) : (
-                        <FileText className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
-                      )}
-                      <div>
-                        <p className="text-sm font-black text-zinc-950 dark:text-white">
-                          {t("modelFinder.optionalTitle")}: {optionalModel.name}
-                        </p>
-                        <p className="mt-1 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
-                          {t(
-                            optionalSuggestion.reason === "research"
-                              ? "modelFinder.optionalResearch"
-                              : "modelFinder.optionalDeep"
-                          )}
-                        </p>
-                        <CreditCostBadge
-                          credits={optionalProfile.credits}
-                          size="xs"
-                          className="mt-1"
-                          label={lang === "ko" ? `기본 ${optionalProfile.credits}크레딧 차감` : `Base cost ${optionalProfile.credits} credits`}
-                          testId="model-finder-credit-cost"
-                        />
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      aria-pressed={includeOptionalModel}
-                      onClick={() => {
-                        const next = !includeOptionalModel;
-                        setIncludeOptionalModel(next);
-                        if (next) {
-                          trackProductEvent("advanced_model_selected", 2, {
-                            model_id: optionalModel.id,
-                            suggestion_reason: optionalSuggestion.reason,
-                          });
-                        }
-                      }}
-                      className={`shrink-0 rounded-xl px-4 py-2.5 text-xs font-black transition ${
-                        includeOptionalModel
-                          ? "bg-zinc-900 text-white dark:bg-white dark:text-zinc-950"
-                          : "border border-amber-300 bg-white text-amber-800 hover:bg-amber-100 dark:border-amber-800 dark:bg-zinc-950 dark:text-amber-200"
-                      }`}
-                    >
-                      {t(
-                        includeOptionalModel
-                          ? "modelFinder.optionalRemove"
-                          : "modelFinder.optionalUse"
-                      )}
-                    </button>
-                  </div>
-                  <p className="mt-3 text-[11px] leading-5 text-zinc-500">
-                    {t("modelFinder.freeAdvancedQuota")}
-                  </p>
-                </div>
-              )}
-
               <button
                 type="button"
-                disabled={isSaving || !selectedRecommendation}
+                disabled={isSaving || selectedModelIds.size === 0}
                 onClick={() => void handleComplete()}
                 className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-4 text-sm font-black text-white hover:bg-blue-500 disabled:opacity-50"
               >
@@ -492,15 +363,7 @@ export function ModelFinder({ enabled, userId, onComplete }: ModelFinderProps) {
               <div className="flex items-center gap-3">
                 <button
                   type="button"
-                  onClick={() =>
-                    setStage(
-                      stage === "tasks"
-                        ? "intro"
-                        : stage === "priority"
-                          ? "tasks"
-                          : "priority"
-                    )
-                  }
+                  onClick={() => setStage(stage === "tasks" ? "intro" : "tasks")}
                   aria-label={t("modelFinder.back")}
                   className="flex h-10 w-10 items-center justify-center rounded-xl border border-zinc-200 text-zinc-500 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
                 >
@@ -508,14 +371,15 @@ export function ModelFinder({ enabled, userId, onComplete }: ModelFinderProps) {
                 </button>
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-black uppercase tracking-wider text-blue-500">
-                    {formatCopy("modelFinder.progress", {
-                      current: String(stageNumber(stage)),
-                    })}
+                    {t("modelFinder.progress").replaceAll(
+                      "{current}",
+                      String(stageNumber(stage))
+                    )}
                   </p>
                   <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
                     <div
                       className="h-full rounded-full bg-blue-500 transition-all"
-                      style={{ width: `${(stageNumber(stage) / 3) * 100}%` }}
+                      style={{ width: `${(stageNumber(stage) / 2) * 100}%` }}
                     />
                   </div>
                 </div>
@@ -528,9 +392,7 @@ export function ModelFinder({ enabled, userId, onComplete }: ModelFinderProps) {
                 {t(
                   stage === "tasks"
                     ? "modelFinder.tasksTitle"
-                    : stage === "priority"
-                      ? "modelFinder.priorityTitle"
-                      : "modelFinder.filesTitle"
+                    : "modelFinder.priorityTitle"
                 )}
               </h2>
               {stage === "tasks" && (
@@ -591,44 +453,25 @@ export function ModelFinder({ enabled, userId, onComplete }: ModelFinderProps) {
                       {t(option.label)}
                     </button>
                   ))}
-                {stage === "files" &&
-                  fileOptions.map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      aria-pressed={fileUsage === option.value}
-                      onClick={() => setFileUsage(option.value)}
-                      className={`flex items-center gap-3 rounded-2xl border p-4 text-left text-sm font-bold transition sm:col-span-2 ${
-                        fileUsage === option.value
-                          ? "border-blue-500 bg-blue-50 text-blue-800 dark:bg-blue-950/20 dark:text-blue-200"
-                          : "border-zinc-200 text-zinc-700 hover:border-zinc-400 dark:border-zinc-800 dark:text-zinc-300"
-                      }`}
-                    >
-                      <FileText className="h-5 w-5 shrink-0" />
-                      {t(option.label)}
-                    </button>
-                  ))}
               </div>
 
               <button
                 type="button"
                 disabled={
                   (stage === "tasks" && tasks.length === 0) ||
-                  (stage === "priority" && !priority) ||
-                  (stage === "files" && !fileUsage)
+                  (stage === "priority" && !priority)
                 }
                 onClick={() => {
                   if (stage === "tasks") setStage("priority");
-                  if (stage === "priority") setStage("files");
-                  if (stage === "files") {
+                  if (stage === "priority") {
                     const nextAnswers =
-                      tasks.length > 0 && priority && fileUsage
-                        ? { tasks, priority, fileUsage }
-                        : null;
-                    const nextRecommendations = nextAnswers
-                      ? getModelFinderRecommendations(nextAnswers)
+                      tasks.length > 0 && priority ? { tasks, priority } : null;
+                    const nextCombo = nextAnswers
+                      ? getModelFinderCombination(nextAnswers)
                       : [];
-                    setSelectedModelId(nextRecommendations[0]?.modelId || null);
+                    setSelectedModelIds(
+                      new Set(nextCombo.map((pick) => pick.modelId))
+                    );
                     setStage("result");
                   }
                 }}
