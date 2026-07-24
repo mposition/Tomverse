@@ -68,6 +68,7 @@ type DesktopChatShellProps = {
   onCompareSummary: () => void;
   isCompareSummaryLoading: boolean;
   onComparisonReview: () => void;
+  onGuestSignInPrompt: () => void;
   onResponseComplete: (promptId: string | null, modelId: string, responseText: string) => void;
   onFollowupSent: (modelId: string) => void;
 };
@@ -111,6 +112,7 @@ export function DesktopChatShell({
   onCompareSummary,
   isCompareSummaryLoading,
   onComparisonReview,
+  onGuestSignInPrompt,
   onResponseComplete,
   onFollowupSent,
 }: DesktopChatShellProps) {
@@ -418,34 +420,48 @@ export function DesktopChatShell({
                 testId="quick-comparison-credit-cost"
               />
             </button>
-            {!isGuestMode && currentChatId !== "private-chat" && (
-              <div className="flex items-center gap-1">
+            {currentChatId !== "private-chat" && (
+              isGuestMode ? (
                 <button
                   type="button"
-                  onClick={onComparisonReview}
-                  className="flex items-center justify-between gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-black text-white hover:bg-blue-500"
+                  data-testid="ai-review-guest-locked"
+                  onClick={onGuestSignInPrompt}
+                  className="flex items-center justify-between gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2 text-xs font-black text-zinc-600 hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
                 >
-                  <span>{t("chat.aiReviewButton")}</span>
-                  <CreditCostBadge
-                    credits={4}
-                    size="xs"
-                    tone="onColor"
-                    label={`4 ${t("chat.aiReviewCredits")}`}
-                    testId="ai-review-entry-credit-cost"
-                    className="border-0 bg-white/20"
-                  />
+                  <span className="flex items-center gap-1.5">
+                    <Lock className="h-3.5 w-3.5" aria-hidden="true" />
+                    {t("chat.aiReviewLoginToUnlock")}
+                  </span>
                 </button>
-                <FeatureHelpPopover
-                  title={helpCopy.aiReviewTitle}
-                  description={helpCopy.aiReviewDescription}
-                  buttonLabel={helpCopy.helpAboutAiReview}
-                  learnMoreLabel={helpCopy.learnMore}
-                  topic="ai_review"
-                  href={chatWorkspaceGuideHref(lang, "ai-review")}
-                  align="right"
-                  testId="ai-review-help"
-                />
-              </div>
+              ) : (
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={onComparisonReview}
+                    className="flex items-center justify-between gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-black text-white hover:bg-blue-500"
+                  >
+                    <span>{t("chat.aiReviewButton")}</span>
+                    <CreditCostBadge
+                      credits={4}
+                      size="xs"
+                      tone="onColor"
+                      label={`4 ${t("chat.aiReviewCredits")}`}
+                      testId="ai-review-entry-credit-cost"
+                      className="border-0 bg-white/20"
+                    />
+                  </button>
+                  <FeatureHelpPopover
+                    title={helpCopy.aiReviewTitle}
+                    description={helpCopy.aiReviewDescription}
+                    buttonLabel={helpCopy.helpAboutAiReview}
+                    learnMoreLabel={helpCopy.learnMore}
+                    topic="ai_review"
+                    href={chatWorkspaceGuideHref(lang, "ai-review")}
+                    align="right"
+                    testId="ai-review-help"
+                  />
+                </div>
+              )
             )}
           </div>
         )}

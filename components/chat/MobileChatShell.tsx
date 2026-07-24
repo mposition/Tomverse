@@ -75,6 +75,7 @@ type MobileChatShellProps = {
   onCompareSummary: () => void;
   isCompareSummaryLoading: boolean;
   onComparisonReview: () => void;
+  onGuestSignInPrompt: () => void;
   onResponseComplete: (promptId: string | null, modelId: string, responseText: string) => void;
   onFollowupSent: (modelId: string) => void;
 };
@@ -115,6 +116,7 @@ export function MobileChatShell({
   onCompareSummary,
   isCompareSummaryLoading,
   onComparisonReview,
+  onGuestSignInPrompt,
   onResponseComplete,
   onFollowupSent,
 }: MobileChatShellProps) {
@@ -473,7 +475,7 @@ export function MobileChatShell({
       )}
 
       {!isConversationEmpty && selectedModels.length > 1 && currentChatId && (
-        <div className={`grid shrink-0 gap-2 border-b border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950 ${!isGuestMode && currentChatId !== "private-chat" ? "grid-cols-2" : "grid-cols-1"}`}>
+        <div className={`grid shrink-0 gap-2 border-b border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950 ${currentChatId !== "private-chat" ? "grid-cols-2" : "grid-cols-1"}`}>
           <button
             type="button"
             data-testid="quick-comparison-button"
@@ -500,35 +502,47 @@ export function MobileChatShell({
               testId="quick-comparison-credit-cost"
             />
           </button>
-          {!isGuestMode && currentChatId !== "private-chat" && (
-            <div className="flex min-w-0 items-center gap-0.5">
+          {currentChatId !== "private-chat" && (
+            isGuestMode ? (
               <button
                 type="button"
-                onClick={onComparisonReview}
-                className="flex h-8 min-w-0 flex-1 items-center justify-between gap-1.5 rounded-xl bg-blue-600 px-2 text-[11px] font-black text-white"
+                data-testid="ai-review-guest-locked"
+                onClick={onGuestSignInPrompt}
+                className="flex h-8 w-full items-center justify-center gap-1.5 rounded-xl border border-zinc-200 bg-zinc-50 px-2 text-[11px] font-black text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
               >
-                <span className="truncate">{t("chat.aiReviewButton")}</span>
-                <CreditCostBadge
-                  credits={4}
-                  size="xs"
-                  tone="onColor"
-                  label={`4 ${t("chat.aiReviewCredits")}`}
-                  testId="ai-review-entry-credit-cost"
-                  className="border-0 bg-white/20"
-                />
+                <Lock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                <span className="truncate">{t("chat.aiReviewLoginToUnlock")}</span>
               </button>
-              <FeatureHelpPopover
-                title={helpCopy.aiReviewTitle}
-                description={helpCopy.aiReviewDescription}
-                buttonLabel={helpCopy.helpAboutAiReview}
-                learnMoreLabel={helpCopy.learnMore}
-                topic="ai_review"
-                href={chatWorkspaceGuideHref(lang, "ai-review")}
-                mobile
-                align="right"
-                testId="ai-review-help-mobile"
-              />
-            </div>
+            ) : (
+              <div className="flex min-w-0 items-center gap-0.5">
+                <button
+                  type="button"
+                  onClick={onComparisonReview}
+                  className="flex h-8 min-w-0 flex-1 items-center justify-between gap-1.5 rounded-xl bg-blue-600 px-2 text-[11px] font-black text-white"
+                >
+                  <span className="truncate">{t("chat.aiReviewButton")}</span>
+                  <CreditCostBadge
+                    credits={4}
+                    size="xs"
+                    tone="onColor"
+                    label={`4 ${t("chat.aiReviewCredits")}`}
+                    testId="ai-review-entry-credit-cost"
+                    className="border-0 bg-white/20"
+                  />
+                </button>
+                <FeatureHelpPopover
+                  title={helpCopy.aiReviewTitle}
+                  description={helpCopy.aiReviewDescription}
+                  buttonLabel={helpCopy.helpAboutAiReview}
+                  learnMoreLabel={helpCopy.learnMore}
+                  topic="ai_review"
+                  href={chatWorkspaceGuideHref(lang, "ai-review")}
+                  mobile
+                  align="right"
+                  testId="ai-review-help-mobile"
+                />
+              </div>
+            )
           )}
         </div>
       )}

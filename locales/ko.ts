@@ -248,6 +248,7 @@ export const ko = {
         quickSummaryDisclaimer: "이 AI 분석은 제공된 답변만 비교합니다. 웹을 검색하거나 외부 사실을 검증하지 않으며 정답을 보장하지 않습니다.",
         modelComparison: "모델 비교",
         aiReviewButton: "AI 답변 교차검토",
+        aiReviewLoginToUnlock: "로그인하고 AI 교차검토 사용",
         aiReviewEyebrow: "수동 AI 검토",
         aiReviewTitle: "AI 답변 교차검토",
         aiReviewDescription: "완료된 답변들의 공통점, 중요한 차이, 모순, 빠진 내용과 확인이 필요한 주장을 비교합니다. 실행 전에 검토 기준을 선택하세요.",

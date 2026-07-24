@@ -2643,6 +2643,7 @@ export default function Home() {
           onCompareSummary={handleCompareSummary}
           isCompareSummaryLoading={isCompareSummaryLoading}
           onComparisonReview={() => setShowComparisonReview(true)}
+          onGuestSignInPrompt={() => setShowGuestSignInPrompt(true)}
           onResponseComplete={handleResponseComplete}
           onFollowupSent={handleModelFollowupSent}
         />
@@ -2691,6 +2692,7 @@ export default function Home() {
           onCompareSummary={handleCompareSummary}
           isCompareSummaryLoading={isCompareSummaryLoading}
           onComparisonReview={() => setShowComparisonReview(true)}
+          onGuestSignInPrompt={() => setShowGuestSignInPrompt(true)}
           onResponseComplete={handleResponseComplete}
           onFollowupSent={handleModelFollowupSent}
         />

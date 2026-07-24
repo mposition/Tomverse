@@ -248,6 +248,7 @@ export const en = {
         quickSummaryDisclaimer: "This AI analysis compares only the supplied answers. It does not search the web, verify facts externally, or guarantee the correct answer.",
         modelComparison: "Model comparison",
         aiReviewButton: "AI answer cross-review",
+        aiReviewLoginToUnlock: "Log in to use AI cross-review",
         aiReviewEyebrow: "Manual AI review",
         aiReviewTitle: "AI answer cross-review",
         aiReviewDescription: "Compare the completed answers for consensus, important differences, contradictions, missing points, and claims that need verification. Choose a review focus before running it.",
