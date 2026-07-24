@@ -168,7 +168,7 @@ const serializeReservation = (
     };
 };
 
-const deserializeReservation = (payload: Prisma.JsonValue) => {
+export const deserializeReservation = (payload: Prisma.JsonValue) => {
     const parsed = durableReservationPayloadSchema.parse(payload);
     return {
         ...parsed,
@@ -2126,6 +2126,30 @@ export const settleChatUsage = async (
         }
     }
     return { applied: settlement.applied, status: settlement.status };
+};
+
+// Heartbeat for a reservation backing a long-running async job (Perplexity
+// deep research can run well past the 30-minute ceiling acquireChatAccess
+// clamps CHAT_RESERVATION_TTL_SECONDS to). Called on every poll that finds
+// the job still running, so reconcileExpiredChatCreditReservations' 15-minute
+// sweep doesn't forcibly refund/close a reservation whose job is still
+// legitimately in progress. No-ops if the reservation already settled.
+export const extendChatReservationExpiry = async (
+    reservationId: string,
+    additionalSeconds: number
+) => {
+    await prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`chat-credit-reservation:${reservationId}`}))`;
+        const durable = await tx.chatCreditReservation.findUnique({
+            where: { id: reservationId },
+            select: { status: true },
+        });
+        if (!durable || durable.status !== "reserved") return;
+        await tx.chatCreditReservation.update({
+            where: { id: reservationId },
+            data: { expiresAt: new Date(Date.now() + additionalSeconds * 1000) },
+        });
+    });
 };
 
 const boundedProviderIdentifier = (value: string | null | undefined) => {

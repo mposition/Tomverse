@@ -193,6 +193,118 @@ function ChatAppComponent({
     );
   }, []);
 
+  const deepResearchPhaseText = useCallback(
+    (elapsedMs: number) => {
+      if (elapsedMs < 30_000) return t("chat.deepResearchRequestingStatus");
+      if (elapsedMs < 120_000) return t("chat.deepResearchSearchingStatus");
+      return t("chat.deepResearchWritingStatus");
+    },
+    [t]
+  );
+
+  // Perplexity's sonar-deep-research model can't stream -- app/api/chat/route.ts
+  // submits it as an async job and returns immediately, so this polls the
+  // dedicated status endpoint until Perplexity reports a terminal state. No
+  // idle-timeout/AbortController-driven fetch is involved here on purpose:
+  // each poll is a short, independent request, so there's no single
+  // long-held connection that can stall. `signal` only stops this loop
+  // client-side (the job keeps running server-side either way) -- checked
+  // between ticks rather than passed into fetch, so a stop takes effect
+  // within one poll interval instead of needing its own abort plumbing.
+  const pollDeepResearchJob = useCallback(
+    async (
+      jobAssistantMessageId: string,
+      submittedAtMs: number,
+      signal: AbortSignal,
+      analyticsPromptId: string | null = null
+    ) => {
+      const POLL_INTERVAL_MS = 5_000;
+      const TAKING_LONGER_THRESHOLD_MS = 5 * 60 * 1000;
+
+      while (true) {
+        if (signal.aborted) {
+          setAssistantMessage(jobAssistantMessageId, t("chat.responseCancelled"), "cancelled");
+          return;
+        }
+
+        const elapsedMs = Date.now() - submittedAtMs;
+        const phaseText =
+          elapsedMs > TAKING_LONGER_THRESHOLD_MS
+            ? `${deepResearchPhaseText(elapsedMs)}\n${t("chat.deepResearchTakingLonger")}`
+            : deepResearchPhaseText(elapsedMs);
+        setAssistantMessage(jobAssistantMessageId, phaseText, "normal");
+
+        let poll: { status?: string; content?: string; error?: string } | null = null;
+        try {
+          const res = await fetch("/api/chat/deep-research/status", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ assistantMessageId: jobAssistantMessageId }),
+          });
+          if (res.ok) poll = await res.json();
+        } catch {
+          // Transient network error talking to our own status endpoint --
+          // just retry on the next tick instead of failing the job.
+        }
+
+        if (poll?.status === "completed") {
+          const content = poll.content || "";
+          setAssistantMessage(jobAssistantMessageId, content, "normal");
+          onResponseComplete?.(analyticsPromptId, modelId, content);
+          return;
+        }
+        if (poll?.status === "failed") {
+          setAssistantMessage(
+            jobAssistantMessageId,
+            poll.error || t("chat.responseError"),
+            "error",
+            { errorCode: "DEEP_RESEARCH_FAILED" }
+          );
+          return;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+      }
+    },
+    [deepResearchPhaseText, modelId, onResponseComplete, setAssistantMessage, t]
+  );
+
+  // Resumes polling for a deep-research job that was still pending when this
+  // panel (re)mounted -- e.g. the user refreshed mid-research. The job keeps
+  // running server-side regardless of whether any tab is open, so this just
+  // reattaches the UI to it using the persisted pendingJobId instead of
+  // losing track of an in-flight request on every reload.
+  const resumedDeepResearchJobsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!isCurrentMessageViewLoaded || isSendingRef.current) return;
+    const pendingMessage = messages.find(
+      (message) =>
+        message.role === "assistant" &&
+        message.status === "pending" &&
+        Boolean(message.pendingJobId)
+    );
+    if (!pendingMessage || resumedDeepResearchJobsRef.current.has(pendingMessage.id)) {
+      return;
+    }
+    resumedDeepResearchJobsRef.current.add(pendingMessage.id);
+
+    setIsSending(true);
+    isSendingRef.current = true;
+    streamingChatIdRef.current = initialConversationId;
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const submittedAtMs = pendingMessage.createdAt
+      ? new Date(pendingMessage.createdAt).getTime()
+      : Date.now();
+
+    pollDeepResearchJob(pendingMessage.id, submittedAtMs, controller.signal).finally(() => {
+      setIsSending(false);
+      isSendingRef.current = false;
+      streamingChatIdRef.current = null;
+      abortControllerRef.current = null;
+    });
+  }, [initialConversationId, isCurrentMessageViewLoaded, messages, pollDeepResearchJob]);
+
     useEffect(() => {
         if (!isGuestMode && !sessionUserId) {
         return;
@@ -483,6 +595,23 @@ function ChatAppComponent({
         }
       }
 
+      if (response.headers.get("X-Chat-Response-Mode") === "async-job") {
+        // Deep research doesn't stream -- the idle-timeout watchdog is
+        // meaningless here (there's no single connection for it to guard),
+        // and pollDeepResearchJob checks the abort signal itself instead.
+        if (idleTimeoutId !== null) {
+          window.clearTimeout(idleTimeoutId);
+          idleTimeoutId = null;
+        }
+        await pollDeepResearchJob(
+          assistantMessageId,
+          Date.now(),
+          controller.signal,
+          analyticsPromptId
+        );
+        return;
+      }
+
       if (!response.body) {
         throw new Error(t("chat.responseBodyMissing"));
       }
@@ -618,6 +747,7 @@ function ChatAppComponent({
     messages,
     modelId,
     onResponseComplete,
+    pollDeepResearchJob,
     setAssistantMessage,
     t,
   ]);

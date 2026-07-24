@@ -4,6 +4,7 @@ import { after, beforeEach, test } from "node:test";
 import type Stripe from "stripe";
 import {
   acquireChatAccess,
+  extendChatReservationExpiry,
   preflightChatComparisonAccess,
   reconcileExpiredChatCreditReservations,
   releaseChatAccess,
@@ -260,6 +261,48 @@ test("creates a durable reservation and prevents duplicate settlement", async ()
     where: { provider: "openai", source: "internal" },
   });
   assert.equal(providerUsage.requestCount, 1);
+  await releaseChatAccess(acquired.leaseId);
+});
+
+test("extendChatReservationExpiry heartbeats a reserved row but leaves a settled one alone", async () => {
+  const user = await createUser();
+  const acquired = await acquireChatAccess(
+    chatAccess(user, 100),
+    chatBudget({ credits: 5, inputRate: 1, outputRate: 1 })
+  );
+  const reservationId = acquired.usageReservation.reservationId;
+
+  const before = await prisma.chatCreditReservation.findUniqueOrThrow({
+    where: { id: reservationId },
+  });
+  await extendChatReservationExpiry(reservationId, 900);
+  const afterHeartbeat = await prisma.chatCreditReservation.findUniqueOrThrow({
+    where: { id: reservationId },
+  });
+  assert.ok(
+    afterHeartbeat.expiresAt.getTime() > before.expiresAt.getTime(),
+    "heartbeat should push expiresAt forward for a still-reserved job"
+  );
+
+  await settleChatUsage(acquired.usageReservation, {
+    inputTokens: 100,
+    outputTokens: 900,
+    outcome: "completed",
+  });
+  const settled = await prisma.chatCreditReservation.findUniqueOrThrow({
+    where: { id: reservationId },
+  });
+  assert.equal(settled.status, "settled");
+
+  // Deep research can keep polling after Perplexity already reported a
+  // terminal state (e.g. a slow client); the heartbeat must be a no-op once
+  // the reservation is no longer "reserved" rather than reopening it.
+  await extendChatReservationExpiry(reservationId, 900);
+  const afterSettled = await prisma.chatCreditReservation.findUniqueOrThrow({
+    where: { id: reservationId },
+  });
+  assert.equal(afterSettled.expiresAt.getTime(), settled.expiresAt.getTime());
+
   await releaseChatAccess(acquired.leaseId);
 });
 

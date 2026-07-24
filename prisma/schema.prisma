@@ -207,11 +207,12 @@ model ConversationProject {
 }
 
 model Message {
-  id      String  @id @default(cuid())
-  role    String
-  content String
-  status  String  @default("normal")
-  modelId String?
+  id           String  @id @default(cuid())
+  role         String
+  content      String
+  status       String  @default("normal")
+  modelId      String?
+  pendingJobId String?
 
   conversationId String
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -562,6 +563,31 @@ model ChatCreditReservation {
   @@index([traceId])
   @@index([providerRequestId])
   @@index([providerResponseId])
+}
+
+// Tracks a single Perplexity "sonar-deep-research" async job durably, since
+// the request can run well past 30 minutes -- long enough to outlive both
+// the request that submitted it and a page refresh. See lib/perplexityDeepResearch.ts
+// (submit/poll HTTP calls) and app/api/chat/deep-research/status/route.ts
+// (the client-polled endpoint that reads and advances this row).
+model PerplexityAsyncJob {
+  id                 String    @id @default(cuid())
+  perplexityJobId    String    @unique
+  conversationId     String
+  assistantMessageId String    @unique
+  modelId            String
+  reservationId      String
+  traceId            String
+  status             String    @default("submitted") // submitted | in_progress | completed | failed
+  resultText         String?
+  errorMessage       String?
+  submittedAt        DateTime  @default(now())
+  lastPolledAt       DateTime?
+  completedAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([status, lastPolledAt])
 }
 
 model AppSetting {

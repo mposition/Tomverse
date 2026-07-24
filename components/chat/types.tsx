@@ -12,12 +12,13 @@ export type Message = {
   id: string;
   role: "user" | "assistant";
   content: string;
-  status?: "normal" | "error" | "cancelled";
+  status?: "normal" | "error" | "cancelled" | "pending";
   attachments?: ChatAttachment[];
   modelId?: string;
   errorCode?: string;
   errorHadAttachments?: boolean;
   createdAt?: string;
+  pendingJobId?: string | null;
 };
 
 export type Conversation = {

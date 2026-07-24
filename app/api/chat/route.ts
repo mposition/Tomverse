@@ -23,6 +23,7 @@ import {
     discardPerplexityUsage,
     perplexityUsageHeaders,
 } from "@/lib/perplexityUsageCapture";
+import { submitDeepResearchJob } from "@/lib/perplexityDeepResearch";
 import { assertModelRuntimeAvailable } from "@/lib/modelAvailability";
 import { parseOfficeSafely } from "@/lib/officeSecurity";
 import {
@@ -1224,6 +1225,124 @@ export async function POST(req: Request) {
                 error,
                 requestedModelId
             );
+        }
+
+        // Perplexity's "sonar-deep-research" model doesn't stream like every
+        // other model here -- it's a submit-then-poll async job that can run
+        // well past 30 minutes. Submit it, persist a "pending" message + job
+        // row, and hand off polling to the client (app/api/chat/deep-research/
+        // status) instead of holding this request or the 120s concurrency
+        // lease open for the job's lifetime.
+        if (modelConfig.usageClass === "deep-research") {
+            const activeLeaseId = leaseId;
+            leaseId = null;
+            await releaseChatAccess(activeLeaseId);
+
+            if (!conversationId || !assistantMessageId || !session?.user?.id) {
+                await settleChatUsage(usageReservation, {
+                    inputTokens: 0,
+                    outputTokens: 0,
+                    outcome: "failed",
+                });
+                usageReservation = null;
+                return tracedJsonError(
+                    "Deep research requires a saved conversation.",
+                    "CONVERSATION_REQUIRED",
+                    400,
+                    traceId
+                );
+            }
+
+            try {
+                const { perplexityJobId } = await submitDeepResearchJob({
+                    messages: formattedMessages,
+                    maxOutputTokens: 24_000,
+                    reasoningEffort:
+                        modelConfig.reasoning === "high" ? "high" : undefined,
+                });
+
+                await linkChatReservationProviderRequest(
+                    usageReservation.reservationId,
+                    { providerRequestId: perplexityJobId }
+                ).catch(() => {});
+
+                await prisma.$transaction(async (tx) => {
+                    await assertMessageCapacity(
+                        tx,
+                        session.user!.id,
+                        conversationId,
+                        1,
+                        0
+                    );
+                    await tx.message.create({
+                        data: {
+                            id: assistantMessageId,
+                            conversationId,
+                            role: "assistant",
+                            content: "",
+                            status: "pending",
+                            modelId: requestedModelId,
+                            pendingJobId: perplexityJobId,
+                        },
+                    });
+                    await tx.perplexityAsyncJob.create({
+                        data: {
+                            perplexityJobId,
+                            conversationId,
+                            assistantMessageId,
+                            modelId: requestedModelId,
+                            reservationId: usageReservation!.reservationId,
+                            traceId,
+                            status: "submitted",
+                        },
+                    });
+                });
+
+                return Response.json(
+                    { deepResearchJobId: assistantMessageId, status: "submitted" },
+                    {
+                        headers: {
+                            "X-Request-ID": traceId,
+                            "X-Chat-Response-Mode": "async-job",
+                        },
+                    }
+                );
+            } catch (error) {
+                await settleChatUsage(usageReservation, {
+                    inputTokens: 0,
+                    outputTokens: 0,
+                    outcome: "failed",
+                }).catch(() => {});
+                usageReservation = null;
+                await recordProviderFailure(
+                    modelConfig.provider,
+                    "DEEP_RESEARCH_SUBMIT_FAILED",
+                    {
+                        modelId: requestedModelId,
+                        phase: "request",
+                        traceId,
+                        message:
+                            error instanceof Error ? error.message : String(error),
+                    }
+                ).catch(() => {});
+                await recordModelFailure(
+                    requestedModelId,
+                    modelConfig.provider,
+                    "DEEP_RESEARCH_SUBMIT_FAILED"
+                ).catch(() => {});
+                logRequestError(
+                    "deep_research_submit_failed",
+                    traceId,
+                    error,
+                    requestedModelId
+                );
+                return tracedJsonError(
+                    "Failed to start the deep research job. Reserved credits were refunded.",
+                    "DEEP_RESEARCH_SUBMIT_FAILED",
+                    502,
+                    traceId
+                );
+            }
         }
 
         const result = await streamText({

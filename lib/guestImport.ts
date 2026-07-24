@@ -182,7 +182,10 @@ export function buildGuestImportPayload(guestConversationId: string): GuestImpor
       merged.push({
         role: message.role,
         content: message.content,
-        status: message.status || "normal",
+        // Guests never reach the Pro-only deep-research model, so a
+        // "pending" status can't legitimately appear in guest storage --
+        // coerced defensively since Message's status type now includes it.
+        status: message.status === "pending" ? "normal" : message.status || "normal",
         modelId: message.role === "assistant" ? modelId : null,
         createdAt:
           message.createdAt ||

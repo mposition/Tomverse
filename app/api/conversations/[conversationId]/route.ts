@@ -197,6 +197,8 @@ export async function GET(
         content: true,
         status: true,
         modelId: true,
+        pendingJobId: true,
+        createdAt: true,
       },
     });
     const hasMoreMessages = messagePage.length > MESSAGE_PAGE_SIZE;
