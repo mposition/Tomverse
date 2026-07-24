@@ -1287,8 +1287,25 @@ export default function Home() {
                         storeAndApplyThemePreference(data.theme);
                     }
 
-                    if (!isLanguage(urlLanguage) && data && isLanguage(data.language)) {
+                    // The account's saved language always wins once we know it --
+                    // ?lang= only ever seeds a brand-new account's row (see
+                    // /api/user/settings), it never overrides an existing one, so
+                    // there's no case where deferring to the URL here is correct.
+                    // (A guest signing in from an English session used to get
+                    // stuck in English even with a Korean account preference,
+                    // because ?lang=en carried over from the guest callback URL
+                    // suppressed this entirely.)
+                    if (data && isLanguage(data.language)) {
                         setLang(data.language);
+                        if (
+                            isLanguage(urlLanguage) &&
+                            urlLanguage !== data.language &&
+                            typeof window !== "undefined"
+                        ) {
+                            const url = new URL(window.location.href);
+                            url.searchParams.delete("lang");
+                            window.history.replaceState(null, "", url.toString());
+                        }
                     }
 
                     const detectedTimeZone = detectBrowserTimeZone();
