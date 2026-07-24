@@ -756,26 +756,41 @@ function ChatAppComponent({
     const lastPrompt = lastPromptRef.current;
     if (!lastPrompt || isSendingRef.current) return;
 
-    const retryUserMessageId = crypto.randomUUID();
-    void handleSendPrompt(
-      lastPrompt.text,
-      lastPrompt.targetChatId,
-      retryUserMessageId,
-      lastPrompt.attachments
-    );
-  }, [handleSendPrompt]);
+    // Unlike a fresh send, a retry doesn't go through handleGlobalSubmit or
+    // handleModelOnlySubmit -- both of which flush any pending model-list
+    // sync via onBeforeSend first. Skipping that here means a request that
+    // failed because the server hadn't yet seen a just-added model would
+    // keep failing on every retry, since nothing ever re-flushes the sync.
+    void (async () => {
+      const settingsReady = (await onBeforeSend?.(lastPrompt.targetChatId)) ?? true;
+      if (!settingsReady) return;
+
+      const retryUserMessageId = crypto.randomUUID();
+      void handleSendPrompt(
+        lastPrompt.text,
+        lastPrompt.targetChatId,
+        retryUserMessageId,
+        lastPrompt.attachments
+      );
+    })();
+  }, [handleSendPrompt, onBeforeSend]);
 
   const handleRetryWithoutAttachments = useCallback(() => {
     const lastPrompt = lastPromptRef.current;
     if (!lastPrompt || isSendingRef.current) return;
 
-    void handleSendPrompt(
-      lastPrompt.text,
-      lastPrompt.targetChatId,
-      crypto.randomUUID(),
-      []
-    );
-  }, [handleSendPrompt]);
+    void (async () => {
+      const settingsReady = (await onBeforeSend?.(lastPrompt.targetChatId)) ?? true;
+      if (!settingsReady) return;
+
+      void handleSendPrompt(
+        lastPrompt.text,
+        lastPrompt.targetChatId,
+        crypto.randomUUID(),
+        []
+      );
+    })();
+  }, [handleSendPrompt, onBeforeSend]);
 
   useEffect(() => {
     if (!isGuestMode && status === "loading") return;
