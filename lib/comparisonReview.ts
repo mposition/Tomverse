@@ -4,6 +4,8 @@ import { createHash, randomInt } from "node:crypto";
 import { z } from "zod";
 import { getEnabledModel, type AiModel } from "@/lib/models";
 import { PROVIDER_API_KEY_ENV } from "@/lib/providerMonitoring";
+import { assertModelAccess, type ChatAccess } from "@/lib/chatSecurity";
+import { assertModelRuntimeAvailable } from "@/lib/modelAvailability";
 
 export const COMPARISON_REVIEW_PROMPT_VERSION = "comparison-review-v1";
 export const QUICK_COMPARISON_PROMPT_VERSION = "quick-comparison-v1";
@@ -372,3 +374,27 @@ export const getQuickComparisonReviewerCandidates = (
     ),
     sourceProviders
   );
+
+// Shared between the logged-in (DB-conversation-scoped) and guest quick
+// comparison routes: narrows the candidate reviewer list down to models
+// the caller can actually use (plan-gated) and that are currently runtime
+// -available (not disabled/retired).
+export const accessibleQuickReviewers = async (
+  access: Pick<ChatAccess, "kind" | "plan">,
+  responses: ReviewSourceResponse[]
+) => {
+  const candidates = getQuickComparisonReviewerCandidates(
+    new Set(responses.map((response) => response.provider))
+  );
+  const available: AiModel[] = [];
+  for (const candidate of candidates) {
+    try {
+      assertModelAccess(access, candidate);
+      const override = await assertModelRuntimeAvailable(candidate.id);
+      if (override.allowed) available.push(candidate);
+    } catch {
+      // Try the next configured Standard reviewer.
+    }
+  }
+  return available;
+};

@@ -272,6 +272,7 @@ export const en = {
         compareUnavailable: "Comparison summary is unavailable.",
         compareRateLimited: "Too many requests. Please try again in a moment.",
         compareServiceUnavailable: "Comparison summary is temporarily unavailable. Please try again shortly.",
+        guestQuickSummaryLimitReached: "Guests can use Quick Difference Summary once per day. Log in for unlimited use.",
         noResponseContent: "No response content found.",
         promptSummarizeDocument: "Summarize this document",
         promptCompareModels: "Compare these models",

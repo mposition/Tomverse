@@ -531,6 +531,35 @@ const incrementUsage = async (
     return rows.length > 0;
 };
 
+// A separate, feature-scoped guest cap (independent of the general
+// day/month chat-message quota from limitsFor/acquireChatAccess): guests
+// get exactly one Quick Difference Summary per day. Uses its own "period"
+// string on the same ChatUsageBucket table/subjectKey so it can't collide
+// with or be confused for the chat-message "day" bucket.
+export async function assertGuestQuickSummaryDailyLimit(
+    access: Pick<ChatAccess, "kind" | "subjectKey">
+) {
+    if (access.kind !== "guest") return;
+    const allowed = await prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"guest-quick-summary:" + access.subjectKey}))`;
+        return incrementUsage(
+            tx,
+            access.subjectKey,
+            "guest-quick-summary-day",
+            periodStart("day", new Date()),
+            positiveInteger(process.env.CHAT_GUEST_QUICK_SUMMARY_PER_DAY, 1),
+            1
+        );
+    });
+    if (!allowed) {
+        throw new ChatAccessError(
+            429,
+            "GUEST_QUICK_SUMMARY_LIMIT_REACHED",
+            "Guests can use quick difference summary once per day."
+        );
+    }
+}
+
 const readUsageCount = async (
     tx: Prisma.TransactionClient,
     key: string,

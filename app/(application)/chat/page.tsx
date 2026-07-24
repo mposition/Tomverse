@@ -65,6 +65,7 @@ import {
 } from "@/lib/guestImport";
 import { GuestImportModal } from "@/components/chat/GuestImportModal";
 import { GUEST_IMPORT_MODAL_OPEN_EVENT } from "@/lib/guestImportModalEvents";
+import { useTurnstile } from "@/components/chat/useTurnstile";
 
 // Persists which conversation is open in *this tab* so an F5 / crash
 // recovery restores it instead of falling back to the welcome screen --
@@ -392,6 +393,7 @@ export default function Home() {
     Map<string, Map<string, string>>
   >(new Map());
   const latestLocalComparisonPromptRef = useRef<string | null>(null);
+  const localComparisonQuestionsRef = useRef<Map<string, string>>(new Map());
   const promptCountsRef = useRef<Map<string, number>>(new Map());
   const comparisonPresetAppliedRef = useRef(false);
   const comparisonPresetRequestedRef = useRef(false);
@@ -400,6 +402,10 @@ export default function Home() {
   const [isPrivateMode, setIsPrivateMode] = useState(false);
 
   const isGuestMode = status !== "loading" && !sessionUserId;
+  const {
+    containerRef: guestQuickSummaryTurnstileContainerRef,
+    getToken: getGuestQuickSummaryTurnstileToken,
+  } = useTurnstile(isGuestMode, "guest_quick_summary");
   const accountUsage = useUserUsage(!isGuestMode);
   const maxSelectableModels = isGuestMode
     ? APP_DEFAULTS.maxGuestSelectedModels
@@ -1842,9 +1848,10 @@ export default function Home() {
         { conversation_mode: "private" }
       );
       promptCountsRef.current.set("private-chat", previousCount + 1);
-      setPromptPayload({ 
+      localComparisonQuestionsRef.current.set(comparisonId, trimmed);
+      setPromptPayload({
         id: comparisonId,
-        text: trimmed, 
+        text: trimmed,
         chatId: "private-chat",
         userMessageId: crypto.randomUUID(),
         attachments: promptAttachments,
@@ -1956,9 +1963,10 @@ export default function Home() {
       }
     }
 
-      setPromptPayload({ 
+      localComparisonQuestionsRef.current.set(comparisonId, trimmed);
+      setPromptPayload({
         id: comparisonId,
-        text: trimmed, 
+        text: trimmed,
         chatId: activeChatId,
         userMessageId: userMsgId,
         attachments: promptAttachments,
@@ -2366,10 +2374,85 @@ export default function Home() {
       }
     };
 
+    const guestCompareSummaryErrorMessage = (code?: string) =>
+      code === "GUEST_QUICK_SUMMARY_LIMIT_REACHED"
+        ? t("chat.guestQuickSummaryLimitReached")
+        : code === "API_RATE_LIMITED"
+          ? t("chat.compareRateLimited")
+          : code === "QUICK_COMPARISON_REVIEWER_UNAVAILABLE"
+            ? t("chat.compareServiceUnavailable")
+            : t("chat.compareUnavailable");
+
+    const executeGuestCompareSummary = async () => {
+      const promptId = latestLocalComparisonPromptRef.current;
+      const question = promptId
+        ? localComparisonQuestionsRef.current.get(promptId)
+        : undefined;
+      const responseMap = promptId
+        ? localComparisonResponsesRef.current.get(promptId)
+        : undefined;
+      if (!promptId || !question || !responseMap || responseMap.size < 2) {
+        showToast(t("chat.aiReviewResponsesRequired"), "info");
+        return;
+      }
+      setIsCompareSummaryLoading(true);
+      try {
+        const responses = Array.from(responseMap.entries()).map(
+          ([modelId, content]) => ({
+            messageId: `${promptId}:${modelId}`,
+            modelId,
+            content,
+          })
+        );
+        const sendRequest = (turnstileToken?: string) =>
+          fetch("/api/chat/compare-summary", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            cache: "no-store",
+            body: JSON.stringify({
+              question,
+              responses,
+              language: lang,
+              ...(turnstileToken ? { turnstileToken } : {}),
+            }),
+          });
+
+        let response = await sendRequest();
+        if (!response.ok) {
+          const payload = (await response.json().catch(() => null)) as
+            | { code?: string }
+            | null;
+          if (payload?.code === "TURNSTILE_REQUIRED") {
+            const turnstileToken = await getGuestQuickSummaryTurnstileToken();
+            response = await sendRequest(turnstileToken);
+            if (!response.ok) {
+              const retryPayload = (await response.json().catch(() => null)) as
+                | { code?: string }
+                | null;
+              showToast(guestCompareSummaryErrorMessage(retryPayload?.code), "error");
+              return;
+            }
+          } else {
+            showToast(guestCompareSummaryErrorMessage(payload?.code), "error");
+            return;
+          }
+        }
+        setCompareSummary(await response.json());
+      } catch {
+        showToast(t("chat.compareUnavailable"), "error");
+      } finally {
+        setIsCompareSummaryLoading(false);
+      }
+    };
+
     const handleCompareSummary = async () => {
       if (!currentChatId || isCompareSummaryLoading) return;
-      if (isGuestMode || currentChatId === "private-chat") {
+      if (currentChatId === "private-chat") {
         showToast(t("chat.quickDifferenceSummarySavedChatRequired"), "info");
+        return;
+      }
+      if (isGuestMode) {
+        await executeGuestCompareSummary();
         return;
       }
       await executeCompareSummary(currentChatId);
@@ -2409,6 +2492,12 @@ export default function Home() {
         onSkip={() => closeGuestImportModal(true)}
         onComplete={handleGuestImportComplete}
       />
+      {isGuestMode ? (
+        <div
+          ref={guestQuickSummaryTurnstileContainerRef}
+          className="fixed bottom-2 right-2 z-[70]"
+        />
+      ) : null}
       {!isViewportReady ? (
         <ChatShellSkeleton label={t("auth.loading")} />
       ) : isMobileViewport ? (
