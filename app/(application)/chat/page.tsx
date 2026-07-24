@@ -370,6 +370,20 @@ export default function Home() {
     cached: boolean;
   } | null>(null);
   const [isCompareSummaryLoading, setIsCompareSummaryLoading] = useState(false);
+  // The comparison summary is one non-streaming request, so there's no real
+  // per-step progress to report -- but it does genuinely read the responses
+  // before it can summarize their differences, so swapping the loading text
+  // once partway through reflects that real (if coarse) sequencing instead
+  // of a single static line for however long the request takes.
+  const [compareSummaryStage, setCompareSummaryStage] = useState(0);
+  useEffect(() => {
+    if (!isCompareSummaryLoading) {
+      queueMicrotask(() => setCompareSummaryStage(0));
+      return;
+    }
+    const timer = window.setTimeout(() => setCompareSummaryStage(1), 2500);
+    return () => window.clearTimeout(timer);
+  }, [isCompareSummaryLoading]);
   const [showComparisonReview, setShowComparisonReview] = useState(false);
   const [upgradeModelPrompt, setUpgradeModelPrompt] = useState<AiModel | null>(null);
   const [valueUpgradeSource, setValueUpgradeSource] = useState<
@@ -2973,7 +2987,9 @@ export default function Home() {
           className="flex items-center gap-3 rounded-2xl border border-zinc-200 bg-white px-5 py-4 text-sm font-bold text-zinc-900 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
         >
           <Loader2 className="h-5 w-5 animate-spin text-blue-600" aria-hidden="true" />
-          {t("chat.quickDifferenceSummaryLoading")}
+          {compareSummaryStage === 0
+            ? t("chat.quickDifferenceSummaryLoading")
+            : t("chat.quickDifferenceSummaryLoadingStage2")}
         </div>
       </div>
     )}

@@ -302,6 +302,9 @@ export function MobileChatShell({
     (modelId) =>
       !disabledPanels.includes(modelId) && modelStatuses[modelId] === "idle"
   ).length;
+  const comparableModelCount = selectedModels.filter(
+    (modelId) => !disabledPanels.includes(modelId)
+  ).length;
   const isCompareSummaryDisabled =
     isCompareSummaryLoading || readyForCompareCount < 2;
   const isAnyWorkingOrError = selectedModels.some((modelId) => {
@@ -479,7 +482,17 @@ export function MobileChatShell({
             title={readyForCompareCount < 2 ? t("chat.aiReviewResponsesRequired") : undefined}
             className="flex h-8 w-full items-center justify-between gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-2 text-[11px] font-black text-blue-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200"
           >
-            <span className="truncate">{t("chat.quickDifferenceSummary")}</span>
+            <span className="truncate">
+              {t("chat.quickDifferenceSummary")}
+              {comparableModelCount > 1 && readyForCompareCount < comparableModelCount && (
+                <span
+                  data-testid="quick-comparison-ready-count"
+                  className="ml-1 font-normal text-blue-500/80 dark:text-blue-300/80"
+                >
+                  ({readyForCompareCount}/{comparableModelCount})
+                </span>
+              )}
+            </span>
             <CreditCostBadge
               credits={1}
               size="xs"

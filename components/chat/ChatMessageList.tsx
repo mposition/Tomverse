@@ -19,6 +19,7 @@ import {
   Presentation,
   RotateCcw,
   Sheet,
+  Square,
   UserRound,
 } from "lucide-react";
 import { Message, type ChatAttachment } from "@/components/chat/types";
@@ -43,6 +44,9 @@ type ChatMessageListProps = {
   // distinct from msg.status, which doesn't tell "still streaming" apart
   // from "finished normally".
   isSending?: boolean;
+  // Aborts only this panel's in-flight request, distinct from the shell's
+  // "stop all" button.
+  onStopGenerating?: () => void;
 };
 type MarkdownCodeProps = ComponentPropsWithoutRef<"code"> & ExtraProps;
 
@@ -142,6 +146,7 @@ export function ChatMessageList({
   isGuestMode = false,
   currentChatId = null,
   isSending = false,
+  onStopGenerating,
 }: ChatMessageListProps) {
   const { models: AVAILABLE_MODELS } = useModelCatalog();
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -292,6 +297,19 @@ export function ChatMessageList({
             const isActivelyGenerating =
               !isUser && isSending && idx === messages.length - 1 && msg.role === "assistant";
 
+            // Only shown before the first token arrives (msg.content is
+            // still empty) -- once real text starts streaming in, the
+            // generic "generating" label takes over. Perplexity models
+            // genuinely run a live web search first; a prior user turn with
+            // attachments genuinely gets read first. Anything else falls
+            // back to the plain "connecting" text rather than guessing.
+            const connectingStatusText =
+              modelInfo?.provider === "perplexity"
+                ? t("chat.searchingWebStatus")
+                : messages[idx - 1]?.attachments?.length
+                  ? t("chat.readingFileStatus")
+                  : t("chat.connectingStatus");
+
               // Technical detail lines (trace IDs, internal cost figures) are
             // appended to msg.content after a newline for support purposes,
             // but only the first line is meant for the user to read.
@@ -326,6 +344,19 @@ export function ChatMessageList({
                       <span className="text-[10px] font-bold uppercase tracking-wide text-blue-500 dark:text-blue-400">
                         {t("chat.generatingStatus")}
                       </span>
+                    )}
+                    {isActivelyGenerating && onStopGenerating && (
+                      <button
+                        type="button"
+                        data-testid="stop-this-response"
+                        onClick={onStopGenerating}
+                        title={t("chat.stopThisResponse")}
+                        aria-label={t("chat.stopThisResponse")}
+                        className="ml-auto flex items-center gap-1 rounded-full border border-zinc-300 px-2 py-0.5 text-[10px] font-bold text-zinc-500 hover:border-zinc-400 hover:text-zinc-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-600 dark:hover:text-zinc-200"
+                      >
+                        <Square className="h-2.5 w-2.5 fill-current" aria-hidden="true" />
+                        {t("chat.stop")}
+                      </button>
                     )}
                   </div>
                 )}
@@ -416,7 +447,7 @@ export function ChatMessageList({
                       <div className="flex items-center gap-2">
                         <TypingIndicator />
                         <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
-                          {t("chat.connectingStatus")}
+                          {connectingStatusText}
                         </span>
                       </div>
                     ) : (

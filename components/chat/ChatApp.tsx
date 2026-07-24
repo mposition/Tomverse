@@ -167,6 +167,12 @@ function ChatAppComponent({
     abortControllerRef.current?.abort();
   }, [stopSignal]);
 
+  // Lets the message list offer a per-panel stop button, distinct from the
+  // shell's "stop all" button which drives every panel via stopSignal.
+  const stopThisPanel = useCallback(() => {
+    abortControllerRef.current?.abort();
+  }, []);
+
   const isConversationEmpty =
     messages.length === 0 || (messages.length === 1 && messages[0]?.id === "welcome");
 
@@ -738,6 +744,7 @@ function ChatAppComponent({
         isGuestMode={isGuestMode}
         currentChatId={initialConversationId}
         isSending={isSending}
+        onStopGenerating={stopThisPanel}
       />}
                   </div>
                   {isGuestMode ? (
