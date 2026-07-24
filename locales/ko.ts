@@ -289,6 +289,7 @@ export const ko = {
         compareUnavailable: "비교 요약을 사용할 수 없습니다.",
         compareRateLimited: "요청이 너무 많습니다. 잠시 후 다시 시도해주세요.",
         compareServiceUnavailable: "비교 요약을 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도해주세요.",
+        compareGenerationFailed: "비교 요약을 생성하지 못했습니다. 크레딧은 차감되지 않았습니다. 다시 시도해 주세요.",
         guestQuickSummaryLimitReached: "게스트는 빠른 차이 요약을 하루에 한 번만 이용할 수 있습니다. 로그인하면 제한 없이 이용할 수 있습니다.",
         noResponseContent: "응답 내용을 찾을 수 없습니다.",
         promptSummarizeDocument: "이 문서 요약하기",

@@ -2464,7 +2464,9 @@ export default function Home() {
                 ? t("chat.compareRateLimited")
                 : payload?.code === "QUICK_COMPARISON_REVIEWER_UNAVAILABLE"
                   ? t("chat.compareServiceUnavailable")
-                  : t("chat.compareUnavailable");
+                  : payload?.code === "QUICK_COMPARISON_FAILED"
+                    ? t("chat.compareGenerationFailed")
+                    : t("chat.compareUnavailable");
           showToast(message, "error");
           return;
         }
@@ -2484,7 +2486,9 @@ export default function Home() {
           ? t("chat.compareRateLimited")
           : code === "QUICK_COMPARISON_REVIEWER_UNAVAILABLE"
             ? t("chat.compareServiceUnavailable")
-            : t("chat.compareUnavailable");
+            : code === "QUICK_COMPARISON_FAILED"
+              ? t("chat.compareGenerationFailed")
+              : t("chat.compareUnavailable");
 
     const executeGuestCompareSummary = async () => {
       const promptId = latestLocalComparisonPromptRef.current;
