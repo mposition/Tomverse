@@ -9,6 +9,7 @@ import { encryptOAuthAccountTokens } from "@/lib/oauthTokenCrypto";
 import { logAuthAuditEvent } from "@/lib/securityAudit";
 import { effectivePlanForAccess } from "@/lib/foundingTesterPassCore";
 import { verifyEmailLoginCode, verifyEmailLoginLink } from "@/lib/emailLogin";
+import { appUrl } from "@/lib/accountEmails";
 
 // next-auth v4's CredentialsProvider only exposes authorize()'s second
 // argument as a RequestInternal (plain headers object, not a Headers
@@ -142,6 +143,17 @@ export const authOptions: NextAuthOptions = {
                         },
                     });
                     return true;
+                }
+                if (security.accountStatus === "pending_deletion" || security.accountStatus === "deletion_processing") {
+                    // Only reachable after the provider already verified this
+                    // identity (OAuth completed, or the emailed code/link was
+                    // correct), so showing deletion-specific detail here does
+                    // not expose account status to someone who hasn't proven
+                    // ownership yet.
+                    logAuthAuditEvent("auth.sign_in_denied_pending_deletion", {
+                        userId: user.id,
+                    });
+                    return `${appUrl()}/auth/signin?error=AccountPendingDeletion`;
                 }
                 logAuthAuditEvent("auth.sign_in_denied_suspended", {
                     userId: user.id,

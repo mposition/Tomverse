@@ -473,6 +473,7 @@ export const de = {
         addEmailLoginSuccess: "Die E-Mail-Anmeldung ist jetzt für Ihr Konto aktiviert.",
         errorAccountNotLinked: "Diese E-Mail wird bereits von einer anderen Anmeldemethode verwendet. Versuchen Sie Google, Microsoft oder die E-Mail-Anmeldung.",
         errorAccessDenied: "Zugriff verweigert. Bitte erneut versuchen.",
+        errorAccountPendingDeletion: "Dieses Konto ist zur Löschung vorgemerkt, die Anmeldung ist gesperrt. Um die Löschung abzubrechen, kontaktieren Sie support@tomverse.app -- dies kann nicht über den Anmeldebildschirm rückgängig gemacht werden.",
         errorGeneric: "Bei der Anmeldung ist ein Fehler aufgetreten. Bitte erneut versuchen.",
         manageLoginMethods: "Anmeldemethoden",
         manageLoginMethodsDescription: "Verwalten Sie, wie Sie sich bei Tomverse anmelden. Mindestens eine Methode muss aktiviert bleiben.",

@@ -267,6 +267,7 @@ export function AdminUsersPanel({
   const [securityReason, setSecurityReason] = useState("");
   const [securityUntil, setSecurityUntil] = useState("");
   const [securityIncidentNote, setSecurityIncidentNote] = useState("");
+  const [securityTicketReference, setSecurityTicketReference] = useState("");
   const [segment, setSegment] = useState<AdminUserSegment>(initialSegment);
   const [pageSize, setPageSize] = useState<PageSize>(initialPageSize);
   const [pageIndex, setPageIndex] = useState(initialPageIndex);
@@ -608,12 +609,17 @@ export function AdminUsersPanel({
       | "revoke_sessions"
       | "restrict_ai"
       | "unrestrict_ai"
-      | "unlink_oauth",
+      | "unlink_oauth"
+      | "restore_account",
     provider?: string
   ) => {
     if (billingAction) return;
     if (securityReason.trim().length < 5) {
       dispatchAppToast("Enter an audit reason of at least five characters.", "error");
+      return;
+    }
+    if (action === "restore_account" && securityTicketReference.trim().length < 3) {
+      dispatchAppToast("Enter the support ticket reference to restore this account.", "error");
       return;
     }
     setBillingAction(`security:${action}${provider ? `:${provider}` : ""}`);
@@ -629,6 +635,8 @@ export function AdminUsersPanel({
             until: securityUntil ? new Date(securityUntil).toISOString() : null,
             incidentNote: securityIncidentNote.trim() || null,
             provider: provider || null,
+            supportTicketReference:
+              action === "restore_account" ? securityTicketReference.trim() : null,
           }),
         }
       );
@@ -637,6 +645,7 @@ export function AdminUsersPanel({
             user?: Partial<AdminUserDetail>;
             error?: string;
             approvalId?: string;
+            alreadyRestored?: boolean;
           }
         | null;
       if (!response.ok || !data?.user) {
@@ -650,7 +659,13 @@ export function AdminUsersPanel({
       setSecurityReason("");
       setSecurityUntil("");
       setSecurityIncidentNote("");
-      dispatchAppToast("User security control applied.", "success");
+      setSecurityTicketReference("");
+      dispatchAppToast(
+        data.alreadyRestored
+          ? "Account was already active -- no change made."
+          : "User security control applied.",
+        "success"
+      );
     } catch (error) {
       dispatchAppToast(
         error instanceof Error ? error.message : "Security control failed.",
@@ -1118,16 +1133,35 @@ export function AdminUsersPanel({
                     placeholder="Optional security incident note"
                     className="h-10 rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-sm text-white outline-none focus:border-blue-400 md:col-span-3"
                   />
+                  {detailUser.accountStatus === "pending_deletion" && (
+                    <input
+                      value={securityTicketReference}
+                      onChange={(event) => setSecurityTicketReference(event.target.value)}
+                      placeholder="Support ticket reference (required to restore)"
+                      className="h-10 rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-sm text-white outline-none focus:border-blue-400 md:col-span-3"
+                    />
+                  )}
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => applySecurityAction(detailUser.id, detailUser.accountStatus === "suspended" ? "unsuspend" : "suspend")}
-                    disabled={Boolean(billingAction)}
-                    className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-black text-red-100 hover:bg-red-500/20 disabled:opacity-50"
-                  >
-                    {detailUser.accountStatus === "suspended" ? "Unsuspend account" : "Suspend account"}
-                  </button>
+                  {detailUser.accountStatus === "pending_deletion" ? (
+                    <button
+                      type="button"
+                      onClick={() => applySecurityAction(detailUser.id, "restore_account")}
+                      disabled={Boolean(billingAction)}
+                      className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-black text-emerald-100 hover:bg-emerald-500/20 disabled:opacity-50"
+                    >
+                      Cancel deletion & restore account
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => applySecurityAction(detailUser.id, detailUser.accountStatus === "suspended" ? "unsuspend" : "suspend")}
+                      disabled={Boolean(billingAction)}
+                      className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-black text-red-100 hover:bg-red-500/20 disabled:opacity-50"
+                    >
+                      {detailUser.accountStatus === "suspended" ? "Unsuspend account" : "Suspend account"}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => applySecurityAction(detailUser.id, detailUser.aiUsageRestricted ? "unrestrict_ai" : "restrict_ai")}

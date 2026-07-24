@@ -17,6 +17,7 @@ import {
 const PROVIDER_ERROR_KEYS: Record<string, string> = {
     OAuthAccountNotLinked: "auth.errorAccountNotLinked",
     AccessDenied: "auth.errorAccessDenied",
+    AccountPendingDeletion: "auth.errorAccountPendingDeletion",
 };
 
 // Maps the specific failure the server reports (lib/emailLogin.ts's

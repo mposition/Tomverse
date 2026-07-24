@@ -469,6 +469,7 @@ export const zh = {
         addEmailLoginSuccess: "已为你的账户启用邮箱登录。",
         errorAccountNotLinked: "该邮箱已被其他登录方式使用，请尝试 Google、Microsoft 或邮箱登录。",
         errorAccessDenied: "访问被拒绝，请重试。",
+        errorAccountPendingDeletion: "该账户已安排删除，登录已被阻止。要取消删除，请联系 support@tomverse.app —— 无法在登录页面撤销。",
         errorGeneric: "登录时出现问题，请重试。",
         manageLoginMethods: "登录方式",
         manageLoginMethodsDescription: "管理你登录 Tomverse 的方式，至少需保留一种登录方式。",

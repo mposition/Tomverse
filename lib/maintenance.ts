@@ -22,7 +22,7 @@ const OAUTH_ACCOUNT_BATCH_SIZE = 200;
 const TESTER_PASS_BATCH_SIZE = 100;
 const TESTER_PASS_REMINDER_WINDOW_MS = 7 * 86_400_000;
 
-const deleteScheduledAccounts = async (now: Date) => {
+export const deleteScheduledAccounts = async (now: Date) => {
   const users = await prisma.user.findMany({
     where: {
       accountStatus: "pending_deletion",
@@ -34,6 +34,20 @@ const deleteScheduledAccounts = async (now: Date) => {
   });
   let deleted = 0;
   for (const user of users) {
+    // Re-verify and claim atomically right before deleting: an admin
+    // restore that lands between the findMany above and here already
+    // flipped accountStatus away from pending_deletion, so this affects 0
+    // rows and the account survives instead of being deleted out from
+    // under the restore.
+    const claimed = await prisma.user.updateMany({
+      where: {
+        id: user.id,
+        accountStatus: "pending_deletion",
+        accountDeletionScheduledFor: { lte: now },
+      },
+      data: { accountStatus: "deletion_processing" },
+    });
+    if (claimed.count !== 1) continue;
     const result = await deleteTomverseAccount(user.id, {
       cancelSubscription: false,
     });

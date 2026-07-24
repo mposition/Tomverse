@@ -473,6 +473,7 @@ export const pt = {
         addEmailLoginSuccess: "O login por e-mail agora está ativado para sua conta.",
         errorAccountNotLinked: "Esse e-mail já está em uso por outro método de login. Tente Google, Microsoft ou login por e-mail.",
         errorAccessDenied: "Acesso negado. Tente novamente.",
+        errorAccountPendingDeletion: "Esta conta está agendada para exclusão e o login está bloqueado. Para cancelar a exclusão, contacte support@tomverse.app -- isto não pode ser desfeito na tela de login.",
         errorGeneric: "Algo deu errado ao entrar. Tente novamente.",
         manageLoginMethods: "Métodos de login",
         manageLoginMethodsDescription: "Gerencie como você entra no Tomverse. Pelo menos um método deve permanecer ativado.",

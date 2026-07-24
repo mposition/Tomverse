@@ -93,6 +93,7 @@ run(
     "tests/integration/admin-security.db.test.ts",
     "tests/integration/admin-users.db.test.ts",
     "tests/integration/login-methods.db.test.ts",
+    "tests/integration/account-deletion.db.test.ts",
   ],
-  "Running financial, credit, model-registry, admin-security, admin-users, and login-methods transaction scenarios"
+  "Running financial, credit, model-registry, admin-security, admin-users, login-methods, and account-deletion transaction scenarios"
 );

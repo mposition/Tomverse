@@ -473,6 +473,7 @@ export const es = {
         addEmailLoginSuccess: "El acceso por correo ya está habilitado para tu cuenta.",
         errorAccountNotLinked: "Ese correo ya se usa con otro método de acceso. Prueba con Google, Microsoft o el acceso por correo.",
         errorAccessDenied: "Acceso denegado. Inténtalo de nuevo.",
+        errorAccountPendingDeletion: "Esta cuenta tiene una eliminación programada y el inicio de sesión está bloqueado. Para cancelar la eliminación, contacta a support@tomverse.app -- esto no se puede deshacer desde la pantalla de inicio de sesión.",
         errorGeneric: "Ocurrió un error al iniciar sesión. Inténtalo de nuevo.",
         manageLoginMethods: "Métodos de acceso",
         manageLoginMethodsDescription: "Gestiona cómo inicias sesión en Tomverse. Debe quedar al menos un método habilitado.",

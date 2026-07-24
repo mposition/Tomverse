@@ -19,8 +19,20 @@ export async function sendAccountDeletionScheduledEmail(input: {
   return sendTransactionalEmail({
     to: input.to,
     subject: "Tomverse account deletion scheduled",
-    text: `Your Tomverse account has been signed out and scheduled for permanent deletion on ${date}. If you did not request this, contact support@tomverse.app immediately.`,
-    html: `<p>Your Tomverse account has been signed out and scheduled for permanent deletion on <strong>${escapeHtml(date)}</strong>.</p><p>If you did not request this, contact <a href="mailto:support@tomverse.app">support@tomverse.app</a> immediately.</p>`,
+    text: `Your Tomverse account access has been stopped immediately and permanent deletion (including all data) is scheduled for ${date}. If you have a paid plan, automatic renewal has been stopped, but access stays blocked either way while deletion is pending. Cancelling this request is not self-service -- contact support@tomverse.app before that date and our team will restore your account. If restored, plan access resumes only until your plan's original expiration date; automatic renewal is not restored. If you did not request this, contact support@tomverse.app immediately.`,
+    html: `<p>Your Tomverse account access has been stopped immediately, and permanent deletion (including all data) is scheduled for <strong>${escapeHtml(date)}</strong>.</p><p>If you have a paid plan, automatic renewal has been stopped, but access stays blocked either way while deletion is pending.</p><p>Cancelling this request is <strong>not self-service</strong> -- contact <a href="mailto:support@tomverse.app">support@tomverse.app</a> before that date and our team will restore your account. If restored, plan access resumes only until your plan's original expiration date; automatic renewal is not restored.</p><p>If you did not request this, contact <a href="mailto:support@tomverse.app">support@tomverse.app</a> immediately.</p>`,
+  });
+}
+
+export async function sendAccountRestoredEmail(input: {
+  to: string | null | undefined;
+}) {
+  if (!input.to) return { sent: false, reason: "Recipient email missing" };
+  return sendTransactionalEmail({
+    to: input.to,
+    subject: "Your Tomverse account has been restored",
+    text: `Your Tomverse account is active again and you can sign in. If you had a paid plan, it continues until its original expiration date, but automatic renewal was not restored -- you'll need to resubscribe if you want to keep the plan after that date.`,
+    html: `<p>Your Tomverse account is active again and you can sign in.</p><p>If you had a paid plan, it continues until its original expiration date, but automatic renewal was not restored -- you'll need to resubscribe if you want to keep the plan after that date.</p>`,
   });
 }
 
@@ -38,7 +50,7 @@ type WelcomeCopy = {
   preview: string;
 };
 
-const appUrl = () =>
+export const appUrl = () =>
   process.env.PUBLIC_APP_URL ||
   process.env.NEXT_PUBLIC_APP_URL ||
   "https://tomverse.app";

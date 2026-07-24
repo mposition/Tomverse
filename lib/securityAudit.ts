@@ -7,6 +7,7 @@ type AuthAuditEvent =
     | "auth.create_user"
     | "auth.sign_in"
     | "auth.sign_in_denied_suspended"
+    | "auth.sign_in_denied_pending_deletion"
     | "auth.sign_out"
     | "auth.link_account";
 export type SecurityAuditEvent =

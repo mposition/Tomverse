@@ -18,6 +18,10 @@ import {
 } from "@/lib/apiSecurity";
 import { prisma } from "@/lib/prisma";
 import { revokeAllUserSessions } from "@/lib/sessionSecurity";
+import { restoreTomverseAccount } from "@/lib/accountDeletion";
+import { sendAccountRestoredEmail } from "@/lib/accountEmails";
+
+const SECURITY_ACTIONS_WITH_EXPIRY = new Set(["suspend", "restrict_ai"]);
 
 const securityActionSchema = z
   .object({
@@ -28,11 +32,13 @@ const securityActionSchema = z
       "restrict_ai",
       "unrestrict_ai",
       "unlink_oauth",
+      "restore_account",
     ]),
     reason: z.string().trim().min(5).max(1_000),
     until: z.string().datetime().nullable().optional(),
     incidentNote: z.string().trim().max(2_000).nullable().optional(),
     provider: z.string().trim().min(2).max(80).nullable().optional(),
+    supportTicketReference: z.string().trim().min(3).max(120).nullable().optional(),
   })
   .strict();
 
@@ -73,6 +79,12 @@ export async function POST(req: Request, context: RouteContext) {
       return NextResponse.json({ error: "User not found." }, { status: 404 });
     }
 
+    if (body.until && !SECURITY_ACTIONS_WITH_EXPIRY.has(body.action)) {
+      return NextResponse.json(
+        { error: `The "${body.action}" action does not accept an expiry.` },
+        { status: 400 }
+      );
+    }
     const until = body.until ? new Date(body.until) : null;
     if (until && until <= new Date()) {
       return NextResponse.json(
@@ -80,6 +92,13 @@ export async function POST(req: Request, context: RouteContext) {
         { status: 400 }
       );
     }
+    if (body.action === "restore_account" && !body.supportTicketReference) {
+      return NextResponse.json(
+        { error: "A support ticket reference is required to restore a pending-deletion account." },
+        { status: 400 }
+      );
+    }
+    let restoreResult: string | null = null;
 
     if (body.action === "unlink_oauth") {
       await runWithAdminApproval(
@@ -168,6 +187,27 @@ export async function POST(req: Request, context: RouteContext) {
             securityIncidentNote: body.incidentNote || undefined,
           },
         });
+      } else if (body.action === "restore_account") {
+        const result = await restoreTomverseAccount(userId);
+        if (result === "not_found") {
+          return NextResponse.json({ error: "User not found." }, { status: 404 });
+        }
+        if (result === "deletion_in_progress") {
+          return NextResponse.json(
+            {
+              error:
+                "This account's permanent deletion has already started and can no longer be cancelled.",
+              code: "DELETION_ALREADY_PROCESSING",
+            },
+            { status: 409 }
+          );
+        }
+        restoreResult = result;
+        if (result === "restored") {
+          await sendAccountRestoredEmail({ to: existing.email }).catch((emailError) =>
+            console.error("Account restoration email failed:", emailError)
+          );
+        }
       } else {
         await revokeAllUserSessions(userId);
       }
@@ -185,6 +225,8 @@ export async function POST(req: Request, context: RouteContext) {
         until: until?.toISOString() || null,
         provider: body.provider || null,
         hasIncidentNote: Boolean(body.incidentNote),
+        supportTicketReference: body.supportTicketReference || null,
+        restoreResult,
       },
     });
 
@@ -203,7 +245,10 @@ export async function POST(req: Request, context: RouteContext) {
         _count: { select: { sessions: true, accounts: true } },
       },
     });
-    return NextResponse.json({ user });
+    return NextResponse.json({
+      user,
+      alreadyRestored: restoreResult === "already_active",
+    });
   } catch (error) {
     const approvalResponse = adminApprovalErrorResponse(error);
     if (approvalResponse) return approvalResponse;

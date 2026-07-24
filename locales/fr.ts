@@ -473,6 +473,7 @@ export const fr = {
         addEmailLoginSuccess: "La connexion par e-mail est maintenant activée pour votre compte.",
         errorAccountNotLinked: "Cet e-mail est déjà utilisé par une autre méthode de connexion. Essayez Google, Microsoft ou la connexion par e-mail.",
         errorAccessDenied: "Accès refusé. Veuillez réessayer.",
+        errorAccountPendingDeletion: "Ce compte est programmé pour suppression et la connexion est bloquée. Pour annuler la suppression, contactez support@tomverse.app -- cela ne peut pas être annulé depuis l'écran de connexion.",
         errorGeneric: "Une erreur est survenue lors de la connexion. Veuillez réessayer.",
         manageLoginMethods: "Méthodes de connexion",
         manageLoginMethodsDescription: "Gérez la façon dont vous vous connectez à Tomverse. Au moins une méthode doit rester activée.",

@@ -20,6 +20,20 @@ async function cancelStripeSubscription(
   }
 }
 
+// Used only when scheduling a deletion (not the permanent-delete path below,
+// which still cancels immediately). Always awaited before any DB write, so
+// a Stripe failure here throws and aborts the whole request -- the account
+// never ends up pending_deletion with a subscription that's still set to
+// auto-renew.
+async function scheduleStripeSubscriptionCancellation(
+  subscriptionId: string | null | undefined
+) {
+  if (!subscriptionId || !isStripeConfigured()) return;
+  await getStripe().subscriptions.update(subscriptionId, {
+    cancel_at_period_end: true,
+  });
+}
+
 export async function scheduleTomverseAccountDeletion(userId: string) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -27,7 +41,7 @@ export async function scheduleTomverseAccountDeletion(userId: string) {
   });
   if (!user) return { scheduled: false as const };
 
-  await cancelStripeSubscription(user.stripeSubscriptionId, true);
+  await scheduleStripeSubscriptionCancellation(user.stripeSubscriptionId);
   const requestedAt = new Date();
   const scheduledFor = new Date(requestedAt.getTime() + ACCOUNT_DELETION_GRACE_MS);
   await prisma.user.update({
@@ -36,7 +50,12 @@ export async function scheduleTomverseAccountDeletion(userId: string) {
       accountStatus: "pending_deletion",
       accountDeletionRequestedAt: requestedAt,
       accountDeletionScheduledFor: scheduledFor,
-      subscriptionStatus: user.stripeSubscriptionId ? "canceled" : undefined,
+      // subscriptionStatus is intentionally left alone -- the subscription
+      // is still genuinely active (just non-renewing), and the
+      // customer.subscription.updated webhook is the source of truth for
+      // it. plan/stripeSubscriptionId/stripePriceId/period end are also
+      // untouched, so a restore within the grace period needs no separate
+      // entitlement bookkeeping: it's still exactly what it was.
       subscriptionCancelAtPeriodEnd: Boolean(user.stripeSubscriptionId),
       aiUsageRestricted: true,
       aiUsageRestrictedAt: requestedAt,
@@ -50,6 +69,48 @@ export async function scheduleTomverseAccountDeletion(userId: string) {
     requestedAt,
     scheduledFor,
   };
+}
+
+export type RestoreAccountResult =
+  | "restored"
+  | "already_active"
+  | "deletion_in_progress"
+  | "not_found";
+
+// Deliberately makes no Stripe calls: scheduleTomverseAccountDeletion above
+// never actually cancels the subscription (cancel_at_period_end only), so
+// there is nothing to resume, and per product policy cancelling a deletion
+// must not be treated as restoring auto-renewal consent -- cancel_at_period_end
+// stays exactly as Stripe already has it either way.
+export async function restoreTomverseAccount(
+  userId: string
+): Promise<RestoreAccountResult> {
+  const existing = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { accountStatus: true },
+  });
+  if (!existing) return "not_found";
+  if (existing.accountStatus === "active") return "already_active";
+  if (existing.accountStatus !== "pending_deletion") {
+    return "deletion_in_progress";
+  }
+
+  const claimed = await prisma.user.updateMany({
+    where: { id: userId, accountStatus: "pending_deletion" },
+    data: {
+      accountStatus: "active",
+      accountDeletionRequestedAt: null,
+      accountDeletionScheduledFor: null,
+      aiUsageRestricted: false,
+      aiUsageRestrictedAt: null,
+      aiUsageRestrictedUntil: null,
+      aiUsageRestrictionReason: null,
+      aiUsageRestrictedById: null,
+      aiUsageRestrictedByEmail: null,
+    },
+  });
+  if (claimed.count !== 1) return "deletion_in_progress";
+  return "restored";
 }
 
 export async function deleteTomverseAccount(
