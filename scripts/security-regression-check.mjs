@@ -659,8 +659,18 @@ const checks = [
       return (
         source.includes("getServerSession(authOptions)") &&
         source.includes("readLimitedJson(req, 8 * 1024, actionSchema)") &&
-        source.includes("isModelFinderDefaultId(body.defaultModelId)") &&
-        source.includes("getModelFinderRecommendations(body.answers)") &&
+        source.includes('consumeApiRateLimit(req, userId, "model-finder-save"') &&
+        // "accept_default" takes no client-supplied model id at all -- the
+        // server always picks its own Standard-tier default.
+        source.includes("isModelFinderDefaultId(APP_DEFAULTS.defaultModelId)") &&
+        // "complete" is bounded to at most 3 model ids and every one of them
+        // must be re-validated against the server-computed recommendation
+        // combination, not trusted from the client.
+        source.includes(
+          "modelIds: z.array(z.string().trim().min(1).max(100)).min(1).max(3)"
+        ) &&
+        source.includes("getModelFinderCombination(body.answers)") &&
+        source.includes("comboModelIds.has(modelId)") &&
         rules.includes('canUseModelWithPlan("Guest", model)') &&
         rules.includes('category === "Standard"') &&
         component.includes('"model_finder_started"') &&
@@ -673,9 +683,6 @@ const checks = [
         schema.includes("usesFilesFrequently") &&
         schema.includes("modelFinderCompletedAt") &&
         schema.includes("modelFinderDismissedAt") &&
-        source.includes('body.action === "dismiss"') &&
-        source.includes("shouldAutoShowModelFinder") &&
-        component.includes('action: method === "default" ? "accept_default" : "dismiss"') &&
         migration.includes("model_finder_viewed") &&
         migration.includes("advanced_model_selected") &&
         dismissalMigration.includes('ADD COLUMN "modelFinderDismissedAt"') &&
