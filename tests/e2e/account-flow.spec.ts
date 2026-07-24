@@ -147,7 +147,7 @@ test("theme preference changes immediately and follows the system setting", asyn
   await expect(page.locator("html")).not.toHaveClass(/dark/);
 });
 
-test("authenticated selector blocks a fourth model", async ({ page }) => {
+test("authenticated selector opens a swap dialog for a fourth model", async ({ page }) => {
   await openModelSelector(page);
 
   const selectedModels = page.locator('[data-testid="model-option"][aria-pressed="true"]');
@@ -159,8 +159,11 @@ test("authenticated selector blocks a fourth model", async ({ page }) => {
   await unselectedModels.first().click();
   await expect(selectedModels).toHaveCount(3);
 
+  // Picking a 4th free model at the 3-model cap opens a swap dialog instead
+  // of a blocking toast -- the current selection is left untouched until the
+  // guest/user actually picks which panel to replace.
   await unselectedModels.first().click();
-  await expect(page.getByRole("status")).toContainText(/최대 3개|up to 3|最多 3/);
+  await expect(page.getByRole("dialog", { name: /교체|Swap|替换/ }).last()).toBeVisible();
   await expect(selectedModels).toHaveCount(3);
 });
 

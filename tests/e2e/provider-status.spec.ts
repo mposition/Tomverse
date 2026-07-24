@@ -50,14 +50,33 @@ test("limited provider health stays hidden from users", async ({ page }) => {
 
 test("outage remains visible with a fallback suggestion", async ({ page }) => {
   await prepareGuestPage(page, "en");
-  await mockProviderStatus(page, "unavailable");
+  // The guest default already includes the GPT/Claude/Gemini brand trio, so
+  // the fallback suggestion must be a model outside that trio -- otherwise
+  // it's filtered out as "already selected" and no suggestion is shown.
+  await page.route("**/api/models/status", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        generatedAt: new Date().toISOString(),
+        models: [
+          {
+            id: "gemini-2-5-flash",
+            provider: "google",
+            status: "unavailable",
+            fallbackModelIds: ["deepseek-v4-flash"],
+          },
+        ],
+      }),
+    });
+  });
 
   await page.goto("/chat");
 
   const banner = page.getByTestId("provider-outage-banner");
   await expect(banner).toBeVisible();
   await expect(banner).toContainText("1 unavailable");
-  await expect(banner).toContainText("Claude Haiku 4.5");
+  await expect(banner).toContainText("DeepSeek-V4 Flash");
 });
 
 test("retired models stay out of the user model catalogue", async ({ page }) => {

@@ -55,16 +55,20 @@ test("guest message appears immediately with mocked response", async ({ page }) 
   await page.getByTestId("chat-textarea").fill("First QA message");
   await page.getByTestId("chat-textarea").press("Enter");
 
+  // The guest default is 3 comparison panels, so the same user message and
+  // mocked response each legitimately appear once per panel.
   await expect(
-    page.locator('[data-message-role="user"]').filter({ hasText: "First QA message" })
+    page.locator('[data-message-role="user"]').filter({ hasText: "First QA message" }).first()
   ).toBeVisible();
-  await expect(page.getByText("QA mock response", { exact: true })).toBeVisible();
+  await expect(page.getByText("QA mock response", { exact: true }).first()).toBeVisible();
 });
 
 test("guest cannot activate a paid model", async ({ page }) => {
   await page.goto("/chat");
 
   await modelSelectorTrigger(page).click();
+  const selectedModels = page.locator('[data-testid="model-option"][aria-pressed="true"]');
+  const selectedCountBefore = await selectedModels.count();
   const paidModel = page
     .locator(
       '[data-testid="model-option"][data-model-plan-locked="true"]:not([disabled])'
@@ -74,5 +78,7 @@ test("guest cannot activate a paid model", async ({ page }) => {
   await expect(paidModel).toBeVisible();
   await paidModel.click();
   await expect(page.getByRole("dialog").last()).toBeVisible();
-  await expect(page.locator('[data-testid="model-option"][aria-pressed="true"]')).toHaveCount(1);
+  // Clicking a plan-locked model must not change the current selection --
+  // whatever the guest default was (currently 3 models) stays as it was.
+  await expect(selectedModels).toHaveCount(selectedCountBefore);
 });

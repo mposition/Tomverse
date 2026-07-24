@@ -113,7 +113,12 @@ test("test campaign retains first-touch UTM through consent, chat, signup, and c
 
   await page.getByTestId("chat-textarea").fill("Validate campaign funnel");
   await page.getByTestId("chat-textarea").press("Enter");
-  await expect(page.getByText("Campaign QA response", { exact: true })).toBeVisible();
+  // The guest default is 3 comparison panels, and the mock responds
+  // identically to every one of them, so the response legitimately appears
+  // once per panel.
+  await expect(
+    page.getByText("Campaign QA response", { exact: true }).first()
+  ).toBeVisible();
   await expect
     .poll(() => capturedEvents.map((event) => event.event_name))
     .toEqual(
@@ -124,7 +129,8 @@ test("test campaign retains first-touch UTM through consent, chat, signup, and c
   await expect
     .poll(() => capturedEvents.map((event) => event.event_name))
     .toContain("signup_page_view");
-  await page.getByRole("checkbox").check();
+  // The sign-in page no longer gates OAuth behind a consent checkbox -- the
+  // terms/privacy links are shown as passive inline text instead.
   await page.getByRole("button", { name: "Continue with Google" }).click();
   await expect
     .poll(() => capturedEvents.map((event) => event.event_name))

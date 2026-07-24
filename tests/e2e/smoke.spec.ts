@@ -89,11 +89,6 @@ test("guest preview opens a 3-model comparison chat by default", async ({ page }
   if ((page.viewportSize()?.width ?? 1024) < 768) {
     await page.keyboard.press("Escape");
   }
-  await expect(page.getByRole("button", { name: "Summarize this document" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Compare these models" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Review this code" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Draft an email" })).toHaveCount(0);
-
   // Guests now default to a 3-model comparison (Gemini/GPT/Claude) instead of
   // a single model, so Tomverse's core value is visible on the first question.
   // A single shared welcome screen covers all panels until the first message

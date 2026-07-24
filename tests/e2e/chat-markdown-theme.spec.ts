@@ -38,6 +38,9 @@ test("assistant code blocks keep readable contrast in the light theme", async ({
   });
 
   await page.goto("/chat");
+  // A fresh chat starts blank -- open the mocked qa-conversation from the
+  // welcome screen's recent-conversations card to load its messages.
+  await page.getByTestId("recent-conversation-card").click();
 
   const code = page.locator('[data-message-role="assistant"] pre code').first();
   await expect(code).toContainText("Compare AI answers in one place.");

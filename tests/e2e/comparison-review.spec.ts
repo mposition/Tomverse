@@ -143,9 +143,66 @@ async function mockComparisonReview(
   };
 }
 
-async function openDesktopReviewConversation(page: Page) {
-  await page.getByText("QA conversation", { exact: true }).click();
-  await expect(page.getByRole("button", { name: "모델 선택" })).toContainText("3");
+async function mockConversationHistory(page: Page) {
+  // The generic qa-conversation fixture returns an empty message list, but
+  // the AI Review / quick-comparison entry points only render once the
+  // conversation has responses -- so these tests need to seed one user
+  // message plus a per-model assistant answer to match.
+  const assistantMessageByModel: Record<string, { id: string; content: string }> = {
+    [reviewModels[0]]: { id: "21111111-1111-4111-8111-111111111111", content: "GPT-5.4 mini answer" },
+    [reviewModels[1]]: { id: "31111111-1111-4111-8111-111111111111", content: "Claude Haiku 4.5 answer" },
+    [reviewModels[2]]: { id: "41111111-1111-4111-8111-111111111111", content: "Gemini 3.1 Flash-Lite answer" },
+  };
+  await page.route(
+    /.*\/api\/conversations\/qa-conversation(\?.*)?$/,
+    async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.fallback();
+        return;
+      }
+      const modelId = new URL(route.request().url()).searchParams.get("modelId");
+      const assistantMessage = modelId ? assistantMessageByModel[modelId] : undefined;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          id: "qa-conversation",
+          title: "QA conversation",
+          selectedModels: reviewModels,
+          disabledPanels: [],
+          messages: [
+            {
+              id: "11111111-1111-4111-8111-111111111111",
+              role: "user",
+              content: "Compare these approaches",
+              modelId: null,
+            },
+            ...(assistantMessage
+              ? [
+                  {
+                    id: assistantMessage.id,
+                    role: "assistant",
+                    content: assistantMessage.content,
+                    modelId,
+                    status: "normal",
+                  },
+                ]
+              : []),
+          ],
+          messagePage: { hasMore: false, nextCursor: null },
+        }),
+      });
+    }
+  );
+}
+
+async function openReviewConversation(page: Page) {
+  // The welcome screen's "recent conversations" card is the one
+  // unambiguous way to open the mocked conversation on every viewport --
+  // the sidebar (always-visible on desktop, a drawer on mobile) shows the
+  // same conversation title and would otherwise be a second match.
+  await page.getByTestId("recent-conversation-card").click();
+  await expect(page.getByTestId("chat-input")).toBeVisible();
 }
 
 async function mockQuickComparison(page: Page) {
@@ -225,9 +282,10 @@ test("AI comparison review does not flash an unavailable setup before loading", 
   test.setTimeout(60_000);
   await prepareGuestPage(page, "ko");
   await mockAuthenticatedApi(page, { selectedModels: reviewModels });
+  await mockConversationHistory(page);
   const reviewApi = await mockComparisonReview(page, { deferSetup: true });
   await page.goto("/chat");
-  await openDesktopReviewConversation(page);
+  await openReviewConversation(page);
 
   const reviewButton = page.getByRole("button", { name: "AI 답변 교차검토" });
   await expect(reviewButton).toBeVisible({ timeout: 30_000 });
@@ -254,11 +312,10 @@ for (const viewport of [
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await prepareGuestPage(page, "ko");
     await mockAuthenticatedApi(page, { selectedModels: reviewModels });
+    await mockConversationHistory(page);
     const reviewApi = await mockComparisonReview(page);
     await page.goto("/chat");
-    if (viewport.name === "desktop") {
-      await openDesktopReviewConversation(page);
-    }
+    await openReviewConversation(page);
 
     const reviewEntryButton = page.getByRole("button", { name: "AI 답변 교차검토" });
     await expect(reviewEntryButton.getByTestId("ai-review-entry-credit-cost")).toContainText("4");
@@ -293,8 +350,10 @@ test("quick comparison performs a structured AI analysis on mobile", async ({
   await page.setViewportSize({ width: 390, height: 844 });
   await prepareGuestPage(page, "ko");
   await mockAuthenticatedApi(page, { selectedModels: reviewModels });
+  await mockConversationHistory(page);
   const quickApi = await mockQuickComparison(page);
   await page.goto("/chat");
+  await openReviewConversation(page);
 
   const quickButton = page.getByTestId("quick-comparison-button");
   await expect(quickButton.getByTestId("quick-comparison-credit-cost")).toContainText("1");

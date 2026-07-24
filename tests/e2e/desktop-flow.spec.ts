@@ -37,8 +37,11 @@ test("account controls remain fully visible at a 150 percent scaled viewport", a
   expect(accountBox!.y + accountBox!.height).toBeLessThanOrEqual(720);
 });
 
-test("guest model selector keeps one panel and explains sign-in for comparison", async ({ page }) => {
-  await expect(page.getByTestId("desktop-model-panel")).toHaveCount(1);
+test("guest model selector opens a swap dialog once the 3-model cap is reached", async ({ page }) => {
+  // Guests now default to a 3-model comparison (Gemini/GPT/Claude), already
+  // at the selection cap, so picking another free model swaps a panel
+  // instead of adding a 4th one or asking the guest to sign in.
+  await expect(page.getByTestId("desktop-model-panel")).toHaveCount(3);
 
   await modelMenuTrigger(page).click();
   const dialog = page.locator("#chat-input-popover");
@@ -53,7 +56,7 @@ test("guest model selector keeps one panel and explains sign-in for comparison",
   await freeUnselectedModel.click();
 
   await expect(page.getByRole("dialog").last()).toBeVisible();
-  await expect(page.getByTestId("desktop-model-panel")).toHaveCount(1);
+  await expect(page.getByTestId("desktop-model-panel")).toHaveCount(3);
   await expectNoHorizontalOverflow(page);
 });
 
@@ -102,7 +105,9 @@ test("model picker prioritizes exact credits and shows the final input estimate"
   await page.getByTestId("chat-textarea").fill("x".repeat(64_004));
   const estimate = page.getByTestId("request-credit-estimate");
   await expect(estimate).toContainText("1.5×");
-  await expect(estimate).toContainText("2");
+  // Guests default to the 3-model brand trio, so the base estimate is the
+  // combined cost of all three selected models (6), not a single model's.
+  await expect(estimate).toContainText("6");
   await expect(estimate.getByTestId("credit-coin-icon").first()).toBeVisible();
 });
 

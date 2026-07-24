@@ -139,6 +139,12 @@ test.describe("value-moment upgrade prompt", () => {
     });
     await mockChatStream(page, "Comparison response");
     await page.goto("/chat?lang=ko");
+    // A fresh chat starts with a single default model -- these tests need
+    // the persisted qa-conversation's 2-model comparison selection active
+    // (and a real currentChatId) for the comparison preflight/upgrade-prompt
+    // flow to trigger at all.
+    await page.getByTestId("recent-conversation-card").click();
+    await expect(page.getByTestId("chat-input")).toBeVisible();
   });
 
   test("first successful comparison shows a one-time nonblocking prompt", async ({
@@ -184,7 +190,9 @@ test.describe("value-moment upgrade prompt", () => {
     await page.getByTestId("chat-textarea").fill("Compare safely");
     await page.getByTestId("chat-textarea").press("Enter");
 
-    await expect(page.getByRole("status")).toContainText("비용 안전 한도");
+    await expect(page.getByRole("status")).toContainText(
+      "오늘 처리할 수 있는 한도를 넘었습니다"
+    );
     await expect.poll(() => providerRequestCount).toBe(0);
   });
 

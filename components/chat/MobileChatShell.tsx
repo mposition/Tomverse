@@ -127,6 +127,14 @@ export function MobileChatShell({
   const [activeModelId, setActiveModelId] = useState<string | null>(
     selectedModels[0] || null
   );
+  const recentConversations = useMemo(
+    () =>
+      conversations
+        .filter((conversation) => !conversation.isLocked)
+        .slice(0, 3)
+        .map((conversation) => ({ id: conversation.id, title: conversation.title })),
+    [conversations]
+  );
   const [modelStatuses, setModelStatuses] = useState<Record<string, ModelRuntimeStatus>>({});
   const [modelEmptyStates, setModelEmptyStates] = useState<Record<string, boolean>>({});
   const [modeSheet, setModeSheet] = useState<"guest" | null>(null);
@@ -552,7 +560,7 @@ export function MobileChatShell({
         {isConversationEmpty && selectedModels.length > 0 && (
           <div className="absolute inset-0 z-10 bg-zinc-50 dark:bg-zinc-950">
             <ChatWelcomeScreen
-              recentConversations={[]}
+              recentConversations={recentConversations}
               onSelectConversation={onSelectConversation}
               inputSlotRef={setWelcomeInputSlot}
             />

@@ -95,7 +95,7 @@ test("search hides recommendations and shows matching full-list models", async (
   await expect(dialog.getByTestId("model-option")).toHaveCount(1);
 });
 
-test("recommended shortcuts stay synchronized with the full model list", async ({ page }) => {
+test("recommended shortcuts activate the same model shown in the full list", async ({ page }) => {
   // A single pre-selected model keeps selection below capacity, so the
   // recommendations card (hidden once at the model cap) stays visible.
   await mockAuthenticatedApi(page, { selectedModels: ["gpt-5-4-mini"] });
@@ -111,13 +111,20 @@ test("recommended shortcuts stay synchronized with the full model list", async (
   const fullListOption = dialog.locator(
     `[data-testid="model-option"][data-model-id="${modelId}"]`
   );
+  await expect(fullListOption).toHaveAttribute("aria-pressed", "false");
 
   await recommended.click();
-  await expect(recommended).toHaveAttribute("aria-pressed", "true");
+  // Clicking the shortcut selects the same model in the full list. Once
+  // selected, that model is no longer an available suggestion, so the
+  // recommendations card recycles to a different complementary model
+  // instead of showing the just-picked one a second time.
   await expect(fullListOption).toHaveAttribute("aria-pressed", "true");
+  await expect(dialog.getByTestId("recommended-model-option")).toHaveCount(1);
+  await expect(
+    dialog.getByTestId("recommended-model-option").first()
+  ).not.toHaveAttribute("data-model-id", modelId!);
 
   await fullListOption.click();
-  await expect(recommended).toHaveAttribute("aria-pressed", "false");
   await expect(fullListOption).toHaveAttribute("aria-pressed", "false");
 });
 
@@ -201,7 +208,9 @@ test("long input explains its multiplier beside the send controls", async ({ pag
   await page.getByTestId("chat-textarea").fill("x".repeat(64_004));
   const estimate = page.getByTestId("request-credit-estimate");
   await expect(estimate).toContainText("1.5×");
-  await expect(estimate).toContainText("2");
+  // Guests default to the 3-model brand trio, so the base estimate is the
+  // combined cost of all three selected models (6), not a single model's.
+  await expect(estimate).toContainText("6");
 
   const estimateBox = await estimate.boundingBox();
   const inputBox = await page.getByTestId("chat-input").boundingBox();

@@ -126,6 +126,12 @@ test("authenticated users can complete and replay the sidebar tour", async ({ pa
   await page.goto("/chat");
 
   const tour = page.getByTestId("sidebar-tour");
+  await expect(tour).toHaveCount(0);
+
+  // The tour no longer auto-pops on load -- it only starts when requested
+  // from the help menu.
+  await page.getByTestId("sidebar-help-button").click();
+  await page.getByTestId("sidebar-tour-replay").click();
   await expect(tour).toBeVisible();
   await page.getByTestId("sidebar-tour-next").click();
   await page.getByTestId("sidebar-tour-next").click();
