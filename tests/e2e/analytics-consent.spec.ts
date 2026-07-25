@@ -50,7 +50,63 @@ test("mobile analytics consent stays compact with one-row actions", async ({
   await expect(banner).toBeHidden();
 });
 
-test("mobile analytics settings shortcut hides while the chat keyboard is active", async ({
+// The floating analytics-settings shortcut used to be the only path back to
+// analytics preferences on mobile chat, so it had to duck out of the way of
+// the keyboard. Since 2026-07-23 it is hidden on mobile chat unconditionally
+// (components/analytics/AnalyticsProvider.tsx: "hidden ... md:inline-flex"),
+// and guests reach preferences through the sidebar drawer instead
+// (components/auth/AuthButton.tsx's guest-analytics-cookie-settings, wired
+// up via ChatSidebar's showAnalyticsCookieButton={isMobileDrawer}). The
+// three tests below replace the old single keyboard-overlap test with that
+// current contract: the shortcut never reappears, the composer stays usable
+// regardless, and the drawer is a working replacement entry point.
+const initMobileGuestAnalyticsState = (page: Page) =>
+  page.addInitScript(() => {
+    window.localStorage.setItem("tomverse_analytics_consent_v1", "accepted");
+    window.localStorage.setItem("tomverse_guest_quick_start_seen_v2", "1");
+    window.sessionStorage.removeItem("tomverse_guest_quick_start_active_v2");
+  });
+
+test("mobile guest chat never shows the floating analytics settings shortcut", async ({
+  page,
+}, testInfo) => {
+  test.skip(
+    !testInfo.project.name.startsWith("mobile"),
+    "Floating-shortcut visibility only applies to mobile chat."
+  );
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.context().addCookies([
+    {
+      name: "__tomverse_e2e_analytics",
+      value: "1",
+      url: "http://127.0.0.1:3100",
+    },
+  ]);
+  await prepareGuestPage(page, "en");
+  await initMobileGuestAnalyticsState(page);
+  await page.goto("/chat");
+
+  const settings = page.getByTestId("analytics-settings-button");
+  // The button stays in the DOM (the same markup shows it on desktop via
+  // md:inline-flex) but is CSS-hidden below the md breakpoint, so this
+  // asserts "present but not visible" rather than "absent" -- see the
+  // authenticated-user test below for the case that's genuinely absent.
+  await expect(settings).toBeHidden();
+
+  const textarea = page.getByTestId("chat-textarea");
+  await textarea.click();
+  await expect(settings, "stays hidden on textarea focus").toBeHidden();
+  await textarea.fill("Does the old shortcut leak back in?");
+  await expect(settings, "stays hidden while typing").toBeHidden();
+  await textarea.evaluate((element) => element.blur());
+  await expect(settings, "stays hidden after blur").toBeHidden();
+
+  await expect(page.getByTestId("chat-send-button")).toBeVisible();
+  await expect(page.getByTestId("chat-send-button")).toBeEnabled();
+});
+
+test("mobile guest chat keeps the composer usable and overflow-free while the keyboard is active", async ({
   page,
 }, testInfo) => {
   test.skip(
@@ -67,23 +123,119 @@ test("mobile analytics settings shortcut hides while the chat keyboard is active
     },
   ]);
   await prepareGuestPage(page, "en");
-  await page.addInitScript(() => {
-    window.localStorage.setItem("tomverse_analytics_consent_v1", "accepted");
-    window.localStorage.setItem("tomverse_guest_quick_start_seen_v2", "1");
-    window.sessionStorage.removeItem("tomverse_guest_quick_start_active_v2");
-  });
+  await initMobileGuestAnalyticsState(page);
   await page.goto("/chat");
 
   const settings = page.getByTestId("analytics-settings-button");
-  await expect(settings).toBeVisible();
+  await expect(settings).toBeHidden();
 
   const textarea = page.getByTestId("chat-textarea");
-  await textarea.fill("Keyboard overlap regression");
-  await expect(settings).toBeHidden();
-  await expect(page.getByTestId("chat-send-button")).toBeVisible();
+  await textarea.fill("Line one\nLine two\nKeyboard overlap regression check");
+  await expect(settings, "stays hidden with a multi-line draft").toBeHidden();
 
-  await textarea.evaluate((element) => element.blur());
-  await expect(settings).toBeVisible();
+  const sendButton = page.getByTestId("chat-send-button");
+  await expect(sendButton).toBeVisible();
+  await expect(sendButton).toBeEnabled();
+
+  const dimensions = await page.evaluate(() => ({
+    viewport: document.documentElement.clientWidth,
+    content: document.documentElement.scrollWidth,
+  }));
+  expect(dimensions.content, "no horizontal page overflow").toBeLessThanOrEqual(
+    dimensions.viewport + 1
+  );
+
+  // With the floating shortcut gone, the drawer is the only path back to
+  // analytics preferences -- it must stay reachable even mid-draft.
+  await expect(page.getByTestId("mobile-sidebar-open")).toBeVisible();
+});
+
+test("mobile guest chat opens analytics preferences from the sidebar drawer", async ({
+  page,
+}, testInfo) => {
+  test.skip(
+    !testInfo.project.name.startsWith("mobile"),
+    "Guest drawer analytics entry point only applies to mobile chat."
+  );
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.context().addCookies([
+    {
+      name: "__tomverse_e2e_analytics",
+      value: "1",
+      url: "http://127.0.0.1:3100",
+    },
+  ]);
+  await prepareGuestPage(page, "en");
+  await initMobileGuestAnalyticsState(page);
+  await page.goto("/chat");
+
+  await expect(page.getByTestId("analytics-settings-button")).toBeHidden();
+
+  await page.getByTestId("mobile-sidebar-open").click();
+  const drawer = page.getByTestId("mobile-chat-shell").getByRole("dialog");
+  await expect(drawer).toBeVisible();
+
+  const analyticsButton = drawer.getByTestId("guest-analytics-cookie-settings");
+  await expect(analyticsButton).toBeVisible();
+  await expect(analyticsButton).toHaveAccessibleName(/analytics|cookie/i);
+
+  // Real clickable hit area, not the inner icon/text glyph -- the button is
+  // a plain labeled text control (no icon), so color/icon dependence isn't
+  // a concern here. Its current height (~40px) sits a few px under the
+  // ~44px mobile touch-target guideline; see the report for that gap.
+  const box = await analyticsButton.boundingBox();
+  expect(box, "guest analytics settings button bounding box").not.toBeNull();
+  if (box) {
+    expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(40);
+  }
+
+  await analyticsButton.focus();
+  await expect(analyticsButton, "keyboard-focusable").toBeFocused();
+
+  await analyticsButton.click();
+
+  // Opening preferences must close the drawer: the notice portals into a
+  // slot in the main chat area, which sits below the drawer's fixed
+  // overlay, so leaving the drawer open would render the notice invisible
+  // and unclickable behind it (components/chat/MobileChatShell.tsx).
+  await expect(drawer, "drawer closes so the notice isn't trapped behind it").toBeHidden();
+
+  const notice = page.getByTestId("chat-consent-notice");
+  await expect(notice).toBeVisible();
+  const declineButton = notice.getByTestId("analytics-consent-decline");
+  const acceptButton = notice.getByTestId("analytics-consent-accept");
+  await expect(declineButton).toBeVisible();
+  await expect(acceptButton).toBeVisible();
+  await expect(notice.getByRole("link", { name: "Privacy policy" })).toBeVisible();
+
+  // The notice must not block the composer underneath it.
+  const sendButton = page.getByTestId("chat-send-button");
+  await expect(sendButton).toBeVisible();
+  const sendBox = await sendButton.boundingBox();
+  const noticeBox = await notice.boundingBox();
+  expect(sendBox, "send button bounding box").not.toBeNull();
+  expect(noticeBox, "notice bounding box").not.toBeNull();
+  if (sendBox && noticeBox) {
+    const overlaps =
+      sendBox.x < noticeBox.x + noticeBox.width &&
+      sendBox.x + sendBox.width > noticeBox.x &&
+      sendBox.y < noticeBox.y + noticeBox.height &&
+      sendBox.y + sendBox.height > noticeBox.y;
+    expect(overlaps, "send button must not sit under the notice").toBe(false);
+  }
+
+  await declineButton.click();
+  await expect(notice).toBeHidden();
+  await expect
+    .poll(() =>
+      page.evaluate(() => window.localStorage.getItem("tomverse_analytics_consent_v1"))
+    )
+    .toBe("declined");
+
+  // Chat stays usable once the settings UI is closed.
+  await expect(sendButton).toBeVisible();
+  await expect(page.getByTestId("chat-textarea")).toBeVisible();
 });
 
 test("authenticated chat moves analytics settings into the account menu", async ({
@@ -108,11 +260,22 @@ test("authenticated chat moves analytics settings into the account menu", async 
   });
   await page.goto("/chat?lang=en");
 
+  // Unlike the guest mobile case (present but CSS-hidden), the floating
+  // shortcut's JSX is skipped entirely for a signed-in user on /chat, so
+  // it's genuinely absent -- toHaveCount(0), not toBeHidden().
   await expect(page.getByTestId("analytics-settings-button")).toHaveCount(0);
   await page.getByTestId("account-menu-trigger").click();
-  const analyticsSettings = page.getByTestId("account-analytics-settings");
+  const accountMenu = page.getByTestId("account-menu");
+  await expect(accountMenu).toBeVisible();
+  const analyticsSettings = accountMenu.getByTestId("account-analytics-settings");
   await expect(analyticsSettings).toBeVisible();
   await analyticsSettings.click();
+
+  // The account menu closes itself before opening preferences
+  // (components/auth/AuthButton.tsx calls setIsAccountMenuOpen(false)
+  // ahead of openAnalyticsPreferences()), so it shouldn't linger on top of
+  // or behind the notice.
+  await expect(accountMenu).toHaveCount(0);
   await expect(
     page.getByRole("region", { name: "Privacy-safe product analytics" })
   ).toBeVisible();

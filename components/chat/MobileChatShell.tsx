@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useChatConsentSlotRef } from "@/components/analytics/AnalyticsProvider";
+import { ANALYTICS_PREFERENCES_OPEN_EVENT } from "@/lib/analyticsPreferencesEvents";
 import { ChatApp } from "@/components/chat/ChatApp";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { ChatWelcomeScreen } from "@/components/chat/ChatWelcomeScreen";
@@ -234,6 +235,25 @@ export function MobileChatShell({
       document.body.style.overflow = "";
       document.removeEventListener("keydown", handleEscape);
     };
+  }, [isDrawerOpen]);
+
+  // The drawer's own analytics-settings entry point (guest-analytics-cookie-settings
+  // in AuthButton) opens the analytics preferences notice via this shared event
+  // without knowing the drawer is open. The notice portals into a slot in the main
+  // chat area, which sits below the drawer's fixed overlay, so without closing the
+  // drawer first the notice would render but stay hidden and unreachable behind it.
+  useEffect(() => {
+    if (!isDrawerOpen) return;
+    const closeDrawerForAnalyticsPreferences = () => setIsDrawerOpen(false);
+    window.addEventListener(
+      ANALYTICS_PREFERENCES_OPEN_EVENT,
+      closeDrawerForAnalyticsPreferences
+    );
+    return () =>
+      window.removeEventListener(
+        ANALYTICS_PREFERENCES_OPEN_EVENT,
+        closeDrawerForAnalyticsPreferences
+      );
   }, [isDrawerOpen]);
 
   const getDrawerFocusableElements = useCallback(() => {
