@@ -4,15 +4,15 @@ import {
   createQaPngBuffer,
   mockChatStream,
   prepareGuestPage,
+  sendChatMessage,
 } from "./support/app-fixtures";
 
-test("mock chat returns deterministic text", async ({ page }) => {
+test("mock chat returns deterministic text", async ({ page }, testInfo) => {
   await prepareGuestPage(page, "ko");
   await mockChatStream(page, "QA mock response");
 
   await page.goto("/chat");
-  await page.getByTestId("chat-textarea").fill("QA message");
-  await page.getByTestId("chat-textarea").press("Enter");
+  await sendChatMessage(page, testInfo, "QA message");
 
   // The guest default is 3 comparison panels, and the mock responds
   // identically to every one of them, so both strings legitimately appear

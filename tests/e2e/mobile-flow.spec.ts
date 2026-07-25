@@ -46,7 +46,7 @@ test("sent message renders without leaving the active model", async ({ page }) =
   const activeModelName = await activeModel.textContent();
 
   await page.getByTestId("chat-textarea").fill("Mobile immediate message");
-  await page.getByTestId("chat-textarea").press("Enter");
+  await page.getByTestId("chat-send-button").click();
 
   await expect(
     page

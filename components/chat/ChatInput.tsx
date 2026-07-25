@@ -88,6 +88,11 @@ import { CreditBreakdownSheet } from "@/components/chat/CreditBreakdownSheet";
 import { UsageLimitModal } from "@/components/chat/UsageLimitModal";
 import { getChatCreditAllocation } from "@/lib/chatCreditAllocation";
 import { looksLikeStructuredText } from "@/lib/structuredPasteDetection";
+import { useIsMobileShell } from "@/components/chat/useIsMobileShell";
+import {
+  getChatEnterKeyAction,
+  isComposingKeydown,
+} from "@/lib/chatKeyboardPolicy";
 
 type PublicModelStatus = "available" | "limited" | "unavailable";
 type PublicModelStatusRecord = {
@@ -429,6 +434,7 @@ export function ChatInput({
     () => new Set(PUBLIC_MODELS.map((model) => model.id)),
     [PUBLIC_MODELS]
   );
+  const isMobileShell = useIsMobileShell();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const previousAttachmentsRef = useRef<ChatAttachment[]>([]);
@@ -1259,12 +1265,17 @@ export function ChatInput({
   }, [attachments]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      if (!isDisabled) {
-        dismissGuestQuickStart();
-        onSubmit();
-      }
+    const action = getChatEnterKeyAction(
+      e,
+      isComposingKeydown(e),
+      isMobileShell
+    );
+    if (action !== "submit") return;
+
+    e.preventDefault();
+    if (!isDisabled) {
+      dismissGuestQuickStart();
+      onSubmit();
     }
   };
 
@@ -1848,6 +1859,7 @@ export function ChatInput({
           aria-label={placeholderText}
           placeholder={placeholderText}
           disabled={isDisabled}
+          enterKeyHint={isMobileShell ? "enter" : undefined}
           rows={1}
           className={`w-full max-h-[92px] min-h-[36px] resize-none overflow-y-auto border-0 bg-transparent px-1 py-1.5 text-base leading-5 text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-500 md:max-h-[200px] md:min-h-[52px] md:py-2 md:text-sm md:leading-6 ${preserveFormatting ? "overflow-x-auto whitespace-pre font-mono" : ""}`}
         />

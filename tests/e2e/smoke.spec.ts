@@ -4,6 +4,7 @@ import {
   mockPublicBillingConfig,
   mockPublicProofMetrics,
   prepareGuestPage,
+  sendChatMessage,
 } from "./support/app-fixtures";
 
 test.beforeEach(async ({ page }) => {
@@ -73,7 +74,7 @@ test("signed-in homepage keeps the page visible and offers one continue action",
   await expect(page.getByTestId("landing-guest-cta")).toHaveCount(0);
 });
 
-test("guest preview opens a 3-model comparison chat by default", async ({ page }) => {
+test("guest preview opens a 3-model comparison chat by default", async ({ page }, testInfo) => {
   await prepareGuestPage(page, "en");
   await mockChatStream(page, "Guest preview answer");
   await page.goto("/chat?lang=en&entry=guest-preview");
@@ -98,8 +99,7 @@ test("guest preview opens a 3-model comparison chat by default", async ({ page }
     await expect(page.getByTestId("desktop-model-panel")).toHaveCount(3);
   }
 
-  await page.getByTestId("chat-textarea").fill("Show me how Tomverse works");
-  await page.getByTestId("chat-textarea").press("Enter");
+  await sendChatMessage(page, testInfo, "Show me how Tomverse works");
   await expect(
     page.locator(":visible", { hasText: "Guest preview answer" }).first()
   ).toBeVisible();

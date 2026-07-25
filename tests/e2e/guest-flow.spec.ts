@@ -2,6 +2,7 @@ import { expect, type Page, test } from "@playwright/test";
 import {
   mockChatStream,
   prepareGuestPage,
+  sendChatMessage,
 } from "./support/app-fixtures";
 
 const languageSelect = (page: Page) =>
@@ -49,11 +50,10 @@ test("guest can change and persist language", async ({ page }) => {
   await expect(languageSelect(page)).toHaveValue("zh");
 });
 
-test("guest message appears immediately with mocked response", async ({ page }) => {
+test("guest message appears immediately with mocked response", async ({ page }, testInfo) => {
   await page.goto("/chat");
 
-  await page.getByTestId("chat-textarea").fill("First QA message");
-  await page.getByTestId("chat-textarea").press("Enter");
+  await sendChatMessage(page, testInfo, "First QA message");
 
   // The guest default is 3 comparison panels, so the same user message and
   // mocked response each legitimately appear once per panel.

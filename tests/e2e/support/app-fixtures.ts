@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Page, type TestInfo } from "@playwright/test";
 
 export type QaLanguage = "en" | "ko" | "zh";
 
@@ -553,6 +553,26 @@ export function createQaPdfBuffer() {
   } /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
 
   return Buffer.from(pdf, "ascii");
+}
+
+// Chat message submission is shell-dependent: PC shells send on plain
+// Enter, but mobile shells only send via the on-screen send button (or an
+// external-keyboard Ctrl/Cmd+Enter). Tests that merely need a message sent
+// -- not ones specifically covering keyboard policy -- should use this
+// helper so they behave correctly under every Playwright project.
+export async function sendChatMessage(
+  page: Page,
+  testInfo: TestInfo,
+  text: string,
+  textareaTestId = "chat-textarea"
+) {
+  const textarea = page.getByTestId(textareaTestId);
+  await textarea.fill(text);
+  if (testInfo.project.name.startsWith("mobile")) {
+    await page.getByTestId("chat-send-button").click();
+  } else {
+    await textarea.press("Enter");
+  }
 }
 
 export async function expectNoHorizontalOverflow(page: Page) {

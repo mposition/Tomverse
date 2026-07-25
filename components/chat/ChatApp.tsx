@@ -11,6 +11,11 @@ import {
   formatChatCostSafetyDetails,
   isChatCostSafetyCode,
 } from "@/lib/chatCostSafetyCore";
+import { useIsMobileShell } from "@/components/chat/useIsMobileShell";
+import {
+  getChatEnterKeyAction,
+  isComposingKeydown,
+} from "@/lib/chatKeyboardPolicy";
 
 const processedPromptKeys = new Set<string>();
 const CHAT_STREAM_IDLE_TIMEOUT_MS = 90_000;
@@ -104,6 +109,7 @@ function ChatAppComponent({
     },
   ]);
   
+    const isMobileShell = useIsMobileShell();
     const [isSending, setIsSending] = useState(false);
     const [modelInputs, setModelInputs] = useState<Record<string, string>>({});
     const modelInput = modelInputs[modelId] || "";
@@ -902,12 +908,18 @@ function ChatAppComponent({
                               value={modelInput}
                               onChange={(event) => setModelInput(event.target.value)}
                               onKeyDown={(event) => {
-                                  if (event.key === "Enter" && !event.shiftKey) {
-                                      event.preventDefault();
-                                      handleModelOnlySubmit();
-                                  }
+                                  const action = getChatEnterKeyAction(
+                                      event,
+                                      isComposingKeydown(event),
+                                      isMobileShell
+                                  );
+                                  if (action !== "submit") return;
+
+                                  event.preventDefault();
+                                  handleModelOnlySubmit();
                               }}
                               disabled={isSending || !initialConversationId}
+                              enterKeyHint={isMobileShell ? "enter" : undefined}
                               rows={1}
                               placeholder={t("chat.modelOnlyPlaceholder")}
                               className="max-h-28 min-h-7 flex-1 resize-none border-0 bg-transparent py-1 text-sm leading-5 text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-500"

@@ -3,6 +3,7 @@ import {
   mockAuthenticatedApi,
   mockChatStream,
   prepareGuestPage,
+  sendChatMessage,
 } from "./support/app-fixtures";
 
 const qaSession = {
@@ -44,8 +45,7 @@ test("session revalidation preserves chat data without redundant reloads", async
       : "desktop-chat-shell"
   );
   await expect(chatShell).toBeVisible();
-  await page.getByTestId("chat-textarea").fill("Keep this message");
-  await page.getByTestId("chat-textarea").press("Enter");
+  await sendChatMessage(page, testInfo, "Keep this message");
   await expect(page.getByText("Tab resume response", { exact: true })).toBeVisible();
 
   const conversationReads = state.conversationListReads;

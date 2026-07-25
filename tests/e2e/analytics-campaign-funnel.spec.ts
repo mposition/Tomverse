@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import {
   mockChatStream,
   prepareGuestPage,
+  sendChatMessage,
 } from "./support/app-fixtures";
 
 type CapturedAnalyticsEvent = {
@@ -30,7 +31,7 @@ const billingPlan = (
 
 test("test campaign retains first-touch UTM through consent, chat, signup, and checkout", async ({
   page,
-}) => {
+}, testInfo) => {
   const capturedEvents: CapturedAnalyticsEvent[] = [];
   let checkoutRequest: Record<string, unknown> | null = null;
   await page.context().addCookies([
@@ -111,8 +112,7 @@ test("test campaign retains first-touch UTM through consent, chat, signup, and c
     .poll(() => capturedEvents.map((event) => event.event_name))
     .toEqual(expect.arrayContaining(["landing_view", "cta_start_click"]));
 
-  await page.getByTestId("chat-textarea").fill("Validate campaign funnel");
-  await page.getByTestId("chat-textarea").press("Enter");
+  await sendChatMessage(page, testInfo, "Validate campaign funnel");
   // The guest default is 3 comparison panels, and the mock responds
   // identically to every one of them, so the response legitimately appears
   // once per panel.
