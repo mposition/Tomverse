@@ -4,9 +4,10 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { AlertCircle, ArrowRight, CheckCircle2, Info, Loader2, Sparkles, X } from "lucide-react";
 import { DesktopChatShell } from "@/components/chat/DesktopChatShell";
 import { MobileChatShell } from "@/components/chat/MobileChatShell";
-import { ComparisonReviewDialog, QuoteBadge } from "@/components/chat/ComparisonReviewDialog";
+import { ComparisonReviewDialog, QuoteBadge, VerifyItemButton } from "@/components/chat/ComparisonReviewDialog";
 import { UpgradeCtaLink } from "@/components/billing/UpgradeCtaLink";
 import { ModelFinder } from "@/components/onboarding/ModelFinder";
+import { DeepResearchSetupSheet } from "@/components/chat/DeepResearchSetupSheet";
 import { Conversation, type ChatAttachment } from "@/components/chat/types";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { useSession } from "next-auth/react";
@@ -18,6 +19,8 @@ import {
   APP_DEFAULTS,
   GUEST_BRAND_TRIO_MODEL_IDS,
   GUEST_FALLBACK_MODEL_IDS,
+  isWebSearchMode,
+  type WebSearchMode,
 } from "@/lib/appDefaults";
 import {
   canUseModelWithPlan,
@@ -343,7 +346,14 @@ export default function Home() {
   );
   const [showGuestSignInPrompt, setShowGuestSignInPrompt] = useState(false);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
-  const [promptPayload, setPromptPayload] = useState<{ id: string; text: string; chatId: string; userMessageId: string; attachments: ChatAttachment[] } | null>(null);
+  const [promptPayload, setPromptPayload] = useState<{
+    id: string;
+    text: string;
+    chatId: string;
+    userMessageId: string;
+    attachments: ChatAttachment[];
+    deepResearchDepth?: "quick" | "standard" | "deep";
+  } | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [pendingRemoveModelId, setPendingRemoveModelId] = useState<string | null>(null);
   const [pendingRevokeShareId, setPendingRevokeShareId] = useState<string | null>(null);
@@ -416,6 +426,20 @@ export default function Home() {
   const [selectedModels, setSelectedModels] = useState<string[]>([APP_DEFAULTS.defaultModelId]);
   
   const [disabledPanels, setDisabledPanels] = useState<string[]>([]);
+  // Per-conversation, reset/restored on chat switch the same way
+  // selectedModels/disabledPanels are -- must never leak between
+  // conversations (see components/chat/ChatInput.tsx's tools sheet).
+  const [webSearchMode, setWebSearchMode] = useState<WebSearchMode>(
+    APP_DEFAULTS.defaultWebSearchMode
+  );
+  const [isDeepResearchSetupOpen, setIsDeepResearchSetupOpen] = useState(false);
+  // Per-conversation, like webSearchMode -- reset on New Chat/conversation
+  // switch so a job's status chip never appears to follow the user into a
+  // different chat. Cleared on completion via handleResponseComplete below;
+  // on failure it stays visible until the user dismisses it (no failure
+  // callback is threaded up from ChatApp today), which is disclosed in the
+  // chip's own copy rather than silently claimed as a real cancel.
+  const [isDeepResearchPending, setIsDeepResearchPending] = useState(false);
   const modelSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const modelSyncAbortRef = useRef<AbortController | null>(null);
   const pendingModelSyncRef = useRef<PendingModelSettingsSync | null>(null);
@@ -1059,6 +1083,7 @@ export default function Home() {
     const applyConversationSettings = useCallback((data: {
         selectedModels?: unknown;
         disabledPanels?: unknown;
+        webSearchMode?: unknown;
         messages?: Array<{ role?: string; modelId?: string | null }>;
     }, targetChatId?: string) => {
         const savedModels = normalizeStringArray(data.selectedModels, [userDefaultEngine]);
@@ -1069,6 +1094,11 @@ export default function Home() {
 
         setSelectedModels(nextModels.length > 0 ? nextModels : [userDefaultEngine]);
         setDisabledPanels(nextDisabled);
+        setWebSearchMode(
+            isWebSearchMode(data.webSearchMode)
+                ? data.webSearchMode
+                : APP_DEFAULTS.defaultWebSearchMode
+        );
         if (targetChatId) {
           confirmedModelSettingsRef.current = {
             targetChatId,
@@ -1143,6 +1173,11 @@ export default function Home() {
                 (modelId: string) => restoredModels.includes(modelId)
               )
             );
+            setWebSearchMode(
+              isWebSearchMode(restoredConversation.webSearchMode)
+                ? restoredConversation.webSearchMode
+                : APP_DEFAULTS.defaultWebSearchMode
+            );
           }
         } catch (e) {
           console.error("Failed to parse guest conversations:", e);
@@ -1154,6 +1189,7 @@ export default function Home() {
           title: t("sidebar.newChat"),
             selectedModels: guestDefaultSelectedModels,
           disabledPanels: [],
+          webSearchMode: APP_DEFAULTS.defaultWebSearchMode,
           createdAt: new Date().toISOString(),
         };
         setConversations([initialChat]);
@@ -1379,6 +1415,7 @@ export default function Home() {
           title: t("sidebar.autoGeneratedNewRoom"),
           selectedModels: guestDefaultSelectedModels,
           disabledPanels: [],
+          webSearchMode: APP_DEFAULTS.defaultWebSearchMode,
         };
         setConversations((prev) => prev.map((c) => (c.id === resetChat.id ? resetChat : c)));
       } else {
@@ -1387,6 +1424,7 @@ export default function Home() {
             title: t("sidebar.autoGeneratedNewRoom"),
             selectedModels: guestDefaultSelectedModels,
           disabledPanels: [],
+          webSearchMode: APP_DEFAULTS.defaultWebSearchMode,
           createdAt: new Date().toISOString(),
         };
           setConversations((prev) => [newGuestChat, ...prev]);
@@ -1400,6 +1438,8 @@ export default function Home() {
     }
 
     setDisabledPanels([]);
+    setWebSearchMode(APP_DEFAULTS.defaultWebSearchMode);
+    setIsDeepResearchPending(false);
     setInputValue("");
       setPromptPayload(null);
       setIsInitialConversationResolved(true);
@@ -1436,6 +1476,7 @@ export default function Home() {
 	  currentChatIdRef.current = id;
       setCurrentChatId(id);
 	  setPromptPayload(null);
+      setIsDeepResearchPending(false);
 
     if (isGuestMode) {
       const targetConv = conversations.find((c) => c.id === id);
@@ -1456,6 +1497,13 @@ export default function Home() {
               (modelId) => restoredModels.includes(modelId)
             )
           );
+          setWebSearchMode(
+            isWebSearchMode(targetConv.webSearchMode)
+              ? targetConv.webSearchMode
+              : APP_DEFAULTS.defaultWebSearchMode
+          );
+        } else {
+          setWebSearchMode(APP_DEFAULTS.defaultWebSearchMode);
         }
       return;
     }
@@ -1761,6 +1809,35 @@ export default function Home() {
     }, 250);
   };
 
+  // Deliberate user action (picked from the tools sheet), not the frequent
+  // rapid-toggle case selectedModels' debounced sync guards against -- an
+  // immediate PATCH is simpler and correct here. Guests have no server
+  // record to PATCH; their conversations array (already localStorage-backed
+  // by the effect below) is updated directly instead.
+  const updateWebSearchMode = (mode: WebSearchMode) => {
+    setWebSearchMode(mode);
+    if (isGuestMode) {
+      if (currentChatId) {
+        setConversations((prev) =>
+          prev.map((conversation) =>
+            conversation.id === currentChatId
+              ? { ...conversation, webSearchMode: mode }
+              : conversation
+          )
+        );
+      }
+      return;
+    }
+    if (!currentChatId || !sessionUserId) return;
+    void fetch(`/api/conversations/${currentChatId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ webSearchMode: mode }),
+    }).catch((error) => {
+      console.error("Failed to sync web search mode:", error);
+    });
+  };
+
   const flushModelSettingsToServer = async (targetChatId: string) => {
     const pending = pendingModelSyncRef.current;
     if (!pending || pending.targetChatId !== targetChatId) return true;
@@ -1871,7 +1948,9 @@ export default function Home() {
     status,
   ]);
   
-  const handleGlobalSubmit = async () => {
+  const handleGlobalSubmit = async (options?: {
+    deepResearchDepth?: "quick" | "standard" | "deep";
+  }) => {
     const trimmed = inputValue.trim();
     if ((!trimmed && attachments.length === 0) || selectedModels.length === 0) return;
     if (activeModelCount === 0) {
@@ -1906,6 +1985,7 @@ export default function Home() {
             title: t("sidebar.newChat"),
             selectedModels,
             disabledPanels,
+            webSearchMode,
             createdAt: new Date().toISOString(),
           };
           setConversations([initialChat]);
@@ -1917,10 +1997,11 @@ export default function Home() {
         const res = await fetch("/api/conversations", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ 
+          body: JSON.stringify({
             title: (trimmed || attachments[0]?.name || t("sidebar.newChat")).slice(0, 30),
             selectedModels,
-            disabledPanels
+            disabledPanels,
+            webSearchMode
           }),
         });
         
@@ -1997,6 +2078,9 @@ export default function Home() {
         chatId: activeChatId,
         userMessageId: userMsgId,
         attachments: promptAttachments,
+        ...(options?.deepResearchDepth
+          ? { deepResearchDepth: options.deepResearchDepth }
+          : {}),
       });
       setInputValue("");
       setAttachments([]);
@@ -2062,6 +2146,10 @@ export default function Home() {
 
   const handleResponseComplete = useCallback(
     (promptId: string | null, modelId: string, responseText: string) => {
+      if (modelId === "perplexity/sonar-deep-research") {
+        setIsDeepResearchPending(false);
+        trackProductEvent("deep_research_completed", activeModelCount, {});
+      }
       if (promptId && responseText.trim()) {
         const responses =
           localComparisonResponsesRef.current.get(promptId) ||
@@ -2201,6 +2289,77 @@ export default function Home() {
       syncModelSettingsToServer(currentChatId, nextModels, nextDisabled);
     }
     return true;
+  };
+
+  // "항상" means this conversation searches the web -- the only real backing
+  // for that today is having a Perplexity search model active (no other
+  // provider's web search is wired into general chat yet). Rather than
+  // silently mutating the user's model selection, this reuses the exact
+  // same add/swap affordances (and their guest/plan gating) already exposed
+  // through the model picker, so the change is visible and undoable the
+  // same way any other model-selection change is.
+  const handleWebSearchModeChange = (mode: WebSearchMode) => {
+    updateWebSearchMode(mode);
+    if (mode !== "always") return;
+    const hasSearchModel = selectedModels.some((id) => {
+      const model = getModel(id);
+      return model?.provider === "perplexity" && model.usageClass !== "deep-research";
+    });
+    if (hasSearchModel) return;
+    const searchModelId = "perplexity/sonar";
+    if (selectedModels.length < maxSelectableModels) {
+      toggleModel(searchModelId);
+    } else {
+      const removeModelId = selectedModels[selectedModels.length - 1];
+      if (removeModelId) swapSelectedModel(removeModelId, searchModelId);
+    }
+  };
+
+  // handleGlobalSubmit is redefined every render (not memoized); a ref
+  // holding the latest closure lets the effect below call a fresh copy
+  // (with the just-updated selectedModels) without needing
+  // handleGlobalSubmit itself in the dependency array, which would fire the
+  // effect on every render instead of only when selectedModels changes.
+  const handleGlobalSubmitRef = useRef(handleGlobalSubmit);
+  useEffect(() => {
+    handleGlobalSubmitRef.current = handleGlobalSubmit;
+  });
+  const pendingDeepResearchSubmitRef = useRef<{
+    depth: "quick" | "standard" | "deep";
+  } | null>(null);
+
+  useEffect(() => {
+    if (!pendingDeepResearchSubmitRef.current) return;
+    if (!selectedModels.includes("perplexity/sonar-deep-research")) return;
+    const { depth } = pendingDeepResearchSubmitRef.current;
+    pendingDeepResearchSubmitRef.current = null;
+    void handleGlobalSubmitRef.current({ deepResearchDepth: depth });
+  }, [selectedModels]);
+
+  const dismissDeepResearchChip = () => {
+    setIsDeepResearchPending(false);
+    trackProductEvent("deep_research_cancelled", activeModelCount, {});
+  };
+
+  const confirmDeepResearchSetup = (depth: "quick" | "standard" | "deep") => {
+    if (!inputValue.trim()) return;
+    setIsDeepResearchSetupOpen(false);
+    setIsDeepResearchPending(true);
+    trackProductEvent("deep_research_started", activeModelCount, {
+      deep_research_depth: depth,
+    });
+    const searchModelId = "perplexity/sonar-deep-research";
+    if (selectedModels.includes(searchModelId)) {
+      void handleGlobalSubmitRef.current({ deepResearchDepth: depth });
+      return;
+    }
+    pendingDeepResearchSubmitRef.current = { depth };
+    if (selectedModels.length < maxSelectableModels) {
+      toggleModel(searchModelId);
+    } else {
+      const removeModelId = selectedModels[selectedModels.length - 1];
+      if (removeModelId) swapSelectedModel(removeModelId, searchModelId);
+    }
   };
 
   const handleModelFinderComplete = ({
@@ -2527,11 +2686,34 @@ export default function Home() {
     ])
   );
 
+  const deepResearchSetupModel = AVAILABLE_MODELS.find(
+    (model) => model.id === "perplexity/sonar-deep-research"
+  ) || null;
+  const deepResearchEstimatedInputTokens = Math.max(
+    1,
+    Math.ceil(new TextEncoder().encode(inputValue).length / 4)
+  );
+
   return (
     <>
       <ModelFinder
         enabled={Boolean(sessionUserId && isUserSettingsLoaded)}
         onComplete={handleModelFinderComplete}
+      />
+      <DeepResearchSetupSheet
+        open={isDeepResearchSetupOpen}
+        onClose={() => setIsDeepResearchSetupOpen(false)}
+        onConfirm={confirmDeepResearchSetup}
+        deepResearchModel={deepResearchSetupModel}
+        isGuestMode={isGuestMode}
+        isPlanLocked={
+          !isGuestMode &&
+          Boolean(deepResearchSetupModel) &&
+          !canUseModelWithPlan(currentAccessPlan, deepResearchSetupModel!)
+        }
+        onGuestSignInPrompt={() => setShowGuestSignInPrompt(true)}
+        estimatedInputTokens={deepResearchEstimatedInputTokens}
+        hasDraftText={Boolean(inputValue.trim())}
       />
       <GuestImportModal
         open={isGuestImportModalOpen}
@@ -2577,6 +2759,11 @@ export default function Home() {
           onDownload={handleDownloadConversation}
           onToggleModel={toggleModel}
           onSwapModel={swapSelectedModel}
+          webSearchMode={webSearchMode}
+          onWebSearchModeChange={handleWebSearchModeChange}
+          onOpenDeepResearchSetup={() => setIsDeepResearchSetupOpen(true)}
+          isDeepResearchPending={isDeepResearchPending}
+          onDismissDeepResearchChip={dismissDeepResearchChip}
           onRequestUndoToast={(message, undo) =>
             showToast(message, "info", { label: t("chat.undo"), onClick: undo })
           }
@@ -2624,6 +2811,11 @@ export default function Home() {
           onDownload={handleDownloadConversation}
           onToggleModel={toggleModel}
           onSwapModel={swapSelectedModel}
+          webSearchMode={webSearchMode}
+          onWebSearchModeChange={handleWebSearchModeChange}
+          onOpenDeepResearchSetup={() => setIsDeepResearchSetupOpen(true)}
+          isDeepResearchPending={isDeepResearchPending}
+          onDismissDeepResearchChip={dismissDeepResearchChip}
           onSubmit={handleGlobalSubmit}
           onBeforeModelSend={ensureModelSettingsReady}
           onChangePanelModel={changePanelModel}
@@ -3143,7 +3335,27 @@ export default function Home() {
                   {compareSummary.result.verificationNeeded.map((item, index) => (
                     <li key={`${index}-${item}`} className="flex gap-2">
                       <span className="font-black text-amber-600" aria-hidden="true">!</span>
-                      <span>{item}</span>
+                      <div className="min-w-0 flex-1">
+                        <span>{item}</span>
+                        {/* Guests never get a persisted conversationId, so
+                            the per-item web check (which looks the
+                            conversation up server-side) only offers itself
+                            once signed in. */}
+                        {currentChatId && (
+                          <VerifyItemButton
+                            conversationId={currentChatId}
+                            item={item}
+                            checkLabel={t("chat.aiReviewVerifyWithWeb")}
+                            checkingLabel={t("chat.aiReviewVerifying")}
+                            failedLabel={t("chat.aiReviewVerifyFailed")}
+                            statusLabels={{
+                              supported: t("chat.aiReviewVerifySupported"),
+                              unsupported: t("chat.aiReviewVerifyUnsupported"),
+                              inconclusive: t("chat.aiReviewVerifyInconclusive"),
+                            }}
+                          />
+                        )}
+                      </div>
                     </li>
                   ))}
                 </ul>
