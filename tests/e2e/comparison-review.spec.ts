@@ -15,7 +15,7 @@ const reviewModels = [
 
 async function mockComparisonReview(
   page: Page,
-  options: { deferSetup?: boolean } = {}
+  options: { deferSetup?: boolean; withSecondary?: boolean } = {}
 ) {
   let requestBody: Record<string, unknown> | null = null;
   let releaseSetup = () => {};
@@ -74,73 +74,115 @@ async function mockComparisonReview(
         body: JSON.stringify({
           id: "review-1",
           result: {
-            consensus: [
-              {
-                text: "세 답변 모두 단계적 검토가 필요하다는 데 동의합니다.",
-                citations: [
-                  { responseId: "A", quote: "단계적으로 접근해야 합니다.", verified: true },
-                  { responseId: "B", quote: "단계별 검토가 필요합니다.", verified: true },
+            primary: {
+              reviewerModelId: "mistral-medium-3-1",
+              result: {
+                consensus: [
+                  {
+                    text: "세 답변 모두 단계적 검토가 필요하다는 데 동의합니다.",
+                    citations: [
+                      { responseId: "A", quote: "단계적으로 접근해야 합니다.", verified: true },
+                      { responseId: "B", quote: "단계별 검토가 필요합니다.", verified: true },
+                    ],
+                    verified: true,
+                  },
                 ],
-                verified: true,
-              },
-            ],
-            differences: [
-              {
-                issue: "우선순위",
-                positions: [
+                differences: [
+                  {
+                    issue: "우선순위",
+                    positions: [
+                      {
+                        responseId: "A",
+                        position: "보안을 먼저 점검합니다.",
+                        quote: "보안 점검을 최우선으로 합니다.",
+                        verified: true,
+                      },
+                      {
+                        responseId: "B",
+                        position: "사용성을 먼저 확인합니다.",
+                        quote: "사용성을 먼저 확인해야 합니다.",
+                        verified: true,
+                      },
+                      {
+                        responseId: "C",
+                        position: "비용과 속도를 함께 봅니다.",
+                        quote: "비용과 속도를 함께 고려합니다.",
+                        verified: false,
+                      },
+                    ],
+                  },
+                ],
+                contradictions: [
+                  {
+                    text: "배포 순서에 대한 권고가 서로 다릅니다.",
+                    citations: [
+                      { responseId: "A", quote: "먼저 배포부터 진행합니다.", verified: true },
+                    ],
+                    verified: true,
+                  },
+                ],
+                missingPoints: ["실제 운영 지표가 제공되지 않았습니다."],
+                verificationNeeded: ["공급자별 가격은 외부 확인이 필요합니다."],
+                modelAssessments: [
                   {
                     responseId: "A",
-                    position: "보안을 먼저 점검합니다.",
-                    quote: "보안 점검을 최우선으로 합니다.",
-                    verified: true,
+                    strengths: ["구조가 명확합니다."],
+                    cautions: ["근거 링크가 없습니다."],
                   },
                   {
                     responseId: "B",
-                    position: "사용성을 먼저 확인합니다.",
-                    quote: "사용성을 먼저 확인해야 합니다.",
-                    verified: true,
+                    strengths: ["실행 단계가 구체적입니다."],
+                    cautions: ["비용 설명이 부족합니다."],
                   },
                   {
                     responseId: "C",
-                    position: "비용과 속도를 함께 봅니다.",
-                    quote: "비용과 속도를 함께 고려합니다.",
-                    verified: false,
+                    strengths: ["장단점을 함께 다룹니다."],
+                    cautions: ["일부 가정이 있습니다."],
                   },
                 ],
+                synthesis: "공통된 안전 조치를 먼저 적용한 뒤 운영 지표로 우선순위를 조정합니다.",
+                confidence: "medium",
+                limitations: ["이 검토는 외부 사실 검증이 아닙니다."],
+                groundingStats: { totalCitations: 5, verifiedCitations: 4 },
               },
-            ],
-            contradictions: [
-              {
-                text: "배포 순서에 대한 권고가 서로 다릅니다.",
-                citations: [
-                  { responseId: "A", quote: "먼저 배포부터 진행합니다.", verified: true },
-                ],
-                verified: true,
-              },
-            ],
-            missingPoints: ["실제 운영 지표가 제공되지 않았습니다."],
-            verificationNeeded: ["공급자별 가격은 외부 확인이 필요합니다."],
-            modelAssessments: [
-              {
-                responseId: "A",
-                strengths: ["구조가 명확합니다."],
-                cautions: ["근거 링크가 없습니다."],
-              },
-              {
-                responseId: "B",
-                strengths: ["실행 단계가 구체적입니다."],
-                cautions: ["비용 설명이 부족합니다."],
-              },
-              {
-                responseId: "C",
-                strengths: ["장단점을 함께 다룹니다."],
-                cautions: ["일부 가정이 있습니다."],
-              },
-            ],
-            synthesis: "공통된 안전 조치를 먼저 적용한 뒤 운영 지표로 우선순위를 조정합니다.",
-            confidence: "medium",
-            limitations: ["이 검토는 외부 사실 검증이 아닙니다."],
-            groundingStats: { totalCitations: 5, verifiedCitations: 4 },
+            },
+            secondary: options.withSecondary
+              ? {
+                  reviewerModelId: "claude-sonnet-5",
+                  result: {
+                    consensus: [
+                      {
+                        text: "두 검토자 모두 단계적 접근에 동의합니다.",
+                        citations: [
+                          { responseId: "A", quote: "단계적으로 접근해야 합니다.", verified: true },
+                        ],
+                        verified: true,
+                      },
+                    ],
+                    differences: [],
+                    contradictions: [],
+                    missingPoints: [],
+                    verificationNeeded: ["보안 정책 문서는 별도 확인이 필요합니다."],
+                    modelAssessments: [
+                      { responseId: "A", strengths: ["명확합니다."], cautions: [] },
+                      { responseId: "B", strengths: [], cautions: ["근거가 부족합니다."] },
+                      { responseId: "C", strengths: [], cautions: [] },
+                    ],
+                    synthesis: "",
+                    confidence: "high",
+                    limitations: ["이 검토는 외부 사실 검증이 아닙니다."],
+                    groundingStats: { totalCitations: 1, verifiedCitations: 1 },
+                  },
+                }
+              : null,
+            agreement: options.withSecondary
+              ? {
+                  confidenceMatches: false,
+                  primaryConfidence: "medium",
+                  secondaryConfidence: "high",
+                  sharedVerifiedQuoteCount: 1,
+                }
+              : null,
           },
           responseMap: [
             {
@@ -414,6 +456,80 @@ for (const viewport of [
     await expectNoHorizontalOverflow(page);
   });
 }
+
+test("AI comparison review with two reviewers shows a tab switcher and agreement summary", async ({
+  page,
+}) => {
+  await prepareGuestPage(page, "ko");
+  await mockAuthenticatedApi(page, { selectedModels: reviewModels });
+  await mockConversationHistory(page);
+  await mockComparisonReview(page, { withSecondary: true });
+  await page.goto("/chat");
+  await openReviewConversation(page);
+
+  await page.getByRole("button", { name: "AI 답변 교차검토" }).click();
+  const dialog = page.getByRole("dialog", { name: "AI 답변 교차검토" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: /교차검토 실행/ }).click();
+
+  const primaryTab = dialog.getByRole("tab", { name: /검토자 1/ });
+  const secondaryTab = dialog.getByRole("tab", { name: /검토자 2/ });
+  await expect(primaryTab).toBeVisible();
+  await expect(secondaryTab).toBeVisible();
+  await expect(primaryTab).toHaveAttribute("aria-selected", "true");
+  await expect(dialog.getByText("두 검토자의 신뢰도가 다릅니다")).toBeVisible();
+
+  // Primary tab shows the first reviewer's content (from the base mock).
+  await expect(dialog.getByText("1. 공통된 내용")).toBeVisible();
+
+  await secondaryTab.click();
+  await expect(secondaryTab).toHaveAttribute("aria-selected", "true");
+  await expect(dialog.getByText("두 검토자 모두 단계적 접근에 동의합니다.")).toBeVisible();
+  await expect(dialog.getByText("보안 정책 문서는 별도 확인이 필요합니다.")).toBeVisible();
+});
+
+test("a verificationNeeded item can be checked with a separate, per-item web search", async ({
+  page,
+}) => {
+  await prepareGuestPage(page, "ko");
+  await mockAuthenticatedApi(page, { selectedModels: reviewModels });
+  await mockConversationHistory(page);
+  await mockComparisonReview(page);
+  let verifyRequestBody: Record<string, unknown> | null = null;
+  await page.route(
+    "**/api/conversations/qa-conversation/comparison-reviews/verify-item",
+    async (route) => {
+      verifyRequestBody = route.request().postDataJSON() as Record<string, unknown>;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          status: "unsupported",
+          summary: "최근 공급자 발표에 따르면 가격이 인상되었습니다.",
+          reviewerModelId: "perplexity/sonar",
+          usageCredits: 1,
+          disclaimer: "This is a best-effort web check, not a guarantee.",
+        }),
+      });
+    }
+  );
+  await page.goto("/chat");
+  await openReviewConversation(page);
+
+  await page.getByRole("button", { name: "AI 답변 교차검토" }).click();
+  const dialog = page.getByRole("dialog", { name: "AI 답변 교차검토" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: /교차검토 실행/ }).click();
+
+  await expect(dialog.getByText("공급자별 가격은 외부 확인이 필요합니다.")).toBeVisible();
+  await dialog.getByRole("button", { name: "웹으로 확인" }).click();
+
+  await expect(dialog.getByText("반박됨:")).toBeVisible();
+  await expect(dialog.getByText("최근 공급자 발표에 따르면 가격이 인상되었습니다.")).toBeVisible();
+  expect(verifyRequestBody).toMatchObject({
+    item: "공급자별 가격은 외부 확인이 필요합니다.",
+  });
+});
 
 test("quick comparison performs a structured AI analysis on mobile", async ({
   page,

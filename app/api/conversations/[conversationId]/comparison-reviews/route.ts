@@ -16,15 +16,18 @@ import { getUserBillingPlan } from "@/lib/billingEntitlements";
 import {
   accessibleComparisonReviewers,
   buildComparisonReviewPrompt,
+  computeReviewAgreement,
   COMPARISON_REVIEW_PROMPT_VERSION,
   comparisonReviewModeSchema,
   comparisonReviewResultSchema,
   createComparisonReviewHash,
+  dualComparisonReviewResultSchema,
   estimateComparisonReviewTokens,
   validateComparisonReviewInputSize,
   verifyComparisonReviewResult,
-  verifiedComparisonReviewResultSchema,
+  type DualComparisonReviewResult,
   type ReviewSourceResponse,
+  type VerifiedComparisonReviewResult,
 } from "@/lib/comparisonReview";
 import {
   latestComparableConversationTurn,
@@ -51,7 +54,7 @@ import {
   conversationLockedResponse,
   hasConversationUnlockGrant,
 } from "@/lib/conversationLock";
-import { getModelUsageProfile } from "@/lib/models";
+import { getModelUsageProfile, type AiModel } from "@/lib/models";
 import { prisma } from "@/lib/prisma";
 import {
   recordModelFailure,
@@ -194,6 +197,14 @@ export async function GET(
       turn.responses
     );
     const budget = createChatBudget("user", candidates[0], inputTokens);
+    // A second independent reviewer runs whenever one is accessible, so the
+    // upfront estimate reflects the real (roughly doubled) cost instead of
+    // surprising the user after the fact.
+    const secondCandidate = candidates.find((candidate) => candidate.id !== candidates[0].id);
+    const secondBudget = secondCandidate
+      ? createChatBudget("user", secondCandidate, inputTokens)
+      : null;
+    const estimatedCredits = budget.usageCredits + (secondBudget?.usageCredits || 0);
 
     return Response.json(
       {
@@ -206,7 +217,8 @@ export async function GET(
           modelId: response.modelId,
           modelName: response.modelName,
         })),
-        estimatedCredits: budget.usageCredits,
+        estimatedCredits,
+        dualReview: Boolean(secondCandidate),
         reviewerClass: getModelUsageProfile(candidates[0]).category,
         reviewModes: ["balanced", "evidence", "action"],
         freeMonthlyReviews:
@@ -299,7 +311,7 @@ export async function POST(
       },
     });
     if (cached && !cached.isStale) {
-      const result = verifiedComparisonReviewResultSchema.safeParse(cached.result);
+      const result = dualComparisonReviewResultSchema.safeParse(cached.result);
       const responseMap = responseMapForStoredReview(
         cached.assistantMessageIds,
         turn.responses
@@ -355,9 +367,20 @@ export async function POST(
       turn.prompt.content,
       turn.responses
     );
-    let lastError: unknown = new Error("No reviewer attempted.");
 
-    for (const candidate of candidates) {
+    type ReviewAttempt = {
+      candidate: AiModel;
+      result: VerifiedComparisonReviewResult;
+      usageCredits: number;
+    };
+
+    // One attempt against one candidate model: reserve credits, generate,
+    // verify, settle -- refunding on any failure. Used twice below (primary
+    // and secondary reviewer) so a failed second attempt can never leave a
+    // dangling reservation.
+    const attemptReview = async (
+      candidate: AiModel
+    ): Promise<ReviewAttempt | null> => {
       let leaseId: string | null = null;
       let reservation: ChatUsageReservation | null = null;
       let providerUsageTraceId: string | null = null;
@@ -432,34 +455,7 @@ export async function POST(
           rawResult,
           reviewPrompt.contentByResponseId
         );
-        const stored = await prisma.comparisonReview.upsert({
-          where: {
-            userId_inputHash: { userId: session.user.id, inputHash },
-          },
-          create: {
-            userId: session.user.id,
-            conversationId,
-            promptMessageId: turn.prompt.id,
-            assistantMessageIds: reviewPrompt.responseMap.map(
-              (response) => response.messageId
-            ),
-            reviewerModelId: candidate.id,
-            reviewMode: payload.reviewMode,
-            promptVersion: COMPARISON_REVIEW_PROMPT_VERSION,
-            result,
-            usageCredits: budget.usageCredits,
-            inputHash,
-          },
-          update: {
-            assistantMessageIds: reviewPrompt.responseMap.map(
-              (response) => response.messageId
-            ),
-            reviewerModelId: candidate.id,
-            result,
-            usageCredits: budget.usageCredits,
-            isStale: false,
-          },
-        });
+
         const successfulReservation = reservation;
         reservation = null;
         await settleChatUsage(successfulReservation, {
@@ -480,23 +476,8 @@ export async function POST(
           recordProviderSuccess(candidate.provider),
           recordModelSuccess(candidate.id),
         ]);
-        completed = true;
-        return Response.json(
-          {
-            id: stored.id,
-            result,
-            responseMap: reviewPrompt.responseMap,
-            reviewerModelId: candidate.id,
-            usageCredits: budget.usageCredits,
-            cached: false,
-            createdAt: stored.createdAt.toISOString(),
-            disclaimer:
-              "This AI review compares supplied answers and is not external fact verification.",
-          },
-          { headers: { "Cache-Control": "no-store" } }
-        );
+        return { candidate, result, usageCredits: budget.usageCredits };
       } catch (error) {
-        lastError = error;
         if (reservation) {
           if (candidate.provider === "perplexity" && providerUsageTraceId) {
             providerUsageSnapshot = await consumePerplexityUsage(
@@ -536,20 +517,106 @@ export async function POST(
           reviewerModelId: candidate.id,
           error,
         });
+        return null;
       } finally {
         if (providerUsageTraceId) {
           discardPerplexityUsage(providerUsageTraceId);
         }
         if (leaseId) await releaseChatAccess(leaseId);
       }
+    };
+
+    let primaryAttempt: ReviewAttempt | null = null;
+    for (const candidate of candidates) {
+      primaryAttempt = await attemptReview(candidate);
+      if (primaryAttempt) break;
     }
 
-    console.error("All comparison reviewers failed:", { traceId, lastError });
-    return jsonError(
-      "The AI comparison review could not be completed. Reserved credits were refunded.",
-      "COMPARISON_REVIEW_FAILED",
-      502,
-      traceId
+    if (!primaryAttempt) {
+      console.error("All comparison reviewers failed:", { traceId });
+      return jsonError(
+        "The AI comparison review could not be completed. Reserved credits were refunded.",
+        "COMPARISON_REVIEW_FAILED",
+        502,
+        traceId
+      );
+    }
+
+    // "AI Review" promises a cross-review, so once a primary reviewer
+    // succeeds, run a second independent one (from a different candidate,
+    // ideally a different provider -- accessibleComparisonReviewers already
+    // sorts for that) instead of stopping at the first success. This
+    // genuinely doubles credit cost when it runs, which is why the GET
+    // preview above reflects it upfront; if no second candidate is
+    // available or it fails, the review still completes with just the
+    // primary reviewer instead of failing outright.
+    let secondaryAttempt: ReviewAttempt | null = null;
+    for (const candidate of candidates) {
+      if (candidate.id === primaryAttempt.candidate.id) continue;
+      secondaryAttempt = await attemptReview(candidate);
+      if (secondaryAttempt) break;
+    }
+
+    const dualResult: DualComparisonReviewResult = {
+      primary: {
+        reviewerModelId: primaryAttempt.candidate.id,
+        result: primaryAttempt.result,
+      },
+      secondary: secondaryAttempt
+        ? {
+            reviewerModelId: secondaryAttempt.candidate.id,
+            result: secondaryAttempt.result,
+          }
+        : null,
+      agreement: secondaryAttempt
+        ? computeReviewAgreement(primaryAttempt.result, secondaryAttempt.result)
+        : null,
+    };
+    const totalUsageCredits =
+      primaryAttempt.usageCredits + (secondaryAttempt?.usageCredits || 0);
+
+    const stored = await prisma.comparisonReview.upsert({
+      where: {
+        userId_inputHash: { userId: session.user.id, inputHash },
+      },
+      create: {
+        userId: session.user.id,
+        conversationId,
+        promptMessageId: turn.prompt.id,
+        assistantMessageIds: reviewPrompt.responseMap.map(
+          (response) => response.messageId
+        ),
+        reviewerModelId: primaryAttempt.candidate.id,
+        reviewMode: payload.reviewMode,
+        promptVersion: COMPARISON_REVIEW_PROMPT_VERSION,
+        result: dualResult,
+        usageCredits: totalUsageCredits,
+        inputHash,
+      },
+      update: {
+        assistantMessageIds: reviewPrompt.responseMap.map(
+          (response) => response.messageId
+        ),
+        reviewerModelId: primaryAttempt.candidate.id,
+        result: dualResult,
+        usageCredits: totalUsageCredits,
+        isStale: false,
+      },
+    });
+    completed = true;
+    return Response.json(
+      {
+        id: stored.id,
+        result: dualResult,
+        responseMap: reviewPrompt.responseMap,
+        reviewerModelId: primaryAttempt.candidate.id,
+        usageCredits: totalUsageCredits,
+        cached: false,
+        createdAt: stored.createdAt.toISOString(),
+        disclaimer:
+          "This AI review compares supplied answers and is not external fact verification.",
+      },
+      { headers: { "Cache-Control": "no-store" } }
     );
   } catch (error) {
     if (

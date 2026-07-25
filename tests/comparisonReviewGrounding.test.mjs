@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  computeReviewAgreement,
   estimateComparisonReviewTokens,
   verifyComparisonReviewResult,
   verifyQuickComparisonSummaryResult,
@@ -157,4 +158,85 @@ test("English input still estimates close to the bytes/4 heuristic", () => {
     { messageId: "a", modelId: "m", modelName: "M", provider: "openai", content: englishText },
   ]);
   assert.ok(tokens < 3_000, `expected a modest estimate for plain ASCII text, got ${tokens}`);
+});
+
+test("computeReviewAgreement reports matching confidence and counts an exact shared quote", () => {
+  const primary = verifyComparisonReviewResult(
+    baseFullResult({
+      consensus: [
+        {
+          text: "Both agree on the capital.",
+          citations: [{ responseId: "A", quote: "The capital of France is Paris." }],
+        },
+      ],
+    }),
+    contentByResponseId
+  );
+  const secondary = verifyComparisonReviewResult(
+    baseFullResult({
+      consensus: [
+        {
+          text: "Same fact, independently found.",
+          citations: [{ responseId: "A", quote: "The capital of France is Paris." }],
+        },
+      ],
+    }),
+    contentByResponseId
+  );
+  const agreement = computeReviewAgreement(primary, secondary);
+  assert.equal(agreement.confidenceMatches, true);
+  assert.equal(agreement.primaryConfidence, "high");
+  assert.equal(agreement.secondaryConfidence, "high");
+  assert.equal(agreement.sharedVerifiedQuoteCount, 1);
+});
+
+test("computeReviewAgreement reports zero shared quotes and a confidence mismatch when reviewers diverge", () => {
+  const primary = verifyComparisonReviewResult(
+    baseFullResult({
+      consensus: [
+        {
+          text: "Grounded claim.",
+          citations: [{ responseId: "A", quote: "The capital of France is Paris." }],
+        },
+      ],
+    }),
+    contentByResponseId
+  );
+  const secondary = verifyComparisonReviewResult(
+    baseFullResult({
+      consensus: [
+        {
+          text: "Fabricated claim.",
+          citations: [{ responseId: "B", quote: "this text does not exist anywhere" }],
+        },
+      ],
+    }),
+    contentByResponseId
+  );
+  const agreement = computeReviewAgreement(primary, secondary);
+  assert.equal(agreement.confidenceMatches, false);
+  assert.equal(agreement.primaryConfidence, "high");
+  assert.equal(agreement.secondaryConfidence, "low");
+  assert.equal(agreement.sharedVerifiedQuoteCount, 0);
+});
+
+test("computeReviewAgreement does not count an unverified quote as shared even if both reviewers cite it identically", () => {
+  const primary = verifyComparisonReviewResult(
+    baseFullResult({
+      consensus: [
+        { text: "x", citations: [{ responseId: "A", quote: "not in the source text" }] },
+      ],
+    }),
+    contentByResponseId
+  );
+  const secondary = verifyComparisonReviewResult(
+    baseFullResult({
+      consensus: [
+        { text: "y", citations: [{ responseId: "A", quote: "not in the source text" }] },
+      ],
+    }),
+    contentByResponseId
+  );
+  const agreement = computeReviewAgreement(primary, secondary);
+  assert.equal(agreement.sharedVerifiedQuoteCount, 0);
 });

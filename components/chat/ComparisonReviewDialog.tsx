@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
   LoaderCircle,
   RefreshCw,
+  Search,
   ShieldAlert,
   ShieldCheck,
   Sparkles,
@@ -29,6 +30,7 @@ type ReviewSetup = {
     modelName: string;
   }>;
   estimatedCredits?: number;
+  dualReview?: boolean;
   reviewerClass?: string;
   freeMonthlyReviews?: number | null;
   disclaimer?: string;
@@ -37,31 +39,44 @@ type ReviewSetup = {
 type Citation = { responseId: "A" | "B" | "C"; quote: string; verified: boolean };
 type GroundedClaim = { text: string; citations: Citation[]; verified: boolean };
 
+type SingleReviewResult = {
+  consensus: GroundedClaim[];
+  differences: Array<{
+    issue: string;
+    positions: Array<{
+      responseId: "A" | "B" | "C";
+      position: string;
+      quote: string;
+      verified: boolean;
+    }>;
+  }>;
+  contradictions: GroundedClaim[];
+  missingPoints: string[];
+  verificationNeeded: string[];
+  modelAssessments: Array<{
+    responseId: "A" | "B" | "C";
+    strengths: string[];
+    cautions: string[];
+  }>;
+  synthesis: string;
+  confidence: "low" | "medium" | "high";
+  limitations: string[];
+  groundingStats: { totalCitations: number; verifiedCitations: number };
+};
+
+type ReviewAgreement = {
+  confidenceMatches: boolean;
+  primaryConfidence: "low" | "medium" | "high";
+  secondaryConfidence: "low" | "medium" | "high";
+  sharedVerifiedQuoteCount: number;
+};
+
 type ComparisonReview = {
   id: string;
   result: {
-    consensus: GroundedClaim[];
-    differences: Array<{
-      issue: string;
-      positions: Array<{
-        responseId: "A" | "B" | "C";
-        position: string;
-        quote: string;
-        verified: boolean;
-      }>;
-    }>;
-    contradictions: GroundedClaim[];
-    missingPoints: string[];
-    verificationNeeded: string[];
-    modelAssessments: Array<{
-      responseId: "A" | "B" | "C";
-      strengths: string[];
-      cautions: string[];
-    }>;
-    synthesis: string;
-    confidence: "low" | "medium" | "high";
-    limitations: string[];
-    groundingStats: { totalCitations: number; verifiedCitations: number };
+    primary: { reviewerModelId: string; result: SingleReviewResult };
+    secondary: { reviewerModelId: string; result: SingleReviewResult } | null;
+    agreement: ReviewAgreement | null;
   };
   responseMap: Array<{
     responseId: "A" | "B" | "C";
@@ -103,11 +118,13 @@ function ReviewList({
   items,
   emptyLabel,
   tone = "default",
+  renderExtra,
 }: {
   title: string;
   items: string[];
   emptyLabel: string;
   tone?: "default" | "warning";
+  renderExtra?: (item: string, index: number) => ReactNode;
 }) {
   return (
     <section className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950/70">
@@ -124,7 +141,10 @@ function ReviewList({
                   tone === "warning" ? "bg-amber-500" : "bg-blue-500"
                 }`}
               />
-              <span className="min-w-0 break-words">{item}</span>
+              <div className="min-w-0 flex-1">
+                <span className="break-words">{item}</span>
+                {renderExtra?.(item, index)}
+              </div>
             </li>
           ))}
         </ul>
@@ -230,6 +250,101 @@ function GroundedReviewList({
   );
 }
 
+type VerifyItemResult = {
+  status: "supported" | "unsupported" | "inconclusive";
+  summary: string;
+  usageCredits: number;
+};
+
+// Opt-in, per-item web verification for a single "needs external
+// verification" claim -- a separate paid action (Perplexity web search),
+// never run automatically, so the base review cost stays unchanged unless
+// the user explicitly asks to check a specific item.
+export function VerifyItemButton({
+  conversationId,
+  item,
+  checkLabel,
+  checkingLabel,
+  failedLabel,
+  statusLabels,
+}: {
+  conversationId: string;
+  item: string;
+  checkLabel: string;
+  checkingLabel: string;
+  failedLabel: string;
+  statusLabels: Record<VerifyItemResult["status"], string>;
+}) {
+  const [state, setState] = useState<
+    | { phase: "idle" }
+    | { phase: "loading" }
+    | { phase: "done"; result: VerifyItemResult }
+    | { phase: "error"; message: string }
+  >({ phase: "idle" });
+
+  const run = async () => {
+    setState({ phase: "loading" });
+    try {
+      const response = await fetch(
+        `/api/conversations/${conversationId}/comparison-reviews/verify-item`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ item }),
+        }
+      );
+      const data = (await response.json().catch(() => ({}))) as
+        | VerifyItemResult
+        | { error?: string };
+      if (!response.ok || !("status" in data)) {
+        throw new Error("error" in data && data.error ? data.error : failedLabel);
+      }
+      setState({ phase: "done", result: data });
+    } catch (error) {
+      setState({
+        phase: "error",
+        message: error instanceof Error ? error.message : failedLabel,
+      });
+    }
+  };
+
+  if (state.phase === "done") {
+    const toneClass =
+      state.result.status === "supported"
+        ? "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:text-emerald-200"
+        : state.result.status === "unsupported"
+          ? "border-red-200 bg-red-50 text-red-900 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-200"
+          : "border-zinc-200 bg-zinc-50 text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300";
+    return (
+      <div className={`mt-1.5 rounded-lg border px-2 py-1.5 text-xs leading-5 ${toneClass}`}>
+        <span className="font-bold">{statusLabels[state.result.status]}: </span>
+        {state.result.summary}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-1.5">
+      <button
+        type="button"
+        onClick={run}
+        disabled={state.phase === "loading"}
+        className="inline-flex items-center gap-1 rounded-full border border-zinc-300 px-2 py-1 text-[11px] font-bold text-zinc-600 transition hover:bg-zinc-100 disabled:cursor-wait disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+      >
+        {state.phase === "loading" ? (
+          <LoaderCircle className="h-3 w-3 animate-spin" aria-hidden="true" />
+        ) : (
+          <Search className="h-3 w-3" aria-hidden="true" />
+        )}
+        {state.phase === "loading" ? checkingLabel : checkLabel}
+      </button>
+      {state.phase === "error" && (
+        <p className="mt-1 text-[11px] text-red-600 dark:text-red-400">{state.message}</p>
+      )}
+    </div>
+  );
+}
+
 export function ComparisonReviewDialog({
   conversationId,
   open,
@@ -250,6 +365,7 @@ export function ComparisonReviewDialog({
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
+  const [activeReviewer, setActiveReviewer] = useState<"primary" | "secondary">("primary");
 
   useEffect(() => {
     if (!open || !conversationId) return;
@@ -308,13 +424,8 @@ export function ComparisonReviewDialog({
     [review]
   );
 
-  const reviewerModelName = useMemo(() => {
-    if (!review) return "";
-    return (
-      catalogModels.find((model) => model.id === review.reviewerModelId)?.name ||
-      review.reviewerModelId
-    );
-  }, [catalogModels, review]);
+  const modelName = (modelId: string) =>
+    catalogModels.find((model) => model.id === modelId)?.name || modelId;
 
   if (!open || !conversationId) return null;
 
@@ -357,6 +468,7 @@ export function ComparisonReviewDialog({
         );
       }
       setReview(data);
+      setActiveReviewer("primary");
       trackProductEvent(
         "comparison_review_completed",
         setup.responses?.length || 0,
@@ -425,181 +537,251 @@ export function ComparisonReviewDialog({
               <p className="mt-3 text-sm font-semibold">{t("chat.aiReviewPreparing")}</p>
             </div>
           ) : review ? (
-            <div className="space-y-5">
-              <div className="flex flex-wrap items-center gap-2">
-                {review.cached ? (
-                  <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-black text-emerald-600 dark:text-emerald-300">
-                    {t("chat.aiReviewCached")}
-                  </span>
-                ) : (
-                  <CreditCostBadge
-                    credits={review.usageCredits}
-                    size="md"
-                    label={`${review.usageCredits} ${t("chat.aiReviewCreditsUsed")}`}
-                    testId="ai-review-used-credits"
-                  />
-                )}
-                <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-bold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-                  {t("chat.aiReviewConfidence")}: {review.result.confidence}
-                </span>
-                <span
-                  className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-bold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
-                  title={t("chat.aiReviewGroundingHint")}
-                >
-                  {review.result.groundingStats.verifiedCitations}/
-                  {review.result.groundingStats.totalCitations} {t("chat.aiReviewQuotesVerified")}
-                </span>
-                <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-bold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-                  {t("chat.aiReviewedBy")}: {reviewerModelName}
-                </span>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <GroundedReviewList
-                  title={t("chat.aiReviewConsensus")}
-                  items={review.result.consensus}
-                  emptyLabel={t("chat.aiReviewNoneFound")}
-                  modelNames={modelNames}
-                  responseLabel={t("chat.aiReviewResponse")}
-                  verifiedLabel={t("chat.aiReviewQuoteVerified")}
-                  unverifiedLabel={t("chat.aiReviewQuoteUnverified")}
-                />
-                <GroundedReviewList
-                  title={t("chat.aiReviewContradictions")}
-                  items={review.result.contradictions}
-                  emptyLabel={t("chat.aiReviewNoneFound")}
-                  modelNames={modelNames}
-                  responseLabel={t("chat.aiReviewResponse")}
-                  verifiedLabel={t("chat.aiReviewQuoteVerified")}
-                  unverifiedLabel={t("chat.aiReviewQuoteUnverified")}
-                  tone="warning"
-                />
-              </div>
-
-              <section className="rounded-2xl border border-zinc-200 p-4 dark:border-zinc-800">
-                <h3 className="text-sm font-black text-zinc-900 dark:text-zinc-100">
-                  {t("chat.aiReviewDifferences")}
-                </h3>
-                {review.result.differences.length ? (
-                  <div className="mt-3 space-y-3">
-                    {review.result.differences.map((difference, index) => (
-                      <article
-                        key={`${index}:${difference.issue.slice(0, 32)}`}
-                        className="overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-800"
-                      >
-                        <h4 className="bg-zinc-50 px-3 py-2 text-sm font-bold dark:bg-zinc-950">
-                          {difference.issue}
-                        </h4>
-                        <div className="divide-y divide-zinc-200 dark:divide-zinc-800">
-                          {difference.positions.map((position) => (
-                            <div
-                              key={position.responseId}
-                              className="grid gap-1 px-3 py-2 text-sm sm:grid-cols-[10rem_1fr] sm:gap-3"
+            (() => {
+              const activeEntry =
+                activeReviewer === "secondary" && review.result.secondary
+                  ? review.result.secondary
+                  : review.result.primary;
+              const activeResult = activeEntry.result;
+              return (
+                <div className="space-y-5">
+                  {review.result.secondary && (
+                    <div className="space-y-2">
+                      <div className="flex gap-2" role="tablist" aria-label={t("chat.aiReviewedBy")}>
+                        {(["primary", "secondary"] as const).map((key) => {
+                          const entry =
+                            key === "primary" ? review.result.primary : review.result.secondary;
+                          if (!entry) return null;
+                          const isActive = activeReviewer === key;
+                          return (
+                            <button
+                              key={key}
+                              type="button"
+                              role="tab"
+                              aria-selected={isActive}
+                              onClick={() => setActiveReviewer(key)}
+                              className={`rounded-xl px-3 py-2 text-xs font-black transition ${
+                                isActive
+                                  ? "bg-blue-600 text-white"
+                                  : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                              }`}
                             >
-                              <span className="font-black text-blue-600 dark:text-blue-300">
-                                {modelNames.get(position.responseId) ||
-                                  `${t("chat.aiReviewResponse")} ${position.responseId}`}
-                              </span>
-                              <div className="min-w-0">
-                                <span className="break-words leading-6 text-zinc-700 dark:text-zinc-300">
-                                  {position.position}
-                                </span>
-                                <QuoteBadge
-                                  quote={position.quote}
-                                  verified={position.verified}
-                                  sourceLabel={
-                                    modelNames.get(position.responseId) ||
-                                    `${t("chat.aiReviewResponse")} ${position.responseId}`
-                                  }
-                                  verifiedLabel={t("chat.aiReviewQuoteVerified")}
-                                  unverifiedLabel={t("chat.aiReviewQuoteUnverified")}
-                                />
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="mt-2 text-sm text-zinc-500">{t("chat.aiReviewNoneFound")}</p>
-                )}
-              </section>
+                              {key === "primary"
+                                ? t("chat.aiReviewPrimaryReviewer")
+                                : t("chat.aiReviewSecondaryReviewer")}
+                              {": "}
+                              {modelName(entry.reviewerModelId)}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {review.result.agreement && (
+                        <p className="rounded-xl bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-600 dark:bg-zinc-950/60 dark:text-zinc-300">
+                          {review.result.agreement.confidenceMatches
+                            ? t("chat.aiReviewAgreementConfidenceMatch")
+                            : t("chat.aiReviewAgreementConfidenceMismatch")
+                                .replace("{primary}", review.result.agreement.primaryConfidence)
+                                .replace("{secondary}", review.result.agreement.secondaryConfidence)}
+                          {" · "}
+                          {t("chat.aiReviewAgreementSharedQuotes").replace(
+                            "{count}",
+                            String(review.result.agreement.sharedVerifiedQuoteCount)
+                          )}
+                        </p>
+                      )}
+                    </div>
+                  )}
 
-              <div className="grid gap-4 md:grid-cols-2">
-                <ReviewList
-                  title={t("chat.aiReviewMissingPoints")}
-                  items={review.result.missingPoints}
-                  emptyLabel={t("chat.aiReviewNoneFound")}
-                />
-                <ReviewList
-                  title={t("chat.aiReviewVerificationNeeded")}
-                  items={review.result.verificationNeeded}
-                  emptyLabel={t("chat.aiReviewNoneFound")}
-                  tone="warning"
-                />
-              </div>
-
-              <section className="rounded-2xl border border-zinc-200 p-4 dark:border-zinc-800">
-                <h3 className="text-sm font-black text-zinc-900 dark:text-zinc-100">
-                  {t("chat.aiReviewModelAssessments")}
-                </h3>
-                <div className="mt-3 grid gap-3 lg:grid-cols-3">
-                  {review.result.modelAssessments.map((assessment) => (
-                    <article
-                      key={assessment.responseId}
-                      className="rounded-xl bg-zinc-50 p-3 dark:bg-zinc-950"
+                  <div className="flex flex-wrap items-center gap-2">
+                    {review.cached ? (
+                      <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-black text-emerald-600 dark:text-emerald-300">
+                        {t("chat.aiReviewCached")}
+                      </span>
+                    ) : (
+                      <CreditCostBadge
+                        credits={review.usageCredits}
+                        size="md"
+                        label={`${review.usageCredits} ${t("chat.aiReviewCreditsUsed")}`}
+                        testId="ai-review-used-credits"
+                      />
+                    )}
+                    <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-bold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                      {t("chat.aiReviewConfidence")}: {activeResult.confidence}
+                    </span>
+                    <span
+                      className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-bold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+                      title={t("chat.aiReviewGroundingHint")}
                     >
-                      <h4 className="font-black text-blue-600 dark:text-blue-300">
-                        {modelNames.get(assessment.responseId) || assessment.responseId}
-                      </h4>
-                      <p className="mt-2 text-xs font-black uppercase tracking-wide text-emerald-600 dark:text-emerald-300">
-                        {t("chat.aiReviewStrengths")}
-                      </p>
-                      <ul className="mt-1 space-y-1 text-sm leading-5 text-zinc-700 dark:text-zinc-300">
-                        {assessment.strengths.map((item) => (
-                          <li key={item}>• {item}</li>
+                      {activeResult.groundingStats.verifiedCitations}/
+                      {activeResult.groundingStats.totalCitations} {t("chat.aiReviewQuotesVerified")}
+                    </span>
+                    <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-bold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                      {t("chat.aiReviewedBy")}: {modelName(activeEntry.reviewerModelId)}
+                    </span>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <GroundedReviewList
+                      title={t("chat.aiReviewConsensus")}
+                      items={activeResult.consensus}
+                      emptyLabel={t("chat.aiReviewNoneFound")}
+                      modelNames={modelNames}
+                      responseLabel={t("chat.aiReviewResponse")}
+                      verifiedLabel={t("chat.aiReviewQuoteVerified")}
+                      unverifiedLabel={t("chat.aiReviewQuoteUnverified")}
+                    />
+                    <GroundedReviewList
+                      title={t("chat.aiReviewContradictions")}
+                      items={activeResult.contradictions}
+                      emptyLabel={t("chat.aiReviewNoneFound")}
+                      modelNames={modelNames}
+                      responseLabel={t("chat.aiReviewResponse")}
+                      verifiedLabel={t("chat.aiReviewQuoteVerified")}
+                      unverifiedLabel={t("chat.aiReviewQuoteUnverified")}
+                      tone="warning"
+                    />
+                  </div>
+
+                  <section className="rounded-2xl border border-zinc-200 p-4 dark:border-zinc-800">
+                    <h3 className="text-sm font-black text-zinc-900 dark:text-zinc-100">
+                      {t("chat.aiReviewDifferences")}
+                    </h3>
+                    {activeResult.differences.length ? (
+                      <div className="mt-3 space-y-3">
+                        {activeResult.differences.map((difference, index) => (
+                          <article
+                            key={`${index}:${difference.issue.slice(0, 32)}`}
+                            className="overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-800"
+                          >
+                            <h4 className="bg-zinc-50 px-3 py-2 text-sm font-bold dark:bg-zinc-950">
+                              {difference.issue}
+                            </h4>
+                            <div className="divide-y divide-zinc-200 dark:divide-zinc-800">
+                              {difference.positions.map((position) => (
+                                <div
+                                  key={position.responseId}
+                                  className="grid gap-1 px-3 py-2 text-sm sm:grid-cols-[10rem_1fr] sm:gap-3"
+                                >
+                                  <span className="font-black text-blue-600 dark:text-blue-300">
+                                    {modelNames.get(position.responseId) ||
+                                      `${t("chat.aiReviewResponse")} ${position.responseId}`}
+                                  </span>
+                                  <div className="min-w-0">
+                                    <span className="break-words leading-6 text-zinc-700 dark:text-zinc-300">
+                                      {position.position}
+                                    </span>
+                                    <QuoteBadge
+                                      quote={position.quote}
+                                      verified={position.verified}
+                                      sourceLabel={
+                                        modelNames.get(position.responseId) ||
+                                        `${t("chat.aiReviewResponse")} ${position.responseId}`
+                                      }
+                                      verifiedLabel={t("chat.aiReviewQuoteVerified")}
+                                      unverifiedLabel={t("chat.aiReviewQuoteUnverified")}
+                                    />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </article>
                         ))}
-                      </ul>
-                      <p className="mt-3 text-xs font-black uppercase tracking-wide text-amber-600 dark:text-amber-300">
-                        {t("chat.aiReviewCautions")}
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-sm text-zinc-500">{t("chat.aiReviewNoneFound")}</p>
+                    )}
+                  </section>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <ReviewList
+                      title={t("chat.aiReviewMissingPoints")}
+                      items={activeResult.missingPoints}
+                      emptyLabel={t("chat.aiReviewNoneFound")}
+                    />
+                    <ReviewList
+                      title={t("chat.aiReviewVerificationNeeded")}
+                      items={activeResult.verificationNeeded}
+                      emptyLabel={t("chat.aiReviewNoneFound")}
+                      tone="warning"
+                      renderExtra={(item) => (
+                        <VerifyItemButton
+                          conversationId={conversationId as string}
+                          item={item}
+                          checkLabel={t("chat.aiReviewVerifyWithWeb")}
+                          checkingLabel={t("chat.aiReviewVerifying")}
+                          failedLabel={t("chat.aiReviewVerifyFailed")}
+                          statusLabels={{
+                            supported: t("chat.aiReviewVerifySupported"),
+                            unsupported: t("chat.aiReviewVerifyUnsupported"),
+                            inconclusive: t("chat.aiReviewVerifyInconclusive"),
+                          }}
+                        />
+                      )}
+                    />
+                  </div>
+
+                  <section className="rounded-2xl border border-zinc-200 p-4 dark:border-zinc-800">
+                    <h3 className="text-sm font-black text-zinc-900 dark:text-zinc-100">
+                      {t("chat.aiReviewModelAssessments")}
+                    </h3>
+                    <div className="mt-3 grid gap-3 lg:grid-cols-3">
+                      {activeResult.modelAssessments.map((assessment) => (
+                        <article
+                          key={assessment.responseId}
+                          className="rounded-xl bg-zinc-50 p-3 dark:bg-zinc-950"
+                        >
+                          <h4 className="font-black text-blue-600 dark:text-blue-300">
+                            {modelNames.get(assessment.responseId) || assessment.responseId}
+                          </h4>
+                          <p className="mt-2 text-xs font-black uppercase tracking-wide text-emerald-600 dark:text-emerald-300">
+                            {t("chat.aiReviewStrengths")}
+                          </p>
+                          <ul className="mt-1 space-y-1 text-sm leading-5 text-zinc-700 dark:text-zinc-300">
+                            {assessment.strengths.map((item) => (
+                              <li key={item}>• {item}</li>
+                            ))}
+                          </ul>
+                          <p className="mt-3 text-xs font-black uppercase tracking-wide text-amber-600 dark:text-amber-300">
+                            {t("chat.aiReviewCautions")}
+                          </p>
+                          <ul className="mt-1 space-y-1 text-sm leading-5 text-zinc-700 dark:text-zinc-300">
+                            {assessment.cautions.map((item) => (
+                              <li key={item}>• {item}</li>
+                            ))}
+                          </ul>
+                        </article>
+                      ))}
+                    </div>
+                  </section>
+
+                  {activeResult.synthesis && (
+                    <section className="rounded-2xl border border-blue-200 bg-blue-50 p-4 dark:border-blue-900/60 dark:bg-blue-950/20">
+                      <h3 className="text-sm font-black text-blue-900 dark:text-blue-100">
+                        {t("chat.aiReviewSynthesis")}
+                      </h3>
+                      <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-blue-950/80 dark:text-blue-100/80">
+                        {activeResult.synthesis}
                       </p>
-                      <ul className="mt-1 space-y-1 text-sm leading-5 text-zinc-700 dark:text-zinc-300">
-                        {assessment.cautions.map((item) => (
-                          <li key={item}>• {item}</li>
-                        ))}
-                      </ul>
-                    </article>
-                  ))}
+                    </section>
+                  )}
+
+                  <ReviewList
+                    title={t("chat.aiReviewLimitations")}
+                    items={activeResult.limitations}
+                    emptyLabel={review.disclaimer}
+                    tone="warning"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setReview(null)}
+                    className="inline-flex items-center gap-2 rounded-xl border border-zinc-300 px-4 py-2 text-sm font-bold hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+                  >
+                    <RefreshCw className="h-4 w-4" />
+                    {t("chat.aiReviewChangeCriteria")}
+                  </button>
                 </div>
-              </section>
-
-              {review.result.synthesis && (
-                <section className="rounded-2xl border border-blue-200 bg-blue-50 p-4 dark:border-blue-900/60 dark:bg-blue-950/20">
-                  <h3 className="text-sm font-black text-blue-900 dark:text-blue-100">
-                    {t("chat.aiReviewSynthesis")}
-                  </h3>
-                  <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-blue-950/80 dark:text-blue-100/80">
-                    {review.result.synthesis}
-                  </p>
-                </section>
-              )}
-
-              <ReviewList
-                title={t("chat.aiReviewLimitations")}
-                items={review.result.limitations}
-                emptyLabel={review.disclaimer}
-                tone="warning"
-              />
-              <button
-                type="button"
-                onClick={() => setReview(null)}
-                className="inline-flex items-center gap-2 rounded-xl border border-zinc-300 px-4 py-2 text-sm font-bold hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
-              >
-                <RefreshCw className="h-4 w-4" />
-                {t("chat.aiReviewChangeCriteria")}
-              </button>
-            </div>
+              );
+            })()
           ) : (
             <div data-testid="comparison-review-setup" className="space-y-5">
               <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-300">
@@ -659,6 +841,11 @@ export function ComparisonReviewDialog({
                           label={`${setup.estimatedCredits || 0} ${t("chat.aiReviewCredits")}`}
                           testId="ai-review-estimated-credits"
                         />
+                        {setup.dualReview && (
+                          <p className="mt-1 text-xs leading-5 text-zinc-500">
+                            {t("chat.aiReviewDualReviewerNote")}
+                          </p>
+                        )}
                       </div>
                       <div className="text-right text-xs leading-5 text-zinc-500">
                         <p>{setup.reviewerClass} reviewer</p>

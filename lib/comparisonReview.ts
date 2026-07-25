@@ -7,7 +7,7 @@ import { PROVIDER_API_KEY_ENV } from "@/lib/providerMonitoring";
 import { assertModelAccess, type ChatAccess } from "@/lib/chatSecurity";
 import { assertModelRuntimeAvailable } from "@/lib/modelAvailability";
 
-export const COMPARISON_REVIEW_PROMPT_VERSION = "comparison-review-v2";
+export const COMPARISON_REVIEW_PROMPT_VERSION = "comparison-review-v3";
 export const QUICK_COMPARISON_PROMPT_VERSION = "quick-comparison-v2";
 export const COMPARISON_REVIEW_LIMITS = {
   maxQuestionCharacters: 30_000,
@@ -322,6 +322,92 @@ export const verifiedComparisonReviewResultSchema = z.object({
     totalCitations: z.number(),
     verifiedCitations: z.number(),
   }),
+});
+
+// ---------------------------------------------------------------------------
+// Dual-judge cross-review -- the "AI 교차검토" (cross-review) feature ran a
+// single reviewer with a fallback list, which is failover, not the
+// independent cross-validation the name promises. When a second accessible
+// reviewer is available, the full AI Review now runs both in parallel and
+// reports where they agree/disagree, instead of silently discarding
+// everything but the first candidate that happened to succeed.
+// ---------------------------------------------------------------------------
+
+export type ReviewAgreement = {
+  confidenceMatches: boolean;
+  primaryConfidence: "low" | "medium" | "high";
+  secondaryConfidence: "low" | "medium" | "high";
+  sharedVerifiedQuoteCount: number;
+};
+
+const collectVerifiedQuoteKeys = (result: VerifiedComparisonReviewResult) => {
+  const keys = new Set<string>();
+  for (const claim of [...result.consensus, ...result.contradictions]) {
+    for (const citation of claim.citations) {
+      if (citation.verified) {
+        keys.add(`${citation.responseId}:${normalizeForMatch(citation.quote)}`);
+      }
+    }
+  }
+  for (const difference of result.differences) {
+    for (const position of difference.positions) {
+      if (position.verified) {
+        keys.add(`${position.responseId}:${normalizeForMatch(position.quote)}`);
+      }
+    }
+  }
+  return keys;
+};
+
+// Deliberately conservative: this only counts *exact* (normalized) quote
+// matches between the two independent judges as "shared" evidence, not a
+// fuzzy semantic similarity score. Two independently-run models citing the
+// literal same sentence is a strong, honest agreement signal; a low or zero
+// count is reported as-is rather than papered over with an invented
+// similarity percentage.
+export const computeReviewAgreement = (
+  primary: VerifiedComparisonReviewResult,
+  secondary: VerifiedComparisonReviewResult
+): ReviewAgreement => {
+  const primaryQuotes = collectVerifiedQuoteKeys(primary);
+  const secondaryQuotes = collectVerifiedQuoteKeys(secondary);
+  let sharedVerifiedQuoteCount = 0;
+  for (const quote of primaryQuotes) {
+    if (secondaryQuotes.has(quote)) sharedVerifiedQuoteCount += 1;
+  }
+  return {
+    confidenceMatches: primary.confidence === secondary.confidence,
+    primaryConfidence: primary.confidence,
+    secondaryConfidence: secondary.confidence,
+    sharedVerifiedQuoteCount,
+  };
+};
+
+export type DualComparisonReviewResult = {
+  primary: { reviewerModelId: string; result: VerifiedComparisonReviewResult };
+  secondary: { reviewerModelId: string; result: VerifiedComparisonReviewResult } | null;
+  agreement: ReviewAgreement | null;
+};
+
+export const dualComparisonReviewResultSchema = z.object({
+  primary: z.object({
+    reviewerModelId: z.string(),
+    result: verifiedComparisonReviewResultSchema,
+  }),
+  secondary: z
+    .object({
+      reviewerModelId: z.string(),
+      result: verifiedComparisonReviewResultSchema,
+    })
+    .nullable(),
+  agreement: z
+    .object({
+      confidenceMatches: z.boolean(),
+      primaryConfidence: z.enum(["low", "medium", "high"]),
+      secondaryConfidence: z.enum(["low", "medium", "high"]),
+      sharedVerifiedQuoteCount: z.number(),
+    })
+    .nullable(),
 });
 
 export type VerifiedQuickComparisonSummaryResult = {
