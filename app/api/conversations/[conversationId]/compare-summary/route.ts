@@ -15,7 +15,8 @@ import {
   QUICK_COMPARISON_PROMPT_VERSION,
   quickComparisonSummaryResultSchema,
   validateComparisonReviewInputSize,
-  type QuickComparisonSummaryResult,
+  verifyQuickComparisonSummaryResult,
+  verifiedQuickComparisonSummaryResultSchema,
   type ReviewSourceResponse,
 } from "@/lib/comparisonReview";
 import { latestComparableConversationTurn } from "@/lib/comparisonReviewTurn";
@@ -161,7 +162,7 @@ export async function GET(
     const hasValidCache = Boolean(
       cached &&
         !cached.isStale &&
-        quickComparisonSummaryResultSchema.safeParse(cached.result).success &&
+        verifiedQuickComparisonSummaryResultSchema.safeParse(cached.result).success &&
         responseMapForCachedSummary(
           cached.assistantMessageIds,
           turn.responses
@@ -290,7 +291,7 @@ export async function POST(
       },
     });
     if (cached && !cached.isStale) {
-      const result = quickComparisonSummaryResultSchema.safeParse(cached.result);
+      const result = verifiedQuickComparisonSummaryResultSchema.safeParse(cached.result);
       const responseMap = responseMapForCachedSummary(
         cached.assistantMessageIds,
         turn.responses
@@ -413,8 +414,11 @@ export async function POST(
           })
         );
 
-        const result: QuickComparisonSummaryResult =
-          quickComparisonSummaryResultSchema.parse(generated.output);
+        const rawResult = quickComparisonSummaryResultSchema.parse(generated.output);
+        const result = verifyQuickComparisonSummaryResult(
+          rawResult,
+          summaryPrompt.contentByResponseId
+        );
         const stored = await prisma.comparisonReview.upsert({
           where: {
             userId_inputHash: { userId: session.user.id, inputHash },

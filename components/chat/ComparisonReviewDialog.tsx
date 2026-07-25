@@ -6,10 +6,13 @@ import {
   CheckCircle2,
   LoaderCircle,
   RefreshCw,
+  ShieldAlert,
+  ShieldCheck,
   Sparkles,
   X,
 } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
+import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 
@@ -31,15 +34,23 @@ type ReviewSetup = {
   disclaimer?: string;
 };
 
+type Citation = { responseId: "A" | "B" | "C"; quote: string; verified: boolean };
+type GroundedClaim = { text: string; citations: Citation[]; verified: boolean };
+
 type ComparisonReview = {
   id: string;
   result: {
-    consensus: string[];
+    consensus: GroundedClaim[];
     differences: Array<{
       issue: string;
-      positions: Array<{ responseId: "A" | "B" | "C"; position: string }>;
+      positions: Array<{
+        responseId: "A" | "B" | "C";
+        position: string;
+        quote: string;
+        verified: boolean;
+      }>;
     }>;
-    contradictions: string[];
+    contradictions: GroundedClaim[];
     missingPoints: string[];
     verificationNeeded: string[];
     modelAssessments: Array<{
@@ -50,6 +61,7 @@ type ComparisonReview = {
     synthesis: string;
     confidence: "low" | "medium" | "high";
     limitations: string[];
+    groundingStats: { totalCitations: number; verifiedCitations: number };
   };
   responseMap: Array<{
     responseId: "A" | "B" | "C";
@@ -123,6 +135,101 @@ function ReviewList({
   );
 }
 
+export function QuoteBadge({
+  quote,
+  verified,
+  sourceLabel,
+  verifiedLabel,
+  unverifiedLabel,
+}: {
+  quote: string;
+  verified: boolean;
+  sourceLabel: string;
+  verifiedLabel: string;
+  unverifiedLabel: string;
+}) {
+  return (
+    <div
+      className={`mt-1.5 flex items-start gap-1.5 rounded-lg border px-2 py-1.5 text-xs leading-5 ${
+        verified
+          ? "border-emerald-200 bg-emerald-50/60 text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:text-emerald-200"
+          : "border-amber-200 bg-amber-50/60 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-200"
+      }`}
+      title={verified ? verifiedLabel : unverifiedLabel}
+    >
+      {verified ? (
+        <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      ) : (
+        <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      )}
+      <span className="min-w-0 break-words">
+        <span className="font-bold">{sourceLabel}: </span>
+        &ldquo;{quote}&rdquo;
+      </span>
+    </div>
+  );
+}
+
+function GroundedReviewList({
+  title,
+  items,
+  emptyLabel,
+  modelNames,
+  responseLabel,
+  verifiedLabel,
+  unverifiedLabel,
+  tone = "default",
+}: {
+  title: string;
+  items: GroundedClaim[];
+  emptyLabel: string;
+  modelNames: Map<string, string>;
+  responseLabel: string;
+  verifiedLabel: string;
+  unverifiedLabel: string;
+  tone?: "default" | "warning";
+}) {
+  return (
+    <section className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950/70">
+      <h3 className="text-sm font-black text-zinc-900 dark:text-zinc-100">{title}</h3>
+      {items.length ? (
+        <ul className="mt-3 space-y-3">
+          {items.map((item, index) => (
+            <li
+              key={`${index}:${item.text.slice(0, 32)}`}
+              className="flex gap-2 text-sm leading-6 text-zinc-700 dark:text-zinc-300"
+            >
+              <span
+                className={`mt-2 h-1.5 w-1.5 shrink-0 rounded-full ${
+                  tone === "warning" ? "bg-amber-500" : "bg-blue-500"
+                }`}
+              />
+              <div className="min-w-0 flex-1">
+                <span className="break-words">{item.text}</span>
+                {item.citations.map((citation, citationIndex) => (
+                  <QuoteBadge
+                    key={`${citationIndex}:${citation.responseId}`}
+                    quote={citation.quote}
+                    verified={citation.verified}
+                    sourceLabel={
+                      modelNames.get(citation.responseId) ||
+                      `${responseLabel} ${citation.responseId}`
+                    }
+                    verifiedLabel={verifiedLabel}
+                    unverifiedLabel={unverifiedLabel}
+                  />
+                ))}
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-2 text-sm text-zinc-500">{emptyLabel}</p>
+      )}
+    </section>
+  );
+}
+
 export function ComparisonReviewDialog({
   conversationId,
   open,
@@ -135,6 +242,7 @@ export function ComparisonReviewDialog({
   onCompleted?: () => void;
 }) {
   const { t } = useLanguage();
+  const { models: catalogModels } = useModelCatalog();
   const [setup, setSetup] = useState<ReviewSetup | null>(null);
   const [review, setReview] = useState<ComparisonReview | null>(null);
   const [mode, setMode] = useState<ReviewMode>("balanced");
@@ -199,6 +307,14 @@ export function ComparisonReviewDialog({
       ),
     [review]
   );
+
+  const reviewerModelName = useMemo(() => {
+    if (!review) return "";
+    return (
+      catalogModels.find((model) => model.id === review.reviewerModelId)?.name ||
+      review.reviewerModelId
+    );
+  }, [catalogModels, review]);
 
   if (!open || !conversationId) return null;
 
@@ -326,18 +442,36 @@ export function ComparisonReviewDialog({
                 <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-bold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
                   {t("chat.aiReviewConfidence")}: {review.result.confidence}
                 </span>
+                <span
+                  className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-bold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+                  title={t("chat.aiReviewGroundingHint")}
+                >
+                  {review.result.groundingStats.verifiedCitations}/
+                  {review.result.groundingStats.totalCitations} {t("chat.aiReviewQuotesVerified")}
+                </span>
+                <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-bold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                  {t("chat.aiReviewedBy")}: {reviewerModelName}
+                </span>
               </div>
 
               <div className="grid gap-4 md:grid-cols-2">
-                <ReviewList
+                <GroundedReviewList
                   title={t("chat.aiReviewConsensus")}
                   items={review.result.consensus}
                   emptyLabel={t("chat.aiReviewNoneFound")}
+                  modelNames={modelNames}
+                  responseLabel={t("chat.aiReviewResponse")}
+                  verifiedLabel={t("chat.aiReviewQuoteVerified")}
+                  unverifiedLabel={t("chat.aiReviewQuoteUnverified")}
                 />
-                <ReviewList
+                <GroundedReviewList
                   title={t("chat.aiReviewContradictions")}
                   items={review.result.contradictions}
                   emptyLabel={t("chat.aiReviewNoneFound")}
+                  modelNames={modelNames}
+                  responseLabel={t("chat.aiReviewResponse")}
+                  verifiedLabel={t("chat.aiReviewQuoteVerified")}
+                  unverifiedLabel={t("chat.aiReviewQuoteUnverified")}
                   tone="warning"
                 />
               </div>
@@ -366,9 +500,21 @@ export function ComparisonReviewDialog({
                                 {modelNames.get(position.responseId) ||
                                   `${t("chat.aiReviewResponse")} ${position.responseId}`}
                               </span>
-                              <span className="break-words leading-6 text-zinc-700 dark:text-zinc-300">
-                                {position.position}
-                              </span>
+                              <div className="min-w-0">
+                                <span className="break-words leading-6 text-zinc-700 dark:text-zinc-300">
+                                  {position.position}
+                                </span>
+                                <QuoteBadge
+                                  quote={position.quote}
+                                  verified={position.verified}
+                                  sourceLabel={
+                                    modelNames.get(position.responseId) ||
+                                    `${t("chat.aiReviewResponse")} ${position.responseId}`
+                                  }
+                                  verifiedLabel={t("chat.aiReviewQuoteVerified")}
+                                  unverifiedLabel={t("chat.aiReviewQuoteUnverified")}
+                                />
+                              </div>
                             </div>
                           ))}
                         </div>

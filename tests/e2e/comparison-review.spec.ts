@@ -74,18 +74,50 @@ async function mockComparisonReview(
         body: JSON.stringify({
           id: "review-1",
           result: {
-            consensus: ["세 답변 모두 단계적 검토가 필요하다는 데 동의합니다."],
+            consensus: [
+              {
+                text: "세 답변 모두 단계적 검토가 필요하다는 데 동의합니다.",
+                citations: [
+                  { responseId: "A", quote: "단계적으로 접근해야 합니다.", verified: true },
+                  { responseId: "B", quote: "단계별 검토가 필요합니다.", verified: true },
+                ],
+                verified: true,
+              },
+            ],
             differences: [
               {
                 issue: "우선순위",
                 positions: [
-                  { responseId: "A", position: "보안을 먼저 점검합니다." },
-                  { responseId: "B", position: "사용성을 먼저 확인합니다." },
-                  { responseId: "C", position: "비용과 속도를 함께 봅니다." },
+                  {
+                    responseId: "A",
+                    position: "보안을 먼저 점검합니다.",
+                    quote: "보안 점검을 최우선으로 합니다.",
+                    verified: true,
+                  },
+                  {
+                    responseId: "B",
+                    position: "사용성을 먼저 확인합니다.",
+                    quote: "사용성을 먼저 확인해야 합니다.",
+                    verified: true,
+                  },
+                  {
+                    responseId: "C",
+                    position: "비용과 속도를 함께 봅니다.",
+                    quote: "비용과 속도를 함께 고려합니다.",
+                    verified: false,
+                  },
                 ],
               },
             ],
-            contradictions: ["배포 순서에 대한 권고가 서로 다릅니다."],
+            contradictions: [
+              {
+                text: "배포 순서에 대한 권고가 서로 다릅니다.",
+                citations: [
+                  { responseId: "A", quote: "먼저 배포부터 진행합니다.", verified: true },
+                ],
+                verified: true,
+              },
+            ],
             missingPoints: ["실제 운영 지표가 제공되지 않았습니다."],
             verificationNeeded: ["공급자별 가격은 외부 확인이 필요합니다."],
             modelAssessments: [
@@ -108,6 +140,7 @@ async function mockComparisonReview(
             synthesis: "공통된 안전 조치를 먼저 적용한 뒤 운영 지표로 우선순위를 조정합니다.",
             confidence: "medium",
             limitations: ["이 검토는 외부 사실 검증이 아닙니다."],
+            groundingStats: { totalCitations: 5, verifiedCitations: 4 },
           },
           responseMap: [
             {
@@ -232,19 +265,57 @@ async function mockQuickComparison(page: Page) {
           id: "quick-review-1",
           title: "QA conversation",
           result: {
-            commonConclusions: ["All answers recommend a staged rollout."],
+            commonConclusions: [
+              {
+                text: "All answers recommend a staged rollout.",
+                citations: [
+                  { responseId: "A", quote: "we recommend a staged rollout", verified: true },
+                  { responseId: "B", quote: "a staged rollout is safest", verified: true },
+                ],
+                verified: true,
+              },
+            ],
             importantDifferences: [
-              "The answers prioritize security, usability, and cost differently.",
-              "Only one answer defines a measurable success threshold.",
+              {
+                text: "The answers prioritize security, usability, and cost differently.",
+                citations: [
+                  { responseId: "A", quote: "security should come first", verified: true },
+                ],
+                verified: true,
+              },
+              {
+                text: "Only one answer defines a measurable success threshold.",
+                citations: [
+                  { responseId: "C", quote: "a measurable success threshold", verified: true },
+                ],
+                verified: true,
+              },
             ],
             modelKeyClaims: [
-              { responseId: "A", claims: ["Start with a security review."] },
-              { responseId: "B", claims: ["Validate usability before launch."] },
-              { responseId: "C", claims: ["Track cost and latency together."] },
+              {
+                responseId: "A",
+                claims: [
+                  { claim: "Start with a security review.", quote: "start with a security review", verified: true },
+                ],
+              },
+              {
+                responseId: "B",
+                claims: [
+                  { claim: "Validate usability before launch.", quote: "validate usability first", verified: true },
+                ],
+              },
+              {
+                responseId: "C",
+                claims: [
+                  { claim: "Track cost and latency together.", quote: "track cost and latency", verified: true },
+                ],
+              },
             ],
             verificationNeeded: [
               "Confirm current provider pricing in an external source.",
             ],
+            confidence: "high",
+            groundingStats: { totalCitations: 5, verifiedCitations: 5 },
           },
           responseMap: [
             {

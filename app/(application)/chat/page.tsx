@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { AlertCircle, ArrowRight, CheckCircle2, Info, Loader2, Sparkles, X } from "lucide-react";
 import { DesktopChatShell } from "@/components/chat/DesktopChatShell";
 import { MobileChatShell } from "@/components/chat/MobileChatShell";
-import { ComparisonReviewDialog } from "@/components/chat/ComparisonReviewDialog";
+import { ComparisonReviewDialog, QuoteBadge } from "@/components/chat/ComparisonReviewDialog";
 import { UpgradeCtaLink } from "@/components/billing/UpgradeCtaLink";
 import { ModelFinder } from "@/components/onboarding/ModelFinder";
 import { Conversation, type ChatAttachment } from "@/components/chat/types";
@@ -351,10 +351,23 @@ export default function Home() {
   const [compareSummary, setCompareSummary] = useState<{
     title: string;
     result: {
-      commonConclusions: string[];
-      importantDifferences: string[];
-      modelKeyClaims: Array<{ responseId: "A" | "B" | "C"; claims: string[] }>;
+      commonConclusions: Array<{
+        text: string;
+        citations: Array<{ responseId: "A" | "B" | "C"; quote: string; verified: boolean }>;
+        verified: boolean;
+      }>;
+      importantDifferences: Array<{
+        text: string;
+        citations: Array<{ responseId: "A" | "B" | "C"; quote: string; verified: boolean }>;
+        verified: boolean;
+      }>;
+      modelKeyClaims: Array<{
+        responseId: "A" | "B" | "C";
+        claims: Array<{ claim: string; quote: string; verified: boolean }>;
+      }>;
       verificationNeeded: string[];
+      confidence: "low" | "medium" | "high";
+      groundingStats: { totalCitations: number; verifiedCitations: number };
     };
     responseMap: Array<{
       responseId: "A" | "B" | "C";
@@ -362,6 +375,7 @@ export default function Home() {
       modelId: string;
       modelName: string;
     }>;
+    reviewerModelId: string;
     usageCredits: number;
     originalUsageCredits?: number;
     cached: boolean;
@@ -2506,6 +2520,12 @@ export default function Home() {
   const guestCompareSignInHref = `/auth/signin?callbackUrl=${encodeURIComponent(
     `/chat?lang=${encodeURIComponent(lang)}`
   )}`;
+  const quickModelNames = new Map(
+    (compareSummary?.responseMap || []).map((response) => [
+      response.responseId,
+      response.modelName,
+    ])
+  );
 
   return (
     <>
@@ -2993,6 +3013,11 @@ export default function Home() {
                       credits: String(compareSummary.usageCredits),
                     })}
               </p>
+              <p className="mt-0.5 text-xs leading-5 text-zinc-400">
+                {t("chat.aiReviewedBy")}:{" "}
+                {AVAILABLE_MODELS.find((model) => model.id === compareSummary.reviewerModelId)
+                  ?.name || compareSummary.reviewerModelId}
+              </p>
             </div>
             <button
               type="button"
@@ -3004,14 +3029,34 @@ export default function Home() {
           </div>
           <div className="grid min-h-0 flex-1 touch-pan-y gap-4 overflow-y-auto overscroll-contain p-4 [scrollbar-gutter:stable] sm:p-5">
             <section data-testid="quick-summary-consensus" className="rounded-xl border border-blue-200 bg-blue-50/70 p-4 dark:border-blue-900/70 dark:bg-blue-950/30">
-              <h3 className="text-sm font-black text-blue-950 dark:text-blue-100">
-                {t("chat.quickSummaryCommonConclusions")}
-              </h3>
-              <ul className="mt-3 grid gap-2 text-sm leading-6 text-zinc-700 dark:text-zinc-200">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-sm font-black text-blue-950 dark:text-blue-100">
+                  {t("chat.quickSummaryCommonConclusions")}
+                </h3>
+                <span className="rounded-full bg-white/60 px-2 py-0.5 text-[11px] font-bold text-blue-900 dark:bg-blue-950/40 dark:text-blue-100">
+                  {compareSummary.result.groundingStats.verifiedCitations}/
+                  {compareSummary.result.groundingStats.totalCitations} {t("chat.aiReviewQuotesVerified")}
+                </span>
+              </div>
+              <ul className="mt-3 grid gap-3 text-sm leading-6 text-zinc-700 dark:text-zinc-200">
                 {compareSummary.result.commonConclusions.map((item, index) => (
-                  <li key={`${index}-${item}`} className="flex gap-2">
-                    <span className="font-black text-blue-600" aria-hidden="true">•</span>
-                    <span>{item}</span>
+                  <li key={`${index}-${item.text}`} className="flex gap-2">
+                    <span className="mt-1 font-black text-blue-600" aria-hidden="true">•</span>
+                    <div className="min-w-0 flex-1">
+                      <span>{item.text}</span>
+                      {item.citations.map((citation, citationIndex) => (
+                        <QuoteBadge
+                          key={`${citationIndex}:${citation.responseId}`}
+                          quote={citation.quote}
+                          verified={citation.verified}
+                          sourceLabel={
+                            quickModelNames.get(citation.responseId) || citation.responseId
+                          }
+                          verifiedLabel={t("chat.aiReviewQuoteVerified")}
+                          unverifiedLabel={t("chat.aiReviewQuoteUnverified")}
+                        />
+                      ))}
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -3022,11 +3067,25 @@ export default function Home() {
                 {t("chat.quickSummaryImportantDifferences")}
               </h3>
               {compareSummary.result.importantDifferences.length ? (
-                <ol className="mt-3 grid gap-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+                <ol className="mt-3 grid gap-3 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
                   {compareSummary.result.importantDifferences.map((item, index) => (
-                    <li key={`${index}-${item}`} className="flex gap-3">
-                      <span className="font-black text-zinc-400">{index + 1}.</span>
-                      <span>{item}</span>
+                    <li key={`${index}-${item.text}`} className="flex gap-3">
+                      <span className="mt-1 font-black text-zinc-400">{index + 1}.</span>
+                      <div className="min-w-0 flex-1">
+                        <span>{item.text}</span>
+                        {item.citations.map((citation, citationIndex) => (
+                          <QuoteBadge
+                            key={`${citationIndex}:${citation.responseId}`}
+                            quote={citation.quote}
+                            verified={citation.verified}
+                            sourceLabel={
+                              quickModelNames.get(citation.responseId) || citation.responseId
+                            }
+                            verifiedLabel={t("chat.aiReviewQuoteVerified")}
+                            unverifiedLabel={t("chat.aiReviewQuoteUnverified")}
+                          />
+                        ))}
+                      </div>
                     </li>
                   ))}
                 </ol>
@@ -3054,9 +3113,18 @@ export default function Home() {
                       </h4>
                       <ul className="mt-2 grid gap-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
                         {assessment.claims.map((claim, index) => (
-                          <li key={`${index}-${claim}`} className="flex gap-2">
-                            <span className="text-zinc-400" aria-hidden="true">•</span>
-                            <span>{claim}</span>
+                          <li key={`${index}-${claim.claim}`} className="flex gap-2">
+                            <span className="mt-1 text-zinc-400" aria-hidden="true">•</span>
+                            <div className="min-w-0 flex-1">
+                              <span>{claim.claim}</span>
+                              <QuoteBadge
+                                quote={claim.quote}
+                                verified={claim.verified}
+                                sourceLabel={model?.modelName || assessment.responseId}
+                                verifiedLabel={t("chat.aiReviewQuoteVerified")}
+                                unverifiedLabel={t("chat.aiReviewQuoteUnverified")}
+                              />
+                            </div>
                           </li>
                         ))}
                       </ul>

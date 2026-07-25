@@ -8,9 +8,10 @@ import {
   accessibleQuickReviewers,
   buildQuickComparisonSummaryPrompt,
   COMPARISON_REVIEW_LIMITS,
+  estimateComparisonReviewTokens,
   quickComparisonSummaryResultSchema,
   validateComparisonReviewInputSize,
-  type QuickComparisonSummaryResult,
+  verifyQuickComparisonSummaryResult,
   type ReviewSourceResponse,
 } from "@/lib/comparisonReview";
 import {
@@ -180,9 +181,7 @@ export async function POST(request: Request) {
       responses,
       language: body.language || "en",
     });
-    const inputTokens = Math.ceil(
-      (body.question.length + responses.reduce((sum, r) => sum + r.content.length, 0)) / 4
-    );
+    const inputTokens = estimateComparisonReviewTokens(body.question, responses);
     let lastError: unknown = new Error("No quick comparison reviewer attempted.");
 
     for (const candidate of candidates) {
@@ -257,8 +256,11 @@ export async function POST(request: Request) {
           })
         );
 
-        const result: QuickComparisonSummaryResult =
-          quickComparisonSummaryResultSchema.parse(generated.output);
+        const rawResult = quickComparisonSummaryResultSchema.parse(generated.output);
+        const result = verifyQuickComparisonSummaryResult(
+          rawResult,
+          summaryPrompt.contentByResponseId
+        );
 
         const successfulReservation = reservation;
         reservation = null;

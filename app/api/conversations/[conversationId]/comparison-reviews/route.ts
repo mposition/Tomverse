@@ -14,15 +14,16 @@ import {
 import type { PerplexityUsageCostSnapshot } from "@/lib/perplexityUsageCore";
 import { getUserBillingPlan } from "@/lib/billingEntitlements";
 import {
+  accessibleComparisonReviewers,
   buildComparisonReviewPrompt,
   COMPARISON_REVIEW_PROMPT_VERSION,
   comparisonReviewModeSchema,
   comparisonReviewResultSchema,
   createComparisonReviewHash,
   estimateComparisonReviewTokens,
-  getComparisonReviewerCandidates,
   validateComparisonReviewInputSize,
-  type ComparisonReviewResult,
+  verifyComparisonReviewResult,
+  verifiedComparisonReviewResultSchema,
   type ReviewSourceResponse,
 } from "@/lib/comparisonReview";
 import {
@@ -37,7 +38,6 @@ import {
 } from "@/lib/comparisonReviewQuota";
 import {
   acquireChatAccess,
-  assertModelAccess,
   chatErrorResponse,
   ChatAccessError,
   createChatBudget,
@@ -51,8 +51,7 @@ import {
   conversationLockedResponse,
   hasConversationUnlockGrant,
 } from "@/lib/conversationLock";
-import { assertModelRuntimeAvailable } from "@/lib/modelAvailability";
-import { getModelUsageProfile, type AiModel } from "@/lib/models";
+import { getModelUsageProfile } from "@/lib/models";
 import { prisma } from "@/lib/prisma";
 import {
   recordModelFailure,
@@ -120,26 +119,6 @@ const authorizeConversation = async (
   return { conversation };
 };
 
-const accessibleCandidates = async (
-  access: ReturnType<typeof identifyChatCaller>,
-  responses: ReviewSourceResponse[]
-) => {
-  const candidates = getComparisonReviewerCandidates(
-    new Set(responses.map((response) => response.provider))
-  );
-  const available: AiModel[] = [];
-  for (const candidate of candidates) {
-    try {
-      assertModelAccess(access, candidate);
-      const override = await assertModelRuntimeAvailable(candidate.id);
-      if (override.allowed) available.push(candidate);
-    } catch {
-      // A configured fallback can be outside this plan's model tier.
-    }
-  }
-  return available;
-};
-
 const responseMapForStoredReview = (
   storedIds: unknown,
   responses: ReviewSourceResponse[]
@@ -202,7 +181,7 @@ export async function GET(
       dailyMessageLimit: billingPlan.dailyMessageLimit,
       monthlyMessageLimit: billingPlan.monthlyMessageLimit,
     });
-    const candidates = await accessibleCandidates(access, turn.responses);
+    const candidates = await accessibleComparisonReviewers(access, turn.responses);
     if (!candidates.length) {
       return jsonError(
         "No comparison reviewer is currently configured for your plan.",
@@ -320,7 +299,7 @@ export async function POST(
       },
     });
     if (cached && !cached.isStale) {
-      const result = comparisonReviewResultSchema.safeParse(cached.result);
+      const result = verifiedComparisonReviewResultSchema.safeParse(cached.result);
       const responseMap = responseMapForStoredReview(
         cached.assistantMessageIds,
         turn.responses
@@ -352,7 +331,7 @@ export async function POST(
     if (billingPlan.tier === "Free") {
       freeQuota = await reserveFreeComparisonReview(access.subjectKey);
     }
-    const candidates = await accessibleCandidates(access, turn.responses);
+    const candidates = await accessibleComparisonReviewers(access, turn.responses);
     if (!candidates.length) {
       throw new ChatAccessError(
         503,
@@ -448,8 +427,10 @@ export async function POST(
             linkError,
           })
         );
-        const result: ComparisonReviewResult = comparisonReviewResultSchema.parse(
-          generated.output
+        const rawResult = comparisonReviewResultSchema.parse(generated.output);
+        const result = verifyComparisonReviewResult(
+          rawResult,
+          reviewPrompt.contentByResponseId
         );
         const stored = await prisma.comparisonReview.upsert({
           where: {
