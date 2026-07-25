@@ -175,13 +175,12 @@ export const resolveGuestInitialSelectedModels = ({
         ) as { selectedModels?: unknown } | undefined)
       : undefined;
     if (restored) {
-      const restoredModels = clamp(
-        normalizeStringArray(restored.selectedModels) ?? guestDefault
-      );
-      // An empty or fully invalid saved selection falls through to the guest
-      // default rather than to an empty composer -- the same deterministic
-      // answer the server would have produced, so there is still no change
-      // between the first frame and the restore.
+      const savedModels = normalizeStringArray(restored.selectedModels);
+      const restoredModels = savedModels ? clamp(savedModels) : [];
+      // A saved selection that is empty, unreadable, or names only models the
+      // catalogue no longer serves falls through to the guest default rather
+      // than to an empty composer -- the same deterministic answer the server
+      // would have produced, so there is still nothing to correct later.
       if (restoredModels.length > 0) {
         return { models: restoredModels, source: "restored_conversation" };
       }

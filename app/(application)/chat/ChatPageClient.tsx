@@ -368,12 +368,6 @@ export function ChatPageClient({
 
     const [userDefaultEngine, setUserDefaultEngine] = useState<string>(APP_DEFAULTS.defaultModelId);
   const [isUserSettingsLoaded, setIsUserSettingsLoaded] = useState(false);
-  // Guest settings (selected models, web search mode, etc.) all come from
-  // localStorage/synchronous props -- there is no async load to gate on, so
-  // this starts (and stays) true. Declared as its own flag rather than
-  // reusing isUserSettingsLoaded so the two guest-mode effects below that
-  // check it keep working if guest settings ever do gain a real async load.
-  const [isGuestSettingsLoaded] = useState(true);
 
   const [inputValue, setInputValue] = useState("");
   const [personalizedPrompt, setPersonalizedPrompt] = useState<string | null>(null);
@@ -482,14 +476,20 @@ export function ChatPageClient({
   // used to start on a single model here and get upgraded to the brand trio
   // by an effect that waited on a network response, which is what made the
   // composer show "1 credit" and then "3 credits" (STG-F006).
-  const [selectedModels, setSelectedModels] = useState<string[]>(() =>
+  //
+  // The resolved `source` is kept because the guest bootstrap effect below
+  // has to know whether this decision came from something it outranks.
+  const [initialGuestModels] = useState(() =>
     isGuestMode
       ? resolveGuestInitialSelectedModels({
           catalogue: guestCatalogue,
           leadModelId: guestDefaultModelId,
           environment: readGuestInitialModelEnvironment(),
-        }).models
-      : [APP_DEFAULTS.defaultModelId]
+        })
+      : null
+  );
+  const [selectedModels, setSelectedModels] = useState<string[]>(
+    initialGuestModels?.models ?? [APP_DEFAULTS.defaultModelId]
   );
 
   const [disabledPanels, setDisabledPanels] = useState<string[]>([]);
@@ -655,6 +655,7 @@ export function ChatPageClient({
 
   const isInitialSelectedRef = useRef(false);
   const guestCarryoverAppliedRef = useRef(false);
+  const guestBootstrapAppliedRef = useRef(false);
   const currentChatIdRef = useRef(currentChatId);
 
   useEffect(() => {
@@ -741,8 +742,6 @@ export function ChatPageClient({
     localStorage.setItem("tomverse_sidebar_organizer_v1", "collapsed");
     window.dispatchEvent(new Event("tomverse-sidebar-organizer-change"));
   }, [isGuestPreviewEntry]);
-
-  const isGuestEligibleModel = guestCatalogue.isGuestEligible;
 
   const clampSelectedModels = useCallback(
     (models: string[]) =>
@@ -1125,16 +1124,40 @@ export function ChatPageClient({
     }, [clampSelectedModels, userDefaultEngine]);
 
   useEffect(() => {
-    if (isGuestMode && !isGuestSettingsLoaded) return;
-    if (isGuestMode) {
+    if (!isGuestMode) {
+      // Signing out in the same tab must be able to bootstrap again.
+      guestBootstrapAppliedRef.current = false;
+      return;
+    }
+    // Runs once per guest session. Without this, a later model-catalogue
+    // refresh (ModelCatalogProvider re-fetches on mount) changes
+    // guestDefaultSelectedModels' identity and re-runs the whole bootstrap,
+    // which would overwrite a restored conversation, a ?models= preset, or a
+    // selection the guest had already changed -- each of them a visible model
+    // count and price change after the first paint.
+    if (guestBootstrapAppliedRef.current) return;
+    // A ?models= comparison link outranks both the guest default and the
+    // restored conversation, and the first render already applied it. Leaving
+    // it alone here is what stops the composer bouncing preset -> default ->
+    // preset once the preset effect further down re-asserts it.
+    const hasUrlModelPreset = initialGuestModels?.source === "url_models_param";
+    {
       let cancelled = false;
       queueMicrotask(() => {
       if (cancelled) return;
+      guestBootstrapAppliedRef.current = true;
       setUserDefaultEngine(guestDefaultModelId);
-      setSelectedModels(guestDefaultSelectedModels);
+      // Decided once and written once. selectedModels already holds this same
+      // value from the first render, so this cannot change what is on screen;
+      // it exists so the restore path below can refine it in the same commit
+      // rather than after a visible default-then-restore step.
+      let nextSelectedModels =
+        hasUrlModelPreset && initialGuestModels
+          ? initialGuestModels.models
+          : guestDefaultSelectedModels;
       refreshGuestUsage();
 
-      const savedConversations = localStorage.getItem("guest_conversations");
+      const savedConversations = localStorage.getItem(GUEST_CONVERSATIONS_STORAGE_KEY);
       if (savedConversations) {
         try {
           const parsed = JSON.parse(savedConversations);
@@ -1162,7 +1185,10 @@ export function ChatPageClient({
               })
             : parsed;
           if (Array.isArray(parsed) && cleaned.length !== parsed.length) {
-            localStorage.setItem("guest_conversations", JSON.stringify(cleaned));
+            localStorage.setItem(
+              GUEST_CONVERSATIONS_STORAGE_KEY,
+              JSON.stringify(cleaned)
+            );
           }
           setConversations(cleaned);
 
@@ -1181,9 +1207,11 @@ export function ChatPageClient({
                 guestDefaultSelectedModels
               )
             );
-            setSelectedModels(
-              restoredModels.length ? restoredModels : guestDefaultSelectedModels
-            );
+            if (!hasUrlModelPreset) {
+              nextSelectedModels = restoredModels.length
+                ? restoredModels
+                : guestDefaultSelectedModels;
+            }
             setDisabledPanels(
               normalizeStringArray(restoredConversation.disabledPanels, []).filter(
                 (modelId: string) => restoredModels.includes(modelId)
@@ -1210,9 +1238,13 @@ export function ChatPageClient({
         };
         setConversations([initialChat]);
         setCurrentChatId(initialChatId);
-        localStorage.setItem("guest_conversations", JSON.stringify([initialChat]));
+        localStorage.setItem(
+          GUEST_CONVERSATIONS_STORAGE_KEY,
+          JSON.stringify([initialChat])
+        );
       }
 
+      setSelectedModels(nextSelectedModels);
       setIsConversationsLoaded(true);
       setIsInitialConversationResolved(true);
       });
@@ -1224,15 +1256,15 @@ export function ChatPageClient({
     clampGuestSelectedModels,
     guestDefaultModelId,
     guestDefaultSelectedModels,
+    initialGuestModels,
     isGuestMode,
-    isGuestSettingsLoaded,
     refreshGuestUsage,
     t,
   ]);
 
   useEffect(() => {
     if (isGuestMode && isConversationsLoaded && conversations.length > 0) {
-      localStorage.setItem("guest_conversations", JSON.stringify(conversations));
+      localStorage.setItem(GUEST_CONVERSATIONS_STORAGE_KEY, JSON.stringify(conversations));
     }
   }, [conversations, isGuestMode, isConversationsLoaded]);
 
@@ -1254,7 +1286,7 @@ export function ChatPageClient({
         if (!guestCarryoverAppliedRef.current) {
             guestCarryoverAppliedRef.current = true;
             try {
-                const savedGuestConversations = localStorage.getItem("guest_conversations");
+                const savedGuestConversations = localStorage.getItem(GUEST_CONVERSATIONS_STORAGE_KEY);
                 const parsedGuestConversations = savedGuestConversations
                     ? JSON.parse(savedGuestConversations)
                     : null;
@@ -1725,7 +1757,7 @@ export function ChatPageClient({
         setCurrentChatId(updated.length > 0 ? updated[0].id : null);
       }
       if (updated.length === 0) {
-        localStorage.removeItem("guest_conversations");
+        localStorage.removeItem(GUEST_CONVERSATIONS_STORAGE_KEY);
       }
     } else {    
       try {
@@ -1888,8 +1920,7 @@ export function ChatPageClient({
     if (
       comparisonPresetAppliedRef.current ||
       status === "loading" ||
-      !isUserSettingsLoaded ||
-      (isGuestMode && !isGuestSettingsLoaded)
+      !isUserSettingsLoaded
     ) {
       return;
     }
@@ -1957,7 +1988,6 @@ export function ChatPageClient({
     clampGuestSelectedModels,
     clampSelectedModels,
     isGuestMode,
-    isGuestSettingsLoaded,
     isUserSettingsLoaded,
     maxSelectableModels,
     isEnabledModelId,
@@ -2005,7 +2035,7 @@ export function ChatPageClient({
             createdAt: new Date().toISOString(),
           };
           setConversations([initialChat]);
-          localStorage.setItem("guest_conversations", JSON.stringify([initialChat]));
+          localStorage.setItem(GUEST_CONVERSATIONS_STORAGE_KEY, JSON.stringify([initialChat]));
         }
         setCurrentChatId(activeChatId);
       } else {
