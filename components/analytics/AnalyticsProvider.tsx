@@ -3,7 +3,8 @@
 import Script from "next/script";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import {
   analyticsConsent,
@@ -24,6 +25,18 @@ type ConsentState = "loading" | "unset" | "accepted" | "declined";
 
 const GUEST_QUICK_START_ACTIVE_KEY = "tomverse_guest_quick_start_active_v2";
 const GUEST_QUICK_START_EVENT = "tomverse:guest-quick-start";
+
+// The chat shells register a flex-flow slot rendered directly above the
+// composer. When present, the consent notice portals into it instead of
+// floating as a viewport-fixed overlay, so it reserves its own space and
+// can never cover composer controls (STG-F001).
+type ChatConsentSlotSetter = (node: HTMLDivElement | null) => void;
+const ChatConsentSlotContext = createContext<ChatConsentSlotSetter | null>(null);
+
+export function useChatConsentSlotRef(): ChatConsentSlotSetter {
+  const register = useContext(ChatConsentSlotContext);
+  return register || (() => {});
+}
 
 const consentCopy: Record<
   Language,
@@ -178,6 +191,9 @@ export function AnalyticsProvider({
   const [chatConsentReady, setChatConsentReady] = useState(false);
   const [isMobileChatTextEntryActive, setIsMobileChatTextEntryActive] =
     useState(false);
+  const [chatConsentSlot, setChatConsentSlot] = useState<HTMLDivElement | null>(
+    null
+  );
   const lifecycleCheckedRef = useRef(false);
   const copy = consentCopy[lang];
 
@@ -431,8 +447,60 @@ export function AnalyticsProvider({
       }
     : copy;
 
+  // On /chat, once a shell has registered a slot above the composer, the
+  // notice portals there instead of floating fixed over the viewport --
+  // that slot reserves real layout space, so it can never cover composer
+  // controls at any width. Everywhere else (and before the slot exists,
+  // e.g. the initial shell-loading skeleton) the original fixed overlay is
+  // unchanged.
+  const inlineSlot = pathname === "/chat" ? chatConsentSlot : null;
+
+  const showConsentPrompt =
+    !disabled &&
+    resolvedPolicy &&
+    consentPromptReady &&
+    (consent === "unset" || showPreferences);
+
+  const noticeInner = (
+    <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap sm:justify-between sm:gap-3">
+      <div className="min-w-0 flex-1">
+        <p className="text-[10px] leading-4 text-zinc-300 sm:hidden">
+          {promptCopy.mobileBody}{" "}
+          <Link href="/privacy" className="font-bold text-blue-300 hover:text-blue-200">
+            {copy.privacy}
+          </Link>
+        </p>
+        <div className="hidden sm:block">
+          <p className="text-xs font-black">{promptCopy.title}</p>
+          <p className="mt-0.5 text-[11px] leading-4 text-zinc-400">{promptCopy.body}</p>
+          <Link href="/privacy" className="mt-0.5 inline-flex text-[11px] font-bold text-blue-300 hover:text-blue-200">
+            {copy.privacy}
+          </Link>
+        </div>
+      </div>
+      <div className="flex shrink-0 gap-1 sm:gap-2">
+        <button
+          type="button"
+          data-testid="analytics-consent-decline"
+          onClick={decline}
+          className="min-h-11 rounded-lg border border-zinc-600 bg-zinc-900 px-2.5 text-[10px] font-black text-white hover:bg-zinc-800 sm:px-3 sm:text-[11px]"
+        >
+          {promptCopy.decline}
+        </button>
+        <button
+          type="button"
+          data-testid="analytics-consent-accept"
+          onClick={accept}
+          className="min-h-11 rounded-lg border border-zinc-600 bg-zinc-900 px-2.5 text-[10px] font-black text-white hover:bg-zinc-800 sm:px-3 sm:text-[11px]"
+        >
+          {promptCopy.accept}
+        </button>
+      </div>
+    </div>
+  );
+
   return (
-    <>
+    <ChatConsentSlotContext.Provider value={setChatConsentSlot}>
       {children}
       {analyticsEnabled && analyticsClientReady && measurementId ? (
         <Script
@@ -442,48 +510,27 @@ export function AnalyticsProvider({
           nonce={nonce || undefined}
         />
       ) : null}
-      {!disabled &&
-      resolvedPolicy &&
-      consentPromptReady &&
-      (consent === "unset" || showPreferences) ? (
+      {showConsentPrompt && inlineSlot
+        ? createPortal(
+            <div
+              role="region"
+              aria-label={promptCopy.title}
+              data-testid="chat-consent-notice"
+              className="mx-2 mb-2 rounded-xl border border-zinc-700 bg-zinc-950/95 p-2 text-zinc-100 shadow-sm sm:mx-4 sm:p-3"
+            >
+              {noticeInner}
+            </div>,
+            inlineSlot
+          )
+        : null}
+      {showConsentPrompt && !inlineSlot ? (
         <aside
           role="region"
           aria-label={promptCopy.title}
+          data-testid="chat-consent-notice"
           className="fixed bottom-[max(0.5rem,env(safe-area-inset-bottom))] left-1/2 z-[100] w-[min(46rem,calc(100vw-1rem))] -translate-x-1/2 rounded-xl border border-zinc-700 bg-zinc-950/95 p-2 text-zinc-100 shadow-2xl shadow-black/40 backdrop-blur sm:p-3"
         >
-          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 sm:flex sm:justify-between sm:gap-3">
-            <div className="min-w-0">
-              <p className="text-[10px] leading-4 text-zinc-300 sm:hidden">
-                {promptCopy.mobileBody}{" "}
-                <Link href="/privacy" className="font-bold text-blue-300 hover:text-blue-200">
-                  {copy.privacy}
-                </Link>
-              </p>
-              <div className="hidden sm:block">
-                <p className="text-xs font-black">{promptCopy.title}</p>
-                <p className="mt-0.5 text-[11px] leading-4 text-zinc-400">{promptCopy.body}</p>
-                <Link href="/privacy" className="mt-0.5 inline-flex text-[11px] font-bold text-blue-300 hover:text-blue-200">
-                  {copy.privacy}
-                </Link>
-              </div>
-            </div>
-            <div className="flex shrink-0 gap-1 sm:gap-2">
-              <button
-                type="button"
-                onClick={decline}
-                className="h-8 rounded-lg border border-zinc-600 bg-zinc-900 px-2 text-[10px] font-black text-white hover:bg-zinc-800 sm:px-3 sm:text-[11px]"
-              >
-                {promptCopy.decline}
-              </button>
-              <button
-                type="button"
-                onClick={accept}
-                className="h-8 rounded-lg border border-zinc-600 bg-zinc-900 px-2 text-[10px] font-black text-white hover:bg-zinc-800 sm:px-3 sm:text-[11px]"
-              >
-                {promptCopy.accept}
-              </button>
-            </div>
-          </div>
+          {noticeInner}
         </aside>
       ) : null}
       {!disabled &&
@@ -510,6 +557,6 @@ export function AnalyticsProvider({
           {copy.settings}
         </button>
       ) : null}
-    </>
+    </ChatConsentSlotContext.Provider>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useChatConsentSlotRef } from "@/components/analytics/AnalyticsProvider";
 import { ChatApp } from "@/components/chat/ChatApp";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { ChatWelcomeScreen } from "@/components/chat/ChatWelcomeScreen";
@@ -131,6 +132,7 @@ export function MobileChatShell({
   const { models: AVAILABLE_MODELS } = useModelCatalog();
   const { t, lang } = useLanguage();
   const helpCopy = chatHelpCopy[lang];
+  const registerChatConsentSlot = useChatConsentSlotRef();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const drawerPanelRef = useRef<HTMLDivElement | null>(null);
   const drawerCloseButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -302,6 +304,18 @@ export function MobileChatShell({
   const inputPortalTarget = isConversationEmpty
     ? welcomeInputSlot ?? bottomInputSlot
     : bottomInputSlot ?? welcomeInputSlot;
+  // Mirrors inputPortalTarget above: the composer (and so the consent
+  // notice slot right next to it) lives in one of two DOM positions
+  // depending on whether the welcome screen is showing.
+  const [welcomeConsentSlot, setWelcomeConsentSlot] = useState<HTMLDivElement | null>(null);
+  const [bottomConsentSlot, setBottomConsentSlot] = useState<HTMLDivElement | null>(null);
+  const consentSlotTarget = isConversationEmpty
+    ? welcomeConsentSlot ?? bottomConsentSlot
+    : bottomConsentSlot ?? welcomeConsentSlot;
+  useEffect(() => {
+    registerChatConsentSlot(consentSlotTarget);
+    return () => registerChatConsentSlot(null);
+  }, [consentSlotTarget, registerChatConsentSlot]);
   const isCurrentLocked = Boolean(currentConversation?.isLocked);
   const isCurrentShared = Boolean(currentConversation?.shareEnabled);
   const respondingCount = selectedModels.filter((modelId) => {
@@ -575,6 +589,7 @@ export function MobileChatShell({
               recentConversations={recentConversations}
               onSelectConversation={onSelectConversation}
               inputSlotRef={setWelcomeInputSlot}
+              consentSlotRef={setWelcomeConsentSlot}
             />
           </div>
         )}
@@ -629,6 +644,7 @@ export function MobileChatShell({
         )}
       </section>
 
+      <div ref={setBottomConsentSlot} className="shrink-0" />
       <div ref={setBottomInputSlot} />
       {inputPortalTarget &&
         createPortal(

@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Lock } from "lucide-react";
+import { useChatConsentSlotRef } from "@/components/analytics/AnalyticsProvider";
 import { ChatApp } from "@/components/chat/ChatApp";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { ChatWelcomeScreen } from "@/components/chat/ChatWelcomeScreen";
@@ -199,6 +200,19 @@ export function DesktopChatShell({
   const inputPortalTarget = isConversationEmpty
     ? welcomeInputSlot ?? bottomInputSlot
     : bottomInputSlot ?? welcomeInputSlot;
+  // Mirrors inputPortalTarget above: the composer (and so the consent
+  // notice slot right next to it) lives in one of two DOM positions
+  // depending on whether the welcome screen is showing.
+  const [welcomeConsentSlot, setWelcomeConsentSlot] = useState<HTMLDivElement | null>(null);
+  const [bottomConsentSlot, setBottomConsentSlot] = useState<HTMLDivElement | null>(null);
+  const consentSlotTarget = isConversationEmpty
+    ? welcomeConsentSlot ?? bottomConsentSlot
+    : bottomConsentSlot ?? welcomeConsentSlot;
+  const registerChatConsentSlot = useChatConsentSlotRef();
+  useEffect(() => {
+    registerChatConsentSlot(consentSlotTarget);
+    return () => registerChatConsentSlot(null);
+  }, [consentSlotTarget, registerChatConsentSlot]);
 
   return (
     <main
@@ -238,6 +252,7 @@ export function DesktopChatShell({
                 recentConversations={recentConversations}
                 onSelectConversation={onSelectConversation}
                 inputSlotRef={setWelcomeInputSlot}
+                consentSlotRef={setWelcomeConsentSlot}
               />
             </div>
           )}
@@ -448,6 +463,7 @@ export function DesktopChatShell({
           </div>
         )}
 
+        <div ref={setBottomConsentSlot} className="shrink-0 px-4" />
         <div ref={setBottomInputSlot} />
         {inputPortalTarget &&
           createPortal(

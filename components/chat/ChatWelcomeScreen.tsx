@@ -8,12 +8,14 @@ type ChatWelcomeScreenProps = {
   recentConversations: { id: string; title: string }[];
   onSelectConversation?: (id: string) => void;
   inputSlotRef?: (node: HTMLDivElement | null) => void;
+  consentSlotRef?: (node: HTMLDivElement | null) => void;
 };
 
 export function ChatWelcomeScreen({
   recentConversations,
   onSelectConversation,
   inputSlotRef,
+  consentSlotRef,
 }: ChatWelcomeScreenProps) {
   const { data: session } = useSession();
   const { t } = useLanguage();
@@ -31,6 +33,7 @@ export function ChatWelcomeScreen({
         {welcomeGreeting}
       </p>
       <div ref={inputSlotRef} className="mt-5 w-full max-w-xl" />
+      <div ref={consentSlotRef} className="w-full max-w-xl empty:mt-0 [&:not(:empty)]:mt-3" />
       {recentConversations.length > 0 && (
         <div className="mt-5 flex w-full max-w-xs flex-col gap-2">
           <p className="text-left text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
