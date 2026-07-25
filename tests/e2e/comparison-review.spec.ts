@@ -477,7 +477,11 @@ test("AI comparison review with two reviewers shows a tab switcher and agreement
   await expect(primaryTab).toBeVisible();
   await expect(secondaryTab).toBeVisible();
   await expect(primaryTab).toHaveAttribute("aria-selected", "true");
-  await expect(dialog.getByText("두 검토자의 신뢰도가 다릅니다")).toBeVisible();
+  // The reviewers are compared on source grounding -- the share of their
+  // quotes that matched the answers -- not on any self-reported confidence.
+  await expect(
+    dialog.getByText("두 검토자의 출처 일치도가 다릅니다 (보통 vs 높음)")
+  ).toBeVisible();
 
   // Primary tab shows the first reviewer's content (from the base mock).
   await expect(dialog.getByText("1. 공통된 내용")).toBeVisible();

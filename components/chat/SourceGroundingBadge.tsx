@@ -71,6 +71,12 @@ export function SourceGroundingBadge({
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const popoverRef = useRef<HTMLSpanElement | null>(null);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // A press focuses the button before it clicks it, and the focus alone
+  // already opens the bubble. Without remembering the state from before the
+  // press, the click would immediately toggle shut whatever the focus just
+  // opened -- which is exactly what a tap looks like on a touch screen.
+  const pointerPressRef = useRef(false);
+  const openBeforePressRef = useRef(false);
 
   const clearCloseTimer = useCallback(() => {
     if (!closeTimerRef.current) return;
@@ -164,7 +170,11 @@ export function SourceGroundingBadge({
       if (event.key !== "Escape") return;
       event.stopPropagation();
       closePopover();
-      buttonRef.current?.focus();
+      // Only pull focus back when it was already inside the badge. Calling
+      // focus() from a hover-opened bubble would fire a fresh focus event and
+      // immediately reopen what Escape just dismissed.
+      const active = document.activeElement;
+      if (active && rootRef.current?.contains(active)) buttonRef.current?.focus();
     };
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target as Node;
@@ -252,9 +262,19 @@ export function SourceGroundingBadge({
         aria-expanded={open}
         aria-controls={popoverId}
         data-testid={testId ? `${testId}-info` : undefined}
+        onPointerDown={() => {
+          pointerPressRef.current = true;
+          openBeforePressRef.current = open;
+        }}
         onClick={(event) => {
           event.stopPropagation();
-          if (open) closePopover();
+          // Keyboard activation has no preceding press, so it toggles the
+          // state it can actually see.
+          const shouldClose = pointerPressRef.current
+            ? openBeforePressRef.current
+            : open;
+          pointerPressRef.current = false;
+          if (shouldClose) closePopover();
           else openPopover();
         }}
         // The circle stays badge-sized, but the ::after box gives every
