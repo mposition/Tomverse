@@ -20,8 +20,16 @@ test("every public model has a concise model-specific picker description", () =>
 });
 
 test("picker exposes only decision-relevant special features", () => {
+  // gpt-5-5-thinking is confirmed native-web-search-capable (see
+  // lib/webSearchCapability.ts), so it now genuinely qualifies for the
+  // search badge too -- with the 2-feature cap, that takes the slot "image"
+  // used to occupy, which is covered separately below via a model that has
+  // image input but no confirmed search support.
   assert.deepEqual(getModelPickerFeatures(getModel("gpt-5-5-thinking")), [
+    "search",
     "reasoning",
+  ]);
+  assert.deepEqual(getModelPickerFeatures(getModel("gemini-2-5-flash")), [
     "image",
   ]);
   assert.deepEqual(getModelPickerFeatures(getModel("perplexity/sonar")), [

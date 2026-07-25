@@ -86,6 +86,7 @@ import {
   type ModelFinderTask,
 } from "@/lib/modelFinder";
 import { draftSuggestionKey, suggestsCurrentInformationNeeded } from "@/lib/webSearchSuggestion";
+import { getWebSearchCapability } from "@/lib/webSearchCapability";
 import { openModelFinder } from "@/lib/modelFinderEvents";
 import { CreditBreakdownSheet } from "@/components/chat/CreditBreakdownSheet";
 import { UsageLimitModal } from "@/components/chat/UsageLimitModal";
@@ -1861,7 +1862,7 @@ export function ChatInput({
                     onClick={() => onWebSearchModeChange?.("off")}
                     aria-label={t("chat.removeWebSearchMode")}
                     title={t("chat.removeWebSearchMode")}
-                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sky-500 hover:bg-sky-100 dark:hover:bg-sky-900/40"
+                    className={`relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sky-500 before:absolute before:content-[''] hover:bg-sky-100 dark:hover:bg-sky-900/40 ${isMobileShell ? "before:-inset-2.5" : "before:-inset-1"}`}
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
@@ -1880,7 +1881,7 @@ export function ChatInput({
                     onClick={() => onDismissDeepResearchChip?.()}
                     aria-label={t("chat.removeDeepResearchChip")}
                     title={t("chat.removeDeepResearchChip")}
-                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-violet-500 hover:bg-violet-100 dark:hover:bg-violet-900/40"
+                    className={`relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-violet-500 before:absolute before:content-[''] hover:bg-violet-100 dark:hover:bg-violet-900/40 ${isMobileShell ? "before:-inset-2.5" : "before:-inset-1"}`}
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
@@ -1888,6 +1889,23 @@ export function ChatInput({
               )}
             </div>
           )}
+          {webSearchMode === "always" && selectedModels.length > 0 && (() => {
+            const supportedCount = selectedModels.filter((id) => {
+              const support = getWebSearchCapability(id).support;
+              return support === "native" || support === "search-model";
+            }).length;
+            const unsupportedCount = selectedModels.length - supportedCount;
+            return (
+              <p
+                data-testid="web-search-readiness-summary"
+                className="mb-2 px-1 text-[11px] font-semibold text-zinc-500 dark:text-zinc-400"
+              >
+                {t("chat.webSearchReadinessSummary")
+                  .replace("{supported}", String(supportedCount))
+                  .replace("{unsupported}", String(unsupportedCount))}
+              </p>
+            );
+          })()}
           {attachments.length > 0 && (
             <div className="mb-2 rounded-2xl bg-zinc-50 p-1.5 dark:bg-zinc-950/70 md:mb-3 md:bg-transparent md:p-0">
             <div className="flex max-w-full gap-2 overflow-x-auto overscroll-x-contain pb-1 md:flex-wrap md:overflow-visible md:pb-0">
@@ -1925,11 +1943,11 @@ export function ChatInput({
                   <button
                     type="button"
                     onClick={() => handleRemoveAttachment(attachment)}
-                    className={
+                    className={`relative before:absolute before:content-[''] ${isMobileShell ? "before:-inset-3" : "before:-inset-1"} ${
                       attachment.data
                         ? "absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-zinc-950/80 text-white hover:bg-zinc-950"
                         : "absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-200 hover:text-zinc-900 dark:hover:bg-zinc-700 dark:hover:text-white"
-                    }
+                    }`}
                     title={t("chat.removeAttachment")}
                     aria-label={t("chat.removeAttachment")}
                   >
@@ -2012,7 +2030,7 @@ export function ChatInput({
               setIsMenuOpen(true);
               trackProductEvent("chat_tool_menu_opened", selectedModels.length, {});
             }}
-            className="flex h-10 w-10 shrink-0 touch-manipulation items-center justify-center rounded-full border border-zinc-300 bg-zinc-50 text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white"
+            className={`flex shrink-0 touch-manipulation items-center justify-center rounded-full border border-zinc-300 bg-zinc-50 text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white ${isMobileShell ? "h-11 w-11" : "h-10 w-10"}`}
             title={t("chat.moreActions")}
             aria-label={t("chat.moreActions")}
             aria-expanded={isMenuOpen && menuView === "actions"}
@@ -2041,7 +2059,7 @@ export function ChatInput({
               setMenuView("models");
               setIsMenuOpen(true);
             }}
-            className="flex h-10 max-w-[112px] shrink-0 touch-manipulation items-center gap-1 rounded-full border border-zinc-300 bg-zinc-50 px-2.5 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            className={`flex max-w-[112px] shrink-0 touch-manipulation items-center gap-1 rounded-full border border-zinc-300 bg-zinc-50 px-2.5 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-800 ${isMobileShell ? "h-11" : "h-10"}`}
             title={activeModelNames.join(", ")}
             aria-label={t("chat.modelSelect")}
             aria-expanded={isMenuOpen && menuView === "models"}
@@ -2069,7 +2087,7 @@ export function ChatInput({
               type="button"
               data-testid="request-credit-estimate"
               onClick={() => setIsCreditBreakdownOpen(true)}
-              className="flex h-9 shrink-0 items-center gap-1 rounded-full border border-zinc-200 bg-zinc-50 px-2 text-[11px] font-bold text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              className={`flex shrink-0 items-center gap-1 rounded-full border border-zinc-200 bg-zinc-50 px-2 text-[11px] font-bold text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800 ${isMobileShell ? "h-11" : "h-9"}`}
               title={
                 lang === "ko"
                   ? `예상 ${estimatedRequestCredits}크레딧${inputCreditMultiplier > 1 ? ` · ${inputCreditMultiplier}×` : ""}`
@@ -2098,7 +2116,7 @@ export function ChatInput({
             <button
               type="button"
               onClick={onCancel}
-              className="flex h-9 w-9 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-red-600 text-white hover:bg-red-500"
+              className={`flex shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-red-600 text-white hover:bg-red-500 ${isMobileShell ? "h-11 w-11" : "h-9 w-9"}`}
               title={t("chat.stopAllResponses")}
               aria-label={t("chat.stopAllResponses")}
             >
@@ -2117,7 +2135,7 @@ export function ChatInput({
                 activeSelectedModels.length === 0 ||
                 (!value.trim() && attachments.length === 0)
               }
-              className="flex h-9 w-9 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-blue-600 text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500 dark:disabled:bg-zinc-700 dark:disabled:text-zinc-400"
+              className={`flex shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-blue-600 text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500 dark:disabled:bg-zinc-700 dark:disabled:text-zinc-400 ${isMobileShell ? "h-11 w-11" : "h-9 w-9"}`}
               title={`${t("chat.send")} · ${estimatedRequestCredits} credits`}
               aria-label={`${t("chat.send")} · ${estimatedRequestCredits} credits`}
             >
@@ -2175,7 +2193,7 @@ export function ChatInput({
                 <button
                   type="button"
                   onClick={() => closeMenu(true)}
-                  className="flex h-9 w-9 items-center justify-center rounded-xl bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+                  className="flex h-11 w-11 items-center justify-center rounded-xl bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
                   aria-label={t("auth.cancel")}
                 >
                   <X className="h-4 w-4" />
@@ -2330,7 +2348,7 @@ export function ChatInput({
                   <button
                     type="button"
                     onClick={() => setMenuView("actions")}
-                    className="mb-1 flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-white"
+                    className={`mb-1 flex items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-white ${isMobileShell ? "h-11 w-11" : "h-8 w-8"}`}
                     aria-label={t("auth.cancel")}
                   >
                     <ArrowLeft className="h-4 w-4" />
@@ -2415,7 +2433,7 @@ export function ChatInput({
                       <p className="mb-1 px-1 text-[10px] font-black uppercase tracking-wide text-zinc-400">
                         {pickerCopy.selectedModelsLabel}
                       </p>
-                      <div className="flex flex-wrap gap-1.5">
+                      <div className="flex flex-wrap gap-x-4 gap-y-2.5 md:gap-1.5">
                         {selectedModels.map((modelId) => {
                           const model = PUBLIC_MODELS.find((item) => item.id === modelId);
                           return (
@@ -2431,7 +2449,7 @@ export function ChatInput({
                                 type="button"
                                 aria-label={t("chat.removeModelFromComparison")}
                                 onClick={() => onToggleModel(modelId)}
-                                className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-300/60 dark:text-zinc-400 dark:hover:bg-zinc-700"
+                                className={`relative flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-300/60 dark:text-zinc-400 dark:hover:bg-zinc-700 before:absolute before:content-[''] ${isMobileShell ? "before:-inset-3.5" : "before:-inset-2"}`}
                               >
                                 <X className="h-3 w-3" />
                               </button>
@@ -2454,7 +2472,7 @@ export function ChatInput({
                           }
                           className={
                             mobileStyle
-                              ? `inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-black transition ${capabilityFilter === "favorites" ? "border-blue-500 bg-blue-500 text-white" : "border-zinc-200 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"}`
+                              ? `inline-flex min-h-11 shrink-0 items-center gap-1 rounded-full border px-2.5 text-[10px] font-black transition ${capabilityFilter === "favorites" ? "border-blue-500 bg-blue-500 text-white" : "border-zinc-200 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"}`
                               : `flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[10px] font-black transition ${capabilityFilter === "favorites" ? "border-blue-500 bg-blue-500 text-white" : "border-zinc-200 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"}`
                           }
                         >
@@ -2472,6 +2490,7 @@ export function ChatInput({
                         <button
                           key={filterValue}
                           type="button"
+                          data-testid={`capability-filter-${filterValue}`}
                           aria-pressed={capabilityFilter === filterValue}
                           onClick={() =>
                             setCapabilityFilter((current) =>
@@ -2480,7 +2499,7 @@ export function ChatInput({
                           }
                           className={
                             mobileStyle
-                              ? `shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black transition ${capabilityFilter === filterValue ? "border-blue-500 bg-blue-500 text-white" : "border-zinc-200 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"}`
+                              ? `inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-full border px-2.5 text-[10px] font-black transition ${capabilityFilter === filterValue ? "border-blue-500 bg-blue-500 text-white" : "border-zinc-200 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"}`
                               : `rounded-full border px-2.5 py-1 text-left text-[10px] font-black transition ${capabilityFilter === filterValue ? "border-blue-500 bg-blue-500 text-white" : "border-zinc-200 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"}`
                           }
                         >
@@ -2493,7 +2512,7 @@ export function ChatInput({
                           value={providerFilter}
                           onChange={(event) => setProviderFilter(event.target.value)}
                           aria-label={pickerCopy.providerAll}
-                          className="h-9 w-full min-w-0 rounded-lg border border-zinc-200 bg-zinc-50 px-2 text-xs font-medium text-zinc-700 outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
+                          className={`w-full min-w-0 rounded-lg border border-zinc-200 bg-zinc-50 px-2 text-xs font-medium text-zinc-700 outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 ${mobileStyle ? "h-11" : "h-9"}`}
                         >
                           <option value="all">{pickerCopy.providerAll}</option>
                           {modelProviders.map((provider) => (
@@ -2504,7 +2523,7 @@ export function ChatInput({
                           value={usageBandFilter}
                           onChange={(event) => setUsageBandFilter(event.target.value as ModelPickerUsageBand)}
                           aria-label={pickerCopy.usageAll}
-                          className="h-9 w-full min-w-0 rounded-lg border border-zinc-200 bg-zinc-50 px-2 text-xs font-medium text-zinc-700 outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
+                          className={`w-full min-w-0 rounded-lg border border-zinc-200 bg-zinc-50 px-2 text-xs font-medium text-zinc-700 outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 ${mobileStyle ? "h-11" : "h-9"}`}
                         >
                           <option value="all">{pickerCopy.usageAll}</option>
                           <option value="light">{pickerCopy.light}</option>
@@ -2515,7 +2534,7 @@ export function ChatInput({
                       </div>
                     );
                     const advancedFiltersPanel = showAdvancedModelFilters && (
-                      <div className="flex flex-wrap gap-1 rounded-lg bg-zinc-100 p-1.5 dark:bg-zinc-950">
+                      <div className={`flex flex-wrap rounded-lg bg-zinc-100 p-1.5 dark:bg-zinc-950 ${isMobileShell ? "gap-2" : "gap-1"}`}>
                         {([
                           [imageInputOnly, setImageInputOnly, pickerCopy.imageInputOnly],
                           [availableOnPlanOnly, setAvailableOnPlanOnly, pickerCopy.availableOnPlan],
@@ -2525,7 +2544,7 @@ export function ChatInput({
                             type="button"
                             aria-pressed={pressed}
                             onClick={() => setPressed(!pressed)}
-                            className={`rounded-full px-2 py-1 text-[9px] font-black transition ${pressed ? "bg-blue-600 text-white" : "bg-white text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"}`}
+                            className={`inline-flex items-center justify-center rounded-full px-2 text-[9px] font-black transition ${isMobileShell ? "min-h-11" : "py-1"} ${pressed ? "bg-blue-600 text-white" : "bg-white text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"}`}
                           >
                             {label}
                           </button>
@@ -2538,7 +2557,7 @@ export function ChatInput({
                         data-testid="advanced-model-filters"
                         aria-expanded={showAdvancedModelFilters}
                         onClick={() => setShowAdvancedModelFilters((current) => !current)}
-                        className="inline-flex items-center gap-1 self-start rounded-full border border-zinc-200 px-2 py-1 text-[9px] font-black text-zinc-500 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                        className={`inline-flex items-center gap-1 self-start rounded-full border border-zinc-200 px-2 text-[9px] font-black text-zinc-500 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800 ${isMobileShell ? "min-h-11" : "py-1"}`}
                       >
                         <SlidersHorizontal className="h-3 w-3" aria-hidden="true" />
                         {pickerCopy.filters}
@@ -2760,8 +2779,9 @@ export function ChatInput({
                                     >
                                       <button
                                         type="button"
+                                        data-testid="model-favorite-star"
                                         onClick={() => toggleFavoriteModel(model.id)}
-                                        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition ${isFavorite ? "text-amber-400" : "text-zinc-400 hover:text-amber-400"}`}
+                                        className={`flex shrink-0 items-center justify-center rounded-lg transition ${isMobileShell ? "h-11 w-11" : "h-8 w-8"} ${isFavorite ? "text-amber-400" : "text-zinc-400 hover:text-amber-400"}`}
                                         aria-pressed={isFavorite}
                                         aria-label={t("chat.favoriteModels")}
                                       >
@@ -2942,7 +2962,7 @@ export function ChatInput({
                     <button
                       type="button"
                       onClick={() => closeMenu(true)}
-                      className="shrink-0 rounded-xl bg-blue-600 px-3 py-2 text-xs font-black text-white transition hover:bg-blue-500"
+                      className={`flex shrink-0 items-center justify-center rounded-xl bg-blue-600 px-3 text-xs font-black text-white transition hover:bg-blue-500 ${isMobileShell ? "h-11" : "py-2"}`}
                     >
                       {pickerCopy.done}
                     </button>

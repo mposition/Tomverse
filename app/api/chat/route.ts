@@ -12,12 +12,17 @@ import {
 } from "@/lib/r2";
 import { prisma } from "@/lib/prisma";
 import {
+    MODEL_USAGE_CREDIT_WEIGHTS,
     modelSupportsImageInput,
     modelSupportsNativePdfInput,
     type AiModel,
 } from "@/lib/models";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { getActiveAiModel } from "@/lib/activeAiModel";
+import { getWebSearchCapability } from "@/lib/webSearchCapability";
+import { buildWebSearchToolConfig, WEB_SEARCH_TOOL_NAMES } from "@/lib/webSearchToolConfig";
+import { normalizeWebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
+import { buildSearchMetadataTrailerChunk } from "@/lib/webSearchStreamTrailer";
 import {
     consumePerplexityUsage,
     discardPerplexityUsage,
@@ -657,6 +662,7 @@ export async function POST(req: Request) {
             assistantMessageId,
             turnstileToken,
             deepResearchDepth,
+            webSearchMode,
         } = validateChatPayload(body);
         const requestedModelId = modelId || APP_DEFAULTS.defaultModelId;
         requestedModelIdForLog = requestedModelId;
@@ -697,6 +703,14 @@ export async function POST(req: Request) {
             );
         }
         requestedProviderForLog = modelConfig.provider;
+        // webSearchMode === "always" only ever enables a model's OWN
+        // provider-native search tool when its exact catalog id is
+        // confirmed-supported -- it never adds or swaps in a different
+        // model (see lib/webSearchCapability.ts for the support matrix).
+        const webSearchCapability = getWebSearchCapability(modelConfig.id);
+        const webSearchRequested = webSearchMode === "always";
+        const nativeSearchEnabled =
+            webSearchRequested && webSearchCapability.support === "native";
         const requestAttachments = messages.flatMap((message) =>
             Array.isArray(message.attachments)
                 ? (message.attachments as IncomingAttachment[])
@@ -1202,7 +1216,12 @@ export async function POST(req: Request) {
         const budget = createChatBudget(
             access.kind,
             modelConfig,
-            estimatedInputTokens
+            estimatedInputTokens,
+            {
+                webSearchSurchargeCredits: nativeSearchEnabled
+                    ? MODEL_USAGE_CREDIT_WEIGHTS.webSearchSurcharge
+                    : 0,
+            }
         );
         if (
             modelConfig.contextWindowTokens &&
@@ -1353,6 +1372,9 @@ export async function POST(req: Request) {
             }
         }
 
+        const webSearchToolConfig = nativeSearchEnabled
+            ? buildWebSearchToolConfig(webSearchCapability)
+            : null;
         const result = await streamText({
             model: activeModel,
             messages: formattedMessages,
@@ -1362,6 +1384,7 @@ export async function POST(req: Request) {
                 modelConfig.provider === "perplexity"
                     ? perplexityUsageHeaders(traceId)
                     : undefined,
+            ...(webSearchToolConfig ?? {}),
         });
 
         const sourceReader = result.textStream.getReader();
@@ -1385,6 +1408,8 @@ export async function POST(req: Request) {
                 inputTokens?: number;
                 cachedInputTokens?: number;
                 outputTokens?: number;
+                searchSurchargeCredits?: number;
+                searchExecuted?: boolean;
             }
         ) => {
             if (usageSettlement) return usageSettlement;
@@ -1404,6 +1429,8 @@ export async function POST(req: Request) {
                             usage?.outputTokens ??
                             estimatedGeneratedOutputTokens(),
                         outcome,
+                        searchSurchargeCredits: usage?.searchSurchargeCredits,
+                        searchExecuted: usage?.searchExecuted,
                     }, {
                         providerUsageSnapshot,
                     });
@@ -1533,6 +1560,7 @@ export async function POST(req: Request) {
                             result.finishReason,
                             result.rawFinishReason,
                             result.providerMetadata,
+                            result.content,
                         ] as const);
                         const [
                             responseResult,
@@ -1540,6 +1568,7 @@ export async function POST(req: Request) {
                             finishReasonResult,
                             rawFinishReasonResult,
                             providerMetadataResult,
+                            contentResult,
                         ] = completionResults;
                         const rejectedCompletion = completionResults.find(
                             (item): item is PromiseRejectedResult =>
@@ -1595,6 +1624,25 @@ export async function POST(req: Request) {
                             );
                         }
 
+                        const webSearchExecution = normalizeWebSearchExecution({
+                            capability: webSearchCapability,
+                            searchRequested: webSearchRequested,
+                            provider: modelConfig.provider,
+                            toolName: webSearchCapability.provider
+                                ? WEB_SEARCH_TOOL_NAMES[webSearchCapability.provider]
+                                : undefined,
+                            content:
+                                contentResult.status === "fulfilled"
+                                    ? contentResult.value
+                                    : undefined,
+                        });
+                        const searchSettlementFields = {
+                            searchSurchargeCredits: nativeSearchEnabled
+                                ? MODEL_USAGE_CREDIT_WEIGHTS.webSearchSurcharge
+                                : 0,
+                            searchExecuted: webSearchExecution.executed,
+                        };
+
                         if (usageResult.status === "fulfilled") {
                             const usage = usageResult.value;
                             await settleSafely(
@@ -1604,11 +1652,13 @@ export async function POST(req: Request) {
                                     cachedInputTokens:
                                         usage.inputTokenDetails.cacheReadTokens,
                                     outputTokens: usage.outputTokens,
+                                    ...searchSettlementFields,
                                 }
                             );
                         } else {
                             await settleSafely(
-                                generatedText.trim() ? "completed" : "empty"
+                                generatedText.trim() ? "completed" : "empty",
+                                searchSettlementFields
                             );
                         }
                         if (
@@ -1662,6 +1712,7 @@ export async function POST(req: Request) {
                                             content: storedContent,
                                             status: "normal",
                                             modelId: requestedModelId,
+                                            searchMetadata: webSearchExecution,
                                         },
                                     });
                                 });
@@ -1750,6 +1801,16 @@ export async function POST(req: Request) {
                                 );
                             }
                         }
+                        // Sent as one final out-of-band chunk rather than a
+                        // second request or a response header -- the tool
+                        // result/source parts this depends on only resolve
+                        // once the whole turn settles, and this is the only
+                        // delivery path that also reaches guest sessions
+                        // (their messages are never persisted for a re-fetch).
+                        enqueueSafely(
+                            controller,
+                            buildSearchMetadataTrailerChunk(webSearchExecution)
+                        );
                         closeSafely(controller);
                         await releaseSafely();
                         return;

@@ -31,6 +31,9 @@ import { getRuntimeModels } from "@/lib/modelRegistry";
 import { prisma } from "@/lib/prisma";
 import { estimatePreflightAttachmentTokens } from "@/lib/chatAttachmentTokens";
 import { isChatCostSafetyCode } from "@/lib/chatCostSafetyCore";
+import { WEB_SEARCH_MODES } from "@/lib/appDefaults";
+import { MODEL_USAGE_CREDIT_WEIGHTS } from "@/lib/models";
+import { getWebSearchCapability } from "@/lib/webSearchCapability";
 
 const preflightSchema = z
     .object({
@@ -48,6 +51,7 @@ const preflightSchema = z
                     .strict()
             )
             .max(5),
+        webSearchMode: z.enum(WEB_SEARCH_MODES).optional(),
     })
     .strict();
 
@@ -240,10 +244,18 @@ export async function POST(request: Request) {
                 ),
                 attachmentTokens,
             });
+            const nativeSearchEnabled =
+                payload.webSearchMode === "always" &&
+                getWebSearchCapability(model.id).support === "native";
             return createChatBudget(
                 access.kind,
                 model,
-                Math.max(1, historyTokens + promptTokens + attachmentTokens)
+                Math.max(1, historyTokens + promptTokens + attachmentTokens),
+                {
+                    webSearchSurchargeCredits: nativeSearchEnabled
+                        ? MODEL_USAGE_CREDIT_WEIGHTS.webSearchSurcharge
+                        : 0,
+                }
             );
         });
         modelIdsForLog = models.map((model) => model.id);

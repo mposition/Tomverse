@@ -1,4 +1,5 @@
 import type { AiModel } from "@/lib/models";
+import { getWebSearchCapability } from "@/lib/webSearchCapability";
 
 export type ModelPickerLanguage = "en" | "ko" | "zh" | "fr" | "de" | "es" | "pt";
 export type ModelPickerCapability = "all" | "favorites" | "recommended" | "fast" | "reasoning" | "search";
@@ -110,7 +111,12 @@ export const getModelPickerFeatures = (
   model: Pick<AiModel, "id" | "provider" | "reasoning" | "inputCapabilities">
 ): ModelPickerFeature[] => {
   const features: ModelPickerFeature[] = [];
-  if (model.provider === "perplexity") features.push("search");
+  const webSearchSupport = getWebSearchCapability(model.id).support;
+  // "unverified" is deliberately excluded -- showing the badge would imply
+  // confirmed support this model doesn't officially have yet.
+  if (webSearchSupport === "native" || webSearchSupport === "search-model") {
+    features.push("search");
+  }
   if (model.reasoning && model.reasoning !== "none") features.push("reasoning");
   if (model.id.includes("code") || model.id === "codestral") features.push("code");
   if (model.inputCapabilities?.image) features.push("image");
@@ -139,7 +145,10 @@ export const modelMatchesCapability = (
   if (capability === "reasoning") {
     return Boolean(model.reasoning && model.reasoning !== "none");
   }
-  if (capability === "search") return model.provider === "perplexity";
+  if (capability === "search") {
+    const support = getWebSearchCapability(model.id).support;
+    return support === "native" || support === "search-model";
+  }
   const name = `${model.id} ${model.name}`.toLowerCase();
   return ["mini", "flash", "haiku", "small", "lite", "llama-3-1"].some((term) =>
     name.includes(term)

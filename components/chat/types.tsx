@@ -1,4 +1,6 @@
-﻿export type ChatAttachment = {
+﻿import type { WebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
+
+export type ChatAttachment = {
   id: string;
   name: string;
   mediaType: string;
@@ -19,6 +21,7 @@ export type Message = {
   errorHadAttachments?: boolean;
   createdAt?: string;
   pendingJobId?: string | null;
+  searchMetadata?: WebSearchExecution | null;
 };
 
 export type Conversation = {

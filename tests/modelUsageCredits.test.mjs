@@ -13,6 +13,7 @@ import {
   getWeightedUsageCredits,
   modelSupportsImageInput,
   modelSupportsNativePdfInput,
+  MODEL_USAGE_CREDIT_WEIGHTS,
 } from "../lib/models.ts";
 
 const profile = (modelId) => getModelUsageProfile(getModel(modelId));
@@ -161,6 +162,50 @@ test("credit settlement refunds failures and empty responses", () => {
     outcome: "cancelled",
   });
   assert.ok(partial > 0 && partial < 16);
+});
+
+test("native web search surcharge is refunded when the provider didn't actually search", () => {
+  const base = {
+    reservedCredits: 12,
+    reservedInputTokens: 10_000,
+    reservedOutputTokens: 2_000,
+    actualInputTokens: 10_000,
+    actualOutputTokens: 500,
+  };
+  const surcharge = MODEL_USAGE_CREDIT_WEIGHTS.webSearchSurcharge;
+
+  assert.equal(
+    getSettledUsageCredits({
+      ...base,
+      outcome: "completed",
+      searchSurchargeCredits: surcharge,
+      searchExecuted: true,
+    }),
+    12
+  );
+  assert.equal(
+    getSettledUsageCredits({
+      ...base,
+      outcome: "completed",
+      searchSurchargeCredits: surcharge,
+      searchExecuted: false,
+    }),
+    12 - surcharge
+  );
+  assert.equal(
+    getSettledUsageCredits({
+      ...base,
+      reservedCredits: surcharge - 1,
+      outcome: "completed",
+      searchSurchargeCredits: surcharge,
+      searchExecuted: false,
+    }),
+    0
+  );
+  // Calls that never requested search rely on the defaults (searchExecuted
+  // defaults to true, searchSurchargeCredits defaults to 0) -- nothing is
+  // refunded, so pre-existing non-search settlement is unaffected.
+  assert.equal(getSettledUsageCredits({ ...base, outcome: "completed" }), 12);
 });
 
 test("cost reservations use realistic output while preserving provider output caps", () => {

@@ -201,6 +201,7 @@ export async function GET(
         status: true,
         modelId: true,
         pendingJobId: true,
+        searchMetadata: true,
         createdAt: true,
       },
     });

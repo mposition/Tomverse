@@ -57,6 +57,9 @@ export const PRODUCT_ANALYTICS_EVENT_NAMES = [
   "deep_research_completed",
   "deep_research_failed",
   "answer_sources_opened",
+  "web_search_native_executed",
+  "web_search_native_unsupported",
+  "web_search_native_failed",
 ] as const;
 
 export type ProductAnalyticsEventName =
@@ -148,6 +151,14 @@ export const analyticsPropertiesSchema = z
     recommendation_rank: z.number().int().min(1).max(3).optional(),
     suggestion_reason: z.enum(["document", "deep_analysis", "research"]).optional(),
     review_mode: z.enum(["balanced", "evidence", "action"]).optional(),
+    // Bucketed exact-quote-match rate for a comparison review (the value the
+    // UI shows as "Source grounding"). It is stored under the legacy
+    // `confidence` field name, so the analytics property is named for what it
+    // measures to keep it from being reported as model confidence.
+    // "not_available" means the review contained no quotes to match at all.
+    source_grounding_level: z
+      .enum(["low", "medium", "high", "not_available"])
+      .optional(),
     cached: z.boolean().optional(),
     usage_credits: z.number().int().min(0).max(100).optional(),
     help_source: z
@@ -170,6 +181,9 @@ export const analyticsPropertiesSchema = z
     help_article_id: z.enum(["chat_workspace"]).optional(),
     web_search_mode: z.enum(["off", "auto", "always"]).optional(),
     deep_research_depth: z.enum(["quick", "standard", "deep"]).optional(),
+    search_provider: z
+      .enum(["openai", "anthropic", "google", "perplexity"])
+      .optional(),
   })
   .strict()
   .superRefine((properties, context) => {

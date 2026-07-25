@@ -48,6 +48,11 @@ export const MODEL_USAGE_CREDIT_WEIGHTS = {
     premiumReasoning: 16,
     search: 20,
     deepResearch: 30,
+    // Flat surcharge reserved when webSearchMode === "always" enables a
+    // provider-native search tool (OpenAI/Anthropic/Google). Refunded at
+    // settlement if the provider didn't actually execute a search that
+    // turn -- see getSettledUsageCredits' searchExecuted parameter.
+    webSearchSurcharge: 5,
 } as const;
 
 export const INPUT_CREDIT_MULTIPLIERS = [
@@ -279,6 +284,8 @@ export const getSettledUsageCredits = ({
     actualInputTokens,
     actualOutputTokens,
     outcome,
+    searchSurchargeCredits = 0,
+    searchExecuted = true,
 }: {
     reservedCredits: number;
     reservedInputTokens: number;
@@ -286,8 +293,16 @@ export const getSettledUsageCredits = ({
     actualInputTokens: number;
     actualOutputTokens: number;
     outcome: UsageCreditOutcome;
+    /** Extra credits reserved on top of the base weight for a native web search attempt. */
+    searchSurchargeCredits?: number;
+    /** Whether the provider actually executed a search this turn -- refund the surcharge if not. */
+    searchExecuted?: boolean;
 }) => {
-    if (outcome === "completed") return reservedCredits;
+    if (outcome === "completed") {
+        return searchExecuted
+            ? reservedCredits
+            : Math.max(0, reservedCredits - searchSurchargeCredits);
+    }
     if (outcome !== "cancelled" || actualOutputTokens <= 16) return 0;
 
     const reservedTokens = reservedInputTokens + reservedOutputTokens;

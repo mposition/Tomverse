@@ -15,7 +15,12 @@ import {
 import { useLanguage } from "@/components/LanguageProvider";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
+import { SourceGroundingBadge } from "@/components/chat/SourceGroundingBadge";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
+import {
+  toSourceGrounding,
+  type SourceGroundingLevel,
+} from "@/lib/sourceGrounding";
 
 type ReviewMode = "balanced" | "evidence" | "action";
 
@@ -427,6 +432,14 @@ export function ComparisonReviewDialog({
   const modelName = (modelId: string) =>
     catalogModels.find((model) => model.id === modelId)?.name || modelId;
 
+  // The API still returns the bucket under its legacy `confidence` name; it is
+  // relabelled here so the agreement line reads as a grounding comparison
+  // rather than as two models reporting how sure they feel.
+  const groundingLevelLabel = (level: SourceGroundingLevel) =>
+    t(
+      `chat.aiReviewSourceGroundingLevel${level.charAt(0).toUpperCase()}${level.slice(1)}`
+    );
+
   if (!open || !conversationId) return null;
 
   const runReview = async () => {
@@ -469,6 +482,7 @@ export function ComparisonReviewDialog({
       }
       setReview(data);
       setActiveReviewer("primary");
+      const primaryGrounding = toSourceGrounding(data.result.primary.result);
       trackProductEvent(
         "comparison_review_completed",
         setup.responses?.length || 0,
@@ -476,6 +490,10 @@ export function ComparisonReviewDialog({
           review_mode: mode,
           cached: data.cached,
           usage_credits: data.usageCredits,
+          // Deliberately not named after the stored `confidence` field: this
+          // is the exact-quote-match bucket, and analysis must not read it as
+          // a model self-certainty score.
+          source_grounding_level: primaryGrounding.level ?? "not_available",
         }
       );
       onCompleted?.();
@@ -578,10 +596,16 @@ export function ComparisonReviewDialog({
                       {review.result.agreement && (
                         <p className="rounded-xl bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-600 dark:bg-zinc-950/60 dark:text-zinc-300">
                           {review.result.agreement.confidenceMatches
-                            ? t("chat.aiReviewAgreementConfidenceMatch")
-                            : t("chat.aiReviewAgreementConfidenceMismatch")
-                                .replace("{primary}", review.result.agreement.primaryConfidence)
-                                .replace("{secondary}", review.result.agreement.secondaryConfidence)}
+                            ? t("chat.aiReviewAgreementSourceGroundingMatch")
+                            : t("chat.aiReviewAgreementSourceGroundingMismatch")
+                                .replace(
+                                  "{primary}",
+                                  groundingLevelLabel(review.result.agreement.primaryConfidence)
+                                )
+                                .replace(
+                                  "{secondary}",
+                                  groundingLevelLabel(review.result.agreement.secondaryConfidence)
+                                )}
                           {" · "}
                           {t("chat.aiReviewAgreementSharedQuotes").replace(
                             "{count}",
@@ -605,16 +629,17 @@ export function ComparisonReviewDialog({
                         testId="ai-review-used-credits"
                       />
                     )}
-                    <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-bold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-                      {t("chat.aiReviewConfidence")}: {activeResult.confidence}
-                    </span>
-                    <span
-                      className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-bold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
-                      title={t("chat.aiReviewGroundingHint")}
-                    >
-                      {activeResult.groundingStats.verifiedCitations}/
-                      {activeResult.groundingStats.totalCitations} {t("chat.aiReviewQuotesVerified")}
-                    </span>
+                    <SourceGroundingBadge
+                      grounding={toSourceGrounding(activeResult)}
+                      labels={{
+                        label: t("chat.aiReviewSourceGroundingOverall"),
+                        unavailable: t("chat.aiReviewSourceGroundingUnavailable"),
+                        quotesMatched: t("chat.aiReviewSourceGroundingQuotesMatched"),
+                        description: `${t("chat.aiReviewSourceGroundingDescription")}\n\n${t("chat.aiReviewSourceGroundingScopeReview")}`,
+                        infoLabel: t("chat.aiReviewSourceGroundingInfoLabel"),
+                      }}
+                      testId="ai-review-source-grounding"
+                    />
                     <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-bold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
                       {t("chat.aiReviewedBy")}: {modelName(activeEntry.reviewerModelId)}
                     </span>

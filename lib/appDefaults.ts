@@ -4,6 +4,7 @@ import {
   getModel,
   getModelUsageProfile,
   isEnabledModelId,
+  type AiModel,
 } from "@/lib/models";
 
 const GUEST_DEFAULT_MODEL_ID = "gemini-2-5-flash";
@@ -21,14 +22,26 @@ export const GUEST_BRAND_TRIO_MODEL_IDS = ["gpt-5-4-mini", "claude-haiku-4-5", "
 // instead of silently collapsing via Set dedup.
 export const GUEST_FALLBACK_MODEL_IDS = ["llama-3-1", "grok-3-mini", "deepseek-v4-flash"];
 
-const isGuestEligibleModel = (modelId: string) => {
-  const model = getModel(modelId);
-  return Boolean(
-    model?.enabled &&
-      canUseModelWithPlan("Guest", model) &&
-      getModelUsageProfile(model).category === "Standard"
-  );
-};
+/** Resolves a model id against whichever catalogue the caller is holding. */
+export type ModelLookup = (modelId: string) => AiModel | undefined;
+
+// The single definition of "a guest may select this model". Parameterised by
+// the catalogue lookup so the static import-time catalogue (below) and the
+// runtime, DB-backed one (components/ModelCatalogProvider) apply exactly the
+// same rule -- the guest default must never come out differently depending
+// on which catalogue happened to answer.
+export const createGuestEligibilityCheck =
+  (lookup: ModelLookup) => (modelId: string) => {
+    const model = lookup(modelId);
+    return Boolean(
+      model?.enabled &&
+        !model.catalogDeleted &&
+        canUseModelWithPlan("Guest", model) &&
+        getModelUsageProfile(model).category === "Standard"
+    );
+  };
+
+const isGuestEligibleModel = createGuestEligibilityCheck(getModel);
 
 if (!isEnabledModelId(GUEST_DEFAULT_MODEL_ID) || !isGuestEligibleModel(GUEST_DEFAULT_MODEL_ID)) {
   throw new Error("Guest default model must be an enabled guest-accessible Standard model.");
@@ -79,22 +92,45 @@ export const clampGuestSelectedModels = (models: string[]) =>
     isGuestEligibleModel
   ).slice(0, APP_DEFAULTS.maxGuestSelectedModels);
 
-// Always includes the GPT/Claude/Gemini brand trio, backfilling from
-// GUEST_FALLBACK_MODEL_IDS if one of them is disabled. leadModelId (the
+// THE guest default selection. Always includes the GPT/Claude/Gemini brand
+// trio, backfilling from GUEST_FALLBACK_MODEL_IDS if one of them is
+// ineligible so the default is still 3 distinct models. leadModelId (the
 // admin-configured guestDefaultModelId) only reorders which of the three
 // appears first, and is ignored if it names a model outside the trio.
-export const getGuestDefaultSelectedModels = (
-  leadModelId: string = APP_DEFAULTS.guestDefaultModelId
-) => {
+//
+// Deliberately pure and catalogue-injected: the server (app/(application)/
+// chat/page.tsx via lib/appSettings) and the client's very first render
+// (app/(application)/chat/ChatPageClient.tsx) both call this, so the guest
+// model count -- and therefore the estimated credits derived from it -- is
+// identical before and after hydration (STG-F006).
+export const resolveGuestDefaultSelectedModels = ({
+  isEligible,
+  leadModelId = APP_DEFAULTS.guestDefaultModelId,
+  maxModels = APP_DEFAULTS.maxGuestSelectedModels,
+}: {
+  isEligible: (modelId: string) => boolean;
+  leadModelId?: string;
+  maxModels?: number;
+}) => {
   const orderedTrio = GUEST_BRAND_TRIO_MODEL_IDS.includes(leadModelId)
     ? [leadModelId, ...GUEST_BRAND_TRIO_MODEL_IDS.filter((id) => id !== leadModelId)]
     : GUEST_BRAND_TRIO_MODEL_IDS;
 
   const trio: string[] = [];
   for (const modelId of [...orderedTrio, ...GUEST_FALLBACK_MODEL_IDS]) {
-    if (trio.includes(modelId) || !isGuestEligibleModel(modelId)) continue;
+    if (trio.includes(modelId) || !isEligible(modelId)) continue;
     trio.push(modelId);
-    if (trio.length >= 3) break;
+    if (trio.length >= maxModels) break;
   }
-  return clampGuestSelectedModels(trio);
+  return trio;
 };
+
+export const getGuestDefaultSelectedModels = (
+  leadModelId: string = APP_DEFAULTS.guestDefaultModelId
+) =>
+  clampGuestSelectedModels(
+    resolveGuestDefaultSelectedModels({
+      isEligible: isGuestEligibleModel,
+      leadModelId,
+    })
+  );

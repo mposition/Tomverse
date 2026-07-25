@@ -15,6 +15,7 @@ import {
     type ModelTier,
     type ModelUsageClass,
 } from "@/lib/models";
+import { isWebSearchMode, type WebSearchMode } from "@/lib/appDefaults";
 import { getAnonymousClientKey } from "@/lib/clientIp";
 import { recordInternalProviderUsage } from "@/lib/providerUsageAccounting";
 import {
@@ -271,7 +272,8 @@ export const getChatBudgetReservedCostMicroUsd = (budget: ChatBudget) =>
 export const createChatBudget = (
     kind: AccessKind,
     model: AiModel,
-    estimatedInputTokens: number
+    estimatedInputTokens: number,
+    options?: { webSearchSurchargeCredits?: number }
 ): ChatBudget => {
     const profile = getModelBillingProfile(model);
     const maxInputTokens =
@@ -295,7 +297,9 @@ export const createChatBudget = (
         modelId: model.id,
         minimumPlan: model.minimumPlan,
         modelUsageClass: model.usageClass,
-        usageCredits: getWeightedUsageCredits(model, estimatedInputTokens),
+        usageCredits:
+            getWeightedUsageCredits(model, estimatedInputTokens) +
+            (options?.webSearchSurchargeCredits || 0),
         inputTokens: estimatedInputTokens,
         maxOutputTokens: profile.maxOutputTokens,
         reservedOutputTokens: profile.reservationOutputTokens,
@@ -1908,6 +1912,10 @@ export const settleChatUsage = async (
         cachedInputTokens?: number;
         outputTokens?: number;
         outcome: "completed" | "cancelled" | "failed" | "empty";
+        /** Extra credits reserved on top of the base weight for a native web search attempt. */
+        searchSurchargeCredits?: number;
+        /** Whether the provider actually executed a search this turn -- refund the surcharge if not. */
+        searchExecuted?: boolean;
     },
     options?: {
         reconciled?: boolean;
@@ -1966,6 +1974,8 @@ export const settleChatUsage = async (
             actualInputTokens: actualInput,
             actualOutputTokens: actualOutput,
             outcome: usage.outcome,
+            searchSurchargeCredits: usage.searchSurchargeCredits,
+            searchExecuted: usage.searchExecuted,
         });
         const tokenCostBreakdown = calculateProviderUsageCost({
             inputTokens: actualInput,
@@ -2310,6 +2320,7 @@ export const validateChatPayload = (body: unknown) => {
         assistantMessageId?: unknown;
         turnstileToken?: unknown;
         deepResearchDepth?: unknown;
+        webSearchMode?: unknown;
     };
     if (
         !Array.isArray(payload.messages) ||
@@ -2387,6 +2398,16 @@ export const validateChatPayload = (body: unknown) => {
             "Invalid deep research depth."
         );
     }
+    if (
+        payload.webSearchMode !== undefined &&
+        !isWebSearchMode(payload.webSearchMode)
+    ) {
+        throw new ChatAccessError(
+            400,
+            "INVALID_WEB_SEARCH_MODE",
+            "Invalid web search mode."
+        );
+    }
 
     let totalCharacters = 0;
     for (const message of payload.messages) {
@@ -2445,6 +2466,7 @@ export const validateChatPayload = (body: unknown) => {
         assistantMessageId?: string;
         turnstileToken?: string;
         deepResearchDepth?: "quick" | "standard" | "deep";
+        webSearchMode?: WebSearchMode;
     };
 };
 

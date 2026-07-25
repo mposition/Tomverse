@@ -28,7 +28,13 @@ test("desktop shell fits compact viewport", async ({ page }) => {
 test("account controls remain fully visible at a 150 percent scaled viewport", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
 
-  const accountControls = page.getByTestId("sidebar-account-controls");
+  // STG-F002: at 1280x720 with 3 guest-default models, the sidebar now
+  // auto-collapses to a rail (too little room to keep it expanded and give
+  // every panel a usable width) -- account controls stay reachable either
+  // way, just via a different control depending on which sidebar state won.
+  const expandedControls = page.getByTestId("sidebar-account-controls");
+  const railControls = page.getByTestId("sidebar-rail-account-trigger");
+  const accountControls = (await railControls.count()) > 0 ? railControls : expandedControls;
   await expect(accountControls).toBeVisible();
 
   const accountBox = await accountControls.boundingBox();

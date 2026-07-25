@@ -208,12 +208,13 @@ model ConversationProject {
 }
 
 model Message {
-  id           String  @id @default(cuid())
-  role         String
-  content      String
-  status       String  @default("normal")
-  modelId      String?
-  pendingJobId String?
+  id             String  @id @default(cuid())
+  role           String
+  content        String
+  status         String  @default("normal")
+  modelId        String?
+  pendingJobId   String?
+  searchMetadata Json?
 
   conversationId String
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)

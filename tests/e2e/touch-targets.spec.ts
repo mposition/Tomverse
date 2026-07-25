@@ -1,0 +1,305 @@
+import { expect, test, type Locator, type Page } from "@playwright/test";
+import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
+
+// STG-F005: core/repeating mobile controls must have a real (independent)
+// hit area of at least 44x44 CSS px, measured on the actual clickable
+// element -- not the icon inside it, and not a visually-shrunk element that
+// merely LOOKS bigger via padding. Desktop must stay at its pre-existing
+// (smaller, mouse-appropriate) size.
+const MIN_TARGET = 44;
+// Sub-pixel layout rounding (borders, transforms) can shave a hair off an
+// exact 44px box without meaning the fix regressed.
+const TOLERANCE = 0.5;
+
+const MOBILE_VIEWPORTS = [
+  { width: 320, height: 568 },
+  { width: 360, height: 640 },
+  { width: 375, height: 667 },
+  { width: 390, height: 844 },
+  { width: 430, height: 932 },
+];
+
+async function assertMinTouchTarget(locator: Locator, label: string) {
+  // boundingBox()/elementFromPoint() don't auto-scroll like click() does --
+  // a control below the fold in a scrollable list would otherwise report a
+  // real but off-screen box, and a same-coordinate hit-test would spuriously
+  // fail (elementFromPoint returns null outside the viewport). Scrolling
+  // first also matches what a real tap requires.
+  await locator.scrollIntoViewIfNeeded();
+  const box = await locator.boundingBox();
+  expect(box, `${label}: expected a visible bounding box`).not.toBeNull();
+  expect(box!.width, `${label}: width`).toBeGreaterThanOrEqual(MIN_TARGET - TOLERANCE);
+  expect(box!.height, `${label}: height`).toBeGreaterThanOrEqual(MIN_TARGET - TOLERANCE);
+}
+
+async function assertBelowMinTouchTarget(locator: Locator, label: string) {
+  await locator.scrollIntoViewIfNeeded();
+  const box = await locator.boundingBox();
+  expect(box, `${label}: expected a visible bounding box`).not.toBeNull();
+  expect(
+    box!.width < MIN_TARGET - TOLERANCE || box!.height < MIN_TARGET - TOLERANCE,
+    `${label}: expected to still be below 44px on desktop (unnecessarily enlarged)`
+  ).toBe(true);
+}
+
+// document.elementFromPoint() at the control's own center must resolve to
+// the control itself (or a descendant, e.g. the icon svg) -- never a
+// different, unrelated control stealing the tap.
+async function assertHitTestReturnsSelf(locator: Locator, label: string) {
+  await locator.scrollIntoViewIfNeeded();
+  const box = await locator.boundingBox();
+  expect(box, `${label}: expected a visible bounding box`).not.toBeNull();
+  const cx = box!.x + box!.width / 2;
+  const cy = box!.y + box!.height / 2;
+  const isSelfOrChild = await locator.evaluate((element, [x, y]) => {
+    const hit = document.elementFromPoint(x, y);
+    return hit === element || Boolean(hit && element.contains(hit));
+  }, [cx, cy] as [number, number]);
+  expect(isSelfOrChild, `${label}: center hit-test should resolve to itself`).toBe(true);
+}
+
+// Some controls stay visually small and instead grow their real hit area via
+// an invisible pseudo-element (before:-inset-N). getBoundingClientRect() (and
+// therefore Playwright's boundingBox()) never reflects a pseudo-element's
+// paint area, so those controls can't be verified with assertMinTouchTarget --
+// the real, load-bearing check is that the tappable area is at least 44x44
+// via actual hit-testing, not the element's own layout box.
+async function assertMinHitArea(locator: Locator, label: string) {
+  await locator.scrollIntoViewIfNeeded();
+  const box = await locator.boundingBox();
+  expect(box, `${label}: expected a visible bounding box`).not.toBeNull();
+  const cx = box!.x + box!.width / 2;
+  const cy = box!.y + box!.height / 2;
+  const half = MIN_TARGET / 2 - TOLERANCE;
+  const offsets: Array<[number, number]> = [
+    [0, 0],
+    [-half, 0],
+    [half, 0],
+    [0, -half],
+    [0, half],
+  ];
+  for (const [dx, dy] of offsets) {
+    const [x, y] = [cx + dx, cy + dy];
+    const isSelfOrChild = await locator.evaluate((element, [px, py]) => {
+      const hit = document.elementFromPoint(px, py);
+      return hit === element || Boolean(hit && element.contains(hit));
+    }, [x, y] as [number, number]);
+    expect(
+      isSelfOrChild,
+      `${label}: hit-test at center offset (${dx}, ${dy}) should resolve to itself (effective tap area must be >= 44x44)`
+    ).toBe(true);
+  }
+}
+
+const modelSelectorTrigger = (page: Page) =>
+  page.locator('button[aria-controls="chat-input-popover"]').nth(1);
+
+test.describe("mobile touch targets (STG-F005)", () => {
+  // These assertions are only meaningful on a touch-emulating project:
+  // useIsMobileShell() requires a coarse pointer, not just a narrow
+  // viewport, so a non-touch project (desktop-chromium, desktop-compact)
+  // keeps the pre-existing compact sizing even at a 320px viewport. Without
+  // this guard every project in playwright.config.ts would run this file
+  // (there's no per-project testMatch), and these tests would spuriously
+  // fail under desktop-chromium -- including npm run test:e2e:pr, the CI
+  // gate. The dedicated desktop-comparison test below skips the inverse.
+  test.beforeEach(async ({ page }, testInfo) => {
+    test.skip(
+      !testInfo.project.name.startsWith("mobile"),
+      "Touch-target sizing only applies on touch-emulating (mobile-*) projects."
+    );
+    await prepareGuestPage(page, "en");
+  });
+
+  test("composer core controls meet the 44x44 minimum at every required mobile viewport", async ({
+    page,
+  }) => {
+    for (const viewport of MOBILE_VIEWPORTS) {
+      await page.setViewportSize(viewport);
+      await page.goto("/chat");
+      await expect(page.getByTestId("chat-input")).toBeVisible();
+
+      await assertMinTouchTarget(
+        page.locator('button[aria-controls="chat-input-popover"]').first(),
+        `[${viewport.width}x${viewport.height}] More actions`
+      );
+      await assertMinTouchTarget(
+        modelSelectorTrigger(page),
+        `[${viewport.width}x${viewport.height}] Choose AI models`
+      );
+      await assertMinTouchTarget(
+        page.getByTestId("request-credit-estimate"),
+        `[${viewport.width}x${viewport.height}] Estimated credits`
+      );
+      await assertMinTouchTarget(
+        page.getByTestId("chat-send-button"),
+        `[${viewport.width}x${viewport.height}] Send`
+      );
+
+      const overflow = await page.evaluate(
+        () => document.documentElement.scrollWidth > document.documentElement.clientWidth
+      );
+      expect(overflow, `[${viewport.width}x${viewport.height}] horizontal overflow`).toBe(false);
+    }
+  });
+
+  test("composer controls hit-test to themselves, not a neighboring control", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 568 });
+    await page.goto("/chat");
+    await expect(page.getByTestId("chat-input")).toBeVisible();
+
+    await assertHitTestReturnsSelf(
+      page.locator('button[aria-controls="chat-input-popover"]').first(),
+      "More actions"
+    );
+    await assertHitTestReturnsSelf(modelSelectorTrigger(page), "Choose AI models");
+    await assertHitTestReturnsSelf(page.getByTestId("request-credit-estimate"), "Estimated credits");
+    await assertHitTestReturnsSelf(page.getByTestId("chat-send-button"), "Send");
+  });
+
+  test("Choose AI models opens the dialog and Send remains functional after the resize", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 320, height: 568 });
+    await page.goto("/chat");
+
+    await modelSelectorTrigger(page).click();
+    await expect(page.locator("#chat-input-popover")).toBeVisible();
+    await page.keyboard.press("Escape");
+
+    await page.getByTestId("chat-textarea").fill("Hello");
+    await expect(page.getByTestId("chat-send-button")).toBeEnabled();
+  });
+
+  test("selected-model-chip remove buttons meet the minimum and stay independently clickable", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 320, height: 568 });
+    await page.goto("/chat");
+    await modelSelectorTrigger(page).click();
+    const dialog = page.locator("#chat-input-popover");
+    await expect(dialog).toBeVisible();
+
+    const chips = dialog.getByTestId("selected-model-chip");
+    const chipCount = await chips.count();
+    expect(chipCount).toBeGreaterThan(0);
+
+    const removeButtons = chips.locator('button[aria-label]');
+    const firstRemove = removeButtons.first();
+    // The chip stays visually small; its real hit area is grown via an
+    // invisible pseudo-element, so verify by hit-testing, not boundingBox.
+    await assertMinHitArea(firstRemove, "selected-model-chip remove #1");
+
+    // Removing one model must not affect an adjacent chip's own remove
+    // button -- the expanded (mostly invisible) hit area must not bleed
+    // into the neighboring chip's own interactive control.
+    const beforeCount = await chips.count();
+    await firstRemove.click();
+    await expect(chips).toHaveCount(beforeCount - 1);
+  });
+
+  test("capability filter chips and the model-option favorite star meet the minimum", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 320, height: 568 });
+    await mockAuthenticatedApi(page, { selectedModels: ["gpt-5-4-mini"] });
+    await page.goto("/chat");
+    await modelSelectorTrigger(page).click();
+    const dialog = page.locator("#chat-input-popover");
+    await expect(dialog).toBeVisible();
+
+    // Selected by data-testid, not accessible name/text: the authenticated
+    // mock's /api/user/settings response hardcodes language "ko", which
+    // overrides the ?lang=en navigation once settings load, so the rendered
+    // label is not reliably "Recommended" in English.
+    const recommendedChip = dialog.getByTestId("capability-filter-recommended");
+    await assertMinTouchTarget(recommendedChip, "capability filter chip (Recommended)");
+    await assertHitTestReturnsSelf(recommendedChip, "capability filter chip (Recommended)");
+
+    const favoriteStar = dialog.getByTestId("model-favorite-star").first();
+    await assertMinTouchTarget(favoriteStar, "model row favorite star");
+    await assertHitTestReturnsSelf(favoriteStar, "model row favorite star");
+
+    // Clicking the star must only toggle favorite state, never the model
+    // selection right next to it.
+    const modelOption = dialog.locator('[data-testid="model-option"]').first();
+    const pressedBefore = await modelOption.getAttribute("aria-pressed");
+    await favoriteStar.click();
+    await expect(modelOption).toHaveAttribute("aria-pressed", pressedBefore || "false");
+  });
+
+  test("mobile header controls (sidebar open, new chat) meet the minimum", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 568 });
+    await page.goto("/chat");
+
+    await assertMinTouchTarget(page.getByTestId("mobile-sidebar-open"), "mobile sidebar open");
+    await assertHitTestReturnsSelf(page.getByTestId("mobile-sidebar-open"), "mobile sidebar open");
+  });
+
+  test("mobile sidebar drawer close button meets the minimum", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 568 });
+    await page.goto("/chat");
+    await page.getByTestId("mobile-sidebar-open").click();
+    const dialog = page.getByRole("dialog").first();
+    await expect(dialog).toBeVisible();
+
+    // The drawer also has a full-bleed backdrop button sharing the same
+    // "Cancel" accessible name (dismiss-on-outside-click); the visible close
+    // X is the last "Cancel"-named button in the dialog.
+    const closeButton = dialog.getByRole("button", { name: "Cancel" }).last();
+    await assertMinTouchTarget(closeButton, "drawer close");
+    await assertHitTestReturnsSelf(closeButton, "drawer close");
+  });
+
+  test("mobile-model-tab remove buttons meet the minimum and do not select the tab", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 320, height: 568 });
+    await page.goto("/chat?lang=en&entry=guest-preview");
+    // Guests default to a 3-model comparison, so the mobile tab strip (and
+    // its per-tab remove buttons) is present without any setup. On a
+    // touch-emulating mobile project, plain Enter inserts a newline instead
+    // of submitting (see lib/chatKeyboardPolicy.ts), so send via the button.
+    await page.getByTestId("chat-textarea").fill("start");
+    await page.getByTestId("chat-send-button").click();
+    const removeButtons = page.getByTestId("mobile-model-tab-remove");
+    await expect(removeButtons.first()).toBeVisible();
+
+    // Real box is 36x36; the extra 44x44 tap area comes from a pseudo-element,
+    // so verify via hit-testing rather than boundingBox.
+    await assertMinHitArea(removeButtons.first(), "mobile-model-tab-remove");
+  });
+});
+
+// Kept outside the mobile-only describe block above: this test verifies the
+// opposite condition (no touch emulation keeps the pre-existing compact
+// sizing), so it needs its own beforeEach without the mobile-only skip.
+test.describe("mobile touch targets (STG-F005) -- desktop comparison", () => {
+  test.beforeEach(async ({ page }, testInfo) => {
+    test.skip(
+      testInfo.project.name.startsWith("mobile"),
+      "This checks the non-touch desktop path specifically."
+    );
+    await prepareGuestPage(page, "en");
+  });
+
+  test("desktop keeps the original compact sizing for shared controls", async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await page.goto("/chat");
+    await modelSelectorTrigger(page).click();
+    const dialog = page.locator("#chat-input-popover");
+    await expect(dialog).toBeVisible();
+
+    const chip = dialog.getByTestId("selected-model-chip").first();
+    if (await chip.count()) {
+      const removeButton = chip.locator("button[aria-label]");
+      await assertBelowMinTouchTarget(removeButton, "selected-model-chip remove (desktop)");
+    }
+
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth
+    );
+    expect(overflow).toBe(false);
+  });
+});
+

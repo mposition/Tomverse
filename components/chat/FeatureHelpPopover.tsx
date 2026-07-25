@@ -219,7 +219,7 @@ export function FeatureHelpPopover({
           <button
             type="button"
             onClick={closePopover}
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
             aria-label={buttonLabel}
           >
             <X className="h-4 w-4" aria-hidden="true" />
@@ -327,7 +327,7 @@ export function FeatureHelpPopover({
           if (renderAsSheet && open) closePopover();
           else openPopover();
         }}
-        className="inline-flex h-8 w-8 items-center justify-center rounded-full text-zinc-400 transition hover:bg-blue-50 hover:text-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:hover:bg-blue-950/50 dark:hover:text-blue-300"
+        className={`inline-flex items-center justify-center rounded-full text-zinc-400 transition hover:bg-blue-50 hover:text-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:hover:bg-blue-950/50 dark:hover:text-blue-300 ${renderAsSheet ? "h-11 w-11" : "h-8 w-8"}`}
       >
         <Info className="h-4 w-4" aria-hidden="true" />
       </button>

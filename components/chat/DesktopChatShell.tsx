@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Lock } from "lucide-react";
+import { Check, Lock, X } from "lucide-react";
 import { useChatConsentSlotRef } from "@/components/analytics/AnalyticsProvider";
+import { useSidebarCollapsePreference } from "@/components/chat/useSidebarCollapse";
 import { ChatApp } from "@/components/chat/ChatApp";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { ChatWelcomeScreen } from "@/components/chat/ChatWelcomeScreen";
@@ -214,6 +215,108 @@ export function DesktopChatShell({
     return () => registerChatConsentSlot(null);
   }, [consentSlotTarget, registerChatConsentSlot]);
 
+  // STG-F002: at tablet/split-screen widths, an always-expanded 320px
+  // sidebar plus N side-by-side panels can leave each panel with nowhere
+  // near enough room for its model name/controls. Both layout decisions
+  // below are driven by content width (viewport width, minus the sidebar's
+  // own known fixed widths, minus chrome padding/gaps, divided by the
+  // selected model count) rather than a single breakpoint -- so the same
+  // math that decides collapsing the sidebar also decides falling back to
+  // tabs, and both react correctly to browser zoom (window.innerWidth
+  // shrinks in CSS px as zoom increases) as well as to the model count
+  // changing. Auto-collapsing the sidebar is tried first (recovering
+  // SIDEBAR_EXPANDED_WIDTH - SIDEBAR_COLLAPSED_WIDTH of extra room); tabs
+  // only kick in if that alone still isn't enough, matching the requested
+  // priority order.
+  const SIDEBAR_EXPANDED_WIDTH = 320;
+  const SIDEBAR_COLLAPSED_WIDTH = 64;
+  const CONTENT_PADDING = 32; // px-4 on both the sidebar's sibling section and the panel row
+  const PANEL_GAP = 16; // gap-4 between panels
+  const MIN_PANEL_WIDTH = 310; // keeps the model name/select area >= 120px usable
+
+  const [viewportWidth, setViewportWidth] = useState<number>(
+    () => window.innerWidth
+  );
+  useEffect(() => {
+    const updateViewportWidth = () => setViewportWidth(window.innerWidth);
+    window.addEventListener("resize", updateViewportWidth);
+    return () => window.removeEventListener("resize", updateViewportWidth);
+  }, []);
+
+  const [sidebarCollapsePreference] = useSidebarCollapsePreference();
+  const perModelWidth = useCallback(
+    (sidebarWidth: number) => {
+      if (selectedModels.length === 0) return Infinity;
+      const contentWidth = viewportWidth - sidebarWidth - CONTENT_PADDING;
+      return (
+        (contentWidth - PANEL_GAP * (selectedModels.length - 1)) /
+        selectedModels.length
+      );
+    },
+    [viewportWidth, selectedModels.length]
+  );
+  const autoCollapseSuggested =
+    selectedModels.length > 1 &&
+    perModelWidth(SIDEBAR_EXPANDED_WIDTH) < MIN_PANEL_WIDTH;
+  const isSidebarCollapsed =
+    sidebarCollapsePreference === "collapsed" ||
+    (sidebarCollapsePreference === "auto" && autoCollapseSuggested);
+  const useTabsLayout =
+    selectedModels.length > 1 &&
+    perModelWidth(isSidebarCollapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_EXPANDED_WIDTH) <
+      MIN_PANEL_WIDTH;
+
+  const [activeModelId, setActiveModelId] = useState<string | null>(
+    selectedModels[0] || null
+  );
+  const resolvedActiveModelId =
+    activeModelId && selectedModels.includes(activeModelId)
+      ? activeModelId
+      : selectedModels[0] || null;
+  const activeModelIndex = resolvedActiveModelId
+    ? selectedModels.indexOf(resolvedActiveModelId)
+    : -1;
+  // Roving tabindex per the WAI-ARIA tabs pattern: only the active tab is
+  // in the Tab order, and arrow keys move both selection and focus. Focus
+  // is moved imperatively inside these handlers (not via an effect keyed
+  // on the active id) so it only happens in response to an actual
+  // keyboard/click interaction, never on mount or on an ambient re-render
+  // (e.g. resizing into tabs layout for the first time).
+  const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const activateModel = useCallback((modelId: string, focus: boolean) => {
+    setActiveModelId(modelId);
+    if (focus) tabRefs.current[modelId]?.focus();
+  }, []);
+  const switchModelByOffset = useCallback(
+    (offset: number) => {
+      if (selectedModels.length < 2 || activeModelIndex < 0) return;
+      const nextIndex =
+        (activeModelIndex + offset + selectedModels.length) %
+        selectedModels.length;
+      activateModel(selectedModels[nextIndex], true);
+    },
+    [activateModel, activeModelIndex, selectedModels]
+  );
+  const handleTabKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLButtonElement>) => {
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        switchModelByOffset(1);
+      } else if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        switchModelByOffset(-1);
+      } else if (event.key === "Home") {
+        event.preventDefault();
+        if (selectedModels[0]) activateModel(selectedModels[0], true);
+      } else if (event.key === "End") {
+        event.preventDefault();
+        const last = selectedModels[selectedModels.length - 1];
+        if (last) activateModel(last, true);
+      }
+    },
+    [activateModel, selectedModels, switchModelByOffset]
+  );
+
   return (
     <main
       data-testid="desktop-chat-shell"
@@ -236,6 +339,7 @@ export function DesktopChatShell({
         onDownload={onDownload}
         currentModelId={selectedModels[0]}
         attachmentCount={attachments.length}
+        autoCollapseSuggested={autoCollapseSuggested}
       />
 
       <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
@@ -245,6 +349,80 @@ export function DesktopChatShell({
           onToggleModel={onToggleModel}
           onSwapModel={onSwapModel}
         />
+        {!isConversationEmpty && useTabsLayout && (
+          <div
+            role="tablist"
+            aria-label={t("chat.compareTabsLabel")}
+            data-testid="model-compare-tablist"
+            className="flex shrink-0 snap-x snap-mandatory gap-1.5 overflow-x-auto border-b border-zinc-200 bg-white px-4 py-2 dark:border-zinc-800 dark:bg-zinc-950"
+          >
+            {selectedModels.map((modelId) => {
+              const model = AVAILABLE_MODELS.find((item) => item.id === modelId);
+              const isActive = modelId === resolvedActiveModelId;
+              const isPanelDisabled = disabledPanels.includes(modelId);
+              const status = isPanelDisabled
+                ? "paused"
+                : modelStatuses[modelId] || "idle";
+              return (
+                <div
+                  key={modelId}
+                  className={`flex min-w-[228px] shrink-0 snap-start items-center rounded-xl border transition ${
+                    isActive
+                      ? "border-blue-400 bg-blue-50 dark:border-blue-700 dark:bg-blue-950/30"
+                      : "border-zinc-200 bg-white hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900"
+                  } ${isPanelDisabled ? "opacity-50" : ""}`}
+                >
+                  <button
+                    ref={(node) => {
+                      tabRefs.current[modelId] = node;
+                    }}
+                    type="button"
+                    role="tab"
+                    id={`model-tab-${modelId}`}
+                    aria-selected={isActive}
+                    aria-controls={`model-tabpanel-${modelId}`}
+                    tabIndex={isActive ? 0 : -1}
+                    data-testid="model-compare-tab"
+                    data-model-id={modelId}
+                    onClick={() => activateModel(modelId, false)}
+                    onKeyDown={handleTabKeyDown}
+                    className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left"
+                  >
+                    <ModelLogo model={model} size="sm" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-xs font-bold text-zinc-800 dark:text-zinc-100">
+                        {model?.name || modelId}
+                      </span>
+                      <span className="block truncate text-[10px] text-zinc-400">
+                        {model?.provider}
+                      </span>
+                    </span>
+                    {status === "responding" || status === "loading" ? (
+                      <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-blue-500" aria-hidden="true" />
+                    ) : status === "error" ? (
+                      <span className="h-2 w-2 shrink-0 rounded-full bg-red-500" aria-hidden="true" />
+                    ) : status === "paused" ? (
+                      <span className="shrink-0 text-[9px] font-bold text-zinc-400">OFF</span>
+                    ) : status === "idle" ? (
+                      <Check className="h-3 w-3 shrink-0 text-emerald-500" aria-hidden="true" />
+                    ) : null}
+                  </button>
+                  {selectedModels.length > 1 && (
+                    <button
+                      type="button"
+                      data-testid="model-compare-tab-remove"
+                      aria-label={t("chat.removeModelFromComparison")}
+                      onClick={() => onRemoveModel(modelId)}
+                      className="mr-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800"
+                    >
+                      <X className="h-3 w-3" aria-hidden="true" />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
         <div className="relative flex min-h-0 flex-1 gap-4 overflow-hidden bg-zinc-100/80 px-4 pb-4 pt-3 dark:bg-zinc-950">
           {isConversationEmpty && (
             <div className="absolute inset-0 z-10 bg-zinc-100/80 dark:bg-zinc-950">
@@ -270,13 +448,25 @@ export function DesktopChatShell({
               ? getModelUsageProfile(modelInfo)
               : null;
             const isPanelDisabled = disabledPanels.includes(modelId);
+            const isPanelVisible = !useTabsLayout || modelId === resolvedActiveModelId;
 
             return (
               <div
                 key={`${currentChatId || "new"}:panel:${panelIndex}`}
                 data-testid="desktop-model-panel"
                 data-model-id={modelId}
-                className={`relative flex flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm shadow-zinc-200/60 transition-all duration-300 ease-in-out dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/20 ${isPanelDisabled ? "w-44 shrink-0" : "min-w-0 flex-1"}`}
+                {...(useTabsLayout
+                  ? {
+                      role: "tabpanel",
+                      id: `model-tabpanel-${modelId}`,
+                      "aria-labelledby": `model-tab-${modelId}`,
+                    }
+                  : {})}
+                aria-hidden={!isPanelVisible}
+                style={isPanelVisible ? undefined : { contentVisibility: "hidden" }}
+                className={`relative flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm shadow-zinc-200/60 transition-all duration-300 ease-in-out dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/20 ${
+                  !isPanelVisible ? "hidden" : isPanelDisabled ? "flex w-44 shrink-0" : "flex min-w-0 flex-1"
+                }`}
               >
                 <div className="flex min-h-12 shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-400">
                   <div className={`flex min-w-0 flex-1 items-center gap-2 transition-opacity ${isPanelDisabled ? "opacity-50" : ""}`}>
@@ -375,6 +565,7 @@ export function DesktopChatShell({
                   promptPayload={promptPayload}
                   isPanelDisabled={isPanelDisabled}
                   isGuestMode={isGuestMode}
+                  webSearchMode={webSearchMode}
                   onBeforeSend={onBeforeModelSend}
                   onResponseComplete={onResponseComplete}
                   onFollowupSent={onFollowupSent}

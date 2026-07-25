@@ -16,6 +16,9 @@ import {
   getChatEnterKeyAction,
   isComposingKeydown,
 } from "@/lib/chatKeyboardPolicy";
+import type { WebSearchMode } from "@/lib/appDefaults";
+import { splitSearchMetadataTrailer } from "@/lib/webSearchStreamTrailer";
+import type { WebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
 
 const processedPromptKeys = new Set<string>();
 const CHAT_STREAM_IDLE_TIMEOUT_MS = 90_000;
@@ -55,6 +58,7 @@ type ChatAppProps = {
   } | null;
   isPanelDisabled?: boolean;
   isGuestMode?: boolean;
+  webSearchMode?: WebSearchMode;
   hideModelOnlyInput?: boolean;
   useCenteredWelcome?: boolean;
   onEmptyStateChange?: (modelId: string, isEmpty: boolean) => void;
@@ -65,7 +69,8 @@ type ChatAppProps = {
   onResponseComplete?: (
     promptId: string | null,
     modelId: string,
-    responseText: string
+    responseText: string,
+    searchMetadata?: WebSearchExecution | null
   ) => void;
   onFollowupSent?: (modelId: string) => void;
   onBeforeSend?: (chatId: string) => Promise<boolean>;
@@ -85,6 +90,7 @@ function ChatAppComponent({
   promptPayload,
   isPanelDisabled = false,
   isGuestMode = false,
+  webSearchMode,
   hideModelOnlyInput = false,
   useCenteredWelcome = false,
   onEmptyStateChange,
@@ -197,11 +203,14 @@ function ChatAppComponent({
     id: string,
     content: string,
     status?: Message["status"],
-    errorMeta?: { errorCode?: string; errorHadAttachments?: boolean }
+    errorMeta?: { errorCode?: string; errorHadAttachments?: boolean },
+    extraFields?: Partial<Message>
   ) => {
     setMessages((prev) =>
       prev.map((message) =>
-        message.id === id ? { ...message, content, status, ...errorMeta } : message
+        message.id === id
+          ? { ...message, content, status, ...errorMeta, ...extraFields }
+          : message
       )
     );
   }, []);
@@ -543,6 +552,7 @@ function ChatAppComponent({
                 }
               : {}),
             ...(deepResearchDepth ? { deepResearchDepth } : {}),
+            ...(webSearchMode && webSearchMode !== "off" ? { webSearchMode } : {}),
           }),
           signal: controller.signal,
         });
@@ -634,13 +644,31 @@ function ChatAppComponent({
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
 
+      // The stream ends with one extra out-of-band chunk carrying this
+      // turn's WebSearchExecution JSON (see lib/webSearchStreamTrailer.ts) --
+      // rawStreamText keeps the untouched accumulation so the marker can be
+      // found even if it arrives split across reads, while assistantText
+      // (used for display and the empty-response check below) always has it
+      // stripped back out.
+      let rawStreamText = "";
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
         resetIdleTimeout();
-        assistantText += decoder.decode(value, { stream: true });
+        rawStreamText += decoder.decode(value, { stream: true });
+        assistantText = splitSearchMetadataTrailer(rawStreamText).displayText;
 		setAssistantMessage(assistantMessageId, assistantText, "normal");
+      }
+
+      const { searchMetadataJson } = splitSearchMetadataTrailer(rawStreamText);
+      let searchMetadata: WebSearchExecution | null = null;
+      if (searchMetadataJson) {
+        try {
+          searchMetadata = JSON.parse(searchMetadataJson) as WebSearchExecution;
+        } catch {
+          searchMetadata = null;
+        }
       }
 
 	  if (!assistantText.trim()) {
@@ -661,7 +689,10 @@ function ChatAppComponent({
           { errorCode: "EMPTY_RESPONSE", errorHadAttachments: attachments.length > 0 }
         );
       } else {
-        onResponseComplete?.(analyticsPromptId, modelId, assistantText);
+        setAssistantMessage(assistantMessageId, assistantText, "normal", undefined, {
+          searchMetadata,
+        });
+        onResponseComplete?.(analyticsPromptId, modelId, assistantText, searchMetadata);
       }
     } catch (error: unknown) {
       const requestError =
@@ -765,6 +796,7 @@ function ChatAppComponent({
     pollDeepResearchJob,
     setAssistantMessage,
     t,
+    webSearchMode,
   ]);
 
   const handleRetryLast = useCallback(() => {

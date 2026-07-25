@@ -375,7 +375,7 @@ export function MobileChatShell({
           type="button"
           onClick={() => setIsDrawerOpen(true)}
           data-testid="mobile-sidebar-open"
-          className="flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-50 text-zinc-600 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
+          className="flex h-11 w-11 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-50 text-zinc-600 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
           aria-label={t("chat.moreActions")}
         >
           <Menu className="h-5 w-5" />
@@ -392,7 +392,7 @@ export function MobileChatShell({
           <button
             type="button"
             onClick={onNewChat}
-            className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm shadow-blue-950/20"
+            className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm shadow-blue-950/20"
             aria-label={t("sidebar.newChat")}
           >
             <SquarePen className="h-5 w-5" />
@@ -404,7 +404,8 @@ export function MobileChatShell({
             <button
               type="button"
               onClick={() => setModeSheet("guest")}
-              className="inline-flex shrink-0 items-center gap-1 rounded-full bg-blue-500/10 px-2 py-1 text-[10px] font-bold text-blue-600 dark:text-blue-300"
+              data-testid="mobile-guest-usage-badge"
+              className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-full bg-blue-500/10 px-2 text-[10px] font-bold text-blue-600 dark:text-blue-300"
             >
               <Sparkles className="h-3 w-3" />
               {t("modelTiers.guest")} {guestMessageCount}/{maxGuestMessages}
@@ -460,7 +461,7 @@ export function MobileChatShell({
                   key={modelId}
                   role="tab"
                   aria-selected={isActive}
-                  className={`relative flex h-9 min-w-0 flex-1 touch-manipulation items-center rounded-full border shadow-sm transition-colors ${
+                  className={`relative flex h-11 min-w-0 flex-1 touch-manipulation items-center rounded-full border shadow-sm transition-colors ${
                     isActive
                       ? "border-blue-500 bg-blue-600 text-white"
                       : "border-zinc-200 bg-white text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300"
@@ -472,7 +473,7 @@ export function MobileChatShell({
                     data-model-id={modelId}
                     onClick={() => setActiveModelId(modelId)}
                     aria-label={`${model?.name || modelId} ${status}`}
-                    className="flex min-w-0 flex-1 items-center gap-1 py-1 pl-2.5 pr-1 text-left text-[11px] font-semibold"
+                    className="flex min-w-0 flex-1 shrink-0 items-center gap-1 self-stretch py-1 pl-2.5 pr-1 text-left text-[11px] font-semibold"
                   >
                     <ModelLogo model={model} size="xs" />
                     <span className="min-w-0 flex-1 truncate">{model?.name || modelId}</span>
@@ -496,7 +497,7 @@ export function MobileChatShell({
                       event.stopPropagation();
                       handleTabRemoveClick(modelId);
                     }}
-                    className={`mr-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full transition-colors ${
+                    className={`relative mr-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors before:absolute before:-inset-1.5 before:content-[''] ${
                       isActive
                         ? "text-white/80 hover:bg-white/20"
                         : "text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800"
@@ -519,7 +520,7 @@ export function MobileChatShell({
             onClick={onCompareSummary}
             disabled={isCompareSummaryDisabled}
             title={readyForCompareCount < 2 ? t("chat.aiReviewResponsesRequired") : undefined}
-            className="flex h-8 w-full items-center justify-between gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-2 text-[11px] font-black text-blue-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200"
+            className="flex h-11 w-full items-center justify-between gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-2 text-[11px] font-black text-blue-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200"
           >
             <span className="truncate">
               {t("chat.quickDifferenceSummary")}
@@ -544,7 +545,7 @@ export function MobileChatShell({
               type="button"
               data-testid="ai-review-guest-locked"
               onClick={onGuestSignInPrompt}
-              className="flex h-8 w-full items-center justify-center gap-1.5 rounded-xl border border-zinc-200 bg-zinc-50 px-2 text-[11px] font-black text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
+              className="flex h-11 w-full items-center justify-center gap-1.5 rounded-xl border border-zinc-200 bg-zinc-50 px-2 text-[11px] font-black text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
             >
               <Lock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
               <span className="truncate">{t("chat.aiReviewLoginToUnlock")}</span>
@@ -554,7 +555,7 @@ export function MobileChatShell({
               <button
                 type="button"
                 onClick={onComparisonReview}
-                className="flex h-8 min-w-0 flex-1 items-center justify-between gap-1.5 rounded-xl bg-blue-600 px-2 text-[11px] font-black text-white"
+                className="flex h-11 min-w-0 flex-1 items-center justify-between gap-1.5 rounded-xl bg-blue-600 px-2 text-[11px] font-black text-white"
               >
                 <span className="truncate">{t("chat.aiReviewButton")}</span>
                 <CreditCostBadge
@@ -632,6 +633,7 @@ export function MobileChatShell({
                   promptPayload={promptPayload}
                   isPanelDisabled={disabledPanels.includes(modelId)}
                   isGuestMode={isGuestMode}
+                  webSearchMode={webSearchMode}
                   onBeforeSend={onBeforeModelSend}
                   hideModelOnlyInput
                   useCenteredWelcome
@@ -754,7 +756,7 @@ export function MobileChatShell({
               ref={drawerCloseButtonRef}
               type="button"
               onClick={() => setIsDrawerOpen(false)}
-              className="absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-xl bg-zinc-900/80 text-white"
+              className="absolute right-3 top-3 flex h-11 w-11 items-center justify-center rounded-xl bg-zinc-900/80 text-white"
               aria-label={t("auth.cancel")}
             >
               <X className="h-5 w-5" />

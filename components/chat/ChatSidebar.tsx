@@ -17,6 +17,7 @@ import { useUserUsage, type UserPlan } from "@/components/chat/useUserUsage";
 import { dispatchAppToast } from "@/lib/appToast";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
+import { useSidebarCollapsePreference } from "@/components/chat/useSidebarCollapse";
 
 type ChatSidebarProps = {
     conversations: Conversation[];
@@ -36,6 +37,10 @@ type ChatSidebarProps = {
     currentModelId?: string | null;
     attachmentCount?: number;
     isMobileDrawer?: boolean;
+    // Set by DesktopChatShell once it measures that expanding the sidebar
+    // would leave too little room for the current model comparison. Only
+    // takes effect while the user's own preference is "auto".
+    autoCollapseSuggested?: boolean;
 };
 
 type ConversationFilter = "all" | "locked" | "shared" | "work" | "research" | "personal" | `project:${string}`;
@@ -76,23 +81,6 @@ const getOrganizerPreference = (): OrganizerPreference => {
 
 const getServerOrganizerPreference = (): OrganizerPreference => "auto";
 
-const SIDEBAR_COLLAPSED_STORAGE_KEY = "tomverse_sidebar_collapsed_v1";
-const SIDEBAR_COLLAPSED_CHANGE_EVENT = "tomverse-sidebar-collapsed-change";
-
-const subscribeSidebarCollapsed = (onStoreChange: () => void) => {
-    window.addEventListener("storage", onStoreChange);
-    window.addEventListener(SIDEBAR_COLLAPSED_CHANGE_EVENT, onStoreChange);
-    return () => {
-        window.removeEventListener("storage", onStoreChange);
-        window.removeEventListener(SIDEBAR_COLLAPSED_CHANGE_EVENT, onStoreChange);
-    };
-};
-
-const getSidebarCollapsed = (): boolean =>
-    localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "1";
-
-const getServerSidebarCollapsed = (): boolean => false;
-
 export function ChatSidebar({
     conversations,
     currentChatId,
@@ -111,6 +99,7 @@ export function ChatSidebar({
     currentModelId,
     attachmentCount = 0,
     isMobileDrawer = false,
+    autoCollapseSuggested = false,
 }: ChatSidebarProps) {
     const { getModel } = useModelCatalog();
     const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -181,14 +170,16 @@ export function ChatSidebar({
         getOrganizerPreference,
         getServerOrganizerPreference
     );
-    const isSidebarCollapsed = useSyncExternalStore(
-        subscribeSidebarCollapsed,
-        getSidebarCollapsed,
-        getServerSidebarCollapsed
-    );
+    const [sidebarCollapsePreference, setSidebarCollapsePreference] =
+        useSidebarCollapsePreference();
+    const isSidebarCollapsed =
+        sidebarCollapsePreference === "collapsed" ||
+        (sidebarCollapsePreference === "auto" && autoCollapseSuggested);
+    // Always a sticky, explicit override of whatever "auto" currently
+    // resolves to -- so reopening a sidebar the width-based logic collapsed
+    // sticks even if the viewport hasn't changed.
     const toggleSidebarCollapsed = () => {
-        localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, isSidebarCollapsed ? "0" : "1");
-        window.dispatchEvent(new Event(SIDEBAR_COLLAPSED_CHANGE_EVENT));
+        setSidebarCollapsePreference(isSidebarCollapsed ? "expanded" : "collapsed");
     };
     const { t, lang } = useLanguage();
     const helpCopy = chatHelpCopy[lang];
@@ -779,7 +770,7 @@ export function ChatSidebar({
                                 help_topic: "workspace",
                             });
                         }}
-                        className={`inline-flex items-center justify-center rounded-full text-zinc-500 transition hover:bg-blue-50 hover:text-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-zinc-400 dark:hover:bg-blue-950/50 dark:hover:text-blue-300 ${isMobileDrawer ? "h-10 w-10" : "h-8 w-8"}`}
+                        className={`inline-flex items-center justify-center rounded-full text-zinc-500 transition hover:bg-blue-50 hover:text-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-zinc-400 dark:hover:bg-blue-950/50 dark:hover:text-blue-300 ${isMobileDrawer ? "h-11 w-11" : "h-8 w-8"}`}
                     >
                         <CircleHelp className="h-5 w-5" aria-hidden="true" />
                     </button>
@@ -1237,7 +1228,7 @@ export function ChatSidebar({
                                 }`}
                             title={isGuestMode ? t("sidebar.loginRequired") : ""}
                         >
-                            <div className="cursor-pointer flex min-w-0 flex-1 items-center gap-2.5 pr-6">
+                            <div className={`cursor-pointer flex min-w-0 flex-1 items-center gap-2.5 ${isMobileDrawer ? "pr-11" : "pr-6"}`}>
                                 <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${conv.isLocked ? "bg-amber-500/10 text-amber-500" : "bg-blue-500/10 text-blue-500"}`}>
                                     {conv.isLocked ? (
                                         <Lock className="h-3.5 w-3.5" />
@@ -1287,7 +1278,7 @@ export function ChatSidebar({
                                          e.stopPropagation();
                                          toggleConversationMenu(conv.id, e.currentTarget);
                                      }}
-                                     className="cursor-pointer p-1 text-zinc-500 hover:text-zinc-200 transition-colors"
+                                     className={`flex shrink-0 cursor-pointer items-center justify-center text-zinc-500 transition-colors hover:text-zinc-200 ${isMobileDrawer ? "h-11 w-11" : "p-1"}`}
                                      title={t("chat.moreActions")}
                                      aria-label={`${t("chat.moreActions")}: ${conv.title}`}
                                      aria-expanded={isMenuOpen}

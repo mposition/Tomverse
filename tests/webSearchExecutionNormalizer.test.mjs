@@ -1,0 +1,167 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { normalizeWebSearchExecution } from "../lib/webSearchExecutionNormalizer.ts";
+import { getWebSearchCapability } from "../lib/webSearchCapability.ts";
+
+const openaiCapability = getWebSearchCapability("gpt-5-5");
+const anthropicCapability = getWebSearchCapability("claude-sonnet-5");
+const googleCapability = getWebSearchCapability("gemini-3-5-flash");
+const perplexityCapability = getWebSearchCapability("perplexity/sonar");
+const unsupportedCapability = getWebSearchCapability("codestral");
+
+test("off mode never claims a search happened, even for a native-capable model", () => {
+  const result = normalizeWebSearchExecution({
+    capability: openaiCapability,
+    searchRequested: false,
+    provider: "openai",
+    toolName: "web_search",
+    content: [],
+  });
+  assert.equal(result.requested, false);
+  assert.equal(result.executed, false);
+  assert.equal(result.supported, true);
+  assert.deepEqual(result.citations, []);
+});
+
+test("a native model that actually executed the tool reports completed with citations", () => {
+  const result = normalizeWebSearchExecution({
+    capability: openaiCapability,
+    searchRequested: true,
+    provider: "openai",
+    toolName: "web_search",
+    content: [
+      { type: "tool-call", toolName: "web_search" },
+      { type: "tool-result", toolName: "web_search" },
+      {
+        type: "source",
+        sourceType: "url",
+        url: "https://example.com/result",
+        title: "Example result",
+      },
+    ],
+  });
+  assert.equal(result.requested, true);
+  assert.equal(result.supported, true);
+  assert.equal(result.executed, true);
+  assert.equal(result.failureCode, undefined);
+  assert.equal(result.citations.length, 1);
+  assert.equal(result.citations[0].url, "https://example.com/result");
+});
+
+test("a native model that chose not to search is requested+supported but not executed", () => {
+  const result = normalizeWebSearchExecution({
+    capability: anthropicCapability,
+    searchRequested: true,
+    provider: "anthropic",
+    toolName: "web_search",
+    content: [{ type: "text", text: "The answer, no search needed." }],
+  });
+  assert.equal(result.requested, true);
+  assert.equal(result.supported, true);
+  assert.equal(result.executed, false);
+  assert.equal(result.failureCode, undefined);
+  assert.deepEqual(result.citations, []);
+});
+
+test("a tool-error part is surfaced as a failure, never a false completion", () => {
+  const result = normalizeWebSearchExecution({
+    capability: googleCapability,
+    searchRequested: true,
+    provider: "google",
+    toolName: "google_search",
+    content: [{ type: "tool-error", toolName: "google_search" }],
+  });
+  assert.equal(result.requested, true);
+  assert.equal(result.supported, true);
+  assert.equal(result.executed, false);
+  assert.equal(result.failureCode, "provider_tool_error");
+  assert.deepEqual(result.citations, []);
+});
+
+test("Anthropic search cost is tracked internally, only when queries actually ran", () => {
+  const result = normalizeWebSearchExecution({
+    capability: anthropicCapability,
+    searchRequested: true,
+    provider: "anthropic",
+    toolName: "web_search",
+    content: [
+      { type: "tool-result", toolName: "web_search" },
+      { type: "tool-result", toolName: "web_search" },
+    ],
+  });
+  assert.equal(result.queryCount, 2);
+  assert.deepEqual(result.costMetadata, { searchCostMicroUsd: 20_000 });
+});
+
+test("an unsupported model that had search requested is flagged unsupported, not executed", () => {
+  const result = normalizeWebSearchExecution({
+    capability: unsupportedCapability,
+    searchRequested: true,
+    provider: "groq",
+    toolName: undefined,
+    content: [],
+  });
+  assert.equal(result.requested, true);
+  assert.equal(result.supported, false);
+  assert.equal(result.executed, false);
+  assert.deepEqual(result.citations, []);
+});
+
+test("an unverified model behaves the same as unsupported -- never assumed native", () => {
+  const unverified = getWebSearchCapability("gpt-5-4-mini");
+  const result = normalizeWebSearchExecution({
+    capability: unverified,
+    searchRequested: true,
+    provider: "openai",
+    toolName: undefined,
+    content: [],
+  });
+  assert.equal(result.supported, false);
+  assert.equal(result.executed, false);
+});
+
+test("Perplexity search models always report executed, independent of webSearchMode", () => {
+  const withSourcesAlwaysMode = normalizeWebSearchExecution({
+    capability: perplexityCapability,
+    searchRequested: true,
+    provider: "perplexity",
+    content: [
+      { type: "source", sourceType: "url", url: "https://example.com/p1" },
+    ],
+  });
+  assert.equal(withSourcesAlwaysMode.requested, true);
+  assert.equal(withSourcesAlwaysMode.supported, true);
+  assert.equal(withSourcesAlwaysMode.executed, true);
+  assert.equal(withSourcesAlwaysMode.citations.length, 1);
+
+  // Even when the global toggle is "off", Perplexity's own chat models
+  // still searched as part of normal completion -- this must never be
+  // misreported as "training knowledge" just because the app-wide mode
+  // wasn't set to "always".
+  const offMode = normalizeWebSearchExecution({
+    capability: perplexityCapability,
+    searchRequested: false,
+    provider: "perplexity",
+    content: [],
+  });
+  assert.equal(offMode.requested, true);
+  assert.equal(offMode.executed, true);
+});
+
+test("dangerous citation URLs never survive normalization", () => {
+  const result = normalizeWebSearchExecution({
+    capability: openaiCapability,
+    searchRequested: true,
+    provider: "openai",
+    toolName: "web_search",
+    content: [
+      { type: "tool-result", toolName: "web_search" },
+      { type: "source", sourceType: "url", url: "javascript:alert(1)" },
+      { type: "source", sourceType: "url", url: "https://safe.example.com" },
+    ],
+  });
+  assert.deepEqual(
+    result.citations.map((citation) => citation.url),
+    ["https://safe.example.com"]
+  );
+});

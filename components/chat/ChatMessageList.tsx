@@ -340,18 +340,49 @@ export function ChatMessageList({
                     <span className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
                       {modelInfo.name}
                     </span>
-                    {msg.content && msg.status !== "error" && msg.status !== "pending" && (
-                      <span
-                        data-testid="search-status-badge"
-                        className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[9px] font-bold text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
-                      >
-                        {modelInfo.usageClass === "deep-research"
+                    {msg.content && msg.status !== "error" && msg.status !== "pending" && (() => {
+                      const meta = msg.searchMetadata;
+                      // meta is only absent for messages persisted before this
+                      // field existed -- fall back to the old provider/usageClass
+                      // heuristic so historical Perplexity answers don't regress
+                      // to "training knowledge".
+                      const status = !meta
+                        ? modelInfo.provider === "perplexity" && modelInfo.usageClass === "research"
+                          ? "executed"
+                          : "training-knowledge"
+                        : !meta.requested
+                          ? "training-knowledge"
+                          : !meta.supported
+                            ? "unsupported"
+                            : meta.failureCode
+                              ? "failed"
+                              : meta.executed
+                                ? "executed"
+                                : "requested-not-executed";
+                      const label =
+                        modelInfo.usageClass === "deep-research"
                           ? t("chat.searchStatusDeepResearch")
-                          : modelInfo.provider === "perplexity" && modelInfo.usageClass === "research"
-                            ? t("chat.searchStatusWebSearch")
-                            : t("chat.searchStatusTrainingKnowledge")}
-                      </span>
-                    )}
+                          : status === "unsupported"
+                            ? t("chat.searchStatusUnsupported")
+                            : status === "failed"
+                              ? t("chat.searchStatusFailed")
+                              : status === "executed"
+                                ? t("chat.searchStatusWebSearch")
+                                : status === "requested-not-executed"
+                                  ? t("chat.searchStatusRequestedNotExecuted")
+                                  : t("chat.searchStatusTrainingKnowledge");
+                      return (
+                        <span
+                          data-testid="search-status-badge"
+                          data-search-status={
+                            modelInfo.usageClass === "deep-research" ? "deep-research" : status
+                          }
+                          className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[9px] font-bold text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
+                        >
+                          {label}
+                        </span>
+                      );
+                    })()}
                     {isActivelyGenerating && msg.content && (
                       <span className="text-[10px] font-bold uppercase tracking-wide text-blue-500 dark:text-blue-400">
                         {t("chat.generatingStatus")}
@@ -502,6 +533,31 @@ export function ChatMessageList({
                         className="ml-0.5 inline-block h-3.5 w-[2px] animate-pulse bg-zinc-400 align-middle motion-reduce:animate-none dark:bg-zinc-500"
                         aria-hidden="true"
                       />
+                    )}
+                    {msg.searchMetadata && msg.searchMetadata.citations.length > 0 && (
+                      <div
+                        data-testid="search-citation-list"
+                        className="mt-3 border-t border-zinc-200 pt-2 dark:border-zinc-700/60"
+                      >
+                        <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
+                          {t("chat.searchCitationsLabel")}
+                        </p>
+                        <ul className="space-y-1">
+                          {msg.searchMetadata.citations.map((citation, citationIndex) => (
+                            <li key={`${citation.url}-${citationIndex}`} className="truncate">
+                              <a
+                                href={citation.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title={citation.url}
+                                className="text-[11px] font-medium text-blue-600 underline underline-offset-2 dark:text-blue-400"
+                              >
+                                {citation.title || citation.url}
+                              </a>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
                     )}
                     </>
                   ) : (
