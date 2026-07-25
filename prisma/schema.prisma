@@ -302,6 +302,22 @@ model ProviderErrorEvent {
   @@index([traceId])
 }
 
+// One row per provider, updated atomically on every recordProviderSuccess/
+// recordProviderFailure call. Unlike ChatUsageBucket's day/5-minute counters
+// (which reset on their own schedule and can't tell "no traffic since
+// midnight" apart from "no traffic in months"), this is the durable source
+// of truth for "when did we last actually hear from this provider" -- it's
+// what the public status page's freshness check is computed from.
+model ProviderHealthState {
+  provider            String    @id
+  lastSuccessAt       DateTime?
+  lastFailureAt       DateTime?
+  consecutiveFailures Int       @default(0)
+  updatedAt           DateTime  @updatedAt
+
+  @@index([lastSuccessAt])
+}
+
 model ChatRequestLease {
   id         String   @id
   subjectKey String
