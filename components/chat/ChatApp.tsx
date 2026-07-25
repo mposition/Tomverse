@@ -45,7 +45,14 @@ const toChatRequestMessage = (message: Message): Message => {
 type ChatAppProps = {
   modelId: string;
   initialConversationId?: string | null;
-  promptPayload?: { id: string; text: string; chatId: string; userMessageId: string; attachments: ChatAttachment[] } | null;
+  promptPayload?: {
+    id: string;
+    text: string;
+    chatId: string;
+    userMessageId: string;
+    attachments: ChatAttachment[];
+    deepResearchDepth?: "quick" | "standard" | "deep";
+  } | null;
   isPanelDisabled?: boolean;
   isGuestMode?: boolean;
   hideModelOnlyInput?: boolean;
@@ -462,7 +469,8 @@ function ChatAppComponent({
     targetChatId: string,
     userMsgId: string,
     attachments: ChatAttachment[] = [],
-    analyticsPromptId: string | null = null
+    analyticsPromptId: string | null = null,
+    deepResearchDepth?: "quick" | "standard" | "deep"
   ) => {
   	if ((!text && attachments.length === 0) || isSendingRef.current) return;
 
@@ -534,6 +542,7 @@ function ChatAppComponent({
                   assistantMessageId,
                 }
               : {}),
+            ...(deepResearchDepth ? { deepResearchDepth } : {}),
           }),
           signal: controller.signal,
         });
@@ -816,7 +825,10 @@ function ChatAppComponent({
           promptPayload.chatId,
           promptPayload.userMessageId,
           promptPayload.attachments,
-          promptPayload.id
+          promptPayload.id,
+          modelId === "perplexity/sonar-deep-research"
+            ? promptPayload.deepResearchDepth
+            : undefined
         );
     });
     return () => {

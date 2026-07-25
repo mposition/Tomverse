@@ -172,6 +172,7 @@ model Conversation {
 
   selectedModels String @default("[\"gpt-5-4-mini\"]")
   disabledPanels String @default("[]")
+  webSearchMode  String @default("off") // off | auto | always
 
   shareToken     String?   @unique
   shareEnabled   Boolean   @default(false)

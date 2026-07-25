@@ -20,6 +20,7 @@ import {
 } from "@/components/chat/types";
 import { useLanguage } from "@/components/LanguageProvider";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
+import type { WebSearchMode } from "@/lib/appDefaults";
 
 type PromptPayload = {
   id: string;
@@ -27,6 +28,7 @@ type PromptPayload = {
   chatId: string;
   userMessageId: string;
   attachments: ChatAttachment[];
+  deepResearchDepth?: "quick" | "standard" | "deep";
 };
 
 type DesktopChatShellProps = {
@@ -58,6 +60,11 @@ type DesktopChatShellProps = {
   onDownload: (id: string, title: string) => void;
   onToggleModel: (modelId: string) => boolean;
   onSwapModel: (removeModelId: string, addModelId: string) => boolean;
+  webSearchMode: WebSearchMode;
+  onWebSearchModeChange: (mode: WebSearchMode) => void;
+  onOpenDeepResearchSetup: () => void;
+  isDeepResearchPending: boolean;
+  onDismissDeepResearchChip: () => void;
   onSubmit: () => void;
   onBeforeModelSend: (chatId: string) => Promise<boolean>;
   onChangePanelModel: (oldModelId: string, newModelId: string) => void;
@@ -100,6 +107,11 @@ export function DesktopChatShell({
   onDownload,
   onToggleModel,
   onSwapModel,
+  webSearchMode,
+  onWebSearchModeChange,
+  onOpenDeepResearchSetup,
+  isDeepResearchPending,
+  onDismissDeepResearchChip,
   onSubmit,
   onBeforeModelSend,
   onChangePanelModel,
@@ -452,6 +464,11 @@ export function DesktopChatShell({
               disabledModelIds={disabledPanels}
               onToggleModel={onToggleModel}
               onSwapModel={onSwapModel}
+              webSearchMode={webSearchMode}
+              onWebSearchModeChange={onWebSearchModeChange}
+              onOpenDeepResearchSetup={onOpenDeepResearchSetup}
+              isDeepResearchPending={isDeepResearchPending}
+              onDismissDeepResearchChip={onDismissDeepResearchChip}
               attachments={attachments}
               onAttachmentsChange={setAttachments}
               canAttach={!isGuestMode}

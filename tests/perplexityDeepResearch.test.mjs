@@ -1,11 +1,29 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  DEEP_RESEARCH_DEPTH_PARAMS,
   PerplexityDeepResearchError,
   pollDeepResearchJob,
   submitDeepResearchJob,
   toPlainDeepResearchMessages,
 } from "../lib/perplexityDeepResearch.ts";
+
+test("DEEP_RESEARCH_DEPTH_PARAMS: standard matches the flat values this integration already ran successfully with", () => {
+  assert.deepEqual(DEEP_RESEARCH_DEPTH_PARAMS.standard, {
+    maxOutputTokens: 24_000,
+    reasoningEffort: "high",
+  });
+});
+
+test("DEEP_RESEARCH_DEPTH_PARAMS: each tier has a genuinely different, increasing token cap", () => {
+  const { quick, standard, deep } = DEEP_RESEARCH_DEPTH_PARAMS;
+  assert.ok(quick.maxOutputTokens < standard.maxOutputTokens);
+  assert.ok(standard.maxOutputTokens < deep.maxOutputTokens);
+  // "quick" deliberately doesn't force high reasoning effort -- distinct
+  // real behavior, not just a relabeled copy of "standard".
+  assert.equal(quick.reasoningEffort, undefined);
+  assert.equal(deep.reasoningEffort, "high");
+});
 
 const withMockFetch = async (impl, run) => {
   const original = global.fetch;

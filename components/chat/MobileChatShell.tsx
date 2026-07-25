@@ -19,6 +19,7 @@ import {
 } from "@/components/chat/types";
 import { useLanguage } from "@/components/LanguageProvider";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
+import type { WebSearchMode } from "@/lib/appDefaults";
 import {
   Check,
   Lock,
@@ -35,6 +36,7 @@ type PromptPayload = {
   chatId: string;
   userMessageId: string;
   attachments: ChatAttachment[];
+  deepResearchDepth?: "quick" | "standard" | "deep";
 };
 
 type ModelRuntimeStatus = "idle" | "loading" | "responding" | "error" | "cancelled" | "paused";
@@ -67,6 +69,11 @@ type MobileChatShellProps = {
   onDownload: (id: string, title: string) => void;
   onToggleModel: (modelId: string) => boolean;
   onSwapModel: (removeModelId: string, addModelId: string) => boolean;
+  webSearchMode: WebSearchMode;
+  onWebSearchModeChange: (mode: WebSearchMode) => void;
+  onOpenDeepResearchSetup: () => void;
+  isDeepResearchPending: boolean;
+  onDismissDeepResearchChip: () => void;
   onRequestUndoToast: (message: string, undo: () => void) => void;
   onSubmit: () => void;
   onBeforeModelSend: (chatId: string) => Promise<boolean>;
@@ -106,6 +113,11 @@ export function MobileChatShell({
   onDownload,
   onToggleModel,
   onSwapModel,
+  webSearchMode,
+  onWebSearchModeChange,
+  onOpenDeepResearchSetup,
+  isDeepResearchPending,
+  onDismissDeepResearchChip,
   onRequestUndoToast,
   onSubmit,
   onBeforeModelSend,
@@ -634,6 +646,11 @@ export function MobileChatShell({
             disabledModelIds={disabledPanels}
             onToggleModel={onToggleModel}
             onSwapModel={onSwapModel}
+            webSearchMode={webSearchMode}
+            onWebSearchModeChange={onWebSearchModeChange}
+            onOpenDeepResearchSetup={onOpenDeepResearchSetup}
+            isDeepResearchPending={isDeepResearchPending}
+            onDismissDeepResearchChip={onDismissDeepResearchChip}
             attachments={attachments}
             onAttachmentsChange={setAttachments}
             canAttach={!isGuestMode}

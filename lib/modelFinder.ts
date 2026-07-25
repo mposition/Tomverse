@@ -361,7 +361,11 @@ export type ContextualModelSuggestion = OptionalModelSuggestion & {
 
 const DOCUMENT_PATTERN =
   /\b(long document|contract|agreement|risk clause|due diligence|detailed document analysis)\b|계약서|긴\s*문서|위험\s*조항|정밀\s*분석|실사\s*검토/i;
-const RESEARCH_PATTERN =
+// Exported for lib/webSearchSuggestion.ts's "web search: auto" inline
+// suggestion, which shares this signal (source/citation/research intent
+// correlates strongly with needing current information) rather than
+// duplicating a second Korean/English keyword regex.
+export const RESEARCH_PATTERN =
   /\b(source|sources|citation|citations|research|web search|latest evidence)\b|출처|근거|웹\s*검색|자료\s*조사|최신\s*정보/i;
 
 export const getContextualModelSuggestion = ({

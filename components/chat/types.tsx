@@ -27,6 +27,7 @@ export type Conversation = {
     projectId?: string | null;
     selectedModels?: string[];
     disabledPanels?: string[];
+    webSearchMode?: "off" | "auto" | "always";
     isLocked?: boolean;
     shareEnabled?: boolean;
     shareExpiresAt?: string | null;

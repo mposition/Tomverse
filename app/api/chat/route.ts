@@ -23,7 +23,10 @@ import {
     discardPerplexityUsage,
     perplexityUsageHeaders,
 } from "@/lib/perplexityUsageCapture";
-import { submitDeepResearchJob } from "@/lib/perplexityDeepResearch";
+import {
+    DEEP_RESEARCH_DEPTH_PARAMS,
+    submitDeepResearchJob,
+} from "@/lib/perplexityDeepResearch";
 import { assertModelRuntimeAvailable } from "@/lib/modelAvailability";
 import { parseOfficeSafely } from "@/lib/officeSecurity";
 import {
@@ -653,6 +656,7 @@ export async function POST(req: Request) {
             conversationId,
             assistantMessageId,
             turnstileToken,
+            deepResearchDepth,
         } = validateChatPayload(body);
         const requestedModelId = modelId || APP_DEFAULTS.defaultModelId;
         requestedModelIdForLog = requestedModelId;
@@ -1255,11 +1259,14 @@ export async function POST(req: Request) {
             }
 
             try {
+                const depthParams =
+                    DEEP_RESEARCH_DEPTH_PARAMS[deepResearchDepth || "standard"];
                 const { perplexityJobId } = await submitDeepResearchJob({
                     messages: formattedMessages,
-                    maxOutputTokens: 24_000,
+                    maxOutputTokens: depthParams.maxOutputTokens,
                     reasoningEffort:
-                        modelConfig.reasoning === "high" ? "high" : undefined,
+                        depthParams.reasoningEffort ||
+                        (modelConfig.reasoning === "high" ? "high" : undefined),
                 });
 
                 await linkChatReservationProviderRequest(

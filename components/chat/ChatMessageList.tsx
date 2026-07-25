@@ -340,6 +340,18 @@ export function ChatMessageList({
                     <span className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
                       {modelInfo.name}
                     </span>
+                    {msg.content && msg.status !== "error" && msg.status !== "pending" && (
+                      <span
+                        data-testid="search-status-badge"
+                        className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[9px] font-bold text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
+                      >
+                        {modelInfo.usageClass === "deep-research"
+                          ? t("chat.searchStatusDeepResearch")
+                          : modelInfo.provider === "perplexity" && modelInfo.usageClass === "research"
+                            ? t("chat.searchStatusWebSearch")
+                            : t("chat.searchStatusTrainingKnowledge")}
+                      </span>
+                    )}
                     {isActivelyGenerating && msg.content && (
                       <span className="text-[10px] font-bold uppercase tracking-wide text-blue-500 dark:text-blue-400">
                         {t("chat.generatingStatus")}

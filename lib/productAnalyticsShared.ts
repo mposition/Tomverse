@@ -46,6 +46,17 @@ export const PRODUCT_ANALYTICS_EVENT_NAMES = [
   "sidebar_tour_started",
   "sidebar_tour_completed",
   "sidebar_tour_skipped",
+  "chat_tool_menu_opened",
+  "web_search_mode_selected",
+  "web_search_suggestion_shown",
+  "web_search_suggestion_accepted",
+  "web_search_suggestion_declined",
+  "deep_research_setup_opened",
+  "deep_research_started",
+  "deep_research_cancelled",
+  "deep_research_completed",
+  "deep_research_failed",
+  "answer_sources_opened",
 ] as const;
 
 export type ProductAnalyticsEventName =
@@ -157,6 +168,8 @@ export const analyticsPropertiesSchema = z
       ])
       .optional(),
     help_article_id: z.enum(["chat_workspace"]).optional(),
+    web_search_mode: z.enum(["off", "auto", "always"]).optional(),
+    deep_research_depth: z.enum(["quick", "standard", "deep"]).optional(),
   })
   .strict()
   .superRefine((properties, context) => {

@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { APP_DEFAULTS } from "@/lib/appDefaults";
+import { APP_DEFAULTS, WEB_SEARCH_MODES, isWebSearchMode } from "@/lib/appDefaults";
 import { clampRuntimeSelectedModels } from "@/lib/modelRegistry";
 import { z } from "zod";
 import {
@@ -30,6 +30,7 @@ const createConversationSchema = z
     selectedModels: z.array(modelSchema).max(APP_DEFAULTS.maxSelectedModels).optional(),
     disabledPanels: z.array(modelSchema).max(APP_DEFAULTS.maxSelectedModels).optional(),
     projectId: z.string().trim().min(1).max(100).optional(),
+    webSearchMode: z.enum(WEB_SEARCH_MODES).optional(),
   })
   .strict();
 
@@ -82,6 +83,9 @@ export async function GET(req: Request) {
         projectId: conv.projectId || null,
         selectedModels: safeParse(conv.selectedModels, [defaultEngine]),
         disabledPanels: safeParse(conv.disabledPanels, []),
+        webSearchMode: isWebSearchMode(conv.webSearchMode)
+          ? conv.webSearchMode
+          : APP_DEFAULTS.defaultWebSearchMode,
         isLocked: !!conv.password,
         shareEnabled:
           conv.shareEnabled &&
@@ -156,6 +160,8 @@ export async function POST(req: Request) {
       }
     }
 
+    const webSearchMode = body.webSearchMode || APP_DEFAULTS.defaultWebSearchMode;
+
     const newConversation = await prisma.$transaction(async (tx) => {
       await assertConversationCapacity(tx, userId);
       return tx.conversation.create({
@@ -164,6 +170,7 @@ export async function POST(req: Request) {
           title,
           selectedModels,
           disabledPanels,
+          webSearchMode,
           projectId: body.projectId || null,
         },
       });
@@ -174,6 +181,9 @@ export async function POST(req: Request) {
           projectId: newConversation.projectId || null,
           selectedModels: safeParse(newConversation.selectedModels, [defaultEngine]),
           disabledPanels: safeParse(newConversation.disabledPanels, []),
+          webSearchMode: isWebSearchMode(newConversation.webSearchMode)
+            ? newConversation.webSearchMode
+            : APP_DEFAULTS.defaultWebSearchMode,
           isLocked: !!newConversation.password,
           messageCount: 0,
           password: undefined

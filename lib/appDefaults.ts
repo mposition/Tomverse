@@ -55,7 +55,17 @@ export const APP_DEFAULTS = {
   maxSelectedModels: 3,
   maxGuestSelectedModels: 3,
   maxGuestMessages: 20,
+
+  defaultWebSearchMode: "off",
 } as const;
+
+// Per-conversation, not per-message -- see components/chat/ChatInput.tsx's
+// tools sheet. "auto" only ever triggers a dismissible inline suggestion,
+// it never sends a search request on its own.
+export const WEB_SEARCH_MODES = ["off", "auto", "always"] as const;
+export type WebSearchMode = (typeof WEB_SEARCH_MODES)[number];
+export const isWebSearchMode = (value: unknown): value is WebSearchMode =>
+  typeof value === "string" && (WEB_SEARCH_MODES as readonly string[]).includes(value);
 
 export const getDefaultSelectedModels = () => [APP_DEFAULTS.defaultModelId];
 

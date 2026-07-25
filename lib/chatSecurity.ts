@@ -2309,6 +2309,7 @@ export const validateChatPayload = (body: unknown) => {
         conversationId?: unknown;
         assistantMessageId?: unknown;
         turnstileToken?: unknown;
+        deepResearchDepth?: unknown;
     };
     if (
         !Array.isArray(payload.messages) ||
@@ -2374,6 +2375,18 @@ export const validateChatPayload = (body: unknown) => {
             "Invalid guest verification token."
         );
     }
+    if (
+        payload.deepResearchDepth !== undefined &&
+        payload.deepResearchDepth !== "quick" &&
+        payload.deepResearchDepth !== "standard" &&
+        payload.deepResearchDepth !== "deep"
+    ) {
+        throw new ChatAccessError(
+            400,
+            "INVALID_DEEP_RESEARCH_DEPTH",
+            "Invalid deep research depth."
+        );
+    }
 
     let totalCharacters = 0;
     for (const message of payload.messages) {
@@ -2431,6 +2444,7 @@ export const validateChatPayload = (body: unknown) => {
         conversationId?: string;
         assistantMessageId?: string;
         turnstileToken?: string;
+        deepResearchDepth?: "quick" | "standard" | "deep";
     };
 };
 

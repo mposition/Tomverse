@@ -25,7 +25,9 @@ import {
   HardDrive,
   Globe2,
   Image as ImageIcon,
+  Link2,
   LockKeyhole,
+  Microscope,
   Paperclip,
   Plus,
   Presentation,
@@ -50,7 +52,7 @@ import { FeatureHelpPopover } from "@/components/chat/FeatureHelpPopover";
 import { chatHelpCopy } from "@/components/chat/chatHelpCopy";
 import { dispatchAppToast } from "@/lib/appToast";
 import { getModelExperienceStatus } from "@/lib/modelExperience";
-import { APP_DEFAULTS } from "@/lib/appDefaults";
+import { APP_DEFAULTS, WEB_SEARCH_MODES, type WebSearchMode } from "@/lib/appDefaults";
 import {
   canUseModelWithPlan,
   getInputCreditMultiplier,
@@ -83,6 +85,7 @@ import {
   type ModelFinderPriority,
   type ModelFinderTask,
 } from "@/lib/modelFinder";
+import { draftSuggestionKey, suggestsCurrentInformationNeeded } from "@/lib/webSearchSuggestion";
 import { openModelFinder } from "@/lib/modelFinderEvents";
 import { CreditBreakdownSheet } from "@/components/chat/CreditBreakdownSheet";
 import { UsageLimitModal } from "@/components/chat/UsageLimitModal";
@@ -326,6 +329,11 @@ type ChatInputProps = {
   // (independent of the composer's floating/docked position) instead of
   // this one, which always sits directly under the input box.
   hideDisclaimer?: boolean;
+  webSearchMode?: WebSearchMode;
+  onWebSearchModeChange?: (mode: WebSearchMode) => void;
+  onOpenDeepResearchSetup?: () => void;
+  isDeepResearchPending?: boolean;
+  onDismissDeepResearchChip?: () => void;
 };
 
 type GooglePickerConfig = {
@@ -425,6 +433,11 @@ export function ChatInput({
   guestPreviewMode = false,
   variant = "bar",
   hideDisclaimer = false,
+  webSearchMode = "off",
+  onWebSearchModeChange,
+  onOpenDeepResearchSetup,
+  isDeepResearchPending = false,
+  onDismissDeepResearchChip,
 }: ChatInputProps) {
   const {
     models: AVAILABLE_MODELS,
@@ -452,6 +465,9 @@ export function ChatInput({
   }, [value]);
   const [showGuestQuickStart, setShowGuestQuickStart] = useState(false);
   const [dismissedSuggestionKey, setDismissedSuggestionKey] = useState<string | null>(null);
+  const [dismissedWebSearchSuggestionKey, setDismissedWebSearchSuggestionKey] = useState<
+    string | null
+  >(null);
   const [dismissedComplementaryModelId, setDismissedComplementaryModelId] = useState<string | null>(null);
   const [isCreditBreakdownOpen, setIsCreditBreakdownOpen] = useState(false);
   const [isUsageLimitModalOpen, setIsUsageLimitModalOpen] = useState(false);
@@ -592,7 +608,7 @@ export function ChatInput({
   const isDisabled = disabled || isSending || isUploading || isUsageLimitReached;
   
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [menuView, setMenuView] = useState<"actions" | "models">("actions");
+  const [menuView, setMenuView] = useState<"actions" | "models" | "webSearch">("actions");
   const [modelSearchQuery, setModelSearchQuery] = useState("");
   const [providerFilter, setProviderFilter] = useState("all");
   const [usageBandFilter, setUsageBandFilter] = useState<ModelPickerUsageBand>("all");
@@ -656,6 +672,23 @@ export function ChatInput({
       !selectedModels.includes(contextualModel.id) &&
       contextualLiveStatus !== "unavailable"
   );
+  // "웹 검색: 자동" only ever shows this dismissible suggestion -- it never
+  // sends a search on its own. Never shown once a mode is already forced on
+  // (nothing to suggest), and never repeats for the exact same draft text.
+  const webSearchSuggestionKey =
+    webSearchMode === "auto" && suggestsCurrentInformationNeeded(value)
+      ? draftSuggestionKey(value)
+      : null;
+  const showWebSearchSuggestion = Boolean(
+    webSearchSuggestionKey && webSearchSuggestionKey !== dismissedWebSearchSuggestionKey
+  );
+  const trackedWebSearchSuggestionKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!showWebSearchSuggestion || !webSearchSuggestionKey) return;
+    if (trackedWebSearchSuggestionKeyRef.current === webSearchSuggestionKey) return;
+    trackedWebSearchSuggestionKeyRef.current = webSearchSuggestionKey;
+    trackProductEvent("web_search_suggestion_shown", selectedModels.length, {});
+  }, [showWebSearchSuggestion, webSearchSuggestionKey, selectedModels.length]);
   // Model-picker-only counterpart to the message-content-driven
   // contextualSuggestion above: nudges toward one complementary model based
   // on what kind of thinking the *currently selected* models are missing,
@@ -1755,6 +1788,106 @@ export function ChatInput({
                 </div>
               </div>
             )}
+          {showWebSearchSuggestion && (
+            <div
+              data-testid="web-search-auto-suggestion"
+              className="mb-2 rounded-2xl border border-sky-200 bg-sky-50 px-3 py-3 dark:border-sky-900/60 dark:bg-sky-950/20"
+            >
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-black text-zinc-900 dark:text-white">
+                    {t("chat.webSearchSuggestionTitle")}
+                  </p>
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <button
+                    type="button"
+                    data-testid="web-search-suggestion-accept"
+                    onClick={() => {
+                      onWebSearchModeChange?.("always");
+                      trackProductEvent(
+                        "web_search_suggestion_accepted",
+                        selectedModels.length,
+                        {}
+                      );
+                      if (webSearchSuggestionKey) {
+                        setDismissedWebSearchSuggestionKey(webSearchSuggestionKey);
+                      }
+                    }}
+                    className="rounded-xl bg-sky-600 px-3 py-2 text-[11px] font-black text-white hover:bg-sky-500"
+                  >
+                    {t("chat.webSearchSuggestionAccept")}
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="web-search-suggestion-decline"
+                    onClick={() => {
+                      trackProductEvent(
+                        "web_search_suggestion_declined",
+                        selectedModels.length,
+                        {}
+                      );
+                      if (webSearchSuggestionKey) {
+                        setDismissedWebSearchSuggestionKey(webSearchSuggestionKey);
+                      }
+                    }}
+                    className="rounded-xl border border-sky-300 bg-white px-3 py-2 text-[11px] font-bold text-sky-900 hover:bg-sky-100 dark:border-sky-800 dark:bg-zinc-950 dark:text-sky-200"
+                  >
+                    {t("chat.webSearchSuggestionDecline")}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+          {(webSearchMode !== "off" || isDeepResearchPending) && (
+            <div
+              data-testid="tool-status-chip-row"
+              className="mb-2 flex max-w-full gap-1.5 overflow-x-auto overscroll-x-contain pb-1 md:mb-3 md:flex-wrap md:overflow-visible md:pb-0"
+            >
+              {webSearchMode !== "off" && (
+                <div
+                  data-testid="web-search-mode-chip"
+                  className="flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 pl-3 pr-1.5 text-xs font-bold text-sky-800 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-200"
+                >
+                  <Globe2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <span className="truncate">
+                    {t("chat.toolsWebSearch")} ·{" "}
+                    {webSearchMode === "always"
+                      ? t("chat.toolsWebSearchAlways")
+                      : t("chat.toolsWebSearchAuto")}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => onWebSearchModeChange?.("off")}
+                    aria-label={t("chat.removeWebSearchMode")}
+                    title={t("chat.removeWebSearchMode")}
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sky-500 hover:bg-sky-100 dark:hover:bg-sky-900/40"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
+              {isDeepResearchPending && (
+                <div
+                  data-testid="deep-research-chip"
+                  className="flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-violet-200 bg-violet-50 pl-3 pr-1.5 text-xs font-bold text-violet-800 dark:border-violet-900/60 dark:bg-violet-950/30 dark:text-violet-200"
+                  title={t("chat.deepResearchChipTooltip")}
+                >
+                  <Microscope className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <span className="truncate">{t("chat.deepResearchChipLabel")}</span>
+                  <button
+                    type="button"
+                    onClick={() => onDismissDeepResearchChip?.()}
+                    aria-label={t("chat.removeDeepResearchChip")}
+                    title={t("chat.removeDeepResearchChip")}
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-violet-500 hover:bg-violet-100 dark:hover:bg-violet-900/40"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           {attachments.length > 0 && (
             <div className="mb-2 rounded-2xl bg-zinc-50 p-1.5 dark:bg-zinc-950/70 md:mb-3 md:bg-transparent md:p-0">
             <div className="flex max-w-full gap-2 overflow-x-auto overscroll-x-contain pb-1 md:flex-wrap md:overflow-visible md:pb-0">
@@ -1877,6 +2010,7 @@ export function ChatInput({
               }
               setMenuView("actions");
               setIsMenuOpen(true);
+              trackProductEvent("chat_tool_menu_opened", selectedModels.length, {});
             }}
             className="flex h-10 w-10 shrink-0 touch-manipulation items-center justify-center rounded-full border border-zinc-300 bg-zinc-50 text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white"
             title={t("chat.moreActions")}
@@ -2006,7 +2140,13 @@ export function ChatInput({
               id="chat-input-popover"
               role="dialog"
               aria-modal="false"
-              aria-label={menuView === "models" ? t("chat.modelSelect") : t("chat.moreActions")}
+              aria-label={
+                menuView === "models"
+                  ? t("chat.modelSelect")
+                  : menuView === "webSearch"
+                    ? t("chat.toolsWebSearch")
+                    : t("chat.moreActions")
+              }
               tabIndex={-1}
               className={`fixed inset-x-2 z-[100] flex max-w-[calc(100%_-_1rem)] flex-col overflow-hidden rounded-3xl border border-zinc-200 bg-white p-2 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900 md:rounded-2xl ${
                 menuView === "models"
@@ -2018,12 +2158,18 @@ export function ChatInput({
               <div className="mb-2 flex items-center justify-between border-b border-zinc-200 px-2 pb-2 pt-1 dark:border-zinc-800 md:hidden">
                 <div>
                   <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
-                    {menuView === "models" ? t("chat.modelSelect") : t("chat.moreActions")}
+                    {menuView === "models"
+                      ? t("chat.modelSelect")
+                      : menuView === "webSearch"
+                        ? t("chat.toolsWebSearch")
+                        : t("chat.moreActions")}
                   </p>
                   <p className="text-xs text-zinc-500">
                     {menuView === "models"
                       ? `${selectedModels.length}/${maxSelectableModels} ${selectedModels.length === 1 ? t("chat.modelsSelectedOne") : t("chat.modelsSelectedOther")}`
-                      : t("chat.uploadFromComputer")}
+                      : menuView === "webSearch"
+                        ? t("chat.toolsWebSearchDescription")
+                        : t("chat.uploadFromComputer")}
                   </p>
                 </div>
                 <button
@@ -2071,6 +2217,89 @@ export function ChatInput({
                       <span className="text-xs text-zinc-500">{t("chat.googleDriveDescription")}</span>
                     </span>
                   </button>
+                  <div className="my-1 border-t border-zinc-200 dark:border-zinc-700" />
+                  <button
+                    type="button"
+                    data-testid="tools-web-search-row"
+                    onClick={() => setMenuView("webSearch")}
+                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                  >
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-sky-500/10 text-sky-500">
+                      <Globe2 className="h-5 w-5" />
+                    </span>
+                    <span className="flex min-w-0 flex-col">
+                      <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t("chat.toolsWebSearch")}</span>
+                      <span className="text-xs text-zinc-500">
+                        {webSearchMode === "always"
+                          ? t("chat.toolsWebSearchAlways")
+                          : webSearchMode === "auto"
+                            ? t("chat.toolsWebSearchAuto")
+                            : t("chat.toolsWebSearchOff")}
+                      </span>
+                    </span>
+                  </button>
+                  {(() => {
+                    const deepResearchModel = AVAILABLE_MODELS.find(
+                      (model) => model.id === "perplexity/sonar-deep-research"
+                    );
+                    const deepResearchLocked =
+                      !deepResearchModel || !canUseModelWithPlan(currentPlan, deepResearchModel);
+                    const deepResearchReason = !deepResearchModel
+                      ? null
+                      : isGuestMode
+                        ? t("modelStatusReasons.loginRequired")
+                        : deepResearchLocked
+                          ? t("modelStatusReasons.upgradeRequired")
+                          : null;
+                    return (
+                      <button
+                        type="button"
+                        data-testid="tools-deep-research-row"
+                        disabled={!deepResearchModel}
+                        onClick={() => {
+                          closeMenu(false);
+                          if (deepResearchLocked) {
+                            // Reuses the same guest-sign-in/upgrade-plan gating
+                            // toggling a locked model in the picker already
+                            // triggers, instead of inventing a second prompt.
+                            onToggleModel("perplexity/sonar-deep-research");
+                            return;
+                          }
+                          trackProductEvent(
+                            "deep_research_setup_opened",
+                            selectedModels.length,
+                            {}
+                          );
+                          onOpenDeepResearchSetup?.();
+                        }}
+                        className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-zinc-800"
+                      >
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-violet-500/10 text-violet-500">
+                          <Microscope className="h-5 w-5" />
+                        </span>
+                        <span className="flex min-w-0 flex-col">
+                          <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t("chat.toolsDeepResearch")}</span>
+                          <span className={`text-xs ${deepResearchReason ? "text-amber-600 dark:text-amber-400" : "text-zinc-500"}`}>
+                            {deepResearchReason || t("chat.toolsDeepResearchDescription")}
+                          </span>
+                        </span>
+                      </button>
+                    );
+                  })()}
+                  <button
+                    type="button"
+                    data-testid="tools-read-webpage-row"
+                    disabled
+                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left opacity-40"
+                  >
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+                      <Link2 className="h-5 w-5" />
+                    </span>
+                    <span className="flex min-w-0 flex-col">
+                      <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t("chat.toolsReadWebpage")}</span>
+                      <span className="text-xs text-zinc-500">{t("chat.toolsComingSoon")}</span>
+                    </span>
+                  </button>
                   <div className="mx-1 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950/70 dark:text-zinc-400">
                     <p className="font-semibold text-zinc-700 dark:text-zinc-200">
                       {canAttach ? t("chat.attachmentGuideTitle") : t("chat.loginToAttach")}
@@ -2095,6 +2324,60 @@ export function ChatInput({
                       </span>
                     </span>
                   </button>
+                </div>
+              ) : menuView === "webSearch" ? (
+                <div className="space-y-1">
+                  <button
+                    type="button"
+                    onClick={() => setMenuView("actions")}
+                    className="mb-1 flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-white"
+                    aria-label={t("auth.cancel")}
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                  </button>
+                  {WEB_SEARCH_MODES.map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      data-testid={`web-search-mode-option-${mode}`}
+                      aria-pressed={webSearchMode === mode}
+                      onClick={() => {
+                        onWebSearchModeChange?.(mode);
+                        trackProductEvent(
+                          "web_search_mode_selected",
+                          selectedModels.length,
+                          { web_search_mode: mode }
+                        );
+                        closeMenu(false);
+                      }}
+                      className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
+                        webSearchMode === mode ? "bg-sky-500/10" : ""
+                      }`}
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-sky-500/10 text-sky-500">
+                        <Globe2 className="h-5 w-5" />
+                      </span>
+                      <span className="flex min-w-0 flex-1 flex-col">
+                        <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                          {mode === "always"
+                            ? t("chat.toolsWebSearchAlways")
+                            : mode === "auto"
+                              ? t("chat.toolsWebSearchAuto")
+                              : t("chat.toolsWebSearchOff")}
+                        </span>
+                        <span className="text-xs text-zinc-500">
+                          {mode === "always"
+                            ? t("chat.toolsWebSearchAlwaysDescription")
+                            : mode === "auto"
+                              ? t("chat.toolsWebSearchAutoDescription")
+                              : t("chat.toolsWebSearchOffDescription")}
+                        </span>
+                      </span>
+                      {webSearchMode === mode && (
+                        <Check className="h-4 w-4 shrink-0 text-sky-500" aria-hidden="true" />
+                      )}
+                    </button>
+                  ))}
                 </div>
               ) : (
                 <>

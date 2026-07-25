@@ -86,6 +86,25 @@ export const toPlainDeepResearchMessages = (
       .filter((message) => message.content.trim().length > 0)
   );
 
+// Perplexity's async submit takes max_tokens/reasoning_effort directly (no
+// documented "depth" parameter of its own) -- these tiers are this app's own
+// mapping onto those two real knobs, not a Perplexity concept. "standard"
+// matches the flat values this integration already shipped and ran
+// successfully with; "quick" trades completeness for a lower cap and no
+// forced high reasoning effort; "deep" is a conservative increase over
+// "standard", not pushed further without first confirming Perplexity's real
+// ceiling for this model.
+export type DeepResearchDepth = "quick" | "standard" | "deep";
+
+export const DEEP_RESEARCH_DEPTH_PARAMS: Record<
+  DeepResearchDepth,
+  { maxOutputTokens: number; reasoningEffort?: "high" }
+> = {
+  quick: { maxOutputTokens: 8_000 },
+  standard: { maxOutputTokens: 24_000, reasoningEffort: "high" },
+  deep: { maxOutputTokens: 32_000, reasoningEffort: "high" },
+};
+
 const getApiKey = () => {
   const apiKey = process.env.PERPLEXITY_API_KEY;
   if (!apiKey) {
