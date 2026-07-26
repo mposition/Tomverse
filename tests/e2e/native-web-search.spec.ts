@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import {
   mockAuthenticatedApi,
+  openModelPickerCatalogue,
   prepareGuestPage,
   sendChatMessage,
 } from "./support/app-fixtures";
@@ -119,7 +120,9 @@ const seedFreshAccount = async (page: Page) => {
 // the default can only be removed once at least one target is already
 // selected -- add the first target, drop the default, then add the rest.
 const selectModelsViaPicker = async (page: Page, models: string[]) => {
-  await page.locator('button[aria-controls="chat-input-popover"]').nth(1).click();
+  // STG-F008: specific models are picked from the full catalogue, which is the
+  // picker's second step.
+  await openModelPickerCatalogue(page);
   const optionFor = (modelId: string) =>
     page.locator(`[data-testid="model-option"][data-model-id="${modelId}"]`);
   await optionFor(models[0]).click();
@@ -127,7 +130,11 @@ const selectModelsViaPicker = async (page: Page, models: string[]) => {
   for (const modelId of models.slice(1)) {
     await optionFor(modelId).click();
   }
-  await page.keyboard.press("Escape");
+  // Escape only steps back one level in the two-step picker, so close via the
+  // completion control -- the dialog's backdrop blocks the tools menu until it
+  // is actually dismissed.
+  await page.getByTestId("model-picker-done").click();
+  await expect(page.locator("#chat-input-popover")).toBeHidden();
 };
 
 const assistantBadge = (page: Page, modelId: string) =>

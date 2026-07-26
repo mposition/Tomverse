@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import {
   mockAuthenticatedApi,
   mockChatStream,
+  openModelPickerCatalogue,
   prepareGuestPage,
 } from "./support/app-fixtures";
 
@@ -57,8 +58,7 @@ test.describe("desktop upgrade discovery", () => {
   });
 
   test("locked paid model opens an actionable plan dialog", async ({ page }) => {
-    await modelMenuTrigger(page).click();
-    const modelDialog = page.locator("#chat-input-popover");
+    const modelDialog = await openModelPickerCatalogue(page);
     const lockedModel = modelDialog
       .locator(
         '[data-testid="model-option"][data-model-minimum-plan="Pro"][data-model-plan-locked="true"]:not([disabled])'

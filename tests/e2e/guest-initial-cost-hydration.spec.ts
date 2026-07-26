@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { prepareGuestPage } from "./support/app-fixtures";
+import { openModelCatalogue, prepareGuestPage } from "./support/app-fixtures";
 
 // Regression coverage for STG-F006: a new guest's composer briefly showed a
 // single-model "1 credit" estimate before an effect (which waited on
@@ -431,6 +431,9 @@ test.describe("guest initial cost hydration", () => {
     await modelMenu.click();
     const dialog = page.locator("#chat-input-popover");
     await expect(dialog).toBeVisible();
+    // STG-F008: the picker opens on recommendations; deselecting a specific
+    // model by id means stepping into the full catalogue first.
+    await openModelCatalogue(page);
 
     const removed = "claude-haiku-4-5";
     const option = dialog.locator(
@@ -464,6 +467,9 @@ test.describe("guest initial cost hydration", () => {
       GUEST_CREDITS,
     ]);
 
+    // Escape is layered in the two-step picker: the first press leaves the
+    // catalogue for the recommendations, the second closes the dialog.
+    await page.keyboard.press("Escape");
     await page.keyboard.press("Escape");
     await expect(dialog).toBeHidden();
     await expect(modelMenu).toContainText(`${GUEST_MODEL_COUNT} AIs`);

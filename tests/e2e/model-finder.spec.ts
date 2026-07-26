@@ -1,8 +1,20 @@
 import { expect, test, type Page } from "@playwright/test";
-import { mockAuthenticatedApi } from "./support/app-fixtures";
+import { mockAuthenticatedApi, openModelCatalogue } from "./support/app-fixtures";
 
 const modelMenuTrigger = (page: Page) =>
   page.locator('button[aria-controls="chat-input-popover"]').nth(1);
+
+/**
+ * STG-F008: the combo-finder CTA and the complementary nudge live on the
+ * picker's recommended screen, so selecting a specific catalogue row means
+ * stepping into "All models" and back again.
+ */
+async function backToRecommendations(page: Page) {
+  await page.locator("#chat-input-popover").getByTestId("model-picker-back").first().click();
+  await expect(
+    page.locator("#chat-input-popover").getByTestId("recommended-model-option").first()
+  ).toBeVisible();
+}
 
 test("the in-picker combo CTA recommends an AI combination and applies only the kept models", async ({
   page,
@@ -141,15 +153,18 @@ test("selecting two models suggests one complementary model instead of the full 
   await page.goto("/chat?lang=ko");
 
   await modelMenuTrigger(page).click();
+  await openModelCatalogue(page);
   await page
     .locator('[data-testid="model-option"][data-model-id="gemini-2-5-flash"]')
     .click();
+  await backToRecommendations(page);
 
   const suggestion = page.getByTestId("model-combo-complementary-suggestion");
   await expect(suggestion).toBeVisible();
   await expect(page.getByTestId("model-combo-finder-cta")).toHaveCount(0);
 
   await page.getByTestId("model-combo-complementary-add").click();
+  await openModelCatalogue(page);
   await expect(
     page.locator('[data-testid="model-option"][data-model-id="deepseek-r1"]')
   ).toHaveAttribute("aria-pressed", "true");
@@ -162,12 +177,14 @@ test("the picker shows a compact re-recommend link once the model cap is reached
   await page.goto("/chat?lang=ko");
 
   await modelMenuTrigger(page).click();
+  await openModelCatalogue(page);
   await page
     .locator('[data-testid="model-option"][data-model-id="gemini-2-5-flash"]')
     .click();
   await page
     .locator('[data-testid="model-option"][data-model-id="claude-haiku-4-5"]')
     .click();
+  await backToRecommendations(page);
 
   await expect(page.getByTestId("model-combo-finder-cta")).toHaveCount(0);
   await expect(page.getByTestId("model-combo-complementary-suggestion")).toHaveCount(0);

@@ -1,5 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
-import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
+import {
+  mockAuthenticatedApi,
+  openModelPickerCatalogue,
+  prepareGuestPage,
+} from "./support/app-fixtures";
 
 async function installClipboardMock(page: Page) {
   await page.addInitScript(() => {
@@ -44,8 +48,9 @@ async function openConversationMenu(page: Page) {
 }
 
 async function openModelSelector(page: Page) {
-  const trigger = page.locator('button[aria-controls="chat-input-popover"]').nth(1);
-  await trigger.click();
+  // STG-F008: the catalogue rows this suite asserts on live behind the
+  // "All models" step of the picker.
+  await openModelPickerCatalogue(page);
 }
 
 test.beforeEach(async ({ page }) => {

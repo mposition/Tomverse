@@ -579,6 +579,35 @@ export async function sendChatMessage(
   }
 }
 
+/** The model-selector trigger, second of the two chat-input popover buttons. */
+export function modelMenuTrigger(page: Page) {
+  return page.locator('button[aria-controls="chat-input-popover"]').nth(1);
+}
+
+/**
+ * STG-F008: opening the picker lands on the recommended screen, so the 30+
+ * model catalogue and its filters only exist after stepping into "All models".
+ * Specs that assert on `model-option` rows go through here.
+ */
+export async function openModelCatalogue(page: Page) {
+  const dialog = page.locator("#chat-input-popover");
+  if (!(await dialog.isVisible())) {
+    await modelMenuTrigger(page).click();
+    await expect(dialog).toBeVisible();
+  }
+  await dialog.getByTestId("model-picker-open-all").click();
+  await expect(dialog.getByTestId("model-picker-scroll-region")).toBeVisible();
+  await expect.poll(() => dialog.getByTestId("model-option").count()).toBeGreaterThan(0);
+  return dialog;
+}
+
+/** Opens the picker and steps straight into the full catalogue. */
+export async function openModelPickerCatalogue(page: Page) {
+  await modelMenuTrigger(page).click();
+  await expect(page.locator("#chat-input-popover")).toBeVisible();
+  return openModelCatalogue(page);
+}
+
 export async function expectNoHorizontalOverflow(page: Page) {
   const dimensions = await page.evaluate(() => ({
     viewport: document.documentElement.clientWidth,

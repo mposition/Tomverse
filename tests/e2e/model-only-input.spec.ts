@@ -1,8 +1,9 @@
-import { expect, test, type Page } from "@playwright/test";
-import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
-
-const modelMenuTrigger = (page: Page) =>
-  page.locator('button[aria-controls="chat-input-popover"]').nth(1);
+import { expect, test } from "@playwright/test";
+import {
+  mockAuthenticatedApi,
+  openModelPickerCatalogue,
+  prepareGuestPage,
+} from "./support/app-fixtures";
 
 test.beforeEach(async ({ page }, testInfo) => {
   // MobileChatShell always hides the model-only input regardless of model
@@ -25,8 +26,7 @@ test("model-only follow-up input is hidden with one model and appears once a sec
   const modelOnlyInput = page.getByPlaceholder(/Ask only this model|이 모델에게만 추가 질문/);
   await expect(modelOnlyInput).toHaveCount(0);
 
-  await modelMenuTrigger(page).click();
-  const dialog = page.locator("#chat-input-popover");
+  const dialog = await openModelPickerCatalogue(page);
   const secondModel = dialog.locator(
     '[data-testid="model-option"][data-model-id="claude-sonnet-5"]'
   );

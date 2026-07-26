@@ -9,7 +9,12 @@ import {
   modelMatchesCapability,
   modelPickerCopy,
   modelPickerFeatureLabels,
+  modelPickerStepCopy,
+  modelPickerUseCaseLabels,
 } from "../lib/modelPickerPresentation.ts";
+import { MODEL_RECOMMENDATION_USE_CASES } from "../lib/modelRecommendations.ts";
+
+const PICKER_LANGUAGES = ["en", "ko", "zh", "fr", "de", "es", "pt"];
 
 test("every public model has a concise model-specific picker description", () => {
   for (const model of PUBLIC_MODELS) {
@@ -62,4 +67,68 @@ test("recommended and capability filters use model behavior", () => {
   assert.equal(modelPickerCopy.ko.personalizedRecommendations, "나에게 추천");
   assert.equal(modelPickerCopy.ko.tomverseRecommendations, "Tomverse 추천");
   assert.equal(modelPickerCopy.en.searchPlaceholder, "Search model names or tasks");
+});
+
+test("the two-step picker is fully translated in every supported language", () => {
+  const requiredKeys = Object.keys(modelPickerStepCopy.en);
+  assert.ok(requiredKeys.length > 0);
+
+  for (const language of PICKER_LANGUAGES) {
+    const copy = modelPickerStepCopy[language];
+    assert.ok(copy, `${language} is missing step copy`);
+    assert.deepEqual(
+      Object.keys(copy).sort(),
+      requiredKeys.slice().sort(),
+      `${language} step copy has different keys to en`
+    );
+    for (const [key, value] of Object.entries(copy)) {
+      assert.ok(value.trim().length > 0, `${language}.${key} is empty`);
+    }
+    // Interpolated copy must keep its placeholder, otherwise the count or the
+    // model cap silently disappears from the UI.
+    assert.ok(copy.resultCount.includes("{count}"), `${language} lost {count}`);
+    assert.ok(copy.activeFilters.includes("{count}"), `${language} lost {count}`);
+    assert.ok(copy.maxReached.includes("{max}"), `${language} lost {max}`);
+  }
+});
+
+test("recommendation reasons are task language, not provider names", () => {
+  const providerWords = [
+    "openai",
+    "gpt",
+    "anthropic",
+    "claude",
+    "google",
+    "gemini",
+    "deepseek",
+    "mistral",
+    "perplexity",
+    "qwen",
+    "grok",
+    "llama",
+  ];
+
+  for (const language of PICKER_LANGUAGES) {
+    const labels = modelPickerUseCaseLabels[language];
+    assert.ok(labels, `${language} is missing use-case labels`);
+    for (const useCase of MODEL_RECOMMENDATION_USE_CASES) {
+      assert.ok(
+        labels[useCase]?.trim().length > 0,
+        `${language}.${useCase} needs a task-language reason`
+      );
+    }
+    for (const extraSource of ["favorite", "personalized", "recent"]) {
+      assert.ok(labels[extraSource]?.trim().length > 0);
+    }
+    for (const [key, label] of Object.entries(labels)) {
+      const normalized = label.toLowerCase();
+      for (const word of providerWords) {
+        assert.equal(
+          normalized.includes(word),
+          false,
+          `${language}.${key} names a provider instead of the task`
+        );
+      }
+    }
+  }
 });

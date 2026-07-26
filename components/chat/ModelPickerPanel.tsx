@@ -286,7 +286,13 @@ export function ModelPickerPanel({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="mb-2 hidden shrink-0 items-center gap-2 px-1 py-1 md:flex">
+      {/*
+        One header for every layout. It used to be duplicated (a desktop-only
+        row plus a mobile-only row), which left two "back" controls in the DOM
+        with only one of them visible -- a trap for anything selecting by role
+        or test id.
+      */}
+      <div className="mb-2 flex shrink-0 items-center gap-2 px-1 py-1">
         <button
           type="button"
           data-testid="model-picker-back"
@@ -311,23 +317,6 @@ export function ModelPickerPanel({
           </span>
         </div>
       </div>
-
-      {showCatalogue && (
-        <div className="mb-2 flex shrink-0 items-center gap-2 px-1 md:hidden">
-          <button
-            type="button"
-            data-testid="model-picker-back-compact"
-            onClick={goBackToRecommended}
-            aria-label={stepCopy.backToRecommended}
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
-          >
-            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-          </button>
-          <h2 className="min-w-0 flex-1 truncate text-sm font-black text-zinc-900 dark:text-zinc-100">
-            {screenTitle}
-          </h2>
-        </div>
-      )}
 
       <div className="mb-2 shrink-0 px-1">
         <div className="relative">

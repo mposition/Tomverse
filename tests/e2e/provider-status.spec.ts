@@ -1,8 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
-import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
-
-const modelMenuTrigger = (page: Page) =>
-  page.locator('button[aria-controls="chat-input-popover"]').nth(1);
+import {
+  mockAuthenticatedApi,
+  openModelPickerCatalogue,
+  prepareGuestPage,
+} from "./support/app-fixtures";
 
 type MockStatus = "limited" | "unavailable";
 
@@ -44,7 +45,7 @@ test("limited provider health stays hidden from users", async ({ page }) => {
   if (await dismissOnboarding.isVisible()) {
     await dismissOnboarding.click();
   }
-  await page.locator('button[aria-controls="chat-input-popover"]').nth(1).click();
+  await openModelPickerCatalogue(page);
   await expect(page.locator('[title="limited"]')).toHaveCount(0);
 });
 
@@ -108,23 +109,28 @@ test("retired models stay out of the user model catalogue", async ({ page }) => 
     await dismissOnboarding.click();
   }
 
-  await page.locator('button[aria-controls="chat-input-popover"]').nth(1).click();
+  const dialog = await openModelPickerCatalogue(page);
   await expect(page.getByText("Gemini 2.5 Pro", { exact: true })).toHaveCount(0);
   await expect(
-    page
-      .getByRole("dialog", { name: "Choose AI models" })
-      .getByTestId("model-option")
-      .filter({ hasText: "Gemini 3.1 Pro" })
+    dialog.getByTestId("model-option").filter({ hasText: "Gemini 3.1 Pro" })
   ).toBeVisible();
 });
 
 test("clicking the banner's suggestion swaps the failed model instead of silently failing at the cap", async ({
   page,
-}) => {
+}, testInfo) => {
   // Regression test for a reported bug: with 3 models already selected (the
   // max), the banner's suggestion button used to call the plain add/toggle
   // handler, which rejects once at the cap -- so clicking it did nothing at
   // all, and the failed model stayed selected. It must swap instead.
+  //
+  // desktop-model-panel only exists in DesktopChatShell, so this has always
+  // been a desktop-shell assertion; without the guard it fails on the
+  // mobile-* projects for that reason alone.
+  test.skip(
+    testInfo.project.name.startsWith("mobile"),
+    "The 3-panel cap assertion only applies to the desktop chat shell."
+  );
   await mockAuthenticatedApi(page);
   await page.route("**/api/models/status", async (route) => {
     await route.fulfill({
@@ -145,14 +151,17 @@ test("clicking the banner's suggestion swaps the failed model instead of silentl
   });
 
   await page.goto("/chat?lang=en");
-  await modelMenuTrigger(page).click();
+  await openModelPickerCatalogue(page);
   await page
     .locator('[data-testid="model-option"][data-model-id="gemini-2-5-flash"]')
     .click();
   await page
     .locator('[data-testid="model-option"][data-model-id="claude-haiku-4-5"]')
     .click();
+  // Escape steps back to the recommendations first, then closes the picker.
   await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#chat-input-popover")).toBeHidden();
 
   await expect(page.getByTestId("desktop-model-panel")).toHaveCount(3);
 

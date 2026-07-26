@@ -1,14 +1,13 @@
 import { expect, test } from "@playwright/test";
 import {
   expectNoHorizontalOverflow,
+  modelMenuTrigger,
+  openModelPickerCatalogue,
   prepareGuestPage,
 } from "./support/app-fixtures";
 
 const actionMenuTrigger = (page: import("@playwright/test").Page) =>
   page.locator('button[aria-controls="chat-input-popover"]').first();
-
-const modelMenuTrigger = (page: import("@playwright/test").Page) =>
-  page.locator('button[aria-controls="chat-input-popover"]').nth(1);
 
 test.beforeEach(async ({ page }) => {
   await prepareGuestPage(page, "ko");
@@ -49,9 +48,7 @@ test("guest model selector opens a swap dialog once the 3-model cap is reached",
   // instead of adding a 4th one or asking the guest to sign in.
   await expect(page.getByTestId("desktop-model-panel")).toHaveCount(3);
 
-  await modelMenuTrigger(page).click();
-  const dialog = page.locator("#chat-input-popover");
-  await expect(dialog).toBeVisible();
+  const dialog = await openModelPickerCatalogue(page);
 
   const freeUnselectedModel = dialog
     .locator(
@@ -67,8 +64,7 @@ test("guest model selector opens a swap dialog once the 3-model cap is reached",
 });
 
 test("model names remain readable in the narrow selector", async ({ page }) => {
-  await modelMenuTrigger(page).click();
-  const dialog = page.locator("#chat-input-popover");
+  const dialog = await openModelPickerCatalogue(page);
   const longName = dialog
     .locator('[data-model-id="perplexity/sonar-deep-research"]')
     .getByTestId("model-option-name");
@@ -88,12 +84,9 @@ test("model names remain readable in the narrow selector", async ({ page }) => {
 });
 
 test("model picker prioritizes exact credits and shows the final input estimate", async ({ page }) => {
-  await modelMenuTrigger(page).click();
-  const dialog = page.locator("#chat-input-popover");
-
-  // Guests start with the brand-trio default already at the 3-model cap, so
-  // the recommendations card is hidden (it only shows below capacity).
-  await expect(dialog.getByTestId("recommended-model-option")).toHaveCount(0);
+  // STG-F008: the picker opens on recommendations, so the exact-credit
+  // assertions for the catalogue rows live one step in.
+  const dialog = await openModelPickerCatalogue(page);
   await expect.poll(() => dialog.getByTestId("model-option").count()).toBeGreaterThan(3);
 
   const gptMini = dialog.locator(
@@ -107,7 +100,13 @@ test("model picker prioritizes exact credits and shows the final input estimate"
   await expect(gptMini).not.toContainText("Best for");
   await expect(dialog.getByTestId("model-selection-summary")).toBeVisible();
 
+  // Escape is layered now: the first press returns to the recommended screen,
+  // the second closes the picker.
   await page.keyboard.press("Escape");
+  await expect(dialog.getByTestId("recommended-model-option").first()).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+
   await page.getByTestId("chat-textarea").fill("x".repeat(64_004));
   const estimate = page.getByTestId("request-credit-estimate");
   await expect(estimate).toContainText("1.5×");

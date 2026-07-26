@@ -1,6 +1,7 @@
 import { expect, type Page, test } from "@playwright/test";
 import {
   mockChatStream,
+  openModelPickerCatalogue,
   prepareGuestPage,
   sendChatMessage,
 } from "./support/app-fixtures";
@@ -10,9 +11,6 @@ const languageSelect = (page: Page) =>
     .locator("select")
     .filter({ has: page.locator('option[value="ko"]') })
     .last();
-
-const modelSelectorTrigger = (page: Page) =>
-  page.locator('button[aria-controls="chat-input-popover"]').nth(1);
 
 async function openMobileDrawerIfNeeded(page: Page) {
   if ((page.viewportSize()?.width ?? 1024) >= 768) return;
@@ -66,7 +64,7 @@ test("guest message appears immediately with mocked response", async ({ page }, 
 test("guest cannot activate a paid model", async ({ page }) => {
   await page.goto("/chat");
 
-  await modelSelectorTrigger(page).click();
+  await openModelPickerCatalogue(page);
   const selectedModels = page.locator('[data-testid="model-option"][aria-pressed="true"]');
   const selectedCountBefore = await selectedModels.count();
   const paidModel = page

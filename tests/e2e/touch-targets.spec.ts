@@ -1,5 +1,9 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
+import {
+  mockAuthenticatedApi,
+  openModelPickerCatalogue,
+  prepareGuestPage,
+} from "./support/app-fixtures";
 
 // STG-F005: core/repeating mobile controls must have a real (independent)
 // hit area of at least 44x44 CSS px, measured on the actual clickable
@@ -204,17 +208,31 @@ test.describe("mobile touch targets (STG-F005)", () => {
     await page.setViewportSize({ width: 320, height: 568 });
     await mockAuthenticatedApi(page, { selectedModels: ["gpt-5-4-mini"] });
     await page.goto("/chat");
-    await modelSelectorTrigger(page).click();
-    const dialog = page.locator("#chat-input-popover");
-    await expect(dialog).toBeVisible();
+    // STG-F008: the capability chips moved into the All-models filter sheet,
+    // so the picker has to be stepped through to reach them.
+    const dialog = await openModelPickerCatalogue(page);
 
+    const filterTrigger = dialog.getByTestId("model-filter-sheet-trigger");
+    await assertMinTouchTarget(filterTrigger, "filter sheet trigger");
+    await assertHitTestReturnsSelf(filterTrigger, "filter sheet trigger");
+    await assertMinTouchTarget(dialog.getByTestId("model-task-filter"), "task filter");
+
+    await filterTrigger.click();
+    const sheet = dialog.getByTestId("model-filter-sheet");
+    await expect(sheet).toBeVisible();
     // Selected by data-testid, not accessible name/text: the authenticated
     // mock's /api/user/settings response hardcodes language "ko", which
     // overrides the ?lang=en navigation once settings load, so the rendered
-    // label is not reliably "Recommended" in English.
-    const recommendedChip = dialog.getByTestId("capability-filter-recommended");
-    await assertMinTouchTarget(recommendedChip, "capability filter chip (Recommended)");
-    await assertHitTestReturnsSelf(recommendedChip, "capability filter chip (Recommended)");
+    // label is not reliably "Web search" in English.
+    const capabilityChip = sheet.getByTestId("capability-filter-search");
+    await assertMinTouchTarget(capabilityChip, "capability filter chip (Web search)");
+    await assertHitTestReturnsSelf(capabilityChip, "capability filter chip (Web search)");
+    await assertMinTouchTarget(
+      sheet.getByTestId("model-filter-sheet-close"),
+      "filter sheet close"
+    );
+    await sheet.getByTestId("model-filter-sheet-close").click();
+    await expect(sheet).toHaveCount(0);
 
     const favoriteStar = dialog.getByTestId("model-favorite-star").first();
     await assertMinTouchTarget(favoriteStar, "model row favorite star");

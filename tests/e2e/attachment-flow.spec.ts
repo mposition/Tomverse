@@ -5,6 +5,7 @@ import {
   mockAttachmentUpload,
   mockAuthenticatedApi,
   mockChatStream,
+  openModelCatalogue,
   prepareGuestPage,
   type AttachmentUploadQaState,
 } from "./support/app-fixtures";
@@ -149,6 +150,7 @@ test.describe("attachment UX", () => {
       .getByRole("dialog", { name: /더 많은 작업|More actions|更多操作/ })
       .getByRole("button", { name: /AI 모델 선택|Choose AI models|选择 AI 模型/ })
       .click();
+    await openModelCatalogue(page);
 
     const textOnlyLlama = page.locator(
       '[data-testid="model-option"][data-model-id="llama-3-1"]'
@@ -168,10 +170,14 @@ test.describe("attachment UX", () => {
       .getByRole("dialog", { name: /더 많은 작업|More actions|更多操作/ })
       .getByRole("button", { name: /AI 모델 선택|Choose AI models|选择 AI 模型/ })
       .click();
+    await openModelCatalogue(page);
     await page
       .locator('[data-testid="model-option"][data-model-id="llama-3-1"]')
       .click();
+    // Escape steps back to the recommendations first, then closes the picker.
     await page.keyboard.press("Escape");
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#chat-input-popover")).toBeHidden();
 
     await attachFromComputer(page, {
       name: "selected-model-warning.png",

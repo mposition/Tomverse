@@ -1020,25 +1020,76 @@ const checks = [
   {
     name: "Chat model picker hides internal classes and shows exact credit costs",
     file: "components/chat/ChatInput.tsx",
-    test: (source) =>
-      source.includes('testId="model-credit-badge"') &&
-      source.includes("CreditCostBadge") &&
-      read("components/credits/CreditCostBadge.tsx").includes(
-        'data-testid="credit-coin-icon"'
-      ) &&
-      source.includes("getModelPickerDescription") &&
-      source.includes("getModelPickerFeatures") &&
-      source.includes('data-testid="model-recommendations"') &&
-      source.includes('data-testid="recommended-model-option"') &&
-      source.includes('data-testid="model-search-input"') &&
-      source.includes('data-testid="model-selection-summary"') &&
-      source.includes('data-testid="request-credit-estimate"') &&
-      !source.includes('data-testid="show-all-models"') &&
-      !source.includes('option value="Research"') &&
-      !source.includes("usageClassFilter") &&
-      read("components/auth/AuthButton.tsx").includes(
-        "getModelUsageProfile(model)"
-      ),
+    test: (source) => {
+      const panel = read("components/chat/ModelPickerPanel.tsx");
+      const catalogue = read("components/chat/ModelCatalogue.tsx");
+      // STG-F008 moved the 30+ model catalogue behind an "All models" step.
+      // The 2026-07-17 version of that idea was reverted because the collapsed
+      // state also hid the search box, leaving a beginner with three models and
+      // no way to look for a fourth -- so the search entry point must render
+      // before the branch that swaps in the catalogue, on both steps.
+      const searchIndex = panel.indexOf('data-testid="model-search-input"');
+      const catalogueBranchIndex = panel.indexOf("showCatalogue ? (");
+      return (
+        catalogue.includes('testId="model-credit-badge"') &&
+        catalogue.includes("CreditCostBadge") &&
+        panel.includes("CreditCostBadge") &&
+        read("components/credits/CreditCostBadge.tsx").includes(
+          'data-testid="credit-coin-icon"'
+        ) &&
+        catalogue.includes("getModelPickerDescription") &&
+        catalogue.includes("getModelPickerFeatures") &&
+        // Recommendation reasons come from the task-language label table, never
+        // from provider names or an absolute quality ranking.
+        panel.includes("modelPickerUseCaseLabels") &&
+        panel.includes('data-testid="model-recommendations"') &&
+        panel.includes('data-testid="recommended-model-option"') &&
+        panel.includes('data-testid="model-picker-open-all"') &&
+        panel.includes('data-testid="model-selection-summary"') &&
+        searchIndex > 0 &&
+        catalogueBranchIndex > 0 &&
+        searchIndex < catalogueBranchIndex &&
+        // The advanced filters were moved into a sheet, not deleted.
+        catalogue.includes('data-testid="model-filter-sheet"') &&
+        catalogue.includes('data-testid="model-filter-reset-all"') &&
+        catalogue.includes('data-testid="model-catalogue-result-count"') &&
+        source.includes('data-testid="request-credit-estimate"') &&
+        !panel.includes('data-testid="show-all-models"') &&
+        !catalogue.includes('option value="Research"') &&
+        !catalogue.includes("usageClassFilter") &&
+        read("components/auth/AuthButton.tsx").includes(
+          "getModelUsageProfile(model)"
+        )
+      );
+    },
+  },
+  {
+    name: "Model picker analytics records funnel steps without search terms",
+    file: "components/chat/ModelPickerPanel.tsx",
+    test: (source) => {
+      const shared = read("lib/productAnalyticsShared.ts");
+      const migration = read(
+        "prisma/migrations/20260726120000_add_model_picker_funnel_events/migration.sql"
+      );
+      const searchTracking = source.slice(
+        source.indexOf("const handleSearchChange"),
+        source.indexOf("const handleFilterSheetOpenChange")
+      );
+      return (
+        // Only the fact that a search happened is sent -- the query never
+        // reaches trackProductEvent.
+        searchTracking.includes('onTrackEvent("model_picker_search_used")') &&
+        !searchTracking.includes("search_query") &&
+        !searchTracking.includes("onTrackEvent(\"model_picker_search_used\", {") &&
+        shared.includes('"model_picker_opened"') &&
+        shared.includes('"model_picker_all_opened"') &&
+        shared.includes('"model_picker_selection_confirmed"') &&
+        shared.includes('"model_picker_abandoned"') &&
+        shared.includes("recommendation_rank: z.number().int().min(1).max(8)") &&
+        migration.includes("'model_picker_opened'") &&
+        migration.includes("'model_picker_abandoned'")
+      );
+    },
   },
   {
     name: "Guest chat entry uses a non-blocking inline guide with truthful capabilities",
