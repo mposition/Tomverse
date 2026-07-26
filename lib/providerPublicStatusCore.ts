@@ -17,6 +17,8 @@ export type PublicStatusReasonCode =
   | "RECENT_FAILURE_EVIDENCE"
   | "ELEVATED_LATENCY"
   | "RECENT_SUCCESS_CONFIRMED"
+  | "PROBE_SUCCESS_CONFIRMED"
+  | "PROBE_REPEATED_FAILURE"
   | "NO_SUCCESS_RECORDED"
   | "SUCCESS_STALE"
   | "HEALTH_DATA_UNAVAILABLE";
@@ -57,10 +59,24 @@ export type PublicProviderStatusInput = {
    *  folded into the core function (rather than composed ad hoc per page) so
    *  the public page and admin panel can't disagree about it. */
   hasActiveModelIncident?: boolean;
+  /** AUD-R001: evidence from scheduled synthetic probes, kept in separate fields
+   *  from the real-traffic ones above so the two streams can never silently
+   *  overwrite each other -- see lib/providerMonitoring.ts's
+   *  recordProviderProbeSuccess/Failure. All default to "no probe evidence",
+   *  so every existing caller/test keeps behaving exactly as before. */
+  lastProbeSuccessAt?: Date | null;
+  lastProbeFailureAt?: Date | null;
+  consecutiveProbeFailures?: number;
+  /** How many consecutive probe failures (with no fresh real success) escalate
+   *  probe evidence to "incident" rather than just "degraded". Deliberately a
+   *  higher bar than a single failed probe (principle #4: one probe failure
+   *  never alone means an outage). */
+  probeIncidentConsecutiveFailureThreshold?: number;
 };
 
 export const DEFAULT_PUBLIC_STATUS_FRESHNESS_MINUTES = 30;
 export const DEFAULT_INCIDENT_CONSECUTIVE_FAILURE_THRESHOLD = 3;
+export const DEFAULT_PROBE_INCIDENT_CONSECUTIVE_FAILURE_THRESHOLD = 3;
 
 const isValidPast = (value: Date | null, now: Date): value is Date =>
   value !== null && !Number.isNaN(value.getTime()) && value.getTime() <= now.getTime();
@@ -84,6 +100,14 @@ export const evaluatePublicProviderStatus = ({
   incidentConsecutiveFailureThreshold = DEFAULT_INCIDENT_CONSECUTIVE_FAILURE_THRESHOLD,
   elevatedLatency = false,
   hasActiveModelIncident = false,
+  lastProbeSuccessAt = null,
+  // lastProbeFailureAt is accepted on the input type for API completeness
+  // (mirroring lastFailureAt) and future use, but consecutiveProbeFailures
+  // alone is sufficient evidence for the merge policy below -- both fields
+  // are written atomically together by recordProviderProbeFailure, so there
+  // is no case where one is stale relative to the other.
+  consecutiveProbeFailures = 0,
+  probeIncidentConsecutiveFailureThreshold = DEFAULT_PROBE_INCIDENT_CONSECUTIVE_FAILURE_THRESHOLD,
 }: PublicProviderStatusInput): PublicProviderStatusResult => {
   const safeFreshnessMinutes =
     Number.isFinite(freshnessMinutes) && freshnessMinutes > 0
@@ -92,10 +116,23 @@ export const evaluatePublicProviderStatus = ({
 
   const validSuccessAt = isValidPast(lastSuccessAt, now) ? lastSuccessAt : null;
   const validFailureAt = isValidPast(lastFailureAt, now) ? lastFailureAt : null;
+  const validProbeSuccessAt = isValidPast(lastProbeSuccessAt ?? null, now)
+    ? lastProbeSuccessAt
+    : null;
 
   const isFresh =
     validSuccessAt !== null &&
     minutesBetween(now, validSuccessAt) <= safeFreshnessMinutes;
+
+  const isFreshFromProbe =
+    validProbeSuccessAt !== null &&
+    minutesBetween(now, validProbeSuccessAt) <= safeFreshnessMinutes;
+
+  // Either stream is legitimate "the provider is alive" evidence for the
+  // purpose of clearing "unknown" -- this is the actual AUD-R001 fix (idle
+  // providers that only ever get probed, never used, no longer stay
+  // permanently unknown).
+  const isFreshFromEitherStream = isFresh || isFreshFromProbe;
 
   // The most recent *kind* of event we have evidence for -- lets a stale-but-old
   // success never mask a more recent failure (and vice versa).
@@ -111,7 +148,7 @@ export const evaluatePublicProviderStatus = ({
     status,
     reasonCode,
     reasonText,
-    isFresh,
+    isFresh: isFreshFromEitherStream,
     freshnessMinutes: safeFreshnessMinutes,
   });
 
@@ -180,6 +217,8 @@ export const evaluatePublicProviderStatus = ({
   }
 
   // 7. Caller-supplied latency signal on an otherwise-healthy, recent success.
+  //    Gated on real-traffic freshness specifically -- a probe can't observe
+  //    real-user latency, only real traffic can.
   if (elevatedLatency && isFresh) {
     return result(
       "degraded",
@@ -188,7 +227,38 @@ export const evaluatePublicProviderStatus = ({
     );
   }
 
-  // 8. Fresh, valid success evidence with nothing above overriding it.
+  // 8-9. AUD-R001 synthetic-probe evidence. Only consulted once every
+  //      real-traffic signal above has had its say, and only when real
+  //      traffic doesn't already have a fresh success of its own -- a
+  //      flaky probe must never override or race with an actual working
+  //      provider (principle #3: don't let absence-of-real-failure be
+  //      silently overridden by probe noise).
+  if (!isFresh) {
+    const safeConsecutiveProbeFailures = Math.max(
+      0,
+      Math.floor(consecutiveProbeFailures)
+    );
+    if (
+      safeConsecutiveProbeFailures >=
+      Math.max(1, Math.floor(probeIncidentConsecutiveFailureThreshold))
+    ) {
+      return result(
+        "incident",
+        "PROBE_REPEATED_FAILURE",
+        `${safeConsecutiveProbeFailures} consecutive automated probes have failed with no fresh real-traffic success to contradict them.`
+      );
+    }
+    if (safeConsecutiveProbeFailures >= 1) {
+      return result(
+        "degraded",
+        "PROBE_REPEATED_FAILURE",
+        `The most recent automated probe failed (${safeConsecutiveProbeFailures} consecutive), though this hasn't yet reached the incident threshold.`
+      );
+    }
+  }
+
+  // 10. Fresh success evidence from either real traffic or a synthetic
+  //     probe, with nothing above overriding it.
   if (isFresh) {
     return result(
       "operational",
@@ -196,9 +266,16 @@ export const evaluatePublicProviderStatus = ({
       `A successful request was recorded within the last ${safeFreshnessMinutes} minutes.`
     );
   }
+  if (isFreshFromProbe) {
+    return result(
+      "operational",
+      "PROBE_SUCCESS_CONFIRMED",
+      `An automated probe succeeded within the last ${safeFreshnessMinutes} minutes.`
+    );
+  }
 
-  // 9. No success evidence at all.
-  if (validSuccessAt === null) {
+  // 11. No success evidence at all, from either stream.
+  if (validSuccessAt === null && validProbeSuccessAt === null) {
     return result(
       "unknown",
       "NO_SUCCESS_RECORDED",
@@ -206,7 +283,8 @@ export const evaluatePublicProviderStatus = ({
     );
   }
 
-  // 10. Success evidence exists but is older than the freshness window.
+  // 12. Success evidence exists in at least one stream but is older than the
+  //     freshness window in both.
   return result(
     "unknown",
     "SUCCESS_STALE",

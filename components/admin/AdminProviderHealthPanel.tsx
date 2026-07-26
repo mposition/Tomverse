@@ -1123,6 +1123,17 @@ export function AdminProviderHealthPanel({
             Admin API refreshes every 30 seconds · Updated{" "}
             {dateLabel(dashboard.generatedAt)}
           </p>
+          <p
+            className={`mt-1 text-xs ${
+              dashboard.probeCostCapMicroUsd > 0 &&
+              dashboard.probeCostTodayMicroUsd >= dashboard.probeCostCapMicroUsd
+                ? "font-bold text-amber-300"
+                : "text-zinc-500"
+            }`}
+          >
+            Synthetic probe spend today: {money(dashboard.probeCostTodayMicroUsd)} of{" "}
+            {money(dashboard.probeCostCapMicroUsd)} daily cap
+          </p>
         </div>
         <button
           type="button"

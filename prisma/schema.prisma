@@ -314,9 +314,51 @@ model ProviderHealthState {
   lastSuccessAt       DateTime?
   lastFailureAt       DateTime?
   consecutiveFailures Int       @default(0)
+  // AUD-R001: synthetic-probe evidence, kept in separate fields from the
+  // real-user-traffic ones above so the two evidence streams never
+  // overwrite each other -- recordProviderProbeSuccess/Failure only ever
+  // touch these three, recordProviderSuccess/Failure only ever touch the
+  // three above. lib/providerPublicStatusCore.ts merges both explicitly.
+  lastProbeSuccessAt       DateTime?
+  lastProbeFailureAt       DateTime?
+  consecutiveProbeFailures Int       @default(0)
   updatedAt           DateTime  @updatedAt
 
   @@index([lastSuccessAt])
+  @@index([lastProbeSuccessAt])
+}
+
+// One row per (provider, model) synthetic probe attempt (AUD-R001). Distinct
+// from ProviderHealthCheck, which is an admin-triggered manual "is the API
+// key configured" check that never calls a provider live -- this table is
+// the automated scheduled prober's own attempt log. Deliberately excludes
+// anything sensitive: no API keys, no raw provider response body, no stack
+// traces, no user content -- enforced by the row-builder never receiving
+// those values in the first place (see lib/providerProbe.ts), and checked
+// by a static-scan unit test.
+model ProviderProbeResult {
+  id                 String   @id @default(cuid())
+  /// The owning ScheduledJobRun.id for this probe cycle.
+  runId              String
+  provider           String
+  modelId            String
+  environment        String
+  startedAt          DateTime
+  completedAt        DateTime
+  success            Boolean
+  timedOut           Boolean  @default(false)
+  latencyMs          Int?
+  /// Public-safe classification only, e.g. "TIMEOUT" | "AUTH" | "RATE_LIMIT" |
+  /// "SERVER_ERROR" | "NETWORK" | "UNKNOWN" -- never a raw provider message.
+  errorClassification String?
+  /// Sanitized diagnostic code in the same shape providerDiagnosticCode()
+  /// produces (e.g. "PROVIDER_PROBE_FAILED.ECONNRESET.HTTP_503.RETRYABLE").
+  diagnosticCode     String?
+  createdAt          DateTime @default(now())
+
+  @@index([provider, createdAt])
+  @@index([provider, modelId, createdAt])
+  @@index([runId])
 }
 
 model ChatRequestLease {

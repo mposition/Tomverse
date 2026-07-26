@@ -23,6 +23,10 @@ export type ProviderUsageRecordInput = {
   cachedInputCostMicroUsd: number;
   outputCostMicroUsd: number;
   date?: Date;
+  /** Defaults to "internal" (non-billed internal calls, e.g. conversation
+   *  titles). AUD-R001's synthetic provider probes pass "probe" so their
+   *  cost stays queryable/cappable separately from other internal usage. */
+  source?: "internal" | "probe";
 };
 
 export async function recordInternalProviderUsage({
@@ -36,6 +40,7 @@ export async function recordInternalProviderUsage({
   cachedInputCostMicroUsd,
   outputCostMicroUsd,
   date,
+  source = "internal",
 }: ProviderUsageRecordInput) {
   const usageDate = dayStartUtc(date);
   const safeInputTokens = Math.max(0, Math.min(2_000_000_000, Math.round(inputTokens)));
@@ -54,14 +59,14 @@ export async function recordInternalProviderUsage({
       provider_modelId_source_date: {
         provider,
         modelId,
-        source: "internal",
+        source,
         date: usageDate,
       },
     },
     create: {
       provider,
       modelId,
-      source: "internal",
+      source,
       date: usageDate,
       requestCount: 1,
       inputTokens: safeInputTokens,
@@ -112,6 +117,22 @@ export async function getInternalProviderUsageSummary({
     outputTokens: aggregate._sum.outputTokens || 0,
     estimatedCostMicroUsd: aggregate._sum.estimatedCostMicroUsd || 0,
   };
+}
+
+/**
+ * Total synthetic-probe spend across every provider for a given UTC day.
+ * Used by the AUD-R001 probe route to enforce a daily cost ceiling before
+ * running each cycle -- deliberately summed across providers (not per
+ * provider) since the cap is a single overall budget for probing, not a
+ * per-provider one.
+ */
+export async function getProbeUsageCostTodayMicroUsd(date = new Date()): Promise<number> {
+  const usageDate = dayStartUtc(date);
+  const aggregate = await prisma.providerDailyUsage.aggregate({
+    where: { source: "probe", date: usageDate },
+    _sum: { estimatedCostMicroUsd: true },
+  });
+  return aggregate._sum.estimatedCostMicroUsd || 0;
 }
 
 export async function recordProviderReportedUsage({

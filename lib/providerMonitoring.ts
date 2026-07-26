@@ -26,11 +26,14 @@ import {
 } from "@/lib/providerHealthPolicyCore";
 import {
   DEFAULT_INCIDENT_CONSECUTIVE_FAILURE_THRESHOLD,
+  DEFAULT_PROBE_INCIDENT_CONSECUTIVE_FAILURE_THRESHOLD,
   DEFAULT_PUBLIC_STATUS_FRESHNESS_MINUTES,
   evaluatePublicProviderStatus,
   type PublicProviderStatus,
   type PublicStatusReasonCode,
 } from "@/lib/providerPublicStatusCore";
+import { probeDailyCostCapMicroUsd } from "@/lib/providerProbe";
+import { getProbeUsageCostTodayMicroUsd } from "@/lib/providerUsageAccounting";
 
 export type ProviderHealthStatus = "available" | "limited" | "outage";
 
@@ -85,6 +88,11 @@ export type ProviderHealthRow = {
   lastSuccessAt: string | null;
   lastFailureAt: string | null;
   consecutiveFailures: number;
+  /** AUD-R001: synthetic-probe evidence, kept separate from the real-traffic
+   *  fields above -- see recordProviderProbeSuccess/Failure. */
+  lastProbeSuccessAt: string | null;
+  lastProbeFailureAt: string | null;
+  consecutiveProbeFailures: number;
   publicStatus: PublicProviderStatus;
   publicStatusReasonCode: PublicStatusReasonCode;
   publicStatusReasonText: string;
@@ -141,6 +149,12 @@ export type ProviderHealthDashboard = {
     slack: boolean;
     discord: boolean;
   };
+  /** AUD-R001: today's synthetic-probe spend against the configured daily
+   *  cap, so operators can see probe cost without a direct DB query -- see
+   *  app/api/internal/provider-probe/check/route.ts, which enforces this
+   *  same cap before running each cycle. */
+  probeCostTodayMicroUsd: number;
+  probeCostCapMicroUsd: number;
 };
 
 export const PROVIDER_DISPLAY_NAMES: Record<AiProvider, string> = {
@@ -227,6 +241,14 @@ const INCIDENT_CONSECUTIVE_FAILURE_THRESHOLD = positiveInteger(
   DEFAULT_INCIDENT_CONSECUTIVE_FAILURE_THRESHOLD
 );
 
+// AUD-R001: how many consecutive synthetic-probe failures (with no fresh
+// real-traffic success) escalate probe evidence to "incident" rather than
+// just "degraded" -- see evaluatePublicProviderStatus's probe merge policy.
+const PROBE_INCIDENT_CONSECUTIVE_FAILURE_THRESHOLD = positiveInteger(
+  process.env.PROVIDER_PROBE_INCIDENT_THRESHOLD,
+  DEFAULT_PROBE_INCIDENT_CONSECUTIVE_FAILURE_THRESHOLD
+);
+
 const publicStatusFreshnessMinutesFor = (provider: AiProvider) =>
   positiveInteger(
     process.env[`PROVIDER_${envProvider(provider)}_PUBLIC_STATUS_FRESHNESS_MINUTES`],
@@ -308,7 +330,7 @@ const alertPolicyFor = async (provider: AiProvider) => {
 const balanceUsdFor = (provider: AiProvider) =>
   positiveNumber(process.env[`PROVIDER_${envProvider(provider)}_BALANCE_USD`]);
 
-const errorExplanationFor = (code: string | null) => {
+export const errorExplanationFor = (code: string | null) => {
   if (!code) return "No provider error code was recorded.";
   if (isEmptyResponseDiagnostic(code)) {
     return "The model stream completed without producing displayable text. This is tracked as a model-level transient warning and does not by itself limit the entire provider.";
@@ -766,6 +788,64 @@ const recordProviderHealthHeartbeat = async (
   `;
 };
 
+// AUD-R001: the synthetic-probe counterpart to recordProviderHealthHeartbeat.
+// Deliberately touches only the probe-specific columns -- never the
+// lastSuccessAt/lastFailureAt/consecutiveFailures fields real chat traffic
+// writes to -- so the two evidence streams can never overwrite each other.
+const recordProviderHealthProbeHeartbeat = async (
+  provider: AiProvider,
+  outcome: "success" | "failure"
+) => {
+  if (outcome === "success") {
+    await prisma.$executeRaw`
+      INSERT INTO "ProviderHealthState" ("provider", "lastProbeSuccessAt", "consecutiveProbeFailures", "updatedAt")
+      VALUES (${provider}, NOW(), 0, NOW())
+      ON CONFLICT ("provider")
+      DO UPDATE SET
+        "lastProbeSuccessAt" = NOW(),
+        "consecutiveProbeFailures" = 0,
+        "updatedAt" = NOW()
+    `;
+    return;
+  }
+  await prisma.$executeRaw`
+    INSERT INTO "ProviderHealthState" ("provider", "lastProbeFailureAt", "consecutiveProbeFailures", "updatedAt")
+    VALUES (${provider}, NOW(), 1, NOW())
+    ON CONFLICT ("provider")
+    DO UPDATE SET
+      "lastProbeFailureAt" = NOW(),
+      "consecutiveProbeFailures" = "ProviderHealthState"."consecutiveProbeFailures" + 1,
+      "updatedAt" = NOW()
+  `;
+};
+
+/** Records a successful synthetic probe attempt (AUD-R001). Never called from
+ *  real chat traffic -- see recordProviderSuccess for that. */
+export const recordProviderProbeSuccess = async (provider: AiProvider) => {
+  await Promise.all([
+    incrementBucket(`provider:${provider}:probe-success`, "provider-health-day"),
+    incrementBucket(
+      `provider:${provider}:probe-success`,
+      "provider-health-5m",
+      1,
+      periodStart("five-minute")
+    ),
+    recordProviderHealthProbeHeartbeat(provider, "success"),
+  ]);
+};
+
+/** Records a failed synthetic probe attempt (AUD-R001). Deliberately has no
+ *  Slack/email alerting side effect -- a single probe failure must never
+ *  page anyone (that would violate "one probe failure never alone means an
+ *  outage"); repeated probe failures surface through the public/admin
+ *  status pages via evaluatePublicProviderStatus instead. */
+export const recordProviderProbeFailure = async (provider: AiProvider) => {
+  await Promise.all([
+    incrementBucket(`provider:${provider}:probe-failure`, "provider-health-day"),
+    recordProviderHealthProbeHeartbeat(provider, "failure"),
+  ]);
+};
+
 export const recordProviderSuccess = async (provider: AiProvider) => {
   await Promise.all([
     incrementBucket(`provider:${provider}:success`, "provider-health-day"),
@@ -1192,6 +1272,9 @@ export const getProviderHealthDashboard = async (
         lastSuccessAt: true,
         lastFailureAt: true,
         consecutiveFailures: true,
+        lastProbeSuccessAt: true,
+        lastProbeFailureAt: true,
+        consecutiveProbeFailures: true,
       },
     }),
   ]);
@@ -1507,6 +1590,7 @@ export const getProviderHealthDashboard = async (
     // freshness check reads from.
     const healthState = healthStateByProvider.get(provider) ?? null;
     const consecutiveFailures = healthState?.consecutiveFailures ?? 0;
+    const consecutiveProbeFailures = healthState?.consecutiveProbeFailures ?? 0;
     const freshnessMinutes = publicStatusFreshnessMinutesFor(provider);
     const publicStatusResult = evaluatePublicProviderStatus({
       now,
@@ -1519,6 +1603,10 @@ export const getProviderHealthDashboard = async (
       hasActiveModelIncident: modelIncidents.some(
         (incident) => incident.failureCount5m >= 3
       ),
+      lastProbeSuccessAt: healthState?.lastProbeSuccessAt ?? null,
+      lastProbeFailureAt: healthState?.lastProbeFailureAt ?? null,
+      consecutiveProbeFailures,
+      probeIncidentConsecutiveFailureThreshold: PROBE_INCIDENT_CONSECUTIVE_FAILURE_THRESHOLD,
     });
 
     return {
@@ -1541,6 +1629,9 @@ export const getProviderHealthDashboard = async (
       lastSuccessAt: healthState?.lastSuccessAt?.toISOString() ?? null,
       lastFailureAt: healthState?.lastFailureAt?.toISOString() ?? null,
       consecutiveFailures,
+      lastProbeSuccessAt: healthState?.lastProbeSuccessAt?.toISOString() ?? null,
+      lastProbeFailureAt: healthState?.lastProbeFailureAt?.toISOString() ?? null,
+      consecutiveProbeFailures,
       publicStatus: publicStatusResult.status,
       publicStatusReasonCode: publicStatusResult.reasonCode,
       publicStatusReasonText: publicStatusResult.reasonText,
@@ -1586,6 +1677,12 @@ export const getProviderHealthDashboard = async (
     };
   });
 
+  // AUD-R001: best-effort -- a failure here must never break the whole
+  // dashboard over a secondary operational metric.
+  const probeCostTodayMicroUsd = await getProbeUsageCostTodayMicroUsd(now).catch(
+    () => 0
+  );
+
   return {
     generatedAt: now.toISOString(),
     providers,
@@ -1599,5 +1696,7 @@ export const getProviderHealthDashboard = async (
       slack: !!process.env.SLACK_WEBHOOK_URL,
       discord: !!process.env.DISCORD_WEBHOOK_URL,
     },
+    probeCostTodayMicroUsd,
+    probeCostCapMicroUsd: probeDailyCostCapMicroUsd(),
   };
 };

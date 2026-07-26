@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   DEFAULT_INCIDENT_CONSECUTIVE_FAILURE_THRESHOLD,
+  DEFAULT_PROBE_INCIDENT_CONSECUTIVE_FAILURE_THRESHOLD,
   evaluatePublicProviderStatus,
   summarizeMonitoredStatuses,
   type PublicProviderStatusInput,
@@ -205,6 +206,105 @@ test("summarizeMonitoredStatuses surfaces incident above everything else", () =>
     "operational",
   ]);
   assert.equal(summary.tone, "incident");
+});
+
+// --- AUD-R001: synthetic-probe evidence merge policy ----------------------
+
+test("no real evidence but a fresh probe success -> operational (PROBE_SUCCESS_CONFIRMED)", () => {
+  const result = evaluatePublicProviderStatus({
+    ...baseInput,
+    lastProbeSuccessAt: minutesAgo(5),
+  });
+  assert.equal(result.status, "operational");
+  assert.equal(result.reasonCode, "PROBE_SUCCESS_CONFIRMED");
+  assert.equal(result.isFresh, true);
+});
+
+test("a single probe failure with no real success -> degraded, not incident", () => {
+  const result = evaluatePublicProviderStatus({
+    ...baseInput,
+    consecutiveProbeFailures: 1,
+  });
+  assert.equal(result.status, "degraded");
+  assert.equal(result.reasonCode, "PROBE_REPEATED_FAILURE");
+});
+
+test("repeated probe failures at the threshold with no real success -> incident", () => {
+  const result = evaluatePublicProviderStatus({
+    ...baseInput,
+    consecutiveProbeFailures: DEFAULT_PROBE_INCIDENT_CONSECUTIVE_FAILURE_THRESHOLD,
+  });
+  assert.equal(result.status, "incident");
+  assert.equal(result.reasonCode, "PROBE_REPEATED_FAILURE");
+});
+
+test("probe failures below the incident threshold stay degraded, never escalate alone", () => {
+  const result = evaluatePublicProviderStatus({
+    ...baseInput,
+    consecutiveProbeFailures: DEFAULT_PROBE_INCIDENT_CONSECUTIVE_FAILURE_THRESHOLD - 1,
+  });
+  assert.equal(result.status, "degraded");
+});
+
+test("a fresh real success overrides probe failures entirely", () => {
+  const result = evaluatePublicProviderStatus({
+    ...baseInput,
+    lastSuccessAt: minutesAgo(2),
+    consecutiveProbeFailures: 10,
+  });
+  assert.equal(result.status, "operational");
+  assert.equal(result.reasonCode, "RECENT_SUCCESS_CONFIRMED");
+});
+
+test("probe evidence never overrides an existing real-traffic incident or degraded verdict", () => {
+  const incident = evaluatePublicProviderStatus({
+    ...baseInput,
+    lastSuccessAt: minutesAgo(60),
+    lastFailureAt: minutesAgo(1),
+    consecutiveFailures: DEFAULT_INCIDENT_CONSECUTIVE_FAILURE_THRESHOLD,
+    lastProbeSuccessAt: minutesAgo(1),
+  });
+  assert.equal(incident.status, "incident");
+  assert.equal(incident.reasonCode, "CONSECUTIVE_FAILURES_THRESHOLD");
+
+  const degraded = evaluatePublicProviderStatus({
+    ...baseInput,
+    lastSuccessAt: minutesAgo(20),
+    lastFailureAt: minutesAgo(2),
+    lastProbeSuccessAt: minutesAgo(1),
+  });
+  assert.equal(degraded.status, "degraded");
+  assert.equal(degraded.reasonCode, "RECENT_FAILURE_EVIDENCE");
+});
+
+test("both real and probe evidence stale -> unknown (SUCCESS_STALE)", () => {
+  const result = evaluatePublicProviderStatus({
+    ...baseInput,
+    lastSuccessAt: minutesAgo(120),
+    lastProbeSuccessAt: minutesAgo(90),
+  });
+  assert.equal(result.status, "unknown");
+  assert.equal(result.reasonCode, "SUCCESS_STALE");
+});
+
+test("neither real nor probe evidence ever recorded -> unknown (NO_SUCCESS_RECORDED)", () => {
+  const result = evaluatePublicProviderStatus({ ...baseInput });
+  assert.equal(result.status, "unknown");
+  assert.equal(result.reasonCode, "NO_SUCCESS_RECORDED");
+});
+
+test("a future or invalid probe success timestamp is never treated as fresh evidence", () => {
+  const future = evaluatePublicProviderStatus({
+    ...baseInput,
+    lastProbeSuccessAt: minutesFromNow(10),
+  });
+  assert.notEqual(future.status, "operational");
+
+  const invalid = evaluatePublicProviderStatus({
+    ...baseInput,
+    lastProbeSuccessAt: new Date(Number.NaN),
+  });
+  assert.notEqual(invalid.status, "operational");
 });
 
 // --- E2E-style fixture matrix from the report -----------------------------

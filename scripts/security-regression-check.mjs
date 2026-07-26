@@ -333,6 +333,48 @@ const checks = [
       source.includes('"Cache-Control": "no-store"'),
   },
   {
+    name: "Synthetic provider probe (AUD-R001) is authenticated, bounded, and leaks no secrets",
+    file: "app/api/internal/provider-probe/check/route.ts",
+    test: (source) => {
+      const probe = read("lib/providerProbe.ts");
+      const errorClassification = read("lib/providerErrorClassification.ts");
+      const cron = read("railway.provider-probe.json");
+      const runner = read("scripts/run-provider-probe.mjs");
+      return (
+        // Constant-time secret comparison, and an unauthenticated request
+        // gets an unrevealing 404 rather than 401/403 -- this endpoint must
+        // never be discoverable or brute-forceable from outside.
+        source.includes("timingSafeEqual") &&
+        source.includes("PROVIDER_PROBE_SECRET") &&
+        source.includes('{ error: "Not found." }, { status: 404 }') &&
+        // The provider list is the server's own fixed registry, never a
+        // client-supplied value -- no SSRF-style dynamic provider/endpoint.
+        source.includes("MONITORED_PROVIDERS") &&
+        // Overlap guard (no duplicate concurrent runs) and a daily cost cap
+        // enforced before any provider is called.
+        source.includes("OVERLAP_GUARD_MS") &&
+        source.includes("probeDailyCostCapMicroUsd") &&
+        // Hard per-call timeout, zero internal retries (the next cron tick
+        // is the retry, so a flaky provider can't cause a retry storm), and
+        // no live provider call outside production without an explicit
+        // opt-in -- both required regardless of which internal route calls
+        // into lib/providerProbe.ts.
+        probe.includes("PROBE_TIMEOUT_MS") &&
+        probe.includes("maxRetries: 0") &&
+        probe.includes("isLiveProbeEnvironment") &&
+        // Failures are classified into a small fixed public-safe vocabulary,
+        // never a raw provider message, stack trace, or API key.
+        errorClassification.includes("ProbeErrorClassification") &&
+        // The Railway cron cadence stays comfortably under the public
+        // status page's freshness window, and the trigger script only ever
+        // calls this one fixed, HTTPS-enforced endpoint.
+        cron.includes('"cronSchedule": "*/10 * * * *"') &&
+        runner.includes("/api/internal/provider-probe/check") &&
+        runner.includes('protocol !== "https:"')
+      );
+    },
+  },
+  {
     name: "Provider error events expire through maintenance cleanup",
     file: "lib/maintenance.ts",
     test: (source) =>

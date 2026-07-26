@@ -50,3 +50,47 @@ test("status page headline and timestamp are accessible and UTC-labeled", async 
   await expect(dataAsOfTime).toHaveAttribute("datetime", /.+/);
   await expect(dataAsOfTime).toContainText("UTC");
 });
+
+// AUD-R001: with the DB unreachable, getScheduledJobsDashboard() also fails
+// and is caught the same way getProviderHealthDashboard() is (see
+// app/(application)/status/page.tsx) -- the page must show the single
+// "data could not be loaded" notice, not also surface a contradictory
+// "monitoring delayed" notice derived from the same missing data.
+test("status page never shows a probe-scheduler-delay notice on top of the general data-unavailable notice", async ({
+  page,
+}) => {
+  await page.goto("/status");
+
+  await expect(
+    page.getByText(
+      "Provider health data could not be loaded right now, so every provider below is shown as Unknown rather than guessed at."
+    )
+  ).toBeVisible();
+  await expect(page.getByText(/automated provider checks/i)).toHaveCount(0);
+});
+
+test("status page fits a 320px mobile viewport with no horizontal overflow", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 640 });
+  await page.goto("/status");
+
+  const dimensions = await page.evaluate(() => ({
+    viewport: document.documentElement.clientWidth,
+    content: document.documentElement.scrollWidth,
+  }));
+  expect(dimensions.content, "no horizontal page overflow at 320px").toBeLessThanOrEqual(
+    dimensions.viewport + 1
+  );
+
+  // The headline, the "Data as of" freshness badge, and the four
+  // Operational/Degraded/Incident/Unknown count tiles must all stay
+  // readable (not clipped or zero-width) at the narrowest supported width.
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  await expect(page.locator("time").first()).toBeVisible();
+  for (const label of ["Operational", "Degraded", "Incident", "Unknown"]) {
+    const tile = page.getByText(label, { exact: true }).first();
+    await expect(tile).toBeVisible();
+    const box = await tile.boundingBox();
+    expect(box, `${label} tile bounding box`).not.toBeNull();
+    expect(box!.width).toBeGreaterThan(0);
+  }
+});

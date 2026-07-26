@@ -18,7 +18,9 @@ import {
   summarizeMonitoredStatuses,
   type PublicProviderStatus,
 } from "@/lib/providerPublicStatusCore";
+import { getScheduledJobsDashboard } from "@/lib/scheduledJobs";
 import { createPageMetadata } from "@/lib/seo";
+import { describeProbeSchedulerDelay, evidenceSourceLabel } from "@/lib/statusPageEvidence";
 
 export const metadata = createPageMetadata({
   title: "Service Status",
@@ -83,6 +85,8 @@ const buildEmptyDashboard = (): ProviderHealthDashboard => ({
   providers: [],
   tierLimits: { Free: "", Pro: "", Max: "" },
   notificationChannels: { email: false, slack: false, discord: false },
+  probeCostTodayMicroUsd: 0,
+  probeCostCapMicroUsd: 0,
 });
 
 export default async function StatusPage() {
@@ -95,6 +99,16 @@ export default async function StatusPage() {
     dashboard = buildEmptyDashboard();
     dataUnavailable = true;
   }
+
+  // A delayed probe scheduler is a monitoring problem, not a provider
+  // problem -- shown as a distinct page-level notice, never folded into
+  // any individual provider's status. Best-effort: if this itself can't be
+  // loaded, the page still renders normally with no delay notice, rather
+  // than failing the whole page over a secondary signal.
+  const probeSchedulerJob = await getScheduledJobsDashboard()
+    .then((jobs) => jobs.find((job) => job.key === "provider_probe") ?? null)
+    .catch(() => null);
+  const probeSchedulerDelay = describeProbeSchedulerDelay(probeSchedulerJob);
 
   const providers: ProviderHealthRow[] = dashboard.providers;
   const summary = summarizeMonitoredStatuses(
@@ -144,6 +158,20 @@ export default async function StatusPage() {
                   shown as Unknown rather than guessed at.
                 </p>
               )}
+              {probeSchedulerDelay && (
+                <p
+                  role="status"
+                  className="mt-3 max-w-2xl rounded-xl border border-zinc-700 bg-zinc-900/70 px-3 py-2 text-sm text-zinc-300"
+                >
+                  {probeSchedulerDelay === "delayed_with_history"
+                    ? `Automated provider checks are running behind schedule (last check started ${
+                        probeSchedulerJob?.lastRunAt
+                          ? `${formatUtc(probeSchedulerJob.lastRunAt)} UTC`
+                          : "an unknown time ago"
+                      }). This is a monitoring delay, not evidence that any provider is unhealthy -- statuses below may simply reflect older evidence than usual.`
+                    : "Automated provider checks have not run yet. Statuses below rely only on real request traffic, if any -- this is a monitoring gap, not evidence that any provider is unhealthy."}
+                </p>
+              )}
             </div>
             <div className="rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm text-zinc-400">
               Data as of{" "}
@@ -189,7 +217,14 @@ export default async function StatusPage() {
                 .filter((value): value is string => Boolean(value))
                 .sort()
                 .at(-1) ?? null;
+              const lastProbeCheckedAt = [provider.lastProbeSuccessAt, provider.lastProbeFailureAt]
+                .filter((value): value is string => Boolean(value))
+                .sort()
+                .at(-1) ?? null;
               const statusDetailsId = `public-status-${provider.provider}`;
+              const affectedModelNames = provider.modelIncidents.map(
+                (incident) => incident.modelName
+              );
               return (
                 <div
                   key={provider.provider}
@@ -206,7 +241,12 @@ export default async function StatusPage() {
                         />
                       </p>
                       <p className="mt-0.5 text-xs text-zinc-500">
-                        Last checked: <TimeOrUnrecorded value={lastCheckedAt} fallback="Never" />
+                        Last real-traffic check:{" "}
+                        <TimeOrUnrecorded value={lastCheckedAt} fallback="Never" />
+                      </p>
+                      <p className="mt-0.5 text-xs text-zinc-500">
+                        Last automated check:{" "}
+                        <TimeOrUnrecorded value={lastProbeCheckedAt} fallback="Never" />
                       </p>
                     </div>
                     <span
@@ -219,10 +259,15 @@ export default async function StatusPage() {
                   </div>
                   <p id={statusDetailsId} className="mt-3 text-xs leading-5 text-zinc-400">
                     {provider.publicStatusReasonText}{" "}
-                    {provider.publicStatusReasonCode === "PUBLIC_INCIDENT_DECLARED"
-                      ? "(declared by a Tomverse operator)"
-                      : "(from automated monitoring)"}
+                    {evidenceSourceLabel(provider.publicStatusReasonCode)}
                   </p>
+                  {affectedModelNames.length > 0 && (
+                    <p className="mt-2 text-xs leading-5 text-zinc-500">
+                      Recent failures are concentrated in specific model
+                      {affectedModelNames.length > 1 ? "s" : ""} under this provider:{" "}
+                      {affectedModelNames.join(", ")}.
+                    </p>
+                  )}
                 </div>
               );
             })}

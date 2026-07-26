@@ -921,6 +921,70 @@ API failures. Admin Scheduled Jobs records the latest run, result counts,
 delay, and failure state. Admin Alerts also exposes the managed Slack template
 and a safe test payload.
 
+Create a fifth Railway Cron service for the synthetic provider health probe
+(AUD-R001) and set its Config File Path to `/railway.provider-probe.json`. It
+runs every 10 minutes:
+
+```text
+npm run maintenance:provider-probe
+```
+
+Set `PROVIDER_PROBE_SECRET` on both the web and Cron services (or let it fall
+back to the shared `MAINTENANCE_SECRET`), and `PROVIDER_PROBE_URL` on the Cron
+service (or let it fall back to `PUBLIC_APP_URL`/`NEXTAUTH_URL`). Each run
+sends one minimal, non-billed request to one representative model per
+configured provider (a fixed prompt, `maxOutputTokens: 8`, zero temperature,
+no tools/search/image/file/deep-research, a 10-second timeout, and no
+client-side retry -- the next cron tick is the retry) so idle providers with
+no real user traffic stop showing as permanently **Unknown** on the public
+`/status` page. The public status page never treats this as a substitute for
+real evidence: a single failed probe never alone declares an incident
+(repeated consecutive failures are required, default 3, configurable with
+`PROVIDER_PROBE_INCIDENT_THRESHOLD`), and probe evidence is always stored
+completely separately from real-request evidence (`ProviderHealthState`'s
+`lastProbeSuccessAt`/`lastProbeFailureAt`/`consecutiveProbeFailures` columns,
+distinct from the real-traffic `lastSuccessAt`/`lastFailureAt`/
+`consecutiveFailures` columns) so the two streams can never silently overwrite
+each other.
+
+The probe model for a provider is resolved from the model registry (the
+cheapest enabled `standard`-tier model, or -- for the two providers with no
+standard-tier option, Moonshot and Perplexity -- the cheapest enabled model
+of any tier) and can be overridden per provider without a deploy via a JSON
+map:
+
+```text
+PROVIDER_PROBE_MODEL_OVERRIDES={"openai":"gpt-5-4-mini"}
+```
+
+A daily cost ceiling guards the whole cycle, checked before every run against
+that day's total `ProviderDailyUsage` rows recorded with `source: "probe"`
+(a value distinct from `"internal"` and `"provider_api"`, so probe spend is
+always queryable in isolation):
+
+```text
+PROVIDER_PROBE_DAILY_COST_CAP_USD=1
+```
+
+If the cap is already reached, the run records a skip and calls no provider
+for the rest of that day. Today's spend against this same cap is shown at
+the top of Admin Provider Health (`components/admin/AdminProviderHealthPanel.tsx`)
+so operators don't need a direct DB query to see it, and highlights once the
+cap is reached. A soft overlap guard (a `ScheduledJobRun` lookup
+within half the 10-minute cadence, the same pattern
+`lib/infrastructureThresholdMonitor.ts` uses) skips a cycle entirely if
+another one started moments earlier, so two near-simultaneous cron ticks
+never double-charge or double-count. `development` and `test` never call a
+real provider by default -- set `PROVIDER_PROBE_FORCE_LIVE=true` on a
+developer machine for manual staging-style verification; unit tests always
+inject a fake generator regardless of this flag. Each attempt is also logged
+to `ProviderProbeResult` (provider, model, timing, success/timeout, and a
+small fixed-vocabulary public-safe error classification -- never a raw
+provider message, API key, or user content) for auditing. Admin Scheduled
+Jobs records this job as `provider_probe`, including delay/failure state
+separately from any individual provider's health, so a delayed scheduler is
+never confused with a provider outage on the public page.
+
 All Tomverse Slack deliveries, including Admin test messages and DB-independent
 operational alerts, automatically include `<!channel>` so the destination channel
 receives an explicit notification.

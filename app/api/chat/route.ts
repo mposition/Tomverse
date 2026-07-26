@@ -86,6 +86,11 @@ import {
 import { getOperationalFeatureFlags } from "@/lib/appSettings";
 import { estimateNativeAttachmentTokens } from "@/lib/chatAttachmentTokens";
 import { isChatCostSafetyCode } from "@/lib/chatCostSafetyCore";
+import {
+    providerDiagnosticCode,
+    safeErrorMessage,
+    safeErrorMetadata,
+} from "@/lib/providerErrorClassification";
 
 const MAX_ATTACHMENTS = 5;
 // Every request resends the full conversation history (including past
@@ -117,48 +122,6 @@ const parseStoredModelIds = (value: unknown) => {
     return Array.isArray(parsed)
         ? parsed.filter((item): item is string => typeof item === "string")
         : [];
-};
-
-const safeErrorMetadata = (error: unknown) => {
-    if (!error || typeof error !== "object") {
-        return { name: "UnknownError" };
-    }
-
-    const candidate = error as {
-        name?: unknown;
-        code?: unknown;
-        status?: unknown;
-        statusCode?: unknown;
-        isRetryable?: unknown;
-    };
-    return {
-        name:
-            typeof candidate.name === "string"
-                ? candidate.name.slice(0, 80)
-                : "Error",
-        code:
-            typeof candidate.code === "string" &&
-            /^[A-Za-z0-9_.-]{1,80}$/.test(candidate.code)
-                ? candidate.code
-                : undefined,
-        statusCode:
-            typeof candidate.statusCode === "number"
-                ? candidate.statusCode
-                : typeof candidate.status === "number"
-                  ? candidate.status
-                  : undefined,
-        isRetryable:
-            typeof candidate.isRetryable === "boolean"
-                ? candidate.isRetryable
-                : undefined,
-    };
-};
-
-const safeErrorMessage = (error: unknown) => {
-    if (!error || typeof error !== "object" || !("message" in error)) {
-        return undefined;
-    }
-    return typeof error.message === "string" ? error.message : undefined;
 };
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
@@ -204,18 +167,6 @@ const isClosedStreamControllerError = (error: unknown) => {
         safeErrorMessage(error)?.toLowerCase().includes("controller is already closed") ===
             true
     );
-};
-
-const providerDiagnosticCode = (fallback: string, error: unknown) => {
-    const metadata = safeErrorMetadata(error);
-    return [
-        fallback,
-        metadata.code || metadata.name,
-        metadata.statusCode ? `HTTP_${metadata.statusCode}` : null,
-        metadata.isRetryable === true ? "RETRYABLE" : null,
-    ]
-        .filter((value): value is string => Boolean(value))
-        .join(".");
 };
 
 const logRequestError = (

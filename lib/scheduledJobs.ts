@@ -34,6 +34,16 @@ export const SCHEDULED_JOB_DEFINITIONS = [
     schedule: "Every 15 minutes via credit reconciliation cron",
     maximumSilenceMs: 35 * 60 * 1_000,
   },
+  {
+    key: "provider_probe",
+    name: "Synthetic provider health probe (AUD-R001)",
+    schedule: "Every 10 minutes",
+    // Cadence is 10 minutes; the public status page's freshness window
+    // (see PROVIDER_PUBLIC_STATUS_FRESHNESS_MINUTES) is 30 minutes, so this
+    // must stay well under that or "monitoring delayed" and "provider
+    // stale" would trip at nearly the same time and be indistinguishable.
+    maximumSilenceMs: 25 * 60 * 1_000,
+  },
 ] as const;
 
 export type ScheduledJobKey = (typeof SCHEDULED_JOB_DEFINITIONS)[number]["key"];
@@ -175,6 +185,12 @@ const nextScheduledAt = (key: ScheduledJobKey, now: Date) => {
     const result = new Date(now);
     result.setUTCSeconds(0, 0);
     result.setUTCMinutes(Math.floor(result.getUTCMinutes() / 15) * 15 + 15);
+    return result;
+  }
+  if (key === "provider_probe") {
+    const result = new Date(now);
+    result.setUTCSeconds(0, 0);
+    result.setUTCMinutes(Math.floor(result.getUTCMinutes() / 10) * 10 + 10);
     return result;
   }
   return key === "retention_cleanup"
