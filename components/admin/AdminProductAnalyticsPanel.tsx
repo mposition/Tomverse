@@ -5,6 +5,7 @@ const eventGroups = [
   { label: "Acquisition", events: ["landing_view", "cta_start_click", "pricing_view", "plan_selected"] },
   { label: "Onboarding", events: ["onboarding_shown", "onboarding_completed", "onboarding_skipped"] },
   { label: "Model Finder", events: ["model_finder_viewed", "model_finder_started", "model_finder_completed", "model_finder_skipped", "recommended_model_accepted", "recommended_model_changed", "advanced_model_suggested", "advanced_model_selected"] },
+  { label: "Model picker", events: ["model_picker_opened", "model_picker_all_opened", "model_picker_search_used", "model_picker_filter_opened", "model_picker_filter_applied", "model_picker_selection_confirmed", "model_picker_max_reached", "model_picker_abandoned"] },
   { label: "First experience", events: ["chat_started", "first_response_completed"] },
   { label: "Core value", events: ["multi_model_compare_completed"] },
   { label: "AI Review", events: ["comparison_review_viewed", "comparison_review_started", "comparison_review_completed", "comparison_review_failed"] },

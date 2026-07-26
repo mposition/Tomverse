@@ -47,6 +47,14 @@ export const PRODUCT_ANALYTICS_EVENT_NAMES = [
   "sidebar_tour_completed",
   "sidebar_tour_skipped",
   "chat_tool_menu_opened",
+  "model_picker_opened",
+  "model_picker_all_opened",
+  "model_picker_search_used",
+  "model_picker_filter_opened",
+  "model_picker_filter_applied",
+  "model_picker_selection_confirmed",
+  "model_picker_max_reached",
+  "model_picker_abandoned",
   "web_search_mode_selected",
   "web_search_suggestion_shown",
   "web_search_suggestion_accepted",
@@ -148,7 +156,9 @@ export const analyticsPropertiesSchema = z
     market_tier: z.enum(["primary", "limited", "preview"]).optional(),
     paid_marketing_eligible: z.boolean().optional(),
     experiment_variant: z.enum(["control", "finder"]).optional(),
-    recommendation_rank: z.number().int().min(1).max(3).optional(),
+    // The picker's recommended screen shows up to 8 cards (STG-F008); the
+    // onboarding Model Finder still only ever emits ranks 1-3.
+    recommendation_rank: z.number().int().min(1).max(8).optional(),
     suggestion_reason: z.enum(["document", "deep_analysis", "research"]).optional(),
     review_mode: z.enum(["balanced", "evidence", "action"]).optional(),
     // Bucketed exact-quote-match rate for a comparison review (the value the

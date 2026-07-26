@@ -368,6 +368,12 @@ export function ChatPageClient({
 
     const [userDefaultEngine, setUserDefaultEngine] = useState<string>(APP_DEFAULTS.defaultModelId);
   const [isUserSettingsLoaded, setIsUserSettingsLoaded] = useState(false);
+  // Both shells gate their model UI on this: a signed-in tab only knows its
+  // real selection once settings, the conversation list and the initial
+  // conversation have all resolved. Guests are decided on the first frame.
+  const isModelSelectionReady =
+    isGuestMode ||
+    (isUserSettingsLoaded && isConversationsLoaded && isInitialConversationResolved);
 
   const [inputValue, setInputValue] = useState("");
   const [personalizedPrompt, setPersonalizedPrompt] = useState<string | null>(null);
@@ -522,11 +528,25 @@ export function ChatPageClient({
   const comparisonPresetAppliedRef = useRef(false);
   const comparisonPresetRequestedRef = useRef(false);
   const comparisonPreflightInFlightRef = useRef(false);
+  // Auto-title generation: keyed by comparisonId (the promptId ChatApp
+  // instances report back on completion) so handleResponseComplete can look
+  // up which chat a first-turn response belongs to without needing its own
+  // chatId parameter. titleRequestSentRef guarantees exactly one generation
+  // request per conversation even when several model panels each report
+  // completion for the same first-turn promptId.
+  const firstTurnTitleTrackingRef = useRef<
+    Map<string, { chatId: string; interimTitle: string; firstPromptText: string }>
+  >(new Map());
+  const titleRequestSentRef = useRef<Set<string>>(new Set());
 
   const {
     containerRef: guestQuickSummaryTurnstileContainerRef,
     getToken: getGuestQuickSummaryTurnstileToken,
   } = useTurnstile(isGuestMode, "guest_quick_summary");
+  const {
+    containerRef: conversationTitleTurnstileContainerRef,
+    getToken: getConversationTitleTurnstileToken,
+  } = useTurnstile(isGuestMode, "guest_conversation_title");
   const accountUsage = useUserUsage(!isGuestMode);
 
   // The refs above are only ever written live by handleResponseComplete, so
@@ -2014,6 +2034,11 @@ export function ChatPageClient({
     }
 
 	let activeChatId = currentChatId;
+    // Captured only when a brand-new conversation is created below, so the
+    // first-turn title tracking further down knows the exact interim title
+    // string without re-deriving it from state that may not have committed
+    // yet (setConversations is async).
+    let justCreatedTitle: string | null = null;
 
     if (!activeChatId) {
       if (isGuestMode) {
@@ -2034,26 +2059,31 @@ export function ChatPageClient({
             webSearchMode,
             createdAt: new Date().toISOString(),
           };
+          justCreatedTitle = initialChat.title;
           setConversations([initialChat]);
           localStorage.setItem(GUEST_CONVERSATIONS_STORAGE_KEY, JSON.stringify([initialChat]));
         }
         setCurrentChatId(activeChatId);
       } else {
       try {
+        const newConversationTitle = (
+          trimmed || attachments[0]?.name || t("sidebar.newChat")
+        ).slice(0, 30);
         const res = await fetch("/api/conversations", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            title: (trimmed || attachments[0]?.name || t("sidebar.newChat")).slice(0, 30),
+            title: newConversationTitle,
             selectedModels,
             disabledPanels,
             webSearchMode
           }),
         });
-        
+
         if (res.ok) {
           const data = await res.json();
           activeChatId = data.id;
+          justCreatedTitle = newConversationTitle;
           confirmedModelSettingsRef.current = {
             targetChatId: data.id,
             models: clampSelectedModels(selectedModels),
@@ -2095,6 +2125,18 @@ export function ChatPageClient({
         { conversation_mode: isGuestMode ? "guest" : "account" }
       );
       promptCountsRef.current.set(activeChatId, previousCount + 1);
+
+      if (previousCount === 0 && trimmed) {
+        const interimTitle =
+          justCreatedTitle ??
+          conversation?.title ??
+          t("sidebar.newChat");
+        firstTurnTitleTrackingRef.current.set(comparisonId, {
+          chatId: activeChatId,
+          interimTitle,
+          firstPromptText: trimmed,
+        });
+      }
 
       if (!isGuestMode) {
       try {
@@ -2190,6 +2232,72 @@ export function ChatPageClient({
     localStorage.setItem("tomverse_guest_save_review_seen_v1", "1");
   }, [showGuestSaveReviewCard]);
 
+  // Fired at most once per conversation, right after its first successful
+  // response, from handleResponseComplete below. Never awaited by the
+  // response-completion path, and every failure mode (network error,
+  // non-2xx, provider disabled, invalid output) is swallowed silently here
+  // -- the interim title the user already sees simply stays as-is.
+  const triggerTitleGeneration = useCallback(
+    async (chatId: string, interimTitle: string, firstPromptText: string) => {
+      try {
+        let result: { updated?: boolean; title?: string } | null = null;
+        if (isGuestMode) {
+          const sendRequest = (turnstileToken?: string) =>
+            fetch("/api/chat/conversation-title", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                message: firstPromptText,
+                ...(turnstileToken ? { turnstileToken } : {}),
+              }),
+            });
+          let response = await sendRequest();
+          if (!response.ok) {
+            const payload = (await response.json().catch(() => null)) as
+              | { code?: string }
+              | null;
+            if (payload?.code === "TURNSTILE_REQUIRED") {
+              const turnstileToken = await getConversationTitleTurnstileToken();
+              response = await sendRequest(turnstileToken);
+            }
+          }
+          if (response.ok) {
+            result = await response.json();
+          }
+        } else {
+          const response = await fetch(
+            `/api/conversations/${chatId}/generate-title`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ expectedTitle: interimTitle }),
+            }
+          );
+          if (response.ok) {
+            result = await response.json();
+          }
+        }
+        // Re-checks the title still equals the interim value at apply time
+        // (not just at request time) so a manual rename that lands while
+        // this request was in flight is never clobbered -- mirrors the
+        // server's own expectedTitle compare-and-set for the logged-in path.
+        if (result?.updated && typeof result.title === "string") {
+          const finalTitle = result.title;
+          setConversations((prev) =>
+            prev.map((item) =>
+              item.id === chatId && item.title === interimTitle
+                ? { ...item, title: finalTitle }
+                : item
+            )
+          );
+        }
+      } catch {
+        // Silent by design -- see comment above.
+      }
+    },
+    [getConversationTitleTurnstileToken, isGuestMode]
+  );
+
   const handleResponseComplete = useCallback(
     (
       promptId: string | null,
@@ -2197,6 +2305,22 @@ export function ChatPageClient({
       responseText: string,
       searchMetadata?: WebSearchExecution | null
     ) => {
+      if (
+        promptId &&
+        responseText.trim() &&
+        firstTurnTitleTrackingRef.current.has(promptId)
+      ) {
+        const tracking = firstTurnTitleTrackingRef.current.get(promptId)!;
+        firstTurnTitleTrackingRef.current.delete(promptId);
+        if (!titleRequestSentRef.current.has(tracking.chatId)) {
+          titleRequestSentRef.current.add(tracking.chatId);
+          void triggerTitleGeneration(
+            tracking.chatId,
+            tracking.interimTitle,
+            tracking.firstPromptText
+          );
+        }
+      }
       if (modelId === "perplexity/sonar-deep-research") {
         setIsDeepResearchPending(false);
         trackProductEvent("deep_research_completed", activeModelCount, {});
@@ -2271,6 +2395,7 @@ export function ChatPageClient({
       maybeShowGuestSaveCompareCard,
       maybeShowValueUpgradePrompt,
       refreshGuestUsage,
+      triggerTitleGeneration,
     ]
   );
 
@@ -2787,6 +2912,12 @@ export function ChatPageClient({
           className="fixed bottom-2 right-2 z-[70]"
         />
       ) : null}
+      {isGuestMode ? (
+        <div
+          ref={conversationTitleTurnstileContainerRef}
+          className="fixed bottom-2 right-2 z-[70]"
+        />
+      ) : null}
       {!isViewportReady ? (
         <ChatShellSkeleton label={t("auth.loading")} />
       ) : isMobileViewport ? (
@@ -2807,6 +2938,7 @@ export function ChatPageClient({
           guestPreviewMode={isGuestPreviewEntry}
           guestMessageCount={guestMessageCount}
           maxGuestMessages={MAX_GUEST_MESSAGES}
+          isModelSelectionReady={isModelSelectionReady}
           onNewChat={handleNewChat}
           onSelectConversation={handleSelectConversation}
           onRename={handleRename}
@@ -2853,12 +2985,7 @@ export function ChatPageClient({
           guestPreviewMode={isGuestPreviewEntry}
           guestMessageCount={guestMessageCount}
           maxGuestMessages={MAX_GUEST_MESSAGES}
-          isModelSelectionReady={
-            isGuestMode ||
-            (isUserSettingsLoaded &&
-              isConversationsLoaded &&
-              isInitialConversationResolved)
-          }
+          isModelSelectionReady={isModelSelectionReady}
           onNewChat={handleNewChat}
           onSelectConversation={handleSelectConversation}
           onRename={handleRename}

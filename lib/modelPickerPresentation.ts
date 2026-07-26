@@ -102,6 +102,315 @@ export const modelPickerFeatureLabels: Record<
   pt: { image: "Entrada de imagem", reasoning: "Raciocínio profundo", search: "Pesquisa web", code: "Especializado em código" },
 };
 
+/**
+ * Copy for the two-step picker (recommended screen -> all models). Kept as its
+ * own record rather than folded into modelPickerCopy so the step-2 vocabulary
+ * can grow without rewriting the seven single-line locale entries above.
+ */
+export const modelPickerStepCopy: Record<
+  ModelPickerLanguage,
+  {
+    recommendedTitle: string;
+    recommendedSubtitle: string;
+    recommendedEmpty: string;
+    openAllModels: string;
+    openAllModelsHint: string;
+    allModelsTitle: string;
+    backToRecommended: string;
+    filterSheetTitle: string;
+    openFilters: string;
+    resetAllFilters: string;
+    resultCount: string;
+    taskAll: string;
+    searchResultsTitle: string;
+    clearSearch: string;
+    signInToUse: string;
+    upgradeToUse: string;
+    maxReached: string;
+    activeFilters: string;
+    sortLabel: string;
+    sortRecommended: string;
+    sortCredits: string;
+    sortName: string;
+  }
+> = {
+  en: {
+    recommendedTitle: "Recommended for this kind of work",
+    recommendedSubtitle: "Pick one to start. You can change models any time — it costs nothing.",
+    recommendedEmpty: "No recommendations are available right now. Open All models to choose one yourself.",
+    openAllModels: "All models",
+    openAllModelsHint: "Browse the full catalogue with search and filters",
+    allModelsTitle: "All models",
+    backToRecommended: "Back to recommendations",
+    filterSheetTitle: "Filters",
+    openFilters: "Filters",
+    resetAllFilters: "Reset all",
+    resultCount: "{count} models",
+    taskAll: "Task: All",
+    searchResultsTitle: "Search results",
+    clearSearch: "Clear search",
+    signInToUse: "Sign in to use this model",
+    upgradeToUse: "Upgrade your plan to use this model",
+    maxReached: "You can compare up to {max} models. Remove one to add another.",
+    activeFilters: "Filters {count}",
+    sortLabel: "Sort",
+    sortRecommended: "Suggested order",
+    sortCredits: "Lowest credit cost first",
+    sortName: "Name (A–Z)",
+  },
+  ko: {
+    recommendedTitle: "이런 작업에 맞는 추천",
+    recommendedSubtitle: "하나만 골라 시작하세요. 모델 변경은 언제든 가능하고 크레딧이 들지 않습니다.",
+    recommendedEmpty: "지금 사용할 수 있는 추천 모델이 없습니다. 모든 모델에서 직접 선택해 주세요.",
+    openAllModels: "모든 모델",
+    openAllModelsHint: "검색과 필터로 전체 목록 살펴보기",
+    allModelsTitle: "모든 모델",
+    backToRecommended: "추천으로 돌아가기",
+    filterSheetTitle: "필터",
+    openFilters: "필터",
+    resetAllFilters: "모두 초기화",
+    resultCount: "모델 {count}개",
+    taskAll: "작업: 전체",
+    searchResultsTitle: "검색 결과",
+    clearSearch: "검색 지우기",
+    signInToUse: "로그인하면 사용할 수 있어요",
+    upgradeToUse: "플랜을 업그레이드하면 사용할 수 있어요",
+    maxReached: "최대 {max}개까지 비교할 수 있어요. 하나를 빼면 다른 모델을 추가할 수 있습니다.",
+    activeFilters: "필터 {count}",
+    sortLabel: "정렬",
+    sortRecommended: "추천 순서",
+    sortCredits: "크레딧 낮은 순",
+    sortName: "이름순 (가나다)",
+  },
+  zh: {
+    recommendedTitle: "适合这类工作的推荐",
+    recommendedSubtitle: "先选一个开始。随时可以更换模型，不消耗额度。",
+    recommendedEmpty: "目前没有可用的推荐模型。请打开全部模型自行选择。",
+    openAllModels: "全部模型",
+    openAllModelsHint: "使用搜索和筛选浏览完整目录",
+    allModelsTitle: "全部模型",
+    backToRecommended: "返回推荐",
+    filterSheetTitle: "筛选",
+    openFilters: "筛选",
+    resetAllFilters: "全部重置",
+    resultCount: "{count} 个模型",
+    taskAll: "任务：全部",
+    searchResultsTitle: "搜索结果",
+    clearSearch: "清除搜索",
+    signInToUse: "登录后即可使用",
+    upgradeToUse: "升级套餐后即可使用",
+    maxReached: "最多可对比 {max} 个模型。移除一个即可添加其他模型。",
+    activeFilters: "筛选 {count}",
+    sortLabel: "排序",
+    sortRecommended: "推荐顺序",
+    sortCredits: "额度从低到高",
+    sortName: "名称（A–Z）",
+  },
+  fr: {
+    recommendedTitle: "Recommandés pour ce type de travail",
+    recommendedSubtitle: "Choisissez-en un pour commencer. Changer de modèle est gratuit et toujours possible.",
+    recommendedEmpty: "Aucune recommandation disponible pour le moment. Ouvrez Tous les modèles pour choisir vous-même.",
+    openAllModels: "Tous les modèles",
+    openAllModelsHint: "Parcourir le catalogue complet avec recherche et filtres",
+    allModelsTitle: "Tous les modèles",
+    backToRecommended: "Retour aux recommandations",
+    filterSheetTitle: "Filtres",
+    openFilters: "Filtres",
+    resetAllFilters: "Tout réinitialiser",
+    resultCount: "{count} modèles",
+    taskAll: "Tâche : toutes",
+    searchResultsTitle: "Résultats de recherche",
+    clearSearch: "Effacer la recherche",
+    signInToUse: "Connectez-vous pour utiliser ce modèle",
+    upgradeToUse: "Passez à un forfait supérieur pour utiliser ce modèle",
+    maxReached: "Vous pouvez comparer jusqu'à {max} modèles. Retirez-en un pour en ajouter un autre.",
+    activeFilters: "Filtres {count}",
+    sortLabel: "Trier",
+    sortRecommended: "Ordre suggéré",
+    sortCredits: "Coût en crédits croissant",
+    sortName: "Nom (A–Z)",
+  },
+  de: {
+    recommendedTitle: "Empfohlen für diese Art von Arbeit",
+    recommendedSubtitle: "Wähle eins zum Starten. Ein Modellwechsel ist jederzeit möglich und kostenlos.",
+    recommendedEmpty: "Derzeit sind keine Empfehlungen verfügbar. Öffne Alle Modelle, um selbst zu wählen.",
+    openAllModels: "Alle Modelle",
+    openAllModelsHint: "Den vollständigen Katalog mit Suche und Filtern durchsehen",
+    allModelsTitle: "Alle Modelle",
+    backToRecommended: "Zurück zu den Empfehlungen",
+    filterSheetTitle: "Filter",
+    openFilters: "Filter",
+    resetAllFilters: "Alle zurücksetzen",
+    resultCount: "{count} Modelle",
+    taskAll: "Aufgabe: Alle",
+    searchResultsTitle: "Suchergebnisse",
+    clearSearch: "Suche löschen",
+    signInToUse: "Melde dich an, um dieses Modell zu nutzen",
+    upgradeToUse: "Wechsle den Tarif, um dieses Modell zu nutzen",
+    maxReached: "Du kannst bis zu {max} Modelle vergleichen. Entferne eins, um ein anderes hinzuzufügen.",
+    activeFilters: "Filter {count}",
+    sortLabel: "Sortieren",
+    sortRecommended: "Vorgeschlagene Reihenfolge",
+    sortCredits: "Niedrigste Credit-Kosten zuerst",
+    sortName: "Name (A–Z)",
+  },
+  es: {
+    recommendedTitle: "Recomendados para este tipo de trabajo",
+    recommendedSubtitle: "Elige uno para empezar. Cambiar de modelo es gratis y siempre posible.",
+    recommendedEmpty: "No hay recomendaciones disponibles ahora mismo. Abre Todos los modelos para elegir tú mismo.",
+    openAllModels: "Todos los modelos",
+    openAllModelsHint: "Explora el catálogo completo con búsqueda y filtros",
+    allModelsTitle: "Todos los modelos",
+    backToRecommended: "Volver a las recomendaciones",
+    filterSheetTitle: "Filtros",
+    openFilters: "Filtros",
+    resetAllFilters: "Restablecer todo",
+    resultCount: "{count} modelos",
+    taskAll: "Tarea: todas",
+    searchResultsTitle: "Resultados de búsqueda",
+    clearSearch: "Borrar búsqueda",
+    signInToUse: "Inicia sesión para usar este modelo",
+    upgradeToUse: "Mejora tu plan para usar este modelo",
+    maxReached: "Puedes comparar hasta {max} modelos. Quita uno para añadir otro.",
+    activeFilters: "Filtros {count}",
+    sortLabel: "Ordenar",
+    sortRecommended: "Orden sugerido",
+    sortCredits: "Menor coste en créditos primero",
+    sortName: "Nombre (A–Z)",
+  },
+  pt: {
+    recommendedTitle: "Recomendados para este tipo de trabalho",
+    recommendedSubtitle: "Escolha um para começar. Trocar de modelo é gratuito e sempre possível.",
+    recommendedEmpty: "Não há recomendações disponíveis agora. Abra Todos os modelos para escolher você mesmo.",
+    openAllModels: "Todos os modelos",
+    openAllModelsHint: "Percorra o catálogo completo com busca e filtros",
+    allModelsTitle: "Todos os modelos",
+    backToRecommended: "Voltar às recomendações",
+    filterSheetTitle: "Filtros",
+    openFilters: "Filtros",
+    resetAllFilters: "Redefinir tudo",
+    resultCount: "{count} modelos",
+    taskAll: "Tarefa: todas",
+    searchResultsTitle: "Resultados da busca",
+    clearSearch: "Limpar busca",
+    signInToUse: "Entre para usar este modelo",
+    upgradeToUse: "Faça upgrade do plano para usar este modelo",
+    maxReached: "Você pode comparar até {max} modelos. Remova um para adicionar outro.",
+    activeFilters: "Filtros {count}",
+    sortLabel: "Ordenar",
+    sortRecommended: "Ordem sugerida",
+    sortCredits: "Menor custo em créditos primeiro",
+    sortName: "Nome (A–Z)",
+  },
+};
+
+/**
+ * Recommendation reasons in the user's task language. Provider names stay off
+ * these labels on purpose -- a beginner picks by "what am I doing", not by
+ * "who built it".
+ */
+export const modelPickerUseCaseLabels: Record<
+  ModelPickerLanguage,
+  Record<
+    | "everyday"
+    | "writing"
+    | "analysis"
+    | "multimodal"
+    | "coding"
+    | "search"
+    | "value"
+    | "favorite"
+    | "personalized"
+    | "recent",
+    string
+  >
+> = {
+  en: {
+    everyday: "Fast everyday questions",
+    writing: "Quick summaries and drafts",
+    analysis: "In-depth analysis",
+    multimodal: "Image and file analysis",
+    coding: "Coding and technical work",
+    search: "Current information from the web",
+    value: "Low-cost everyday option",
+    favorite: "One of your favourites",
+    personalized: "Matches the answers you gave",
+    recent: "You used this recently",
+  },
+  ko: {
+    everyday: "빠른 일상 질문",
+    writing: "빠른 요약과 초안",
+    analysis: "복잡한 분석",
+    multimodal: "이미지·파일 분석",
+    coding: "코딩과 기술 작업",
+    search: "최신 웹 정보 검색",
+    value: "비용 효율적인 선택",
+    favorite: "즐겨찾기한 모델",
+    personalized: "내가 답한 취향에 맞는 모델",
+    recent: "최근에 사용한 모델",
+  },
+  zh: {
+    everyday: "快速的日常提问",
+    writing: "快速摘要与初稿",
+    analysis: "复杂分析",
+    multimodal: "图像与文件分析",
+    coding: "编程与技术工作",
+    search: "最新网络信息检索",
+    value: "高性价比之选",
+    favorite: "你收藏的模型",
+    personalized: "符合你的回答",
+    recent: "你最近用过",
+  },
+  fr: {
+    everyday: "Questions quotidiennes rapides",
+    writing: "Résumés et brouillons rapides",
+    analysis: "Analyse approfondie",
+    multimodal: "Analyse d'images et de fichiers",
+    coding: "Code et travail technique",
+    search: "Informations web récentes",
+    value: "Option économique au quotidien",
+    favorite: "Un de vos favoris",
+    personalized: "Correspond à vos réponses",
+    recent: "Utilisé récemment",
+  },
+  de: {
+    everyday: "Schnelle Alltagsfragen",
+    writing: "Schnelle Zusammenfassungen und Entwürfe",
+    analysis: "Tiefgehende Analyse",
+    multimodal: "Bild- und Dateianalyse",
+    coding: "Programmieren und technische Arbeit",
+    search: "Aktuelle Informationen aus dem Web",
+    value: "Günstige Alltagsoption",
+    favorite: "Einer deiner Favoriten",
+    personalized: "Passt zu deinen Angaben",
+    recent: "Kürzlich verwendet",
+  },
+  es: {
+    everyday: "Preguntas rápidas del día a día",
+    writing: "Resúmenes y borradores rápidos",
+    analysis: "Análisis en profundidad",
+    multimodal: "Análisis de imágenes y archivos",
+    coding: "Programación y trabajo técnico",
+    search: "Información actual de la web",
+    value: "Opción económica para el día a día",
+    favorite: "Uno de tus favoritos",
+    personalized: "Coincide con tus respuestas",
+    recent: "Lo usaste hace poco",
+  },
+  pt: {
+    everyday: "Perguntas rápidas do dia a dia",
+    writing: "Resumos e rascunhos rápidos",
+    analysis: "Análise aprofundada",
+    multimodal: "Análise de imagens e arquivos",
+    coding: "Programação e trabalho técnico",
+    search: "Informações atuais da web",
+    value: "Opção econômica para o dia a dia",
+    favorite: "Um dos seus favoritos",
+    personalized: "Combina com suas respostas",
+    recent: "Você usou recentemente",
+  },
+};
+
 export const getModelPickerDescription = (
   model: Pick<AiModel, "id" | "bestFor">,
   language: ModelPickerLanguage

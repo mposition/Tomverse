@@ -398,7 +398,11 @@ export async function mockAuthenticatedApi(
     state.deleted = false;
     state.locked = false;
     state.shared = false;
-    state.title = "New QA conversation";
+    const body = route.request().postDataJSON() as { title?: unknown };
+    state.title =
+      typeof body.title === "string" && body.title.trim()
+        ? body.title
+        : "New QA conversation";
     await route.fulfill(json(conversation(), 201));
   });
 

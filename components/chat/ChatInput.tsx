@@ -14,29 +14,22 @@ import { createPortal } from "react-dom";
 import {
   ArrowLeft,
   ArrowUp,
-  Brain,
   Boxes,
   Braces,
   Check,
   ChevronDown,
-  Code2,
   File as FileIcon,
   FileText,
   HardDrive,
   Globe2,
-  Image as ImageIcon,
   Link2,
-  LockKeyhole,
   Microscope,
   Paperclip,
   Plus,
   Presentation,
-  Search,
   Sheet,
-  SlidersHorizontal,
   Sparkles,
   Square,
-  Star,
   X,
 } from "lucide-react";
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
@@ -51,31 +44,28 @@ import { useLanguage } from "@/components/LanguageProvider";
 import { FeatureHelpPopover } from "@/components/chat/FeatureHelpPopover";
 import { chatHelpCopy } from "@/components/chat/chatHelpCopy";
 import { dispatchAppToast } from "@/lib/appToast";
-import { getModelExperienceStatus } from "@/lib/modelExperience";
 import { APP_DEFAULTS, WEB_SEARCH_MODES, type WebSearchMode } from "@/lib/appDefaults";
 import {
   canUseModelWithPlan,
   getInputCreditMultiplier,
   getWeightedUsageCredits,
   modelSupportsImageInput,
+  type AiModel,
 } from "@/lib/models";
 import {
-  RECOMMENDED_MODEL_IDS,
-  getModelPickerDescription,
-  getModelPickerFeatures,
-  getModelPickerUsageBand,
-  modelMatchesCapability,
-  modelPickerCopy,
-  modelPickerFeatureLabels,
-  type ModelPickerCapability,
-  type ModelPickerUsageBand,
-} from "@/lib/modelPickerPresentation";
+  ModelPickerPanel,
+  type ModelPickerAnalyticsEvent,
+} from "@/components/chat/ModelPickerPanel";
 import { useUserUsage } from "@/components/chat/useUserUsage";
 import { withChatLanguage } from "@/lib/localizedCallbackUrl";
 import {
   trackProductEvent,
   trackProductEventOnce,
 } from "@/lib/productAnalyticsClient";
+import {
+  CHAT_MODEL_PICKER_OPEN_EVENT,
+  type ChatModelPickerOpenDetail,
+} from "@/lib/chatModelPickerEvents";
 import {
   getComplementaryModelSuggestion,
   getContextualModelSuggestion,
@@ -104,22 +94,6 @@ type PublicModelStatusRecord = {
   fallbackModelIds: string[];
 };
 
-function ModelSelectionBadge({ isSelected, isLocked }: { isSelected: boolean; isLocked: boolean }) {
-  const Icon = isSelected ? Check : isLocked ? LockKeyhole : Plus;
-  return (
-    <span
-      aria-hidden="true"
-      className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border ${
-        isSelected
-          ? "border-blue-600 bg-blue-600 text-white"
-          : "border-zinc-300 text-zinc-400 dark:border-zinc-600 dark:text-zinc-500"
-      }`}
-    >
-      <Icon className="h-3.5 w-3.5" />
-    </span>
-  );
-}
-
 const MAX_ATTACHMENTS = 5;
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
 const GOOGLE_DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
@@ -132,7 +106,6 @@ const RECENT_MODEL_STORAGE_KEY = "recent_model_ids";
 const GUEST_QUICK_START_STORAGE_KEY = "tomverse_guest_quick_start_seen_v2";
 const GUEST_QUICK_START_ACTIVE_KEY = "tomverse_guest_quick_start_active_v2";
 const GUEST_QUICK_START_EVENT = "tomverse:guest-quick-start";
-const PROVIDER_DISPLAY_ORDER = ["openai", "google", "anthropic", "deepseek", "mistral"];
 const MOBILE_MODEL_MENU_QUERY = "(max-width: 767px)";
 const subscribeToMobileModelMenu = (onChange: () => void) => {
   const mediaQuery = window.matchMedia(MOBILE_MODEL_MENU_QUERY);
@@ -201,11 +174,6 @@ const ACCEPTED_FILE_TYPES = [
   ...OFFICE_FILE_TYPES,
   ...Object.keys(OFFICE_EXTENSION_TYPES).map((extension) => `.${extension}`),
 ].join(",");
-
-const getProviderSortRank = (provider: string) => {
-  const priorityIndex = PROVIDER_DISPLAY_ORDER.indexOf(provider);
-  return priorityIndex === -1 ? PROVIDER_DISPLAY_ORDER.length : priorityIndex;
-};
 
 const getFileMediaType = (file: File) => {
   if (TEXT_FILE_TYPES.has(file.type) || OFFICE_FILE_TYPES.has(file.type)) {
@@ -476,8 +444,6 @@ export function ChatInput({
     const helpCopy = chatHelpCopy[lang];
     const modelsSelectedLabel = (count: number) =>
       `${count} ${count === 1 ? t("chat.modelsSelectedOne") : t("chat.modelsSelectedOther")}`;
-    const pickerCopy = modelPickerCopy[lang];
-    const pickerFeatureLabels = modelPickerFeatureLabels[lang];
     const signInCallbackUrl = withChatLanguage("/chat", lang);
     const accountUsage = useUserUsage(!isGuestMode);
     const canAttach =
@@ -610,13 +576,6 @@ export function ChatInput({
   
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [menuView, setMenuView] = useState<"actions" | "models" | "webSearch">("actions");
-  const [modelSearchQuery, setModelSearchQuery] = useState("");
-  const [providerFilter, setProviderFilter] = useState("all");
-  const [usageBandFilter, setUsageBandFilter] = useState<ModelPickerUsageBand>("all");
-  const [capabilityFilter, setCapabilityFilter] = useState<ModelPickerCapability>("all");
-  const [showAdvancedModelFilters, setShowAdvancedModelFilters] = useState(false);
-  const [imageInputOnly, setImageInputOnly] = useState(false);
-  const [availableOnPlanOnly, setAvailableOnPlanOnly] = useState(false);
   const [personalizedRecommendationIds, setPersonalizedRecommendationIds] = useState<string[]>([]);
   const hasRequestedPickerRecommendationsRef = useRef(false);
   const [liveModelStatuses, setLiveModelStatuses] = useState<Record<string, PublicModelStatusRecord>>({});
@@ -633,7 +592,7 @@ export function ChatInput({
       return [];
     }
   });
-  const [replaceModelCandidate, setReplaceModelCandidate] = useState<(typeof PUBLIC_MODELS)[number] | null>(null);
+  const [replaceModelCandidate, setReplaceModelCandidate] = useState<AiModel | null>(null);
   const [recentModelIds, setRecentModelIds] = useState<string[]>(() => {
     if (typeof window === "undefined") return [];
     try {
@@ -715,10 +674,16 @@ export function ChatInput({
 
   const menuRef = useRef<HTMLDivElement>(null);
   const menuPopoverRef = useRef<HTMLDivElement>(null);
+  // Set by ModelPickerPanel while the picker is mounted. Escape is layered:
+  // the panel closes its filter sheet, then the All-models step, and only
+  // returns false once there is nothing left but the dialog itself.
+  const modelPickerEscapeRef = useRef<(() => boolean) | null>(null);
   const actionMenuButtonRef = useRef<HTMLButtonElement | null>(null);
   const modelMenuButtonRef = useRef<HTMLButtonElement | null>(null);
   const modelSearchInputRef = useRef<HTMLInputElement | null>(null);
-  const lastMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
+  // Not always a button any more: the mobile header's model summary opens this
+  // same picker and expects focus back when it closes.
+  const lastMenuTriggerRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (
@@ -861,125 +826,57 @@ export function ChatInput({
     ).filter((element) => element.offsetParent !== null);
   }, []);
 
-  const closeMenu = useCallback((restoreFocus = true) => {
-    setIsMenuOpen(false);
-    setMenuView("actions");
-
-    if (restoreFocus) {
-      requestAnimationFrame(() => {
-        lastMenuTriggerRef.current?.focus();
-      });
-    }
-  }, [setMenuView]);
-
-  const modelProviders = useMemo(
-    () =>
-      Array.from(new Set(PUBLIC_MODELS.map((model) => model.provider))).sort(
-        (a, b) =>
-          getProviderSortRank(a) - getProviderSortRank(b) ||
-          a.localeCompare(b)
-      ),
-    [PUBLIC_MODELS]
+  const trackModelPickerEvent = useCallback(
+    (
+      event: ModelPickerAnalyticsEvent,
+      properties: { model_id?: string; recommendation_rank?: number } = {}
+    ) => {
+      // Model names are catalogue metadata, but the search box can contain
+      // anything the user typed, so only the fact that a search ran is sent.
+      trackProductEvent(event, selectedModels.length, properties);
+    },
+    [selectedModels.length]
   );
 
+  const closeMenu = useCallback(
+    (restoreFocus = true, reason: "done" | "dismissed" = "dismissed") => {
+      if (menuView === "models") {
+        trackProductEvent(
+          reason === "done"
+            ? "model_picker_selection_confirmed"
+            : "model_picker_abandoned",
+          selectedModels.length,
+          {}
+        );
+      }
+      setIsMenuOpen(false);
+      setMenuView("actions");
+
+      if (restoreFocus) {
+        requestAnimationFrame(() => {
+          lastMenuTriggerRef.current?.focus();
+        });
+      }
+    },
+    [menuView, selectedModels.length]
+  );
+
+  // The mobile header's model summary opens this picker rather than shipping a
+  // second one with its own copy of the selection state (STG-F009).
+  useEffect(() => {
+    const openModelPicker = (event: Event) => {
+      const { trigger } = (event as CustomEvent<ChatModelPickerOpenDetail>).detail || {};
+      lastMenuTriggerRef.current = trigger ?? null;
+      setMenuView("models");
+      setIsMenuOpen(true);
+    };
+
+    window.addEventListener(CHAT_MODEL_PICKER_OPEN_EVENT, openModelPicker);
+    return () =>
+      window.removeEventListener(CHAT_MODEL_PICKER_OPEN_EVENT, openModelPicker);
+  }, []);
+
   const currentPlan = isGuestMode ? "Guest" : accountUsage?.plan ?? "Free";
-
-  const favoriteRecommendationModels = useMemo(() => {
-    return favoriteModelIds
-      .map((modelId) => PUBLIC_MODELS.find((model) => model.id === modelId))
-      .filter((model): model is (typeof PUBLIC_MODELS)[number] => Boolean(model?.enabled))
-      .filter((model) => !selectedModels.includes(model.id));
-  }, [PUBLIC_MODELS, favoriteModelIds, selectedModels]);
-
-  const recommendationModels = useMemo(() => {
-    if (favoriteRecommendationModels.length) return favoriteRecommendationModels;
-    const ids = personalizedRecommendationIds.length
-      ? personalizedRecommendationIds
-      : [...RECOMMENDED_MODEL_IDS];
-    const pool = ids
-      .map((modelId) => PUBLIC_MODELS.find((model) => model.id === modelId))
-      .filter((model): model is (typeof PUBLIC_MODELS)[number] => Boolean(model?.enabled))
-      .filter((model) => !selectedModels.includes(model.id));
-    // Once the user has started picking models, a single well-matched
-    // suggestion is more useful than a fixed panel of three -- the rest of
-    // the picker (Selected, Favorites, All models) already covers browsing.
-    return pool.slice(0, selectedModels.length === 0 ? 3 : 1);
-  }, [PUBLIC_MODELS, favoriteRecommendationModels, personalizedRecommendationIds, selectedModels]);
-
-  const filteredModels = useMemo(() => {
-    const normalizedQuery = modelSearchQuery.trim().toLowerCase();
-
-    return PUBLIC_MODELS.filter((model) => {
-      const usageProfile = getModelUsageProfile(model);
-      const description = getModelPickerDescription(model, lang).toLowerCase();
-      const matchesQuery =
-        !normalizedQuery ||
-        model.name.toLowerCase().includes(normalizedQuery) ||
-        model.provider.toLowerCase().includes(normalizedQuery) ||
-        description.includes(normalizedQuery);
-      const matchesProvider =
-        providerFilter === "all" || model.provider === providerFilter;
-      const matchesUsageBand =
-        usageBandFilter === "all" ||
-        getModelPickerUsageBand(usageProfile.credits) === usageBandFilter;
-      const matchesCapability =
-        capabilityFilter === "favorites"
-          ? favoriteModelIds.includes(model.id)
-          : modelMatchesCapability(model, capabilityFilter);
-      const matchesImageInput = !imageInputOnly || modelSupportsImageInput(model);
-      const matchesCurrentPlan =
-        !availableOnPlanOnly || canUseModelWithPlan(currentPlan, model);
-
-      return (
-        matchesQuery &&
-        matchesProvider &&
-        matchesUsageBand &&
-        matchesCapability &&
-        matchesImageInput &&
-        matchesCurrentPlan
-      );
-    });
-  }, [
-    availableOnPlanOnly,
-    capabilityFilter,
-    currentPlan,
-    favoriteModelIds,
-    imageInputOnly,
-    lang,
-    modelSearchQuery,
-    PUBLIC_MODELS,
-    providerFilter,
-    usageBandFilter,
-  ]);
-
-  const groupedModels = useMemo(() => {
-    const favoriteSet = new Set(favoriteModelIds);
-    const recentSet = new Set(recentModelIds);
-    const sortedModels = [...filteredModels].sort((a, b) => {
-      const providerDelta =
-        getProviderSortRank(a.provider) - getProviderSortRank(b.provider);
-      if (providerDelta !== 0) return providerDelta;
-      const providerNameDelta = a.provider.localeCompare(b.provider);
-      if (providerNameDelta !== 0) return providerNameDelta;
-      const favoriteDelta =
-        Number(favoriteSet.has(b.id)) - Number(favoriteSet.has(a.id));
-      if (favoriteDelta !== 0) return favoriteDelta;
-      const recentDelta = Number(recentSet.has(b.id)) - Number(recentSet.has(a.id));
-      if (recentDelta !== 0) return recentDelta;
-      return a.name.localeCompare(b.name);
-    });
-
-    return sortedModels.reduce<Array<{ provider: string; models: typeof filteredModels }>>(
-      (groups, model) => {
-        const provider = model.provider;
-        const group = groups.find((item) => item.provider === provider);
-        if (group) group.models.push(model);
-        else groups.push({ provider, models: [model] });
-        return groups;
-      },
-      []
-    );
-  }, [favoriteModelIds, filteredModels, recentModelIds]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1172,6 +1069,7 @@ export function ChatInput({
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
+        if (menuView === "models" && modelPickerEscapeRef.current?.()) return;
         closeMenu(true);
         return;
       }
@@ -1242,7 +1140,7 @@ export function ChatInput({
 
     document.addEventListener("keydown", handleMenuKeyDown, true);
     return () => document.removeEventListener("keydown", handleMenuKeyDown, true);
-  }, [closeMenu, getMenuFocusableElements, isMenuOpen]);
+  }, [closeMenu, getMenuFocusableElements, isMenuOpen, menuView]);
 
   const toggleFavoriteModel = (modelId: string) => {
     setFavoriteModelIds((current) => {
@@ -2058,6 +1956,7 @@ export function ChatInput({
               }
               setMenuView("models");
               setIsMenuOpen(true);
+              trackProductEvent("model_picker_opened", selectedModels.length, {});
             }}
             className={`flex max-w-[112px] shrink-0 touch-manipulation items-center gap-1 rounded-full border border-zinc-300 bg-zinc-50 px-2.5 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-800 ${isMobileShell ? "h-11" : "h-10"}`}
             title={activeModelNames.join(", ")}
@@ -2066,18 +1965,24 @@ export function ChatInput({
             aria-controls="chat-input-popover"
             aria-haspopup="dialog"
           >
-            {selectedModels.length === 1 ? (
+            {/* Counts what will actually be sent and billed -- the same basis
+                as the credit estimate beside it and as the mobile header's
+                "+N", so a paused panel cannot make the two disagree. */}
+            {activeSelectedModels.length === 1 ? (
               <ModelLogo
-                model={AVAILABLE_MODELS.find((item) => item.id === selectedModels[0])}
+                model={AVAILABLE_MODELS.find((item) => item.id === activeSelectedModels[0])}
                 size="xs"
               />
             ) : (
               <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[9px] font-black text-white">
-                {selectedModels.length}
+                {activeSelectedModels.length}
               </span>
             )}
-            <span className="min-w-0 truncate whitespace-nowrap">
-              {modelsSelectedLabel(selectedModels.length)}
+            <span
+              data-testid="composer-active-model-count"
+              className="min-w-0 truncate whitespace-nowrap"
+            >
+              {modelsSelectedLabel(activeSelectedModels.length)}
             </span>
             <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
           </button>
@@ -2329,7 +2234,10 @@ export function ChatInput({
                   <div className="my-1 border-t border-zinc-200 dark:border-zinc-700" />
                   <button
                     type="button"
-                    onClick={() => setMenuView("models")}
+                    onClick={() => {
+                      setMenuView("models");
+                      trackProductEvent("model_picker_opened", selectedModels.length, {});
+                    }}
                     className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
                   >
                     <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-purple-500/10 text-purple-500">
@@ -2399,177 +2307,13 @@ export function ChatInput({
                 </div>
               ) : (
                 <>
-                  <div className="mb-2 hidden items-center gap-2 px-1 py-1 md:flex">
-                    <button
-                      type="button"
-                      onClick={() => setMenuView("actions")}
-                      className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-white"
-                      aria-label={t("auth.cancel")}
-                    >
-                      <ArrowLeft className="h-4 w-4" />
-                    </button>
-                    <div className="min-w-0 flex-1">
-                      <span className="block text-sm font-semibold text-zinc-900 dark:text-zinc-100">{t("chat.modelSelect")}</span>
-                      <span className="block text-xs text-zinc-500">
-                        {selectedModels.length}/{maxSelectableModels} {selectedModels.length === 1 ? t("chat.modelsSelectedOne") : t("chat.modelsSelectedOther")}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="mb-2 shrink-0 px-1">
-                    <div className="relative">
-                      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                      <input
-                        ref={modelSearchInputRef}
-                        data-testid="model-search-input"
-                        value={modelSearchQuery}
-                        onChange={(event) => setModelSearchQuery(event.target.value)}
-                        placeholder={pickerCopy.searchPlaceholder}
-                        className="h-9 w-full rounded-lg border border-zinc-200 bg-zinc-50 pl-9 pr-3 text-xs text-zinc-800 outline-none transition placeholder:text-zinc-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:focus:border-blue-500"
-                      />
-                    </div>
-                  </div>
-                  {selectedModels.length > 0 && (
-                    <div className="mb-2 shrink-0 px-1">
-                      <p className="mb-1 px-1 text-[10px] font-black uppercase tracking-wide text-zinc-400">
-                        {pickerCopy.selectedModelsLabel}
-                      </p>
-                      <div className="flex flex-wrap gap-x-4 gap-y-2.5 md:gap-1.5">
-                        {selectedModels.map((modelId) => {
-                          const model = PUBLIC_MODELS.find((item) => item.id === modelId);
-                          return (
-                            <span
-                              key={modelId}
-                              data-testid="selected-model-chip"
-                              className="inline-flex max-w-full items-center gap-1 rounded-full border border-blue-300 bg-zinc-100 py-1 pl-2 pr-1 text-[11px] font-bold text-zinc-700 dark:border-blue-800 dark:bg-zinc-800 dark:text-zinc-200"
-                            >
-                              <Check className="h-3 w-3 shrink-0 text-blue-600 dark:text-blue-400" aria-hidden="true" />
-                              <ModelLogo model={model} size="xs" />
-                              <span className="max-w-[120px] truncate">{model?.name || modelId}</span>
-                              <button
-                                type="button"
-                                aria-label={t("chat.removeModelFromComparison")}
-                                onClick={() => onToggleModel(modelId)}
-                                className={`relative flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-300/60 dark:text-zinc-400 dark:hover:bg-zinc-700 before:absolute before:content-[''] ${isMobileShell ? "before:-inset-3.5" : "before:-inset-2"}`}
-                              >
-                                <X className="h-3 w-3" />
-                              </button>
-                            </span>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
                   {(() => {
-                    const favoritesButton = (mobileStyle: boolean) =>
-                      favoriteModelIds.length > 0 && (
-                        <button
-                          type="button"
-                          aria-pressed={capabilityFilter === "favorites"}
-                          onClick={() =>
-                            setCapabilityFilter((current) =>
-                              current === "favorites" ? "all" : "favorites"
-                            )
-                          }
-                          className={
-                            mobileStyle
-                              ? `inline-flex min-h-11 shrink-0 items-center gap-1 rounded-full border px-2.5 text-[10px] font-black transition ${capabilityFilter === "favorites" ? "border-blue-500 bg-blue-500 text-white" : "border-zinc-200 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"}`
-                              : `flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[10px] font-black transition ${capabilityFilter === "favorites" ? "border-blue-500 bg-blue-500 text-white" : "border-zinc-200 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"}`
-                          }
-                        >
-                          <Star className={`h-3 w-3 ${capabilityFilter === "favorites" ? "fill-current" : ""}`} aria-hidden="true" />
-                          {t("chat.favoriteModels")}
-                        </button>
-                      );
-                    const capabilityChips = (mobileStyle: boolean) =>
-                      ([
-                        ["recommended", pickerCopy.recommended],
-                        ["fast", pickerCopy.fast],
-                        ["reasoning", pickerCopy.deepReasoning],
-                        ["search", pickerCopy.webSearch],
-                      ] as const).map(([filterValue, label]) => (
-                        <button
-                          key={filterValue}
-                          type="button"
-                          data-testid={`capability-filter-${filterValue}`}
-                          aria-pressed={capabilityFilter === filterValue}
-                          onClick={() =>
-                            setCapabilityFilter((current) =>
-                              current === filterValue ? "all" : filterValue
-                            )
-                          }
-                          className={
-                            mobileStyle
-                              ? `inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-full border px-2.5 text-[10px] font-black transition ${capabilityFilter === filterValue ? "border-blue-500 bg-blue-500 text-white" : "border-zinc-200 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"}`
-                              : `rounded-full border px-2.5 py-1 text-left text-[10px] font-black transition ${capabilityFilter === filterValue ? "border-blue-500 bg-blue-500 text-white" : "border-zinc-200 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"}`
-                          }
-                        >
-                          {label}
-                        </button>
-                      ));
-                    const providerUsageSelects = (mobileStyle: boolean) => (
-                      <div className={mobileStyle ? "grid grid-cols-2 gap-2" : "flex flex-col gap-2"}>
-                        <select
-                          value={providerFilter}
-                          onChange={(event) => setProviderFilter(event.target.value)}
-                          aria-label={pickerCopy.providerAll}
-                          className={`w-full min-w-0 rounded-lg border border-zinc-200 bg-zinc-50 px-2 text-xs font-medium text-zinc-700 outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 ${mobileStyle ? "h-11" : "h-9"}`}
-                        >
-                          <option value="all">{pickerCopy.providerAll}</option>
-                          {modelProviders.map((provider) => (
-                            <option key={provider} value={provider}>{provider}</option>
-                          ))}
-                        </select>
-                        <select
-                          value={usageBandFilter}
-                          onChange={(event) => setUsageBandFilter(event.target.value as ModelPickerUsageBand)}
-                          aria-label={pickerCopy.usageAll}
-                          className={`w-full min-w-0 rounded-lg border border-zinc-200 bg-zinc-50 px-2 text-xs font-medium text-zinc-700 outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 ${mobileStyle ? "h-11" : "h-9"}`}
-                        >
-                          <option value="all">{pickerCopy.usageAll}</option>
-                          <option value="light">{pickerCopy.light}</option>
-                          <option value="medium">{pickerCopy.medium}</option>
-                          <option value="heavy">{pickerCopy.heavy}</option>
-                          <option value="intensive">{pickerCopy.intensive}</option>
-                        </select>
-                      </div>
-                    );
-                    const advancedFiltersPanel = showAdvancedModelFilters && (
-                      <div className={`flex flex-wrap rounded-lg bg-zinc-100 p-1.5 dark:bg-zinc-950 ${isMobileShell ? "gap-2" : "gap-1"}`}>
-                        {([
-                          [imageInputOnly, setImageInputOnly, pickerCopy.imageInputOnly],
-                          [availableOnPlanOnly, setAvailableOnPlanOnly, pickerCopy.availableOnPlan],
-                        ] as const).map(([pressed, setPressed, label]) => (
-                          <button
-                            key={label}
-                            type="button"
-                            aria-pressed={pressed}
-                            onClick={() => setPressed(!pressed)}
-                            className={`inline-flex items-center justify-center rounded-full px-2 text-[9px] font-black transition ${isMobileShell ? "min-h-11" : "py-1"} ${pressed ? "bg-blue-600 text-white" : "bg-white text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"}`}
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                    );
-                    const advancedFiltersToggle = (
-                      <button
-                        type="button"
-                        data-testid="advanced-model-filters"
-                        aria-expanded={showAdvancedModelFilters}
-                        onClick={() => setShowAdvancedModelFilters((current) => !current)}
-                        className={`inline-flex items-center gap-1 self-start rounded-full border border-zinc-200 px-2 text-[9px] font-black text-zinc-500 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800 ${isMobileShell ? "min-h-11" : "py-1"}`}
-                      >
-                        <SlidersHorizontal className="h-3 w-3" aria-hidden="true" />
-                        {pickerCopy.filters}
-                        {(imageInputOnly || availableOnPlanOnly) && (
-                          <span className="rounded-full bg-blue-600 px-1.5 text-white">
-                            {Number(imageInputOnly) + Number(availableOnPlanOnly)}
-                          </span>
-                        )}
-                      </button>
-                    );
-                    const comboFinderArea = !isGuestMode && (
-                      selectedModels.length >= maxSelectableModels ? (
+                    // The AI-combination nudge stays owned by ChatInput because
+                    // it depends on the draft text and the model-finder entry
+                    // point; the picker just renders it under the
+                    // recommendations.
+                    const comboFinderSlot = !isGuestMode ? (
+                      activeSelectedModels.length >= maxSelectableModels ? (
                         <button
                           type="button"
                           data-testid="model-combo-finder-cta-compact"
@@ -2577,7 +2321,7 @@ export function ChatInput({
                             closeMenu(false);
                             openModelFinder();
                           }}
-                          className="self-start text-[10px] font-bold text-blue-600 underline decoration-dotted underline-offset-2 hover:text-blue-500 dark:text-blue-300"
+                          className={`inline-flex items-center self-start rounded-lg px-2 text-[11px] font-bold text-blue-600 underline decoration-dotted underline-offset-2 hover:text-blue-500 dark:text-blue-300 ${isMobileShell ? "min-h-11" : "py-1"}`}
                         >
                           {t("modelFinder.pickerCtaCompact")}
                         </button>
@@ -2601,7 +2345,7 @@ export function ChatInput({
                                   : "modelFinder.complementaryDifferentProvider"
                             )}
                           </p>
-                          <div className="mt-2 flex gap-1.5">
+                          <div className="mt-2 flex flex-wrap gap-1.5">
                             <button
                               type="button"
                               data-testid="model-combo-complementary-add"
@@ -2614,7 +2358,7 @@ export function ChatInput({
                                   { model_id: complementaryModel.id }
                                 );
                               }}
-                              className="rounded-lg bg-amber-600 px-2.5 py-1.5 text-[10px] font-black text-white hover:bg-amber-500"
+                              className={`inline-flex items-center justify-center rounded-lg bg-amber-600 px-2.5 text-[10px] font-black text-white hover:bg-amber-500 ${isMobileShell ? "min-h-11" : "py-1.5"}`}
                             >
                               {t("modelFinder.complementaryAdd").replace(
                                 "{model}",
@@ -2628,7 +2372,7 @@ export function ChatInput({
                                   complementarySuggestion.modelId
                                 )
                               }
-                              className="rounded-lg border border-amber-300 bg-white px-2.5 py-1.5 text-[10px] font-bold text-amber-900 hover:bg-amber-100 dark:border-amber-800 dark:bg-zinc-950 dark:text-amber-200"
+                              className={`inline-flex items-center justify-center rounded-lg border border-amber-300 bg-white px-2.5 text-[10px] font-bold text-amber-900 hover:bg-amber-100 dark:border-amber-800 dark:bg-zinc-950 dark:text-amber-200 ${isMobileShell ? "min-h-11" : "py-1.5"}`}
                             >
                               {t("modelFinder.complementaryDismiss")}
                             </button>
@@ -2642,331 +2386,43 @@ export function ChatInput({
                             closeMenu(false);
                             openModelFinder();
                           }}
-                          className="inline-flex items-center justify-center gap-1.5 self-start rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[10px] font-black text-blue-700 transition hover:bg-blue-100 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200 dark:hover:bg-blue-950"
+                          className={`inline-flex items-center justify-center gap-1.5 self-start rounded-full border border-blue-200 bg-blue-50 px-3 text-[11px] font-black text-blue-700 transition hover:bg-blue-100 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200 dark:hover:bg-blue-950 ${isMobileShell ? "min-h-11" : "py-1.5"}`}
                         >
                           <Sparkles className="h-3 w-3" aria-hidden="true" />
                           {t("modelFinder.pickerCta")}
                         </button>
                       )
-                    );
-                    const recommendationsSection = !modelSearchQuery.trim() &&
-                          selectedModels.length < maxSelectableModels &&
-                          recommendationModels.length > 0 && (
-                          <section
-                            data-testid="model-recommendations"
-                            aria-label={
-                              favoriteRecommendationModels.length
-                                ? t("chat.favoriteModels")
-                                : personalizedRecommendationIds.length
-                                  ? pickerCopy.personalizedRecommendations
-                                  : pickerCopy.tomverseRecommendations
-                            }
-                            className="space-y-1 rounded-xl border border-blue-200 bg-blue-50/60 p-2 dark:border-blue-900/60 dark:bg-blue-950/20"
-                          >
-                            <p className="px-1 text-[11px] font-black text-zinc-900 dark:text-white">
-                              {favoriteRecommendationModels.length
-                                ? t("chat.favoriteModels")
-                                : personalizedRecommendationIds.length
-                                  ? pickerCopy.personalizedRecommendations
-                                  : pickerCopy.tomverseRecommendations}
-                            </p>
-                            {recommendationModels.map((model, recommendationIndex) => {
-                              const isSelected = selectedModels.includes(model.id);
-                              const liveStatus = liveModelStatuses[model.id];
-                              const modelStatus =
-                                liveStatus?.status || getModelExperienceStatus(model);
-                              const imageIncompatible =
-                                hasImageAttachments && !modelSupportsImageInput(model);
-                              const selectionDisabled =
-                                !model.enabled ||
-                                modelStatus === "unavailable" ||
-                                imageIncompatible;
-                              const usageProfile = getModelUsageProfile(model);
-                              const isPlanLocked = !canUseModelWithPlan(currentPlan, model);
+                    ) : null;
 
-                              return (
-                                <button
-                                  key={model.id}
-                                  type="button"
-                                  data-testid="recommended-model-option"
-                                  data-model-id={model.id}
-                                  data-model-plan-locked={isPlanLocked}
-                                  disabled={selectionDisabled && !isSelected}
-                                  aria-pressed={isSelected}
-                                  onClick={() => {
-                                    rememberRecentModel(model.id);
-                                    if (!isSelected) {
-                                      trackProductEvent(
-                                        "recommended_model_accepted",
-                                        Math.min(maxSelectableModels, selectedModels.length + 1),
-                                        {
-                                          model_id: model.id,
-                                          recommendation_rank: recommendationIndex + 1,
-                                        }
-                                      );
-                                    }
-                                    onToggleModel(model.id);
-                                  }}
-                                  className="flex min-h-12 w-full items-center gap-2 rounded-lg bg-white px-2 py-1.5 text-left shadow-sm transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-45 dark:bg-zinc-900 dark:hover:bg-zinc-800"
-                                >
-                                  <ModelLogo model={model} size="sm" />
-                                  <span className="min-w-0 flex-1">
-                                    <span className="block truncate text-xs font-bold text-zinc-900 dark:text-zinc-100">
-                                      {model.name}
-                                    </span>
-                                    <span className="block truncate text-[10px] text-zinc-500 dark:text-zinc-400">
-                                      {getModelPickerDescription(model, lang)}
-                                    </span>
-                                  </span>
-                                  <CreditCostBadge
-                                    credits={usageProfile.credits}
-                                    size="xs"
-                                    label={lang === "ko" ? `기본 ${usageProfile.credits}크레딧 차감` : `Base cost ${usageProfile.credits} credits`}
-                                  />
-                                  <ModelSelectionBadge isSelected={isSelected} isLocked={isPlanLocked} />
-                                </button>
-                              );
-                            })}
-                          </section>
-                        );
-                    const groupedModelsSection = (
-                      <div className="space-y-3">
-                        {groupedModels.map((group) => (
-                            <div key={group.provider} className="space-y-1">
-                              <div className="px-2 text-[10px] font-bold uppercase tracking-wide text-zinc-400">
-                                {group.provider.toUpperCase()}
-                              </div>
-                              <div className="grid grid-cols-1 gap-2 @[760px]/list:grid-cols-2">
-                                {group.models.map((model) => {
-                                  const isSelected = selectedModels.includes(model.id);
-                                  const isFavorite = favoriteModelIds.includes(model.id);
-                                  const liveStatus = liveModelStatuses[model.id];
-                                  const modelStatus = liveStatus?.status || getModelExperienceStatus(model);
-                                  const fallbackModels = (liveStatus?.fallbackModelIds || [])
-                                    .map((id) => PUBLIC_MODELS.find((item) => item.id === id))
-                                    .filter((item): item is (typeof PUBLIC_MODELS)[number] => Boolean(item))
-                                    .filter((item) => item.enabled && item.id !== model.id)
-                                    .slice(0, 2);
-                                  const isPlanLocked = !canUseModelWithPlan(currentPlan, model);
-                                  const imageIncompatible =
-                                    hasImageAttachments && !modelSupportsImageInput(model);
-                                  const selectionDisabled =
-                                    !model.enabled ||
-                                    modelStatus === "unavailable" ||
-                                    imageIncompatible;
-                                  const usageProfile = getModelUsageProfile(model);
-                                  const statusReason = isPlanLocked
-                                    ? isGuestMode
-                                      ? t("modelStatusReasons.loginRequired")
-                                      : t("modelStatusReasons.upgradeRequired")
-                                    : imageIncompatible
-                                      ? t("modelStatusReasons.imageUnsupported")
-                                    : !model.enabled || modelStatus === "unavailable"
-                                      ? t("modelStatusReasons.unavailable")
-                                      : model.status !== "enabled" || modelStatus === "limited"
-                                        ? t("modelStatusReasons.limited")
-                                        : null;
-                                  const modelDescription = getModelPickerDescription(model, lang);
-                                  const modelFeatures = getModelPickerFeatures(model);
-                                  return (
-                                    <div
-                                      key={model.id}
-                                      className={`flex w-full items-start gap-2 rounded-xl border px-2 py-1.5 transition ${
-                                        isSelected
-                                          ? "border-blue-200 bg-blue-50/70 dark:border-blue-900/50 dark:bg-blue-950/20"
-                                          : "border-transparent hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                                      }`}
-                                    >
-                                      <button
-                                        type="button"
-                                        data-testid="model-favorite-star"
-                                        onClick={() => toggleFavoriteModel(model.id)}
-                                        className={`flex shrink-0 items-center justify-center rounded-lg transition ${isMobileShell ? "h-11 w-11" : "h-8 w-8"} ${isFavorite ? "text-amber-400" : "text-zinc-400 hover:text-amber-400"}`}
-                                        aria-pressed={isFavorite}
-                                        aria-label={t("chat.favoriteModels")}
-                                      >
-                                        <Star className={`h-4 w-4 ${isFavorite ? "fill-current" : ""}`} />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        data-testid="model-option"
-                                        data-model-id={model.id}
-                                        data-model-usage-class={usageProfile.category}
-                                        data-model-minimum-plan={model.minimumPlan}
-                                        data-model-image-input={modelSupportsImageInput(model)}
-                                        data-model-plan-locked={isPlanLocked}
-                                        disabled={selectionDisabled && !isSelected}
-                                        onClick={() => {
-                                          rememberRecentModel(model.id);
-                                          if (!isSelected && !isPlanLocked && selectedModels.length >= maxSelectableModels) {
-                                            setReplaceModelCandidate(model);
-                                            return;
-                                          }
-                                          onToggleModel(model.id);
-                                        }}
-                                        aria-pressed={isSelected}
-                                        className="flex min-w-0 flex-1 items-start gap-2 rounded-lg py-0.5 text-sm disabled:cursor-not-allowed disabled:opacity-45"
-                                      >
-                                        <ModelLogo model={model} size="md" />
-                                        <span className="min-w-0 flex-1 text-left">
-                                          <span className="flex min-w-0 items-start gap-1.5">
-                                            <span
-                                              data-testid="model-option-name"
-                                              className="min-w-0 whitespace-normal break-words font-semibold leading-5 text-zinc-800 dark:text-zinc-100"
-                                            >
-                                              {model.name}
-                                            </span>
-                                            <span
-                                              className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${
-                                                modelStatus === "available"
-                                                  ? "bg-emerald-500"
-                                                  : modelStatus === "limited"
-                                                    ? "bg-amber-500"
-                                                    : "bg-zinc-400"
-                                              }`}
-                                              title={modelStatus === "available" ? undefined : statusReason || modelStatus}
-                                              aria-label={statusReason || modelStatus}
-                                            />
-                                          </span>
-                                          <span className="mt-0.5 block text-[10px] leading-4 text-zinc-500 dark:text-zinc-400">
-                                            {modelDescription}
-                                          </span>
-                                          {statusReason && (
-                                            <span className={`mt-0.5 flex items-center gap-1 text-[10px] font-bold ${modelStatus === "unavailable" || !model.enabled ? "text-red-500" : modelStatus === "limited" ? "text-amber-500" : "text-blue-500"}`}>
-                                              {isPlanLocked && <LockKeyhole className="h-3 w-3" aria-hidden="true" />}
-                                              {statusReason}
-                                            </span>
-                                          )}
-                                          {modelFeatures.length > 0 && (
-                                            <span className="mt-1 flex max-w-full flex-wrap gap-x-2 gap-y-1">
-                                              {modelFeatures.map((feature) => {
-                                                const Icon =
-                                                  feature === "image"
-                                                    ? ImageIcon
-                                                    : feature === "reasoning"
-                                                      ? Brain
-                                                      : feature === "search"
-                                                        ? Globe2
-                                                        : Code2;
-                                                const label = pickerFeatureLabels[feature];
-                                                return (
-                                                  <span
-                                                    key={feature}
-                                                    className="inline-flex items-center gap-1 text-[9px] font-bold text-zinc-500 dark:text-zinc-300"
-                                                  >
-                                                    <Icon className="h-3 w-3" aria-hidden="true" />
-                                                    {label}
-                                                  </span>
-                                                );
-                                              })}
-                                            </span>
-                                          )}
-                                          {(modelStatus === "limited" || modelStatus === "unavailable") && fallbackModels.length > 0 && (
-                                            <span className="mt-1 flex flex-wrap items-center gap-1 text-[10px] text-zinc-500">
-                                              <span>{t("chat.trySimilarModel")}</span>
-                                              {fallbackModels.map((fallback) => (
-                                                <span
-                                                  key={fallback.id}
-                                                  className="rounded-full bg-blue-500/10 px-1.5 py-0.5 font-bold text-blue-500"
-                                                >
-                                                  {fallback.name}
-                                                </span>
-                                              ))}
-                                            </span>
-                                          )}
-                                        </span>
-                                        <span className="flex shrink-0 flex-col items-end gap-2">
-                                          <CreditCostBadge
-                                            credits={usageProfile.credits}
-                                            testId="model-credit-badge"
-                                            label={lang === "ko" ? `기본 ${usageProfile.credits}크레딧 차감` : `Base cost ${usageProfile.credits} credits`}
-                                          />
-                                          <ModelSelectionBadge isSelected={isSelected} isLocked={isPlanLocked} />
-                                        </span>
-                                      </button>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          ))}
-                          {filteredModels.length === 0 && capabilityFilter === "favorites" && (
-                            <div className="rounded-xl border border-dashed border-zinc-200 px-4 py-8 text-center text-xs text-zinc-400 dark:border-zinc-700">
-                              <p className="font-bold text-zinc-500 dark:text-zinc-300">{t("chat.noFavoriteModelsTitle")}</p>
-                              <p className="mt-1">{t("chat.noFavoriteModelsHint")}</p>
-                            </div>
-                          )}
-                          {filteredModels.length === 0 && capabilityFilter !== "favorites" && (
-                            <div className="rounded-xl border border-dashed border-zinc-200 px-4 py-8 text-center text-xs text-zinc-400 dark:border-zinc-700">
-                              {t("chat.noModelsFound")}
-                            </div>
-                          )}
-                      </div>
-                    );
-
-                    return isMobileModelMenu ? (
-                      <div
-                        data-testid="model-picker-scroll-region"
-                        className="h-0 min-h-0 flex-1 touch-pan-y space-y-2 overflow-x-hidden overflow-y-scroll overscroll-y-contain px-1 pb-4 pr-2 [scrollbar-gutter:stable] [-webkit-overflow-scrolling:touch]"
-                      >
-                        {recommendationsSection}
-                        <div className="flex items-center justify-between gap-2 px-1 pt-0.5">
-                          <p className="text-[11px] font-black text-zinc-900 dark:text-white">
-                            {pickerCopy.allModels}
-                          </p>
-                          {advancedFiltersToggle}
-                        </div>
-                        {comboFinderArea}
-                        <div className="flex touch-pan-x gap-1 overflow-x-auto pb-0.5 [-webkit-overflow-scrolling:touch]">
-                          {favoritesButton(true)}
-                          {capabilityChips(true)}
-                        </div>
-                        {providerUsageSelects(true)}
-                        {advancedFiltersPanel}
-                        {groupedModelsSection}
-                      </div>
-                    ) : (
-                      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden md:flex-row md:gap-4">
-                        <div className="flex shrink-0 flex-col gap-3 overflow-y-auto px-1 md:w-44 md:shrink-0 md:border-r md:border-zinc-200 md:pr-3 dark:md:border-zinc-800">
-                          {favoritesButton(false)}
-                          <div className="flex flex-col gap-1">{capabilityChips(false)}</div>
-                          {providerUsageSelects(false)}
-                          {advancedFiltersToggle}
-                          {advancedFiltersPanel}
-                          {comboFinderArea}
-                        </div>
-                        <div className="flex min-h-0 min-w-0 flex-1 flex-col @container/list">
-                          <p className="mb-1 shrink-0 px-1 text-[11px] font-black text-zinc-900 dark:text-white">
-                            {pickerCopy.allModels}
-                          </p>
-                          <div
-                            data-testid="model-picker-scroll-region"
-                            className="h-0 min-h-0 flex-1 touch-pan-y space-y-3 overflow-x-hidden overflow-y-scroll overscroll-y-contain px-1 pb-4 pr-2 [scrollbar-gutter:stable] [-webkit-overflow-scrolling:touch]"
-                          >
-                            {recommendationsSection}
-                            {groupedModelsSection}
-                          </div>
-                        </div>
-                      </div>
+                    return (
+                      <ModelPickerPanel
+                        models={PUBLIC_MODELS}
+                        selectedModelIds={selectedModels}
+                        activeSelectedCount={activeSelectedModels.length}
+                        maxSelectableModels={maxSelectableModels}
+                        currentPlan={currentPlan}
+                        isGuestMode={isGuestMode}
+                        isMobileShell={isMobileShell}
+                        isCompactLayout={isMobileModelMenu}
+                        modelStatuses={liveModelStatuses}
+                        hasImageAttachments={hasImageAttachments}
+                        favoriteModelIds={favoriteModelIds}
+                        recentModelIds={recentModelIds}
+                        personalizedModelIds={personalizedRecommendationIds}
+                        selectedBaseCredits={selectedBaseCredits}
+                        searchInputRef={modelSearchInputRef}
+                        escapeHandlerRef={modelPickerEscapeRef}
+                        onToggleModel={onToggleModel}
+                        onRequestSwap={setReplaceModelCandidate}
+                        onToggleFavorite={toggleFavoriteModel}
+                        onRememberRecentModel={rememberRecentModel}
+                        onBackToActions={() => setMenuView("actions")}
+                        onDone={() => closeMenu(true, "done")}
+                        onTrackEvent={trackModelPickerEvent}
+                        comboFinderSlot={comboFinderSlot}
+                      />
                     );
                   })()}
-                  <div data-testid="model-selection-summary" className="mt-2 flex shrink-0 items-center gap-2 border-t border-zinc-200 px-1 pt-2 dark:border-zinc-700">
-                    <p className="min-w-0 flex-1 text-[11px] font-bold text-zinc-600 dark:text-zinc-300">
-                      {modelsSelectedLabel(selectedModels.length)} · {pickerCopy.baseEstimate}{" "}
-                      <CreditCostBadge
-                        credits={selectedBaseCredits}
-                        size="xs"
-                        label={lang === "ko" ? `기본 예상 ${selectedBaseCredits}크레딧` : `Base estimate ${selectedBaseCredits} credits`}
-                      />
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => closeMenu(true)}
-                      className={`flex shrink-0 items-center justify-center rounded-xl bg-blue-600 px-3 text-xs font-black text-white transition hover:bg-blue-500 ${isMobileShell ? "h-11" : "py-2"}`}
-                    >
-                      {pickerCopy.done}
-                    </button>
-                  </div>
                 </>
               )}
             </div>

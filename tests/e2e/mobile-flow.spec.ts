@@ -20,9 +20,9 @@ test.beforeEach(async ({ page }, testInfo) => {
   }
   await mockChatStream(page, "Mobile QA response");
   await page.goto("/chat");
-  await expect(
-    page.getByTestId("mobile-chat-shell").locator("header p").nth(1)
-  ).toHaveText(needsMultipleModels ? "GPT-5.4 mini" : "Gemini 3.1 Flash-Lite");
+  await expect(page.getByTestId("mobile-header-primary-model")).toHaveText(
+    needsMultipleModels ? "GPT-5.4 mini" : "Gemini 3.1 Flash-Lite"
+  );
 });
 
 test("mobile shell and drawer stay inside viewport", async ({ page }) => {
@@ -39,10 +39,7 @@ test("mobile shell and drawer stay inside viewport", async ({ page }) => {
 });
 
 test("sent message renders without leaving the active model", async ({ page }) => {
-  const activeModel = page
-    .getByTestId("mobile-chat-shell")
-    .locator("header p")
-    .nth(1);
+  const activeModel = page.getByTestId("mobile-header-primary-model");
   const activeModelName = await activeModel.textContent();
 
   await page.getByTestId("chat-textarea").fill("Mobile immediate message");

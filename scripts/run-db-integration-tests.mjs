@@ -94,6 +94,7 @@ run(
     "tests/integration/admin-users.db.test.ts",
     "tests/integration/login-methods.db.test.ts",
     "tests/integration/account-deletion.db.test.ts",
+    "tests/integration/conversation-title.db.test.ts",
   ],
-  "Running financial, credit, model-registry, admin-security, admin-users, login-methods, and account-deletion transaction scenarios"
+  "Running financial, credit, model-registry, admin-security, admin-users, login-methods, account-deletion, and conversation-title transaction scenarios"
 );

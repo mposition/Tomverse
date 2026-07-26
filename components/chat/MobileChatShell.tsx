@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import { createPortal } from "react-dom";
 import { useChatConsentSlotRef } from "@/components/analytics/AnalyticsProvider";
 import { ANALYTICS_PREFERENCES_OPEN_EVENT } from "@/lib/analyticsPreferencesEvents";
@@ -14,7 +21,11 @@ import { FeatureHelpPopover } from "@/components/chat/FeatureHelpPopover";
 import { ModeInfoSheet } from "@/components/chat/ModeInfoSheet";
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import { chatHelpCopy } from "@/components/chat/chatHelpCopy";
+import { chatModelSummaryCopy } from "@/components/chat/chatModelSummaryCopy";
 import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
+import { buildChatModelSummary } from "@/lib/chatModelSummary";
+import { openChatModelPicker } from "@/lib/chatModelPickerEvents";
+import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import {
   type ChatAttachment,
   type Conversation,
@@ -24,6 +35,7 @@ import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import type { WebSearchMode } from "@/lib/appDefaults";
 import {
   Check,
+  ChevronDown,
   Lock,
   Menu,
   Share2,
@@ -60,6 +72,7 @@ type MobileChatShellProps = {
   guestPreviewMode?: boolean;
   guestMessageCount: number;
   maxGuestMessages: number;
+  isModelSelectionReady: boolean;
   onNewChat: () => void;
   onSelectConversation: (id: string) => void;
   onRename: (id: string, title: string) => void;
@@ -104,6 +117,7 @@ export function MobileChatShell({
   guestPreviewMode = false,
   guestMessageCount,
   maxGuestMessages,
+  isModelSelectionReady,
   onNewChat,
   onSelectConversation,
   onRename,
@@ -306,9 +320,34 @@ export function MobileChatShell({
     return () => document.removeEventListener("keydown", handleDrawerKeyDown, true);
   }, [getDrawerFocusableElements, isDrawerOpen]);
 
-  const activeModel = useMemo(
-    () => AVAILABLE_MODELS.find((model) => model.id === resolvedActiveModelId),
-    [AVAILABLE_MODELS, resolvedActiveModelId]
+  // One derivation feeds the header summary, its accessible name and (through
+  // the same selectedModels/disabledPanels props) the composer's own count, so
+  // the two can no longer disagree about how many models are really answering.
+  const modelSummary = useMemo(
+    () =>
+      buildChatModelSummary({
+        selectedModels,
+        disabledModelIds: disabledPanels,
+        primaryModelId: resolvedActiveModelId,
+        models: AVAILABLE_MODELS,
+      }),
+    [AVAILABLE_MODELS, disabledPanels, resolvedActiveModelId, selectedModels]
+  );
+  const summaryCopy = chatModelSummaryCopy[lang];
+  const modelSummaryLabel = summaryCopy.accessibleName({
+    primaryModelName: modelSummary.primary?.name ?? null,
+    extraActiveCount: modelSummary.extraActiveCount,
+    activeCount: modelSummary.activeCount,
+    pausedCount: modelSummary.pausedCount,
+  });
+  const handleOpenModelPicker = useCallback(
+    (event: ReactMouseEvent<HTMLButtonElement>) => {
+      trackProductEvent("chat_tool_menu_opened", modelSummary.activeCount, {
+        cta_location: "mobile_header_model_summary",
+      });
+      openChatModelPicker(event.currentTarget);
+    },
+    [modelSummary.activeCount]
   );
   const isActiveConversationEmpty = resolvedActiveModelId
     ? modelEmptyStates[emptyStateKey(resolvedActiveModelId)] ?? true
@@ -380,13 +419,71 @@ export function MobileChatShell({
         >
           <Menu className="h-5 w-5" />
         </button>
-        <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-col">
           <p className="truncate text-[13px] font-bold">
             {currentConversation?.title || t("sidebar.newChat")}
           </p>
-          <p className="truncate text-[10px] font-medium text-zinc-500">
-            {activeModel?.name || t("chat.modelSelect")}
-          </p>
+          {isModelSelectionReady ? (
+            <button
+              type="button"
+              data-testid="mobile-header-model-summary"
+              onClick={handleOpenModelPicker}
+              aria-haspopup="dialog"
+              aria-label={modelSummaryLabel}
+              title={modelSummary.entries.map((entry) => entry.name).join(", ")}
+              className="-mx-1 -my-0.5 flex min-h-11 min-w-0 max-w-full items-center gap-1 rounded-lg px-1 py-0.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 active:bg-zinc-100 dark:active:bg-zinc-900"
+            >
+              {/* Avatars are a supplement, never the only signal: the model
+                  name and "+N" carry the same information, and the stack is
+                  the first thing to go when the viewport cannot afford it. */}
+              {modelSummary.avatars.length > 1 && (
+                <span
+                  data-testid="mobile-header-model-avatars"
+                  className="hidden shrink-0 items-center -space-x-1 min-[360px]:flex"
+                  aria-hidden="true"
+                >
+                  {modelSummary.avatars.map((entry) => (
+                    <ModelLogo
+                      key={entry.modelId}
+                      model={entry.model}
+                      size="xs"
+                      className={entry.isPaused ? "opacity-40" : ""}
+                    />
+                  ))}
+                  {modelSummary.avatarOverflowCount > 0 && (
+                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-zinc-200 text-[9px] font-black text-zinc-600 ring-1 ring-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:ring-zinc-700">
+                      +{modelSummary.avatarOverflowCount}
+                    </span>
+                  )}
+                </span>
+              )}
+              <span
+                data-testid="mobile-header-primary-model"
+                className="min-w-0 flex-1 truncate text-[10px] font-medium text-zinc-500"
+              >
+                {modelSummary.primary?.name || t("chat.modelSelect")}
+              </span>
+              {modelSummary.extraActiveCount > 0 && (
+                <span
+                  data-testid="mobile-header-extra-model-count"
+                  className="shrink-0 rounded-full bg-blue-500/10 px-1.5 py-px text-[10px] font-black leading-4 text-blue-600 dark:text-blue-300"
+                >
+                  +{modelSummary.extraActiveCount}
+                </span>
+              )}
+              <ChevronDown className="h-3 w-3 shrink-0 text-zinc-400" aria-hidden="true" />
+            </button>
+          ) : (
+            // Never paint "1 model" and correct it to "3" a frame later: until
+            // the restored selection is known there is no honest number to show.
+            <span
+              data-testid="mobile-header-model-summary-skeleton"
+              className="-my-0.5 flex min-h-11 items-center py-0.5"
+              aria-hidden="true"
+            >
+              <span className="h-3 w-24 animate-pulse rounded-full bg-zinc-200 dark:bg-zinc-800" />
+            </span>
+          )}
         </div>
         {!isActiveConversationEmpty && (
           <button
