@@ -1120,8 +1120,13 @@ const checks = [
       source.includes("consentPromptReady") &&
       source.includes("GUEST_QUICK_START_ACTIVE_KEY") &&
       source.includes("calc(100vw-1rem)") &&
-      source.includes("grid-cols-[minmax(0,1fr)_auto]") &&
-      source.includes('className="h-8 rounded-lg') &&
+      // STG-F001 replaced the rigid grid-cols layout with flex-wrap (so long
+      // translated labels wrap instead of overflowing) and bumped the
+      // decline/accept buttons from h-8 (32px) to min-h-11 (44px, WCAG 2.2
+      // target size) -- these two checks were updated to match, in place of
+      // the pre-STG-F001 grid-cols-[minmax(0,1fr)_auto] / h-8 markup.
+      source.includes("flex-wrap items-center gap-2 sm:flex-nowrap") &&
+      source.includes('className="min-h-11 rounded-lg') &&
       source.includes("env(safe-area-inset-bottom)"),
   },
   {
@@ -1214,7 +1219,10 @@ const checks = [
   },
   {
     name: "Prepared chat comparison validates and bounds URL presets",
-    file: "app/(application)/chat/page.tsx",
+    // STG-F006 split the old monolithic page.tsx into a thin server component
+    // (just resolving the guest default model) plus this client component,
+    // which now holds all the state and logic this check protects.
+    file: "app/(application)/chat/ChatPageClient.tsx",
     test: (source) =>
       source.includes("comparisonPresetAppliedRef") &&
       source.includes(".filter(isEnabledModelId)") &&
