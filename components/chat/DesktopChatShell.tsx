@@ -269,6 +269,16 @@ export function DesktopChatShell({
   const [activeModelId, setActiveModelId] = useState<string | null>(
     selectedModels[0] || null
   );
+  // The active tab is scoped to the current conversation: switching to a
+  // different conversation (even one that happens to share a model with
+  // whatever tab was active before) must re-anchor to that conversation's
+  // first model rather than silently keeping the previous tab selected just
+  // because that model id still happens to be a member of the new list.
+  const [activeModelChatKey, setActiveModelChatKey] = useState(conversationStateKey);
+  if (activeModelChatKey !== conversationStateKey) {
+    setActiveModelChatKey(conversationStateKey);
+    setActiveModelId(selectedModels[0] || null);
+  }
   const resolvedActiveModelId =
     activeModelId && selectedModels.includes(activeModelId)
       ? activeModelId
