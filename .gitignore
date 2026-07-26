@@ -44,6 +44,7 @@ yarn-error.log*
 next-env.d.ts
 
 /app/generated/prisma
+/lib/generated
 .vs
 .local-backups/aihub-clone.dump
 docs

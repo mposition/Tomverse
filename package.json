@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
+    "predev": "node scripts/generate-build-info.mjs",
+    "prebuild": "node scripts/generate-build-info.mjs",
     "build": "next build",
     "start": "next start",
     "start:e2e": "next start -H 127.0.0.1 -p 3100",

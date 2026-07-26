@@ -18,6 +18,7 @@ import { dispatchAppToast } from "@/lib/appToast";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
 import { useSidebarCollapsePreference } from "@/components/chat/useSidebarCollapse";
+import { BuildInfoMenuItem, BuildStagingBadge } from "@/components/chat/BuildInfoMenu";
 
 type ChatSidebarProps = {
     conversations: Conversation[];
@@ -742,6 +743,7 @@ export function ChatSidebar({
                 <h1 className={`${isMobileDrawer ? "text-sm" : "text-base"} font-bold tracking-tight text-zinc-800 dark:text-zinc-100`}>
                     Tomverse Insight
                 </h1>
+                <BuildStagingBadge />
                 <div className="ml-auto flex items-center gap-1">
                 {!isMobileDrawer && (
                     <button
@@ -814,6 +816,10 @@ export function ChatSidebar({
                                 <CircleHelp className="h-4 w-4 text-blue-500" aria-hidden="true" />
                                 {helpCopy.openFullGuide}
                             </Link>
+                            <BuildInfoMenuItem
+                                menuItemClassName="flex min-h-11 w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-bold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                                iconClassName="h-4 w-4 text-blue-500"
+                            />
                         </span>
                     ) : null}
                 </span>
