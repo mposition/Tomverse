@@ -14,16 +14,7 @@ const openSidebarIfNeeded = async (page: Page, testInfo: TestInfo) => {
   }
 };
 
-// Pre-existing, unrelated bug (confirmed via `git stash` to already
-// reproduce on develop HEAD before this feature's changes): on mobile, the
-// drawer's own close button visually overlaps sidebar-help-button, so both
-// a real tap AND a Playwright `{ force: true }` click (which still hit-tests
-// at that screen position) land on the close button instead. Flagged
-// separately for a fix; dispatching the click event directly at the DOM
-// node bypasses hit-testing entirely, so these build-info tests exercise
-// this feature's own logic instead of failing on that unrelated overlap.
-const clickSidebarHelpButton = (page: Page) =>
-  page.getByTestId("sidebar-help-button").dispatchEvent("click");
+const clickSidebarHelpButton = (page: Page) => page.getByTestId("sidebar-help-button").click();
 
 // STG-F010: a public, unauthenticated build-info endpoint plus a sidebar UI
 // so QA/users can confirm which commit/deployment staging is actually

@@ -269,6 +269,33 @@ test.describe("mobile touch targets (STG-F005)", () => {
     await assertHitTestReturnsSelf(closeButton, "drawer close");
   });
 
+  // Regression test: the drawer's own close button used to sit directly on
+  // top of sidebar-help-button in the header (both a 44x44 box anchored to
+  // the same top-right corner), so a real tap on the help button landed on
+  // the close button instead. Covers both the default per-project mobile
+  // viewport and the narrowest supported width.
+  for (const viewport of [null, { width: 320, height: 640 }] as const) {
+    test(`sidebar-help-button in the mobile drawer is tappable, not covered by the drawer close button${
+      viewport ? ` at ${viewport.width}x${viewport.height}` : ""
+    }`, async ({ page }) => {
+      if (viewport) {
+        await page.setViewportSize(viewport);
+      }
+      await page.goto("/chat");
+      await page.getByTestId("mobile-sidebar-open").click();
+      const dialog = page.getByRole("dialog").first();
+      await expect(dialog).toBeVisible();
+
+      const helpButton = dialog.getByTestId("sidebar-help-button");
+      await assertMinTouchTarget(helpButton, "sidebar help button (mobile drawer)");
+      await assertHitTestReturnsSelf(helpButton, "sidebar help button (mobile drawer)");
+
+      await helpButton.click();
+      await expect(page.getByTestId("sidebar-tour-replay")).toBeVisible();
+      await expect(page.getByTestId("sidebar-help-link")).toBeVisible();
+    });
+  }
+
   test("mobile-model-tab remove buttons meet the minimum and do not select the tab", async ({
     page,
   }) => {

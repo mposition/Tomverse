@@ -731,7 +731,7 @@ export function ChatSidebar({
         <>
         <aside className={`relative flex h-full w-full shrink-0 select-none flex-col border-r border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 ${isMobileDrawer ? "" : "md:w-80"}`}>
 
-            <div className={`${isMobileDrawer ? "p-3" : "p-4"} border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-2.5`}>
+            <div className={`${isMobileDrawer ? "p-3 pr-16" : "p-4"} border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-2.5`}>
                 <span className={`flex items-center justify-center overflow-hidden rounded-xl bg-white ring-1 ring-zinc-200 shadow-sm dark:ring-zinc-800 ${isMobileDrawer ? "h-8 w-8" : "h-9 w-9"}`}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
