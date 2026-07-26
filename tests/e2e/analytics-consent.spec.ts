@@ -281,6 +281,84 @@ test("authenticated chat moves analytics settings into the account menu", async 
   ).toBeVisible();
 });
 
+// AUD-R003: the two banners are gated by the same coordination the guest
+// quick-start guide and AnalyticsProvider already share (ChatInput.tsx's
+// announceGuestQuickStart -> sessionStorage ACTIVE_KEY + the
+// "tomverse:guest-quick-start" event AnalyticsProvider listens for) -- a
+// fresh guest must see the quick-start guide first, with the consent notice
+// deferred, and only get the notice once the guide is dismissed (here, by
+// focusing the composer, which is the guide's own documented dismissal path).
+test("a fresh guest sees the quick-start guide before the analytics consent notice, never both competing at once", async ({
+  page,
+}, testInfo) => {
+  test.skip(
+    testInfo.project.name !== "desktop-chromium",
+    "Ordering logic is timing-driven, not layout-driven -- covered once."
+  );
+
+  await page.context().addCookies([
+    {
+      name: "__tomverse_e2e_analytics",
+      value: "1",
+      url: "http://127.0.0.1:3100",
+    },
+  ]);
+  await prepareGuestPage(page, "en");
+  // No quick-start-seen flag and no guest-preview mode: this is a genuinely
+  // fresh guest, the only state the quick-start guide actually renders for.
+  await page.goto("/chat?lang=en");
+
+  const quickStart = page.getByTestId("guest-quick-start");
+  const notice = page.getByTestId("chat-consent-notice");
+  await expect(quickStart, "quick-start guide shows for a fresh guest").toBeVisible();
+  await expect(notice, "consent notice stays deferred while the guide is up").toHaveCount(0);
+
+  // The guide's documented dismissal path: focusing the composer.
+  await page.getByTestId("chat-textarea").click();
+  await expect(quickStart, "guide dismisses on composer focus").toBeHidden();
+  await expect(notice, "consent notice appears once the guide clears").toBeVisible();
+});
+
+test("both consent controls are reachable and operable by keyboard alone", async ({
+  page,
+}, testInfo) => {
+  test.skip(
+    testInfo.project.name !== "desktop-chromium",
+    "Keyboard operability is input-method-driven, not layout-driven -- covered once."
+  );
+
+  await page.context().addCookies([
+    {
+      name: "__tomverse_e2e_analytics",
+      value: "1",
+      url: "http://127.0.0.1:3100",
+    },
+  ]);
+  await prepareGuestPage(page, "en");
+  await page.addInitScript(() => {
+    window.localStorage.setItem("tomverse_guest_quick_start_seen_v2", "1");
+  });
+  await page.goto("/chat?lang=en");
+
+  const notice = page.getByTestId("chat-consent-notice");
+  await expect(notice).toBeVisible();
+  const decline = notice.getByTestId("analytics-consent-decline");
+  const accept = notice.getByTestId("analytics-consent-accept");
+
+  await decline.focus();
+  await expect(decline, "decline is keyboard-focusable").toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(accept, "accept is reachable by Tab from decline").toBeFocused();
+
+  await page.keyboard.press("Enter");
+  await expect(notice, "Enter on the focused accept control activates it").toBeHidden();
+  await expect
+    .poll(() =>
+      page.evaluate(() => window.localStorage.getItem("tomverse_analytics_consent_v1"))
+    )
+    .toBe("accepted");
+});
+
 test("Australia starts privacy-minimized analytics with an immediate opt-out", async ({
   page,
 }, testInfo) => {

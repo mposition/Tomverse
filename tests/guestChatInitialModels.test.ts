@@ -198,3 +198,69 @@ test("no selection ever exceeds the guest model cap", () => {
   assert.equal(resolved.models.length, guestDefault.length);
   assert.equal(new Set(resolved.models).size, resolved.models.length);
 });
+
+// -- AUD-R003: additional URL-preset hardening cases --
+
+test("a ?models= link mixing valid and unknown models keeps only the valid ones, in order", () => {
+  const [first, , third] = GUEST_BRAND_TRIO_MODEL_IDS;
+  const resolved = resolve({
+    search: `?models=not-a-model,${first},also-fake,${third}`,
+  });
+
+  assert.equal(resolved.source, "url_models_param");
+  assert.deepEqual(resolved.models, [first, third]);
+});
+
+test("a ?models= link naming a plan-locked (Pro-only) model drops it, never granting guest access", () => {
+  // gpt-5-5 is minimumPlan: "Pro" -- enabled, but never guest-eligible.
+  const resolved = resolve({ search: "?models=gpt-5-5" });
+
+  assert.equal(resolved.source, "guest_default");
+  assert.ok(!resolved.models.includes("gpt-5-5"));
+});
+
+test("a ?models= link naming a non-Standard-tier model (Free plan but not guest tier) drops it", () => {
+  // claude-sonnet-5 is minimumPlan: "Free" but usageClass "advanced", so it
+  // passes the plan check but fails the guest Standard-tier requirement.
+  const resolved = resolve({ search: "?models=claude-sonnet-5" });
+
+  assert.equal(resolved.source, "guest_default");
+  assert.ok(!resolved.models.includes("claude-sonnet-5"));
+});
+
+test("a plan-locked model mixed with an eligible one keeps only the eligible model", () => {
+  const eligible = GUEST_BRAND_TRIO_MODEL_IDS[0];
+  const resolved = resolve({ search: `?models=gpt-5-5,${eligible}` });
+
+  assert.equal(resolved.source, "url_models_param");
+  assert.deepEqual(resolved.models, [eligible]);
+});
+
+test("an extremely long ?models= query degrades safely to the guest default rather than throwing", () => {
+  const junk = Array.from({ length: 5_000 }, (_, i) => `not-a-model-${i}`).join(",");
+  const resolved = resolve({ search: `?models=${junk}` });
+
+  assert.equal(resolved.source, "guest_default");
+  assert.deepEqual(resolved.models, guestDefault);
+});
+
+test("a query key shaped like a prototype-pollution attempt has no effect on the resolved models", () => {
+  const eligible = GUEST_BRAND_TRIO_MODEL_IDS[0];
+  const resolved = resolve({
+    search: `?models=${eligible}&__proto__[polluted]=1&constructor[prototype][polluted]=1`,
+  });
+
+  assert.equal(resolved.source, "url_models_param");
+  assert.deepEqual(resolved.models, [eligible]);
+  assert.equal((Object.prototype as Record<string, unknown>).polluted, undefined);
+});
+
+test("a ?models= link cannot smuggle credit, plan, or provider-shaped keys into the resolved selection", () => {
+  const eligible = GUEST_BRAND_TRIO_MODEL_IDS[0];
+  const resolved = resolve({
+    search: `?models=${eligible}&plan=Max&credits=999999&providerApiKey=leaked`,
+  });
+
+  assert.deepEqual(Object.keys(resolved).sort(), ["models", "source"]);
+  assert.deepEqual(resolved.models, [eligible]);
+});

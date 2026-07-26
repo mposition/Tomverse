@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { prepareGuestPage } from "./support/app-fixtures";
+import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
 
 // STG-F002: at 768-1024px, an always-expanded 320px sidebar plus 3
 // side-by-side panels could leave each panel's model-name control at ~0px.
@@ -309,4 +309,32 @@ test("STG-F002: 1440px keeps the existing always-expanded 3-column desktop layou
     expect(box?.width).toBeGreaterThanOrEqual(120);
   }
   await expectNoHorizontalOverflow(page);
+});
+
+// AUD-R003: ChatPageClient.tsx's comparisonPresetAppliedRef effect (the
+// signed-in counterpart to lib/guestChatInitialModels.ts's guest-only
+// resolver, which already has full unit coverage) has no dedicated e2e case
+// for a real authenticated account. This exercises it directly: duplicates
+// collapse, an unknown model is dropped, and the URL is cleaned up so a
+// refresh doesn't re-apply the same preset.
+test("AUD-R003: an authenticated account's ?models= preset dedupes, drops unknown models, and clears the URL", async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-chromium", "Covered once in desktop Chromium.");
+
+  await resizeAndSettle(page, 1440, 900);
+  await mockAuthenticatedApi(page);
+  await page.goto(
+    "/chat?lang=en&models=gpt-5-4-mini,not-a-real-model,claude-haiku-4-5,gpt-5-4-mini"
+  );
+
+  const panels = page.locator('[data-testid="desktop-model-panel"]');
+  await expect(panels).toHaveCount(2);
+
+  await expect
+    .poll(() => new URL(page.url()).searchParams.has("models"))
+    .toBe(false);
+  await expect
+    .poll(() => new URL(page.url()).searchParams.has("prompt"))
+    .toBe(false);
 });
