@@ -235,6 +235,7 @@ export const ko = {
         allTiers: "모든 사용량 클래스",
         noModelsFound: "조건에 맞는 모델이 없습니다.",
         scrollToLatest: "최신 메시지로 이동",
+        newResponseAvailable: "새 답변이 있습니다",
         panelPaused: "일시정지됨",
         availableModel: "사용 가능",
         unavailableModel: "사용 불가",

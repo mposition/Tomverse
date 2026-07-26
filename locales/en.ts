@@ -235,6 +235,7 @@ export const en = {
         allTiers: "All usage classes",
         noModelsFound: "No models match these filters.",
         scrollToLatest: "Jump to latest",
+        newResponseAvailable: "New response available",
         panelPaused: "Paused",
         availableModel: "Available",
         unavailableModel: "Unavailable",

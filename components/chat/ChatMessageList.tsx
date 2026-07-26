@@ -28,6 +28,10 @@ import { useLanguage } from "@/components/LanguageProvider";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { FeedbackButton } from "@/components/chat/FeedbackButton";
 import { writePendingGuestImportIntent } from "@/lib/guestImport";
+import {
+  nextModeForUserScroll,
+  type ChatScrollMode,
+} from "@/lib/chatAutoScroll";
 
 type ChatMessageListProps = {
   messages: Message[];
@@ -150,12 +154,19 @@ export function ChatMessageList({
 }: ChatMessageListProps) {
   const { models: AVAILABLE_MODELS } = useModelCatalog();
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const previousLastMessageIdRef = useRef<string | null>(null);
+  const previousLastUserMessageIdRef = useRef<string | null>(null);
   const previousMessageCountRef = useRef(0);
-  const autoStickUntilRef = useRef(0);
-  const scheduledScrollsRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
-  const [isNearBottom, setIsNearBottom] = useState(true);
-  const showScrollButton = !isNearBottom;
+  // Mirrors scrollMode synchronously for callbacks that run outside React's
+  // render cycle (ResizeObserver, the native scroll listener) and would
+  // otherwise close over a stale value.
+  const scrollModeRef = useRef<ChatScrollMode>("following");
+  // True only for the lifetime of a scroll call this component itself
+  // triggered -- not a fixed time window. Lets the scroll listener tell "we
+  // just moved the viewport" apart from "the user (or their input device)
+  // moved it", however long that scroll actually takes to settle.
+  const isProgrammaticScrollRef = useRef(false);
+  const programmaticScrollRafRef = useRef<number | null>(null);
+  const [scrollMode, setScrollModeState] = useState<ChatScrollMode>("following");
     const { t } = useLanguage();
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const copiedResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -178,89 +189,112 @@ export function ChatMessageList({
     };
   }, []);
 
-  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+  // Keeps scrollModeRef (readable synchronously from non-React callbacks)
+  // and the rendered scrollMode state in lockstep -- always go through this
+  // instead of calling setScrollModeState directly.
+  const setMode = useCallback((mode: ChatScrollMode) => {
+    scrollModeRef.current = mode;
+    setScrollModeState(mode);
+  }, []);
+
+  // Scrolls the container and marks the scroll that results as "ours" for
+  // exactly as long as it actually takes -- via the `scrollend` event where
+  // supported, with a couple of animation frames as a fallback/backstop --
+  // rather than guessing a fixed duration. See lib/chatAutoScroll.ts for why
+  // a clock-based window doesn't work once chunks arrive faster than it.
+  const scrollToBottomNow = useCallback((behavior: ScrollBehavior) => {
     const container = containerRef.current;
     if (!container) return;
 
-    container.scrollTo({ top: container.scrollHeight, behavior });
-  }, []);
+    if (programmaticScrollRafRef.current !== null) {
+      cancelAnimationFrame(programmaticScrollRafRef.current);
+      programmaticScrollRafRef.current = null;
+    }
+    isProgrammaticScrollRef.current = true;
 
-  const clearScheduledScrolls = useCallback(() => {
-    scheduledScrollsRef.current.forEach((timer) => clearTimeout(timer));
-    scheduledScrollsRef.current = [];
-  }, []);
-
-  const forceScrollToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
-    autoStickUntilRef.current = Date.now() + 650;
-    setIsNearBottom(true);
-    clearScheduledScrolls();
-
-    const run = () => {
-      scrollToBottom(behavior);
-      setIsNearBottom(true);
+    let cleared = false;
+    const clear = () => {
+      if (cleared) return;
+      cleared = true;
+      container.removeEventListener("scrollend", clear);
+      isProgrammaticScrollRef.current = false;
     };
 
-    run();
-    requestAnimationFrame(() => {
-      run();
-      requestAnimationFrame(run);
+    container.addEventListener("scrollend", clear, { once: true });
+    container.scrollTo({ top: container.scrollHeight, behavior });
+
+    // Covers browsers without `scrollend`, and is also normally how an
+    // "auto" (instant) scroll's own resulting scroll event gets seen.
+    programmaticScrollRafRef.current = requestAnimationFrame(() => {
+      programmaticScrollRafRef.current = requestAnimationFrame(clear);
     });
+  }, []);
 
-    scheduledScrollsRef.current = [60, 160, 320, 520].map((delay) =>
-      setTimeout(run, delay)
-    );
-  }, [clearScheduledScrolls, scrollToBottom]);
+  useEffect(() => {
+    return () => {
+      if (programmaticScrollRafRef.current !== null) {
+        cancelAnimationFrame(programmaticScrollRafRef.current);
+      }
+    };
+  }, []);
 
-  const checkIsNearBottom = () => {
+  // The only place a real (non-programmatic) scroll is interpreted. Covers
+  // wheel, trackpad, touch swipe, scrollbar drag, and keyboard paging
+  // uniformly -- all of them move scrollTop and fire this same native event;
+  // none need their own listener.
+  const handleScroll = useCallback(() => {
+    if (isProgrammaticScrollRef.current) return;
+
     const container = containerRef.current;
-    if (!container) return true;
+    if (!container) return;
 
-    const threshold = 80;
-    const distanceFromBottom =
-      container.scrollHeight - container.scrollTop - container.clientHeight;
+    setMode(
+      nextModeForUserScroll({
+        scrollTop: container.scrollTop,
+        scrollHeight: container.scrollHeight,
+        clientHeight: container.clientHeight,
+      })
+    );
+  }, [setMode]);
 
-    return distanceFromBottom < threshold;
-  };
+  useLayoutEffect(() => {
+    const messageCount = messages.length;
+    const previousMessageCount = previousMessageCountRef.current;
+    previousMessageCountRef.current = messageCount;
 
-  const handleScroll = () => {
-    if (Date.now() < autoStickUntilRef.current) {
-      setIsNearBottom(true);
+    const lastUserMessage = [...messages].reverse().find((message) => message.role === "user");
+    const lastUserMessageId = lastUserMessage?.id ?? null;
+    const isNewUserTurn =
+      lastUserMessageId !== null && lastUserMessageId !== previousLastUserMessageIdRef.current;
+    previousLastUserMessageIdRef.current = lastUserMessageId;
+
+    const isInitialLoad = previousMessageCount === 0 && messageCount > 0;
+
+    if (isInitialLoad || isNewUserTurn) {
+      // A fresh load or an explicitly-sent new message always follows the
+      // new response, even if the user was reading history a moment ago.
+      setMode("following");
+      scrollToBottomNow("auto");
       return;
     }
 
-    const nearBottom = checkIsNearBottom();
-    setIsNearBottom(nearBottom);
-  };
-
-  useLayoutEffect(() => {
-    const lastMessage = messages[messages.length - 1];
-    const lastMessageId = lastMessage?.id || null;
-    const previousLastMessageId = previousLastMessageIdRef.current;
-    const previousMessageCount = previousMessageCountRef.current;
-    const isInitialLoad =
-      previousMessageCount === 0 ||
-      (messages.length > 0 && previousLastMessageId === null);
-    const didAppendMessage =
-      messages.length > previousMessageCount ||
-      (lastMessageId !== null && lastMessageId !== previousLastMessageId);
-
-    previousLastMessageIdRef.current = lastMessageId;
-    previousMessageCountRef.current = messages.length;
-
-    if (!isInitialLoad && !didAppendMessage && !isNearBottom) return;
-
-    const behavior: ScrollBehavior = isInitialLoad ? "auto" : "smooth";
-    forceScrollToBottom(behavior);
-  }, [forceScrollToBottom, messages, isNearBottom]);
+    if (scrollModeRef.current === "following") {
+      scrollToBottomNow("auto");
+    }
+    // Paused: streamed content growing must never move scrollTop.
+  }, [messages, scrollToBottomNow, setMode]);
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container || typeof ResizeObserver === "undefined") return;
 
+    // Catches layout growth that doesn't come with a `messages` change --
+    // an image finishing decode, code-block syntax highlighting landing
+    // late, etc. Never allowed to touch scrollMode itself (only real user
+    // scroll input does that), so it can't silently cancel a pause.
     const observer = new ResizeObserver(() => {
-      if (Date.now() >= autoStickUntilRef.current) return;
-      scrollToBottom("auto");
-      setIsNearBottom(true);
+      if (scrollModeRef.current !== "following") return;
+      scrollToBottomNow("auto");
     });
 
     observer.observe(container);
@@ -270,9 +304,8 @@ export function ChatMessageList({
 
     return () => {
       observer.disconnect();
-      clearScheduledScrolls();
     };
-  }, [clearScheduledScrolls, scrollToBottom]);
+  }, [scrollToBottomNow]);
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
@@ -280,7 +313,12 @@ export function ChatMessageList({
         data-testid="chat-message-list"
         ref={containerRef}
         onScroll={handleScroll}
-        className="min-h-0 flex-1 overflow-y-auto px-2.5 py-3 md:px-6 md:py-6"
+        // Focusable so PageUp/PageDown/Home/End/ArrowUp/ArrowDown reach this
+        // scroll container natively once the user clicks into it, the same
+        // as wheel/trackpad/touch/scrollbar input already does via the
+        // browser's own scroll handling -- no extra key handling needed.
+        tabIndex={0}
+        className="min-h-0 flex-1 overflow-y-auto px-2.5 py-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 md:px-6 md:py-6"
       >
         <div className="mx-auto flex w-full max-w-4xl flex-col gap-3.5 pb-3 md:gap-5 md:pb-4">
           {messages.map((msg, idx) => {
@@ -690,18 +728,23 @@ export function ChatMessageList({
         </div>
       </div>
 
-      {showScrollButton && (
+      {scrollMode === "paused" && (
         <button
           type="button"
+          data-testid="scroll-to-latest-button"
           onClick={() => {
-            scrollToBottom("smooth");
-            setIsNearBottom(true);
+            const prefersReducedMotion =
+              typeof window !== "undefined" &&
+              window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+            setMode("following");
+            scrollToBottomNow(prefersReducedMotion ? "auto" : "smooth");
           }}
-          className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm text-zinc-100 shadow-lg hover:bg-zinc-800"
+          aria-label={isSending ? t("chat.newResponseAvailable") : t("chat.scrollToLatest")}
+          className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm text-zinc-100 shadow-lg hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
         >
           <span className="flex items-center gap-2">
             <ArrowDown className="h-4 w-4" />
-            {t("chat.scrollToLatest")}
+            {isSending ? t("chat.newResponseAvailable") : t("chat.scrollToLatest")}
           </span>
         </button>
       )}
