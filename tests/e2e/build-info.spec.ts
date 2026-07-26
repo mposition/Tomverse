@@ -28,8 +28,20 @@ const VALID_BUILD_INFO = {
   commitSha: "c12e84489559ed1320293e1cf8099dd17a7e80a6",
   shortCommitSha: "c12e844",
   builtAt: "2026-07-25T04:21:10.000Z",
-  deployedAt: null,
   deploymentId: "staging-20260725-042436",
+  deploymentStartedAt: "2026-07-25T04:22:00.000Z",
+  deployedAt: "2026-07-25T04:24:36.000Z",
+  deploymentStatus: "success",
+};
+
+// Fixture for a deployment Railway has only reported a start time for (Path
+// B) -- deployedAt must stay null and the UI must label the one timestamp it
+// does have as "Deployment started", never fudge it into "Deployment
+// completed".
+const STARTED_ONLY_BUILD_INFO = {
+  ...VALID_BUILD_INFO,
+  deployedAt: null,
+  deploymentStatus: "in_progress",
 };
 
 const mockBuildInfo = (page: Page, body: unknown) =>
@@ -57,13 +69,21 @@ test.describe("build-info API contract (real endpoint)", () => {
       "commitSha",
       "deployedAt",
       "deploymentId",
+      "deploymentStartedAt",
+      "deploymentStatus",
       "environment",
       "shortCommitSha",
     ]);
     expect(["development", "staging", "production", "test"]).toContain(
       body.environment
     );
+    // This suite runs without RAILWAY_API_TOKEN/RAILWAY_DEPLOYMENT_ID
+    // configured, so the real (unmocked) endpoint must resolve deployment
+    // timestamps to null rather than fabricating them -- see the UI-scenario
+    // tests below for the mocked, fixture-driven cases.
     expect(body.deployedAt).toBeNull();
+    expect(body.deploymentStartedAt).toBeNull();
+    expect(body.deploymentStatus).toBe("unknown");
   });
 
   test("rejects non-GET methods", async ({ page }) => {
@@ -147,12 +167,55 @@ test.describe("build-info UI", () => {
     await expect(panel).toContainText("c12e844");
     await expect(panel).toContainText("2026-07-25T04:21:10.000Z");
     await expect(panel).toContainText("staging-20260725-042436");
-    // The full SHA and the null deployedAt are reachable/honest, not hidden.
+    // The full SHA is reachable via tooltip/detail, not hidden.
     await expect(panel.locator('[title="c12e84489559ed1320293e1cf8099dd17a7e80a6"]')).toHaveCount(1);
-    await expect(panel).toContainText("Not available");
+    // Deployment-started and deployment-completed are distinct rows with
+    // distinct real values -- never the same label doing double duty.
+    await expect(panel).toContainText("Deployment started");
+    await expect(panel).toContainText("2026-07-25T04:22:00.000Z");
+    await expect(panel).toContainText("Deployment completed");
+    await expect(panel).toContainText("2026-07-25T04:24:36.000Z");
   });
 
-  test("missing fields render 'Not available' rather than disappearing", async ({
+  test("a completed-timestamp fixture shows 'Deployment completed' with the real value", async ({
+    page,
+  }, testInfo) => {
+    await prepareGuestPage(page, "en");
+    await mockBuildInfo(page, VALID_BUILD_INFO);
+    await page.goto("/chat");
+    await openSidebarIfNeeded(page, testInfo);
+
+    await clickSidebarHelpButton(page);
+    await page.getByTestId("sidebar-build-info-toggle").click();
+    const panel = page.getByTestId("build-info-panel");
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText("Deployment completed");
+    await expect(panel).toContainText("2026-07-25T04:24:36.000Z");
+    // The build timestamp and the deployment-completed timestamp are
+    // different real values in this fixture -- confirms the two are never
+    // confused/copied onto each other.
+    await expect(panel).toContainText("2026-07-25T04:21:10.000Z");
+  });
+
+  test("a started-only fixture shows 'Deployment started' and leaves 'Deployment completed' honestly unavailable", async ({
+    page,
+  }, testInfo) => {
+    await prepareGuestPage(page, "en");
+    await mockBuildInfo(page, STARTED_ONLY_BUILD_INFO);
+    await page.goto("/chat");
+    await openSidebarIfNeeded(page, testInfo);
+
+    await clickSidebarHelpButton(page);
+    await page.getByTestId("sidebar-build-info-toggle").click();
+    const panel = page.getByTestId("build-info-panel");
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText("Deployment started");
+    await expect(panel).toContainText("2026-07-25T04:22:00.000Z");
+    const completedRow = panel.getByText("Deployment completed").locator("..");
+    await expect(completedRow).toContainText("Not available");
+  });
+
+  test("missing fields render 'Not available' rather than disappearing, and never borrow the build timestamp", async ({
     page,
   }, testInfo) => {
     await prepareGuestPage(page, "en");
@@ -161,8 +224,10 @@ test.describe("build-info UI", () => {
       commitSha: null,
       shortCommitSha: null,
       builtAt: null,
-      deployedAt: null,
       deploymentId: null,
+      deploymentStartedAt: null,
+      deployedAt: null,
+      deploymentStatus: "unknown",
     });
     await page.goto("/chat");
     await openSidebarIfNeeded(page, testInfo);
@@ -172,7 +237,14 @@ test.describe("build-info UI", () => {
     const panel = page.getByTestId("build-info-panel");
     await expect(panel).toBeVisible();
     const notAvailableCount = await panel.getByText("Not available").count();
+    // Built, deployment-started, deployment-completed, and deployment ID all
+    // honestly report unavailable rather than any of them borrowing another
+    // field's value.
     expect(notAvailableCount).toBeGreaterThanOrEqual(4);
+    const startedRow = panel.getByText("Deployment started").locator("..");
+    await expect(startedRow).toContainText("Not available");
+    const completedRow = panel.getByText("Deployment completed").locator("..");
+    await expect(completedRow).toContainText("Not available");
   });
 
   test("copy build info writes the expected text and shows a success toast", async ({
@@ -195,6 +267,8 @@ test.describe("build-info UI", () => {
       "Commit: c12e84489559ed1320293e1cf8099dd17a7e80a6"
     );
     expect(clipboardText).toContain("Built: 2026-07-25T04:21:10.000Z");
+    expect(clipboardText).toContain("Deployment started: 2026-07-25T04:22:00.000Z");
+    expect(clipboardText).toContain("Deployment completed: 2026-07-25T04:24:36.000Z");
     expect(clipboardText).toContain("Deployment: staging-20260725-042436");
   });
 

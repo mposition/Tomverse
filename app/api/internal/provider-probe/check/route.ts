@@ -108,7 +108,7 @@ export async function POST(request: Request) {
   }
 
   const scheduledRun = await startScheduledJob("provider_probe");
-  const environment = getPublicBuildInfo().environment;
+  const environment = (await getPublicBuildInfo()).environment;
   const runId = scheduledRun?.id ?? null;
 
   try {

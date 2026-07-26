@@ -1,9 +1,10 @@
 export const dynamic = "force-dynamic";
 
-// Public, unauthenticated endpoint (STG-F010): lets QA and users confirm
-// which commit/deployment is actually running on a given environment
-// without logging in. Only ever returns the four PublicBuildInfo fields --
-// never raw process.env, hostnames, or anything else from lib/buildInfo.ts.
+// Public, unauthenticated endpoint (STG-F010, extended by AUD-R002): lets QA
+// and users confirm which commit/deployment is actually running on a given
+// environment without logging in. Only ever returns the PublicBuildInfo
+// allowlist fields -- never raw process.env, hostnames, Railway tokens, or
+// anything else from lib/buildInfo.ts.
 import { getPublicBuildInfo } from "@/lib/buildInfo";
 
 const headers = {
@@ -11,6 +12,6 @@ const headers = {
   "Cache-Control": "no-store",
 };
 
-export function GET() {
-  return Response.json(getPublicBuildInfo(), { status: 200, headers });
+export async function GET() {
+  return Response.json(await getPublicBuildInfo(), { status: 200, headers });
 }

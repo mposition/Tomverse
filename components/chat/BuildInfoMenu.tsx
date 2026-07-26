@@ -26,8 +26,10 @@ const buildCopyText = (
     `Environment: ${info.environment}`,
     `Commit: ${info.commitSha || notAvailable}`,
     `Built: ${info.builtAt || notAvailable}`,
-    `Deployed: ${info.deployedAt || notAvailable}`,
+    `Deployment started: ${info.deploymentStartedAt || notAvailable}`,
+    `Deployment completed: ${info.deployedAt || notAvailable}`,
     `Deployment: ${info.deploymentId || notAvailable}`,
+    `Deployment status: ${copy.deploymentStatusNames[info.deploymentStatus] || notAvailable}`,
     url ? `URL: ${url}` : null,
   ]
     .filter((line): line is string => line !== null)
@@ -118,6 +120,12 @@ export function BuildInfoMenuItem({
               </dd>
             </div>
             <div className="flex items-center justify-between gap-3">
+              <dt className="font-bold text-zinc-500">{copy.deploymentStartedLabel}</dt>
+              <dd className="text-zinc-800 dark:text-zinc-100">
+                {buildInfo?.deploymentStartedAt || copy.notAvailable}
+              </dd>
+            </div>
+            <div className="flex items-center justify-between gap-3">
               <dt className="font-bold text-zinc-500">{copy.deployedLabel}</dt>
               <dd className="text-zinc-800 dark:text-zinc-100">
                 {buildInfo?.deployedAt || copy.notAvailable}
@@ -130,6 +138,14 @@ export function BuildInfoMenuItem({
                 title={buildInfo?.deploymentId || undefined}
               >
                 {buildInfo?.deploymentId || copy.notAvailable}
+              </dd>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <dt className="font-bold text-zinc-500">{copy.deploymentStatusLabel}</dt>
+              <dd className="text-zinc-800 dark:text-zinc-100">
+                {buildInfo
+                  ? copy.deploymentStatusNames[buildInfo.deploymentStatus]
+                  : copy.notAvailable}
               </dd>
             </div>
           </dl>
