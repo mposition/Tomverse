@@ -150,6 +150,15 @@ async function enterConversation(
 
   const shellTestId = viewport.width < 768 ? "mobile-chat-shell" : "desktop-chat-shell";
   await expect(page.getByTestId(shellTestId)).toBeVisible();
+  if (viewport.width < 768) {
+    // The mobile header's model summary briefly renders a skeleton while
+    // isModelSelectionReady resolves; without waiting it out, a screenshot
+    // taken right after the shell appears can non-deterministically catch
+    // either the skeleton or the real content depending on run-to-run
+    // timing -- exactly the kind of screenshot-variance this suite is
+    // supposed to eliminate.
+    await expect(page.getByTestId("mobile-header-model-summary-skeleton")).toHaveCount(0);
+  }
 
   return authState;
 }
