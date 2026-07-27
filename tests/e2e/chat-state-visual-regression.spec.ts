@@ -174,8 +174,12 @@ async function enterConversation(
     // either the skeleton or the real content depending on run-to-run
     // timing -- exactly the kind of screenshot-variance this suite is
     // supposed to eliminate.
+    // Timeout is generous (not tight) because this wait absorbs CI-runner
+    // load spikes (slow API/DB round-trips during isModelSelectionReady
+    // bootstrap) rather than steady-state render time -- under a loaded
+    // runner 15s was observed to be insufficient even across retries.
     await expect(page.getByTestId("mobile-header-model-summary-skeleton")).toHaveCount(0, {
-      timeout: 15_000,
+      timeout: 30_000,
     });
   }
 
