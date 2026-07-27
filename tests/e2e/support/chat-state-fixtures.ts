@@ -423,15 +423,22 @@ export async function expectNoUnexpectedTransientUi(
   }
 }
 
-// Measured against this suite's own committed goldens across repeated runs
-// on the same Chromium build: real anti-aliasing/sub-pixel font-hinting
-// noise between otherwise-identical renders tops out at ~0.001 (0.1%) of
-// total pixels. Set just above that floor -- tight enough that a genuinely
-// missing state badge, wrong color, or shifted CTA (which moves far more
-// than 0.1% of pixels) still fails, loose enough to absorb that noise
-// without a manual per-test override. See tests/e2e/README or the UI-P1-03
-// completion report for the measurement methodology.
-export const GOLDEN_MAX_DIFF_PIXEL_RATIO = 0.0015;
+// Same-build noise (repeated captures on one, fixed Chromium binary) is
+// near zero -- under 0.0002. That alone isn't the right calibration
+// target, though: CI installs a fresh Chromium per run, which can be a
+// different point release than whatever produced the committed goldens,
+// and cross-build font-hinting/anti-aliasing differences are real even
+// with pixel-identical markup and CSS. Measured directly from a PR Fast
+// Gate run (mposition/Tomverse run 30266722787) comparing this suite's
+// locally-generated goldens against CI's own Chromium render: four
+// mobile goldens differed by 0.0015-0.0034 of total pixels with no
+// underlying UI change at all. Set to ~1.8x the observed worst case
+// (0.0034) -- comfortable margin above real cross-build noise, while
+// still ~3x tighter than this suite's original blanket 0.02, so a
+// genuinely missing state badge, wrong color, or shifted CTA (which
+// moves far more than 0.6% of pixels) still fails. See the UI-P1-03
+// completion report for the full measurement.
+export const GOLDEN_MAX_DIFF_PIXEL_RATIO = 0.006;
 
 export type StableScreenshotOptions = {
   theme: Theme;
