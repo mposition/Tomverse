@@ -46,6 +46,16 @@ test.beforeEach(async ({}, testInfo) => {
   );
 });
 
+// useIsMobileShell() (components/chat/useIsMobileShell.ts) requires both a
+// narrow width AND a coarse (touch) pointer before it treats the shell as
+// mobile -- specifically so a desktop browser window that's merely been
+// narrowed doesn't pick up touch-oriented behavior (Enter-key policy,
+// 44px CTA sizing). Without hasTouch, this desktop-chromium context reports
+// a fine pointer even at a 390px viewport, silently under-sizing touch
+// targets in a way a real phone never would. hasTouch: true matches what a
+// real mobile device (and Playwright's own mobile device presets) reports.
+test.use({ hasTouch: true });
+
 const MODEL_A = "gpt-5-4-mini"; // OpenAI, standard tier
 const MODEL_B = "claude-sonnet-5"; // Anthropic, advanced tier
 const MODEL_C = "gemini-3-5-flash"; // Google, standard tier
@@ -547,7 +557,14 @@ async function enterProConversation(page: Page, theme: Theme, viewport: { width:
     theme,
     viewport,
     selectedModels: [MODEL_B, MODEL_C],
-    usagePatch: { plan: "Pro", balances: { planRemainingCredits: 3000, dailyRemainingCredits: 300 } },
+    usagePatch: {
+      plan: "Pro",
+      balances: { planRemainingCredits: 3000, dailyRemainingCredits: 300 },
+      // Deep Research alone costs ~35 credits; the Free-tier default daily
+      // limit (30) would otherwise trip the "daily limit reached" modal
+      // even on a Pro-plan account with plenty of monthly balance.
+      limits: { creditsDay: 300, creditsMonth: 3000 },
+    },
   });
 }
 
