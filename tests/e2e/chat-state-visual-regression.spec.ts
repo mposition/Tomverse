@@ -175,7 +175,7 @@ test.describe("Loading state", () => {
 // ===========================================================================
 async function setupStreamingTrio(page: Page) {
   await installChatModelStub(page, {
-    [MODEL_A]: { kind: "success", chunks: ["Paris is the capital of France."], intervalMs: 15 },
+    [MODEL_A]: { kind: "success", chunks: [SHORT_ANSWER], intervalMs: 15 },
     [MODEL_B]: {
       kind: "success",
       chunks: ["Here is the first part of a longer, ", "still-streaming answer about world capitals."],
@@ -234,9 +234,15 @@ test.describe("Success state", () => {
         });
         await submitComposer(page, "Give me short, long, and markdown answers.", viewport.width);
 
+        // Desktop shows all 3 panels side by side; mobile shows one active
+        // tab at a time (the other two are in the DOM but not visible), so
+        // only the active tab's content -- the short answer -- is asserted
+        // visible there. Both layouts still get their own golden below.
         await expect(page.getByText(SHORT_ANSWER)).toBeVisible();
-        await expect(page.getByText(/Paragraph 1:/)).toBeVisible();
-        await expect(page.getByRole("heading", { name: "Summary" })).toBeVisible();
+        if (viewport.width >= 768) {
+          await expect(page.getByText(/Paragraph 1:/)).toBeVisible();
+          await expect(page.getByRole("heading", { name: "Summary" })).toBeVisible();
+        }
         await expect(page.getByTestId("chat-textarea")).toBeEnabled();
         // AI Review only makes sense once every active model has answered.
         await expect(page.getByTestId("quick-comparison-button")).toBeEnabled();
@@ -262,13 +268,18 @@ test.describe("Partial failure state", () => {
         });
         await submitComposer(page, "Trigger a single-model failure.", viewport.width);
 
-        // Two successes preserved...
+        // Two successes preserved (desktop shows all 3 panels at once;
+        // mobile shows one active tab, the rest present in the DOM but not
+        // visible -- see the Success state test for the same distinction).
         await expect(page.getByText(SHORT_ANSWER)).toBeVisible();
-        await expect(page.getByText(/Paragraph 1:/)).toBeVisible();
-        // ...and exactly one failure, visually distinct (role=alert, red card).
+        // ...and exactly one failure, visually distinct (role=alert, red
+        // card) -- counted regardless of which tab is active on mobile.
         const errorCards = page.locator('[data-testid="chat-message"][data-message-role="assistant"] [role="alert"]');
         await expect(errorCards).toHaveCount(1);
-        await expect(page.getByRole("button", { name: "다시 시도" })).toBeVisible();
+        if (viewport.width >= 768) {
+          await expect(page.getByText(/Paragraph 1:/)).toBeVisible();
+          await expect(page.getByRole("button", { name: "다시 시도" })).toBeVisible();
+        }
 
         await expect(page).toHaveScreenshot(`chat-partial-failure-${viewportName}-${theme}-ko.png`);
       });
@@ -407,19 +418,22 @@ test.describe("Retry state", () => {
       [MODEL_B]: { kind: "success", chunks: [SHORT_ANSWER], intervalMs: 5 },
       [MODEL_C]: { kind: "success", chunks: [SHORT_ANSWER], intervalMs: 5 },
     });
-    await submitComposer(page, "Retry lifecycle.", DESKTOP_VIEWPORT.width);
+    await submitComposer(page, "Test the retry lifecycle end to end.", DESKTOP_VIEWPORT.width);
 
     const retryButton = page.getByRole("button", { name: "다시 시도" }).first();
     await expect(retryButton).toBeVisible();
     await retryButton.click();
 
     // In-flight: stop button appears, no duplicate retry CTA while sending.
-    await expect(page.getByText("Retry ", { exact: false })).toBeVisible();
+    // Scoped to assistant messages so it can't match the user's own prompt
+    // text, which also happens to start with "Retry".
+    const assistantMessages = page.locator('[data-testid="chat-message"][data-message-role="assistant"]');
+    await expect(assistantMessages.getByText("Retry ", { exact: false })).toBeVisible();
     await expect(page.getByTestId("stop-this-response").first()).toBeVisible();
     await expect(page.getByRole("button", { name: "다시 시도" })).toHaveCount(0);
 
     // Success: the error card is gone, replaced by the retried answer.
-    await expect(page.getByText("Retry succeeded.")).toBeVisible();
+    await expect(assistantMessages.getByText("Retry succeeded.")).toBeVisible();
     await expect(page.locator('[data-testid="chat-message"][data-message-role="assistant"] [role="alert"]')).toHaveCount(0);
   });
 });
@@ -553,8 +567,9 @@ test.describe("Deep Research state", () => {
         await startDeepResearch(page, viewport.width);
 
         await expect(page.getByText("심층 리서치 요청 중…")).toBeVisible();
-        // Deep Research is visually distinct from a plain web-search chip.
-        await expect(page.getByTestId("deep-research-chip")).toHaveCount(0); // chip clears once submitted
+        // The Deep Research chip persists through the run as a visibly
+        // distinct marker from a plain web-search request.
+        await expect(page.getByTestId("deep-research-chip")).toBeVisible();
         await expect(page.getByText(SHORT_ANSWER).first()).toBeVisible();
 
         await expect(page).toHaveScreenshot(`chat-deep-research-${viewportName}-${theme}-ko.png`);
@@ -763,6 +778,10 @@ test.describe("Mobile touch targets", () => {
       [MODEL_C]: { kind: "success", chunks: [SHORT_ANSWER], intervalMs: 5 },
     });
     await submitComposer(page, "Mobile touch targets.", MOBILE_VIEWPORT.width);
+
+    // Mobile shows one active tab at a time; MODEL_A (the failed one) is
+    // active by default, so switch to MODEL_B's tab to reach its stop button.
+    await page.locator(`[data-testid="mobile-model-tab"][data-model-id="${MODEL_B}"]`).click();
 
     const stop = page.getByTestId("stop-this-response").first();
     await expect(stop).toBeVisible();
