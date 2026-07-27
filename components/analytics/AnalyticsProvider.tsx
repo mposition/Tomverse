@@ -96,6 +96,12 @@ export function MarketingConsentSlot({
   );
 }
 
+// The `*Short` labels are the visible text used when the notice renders in a
+// narrow container (the sign-in card, the chat composer slot, a phone-width
+// marketing header). Each one is a substring of its full counterpart, which
+// stays on the button as its aria-label: the accessible name never shrinks
+// (WCAG 2.5.3 Label in Name holds, and every existing role/name query keeps
+// matching), while the layout gets labels that fit next to 44x44 targets.
 const consentCopy: Record<
   Language,
   {
@@ -103,14 +109,18 @@ const consentCopy: Record<
     body: string;
     mobileBody: string;
     accept: string;
+    acceptShort: string;
     decline: string;
+    declineShort: string;
     privacy: string;
     settings: string;
     noticeTitle: string;
     noticeBody: string;
     noticeMobileBody: string;
     keepOn: string;
+    keepOnShort: string;
     turnOff: string;
+    turnOffShort: string;
   }
 > = {
   en: {
@@ -118,98 +128,126 @@ const consentCopy: Record<
     body: "With your permission, Tomverse measures product usage and campaign attribution. Prompts, responses, filenames, and file contents are never included.",
     mobileBody: "Help improve Tomverse. Prompts and file contents are never collected.",
     accept: "Allow analytics",
+    acceptShort: "Allow",
     decline: "Decline",
+    declineShort: "Decline",
     privacy: "Privacy policy",
     settings: "Analytics settings",
     noticeTitle: "Privacy-safe analytics is on",
     noticeBody: "In this region, Tomverse starts privacy-minimized product analytics with a clear opt-out. Prompts, responses, filenames, and file contents are never included, and advertising storage stays off.",
-    noticeMobileBody: "Privacy-safe analytics is on. Prompts and files are never collected; you can turn it off now.",
+    noticeMobileBody: "Analytics is on. Prompts and files are never collected.",
     keepOn: "Keep analytics on",
+    keepOnShort: "Keep",
     turnOff: "Turn off analytics",
+    turnOffShort: "Turn off",
   },
   ko: {
     title: "개인정보를 보호하는 제품 분석",
     body: "동의하면 Tomverse가 제품 사용과 캠페인 유입을 측정합니다. 프롬프트, 응답, 파일명 및 파일 내용은 절대 포함하지 않습니다.",
     mobileBody: "Tomverse 개선에 동의하시겠어요? 질문과 파일 내용은 수집하지 않습니다.",
     accept: "분석 허용",
+    acceptShort: "허용",
     decline: "거부",
+    declineShort: "거부",
     privacy: "개인정보 처리방침",
     settings: "분석 설정",
     noticeTitle: "개인정보 보호 분석이 활성화되어 있습니다",
     noticeBody: "이 지역에서는 명확한 거부 기능과 함께 개인정보를 최소화한 제품 분석을 시작합니다. 프롬프트, 응답, 파일명 및 파일 내용은 포함하지 않으며 광고 저장 기능은 계속 꺼져 있습니다.",
-    noticeMobileBody: "개인정보 보호 분석이 켜져 있습니다. 질문과 파일은 수집하지 않으며 지금 끌 수 있습니다.",
+    noticeMobileBody: "분석이 켜져 있습니다. 질문과 파일은 수집하지 않습니다.",
     keepOn: "분석 유지",
+    keepOnShort: "유지",
     turnOff: "분석 끄기",
+    turnOffShort: "끄기",
   },
   zh: {
     title: "保护隐私的产品分析",
     body: "经您同意，Tomverse 会衡量产品使用和活动归因。绝不会收集提示词、回复、文件名或文件内容。",
     mobileBody: "帮助改进 Tomverse。绝不收集提示词和文件内容。",
     accept: "允许分析",
+    acceptShort: "允许",
     decline: "拒绝",
+    declineShort: "拒绝",
     privacy: "隐私政策",
     settings: "分析设置",
     noticeTitle: "隐私保护分析已开启",
     noticeBody: "在此地区，Tomverse 会启动数据最小化的产品分析，并提供明确的退出选项。绝不会包含提示词、回复、文件名或文件内容，广告存储仍保持关闭。",
-    noticeMobileBody: "隐私保护分析已开启。不会收集提示词或文件，您可立即关闭。",
+    noticeMobileBody: "分析已开启。不会收集提示词或文件。",
     keepOn: "保持开启",
+    keepOnShort: "开启",
     turnOff: "关闭分析",
+    turnOffShort: "关闭",
   },
   fr: {
     title: "Analyse produit respectueuse de la vie privée",
     body: "Avec votre accord, Tomverse mesure l’usage du produit et l’attribution des campagnes. Les prompts, réponses, noms et contenus de fichiers ne sont jamais inclus.",
     mobileBody: "Aidez à améliorer Tomverse. Prompts et fichiers ne sont jamais collectés.",
     accept: "Autoriser",
+    acceptShort: "Autoriser",
     decline: "Refuser",
+    declineShort: "Refuser",
     privacy: "Confidentialité",
     settings: "Paramètres d’analyse",
     noticeTitle: "L’analyse respectueuse de la vie privée est active",
     noticeBody: "Dans cette région, Tomverse active une analyse produit minimisée avec une option de refus claire. Les prompts, réponses, noms et contenus de fichiers ne sont jamais inclus, et le stockage publicitaire reste désactivé.",
-    noticeMobileBody: "L’analyse respectueuse de la vie privée est active. Vous pouvez la désactiver maintenant.",
+    noticeMobileBody: "L’analyse est active. Prompts et fichiers jamais collectés.",
     keepOn: "Garder active",
+    keepOnShort: "Garder",
     turnOff: "Désactiver",
+    turnOffShort: "Désactiver",
   },
   de: {
     title: "Datenschutzfreundliche Produktanalyse",
     body: "Mit Ihrer Zustimmung misst Tomverse Produktnutzung und Kampagnenzuordnung. Prompts, Antworten, Dateinamen und Dateiinhalte werden niemals erfasst.",
     mobileBody: "Tomverse verbessern. Prompts und Dateiinhalte werden nie erfasst.",
     accept: "Analyse erlauben",
+    acceptShort: "Erlauben",
     decline: "Ablehnen",
+    declineShort: "Ablehnen",
     privacy: "Datenschutz",
     settings: "Analyse-Einstellungen",
     noticeTitle: "Datenschutzfreundliche Analyse ist aktiv",
     noticeBody: "In dieser Region startet Tomverse eine datensparsame Produktanalyse mit klarer Widerspruchsmöglichkeit. Prompts, Antworten, Dateinamen und Dateiinhalte werden nie einbezogen; Werbespeicher bleibt deaktiviert.",
-    noticeMobileBody: "Datenschutzfreundliche Analyse ist aktiv und kann jetzt deaktiviert werden.",
+    noticeMobileBody: "Analyse ist aktiv. Keine Prompts oder Dateien.",
     keepOn: "Aktiv lassen",
+    keepOnShort: "Aktiv",
     turnOff: "Deaktivieren",
+    turnOffShort: "Deaktivieren",
   },
   es: {
     title: "Analítica de producto con privacidad",
     body: "Con tu permiso, Tomverse mide el uso del producto y la atribución de campañas. Nunca se incluyen prompts, respuestas, nombres ni contenidos de archivos.",
     mobileBody: "Ayuda a mejorar Tomverse. Nunca recogemos prompts ni archivos.",
     accept: "Permitir analítica",
+    acceptShort: "Permitir",
     decline: "Rechazar",
+    declineShort: "Rechazar",
     privacy: "Privacidad",
     settings: "Ajustes de analítica",
     noticeTitle: "La analítica con privacidad está activa",
     noticeBody: "En esta región, Tomverse inicia analítica de producto minimizada con una opción clara para desactivarla. Nunca se incluyen prompts, respuestas, nombres ni contenidos de archivos, y el almacenamiento publicitario sigue desactivado.",
-    noticeMobileBody: "La analítica con privacidad está activa. Puedes desactivarla ahora.",
+    noticeMobileBody: "La analítica está activa. No recogemos prompts ni archivos.",
     keepOn: "Mantener activa",
+    keepOnShort: "Mantener",
     turnOff: "Desactivar",
+    turnOffShort: "Desactivar",
   },
   pt: {
     title: "Análise de produto com privacidade",
     body: "Com a sua permissão, o Tomverse mede a utilização do produto e a atribuição de campanhas. Prompts, respostas, nomes e conteúdos de ficheiros nunca são incluídos.",
     mobileBody: "Ajude a melhorar o Tomverse. Nunca recolhemos prompts nem ficheiros.",
     accept: "Permitir análise",
+    acceptShort: "Permitir",
     decline: "Recusar",
+    declineShort: "Recusar",
     privacy: "Privacidade",
     settings: "Definições de análise",
     noticeTitle: "A análise com privacidade está ativa",
     noticeBody: "Nesta região, o Tomverse inicia análise de produto minimizada com uma opção clara de recusa. Prompts, respostas, nomes e conteúdos de ficheiros nunca são incluídos, e o armazenamento publicitário permanece desativado.",
-    noticeMobileBody: "A análise com privacidade está ativa. Pode desativá-la agora.",
+    noticeMobileBody: "A análise está ativa. Não recolhemos prompts nem ficheiros.",
     keepOn: "Manter ativa",
+    keepOnShort: "Manter",
     turnOff: "Desativar",
+    turnOffShort: "Desativar",
   },
 };
 
@@ -506,7 +544,9 @@ export function AnalyticsProvider({
         body: copy.noticeBody,
         mobileBody: copy.noticeMobileBody,
         accept: copy.keepOn,
+        acceptShort: copy.keepOnShort,
         decline: copy.turnOff,
+        declineShort: copy.turnOffShort,
       }
     : copy;
 
@@ -535,57 +575,93 @@ export function AnalyticsProvider({
   // muted dark card on dark theme (instead of the old always-black
   // high-contrast bar), so the notice reads as an ordinary compact toast
   // rather than a warning that outweighs the surrounding page (UI-P1-02).
+  //
+  // 11px is the floor for the label, not 10px: this is required text inside a
+  // 44x44 control, and the audit flagged the old 10px/9px auxiliary sizes
+  // across the product as too small to read comfortably at a phone's viewing
+  // distance.
   const consentButtonClass =
-    "inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-zinc-300 bg-white px-2.5 text-[10px] font-black text-zinc-700 transition-colors hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700 dark:focus-visible:ring-offset-zinc-900 sm:px-3 sm:text-[11px]";
+    "inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-zinc-300 bg-white px-2.5 text-[11px] font-black text-zinc-700 transition-colors hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700 dark:focus-visible:ring-offset-zinc-900 @md/notice:px-3 @md/notice:text-xs";
 
-  // The body copy used to carry `min-w-0` next to a `shrink-0` action pair, so
-  // on narrow viewports it absorbed all of the shrink instead of triggering
-  // the wrap this row already allows -- the audit measured 34.6px of body
-  // width at 320px. Giving the copy a real minimum makes the existing
-  // flex-wrap do its job: when the copy and the actions no longer both fit,
-  // the actions drop to their own line rather than crushing the sentence.
-  // It stays content-driven, so a locale with long action labels wraps at a
-  // wider viewport than English does instead of at a hard-coded breakpoint.
+  // Why container queries (@container/notice on the card below) instead of the
+  // viewport-keyed `sm:` variants this used to carry: the notice is portalled
+  // into slots whose widths have nothing to do with the viewport width. On a
+  // 1440x900 desktop the sign-in slot is a max-w-sm card -- 360px of content
+  // box -- yet `sm:flex-nowrap` + `shrink-0` actions still applied there, so
+  // the two full-length actions ("Turn off analytics" / "Keep analytics on")
+  // were laid out as if they had a desktop's width to spend and ran 45.4px
+  // past the card's right edge (audit: 75.91px against the notice's padding
+  // box). Sizing every decision on the *container* is what makes the same
+  // markup correct in the sign-in card, the chat composer slot and the
+  // full-width marketing header alike.
+  //
+  // Nothing forces `flex-nowrap` any more either: the row wraps as a last
+  // resort, so even a locale whose labels outgrow every budget below degrades
+  // to a two-row notice instead of overflowing its container.
+  const consentAction = (
+    kind: "decline" | "accept",
+    onClick: () => void,
+    label: string,
+    shortLabel: string
+  ) => (
+    <button
+      type="button"
+      data-testid={`analytics-consent-${kind}`}
+      onClick={onClick}
+      // The accessible name is always the full label; only the visible text
+      // shortens in a narrow container, and it is a substring of that name.
+      aria-label={label}
+      className={consentButtonClass}
+    >
+      <span className="@md/notice:hidden">{shortLabel}</span>
+      <span className="hidden @md/notice:inline">{label}</span>
+    </button>
+  );
+
   const noticeInner = (
-    <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap sm:justify-between sm:gap-3">
-      <div className="min-w-[10rem] flex-1">
-        <p className="text-[10px] leading-4 text-zinc-600 dark:text-zinc-300 sm:hidden">
-          {promptCopy.mobileBody}{" "}
-          <Link
-            href="/privacy"
-            className="font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200"
-          >
-            {copy.privacy}
-          </Link>
-        </p>
-        <div className="hidden sm:block">
-          <p className="text-xs font-black text-zinc-900 dark:text-zinc-50">{promptCopy.title}</p>
-          <p className="mt-0.5 text-[11px] leading-4 text-zinc-500 dark:text-zinc-400">{promptCopy.body}</p>
-          <Link
-            href="/privacy"
-            className="mt-0.5 inline-flex text-[11px] font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200"
-          >
-            {copy.privacy}
-          </Link>
+    // The query container is this wrapper rather than the card itself: a
+    // container cannot query its own size, and keeping it inside the card
+    // leaves the card's own padding/margins untouched.
+    <div className="@container/notice">
+      <div className="flex flex-wrap items-center gap-2 @md/notice:justify-between @md/notice:gap-3">
+        {/*
+          The copy keeps a real minimum width so it can never be crushed to an
+          unreadable sliver (the audit measured 34.6px at 320px), but the
+          minimum is now small enough to still sit *beside* the compact actions
+          at 320px rather than pushing them onto a second row: a wrapped action
+          row costs ~44px of height, which is what put the phone notice at
+          102px against its 80px contract.
+        */}
+        <div className="min-w-[6rem] flex-1">
+          <p className="text-[11px] leading-4 text-zinc-600 dark:text-zinc-300 @md/notice:hidden">
+            {promptCopy.mobileBody}{" "}
+            <Link
+              href="/privacy"
+              className="font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200"
+            >
+              {copy.privacy}
+            </Link>
+          </p>
+          <div className="hidden @md/notice:block">
+            <p className="text-xs font-black text-zinc-900 dark:text-zinc-50">{promptCopy.title}</p>
+            <p className="mt-0.5 text-[11px] leading-4 text-zinc-500 dark:text-zinc-400">{promptCopy.body}</p>
+            <Link
+              href="/privacy"
+              className="mt-0.5 inline-flex text-[11px] font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200"
+            >
+              {copy.privacy}
+            </Link>
+          </div>
         </div>
-      </div>
-      <div className="flex shrink-0 gap-2">
-        <button
-          type="button"
-          data-testid="analytics-consent-decline"
-          onClick={decline}
-          className={consentButtonClass}
-        >
-          {promptCopy.decline}
-        </button>
-        <button
-          type="button"
-          data-testid="analytics-consent-accept"
-          onClick={accept}
-          className={consentButtonClass}
-        >
-          {promptCopy.accept}
-        </button>
+        <div className="flex shrink-0 gap-2">
+          {consentAction(
+            "decline",
+            decline,
+            promptCopy.decline,
+            promptCopy.declineShort
+          )}
+          {consentAction("accept", accept, promptCopy.accept, promptCopy.acceptShort)}
+        </div>
       </div>
     </div>
   );
@@ -613,8 +689,8 @@ export function AnalyticsProvider({
                   inlineSlot === marketingConsentSlot
                     ? // The marketing slot already supplies the page gutter, so
                       // the card spans it and never needs its own max-width.
-                      "rounded-xl border border-zinc-200 bg-white/95 p-2 text-zinc-700 shadow-md shadow-zinc-900/5 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-black/20 sm:p-3"
-                    : "mx-2 mb-2 rounded-xl border border-zinc-200 bg-white/95 p-2 text-zinc-700 shadow-md shadow-zinc-900/5 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-black/20 sm:mx-4 sm:ml-auto sm:max-w-sm sm:p-3"
+                      "rounded-xl border border-zinc-200 bg-white/95 px-2 py-1.5 text-zinc-700 shadow-md shadow-zinc-900/5 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-black/20 sm:p-3"
+                    : "mx-2 mb-2 rounded-xl border border-zinc-200 bg-white/95 px-2 py-1.5 text-zinc-700 shadow-md shadow-zinc-900/5 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-black/20 sm:mx-4 sm:ml-auto sm:max-w-sm sm:p-3"
                 }
               >
                 {noticeInner}
@@ -627,7 +703,7 @@ export function AnalyticsProvider({
             role="region"
             aria-label={promptCopy.title}
             data-testid="chat-consent-notice"
-            className="fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] right-[max(0.75rem,env(safe-area-inset-right))] z-[100] w-[min(26rem,calc(100vw-1.5rem))] rounded-xl border border-zinc-200 bg-white/95 p-2 text-zinc-700 shadow-lg shadow-zinc-900/10 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-black/30 sm:p-3"
+            className="fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] right-[max(0.75rem,env(safe-area-inset-right))] z-[100] w-[min(26rem,calc(100vw-1.5rem))] rounded-xl border border-zinc-200 bg-white/95 px-2 py-1.5 text-zinc-700 shadow-lg shadow-zinc-900/10 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-black/30 sm:p-3"
           >
             {noticeInner}
           </aside>

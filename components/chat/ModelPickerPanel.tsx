@@ -22,6 +22,7 @@ import {
   Image as ImageIcon,
   LockKeyhole,
   Search,
+  SlidersHorizontal,
   X,
 } from "lucide-react";
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
@@ -253,6 +254,17 @@ export function ModelPickerPanel({
     onTrackEvent("model_picker_all_opened");
   };
 
+  // The advanced filters live inside the catalogue step, so this is the same
+  // journey a user would take by hand (All models -> Filters) collapsed into
+  // one tap. The collapsed-by-default structure is unchanged: nothing about
+  // the filter sheet is expanded until this is pressed.
+  const openAllModelsWithFilters = () => {
+    setStep("all");
+    onTrackEvent("model_picker_all_opened");
+    setIsFilterSheetOpen(true);
+    onTrackEvent("model_picker_filter_opened");
+  };
+
   const handleSearchChange = (value: string) => {
     setSearchQuery(value);
     // Only that a search happened is recorded -- never the query itself.
@@ -297,6 +309,60 @@ export function ModelPickerPanel({
     : showCatalogue
       ? stepCopy.allModelsTitle
       : stepCopy.recommendedTitle;
+
+  const openAllHint = `${interpolate(stepCopy.openAllModelsHint, {
+    count: models.length,
+  })}${
+    activeFilterCount > 0
+      ? ` · ${interpolate(stepCopy.activeFilters, { count: activeFilterCount })}`
+      : ""
+  }`;
+
+  // One element, two densities: the compact sheet pins it above the footer as
+  // a single 44px row (see below), the roomier layouts keep the two-line card
+  // at the end of the recommendation list. Rendering it once -- never twice --
+  // keeps `model-picker-open-all` unambiguous for anything selecting by id.
+  const openAllEntry = isCompactLayout ? (
+    <button
+      ref={openAllButtonRef}
+      type="button"
+      data-testid="model-picker-open-all"
+      onClick={openAllModels}
+      // The hint is what the wider layout shows on a second line; keeping it
+      // in the accessible name means the compact row loses no information for
+      // a screen-reader user, only visual height.
+      aria-label={`${stepCopy.openAllModels} · ${openAllHint}`}
+      className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-xl border border-zinc-200 px-3 text-left transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+    >
+      <Boxes className="h-4 w-4 shrink-0 text-purple-500" aria-hidden="true" />
+      <span className="min-w-0 flex-1 truncate text-[13px] font-bold text-zinc-900 dark:text-zinc-100">
+        {stepCopy.openAllModels}
+      </span>
+      <span className="shrink-0 text-[11px] font-bold text-zinc-500">
+        {models.length}
+      </span>
+      <ChevronRight className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden="true" />
+    </button>
+  ) : (
+    <button
+      ref={openAllButtonRef}
+      type="button"
+      data-testid="model-picker-open-all"
+      onClick={openAllModels}
+      className={`flex w-full items-center gap-3 rounded-xl border border-zinc-200 px-3 text-left transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800 ${touchTarget ? "min-h-14 py-2" : "py-2.5"}`}
+    >
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-purple-500/10 text-purple-500">
+        <Boxes className="h-5 w-5" aria-hidden="true" />
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
+          {stepCopy.openAllModels}
+        </span>
+        <span className="text-xs text-zinc-500">{openAllHint}</span>
+      </span>
+      <ChevronRight className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden="true" />
+    </button>
+  );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -373,7 +439,7 @@ export function ModelPickerPanel({
 
       {selectedModelIds.length > 0 && (
         <div className="mb-2 shrink-0 px-1">
-          <p className="mb-1 px-1 text-[10px] font-black uppercase tracking-wide text-zinc-400">
+          <p className="mb-1 px-1 text-[11px] font-black uppercase tracking-wide text-zinc-400">
             {pickerCopy.selectedModelsLabel}
           </p>
           {/*
@@ -526,34 +592,36 @@ export function ModelPickerPanel({
             </section>
           )}
 
-          <button
-            ref={openAllButtonRef}
-            type="button"
-            data-testid="model-picker-open-all"
-            onClick={openAllModels}
-            className={`flex w-full items-center gap-3 rounded-xl border border-zinc-200 px-3 text-left transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800 ${touchTarget ? "min-h-14 py-2" : "py-2.5"}`}
-          >
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-purple-500/10 text-purple-500">
-              <Boxes className="h-5 w-5" aria-hidden="true" />
-            </span>
-            <span className="flex min-w-0 flex-1 flex-col">
-              <span className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
-                {stepCopy.openAllModels}
-              </span>
-              <span className="text-xs text-zinc-500">
-                {interpolate(stepCopy.openAllModelsHint, { count: models.length })}
-                {activeFilterCount > 0
-                  ? ` · ${interpolate(stepCopy.activeFilters, { count: activeFilterCount })}`
-                  : ""}
-              </span>
-            </span>
-            <ChevronRight
-              className="h-4 w-4 shrink-0 text-zinc-400"
-              aria-hidden="true"
-            />
-          </button>
+          {isCompactLayout ? null : openAllEntry}
 
           {comboFinderSlot}
+        </div>
+      )}
+
+      {/*
+        On the compact sheet these two entry points used to sit at the bottom
+        of the scrolling recommendation list: at 390x844 "All models" started
+        182px below the fold, so a phone user had to scroll past every
+        recommendation to discover that the other 30+ models -- and the
+        advanced filters behind them -- existed at all. Pinned here they cost
+        one recommendation card of list height and are on the first screen,
+        while the reading order stays recommendations-first and the Done
+        control below stays exactly where it was.
+      */}
+      {isCompactLayout && !showCatalogue && (
+        <div className="mt-2 flex shrink-0 items-center gap-2 px-1">
+          {openAllEntry}
+          <button
+            type="button"
+            data-testid="model-picker-open-filters"
+            onClick={openAllModelsWithFilters}
+            className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-xl border border-zinc-200 px-3 text-[11px] font-black text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+          >
+            <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+            {activeFilterCount > 0
+              ? interpolate(stepCopy.activeFilters, { count: activeFilterCount })
+              : stepCopy.openFilters}
+          </button>
         </div>
       )}
 
@@ -646,7 +714,7 @@ function RecommendationCard({
             return (
               <span
                 key={feature}
-                className="inline-flex items-center gap-1 text-[9px] font-bold text-zinc-500 dark:text-zinc-400"
+                className="inline-flex items-center gap-1 text-[11px] font-bold text-zinc-500 dark:text-zinc-400"
               >
                 <Icon className="h-3 w-3" aria-hidden="true" />
                 {featureLabels[feature]}
@@ -654,7 +722,7 @@ function RecommendationCard({
             );
           })}
           {recommendation.status === "limited" && (
-            <span className="inline-flex items-center gap-1 text-[9px] font-bold text-amber-600 dark:text-amber-400">
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-600 dark:text-amber-400">
               <span
                 className="h-1.5 w-1.5 rounded-full bg-amber-500"
                 aria-hidden="true"
@@ -664,7 +732,7 @@ function RecommendationCard({
           )}
         </span>
         {lockLabel && (
-          <span className="mt-1 flex items-center gap-1 text-[10px] font-bold text-blue-600 dark:text-blue-300">
+          <span className="mt-1 flex items-center gap-1 text-[11px] font-bold text-blue-600 dark:text-blue-300">
             <LockKeyhole className="h-3 w-3" aria-hidden="true" />
             {lockLabel}
           </span>

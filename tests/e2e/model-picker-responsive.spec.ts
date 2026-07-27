@@ -236,3 +236,96 @@ test("the picker footer clears the mobile keyboard and safe area", async ({ page
   expect(metrics.bottom).toBeLessThanOrEqual(metrics.visualHeight + 1);
   await expectNoHorizontalOverflow(page);
 });
+
+// ---------------------------------------------------------------------------
+// UI-P2-02: the phone's first screen.
+//
+// "All models" and the advanced filters used to sit at the bottom of the
+// scrolling recommendation list. At 390x844 that put the All-models row 182px
+// below the fold (measured: it started at y=948 inside a region that ended at
+// y=766), so the only way to discover the other 30+ models -- or that advanced
+// filters existed at all -- was to scroll past every recommendation. Both
+// entry points are now pinned between the list and the Done footer: the
+// reading order is still recommendations-first and the filters are still
+// collapsed until asked for, but neither entry point costs a scroll.
+// ---------------------------------------------------------------------------
+// 390x844 is the contract viewport for "candidates plus both entry points on
+// one screen". 320x568 has 276px less height to spend and fits one candidate
+// alongside the same chrome; what it must still deliver is both entry points
+// without a scroll, which is the part that was actually broken.
+const FIRST_SCREEN_VIEWPORTS = [
+  { name: "390x844", width: 390, height: 844, minCandidates: 2 },
+  { name: "320x568", width: 320, height: 568, minCandidates: 1 },
+] as const;
+
+for (const viewport of FIRST_SCREEN_VIEWPORTS) {
+  for (const lang of ["en", "ko"] as const) {
+    test(`model picker's first screen needs no scrolling at ${viewport.name} (${lang})`, async ({
+      page,
+    }, testInfo) => {
+      test.skip(
+        !testInfo.project.name.startsWith("mobile"),
+        "The compact sheet layout only renders on touch (mobile-*) projects."
+      );
+
+      await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      await prepareGuestPage(page, lang);
+      await page.goto(`/chat?lang=${lang}`);
+
+      await modelMenuTrigger(page).click();
+      const dialog = page.locator("#chat-input-popover");
+      await expect(dialog).toBeVisible();
+
+      const scrollRegion = dialog.getByTestId("model-picker-scroll-region");
+      await expect(scrollRegion).toBeVisible();
+
+      // Nothing below is allowed to depend on a scroll having happened.
+      expect(
+        await scrollRegion.evaluate((element) => element.scrollTop),
+        "the picker opens at the top of its list"
+      ).toBe(0);
+
+      for (const [label, locator] of [
+        ["search", dialog.getByTestId("model-search-input")],
+        ["selected model", dialog.getByTestId("selected-model-chip").first()],
+        ["all-models entry", dialog.getByTestId("model-picker-open-all")],
+        ["advanced-filters entry", dialog.getByTestId("model-picker-open-filters")],
+        ["done control", dialog.getByTestId("model-picker-done")],
+      ] as const) {
+        await expect(locator, `${label} visible`).toBeVisible();
+        await expectWithinViewport(page, locator, `${label} at ${viewport.name}`);
+      }
+
+      // "Visible" for a candidate means fully inside the list's own clipping
+      // box, not merely attached: a card cut off by the scroll region's bottom
+      // edge is not something the user can read without scrolling.
+      const fullyVisibleCandidates = await page.evaluate(() => {
+        const region = document.querySelector(
+          '[data-testid="model-picker-scroll-region"]'
+        )!;
+        const bounds = region.getBoundingClientRect();
+        return Array.from(
+          document.querySelectorAll('[data-testid="recommended-model-option"]')
+        ).filter((card) => {
+          const rect = card.getBoundingClientRect();
+          return rect.top >= bounds.top - 0.5 && rect.bottom <= bounds.bottom + 0.5;
+        }).length;
+      });
+      expect(
+        fullyVisibleCandidates,
+        "recommended candidates readable without scrolling"
+      ).toBeGreaterThanOrEqual(viewport.minCandidates);
+
+      // The filters entry opens the same collapsed sheet the catalogue offers,
+      // in one tap instead of two.
+      await dialog.getByTestId("model-picker-open-filters").click();
+      const sheet = dialog.getByTestId("model-filter-sheet");
+      await expect(sheet).toBeVisible();
+      await expectWithinViewport(page, sheet, `filter sheet at ${viewport.name}`);
+      await sheet.getByTestId("model-filter-apply").click();
+      await expect(sheet).toHaveCount(0);
+      await expect(dialog.getByTestId("model-option").first()).toBeVisible();
+      await expectNoHorizontalOverflow(page);
+    });
+  }
+}
