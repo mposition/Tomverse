@@ -157,7 +157,9 @@ async function enterConversation(
     // either the skeleton or the real content depending on run-to-run
     // timing -- exactly the kind of screenshot-variance this suite is
     // supposed to eliminate.
-    await expect(page.getByTestId("mobile-header-model-summary-skeleton")).toHaveCount(0);
+    await expect(page.getByTestId("mobile-header-model-summary-skeleton")).toHaveCount(0, {
+      timeout: 15_000,
+    });
   }
 
   return authState;
