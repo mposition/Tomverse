@@ -9,6 +9,8 @@ import {
   DESKTOP_VIEWPORT,
   MOBILE_VIEWPORT,
   MOBILE_MIN_VIEWPORT,
+  expectStableScreenshot,
+  expectThemeApplied,
   freezeAnimations,
   installChatModelStub,
   mockAuthenticatedApi,
@@ -16,7 +18,9 @@ import {
   mockGuestUsage,
   mockUserUsage,
   restoreActiveConversation,
+  setDeterministicTheme,
   submitComposer,
+  suppressTransientUi,
   type ChatModelStubSpec,
   type Theme,
   type UsagePatch,
@@ -120,6 +124,11 @@ async function enterConversation(
   } = options;
   const authState = await mockAuthenticatedApi(page, { selectedModels });
   authState.theme = theme;
+  // Deterministic, pre-navigation theme source: see setDeterministicTheme's
+  // docstring for why this -- not the mocked GET /api/user/settings response
+  // above -- is what actually controls the very first paint's theme.
+  await setDeterministicTheme(page, theme);
+  await suppressTransientUi(page);
   await restoreActiveConversation(page);
   if (modelStub) {
     await installChatModelStub(page, modelStub);
@@ -161,6 +170,11 @@ async function enterConversation(
     await expect(page.getByTestId("mobile-header-model-summary")).toBeVisible();
     await expect(page.getByTestId("mobile-header-model-summary-skeleton")).toHaveCount(0);
   }
+  // Belt-and-suspenders on top of the deterministic pre-navigation
+  // localStorage write above: fails loudly (not silently mislabels a
+  // golden) if the theme somehow still didn't land by the time the shell
+  // is interactive.
+  await expectThemeApplied(page, theme);
 
   return authState;
 }
@@ -185,7 +199,7 @@ test.describe("Loading state", () => {
         await expect(page.getByTestId("chat-empty-state")).toHaveCount(0);
         await expect(page.getByText("불러오는 중...")).not.toHaveCount(0);
 
-        await expect(page).toHaveScreenshot(`chat-loading-${viewportName}-${theme}-ko.png`, { maxDiffPixelRatio: 0.02 });
+        await expectStableScreenshot(page, `chat-loading-${viewportName}-${theme}-ko.png`, { theme });
       });
     }
   }
@@ -228,7 +242,7 @@ test.describe("Streaming state", () => {
         // Composer is disabled while any panel is still sending.
         await expect(page.getByTestId("chat-textarea")).toBeDisabled();
 
-        await expect(page).toHaveScreenshot(`chat-streaming-${viewportName}-${theme}-ko.png`, { maxDiffPixelRatio: 0.02 });
+        await expectStableScreenshot(page, `chat-streaming-${viewportName}-${theme}-ko.png`, { theme });
       });
     }
   }
@@ -242,7 +256,7 @@ test.describe("Streaming state", () => {
     await expect(page.getByText(SHORT_ANSWER)).toBeVisible();
     await expect(page.getByText("Here is the first part of a longer,", { exact: false })).toBeVisible();
 
-    await expect(page).toHaveScreenshot("chat-streaming-reduced-motion-desktop-light-ko.png", { maxDiffPixelRatio: 0.02 });
+    await expectStableScreenshot(page, "chat-streaming-reduced-motion-desktop-light-ko.png", { theme: "light" });
   });
 });
 
@@ -274,7 +288,7 @@ test.describe("Success state", () => {
         // AI Review only makes sense once every active model has answered.
         await expect(page.getByTestId("quick-comparison-button")).toBeEnabled();
 
-        await expect(page).toHaveScreenshot(`chat-success-${viewportName}-${theme}-ko.png`, { maxDiffPixelRatio: 0.02 });
+        await expectStableScreenshot(page, `chat-success-${viewportName}-${theme}-ko.png`, { theme });
       });
     }
   }
@@ -308,7 +322,7 @@ test.describe("Partial failure state", () => {
           await expect(page.getByRole("button", { name: "다시 시도" })).toBeVisible();
         }
 
-        await expect(page).toHaveScreenshot(`chat-partial-failure-${viewportName}-${theme}-ko.png`, { maxDiffPixelRatio: 0.02 });
+        await expectStableScreenshot(page, `chat-partial-failure-${viewportName}-${theme}-ko.png`, { theme });
       });
     }
   }
@@ -329,7 +343,7 @@ test.describe("Partial failure state", () => {
     }));
     expect(dimensions.content).toBeLessThanOrEqual(dimensions.viewport + 1);
 
-    await expect(page).toHaveScreenshot("chat-partial-failure-mobile-min-light-ko.png", { maxDiffPixelRatio: 0.02 });
+    await expectStableScreenshot(page, "chat-partial-failure-mobile-min-light-ko.png", { theme: "light" });
   });
 
   test("two of three models failing keeps the one success and shows two distinct failures", async ({ page }) => {
@@ -367,7 +381,7 @@ test.describe("Full error state", () => {
         // No success answer bleeds through in a full failure.
         await expect(page.getByText(SHORT_ANSWER)).toHaveCount(0);
 
-        await expect(page).toHaveScreenshot(`chat-error-${viewportName}-${theme}-ko.png`, { maxDiffPixelRatio: 0.02 });
+        await expectStableScreenshot(page, `chat-error-${viewportName}-${theme}-ko.png`, { theme });
       });
     }
   }
@@ -388,7 +402,7 @@ test.describe("Full error state", () => {
     }));
     expect(dimensions.content).toBeLessThanOrEqual(dimensions.viewport + 1);
 
-    await expect(page).toHaveScreenshot("chat-error-long-message-desktop-light-ko.png", { maxDiffPixelRatio: 0.02 });
+    await expectStableScreenshot(page, "chat-error-long-message-desktop-light-ko.png", { theme: "light" });
   });
 
   test("chat-error-long-message-desktop-light-en", async ({ page }) => {
@@ -407,7 +421,7 @@ test.describe("Full error state", () => {
     }));
     expect(dimensions.content).toBeLessThanOrEqual(dimensions.viewport + 1);
 
-    await expect(page).toHaveScreenshot("chat-error-long-message-desktop-light-en.png", { maxDiffPixelRatio: 0.02 });
+    await expectStableScreenshot(page, "chat-error-long-message-desktop-light-en.png", { theme: "light" });
   });
 });
 
@@ -430,7 +444,7 @@ test.describe("Retry state", () => {
         await expect(retryButton).toBeVisible();
         await expect(retryButton).toBeEnabled();
 
-        await expect(page).toHaveScreenshot(`chat-retry-${viewportName}-${theme}-ko.png`, { maxDiffPixelRatio: 0.02 });
+        await expectStableScreenshot(page, `chat-retry-${viewportName}-${theme}-ko.png`, { theme });
       });
     }
   }
@@ -485,6 +499,11 @@ test.describe("Insufficient credits state", () => {
         });
         await page.reload();
         await freezeAnimations(page);
+        // page.reload() re-runs addInitScript (so localStorage's theme
+        // write still lands before first paint) but not addStyleTag, hence
+        // the explicit freezeAnimations() re-call above; re-assert theme
+        // for the same reason expectStableScreenshot always does.
+        await expectThemeApplied(page, theme);
 
         // The inline composer banner is always present; the modal with the
         // same heading auto-opens the first time the limit is detected
@@ -494,7 +513,13 @@ test.describe("Insufficient credits state", () => {
         await expect(page.getByTestId("chat-textarea")).toBeDisabled();
         await expect(page.getByTestId("usage-limit-view-options")).toBeVisible();
 
-        await expect(page).toHaveScreenshot(`chat-insufficient-credits-${viewportName}-${theme}-ko.png`, { maxDiffPixelRatio: 0.02 });
+        // Unlike every other state golden, the usage-limit modal IS the
+        // state under test here -- explicitly allow it past the shared
+        // transient-UI guard instead of letting it slip through unchecked.
+        await expectStableScreenshot(page, `chat-insufficient-credits-${viewportName}-${theme}-ko.png`, {
+          theme,
+          allowTransientUi: ["usage-limit-modal"],
+        });
       });
     }
   }
@@ -507,6 +532,7 @@ test.describe("Insufficient credits state", () => {
     });
     await page.reload();
     await freezeAnimations(page);
+    await expectThemeApplied(page, "light");
     await expect(page.getByText("플랜 한도에 도달했습니다").first()).toBeVisible();
 
     const dimensions = await page.evaluate(() => ({
@@ -515,7 +541,10 @@ test.describe("Insufficient credits state", () => {
     }));
     expect(dimensions.content).toBeLessThanOrEqual(dimensions.viewport + 1);
 
-    await expect(page).toHaveScreenshot("chat-insufficient-credits-mobile-min-light-ko.png", { maxDiffPixelRatio: 0.02 });
+    await expectStableScreenshot(page, "chat-insufficient-credits-mobile-min-light-ko.png", {
+      theme: "light",
+      allowTransientUi: ["usage-limit-modal"],
+    });
   });
 
   test("account limit reached auto-opens a modal with a purchase/upgrade CTA, not a sign-in CTA", async ({ page }) => {
@@ -623,7 +652,7 @@ test.describe("Deep Research state", () => {
           await expect(page.getByText(SHORT_ANSWER).first()).toBeVisible();
         }
 
-        await expect(page).toHaveScreenshot(`chat-deep-research-${viewportName}-${theme}-ko.png`, { maxDiffPixelRatio: 0.02 });
+        await expectStableScreenshot(page, `chat-deep-research-${viewportName}-${theme}-ko.png`, { theme });
       });
     }
   }
@@ -640,7 +669,45 @@ test.describe("Deep Research state", () => {
 
     await expect(page.getByRole("heading", { name: "Summary" })).toBeVisible();
 
-    await expect(page).toHaveScreenshot("chat-deep-research-complete-desktop-light-ko.png", { maxDiffPixelRatio: 0.02 });
+    await expectStableScreenshot(page, "chat-deep-research-complete-desktop-light-ko.png", { theme: "light" });
+  });
+
+  test("chat-deep-research-complete-mobile-dark-ko", async ({ page }) => {
+    await enterProConversation(page, "dark", MOBILE_VIEWPORT);
+    await installChatModelStub(page, {
+      [MODEL_B]: { kind: "success", chunks: [SHORT_ANSWER], intervalMs: 5 },
+      [MODEL_C]: { kind: "success", chunks: [SHORT_ANSWER], intervalMs: 5 },
+      [DEEP_RESEARCH_MODEL]: { kind: "async-job", jobId: "qa-job-complete" },
+    });
+    await mockDeepResearchStatus(page, { status: "completed", content: MARKDOWN_ANSWER });
+    await startDeepResearch(page, MOBILE_VIEWPORT.width);
+    await page.locator(`[data-testid="mobile-model-tab"][data-model-id="${DEEP_RESEARCH_MODEL}"]`).click();
+
+    await expect(page.getByRole("heading", { name: "Summary" })).toBeVisible();
+
+    await expectStableScreenshot(page, "chat-deep-research-complete-mobile-dark-ko.png", { theme: "dark" });
+  });
+
+  test("chat-deep-research-failed-desktop-light-ko", async ({ page }) => {
+    await enterProConversation(page, "light", DESKTOP_VIEWPORT);
+    await installChatModelStub(page, {
+      [MODEL_B]: { kind: "success", chunks: [SHORT_ANSWER], intervalMs: 5 },
+      [MODEL_C]: { kind: "success", chunks: [SHORT_ANSWER], intervalMs: 5 },
+      [DEEP_RESEARCH_MODEL]: { kind: "async-job", jobId: "qa-job-failed" },
+    });
+    await mockDeepResearchStatus(page, { status: "failed", error: "QA fixture: deep research job failed." });
+    await startDeepResearch(page, DESKTOP_VIEWPORT.width);
+
+    const failedPanel = page.locator('[data-testid="desktop-model-panel"][data-model-id="' + DEEP_RESEARCH_MODEL + '"]');
+    await expect(failedPanel).toBeVisible();
+    // A failed Deep Research job surfaces through the same role=alert error
+    // card as any other model failure (ChatApp.tsx's setAssistantMessage(...,
+    // "error", { errorCode: "DEEP_RESEARCH_FAILED" })) -- distinct from a
+    // generic failure only in that it's scoped to this model's own panel,
+    // not the whole comparison.
+    await expect(failedPanel.locator('[role="alert"]')).toHaveCount(1);
+
+    await expectStableScreenshot(page, "chat-deep-research-failed-desktop-light-ko.png", { theme: "light" });
   });
 
   test("chat-deep-research-failed-mobile-dark-ko", async ({ page }) => {
@@ -656,7 +723,7 @@ test.describe("Deep Research state", () => {
     const failedPanel = page.locator('[data-testid="mobile-model-tab"][data-model-id="' + DEEP_RESEARCH_MODEL + '"]');
     await expect(failedPanel).toBeVisible();
 
-    await expect(page).toHaveScreenshot("chat-deep-research-failed-mobile-dark-ko.png", { maxDiffPixelRatio: 0.02 });
+    await expectStableScreenshot(page, "chat-deep-research-failed-mobile-dark-ko.png", { theme: "dark" });
   });
 
   test("Deep Research setup is gated for a Free-plan account", async ({ page }) => {
@@ -685,11 +752,25 @@ async function attachFromComputer(page: Page, file: { name: string; mimeType: st
 }
 
 test.describe("File attachment states", () => {
-  test("selected: preview appears before send", async ({ page }) => {
+  test("chat-attachment-selected-desktop-light-ko: preview appears before send", async ({ page }) => {
     await enterConversation(page, { theme: "light", viewport: DESKTOP_VIEWPORT });
     await mockAttachmentUpload(page);
     await attachFromComputer(page, { name: "qa-image.png", mimeType: "image/png", buffer: createQaPngBuffer() });
     await expect(page.getByAltText("qa-image.png")).toBeVisible();
+    // Not yet sent -- no message bubble exists for it yet, distinguishing
+    // "selected" from "complete" (attached to a sent message) below.
+    await expect(page.locator('[data-testid="chat-message"]')).toHaveCount(0);
+
+    await expectStableScreenshot(page, "chat-attachment-selected-desktop-light-ko.png", { theme: "light" });
+  });
+
+  test("chat-attachment-selected-mobile-dark-ko: preview appears before send", async ({ page }) => {
+    await enterConversation(page, { theme: "dark", viewport: MOBILE_VIEWPORT });
+    await mockAttachmentUpload(page);
+    await attachFromComputer(page, { name: "qa-image.png", mimeType: "image/png", buffer: createQaPngBuffer() });
+    await expect(page.getByAltText("qa-image.png")).toBeVisible();
+
+    await expectStableScreenshot(page, "chat-attachment-selected-mobile-dark-ko.png", { theme: "dark" });
   });
 
   test("chat-attachment-uploading-desktop-light-ko: upload in flight shows a busy affordance", async ({ page }) => {
@@ -708,7 +789,7 @@ test.describe("File attachment states", () => {
     await expect(attachTrigger.locator(".animate-spin")).toBeVisible();
     await expect(attachTrigger).toBeDisabled().catch(() => undefined);
 
-    await expect(page).toHaveScreenshot("chat-attachment-uploading-desktop-light-ko.png", { maxDiffPixelRatio: 0.02 });
+    await expectStableScreenshot(page, "chat-attachment-uploading-desktop-light-ko.png", { theme: "light" });
   });
 
   test("chat-attachment-processing-desktop-light-ko: server-side finalize/extract in flight", async ({ page }) => {
@@ -745,10 +826,10 @@ test.describe("File attachment states", () => {
     await expect.poll(() => finalizeHeld).toBe(true);
     await expect(actionMenuTrigger(page).locator(".animate-spin")).toBeVisible();
 
-    await expect(page).toHaveScreenshot("chat-attachment-processing-desktop-light-ko.png", { maxDiffPixelRatio: 0.02 });
+    await expectStableScreenshot(page, "chat-attachment-processing-desktop-light-ko.png", { theme: "light" });
   });
 
-  test("complete: attachment chip persists after send", async ({ page }) => {
+  test("chat-attachment-complete-desktop-light-ko: attachment chip persists after send", async ({ page }) => {
     await enterConversation(page, { theme: "light", viewport: DESKTOP_VIEWPORT });
     await mockAttachmentUpload(page);
     await installChatModelStub(page, {
@@ -763,6 +844,26 @@ test.describe("File attachment states", () => {
     // sent message (see fixtures.spec.ts's identical .first() pattern), so
     // the same attachment legitimately appears once per active panel.
     await expect(page.getByAltText("qa-image.png")).toHaveCount(THREE_MODELS.length);
+    await expect(page.getByText(SHORT_ANSWER).first()).toBeVisible();
+
+    await expectStableScreenshot(page, "chat-attachment-complete-desktop-light-ko.png", { theme: "light" });
+  });
+
+  test("chat-attachment-complete-mobile-dark-ko: attachment chip persists after send", async ({ page }) => {
+    await enterConversation(page, { theme: "dark", viewport: MOBILE_VIEWPORT });
+    await mockAttachmentUpload(page);
+    await installChatModelStub(page, {
+      [MODEL_A]: { kind: "success", chunks: [SHORT_ANSWER], intervalMs: 5 },
+      [MODEL_B]: { kind: "success", chunks: [SHORT_ANSWER], intervalMs: 5 },
+      [MODEL_C]: { kind: "success", chunks: [SHORT_ANSWER], intervalMs: 5 },
+    });
+    await attachFromComputer(page, { name: "qa-image.png", mimeType: "image/png", buffer: createQaPngBuffer() });
+    await expect(page.getByAltText("qa-image.png").first()).toBeVisible();
+    await submitComposer(page, "Describe this image.", MOBILE_VIEWPORT.width);
+    await expect(page.getByAltText("qa-image.png").first()).toBeVisible();
+    await expect(page.getByText(SHORT_ANSWER).first()).toBeVisible();
+
+    await expectStableScreenshot(page, "chat-attachment-complete-mobile-dark-ko.png", { theme: "dark" });
   });
 
   test("unsupported file type is rejected with a toast, not silently dropped", async ({ page }) => {
@@ -787,6 +888,23 @@ test.describe("File attachment states", () => {
     await expect(toast).toBeVisible();
   });
 
+  test("chat-attachment-error-desktop-light-ko: upload failure surfaces an error toast", async ({ page }) => {
+    await enterConversation(page, { theme: "light", viewport: DESKTOP_VIEWPORT });
+    await page.route("**/api/chat", async (route) => {
+      if (route.request().method() !== "PUT") {
+        await route.fallback();
+        return;
+      }
+      await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "upload failed" }) });
+    });
+    await attachFromComputer(page, { name: "qa-image.png", mimeType: "image/png", buffer: createQaPngBuffer() });
+
+    const toast = page.getByRole("alert").filter({ hasText: "파일을 업로드하지 못했습니다. 다시 시도해 주세요." });
+    await expect(toast).toBeVisible();
+
+    await expectStableScreenshot(page, "chat-attachment-error-desktop-light-ko.png", { theme: "light" });
+  });
+
   test("chat-attachment-error-mobile-dark-ko: upload failure surfaces an error toast", async ({ page }) => {
     await enterConversation(page, { theme: "dark", viewport: MOBILE_VIEWPORT });
     await page.route("**/api/chat", async (route) => {
@@ -801,7 +919,7 @@ test.describe("File attachment states", () => {
     const toast = page.getByRole("alert").filter({ hasText: "파일을 업로드하지 못했습니다. 다시 시도해 주세요." });
     await expect(toast).toBeVisible();
 
-    await expect(page).toHaveScreenshot("chat-attachment-error-mobile-dark-ko.png", { maxDiffPixelRatio: 0.02 });
+    await expectStableScreenshot(page, "chat-attachment-error-mobile-dark-ko.png", { theme: "dark" });
   });
 
   test("removing an attachment clears its preview", async ({ page }) => {
