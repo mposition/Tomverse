@@ -664,7 +664,13 @@ export function MobileChatShell({
                 onClick={onComparisonReview}
                 className="flex h-11 min-w-0 flex-1 items-center justify-between gap-1.5 rounded-xl bg-blue-600 px-2 text-[11px] font-black text-white"
               >
-                <span className="truncate">{t("chat.aiReviewButton")}</span>
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <span
+                    aria-hidden="true"
+                    className="h-1.5 w-1.5 shrink-0 rounded-full bg-gradient-to-br from-cyan-300 via-white to-purple-300"
+                  />
+                  <span className="truncate">{t("chat.aiReviewButton")}</span>
+                </span>
                 <CreditCostBadge
                   credits={4}
                   size="xs"

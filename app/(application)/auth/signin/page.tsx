@@ -6,7 +6,6 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { useTurnstile } from "@/components/chat/useTurnstile";
 import Link from "next/link";
-import { ShieldCheck } from "lucide-react";
 import { withChatLanguage } from "@/lib/localizedCallbackUrl";
 import { isValidLoginEmail } from "@/lib/emailValidation";
 import {
@@ -242,7 +241,7 @@ function SignInButtons() {
                     rel="noreferrer"
                     className="font-semibold text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
                 >
-                    Terms and Conditions
+                    {t("auth.termsLink")}
                 </Link>
                 {" / "}
                 <Link
@@ -390,7 +389,10 @@ export default function SignInPage() {
 
     return (
         <div className="flex min-h-screen items-center justify-center bg-zinc-100 px-4 transition-colors duration-300 dark:bg-zinc-950">
-            <div className="w-full max-w-md overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-2xl shadow-zinc-300/40 transition-all dark:border-zinc-800 dark:bg-zinc-900 dark:shadow-black/30">
+            <div
+                data-testid="signin-card"
+                className="w-full max-w-md overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-2xl shadow-zinc-300/40 transition-all dark:border-zinc-800 dark:bg-zinc-900 dark:shadow-black/30"
+            >
                 <div className="border-b border-zinc-200 px-8 py-7 dark:border-zinc-800">
                     <div className="mx-auto flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-white ring-1 ring-zinc-200 shadow-sm dark:ring-zinc-800">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -410,26 +412,6 @@ export default function SignInPage() {
                     <Suspense fallback={<div className="mt-8 text-center text-sm text-zinc-400 dark:text-zinc-500">{t("auth.loading")}</div>}>
                         <SignInButtons />
                     </Suspense>
-
-                    <div className="mt-6 rounded-xl bg-zinc-50 px-4 py-3 text-center dark:bg-zinc-950/60">
-                        <p className="flex items-center justify-center gap-1.5 text-xs font-medium text-zinc-500 dark:text-zinc-400">
-                            <ShieldCheck className="h-3.5 w-3.5" />
-                            Review the terms before continuing.
-                        </p>
-                        <Link
-                            href="/terms"
-                            className="mt-2 inline-flex text-xs font-semibold text-blue-600 hover:underline dark:text-blue-400"
-                        >
-                            Terms and Conditions
-                        </Link>
-                        <span className="mx-2 text-xs text-zinc-400">/</span>
-                        <Link
-                            href="/privacy"
-                            className="mt-2 inline-flex text-xs font-semibold text-blue-600 hover:underline dark:text-blue-400"
-                        >
-                            {t("auth.privacyPolicyLink")}
-                        </Link>
-                    </div>
                 </div>
             </div>
         </div>

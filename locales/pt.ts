@@ -491,6 +491,7 @@ export const pt = {
         loginMethodLinkFailed: "Não foi possível vincular esse método de login. Tente novamente.",
         description: "Entre no seu hub pessoal de chat com IA",
         privacy: "Ao fazer login, você concorda com os Termos de Serviço e a Política de Privacidade do Tomverse.",
+        termsLink: "Termos de Serviço",
         privacyPolicyLink: "Política de Privacidade",
         signedAs: "Conectado como",
         accountMenu: "Menu da conta",

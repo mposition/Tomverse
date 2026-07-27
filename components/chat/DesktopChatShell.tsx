@@ -650,7 +650,13 @@ export function DesktopChatShell({
                   onClick={onComparisonReview}
                   className="flex items-center justify-between gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-black text-white hover:bg-blue-500"
                 >
-                  <span>{t("chat.aiReviewButton")}</span>
+                  <span className="flex items-center gap-1.5">
+                    <span
+                      aria-hidden="true"
+                      className="h-1.5 w-1.5 shrink-0 rounded-full bg-gradient-to-br from-cyan-300 via-white to-purple-300"
+                    />
+                    {t("chat.aiReviewButton")}
+                  </span>
                   <CreditCostBadge
                     credits={4}
                     size="xs"

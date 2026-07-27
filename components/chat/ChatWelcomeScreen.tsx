@@ -18,7 +18,7 @@ export function ChatWelcomeScreen({
   consentSlotRef,
 }: ChatWelcomeScreenProps) {
   const { data: session } = useSession();
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
   const welcomeGreeting = session?.user ? t("chat.welcomeBack") : t("chat.welcome");
 
   return (
@@ -29,7 +29,12 @@ export function ChatWelcomeScreen({
       <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-3xl bg-blue-500/10 text-blue-500">
         <Bot className="h-6 w-6" />
       </div>
-      <p className="text-xl font-bold text-zinc-800 dark:text-zinc-100 sm:text-2xl">
+      <p
+        data-testid="chat-welcome-greeting"
+        className={`text-xl font-bold text-zinc-800 dark:text-zinc-100 sm:text-2xl ${
+          lang === "ko" ? "break-keep" : ""
+        }`}
+      >
         {welcomeGreeting}
       </p>
       <div ref={inputSlotRef} className="mt-5 w-full max-w-xl" />
