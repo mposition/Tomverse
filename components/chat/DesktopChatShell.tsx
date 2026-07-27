@@ -155,14 +155,20 @@ export function DesktopChatShell({
     },
     [emptyStateKey]
   );
-  // An existing conversation (currentChatId set) hasn't been proven empty
-  // until at least one panel reports back -- defaulting it to "empty" would
-  // flash the welcome screen over a still-loading panel, indistinguishable
-  // from a genuinely empty new chat. Only a brand-new conversation (no id
-  // yet) defaults to empty, since it always legitimately starts that way.
+  // An existing *authenticated* conversation (currentChatId set) hasn't
+  // been proven empty until at least one panel reports back -- defaulting
+  // it to "empty" would flash the welcome screen over a still-loading
+  // panel, indistinguishable from a genuinely empty new chat. Only a
+  // brand-new conversation (no id yet) defaults to empty, since it always
+  // legitimately starts that way. Guests are excluded: unlike an
+  // authenticated chat's server-assigned id, a guest's currentChatId is a
+  // client-generated placeholder assigned immediately even for a
+  // guaranteed-empty new chat, so "has an id" isn't a signal there.
   const isConversationEmpty =
     selectedModels.length > 0 &&
-    selectedModels.every((modelId) => modelEmptyStates[emptyStateKey(modelId)] ?? !currentChatId);
+    selectedModels.every(
+      (modelId) => modelEmptyStates[emptyStateKey(modelId)] ?? (isGuestMode || !currentChatId)
+    );
   const [modelStatuses, setModelStatuses] = useState<
     Record<string, "idle" | "loading" | "responding" | "error" | "cancelled" | "paused">
   >({});

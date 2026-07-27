@@ -349,16 +349,22 @@ export function MobileChatShell({
     },
     [modelSummary.activeCount]
   );
-  // See DesktopChatShell's matching comment: an existing conversation
-  // shouldn't default to "empty" before any panel has actually reported in,
-  // or a still-loading panel would flash the welcome screen instead of its
-  // own loading state. Only a brand-new conversation defaults to empty.
+  // See DesktopChatShell's matching comment: an existing *authenticated*
+  // conversation shouldn't default to "empty" before any panel has
+  // actually reported in, or a still-loading panel would flash the
+  // welcome screen instead of its own loading state. Only a brand-new
+  // conversation defaults to empty -- guests are excluded since their
+  // currentChatId is a client-generated placeholder assigned immediately
+  // even for a guaranteed-empty new chat, unlike an authenticated chat's
+  // server-assigned id.
   const isActiveConversationEmpty = resolvedActiveModelId
-    ? modelEmptyStates[emptyStateKey(resolvedActiveModelId)] ?? !currentChatId
+    ? modelEmptyStates[emptyStateKey(resolvedActiveModelId)] ?? (isGuestMode || !currentChatId)
     : true;
   const isConversationEmpty =
     selectedModels.length > 0 &&
-    selectedModels.every((modelId) => modelEmptyStates[emptyStateKey(modelId)] ?? !currentChatId);
+    selectedModels.every(
+      (modelId) => modelEmptyStates[emptyStateKey(modelId)] ?? (isGuestMode || !currentChatId)
+    );
   const currentConversation = conversations.find(
     (conversation) => conversation.id === currentChatId
   );
