@@ -89,7 +89,7 @@ test("selecting a web search mode shows a removable status chip", async ({ page 
 
   const chip = page.getByTestId("web-search-mode-chip");
   await expect(chip).toBeVisible();
-  await expect(chip).toContainText("Always");
+  await expect(chip).toContainText("Use web search");
 
   await chip.getByRole("button").click();
   await expect(page.getByTestId("web-search-mode-chip")).toHaveCount(0);

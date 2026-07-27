@@ -18,6 +18,8 @@ type CreditBreakdownSheetProps = {
   items: CreditBreakdownItem[];
   total: number;
   multiplier?: number;
+  /** Sum of the flat native-web-search surcharge across eligible selected models, already folded into `total`. */
+  webSearchReservationCredits?: number;
 };
 
 export function CreditBreakdownSheet({
@@ -26,6 +28,7 @@ export function CreditBreakdownSheet({
   items,
   total,
   multiplier,
+  webSearchReservationCredits = 0,
 }: CreditBreakdownSheetProps) {
   const { t, lang } = useLanguage();
   const pickerCopy = modelPickerCopy[lang];
@@ -93,6 +96,27 @@ export function CreditBreakdownSheet({
           <p className="mt-3 text-xs font-semibold text-amber-600 dark:text-amber-400">
             {multiplier}× · {pickerCopy.multiplierApplied}
           </p>
+        )}
+        {webSearchReservationCredits > 0 && (
+          <div
+            data-testid="web-search-reservation-breakdown"
+            className="mt-3 rounded-xl bg-sky-50 p-2.5 text-xs text-sky-800 dark:bg-sky-950/30 dark:text-sky-200"
+          >
+            <div className="flex items-center justify-between gap-2 font-bold">
+              <span>
+                {t("chat.webSearchReservationLabel").replace(
+                  "{credits}",
+                  String(webSearchReservationCredits)
+                )}
+              </span>
+              <CreditCostBadge
+                credits={webSearchReservationCredits}
+                size="xs"
+                label={String(webSearchReservationCredits)}
+              />
+            </div>
+            <p className="mt-1 font-medium opacity-90">{t("chat.webSearchRefundNotice")}</p>
+          </div>
         )}
         <div className="mt-3 flex items-center justify-between border-t border-zinc-200 pt-3 dark:border-zinc-800">
           <span className="text-sm font-black text-zinc-900 dark:text-zinc-100">

@@ -12,7 +12,6 @@ import {
 } from "@/lib/r2";
 import { prisma } from "@/lib/prisma";
 import {
-    MODEL_USAGE_CREDIT_WEIGHTS,
     modelSupportsImageInput,
     modelSupportsNativePdfInput,
     type AiModel,
@@ -20,6 +19,7 @@ import {
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { getActiveAiModel } from "@/lib/activeAiModel";
 import { getWebSearchCapability } from "@/lib/webSearchCapability";
+import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
 import { buildWebSearchToolConfig, WEB_SEARCH_TOOL_NAMES } from "@/lib/webSearchToolConfig";
 import { normalizeWebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
 import { buildSearchMetadataTrailerChunk } from "@/lib/webSearchStreamTrailer";
@@ -1169,9 +1169,10 @@ export async function POST(req: Request) {
             modelConfig,
             estimatedInputTokens,
             {
-                webSearchSurchargeCredits: nativeSearchEnabled
-                    ? MODEL_USAGE_CREDIT_WEIGHTS.webSearchSurcharge
-                    : 0,
+                webSearchSurchargeCredits: getWebSearchSurchargeCredits(
+                    webSearchMode ?? "off",
+                    webSearchCapability
+                ),
             }
         );
         if (
@@ -1353,6 +1354,18 @@ export async function POST(req: Request) {
                       Math.ceil(Buffer.byteLength(generatedText, "utf8") / 4)
                   )
                 : 0;
+        // Used only by settleSafely("cancelled") call sites that fire before
+        // the stream's tool-result content ever resolves (mid-stream abort,
+        // client disconnect, transport error) -- a search cannot have been
+        // confirmed executed at that point, so treat any reserved surcharge
+        // as unearned and let the cancelled-outcome proration exclude it.
+        const earlyCancelSearchFields = {
+            searchSurchargeCredits: getWebSearchSurchargeCredits(
+                webSearchMode ?? "off",
+                webSearchCapability
+            ),
+            searchExecuted: false,
+        };
         const settleSafely = (
             outcome: "completed" | "cancelled" | "failed" | "empty",
             usage?: {
@@ -1588,10 +1601,14 @@ export async function POST(req: Request) {
                                     : undefined,
                         });
                         const searchSettlementFields = {
-                            searchSurchargeCredits: nativeSearchEnabled
-                                ? MODEL_USAGE_CREDIT_WEIGHTS.webSearchSurcharge
-                                : 0,
+                            searchSurchargeCredits: getWebSearchSurchargeCredits(
+                                webSearchMode ?? "off",
+                                webSearchCapability
+                            ),
                             searchExecuted: webSearchExecution.executed,
+                            searchCostMicroUsd:
+                                webSearchExecution.costMetadata?.searchCostMicroUsd,
+                            searchQueryCount: webSearchExecution.queryCount,
                         };
 
                         if (usageResult.status === "fulfilled") {
@@ -1769,7 +1786,7 @@ export async function POST(req: Request) {
                     generatedText += value;
                     if (!enqueueSafely(controller, value)) {
                         await cancelSourceSafely("response stream is no longer open");
-                        await settleSafely("cancelled");
+                        await settleSafely("cancelled", earlyCancelSearchFields);
                         await releaseSafely();
                     }
                 } catch (error) {
@@ -1788,7 +1805,7 @@ export async function POST(req: Request) {
                         }
                         streamState = "cancelled";
                         await cancelSourceSafely(error);
-                        await settleSafely("cancelled");
+                        await settleSafely("cancelled", earlyCancelSearchFields);
                         await releaseSafely();
                         return;
                     }
@@ -1839,7 +1856,7 @@ export async function POST(req: Request) {
             async cancel(reason) {
                 streamState = "cancelled";
                 await cancelSourceSafely(reason);
-                await settleSafely("cancelled");
+                await settleSafely("cancelled", earlyCancelSearchFields);
                 await releaseSafely();
             },
         });

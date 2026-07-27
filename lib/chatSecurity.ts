@@ -1916,6 +1916,9 @@ export const settleChatUsage = async (
         searchSurchargeCredits?: number;
         /** Whether the provider actually executed a search this turn -- refund the surcharge if not. */
         searchExecuted?: boolean;
+        /** Native web search's own per-call provider cost (OpenAI/Anthropic/Google), from webSearchExecutionNormalizer's costMetadata. Never set for Perplexity -- its own reported response cost already covers search. */
+        searchCostMicroUsd?: number;
+        searchQueryCount?: number;
     },
     options?: {
         reconciled?: boolean;
@@ -1992,7 +1995,7 @@ export const settleChatUsage = async (
                 "perplexity_response_usage"
                 ? options.providerUsageSnapshot
                 : null;
-        const costBreakdown = providerUsageSnapshot
+        const baseCostBreakdown = providerUsageSnapshot
             ? {
                   ...tokenCostBreakdown,
                   costSource: "provider_response" as const,
@@ -2008,7 +2011,34 @@ export const settleChatUsage = async (
                       providerUsageSnapshot.outputTokensCostMicroUsd ??
                       tokenCostBreakdown.outputCostMicroUsd,
               }
-            : tokenCostBreakdown;
+            : { ...tokenCostBreakdown, costSource: "token_estimate" as const };
+        // Native web search's own per-call provider cost (never sent by the
+        // client -- derived server-side from the AI SDK's provider response,
+        // see lib/webSearchExecutionNormalizer.ts). Perplexity always takes
+        // the providerUsageSnapshot branch above instead, so this stays 0
+        // there and can never double-count its already-reported cost.
+        const searchCostMicroUsd = Math.max(
+            0,
+            Number.isFinite(usage.searchCostMicroUsd)
+                ? Math.round(usage.searchCostMicroUsd!)
+                : 0
+        );
+        const costBreakdown =
+            searchCostMicroUsd > 0
+                ? {
+                      ...baseCostBreakdown,
+                      tokenCostMicroUsd: baseCostBreakdown.totalCostMicroUsd,
+                      searchCostMicroUsd,
+                      searchQueryCount: Math.max(
+                          0,
+                          Number.isSafeInteger(usage.searchQueryCount)
+                              ? usage.searchQueryCount!
+                              : 0
+                      ),
+                      totalCostMicroUsd:
+                          baseCostBreakdown.totalCostMicroUsd + searchCostMicroUsd,
+                  }
+                : baseCostBreakdown;
         const actualCost = costBreakdown.totalCostMicroUsd;
         const planActualCredits = Math.min(
             actualCredits,

@@ -414,4 +414,41 @@ test.describe("native web search (webSearchMode: always)", () => {
       "unsupported"
     );
   });
+
+  test("the credit estimate breakdown shows the web search reservation for native-capable models", async ({
+    page,
+  }) => {
+    const models = ["gpt-5-5", "claude-sonnet-5"];
+    await prepareGuestPage(page, "en");
+    await mockAuthenticatedApi(page);
+    await asProPlan(page);
+    await seedFreshAccount(page);
+
+    await page.goto("/chat");
+    await expect(page.locator('[data-testid="desktop-model-panel"] select').first()).toBeEnabled();
+    await selectModelsViaPicker(page, models);
+    await expect(page.locator('[data-testid="desktop-model-panel"] select')).toHaveCount(2);
+
+    // Before enabling search: only the base model-response total (1 + 4 = 5,
+    // gpt-5-5 premium=8 and claude-sonnet-5 advanced=4 -- both Pro-tier).
+    const estimate = page.getByTestId("request-credit-estimate");
+    await expect(estimate).toContainText("12");
+
+    await setWebSearchModeAlways(page);
+    // Both models are native-search-eligible: base 12 + 2 * 8 surcharge = 28.
+    await expect(estimate).toContainText("28");
+
+    await estimate.click();
+    const sheet = page.getByTestId("web-search-reservation-breakdown");
+    await expect(sheet).toBeVisible();
+    await expect(sheet).toContainText("16");
+    // mockAuthenticatedApi's mocked account settings response fixes the
+    // language server-side, overriding the "en" passed to prepareGuestPage
+    // (a pre-existing quirk of that fixture) -- match both.
+    await expect(
+      page.getByText(
+        /Search credits are refunded for models that do not perform a web search\.|검색이 실행되지 않은 모델의 검색 크레딧은 자동 환불됩니다\./
+      )
+    ).toBeVisible();
+  });
 });

@@ -48,10 +48,10 @@ import { APP_DEFAULTS, WEB_SEARCH_MODES, type WebSearchMode } from "@/lib/appDef
 import {
   canUseModelWithPlan,
   getInputCreditMultiplier,
-  getWeightedUsageCredits,
   modelSupportsImageInput,
   type AiModel,
 } from "@/lib/models";
+import { estimateRequestCredits } from "@/lib/webSearchCredits";
 import {
   ModelPickerPanel,
   type ModelPickerAnalyticsEvent,
@@ -494,19 +494,22 @@ export function ChatInput({
     return Math.max(1, Math.ceil(textBytes / 4) + binaryAttachmentTokens);
   }, [attachments, value]);
   const inputCreditMultiplier = getInputCreditMultiplier(estimatedInputTokens);
-  const selectedBaseCredits = activeSelectedModels.reduce((sum, modelId) => {
-    const model = AVAILABLE_MODELS.find((item) => item.id === modelId);
-    return sum + (model ? getModelUsageProfile(model).credits : 0);
-  }, 0);
-  const estimatedRequestCredits = activeSelectedModels.reduce((sum, modelId) => {
-    const model = AVAILABLE_MODELS.find((item) => item.id === modelId);
-    return sum + (model ? getWeightedUsageCredits(model, estimatedInputTokens) : 0);
-  }, 0);
-  const creditBreakdown = activeSelectedModels
-    .map((modelId) => {
-      const model = AVAILABLE_MODELS.find((item) => item.id === modelId);
+  const activeSelectedModelObjects = activeSelectedModels
+    .map((modelId) => AVAILABLE_MODELS.find((item) => item.id === modelId))
+    .filter((model): model is AiModel => Boolean(model));
+  const requestCreditEstimate = estimateRequestCredits({
+    models: activeSelectedModelObjects,
+    estimatedInputTokens,
+    webSearchMode,
+  });
+  const selectedBaseCredits = requestCreditEstimate.baseCredits;
+  const estimatedRequestCredits = requestCreditEstimate.totalEstimatedCredits;
+  const webSearchReservationCredits = requestCreditEstimate.webSearchReservationCredits;
+  const creditBreakdown = requestCreditEstimate.models
+    .map((entry) => {
+      const model = activeSelectedModelObjects.find((item) => item.id === entry.modelId);
       return model
-        ? { id: modelId, name: model.name, credits: getWeightedUsageCredits(model, estimatedInputTokens) }
+        ? { id: entry.modelId, name: model.name, credits: entry.totalCredits }
         : null;
     })
     .filter((item): item is { id: string; name: string; credits: number } => item !== null);
@@ -2513,6 +2516,7 @@ export function ChatInput({
         items={creditBreakdown}
         total={estimatedRequestCredits}
         multiplier={inputCreditMultiplier}
+        webSearchReservationCredits={webSearchReservationCredits}
       />
       <UsageLimitModal
         open={isUsageLimitModalOpen && isUsageLimitReached}

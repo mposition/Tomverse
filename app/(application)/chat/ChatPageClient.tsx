@@ -37,9 +37,9 @@ import {
 import {
   canUseModelWithPlan,
   getModelUsageProfile,
-  getWeightedUsageCredits,
   type AiModel,
 } from "@/lib/models";
+import { estimateRequestCredits } from "@/lib/webSearchCredits";
 import {
   USER_SETTINGS_UPDATED_EVENT,
   type UserSettingsUpdatedDetail,
@@ -643,11 +643,13 @@ export function ChatPageClient({
     (modelId) => !effectiveDisabledPanels.includes(modelId)
   ).length;
 
-  // Mirrors ChatInput's own estimate so the guest daily-credit gate and
-  // display reflect each selected model's real weighted cost (Standard=1,
-  // Advanced=4, Premium=8, ...) instead of a flat 1-per-model count, which
-  // let combinations of higher-tier models pass this client-side check
-  // while the server's weighted day-credit bucket still rejected them.
+  // Mirrors ChatInput's own estimate (via the shared lib/webSearchCredits.ts
+  // helper) so the guest daily-credit gate and display reflect each selected
+  // model's real weighted cost (Standard=1, Advanced=4, Premium=8, ...) plus
+  // any native-web-search surcharge, instead of a flat 1-per-model count,
+  // which let combinations of higher-tier/search-surcharged models pass this
+  // client-side check while the server's weighted day-credit bucket still
+  // rejected them.
   const estimateWeightedRequestCredits = useCallback(
     (text: string, attachments: ChatAttachment[]) => {
       const textParts = [
@@ -663,14 +665,17 @@ export function ChatPageClient({
         1,
         Math.ceil(textBytes / 4) + binaryAttachmentTokens
       );
-      return selectedModels
+      const activeModels = selectedModels
         .filter((modelId) => !effectiveDisabledPanels.includes(modelId))
-        .reduce((sum, modelId) => {
-          const model = AVAILABLE_MODELS.find((item) => item.id === modelId);
-          return sum + (model ? getWeightedUsageCredits(model, estimatedInputTokens) : 0);
-        }, 0);
+        .map((modelId) => AVAILABLE_MODELS.find((item) => item.id === modelId))
+        .filter((model): model is AiModel => Boolean(model));
+      return estimateRequestCredits({
+        models: activeModels,
+        estimatedInputTokens,
+        webSearchMode,
+      }).totalEstimatedCredits;
     },
-    [AVAILABLE_MODELS, effectiveDisabledPanels, selectedModels]
+    [AVAILABLE_MODELS, effectiveDisabledPanels, selectedModels, webSearchMode]
   );
 
   const isInitialSelectedRef = useRef(false);
@@ -887,6 +892,7 @@ export function ChatPageClient({
             mediaType: attachment.mediaType,
             size: attachment.size,
           })),
+          webSearchMode,
         });
         const requestPreflight = () =>
           fetch("/api/chat/preflight", {
@@ -2342,6 +2348,15 @@ export function ChatPageClient({
           });
         } else if (searchMetadata.executed) {
           trackProductEvent("web_search_native_executed", activeModelCount, {
+            search_provider: isTrackedSearchProvider(searchMetadata.provider)
+              ? searchMetadata.provider
+              : undefined,
+          });
+        } else {
+          // Native-capable and requested, but the provider chose not to
+          // search this turn -- the reserved surcharge is fully refunded
+          // server-side (see getSettledUsageCredits' searchExecuted branch).
+          trackProductEvent("web_search_native_not_executed", activeModelCount, {
             search_provider: isTrackedSearchProvider(searchMetadata.provider)
               ? searchMetadata.provider
               : undefined,

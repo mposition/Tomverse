@@ -68,6 +68,10 @@ export const PRODUCT_ANALYTICS_EVENT_NAMES = [
   "web_search_native_executed",
   "web_search_native_unsupported",
   "web_search_native_failed",
+  // Requested on a native-capable model, but the provider chose not to
+  // search this turn -- distinct from unsupported/failed. Always paired
+  // with a full surcharge refund (see getSettledUsageCredits).
+  "web_search_native_not_executed",
 ] as const;
 
 export type ProductAnalyticsEventName =

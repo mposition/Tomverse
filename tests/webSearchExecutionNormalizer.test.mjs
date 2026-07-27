@@ -93,6 +93,59 @@ test("Anthropic search cost is tracked internally, only when queries actually ra
   assert.deepEqual(result.costMetadata, { searchCostMicroUsd: 20_000 });
 });
 
+test("OpenAI search cost is tracked internally at $10 per 1,000 queries", () => {
+  const result = normalizeWebSearchExecution({
+    capability: openaiCapability,
+    searchRequested: true,
+    provider: "openai",
+    toolName: "web_search",
+    content: [{ type: "tool-result", toolName: "web_search" }],
+  });
+  assert.equal(result.queryCount, 1);
+  assert.deepEqual(result.costMetadata, { searchCostMicroUsd: 10_000 });
+});
+
+test("Google search cost is tracked internally at $14 per 1,000 queries", () => {
+  const result = normalizeWebSearchExecution({
+    capability: googleCapability,
+    searchRequested: true,
+    provider: "google",
+    toolName: "google_search",
+    content: [
+      { type: "tool-result", toolName: "google_search" },
+      { type: "tool-result", toolName: "google_search" },
+      { type: "tool-result", toolName: "google_search" },
+    ],
+  });
+  assert.equal(result.queryCount, 3);
+  assert.deepEqual(result.costMetadata, { searchCostMicroUsd: 42_000 });
+});
+
+test("Perplexity search-model executions never carry an internal per-query cost estimate", () => {
+  const result = normalizeWebSearchExecution({
+    capability: perplexityCapability,
+    searchRequested: true,
+    provider: "perplexity",
+    toolName: undefined,
+    content: [],
+  });
+  assert.equal(result.executed, true);
+  assert.equal(result.costMetadata, undefined);
+});
+
+test("a native model that did not execute a search never carries a cost estimate", () => {
+  const result = normalizeWebSearchExecution({
+    capability: anthropicCapability,
+    searchRequested: true,
+    provider: "anthropic",
+    toolName: "web_search",
+    content: [{ type: "text", text: "No search needed." }],
+  });
+  assert.equal(result.executed, false);
+  assert.equal(result.queryCount, undefined);
+  assert.equal(result.costMetadata, undefined);
+});
+
 test("an unsupported model that had search requested is flagged unsupported, not executed", () => {
   const result = normalizeWebSearchExecution({
     capability: unsupportedCapability,

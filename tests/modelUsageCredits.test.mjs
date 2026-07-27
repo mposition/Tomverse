@@ -208,6 +208,46 @@ test("native web search surcharge is refunded when the provider didn't actually 
   assert.equal(getSettledUsageCredits({ ...base, outcome: "completed" }), 12);
 });
 
+test("a cancelled request never leaves the search surcharge charged when the search didn't execute", () => {
+  const surcharge = MODEL_USAGE_CREDIT_WEIGHTS.webSearchSurcharge;
+  const base = {
+    reservedCredits: 12,
+    reservedInputTokens: 10_000,
+    reservedOutputTokens: 2_000,
+    actualInputTokens: 10_000,
+    // Above the 16-token cancelled-proration floor.
+    actualOutputTokens: 1_000,
+    outcome: "cancelled",
+    searchSurchargeCredits: surcharge,
+  };
+
+  const executedProration = getSettledUsageCredits({
+    ...base,
+    searchExecuted: true,
+  });
+  const notExecutedProration = getSettledUsageCredits({
+    ...base,
+    searchExecuted: false,
+  });
+  // The not-executed proration is computed from a strictly smaller base
+  // (reservedCredits - surcharge), so it must never exceed the
+  // surcharge-included proration, and must never exceed reservedCredits
+  // minus the surcharge.
+  assert.ok(notExecutedProration < executedProration);
+  assert.ok(notExecutedProration <= 12 - surcharge);
+
+  // Below the 16-token floor, a cancelled request is a full refund
+  // regardless of the surcharge -- unaffected by this change.
+  assert.equal(
+    getSettledUsageCredits({
+      ...base,
+      actualOutputTokens: 10,
+      searchExecuted: false,
+    }),
+    0
+  );
+});
+
 test("cost reservations use realistic output while preserving provider output caps", () => {
   const premium = getModelBillingProfile(getModel("gpt-5-5"));
   assert.equal(premium.maxOutputTokens, 8_192);

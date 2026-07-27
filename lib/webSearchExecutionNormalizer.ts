@@ -15,6 +15,22 @@ export type WebSearchExecution = {
 
 type UnknownContentPart = { type?: unknown; [key: string]: unknown };
 
+// Conservative internal per-query cost estimates for provider-native web
+// search, in micro-USD (1,000,000 = US$1), used only for internal cost
+// accounting (settledCostMicroUsd / provider spend buckets) -- never exposed
+// as extra user-facing credits beyond the flat surcharge already reserved.
+// OpenAI/Anthropic: documented flat $10 per 1,000 searches (i.e. $0.01 each).
+// Google: Gemini native search's public list price is $14 per 1,000 requests
+// past the free grounding quota; billed here at that rate regardless of
+// quota so the internal estimate never understates cost. Perplexity is
+// excluded -- its own reported response cost is used instead (see
+// lib/perplexityUsageCore.ts), never this flat per-query estimate.
+const NATIVE_SEARCH_COST_MICRO_USD_PER_QUERY: Partial<Record<string, number>> = {
+  openai: 10_000,
+  anthropic: 10_000,
+  google: 14_000,
+};
+
 const isToolPart = (
   part: unknown,
   partType: "tool-result" | "tool-error",
@@ -83,15 +99,15 @@ export function normalizeWebSearchExecution(args: {
   const citations = sanitizeWebSearchCitations(
     sourceParts.map((part) => ({ url: part.url, title: part.title, sourceProvider: provider }))
   );
+  // resultParts.length is always >= 1 whenever executed is true, so this is
+  // already the conservative "at least one query" floor the settlement
+  // policy requires for providers that don't report a distinct count.
   const queryCount = executed ? resultParts.length : undefined;
   const failureCode = errorParts.length > 0 ? "provider_tool_error" : undefined;
-  // Anthropic bills web search at a flat, documented $10 / 1,000 searches
-  // (platform.claude.com web-search-tool docs) in addition to token cost --
-  // tracked here for internal cost accounting only, never as extra
-  // user-facing credits beyond the flat surcharge already reserved.
+  const costPerQuery = NATIVE_SEARCH_COST_MICRO_USD_PER_QUERY[provider];
   const costMetadata =
-    provider === "anthropic" && queryCount
-      ? { searchCostMicroUsd: queryCount * 10_000 }
+    queryCount && costPerQuery
+      ? { searchCostMicroUsd: queryCount * costPerQuery }
       : undefined;
 
   return {

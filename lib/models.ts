@@ -51,8 +51,11 @@ export const MODEL_USAGE_CREDIT_WEIGHTS = {
     // Flat surcharge reserved when webSearchMode === "always" enables a
     // provider-native search tool (OpenAI/Anthropic/Google). Refunded at
     // settlement if the provider didn't actually execute a search that
-    // turn -- see getSettledUsageCredits' searchExecuted parameter.
-    webSearchSurcharge: 5,
+    // turn -- see getSettledUsageCredits' searchExecuted parameter. Read
+    // this via lib/webSearchCredits.ts rather than referencing the raw
+    // number so every caller (UI estimate, preflight, reservation) shares
+    // one definition.
+    webSearchSurcharge: 8,
 } as const;
 
 export const INPUT_CREDIT_MULTIPLIERS = [
@@ -298,21 +301,28 @@ export const getSettledUsageCredits = ({
     /** Whether the provider actually executed a search this turn -- refund the surcharge if not. */
     searchExecuted?: boolean;
 }) => {
+    // A search that never executed never earns its surcharge, in either
+    // outcome -- fold it out of the reserved amount once, up front, so
+    // neither branch below can accidentally charge for a search that didn't
+    // happen.
+    const surchargeAdjustedReservedCredits = searchExecuted
+        ? reservedCredits
+        : Math.max(0, reservedCredits - searchSurchargeCredits);
+
     if (outcome === "completed") {
-        return searchExecuted
-            ? reservedCredits
-            : Math.max(0, reservedCredits - searchSurchargeCredits);
+        return surchargeAdjustedReservedCredits;
     }
     if (outcome !== "cancelled" || actualOutputTokens <= 16) return 0;
 
     const reservedTokens = reservedInputTokens + reservedOutputTokens;
     const actualTokens = actualInputTokens + actualOutputTokens;
     return Math.min(
-        reservedCredits,
+        surchargeAdjustedReservedCredits,
         Math.max(
             1,
             Math.ceil(
-                reservedCredits * (actualTokens / Math.max(1, reservedTokens))
+                surchargeAdjustedReservedCredits *
+                    (actualTokens / Math.max(1, reservedTokens))
             )
         )
     );

@@ -32,6 +32,8 @@ import {
   nextModeForUserScroll,
   type ChatScrollMode,
 } from "@/lib/chatAutoScroll";
+import { getWebSearchCapability } from "@/lib/webSearchCapability";
+import { WEB_SEARCH_SURCHARGE_CREDITS } from "@/lib/webSearchCredits";
 
 type ChatMessageListProps = {
   messages: Message[];
@@ -397,6 +399,13 @@ export function ChatMessageList({
                               : meta.executed
                                 ? "executed"
                                 : "requested-not-executed";
+                      // "requested-not-executed" only ever occurs for native
+                      // (surcharge-eligible) capability -- unsupported/unverified
+                      // models are routed to the "unsupported" status instead,
+                      // so the surcharge was always reserved (and refunded) here.
+                      const nativeSearchSurcharged =
+                        status === "executed" &&
+                        getWebSearchCapability(modelInfo.id).support === "native";
                       const label =
                         modelInfo.usageClass === "deep-research"
                           ? t("chat.searchStatusDeepResearch")
@@ -405,16 +414,24 @@ export function ChatMessageList({
                             : status === "failed"
                               ? t("chat.searchStatusFailed")
                               : status === "executed"
-                                ? t("chat.searchStatusWebSearch")
+                                ? nativeSearchSurcharged
+                                  ? `${t("chat.searchStatusWebSearch")} · +${WEB_SEARCH_SURCHARGE_CREDITS}`
+                                  : t("chat.searchStatusWebSearch")
                                 : status === "requested-not-executed"
                                   ? t("chat.searchStatusRequestedNotExecuted")
                                   : t("chat.searchStatusTrainingKnowledge");
+                      const detail =
+                        status === "requested-not-executed"
+                          ? t("chat.searchStatusRefundDetail")
+                          : undefined;
                       return (
                         <span
                           data-testid="search-status-badge"
                           data-search-status={
                             modelInfo.usageClass === "deep-research" ? "deep-research" : status
                           }
+                          title={detail}
+                          aria-label={detail ? `${label} — ${detail}` : undefined}
                           className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[9px] font-bold text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
                         >
                           {label}
