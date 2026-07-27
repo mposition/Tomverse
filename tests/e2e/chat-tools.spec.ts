@@ -87,12 +87,28 @@ test("selecting a web search mode shows a removable status chip", async ({ page 
   await page.getByTestId("tools-web-search-row").click();
   await page.getByTestId("web-search-mode-option-always").click();
 
+  // The chip carries the request state itself instead of echoing the menu
+  // label ("Web search - Use web search"): the only selected model here is
+  // gpt-5-4-mini, which has no verified provider-native search, so the honest
+  // state is "unavailable" plus a way out -- never a silent fall back to
+  // training knowledge.
   const chip = page.getByTestId("web-search-mode-chip");
   await expect(chip).toBeVisible();
-  await expect(chip).toContainText("Use web search");
+  await expect(chip).toHaveAttribute("data-tone", "blocked");
+  await expect(chip).toContainText("Web search unavailable");
+  await expect(chip).not.toContainText("Use web search");
 
-  await chip.getByRole("button").click();
+  const notice = page.getByTestId("web-search-unavailable-notice");
+  await expect(notice).toBeVisible();
+  await expect(notice).toContainText("Add a search-capable model");
+
+  // The normal-state readiness line ("Search-ready N - Unsupported 0") no
+  // longer exists as its own row at all.
+  await expect(page.getByTestId("web-search-readiness-summary")).toHaveCount(0);
+
+  await chip.getByRole("button", { name: "Turn off web search" }).click();
   await expect(page.getByTestId("web-search-mode-chip")).toHaveCount(0);
+  await expect(page.getByTestId("web-search-unavailable-notice")).toHaveCount(0);
 });
 
 test("web search mode selection does not repeat across a new chat", async ({ page }) => {

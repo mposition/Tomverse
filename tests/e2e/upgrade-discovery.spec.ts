@@ -3,6 +3,7 @@ import {
   mockAuthenticatedApi,
   mockChatStream,
   openModelPickerCatalogue,
+  openRecentConversation,
   prepareGuestPage,
 } from "./support/app-fixtures";
 
@@ -57,7 +58,7 @@ test.describe("desktop upgrade discovery", () => {
     await expect(accountMenu.getByTestId("account-plan-view")).toBeVisible();
   });
 
-  test("locked paid model opens an actionable plan dialog", async ({ page }) => {
+  test("locked paid model opens an actionable plan dialog", { tag: "@smoke" }, async ({ page }) => {
     const modelDialog = await openModelPickerCatalogue(page);
     const lockedModel = modelDialog
       .locator(
@@ -143,7 +144,7 @@ test.describe("value-moment upgrade prompt", () => {
     // the persisted qa-conversation's 2-model comparison selection active
     // (and a real currentChatId) for the comparison preflight/upgrade-prompt
     // flow to trigger at all.
-    await page.getByTestId("recent-conversation-card").click();
+    await openRecentConversation(page);
     await expect(page.getByTestId("chat-input")).toBeVisible();
   });
 
@@ -165,7 +166,7 @@ test.describe("value-moment upgrade prompt", () => {
       .toBe("1");
   });
 
-  test("comparison preflight rejection prevents every provider request", async ({
+  test("comparison preflight rejection prevents every provider request", { tag: "@smoke" }, async ({
     page,
   }) => {
     let providerRequestCount = 0;
@@ -201,7 +202,7 @@ test.describe("value-moment upgrade prompt", () => {
     await expect.poll(() => providerRequestCount).toBe(0);
   });
 
-  test("comparison preflight retries one transient network failure", async ({
+  test("comparison preflight retries one transient network failure", { tag: "@smoke" }, async ({
     page,
   }) => {
     let preflightAttempts = 0;
@@ -244,7 +245,7 @@ test.describe("value-moment upgrade prompt", () => {
     await expect(page.getByTestId("value-upgrade-prompt")).toBeVisible();
   });
 
-  test("unexpected aggregate preflight failure falls back to authoritative chat checks", async ({
+  test("unexpected aggregate preflight failure falls back to authoritative chat checks", { tag: "@smoke" }, async ({
     page,
   }) => {
     let preflightAttempts = 0;

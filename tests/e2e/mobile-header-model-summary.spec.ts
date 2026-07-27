@@ -1,5 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
-import { expectNoHorizontalOverflow, prepareGuestPage } from "./support/app-fixtures";
+import {
+  expectNoHorizontalOverflow,
+  openRecentConversation,
+  prepareGuestPage,
+} from "./support/app-fixtures";
 
 // STG-F009: on mobile the header showed a single representative model name
 // ("GPT-5.4 mini") while the composer showed "3 AIs", so a multi-model
@@ -70,7 +74,7 @@ async function seedGuestConversation(
 // auto-restored, so it takes a tap to become the current chat.
 async function openSeededConversation(page: Page) {
   await page.goto("/chat?lang=en");
-  await page.getByTestId("recent-conversation-card").filter({ hasText: TITLE }).click();
+  await openRecentConversation(page, { title: TITLE });
   await expect(page.getByTestId("chat-empty-state")).toHaveCount(0);
 }
 

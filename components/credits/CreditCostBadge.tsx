@@ -41,6 +41,12 @@ type CreditCostBadgeProps = Omit<HTMLAttributes<HTMLSpanElement>, "children"> & 
   size?: "xs" | "sm" | "md";
   tone?: "default" | "onColor" | "plain";
   testId?: string;
+  /**
+   * Marks the number as an estimate rather than a settled price. Used where
+   * the real cost scales with the request (e.g. a difference summary over
+   * long answers), so a bare "1" would read as a guaranteed charge.
+   */
+  approximate?: boolean;
 };
 
 const sizeClasses = {
@@ -71,20 +77,29 @@ export function CreditCostBadge({
   testId = "credit-cost-badge",
   className = "",
   title,
+  approximate = false,
   ...props
 }: CreditCostBadgeProps) {
-  const accessibleLabel = label || `${formatCredits(credits)} credits`;
+  const accessibleLabel =
+    label ||
+    (approximate
+      ? `about ${formatCredits(credits)} credits`
+      : `${formatCredits(credits)} credits`);
 
   return (
     <span
       {...props}
       data-testid={testId}
+      data-approximate={approximate ? "true" : undefined}
       aria-label={accessibleLabel}
       title={title === undefined ? accessibleLabel : title}
       className={`inline-flex shrink-0 items-center justify-center rounded-full border font-black tabular-nums leading-none ${sizeClasses[size]} ${toneClasses[tone]} ${className}`}
     >
       <CreditCoinIcon />
-      <span aria-hidden="true">{formatCredits(credits)}</span>
+      <span aria-hidden="true">
+        {approximate ? "~" : ""}
+        {formatCredits(credits)}
+      </span>
     </span>
   );
 }

@@ -48,7 +48,7 @@ test("guest can change and persist language", async ({ page }) => {
   await expect(languageSelect(page)).toHaveValue("zh");
 });
 
-test("guest message appears immediately with mocked response", async ({ page }, testInfo) => {
+test("guest message appears immediately with mocked response", { tag: "@smoke" }, async ({ page }, testInfo) => {
   await page.goto("/chat");
 
   await sendChatMessage(page, testInfo, "First QA message");
@@ -61,7 +61,7 @@ test("guest message appears immediately with mocked response", async ({ page }, 
   await expect(page.getByText("QA mock response", { exact: true }).first()).toBeVisible();
 });
 
-test("guest cannot activate a paid model", async ({ page }) => {
+test("guest cannot activate a paid model", { tag: "@smoke" }, async ({ page }) => {
   await page.goto("/chat");
 
   await openModelPickerCatalogue(page);
