@@ -559,6 +559,10 @@ async function startDeepResearch(page: Page, viewportWidth: number, depth: "quic
   await page.getByTestId("tools-deep-research-row").click();
   await page.getByTestId(`deep-research-depth-${depth}`).click();
   await page.getByTestId("deep-research-confirm-start").click();
+  // Wait for the setup sheet (and its full-screen backdrop) to actually
+  // close before returning -- otherwise a subsequent click elsewhere (e.g.
+  // switching mobile tabs) can land on the still-present backdrop instead.
+  await expect(page.getByTestId("deep-research-confirm-start")).toHaveCount(0);
   void viewportWidth; // depth confirm submits regardless of viewport/shell
 }
 
@@ -798,15 +802,16 @@ test.describe("Mobile touch targets", () => {
     });
     await submitComposer(page, "Mobile touch targets.", MOBILE_VIEWPORT.width);
 
-    // Checked on the default (first) tab -- switching tabs below replaces
-    // the shared composer with the mobile shell's per-panel one, which
-    // isn't testid'd as chat-send-button.
-    const sendButton = page.getByTestId("chat-send-button");
-    const sendBox = await sendButton.boundingBox();
-    expect(sendBox).not.toBeNull();
-    if (sendBox) {
-      expect(sendBox.width).toBeGreaterThanOrEqual(44);
-      expect(sendBox.height).toBeGreaterThanOrEqual(44);
+    // While any panel is still responding (Model B never resolves here),
+    // the composer swaps its send button for a "stop all" button in the
+    // same slot -- check that one instead of the (currently absent)
+    // chat-send-button.
+    const stopAllButton = page.getByRole("button", { name: "모든 응답 생성 중지" });
+    const stopAllBox = await stopAllButton.boundingBox();
+    expect(stopAllBox).not.toBeNull();
+    if (stopAllBox) {
+      expect(stopAllBox.width).toBeGreaterThanOrEqual(44);
+      expect(stopAllBox.height).toBeGreaterThanOrEqual(44);
     }
 
     // Mobile shows one active tab at a time; MODEL_A (the failed one) is
