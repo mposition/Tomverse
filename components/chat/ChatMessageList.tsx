@@ -351,12 +351,18 @@ export function ChatMessageList({
                   : t("chat.connectingStatus");
 
               // Technical detail lines (trace IDs, internal cost figures) are
-            // appended to msg.content after a newline for support purposes,
-            // but only the first line is meant for the user to read.
+            // appended to msg.content after a newline -- the first line is
+            // the primary, user-facing message; any remaining lines are
+            // rendered separately below as a de-emphasized auxiliary layer
+            // (see errorAuxiliaryLines) rather than dropped entirely.
             const displayContent =
               !isUser && msg.status === "error"
                 ? msg.content.split("\n")[0]
                 : msg.content;
+            const errorAuxiliaryLines =
+              !isUser && msg.status === "error"
+                ? msg.content.split("\n").slice(1).filter(Boolean)
+                : [];
 
             const assistantBoxClass = msg.status === "error"
                   ? "bg-red-50 text-red-800 border border-red-200 dark:bg-red-950 dark:text-red-100 dark:border-red-800"
@@ -478,6 +484,7 @@ export function ChatMessageList({
                 )}
 
                 <div
+                  role={!isUser && msg.status === "error" ? "alert" : undefined}
                   className={`relative max-w-[94%] break-words rounded-2xl px-3 py-2 text-[13px] leading-[1.55] shadow-sm md:max-w-[88%] md:px-4 md:py-3 md:text-[15px] md:leading-relaxed ${
                     isUser ? `${userBoxClass} rounded-br-md` : `${assistantBoxClass} rounded-bl-md`
                   } ${!isUser && msg.content && msg.status !== "error" ? "pr-8 md:pr-9" : ""}`}
@@ -717,6 +724,18 @@ export function ChatMessageList({
                           <p className="mt-2 text-xs leading-5 text-red-600/80 dark:text-red-200/80">
                             {t("chat.guestQuotaLoginBenefitHint")}
                           </p>
+                        )}
+                        {errorAuxiliaryLines.length > 0 && (
+                          <div data-testid="chat-error-auxiliary-info" className="mt-2 space-y-0.5">
+                            {errorAuxiliaryLines.map((line, lineIndex) => (
+                              <p
+                                key={lineIndex}
+                                className="text-[10px] leading-4 text-red-500/70 dark:text-red-300/60"
+                              >
+                                {line}
+                              </p>
+                            ))}
+                          </div>
                         )}
                       </div>
                     );
