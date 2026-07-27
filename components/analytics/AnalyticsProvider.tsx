@@ -52,6 +52,50 @@ export function useAuthConsentSlotRef(): AuthConsentSlotSetter {
   return register || (() => {});
 }
 
+// Marketing pages register a slot directly under the sticky header. Before
+// FINAL-F001 the notice stayed a bottom-anchored viewport-fixed card there,
+// which at <=360px wide viewports landed exactly on the hero's primary CTA:
+// document.elementFromPoint() at the CTA's centre returned the notice's own
+// body copy, so the CTA could not be tapped at all while consent was
+// pending. A bottom overlay cannot avoid that by shrinking -- at 360x640 the
+// hero CTA ends 16px above the fold, so any bottom-anchored card taller than
+// 16px covers it. Putting the notice in normal document flow (the same fix
+// STG-F001 used for the chat composer) removes the overlap by construction
+// at every viewport and scroll offset.
+type MarketingConsentSlotSetter = (node: HTMLDivElement | null) => void;
+const MarketingConsentSlotContext =
+  createContext<MarketingConsentSlotSetter | null>(null);
+
+export function useMarketingConsentSlotRef(): MarketingConsentSlotSetter {
+  const register = useContext(MarketingConsentSlotContext);
+  return register || (() => {});
+}
+
+// Rendered by MarketingChrome's header for every marketing route. It stays
+// `empty:hidden` so a resolved (accepted/declined) consent state costs no
+// layout box and no CLS.
+export function MarketingConsentSlot({
+  maxWidth = "max-w-7xl",
+}: {
+  maxWidth?: string;
+}) {
+  const [node, setNode] = useState<HTMLDivElement | null>(null);
+  const register = useMarketingConsentSlotRef();
+
+  useEffect(() => {
+    register(node);
+    return () => register(null);
+  }, [node, register]);
+
+  return (
+    <div
+      ref={setNode}
+      data-testid="marketing-consent-slot"
+      className={`mx-auto ${maxWidth} px-4 py-2 empty:hidden sm:px-6 lg:px-8`}
+    />
+  );
+}
+
 const consentCopy: Record<
   Language,
   {
@@ -211,6 +255,8 @@ export function AnalyticsProvider({
   const [authConsentSlot, setAuthConsentSlot] = useState<HTMLDivElement | null>(
     null
   );
+  const [marketingConsentSlot, setMarketingConsentSlot] =
+    useState<HTMLDivElement | null>(null);
   const lifecycleCheckedRef = useRef(false);
   const copy = consentCopy[lang];
 
@@ -468,7 +514,8 @@ export function AnalyticsProvider({
   // notice portals there instead of floating fixed over the viewport --
   // that slot reserves real layout space, so it can never cover composer
   // controls at any width. On /auth/signin the sign-in page registers a
-  // similar slot right after the login card. Everywhere else (and before a
+  // similar slot right after the login card, and marketing routes register
+  // one under the sticky header (FINAL-F001). Everywhere else (and before a
   // route's slot exists, e.g. the initial shell-loading skeleton) the
   // original fixed corner overlay is used instead.
   const inlineSlot =
@@ -476,7 +523,7 @@ export function AnalyticsProvider({
       ? chatConsentSlot
       : pathname === "/auth/signin"
         ? authConsentSlot
-        : null;
+        : marketingConsentSlot;
 
   const showConsentPrompt =
     !disabled &&
@@ -489,11 +536,19 @@ export function AnalyticsProvider({
   // high-contrast bar), so the notice reads as an ordinary compact toast
   // rather than a warning that outweighs the surrounding page (UI-P1-02).
   const consentButtonClass =
-    "inline-flex min-h-11 items-center justify-center rounded-lg border border-zinc-300 bg-white px-2.5 text-[10px] font-black text-zinc-700 transition-colors hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700 dark:focus-visible:ring-offset-zinc-900 sm:px-3 sm:text-[11px]";
+    "inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-zinc-300 bg-white px-2.5 text-[10px] font-black text-zinc-700 transition-colors hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700 dark:focus-visible:ring-offset-zinc-900 sm:px-3 sm:text-[11px]";
 
+  // The body copy used to carry `min-w-0` next to a `shrink-0` action pair, so
+  // on narrow viewports it absorbed all of the shrink instead of triggering
+  // the wrap this row already allows -- the audit measured 34.6px of body
+  // width at 320px. Giving the copy a real minimum makes the existing
+  // flex-wrap do its job: when the copy and the actions no longer both fit,
+  // the actions drop to their own line rather than crushing the sentence.
+  // It stays content-driven, so a locale with long action labels wraps at a
+  // wider viewport than English does instead of at a hard-coded breakpoint.
   const noticeInner = (
     <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap sm:justify-between sm:gap-3">
-      <div className="min-w-0 flex-1">
+      <div className="min-w-[10rem] flex-1">
         <p className="text-[10px] leading-4 text-zinc-600 dark:text-zinc-300 sm:hidden">
           {promptCopy.mobileBody}{" "}
           <Link
@@ -514,7 +569,7 @@ export function AnalyticsProvider({
           </Link>
         </div>
       </div>
-      <div className="flex shrink-0 gap-1 sm:gap-2">
+      <div className="flex shrink-0 gap-2">
         <button
           type="button"
           data-testid="analytics-consent-decline"
@@ -538,6 +593,7 @@ export function AnalyticsProvider({
   return (
     <ChatConsentSlotContext.Provider value={setChatConsentSlot}>
       <AuthConsentSlotContext.Provider value={setAuthConsentSlot}>
+        <MarketingConsentSlotContext.Provider value={setMarketingConsentSlot}>
         {children}
         {analyticsEnabled && analyticsClientReady && measurementId ? (
           <Script
@@ -553,7 +609,13 @@ export function AnalyticsProvider({
                 role="region"
                 aria-label={promptCopy.title}
                 data-testid="chat-consent-notice"
-                className="mx-2 mb-2 rounded-xl border border-zinc-200 bg-white/95 p-2 text-zinc-700 shadow-md shadow-zinc-900/5 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-black/20 sm:mx-4 sm:ml-auto sm:max-w-sm sm:p-3"
+                className={
+                  inlineSlot === marketingConsentSlot
+                    ? // The marketing slot already supplies the page gutter, so
+                      // the card spans it and never needs its own max-width.
+                      "rounded-xl border border-zinc-200 bg-white/95 p-2 text-zinc-700 shadow-md shadow-zinc-900/5 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-black/20 sm:p-3"
+                    : "mx-2 mb-2 rounded-xl border border-zinc-200 bg-white/95 p-2 text-zinc-700 shadow-md shadow-zinc-900/5 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-black/20 sm:mx-4 sm:ml-auto sm:max-w-sm sm:p-3"
+                }
               >
                 {noticeInner}
               </div>,
@@ -594,6 +656,7 @@ export function AnalyticsProvider({
             {copy.settings}
           </button>
         ) : null}
+        </MarketingConsentSlotContext.Provider>
       </AuthConsentSlotContext.Provider>
     </ChatConsentSlotContext.Provider>
   );
