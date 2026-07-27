@@ -343,7 +343,7 @@ export function ModelCatalogue({
         {groupedModels.map((group) => (
           <div key={group.provider || "all"} className="space-y-1">
             {group.provider && (
-              <div className="px-2 text-[10px] font-bold uppercase tracking-wide text-zinc-400">
+              <div className="px-2 text-[11px] font-bold uppercase tracking-wide text-zinc-400">
                 {group.provider.toUpperCase()}
               </div>
             )}
@@ -380,6 +380,15 @@ export function ModelCatalogue({
                         : null;
                 const modelDescription = getModelPickerDescription(model, lang);
                 const modelFeatures = getModelPickerFeatures(model);
+                // The dot used to fall back to the raw `modelStatus` enum for
+                // its accessible name, so a Korean screen-reader user heard
+                // the English word "available" on every healthy model.
+                const statusLabel =
+                  modelStatus === "available"
+                    ? t("chat.availableModel")
+                    : modelStatus === "limited"
+                      ? t("modelStatusReasons.limited")
+                      : t("chat.unavailableModel");
 
                 return (
                   <div
@@ -433,20 +442,22 @@ export function ModelCatalogue({
                                   ? "bg-amber-500"
                                   : "bg-zinc-400"
                             }`}
-                            title={
-                              modelStatus === "available"
-                                ? undefined
-                                : statusReason || modelStatus
-                            }
-                            aria-label={statusReason || modelStatus}
+                            title={statusReason || statusLabel}
+                            // When there is a reason, it is already rendered as
+                            // visible text inside this same button, so naming
+                            // the dot with it too made a locked model read its
+                            // "Available after login." line twice in a row.
+                            {...(statusReason
+                              ? { "aria-hidden": true }
+                              : { "aria-label": statusLabel })}
                           />
                         </span>
-                        <span className="mt-0.5 block text-[10px] leading-4 text-zinc-500 dark:text-zinc-400">
+                        <span className="mt-0.5 block text-[11px] leading-4 text-zinc-500 dark:text-zinc-400">
                           {modelDescription}
                         </span>
                         {statusReason && (
                           <span
-                            className={`mt-0.5 flex items-center gap-1 text-[10px] font-bold ${modelStatus === "unavailable" || !model.enabled ? "text-red-500" : modelStatus === "limited" ? "text-amber-500" : "text-blue-500"}`}
+                            className={`mt-0.5 flex items-center gap-1 text-[11px] font-bold ${modelStatus === "unavailable" || !model.enabled ? "text-red-500" : modelStatus === "limited" ? "text-amber-500" : "text-blue-500"}`}
                           >
                             {isPlanLocked && (
                               <LockKeyhole className="h-3 w-3" aria-hidden="true" />
@@ -468,7 +479,7 @@ export function ModelCatalogue({
                               return (
                                 <span
                                   key={feature}
-                                  className="inline-flex items-center gap-1 text-[9px] font-bold text-zinc-500 dark:text-zinc-300"
+                                  className="inline-flex items-center gap-1 text-[11px] font-bold text-zinc-500 dark:text-zinc-300"
                                 >
                                   <Icon className="h-3 w-3" aria-hidden="true" />
                                   {featureLabels[feature]}
@@ -480,7 +491,7 @@ export function ModelCatalogue({
                         {(modelStatus === "limited" ||
                           modelStatus === "unavailable") &&
                           fallbackModels.length > 0 && (
-                            <span className="mt-1 flex flex-wrap items-center gap-1 text-[10px] text-zinc-500">
+                            <span className="mt-1 flex flex-wrap items-center gap-1 text-[11px] text-zinc-500">
                               <span>{t("chat.trySimilarModel")}</span>
                               {fallbackModels.map((fallback) => (
                                 <span

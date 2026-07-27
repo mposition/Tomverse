@@ -1158,17 +1158,22 @@ const checks = [
     file: "components/analytics/AnalyticsProvider.tsx",
     test: (source) => {
       // UI-P1-02 extracted the decline/accept button markup into a shared
-      // `consentButtonClass` string (both buttons reference it) instead of
-      // repeating an inline className literal -- check the shared class
-      // itself carries the 44px WCAG 2.2 target size and pill shape, and
-      // that both buttons actually use it, in place of the old
-      // `className="min-h-11 rounded-lg` literal-string check.
+      // `consentButtonClass` string instead of repeating an inline className
+      // literal -- check the shared class itself carries the 44px WCAG 2.2
+      // target size and pill shape, in place of the old
+      // `className="min-h-11 rounded-lg` literal-string check. UI-P2-01 then
+      // moved both buttons behind one `consentAction` builder that applies
+      // that class, so the "both buttons use it" half is now asserted as
+      // "the single builder applies it and is called exactly twice".
       const buttonClassMatch = source.match(
         /const consentButtonClass =\s*\n?\s*"([^"]+)"/
       );
       const buttonClass = buttonClassMatch ? buttonClassMatch[1] : "";
       const buttonClassUsages = (
         source.match(/className=\{consentButtonClass\}/g) || []
+      ).length;
+      const consentActionCalls = (
+        source.match(/\{?\s*consentAction\(\s*\n?\s*"(decline|accept)"/g) || []
       ).length;
 
       return (
@@ -1181,11 +1186,20 @@ const checks = [
         // viewport-relative width cap accordingly.
         source.includes("calc(100vw-1.5rem)") &&
         // STG-F001 replaced the rigid grid-cols layout with flex-wrap (so long
-        // translated labels wrap instead of overflowing).
-        source.includes("flex-wrap items-center gap-2 sm:flex-nowrap") &&
+        // translated labels wrap instead of overflowing). UI-P2-01 additionally
+        // dropped the viewport-keyed `sm:flex-nowrap`, which re-introduced
+        // overflow whenever the notice's *container* was narrower than the
+        // viewport (the max-w-sm sign-in card on a 1440px desktop): the row is
+        // now sized by container queries and may always wrap as a last resort.
+        source.includes("flex-wrap items-center gap-2 @md/notice:") &&
+        source.includes("@container/notice") &&
+        // Matched inside a className only -- the paragraph above deliberately
+        // names the old utility while explaining why it went away.
+        !/className="[^"]*sm:flex-nowrap/.test(source) &&
         buttonClass.includes("min-h-11") &&
         buttonClass.includes("rounded-lg") &&
-        buttonClassUsages === 2 &&
+        buttonClassUsages === 1 &&
+        consentActionCalls === 2 &&
         source.includes("env(safe-area-inset-bottom)")
       );
     },
