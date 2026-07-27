@@ -59,10 +59,12 @@ async function expectMinHitArea(locator: Locator, label: string) {
 
 for (const viewport of VIEWPORTS) {
   test(`model picker stays usable at ${viewport.name}`, async ({ page }, testInfo) => {
-    // The 44px minimum tracks useIsMobileShell(), which requires a coarse
-    // pointer AND a width under 768px -- a touch tablet at 768px+ gets the
-    // desktop shell and its compact mouse sizing on purpose. Layout,
-    // reachability and overflow are checked at every viewport regardless.
+    // In this width-driven loop the 44px hit-area checks only run on the mobile
+    // projects (where isMobileShell is active). Touch tablets at >=768px are a
+    // separate case: they use the desktop layout but must still get 44px
+    // targets because they expose a coarse pointer -- that is covered in the
+    // dedicated coarse-pointer block below. Layout, reachability and overflow
+    // are checked at every viewport regardless.
     const usesMobileShell =
       testInfo.project.name.startsWith("mobile") && viewport.width <= 767;
     const checkHitArea = async (locator: Locator, label: string) => {
@@ -147,6 +149,67 @@ for (const viewport of VIEWPORTS) {
     await expectNoHorizontalOverflow(page);
   });
 }
+
+// Product decision (2026-07): touch hit area follows the input device, not the
+// layout width. A coarse-pointer tablet at >=768px uses the desktop layout but
+// must still offer 44px targets on the picker's key controls.
+test.describe("coarse-pointer tablets keep 44px hit areas at >=768px", () => {
+  test.use({ hasTouch: true });
+
+  for (const width of [768, 820, 1024]) {
+    test(`touch controls stay >=44px at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 1024 });
+      await prepareGuestPage(page, "en");
+      await page.goto("/chat");
+
+      const isCoarse = await page.evaluate(
+        () => window.matchMedia("(any-pointer: coarse)").matches
+      );
+      expect(isCoarse, "hasTouch must expose a coarse pointer").toBe(true);
+
+      await modelMenuTrigger(page).click();
+      const dialog = page.locator("#chat-input-popover");
+      await expect(dialog).toBeVisible();
+
+      await expectMinHitArea(dialog.getByTestId("model-picker-back"), `back @${width}`);
+      await expectMinHitArea(
+        dialog.getByTestId("model-search-input"),
+        `search input @${width}`
+      );
+      await expectMinHitArea(dialog.getByTestId("model-picker-done"), `done @${width}`);
+
+      await openModelCatalogue(page);
+      await expectMinHitArea(
+        dialog.getByTestId("model-task-filter"),
+        `task filter @${width}`
+      );
+      await expectMinHitArea(
+        dialog.getByTestId("model-favorite-star").first(),
+        `favourite star @${width}`
+      );
+      await expectMinHitArea(
+        dialog.getByTestId("model-option").first(),
+        `model option @${width}`
+      );
+    });
+  }
+});
+
+test("mouse-only desktop keeps the compact favourite control", async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await prepareGuestPage(page, "en");
+  await page.goto("/chat");
+
+  const isCoarse = await page.evaluate(
+    () => window.matchMedia("(any-pointer: coarse)").matches
+  );
+  test.skip(isCoarse, "device exposes a coarse pointer; compact density does not apply");
+
+  const dialog = await openModelCatalogue(page);
+  const box = await dialog.getByTestId("model-favorite-star").first().boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.height, "mouse-only desktop keeps the 32px star").toBeLessThan(44);
+});
 
 test("the picker footer clears the mobile keyboard and safe area", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
