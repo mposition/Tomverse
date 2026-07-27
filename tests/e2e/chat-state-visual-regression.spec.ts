@@ -856,6 +856,11 @@ test.describe("Mobile touch targets", () => {
     });
     await page.reload();
     await freezeAnimations(page);
+    // The modal auto-opens shortly after the limit is detected (see
+    // ChatInput.tsx's limitScope effect); wait for that transition to
+    // settle before measuring, so boundingBox() (which -- unlike
+    // expect() -- doesn't itself retry) doesn't race a layout shift.
+    await expect(page.getByTestId("usage-limit-modal")).toBeVisible();
 
     const viewOptions = page.getByTestId("usage-limit-view-options");
     await expect(viewOptions).toBeVisible();
