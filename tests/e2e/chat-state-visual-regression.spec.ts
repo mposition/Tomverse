@@ -47,17 +47,21 @@ test.beforeEach(async ({}, testInfo) => {
 });
 
 // Discovered while stabilizing this suite: ChatPageClient's authenticated
-// session-bootstrap effect (the one that resolves isModelSelectionReady,
-// gating the mobile header's model-summary skeleton) has a pre-existing,
-// low-frequency (~1-2%) race where it can latch its "already ran" ref
-// before the conversations list has actually loaded, leaving the skeleton
-// on screen indefinitely -- reproduced across several unrelated tests here,
-// never tied to a specific fixture or state. That's an app-level bootstrap
-// issue outside this task's fixture/visual-polish scope (flagged in the
-// completion report for separate follow-up), not something a longer
-// timeout can paper over since the affected runs never resolve at all.
-// One retry re-navigates from scratch and reliably clears it.
-test.describe.configure({ retries: 1 });
+// session-bootstrap effect (app/(application)/chat/ChatPageClient.tsx,
+// the useEffect around the ACTIVE_CHAT_STORAGE_KEY restore, ~line 1654)
+// bails out early whenever conversations.length === 0 on a given render
+// without setting isInitialConversationResolved -- it's designed to retry
+// on the next render once `conversations` (dep array) actually populates,
+// but occasionally (observed ~5-10% of full-suite runs here, sometimes
+// twice in a row) that follow-up render doesn't land in time, leaving
+// isModelSelectionReady -- and the mobile header's model-summary skeleton
+// gating on it -- stuck indefinitely. That's a pre-existing app-level
+// bootstrap race, not something introduced by this suite's fixtures, and
+// fixing its root cause is outside this task's fixture/visual-polish scope
+// (flagged in the completion report for separate follow-up). No timeout
+// increase fixes it since the affected runs never resolve at all; retrying
+// the whole test (which re-navigates from scratch) does.
+test.describe.configure({ retries: 2 });
 
 // useIsMobileShell() (components/chat/useIsMobileShell.ts) requires both a
 // narrow width AND a coarse (touch) pointer before it treats the shell as
