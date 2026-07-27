@@ -195,6 +195,12 @@ test.describe("Streaming state", () => {
 
         // Model A finishes fast.
         await expect(page.getByText(SHORT_ANSWER)).toBeVisible();
+        if (viewport.width < 768) {
+          // Mobile shows one active tab at a time (defaulting to Model A,
+          // already finished) -- switch to Model B's tab so the mobile
+          // golden actually shows the mid-stream state, not a finished one.
+          await page.locator(`[data-testid="mobile-model-tab"][data-model-id="${MODEL_B}"]`).click();
+        }
         // Model B is mid-stream: partial text visible, generation still active.
         await expect(page.getByText("Here is the first part of a longer,", { exact: false })).toBeVisible();
         await expect(page.getByTestId("stop-this-response").first()).toBeVisible();
@@ -430,11 +436,16 @@ test.describe("Retry state", () => {
     const assistantMessages = page.locator('[data-testid="chat-message"][data-message-role="assistant"]');
     await expect(assistantMessages.getByText("Retry ", { exact: false })).toBeVisible();
     await expect(page.getByTestId("stop-this-response").first()).toBeVisible();
-    await expect(page.getByRole("button", { name: "다시 시도" })).toHaveCount(0);
+    // Retry appends a fresh turn below the failed one rather than replacing
+    // it in place -- the original failed turn (and its retry button) stays
+    // in the transcript, so exactly one retry button remains (the old
+    // turn's), and no *second* one appears for the in-flight retry itself.
+    await expect(page.getByRole("button", { name: "다시 시도" })).toHaveCount(1);
 
-    // Success: the error card is gone, replaced by the retried answer.
+    // Success: a new, successful turn is appended; the original failed
+    // turn's error card is preserved in history, not removed.
     await expect(assistantMessages.getByText("Retry succeeded.")).toBeVisible();
-    await expect(page.locator('[data-testid="chat-message"][data-message-role="assistant"] [role="alert"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="chat-message"][data-message-role="assistant"] [role="alert"]')).toHaveCount(1);
   });
 });
 
@@ -566,11 +577,19 @@ test.describe("Deep Research state", () => {
         await mockDeepResearchStatus(page, "hold");
         await startDeepResearch(page, viewport.width);
 
+        if (viewport.width < 768) {
+          // Confirming swaps the deep-research model into the last slot;
+          // mobile defaults to the first tab (Model B), so switch to see
+          // the actively-researching panel instead of the finished one.
+          await page.locator(`[data-testid="mobile-model-tab"][data-model-id="${DEEP_RESEARCH_MODEL}"]`).click();
+        }
         await expect(page.getByText("심층 리서치 요청 중…")).toBeVisible();
         // The Deep Research chip persists through the run as a visibly
         // distinct marker from a plain web-search request.
         await expect(page.getByTestId("deep-research-chip")).toBeVisible();
-        await expect(page.getByText(SHORT_ANSWER).first()).toBeVisible();
+        if (viewport.width >= 768) {
+          await expect(page.getByText(SHORT_ANSWER).first()).toBeVisible();
+        }
 
         await expect(page).toHaveScreenshot(`chat-deep-research-${viewportName}-${theme}-ko.png`);
       });
@@ -779,6 +798,17 @@ test.describe("Mobile touch targets", () => {
     });
     await submitComposer(page, "Mobile touch targets.", MOBILE_VIEWPORT.width);
 
+    // Checked on the default (first) tab -- switching tabs below replaces
+    // the shared composer with the mobile shell's per-panel one, which
+    // isn't testid'd as chat-send-button.
+    const sendButton = page.getByTestId("chat-send-button");
+    const sendBox = await sendButton.boundingBox();
+    expect(sendBox).not.toBeNull();
+    if (sendBox) {
+      expect(sendBox.width).toBeGreaterThanOrEqual(44);
+      expect(sendBox.height).toBeGreaterThanOrEqual(44);
+    }
+
     // Mobile shows one active tab at a time; MODEL_A (the failed one) is
     // active by default, so switch to MODEL_B's tab to reach its stop button.
     await page.locator(`[data-testid="mobile-model-tab"][data-model-id="${MODEL_B}"]`).click();
@@ -793,14 +823,6 @@ test.describe("Mobile touch targets", () => {
     if (stopBox) {
       expect(stopBox.width).toBeGreaterThan(0);
       expect(stopBox.height).toBeGreaterThan(0);
-    }
-
-    const sendButton = page.getByTestId("chat-send-button");
-    const sendBox = await sendButton.boundingBox();
-    expect(sendBox).not.toBeNull();
-    if (sendBox) {
-      expect(sendBox.width).toBeGreaterThanOrEqual(44);
-      expect(sendBox.height).toBeGreaterThanOrEqual(44);
     }
   });
 
