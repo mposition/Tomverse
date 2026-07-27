@@ -208,12 +208,25 @@ test.describe("Loading state", () => {
 // ===========================================================================
 // 2. Streaming
 // ===========================================================================
+// Model B streams in two chunks 250ms apart; the golden captures the state
+// after *both* have landed, with generation still active because Model C's
+// request never settles. Waiting only for the first chunk (as this suite used
+// to) let a capture land in the gap between them -- Playwright reads that as a
+// stable page, so it fails the comparison outright instead of retrying, and
+// the visual step runs with --retries=0. Every streaming assertion below
+// therefore waits for STREAMING_ANSWER, the state the goldens actually hold.
+const STREAMING_CHUNKS = [
+  "Here is the first part of a longer, ",
+  "still-streaming answer about world capitals.",
+];
+const STREAMING_ANSWER = STREAMING_CHUNKS.join("");
+
 async function setupStreamingTrio(page: Page) {
   await installChatModelStub(page, {
     [MODEL_A]: { kind: "success", chunks: [SHORT_ANSWER], intervalMs: 15 },
     [MODEL_B]: {
       kind: "success",
-      chunks: ["Here is the first part of a longer, ", "still-streaming answer about world capitals."],
+      chunks: STREAMING_CHUNKS,
       intervalMs: 250,
     },
     [MODEL_C]: { kind: "hold" },
@@ -236,9 +249,15 @@ test.describe("Streaming state", () => {
           // golden actually shows the mid-stream state, not a finished one.
           await page.locator(`[data-testid="mobile-model-tab"][data-model-id="${MODEL_B}"]`).click();
         }
-        // Model B is mid-stream: partial text visible, generation still active.
-        await expect(page.getByText("Here is the first part of a longer,", { exact: false })).toBeVisible();
-        await expect(page.getByTestId("stop-this-response").first()).toBeVisible();
+        // Model B has streamed every chunk it will send -- the state the
+        // golden actually holds, and one that no longer moves under the
+        // capture.
+        await expect(page.getByText(STREAMING_ANSWER, { exact: false })).toBeVisible();
+        // Generation is still active because Model C never settles. Its stop
+        // control is on screen on desktop, but mobile shows one panel at a
+        // time and Model C's is the hidden one, so assert the control exists
+        // rather than that it is visible.
+        await expect(page.getByTestId("stop-this-response")).not.toHaveCount(0);
         // Composer is disabled while any panel is still sending.
         await expect(page.getByTestId("chat-textarea")).toBeDisabled();
 
@@ -254,7 +273,7 @@ test.describe("Streaming state", () => {
     await submitComposer(page, "Which city is the capital of France?", DESKTOP_VIEWPORT.width);
 
     await expect(page.getByText(SHORT_ANSWER)).toBeVisible();
-    await expect(page.getByText("Here is the first part of a longer,", { exact: false })).toBeVisible();
+    await expect(page.getByText(STREAMING_ANSWER, { exact: false })).toBeVisible();
 
     await expectStableScreenshot(page, "chat-streaming-reduced-motion-desktop-light-ko.png", { theme: "light" });
   });
