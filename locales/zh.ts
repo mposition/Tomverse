@@ -155,6 +155,7 @@ export const zh = {
         googleDriveDescription: "文档、表格、幻灯片",
         googleDriveError: "无法添加 Google Drive 文件，请重试。",
         moreActions: "更多操作",
+        openChatMenu: "打开对话菜单",
         uploadFromComputer: "从电脑选择",
         toolsWebSearch: "网页搜索",
         toolsWebSearchDescription: "选择此对话何时使用网页搜索",

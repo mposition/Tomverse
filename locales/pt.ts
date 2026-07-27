@@ -168,6 +168,7 @@ export const pt = {
         googleDriveDescription: "Docs, Sheets, Slides",
         googleDriveError: "O arquivo do Google Drive não pôde ser anexado. Tente novamente.",
         moreActions: "Mais ações",
+        openChatMenu: "Abrir o menu da conversa",
         uploadFromComputer: "Escolher do computador",
         toolsWebSearch: "Pesquisa web",
         toolsWebSearchDescription: "Escolha quando esta conversa pesquisa na web",

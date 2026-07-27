@@ -168,6 +168,7 @@ export const fr = {
         googleDriveDescription: "Docs, Sheets, Slides",
         googleDriveError: "Le fichier Google Drive n'a pas pu être joint. Réessayez.",
         moreActions: "Plus d'actions",
+        openChatMenu: "Ouvrir le menu de la conversation",
         uploadFromComputer: "Choisir depuis votre ordinateur",
         toolsWebSearch: "Recherche web",
         toolsWebSearchDescription: "Choisissez quand cette conversation effectue une recherche web",
