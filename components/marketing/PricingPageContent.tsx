@@ -27,6 +27,10 @@ import {
   formatBillingMinor,
   type BillingCurrency,
 } from "@/lib/billingMarkets";
+import {
+  formatBillingPeriodLabel,
+  formatCountedUnit,
+} from "@/lib/pricingFormat";
 
 const annualLabelByLanguage: Partial<Record<Language, { annual: string; save: string; checkout: string }>> = {
   en: { annual: "Annual", save: "Save 20%", checkout: "The fixed local price shown is charged at checkout." },
@@ -75,7 +79,10 @@ type CreditValueCopy = {
   title: string;
   description: string;
   typicalLabel: string;
+  /** Plural ("other") form of the credit unit. */
   creditUnit: string;
+  /** Singular ("one") form -- "Standard · 1 credit", never "1 credits". */
+  creditUnitOne: string;
   monthlyUnit: string;
   approx: string;
   standardOnly: string;
@@ -99,6 +106,7 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     description: "Compare the allowance with the base cost of common model combinations before choosing a plan.",
     typicalLabel: "Typical short-request examples",
     creditUnit: "credits",
+    creditUnitOne: "credit",
     monthlyUnit: "credits / month",
     approx: "About",
     standardOnly: "Standard only",
@@ -120,6 +128,7 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     description: "플랜을 선택하기 전에 월 제공량을 자주 사용하는 모델 조합의 기본 차감량과 비교해 보세요.",
     typicalLabel: "일반적인 짧은 요청 기준 예시",
     creditUnit: "크레딧",
+    creditUnitOne: "크레딧",
     monthlyUnit: "크레딧 / 월",
     approx: "약",
     standardOnly: "Standard 단독",
@@ -141,6 +150,7 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     description: "选择方案前，可将每月额度与常用模型组合的基础消耗进行比较。",
     typicalLabel: "典型短请求示例",
     creditUnit: "积分",
+    creditUnitOne: "积分",
     monthlyUnit: "积分 / 月",
     approx: "约",
     standardOnly: "仅 Standard",
@@ -162,6 +172,7 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     description: "Comparez l'enveloppe au coût de base des combinaisons de modèles courantes avant de choisir un plan.",
     typicalLabel: "Exemples de requêtes courtes typiques",
     creditUnit: "crédits",
+    creditUnitOne: "crédit",
     monthlyUnit: "crédits / mois",
     approx: "Environ",
     standardOnly: "Standard uniquement",
@@ -183,6 +194,7 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     description: "Vergleichen Sie das Kontingent vor der Tarifwahl mit den Basiskosten gängiger Modellkombinationen.",
     typicalLabel: "Beispiele für typische kurze Anfragen",
     creditUnit: "Credits",
+    creditUnitOne: "Credit",
     monthlyUnit: "Credits / Monat",
     approx: "Etwa",
     standardOnly: "Nur Standard",
@@ -204,6 +216,7 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     description: "Compara la asignación con el coste base de combinaciones habituales antes de elegir un plan.",
     typicalLabel: "Ejemplos de solicitudes cortas habituales",
     creditUnit: "créditos",
+    creditUnitOne: "crédito",
     monthlyUnit: "créditos / mes",
     approx: "Aprox.",
     standardOnly: "Solo Standard",
@@ -225,6 +238,7 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     description: "Compare a franquia com o custo-base das combinações mais comuns antes de escolher um plano.",
     typicalLabel: "Exemplos de pedidos curtos típicos",
     creditUnit: "créditos",
+    creditUnitOne: "crédito",
     monthlyUnit: "créditos / mês",
     approx: "Cerca de",
     standardOnly: "Somente Standard",
@@ -792,6 +806,17 @@ export function PricingPageContent() {
   const creditPackGuide = creditPackCopy[lang];
   const publicCreditPacks = billing.config?.creditPacks ?? [];
   const numberFormatter = new Intl.NumberFormat(promotionDateLocale[lang]);
+  // FINAL-F006: one place that decides "1 credit" vs "2 credits", and one
+  // place that glues a billing period onto a price, so the plain, sale, and
+  // struck-through regular prices can never drift apart again.
+  const creditUnit = {
+    one: creditGuide.creditUnitOne,
+    other: creditGuide.creditUnit,
+  };
+  const formatCredits = (count: number) =>
+    formatCountedUnit(count, creditUnit, lang, (value) =>
+      numberFormatter.format(value)
+    );
   const creditPlans = ([
     { id: "free", name: "Free", fallbackCredits: 300 },
     { id: "pro", name: "Pro", fallbackCredits: 3_000 },
@@ -954,7 +979,7 @@ export function PricingPageContent() {
                 <div className="mt-8">
                   <span className="text-4xl font-black">{displayPrice}</span>
                   <span className={`ml-2 text-sm font-bold ${plan.highlighted ? "text-blue-100" : "text-zinc-500 dark:text-zinc-400"}`}>
-                    {plan.period}
+                    {formatBillingPeriodLabel(plan.period, lang)}
                   </span>
                 </div>
               ) : (
@@ -974,14 +999,15 @@ export function PricingPageContent() {
                   <div className="mt-3 flex flex-wrap items-end gap-x-3 gap-y-1">
                     <span className="text-5xl font-black">{salePrice}</span>
                     <span className={`pb-1 text-sm font-black ${plan.highlighted ? "text-blue-50" : "text-zinc-700 dark:text-zinc-200"}`}>
-                      / {plan.period}
+                      {formatBillingPeriodLabel(plan.period, lang)}
                     </span>
                     <span className={`pb-1 text-sm font-bold line-through ${plan.highlighted ? "text-blue-100/80" : "text-zinc-500 dark:text-zinc-400"}`}>
                       {displayPrice}
                     </span>
                   </div>
                   <p className={`mt-2 text-xs font-bold ${plan.highlighted ? "text-blue-100" : "text-zinc-600 dark:text-zinc-300"}`}>
-                    {saleCopy.duration}. {saleCopy.regular}: {displayPrice} / {plan.period}.
+                    {saleCopy.duration}. {saleCopy.regular}: {displayPrice}{" "}
+                    {formatBillingPeriodLabel(plan.period, lang)}.
                   </p>
                 </div>
               )}
@@ -1162,13 +1188,13 @@ export function PricingPageContent() {
 
             <div className="mt-5 flex flex-wrap gap-2 text-xs font-bold text-zinc-600 dark:text-zinc-300">
               <span className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 dark:border-zinc-700 dark:bg-zinc-950">
-                Standard · {MODEL_USAGE_CREDIT_WEIGHTS.standard} {creditGuide.creditUnit}
+                Standard · {formatCredits(MODEL_USAGE_CREDIT_WEIGHTS.standard)}
               </span>
               <span className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 dark:border-zinc-700 dark:bg-zinc-950">
-                Advanced · {MODEL_USAGE_CREDIT_WEIGHTS.advanced} {creditGuide.creditUnit}
+                Advanced · {formatCredits(MODEL_USAGE_CREDIT_WEIGHTS.advanced)}
               </span>
               <span className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 dark:border-zinc-700 dark:bg-zinc-950">
-                Premium · {MODEL_USAGE_CREDIT_WEIGHTS.premium} {creditGuide.creditUnit}
+                Premium · {formatCredits(MODEL_USAGE_CREDIT_WEIGHTS.premium)}
               </span>
             </div>
           </div>
@@ -1233,7 +1259,7 @@ export function PricingPageContent() {
                                 : "bg-zinc-100 text-zinc-500 dark:bg-zinc-900 dark:text-zinc-300"
                             }`}
                           >
-                            {example.cost} {creditGuide.creditUnit}
+                            {formatCredits(example.cost)}
                           </span>
                         </div>
                         <p className="mt-2 text-xl font-black">

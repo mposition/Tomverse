@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ArrowRight, ExternalLink, Menu, X } from "lucide-react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
+import { MarketingConsentSlot } from "@/components/analytics/AnalyticsProvider";
 import { MarketingLanguageSwitcher } from "./MarketingLanguageSwitcher";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { localizedPath } from "@/lib/seo";
@@ -226,12 +227,31 @@ export function MarketingHeader({
     <>
       <header className="sticky top-0 z-40 border-b border-zinc-200/80 bg-white/90 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/85">
       <div className={`mx-auto flex h-16 ${maxWidth} items-center justify-between gap-3 px-4 sm:px-6 lg:px-8`}>
-        <Link href="/" className="flex min-w-0 items-center gap-3" onClick={() => setIsMenuOpen(false)}>
+        {/*
+          FINAL-F004: the brand used to be the only shrinkable item in this
+          row, so the language switcher's 10.5rem cap pushed it down to 60px
+          at 320px and the `truncate` collapsed "Tomverse Insight" to "T.".
+          The brand is now shrink-0 and drops the qualifier (never a partial
+          word) on narrow viewports, while the switcher absorbs the shrink.
+          The logo is decorative here, so its alt is empty and the link's
+          accessible name is exactly the visible brand text.
+        */}
+        <Link
+          href="/"
+          className="flex shrink-0 items-center gap-2 sm:gap-3"
+          onClick={() => setIsMenuOpen(false)}
+        >
           <span className="flex h-9 w-9 shrink-0 overflow-hidden rounded-xl bg-white ring-1 ring-zinc-200 dark:ring-zinc-800">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/tomverse-logo.png" alt="Tomverse" className="h-full w-full object-cover" />
+            <img src="/tomverse-logo.png" alt="" className="h-full w-full object-cover" />
           </span>
-          <span className="truncate text-sm font-black">Tomverse Insight</span>
+          <span
+            data-testid="marketing-brand-name"
+            className="whitespace-nowrap text-sm font-black"
+          >
+            <span className="sm:hidden">Tomverse</span>
+            <span className="hidden sm:inline">Tomverse Insight</span>
+          </span>
         </Link>
         <nav className="hidden items-center gap-5 text-sm font-semibold text-zinc-600 dark:text-zinc-300 lg:flex">
           {labels.topMenu.map((item) => (
@@ -259,7 +279,7 @@ export function MarketingHeader({
             </Link>
           ))}
         </nav>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           <MarketingLanguageSwitcher />
           <Link
             href={chatHref}
@@ -278,7 +298,7 @@ export function MarketingHeader({
             aria-label={isMenuOpen ? labels.close : labels.menu}
             aria-expanded={isMenuOpen}
             onClick={() => setIsMenuOpen((open) => !open)}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-zinc-300 bg-white text-zinc-800 shadow-sm transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800 lg:hidden"
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-zinc-300 bg-white text-zinc-800 shadow-sm transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800 lg:hidden"
           >
             {isMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </button>
@@ -329,6 +349,12 @@ export function MarketingHeader({
         </div>
       )}
       </header>
+      {/*
+        FINAL-F001: the analytics consent notice renders here, in normal
+        document flow, instead of as a bottom-anchored fixed overlay that
+        covered the hero's primary CTA on <=360px viewports.
+      */}
+      <MarketingConsentSlot maxWidth={maxWidth} />
       <LocaleSupportNotice
         localizedContentAvailable={localizedContentAvailable}
         maxWidth={maxWidth}

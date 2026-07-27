@@ -39,12 +39,15 @@ export function MarketingLanguageSwitcher() {
     return null;
   };
 
+  // min-w-0 lets this control absorb the marketing header's horizontal shrink
+  // so the brand beside it keeps a whole word at 320px (FINAL-F004): the
+  // selected option's label truncates here instead of the brand name.
   return (
     <label
       data-market-tier={selectedPolicy.marketTier}
-      className="inline-flex h-10 max-w-[10.5rem] items-center gap-2 rounded-xl border border-zinc-300 bg-white px-2.5 text-sm font-bold text-zinc-700 shadow-sm transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800 sm:max-w-none sm:px-3"
+      className="inline-flex h-10 min-w-0 max-w-[10.5rem] items-center gap-2 overflow-hidden rounded-xl border border-zinc-300 bg-white px-2.5 text-sm font-bold text-zinc-700 shadow-sm transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800 sm:max-w-none sm:px-3"
     >
-      <Languages className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+      <Languages className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
       <span className="sr-only">Language</span>
       <select
         aria-label="Language"
@@ -60,7 +63,7 @@ export function MarketingLanguageSwitcher() {
           const basePath = localizedBasePath();
           if (basePath) router.push(localizedPath(nextLanguage, basePath));
         }}
-        className="cursor-pointer bg-transparent text-sm font-bold text-zinc-800 outline-none [color-scheme:light] dark:text-zinc-100 dark:[color-scheme:dark]"
+        className="min-w-0 flex-1 cursor-pointer truncate bg-transparent text-sm font-bold text-zinc-800 outline-none [color-scheme:light] dark:text-zinc-100 dark:[color-scheme:dark]"
       >
         {languageOptions.map((language) => (
           <option

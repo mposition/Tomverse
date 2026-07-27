@@ -11,6 +11,14 @@ const r2Origin = (() => {
   }
 })();
 
+// Deliberately absent: static.cloudflareinsights.com / cloudflareinsights.com.
+// Cloudflare Browser Insights injects its beacon at the edge with no nonce, so
+// it is reported as a violation here (FINAL-F005). Allowlisting the host would
+// only ever help the static marketing policy below -- the app policy uses
+// 'strict-dynamic', which makes host sources inert -- and it would put a
+// third-party RUM script outside the analytics consent gate that GA4 is
+// explicitly held behind. The agreed resolution is to disable Browser Insights
+// in Cloudflare rather than loosen this policy.
 const directives = (
   scriptDirective: string,
   styleDirective: string,
