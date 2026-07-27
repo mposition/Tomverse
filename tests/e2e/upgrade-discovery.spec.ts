@@ -190,7 +190,9 @@ test.describe("value-moment upgrade prompt", () => {
     await page.getByTestId("chat-textarea").fill("Compare safely");
     await page.getByTestId("chat-textarea").press("Enter");
 
-    await expect(page.getByRole("status")).toContainText(
+    // Error-toned toasts render role="alert" (assertive) rather than
+    // role="status" (polite), so screen readers announce them immediately.
+    await expect(page.getByRole("alert")).toContainText(
       "오늘 처리할 수 있는 한도를 넘었습니다"
     );
     await expect.poll(() => providerRequestCount).toBe(0);
