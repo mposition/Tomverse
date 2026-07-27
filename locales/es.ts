@@ -491,6 +491,7 @@ export const es = {
         loginMethodLinkFailed: "No se pudo vincular ese método de acceso. Inténtalo de nuevo.",
         description: "Inicia sesión en tu hub personal de chat con IA",
         privacy: "Al iniciar sesión, aceptas los términos de servicio y la política de privacidad de Tomverse.",
+        termsLink: "Términos de servicio",
         privacyPolicyLink: "Política de privacidad",
         signedAs: "Sesión iniciada como",
         accountMenu: "Menú de cuenta",

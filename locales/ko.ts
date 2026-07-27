@@ -690,6 +690,7 @@ export const ko = {
         loginMethodLinkFailed: "로그인 방법을 연결하지 못했습니다. 다시 시도해 주세요.",
         description: "나만의 AI 채팅 허브에 로그인하세요",
         privacy: "로그인하면 Tomverse의 서비스 이용약관과 개인정보 처리방침에 동의하게 됩니다.",
+        termsLink: "이용약관",
         privacyPolicyLink: "개인정보 처리방침",
         signedAs: "로그인 계정",
         accountMenu: "계정 메뉴",
