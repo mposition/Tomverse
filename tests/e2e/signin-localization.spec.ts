@@ -34,56 +34,86 @@ test.describe("sign-in legal consent localization", () => {
     page,
   }) => {
     await gotoSignIn(page, "ko");
+    const card = page.getByTestId("signin-card");
 
     await expect(
-      page.getByText("Terms and Conditions", { exact: true })
+      card.getByText("Terms and Conditions", { exact: true })
     ).toHaveCount(0);
     await expect(
-      page.getByText("Review the terms before continuing.", { exact: true })
+      card.getByText("Review the terms before continuing.", { exact: true })
     ).toHaveCount(0);
 
     // The one consent sentence, present exactly once (it shares a <p> with
     // the trailing links, so match it as a substring rather than exact text).
     await expect(
-      page.getByText(
+      card.getByText(
         "로그인하면 Tomverse의 서비스 이용약관과 개인정보 처리방침에 동의하게 됩니다."
       )
     ).toHaveCount(1);
 
-    const termsLink = page.getByRole("link", { name: "이용약관", exact: true });
+    const termsLink = card.getByRole("link", { name: "이용약관", exact: true });
     await expect(termsLink).toHaveCount(1);
     await expect(termsLink).toHaveAttribute("href", "/terms");
 
-    const privacyLink = page.getByRole("link", {
+    const privacyLink = card.getByRole("link", {
       name: "개인정보 처리방침",
       exact: true,
     });
     await expect(privacyLink).toHaveCount(1);
     await expect(privacyLink).toHaveAttribute("href", "/privacy");
+
+    // Count by destination URL too, matching the ticket's own acceptance
+    // criteria ("/terms exactly once, /privacy exactly once").
+    await expect(card.locator('a[href="/terms"]')).toHaveCount(1);
+    await expect(card.locator('a[href="/privacy"]')).toHaveCount(1);
+  });
+
+  test("the exact reported URL (/auth/signin?lang=ko) has singular terms/privacy links", async ({
+    page,
+  }) => {
+    await page.route("**/api/auth/session**", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: "null" })
+    );
+    await page.addInitScript(() => {
+      window.localStorage.clear();
+    });
+    await page.goto("/auth/signin?lang=ko");
+    await expect(page.locator("html")).toHaveAttribute("lang", "ko");
+
+    const card = page.getByTestId("signin-card");
+    await expect(card.locator('a[href="/terms"]')).toHaveCount(1);
+    await expect(card.locator('a[href="/privacy"]')).toHaveCount(1);
+    await expect(
+      card.getByText("Terms and Conditions", { exact: true })
+    ).toHaveCount(0);
+    await expect(
+      card.getByText("Review the terms before continuing.", { exact: true })
+    ).toHaveCount(0);
   });
 
   test("English sign-in shows exactly one natural consent block with no Korean leakage", async ({
     page,
   }) => {
     await gotoSignIn(page, "en");
+    const card = page.getByTestId("signin-card");
 
     const bodyText = await page.locator("body").innerText();
     expect(HANGUL_RE.test(bodyText)).toBe(false);
 
     await expect(
-      page.getByText(
+      card.getByText(
         "By logging in, you agree to Tomverse's Terms of Service and Privacy Policy."
       )
     ).toHaveCount(1);
 
-    const termsLink = page.getByRole("link", {
+    const termsLink = card.getByRole("link", {
       name: "Terms and Conditions",
       exact: true,
     });
     await expect(termsLink).toHaveCount(1);
     await expect(termsLink).toHaveAttribute("href", "/terms");
 
-    const privacyLink = page.getByRole("link", {
+    const privacyLink = card.getByRole("link", {
       name: "Privacy Policy",
       exact: true,
     });
@@ -95,21 +125,22 @@ test.describe("sign-in legal consent localization", () => {
     page,
   }) => {
     await gotoSignIn(page, "de");
+    const card = page.getByTestId("signin-card");
 
-    const bodyText = await page.locator("body").innerText();
+    const bodyText = await card.innerText();
     expect(HANGUL_RE.test(bodyText)).toBe(false);
     expect(bodyText).not.toContain("이용약관");
     expect(bodyText).not.toContain("개인정보 처리방침");
     expect(bodyText).not.toContain("Review the terms before continuing.");
 
-    const termsLink = page.getByRole("link", {
+    const termsLink = card.getByRole("link", {
       name: "Nutzungsbedingungen",
       exact: true,
     });
     await expect(termsLink).toHaveCount(1);
     await expect(termsLink).toHaveAttribute("href", "/terms");
 
-    const privacyLink = page.getByRole("link", {
+    const privacyLink = card.getByRole("link", {
       name: "Datenschutzerklärung",
       exact: true,
     });
@@ -153,7 +184,10 @@ test.describe("sign-in legal consent localization", () => {
     });
     const [popup] = await Promise.all([
       page.waitForEvent("popup"),
-      page.getByRole("link", { name: "Terms and Conditions" }).click(),
+      page
+        .getByTestId("signin-card")
+        .getByRole("link", { name: "Terms and Conditions" })
+        .click(),
     ]);
     await popup.close();
     expect(authRequestFired).toBe(false);
@@ -165,6 +199,7 @@ test.describe("sign-in legal consent localization", () => {
     page,
   }) => {
     await gotoSignIn(page, "ko");
+    const card = page.getByTestId("signin-card");
 
     for (const viewport of [
       { width: 320, height: 568 },
@@ -174,10 +209,10 @@ test.describe("sign-in legal consent localization", () => {
       await page.setViewportSize(viewport);
       await expectNoHorizontalOverflow(page);
       await expect(
-        page.getByRole("link", { name: "이용약관", exact: true })
+        card.getByRole("link", { name: "이용약관", exact: true })
       ).toHaveCount(1);
       await expect(
-        page.getByRole("link", { name: "개인정보 처리방침", exact: true })
+        card.getByRole("link", { name: "개인정보 처리방침", exact: true })
       ).toHaveCount(1);
     }
   });
@@ -188,12 +223,42 @@ test.describe("sign-in legal consent localization", () => {
     for (const colorScheme of ["light", "dark"] as const) {
       await page.emulateMedia({ colorScheme });
       await gotoSignIn(page, "ko");
+      const card = page.getByTestId("signin-card");
       await expect(
-        page.getByRole("link", { name: "이용약관", exact: true })
+        card.getByRole("link", { name: "이용약관", exact: true })
       ).toHaveCount(1);
       await expect(
-        page.getByRole("link", { name: "개인정보 처리방침", exact: true })
+        card.getByRole("link", { name: "개인정보 처리방침", exact: true })
       ).toHaveCount(1);
+    }
+  });
+
+  test("the sign-in card's terms/privacy links stay singular and separate from the analytics consent banner", async ({
+    page,
+  }) => {
+    // UI-P1-02's analytics consent banner also links to /privacy. It is a
+    // different feature (cookie/opt-out notice, not legal sign-in consent)
+    // and must never be merged with, or counted as part of, the sign-in
+    // card's own terms/privacy block.
+    await page.context().addCookies([
+      { name: "__tomverse_e2e_analytics", value: "1", url: "http://127.0.0.1:3100" },
+    ]);
+    await gotoSignIn(page, "ko");
+
+    const card = page.getByTestId("signin-card");
+    await expect(
+      card.getByRole("link", { name: "이용약관", exact: true })
+    ).toHaveCount(1);
+    await expect(
+      card.getByRole("link", { name: "개인정보 처리방침", exact: true })
+    ).toHaveCount(1);
+
+    const banner = page.getByTestId("chat-consent-notice");
+    if (await banner.count()) {
+      // The banner is a sibling overlay, not part of the sign-in card, and
+      // may carry its own separate privacy link -- that's expected and must
+      // not be conflated with the card's single privacy link above.
+      await expect(card).not.toContainText(await banner.innerText());
     }
   });
 });
