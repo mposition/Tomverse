@@ -1229,6 +1229,8 @@ export function ChatSidebar({
                     return (
                         <div
                             key={conv.id}
+                            data-testid="sidebar-conversation-item"
+                            data-conversation-id={conv.id}
                             onClick={() => onSelectConversation(conv.id)}
                             className={`relative group flex items-center justify-between rounded-xl px-3 py-2.5 text-xs cursor-pointer transition-all border ${isMenuOpen ? "z-20" : "z-10"} ${isActive
                                     ? "bg-zinc-200 border-zinc-300 text-zinc-900 font-semibold dark:bg-zinc-800 dark:border-zinc-700/80 dark:text-zinc-100"

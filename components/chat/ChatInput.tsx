@@ -76,7 +76,7 @@ import {
   type ModelFinderTask,
 } from "@/lib/modelFinder";
 import { draftSuggestionKey, suggestsCurrentInformationNeeded } from "@/lib/webSearchSuggestion";
-import { getWebSearchCapability } from "@/lib/webSearchCapability";
+import { deriveWebSearchComposerState } from "@/lib/webSearchComposerState";
 import { openModelFinder } from "@/lib/modelFinderEvents";
 import { CreditBreakdownSheet } from "@/components/chat/CreditBreakdownSheet";
 import { UsageLimitModal } from "@/components/chat/UsageLimitModal";
@@ -294,6 +294,13 @@ type ChatInputProps = {
   isGuestMode?: boolean;
   guestPreviewMode?: boolean;
   variant?: "bar" | "floating";
+  /**
+   * The bar variant normally draws the single boundary between the answer
+   * canvas and the bottom dock. When a comparison rail sits directly above it
+   * that rail owns the boundary instead, so the composer must not add a
+   * second full-width border to the same seam.
+   */
+  hideTopBorder?: boolean;
   // MobileChatShell renders its own copy pinned to the true screen bottom
   // (independent of the composer's floating/docked position) instead of
   // this one, which always sits directly under the input box.
@@ -401,6 +408,7 @@ export function ChatInput({
   isGuestMode = false,
   guestPreviewMode = false,
   variant = "bar",
+  hideTopBorder = false,
   hideDisclaimer = false,
   webSearchMode = "off",
   onWebSearchModeChange,
@@ -434,6 +442,9 @@ export function ChatInput({
   }, [value]);
   const [showGuestQuickStart, setShowGuestQuickStart] = useState(false);
   const [dismissedSuggestionKey, setDismissedSuggestionKey] = useState<string | null>(null);
+  // Collapsed by default: the exception detail (which models cannot search and
+  // what they do instead) is a user-initiated disclosure, never a permanent row.
+  const [isWebSearchExceptionOpen, setIsWebSearchExceptionOpen] = useState(false);
   const [dismissedWebSearchSuggestionKey, setDismissedWebSearchSuggestionKey] = useState<
     string | null
   >(null);
@@ -505,6 +516,42 @@ export function ChatInput({
   const selectedBaseCredits = requestCreditEstimate.baseCredits;
   const estimatedRequestCredits = requestCreditEstimate.totalEstimatedCredits;
   const webSearchReservationCredits = requestCreditEstimate.webSearchReservationCredits;
+  // Derived from the same active-model list the credit estimate uses, so the
+  // chip, its support counts and the reservation can never describe different
+  // selections -- changing or pausing a model updates all three together.
+  const webSearchState = deriveWebSearchComposerState({
+    webSearchMode,
+    selectedModelIds: activeSelectedModels,
+  });
+  const webSearchChipLabel = webSearchState.allUnsupported
+    ? t("chat.webSearchChipUnavailable")
+    : webSearchState.hasException
+      ? interpolateCopy(t("chat.webSearchChipPartial"), {
+          supported: webSearchState.supportedCount,
+          total: webSearchState.selectedCount,
+        })
+      : webSearchMode === "auto"
+        ? t("chat.webSearchChipAuto")
+        : t("chat.webSearchChipOn");
+  const webSearchStateDescription =
+    webSearchMode === "always"
+      ? interpolateCopy(t("chat.webSearchChipDescriptionAlways"), {
+          supported: webSearchState.supportedCount,
+          total: webSearchState.selectedCount,
+          unsupported: webSearchState.unsupportedCount,
+          credits: webSearchState.estimatedSurchargeCredits,
+        })
+      : interpolateCopy(t("chat.webSearchChipDescriptionAuto"), {
+          supported: webSearchState.supportedCount,
+          total: webSearchState.selectedCount,
+          unsupported: webSearchState.unsupportedCount,
+        });
+  const webSearchUnsupportedModelNames = webSearchState.unsupportedModelIds
+    .map(
+      (modelId) =>
+        AVAILABLE_MODELS.find((model) => model.id === modelId)?.name || modelId
+    )
+    .join(", ");
   const creditBreakdown = requestCreditEstimate.models
     .map((entry) => {
       const model = activeSelectedModelObjects.find((item) => item.id === entry.modelId);
@@ -1543,7 +1590,9 @@ export function ChatInput({
   return (
       <div className={variant === "floating"
         ? "w-full max-w-full shrink-0 overflow-hidden px-0 py-0 md:overflow-visible"
-        : "w-full max-w-full shrink-0 overflow-hidden border-t border-zinc-200 bg-zinc-50/95 px-2 py-1 pb-[calc(0.3rem+env(safe-area-inset-bottom))] transition-colors dark:border-zinc-800 dark:bg-zinc-950 md:overflow-visible md:px-6 md:py-3 md:pb-3"
+        : `w-full max-w-full shrink-0 overflow-hidden bg-zinc-50/95 px-2 py-1 pb-[calc(0.3rem+env(safe-area-inset-bottom))] transition-colors dark:bg-zinc-950 md:overflow-visible md:px-6 md:py-3 md:pb-3 ${
+            hideTopBorder ? "" : "border-t border-zinc-200 dark:border-zinc-800"
+          }`
       }>
           <div
             data-testid="chat-input"
@@ -1741,29 +1790,63 @@ export function ChatInput({
               </div>
             </div>
           )}
-          {(webSearchMode !== "off" || isDeepResearchPending) && (
+          {(webSearchState.isVisible || isDeepResearchPending) && (
             <div
               data-testid="tool-status-chip-row"
               className="mb-2 flex max-w-full gap-1.5 overflow-x-auto overscroll-x-contain pb-1 md:mb-3 md:flex-wrap md:overflow-visible md:pb-0"
             >
-              {webSearchMode !== "off" && (
+              {webSearchState.isVisible && (
                 <div
                   data-testid="web-search-mode-chip"
-                  className="flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 pl-3 pr-1.5 text-xs font-bold text-sky-800 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-200"
+                  data-tone={webSearchState.tone}
+                  data-supported-count={webSearchState.supportedCount}
+                  data-unsupported-count={webSearchState.unsupportedCount}
+                  className={`flex h-9 shrink-0 items-center gap-1.5 rounded-full border pl-3 pr-1.5 text-xs font-bold ${
+                    webSearchState.tone === "blocked"
+                      ? "border-red-200 bg-red-50 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
+                      : webSearchState.tone === "warning"
+                        ? "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100"
+                        : "border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-200"
+                  }`}
                 >
                   <Globe2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                  <span className="truncate">
-                    {t("chat.toolsWebSearch")} ·{" "}
-                    {webSearchMode === "always"
-                      ? t("chat.toolsWebSearchAlways")
-                      : t("chat.toolsWebSearchAuto")}
-                  </span>
+                  {/*
+                    When nothing can search there is no "which ones" worth
+                    expanding -- the blocking notice below already names the
+                    two ways out, so the chip stays a plain label.
+                  */}
+                  {webSearchState.hasException && !webSearchState.allUnsupported ? (
+                    <button
+                      type="button"
+                      data-testid="web-search-exception-toggle"
+                      aria-expanded={isWebSearchExceptionOpen}
+                      aria-controls="web-search-exception-detail"
+                      aria-describedby="web-search-state-description"
+                      onClick={() => setIsWebSearchExceptionOpen((open) => !open)}
+                      // The chip itself is 36px tall, so the toggle borrows
+                      // vertical hit area from a pseudo-element rather than
+                      // growing the chip. Horizontal inset stays small so it
+                      // never overlaps the adjacent remove control.
+                      className={`relative truncate rounded-full text-left underline decoration-dotted underline-offset-2 before:absolute before:content-[''] before:-inset-x-1 ${
+                        isMobileShell ? "before:-inset-y-3.5" : "before:-inset-y-1"
+                      }`}
+                    >
+                      {webSearchChipLabel}
+                    </button>
+                  ) : (
+                    <span
+                      className="truncate"
+                      aria-describedby="web-search-state-description"
+                    >
+                      {webSearchChipLabel}
+                    </span>
+                  )}
                   <button
                     type="button"
                     onClick={() => onWebSearchModeChange?.("off")}
                     aria-label={t("chat.removeWebSearchMode")}
                     title={t("chat.removeWebSearchMode")}
-                    className={`relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sky-500 before:absolute before:content-[''] hover:bg-sky-100 dark:hover:bg-sky-900/40 ${isMobileShell ? "before:-inset-2.5" : "before:-inset-1"}`}
+                    className={`relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full before:absolute before:content-[''] hover:bg-black/5 dark:hover:bg-white/10 ${isMobileShell ? "before:-inset-2.5" : "before:-inset-1"}`}
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
@@ -1790,23 +1873,49 @@ export function ChatInput({
               )}
             </div>
           )}
-          {webSearchMode === "always" && selectedModels.length > 0 && (() => {
-            const supportedCount = selectedModels.filter((id) => {
-              const support = getWebSearchCapability(id).support;
-              return support === "native" || support === "search-model";
-            }).length;
-            const unsupportedCount = selectedModels.length - supportedCount;
-            return (
-              <p
-                data-testid="web-search-readiness-summary"
-                className="mb-2 px-1 text-[11px] font-semibold text-zinc-500 dark:text-zinc-400"
+          {/*
+            The full request state -- mode, how many models can honour it, how
+            many cannot, the credit ceiling and what the unsupported models
+            actually do -- always exists for assistive tech, but only costs a
+            visible row when there is a real exception to resolve. "Unsupported
+            0" is the normal case and no longer earns a line of its own.
+          */}
+          {webSearchState.isVisible && (
+            <p id="web-search-state-description" className="sr-only">
+              {webSearchStateDescription}
+            </p>
+          )}
+          {webSearchState.hasException &&
+            !webSearchState.allUnsupported &&
+            isWebSearchExceptionOpen && (
+            <p
+              id="web-search-exception-detail"
+              data-testid="web-search-exception-detail"
+              className="mb-2 px-1 text-[11px] leading-4 text-zinc-600 dark:text-zinc-300"
+            >
+              {interpolateCopy(t("chat.webSearchUnsupportedModels"), {
+                models: webSearchUnsupportedModelNames,
+              })}{" "}
+              {t("chat.webSearchUnsupportedBehavior")}
+            </p>
+          )}
+          {webSearchState.allUnsupported && (
+            <div
+              role="status"
+              data-testid="web-search-unavailable-notice"
+              className="mb-2 flex flex-col gap-2 rounded-xl border border-red-300 bg-red-50 px-3 py-2 text-[11px] leading-4 text-red-900 dark:border-red-800 dark:bg-red-950/30 dark:text-red-100 sm:flex-row sm:items-center"
+            >
+              <p className="min-w-0 flex-1">{t("chat.webSearchUnavailableAction")}</p>
+              <button
+                type="button"
+                data-testid="web-search-unavailable-turn-off"
+                onClick={() => onWebSearchModeChange?.("off")}
+                className={`shrink-0 rounded-lg border border-red-400 bg-white px-2.5 font-bold text-red-900 transition hover:bg-red-100 dark:border-red-700 dark:bg-zinc-950 dark:text-red-100 dark:hover:bg-red-950/60 ${isMobileShell ? "min-h-11" : "py-1.5"}`}
               >
-                {t("chat.webSearchReadinessSummary")
-                  .replace("{supported}", String(supportedCount))
-                  .replace("{unsupported}", String(unsupportedCount))}
-              </p>
-            );
-          })()}
+                {t("chat.webSearchTurnOff")}
+              </button>
+            </div>
+          )}
           {attachments.length > 0 && (
             <div className="mb-2 rounded-2xl bg-zinc-50 p-1.5 dark:bg-zinc-950/70 md:mb-3 md:bg-transparent md:p-0">
             <div className="flex max-w-full gap-2 overflow-x-auto overscroll-x-contain pb-1 md:flex-wrap md:overflow-visible md:pb-0">

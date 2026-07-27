@@ -3,6 +3,7 @@ import {
   mockAuthenticatedApi,
   mockChatStream,
   openModelPickerCatalogue,
+  openRecentConversation,
   prepareGuestPage,
 } from "./support/app-fixtures";
 
@@ -143,7 +144,7 @@ test.describe("value-moment upgrade prompt", () => {
     // the persisted qa-conversation's 2-model comparison selection active
     // (and a real currentChatId) for the comparison preflight/upgrade-prompt
     // flow to trigger at all.
-    await page.getByTestId("recent-conversation-card").click();
+    await openRecentConversation(page);
     await expect(page.getByTestId("chat-input")).toBeVisible();
   });
 

@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import {
   mockAuthenticatedApi,
   openModelPickerCatalogue,
+  openRecentConversation,
   prepareGuestPage,
   sendChatMessage,
 } from "./support/app-fixtures";
@@ -333,7 +334,7 @@ test.describe("native web search (webSearchMode: always)", () => {
     );
   });
 
-  test("mixed supported/unsupported selection shows the readiness summary and an unsupported badge", async ({
+  test("mixed supported/unsupported selection shows a compact partial-support chip and an unsupported badge", async ({
     page,
   }, testInfo) => {
     // gpt-5-4-mini and gemini-2-5-flash are deliberately "unverified" (not
@@ -392,11 +393,22 @@ test.describe("native web search (webSearchMode: always)", () => {
     });
 
     await page.goto("/chat?lang=en");
-    await page.getByTestId("recent-conversation-card").filter({ hasText: "Native search test" }).click();
+    await openRecentConversation(page, { title: "Native search test" });
     await expect(page.getByTestId("chat-empty-state")).toHaveCount(0);
 
-    // Readiness summary reflects the mix before sending anything new.
-    await expect(page.getByTestId("web-search-readiness-summary")).toBeVisible();
+    // The mixed selection is the exception case, so it -- and only it -- earns
+    // a visible warning on the chip itself. There is no separate readiness
+    // row any more, and tapping the chip names the models that cannot search.
+    const chip = page.getByTestId("web-search-mode-chip");
+    await expect(chip).toHaveAttribute("data-tone", "warning");
+    await expect(chip).toContainText("1/3 supported");
+    await expect(page.getByTestId("web-search-readiness-summary")).toHaveCount(0);
+    await expect(page.getByTestId("web-search-exception-detail")).toHaveCount(0);
+    await page.getByTestId("web-search-exception-toggle").click();
+    const detail = page.getByTestId("web-search-exception-detail");
+    await expect(detail).toBeVisible();
+    await expect(detail).toContainText("GPT-5.4 mini");
+    await expect(detail).toContainText("training knowledge only");
 
     await sendChatMessage(page, testInfo, "Any current news?");
 
