@@ -519,11 +519,20 @@ export function ComparisonReviewDialog({
       aria-labelledby="comparison-review-title"
     >
       <div className="flex max-h-[calc(100dvh-env(safe-area-inset-top))] w-full flex-col overflow-hidden rounded-t-3xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-900 sm:max-h-[90dvh] sm:max-w-5xl sm:rounded-3xl">
+        <div
+          aria-hidden="true"
+          className="h-[3px] shrink-0 bg-gradient-to-r from-tomverse-accent-start via-tomverse-accent-mid to-tomverse-accent-end"
+        />
         <header className="flex shrink-0 items-start justify-between gap-4 border-b border-zinc-200 px-5 py-4 dark:border-zinc-800 sm:px-6">
           <div className="min-w-0">
-            <div className="flex items-center gap-2 text-blue-600 dark:text-blue-300">
-              <Sparkles className="h-4 w-4" />
-              <span className="text-xs font-black uppercase tracking-[0.18em]">
+            <div className="flex items-center gap-2">
+              <span
+                aria-hidden="true"
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-cyan-700 via-blue-600 to-purple-600"
+              >
+                <Sparkles className="h-3.5 w-3.5 text-white" />
+              </span>
+              <span className="text-xs font-black uppercase tracking-[0.18em] text-tomverse-review-selected-text">
                 {t("chat.aiReviewEyebrow")}
               </span>
             </div>
@@ -562,7 +571,11 @@ export function ComparisonReviewDialog({
                   : review.result.primary;
               const activeResult = activeEntry.result;
               return (
-                <div className="space-y-5">
+                <div className="space-y-4">
+                  <div
+                    data-testid="ai-review-result"
+                    className="space-y-5 rounded-2xl border border-tomverse-review-border bg-tomverse-review-surface p-4 sm:p-5"
+                  >
                   {review.result.secondary && (
                     <div className="space-y-2">
                       <div className="flex gap-2" role="tablist" aria-label={t("chat.aiReviewedBy")}>
@@ -578,10 +591,10 @@ export function ComparisonReviewDialog({
                               role="tab"
                               aria-selected={isActive}
                               onClick={() => setActiveReviewer(key)}
-                              className={`rounded-xl px-3 py-2 text-xs font-black transition ${
+                              className={`rounded-xl border px-3 py-2 text-xs font-black transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-zinc-900 ${
                                 isActive
-                                  ? "bg-blue-600 text-white"
-                                  : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                                  ? "border-indigo-600 bg-indigo-600 text-white dark:border-indigo-500 dark:bg-indigo-500"
+                                  : "border-transparent bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
                               }`}
                             >
                               {key === "primary"
@@ -796,6 +809,7 @@ export function ComparisonReviewDialog({
                     emptyLabel={review.disclaimer}
                     tone="warning"
                   />
+                  </div>
                   <button
                     type="button"
                     onClick={() => setReview(null)}
@@ -820,15 +834,18 @@ export function ComparisonReviewDialog({
                       <button
                         key={item.id}
                         type="button"
+                        aria-pressed={mode === item.id}
                         onClick={() => setMode(item.id)}
-                        className={`rounded-2xl border p-4 text-left transition-colors ${
+                        className={`rounded-2xl border p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-zinc-900 ${
                           mode === item.id
-                            ? "border-blue-500 bg-blue-50 ring-2 ring-blue-500/15 dark:bg-blue-950/30"
+                            ? "border-tomverse-review-selected-border bg-tomverse-review-selected ring-2 ring-tomverse-review-selected-border/20"
                             : "border-zinc-200 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-950"
                         }`}
                       >
                         <span className="flex items-center gap-2 text-sm font-black">
-                          {mode === item.id && <CheckCircle2 className="h-4 w-4 text-blue-500" />}
+                          {mode === item.id && (
+                            <CheckCircle2 className="h-4 w-4 text-tomverse-review-selected-text" />
+                          )}
                           {t(item.label)}
                         </span>
                         <span className="mt-2 block text-xs leading-5 text-zinc-500">
