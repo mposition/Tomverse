@@ -16,7 +16,14 @@ jobs:
   fast-gate:
     name: Security, unit, build, and Chromium smoke tests
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    # Since the gate was scoped to the @smoke tier, the six most recent
+    # completed runs took 253-326s (run #125-#130). 20 minutes is ~3.7x that
+    # worst case: still generous for a cold npm/Playwright cache, but a hung
+    # Playwright web server now gives up in 20 minutes instead of 40, which
+    # halves both the worst-case feedback delay and the runner time burnt on
+    # a run nobody can use. Step-level timeouts below bound each stage more
+    # tightly so the log says which stage hung, not just that the job did.
+    timeout-minutes: 20
     # NEXT_PUBLIC values are embedded by `next build`. Guest E2E tests mock
     # Turnstile in the browser, but the client still requires a configured key.
     env:
@@ -37,6 +44,7 @@ jobs:
       # "Scan repository history for secrets" is itself made a required
       # check. `fetch-depth: 0` above exists for this step.
       - name: Scan pull-request commits for secrets
+        timeout-minutes: 5
         uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -59,25 +67,48 @@ jobs:
             ${{ runner.os }}-next-pr-${{ hashFiles('package-lock.json') }}-
             ${{ runner.os }}-next-
 
+      # `--no-audit` skips the registry advisory round-trip npm otherwise makes
+      # on every install; it does not weaken the audit itself, which Daily
+      # Security Audit runs deliberately (`npm audit --omit=dev`) and reports
+      # on. `--no-fund` drops the funding banner. Neither flag changes which
+      # packages are installed -- `npm ci` still resolves solely from the
+      # lockfile.
       - name: Install dependencies
-        run: npm ci
+        timeout-minutes: 10
+        run: npm ci --no-audit --no-fund
 
       - name: Security regression checks
+        timeout-minutes: 5
         run: npm run security:regression
 
       - name: Unit and API policy tests
+        timeout-minutes: 10
         run: npm run test:unit
 
       - name: Strict encoding validation
+        timeout-minutes: 5
         run: npm run check:encoding:strict
+
+      # Deliberately this early. The check is `playwright test --list`, so it
+      # needs node_modules and nothing else -- no build, no browser -- and it
+      # costs ~2s. Running it here rather than next to the smoke tests moves
+      # feedback on a broken smoke manifest from ~155s into the run to ~50s,
+      # without changing what is checked: it still runs before the smoke
+      # tests, so a tier that has silently lost the billing/credit/auth
+      # contracts fails instead of passing a green-but-empty gate.
+      - name: Verify smoke coverage manifest
+        timeout-minutes: 5
+        run: npm run verify:smoke-coverage
 
       # `npm run check` still runs both locally and in the daily audit. They
       # are split here so the step timings in this log attribute time to the
       # right stage, and so a lint failure reports without paying for a build.
       - name: ESLint
+        timeout-minutes: 10
         run: npx eslint . --max-warnings=0
 
       - name: Production build
+        timeout-minutes: 15
         run: npm run build
 
       - name: Restore Playwright Chromium cache
@@ -90,19 +121,15 @@ jobs:
             ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}-
 
       - name: Install Chromium
+        timeout-minutes: 10
         run: npx playwright install --with-deps chromium
-
-      # Runs before the smoke tests: listing does not launch a browser, and a
-      # smoke set that has silently lost the billing/credit/auth contracts
-      # should fail here rather than pass a green-but-empty gate below.
-      - name: Verify smoke coverage manifest
-        run: npm run verify:smoke-coverage
 
       # The @smoke tier only. Every other desktop-chromium test still runs --
       # on main push via Main Chromium Regression, and nightly via Daily
       # Security Audit and Nightly Visual Regression. See
       # scripts/verify-smoke-coverage.mjs for what this tier must cover.
       - name: Run desktop Chromium smoke tests
+        timeout-minutes: 10
         run: npm run test:e2e:smoke
 
       # Dedicated, zero-retry run of the state-golden visual suite: the
@@ -114,10 +141,12 @@ jobs:
       # passes on the very first attempt, on a clean run, or the check
       # fails outright.
       - name: Run visual-regression suite (retries=0)
+        timeout-minutes: 15
         run: npx playwright test tests/e2e/chat-state-visual-regression.spec.ts --project=desktop-chromium --workers=1 --retries=0
 
       - name: Upload failed test evidence
         if: failure()
+        timeout-minutes: 5
         uses: actions/upload-artifact@v7
         with:
           name: pr-fast-gate-playwright-${{ github.run_id }}
