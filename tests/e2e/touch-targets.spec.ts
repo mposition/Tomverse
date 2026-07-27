@@ -314,6 +314,80 @@ test.describe("mobile touch targets (STG-F005)", () => {
     // so verify via hit-testing rather than boundingBox.
     await assertMinHitArea(removeButtons.first(), "mobile-model-tab-remove");
   });
+
+  // UI-P1-01: "+ New Chat" inside the mobile drawer previously had no height
+  // floor (only reduced padding via isMobileDrawer), unlike its sibling
+  // icon-only header button which was already fixed.
+  test("mobile drawer new-chat button meets the minimum and stays functional (ko)", async ({
+    page,
+  }) => {
+    await prepareGuestPage(page, "ko");
+    await page.setViewportSize({ width: 320, height: 568 });
+    await page.goto("/chat");
+    await page.getByTestId("mobile-sidebar-open").click();
+    const dialog = page.getByRole("dialog").first();
+    await expect(dialog).toBeVisible();
+
+    const newChatButton = dialog.getByTestId("sidebar-new-chat");
+    await assertMinTouchTarget(newChatButton, "mobile drawer new chat");
+    await assertHitTestReturnsSelf(newChatButton, "mobile drawer new chat");
+
+    await newChatButton.click();
+    await expect(dialog).toHaveCount(0);
+  });
+
+  // UI-P1-01: the model-option row had no explicit height floor -- it relied
+  // entirely on its (variable) content, so a model with a short description
+  // and no feature badges could fall under 44px. Also checks the row doesn't
+  // overlap the adjacent favorite-star button's own hit area.
+  test("model-option rows meet the minimum height and do not overlap the favorite star", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 320, height: 568 });
+    await mockAuthenticatedApi(page, { selectedModels: ["gpt-5-4-mini"] });
+    await page.goto("/chat");
+    const dialog = await openModelPickerCatalogue(page);
+
+    const favoriteStar = dialog.getByTestId("model-favorite-star").first();
+    const modelOption = dialog.getByTestId("model-option").first();
+    await assertMinTouchTarget(modelOption, "model option row");
+    await assertHitTestReturnsSelf(modelOption, "model option row");
+
+    const starBox = await favoriteStar.boundingBox();
+    const optionBox = await modelOption.boundingBox();
+    expect(starBox, "favorite star: expected a visible bounding box").not.toBeNull();
+    expect(optionBox, "model option: expected a visible bounding box").not.toBeNull();
+    const overlaps =
+      starBox!.x < optionBox!.x + optionBox!.width &&
+      starBox!.x + starBox!.width > optionBox!.x &&
+      starBox!.y < optionBox!.y + optionBox!.height &&
+      starBox!.y + starBox!.height > optionBox!.y;
+    expect(overlaps, "favorite star and model option row must not overlap").toBe(false);
+  });
+
+  // UI-P1-01: Korean labels (e.g. "새 대화") run shorter/longer than their
+  // English counterparts depending on the string; confirm the composer still
+  // fits without horizontal overflow at the narrowest supported viewport.
+  test("composer meets the minimum and stays overflow-free with Korean labels at 320px", async ({
+    page,
+  }) => {
+    await prepareGuestPage(page, "ko");
+    await page.setViewportSize({ width: 320, height: 568 });
+    await page.goto("/chat");
+    await expect(page.getByTestId("chat-input")).toBeVisible();
+
+    await assertMinTouchTarget(
+      page.locator('button[aria-controls="chat-input-popover"]').first(),
+      "[ko] More actions"
+    );
+    await assertMinTouchTarget(modelSelectorTrigger(page), "[ko] Choose AI models");
+    await assertMinTouchTarget(page.getByTestId("chat-send-button"), "[ko] Send");
+
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth
+    );
+    expect(overflow, "[ko] horizontal overflow").toBe(false);
+  });
 });
 
 // Kept outside the mobile-only describe block above: this test verifies the
@@ -345,6 +419,25 @@ test.describe("mobile touch targets (STG-F005) -- desktop comparison", () => {
       () => document.documentElement.scrollWidth > document.documentElement.clientWidth
     );
     expect(overflow).toBe(false);
+  });
+
+  // UI-P1-01: the new-chat min-height floor is gated on isMobileDrawer, so
+  // the desktop rail's copy of the same button must stay at its original
+  // (smaller) size.
+  test("desktop new-chat button keeps its original compact sizing", async ({ page }) => {
+    // Guest mode defaults to a 3-model comparison, which auto-collapses the
+    // sidebar to an icon rail at this viewport width (unrelated to touch
+    // targets) -- pin the preference to "expanded" so the labeled new-chat
+    // button (and its data-testid) is actually rendered.
+    await page.addInitScript(() => {
+      localStorage.setItem("tomverse_sidebar_collapsed_v1", "expanded");
+    });
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await page.goto("/chat");
+    await assertBelowMinTouchTarget(
+      page.getByTestId("sidebar-new-chat"),
+      "sidebar new chat (desktop)"
+    );
   });
 });
 

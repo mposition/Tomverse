@@ -399,7 +399,7 @@ export function ModelCatalogue({
                       disabled={selectionDisabled && !isSelected}
                       onClick={() => onSelectModel(model)}
                       aria-pressed={isSelected}
-                      className="flex min-w-0 flex-1 items-start gap-2 rounded-lg py-0.5 text-sm disabled:cursor-not-allowed disabled:opacity-45"
+                      className={`flex min-w-0 flex-1 items-start gap-2 rounded-lg py-0.5 text-sm disabled:cursor-not-allowed disabled:opacity-45 ${isMobileShell ? "min-h-11" : ""}`}
                     >
                       <ModelLogo model={model} size="md" />
                       <span className="min-w-0 flex-1 text-left">
