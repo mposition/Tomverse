@@ -26,6 +26,7 @@ import {
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { ModelSelectionBadge } from "@/components/chat/ModelSelectionBadge";
+import { useHasCoarsePointer } from "@/components/chat/useHasCoarsePointer";
 import { useLanguage } from "@/components/LanguageProvider";
 import type { AiModel, ModelTier } from "@/lib/models";
 import {
@@ -152,6 +153,11 @@ export function ModelPickerPanel({
   comboFinderSlot,
 }: ModelPickerPanelProps) {
   const { t, lang } = useLanguage();
+  // Layout stays keyed on isMobileShell; touch hit area tracks the input device
+  // so a coarse-pointer tablet at >=768px (which uses the desktop layout) still
+  // gets 44px targets, while a mouse-only desktop keeps its compact density.
+  const hasCoarsePointer = useHasCoarsePointer();
+  const touchTarget = isMobileShell || hasCoarsePointer;
   const language = lang as ModelPickerLanguage;
   const pickerCopy = modelPickerCopy[language];
   const stepCopy = modelPickerStepCopy[language];
@@ -297,7 +303,7 @@ export function ModelPickerPanel({
           type="button"
           data-testid="model-picker-back"
           onClick={showCatalogue ? goBackToRecommended : onBackToActions}
-          className={`flex shrink-0 items-center justify-center rounded-lg text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-white ${isMobileShell ? "h-11 w-11" : "h-9 w-9"}`}
+          className={`flex shrink-0 items-center justify-center rounded-lg text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-white ${touchTarget ? "h-11 w-11" : "h-9 w-9"}`}
           aria-label={showCatalogue ? stepCopy.backToRecommended : t("auth.cancel")}
         >
           <ArrowLeft className="h-4 w-4" aria-hidden="true" />
@@ -331,7 +337,7 @@ export function ModelPickerPanel({
             onChange={(event) => handleSearchChange(event.target.value)}
             placeholder={pickerCopy.searchPlaceholder}
             aria-label={pickerCopy.searchPlaceholder}
-            className={`w-full rounded-lg border border-zinc-200 bg-zinc-50 pl-9 text-xs text-zinc-800 outline-none transition placeholder:text-zinc-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:focus:border-blue-500 ${trimmedQuery ? "pr-12" : "pr-3"} ${isMobileShell ? "h-11" : "h-9"}`}
+            className={`w-full rounded-lg border border-zinc-200 bg-zinc-50 pl-9 text-xs text-zinc-800 outline-none transition placeholder:text-zinc-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:focus:border-blue-500 ${trimmedQuery ? "pr-12" : "pr-3"} ${touchTarget ? "h-11" : "h-9"}`}
           />
           {trimmedQuery && (
             <button
@@ -374,7 +380,7 @@ export function ModelPickerPanel({
                     type="button"
                     aria-label={t("chat.removeModelFromComparison")}
                     onClick={() => onToggleModel(modelId)}
-                    className={`relative flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-zinc-500 transition before:absolute before:content-[''] hover:bg-zinc-300/60 dark:text-zinc-400 dark:hover:bg-zinc-700 ${isMobileShell ? "before:-inset-3.5" : "before:-inset-2"}`}
+                    className={`relative flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-zinc-500 transition before:absolute before:content-[''] hover:bg-zinc-300/60 dark:text-zinc-400 dark:hover:bg-zinc-700 ${touchTarget ? "before:-inset-3.5" : "before:-inset-2"}`}
                   >
                     <X className="h-3 w-3" />
                   </button>
@@ -470,7 +476,7 @@ export function ModelPickerPanel({
             type="button"
             data-testid="model-picker-open-all"
             onClick={openAllModels}
-            className={`flex w-full items-center gap-3 rounded-xl border border-zinc-200 px-3 text-left transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800 ${isMobileShell ? "min-h-14 py-2" : "py-2.5"}`}
+            className={`flex w-full items-center gap-3 rounded-xl border border-zinc-200 px-3 text-left transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800 ${touchTarget ? "min-h-14 py-2" : "py-2.5"}`}
           >
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-purple-500/10 text-purple-500">
               <Boxes className="h-5 w-5" aria-hidden="true" />
@@ -520,7 +526,7 @@ export function ModelPickerPanel({
           type="button"
           data-testid="model-picker-done"
           onClick={onDone}
-          className={`flex shrink-0 items-center justify-center rounded-xl bg-blue-600 px-3 text-xs font-black text-white transition hover:bg-blue-500 ${isMobileShell ? "h-11" : "py-2"}`}
+          className={`flex shrink-0 items-center justify-center rounded-xl bg-blue-600 px-3 text-xs font-black text-white transition hover:bg-blue-500 ${touchTarget ? "h-11" : "py-2"}`}
         >
           {pickerCopy.done}
         </button>

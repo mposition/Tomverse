@@ -14,6 +14,7 @@ import {
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { ModelSelectionBadge } from "@/components/chat/ModelSelectionBadge";
+import { useHasCoarsePointer } from "@/components/chat/useHasCoarsePointer";
 import { getModelUsageProfile } from "@/components/chat/types";
 import { getModelExperienceStatus } from "@/lib/modelExperience";
 import {
@@ -110,6 +111,11 @@ export function ModelCatalogue({
   const stepCopy = modelPickerStepCopy[lang];
   const useCaseLabels = modelPickerUseCaseLabels[lang];
   const featureLabels = modelPickerFeatureLabels[lang];
+  // Touch hit area tracks the input device, not the layout breakpoint, so a
+  // coarse-pointer tablet at >=768px still gets 44px targets (see
+  // useHasCoarsePointer); isMobileShell continues to drive layout.
+  const hasCoarsePointer = useHasCoarsePointer();
+  const touchTarget = isMobileShell || hasCoarsePointer;
   const filterSheetRef = useRef<HTMLDivElement | null>(null);
   const filterTriggerRef = useRef<HTMLButtonElement | null>(null);
 
@@ -279,7 +285,7 @@ export function ModelCatalogue({
             onChange={(event) =>
               update("task", event.target.value as ModelCatalogueFilters["task"])
             }
-            className={`min-w-0 flex-1 rounded-lg border border-zinc-200 bg-zinc-50 px-2 text-xs font-medium text-zinc-700 outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 ${isMobileShell ? "h-11" : "h-9"}`}
+            className={`min-w-0 flex-1 rounded-lg border border-zinc-200 bg-zinc-50 px-2 text-xs font-medium text-zinc-700 outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 ${touchTarget ? "h-11" : "h-9"}`}
           >
             {taskFilterOptions.map((option) => (
               <option key={option} value={option}>
@@ -382,7 +388,7 @@ export function ModelCatalogue({
                       type="button"
                       data-testid="model-favorite-star"
                       onClick={() => onToggleFavorite(model.id)}
-                      className={`flex shrink-0 items-center justify-center rounded-lg transition ${isMobileShell ? "h-11 w-11" : "h-8 w-8"} ${isFavorite ? "text-amber-400" : "text-zinc-400 hover:text-amber-400"}`}
+                      className={`flex shrink-0 items-center justify-center rounded-lg transition ${touchTarget ? "h-11 w-11" : "h-8 w-8"} ${isFavorite ? "text-amber-400" : "text-zinc-400 hover:text-amber-400"}`}
                       aria-pressed={isFavorite}
                       aria-label={t("chat.favoriteModels")}
                     >
@@ -399,7 +405,7 @@ export function ModelCatalogue({
                       disabled={selectionDisabled && !isSelected}
                       onClick={() => onSelectModel(model)}
                       aria-pressed={isSelected}
-                      className={`flex min-w-0 flex-1 items-start gap-2 rounded-lg py-0.5 text-sm disabled:cursor-not-allowed disabled:opacity-45 ${isMobileShell ? "min-h-11" : ""}`}
+                      className={`flex min-w-0 flex-1 items-start gap-2 rounded-lg py-0.5 text-sm disabled:cursor-not-allowed disabled:opacity-45 ${touchTarget ? "min-h-11" : ""}`}
                     >
                       <ModelLogo model={model} size="md" />
                       <span className="min-w-0 flex-1 text-left">
