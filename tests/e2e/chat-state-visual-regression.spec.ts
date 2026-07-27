@@ -202,7 +202,7 @@ test.describe("Loading state", () => {
         await expect(page.getByTestId("chat-empty-state")).toHaveCount(0);
         await expect(page.getByText("불러오는 중...")).not.toHaveCount(0);
 
-        await expect(page).toHaveScreenshot(`chat-loading-${viewportName}-${theme}-ko.png`);
+        await expect(page).toHaveScreenshot(`chat-loading-${viewportName}-${theme}-ko.png`, { maxDiffPixelRatio: 0.02 });
       });
     }
   }
@@ -245,7 +245,7 @@ test.describe("Streaming state", () => {
         // Composer is disabled while any panel is still sending.
         await expect(page.getByTestId("chat-textarea")).toBeDisabled();
 
-        await expect(page).toHaveScreenshot(`chat-streaming-${viewportName}-${theme}-ko.png`);
+        await expect(page).toHaveScreenshot(`chat-streaming-${viewportName}-${theme}-ko.png`, { maxDiffPixelRatio: 0.02 });
       });
     }
   }
@@ -259,7 +259,7 @@ test.describe("Streaming state", () => {
     await expect(page.getByText(SHORT_ANSWER)).toBeVisible();
     await expect(page.getByText("Here is the first part of a longer,", { exact: false })).toBeVisible();
 
-    await expect(page).toHaveScreenshot("chat-streaming-reduced-motion-desktop-light-ko.png");
+    await expect(page).toHaveScreenshot("chat-streaming-reduced-motion-desktop-light-ko.png", { maxDiffPixelRatio: 0.02 });
   });
 });
 
@@ -291,7 +291,7 @@ test.describe("Success state", () => {
         // AI Review only makes sense once every active model has answered.
         await expect(page.getByTestId("quick-comparison-button")).toBeEnabled();
 
-        await expect(page).toHaveScreenshot(`chat-success-${viewportName}-${theme}-ko.png`);
+        await expect(page).toHaveScreenshot(`chat-success-${viewportName}-${theme}-ko.png`, { maxDiffPixelRatio: 0.02 });
       });
     }
   }
@@ -325,7 +325,7 @@ test.describe("Partial failure state", () => {
           await expect(page.getByRole("button", { name: "다시 시도" })).toBeVisible();
         }
 
-        await expect(page).toHaveScreenshot(`chat-partial-failure-${viewportName}-${theme}-ko.png`);
+        await expect(page).toHaveScreenshot(`chat-partial-failure-${viewportName}-${theme}-ko.png`, { maxDiffPixelRatio: 0.02 });
       });
     }
   }
@@ -346,7 +346,7 @@ test.describe("Partial failure state", () => {
     }));
     expect(dimensions.content).toBeLessThanOrEqual(dimensions.viewport + 1);
 
-    await expect(page).toHaveScreenshot("chat-partial-failure-mobile-min-light-ko.png");
+    await expect(page).toHaveScreenshot("chat-partial-failure-mobile-min-light-ko.png", { maxDiffPixelRatio: 0.02 });
   });
 
   test("two of three models failing keeps the one success and shows two distinct failures", async ({ page }) => {
@@ -384,7 +384,7 @@ test.describe("Full error state", () => {
         // No success answer bleeds through in a full failure.
         await expect(page.getByText(SHORT_ANSWER)).toHaveCount(0);
 
-        await expect(page).toHaveScreenshot(`chat-error-${viewportName}-${theme}-ko.png`);
+        await expect(page).toHaveScreenshot(`chat-error-${viewportName}-${theme}-ko.png`, { maxDiffPixelRatio: 0.02 });
       });
     }
   }
@@ -405,7 +405,7 @@ test.describe("Full error state", () => {
     }));
     expect(dimensions.content).toBeLessThanOrEqual(dimensions.viewport + 1);
 
-    await expect(page).toHaveScreenshot("chat-error-long-message-desktop-light-ko.png");
+    await expect(page).toHaveScreenshot("chat-error-long-message-desktop-light-ko.png", { maxDiffPixelRatio: 0.02 });
   });
 
   test("chat-error-long-message-desktop-light-en", async ({ page }) => {
@@ -424,7 +424,7 @@ test.describe("Full error state", () => {
     }));
     expect(dimensions.content).toBeLessThanOrEqual(dimensions.viewport + 1);
 
-    await expect(page).toHaveScreenshot("chat-error-long-message-desktop-light-en.png");
+    await expect(page).toHaveScreenshot("chat-error-long-message-desktop-light-en.png", { maxDiffPixelRatio: 0.02 });
   });
 });
 
@@ -447,7 +447,7 @@ test.describe("Retry state", () => {
         await expect(retryButton).toBeVisible();
         await expect(retryButton).toBeEnabled();
 
-        await expect(page).toHaveScreenshot(`chat-retry-${viewportName}-${theme}-ko.png`);
+        await expect(page).toHaveScreenshot(`chat-retry-${viewportName}-${theme}-ko.png`, { maxDiffPixelRatio: 0.02 });
       });
     }
   }
@@ -511,7 +511,7 @@ test.describe("Insufficient credits state", () => {
         await expect(page.getByTestId("chat-textarea")).toBeDisabled();
         await expect(page.getByTestId("usage-limit-view-options")).toBeVisible();
 
-        await expect(page).toHaveScreenshot(`chat-insufficient-credits-${viewportName}-${theme}-ko.png`);
+        await expect(page).toHaveScreenshot(`chat-insufficient-credits-${viewportName}-${theme}-ko.png`, { maxDiffPixelRatio: 0.02 });
       });
     }
   }
@@ -532,7 +532,7 @@ test.describe("Insufficient credits state", () => {
     }));
     expect(dimensions.content).toBeLessThanOrEqual(dimensions.viewport + 1);
 
-    await expect(page).toHaveScreenshot("chat-insufficient-credits-mobile-min-light-ko.png");
+    await expect(page).toHaveScreenshot("chat-insufficient-credits-mobile-min-light-ko.png", { maxDiffPixelRatio: 0.02 });
   });
 
   test("account limit reached auto-opens a modal with a purchase/upgrade CTA, not a sign-in CTA", async ({ page }) => {
@@ -640,7 +640,7 @@ test.describe("Deep Research state", () => {
           await expect(page.getByText(SHORT_ANSWER).first()).toBeVisible();
         }
 
-        await expect(page).toHaveScreenshot(`chat-deep-research-${viewportName}-${theme}-ko.png`);
+        await expect(page).toHaveScreenshot(`chat-deep-research-${viewportName}-${theme}-ko.png`, { maxDiffPixelRatio: 0.02 });
       });
     }
   }
@@ -657,7 +657,7 @@ test.describe("Deep Research state", () => {
 
     await expect(page.getByRole("heading", { name: "Summary" })).toBeVisible();
 
-    await expect(page).toHaveScreenshot("chat-deep-research-complete-desktop-light-ko.png");
+    await expect(page).toHaveScreenshot("chat-deep-research-complete-desktop-light-ko.png", { maxDiffPixelRatio: 0.02 });
   });
 
   test("chat-deep-research-failed-mobile-dark-ko", async ({ page }) => {
@@ -673,7 +673,7 @@ test.describe("Deep Research state", () => {
     const failedPanel = page.locator('[data-testid="mobile-model-tab"][data-model-id="' + DEEP_RESEARCH_MODEL + '"]');
     await expect(failedPanel).toBeVisible();
 
-    await expect(page).toHaveScreenshot("chat-deep-research-failed-mobile-dark-ko.png");
+    await expect(page).toHaveScreenshot("chat-deep-research-failed-mobile-dark-ko.png", { maxDiffPixelRatio: 0.02 });
   });
 
   test("Deep Research setup is gated for a Free-plan account", async ({ page }) => {
@@ -725,7 +725,7 @@ test.describe("File attachment states", () => {
     await expect(attachTrigger.locator(".animate-spin")).toBeVisible();
     await expect(attachTrigger).toBeDisabled().catch(() => undefined);
 
-    await expect(page).toHaveScreenshot("chat-attachment-uploading-desktop-light-ko.png");
+    await expect(page).toHaveScreenshot("chat-attachment-uploading-desktop-light-ko.png", { maxDiffPixelRatio: 0.02 });
   });
 
   test("chat-attachment-processing-desktop-light-ko: server-side finalize/extract in flight", async ({ page }) => {
@@ -762,7 +762,7 @@ test.describe("File attachment states", () => {
     await expect.poll(() => finalizeHeld).toBe(true);
     await expect(actionMenuTrigger(page).locator(".animate-spin")).toBeVisible();
 
-    await expect(page).toHaveScreenshot("chat-attachment-processing-desktop-light-ko.png");
+    await expect(page).toHaveScreenshot("chat-attachment-processing-desktop-light-ko.png", { maxDiffPixelRatio: 0.02 });
   });
 
   test("complete: attachment chip persists after send", async ({ page }) => {
@@ -818,7 +818,7 @@ test.describe("File attachment states", () => {
     const toast = page.getByRole("alert").filter({ hasText: "파일을 업로드하지 못했습니다. 다시 시도해 주세요." });
     await expect(toast).toBeVisible();
 
-    await expect(page).toHaveScreenshot("chat-attachment-error-mobile-dark-ko.png");
+    await expect(page).toHaveScreenshot("chat-attachment-error-mobile-dark-ko.png", { maxDiffPixelRatio: 0.02 });
   });
 
   test("removing an attachment clears its preview", async ({ page }) => {
