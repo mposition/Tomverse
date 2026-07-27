@@ -1156,20 +1156,39 @@ const checks = [
   {
     name: "Analytics consent is compact and waits for the guest quick-start guide",
     file: "components/analytics/AnalyticsProvider.tsx",
-    test: (source) =>
-      source.includes("usePathname") &&
-      source.includes('tomverse:guest-quick-start') &&
-      source.includes("consentPromptReady") &&
-      source.includes("GUEST_QUICK_START_ACTIVE_KEY") &&
-      source.includes("calc(100vw-1rem)") &&
-      // STG-F001 replaced the rigid grid-cols layout with flex-wrap (so long
-      // translated labels wrap instead of overflowing) and bumped the
-      // decline/accept buttons from h-8 (32px) to min-h-11 (44px, WCAG 2.2
-      // target size) -- these two checks were updated to match, in place of
-      // the pre-STG-F001 grid-cols-[minmax(0,1fr)_auto] / h-8 markup.
-      source.includes("flex-wrap items-center gap-2 sm:flex-nowrap") &&
-      source.includes('className="min-h-11 rounded-lg') &&
-      source.includes("env(safe-area-inset-bottom)"),
+    test: (source) => {
+      // UI-P1-02 extracted the decline/accept button markup into a shared
+      // `consentButtonClass` string (both buttons reference it) instead of
+      // repeating an inline className literal -- check the shared class
+      // itself carries the 44px WCAG 2.2 target size and pill shape, and
+      // that both buttons actually use it, in place of the old
+      // `className="min-h-11 rounded-lg` literal-string check.
+      const buttonClassMatch = source.match(
+        /const consentButtonClass =\s*\n?\s*"([^"]+)"/
+      );
+      const buttonClass = buttonClassMatch ? buttonClassMatch[1] : "";
+      const buttonClassUsages = (
+        source.match(/className=\{consentButtonClass\}/g) || []
+      ).length;
+
+      return (
+        source.includes("usePathname") &&
+        source.includes('tomverse:guest-quick-start') &&
+        source.includes("consentPromptReady") &&
+        source.includes("GUEST_QUICK_START_ACTIVE_KEY") &&
+        // UI-P1-02 also moved the fixed-fallback notice from a bottom-center
+        // full-width bar to a bottom-right corner toast, narrowing its
+        // viewport-relative width cap accordingly.
+        source.includes("calc(100vw-1.5rem)") &&
+        // STG-F001 replaced the rigid grid-cols layout with flex-wrap (so long
+        // translated labels wrap instead of overflowing).
+        source.includes("flex-wrap items-center gap-2 sm:flex-nowrap") &&
+        buttonClass.includes("min-h-11") &&
+        buttonClass.includes("rounded-lg") &&
+        buttonClassUsages === 2 &&
+        source.includes("env(safe-area-inset-bottom)")
+      );
+    },
   },
   {
     name: "Regional analytics defaults fail closed and preserve strict opt-in countries",

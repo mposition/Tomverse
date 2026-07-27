@@ -8,6 +8,7 @@ import { useTurnstile } from "@/components/chat/useTurnstile";
 import Link from "next/link";
 import { withChatLanguage } from "@/lib/localizedCallbackUrl";
 import { isValidLoginEmail } from "@/lib/emailValidation";
+import { useAuthConsentSlotRef } from "@/components/analytics/AnalyticsProvider";
 import {
     markSignupStarted,
     trackProductEvent,
@@ -386,9 +387,22 @@ function SignInButtons() {
 
 export default function SignInPage() {
     const { t } = useLanguage();
+    // The analytics consent notice used to render as a viewport-fixed bar
+    // spanning the bottom of the screen, which could cross over the login
+    // card's terms/privacy links or CTA on short viewports. Registering a
+    // slot here lets AnalyticsProvider portal the notice into normal
+    // document flow right after the card instead, so it can never overlap
+    // it -- on short viewports the page just grows taller and scrolls
+    // (UI-P1-02).
+    const registerAuthConsentSlot = useAuthConsentSlotRef();
+    const [consentSlot, setConsentSlot] = useState<HTMLDivElement | null>(null);
+    useEffect(() => {
+        registerAuthConsentSlot(consentSlot);
+        return () => registerAuthConsentSlot(null);
+    }, [consentSlot, registerAuthConsentSlot]);
 
     return (
-        <div className="flex min-h-screen items-center justify-center bg-zinc-100 px-4 transition-colors duration-300 dark:bg-zinc-950">
+        <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-zinc-100 px-4 pt-8 pb-[max(2rem,env(safe-area-inset-bottom))] transition-colors duration-300 dark:bg-zinc-950">
             <div
                 data-testid="signin-card"
                 className="w-full max-w-md overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-2xl shadow-zinc-300/40 transition-all dark:border-zinc-800 dark:bg-zinc-900 dark:shadow-black/30"
@@ -414,6 +428,7 @@ export default function SignInPage() {
                     </Suspense>
                 </div>
             </div>
+            <div ref={setConsentSlot} className="w-full max-w-md empty:hidden" />
         </div>
     );
 }
