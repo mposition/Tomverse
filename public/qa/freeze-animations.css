@@ -1,0 +1,18 @@
+/*
+ * QA-only, same-origin stylesheet used exclusively by
+ * tests/e2e/support/chat-state-fixtures.ts (freezeAnimations) to make
+ * golden screenshots pixel-stable. Loaded via page.addStyleTag({ url }),
+ * which inserts a <link rel="stylesheet"> element -- satisfied by the
+ * existing production `style-src 'self'` CSP directive with no policy
+ * change, unlike page.addStyleTag({ content }) (an inline <style> tag,
+ * which production CSP correctly blocks without a nonce).
+ *
+ * Never linked to by the application itself; inert for every real user.
+ */
+*, *::before, *::after {
+  animation-duration: 0s !important;
+  animation-delay: 0s !important;
+  transition-duration: 0s !important;
+  transition-delay: 0s !important;
+  scroll-behavior: auto !important;
+}
