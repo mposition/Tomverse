@@ -92,7 +92,6 @@ const USE_CASE_CANDIDATES: Record<
   multimodal: [
     "gemini-3-5-flash",
     "gemini-2-5-flash",
-    "llama-4-scout",
     "gpt-5-4-mini",
     "gemini-3-1-pro",
   ],

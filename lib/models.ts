@@ -147,7 +147,13 @@ export const AVAILABLE_MODELS = [
     { id: "gemini-2-5-flash", name: "Gemini 3.1 Flash-Lite", apiModel: "gemini-3.1-flash-lite", provider: "google", icon: "✨", bestFor: "Low-cost everyday tasks and quick file questions", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
 
     { id: "llama-3-1", name: "Llama 3.1", apiModel: "llama-3.1-8b-instant", provider: "groq", icon: "∞", bestFor: "Very fast, lightweight text questions", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled" },
-    { id: "llama-4-scout", name: "Llama 4 Scout", apiModel: "meta-llama/llama-4-scout-17b-16e-instruct", provider: "groq", icon: "∞", bestFor: "Fast visual questions and long-context exploration", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", contextWindowTokens: 131_072, inputCapabilities: { image: true, nativePdf: false, maxImages: 5, maxBase64ImagePayloadBytes: 4 * 1024 * 1024 } },
+    // Groq stopped serving this model: the catalog monitor first recorded it
+    // missing on 2026-07-21 and escalated it to likely_deprecated after seven
+    // consecutive absences, while live calls returned HTTP 404. Disabled
+    // rather than repointed because Groq currently exposes no vision-capable
+    // replacement -- llama-3-3 is the closest enabled sibling, so it takes
+    // over as the replacement target even though it is text-only.
+    { id: "llama-4-scout", name: "Llama 4 Scout", apiModel: "meta-llama/llama-4-scout-17b-16e-instruct", provider: "groq", icon: "∞", bestFor: "Legacy fast visual questions and long-context exploration", minimumPlan: "Guest", usageClass: "standard", replacementModelId: "llama-3-3", publiclyListed: false, enabled: false, status: "disabled", contextWindowTokens: 131_072, inputCapabilities: { image: true, nativePdf: false, maxImages: 5, maxBase64ImagePayloadBytes: 4 * 1024 * 1024 } },
     { id: "llama-3-3", name: "Llama 3.3", apiModel: "llama-3.3-70b-versatile", provider: "groq", icon: "∞", bestFor: "Broad open-model text analysis and instruction following", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled" },
 
     { id: "grok-4", name: "Grok 4", apiModel: "grok-4", provider: "xai", icon: "𝕏", bestFor: "Current-events discussion and broad advanced analysis", minimumPlan: "Pro", usageClass: "premium", enabled: true, status: "enabled" },

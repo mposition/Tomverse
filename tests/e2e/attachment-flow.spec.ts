@@ -155,13 +155,15 @@ test.describe("attachment UX", () => {
     const textOnlyLlama = page.locator(
       '[data-testid="model-option"][data-model-id="llama-3-1"]'
     );
-    const scout = page.locator(
-      '[data-testid="model-option"][data-model-id="llama-4-scout"]'
+    // Was llama-4-scout until Groq stopped serving it and it was disabled;
+    // any enabled Guest-tier vision model exercises the same assertion.
+    const visionModel = page.locator(
+      '[data-testid="model-option"][data-model-id="gemini-2-5-flash"]'
     );
     await expect(textOnlyLlama).toBeDisabled();
     await expect(textOnlyLlama).toHaveAttribute("data-model-image-input", "false");
-    await expect(scout).toBeEnabled();
-    await expect(scout).toHaveAttribute("data-model-image-input", "true");
+    await expect(visionModel).toBeEnabled();
+    await expect(visionModel).toHaveAttribute("data-model-image-input", "true");
   });
 
   test("warns when a selected text-only model becomes incompatible with an image", async ({ page }) => {
