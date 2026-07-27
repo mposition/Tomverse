@@ -61,7 +61,7 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByTestId("chat-input")).toBeVisible();
 });
 
-test("billing success modal respects the explicit return language", async ({ page }) => {
+test("billing success modal respects the explicit return language", { tag: "@smoke" }, async ({ page }) => {
   await page.goto("/chat?billing=success&plan=max&interval=monthly&lang=ko");
 
   const successDialog = page.getByRole("dialog", { name: "결제 완료" });
@@ -71,7 +71,7 @@ test("billing success modal respects the explicit return language", async ({ pag
   await expect(successDialog.getByRole("button", { name: "닫기" })).toBeVisible();
 });
 
-test("authenticated user opens settings", async ({ page }) => {
+test("authenticated user opens settings", { tag: "@smoke" }, async ({ page }) => {
   await openAccountMenu(page);
   await page
     .getByTestId("account-menu")

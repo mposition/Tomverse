@@ -458,7 +458,7 @@ for (const viewport of [
   });
 }
 
-test("AI comparison review with two reviewers shows a tab switcher and agreement summary", async ({
+test("AI comparison review with two reviewers shows a tab switcher and agreement summary", { tag: "@smoke" }, async ({
   page,
 }) => {
   await prepareGuestPage(page, "ko");
