@@ -1384,44 +1384,34 @@ export function ChatPageClient({
     }
     }, [sessionUserId]);
 
-    // Read (never reacted to) inside the bootstrap effect's async
-    // settings-fetch callback just below. useModelCatalog()/useLanguage()
-    // don't guarantee isEnabledModelId/setLang stay referentially stable
-    // across unrelated re-renders (e.g. the model catalog itself finishing
-    // a fetch after page load), so including them directly in that
-    // effect's own dependency array made it re-fire -- and re-run its
-    // state resets -- on every one of those unrelated renders, not just
-    // once when sessionUserId itself changes. A repeated reset could zero
-    // isInitialConversationResolved back to false *after* the F5-restore
-    // effect above had already selected a conversation, at which point
-    // that effect's own currentChatId guard correctly refuses to decide
-    // again -- leaving isInitialConversationResolved (and the mobile
-    // header skeleton gated on it via isModelSelectionReady) stuck
-    // regardless of how long anything waits. Refs sidestep this: always
-    // current when the callback actually runs, without being a reason for
-    // the effect itself to re-run.
+    // The session bootstrap below only *reads* these; it must not re-run when
+    // their identity changes. ModelCatalogProvider refreshes the catalog once
+    // after mount, which rebuilds isEnabledModelId (and every memo derived
+    // from it, including newAccountDefaultSelectedModels). While those sat in
+    // the bootstrap's dependency array, that refresh re-ran the bootstrap and
+    // reset isInitialConversationResolved to false *after* the initial
+    // conversation had already been restored. Nothing set it back -- the
+    // restore effect below had already consumed isInitialSelectedRef and
+    // currentChatId -- so isModelSelectionReady, the mobile header's
+    // model-summary skeleton and the desktop model selector's disabled state
+    // stayed stuck until the tab was reloaded.
     const isEnabledModelIdRef = useRef(isEnabledModelId);
     const newAccountDefaultSelectedModelsRef = useRef(newAccountDefaultSelectedModels);
-    const setLangRef = useRef(setLang);
-
     useEffect(() => {
         isEnabledModelIdRef.current = isEnabledModelId;
         newAccountDefaultSelectedModelsRef.current = newAccountDefaultSelectedModels;
-        setLangRef.current = setLang;
-    }, [isEnabledModelId, newAccountDefaultSelectedModels, setLang]);
+    }, [isEnabledModelId, newAccountDefaultSelectedModels]);
 
     useEffect(() => {
         if (sessionUserId) {
-            // Cleared synchronously (not queued) alongside the state resets
-            // below: this ref is the restore-vs-new-account effects' claim
-            // that a decision is already in flight for *some* bootstrap
-            // pass, and a fresh pass (this effect re-firing) needs those
-            // effects to be able to decide again rather than staying
-            // permanently blocked by a claim from a now-superseded pass.
-            isInitialSelectedRef.current = false;
             queueMicrotask(() => setIsUserSettingsLoaded(false));
             queueMicrotask(() => setIsConversationsLoaded(false));
             queueMicrotask(() => setIsInitialConversationResolved(false));
+            // Re-arm the restore path in lockstep with the flags it feeds.
+            // This branch now only runs on a genuine identity change (sign-in,
+            // sign-out, account switch), where re-restoring is exactly right;
+            // leaving the ref latched was what made a reset unrecoverable.
+            isInitialSelectedRef.current = false;
             queueMicrotask(() => {
                 void fetchConversations();
             });
@@ -1461,7 +1451,7 @@ export function ChatPageClient({
                     // because ?lang=en carried over from the guest callback URL
                     // suppressed this entirely.)
                     if (data && isLanguage(data.language)) {
-                        setLangRef.current(data.language);
+                        setLang(data.language);
                         if (
                             isLanguage(urlLanguage) &&
                             urlLanguage !== data.language &&
@@ -1502,15 +1492,7 @@ export function ChatPageClient({
         } else if (status !== "loading") {
             queueMicrotask(() => setIsUserSettingsLoaded(true));
         }
-        // isEnabledModelId, newAccountDefaultSelectedModels, and setLang
-        // are deliberately not deps -- read via the refs synced just above
-        // instead, precisely so this effect only re-fires on a real
-        // sessionUserId/status transition. See the comment on those refs.
-    }, [
-        fetchConversations,
-        sessionUserId,
-        status,
-    ]);
+    }, [fetchConversations, sessionUserId, setLang, status]);
 
     const handleNewChat = () => {
         localComparisonResponsesRef.current.clear();
@@ -1694,16 +1676,40 @@ export function ChatPageClient({
   );
 
     useEffect(() => {
+        // Anything below this point decides the initial conversation one way
+        // or another, so every path must end with
+        // isInitialConversationResolved true. Only genuinely
+        // not-yet-knowable states may return without resolving it -- an
+        // early return that resolves nothing is what previously stranded
+        // isModelSelectionReady (and the mobile model-summary skeleton) for
+        // the whole session.
+        if (isGuestMode || !isUserSettingsLoaded || !isConversationsLoaded) return;
+        // conversations.length === 0 is only meaningful once the list has
+        // actually loaded; the new-account carryover effect above owns that
+        // case (and its guest-import handoff).
+        if (conversations.length === 0 || pendingGuestImportRef.current) return;
+
+        const params = new URLSearchParams(window.location.search);
+        const hasUrlSelectionPreset = params.has("models") || params.has("prompt");
+        // A ?models=/?prompt= landing takes its selection from the URL rather
+        // than from a restore, so the comparison-preset effect owns the first
+        // resolution. After it has applied (or declined) the preset, a later
+        // pass -- e.g. an account switch re-running the bootstrap -- resolves
+        // here instead, because that effect never runs twice.
+        if (hasUrlSelectionPreset && !comparisonPresetAppliedRef.current) return;
+
         if (
-            isGuestMode ||
-            !isUserSettingsLoaded ||
-            conversations.length === 0 ||
             currentChatId ||
             isInitialSelectedRef.current ||
             comparisonPresetRequestedRef.current ||
-            new URLSearchParams(window.location.search).has("models") ||
-            new URLSearchParams(window.location.search).has("prompt")
-        ) return;
+            hasUrlSelectionPreset
+        ) {
+            // A conversation is already open, an initial selection already
+            // ran, or the URL already decided the models. No restore will
+            // happen, so the selection is final and readiness must resolve.
+            queueMicrotask(() => setIsInitialConversationResolved(true));
+            return;
+        }
 
         isInitialSelectedRef.current = true;
 
@@ -1733,7 +1739,13 @@ export function ChatPageClient({
             setIsInitialConversationResolved(true);
         });
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [conversations, currentChatId, isGuestMode, isUserSettingsLoaded]);
+    }, [
+        conversations,
+        currentChatId,
+        isConversationsLoaded,
+        isGuestMode,
+        isUserSettingsLoaded,
+    ]);
 
     const handleLock = async (id: string, password: string) => {
         try {
@@ -2001,9 +2013,21 @@ export function ChatPageClient({
         .filter(isEnabledModelId)
     ).slice(0, APP_DEFAULTS.maxSelectedModels);
     const requestedPrompt = (params.get("prompt") || "").trim().slice(0, 1200);
+    // Captured before the params are stripped below: the restore effect keys
+    // its stand-down on the raw presence of these keys, so readiness has to be
+    // handed back on exactly the same condition.
+    const hadUrlSelectionPreset = params.has("models") || params.has("prompt");
 
     if (requestedModels.length === 0 && !requestedPrompt) {
       comparisonPresetAppliedRef.current = true;
+      // A ?models=/?prompt= URL that carries nothing usable still makes the
+      // restore effect above stand down, so this effect has to hand
+      // readiness back rather than leave it unresolved. Deferred like every
+      // other bootstrap transition in this file so it never cascades a
+      // render from inside the effect body.
+      if (hadUrlSelectionPreset) {
+        queueMicrotask(() => setIsInitialConversationResolved(true));
+      }
       return;
     }
 
@@ -2036,6 +2060,10 @@ export function ChatPageClient({
       if (requestedPrompt) {
         setInputValue((current) => current || requestedPrompt);
       }
+      // The models are applied in this same microtask, so resolving here
+      // never paints a stale count before correcting it -- which is the whole
+      // reason the model-summary skeleton exists.
+      if (hadUrlSelectionPreset) setIsInitialConversationResolved(true);
 
       params.delete("models");
       params.delete("prompt");

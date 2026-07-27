@@ -160,19 +160,15 @@ async function enterConversation(
   const shellTestId = viewport.width < 768 ? "mobile-chat-shell" : "desktop-chat-shell";
   await expect(page.getByTestId(shellTestId)).toBeVisible();
   if (viewport.width < 768) {
-    // The mobile header's model summary briefly renders a skeleton while
-    // isModelSelectionReady resolves; without waiting it out, a screenshot
-    // taken right after the shell appears can non-deterministically catch
-    // either the skeleton or the real content depending on run-to-run
-    // timing -- exactly the kind of screenshot-variance this suite is
-    // supposed to eliminate.
-    // Timeout is generous (not tight) because this wait absorbs CI-runner
-    // load spikes (slow API/DB round-trips during isModelSelectionReady
-    // bootstrap) rather than steady-state render time -- under a loaded
-    // runner 15s was observed to be insufficient even across retries.
-    await expect(page.getByTestId("mobile-header-model-summary-skeleton")).toHaveCount(0, {
-      timeout: 30_000,
-    });
+    // Wait on the positive signal -- the real model summary -- rather than
+    // only on the skeleton's absence, so a header that rendered neither
+    // fails here instead of passing a screenshot of an empty slot.
+    // The default expect timeout is deliberate: isModelSelectionReady now
+    // resolves on every bootstrap path (see ChatPageClient's restore and
+    // comparison-preset effects), so needing longer means a real regression,
+    // not a loaded runner.
+    await expect(page.getByTestId("mobile-header-model-summary")).toBeVisible();
+    await expect(page.getByTestId("mobile-header-model-summary-skeleton")).toHaveCount(0);
   }
   // Belt-and-suspenders on top of the deterministic pre-navigation
   // localStorage write above: fails loudly (not silently mislabels a

@@ -1,0 +1,104 @@
+name: Nightly Visual Regression
+#
+# tests/e2e/chat-state-visual-regression.spec.ts is the chat shell's
+# screenshot-golden suite. It is deliberately not part of PR Fast Gate's
+# `@smoke` tier: screenshot diffs are the slowest tests in this repo and the
+# least able to tell a real regression from a rendering difference, so
+# gating merges on them cost ~8 minutes per PR without a matching increase
+# in signal.
+#
+# Excluding it from the PR gate does not reduce coverage: it still runs on
+# every main push (Main Chromium Regression) and inside the full nightly
+# suite (Daily Security Audit). This workflow adds a third, isolated run
+# whose only job is that suite, so a golden that starts drifting produces a
+# standalone red check with the actual/expected/diff PNGs attached, instead
+# of one line inside a twelve-check audit report.
+#
+# Goldens are never refreshed here, and this workflow must never commit: a
+# baseline mismatch is a failure to be looked at, and auto-accepting one
+# would silently rewrite the baseline it is supposed to defend. The
+# security-regression check asserts that no snapshot-updating flag appears
+# in this file or in PR Fast Gate.
+
+on:
+  schedule:
+    # 19:30 UTC, ahead of Daily Security Audit (21:00 UTC) so a golden
+    # failure is already visible when the wider audit report lands.
+    - cron: "30 19 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-visual-regression-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  visual-regression:
+    name: Chat state visual regression goldens
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Same deterministic Turnstile configuration the other Playwright
+    # workflows build with. This is a public test key, not a credential, and
+    # no production secret is required to render the chat shell.
+    env:
+      NEXTAUTH_URL: http://127.0.0.1:3100
+      NEXT_PUBLIC_TURNSTILE_SITE_KEY: tomverse-playwright-turnstile-site-key
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Restore Next.js build cache
+        continue-on-error: true
+        uses: actions/cache@v5
+        with:
+          path: .next/cache
+          key: ${{ runner.os }}-next-visual-${{ hashFiles('package-lock.json') }}-${{ hashFiles('app/**/*.ts', 'app/**/*.tsx', 'components/**/*.ts', 'components/**/*.tsx', 'lib/**/*.ts', 'lib/**/*.tsx', 'next.config.ts', 'tsconfig.json') }}
+          restore-keys: |
+            ${{ runner.os }}-next-visual-${{ hashFiles('package-lock.json') }}-
+            ${{ runner.os }}-next-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build once for the Chromium test server
+        run: npm run build
+
+      - name: Restore Playwright Chromium cache
+        continue-on-error: true
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}-chromium
+          restore-keys: |
+            ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}-
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      # Goldens are captured on desktop-chromium only, which is also the one
+      # project this suite does not skip itself on.
+      - name: Run chat state visual regression suite
+        run: npm run test:e2e:visual
+
+      # `if: always()` so the actual/expected/diff PNGs a failing golden
+      # writes into test-results are uploaded -- that evidence is the entire
+      # point of running this suite on its own.
+      - name: Upload snapshot diffs and report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: nightly-visual-regression-${{ github.run_id }}
+          path: |
+            test-results
+            playwright-report
+          if-no-files-found: ignore
+          retention-days: 14
