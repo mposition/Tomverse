@@ -1376,6 +1376,32 @@ export function ChatPageClient({
     }
     }, [sessionUserId]);
 
+    // Read (never reacted to) inside the bootstrap effect's async
+    // settings-fetch callback just below. useModelCatalog()/useLanguage()
+    // don't guarantee isEnabledModelId/setLang stay referentially stable
+    // across unrelated re-renders (e.g. the model catalog itself finishing
+    // a fetch after page load), so including them directly in that
+    // effect's own dependency array made it re-fire -- and re-run its
+    // state resets -- on every one of those unrelated renders, not just
+    // once when sessionUserId itself changes. A repeated reset could zero
+    // isInitialConversationResolved back to false *after* the F5-restore
+    // effect above had already selected a conversation, at which point
+    // that effect's own currentChatId guard correctly refuses to decide
+    // again -- leaving isInitialConversationResolved (and the mobile
+    // header skeleton gated on it via isModelSelectionReady) stuck
+    // regardless of how long anything waits. Refs sidestep this: always
+    // current when the callback actually runs, without being a reason for
+    // the effect itself to re-run.
+    const isEnabledModelIdRef = useRef(isEnabledModelId);
+    const newAccountDefaultSelectedModelsRef = useRef(newAccountDefaultSelectedModels);
+    const setLangRef = useRef(setLang);
+
+    useEffect(() => {
+        isEnabledModelIdRef.current = isEnabledModelId;
+        newAccountDefaultSelectedModelsRef.current = newAccountDefaultSelectedModels;
+        setLangRef.current = setLang;
+    }, [isEnabledModelId, newAccountDefaultSelectedModels, setLang]);
+
     useEffect(() => {
         if (sessionUserId) {
             // Cleared synchronously (not queued) alongside the state resets
@@ -1403,12 +1429,12 @@ export function ChatPageClient({
                     return res.json();
                 })
                 .then((data) => {
-                    if (data && isEnabledModelId(data.defaultModel)) {
+                    if (data && isEnabledModelIdRef.current(data.defaultModel)) {
                         setUserDefaultEngine(data.defaultModel);
                         if (!currentChatIdRef.current) {
                             setSelectedModels(
                                 data.isNewAccount
-                                    ? newAccountDefaultSelectedModels
+                                    ? newAccountDefaultSelectedModelsRef.current
                                     : [data.defaultModel]
                             );
                         }
@@ -1427,7 +1453,7 @@ export function ChatPageClient({
                     // because ?lang=en carried over from the guest callback URL
                     // suppressed this entirely.)
                     if (data && isLanguage(data.language)) {
-                        setLang(data.language);
+                        setLangRef.current(data.language);
                         if (
                             isLanguage(urlLanguage) &&
                             urlLanguage !== data.language &&
@@ -1468,12 +1494,13 @@ export function ChatPageClient({
         } else if (status !== "loading") {
             queueMicrotask(() => setIsUserSettingsLoaded(true));
         }
+        // isEnabledModelId, newAccountDefaultSelectedModels, and setLang
+        // are deliberately not deps -- read via the refs synced just above
+        // instead, precisely so this effect only re-fires on a real
+        // sessionUserId/status transition. See the comment on those refs.
     }, [
         fetchConversations,
-        isEnabledModelId,
-        newAccountDefaultSelectedModels,
         sessionUserId,
-        setLang,
         status,
     ]);
 
