@@ -35,11 +35,16 @@ const boundingBoxesOverlap = (
   a.y < b.y + b.height &&
   a.y + a.height > b.y;
 
+// Overlap alone can pass while the element is still practically unusable
+// (e.g. a transparent or lower-z-index notice sitting on top). Center-point
+// hit-testing confirms the control is what a real tap would actually land
+// on -- the exact check STG-F001 already uses for the chat composer.
 const assertNoOverlapWithNotice = async (
   name: string,
   locator: Locator,
   noticeBox: { x: number; y: number; width: number; height: number }
 ) => {
+  await locator.scrollIntoViewIfNeeded();
   await expect(locator, `${name} visible`).toBeVisible();
   const box = await locator.boundingBox();
   expect(box, `${name} bounding box`).not.toBeNull();
@@ -48,6 +53,21 @@ const assertNoOverlapWithNotice = async (
     boundingBoxesOverlap(box, noticeBox),
     `${name} must not overlap the consent notice`
   ).toBe(false);
+
+  // Hit-test the center of the element's own first line fragment rather than
+  // the overall bounding box: an inline link that wraps across two lines
+  // (e.g. "Terms and Conditions" breaking mid-phrase in the narrow card) has
+  // a bounding box whose geometric center can fall in the gap between the
+  // lines, which is not a real overlap -- it's just how union rects work for
+  // wrapped inline content.
+  const hitsItself = await locator.evaluate((el) => {
+    const rect = el.getClientRects()[0] || el.getBoundingClientRect();
+    const centerX = rect.x + rect.width / 2;
+    const centerY = rect.y + rect.height / 2;
+    const hit = document.elementFromPoint(centerX, centerY);
+    return hit !== null && el.contains(hit);
+  });
+  expect(hitsItself, `${name} center hit-tests to itself, not the notice`).toBe(true);
 };
 
 const SIGNIN_VIEWPORTS = [
@@ -123,12 +143,58 @@ for (const viewport of SIGNIN_VIEWPORTS) {
     ]);
     expect(declineBox, "decline button bounding box").not.toBeNull();
     expect(acceptBox, "accept button bounding box").not.toBeNull();
-    if (declineBox) expect(declineBox.height).toBeGreaterThanOrEqual(44);
-    if (acceptBox) expect(acceptBox.height).toBeGreaterThanOrEqual(44);
+    if (declineBox) {
+      expect(declineBox.height, "decline button height >= 44px").toBeGreaterThanOrEqual(44);
+      expect(declineBox.width, "decline button width >= 44px").toBeGreaterThanOrEqual(44);
+    }
+    if (acceptBox) {
+      expect(acceptBox.height, "accept button height >= 44px").toBeGreaterThanOrEqual(44);
+      expect(acceptBox.width, "accept button width >= 44px").toBeGreaterThanOrEqual(44);
+    }
 
     await expect(notice.getByRole("link", { name: "Privacy policy" })).toBeVisible();
   });
 }
+
+test("UI-P1-02: sign-in inputs and primary CTA stay reachable while the email field is focused (virtual-keyboard proxy)", async ({
+  page,
+}, testInfo) => {
+  test.skip(
+    testInfo.project.name !== "desktop-chromium",
+    "Layout-overlap regression is viewport-driven, covered once."
+  );
+
+  await enableAnalyticsCookie(page);
+  await prepareGuestPage(page, "en");
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.goto("/auth/signin?lang=en");
+
+  const notice = page.getByTestId("chat-consent-notice");
+  await expect(notice).toBeVisible();
+
+  // A real mobile OS keyboard shrinks the visual viewport; headless Chromium
+  // can't emulate that, but the notice being non-fixed (plain document flow)
+  // means there is nothing that could newly slide over the input or the
+  // send-code button once focused -- this proves that invariant holds.
+  const email = page.getByPlaceholder("you@example.com");
+  await email.click();
+  await email.fill("keyboard-check@example.com");
+  await expect(email).toBeFocused();
+
+  const sendCode = page.locator("button", { hasText: "Get login code" });
+  await expect(sendCode).toBeVisible();
+  await expect(sendCode).toBeEnabled();
+  const noticeBox = await notice.boundingBox();
+  const sendCodeBox = await sendCode.boundingBox();
+  expect(noticeBox, "notice bounding box").not.toBeNull();
+  expect(sendCodeBox, "send-code bounding box").not.toBeNull();
+  if (noticeBox && sendCodeBox) {
+    expect(
+      boundingBoxesOverlap(sendCodeBox, noticeBox),
+      "send-code button must not be covered while the email field is focused"
+    ).toBe(false);
+  }
+});
 
 test("UI-P1-02: declining analytics from the sign-in notice hides it and persists the choice", async ({
   page,

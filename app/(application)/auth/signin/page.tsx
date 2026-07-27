@@ -403,7 +403,7 @@ export default function SignInPage() {
     }, [consentSlot, registerAuthConsentSlot]);
 
     return (
-        <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-zinc-100 px-4 py-8 transition-colors duration-300 dark:bg-zinc-950">
+        <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-zinc-100 px-4 pt-8 pb-[max(2rem,env(safe-area-inset-bottom))] transition-colors duration-300 dark:bg-zinc-950">
             <div className="w-full max-w-md overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-2xl shadow-zinc-300/40 transition-all dark:border-zinc-800 dark:bg-zinc-900 dark:shadow-black/30">
                 <div className="border-b border-zinc-200 px-8 py-7 dark:border-zinc-800">
                     <div className="mx-auto flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-white ring-1 ring-zinc-200 shadow-sm dark:ring-zinc-800">
