@@ -82,6 +82,10 @@ type ModelCatalogueProps = {
   modelStatuses: Record<string, ModelCatalogueStatusRecord>;
   hasImageAttachments: boolean;
   favoriteModelIds: string[];
+  /** The comparison cap is full: activating another model requires a swap. */
+  isAtCapacity?: boolean;
+  /** Id of the (visually hidden) element explaining that cap. */
+  limitDescriptionId?: string;
   recentModelIds: string[];
   onToggleFavorite: (modelId: string) => void;
   onSelectModel: (model: AiModel) => void;
@@ -103,6 +107,8 @@ export function ModelCatalogue({
   modelStatuses,
   hasImageAttachments,
   favoriteModelIds,
+  isAtCapacity = false,
+  limitDescriptionId,
   recentModelIds,
   onToggleFavorite,
   onSelectModel,
@@ -405,6 +411,9 @@ export function ModelCatalogue({
                       disabled={selectionDisabled && !isSelected}
                       onClick={() => onSelectModel(model)}
                       aria-pressed={isSelected}
+                      aria-describedby={
+                        isAtCapacity && !isSelected ? limitDescriptionId : undefined
+                      }
                       className={`flex min-w-0 flex-1 items-start gap-2 rounded-lg py-0.5 text-sm disabled:cursor-not-allowed disabled:opacity-45 ${touchTarget ? "min-h-11" : ""}`}
                     >
                       <ModelLogo model={model} size="md" />

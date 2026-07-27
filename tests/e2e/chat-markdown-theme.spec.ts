@@ -1,5 +1,9 @@
 import { expect, test } from "@playwright/test";
-import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
+import {
+  mockAuthenticatedApi,
+  openRecentConversation,
+  prepareGuestPage,
+} from "./support/app-fixtures";
 
 test("assistant code blocks keep readable contrast in the light theme", async ({ page }) => {
   await prepareGuestPage(page, "ko");
@@ -40,7 +44,7 @@ test("assistant code blocks keep readable contrast in the light theme", async ({
   await page.goto("/chat");
   // A fresh chat starts blank -- open the mocked qa-conversation from the
   // welcome screen's recent-conversations card to load its messages.
-  await page.getByTestId("recent-conversation-card").click();
+  await openRecentConversation(page);
 
   const code = page.locator('[data-message-role="assistant"] pre code').first();
   await expect(code).toContainText("Compare AI answers in one place.");
