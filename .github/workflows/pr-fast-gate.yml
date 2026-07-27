@@ -82,6 +82,17 @@ jobs:
       - name: Run desktop Chromium PR smoke tests
         run: npm run test:e2e:pr
 
+      # Dedicated, zero-retry run of the state-golden visual suite: the
+      # broader smoke-test step above shares the global CI retries: 2
+      # (playwright.config.ts), which absorbs real CI-load flakiness across
+      # the whole suite but can also let a genuinely-flaky visual state
+      # slip through as "passed on retry" without anyone noticing. This
+      # step enforces the stricter bar UI-P1-03 requires: every golden
+      # passes on the very first attempt, on a clean run, or the check
+      # fails outright.
+      - name: Run visual-regression suite (retries=0)
+        run: npx playwright test tests/e2e/chat-state-visual-regression.spec.ts --project=desktop-chromium --workers=1 --retries=0
+
       - name: Upload failed test evidence
         if: failure()
         uses: actions/upload-artifact@v7

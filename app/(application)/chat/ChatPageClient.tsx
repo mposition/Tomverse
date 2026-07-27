@@ -1378,6 +1378,13 @@ export function ChatPageClient({
 
     useEffect(() => {
         if (sessionUserId) {
+            // Cleared synchronously (not queued) alongside the state resets
+            // below: this ref is the restore-vs-new-account effects' claim
+            // that a decision is already in flight for *some* bootstrap
+            // pass, and a fresh pass (this effect re-firing) needs those
+            // effects to be able to decide again rather than staying
+            // permanently blocked by a claim from a now-superseded pass.
+            isInitialSelectedRef.current = false;
             queueMicrotask(() => setIsUserSettingsLoaded(false));
             queueMicrotask(() => setIsConversationsLoaded(false));
             queueMicrotask(() => setIsInitialConversationResolved(false));
@@ -1692,6 +1699,37 @@ export function ChatPageClient({
         });
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [conversations, currentChatId, isGuestMode, isUserSettingsLoaded]);
+
+    // Safety net for the restore/new-account decision above (and its
+    // "new account" counterpart further up, gated on
+    // conversations.length === 0 && isConversationsLoaded): both claim
+    // isInitialSelectedRef.current eagerly, before their own queued
+    // microtask actually calls setIsInitialConversationResolved(true), so
+    // that neither effect re-decides while its own resolution is still in
+    // flight. If sessionUserId's bootstrap-reset effect (the one that
+    // zeroes isUserSettingsLoaded/isConversationsLoaded/
+    // isInitialConversationResolved back to false to re-bootstrap after an
+    // auth-state change) fires again while that ref is still claimed from
+    // an earlier, now-superseded bootstrap pass, the ref permanently blocks
+    // both effects from ever re-running -- isInitialConversationResolved
+    // (and the mobile header's model-summary skeleton, gated on it via
+    // isModelSelectionReady) would then never resolve at all, no matter how
+    // long a test or a slow connection waits. Once a chat is already
+    // selected and both loads have genuinely finished, there is nothing
+    // left to decide either way, so this converges on "resolved" directly
+    // from that observable state instead of depending on the ref/state
+    // pair staying in sync.
+    useEffect(() => {
+        if (isGuestMode || isInitialConversationResolved) return;
+        if (!isUserSettingsLoaded || !isConversationsLoaded || !currentChatId) return;
+        queueMicrotask(() => setIsInitialConversationResolved(true));
+    }, [
+        currentChatId,
+        isConversationsLoaded,
+        isGuestMode,
+        isInitialConversationResolved,
+        isUserSettingsLoaded,
+    ]);
 
     const handleLock = async (id: string, password: string) => {
         try {

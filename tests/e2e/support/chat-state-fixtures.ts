@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import { mockAuthenticatedApi, type AuthenticatedQaState } from "./app-fixtures";
 
 // ---------------------------------------------------------------------------
@@ -300,29 +300,90 @@ export async function restoreActiveConversation(page: Page, conversationId = "qa
   }, conversationId);
 }
 
-/** Freezes CSS animations/transitions so golden screenshots are pixel-stable. */
+/**
+ * Freezes CSS animations/transitions so golden screenshots and boundingBox()
+ * reads are pixel-/geometry-stable for the rest of the test.
+ *
+ * Deliberately NOT `page.addStyleTag({ content })`: an inline <style> tag is
+ * blocked by production CSP's `style-src 'self' 'nonce-...'` (no
+ * 'unsafe-inline', and page.addStyleTag has no way to attach the page's
+ * per-request nonce). Loading the *same* rules from a same-origin file via
+ * `addStyleTag({ url })` instead inserts a <link rel="stylesheet">, which
+ * `style-src 'self'` already permits -- zero CSP policy change, and the
+ * production directive is left exactly as strict as it already was. The
+ * stylesheet itself lives at public/qa/freeze-animations.css: never linked
+ * to by the app, inert for every real user.
+ */
 export async function freezeAnimations(page: Page) {
-  await page.addStyleTag({
-    content: `
-      *, *::before, *::after {
-        animation-duration: 0s !important;
-        animation-delay: 0s !important;
-        transition-duration: 0s !important;
-        transition-delay: 0s !important;
-        scroll-behavior: auto !important;
-      }
-    `,
-  });
+  await page.addStyleTag({ url: "/qa/freeze-animations.css" });
 }
+
+/**
+ * Sets the theme preference deterministically, before the page's first
+ * script runs, so ThemeController's mount-time
+ * `readStoredThemePreference() ?? "system"` read (components/
+ * ThemeController.tsx) resolves to the exact requested theme on its very
+ * first pass -- not "system" (which, absent an explicit dark
+ * prefers-color-scheme emulation, resolves to light in a fresh browser
+ * context) followed by a later correction once GET /api/user/settings
+ * happens to resolve and ChatPageClient.tsx calls
+ * storeAndApplyThemePreference(data.theme). That correction is real product
+ * behavior, but racing a screenshot against its arrival time (rather than
+ * the deterministic localStorage read this uses instead) is exactly what
+ * produced golden "dark" screenshots that were pixel-identical to their
+ * "light" counterparts: captured before the correction landed.
+ */
+export async function setDeterministicTheme(page: Page, theme: Theme) {
+  await page.addInitScript((value: Theme) => {
+    window.localStorage.setItem("tomverse_theme_preference", value);
+  }, theme);
+}
+
+/** @deprecated use {@link setDeterministicTheme} -- kept as an alias for existing callers. */
+export const setGuestTheme = setDeterministicTheme;
 
 export async function setAuthenticatedTheme(authState: AuthenticatedQaState, theme: Theme) {
   authState.theme = theme;
 }
 
-export async function setGuestTheme(page: Page, theme: Theme) {
-  await page.addInitScript((value: Theme) => {
-    window.localStorage.setItem("tomverse_theme_preference", value);
-  }, theme);
+/**
+ * Asserts the theme actually rendered matches what the test asked for --
+ * the dark/light class, the data-theme attribute, and color-scheme all
+ * independently reflect `lib/theme.ts`'s applyThemePreference, so a test
+ * can never silently pass (or produce a mislabeled golden) if the
+ * requested theme never actually got applied.
+ */
+export async function expectThemeApplied(page: Page, theme: Theme) {
+  await expect(async () => {
+    const state = await page.evaluate(() => ({
+      hasDarkClass: document.documentElement.classList.contains("dark"),
+      dataTheme: document.documentElement.dataset.theme,
+      colorScheme: document.documentElement.style.colorScheme,
+    }));
+    expect(state.hasDarkClass).toBe(theme === "dark");
+    expect(state.dataTheme).toBe(theme);
+    expect(state.colorScheme).toBe(theme === "dark" ? "dark" : "light");
+  }).toPass({ timeout: 10_000 });
+}
+
+/**
+ * Suppresses one-time, dismissible UI (upsell prompts, tour overlays) that
+ * this suite's fixtures don't set out to test but that the real app would
+ * otherwise show non-deterministically on top of the state under test --
+ * e.g. maybeShowValueUpgradePrompt in ChatPageClient.tsx auto-opens a Pro
+ * upsell after the *first* successful comparison on a Free-plan account,
+ * which would otherwise paint over every "success" golden. Scoped to this
+ * suite's own enterConversation() only (not app-fixtures.ts's
+ * mockAuthenticatedApi, which upgrade-discovery.spec.ts also uses and
+ * whose tests specifically exercise this same prompt) so nothing here
+ * changes behavior for any other spec file.
+ */
+export async function suppressTransientUi(page: Page) {
+  await page.addInitScript(() => {
+    window.localStorage.setItem("tomverse_value_upgrade_prompt_seen_v1", "1");
+    window.localStorage.setItem("tomverse_guest_save_compare_seen_v1", "1");
+    window.localStorage.setItem("tomverse_guest_save_review_seen_v1", "1");
+  });
 }
 
 /**
@@ -341,6 +402,64 @@ export async function submitComposer(page: Page, text: string, viewportWidth: nu
   } else {
     await textarea.press("Enter");
   }
+}
+
+// Testids for dismissible/one-time overlays that suppressTransientUi()
+// pre-suppresses via localStorage but that could still legitimately be the
+// subject of a given test (e.g. the insufficient-credits modal). Every
+// golden capture verifies none of these are present unless the test
+// explicitly allows them, so a fixture regression that lets one of these
+// slip through can never silently bake itself into a golden image instead
+// of failing loudly.
+const TRANSIENT_UI_TESTIDS = ["value-upgrade-prompt", "usage-limit-modal"] as const;
+
+export async function expectNoUnexpectedTransientUi(
+  page: Page,
+  allow: Array<(typeof TRANSIENT_UI_TESTIDS)[number]> = []
+) {
+  for (const testid of TRANSIENT_UI_TESTIDS) {
+    if (allow.includes(testid)) continue;
+    await expect(page.getByTestId(testid)).toHaveCount(0);
+  }
+}
+
+// Measured against this suite's own committed goldens across repeated runs
+// on the same Chromium build: real anti-aliasing/sub-pixel font-hinting
+// noise between otherwise-identical renders tops out at ~0.001 (0.1%) of
+// total pixels. Set just above that floor -- tight enough that a genuinely
+// missing state badge, wrong color, or shifted CTA (which moves far more
+// than 0.1% of pixels) still fails, loose enough to absorb that noise
+// without a manual per-test override. See tests/e2e/README or the UI-P1-03
+// completion report for the measurement methodology.
+export const GOLDEN_MAX_DIFF_PIXEL_RATIO = 0.0015;
+
+export type StableScreenshotOptions = {
+  theme: Theme;
+  maxDiffPixelRatio?: number;
+  allowTransientUi?: Array<(typeof TRANSIENT_UI_TESTIDS)[number]>;
+};
+
+/**
+ * Single choke point for every golden capture in this suite: re-verifies
+ * the theme actually applied (expectThemeApplied), confirms no
+ * unsuppressed transient overlay snuck in (expectNoUnexpectedTransientUi),
+ * then captures with animations explicitly disabled (belt-and-suspenders
+ * with freezeAnimations -- Playwright's own default for toHaveScreenshot,
+ * made explicit here since it's the mechanism this suite actually depends
+ * on for CSP-safe animation freezing at capture time) and the shared,
+ * measured diff tolerance.
+ */
+export async function expectStableScreenshot(
+  page: Page,
+  name: string,
+  { theme, maxDiffPixelRatio, allowTransientUi }: StableScreenshotOptions
+) {
+  await expectThemeApplied(page, theme);
+  await expectNoUnexpectedTransientUi(page, allowTransientUi);
+  await expect(page).toHaveScreenshot(name, {
+    animations: "disabled",
+    maxDiffPixelRatio: maxDiffPixelRatio ?? GOLDEN_MAX_DIFF_PIXEL_RATIO,
+  });
 }
 
 export { mockAuthenticatedApi };
