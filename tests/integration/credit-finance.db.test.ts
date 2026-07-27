@@ -336,6 +336,7 @@ test("stores Mistral cached-token usage and the request-time pricing snapshot", 
   assert.equal(finalized.settledOutputTokens, 30);
   assert.equal(finalized.settledCostMicroUsd, BigInt(392));
   assert.deepEqual(finalized.pricingSnapshot, {
+    costSource: "token_estimate",
     inputTokens: 1_013,
     uncachedInputTokens: 5,
     cachedInputTokens: 1_008,
@@ -356,6 +357,173 @@ test("stores Mistral cached-token usage and the request-time pricing snapshot", 
   assert.equal(providerUsage.uncachedInputCostMicroUsd, 10);
   assert.equal(providerUsage.cachedInputCostMicroUsd, 202);
   assert.equal(providerUsage.outputCostMicroUsd, 180);
+  await releaseChatAccess(acquired.leaseId);
+});
+
+// The snapshot above is the token_estimate case: Tomverse priced the turn from
+// token counts. Perplexity instead reports what the call actually cost, and
+// that number must win while the token estimate survives alongside it for
+// audit -- billing on an estimate we know to be superseded is the failure this
+// guards.
+test("settles Perplexity from the provider-reported cost and keeps the token estimate", async () => {
+  const user = await createUser();
+  const acquired = await acquireChatAccess(
+    chatAccess(user, 100),
+    chatBudget({
+      credits: 5,
+      inputTokens: 1_000,
+      outputTokens: 100,
+      inputRate: 3,
+      outputRate: 15,
+      provider: "perplexity",
+    })
+  );
+
+  await settleChatUsage(
+    acquired.usageReservation,
+    { inputTokens: 1_000, outputTokens: 100, outcome: "completed" },
+    {
+      providerUsageSnapshot: {
+        source: "perplexity_response_usage",
+        currency: "USD",
+        totalCostMicroUsd: 7_777,
+        inputTokensCostMicroUsd: 2_222,
+        outputTokensCostMicroUsd: 3_333,
+        reasoningTokensCostMicroUsd: null,
+        requestCostMicroUsd: null,
+        citationTokensCostMicroUsd: null,
+        searchQueriesCostMicroUsd: null,
+        promptTokens: 1_000,
+        completionTokens: 100,
+        totalTokens: 1_100,
+        reasoningTokens: null,
+        citationTokens: null,
+        searchQueries: null,
+        searchContextSize: null,
+      },
+    }
+  );
+
+  const finalized = await prisma.chatCreditReservation.findUniqueOrThrow({
+    where: { id: acquired.usageReservation.reservationId },
+  });
+  // Billed on the provider's number (7_777), not the 4_500 token estimate.
+  assert.equal(finalized.settledCostMicroUsd, BigInt(7_777));
+  assert.deepEqual(finalized.pricingSnapshot, {
+    costSource: "provider_response",
+    inputTokens: 1_000,
+    uncachedInputTokens: 1_000,
+    cachedInputTokens: 0,
+    outputTokens: 100,
+    inputUsdPerMillionTokens: 3,
+    outputUsdPerMillionTokens: 15,
+    cachedInputPriceMultiplier: 1,
+    uncachedInputCostMicroUsd: 2_222,
+    cachedInputCostMicroUsd: 0,
+    outputCostMicroUsd: 3_333,
+    tokenEstimatedTotalCostMicroUsd: 4_500,
+    totalCostMicroUsd: 7_777,
+  });
+
+  await releaseChatAccess(acquired.leaseId);
+});
+
+// Native web search bills a per-call provider fee on top of the token cost.
+// The snapshot has to keep the two separable, and the total has to be their
+// sum -- a search fee folded into tokenCostMicroUsd would be invisible to
+// per-feature cost analysis.
+test("adds native web search cost on top of the token cost and keeps both separable", async () => {
+  const user = await createUser();
+  const acquired = await acquireChatAccess(
+    chatAccess(user, 100),
+    chatBudget({
+      credits: 5,
+      inputTokens: 800,
+      outputTokens: 200,
+      inputRate: 5,
+      outputRate: 20,
+      provider: "openai",
+    })
+  );
+
+  await settleChatUsage(acquired.usageReservation, {
+    inputTokens: 800,
+    outputTokens: 200,
+    outcome: "completed",
+    searchExecuted: true,
+    searchCostMicroUsd: 25_000,
+    searchQueryCount: 3,
+  });
+
+  const finalized = await prisma.chatCreditReservation.findUniqueOrThrow({
+    where: { id: acquired.usageReservation.reservationId },
+  });
+  // tokens 800*5 + 200*20 = 8_000; search 25_000; total 33_000.
+  assert.equal(finalized.settledCostMicroUsd, BigInt(33_000));
+  assert.deepEqual(finalized.pricingSnapshot, {
+    costSource: "token_estimate",
+    inputTokens: 800,
+    uncachedInputTokens: 800,
+    cachedInputTokens: 0,
+    outputTokens: 200,
+    inputUsdPerMillionTokens: 5,
+    outputUsdPerMillionTokens: 20,
+    cachedInputPriceMultiplier: 1,
+    uncachedInputCostMicroUsd: 4_000,
+    cachedInputCostMicroUsd: 0,
+    outputCostMicroUsd: 4_000,
+    tokenCostMicroUsd: 8_000,
+    searchCostMicroUsd: 25_000,
+    searchQueryCount: 3,
+    totalCostMicroUsd: 33_000,
+  });
+
+  await releaseChatAccess(acquired.leaseId);
+});
+
+// The mirror image: when the provider ran no search, no search fee may appear
+// in the snapshot at all -- not a zeroed field, and nothing added to the total.
+test("charges no search cost when the provider ran no native web search", async () => {
+  const user = await createUser();
+  const acquired = await acquireChatAccess(
+    chatAccess(user, 100),
+    chatBudget({
+      credits: 5,
+      inputTokens: 800,
+      outputTokens: 200,
+      inputRate: 5,
+      outputRate: 20,
+      provider: "openai",
+    })
+  );
+
+  await settleChatUsage(acquired.usageReservation, {
+    inputTokens: 800,
+    outputTokens: 200,
+    outcome: "completed",
+    searchExecuted: false,
+    searchQueryCount: 0,
+  });
+
+  const finalized = await prisma.chatCreditReservation.findUniqueOrThrow({
+    where: { id: acquired.usageReservation.reservationId },
+  });
+  assert.equal(finalized.settledCostMicroUsd, BigInt(8_000));
+  assert.deepEqual(finalized.pricingSnapshot, {
+    costSource: "token_estimate",
+    inputTokens: 800,
+    uncachedInputTokens: 800,
+    cachedInputTokens: 0,
+    outputTokens: 200,
+    inputUsdPerMillionTokens: 5,
+    outputUsdPerMillionTokens: 20,
+    cachedInputPriceMultiplier: 1,
+    uncachedInputCostMicroUsd: 4_000,
+    cachedInputCostMicroUsd: 0,
+    outputCostMicroUsd: 4_000,
+    totalCostMicroUsd: 8_000,
+  });
+
   await releaseChatAccess(acquired.leaseId);
 });
 
