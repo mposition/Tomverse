@@ -40,6 +40,7 @@ try {
       generatedAt: result?.generatedAt,
       succeeded: result?.succeeded,
       failed: result?.failed,
+      noProbeModel: result?.noProbeModel,
       skipped: result?.skipped,
     });
   }

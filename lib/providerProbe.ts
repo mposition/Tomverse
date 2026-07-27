@@ -10,6 +10,7 @@ import {
 } from "@/lib/models";
 import {
   providerDiagnosticCode,
+  safeErrorMessage,
   safeErrorMetadata,
 } from "@/lib/providerErrorClassification";
 import { calculateProviderUsageCost } from "@/lib/providerUsageCost";
@@ -42,6 +43,15 @@ export type ProviderProbeOutcome =
       reason: ProviderProbeFailureReason;
       timedOut: boolean;
       diagnosticCode?: string;
+      /**
+       * The provider's own error text, truncated. Strictly for operator logs
+       * -- deliberately never persisted to ProviderProbeResult, which is
+       * public-safe by contract and keeps only the sanitized diagnosticCode.
+       * Without it a 400 is undiagnosable after the fact: the status code
+       * alone cannot distinguish "this model id is wrong" from "these
+       * request parameters are rejected".
+       */
+      errorMessage?: string;
       latencyMs: number;
     };
 
@@ -101,12 +111,26 @@ const totalPricePerMillionTokens = (model: AiModel) => {
 };
 
 /**
+ * Usage classes the probe must never call. The route documents the probe
+ * contract as "no tools/search/image/file/deep-research", and a
+ * search-backed model cannot honor it: sonar answers by running a web
+ * search and returning citations, so probing it both breaks that contract
+ * and bills a search request every cycle. Enforced here, in the one place
+ * that decides what gets called, rather than at the call site.
+ */
+const PROBE_EXCLUDED_USAGE_CLASSES = new Set(["research", "deep-research"]);
+
+/**
  * Picks one representative model to probe per provider: the cheapest
- * enabled "standard" model where one exists, or -- for the two providers
- * with no standard-tier option at all (moonshot, perplexity) -- the
- * cheapest enabled model regardless of tier. A probe's cost profile is
- * unrelated to the user-facing billing tier, so tier is only a preference
- * here, never a hard filter. An explicit env override always wins.
+ * enabled "standard" model where one exists, otherwise the cheapest
+ * enabled model of any tier that is still probe-safe. A probe's cost
+ * profile is unrelated to the user-facing billing tier, so tier is only a
+ * preference here, never a hard filter -- but PROBE_EXCLUDED_USAGE_CLASSES
+ * is a hard filter, and a provider left with no probe-safe model at all
+ * (perplexity, whose every model is search-backed) correctly yields
+ * undefined, so the caller records no_probe_model rather than reporting a
+ * false provider-health failure. An explicit env override still wins: it
+ * is the documented escape hatch for operators diagnosing one model.
  */
 export const getProbeModelFor = (provider: AiProvider): AiModel | undefined => {
   const overrideId = parseModelOverrides()[provider];
@@ -119,7 +143,10 @@ export const getProbeModelFor = (provider: AiProvider): AiModel | undefined => {
   }
 
   const enabledForProvider = AVAILABLE_MODELS.filter(
-    (model) => model.provider === provider && model.enabled
+    (model) =>
+      model.provider === provider &&
+      model.enabled &&
+      !PROBE_EXCLUDED_USAGE_CLASSES.has(model.usageClass)
   );
   if (enabledForProvider.length === 0) return undefined;
 
@@ -209,6 +236,7 @@ export async function runProviderProbe(
       reason: timedOut ? "timeout" : "provider_error",
       timedOut,
       diagnosticCode: providerDiagnosticCode("PROVIDER_PROBE_FAILED", error),
+      errorMessage: safeErrorMessage(error)?.slice(0, 300),
       latencyMs: Date.now() - startedAt,
     };
   }

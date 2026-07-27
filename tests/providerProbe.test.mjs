@@ -18,18 +18,26 @@ test("getProbeModelFor picks the cheapest enabled standard-tier model for a prov
   assert.equal(model.usageClass, "standard");
 });
 
-test("getProbeModelFor falls back to the cheapest enabled model when no standard tier exists (moonshot)", () => {
+test("getProbeModelFor returns no model for a provider whose every model is search-backed (perplexity)", () => {
+  // Regression: this previously fell back to sonar, so the probe sent a
+  // web-search request every cycle -- against the route's documented "no
+  // tools/search/image/file/deep-research" contract -- and the resulting
+  // HTTP 400 was recorded as a provider-health failure. Sustained, that
+  // crossed PROBE_INCIDENT_CONSECUTIVE_FAILURE_THRESHOLD and reported a
+  // healthy provider as a public incident. Returning undefined routes it to
+  // no_probe_model, which the caller deliberately does not count as
+  // evidence either way.
+  assert.equal(getProbeModelFor("perplexity"), undefined);
+});
+
+test("getProbeModelFor still probes a non-standard tier when that tier is probe-safe (moonshot)", () => {
+  // The exclusion is by usage class, not "anything non-standard": moonshot's
+  // only enabled model is advanced-tier but not search-backed, so it stays
+  // probeable.
   const model = getProbeModelFor("moonshot");
   assert.ok(model);
   assert.equal(model.provider, "moonshot");
-  // moonshot has no enabled "standard" model at all -- falling back to
-  // whatever is cheapest/enabled is the documented AUD-R001 behavior.
-});
-
-test("getProbeModelFor falls back to the cheapest enabled model when no standard tier exists (perplexity)", () => {
-  const model = getProbeModelFor("perplexity");
-  assert.ok(model);
-  assert.equal(model.provider, "perplexity");
+  assert.notEqual(model.usageClass, "standard");
 });
 
 test("getProbeModelFor honors PROVIDER_PROBE_MODEL_OVERRIDES for a provider", async () => {
@@ -94,6 +102,21 @@ test("runProviderProbe reports provider_error with a diagnostic code when the ca
     assert.equal(result.timedOut, false);
     assert.ok(result.diagnosticCode.includes("ECONNRESET"));
     assert.ok(result.diagnosticCode.includes("HTTP_503"));
+    assert.equal(result.errorMessage, "simulated provider outage");
+  }
+});
+
+test("runProviderProbe truncates the captured provider error message", async () => {
+  // Operator-log only, so it is bounded rather than public-safe-sanitized;
+  // the sanitized diagnosticCode remains the only thing persisted.
+  const result = await runProviderProbe("openai", {
+    generate: async () => {
+      throw new Error("x".repeat(1_000));
+    },
+  });
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.equal(result.errorMessage.length, 300);
   }
 });
 

@@ -150,6 +150,27 @@ export async function POST(request: Request) {
               : Promise.resolve(),
           ]);
         } else {
+          const errorClassification = classifyProbeError(
+            outcome.diagnosticCode,
+            outcome.timedOut
+          );
+          // Without this, a failed probe is invisible: it lands in
+          // ProviderProbeResult and nowhere else, so a provider failing every
+          // cycle for hours emits no log line and no Sentry event, and the
+          // first outward sign is the public status page flipping to an
+          // incident. Bounded at one line per failed provider per cycle, and
+          // carries no secrets -- diagnosticCode is already sanitized by
+          // providerDiagnosticCode().
+          console.warn("Provider probe failed:", {
+            provider,
+            modelId: outcome.modelId,
+            environment,
+            errorClassification,
+            diagnosticCode: outcome.diagnosticCode ?? null,
+            errorMessage: outcome.errorMessage ?? null,
+            timedOut: outcome.timedOut,
+            latencyMs: outcome.latencyMs,
+          });
           await Promise.all([
             recordProviderProbeFailure(provider),
             runId
@@ -165,10 +186,7 @@ export async function POST(request: Request) {
                       success: false,
                       timedOut: outcome.timedOut,
                       latencyMs: outcome.latencyMs,
-                      errorClassification: classifyProbeError(
-                        outcome.diagnosticCode,
-                        outcome.timedOut
-                      ),
+                      errorClassification,
                       diagnosticCode: outcome.diagnosticCode ?? null,
                     },
                   })
@@ -192,10 +210,15 @@ export async function POST(request: Request) {
       result: { succeeded, failed, noProbeModel, environment },
     });
 
+    // noProbeModel is surfaced alongside the other two so the cron log line
+    // accounts for every monitored provider. Without it a provider that has
+    // no probe-safe model simply disappears from the totals, which reads as
+    // "one fewer provider exists" rather than "one was not probed".
     return NextResponse.json({
       generatedAt: now.toISOString(),
       succeeded,
       failed,
+      noProbeModel,
       skipped: false,
     });
   } catch (error) {

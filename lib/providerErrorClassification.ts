@@ -78,6 +78,8 @@ export type ProbeErrorClassification =
     | "TIMEOUT"
     | "AUTH"
     | "RATE_LIMIT"
+    | "MODEL_NOT_FOUND"
+    | "BAD_REQUEST"
     | "SERVER_ERROR"
     | "NETWORK"
     | "UNKNOWN";
@@ -97,6 +99,15 @@ export const classifyProbeError = (
     if (!diagnosticCode) return "UNKNOWN";
     if (/429|RATE.?LIMIT/i.test(diagnosticCode)) return "RATE_LIMIT";
     if (/401|403|AUTH|KEY/i.test(diagnosticCode)) return "AUTH";
+    // Anchored on the HTTP_ prefix providerDiagnosticCode() emits, unlike the
+    // looser patterns above: a bare /404/ would also match digits that happen
+    // to appear in a provider error name or code. On this call path -- a
+    // chat-completion request naming exactly one model -- a 404 means the
+    // provider does not know that model id (registry drift), and a 400 means
+    // it rejected the request we sent. Both used to fall through to UNKNOWN,
+    // which is what made a config problem indistinguishable from an outage.
+    if (/HTTP_404/.test(diagnosticCode)) return "MODEL_NOT_FOUND";
+    if (/HTTP_400/.test(diagnosticCode)) return "BAD_REQUEST";
     if (/5\d\d/.test(diagnosticCode)) return "SERVER_ERROR";
     if (/TIMEOUT|ECONN|NETWORK/i.test(diagnosticCode)) return "NETWORK";
     return "UNKNOWN";

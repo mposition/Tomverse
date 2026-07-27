@@ -213,9 +213,11 @@ const providerSet = new Set<AiProvider>(
   AVAILABLE_MODELS.map((model) => model.provider)
 );
 
-export const MONITORED_PROVIDERS = Array.from(providerSet).filter(
-  (provider) => provider !== "zhipu" || AVAILABLE_MODELS.some((model) => model.provider === provider)
-);
+// providerSet is built from AVAILABLE_MODELS, so every provider in it is by
+// construction one that AVAILABLE_MODELS contains at least one model for.
+// The zhipu-specific guard that used to sit here restated exactly that
+// condition and could therefore never exclude anything.
+export const MONITORED_PROVIDERS = Array.from(providerSet);
 
 const positiveInteger = (value: string | undefined, fallback: number) => {
   const parsed = Number(value);
