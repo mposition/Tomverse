@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
-  CheckCircle2,
+  Check,
   LoaderCircle,
   RefreshCw,
   Search,
@@ -593,7 +593,7 @@ export function ComparisonReviewDialog({
                               onClick={() => setActiveReviewer(key)}
                               className={`rounded-xl border px-3 py-2 text-xs font-black transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-zinc-900 ${
                                 isActive
-                                  ? "border-indigo-600 bg-indigo-600 text-white dark:border-indigo-500 dark:bg-indigo-500"
+                                  ? "border-transparent bg-gradient-to-r from-cyan-600 via-blue-600 to-purple-600 text-white"
                                   : "border-transparent bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
                               }`}
                             >
@@ -793,11 +793,18 @@ export function ComparisonReviewDialog({
                   </section>
 
                   {activeResult.synthesis && (
-                    <section className="rounded-2xl border border-blue-200 bg-blue-50 p-4 dark:border-blue-900/60 dark:bg-blue-950/20">
-                      <h3 className="text-sm font-black text-blue-900 dark:text-blue-100">
+                    <section
+                      data-testid="ai-review-synthesis"
+                      className="rounded-2xl border border-tomverse-review-border bg-gradient-to-br from-cyan-50 via-blue-50 to-violet-50 p-4 dark:from-cyan-950/25 dark:via-blue-950/25 dark:to-violet-950/25"
+                    >
+                      <h3 className="flex items-center gap-1.5 text-sm font-black text-zinc-900 dark:text-zinc-100">
+                        <Sparkles
+                          className="h-3.5 w-3.5 shrink-0 text-tomverse-review-selected-text"
+                          aria-hidden="true"
+                        />
                         {t("chat.aiReviewSynthesis")}
                       </h3>
-                      <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-blue-950/80 dark:text-blue-100/80">
+                      <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-zinc-700 dark:text-zinc-300">
                         {activeResult.synthesis}
                       </p>
                     </section>
@@ -844,7 +851,12 @@ export function ComparisonReviewDialog({
                       >
                         <span className="flex items-center gap-2 text-sm font-black">
                           {mode === item.id && (
-                            <CheckCircle2 className="h-4 w-4 text-tomverse-review-selected-text" />
+                            <span
+                              aria-hidden="true"
+                              className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-cyan-600 via-blue-600 to-purple-600"
+                            >
+                              <Check className="h-2.5 w-2.5 text-white" strokeWidth={3} />
+                            </span>
                           )}
                           {t(item.label)}
                         </span>
