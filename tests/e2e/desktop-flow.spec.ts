@@ -42,7 +42,7 @@ test("account controls remain fully visible at a 150 percent scaled viewport", a
   expect(accountBox!.y + accountBox!.height).toBeLessThanOrEqual(720);
 });
 
-test("guest model selector opens a swap dialog once the 3-model cap is reached", async ({ page }) => {
+test("guest model selector opens a swap dialog once the 3-model cap is reached", { tag: "@smoke" }, async ({ page }) => {
   // Guests now default to a 3-model comparison (Gemini/GPT/Claude), already
   // at the selection cap, so picking another free model swaps a panel
   // instead of adding a 4th one or asking the guest to sign in.
@@ -83,7 +83,7 @@ test("model names remain readable in the narrow selector", async ({ page }) => {
   expect(styles.overflow).not.toBe("hidden");
 });
 
-test("model picker prioritizes exact credits and shows the final input estimate", async ({ page }) => {
+test("model picker prioritizes exact credits and shows the final input estimate", { tag: "@smoke" }, async ({ page }) => {
   // STG-F008: the picker opens on recommendations, so the exact-credit
   // assertions for the catalogue rows live one step in.
   const dialog = await openModelPickerCatalogue(page);

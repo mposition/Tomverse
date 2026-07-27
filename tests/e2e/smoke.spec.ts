@@ -12,7 +12,7 @@ test.beforeEach(async ({ page }) => {
   await mockPublicProofMetrics(page);
 });
 
-test("home renders the marketing site", async ({ page }) => {
+test("home renders the marketing site", { tag: "@smoke" }, async ({ page }) => {
   await page.goto("/");
   await expect(page.locator("main")).toBeVisible();
   await expect(page.locator("main")).toHaveCount(1);
@@ -47,7 +47,7 @@ test("home renders the marketing site", async ({ page }) => {
   ).toBeVisible();
 });
 
-test("signed-in homepage keeps the page visible and offers one continue action", async ({
+test("signed-in homepage keeps the page visible and offers one continue action", { tag: "@smoke" }, async ({
   page,
 }) => {
   await page.route("**/api/auth/session**", (route) =>
@@ -74,7 +74,7 @@ test("signed-in homepage keeps the page visible and offers one continue action",
   await expect(page.getByTestId("landing-guest-cta")).toHaveCount(0);
 });
 
-test("guest preview opens a 3-model comparison chat by default", async ({ page }, testInfo) => {
+test("guest preview opens a 3-model comparison chat by default", { tag: "@smoke" }, async ({ page }, testInfo) => {
   await prepareGuestPage(page, "en");
   await mockChatStream(page, "Guest preview answer");
   await page.goto("/chat?lang=en&entry=guest-preview");

@@ -1384,11 +1384,34 @@ export function ChatPageClient({
     }
     }, [sessionUserId]);
 
+    // The session bootstrap below only *reads* these; it must not re-run when
+    // their identity changes. ModelCatalogProvider refreshes the catalog once
+    // after mount, which rebuilds isEnabledModelId (and every memo derived
+    // from it, including newAccountDefaultSelectedModels). While those sat in
+    // the bootstrap's dependency array, that refresh re-ran the bootstrap and
+    // reset isInitialConversationResolved to false *after* the initial
+    // conversation had already been restored. Nothing set it back -- the
+    // restore effect below had already consumed isInitialSelectedRef and
+    // currentChatId -- so isModelSelectionReady, the mobile header's
+    // model-summary skeleton and the desktop model selector's disabled state
+    // stayed stuck until the tab was reloaded.
+    const isEnabledModelIdRef = useRef(isEnabledModelId);
+    const newAccountDefaultSelectedModelsRef = useRef(newAccountDefaultSelectedModels);
+    useEffect(() => {
+        isEnabledModelIdRef.current = isEnabledModelId;
+        newAccountDefaultSelectedModelsRef.current = newAccountDefaultSelectedModels;
+    }, [isEnabledModelId, newAccountDefaultSelectedModels]);
+
     useEffect(() => {
         if (sessionUserId) {
             queueMicrotask(() => setIsUserSettingsLoaded(false));
             queueMicrotask(() => setIsConversationsLoaded(false));
             queueMicrotask(() => setIsInitialConversationResolved(false));
+            // Re-arm the restore path in lockstep with the flags it feeds.
+            // This branch now only runs on a genuine identity change (sign-in,
+            // sign-out, account switch), where re-restoring is exactly right;
+            // leaving the ref latched was what made a reset unrecoverable.
+            isInitialSelectedRef.current = false;
             queueMicrotask(() => {
                 void fetchConversations();
             });
@@ -1404,12 +1427,12 @@ export function ChatPageClient({
                     return res.json();
                 })
                 .then((data) => {
-                    if (data && isEnabledModelId(data.defaultModel)) {
+                    if (data && isEnabledModelIdRef.current(data.defaultModel)) {
                         setUserDefaultEngine(data.defaultModel);
                         if (!currentChatIdRef.current) {
                             setSelectedModels(
                                 data.isNewAccount
-                                    ? newAccountDefaultSelectedModels
+                                    ? newAccountDefaultSelectedModelsRef.current
                                     : [data.defaultModel]
                             );
                         }
@@ -1469,14 +1492,7 @@ export function ChatPageClient({
         } else if (status !== "loading") {
             queueMicrotask(() => setIsUserSettingsLoaded(true));
         }
-    }, [
-        fetchConversations,
-        isEnabledModelId,
-        newAccountDefaultSelectedModels,
-        sessionUserId,
-        setLang,
-        status,
-    ]);
+    }, [fetchConversations, sessionUserId, setLang, status]);
 
     const handleNewChat = () => {
         localComparisonResponsesRef.current.clear();
@@ -1660,16 +1676,40 @@ export function ChatPageClient({
   );
 
     useEffect(() => {
+        // Anything below this point decides the initial conversation one way
+        // or another, so every path must end with
+        // isInitialConversationResolved true. Only genuinely
+        // not-yet-knowable states may return without resolving it -- an
+        // early return that resolves nothing is what previously stranded
+        // isModelSelectionReady (and the mobile model-summary skeleton) for
+        // the whole session.
+        if (isGuestMode || !isUserSettingsLoaded || !isConversationsLoaded) return;
+        // conversations.length === 0 is only meaningful once the list has
+        // actually loaded; the new-account carryover effect above owns that
+        // case (and its guest-import handoff).
+        if (conversations.length === 0 || pendingGuestImportRef.current) return;
+
+        const params = new URLSearchParams(window.location.search);
+        const hasUrlSelectionPreset = params.has("models") || params.has("prompt");
+        // A ?models=/?prompt= landing takes its selection from the URL rather
+        // than from a restore, so the comparison-preset effect owns the first
+        // resolution. After it has applied (or declined) the preset, a later
+        // pass -- e.g. an account switch re-running the bootstrap -- resolves
+        // here instead, because that effect never runs twice.
+        if (hasUrlSelectionPreset && !comparisonPresetAppliedRef.current) return;
+
         if (
-            isGuestMode ||
-            !isUserSettingsLoaded ||
-            conversations.length === 0 ||
             currentChatId ||
             isInitialSelectedRef.current ||
             comparisonPresetRequestedRef.current ||
-            new URLSearchParams(window.location.search).has("models") ||
-            new URLSearchParams(window.location.search).has("prompt")
-        ) return;
+            hasUrlSelectionPreset
+        ) {
+            // A conversation is already open, an initial selection already
+            // ran, or the URL already decided the models. No restore will
+            // happen, so the selection is final and readiness must resolve.
+            queueMicrotask(() => setIsInitialConversationResolved(true));
+            return;
+        }
 
         isInitialSelectedRef.current = true;
 
@@ -1699,7 +1739,13 @@ export function ChatPageClient({
             setIsInitialConversationResolved(true);
         });
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [conversations, currentChatId, isGuestMode, isUserSettingsLoaded]);
+    }, [
+        conversations,
+        currentChatId,
+        isConversationsLoaded,
+        isGuestMode,
+        isUserSettingsLoaded,
+    ]);
 
     const handleLock = async (id: string, password: string) => {
         try {
@@ -1967,9 +2013,21 @@ export function ChatPageClient({
         .filter(isEnabledModelId)
     ).slice(0, APP_DEFAULTS.maxSelectedModels);
     const requestedPrompt = (params.get("prompt") || "").trim().slice(0, 1200);
+    // Captured before the params are stripped below: the restore effect keys
+    // its stand-down on the raw presence of these keys, so readiness has to be
+    // handed back on exactly the same condition.
+    const hadUrlSelectionPreset = params.has("models") || params.has("prompt");
 
     if (requestedModels.length === 0 && !requestedPrompt) {
       comparisonPresetAppliedRef.current = true;
+      // A ?models=/?prompt= URL that carries nothing usable still makes the
+      // restore effect above stand down, so this effect has to hand
+      // readiness back rather than leave it unresolved. Deferred like every
+      // other bootstrap transition in this file so it never cascades a
+      // render from inside the effect body.
+      if (hadUrlSelectionPreset) {
+        queueMicrotask(() => setIsInitialConversationResolved(true));
+      }
       return;
     }
 
@@ -2002,6 +2060,10 @@ export function ChatPageClient({
       if (requestedPrompt) {
         setInputValue((current) => current || requestedPrompt);
       }
+      // The models are applied in this same microtask, so resolving here
+      // never paints a stale count before correcting it -- which is the whole
+      // reason the model-summary skeleton exists.
+      if (hadUrlSelectionPreset) setIsInitialConversationResolved(true);
 
       params.delete("models");
       params.delete("prompt");

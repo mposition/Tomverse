@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
 
-test("desktop exposes stable QA contracts", async ({ page }) => {
+test("desktop exposes stable QA contracts", { tag: "@smoke" }, async ({ page }) => {
   await prepareGuestPage(page, "en");
   await page.setViewportSize({ width: 1366, height: 768 });
   await page.goto("/chat");
@@ -94,7 +94,7 @@ test("chat workspace guide honors the language passed from the app", async ({ pa
   await expect(localizedHelpLinks.last()).toBeVisible();
 });
 
-test("mobile exposes stable QA contracts", async ({ page }) => {
+test("mobile exposes stable QA contracts", { tag: "@smoke" }, async ({ page }) => {
   await prepareGuestPage(page, "en");
   await page.setViewportSize({ width: 412, height: 915 });
   await page.goto("/chat");
