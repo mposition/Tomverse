@@ -192,9 +192,12 @@ test.describe("value-moment upgrade prompt", () => {
 
     // Error-toned toasts render role="alert" (assertive) rather than
     // role="status" (polite), so screen readers announce them immediately.
-    await expect(page.getByRole("alert")).toContainText(
-      "오늘 처리할 수 있는 한도를 넘었습니다"
-    );
+    // Filtered by text to disambiguate from Next.js's own role="alert"
+    // route announcer (id="__next-route-announcer__").
+    const toast = page
+      .getByRole("alert")
+      .filter({ hasText: "오늘 처리할 수 있는 한도를 넘었습니다" });
+    await expect(toast).toBeVisible();
     await expect.poll(() => providerRequestCount).toBe(0);
   });
 
