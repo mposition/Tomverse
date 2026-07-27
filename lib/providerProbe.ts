@@ -56,7 +56,13 @@ export type ProviderProbeOutcome =
     };
 
 const PROBE_TIMEOUT_MS = 10_000;
-const PROBE_MAX_OUTPUT_TOKENS = 8;
+// 8 was below OpenAI's floor -- staging returned "Invalid 'max_output_tokens':
+// integer below minimum value. Expected a value >= 16, but got 8 instead."
+// every cycle. Set above that minimum rather than at it, since the budget also
+// has to absorb reasoning tokens on models that emit them. The probe only
+// needs the single word OK back, so the extra headroom costs nothing
+// measurable against the daily cap.
+const PROBE_MAX_OUTPUT_TOKENS = 32;
 
 export const DEFAULT_PROBE_DAILY_COST_CAP_USD = 1;
 
@@ -210,7 +216,12 @@ export async function runProviderProbe(
       model: getActiveAiModel(model),
       system: PROBE_SYSTEM_PROMPT,
       prompt: PROBE_PROMPT,
-      temperature: 0,
+      // Deliberately no temperature: staging returned "invalid temperature:
+      // only 1 is allowed for this model" from moonshot every cycle, and a
+      // probe has no need to pin sampling -- it asserts that the call
+      // succeeds, not that the text is reproducible. Omitting the parameter
+      // leaves each provider on its own default and removes a whole class of
+      // provider-specific rejection.
       maxOutputTokens: PROBE_MAX_OUTPUT_TOKENS,
       maxRetries: 0,
       abortSignal: AbortSignal.timeout(PROBE_TIMEOUT_MS),

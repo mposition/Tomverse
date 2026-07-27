@@ -4,7 +4,7 @@
 - 대상: `mposition/Tomverse` — AUD-R001 합성 프로바이더 프로브 (`lib/providerProbe.ts`, `app/api/internal/provider-probe/check/route.ts`, `lib/providerMonitoring.ts`)
 - 관측 구간: staging 프로브 사이클 2026-07-27 20:10Z ~ 21:10Z (10분 간격 7사이클) + 직전 1시간 `ProviderProbeResult` 집계 (6사이클)
 - 데이터 출처: Railway MCP (`get-logs`, `list-deployments`, `list-services`), staging Postgres 직접 조회 결과(운영자 제공), Sentry MCP, 리포지토리 코드
-- 이 문서는 **감사 보고서이며, 여기서 기술한 수정은 이미 구현·커밋되었습니다** (`469d5aa`, `dcac85f`). 미해결 항목은 6장에 분리했습니다.
+- 이 문서는 **감사 보고서이며, 여기서 기술한 수정은 이미 구현·커밋·병합되었습니다** (`469d5aa`, `dcac85f`, 및 파라미터 수정 커밋). 미해결 항목은 6장에 분리했습니다.
 
 > **표기 규칙**
 > - `[측정]` = staging 실데이터(로그·DB·Railway·Sentry)에서 확인된 값
@@ -23,8 +23,8 @@ staging에서 11개 프로바이더 중 5개가 매 10분 사이클마다 실패
 |---|---|---|---|
 | perplexity | `sonar` | 6/6 실패 HTTP 400 | **프로브 결함** — 검색 모델을 호출 |
 | groq | `meta-llama/llama-4-scout-17b-16e-instruct` | 6/6 실패 HTTP 404 | **레지스트리 드리프트** — 실사용자도 영향 |
-| openai | `gpt-5.4-mini` | 6/6 실패 HTTP 400 | **프로브 결함** — 요청 파라미터 거부 |
-| moonshot | `kimi-k2.7-code` | 6/6 실패 HTTP 400 | **프로브 결함** — 요청 파라미터 거부 |
+| openai | `gpt-5.4-mini` | 6/6 실패 HTTP 400 | **프로브 결함** — `maxOutputTokens: 8`이 최소값 16 미만 |
+| moonshot | `kimi-k2.7-code` | 6/6 실패 HTTP 400 | **프로브 결함** — `temperature: 0` 거부 |
 | google | `gemini-3.5-flash` | 4 성공 / 503·타임아웃 각 1 | 실제 프로바이더 불안정 (정상 동작) |
 | 나머지 6개 | — | 6/6 성공 | 정상 |
 
@@ -120,6 +120,17 @@ Railway `Provider Probe` 서비스(staging) 로그, 7사이클 연속:
 
 `providerSet`은 `AVAILABLE_MODELS`에서 생성되므로 zhipu 가드가 검사하던 조건은 항상 참이었고, 이 필터는 아무것도 제외할 수 없었습니다 `[코드]`. 제거 후 모니터링 대상이 11개로 동일함을 실측 확인했습니다.
 
+### F-07 (High) — 프로브 요청 파라미터가 일부 프로바이더에서 거부됨
+
+`temperature: 0`과 `maxOutputTokens: 8`이 두 프로바이더에서 각각 거부됐습니다 `[측정]`.
+
+- openai: `Invalid 'max_output_tokens': integer below minimum value. Expected a value >= 16, but got 8 instead.` — 상수 8이 OpenAI 최소값 16 미만.
+- moonshot: `invalid temperature: only 1 is allowed for this model` — `kimi-k2.7-code`가 기본값 외 temperature를 거부.
+
+F-01·F-02와 동일한 성격입니다. 프로바이더는 정상인데 프로브가 보낸 요청이 잘못됐고, 그 결과가 프로바이더 건강 신호로 집계됐습니다. 이 항목은 **F-03/F-04 수정이 없었다면 규명 자체가 불가능했습니다** — 두 건 모두 수정 전에는 진단 메시지 없는 `UNKNOWN`이었습니다.
+
+이 발견은 본 감사에서 **F-03/F-04 수정이 실제로 값을 냈다는 증거**이기도 합니다. 관측성 수정을 먼저 넣지 않았다면 두 건은 지금도 원인 불명으로 남아 있었을 것입니다.
+
 ---
 
 ## 4. 구현한 수정
@@ -139,41 +150,61 @@ Railway `Provider Probe` 서비스(staging) 로그, 7사이클 연속:
 - **비전 기능 손실을 명시합니다.** groq 카탈로그에 현재 비전 지원 모델이 없어 `apiModel` 교체가 불가능했고, `llama-3-3`는 텍스트 전용입니다. 이는 마이그레이션이 아니라 **groq 라인업에서 이미지 입력이 제거되는 변경**입니다.
 - 후속 참조 정리: 비교 리뷰어 기본 패널이 groq 항목을 유지하도록 `llama-3-3`로 교체, multimodal 추천 목록에서 제거, 첨부 e2e 테스트를 guest 등급 비전 모델 `gemini-2-5-flash`로 재지정.
 
+### 세 번째 커밋 — 프로브 요청 파라미터 (F-07)
+
+병합 후 staging 로그가 규명해준 두 파라미터를 수정했습니다.
+
+- `PROBE_MAX_OUTPUT_TOKENS` 8 → 32. 최소값 16에 맞추지 않고 여유를 둔 것은, 이 예산이 reasoning 토큰까지 흡수해야 하는 모델이 있기 때문입니다.
+- `temperature: 0` 제거. 프로브는 호출 성공 여부만 확인하므로 샘플링을 고정할 이유가 없고, 파라미터를 생략하면 각 프로바이더 기본값을 따라가 이 계열의 거부가 통째로 사라집니다.
+- 두 값을 고정하는 회귀 테스트 추가 — 실제 staging 실패 문구를 주석에 남겨 재발 시 맥락이 유지되도록 했습니다.
+
 ---
 
 ## 5. 검증 결과
 
 | 항목 | 결과 |
 |---|---|
-| 유닛 테스트 (`npm run test:unit`) | **493개 전부 통과** |
+| 유닛 테스트 (`npm run test:unit`) | **494개 전부 통과** |
 | 타입체크 (`next typegen && tsc --noEmit`) | 통과 (exit 0) |
 | ESLint (`--max-warnings=0`) | 통과 (exit 0) |
 | 프로브 모델 선택 (11개 프로바이더 실행 검증) | perplexity → `no_probe_model`, groq → `llama-3.1-8b-instant`(카탈로그 `available`), 나머지 9개 변동 없음 |
 | `MONITORED_PROVIDERS` | 11개 유지 |
 
-수정 후 예상되는 사이클 출력은 `succeeded 7~8 / failed 2~3 / noProbeModel 1`입니다 `[추정]` — perplexity의 허위 실패가 제거되고, groq이 정상 모델로 전환되며, openai·moonshot 2건과 google 간헐 실패만 남습니다.
+### 5.1 staging 실환경 재검사 `[측정]`
 
-**staging 재검사 제약:** staging은 `develop`에서 배포되고 본 수정은 작업 브랜치에만 있으므로, **실제 staging 재검사는 머지 이후에만 가능합니다.** 본 보고서의 검증은 로컬 동작 검증까지입니다.
+병합(`bb0e7c7`) 후 staging 배포 완료(23:32:00Z) 기준 첫 사이클:
+
+```
+23:40:55Z  succeeded: 8, failed: 2, noProbeModel: 1
+```
+
+수정 전 `succeeded: 6, failed: 5`에서 바뀐 내역이 전부 의도한 대로입니다 — perplexity가 허위 실패에서 `noProbeModel`로 이동(집계에서 사라지지 않고 명시), groq이 `llama-3.1-8b-instant`로 정상 성공, 남은 실패는 openai·moonshot 2건.
+
+> 참고: 직전 23:30:48Z 사이클은 `succeeded: 7, failed: 4, noProbeModel: undefined`를 기록했으나 **검증 근거가 아닙니다.** 크론 컨테이너만 새 빌드였고 호출 대상 웹 서비스는 아직 구 빌드였습니다(웹 배포 완료 23:32:00Z). `noProbeModel: undefined`가 그 증거입니다.
+
+### 5.2 F-03/F-04 수정이 실제로 원인을 규명함 `[측정]`
+
+새로 추가한 실패 로그가 같은 사이클에서 남긴 내용이 남은 2건을 그대로 종결시켰습니다:
+
+```
+provider: 'openai',   errorClassification: 'BAD_REQUEST',
+errorMessage: "Invalid 'max_output_tokens': integer below minimum value. Expected a value >= 16, but got 8 instead."
+
+provider: 'moonshot', errorClassification: 'BAD_REQUEST',
+errorMessage: 'invalid temperature: only 1 is allowed for this model'
+```
+
+수정 전이라면 두 건 모두 `UNKNOWN` 분류에 진단 메시지 없이 DB에만 남았을 내용입니다.
 
 ---
 
 ## 6. 미해결 항목
 
-### 6.1 openai / moonshot의 HTTP 400 — 파라미터 문제로 좁혀졌으나 미확정
-
-두 건 모두 **모델 드리프트가 아님이 확정**됐습니다. moonshot은 카탈로그가 `available`로 확인했고 `[측정]`, openai `gpt-5-4-mini`는 `DEFAULT_MODEL_ID`(`models.ts:132`)이므로 이 모델이 실제로 죽었다면 제품 기본 모델이 통째로 정지한 상태여야 합니다 `[코드]`. 따라서 실패 원인은 **프로브의 요청 형태**입니다 `[추정]`.
-
-후보 파라미터는 `temperature: 0`과 `maxOutputTokens: 8` 두 가지입니다 `[코드]`. 다만 동일한 파라미터로 xai·qwen·zhipu·deepseek·mistral이 정상 성공하므로, 파라미터 단독으로는 차이를 설명하지 못합니다.
-
-관련 정황으로, `getActiveAiModel`에서 **openai만 `createOpenAI(configuration)(model.apiModel)` 기본 호출**을 쓰고 나머지 10개는 모두 `.chat()`을 명시합니다 `[코드]`. `@ai-sdk/openai` 4.0.20의 타입 시그니처상 이 기본 호출은 `(modelId: OpenAIResponsesModelId)` — 즉 **Responses API**입니다 `[코드]`. openai만 다른 API 표면을 타는 것이 400의 유력한 배경입니다 `[추정]`. moonshot은 `.chat()`이므로 이 설명이 적용되지 않아 별개 원인으로 남습니다.
-
-**해결 경로:** 커밋 `469d5aa`가 추가한 프로바이더 오류 메시지 로깅이 정확히 이 판별을 위한 것입니다. 머지 후 첫 사이클의 `Provider probe failed:` 로그에 거부된 파라미터명이 그대로 남으므로, 그 시점에 1줄 수정으로 종결 가능합니다.
-
-### 6.2 카탈로그 → 레지스트리 자동 반영 (F-05)
+### 6.1 카탈로그 → 레지스트리 자동 반영 (F-05)
 
 탐지·통보는 동작하지만 강제력이 없습니다. `likely_deprecated` 상태가 일정 기간 지속된 모델을 자동으로 비활성화하거나, 최소한 배포 시점에 실패시키는 체크가 없습니다. 이는 감사 범위를 넘는 기능 추가이므로 별도 과제로 제안합니다.
 
-### 6.3 groq 비전 모델 공백
+### 6.2 groq 비전 모델 공백
 
 `llama-4-scout` 폐기로 groq에 이미지 입력 모델이 없습니다. 카탈로그의 groq `candidate` 항목(`qwen/qwen3.6-27b`, `openai/gpt-oss-120b` 등)에 비전 지원 모델이 있는지는 각 모델의 실제 입력 능력 확인이 필요하며, 이 환경에서는 조회가 불가능했습니다.
 

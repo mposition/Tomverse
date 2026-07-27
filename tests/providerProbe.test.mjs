@@ -87,6 +87,31 @@ test("runProviderProbe succeeds using the injected generate dependency, regardle
   }
 });
 
+test("runProviderProbe sends a request shape every provider accepts", async () => {
+  // Both assertions pin an actual staging failure. OpenAI rejected the cycle
+  // with "Invalid 'max_output_tokens': integer below minimum value. Expected a
+  // value >= 16, but got 8 instead.", and moonshot with "invalid temperature:
+  // only 1 is allowed for this model" -- each recorded as a provider-health
+  // failure for a fault that was entirely on the probe's side.
+  let received;
+  await runProviderProbe("openai", {
+    generate: async (options) => {
+      received = options;
+      return { text: "OK", usage: { inputTokens: 10, outputTokens: 1 } };
+    },
+  });
+  assert.ok(received);
+  assert.ok(
+    received.maxOutputTokens >= 16,
+    `maxOutputTokens must clear OpenAI's minimum of 16, got ${received.maxOutputTokens}`
+  );
+  assert.equal(
+    "temperature" in received,
+    false,
+    "temperature must stay unset so providers that allow only their default are not rejected"
+  );
+});
+
 test("runProviderProbe reports provider_error with a diagnostic code when the call throws", async () => {
   const result = await runProviderProbe("openai", {
     generate: async () => {
