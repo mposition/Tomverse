@@ -167,6 +167,7 @@ export const de = {
         googleDriveDescription: "Docs, Sheets, Slides",
         googleDriveError: "Die Google-Drive-Datei konnte nicht angehängt werden. Bitte erneut versuchen.",
         moreActions: "Weitere Aktionen",
+        openChatMenu: "Chat-Menü öffnen",
         uploadFromComputer: "Vom Computer auswählen",
         toolsWebSearch: "Websuche",
         toolsWebSearchDescription: "Wählen Sie, wann diese Unterhaltung das Web durchsucht",

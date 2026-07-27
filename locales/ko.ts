@@ -184,6 +184,7 @@ export const ko = {
         googleDriveDescription: "문서, 스프레드시트, 프레젠테이션",
         googleDriveError: "Google Drive 파일을 첨부하지 못했습니다. 다시 시도해 주세요.",
         moreActions: "더 많은 작업",
+        openChatMenu: "대화 메뉴 열기",
         uploadFromComputer: "컴퓨터에서 선택",
         toolsWebSearch: "웹 검색",
         toolsWebSearchDescription: "이 대화에서 웹 검색을 사용할 시점을 선택하세요",

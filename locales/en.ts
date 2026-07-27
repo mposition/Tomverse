@@ -184,6 +184,7 @@ export const en = {
         googleDriveDescription: "Docs, Sheets, Slides",
         googleDriveError: "The Google Drive file could not be attached. Please try again.",
         moreActions: "More actions",
+        openChatMenu: "Open chat menu",
         uploadFromComputer: "Choose from your computer",
         toolsWebSearch: "Web search",
         toolsWebSearchDescription: "Choose when this conversation searches the web",

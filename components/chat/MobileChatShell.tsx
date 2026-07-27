@@ -436,20 +436,40 @@ export function MobileChatShell({
     const status = modelStatuses[modelId];
     return status === "responding" || status === "loading" || status === "error";
   });
+  // The status row used to render unconditionally, so a signed-in new chat --
+  // no guest badge, no lock, no share, nothing responding -- still paid its
+  // margin plus min-height (~30px) for an empty strip. One boolean decides
+  // whether the row exists at all; hiding it with CSS would keep the same
+  // reserved box and leave the badges in the accessibility tree.
+  const hasHeaderStatus =
+    isGuestMode ||
+    isCurrentLocked ||
+    isCurrentShared ||
+    (isAnyWorkingOrError && selectedModels.length > 1);
+  // With a status row the row's own bottom edge is the last content, and the
+  // badges carry their own padding; without one the model summary button ends
+  // the header and needs a real gap of its own before the divider. Its
+  // -my-0.5 pull means the visible gap is this padding minus 2px, so pb-3
+  // lands in the 8-12px band. Kept as one token instead of two ad-hoc values.
+  const headerBottomPadding = hasHeaderStatus ? "pb-1.5" : "pb-3";
 
   return (
     <main
       data-testid="mobile-chat-shell"
       className="flex h-[100dvh] w-full max-w-full flex-col overflow-hidden bg-white text-[13px] text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100"
     >
-      <header className="min-w-0 shrink-0 overflow-hidden border-b border-zinc-200 bg-white px-3 pb-1.5 pt-[calc(0.45rem+env(safe-area-inset-top))] dark:border-zinc-800 dark:bg-zinc-950">
+      <header
+        data-testid="mobile-chat-header"
+        data-has-status={hasHeaderStatus ? "true" : "false"}
+        className={`min-w-0 shrink-0 overflow-hidden border-b border-zinc-200 bg-white px-3 pt-[calc(0.45rem+env(safe-area-inset-top))] dark:border-zinc-800 dark:bg-zinc-950 ${headerBottomPadding}`}
+      >
         <div className="flex items-center gap-2">
         <button
           type="button"
           onClick={(event) => openDrawer(event.currentTarget)}
           data-testid="mobile-sidebar-open"
           className="flex h-11 w-11 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-50 text-zinc-600 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
-          aria-label={t("chat.moreActions")}
+          aria-label={t("chat.openChatMenu")}
         >
           <Menu className="h-5 w-5" />
         </button>
@@ -530,7 +550,11 @@ export function MobileChatShell({
           </button>
         )}
         </div>
-        <div className="mt-1.5 flex min-h-6 max-w-full gap-1.5 overflow-x-auto overscroll-x-contain">
+        {hasHeaderStatus && (
+        <div
+          data-testid="mobile-header-status-row"
+          className="mt-1.5 flex min-h-6 max-w-full gap-1.5 overflow-x-auto overscroll-x-contain"
+        >
           {isGuestMode && (
             <button
               type="button"
@@ -569,6 +593,7 @@ export function MobileChatShell({
             </span>
           )}
         </div>
+        )}
       </header>
 
       <ProviderStatusBanner
