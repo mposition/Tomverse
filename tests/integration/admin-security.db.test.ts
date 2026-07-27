@@ -47,8 +47,16 @@ const createAdminSession = async (label: string): Promise<AdminTestActor> => {
     },
   });
 
+  // High-risk admin actions gate on session.user.authenticatedAt, not on the
+  // Session row: the app runs session.strategy "jwt", so this timestamp is the
+  // only proof of a recent sign-in that assertRecentAdminAuthentication sees.
   const session: Session = {
-    user: { id: user.id, email: user.email, name: label },
+    user: {
+      id: user.id,
+      email: user.email,
+      name: label,
+      authenticatedAt: new Date().toISOString(),
+    },
     expires: expires.toISOString(),
   };
   return {

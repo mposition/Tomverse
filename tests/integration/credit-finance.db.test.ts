@@ -336,6 +336,7 @@ test("stores Mistral cached-token usage and the request-time pricing snapshot", 
   assert.equal(finalized.settledOutputTokens, 30);
   assert.equal(finalized.settledCostMicroUsd, BigInt(392));
   assert.deepEqual(finalized.pricingSnapshot, {
+    costSource: "token_estimate",
     inputTokens: 1_013,
     uncachedInputTokens: 5,
     cachedInputTokens: 1_008,
