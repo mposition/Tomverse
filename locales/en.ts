@@ -690,6 +690,7 @@ export const en = {
         loginMethodLinkFailed: "Could not link that login method. Please try again.",
         description: "Log in to your personal AI chat hub",
         privacy: "By logging in, you agree to Tomverse's Terms of Service and Privacy Policy.",
+        termsLink: "Terms and Conditions",
         privacyPolicyLink: "Privacy Policy",
         signedAs: "Signed as",
         accountMenu: "Account menu",

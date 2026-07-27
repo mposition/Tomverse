@@ -478,7 +478,12 @@ export function LandingPageContent() {
             <p data-testid="landing-brand-note" className="mt-2 max-w-xl text-sm font-medium text-zinc-500 dark:text-zinc-400">
               {content.brandNote}
             </p>
-            <h1 className="mt-6 max-w-4xl whitespace-pre-line text-4xl font-black leading-[1.05] tracking-tight sm:text-6xl lg:text-7xl">
+            <h1
+              data-testid="landing-hero-title"
+              className={`mt-6 max-w-4xl whitespace-pre-line text-4xl font-black leading-[1.05] tracking-tight sm:text-6xl lg:text-7xl ${
+                lang === "ko" ? "break-keep" : ""
+              }`}
+            >
               {content.title}
             </h1>
             <p className="mt-6 max-w-2xl whitespace-pre-line text-lg leading-8 text-zinc-600 dark:text-zinc-300">{content.description}</p>

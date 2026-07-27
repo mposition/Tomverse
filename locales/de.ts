@@ -491,6 +491,7 @@ export const de = {
         loginMethodLinkFailed: "Diese Anmeldemethode konnte nicht verknüpft werden. Bitte erneut versuchen.",
         description: "Melden Sie sich bei Ihrem persönlichen KI-Chat-Hub an",
         privacy: "Mit der Anmeldung stimmen Sie den Nutzungsbedingungen und der Datenschutzerklärung von Tomverse zu.",
+        termsLink: "Nutzungsbedingungen",
         privacyPolicyLink: "Datenschutzerklärung",
         signedAs: "Angemeldet als",
         accountMenu: "Kontomenü",

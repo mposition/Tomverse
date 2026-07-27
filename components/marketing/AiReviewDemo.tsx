@@ -197,11 +197,15 @@ export function AiReviewDemo({
   const chatPath = `/chat?lang=${encodeURIComponent(lang)}`;
 
   return (
-    <div className="overflow-hidden rounded-[2rem] border border-blue-200 bg-white shadow-xl shadow-blue-950/5 dark:border-blue-900/60 dark:bg-zinc-950">
+    <div className="overflow-hidden rounded-[2rem] border border-tomverse-review-border bg-white shadow-xl shadow-blue-950/5 dark:bg-zinc-950">
+      <div
+        aria-hidden="true"
+        className="h-[3px] w-full bg-gradient-to-r from-tomverse-accent-start via-tomverse-accent-mid to-tomverse-accent-end"
+      />
       <div className="grid gap-0 lg:grid-cols-[0.9fr_1.1fr]">
         <div className="border-b border-blue-100 bg-gradient-to-br from-blue-50 via-white to-violet-50 p-5 dark:border-blue-900/40 dark:from-blue-950/40 dark:via-zinc-950 dark:to-violet-950/30 sm:p-7 lg:border-b-0 lg:border-r">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-3 py-1 text-xs font-black text-white">
+            <span className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-cyan-700 via-blue-600 to-purple-600 px-3 py-1 text-xs font-black text-white">
               <Sparkles className="h-3.5 w-3.5" />
               {text.eyebrow}
             </span>
@@ -244,7 +248,11 @@ export function AiReviewDemo({
         </div>
 
         <div className="bg-zinc-950 p-5 text-white sm:p-7">
-          <p className="text-xs font-black uppercase tracking-[0.16em] text-blue-300">
+          <p className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.16em] text-tomverse-review-selected-text">
+            <span
+              aria-hidden="true"
+              className="h-1.5 w-1.5 shrink-0 rounded-full bg-gradient-to-br from-cyan-400 via-blue-400 to-purple-400"
+            />
             {text.after}
           </p>
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
