@@ -828,8 +828,10 @@ export function ChatSidebar({
 
             <div className={`${isMobileDrawer ? "p-2.5" : "p-3"} border-b border-zinc-200/60 dark:border-zinc-800/40`}>
                 <button
+                    type="button"
+                    data-testid="sidebar-new-chat"
                     onClick={onNewChat}
-                    className={`w-full cursor-pointer flex items-center justify-center gap-2 rounded-lg bg-zinc-900 px-4 text-xs font-semibold text-white transition-all hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200 ${isMobileDrawer ? "py-2" : "py-2.5"}`}
+                    className={`w-full cursor-pointer flex items-center justify-center gap-2 rounded-lg bg-zinc-900 px-4 text-xs font-semibold text-white transition-all hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200 ${isMobileDrawer ? "min-h-11 py-2" : "py-2.5"}`}
                 >
                     <span className="text-sm">+</span> {t("sidebar.newChat")}
                 </button>
@@ -1227,6 +1229,8 @@ export function ChatSidebar({
                     return (
                         <div
                             key={conv.id}
+                            data-testid="sidebar-conversation-item"
+                            data-conversation-id={conv.id}
                             onClick={() => onSelectConversation(conv.id)}
                             className={`relative group flex items-center justify-between rounded-xl px-3 py-2.5 text-xs cursor-pointer transition-all border ${isMenuOpen ? "z-20" : "z-10"} ${isActive
                                     ? "bg-zinc-200 border-zinc-300 text-zinc-900 font-semibold dark:bg-zinc-800 dark:border-zinc-700/80 dark:text-zinc-100"

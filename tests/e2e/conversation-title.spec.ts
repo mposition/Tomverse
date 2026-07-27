@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import {
   mockAuthenticatedApi,
+  openRecentConversation,
   prepareGuestPage,
   sendChatMessage,
 } from "./support/app-fixtures";
@@ -130,7 +131,7 @@ test.describe("conversation auto-title generation (logged-in)", () => {
     // already has all 3 models baked in) restores the panel selection
     // directly -- avoids depending on the model-picker UI, which is
     // mid-redesign in a concurrent, unrelated change at the time of writing.
-    await page.getByTestId("recent-conversation-card").click();
+    await openRecentConversation(page);
     await expect(page.locator('[data-testid="desktop-model-panel"] select')).toHaveCount(3);
     await sendChatMessage(page, testInfo, "Compare your answers please");
 

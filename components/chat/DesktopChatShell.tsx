@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, Lock, X } from "lucide-react";
+import { Check, X } from "lucide-react";
 import { useChatConsentSlotRef } from "@/components/analytics/AnalyticsProvider";
 import { useSidebarCollapsePreference } from "@/components/chat/useSidebarCollapse";
 import { ChatApp } from "@/components/chat/ChatApp";
@@ -11,10 +11,9 @@ import { ChatWelcomeScreen } from "@/components/chat/ChatWelcomeScreen";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { ProviderStatusBanner } from "@/components/chat/ProviderStatusBanner";
-import { FeatureHelpPopover } from "@/components/chat/FeatureHelpPopover";
+import { ComparisonActionRail } from "@/components/chat/ComparisonActionRail";
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
-import { chatHelpCopy } from "@/components/chat/chatHelpCopy";
-import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
+import { deriveComparisonReadiness } from "@/lib/comparisonReadiness";
 import {
   getModelUsageProfile,
   type ChatAttachment,
@@ -74,6 +73,8 @@ type DesktopChatShellProps = {
   onRemoveModel: (modelId: string) => void;
   onCompareSummary: () => void;
   isCompareSummaryLoading: boolean;
+  isQuickSummaryCached?: boolean;
+  availableCredits?: number | null;
   onComparisonReview: () => void;
   onGuestSignInPrompt: () => void;
   onResponseComplete: (promptId: string | null, modelId: string, responseText: string) => void;
@@ -121,6 +122,8 @@ export function DesktopChatShell({
   onRemoveModel,
   onCompareSummary,
   isCompareSummaryLoading,
+  isQuickSummaryCached = false,
+  availableCredits = null,
   onComparisonReview,
   onGuestSignInPrompt,
   onResponseComplete,
@@ -131,14 +134,20 @@ export function DesktopChatShell({
     enabledModels: ENABLED_MODELS,
   } = useModelCatalog();
   const { t, lang } = useLanguage();
-  const helpCopy = chatHelpCopy[lang];
   const recentConversations = useMemo(
     () =>
       conversations
-        .filter((conversation) => !conversation.isLocked)
+        // The chat you are already in is not a chat to return to -- a brand
+        // new guest conversation exists from the first render, and offering it
+        // back to the user was both meaningless and (on mobile) the only thing
+        // keeping the recent-chats row on screen for someone with no history.
+        .filter(
+          (conversation) =>
+            !conversation.isLocked && conversation.id !== currentChatId
+        )
         .slice(0, 3)
         .map((conversation) => ({ id: conversation.id, title: conversation.title })),
-    [conversations]
+    [conversations, currentChatId]
   );
   const [modelEmptyStates, setModelEmptyStates] = useState<Record<string, boolean>>({});
   const conversationStateKey = currentChatId || "new";
@@ -155,9 +164,20 @@ export function DesktopChatShell({
     },
     [emptyStateKey]
   );
+  // An existing *authenticated* conversation (currentChatId set) hasn't
+  // been proven empty until at least one panel reports back -- defaulting
+  // it to "empty" would flash the welcome screen over a still-loading
+  // panel, indistinguishable from a genuinely empty new chat. Only a
+  // brand-new conversation (no id yet) defaults to empty, since it always
+  // legitimately starts that way. Guests are excluded: unlike an
+  // authenticated chat's server-assigned id, a guest's currentChatId is a
+  // client-generated placeholder assigned immediately even for a
+  // guaranteed-empty new chat, so "has an id" isn't a signal there.
   const isConversationEmpty =
     selectedModels.length > 0 &&
-    selectedModels.every((modelId) => modelEmptyStates[emptyStateKey(modelId)] ?? true);
+    selectedModels.every(
+      (modelId) => modelEmptyStates[emptyStateKey(modelId)] ?? (isGuestMode || !currentChatId)
+    );
   const [modelStatuses, setModelStatuses] = useState<
     Record<string, "idle" | "loading" | "responding" | "error" | "cancelled" | "paused">
   >({});
@@ -187,15 +207,15 @@ export function DesktopChatShell({
   // request only ever counted selectedModels.length > 1 and an otherwise
   // non-empty conversation, so the button was clickable the instant a
   // message was sent, well before any model had a real answer to compare.
-  const readyForCompareCount = selectedModels.filter(
-    (modelId) =>
-      !disabledPanels.includes(modelId) && modelStatuses[modelId] === "idle"
-  ).length;
-  const comparableModelCount = selectedModels.filter(
-    (modelId) => !disabledPanels.includes(modelId)
-  ).length;
-  const isCompareSummaryDisabled =
-    isCompareSummaryLoading || readyForCompareCount < 2;
+  // Both shells now read that from the same derivation, which also supplies
+  // the sentence explaining the state.
+  const comparisonReadiness = deriveComparisonReadiness({
+    selectedModelIds: selectedModels,
+    disabledModelIds: disabledPanels,
+    modelStatuses,
+    hasComparableConversation: !isConversationEmpty && Boolean(currentChatId),
+    isBusy: isCompareSummaryLoading,
+  });
   const [welcomeInputSlot, setWelcomeInputSlot] = useState<HTMLDivElement | null>(null);
   const [bottomInputSlot, setBottomInputSlot] = useState<HTMLDivElement | null>(null);
   const inputPortalTarget = isConversationEmpty
@@ -592,79 +612,29 @@ export function DesktopChatShell({
           })}
         </div>
 
-        {!isConversationEmpty && selectedModels.length > 1 && currentChatId && (
-          <div className="flex gap-2 border-t border-zinc-200 bg-white px-4 py-2 dark:border-zinc-800 dark:bg-zinc-950">
-            <button
-              type="button"
-              data-testid="quick-comparison-button"
-              onClick={onCompareSummary}
-              disabled={isCompareSummaryDisabled}
-              title={readyForCompareCount < 2 ? t("chat.aiReviewResponsesRequired") : undefined}
-              className="flex items-center justify-between gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-xs font-black text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-blue-50 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200 dark:hover:bg-blue-950 dark:disabled:hover:bg-blue-950/30"
-            >
-              <span>
-                {t("chat.quickDifferenceSummary")}
-                {comparableModelCount > 1 && readyForCompareCount < comparableModelCount && (
-                  <span
-                    data-testid="quick-comparison-ready-count"
-                    className="ml-1 font-normal text-blue-500/80 dark:text-blue-300/80"
-                  >
-                    ({readyForCompareCount}/{comparableModelCount})
-                  </span>
-                )}
-              </span>
-              <CreditCostBadge
-                credits={1}
-                size="xs"
-                label={t("chat.quickDifferenceSummaryCreditCost")}
-                testId="quick-comparison-credit-cost"
-              />
-            </button>
-            {isGuestMode ? (
-              <button
-                type="button"
-                data-testid="ai-review-guest-locked"
-                onClick={onGuestSignInPrompt}
-                className="flex items-center justify-between gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2 text-xs font-black text-zinc-600 hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
-              >
-                <span className="flex items-center gap-1.5">
-                  <Lock className="h-3.5 w-3.5" aria-hidden="true" />
-                  {t("chat.aiReviewLoginToUnlock")}
-                </span>
-              </button>
-            ) : (
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={onComparisonReview}
-                  className="flex items-center justify-between gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-black text-white hover:bg-blue-500"
-                >
-                  <span>{t("chat.aiReviewButton")}</span>
-                  <CreditCostBadge
-                    credits={4}
-                    size="xs"
-                    tone="onColor"
-                    label={`4 ${t("chat.aiReviewCredits")}`}
-                    testId="ai-review-entry-credit-cost"
-                    className="border-0 bg-white/20"
-                  />
-                </button>
-                <FeatureHelpPopover
-                  title={helpCopy.aiReviewTitle}
-                  description={helpCopy.aiReviewDescription}
-                  buttonLabel={helpCopy.helpAboutAiReview}
-                  learnMoreLabel={helpCopy.learnMore}
-                  topic="ai_review"
-                  href={chatWorkspaceGuideHref(lang, "ai-review")}
-                  align="right"
-                  testId="ai-review-help"
-                />
-              </div>
-            )}
-          </div>
-        )}
+        {/*
+          The bottom workflow dock. The comparison rail and the composer are
+          separate sections semantically -- one acts on finished answers, the
+          other configures the next request -- but they share one alignment
+          axis (`max-w-4xl mx-auto`, same horizontal padding) and one boundary
+          against the answer canvas, so a wide screen no longer strands the
+          actions on the far left of a centred composer.
+        */}
+        <ComparisonActionRail
+          layout="desktop"
+          readiness={comparisonReadiness}
+          isGuestMode={isGuestMode}
+          isCompareSummaryLoading={isCompareSummaryLoading}
+          isQuickSummaryCached={isQuickSummaryCached}
+          availableCredits={availableCredits}
+          onCompareSummary={onCompareSummary}
+          onComparisonReview={onComparisonReview}
+          onGuestSignInPrompt={onGuestSignInPrompt}
+        />
 
-        <div ref={setBottomConsentSlot} className="shrink-0 px-4" />
+        <div className="w-full shrink-0 px-4 md:px-6">
+          <div ref={setBottomConsentSlot} className="mx-auto w-full max-w-4xl" />
+        </div>
         <div ref={setBottomInputSlot} />
         {inputPortalTarget &&
           createPortal(
@@ -694,6 +664,7 @@ export function DesktopChatShell({
               guestMessageCount={guestMessageCount}
               maxGuestMessages={maxGuestMessages}
               variant={isConversationEmpty ? "floating" : "bar"}
+              hideTopBorder={comparisonReadiness.isVisible}
             />,
             inputPortalTarget
           )}

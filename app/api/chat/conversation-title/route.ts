@@ -77,6 +77,15 @@ export async function POST(request: Request) {
 
     const generation = await generateConversationTitle(body.message);
     if (!generation.ok) {
+      // Log the reason so a silent fall-back to the interim (truncated) title
+      // is diagnosable from server logs rather than invisible.
+      console.warn(
+        JSON.stringify({
+          event: "guest_conversation_title_generation_failed",
+          traceId,
+          reason: generation.reason,
+        })
+      );
       return Response.json({ updated: false, reason: generation.reason }, { headers });
     }
 

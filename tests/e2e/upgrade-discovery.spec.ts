@@ -3,6 +3,7 @@ import {
   mockAuthenticatedApi,
   mockChatStream,
   openModelPickerCatalogue,
+  openRecentConversation,
   prepareGuestPage,
 } from "./support/app-fixtures";
 
@@ -143,7 +144,7 @@ test.describe("value-moment upgrade prompt", () => {
     // the persisted qa-conversation's 2-model comparison selection active
     // (and a real currentChatId) for the comparison preflight/upgrade-prompt
     // flow to trigger at all.
-    await page.getByTestId("recent-conversation-card").click();
+    await openRecentConversation(page);
     await expect(page.getByTestId("chat-input")).toBeVisible();
   });
 
@@ -190,9 +191,14 @@ test.describe("value-moment upgrade prompt", () => {
     await page.getByTestId("chat-textarea").fill("Compare safely");
     await page.getByTestId("chat-textarea").press("Enter");
 
-    await expect(page.getByRole("status")).toContainText(
-      "오늘 처리할 수 있는 한도를 넘었습니다"
-    );
+    // Error-toned toasts render role="alert" (assertive) rather than
+    // role="status" (polite), so screen readers announce them immediately.
+    // Filtered by text to disambiguate from Next.js's own role="alert"
+    // route announcer (id="__next-route-announcer__").
+    const toast = page
+      .getByRole("alert")
+      .filter({ hasText: "오늘 처리할 수 있는 한도를 넘었습니다" });
+    await expect(toast).toBeVisible();
     await expect.poll(() => providerRequestCount).toBe(0);
   });
 

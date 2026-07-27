@@ -53,6 +53,7 @@ import {
   notifyUserUsageChanged,
   useUserUsage,
 } from "@/components/chat/useUserUsage";
+import { getChatCreditAllocation } from "@/lib/chatCreditAllocation";
 import {
   trackProductEvent,
   trackProductEventOnce,
@@ -430,6 +431,13 @@ export function ChatPageClient({
     cached: boolean;
   } | null>(null);
   const [isCompareSummaryLoading, setIsCompareSummaryLoading] = useState(false);
+  // A summary the server has already produced for this turn replays from cache
+  // at zero credits. Tracking which conversation that applies to lets the
+  // comparison rail show 0 up front instead of quoting a cost the user will
+  // not actually pay. A new question invalidates it.
+  const [cachedCompareSummaryChatId, setCachedCompareSummaryChatId] = useState<
+    string | null
+  >(null);
   // The comparison summary is one non-streaming request, so there's no real
   // per-step progress to report -- but it does genuinely read the responses
   // before it can summarize their differences, so swapping the loading text
@@ -1047,7 +1055,7 @@ export function ChatPageClient({
       } finally {
         comparisonPreflightInFlightRef.current = false;
       }
-    }, [effectiveDisabledPanels, isGuestMode, selectedModels, showToast, t]);
+    }, [effectiveDisabledPanels, isGuestMode, selectedModels, showToast, t, webSearchMode]);
 
   useEffect(() => {
     return () => {
@@ -2166,6 +2174,7 @@ export function ChatPageClient({
     }
 
       localComparisonQuestionsRef.current.set(comparisonId, trimmed);
+      setCachedCompareSummaryChatId(null);
       setPromptPayload({
         id: comparisonId,
         text: trimmed,
@@ -2768,6 +2777,7 @@ export function ChatPageClient({
           return;
         }
         setCompareSummary(await response.json());
+        setCachedCompareSummaryChatId(conversationId);
         maybeShowValueUpgradePrompt("comparison");
       } catch {
         showToast(t("chat.compareUnavailable"), "error");
@@ -2885,6 +2895,29 @@ export function ChatPageClient({
     ])
   );
 
+  // Spendable credits for the comparison actions, using the same allocation
+  // rule as the composer's own pre-send guard. Guests (and a not-yet-loaded
+  // usage response) report null, which the rail reads as "unknown" and does
+  // not gate on.
+  const comparisonAvailableCredits = accountUsage
+    ? getChatCreditAllocation({
+        requiredCredits: 0,
+        monthlyPlanCreditsRemaining: accountUsage.balances.planRemainingCredits,
+        dailyPlanCreditsRemaining:
+          accountUsage.limits.creditsDay > 0
+            ? Math.max(
+                0,
+                accountUsage.limits.creditsDay - accountUsage.usage.creditsDay
+              )
+            : null,
+        purchasedCreditsRemaining:
+          accountUsage.balances.purchasedRemainingCredits,
+      }).totalCreditsAvailableNow
+    : null;
+  const isQuickSummaryCached = Boolean(
+    currentChatId && cachedCompareSummaryChatId === currentChatId
+  );
+
   const deepResearchSetupModel = AVAILABLE_MODELS.find(
     (model) => model.id === "perplexity/sonar-deep-research"
   ) || null;
@@ -2977,6 +3010,8 @@ export function ChatPageClient({
           onBeforeModelSend={ensureModelSettingsReady}
           onCompareSummary={handleCompareSummary}
           isCompareSummaryLoading={isCompareSummaryLoading}
+          isQuickSummaryCached={isQuickSummaryCached}
+          availableCredits={comparisonAvailableCredits}
           onComparisonReview={() => setShowComparisonReview(true)}
           onGuestSignInPrompt={() => setShowGuestSignInPrompt(true)}
           onResponseComplete={handleResponseComplete}
@@ -3024,6 +3059,8 @@ export function ChatPageClient({
           onRemoveModel={handleRemoveModel}
           onCompareSummary={handleCompareSummary}
           isCompareSummaryLoading={isCompareSummaryLoading}
+          isQuickSummaryCached={isQuickSummaryCached}
+          availableCredits={comparisonAvailableCredits}
           onComparisonReview={() => setShowComparisonReview(true)}
           onGuestSignInPrompt={() => setShowGuestSignInPrompt(true)}
           onResponseComplete={handleResponseComplete}
@@ -3074,8 +3111,8 @@ export function ChatPageClient({
     {toast && (
       <div
         key={toast.id}
-        role="status"
-        aria-live="polite"
+        role={toast.tone === "error" ? "alert" : "status"}
+        aria-live={toast.tone === "error" ? "assertive" : "polite"}
         className="fixed bottom-5 left-1/2 z-[70] flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-3 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-900 shadow-2xl shadow-zinc-900/15 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
       >
         <span

@@ -17,12 +17,11 @@ import { ChatWelcomeScreen } from "@/components/chat/ChatWelcomeScreen";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { ProviderStatusBanner } from "@/components/chat/ProviderStatusBanner";
-import { FeatureHelpPopover } from "@/components/chat/FeatureHelpPopover";
+import { ComparisonActionRail } from "@/components/chat/ComparisonActionRail";
 import { ModeInfoSheet } from "@/components/chat/ModeInfoSheet";
-import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
-import { chatHelpCopy } from "@/components/chat/chatHelpCopy";
+import { useCompactBottomDock } from "@/components/chat/useCompactBottomDock";
 import { chatModelSummaryCopy } from "@/components/chat/chatModelSummaryCopy";
-import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
+import { deriveComparisonReadiness } from "@/lib/comparisonReadiness";
 import { buildChatModelSummary } from "@/lib/chatModelSummary";
 import { openChatModelPicker } from "@/lib/chatModelPickerEvents";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
@@ -94,6 +93,8 @@ type MobileChatShellProps = {
   onBeforeModelSend: (chatId: string) => Promise<boolean>;
   onCompareSummary: () => void;
   isCompareSummaryLoading: boolean;
+  isQuickSummaryCached?: boolean;
+  availableCredits?: number | null;
   onComparisonReview: () => void;
   onGuestSignInPrompt: () => void;
   onResponseComplete: (promptId: string | null, modelId: string, responseText: string) => void;
@@ -139,6 +140,8 @@ export function MobileChatShell({
   onBeforeModelSend,
   onCompareSummary,
   isCompareSummaryLoading,
+  isQuickSummaryCached = false,
+  availableCredits = null,
   onComparisonReview,
   onGuestSignInPrompt,
   onResponseComplete,
@@ -146,11 +149,27 @@ export function MobileChatShell({
 }: MobileChatShellProps) {
   const { models: AVAILABLE_MODELS } = useModelCatalog();
   const { t, lang } = useLanguage();
-  const helpCopy = chatHelpCopy[lang];
   const registerChatConsentSlot = useChatConsentSlotRef();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const drawerPanelRef = useRef<HTMLDivElement | null>(null);
   const drawerCloseButtonRef = useRef<HTMLButtonElement | null>(null);
+  const recentDisclosureRef = useRef<HTMLButtonElement | null>(null);
+  // Whatever opened the drawer gets focus back when it closes -- otherwise a
+  // keyboard or screen-reader user who opened it from the welcome screen's
+  // recent-chats row lands back at the top of the document.
+  const drawerReturnFocusRef = useRef<HTMLElement | null>(null);
+  const openDrawer = useCallback((returnFocusTo: HTMLElement | null) => {
+    drawerReturnFocusRef.current = returnFocusTo;
+    setIsDrawerOpen(true);
+  }, []);
+  const closeDrawer = useCallback(() => {
+    setIsDrawerOpen(false);
+    const returnTarget = drawerReturnFocusRef.current;
+    drawerReturnFocusRef.current = null;
+    if (returnTarget && returnTarget.isConnected) {
+      requestAnimationFrame(() => returnTarget.focus());
+    }
+  }, []);
   const touchStartXRef = useRef<number | null>(null);
   const touchStartYRef = useRef<number | null>(null);
   const [activeModelId, setActiveModelId] = useState<string | null>(
@@ -159,10 +178,17 @@ export function MobileChatShell({
   const recentConversations = useMemo(
     () =>
       conversations
-        .filter((conversation) => !conversation.isLocked)
+        // The chat you are already in is not a chat to return to -- a brand
+        // new guest conversation exists from the first render, and offering it
+        // back to the user was both meaningless and (on mobile) the only thing
+        // keeping the recent-chats row on screen for someone with no history.
+        .filter(
+          (conversation) =>
+            !conversation.isLocked && conversation.id !== currentChatId
+        )
         .slice(0, 3)
         .map((conversation) => ({ id: conversation.id, title: conversation.title })),
-    [conversations]
+    [conversations, currentChatId]
   );
   const [modelStatuses, setModelStatuses] = useState<Record<string, ModelRuntimeStatus>>({});
   const [modelEmptyStates, setModelEmptyStates] = useState<Record<string, boolean>>({});
@@ -240,7 +266,7 @@ export function MobileChatShell({
     });
 
     const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setIsDrawerOpen(false);
+      if (event.key === "Escape") closeDrawer();
     };
 
     document.addEventListener("keydown", handleEscape);
@@ -249,7 +275,7 @@ export function MobileChatShell({
       document.body.style.overflow = "";
       document.removeEventListener("keydown", handleEscape);
     };
-  }, [isDrawerOpen]);
+  }, [closeDrawer, isDrawerOpen]);
 
   // The drawer's own analytics-settings entry point (guest-analytics-cookie-settings
   // in AuthButton) opens the analytics preferences notice via this shared event
@@ -349,12 +375,22 @@ export function MobileChatShell({
     },
     [modelSummary.activeCount]
   );
+  // See DesktopChatShell's matching comment: an existing *authenticated*
+  // conversation shouldn't default to "empty" before any panel has
+  // actually reported in, or a still-loading panel would flash the
+  // welcome screen instead of its own loading state. Only a brand-new
+  // conversation defaults to empty -- guests are excluded since their
+  // currentChatId is a client-generated placeholder assigned immediately
+  // even for a guaranteed-empty new chat, unlike an authenticated chat's
+  // server-assigned id.
   const isActiveConversationEmpty = resolvedActiveModelId
-    ? modelEmptyStates[emptyStateKey(resolvedActiveModelId)] ?? true
+    ? modelEmptyStates[emptyStateKey(resolvedActiveModelId)] ?? (isGuestMode || !currentChatId)
     : true;
   const isConversationEmpty =
     selectedModels.length > 0 &&
-    selectedModels.every((modelId) => modelEmptyStates[emptyStateKey(modelId)] ?? true);
+    selectedModels.every(
+      (modelId) => modelEmptyStates[emptyStateKey(modelId)] ?? (isGuestMode || !currentChatId)
+    );
   const currentConversation = conversations.find(
     (conversation) => conversation.id === currentChatId
   );
@@ -385,19 +421,17 @@ export function MobileChatShell({
     (modelId) => modelStatuses[modelId] === "error"
   ).length;
   const isAnyError = errorCount > 0;
-  // Mirrors DesktopChatShell's fix: the button used to be clickable the
-  // instant a message was sent, well before any model had finished --
-  // require at least two active (non-paused) models to have actually
-  // reached "idle" (finished, no error) before allowing a comparison.
-  const readyForCompareCount = selectedModels.filter(
-    (modelId) =>
-      !disabledPanels.includes(modelId) && modelStatuses[modelId] === "idle"
-  ).length;
-  const comparableModelCount = selectedModels.filter(
-    (modelId) => !disabledPanels.includes(modelId)
-  ).length;
-  const isCompareSummaryDisabled =
-    isCompareSummaryLoading || readyForCompareCount < 2;
+  // Mirrors DesktopChatShell: both shells read comparison readiness (and the
+  // sentence that explains it) from the same derivation, so the mobile rail
+  // can never enable an action the desktop rail would refuse.
+  const comparisonReadiness = deriveComparisonReadiness({
+    selectedModelIds: selectedModels,
+    disabledModelIds: disabledPanels,
+    modelStatuses,
+    hasComparableConversation: !isConversationEmpty && Boolean(currentChatId),
+    isBusy: isCompareSummaryLoading,
+  });
+  const isCompactBottomDock = useCompactBottomDock();
   const isAnyWorkingOrError = selectedModels.some((modelId) => {
     const status = modelStatuses[modelId];
     return status === "responding" || status === "loading" || status === "error";
@@ -412,7 +446,7 @@ export function MobileChatShell({
         <div className="flex items-center gap-2">
         <button
           type="button"
-          onClick={() => setIsDrawerOpen(true)}
+          onClick={(event) => openDrawer(event.currentTarget)}
           data-testid="mobile-sidebar-open"
           className="flex h-11 w-11 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-50 text-zinc-600 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
           aria-label={t("chat.moreActions")}
@@ -609,77 +643,6 @@ export function MobileChatShell({
         </div>
       )}
 
-      {!isConversationEmpty && selectedModels.length > 1 && currentChatId && (
-        <div className="grid shrink-0 grid-cols-2 gap-2 border-b border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950">
-          <button
-            type="button"
-            data-testid="quick-comparison-button"
-            onClick={onCompareSummary}
-            disabled={isCompareSummaryDisabled}
-            title={readyForCompareCount < 2 ? t("chat.aiReviewResponsesRequired") : undefined}
-            className="flex h-11 w-full items-center justify-between gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-2 text-[11px] font-black text-blue-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200"
-          >
-            <span className="truncate">
-              {t("chat.quickDifferenceSummary")}
-              {comparableModelCount > 1 && readyForCompareCount < comparableModelCount && (
-                <span
-                  data-testid="quick-comparison-ready-count"
-                  className="ml-1 font-normal text-blue-500/80 dark:text-blue-300/80"
-                >
-                  ({readyForCompareCount}/{comparableModelCount})
-                </span>
-              )}
-            </span>
-            <CreditCostBadge
-              credits={1}
-              size="xs"
-              label={t("chat.quickDifferenceSummaryCreditCost")}
-              testId="quick-comparison-credit-cost"
-            />
-          </button>
-          {isGuestMode ? (
-            <button
-              type="button"
-              data-testid="ai-review-guest-locked"
-              onClick={onGuestSignInPrompt}
-              className="flex h-11 w-full items-center justify-center gap-1.5 rounded-xl border border-zinc-200 bg-zinc-50 px-2 text-[11px] font-black text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
-            >
-              <Lock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-              <span className="truncate">{t("chat.aiReviewLoginToUnlock")}</span>
-            </button>
-          ) : (
-            <div className="flex min-w-0 items-center gap-0.5">
-              <button
-                type="button"
-                onClick={onComparisonReview}
-                className="flex h-11 min-w-0 flex-1 items-center justify-between gap-1.5 rounded-xl bg-blue-600 px-2 text-[11px] font-black text-white"
-              >
-                <span className="truncate">{t("chat.aiReviewButton")}</span>
-                <CreditCostBadge
-                  credits={4}
-                  size="xs"
-                  tone="onColor"
-                  label={`4 ${t("chat.aiReviewCredits")}`}
-                  testId="ai-review-entry-credit-cost"
-                  className="border-0 bg-white/20"
-                />
-              </button>
-              <FeatureHelpPopover
-                title={helpCopy.aiReviewTitle}
-                description={helpCopy.aiReviewDescription}
-                buttonLabel={helpCopy.helpAboutAiReview}
-                learnMoreLabel={helpCopy.learnMore}
-                topic="ai_review"
-                href={chatWorkspaceGuideHref(lang, "ai-review")}
-                mobile
-                align="right"
-                testId="ai-review-help-mobile"
-              />
-            </div>
-          )}
-        </div>
-      )}
-
       <section
         className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-zinc-50 dark:bg-zinc-950"
         onTouchStart={(event) => {
@@ -708,6 +671,11 @@ export function MobileChatShell({
               onSelectConversation={onSelectConversation}
               inputSlotRef={setWelcomeInputSlot}
               consentSlotRef={setWelcomeConsentSlot}
+              recentAccess="disclosure"
+              recentDisclosureRef={(node) => {
+                recentDisclosureRef.current = node;
+              }}
+              onOpenRecentConversations={() => openDrawer(recentDisclosureRef.current)}
             />
           </div>
         )}
@@ -763,6 +731,26 @@ export function MobileChatShell({
         )}
       </section>
 
+      {/*
+        Follow-up tools belong *after* the answers they act on: the rail used
+        to render above the answer section, so a screen reader met "summarise
+        these differences" before there were any differences to read. It now
+        sits directly above the composer inside the same bottom dock, sharing
+        the composer's alignment axis without becoming one of its controls.
+      */}
+      <ComparisonActionRail
+        layout="mobile"
+        readiness={comparisonReadiness}
+        isGuestMode={isGuestMode}
+        isCompactViewport={isCompactBottomDock}
+        isCompareSummaryLoading={isCompareSummaryLoading}
+        isQuickSummaryCached={isQuickSummaryCached}
+        availableCredits={availableCredits}
+        onCompareSummary={onCompareSummary}
+        onComparisonReview={onComparisonReview}
+        onGuestSignInPrompt={onGuestSignInPrompt}
+      />
+
       <div ref={setBottomConsentSlot} className="shrink-0" />
       <div ref={setBottomInputSlot} />
       {inputPortalTarget &&
@@ -794,6 +782,7 @@ export function MobileChatShell({
             guestMessageCount={guestMessageCount}
             maxGuestMessages={maxGuestMessages}
             variant={isConversationEmpty ? "floating" : "bar"}
+            hideTopBorder={comparisonReadiness.isVisible}
             hideDisclaimer
           />,
           inputPortalTarget
@@ -816,7 +805,7 @@ export function MobileChatShell({
           <button
             type="button"
             className="absolute inset-0 h-full w-full cursor-default"
-            onClick={() => setIsDrawerOpen(false)}
+            onClick={closeDrawer}
             aria-label={t("auth.cancel")}
           />
           <div
@@ -829,10 +818,12 @@ export function MobileChatShell({
               currentChatId={currentChatId}
               onNewChat={() => {
                 setIsDrawerOpen(false);
+                drawerReturnFocusRef.current = null;
                 onNewChat();
               }}
               onSelectConversation={(id) => {
                 setIsDrawerOpen(false);
+                drawerReturnFocusRef.current = null;
                 onSelectConversation(id);
               }}
               onRename={onRename}
@@ -852,7 +843,7 @@ export function MobileChatShell({
             <button
               ref={drawerCloseButtonRef}
               type="button"
-              onClick={() => setIsDrawerOpen(false)}
+              onClick={closeDrawer}
               className="absolute right-3 top-3 flex h-11 w-11 items-center justify-center rounded-xl bg-zinc-900/80 text-white"
               aria-label={t("auth.cancel")}
             >

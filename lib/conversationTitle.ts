@@ -4,6 +4,7 @@ import { generateText } from "ai";
 import { prisma } from "@/lib/prisma";
 import { getActiveAiModel } from "@/lib/activeAiModel";
 import {
+  ENABLED_MODELS,
   getEnabledModel,
   getModelBillingProfile,
   type AiModel,
@@ -94,21 +95,41 @@ export function sanitizeGeneratedTitle(raw: string): string | null {
   return candidate.length > 0 ? candidate : null;
 }
 
-const resolveTitleModel = (): AiModel | undefined => {
-  const configuredId = process.env.CONVERSATION_TITLE_MODEL_ID?.trim();
-  const candidateIds = [configuredId, DEFAULT_TITLE_MODEL_ID].filter(
-    (id): id is string => Boolean(id)
-  );
-  for (const id of candidateIds) {
-    const model = getEnabledModel(id);
-    if (!model || model.usageClass !== "standard") continue;
-    const hasApiKey = PROVIDER_API_KEY_ENV[model.provider].some((key) =>
-      Boolean(process.env[key]?.trim())
-    );
-    if (!hasApiKey) continue;
-    return model;
-  }
-  return undefined;
+const providerHasApiKey = (provider: AiProvider): boolean =>
+  PROVIDER_API_KEY_ENV[provider].some((key) => Boolean(process.env[key]?.trim()));
+
+/**
+ * Ordered list of models to try for title generation, best first:
+ *   1. CONVERSATION_TITLE_MODEL_ID (operator override), if set
+ *   2. the compiled-in default (gpt-5-4-mini)
+ *   3. every other enabled "standard" model whose provider key is present
+ *
+ * Only models whose provider actually has an API key in this environment are
+ * included. Returning a LIST (rather than the single default) is what makes
+ * title generation resilient: if the preferred provider is misconfigured or
+ * failing in one environment (e.g. the OpenAI title call fails on staging
+ * while chat runs on other providers), generation falls through to the next
+ * working provider instead of silently giving up and truncating the prompt.
+ */
+const resolveTitleModels = (): AiModel[] => {
+  const preferredIds = [
+    process.env.CONVERSATION_TITLE_MODEL_ID?.trim(),
+    DEFAULT_TITLE_MODEL_ID,
+  ].filter((id): id is string => Boolean(id));
+
+  const ordered: AiModel[] = [];
+  const seen = new Set<string>();
+  const consider = (model: AiModel | undefined) => {
+    if (!model || seen.has(model.id)) return;
+    if (!model.enabled || model.usageClass !== "standard") return;
+    if (!providerHasApiKey(model.provider)) return;
+    seen.add(model.id);
+    ordered.push(model);
+  };
+
+  for (const id of preferredIds) consider(getEnabledModel(id));
+  for (const model of ENABLED_MODELS) consider(model);
+  return ordered;
 };
 
 const TITLE_SYSTEM_PROMPT = [
@@ -130,8 +151,24 @@ export async function generateConversationTitle(
   const trimmed = firstMessage.trim().slice(0, MAX_INPUT_CHARS);
   if (!trimmed) return { ok: false, reason: "empty_input" };
 
-  const model = resolveTitleModel();
-  if (!model) return { ok: false, reason: "provider_error" };
+  const models = resolveTitleModels();
+  // Only emit diagnostics for real provider calls -- unit tests inject a fake
+  // `generate`, and we don't want their simulated failures spamming stderr.
+  const shouldLog = !deps?.generate;
+  const logTitleEvent = (payload: Record<string, unknown>) => {
+    if (shouldLog) console.warn(JSON.stringify({ event: "conversation_title", ...payload }));
+  };
+
+  if (models.length === 0) {
+    // No standard model has a usable provider key in this environment -- the
+    // single most likely cause of a silent "titles are truncated" report.
+    logTitleEvent({
+      outcome: "no_model_available",
+      reason: "provider_error",
+      hint: "No enabled standard model has an API key configured (check CONVERSATION_TITLE_MODEL_ID and provider *_API_KEY vars).",
+    });
+    return { ok: false, reason: "provider_error" };
+  }
 
   const generate = deps?.generate ?? generateText;
   const prompt = [
@@ -141,34 +178,67 @@ export async function generateConversationTitle(
     "</UNTRUSTED_MESSAGE_DATA>",
   ].join("\n");
 
-  let result: Awaited<ReturnType<typeof generateText>>;
-  try {
-    result = await generate({
-      model: getActiveAiModel(model),
-      system: TITLE_SYSTEM_PROMPT,
-      prompt,
-      temperature: 0.2,
-      maxOutputTokens: 32,
-      maxRetries: 1,
-      abortSignal: AbortSignal.timeout(15_000),
-    });
-  } catch {
-    return { ok: false, reason: "provider_error" };
+  // Try each candidate in turn; a provider error or unusable output on one
+  // model falls through to the next working provider rather than giving up.
+  let lastReason: Extract<TitleGenerationResult, { ok: false }>["reason"] =
+    "provider_error";
+  for (const model of models) {
+    let result: Awaited<ReturnType<typeof generateText>>;
+    try {
+      result = await generate({
+        model: getActiveAiModel(model),
+        system: TITLE_SYSTEM_PROMPT,
+        prompt,
+        temperature: 0.2,
+        maxOutputTokens: 32,
+        maxRetries: 1,
+        abortSignal: AbortSignal.timeout(15_000),
+      });
+    } catch (error) {
+      lastReason = "provider_error";
+      logTitleEvent({
+        outcome: "provider_error",
+        modelId: model.id,
+        provider: model.provider,
+        message:
+          error && typeof error === "object" && "message" in error
+            ? String((error as { message?: unknown }).message).slice(0, 300)
+            : undefined,
+      });
+      continue;
+    }
+
+    const title = sanitizeGeneratedTitle(result.text ?? "");
+    if (!title) {
+      lastReason = "invalid_output";
+      logTitleEvent({
+        outcome: "invalid_output",
+        modelId: model.id,
+        provider: model.provider,
+      });
+      continue;
+    }
+
+    return {
+      ok: true,
+      title,
+      provider: model.provider,
+      modelId: model.id,
+      usage: {
+        inputTokens: result.usage?.inputTokens ?? 0,
+        outputTokens: result.usage?.outputTokens ?? 0,
+      },
+    };
   }
 
-  const title = sanitizeGeneratedTitle(result.text ?? "");
-  if (!title) return { ok: false, reason: "invalid_output" };
-
-  return {
-    ok: true,
-    title,
-    provider: model.provider,
-    modelId: model.id,
-    usage: {
-      inputTokens: result.usage?.inputTokens ?? 0,
-      outputTokens: result.usage?.outputTokens ?? 0,
-    },
-  };
+  // Every candidate failed -- surface which reason won last so operators can
+  // tell a provider outage apart from consistently unusable output.
+  logTitleEvent({
+    outcome: "all_candidates_failed",
+    reason: lastReason,
+    triedModelIds: models.map((model) => model.id),
+  });
+  return { ok: false, reason: lastReason };
 }
 
 /**

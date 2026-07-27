@@ -38,6 +38,64 @@ export function useChatConsentSlotRef(): ChatConsentSlotSetter {
   return register || (() => {});
 }
 
+// The sign-in page registers a slot in normal document flow right after the
+// login card. Portaling the notice there (instead of a viewport-fixed bar)
+// guarantees it can never cross over the card, the OAuth buttons, or the
+// terms/privacy links -- on short viewports the page simply grows taller and
+// scrolls, rather than a fixed element risking an overlap that would need to
+// be measured at runtime (UI-P1-02).
+type AuthConsentSlotSetter = (node: HTMLDivElement | null) => void;
+const AuthConsentSlotContext = createContext<AuthConsentSlotSetter | null>(null);
+
+export function useAuthConsentSlotRef(): AuthConsentSlotSetter {
+  const register = useContext(AuthConsentSlotContext);
+  return register || (() => {});
+}
+
+// Marketing pages register a slot directly under the sticky header. Before
+// FINAL-F001 the notice stayed a bottom-anchored viewport-fixed card there,
+// which at <=360px wide viewports landed exactly on the hero's primary CTA:
+// document.elementFromPoint() at the CTA's centre returned the notice's own
+// body copy, so the CTA could not be tapped at all while consent was
+// pending. A bottom overlay cannot avoid that by shrinking -- at 360x640 the
+// hero CTA ends 16px above the fold, so any bottom-anchored card taller than
+// 16px covers it. Putting the notice in normal document flow (the same fix
+// STG-F001 used for the chat composer) removes the overlap by construction
+// at every viewport and scroll offset.
+type MarketingConsentSlotSetter = (node: HTMLDivElement | null) => void;
+const MarketingConsentSlotContext =
+  createContext<MarketingConsentSlotSetter | null>(null);
+
+export function useMarketingConsentSlotRef(): MarketingConsentSlotSetter {
+  const register = useContext(MarketingConsentSlotContext);
+  return register || (() => {});
+}
+
+// Rendered by MarketingChrome's header for every marketing route. It stays
+// `empty:hidden` so a resolved (accepted/declined) consent state costs no
+// layout box and no CLS.
+export function MarketingConsentSlot({
+  maxWidth = "max-w-7xl",
+}: {
+  maxWidth?: string;
+}) {
+  const [node, setNode] = useState<HTMLDivElement | null>(null);
+  const register = useMarketingConsentSlotRef();
+
+  useEffect(() => {
+    register(node);
+    return () => register(null);
+  }, [node, register]);
+
+  return (
+    <div
+      ref={setNode}
+      data-testid="marketing-consent-slot"
+      className={`mx-auto ${maxWidth} px-4 py-2 empty:hidden sm:px-6 lg:px-8`}
+    />
+  );
+}
+
 const consentCopy: Record<
   Language,
   {
@@ -194,6 +252,11 @@ export function AnalyticsProvider({
   const [chatConsentSlot, setChatConsentSlot] = useState<HTMLDivElement | null>(
     null
   );
+  const [authConsentSlot, setAuthConsentSlot] = useState<HTMLDivElement | null>(
+    null
+  );
+  const [marketingConsentSlot, setMarketingConsentSlot] =
+    useState<HTMLDivElement | null>(null);
   const lifecycleCheckedRef = useRef(false);
   const copy = consentCopy[lang];
 
@@ -450,10 +513,17 @@ export function AnalyticsProvider({
   // On /chat, once a shell has registered a slot above the composer, the
   // notice portals there instead of floating fixed over the viewport --
   // that slot reserves real layout space, so it can never cover composer
-  // controls at any width. Everywhere else (and before the slot exists,
-  // e.g. the initial shell-loading skeleton) the original fixed overlay is
-  // unchanged.
-  const inlineSlot = pathname === "/chat" ? chatConsentSlot : null;
+  // controls at any width. On /auth/signin the sign-in page registers a
+  // similar slot right after the login card, and marketing routes register
+  // one under the sticky header (FINAL-F001). Everywhere else (and before a
+  // route's slot exists, e.g. the initial shell-loading skeleton) the
+  // original fixed corner overlay is used instead.
+  const inlineSlot =
+    pathname === "/chat"
+      ? chatConsentSlot
+      : pathname === "/auth/signin"
+        ? authConsentSlot
+        : marketingConsentSlot;
 
   const showConsentPrompt =
     !disabled &&
@@ -461,29 +531,50 @@ export function AnalyticsProvider({
     consentPromptReady &&
     (consent === "unset" || showPreferences);
 
+  // Secondary, non-alarming styling: a light card on light theme and a
+  // muted dark card on dark theme (instead of the old always-black
+  // high-contrast bar), so the notice reads as an ordinary compact toast
+  // rather than a warning that outweighs the surrounding page (UI-P1-02).
+  const consentButtonClass =
+    "inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-zinc-300 bg-white px-2.5 text-[10px] font-black text-zinc-700 transition-colors hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700 dark:focus-visible:ring-offset-zinc-900 sm:px-3 sm:text-[11px]";
+
+  // The body copy used to carry `min-w-0` next to a `shrink-0` action pair, so
+  // on narrow viewports it absorbed all of the shrink instead of triggering
+  // the wrap this row already allows -- the audit measured 34.6px of body
+  // width at 320px. Giving the copy a real minimum makes the existing
+  // flex-wrap do its job: when the copy and the actions no longer both fit,
+  // the actions drop to their own line rather than crushing the sentence.
+  // It stays content-driven, so a locale with long action labels wraps at a
+  // wider viewport than English does instead of at a hard-coded breakpoint.
   const noticeInner = (
     <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap sm:justify-between sm:gap-3">
-      <div className="min-w-0 flex-1">
-        <p className="text-[10px] leading-4 text-zinc-300 sm:hidden">
+      <div className="min-w-[10rem] flex-1">
+        <p className="text-[10px] leading-4 text-zinc-600 dark:text-zinc-300 sm:hidden">
           {promptCopy.mobileBody}{" "}
-          <Link href="/privacy" className="font-bold text-blue-300 hover:text-blue-200">
+          <Link
+            href="/privacy"
+            className="font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200"
+          >
             {copy.privacy}
           </Link>
         </p>
         <div className="hidden sm:block">
-          <p className="text-xs font-black">{promptCopy.title}</p>
-          <p className="mt-0.5 text-[11px] leading-4 text-zinc-400">{promptCopy.body}</p>
-          <Link href="/privacy" className="mt-0.5 inline-flex text-[11px] font-bold text-blue-300 hover:text-blue-200">
+          <p className="text-xs font-black text-zinc-900 dark:text-zinc-50">{promptCopy.title}</p>
+          <p className="mt-0.5 text-[11px] leading-4 text-zinc-500 dark:text-zinc-400">{promptCopy.body}</p>
+          <Link
+            href="/privacy"
+            className="mt-0.5 inline-flex text-[11px] font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200"
+          >
             {copy.privacy}
           </Link>
         </div>
       </div>
-      <div className="flex shrink-0 gap-1 sm:gap-2">
+      <div className="flex shrink-0 gap-2">
         <button
           type="button"
           data-testid="analytics-consent-decline"
           onClick={decline}
-          className="min-h-11 rounded-lg border border-zinc-600 bg-zinc-900 px-2.5 text-[10px] font-black text-white hover:bg-zinc-800 sm:px-3 sm:text-[11px]"
+          className={consentButtonClass}
         >
           {promptCopy.decline}
         </button>
@@ -491,7 +582,7 @@ export function AnalyticsProvider({
           type="button"
           data-testid="analytics-consent-accept"
           onClick={accept}
-          className="min-h-11 rounded-lg border border-zinc-600 bg-zinc-900 px-2.5 text-[10px] font-black text-white hover:bg-zinc-800 sm:px-3 sm:text-[11px]"
+          className={consentButtonClass}
         >
           {promptCopy.accept}
         </button>
@@ -501,62 +592,72 @@ export function AnalyticsProvider({
 
   return (
     <ChatConsentSlotContext.Provider value={setChatConsentSlot}>
-      {children}
-      {analyticsEnabled && analyticsClientReady && measurementId ? (
-        <Script
-          id="tomverse-ga4"
-          src={`https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(measurementId)}`}
-          strategy="afterInteractive"
-          nonce={nonce || undefined}
-        />
-      ) : null}
-      {showConsentPrompt && inlineSlot
-        ? createPortal(
-            <div
-              role="region"
-              aria-label={promptCopy.title}
-              data-testid="chat-consent-notice"
-              className="mx-2 mb-2 rounded-xl border border-zinc-700 bg-zinc-950/95 p-2 text-zinc-100 shadow-sm sm:mx-4 sm:p-3"
-            >
-              {noticeInner}
-            </div>,
-            inlineSlot
-          )
-        : null}
-      {showConsentPrompt && !inlineSlot ? (
-        <aside
-          role="region"
-          aria-label={promptCopy.title}
-          data-testid="chat-consent-notice"
-          className="fixed bottom-[max(0.5rem,env(safe-area-inset-bottom))] left-1/2 z-[100] w-[min(46rem,calc(100vw-1rem))] -translate-x-1/2 rounded-xl border border-zinc-700 bg-zinc-950/95 p-2 text-zinc-100 shadow-2xl shadow-black/40 backdrop-blur sm:p-3"
-        >
-          {noticeInner}
-        </aside>
-      ) : null}
-      {!disabled &&
-      consentPromptReady &&
-      !showPreferences &&
-      !isMobileChatTextEntryActive &&
-      !(pathname === "/chat" && initialPlan !== "Guest") &&
-      (consent === "accepted" || consent === "declined") ? (
-        <button
-          type="button"
-          data-testid="analytics-settings-button"
-          onClick={() => setShowPreferences(true)}
-          className={`fixed right-2 z-[60] rounded-full border border-zinc-700 bg-zinc-950/90 px-2.5 py-1 text-[10px] font-bold text-zinc-400 shadow-lg backdrop-blur hover:text-zinc-100 ${
-            pathname === "/chat"
-              ? // The chat sidebar/drawer offers its own path back to this
-                // (the account menu for signed-in users, an inline button
-                // next to "Login" for guests), so this floating overlay
-                // only needs to cover desktop, where it doesn't compete
-                // with the composer for space.
-                "hidden bottom-[5.5rem] md:inline-flex md:bottom-2"
-              : "bottom-2"
-          }`}
-        >
-          {copy.settings}
-        </button>
-      ) : null}
+      <AuthConsentSlotContext.Provider value={setAuthConsentSlot}>
+        <MarketingConsentSlotContext.Provider value={setMarketingConsentSlot}>
+        {children}
+        {analyticsEnabled && analyticsClientReady && measurementId ? (
+          <Script
+            id="tomverse-ga4"
+            src={`https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(measurementId)}`}
+            strategy="afterInteractive"
+            nonce={nonce || undefined}
+          />
+        ) : null}
+        {showConsentPrompt && inlineSlot
+          ? createPortal(
+              <div
+                role="region"
+                aria-label={promptCopy.title}
+                data-testid="chat-consent-notice"
+                className={
+                  inlineSlot === marketingConsentSlot
+                    ? // The marketing slot already supplies the page gutter, so
+                      // the card spans it and never needs its own max-width.
+                      "rounded-xl border border-zinc-200 bg-white/95 p-2 text-zinc-700 shadow-md shadow-zinc-900/5 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-black/20 sm:p-3"
+                    : "mx-2 mb-2 rounded-xl border border-zinc-200 bg-white/95 p-2 text-zinc-700 shadow-md shadow-zinc-900/5 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-black/20 sm:mx-4 sm:ml-auto sm:max-w-sm sm:p-3"
+                }
+              >
+                {noticeInner}
+              </div>,
+              inlineSlot
+            )
+          : null}
+        {showConsentPrompt && !inlineSlot ? (
+          <aside
+            role="region"
+            aria-label={promptCopy.title}
+            data-testid="chat-consent-notice"
+            className="fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] right-[max(0.75rem,env(safe-area-inset-right))] z-[100] w-[min(26rem,calc(100vw-1.5rem))] rounded-xl border border-zinc-200 bg-white/95 p-2 text-zinc-700 shadow-lg shadow-zinc-900/10 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-black/30 sm:p-3"
+          >
+            {noticeInner}
+          </aside>
+        ) : null}
+        {!disabled &&
+        consentPromptReady &&
+        !showPreferences &&
+        !isMobileChatTextEntryActive &&
+        !(pathname === "/chat" && initialPlan !== "Guest") &&
+        (consent === "accepted" || consent === "declined") ? (
+          <button
+            type="button"
+            data-testid="analytics-settings-button"
+            onClick={() => setShowPreferences(true)}
+            className={`fixed right-2 z-[60] rounded-full border border-zinc-700 bg-zinc-950/90 px-2.5 py-1 text-[10px] font-bold text-zinc-400 shadow-lg backdrop-blur hover:text-zinc-100 ${
+              pathname === "/chat"
+                ? // The chat sidebar/drawer offers its own path back to this
+                  // (the account menu for signed-in users, an inline button
+                  // next to "Login" for guests), so this floating overlay
+                  // only needs to cover desktop, where it doesn't compete
+                  // with the composer for space.
+                  "hidden bottom-[5.5rem] md:inline-flex md:bottom-2"
+                : "bottom-2"
+            }`}
+          >
+            {copy.settings}
+          </button>
+        ) : null}
+        </MarketingConsentSlotContext.Provider>
+      </AuthConsentSlotContext.Provider>
     </ChatConsentSlotContext.Provider>
   );
 }

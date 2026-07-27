@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import {
   expectNoHorizontalOverflow,
   mockAuthenticatedApi,
+  openRecentConversation,
   prepareGuestPage,
 } from "./support/app-fixtures";
 
@@ -276,7 +277,7 @@ async function openReviewConversation(page: Page) {
   // unambiguous way to open the mocked conversation on every viewport --
   // the sidebar (always-visible on desktop, a drawer on mobile) shows the
   // same conversation title and would otherwise be a second match.
-  await page.getByTestId("recent-conversation-card").click();
+  await openRecentConversation(page);
   await expect(page.getByTestId("chat-input")).toBeVisible();
 }
 
