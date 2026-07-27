@@ -112,7 +112,7 @@ test.describe("desktop chat keyboard policy", () => {
 });
 
 test.describe("mobile chat keyboard policy", () => {
-  test.beforeEach(async ({ page }, testInfo) => {
+  test.beforeEach(async (_fixtures, testInfo) => {
     test.skip(
       !testInfo.project.name.startsWith("mobile"),
       "Mobile keyboard policy runs in mobile projects."
