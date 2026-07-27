@@ -1,4 +1,15 @@
 name: Main Chromium Regression
+#
+# This workflow owns the desktop-chromium coverage that PR Fast Gate no
+# longer runs. PR Fast Gate runs only the ~20 `@smoke` contracts (see
+# scripts/verify-smoke-coverage.mjs); every other desktop-chromium test --
+# visual regression, typography, touch targets, keyboard policy, responsive
+# layout, analytics consent, i18n -- is still executed here, unfiltered, on
+# every main push. Nothing was deleted; the CI tier moved.
+#
+# `test:e2e:chromium` must therefore stay unfiltered. Adding a tag filter to
+# it would drop those tests from CI entirely, and the security-regression
+# check asserts that it has none.
 
 on:
   push:

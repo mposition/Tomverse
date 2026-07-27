@@ -29,6 +29,13 @@ jobs:
         with:
           fetch-depth: 0
 
+      # This duplicates the scan Secret History Scan performs on the same PR
+      # (gitleaks-action scans base..head on pull_request in both), but it is
+      # deliberately kept: this job's name is the only required status check
+      # on develop and main, so removing this step would take secret scanning
+      # off the merge-blocking path entirely. Remove it only after
+      # "Scan repository history for secrets" is itself made a required
+      # check. `fetch-depth: 0` above exists for this step.
       - name: Scan pull-request commits for secrets
         uses: gitleaks/gitleaks-action@v3
         env:
@@ -64,8 +71,14 @@ jobs:
       - name: Strict encoding validation
         run: npm run check:encoding:strict
 
-      - name: ESLint and production build
-        run: npm run check
+      # `npm run check` still runs both locally and in the daily audit. They
+      # are split here so the step timings in this log attribute time to the
+      # right stage, and so a lint failure reports without paying for a build.
+      - name: ESLint
+        run: npx eslint . --max-warnings=0
+
+      - name: Production build
+        run: npm run build
 
       - name: Restore Playwright Chromium cache
         continue-on-error: true
@@ -79,8 +92,18 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
-      - name: Run desktop Chromium PR smoke tests
-        run: npm run test:e2e:pr
+      # Runs before the smoke tests: listing does not launch a browser, and a
+      # smoke set that has silently lost the billing/credit/auth contracts
+      # should fail here rather than pass a green-but-empty gate below.
+      - name: Verify smoke coverage manifest
+        run: npm run verify:smoke-coverage
+
+      # The @smoke tier only. Every other desktop-chromium test still runs --
+      # on main push via Main Chromium Regression, and nightly via Daily
+      # Security Audit and Nightly Visual Regression. See
+      # scripts/verify-smoke-coverage.mjs for what this tier must cover.
+      - name: Run desktop Chromium smoke tests
+        run: npm run test:e2e:smoke
 
       - name: Upload failed test evidence
         if: failure()

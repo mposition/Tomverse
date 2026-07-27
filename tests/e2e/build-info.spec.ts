@@ -55,7 +55,7 @@ const mockBuildInfo = (page: Page, body: unknown) =>
   );
 
 test.describe("build-info API contract (real endpoint)", () => {
-  test("GET returns the public shape with a no-store cache header", async ({
+  test("GET returns the public shape with a no-store cache header", { tag: "@smoke" }, async ({
     page,
   }) => {
     const response = await page.request.get("/api/build-info");

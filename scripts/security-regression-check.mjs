@@ -1579,6 +1579,11 @@ const checks = [
       source.includes("github/codeql-action/analyze@v4"),
   },
   {
+    // PR Fast Gate runs the `@smoke` tier rather than the whole
+    // desktop-chromium project. That is only sound while the tier is
+    // manifest-verified before it runs, and while the tests it no longer
+    // runs still execute unfiltered on main push and nightly -- so those
+    // are asserted here together, as one invariant.
     name: "PR, main, and nightly workflows split browser coverage without rebuilding E2E",
     file: "playwright.config.ts",
     test: (source) => {
@@ -1586,6 +1591,8 @@ const checks = [
       const prWorkflow = read(".github/workflows/pr-fast-gate.yml");
       const mainWorkflow = read(".github/workflows/e2e.yml");
       const dailyWorkflow = read(".github/workflows/daily-security-audit.yml");
+      const visualWorkflow = read(".github/workflows/nightly-visual-regression.yml");
+      const smokeVerifier = read("scripts/verify-smoke-coverage.mjs");
       return (
         source.includes("tomverse-e2e-nextauth-secret-only-2026") &&
         source.includes("NEXTAUTH_SECRET: e2eNextAuthSecret") &&
@@ -1597,6 +1604,9 @@ const checks = [
           '"test:e2e:pr": "playwright test --project=desktop-chromium"'
         ) &&
         packageSource.includes(
+          '"test:e2e:smoke": "playwright test --project=desktop-chromium --grep=@smoke"'
+        ) &&
+        packageSource.includes(
           '"check": "eslint . --max-warnings=0 && next build"'
         ) &&
         packageSource.includes(
@@ -1606,20 +1616,49 @@ const checks = [
         !prWorkflow.includes("push:") &&
         prWorkflow.includes("actions: read") &&
         prWorkflow.includes("pull-requests: read") &&
+        // Secret scanning stays inline: this job's name is the only required
+        // status check on develop and main, so dropping the step would take
+        // gitleaks off the merge-blocking path.
         prWorkflow.includes("gitleaks/gitleaks-action@v3") &&
         prWorkflow.includes('GITLEAKS_ENABLE_COMMENTS: "false"') &&
+        prWorkflow.includes("fetch-depth: 0") &&
         prWorkflow.includes("npm run security:regression") &&
         prWorkflow.includes("npm run test:unit") &&
-        prWorkflow.includes("npm run check") &&
-        prWorkflow.includes("npm run test:e2e:pr") &&
+        prWorkflow.includes("npm run check:encoding:strict") &&
+        // `npm run check` is split into its two halves here for step-level
+        // timing; both halves must still run, at the same strictness.
+        prWorkflow.includes("npx eslint . --max-warnings=0") &&
+        prWorkflow.includes("npm run build") &&
+        // The smoke manifest is verified before the smoke tests run, so a
+        // tier that has silently lost its billing/credit/auth contracts
+        // fails instead of passing an empty gate.
+        prWorkflow.includes("npm run verify:smoke-coverage") &&
+        prWorkflow.includes("npm run test:e2e:smoke") &&
         prWorkflow.includes("playwright install --with-deps chromium") &&
         !prWorkflow.includes("chromium webkit") &&
+        // Goldens are never rewritten by CI, on any tier.
+        !prWorkflow.includes("--update-snapshots") &&
+        !visualWorkflow.includes("--update-snapshots") &&
+        // The smoke tier is a reviewed manifest, not a tag count, and it is
+        // capped so it cannot grow back into a second regression suite.
+        smokeVerifier.includes("MANIFEST") &&
+        smokeVerifier.includes("MAX_SMOKE_TESTS") &&
+        smokeVerifier.includes("creditPreflight") &&
+        smokeVerifier.includes("chat-state-visual-regression.spec.ts") &&
+        // Everything the PR tier stopped running still runs here, unfiltered.
         mainWorkflow.includes("push:") &&
         !mainWorkflow.includes("pull_request:") &&
         mainWorkflow.includes("npm run build") &&
         mainWorkflow.includes("npm run test:e2e:chromium") &&
+        !mainWorkflow.includes("--grep") &&
         dailyWorkflow.includes("npm run test:e2e:run") &&
         dailyWorkflow.includes("chromium webkit") &&
+        !dailyWorkflow.includes("--grep") &&
+        // The visual-regression suite dropped from the PR tier has an
+        // explicit nightly home of its own.
+        visualWorkflow.includes("npm run test:e2e:visual") &&
+        visualWorkflow.includes("schedule:") &&
+        visualWorkflow.includes("contents: read") &&
         !prWorkflow.includes("ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION") &&
         !mainWorkflow.includes("ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION")
       );
