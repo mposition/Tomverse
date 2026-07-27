@@ -181,9 +181,32 @@ export type AuthenticatedQaState = {
   userSettingsReads: number;
 };
 
+/**
+ * A message as GET /api/conversations/:id returns it. `modelId` is what each
+ * panel filters on (components/chat/ChatApp.tsx): a user turn with no modelId
+ * belongs to every panel, an assistant turn only to its own model's panel.
+ */
+export type QaConversationMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  modelId?: string;
+  status?: string;
+};
+
 export async function mockAuthenticatedApi(
   page: Page,
-  options: { selectedModels?: string[]; showSidebarTour?: boolean } = {}
+  options: {
+    selectedModels?: string[];
+    showSidebarTour?: boolean;
+    /**
+     * Seeds the conversation with history. Panels report themselves empty
+     * without it, and an empty conversation is exactly the state the mobile
+     * shell hides its model tabs in -- so any test that needs the multi-model
+     * tab strip has to seed this as well as `selectedModels`.
+     */
+    messages?: QaConversationMessage[];
+  } = {}
 ): Promise<AuthenticatedQaState> {
   await page.addInitScript((showSidebarTour) => {
     if (showSidebarTour) {
@@ -465,7 +488,13 @@ export async function mockAuthenticatedApi(
       return;
     }
 
-    await route.fulfill(json({ ...conversation(), messages: [], nextCursor: null }));
+    await route.fulfill(
+      json({
+        ...conversation(),
+        messages: (options.messages || []) as unknown as JsonValue,
+        nextCursor: null,
+      })
+    );
   });
 
   return state;

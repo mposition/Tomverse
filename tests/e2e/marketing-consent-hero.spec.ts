@@ -120,14 +120,31 @@ for (const viewport of MARKETING_VIEWPORTS) {
       expect(box.width, `${name} button width >= 44px`).toBeGreaterThanOrEqual(44);
     }
 
-    // The wrap exists so the sentence keeps a readable measure instead of
-    // being crushed into the sliver the action pair leaves behind (the audit
-    // measured 34.6px of body width at 320px).
+    // The copy keeps a readable measure instead of being crushed into the
+    // sliver the action pair used to leave behind (the audit measured 34.6px
+    // of body width at 320px).
+    //
+    // The floor is 130px rather than the earlier 160px, and deliberately so:
+    // 160px at 320px was only reachable by wrapping the two actions onto a
+    // row of their own, which costs ~44px and put the phone notice at 102px
+    // against its 80px height contract. The notice now keeps copy and actions
+    // on one row with compact action labels, which measures ~141px of copy at
+    // 320px -- narrower, but set at 11px instead of 10px and inside a notice
+    // that is 78px tall instead of 102px. Anything under 130px would mean the
+    // actions had grown back into the sentence's space.
     const bodyWidth = await notice
       .locator("p")
       .first()
       .evaluate((el) => el.getBoundingClientRect().width);
-    expect(bodyWidth, "consent body copy keeps a readable measure").toBeGreaterThan(160);
+    expect(bodyWidth, "consent body copy keeps a readable measure").toBeGreaterThan(130);
+
+    // The height contract the audit set for phones: a notice that eats more
+    // than 80px of a 568px-tall screen is competing with the page it sits on.
+    const heightBox = await notice.boundingBox();
+    expect(heightBox, "notice bounding box").not.toBeNull();
+    if (heightBox && viewport.width < 768) {
+      expect(heightBox.height, "phone notice stays within 80px").toBeLessThanOrEqual(80);
+    }
   });
 }
 
