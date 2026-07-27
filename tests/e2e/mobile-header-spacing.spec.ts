@@ -37,14 +37,6 @@ test.beforeEach(async ({}, testInfo) => {
   );
 });
 
-// Same authenticated-bootstrap race chat-state-visual-regression.spec.ts
-// documents (ChatPageClient's ACTIVE_CHAT_STORAGE_KEY effect can bail out
-// before isModelSelectionReady is set and occasionally never retry): a
-// re-navigation clears it, a longer timeout does not. The raised per-test
-// timeout is for a different reason -- waiting the bootstrap out can eat most
-// of the default 30s budget, leaving nothing for the measurements after it.
-test.describe.configure({ retries: 2, timeout: 90_000 });
-
 const MODEL_A = "gpt-5-4-mini";
 const MODEL_B = "claude-sonnet-5";
 const MODEL_C = "gemini-3-5-flash";
@@ -140,19 +132,15 @@ async function readHeaderMetrics(page: Page): Promise<HeaderMetrics> {
 }
 
 /**
- * Waits out the model-summary skeleton and, more importantly, waits for the
- * real summary to be on screen. Asserting only "skeleton gone" can pass in the
- * gap before the summary mounts (or after it briefly unmounts again during the
- * bootstrap race noted above), which then reads as a missing +N rather than a
- * timing problem.
+ * Waits on the positive signal -- the real model summary -- rather than only
+ * on the skeleton's absence, so a header that rendered neither fails here
+ * instead of getting measured mid-bootstrap. Default timeouts on purpose,
+ * same reasoning as chat-state-visual-regression.spec.ts: isModelSelectionReady
+ * now resolves on every bootstrap path, so needing longer is a regression.
  */
 async function settleModelSummary(page: Page) {
-  await expect(page.getByTestId("mobile-header-model-summary-skeleton")).toHaveCount(0, {
-    timeout: 30_000,
-  });
-  await expect(page.getByTestId("mobile-header-model-summary")).toBeVisible({
-    timeout: 30_000,
-  });
+  await expect(page.getByTestId("mobile-header-model-summary")).toBeVisible();
+  await expect(page.getByTestId("mobile-header-model-summary-skeleton")).toHaveCount(0);
 }
 
 type EnterOptions = {
