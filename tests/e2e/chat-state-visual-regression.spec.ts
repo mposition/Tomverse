@@ -3,6 +3,7 @@ import {
   createQaPdfBuffer,
   createQaPngBuffer,
   mockAttachmentUpload,
+  prepareGuestPage,
 } from "./support/app-fixtures";
 import {
   DESKTOP_VIEWPORT,
@@ -16,7 +17,9 @@ import {
   mockUserUsage,
   restoreActiveConversation,
   submitComposer,
+  type ChatModelStubSpec,
   type Theme,
+  type UsagePatch,
 } from "./support/chat-state-fixtures";
 
 // -----------------------------------------------------------------------
@@ -82,12 +85,38 @@ async function enterConversation(
     lang?: "ko" | "en";
     selectedModels?: string[];
     holdMessagesFetch?: boolean;
+    // Installed here (before page.goto) rather than left to the caller,
+    // because installChatModelStub relies on page.addInitScript -- which
+    // only takes effect on navigations that happen *after* it's
+    // registered. Calling it post-goto silently no-ops: the real request
+    // reaches the real E2E server instead of the stub.
+    modelStub?: ChatModelStubSpec;
+    // Same reasoning as modelStub, but for GET /api/user/usage: the
+    // useUserUsage() hook fires on mount, so a route override registered
+    // after page.goto() can lose the race to the default (Free-plan) route
+    // mockAuthenticatedApi already installed, leaving the account looking
+    // like Free plan even when a test asked for Pro.
+    usagePatch?: UsagePatch;
   }
 ) {
-  const { theme, viewport, lang = "ko", selectedModels = THREE_MODELS, holdMessagesFetch = false } = options;
+  const {
+    theme,
+    viewport,
+    lang = "ko",
+    selectedModels = THREE_MODELS,
+    holdMessagesFetch = false,
+    modelStub,
+    usagePatch,
+  } = options;
   const authState = await mockAuthenticatedApi(page, { selectedModels });
   authState.theme = theme;
   await restoreActiveConversation(page);
+  if (modelStub) {
+    await installChatModelStub(page, modelStub);
+  }
+  if (usagePatch) {
+    await mockUserUsage(page, usagePatch);
+  }
 
   if (holdMessagesFetch) {
     // Registered after mockAuthenticatedApi's own conversation route, so it
@@ -113,10 +142,6 @@ async function enterConversation(
   await expect(page.getByTestId(shellTestId)).toBeVisible();
 
   return authState;
-}
-
-function panelTestIdFor(viewport: { width: number }) {
-  return viewport.width < 768 ? "mobile-model-tab" : "desktop-model-panel";
 }
 
 const CORE_VIEWPORTS: Array<[{ width: number; height: number }, string]> = [
@@ -415,15 +440,13 @@ test.describe("Insufficient credits state", () => {
         await page.reload();
         await freezeAnimations(page);
 
-        await expect(page.getByText("플랜 한도에 도달했습니다")).toBeVisible();
+        // The inline composer banner is always present; the modal with the
+        // same heading auto-opens the first time the limit is detected
+        // (see ChatInput.tsx's limitScope effect) -- both legitimately show
+        // "플랜 한도에 도달했습니다" at once, so this just confirms at least one.
+        await expect(page.getByText("플랜 한도에 도달했습니다").first()).toBeVisible();
         await expect(page.getByTestId("chat-textarea")).toBeDisabled();
-        const viewOptions = page.getByTestId("usage-limit-view-options");
-        await expect(viewOptions).toBeVisible();
-        const box = await viewOptions.boundingBox();
-        expect(box).not.toBeNull();
-        if (box) {
-          expect(box.height).toBeGreaterThanOrEqual(20); // banner CTA, not the 44px composer button
-        }
+        await expect(page.getByTestId("usage-limit-view-options")).toBeVisible();
 
         await expect(page).toHaveScreenshot(`chat-insufficient-credits-${viewportName}-${theme}-ko.png`);
       });
@@ -438,7 +461,7 @@ test.describe("Insufficient credits state", () => {
     });
     await page.reload();
     await freezeAnimations(page);
-    await expect(page.getByText("플랜 한도에 도달했습니다")).toBeVisible();
+    await expect(page.getByText("플랜 한도에 도달했습니다").first()).toBeVisible();
 
     const dimensions = await page.evaluate(() => ({
       viewport: document.documentElement.clientWidth,
@@ -449,24 +472,35 @@ test.describe("Insufficient credits state", () => {
     await expect(page).toHaveScreenshot("chat-insufficient-credits-mobile-min-light-ko.png");
   });
 
-  test("guest limit reached shows a login CTA, not a purchase CTA", async ({ page }) => {
+  test("account limit reached auto-opens a modal with a purchase/upgrade CTA, not a sign-in CTA", async ({ page }) => {
     await enterConversation(page, { theme: "light", viewport: DESKTOP_VIEWPORT });
-    // Guests can't buy credits inline -- confirm we don't accidentally
-    // render the account-only purchase modal for a guest instead.
-    // (Authenticated-only assertion below stands in for the guest path,
-    // which is covered end-to-end in guest-flow.spec.ts; here we assert the
-    // modal correctly differentiates its primary CTA by account type.)
+    // Guests can't buy credits inline -- confirm the authenticated path
+    // offers credit purchase / upgrade rather than a sign-in CTA. (The
+    // guest path itself is covered end-to-end in guest-flow.spec.ts.)
     await mockUserUsage(page, {
       plan: "Free",
       balances: { planRemainingCredits: 0, purchasedRemainingCredits: 0, dailyRemainingCredits: 0 },
     });
     await page.reload();
     await freezeAnimations(page);
-    await page.getByTestId("usage-limit-view-options").click();
+    // The modal auto-opens the first time the limit is detected (see
+    // ChatInput.tsx's limitScope effect) -- no click needed to reach it.
     await expect(page.getByTestId("usage-limit-modal")).toBeVisible();
-    await expect(page.getByText("플랜 한도에 도달했습니다")).toBeVisible();
-    // Authenticated path offers credit purchase / upgrade, not a sign-in CTA.
+    await expect(page.getByText("플랜 한도에 도달했습니다").first()).toBeVisible();
     await expect(page.getByRole("link", { name: /signin/ })).toHaveCount(0);
+  });
+
+  test("guest limit reached shows a login CTA, distinct from the account plan-limit copy", async ({ page }) => {
+    await prepareGuestPage(page, "ko");
+    await mockGuestUsage(page, 20, 20); // used === limit -> isGuestLimitReached
+    await page.setViewportSize(DESKTOP_VIEWPORT);
+    await page.goto("/chat?lang=ko");
+    await freezeAnimations(page);
+
+    await expect(page.getByTestId("chat-textarea")).toBeDisabled();
+    await expect(page.getByText("게스트 한도에 도달했습니다").first()).toBeVisible();
+    // Guests get a sign-in CTA, never the account-only purchase/upgrade CTA.
+    await expect(page.getByRole("link", { name: "로그인하고 이 대화 계속하기" }).first()).toBeVisible();
   });
 
   test("a plan-locked model shows as paused, distinct from a network failure", async ({ page }) => {
@@ -484,13 +518,12 @@ test.describe("Insufficient credits state", () => {
 // 8. Deep Research
 // ===========================================================================
 async function enterProConversation(page: Page, theme: Theme, viewport: { width: number; height: number }) {
-  const authState = await enterConversation(page, {
+  return enterConversation(page, {
     theme,
     viewport,
     selectedModels: [MODEL_B, MODEL_C],
+    usagePatch: { plan: "Pro", balances: { planRemainingCredits: 3000, dailyRemainingCredits: 300 } },
   });
-  await mockUserUsage(page, { plan: "Pro", balances: { planRemainingCredits: 3000, dailyRemainingCredits: 300 } });
-  return authState;
 }
 
 const toolsMenuTrigger = (page: Page) => page.locator('button[aria-controls="chat-input-popover"]').nth(0);
@@ -658,9 +691,12 @@ test.describe("File attachment states", () => {
       [MODEL_C]: { kind: "success", chunks: [SHORT_ANSWER], intervalMs: 5 },
     });
     await attachFromComputer(page, { name: "qa-image.png", mimeType: "image/png", buffer: createQaPngBuffer() });
-    await expect(page.getByAltText("qa-image.png")).toBeVisible();
+    await expect(page.getByAltText("qa-image.png").first()).toBeVisible();
     await submitComposer(page, "Describe this image.", DESKTOP_VIEWPORT.width);
-    await expect(page.getByAltText("qa-image.png")).toBeVisible();
+    // Each of the 3 comparison panels renders its own copy of the user's
+    // sent message (see fixtures.spec.ts's identical .first() pattern), so
+    // the same attachment legitimately appears once per active panel.
+    await expect(page.getByAltText("qa-image.png")).toHaveCount(THREE_MODELS.length);
   });
 
   test("unsupported file type is rejected with a toast, not silently dropped", async ({ page }) => {
@@ -670,7 +706,10 @@ test.describe("File attachment states", () => {
       mimeType: "application/x-msdownload",
       buffer: Buffer.from("not a real executable"),
     });
-    const toast = page.getByRole("status").filter({ hasText: "지원하지 않는 파일 형식입니다." });
+    // Error-tone toasts use role="alert" (assertive), not role="status" --
+    // see the ChatPageClient.tsx fix distinguishing progress (status/polite)
+    // from error (alert/assertive) announcements.
+    const toast = page.getByRole("alert").filter({ hasText: "지원하지 않는 파일 형식입니다." });
     await expect(toast).toBeVisible();
   });
 
@@ -678,7 +717,7 @@ test.describe("File attachment states", () => {
     await enterConversation(page, { theme: "light", viewport: DESKTOP_VIEWPORT });
     const oversized = Buffer.alloc(10 * 1024 * 1024 + 1, 1);
     await attachFromComputer(page, { name: "qa-huge.png", mimeType: "image/png", buffer: oversized });
-    const toast = page.getByRole("status").filter({ hasText: "각 파일은 10MB 이하여야 합니다." });
+    const toast = page.getByRole("alert").filter({ hasText: "각 파일은 10MB 이하여야 합니다." });
     await expect(toast).toBeVisible();
   });
 

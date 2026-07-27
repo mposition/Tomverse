@@ -349,12 +349,16 @@ export function MobileChatShell({
     },
     [modelSummary.activeCount]
   );
+  // See DesktopChatShell's matching comment: an existing conversation
+  // shouldn't default to "empty" before any panel has actually reported in,
+  // or a still-loading panel would flash the welcome screen instead of its
+  // own loading state. Only a brand-new conversation defaults to empty.
   const isActiveConversationEmpty = resolvedActiveModelId
-    ? modelEmptyStates[emptyStateKey(resolvedActiveModelId)] ?? true
+    ? modelEmptyStates[emptyStateKey(resolvedActiveModelId)] ?? !currentChatId
     : true;
   const isConversationEmpty =
     selectedModels.length > 0 &&
-    selectedModels.every((modelId) => modelEmptyStates[emptyStateKey(modelId)] ?? true);
+    selectedModels.every((modelId) => modelEmptyStates[emptyStateKey(modelId)] ?? !currentChatId);
   const currentConversation = conversations.find(
     (conversation) => conversation.id === currentChatId
   );

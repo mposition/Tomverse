@@ -51,8 +51,14 @@ export type ChatModelStubSpec = Record<string, StreamAttempt | StreamAttempt[]>;
  * is what lets a "retry succeeds" fixture answer the first send with an
  * error and the retry with a success.
  */
-export async function installChatModelStub(page: Page, spec: ChatModelStubSpec) {
-  await page.addInitScript((serializedSpec: string) => {
+// Extracted to a standalone function so the exact same patch logic can be
+// applied two ways: via page.addInitScript (covers this test's *future*
+// navigations/reloads) and via page.evaluate (covers the document that's
+// already loaded right now). Relying on addInitScript alone silently no-ops
+// if installChatModelStub is called after page.goto() -- the real request
+// would reach the real E2E server instead of this stub -- so both paths run
+// unconditionally rather than leaving call order to the caller to get right.
+function patchWindowFetchForChatStub(serializedSpec: string) {
     const modelSpec = JSON.parse(serializedSpec) as Record<string, unknown>;
     const callCounts = new Map<string, number>();
     const originalFetch = window.fetch.bind(window);
@@ -160,7 +166,16 @@ export async function installChatModelStub(page: Page, spec: ChatModelStubSpec) 
 
       return originalFetch(input as RequestInfo, init);
     }) as typeof window.fetch;
-  }, JSON.stringify(spec));
+}
+
+export async function installChatModelStub(page: Page, spec: ChatModelStubSpec) {
+  const serialized = JSON.stringify(spec);
+  await page.addInitScript(patchWindowFetchForChatStub, serialized);
+  // Best-effort: applies immediately if a document is already loaded (e.g.
+  // this was called after page.goto()). Ignored if there's no execution
+  // context yet -- the addInitScript registration above still covers the
+  // upcoming navigation in that case.
+  await page.evaluate(patchWindowFetchForChatStub, serialized).catch(() => {});
 }
 
 export type DeepResearchStatusResponse =
@@ -200,7 +215,7 @@ export async function mockGuestUsage(page: Page, used: number, limit: number) {
   );
 }
 
-type UsagePatch = {
+export type UsagePatch = {
   plan?: "Free" | "Pro" | "Max";
   usage?: Partial<{ creditsDay: number; creditsMonth: number }>;
   balances?: Partial<{
