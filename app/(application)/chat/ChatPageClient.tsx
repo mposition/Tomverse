@@ -1047,7 +1047,7 @@ export function ChatPageClient({
       } finally {
         comparisonPreflightInFlightRef.current = false;
       }
-    }, [effectiveDisabledPanels, isGuestMode, selectedModels, showToast, t]);
+    }, [effectiveDisabledPanels, isGuestMode, selectedModels, showToast, t, webSearchMode]);
 
   useEffect(() => {
     return () => {
