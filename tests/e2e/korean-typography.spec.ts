@@ -1,10 +1,18 @@
 import { expect, test, type Page } from "@playwright/test";
 import {
   expectNoHorizontalOverflow,
+  mockAuthenticatedApi,
   mockPublicBillingConfig,
   mockPublicProofMetrics,
   prepareGuestPage,
 } from "./support/app-fixtures";
+
+function boxesOverlap(
+  a: { x: number; y: number; width: number; height: number },
+  b: { x: number; y: number; width: number; height: number }
+): boolean {
+  return a.y < b.y + b.height && a.y + a.height > b.y && a.x < b.x + b.width && a.x + a.width > b.x;
+}
 
 // Measures the rendered line each character of `word` lands on inside
 // `selector`, using Range.getBoundingClientRect() so wrapping is read from
@@ -229,10 +237,7 @@ test.describe("Korean typography: chat welcome screen", () => {
     expect(greetingBox).not.toBeNull();
     expect(inputBox).not.toBeNull();
 
-    const overlaps =
-      greetingBox!.y < inputBox!.y + inputBox!.height &&
-      greetingBox!.y + greetingBox!.height > inputBox!.y;
-    expect(overlaps).toBe(false);
+    expect(boxesOverlap(greetingBox!, inputBox!)).toBe(false);
   });
 
   test("keeps welcome layout correct at 390x844", async ({ page }) => {
@@ -244,6 +249,70 @@ test.describe("Korean typography: chat welcome screen", () => {
     await expect(greeting).toContainText("도와드릴까요");
     const wordLines = await countLinesForWord(page, "[data-testid='chat-welcome-greeting']", "도와드릴까요");
     expect(wordLines).toBe(1);
+
+    const lineCount = await countRenderedLines(page, "[data-testid='chat-welcome-greeting']");
+    expect(lineCount).toBeLessThanOrEqual(2);
+
+    await expectNoHorizontalOverflow(page);
+  });
+
+  test("keeps the signed-in welcomeBack greeting intact at 320x568", async ({ page }) => {
+    await prepareGuestPage(page, "ko");
+    await mockAuthenticatedApi(page);
+    await page.setViewportSize({ width: 320, height: 568 });
+    await page.goto("/chat");
+
+    const greeting = page.getByTestId("chat-welcome-greeting");
+    await expect(greeting).toBeVisible();
+    await expect(greeting).toContainText("도와드릴까요");
+    await expect(greeting).toContainText("다시 만나 반가워요");
+
+    const wordLines = await countLinesForWord(page, "[data-testid='chat-welcome-greeting']", "도와드릴까요");
+    expect(wordLines).toBe(1);
+
+    const box = await greeting.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(320 + 1);
+
+    await expectNoHorizontalOverflow(page);
+  });
+
+  test("welcome text never overlaps the mobile header or the analytics consent notice at 320x568", async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      !testInfo.project.name.startsWith("mobile"),
+      "Mobile header overlap only applies to the mobile shell."
+    );
+
+    await page.context().addCookies([
+      { name: "__tomverse_e2e_analytics", value: "1", url: "http://127.0.0.1:3100" },
+    ]);
+    await prepareGuestPage(page, "ko");
+    await page.setViewportSize({ width: 320, height: 568 });
+    await page.goto("/chat?entry=guest-preview");
+
+    const greeting = page.getByTestId("chat-welcome-greeting");
+    await expect(greeting).toBeVisible();
+    await expect(greeting).toContainText("도와드릴까요");
+
+    const header = page.locator("[data-testid='mobile-chat-shell'] header");
+    const consentNotice = page.getByTestId("chat-consent-notice");
+    const input = page.getByTestId("chat-textarea");
+    await expect(header).toBeVisible();
+    await expect(consentNotice).toBeVisible();
+    await expect(input).toBeVisible();
+
+    const greetingBox = await greeting.boundingBox();
+    const headerBox = await header.boundingBox();
+    const consentBox = await consentNotice.boundingBox();
+    const inputBox = await input.boundingBox();
+    expect(greetingBox && headerBox && consentBox && inputBox).toBeTruthy();
+
+    expect(boxesOverlap(greetingBox!, headerBox!)).toBe(false);
+    expect(boxesOverlap(greetingBox!, consentBox!)).toBe(false);
+    expect(boxesOverlap(greetingBox!, inputBox!)).toBe(false);
 
     await expectNoHorizontalOverflow(page);
   });
