@@ -520,6 +520,7 @@ export const zh = {
         loginMethodLinkFailed: "无法关联该登录方式，请重试。",
         description: "登录你的个人 AI 聊天中心",
         privacy: "登录即表示你同意 Tomverse 的服务条款和隐私政策。",
+        termsLink: "服务条款",
         privacyPolicyLink: "隐私政策",
         signedAs: "登录账号",
         accountMenu: "账户菜单",

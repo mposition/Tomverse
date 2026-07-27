@@ -491,6 +491,7 @@ export const fr = {
         loginMethodLinkFailed: "Impossible de lier cette méthode de connexion. Veuillez réessayer.",
         description: "Connectez-vous à votre hub personnel de chat IA",
         privacy: "En vous connectant, vous acceptez les conditions d'utilisation et la politique de confidentialité de Tomverse.",
+        termsLink: "Conditions d'utilisation",
         privacyPolicyLink: "Politique de confidentialité",
         signedAs: "Connecté en tant que",
         accountMenu: "Menu du compte",
