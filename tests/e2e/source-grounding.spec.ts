@@ -2,6 +2,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 import {
   expectNoHorizontalOverflow,
   mockAuthenticatedApi,
+  openRecentConversation,
   prepareGuestPage,
   type QaLanguage,
 } from "./support/app-fixtures";
@@ -254,7 +255,7 @@ async function mockConversationHistory(page: Page) {
 }
 
 async function openReviewConversation(page: Page) {
-  await page.getByTestId("recent-conversation-card").click();
+  await openRecentConversation(page);
   await expect(page.getByTestId("chat-input")).toBeVisible();
 }
 

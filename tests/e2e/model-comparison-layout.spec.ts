@@ -1,5 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
-import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
+import {
+  mockAuthenticatedApi,
+  openRecentConversation,
+  prepareGuestPage,
+} from "./support/app-fixtures";
 
 // STG-F002: at 768-1024px, an always-expanded 320px sidebar plus 3
 // side-by-side panels could leave each panel's model-name control at ~0px.
@@ -50,7 +54,7 @@ const seedGuestComparison = async (
 // same as any other saved guest conversation, and needs a click to open.
 const openSeededConversation = async (page: Page) => {
   await page.goto("/chat?lang=en");
-  await page.getByTestId("recent-conversation-card").filter({ hasText: "Layout test" }).click();
+  await openRecentConversation(page, { title: "Layout test" });
   await expect(page.getByTestId("chat-empty-state")).toHaveCount(0);
 };
 

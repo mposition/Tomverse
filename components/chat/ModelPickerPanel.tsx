@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -40,6 +41,7 @@ import {
   getModelRecommendations,
   type ModelRecommendation,
 } from "@/lib/modelRecommendations";
+import { deriveModelSelectionLimit } from "@/lib/modelSelectionLimit";
 import {
   countActiveModelCatalogueFilters,
   EMPTY_MODEL_CATALOGUE_FILTERS,
@@ -164,6 +166,7 @@ export function ModelPickerPanel({
   const useCaseLabels = modelPickerUseCaseLabels[language];
   const featureLabels = modelPickerFeatureLabels[language];
 
+  const useIdSafe = useId();
   const [step, setStep] = useState<"recommended" | "all">("recommended");
   const [searchQuery, setSearchQuery] = useState("");
   const [filters, setFilters] = useState<ModelCatalogueFilters>(
@@ -173,12 +176,17 @@ export function ModelPickerPanel({
   const hasTrackedSearchRef = useRef(false);
   const openAllButtonRef = useRef<HTMLButtonElement | null>(null);
 
+  const limitDescriptionId = `${useIdSafe}-model-limit`;
   const trimmedQuery = searchQuery.trim();
   // Searching is a shortcut into the catalogue, not a third screen: results
   // always render in the full list so the same filters and rows apply, and
   // clearing the box drops the user back exactly where they were.
   const showCatalogue = step === "all" || trimmedQuery.length > 0;
-  const isAtCapacity = selectedModelIds.length >= maxSelectableModels;
+  const selectionLimit = deriveModelSelectionLimit({
+    selectedCount: selectedModelIds.length,
+    maxCount: maxSelectableModels,
+  });
+  const isAtCapacity = selectionLimit.limitReached;
   const activeFilterCount = countActiveModelCatalogueFilters(filters);
 
   const statusesForRecommendations = useMemo(() => {
@@ -315,7 +323,14 @@ export function ModelPickerPanel({
           >
             {screenTitle}
           </h2>
-          <span className="block text-xs text-zinc-500">
+          {/*
+            The primary, neutral limit status. Reaching the cap is said here
+            once -- not here plus a warning block plus the footer.
+          */}
+          <span
+            data-testid="model-picker-selection-count"
+            className="block text-xs text-zinc-500"
+          >
             {selectedModelIds.length}/{maxSelectableModels}{" "}
             {selectedModelIds.length === 1
               ? t("chat.modelsSelectedOne")
@@ -361,14 +376,34 @@ export function ModelPickerPanel({
           <p className="mb-1 px-1 text-[10px] font-black uppercase tracking-wide text-zinc-400">
             {pickerCopy.selectedModelsLabel}
           </p>
-          <div className="flex flex-wrap gap-x-4 gap-y-2.5 md:gap-1.5">
+          {/*
+            On the compact sheet the wrapped chip list cost three rows (~110px)
+            at 320px -- with the sticky footer, that left zero model rows fully
+            on screen. It is bounded to one horizontally scrollable row instead.
+
+            The chips there also carry their touch target in the layout box
+            (44px-tall chip, 44px remove control) rather than in an invisible
+            ::before: a scroll container establishes a clipping box, so a hit
+            area that lives outside the element's own bounds would be silently
+            cut off by it.
+          */}
+          <div
+            data-testid="model-picker-selected-list"
+            className={
+              isCompactLayout
+                ? "flex max-w-full gap-x-2 overflow-x-auto overscroll-x-contain pb-1"
+                : "flex flex-wrap gap-x-4 gap-y-2.5 md:gap-1.5"
+            }
+          >
             {selectedModelIds.map((modelId) => {
               const model = models.find((item) => item.id === modelId);
               return (
                 <span
                   key={modelId}
                   data-testid="selected-model-chip"
-                  className="inline-flex max-w-full items-center gap-1 rounded-full border border-blue-300 bg-zinc-100 py-1 pl-2 pr-1 text-[11px] font-bold text-zinc-700 dark:border-blue-800 dark:bg-zinc-800 dark:text-zinc-200"
+                  className={`inline-flex max-w-full items-center gap-1 rounded-full border border-blue-300 bg-zinc-100 pl-2 pr-1 text-[11px] font-bold text-zinc-700 dark:border-blue-800 dark:bg-zinc-800 dark:text-zinc-200 ${
+                    isCompactLayout ? "h-11 shrink-0" : "py-1"
+                  }`}
                 >
                   <Check
                     className="h-3 w-3 shrink-0 text-blue-600 dark:text-blue-400"
@@ -380,7 +415,11 @@ export function ModelPickerPanel({
                     type="button"
                     aria-label={t("chat.removeModelFromComparison")}
                     onClick={() => onToggleModel(modelId)}
-                    className={`relative flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-zinc-500 transition before:absolute before:content-[''] hover:bg-zinc-300/60 dark:text-zinc-400 dark:hover:bg-zinc-700 ${touchTarget ? "before:-inset-3.5" : "before:-inset-2"}`}
+                    className={
+                      isCompactLayout
+                        ? "flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-300/60 dark:text-zinc-400 dark:hover:bg-zinc-700"
+                        : `relative flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-zinc-500 transition before:absolute before:content-[''] hover:bg-zinc-300/60 dark:text-zinc-400 dark:hover:bg-zinc-700 ${touchTarget ? "before:-inset-3.5" : "before:-inset-2"}`
+                    }
                   >
                     <X className="h-3 w-3" />
                   </button>
@@ -391,11 +430,20 @@ export function ModelPickerPanel({
         </div>
       )}
 
-      {isAtCapacity && (
+      {/*
+        Hitting the comparison cap is a normal constraint, not an error. It used
+        to be a full-width amber warning that pushed the actual model catalogue
+        off a 320px screen while repeating what the header already said. The
+        header's "3/3" is now the primary status; the explanation stays
+        reachable -- announced once on reaching the cap, and referenced by every
+        model whose activation would require a swap -- without costing a row.
+      */}
+      {selectionLimit.limitReached && (
         <p
+          id={limitDescriptionId}
           data-testid="model-picker-max-reached"
           role="status"
-          className="mb-2 shrink-0 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-semibold leading-4 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-100"
+          className="sr-only"
         >
           {interpolate(stepCopy.maxReached, { max: maxSelectableModels })}
         </p>
@@ -419,6 +467,8 @@ export function ModelPickerPanel({
           hasImageAttachments={hasImageAttachments}
           favoriteModelIds={favoriteModelIds}
           recentModelIds={recentModelIds}
+          isAtCapacity={isAtCapacity}
+          limitDescriptionId={limitDescriptionId}
           onToggleFavorite={onToggleFavorite}
           onSelectModel={(model) => selectModel(model)}
         />
@@ -465,6 +515,11 @@ export function ModelPickerPanel({
                       : `Base cost ${recommendation.credits} credits`
                   }
                   limitedLabel={t("modelStatusReasons.limited")}
+                  limitDescriptionId={
+                    isAtCapacity && !recommendation.isSelected
+                      ? limitDescriptionId
+                      : undefined
+                  }
                   onSelect={(model) => selectModel(model, index + 1)}
                 />
               ))}
@@ -544,6 +599,7 @@ function RecommendationCard({
   lockLabel,
   creditsLabel,
   limitedLabel,
+  limitDescriptionId,
   onSelect,
 }: {
   recommendation: ModelRecommendation;
@@ -554,6 +610,7 @@ function RecommendationCard({
   lockLabel: string | null;
   creditsLabel: string;
   limitedLabel: string;
+  limitDescriptionId?: string;
   onSelect: (model: AiModel) => void;
 }) {
   if (!model) return null;
@@ -567,6 +624,7 @@ function RecommendationCard({
       data-recommendation-rank={rank}
       data-recommendation-source={recommendation.source}
       aria-pressed={recommendation.isSelected}
+      aria-describedby={limitDescriptionId}
       onClick={() => onSelect(model)}
       className={`flex min-h-16 w-full items-start gap-2 rounded-xl border px-3 py-2.5 text-left transition ${
         recommendation.isSelected

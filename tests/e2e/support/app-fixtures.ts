@@ -608,6 +608,45 @@ export async function openModelPickerCatalogue(page: Page) {
   return openModelCatalogue(page);
 }
 
+/**
+ * Opens a seeded conversation from the new-chat screen, whichever shell is
+ * rendering.
+ *
+ * The desktop welcome screen still lists recent conversations as title cards.
+ * The mobile welcome screen deliberately does not -- printing chat titles on
+ * the first screen of a phone leaks them to anyone holding it -- so there the
+ * path is the compact "View N recent chats" row, which opens the same drawer
+ * the hamburger does. Specs go through here instead of clicking
+ * `recent-conversation-card` directly so they stay shell-agnostic.
+ */
+export async function openRecentConversation(
+  page: Page,
+  options: { title?: string } = {}
+) {
+  const disclosure = page.getByTestId("recent-conversations-disclosure");
+  const cards = page.getByTestId("recent-conversation-card");
+  // Which affordance exists depends on the shell, so wait for whichever one
+  // this viewport renders before branching -- a bare count() would race the
+  // welcome screen's first paint.
+  await expect(disclosure.or(cards.first())).toBeVisible();
+
+  if (await disclosure.count()) {
+    await disclosure.click();
+    const drawer = page.getByRole("dialog");
+    const items = drawer.getByTestId("sidebar-conversation-item");
+    const item = options.title
+      ? items.filter({ hasText: options.title })
+      : items.first();
+    await item.click();
+    return;
+  }
+
+  const card = options.title
+    ? cards.filter({ hasText: options.title })
+    : cards.first();
+  await card.click();
+}
+
 export async function expectNoHorizontalOverflow(page: Page) {
   const dimensions = await page.evaluate(() => ({
     viewport: document.documentElement.clientWidth,
