@@ -131,6 +131,31 @@ const FULL_BINARY_INPUT = {
 
 export const DEFAULT_MODEL_ID = "gpt-5-4-mini";
 
+// Every model carries three separate identifiers. They are not
+// interchangeable, and support/incident work needs all three to line up:
+//
+//   id       -- the Tomverse model ID. Appears in chat request bodies, stored
+//               conversations, the credit ledger and the admin registry. It is
+//               a stable primary key, so it is NOT renamed when the underlying
+//               model is upgraded.
+//   name     -- the display name shown in the picker and comparison panels.
+//               Tracks whatever the provider currently calls the model.
+//   apiModel -- the provider's own model ID, sent upstream. Tracks provider
+//               naming and changes whenever the mapped upstream model changes.
+//
+// Because `id` is pinned and the other two follow the provider, an entry can
+// legitimately look mismatched. As of this writing two do, and both are
+// intentional -- the upstream model behind a stable ID was replaced in place:
+//
+//   id "gemini-2-5-flash"  -> "Gemini 3.1 Flash-Lite" (apiModel gemini-3.1-flash-lite)
+//   id "deepseek-r1"       -> "DeepSeek R1 Reasoning" (apiModel deepseek-reasoner)
+//
+// So when a log line, trace or ledger row says `gemini-2-5-flash`, the user
+// saw "Gemini 3.1 Flash-Lite" and Google was asked for
+// `gemini-3.1-flash-lite`. Do not "fix" such a row by renaming the ID:
+// migrating IDs would break stored conversations and billing history. Retiring
+// a model instead uses `replacementModelId` plus the disabled lifecycle
+// fields, which `lib/modelRegistry.ts` replays onto the runtime registry.
 export const AVAILABLE_MODELS = [
     { id: "gpt-5-5", name: "GPT-5.5", apiModel: "gpt-5.5", provider: "openai", icon: "🤖", bestFor: "Complex analysis and important decisions", minimumPlan: "Pro", usageClass: "premium", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
     { id: "gpt-5-5-thinking", name: "GPT-5.5 Thinking", apiModel: "gpt-5.5", provider: "openai", icon: "🤖", bestFor: "Difficult problems that benefit from step-by-step reasoning", minimumPlan: "Pro", usageClass: "premium-reasoning", enabled: true, status: "enabled", reasoning: "high", inputCapabilities: FULL_BINARY_INPUT },
@@ -472,6 +497,47 @@ export const getModelBillingProfile = (
 
 export const isEnabledModelId = (modelId: string) =>
     getEnabledModel(modelId) !== undefined;
+
+// ---------------------------------------------------------------------------
+// Model lifecycle
+//
+// One definition of "retired" and one definition of "offer this to users",
+// shared by the runtime registry (lib/modelRegistry.ts) and the client catalog
+// (components/ModelCatalogProvider.tsx). They used to be spelled out
+// separately at each site and had drifted: the picker's public filter checked
+// only `publiclyListed`/`catalogDeleted` and never `enabled`/`status`, so a
+// model the registry had disabled stayed selectable.
+// ---------------------------------------------------------------------------
+
+/**
+ * A model this catalog has retired: delisted, disabled and (normally) pointed
+ * at a replacement, because the provider stopped serving it. Distinct from
+ * `catalogDeleted`, which stays a human-controlled admin action.
+ */
+export const isRetiredModel = (
+    model: Pick<AiModel, "enabled" | "publiclyListed" | "status">
+) =>
+    model.enabled === false &&
+    model.publiclyListed === false &&
+    model.status === "disabled";
+
+/**
+ * Whether a model may be offered to users -- listed in the picker and
+ * selectable. Requires every lifecycle signal to agree that it can actually be
+ * called, so a delisted, disabled, retired or catalog-deleted model can never
+ * be presented as a choice.
+ */
+export const isPubliclySelectableModel = (
+    model: Pick<
+        AiModel,
+        "enabled" | "publiclyListed" | "status" | "catalogDeleted"
+    >
+) =>
+    model.publiclyListed !== false &&
+    !model.catalogDeleted &&
+    model.enabled &&
+    model.status !== "disabled" &&
+    model.status !== "coming-soon";
 
 if (!isEnabledModelId(DEFAULT_MODEL_ID)) {
     throw new Error(`Default model "${DEFAULT_MODEL_ID}" must be enabled.`);

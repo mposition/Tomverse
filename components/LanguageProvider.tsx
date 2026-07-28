@@ -1,7 +1,7 @@
 ﻿// components/LanguageProvider.tsx
 "use client";
 
-import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { ko } from "@/locales/ko";
 import { en } from "@/locales/en";
 import { zh } from "@/locales/zh";
@@ -31,6 +31,15 @@ const isLanguage = (value: unknown): value is Language =>
     value === "de" ||
     value === "es" ||
     value === "pt";
+
+const lookup = (dictionary: unknown, keys: string[]) => {
+    let value = dictionary;
+    for (const k of keys) {
+        if (!value || typeof value !== "object") return undefined;
+        value = (value as Record<string, unknown>)[k];
+    }
+    return typeof value === "string" ? value : undefined;
+};
 
 const detectBrowserLanguage = (): Language | null => {
     if (typeof navigator === "undefined") return null;
@@ -111,22 +120,27 @@ export function LanguageProvider({
         return () => window.clearTimeout(restoreSavedLanguage);
     }, [forceInitialLang, initialLang]);
 
-    const lookup = (dictionary: unknown, keys: string[]) => {
-        let value = dictionary;
-        for (const k of keys) {
-            if (!value || typeof value !== "object") return undefined;
-            value = (value as Record<string, unknown>)[k];
-        }
-        return typeof value === "string" ? value : undefined;
-    };
+    // `t` and the context value are memoised on `lang` because consumers put
+    // `t` in effect dependency arrays. When both were rebuilt on every render
+    // of this provider, every one of those effects re-ran on renders that had
+    // nothing to do with language -- including the chat panel's message-view
+    // loader, where a re-run landing inside an in-flight fetch left the panel
+    // stuck on its loading placeholder.
+    const t = useCallback(
+        (key: string) => {
+            const keys = key.split(".");
+            return lookup(dictionaries[lang], keys) ?? lookup(en, keys) ?? key;
+        },
+        [lang]
+    );
 
-    const t = (key: string) => {
-        const keys = key.split(".");
-        return lookup(dictionaries[lang], keys) ?? lookup(en, keys) ?? key;
-    };
+    const contextValue = useMemo(
+        () => ({ lang, setLang, t }),
+        [lang, setLang, t]
+    );
 
     return (
-        <LanguageContext.Provider value={{ lang, setLang, t }}>
+        <LanguageContext.Provider value={contextValue}>
             {children}
         </LanguageContext.Provider>
     );

@@ -92,7 +92,7 @@ import {
 } from "@/lib/guestImport";
 import { GuestImportModal } from "@/components/chat/GuestImportModal";
 import { GUEST_IMPORT_MODAL_OPEN_EVENT } from "@/lib/guestImportModalEvents";
-import { useTurnstile } from "@/components/chat/useTurnstile";
+import { useGuestVerification } from "@/components/chat/GuestVerificationProvider";
 
 // Persists which conversation is open in *this tab* so an F5 / crash
 // recovery restores it instead of falling back to the welcome screen --
@@ -547,14 +547,10 @@ export function ChatPageClient({
   >(new Map());
   const titleRequestSentRef = useRef<Set<string>>(new Set());
 
-  const {
-    containerRef: guestQuickSummaryTurnstileContainerRef,
-    getToken: getGuestQuickSummaryTurnstileToken,
-  } = useTurnstile(isGuestMode, "guest_quick_summary");
-  const {
-    containerRef: conversationTitleTurnstileContainerRef,
-    getToken: getConversationTitleTurnstileToken,
-  } = useTurnstile(isGuestMode, "guest_conversation_title");
+  // One shared verification surface for the whole page: the shells decide
+  // *where* it appears (rail slot on desktop, modal bottom sheet on mobile),
+  // this page only ever asks for a token for a user-initiated action.
+  const { requestToken: requestGuestVerificationToken } = useGuestVerification();
   const accountUsage = useUserUsage(!isGuestMode);
 
   // The refs above are only ever written live by handleResponseComplete, so
@@ -2328,16 +2324,11 @@ export function ChatPageClient({
                 ...(turnstileToken ? { turnstileToken } : {}),
               }),
             });
-          let response = await sendRequest();
-          if (!response.ok) {
-            const payload = (await response.json().catch(() => null)) as
-              | { code?: string }
-              | null;
-            if (payload?.code === "TURNSTILE_REQUIRED") {
-              const turnstileToken = await getConversationTitleTurnstileToken();
-              response = await sendRequest(turnstileToken);
-            }
-          }
+          const response = await sendRequest();
+          // A generated title is a background convenience the user never asked
+          // for, so it must never be the reason a verification challenge
+          // appears. If the server wants one, this simply stops and the interim
+          // title stays -- the server's own verification is untouched.
           if (response.ok) {
             result = await response.json();
           }
@@ -2372,7 +2363,7 @@ export function ChatPageClient({
         // Silent by design -- see comment above.
       }
     },
-    [getConversationTitleTurnstileToken, isGuestMode]
+    [isGuestMode]
   );
 
   const handleResponseComplete = useCallback(
@@ -2899,7 +2890,10 @@ export function ChatPageClient({
             | { code?: string }
             | null;
           if (payload?.code === "TURNSTILE_REQUIRED") {
-            const turnstileToken = await getGuestQuickSummaryTurnstileToken();
+            // User-initiated, so this one may use the shared verification UI.
+            const turnstileToken = await requestGuestVerificationToken(
+              "guest_quick_summary"
+            );
             response = await sendRequest(turnstileToken);
             if (!response.ok) {
               const retryPayload = (await response.json().catch(() => null)) as
@@ -3016,18 +3010,6 @@ export function ChatPageClient({
         onSkip={() => closeGuestImportModal(true)}
         onComplete={handleGuestImportComplete}
       />
-      {isGuestMode ? (
-        <div
-          ref={guestQuickSummaryTurnstileContainerRef}
-          className="fixed bottom-2 right-2 z-[70]"
-        />
-      ) : null}
-      {isGuestMode ? (
-        <div
-          ref={conversationTitleTurnstileContainerRef}
-          className="fixed bottom-2 right-2 z-[70]"
-        />
-      ) : null}
       {!isViewportReady ? (
         <ChatShellSkeleton label={t("auth.loading")} />
       ) : isMobileViewport ? (

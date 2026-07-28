@@ -20,6 +20,7 @@ The message canvas may be optimized for additional vertical space, but the prima
 | Mobile shell, bottom dock, portal placement | `components/chat/MobileChatShell.tsx` |
 | Comparison action rail above the composer | `components/chat/ComparisonActionRail.tsx` |
 | Mobile AI/security disclosure below the composer | `components/chat/AiDisclaimerNotice.tsx` |
+| Guest verification bottom sheet | `components/chat/GuestVerificationSheet.tsx` |
 | Keyboard/landscape compaction signal | `components/chat/useCompactBottomDock.ts` |
 | Mobile shell detection | `components/chat/useIsMobileShell.ts` |
 
@@ -67,6 +68,7 @@ As implemented, that is:
 - Rows below the textarea that wrap when they no longer fit, so no control is pushed outside the composer.
 - `min-h` / `max-h` expressed in `rem` so the input grows with OS/browser text scaling.
 - Auto-growing the textarea from `rows={1}` up to its own maximum, then scrolling vertically inside it.
+- A modal guest-verification sheet, portalled to `<body>` rather than rendered inside the composer: it never takes part in the composer's height calculation, consumes no layout while closed, and stops at the composer's top edge while open so the user can still read the message they are about to send.
 
 ## Forbidden patterns
 
@@ -167,6 +169,7 @@ Primary tests:
 - `tests/e2e/chat-tools.spec.ts`
 - `tests/e2e/web-search-composer-state.spec.ts`
 - `tests/e2e/comparison-action-rail.spec.ts`
+- `tests/e2e/guest-turnstile-verification.spec.ts` (the verification sheet vs. the composer)
 - `tests/e2e/mobile-header-spacing.spec.ts`
 - relevant mobile visual-regression coverage (`tests/e2e/chat-state-visual-regression.spec.ts`)
 

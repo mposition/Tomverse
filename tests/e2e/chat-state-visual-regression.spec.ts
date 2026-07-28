@@ -806,7 +806,15 @@ test.describe("File attachment states", () => {
 
     const attachTrigger = actionMenuTrigger(page);
     await expect(attachTrigger.locator(".animate-spin")).toBeVisible();
-    await expect(attachTrigger).toBeDisabled().catch(() => undefined);
+    // Best-effort: the trigger is not required to be disabled while the
+    // upload is in flight, the spinner above is the contract. The short
+    // timeout is the point -- `.catch()` swallows the rejection but does not
+    // stop the assertion retrying first, so at the default 30s this optional
+    // check silently consumed the entire test budget and the test then timed
+    // out on whatever statement happened to be running next.
+    await expect(attachTrigger)
+      .toBeDisabled({ timeout: 1000 })
+      .catch(() => undefined);
 
     await expectStableScreenshot(page, "chat-attachment-uploading-desktop-light-ko.png", { theme: "light" });
   });

@@ -25,12 +25,18 @@ const isTransientStatusDbError = (error: unknown) => {
   );
 };
 
+// Without a health dashboard there is no evidence about the provider either
+// way, so every model reports `providerStatus: "unknown"` rather than an
+// unearned "operational". The model's own registry lifecycle is still
+// authoritative for its availability.
 const fallbackModelStatus = (publicModels: Awaited<ReturnType<typeof getPublicRuntimeModels>>) => ({
   generatedAt: new Date().toISOString(),
   models: publicModels.map((model) => ({
     id: model.id,
     provider: model.provider,
     status: resolveModelRuntimeAvailability(model),
+    providerStatus: "unknown" as const,
+    providerStatusReason: "Provider health data is unavailable.",
     fallbackModelIds: model.replacementModelId
       ? [model.replacementModelId]
       : [],
@@ -89,14 +95,31 @@ export async function GET(req: Request) {
         resolveModelRuntimeAvailability(model);
       if (status !== "unavailable" && incident && incident.failureCount5m >= 3) {
         status = "unavailable";
-      } else if (status !== "unavailable" && provider?.status === "outage") {
-        status = "unavailable";
+      } else if (status !== "unavailable") {
+        // Derived from the same public projection /status renders, rather
+        // than from the internal health enum. Reading `provider.status`
+        // here was why a provider shown as "Incident" on /status could still
+        // report every one of its models "available" in the same second:
+        // the two surfaces were answering from different evidence models.
+        //
+        //   incident -> unavailable (blocked, offer a replacement)
+        //   degraded -> limited     (usable, but warned)
+        //   unknown  -> unchanged   (neutral; absence of evidence is not
+        //                            evidence of failure, and the caller is
+        //                            told so via providerStatus)
+        if (provider?.publicStatus === "incident") {
+          status = "unavailable";
+        } else if (provider?.publicStatus === "degraded") {
+          status = "limited";
+        }
       }
 
       return {
         id: model.id,
         provider: model.provider,
         status,
+        providerStatus: provider?.publicStatus ?? "unknown",
+        providerStatusReason: provider?.publicStatusReasonText ?? null,
         fallbackModelIds:
           status === "unavailable"
             ? Array.from(

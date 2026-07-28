@@ -30,6 +30,7 @@ import {
 import {
   formatBillingPeriodLabel,
   formatCountedUnit,
+  formatPriceWithPeriod,
 } from "@/lib/pricingFormat";
 
 const annualLabelByLanguage: Partial<Record<Language, { annual: string; save: string; checkout: string }>> = {
@@ -41,6 +42,14 @@ const annualLabelByLanguage: Partial<Record<Language, { annual: string; save: st
   es: { annual: "Anual", save: "20 % de descuento", checkout: "Se cobra el precio local fijo mostrado." },
   pt: { annual: "Anual", save: "20% de desconto", checkout: "O preço local fixo exibido é cobrado no checkout." },
 };
+
+// The public catalogue always offers exactly these three packs, so the
+// loading state can reserve their space without waiting to learn the count.
+const CREDIT_PACK_PLACEHOLDER_KEYS = [
+  "starter_500",
+  "project_1500",
+  "power_4000",
+] as const;
 
 const saleLabelByLanguage: Partial<Record<Language, { badge: string; intro: string; regular: string; duration: string }>> = {
   en: { badge: "Launch special", intro: "50% off now", regular: "Regular", duration: "for the first month" },
@@ -977,9 +986,20 @@ export function PricingPageContent() {
               </p>
               {planId === "free" || !promotionEligible ? (
                 <div className="mt-8">
-                  <span className="text-4xl font-black">{displayPrice}</span>
-                  <span className={`ml-2 text-sm font-bold ${plan.highlighted ? "text-blue-100" : "text-zinc-500 dark:text-zinc-400"}`}>
-                    {formatBillingPeriodLabel(plan.period, lang)}
+                  {/* The price and the period render as separate spans so they
+                      can carry different type sizes, which leaves no text node
+                      between them -- assistive tech read the pair as
+                      "$15per month". The spoken form is supplied once here and
+                      the visual pair is hidden from the accessibility tree, so
+                      the phrase is announced exactly once. */}
+                  <span className="sr-only">
+                    {formatPriceWithPeriod(displayPrice, plan.period, lang)}
+                  </span>
+                  <span aria-hidden="true">
+                    <span className="text-4xl font-black">{displayPrice}</span>
+                    <span className={`ml-2 text-sm font-bold ${plan.highlighted ? "text-blue-100" : "text-zinc-500 dark:text-zinc-400"}`}>
+                      {formatBillingPeriodLabel(plan.period, lang)}
+                    </span>
                   </span>
                 </div>
               ) : (
@@ -996,7 +1016,26 @@ export function PricingPageContent() {
                       {featuredPromotion?.discountPercent}% OFF
                     </span>
                   </div>
-                  <div className="mt-3 flex flex-wrap items-end gap-x-3 gap-y-1">
+                  {/* Same split-span problem as the plain price above, plus a
+                      struck-through regular price that reads as a bare number
+                      out of context. Both are replaced by one spoken sale
+                      phrase, with the visual row hidden from the
+                      accessibility tree. */}
+                  <span className="sr-only">
+                    {`${formatPriceWithPeriod(
+                      salePrice ?? displayPrice,
+                      plan.period,
+                      lang
+                    )}. ${saleCopy.regular}: ${formatPriceWithPeriod(
+                      displayPrice,
+                      plan.period,
+                      lang
+                    )}.`}
+                  </span>
+                  <div
+                    aria-hidden="true"
+                    className="mt-3 flex flex-wrap items-end gap-x-3 gap-y-1"
+                  >
                     <span className="text-5xl font-black">{salePrice}</span>
                     <span className={`pb-1 text-sm font-bold ${plan.highlighted ? "text-blue-50" : "text-zinc-700 dark:text-zinc-200"}`}>
                       {formatBillingPeriodLabel(plan.period, lang)}
@@ -1102,9 +1141,44 @@ export function PricingPageContent() {
 
           <div className="grid gap-4 border-t border-emerald-500/20 p-5 sm:p-7 lg:grid-cols-3">
             {publicCreditPacks.length === 0 ? (
-              <p className="text-sm font-semibold text-zinc-500 dark:text-zinc-400 lg:col-span-3">
-                {creditPackGuide.loading}
-              </p>
+              // Placeholders reserve the geometry the real packs will occupy.
+              // A single line of loading text here meant the section grew by
+              // ~1000px on a 390px viewport the moment usePublicBilling()
+              // resolved -- one repeatable shift that was essentially the
+              // page's entire CLS. The skeleton mirrors a real card's block
+              // structure (header, credits, price, description, validity) so
+              // the reserved height matches what replaces it.
+              <>
+                <p className="sr-only" role="status">
+                  {creditPackGuide.loading}
+                </p>
+                {CREDIT_PACK_PLACEHOLDER_KEYS.map((key) => (
+                  <article
+                    key={key}
+                    aria-hidden="true"
+                    data-testid="credit-pack-placeholder"
+                    className="flex min-h-full animate-pulse flex-col rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950/80"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="w-full">
+                        <div className="h-6 w-2/5 rounded bg-zinc-200 dark:bg-zinc-800" />
+                        <div className="mt-2 h-4 w-3/5 rounded bg-zinc-100 dark:bg-zinc-900" />
+                      </div>
+                      <div className="h-6 w-16 shrink-0 rounded-full bg-zinc-100 dark:bg-zinc-900" />
+                    </div>
+                    <div className="mt-5 h-9 w-1/2 rounded bg-zinc-200 dark:bg-zinc-800" />
+                    <div className="mt-1 h-7 w-1/3 rounded bg-zinc-100 dark:bg-zinc-900" />
+                    <div className="mt-4 flex-1 space-y-2">
+                      <div className="h-4 w-full rounded bg-zinc-100 dark:bg-zinc-900" />
+                      <div className="h-4 w-11/12 rounded bg-zinc-100 dark:bg-zinc-900" />
+                      <div className="h-4 w-4/5 rounded bg-zinc-100 dark:bg-zinc-900" />
+                    </div>
+                    <div className="mt-4 border-t border-zinc-200 pt-3 dark:border-zinc-800">
+                      <div className="h-4 w-2/5 rounded bg-zinc-100 dark:bg-zinc-900" />
+                    </div>
+                  </article>
+                ))}
+              </>
             ) : (
               publicCreditPacks.map((pack) => (
                 <article
