@@ -19,11 +19,9 @@ const visibleMessages = (page: Page, role: "user" | "assistant"): Locator =>
   page.locator(`[data-message-role="${role}"]`).filter({ visible: true });
 
 const TWO_MODELS = ["gemini-2-5-flash", "gpt-5-4-mini"];
-// The header names the panel on screen, not the first selected model: the
-// shell keeps the panel it was already showing (the account's default model)
-// when the restored conversation widens the selection around it.
-const RESTORED_ACTIVE_MODEL_NAME = "GPT-5.4 mini";
-const GUEST_DEFAULT_MODEL_NAME = "Gemini 3.1 Flash-Lite";
+// The mobile header is one row and names how many models will answer, not
+// which panel is on screen -- the tab strip right below it marks that, and the
+// header used to repeat it. The panel on screen is asserted from the tab.
 
 // The tab strip only exists for a conversation that already has history
 // (`!isConversationEmpty && selectedModels.length > 1`), so seeding two
@@ -71,15 +69,12 @@ test.beforeEach(async ({ page }, testInfo) => {
   }
   await mockChatStream(page, "Mobile QA response");
   await page.goto("/chat");
-  await expect(page.getByTestId("mobile-header-primary-model")).toHaveText(
-    needsMultipleModels ? RESTORED_ACTIVE_MODEL_NAME : GUEST_DEFAULT_MODEL_NAME
-  );
+  await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
+  await expect(page.getByTestId("mobile-header-model-summary-skeleton")).toHaveCount(0);
   if (needsMultipleModels) {
-    // Proves the two-model fixture actually landed, rather than the header
-    // happening to name the same model a single-model conversation would.
-    await expect(page.getByTestId("mobile-header-extra-model-count")).toHaveText(
-      "+1"
-    );
+    // Proves the two-model fixture actually landed, rather than the page
+    // coming up on a single-model default.
+    await expect(page.getByTestId("mobile-header-model-count")).toHaveText("2개 모델");
   }
 });
 
@@ -97,8 +92,16 @@ test("mobile shell and drawer stay inside viewport", async ({ page }) => {
 });
 
 test("sent message renders without leaving the active model", async ({ page }) => {
-  const activeModel = page.getByTestId("mobile-header-primary-model");
-  const activeModelName = await activeModel.textContent();
+  // A guest starts on the three-model comparison default, so the panel on
+  // screen is identified by the selected tab rather than by the header. An
+  // empty conversation has no tab strip yet, hence the count check first.
+  const selectedTabLocator = page.locator(
+    '[role="tab"][aria-selected="true"] [data-testid="mobile-model-tab"]'
+  );
+  const activeModelName =
+    (await selectedTabLocator.count()) === 1
+      ? await selectedTabLocator.textContent()
+      : null;
 
   await page.getByTestId("chat-textarea").fill("Mobile immediate message");
   await page.getByTestId("chat-send-button").click();
@@ -109,16 +112,16 @@ test("sent message renders without leaving the active model", async ({ page }) =
   await expect(
     visibleMessages(page, "assistant").filter({ hasText: "Mobile QA response" })
   ).toBeVisible();
-  // A guest starts on the three-model comparison default, so the tab strip
-  // appears as soon as the conversation stops being empty -- that is expected,
-  // and asserting it stays absent would only re-freeze an old single-model
-  // default. What must not change is which panel the send left on screen.
+  // The tab strip appears as soon as the conversation stops being empty --
+  // that is expected. What must not change is which panel the send left on
+  // screen.
   const selectedTab = page.locator(
     '[role="tab"][aria-selected="true"] [data-testid="mobile-model-tab"]'
   );
   await expect(selectedTab).toHaveCount(1);
-  await expect(selectedTab).toContainText((activeModelName || "").trim());
-  await expect(activeModel).toHaveText(activeModelName || "");
+  if (activeModelName) {
+    await expect(selectedTab).toHaveText(activeModelName);
+  }
 });
 
 test("input remains reachable at virtual-keyboard height", async ({ page }) => {

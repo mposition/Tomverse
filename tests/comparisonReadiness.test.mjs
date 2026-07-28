@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { deriveComparisonReadiness } from "../lib/comparisonReadiness.ts";
+import {
+  deriveComparisonReadiness,
+  isComparisonRailSteadyState,
+} from "../lib/comparisonReadiness.ts";
 
 const MODELS = ["a", "b", "c"];
 
@@ -119,4 +122,71 @@ test("insufficient credits is its own blocked reason, not a readiness problem", 
   assert.equal(state.state, "ready");
   assert.equal(state.canRun, false);
   assert.equal(state.blockedReason, "insufficientCredits");
+});
+
+// ---------------------------------------------------------------------------
+// The steady state: the one state where the rail's status sentence has nothing
+// left to tell a sighted user, so mobile hides it visually (never removes it).
+// Every other state has something the user has to act on and keeps it on
+// screen, which is what these cases pin down.
+// ---------------------------------------------------------------------------
+
+test("three completed answers with nothing else going on is the steady state", () => {
+  const state = readiness({ a: "idle", b: "idle", c: "idle" });
+  assert.equal(isComparisonRailSteadyState({ readiness: state }), true);
+  assert.equal(state.selectedCount, 3);
+  assert.equal(state.comparableCount, 3);
+  assert.equal(state.pausedCount, 0);
+});
+
+test("a still-generating answer is not the steady state", () => {
+  const state = readiness({ a: "idle", b: "idle", c: "responding" });
+  assert.equal(state.state, "ready");
+  assert.equal(isComparisonRailSteadyState({ readiness: state }), false);
+});
+
+test("an excluded failure is not the steady state", () => {
+  const state = readiness({ a: "idle", b: "idle", c: "error" });
+  assert.equal(state.state, "ready");
+  assert.equal(state.excludedCount, 1);
+  assert.equal(isComparisonRailSteadyState({ readiness: state }), false);
+});
+
+test("a paused panel is not the steady state, even with two clean answers", () => {
+  // Two completed answers, so the actions run -- but the comparison covers
+  // fewer models than the user selected, which is worth saying out loud.
+  const state = readiness(
+    { a: "idle", b: "idle", c: "paused" },
+    { disabledModelIds: ["c"] }
+  );
+  assert.equal(state.state, "ready");
+  assert.equal(state.canRun, true);
+  assert.equal(state.selectedCount, 3);
+  assert.equal(state.comparableCount, 2);
+  assert.equal(state.pausedCount, 1);
+  assert.equal(isComparisonRailSteadyState({ readiness: state }), false);
+});
+
+test("needsMore and generating are never the steady state", () => {
+  assert.equal(
+    isComparisonRailSteadyState({
+      readiness: readiness({ a: "idle", b: "error", c: "error" }),
+    }),
+    false
+  );
+  assert.equal(
+    isComparisonRailSteadyState({
+      readiness: readiness({ a: "responding", b: "loading", c: "loading" }),
+    }),
+    false
+  );
+});
+
+test("a running analysis or an unaffordable action leaves the steady state", () => {
+  const state = readiness({ a: "idle", b: "idle", c: "idle" });
+  assert.equal(isComparisonRailSteadyState({ readiness: state, isBusy: true }), false);
+  assert.equal(
+    isComparisonRailSteadyState({ readiness: state, isAnyActionUnaffordable: true }),
+    false
+  );
 });
