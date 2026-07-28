@@ -1012,9 +1012,16 @@ export function PricingPageContent() {
                       inline line; at 320px with 200% zoom the pair was wider
                       than the card's content box and pushed the page sideways
                       by the last few pixels. A wrapping baseline row lets the
-                      period drop under the price instead. */}
+                      period drop under the price instead.
+
+                      The price itself also has to be able to shrink. It is one
+                      unbreakable token, so at a fixed 36px it *is* the card's
+                      min-content, and a grid item cannot go below that -- it
+                      pushes the page instead. The clamp only engages below
+                      ~360px of CSS width, which in practice means a zoomed
+                      phone; every real phone width still renders it at 36px. */}
                   <span aria-hidden="true" className="flex flex-wrap items-baseline gap-x-2">
-                    <span className="text-4xl font-black">{displayPrice}</span>
+                    <span className="text-[clamp(1.5rem,10vw,2.25rem)] font-black">{displayPrice}</span>
                     <span className={`text-sm font-bold ${plan.highlighted ? "text-blue-100" : "text-zinc-500 dark:text-zinc-400"}`}>
                       {formatBillingPeriodLabel(plan.period, lang)}
                     </span>
@@ -1452,7 +1459,15 @@ export function PricingPageContent() {
         </section>
 
         <section className="mt-16 grid gap-5 lg:grid-cols-[0.7fr_1.3fr]">
-          <h2 className={`text-3xl font-black ${displayHeadingClass(lang)}`}>{content.faqTitle}</h2>
+          {/*
+            UI-005. `break-words` lets a long word wrap, but by spec it does
+            not lower the element's min-content width -- so as a grid item this
+            heading still demanded the width of "questions" set at 30px, which
+            at 320px/200% is wider than the column and pushed the page. Letting
+            the size fall below ~375px of CSS width fixes the cause; every real
+            phone width still renders it at 30px.
+          */}
+          <h2 className={`text-[clamp(1.5rem,8vw,1.875rem)] font-black ${displayHeadingClass(lang)}`}>{content.faqTitle}</h2>
           <div className="grid gap-4">
             {content.faqs
               .filter((faq) => !faq.promotionOnly || featuredPromotion)

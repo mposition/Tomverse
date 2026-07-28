@@ -39,14 +39,28 @@ const SIZE_KEYWORD_PX = {
 };
 
 const SIZE_TOKEN =
-  /(?:[a-z0-9-]+:)*(text-(?:xs|sm|base|lg|\d?xl|\[\d+(?:\.\d+)?(?:px|rem)\]))/g;
+  /(?:[a-z0-9-]+:)*(text-(?:xs|sm|base|lg|\d?xl|\[clamp\([^\])]*\)\]|\[\d+(?:\.\d+)?(?:px|rem)\]))/g;
 
-function tokenToPx(token) {
+// A token can carry more than one size: `text-[clamp(1.5rem,8vw,1.875rem)]`
+// renders anywhere between its bounds depending on the viewport. Both bounds
+// are returned so the floor test sees the smallest it can get and the weight
+// test sees the largest. Viewport units are left out -- they cannot be
+// resolved without a viewport, and the clamp bounds already frame them.
+function tokenToPxValues(token) {
+  const clamp = /^text-\[clamp\((.*)\)\]$/.exec(token);
+  if (clamp) {
+    return clamp[1]
+      .split(",")
+      .map((part) => /^\s*(\d+(?:\.\d+)?)(px|rem)\s*$/.exec(part))
+      .filter(Boolean)
+      .map((match) => Number(match[1]) * (match[2] === "rem" ? 16 : 1));
+  }
   const bracket = /^text-\[(\d+(?:\.\d+)?)(px|rem)\]$/.exec(token);
   if (bracket) {
-    return Number(bracket[1]) * (bracket[2] === "rem" ? 16 : 1);
+    return [Number(bracket[1]) * (bracket[2] === "rem" ? 16 : 1)];
   }
-  return SIZE_KEYWORD_PX[token] ?? null;
+  const keyword = SIZE_KEYWORD_PX[token];
+  return keyword === undefined ? [] : [keyword];
 }
 
 // A className is normally one string literal. Multi-line template literals are
@@ -66,9 +80,7 @@ function* classSegments(files) {
 }
 
 function sizesIn(segment) {
-  return [...segment.matchAll(SIZE_TOKEN)]
-    .map((match) => tokenToPx(match[1]))
-    .filter((px) => px !== null);
+  return [...segment.matchAll(SIZE_TOKEN)].flatMap((match) => tokenToPxValues(match[1]));
 }
 
 test("customer UI never renders text below 11px", () => {
