@@ -49,5 +49,8 @@ next-env.d.ts
 /lib/generated
 .vs
 .local-backups/aihub-clone.dump
-docs
+# Local scratch docs stay out of the repo, but the UI contracts under
+# docs/ui-contracts/ are product invariants and must be versioned.
+docs/*
+!docs/ui-contracts/
 .playwright-mcp

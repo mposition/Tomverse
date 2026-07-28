@@ -251,7 +251,7 @@ test.describe("ChatMessageList visible height (multi-model, steady state)", () =
 // ===========================================================================
 
 test.describe("Composer tool status", () => {
-  test("partial web-search support rides the input line and stays legible", async ({
+  test("partial web-search support stays legible in a row of its own", async ({
     page,
   }) => {
     await enterMobileComparison(page, {
@@ -260,7 +260,8 @@ test.describe("Composer tool status", () => {
     });
 
     const chipRow = page.getByTestId("tool-status-chip-row");
-    await expect(chipRow).toHaveAttribute("data-placement", "inline");
+    await expect(chipRow).toHaveAttribute("data-placement", "row");
+    await expect(chipRow).toHaveAttribute("data-label-variant", "compact");
 
     const chip = page.getByTestId("web-search-mode-chip");
     await expect(chip).toBeVisible();
@@ -270,13 +271,15 @@ test.describe("Composer tool status", () => {
     // Compact, but never reduced to a bare icon: the ratio is on screen.
     await expect(chip).toContainText("2/3");
 
-    // It shares the textarea's first line rather than owning a row above it.
+    // The saving is the shorter *label*, never the textarea's row: the chip
+    // sits entirely above the input line it used to share.
+    // See docs/ui-contracts/mobile-chat-composer.md.
     const chipBox = await chipRow.boundingBox();
     const textareaBox = await page.getByTestId("chat-textarea").boundingBox();
     expect(
-      Math.abs(chipBox!.y - textareaBox!.y),
-      "chip and textarea are not on the same line"
-    ).toBeLessThanOrEqual(8);
+      chipBox!.y + chipBox!.height,
+      "the chip row still overlaps the textarea's row"
+    ).toBeLessThanOrEqual(textareaBox!.y + 0.5);
 
     // The whole sentence -- counts, credit ceiling, what the unsupported model
     // does instead -- is still what assistive tech gets.
@@ -333,17 +336,18 @@ test.describe("Composer tool status", () => {
     await expectNoHorizontalOverflow(page);
   });
 
-  test("the textarea drops to its own line rather than being squeezed", async ({
+  test("the textarea keeps its own full-width line, not the leftover space", async ({
     page,
   }) => {
     await enterMobileComparison(page, { viewport: { width: 320, height: 640 } });
 
     const chipBox = await page.getByTestId("tool-status-chip-row").boundingBox();
+    const rowBox = await page.getByTestId("composer-textarea-row").boundingBox();
     const textareaBox = await page.getByTestId("chat-textarea").boundingBox();
-    // Wrapped, so the chip keeps its whole label and the input keeps a usable
-    // width -- neither is shrunk into the other.
+    // The chip keeps its whole label and the input keeps the whole row --
+    // neither is shrunk into the other.
     expect(textareaBox!.y).toBeGreaterThan(chipBox!.y + chipBox!.height - 1);
-    expect(textareaBox!.width).toBeGreaterThanOrEqual(176);
+    expect(textareaBox!.width).toBeGreaterThanOrEqual(rowBox!.width * 0.9);
     await expect(page.getByTestId("web-search-mode-chip")).toContainText("2/3");
     await expectNoHorizontalOverflow(page);
   });
@@ -363,6 +367,10 @@ test.describe("Composer tool status", () => {
     await expect(page.getByTestId("tool-status-chip-row")).toHaveAttribute(
       "data-placement",
       "row"
+    );
+    await expect(page.getByTestId("tool-status-chip-row")).toHaveAttribute(
+      "data-label-variant",
+      "full"
     );
     // The full sentence, not the compact ratio, is what desktop shows.
     await expect(page.getByTestId("web-search-mode-chip")).toContainText(

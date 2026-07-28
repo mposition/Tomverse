@@ -640,6 +640,16 @@ export function ChatInput({
     : t("chat.inputPlaceholder");
   
   const isDisabled = disabled || isSending || isUploading || isUsageLimitReached;
+
+  // Why Send is unavailable, for the cases a user cannot work out from the
+  // button itself. `title` alone does not reach a screen reader or a keyboard
+  // user, so this is rendered as text the button points at with
+  // aria-describedby (docs/ui-contracts/mobile-chat-composer.md).
+  const sendDisabledReason = isUsageLimitReached
+    ? t("chat.exceedDailyLimit")
+    : activeSelectedModels.length === 0
+      ? t("chat.chooseModel")
+      : null;
   
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [menuView, setMenuView] = useState<"actions" | "models" | "webSearch">("actions");
@@ -1223,8 +1233,13 @@ export function ChatInput({
     const textarea = textareaRef.current;
     if (!textarea) return;
 
+    // 10rem rather than a fixed 160px: at 200% text scaling the auto-grow cap
+    // has to grow with the text, or the box stops one line short of what the
+    // reader can actually see.
+    const rootFontSize =
+      Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
     textarea.style.height = "auto";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 160)}px`;
+    textarea.style.height = `${Math.min(textarea.scrollHeight, rootFontSize * 10)}px`;
   }, [value]);
 
   useEffect(() => {
@@ -1594,9 +1609,9 @@ export function ChatInput({
     }
   };
 
-  // Both composer tool chips, extracted so the same markup can sit either in
-  // its own row above the textarea (desktop) or on the textarea's own first
-  // line (mobile), without the two placements drifting apart.
+  // Both composer tool chips. They always sit in a row of their own above the
+  // textarea -- see docs/ui-contracts/mobile-chat-composer.md -- and only the
+  // label length differs between the shells, so the two never drift apart.
   const hasToolStatusChips = webSearchState.isVisible || isDeepResearchPending;
   const toolStatusChips = hasToolStatusChips ? (
     <>
@@ -1606,7 +1621,10 @@ export function ChatInput({
         data-tone={webSearchState.tone}
         data-supported-count={webSearchState.supportedCount}
         data-unsupported-count={webSearchState.unsupportedCount}
-        className={`flex h-9 shrink-0 items-center gap-1.5 rounded-full border pl-3 pr-1.5 text-xs font-bold ${
+        // 32px tall on mobile so the row the chip got back costs the answer
+        // canvas as little as possible; the controls inside keep their 44px
+        // touch area through ::before insets rather than through box height.
+        className={`flex min-w-0 max-w-full items-center gap-1.5 rounded-full border pl-3 pr-1.5 text-xs font-bold ${isMobileShell ? "h-8" : "h-9"} ${
           webSearchState.tone === "blocked"
             ? "border-red-200 bg-red-50 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
             : webSearchState.tone === "warning"
@@ -1660,7 +1678,7 @@ export function ChatInput({
     {isDeepResearchPending && (
       <div
         data-testid="deep-research-chip"
-        className="flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-violet-200 bg-violet-50 pl-3 pr-1.5 text-xs font-bold text-violet-800 dark:border-violet-900/60 dark:bg-violet-950/30 dark:text-violet-200"
+        className={`flex min-w-0 max-w-full items-center gap-1.5 rounded-full border border-violet-200 bg-violet-50 pl-3 pr-1.5 text-xs font-bold text-violet-800 dark:border-violet-900/60 dark:bg-violet-950/30 dark:text-violet-200 ${isMobileShell ? "h-8" : "h-9"}`}
         title={t("chat.deepResearchChipTooltip")}
       >
         <Microscope className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -1685,9 +1703,7 @@ export function ChatInput({
       <p
         id="web-search-exception-detail"
         data-testid="web-search-exception-detail"
-        className={`px-1 text-[11px] leading-4 text-zinc-600 dark:text-zinc-300 ${
-          isMobileShell ? "mt-1.5" : "mb-2"
-        }`}
+        className="mb-2 px-1 text-[11px] leading-4 text-zinc-600 dark:text-zinc-300"
       >
         {interpolateCopy(t("chat.webSearchUnsupportedModels"), {
           models: webSearchUnsupportedModelNames,
@@ -1910,14 +1926,20 @@ export function ChatInput({
             </div>
           )}
           {/*
-            On mobile these chips share the textarea's first line (see below)
-            instead of claiming a full row above it.
+            The chips own a row of their own in *both* shells. They used to ride
+            the mobile textarea's first line, which left the input whatever
+            horizontal space the chips did not want; the composer contract in
+            docs/ui-contracts/mobile-chat-composer.md forbids that. Chips wrap
+            onto a second line rather than scrolling sideways or squeezing the
+            row below them. Only the label length is shell-specific, which
+            `data-label-variant` states so tests read it from the DOM.
           */}
-          {!isMobileShell && hasToolStatusChips && (
+          {hasToolStatusChips && (
             <div
               data-testid="tool-status-chip-row"
               data-placement="row"
-              className="mb-2 flex max-w-full gap-1.5 overflow-x-auto overscroll-x-contain pb-1 md:mb-3 md:flex-wrap md:overflow-visible md:pb-0"
+              data-label-variant={isMobileShell ? "compact" : "full"}
+              className="mb-1.5 flex max-w-full flex-wrap gap-1.5 md:mb-3"
             >
               {toolStatusChips}
             </div>
@@ -1934,10 +1956,9 @@ export function ChatInput({
               {webSearchStateDescription}
             </p>
           )}
-          {/* Desktop keeps the detail directly under the chip row it expands
-              from. On mobile the chip sits on the input line below, so the
-              detail follows it there rather than appearing above the chip. */}
-          {!isMobileShell && webSearchExceptionDetail}
+          {/* The detail belongs directly under the chip row it expands from,
+              in both shells. */}
+          {webSearchExceptionDetail}
           {webSearchState.allUnsupported && (
             <div
               role="status"
@@ -2045,25 +2066,13 @@ export function ChatInput({
           </div>
         )}
         {/*
-          Mobile: the tool status shares the composer's first input line rather
-          than claiming a row of its own above it. `flex-wrap` plus a minimum
-          textarea width is what makes that safe at every width -- when the
-          chips and a usable input box no longer fit side by side (a 320px
-          phone with two chips, or 200% zoom), the textarea drops to its own
-          full-width line instead of being squeezed. The chips never shrink
-          below their own label, so a partial- or blocked-search state stays
-          readable rather than scrolling out of sight.
+          The textarea's own row. Nothing else may enter it: no chip, no badge,
+          no absolutely positioned control. Whatever the tool state is, the
+          input keeps the composer's full inner width and at least one complete
+          visible line -- the invariant in
+          docs/ui-contracts/mobile-chat-composer.md.
         */}
-        <div className="flex flex-wrap items-start gap-x-1.5 gap-y-1">
-        {isMobileShell && hasToolStatusChips && (
-          <div
-            data-testid="tool-status-chip-row"
-            data-placement="inline"
-            className="flex max-w-full shrink-0 items-center gap-1.5 overflow-x-auto overscroll-x-contain"
-          >
-            {toolStatusChips}
-          </div>
-        )}
+        <div data-testid="composer-textarea-row" className="flex w-full min-w-0">
         <textarea
           data-testid="chat-textarea"
           ref={textareaRef}
@@ -2081,10 +2090,19 @@ export function ChatInput({
           disabled={isDisabled}
           enterKeyHint={isMobileShell ? "enter" : undefined}
           rows={1}
-          className={`w-full max-h-[92px] min-h-[36px] min-w-[11rem] flex-1 resize-none overflow-y-auto border-0 bg-transparent px-1 py-1.5 text-base leading-5 text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-500 md:max-h-[200px] md:min-h-[52px] md:py-2 md:text-sm md:leading-6 ${preserveFormatting ? "overflow-x-auto whitespace-pre font-mono" : ""}`}
+          // The min/max heights are in rem, not px, so a reader at 200% text
+          // scaling still gets a complete first line instead of a box frozen
+          // at one 16px-root line's worth of height.
+          className={`w-full min-w-0 max-h-[5.75rem] min-h-[2.25rem] flex-1 resize-none overflow-y-auto border-0 bg-transparent px-1 py-1.5 text-base leading-5 text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-500 md:max-h-[12.5rem] md:min-h-[3.25rem] md:py-2 md:text-sm md:leading-6 ${preserveFormatting ? "overflow-x-auto whitespace-pre font-mono" : ""}`}
         />
         </div>
-        <div className="relative flex items-center justify-between gap-1.5" ref={menuRef}>
+        {/*
+          The actions row. It wraps and its model button truncates rather than
+          pushing the send button past the composer's edge: at 200% zoom (a
+          195px layout viewport) a fixed-width rail used to overflow, and the
+          composer's own `overflow-hidden` then clipped Send out of sight.
+        */}
+        <div className="relative flex flex-wrap items-center justify-between gap-1.5" ref={menuRef}>
         <div className="flex shrink-0 items-center gap-1.5">
           <button
             ref={actionMenuButtonRef}
@@ -2115,7 +2133,7 @@ export function ChatInput({
           </button>
         </div>
 
-        <div className="flex shrink-0 items-center gap-1.5">
+        <div className="flex min-w-0 flex-1 items-center justify-end gap-1.5">
           <button
             ref={modelMenuButtonRef}
             type="button"
@@ -2130,7 +2148,7 @@ export function ChatInput({
               setIsMenuOpen(true);
               trackProductEvent("model_picker_opened", selectedModels.length, {});
             }}
-            className={`flex max-w-[112px] shrink-0 touch-manipulation items-center gap-1 rounded-full border border-zinc-300 bg-zinc-50 px-2.5 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-800 ${isMobileShell ? "h-11" : "h-10"}`}
+            className={`flex min-w-0 max-w-[112px] touch-manipulation items-center gap-1 rounded-full border border-zinc-300 bg-zinc-50 px-2.5 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-800 ${isMobileShell ? "h-11" : "h-10"}`}
             title={activeModelNames.join(", ")}
             aria-label={t("chat.modelSelect")}
             aria-expanded={isMenuOpen && menuView === "models"}
@@ -2215,9 +2233,21 @@ export function ChatInput({
               className={`flex shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-blue-600 text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500 dark:disabled:bg-zinc-700 dark:disabled:text-zinc-400 ${isMobileShell ? "h-11 w-11" : "h-9 w-9"}`}
               title={`${t("chat.send")} · ${estimatedRequestCredits} credits`}
               aria-label={`${t("chat.send")} · ${estimatedRequestCredits} credits`}
+              aria-describedby={
+                sendDisabledReason ? "chat-send-disabled-reason" : undefined
+              }
             >
               <ArrowUp className="h-4 w-4" />
             </button>
+          )}
+          {sendDisabledReason && (
+            <p
+              id="chat-send-disabled-reason"
+              data-testid="chat-send-disabled-reason"
+              className="sr-only"
+            >
+              {sendDisabledReason}
+            </p>
           )}
         </div>
 
@@ -2659,8 +2689,6 @@ export function ChatInput({
             </MobileModelMenuPortal>
           )}
         </div>
-
-        {isMobileShell && webSearchExceptionDetail}
 
         <input
           ref={fileInputRef}
