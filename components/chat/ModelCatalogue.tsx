@@ -306,7 +306,7 @@ export function ModelCatalogue({
             aria-expanded={isFilterSheetOpen}
             aria-haspopup="dialog"
             onClick={() => onFilterSheetOpenChange(!isFilterSheetOpen)}
-            className={`inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1 rounded-lg border border-zinc-200 px-3 text-[11px] font-black text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800 ${isMobileShell ? "" : "h-9"}`}
+            className={`inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1 rounded-lg border border-zinc-200 px-3 text-[11px] font-bold text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800 ${isMobileShell ? "" : "h-9"}`}
           >
             <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
             {activeFilterCount > 0
@@ -328,7 +328,7 @@ export function ModelCatalogue({
               onClick={() =>
                 onFiltersChange(resetModelCatalogueFilters(filters))
               }
-              className="inline-flex min-h-11 items-center rounded-lg px-2 text-[11px] font-black text-blue-600 underline decoration-dotted underline-offset-2 hover:text-blue-500 dark:text-blue-300"
+              className="inline-flex min-h-11 items-center rounded-lg px-2 text-[11px] font-bold text-blue-600 underline decoration-dotted underline-offset-2 hover:text-blue-500 dark:text-blue-300"
             >
               {stepCopy.resetAllFilters}
             </button>
@@ -556,7 +556,7 @@ export function ModelCatalogue({
             className="max-h-[85%] w-full max-w-md overflow-y-auto rounded-t-3xl bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl dark:bg-zinc-900 md:rounded-3xl"
           >
             <div className="mb-3 flex items-center justify-between gap-2">
-              <p className="text-sm font-black text-zinc-900 dark:text-zinc-100">
+              <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
                 {stepCopy.filterSheetTitle}
               </p>
               <button
@@ -577,7 +577,7 @@ export function ModelCatalogue({
                   data-testid="capability-filter-favorites"
                   aria-pressed={filters.favoritesOnly}
                   onClick={() => update("favoritesOnly", !filters.favoritesOnly)}
-                  className={`inline-flex min-h-11 shrink-0 items-center gap-1 rounded-full border px-3 text-[11px] font-black transition ${filters.favoritesOnly ? "border-blue-500 bg-blue-500 text-white" : "border-zinc-200 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"}`}
+                  className={`inline-flex min-h-11 shrink-0 items-center gap-1 rounded-full border px-3 text-[11px] font-bold transition ${filters.favoritesOnly ? "border-blue-500 bg-blue-500 text-white" : "border-zinc-200 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"}`}
                 >
                   <Star
                     className={`h-3 w-3 ${filters.favoritesOnly ? "fill-current" : ""}`}
@@ -603,7 +603,7 @@ export function ModelCatalogue({
                         filters.capability === value ? "all" : value
                       )
                     }
-                    className={`inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-full border px-3 text-[11px] font-black transition ${filters.capability === value ? "border-blue-500 bg-blue-500 text-white" : "border-zinc-200 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"}`}
+                    className={`inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-full border px-3 text-[11px] font-bold transition ${filters.capability === value ? "border-blue-500 bg-blue-500 text-white" : "border-zinc-200 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"}`}
                   >
                     {label}
                   </button>
@@ -620,7 +620,7 @@ export function ModelCatalogue({
                     data-testid={`model-filter-${key}`}
                     aria-pressed={filters[key]}
                     onClick={() => update(key, !filters[key])}
-                    className={`inline-flex min-h-11 shrink-0 items-center justify-center rounded-full border px-3 text-[11px] font-black transition ${filters[key] ? "border-blue-500 bg-blue-500 text-white" : "border-zinc-200 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"}`}
+                    className={`inline-flex min-h-11 shrink-0 items-center justify-center rounded-full border px-3 text-[11px] font-bold transition ${filters[key] ? "border-blue-500 bg-blue-500 text-white" : "border-zinc-200 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"}`}
                   >
                     {label}
                   </button>
@@ -674,7 +674,7 @@ export function ModelCatalogue({
                 <button
                   type="button"
                   onClick={() => onFiltersChange(resetModelCatalogueFilters(filters))}
-                  className="inline-flex min-h-11 items-center rounded-lg px-2 text-xs font-black text-zinc-600 underline decoration-dotted underline-offset-2 dark:text-zinc-300"
+                  className="inline-flex min-h-11 items-center rounded-lg px-2 text-xs font-bold text-zinc-600 underline decoration-dotted underline-offset-2 dark:text-zinc-300"
                 >
                   {stepCopy.resetAllFilters}
                 </button>
@@ -682,7 +682,7 @@ export function ModelCatalogue({
                   type="button"
                   data-testid="model-filter-apply"
                   onClick={() => onFilterSheetOpenChange(false)}
-                  className="inline-flex min-h-11 items-center rounded-xl bg-blue-600 px-4 text-xs font-black text-white transition hover:bg-blue-500"
+                  className="inline-flex min-h-11 items-center rounded-xl bg-blue-600 px-4 text-xs font-bold text-white transition hover:bg-blue-500"
                 >
                   {interpolate(stepCopy.resultCount, {
                     count: filteredModels.length,

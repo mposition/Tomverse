@@ -76,7 +76,7 @@ function GuideSection({ section }: { section: WorkspaceGuideSection }) {
             key={`${section.id}-${item.term}`}
             className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950/70"
           >
-            <dt className="text-sm font-black text-zinc-950 dark:text-white">
+            <dt className="text-sm font-bold text-zinc-950 dark:text-white">
               {item.term}
             </dt>
             <dd className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
@@ -125,14 +125,14 @@ export function ChatWorkspaceGuide() {
       <article lang={lang} className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8 lg:py-16">
         <Link
           href={helpCentreHref(lang)}
-          className="inline-flex items-center gap-2 text-sm font-black text-blue-600 hover:text-blue-500 dark:text-blue-300"
+          className="inline-flex items-center gap-2 text-sm font-bold text-blue-600 hover:text-blue-500 dark:text-blue-300"
         >
           <ArrowLeft className="h-4 w-4" aria-hidden="true" />
           {copy.allHelp}
         </Link>
 
         <header className="mt-8 max-w-4xl">
-          <div className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-black uppercase tracking-[0.16em] text-blue-700 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300">
+          <div className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-bold uppercase tracking-[0.16em] text-blue-700 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300">
             <HelpCircle className="h-4 w-4" aria-hidden="true" />
             {copy.eyebrow}
           </div>
@@ -151,7 +151,7 @@ export function ChatWorkspaceGuide() {
           aria-label={copy.contents}
           className="mt-10 rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/45"
         >
-          <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500">
+          <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">
             {copy.contents}
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
@@ -196,7 +196,7 @@ export function ChatWorkspaceGuide() {
                       onClick={() => trackTopic(index === 5 ? "project" : index === 4 ? "labels" : "workspace")}
                       className="group flex items-center gap-3 rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 transition hover:border-blue-500 hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
                     >
-                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-black">
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-bold">
                         {index + 1}
                       </span>
                       <Icon className="h-4 w-4 shrink-0 text-zinc-400 group-hover:text-blue-300" aria-hidden="true" />
@@ -220,7 +220,7 @@ export function ChatWorkspaceGuide() {
                     id={`tour-${index + 1}`}
                     className="scroll-mt-24 rounded-2xl bg-zinc-50 p-4 dark:bg-zinc-950/70"
                   >
-                    <dt className="flex items-center gap-2 text-sm font-black">
+                    <dt className="flex items-center gap-2 text-sm font-bold">
                       <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-[11px] text-white">
                         {index + 1}
                       </span>
@@ -243,7 +243,7 @@ export function ChatWorkspaceGuide() {
                 <div className="mb-6 overflow-hidden rounded-3xl border border-blue-200 bg-blue-50 p-5 sm:p-7 dark:border-blue-900/70 dark:bg-blue-950/20">
                   <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
                     <Sparkles className="h-5 w-5" aria-hidden="true" />
-                    <h3 className="font-black">{copy.reviewVideoTitle}</h3>
+                    <h3 className="font-bold">{copy.reviewVideoTitle}</h3>
                   </div>
                   <video
                     className="mt-5 aspect-video w-full rounded-2xl border border-zinc-200 bg-zinc-950 object-cover shadow-lg dark:border-zinc-800"
@@ -272,7 +272,7 @@ export function ChatWorkspaceGuide() {
           <div className="flex flex-col gap-3 sm:flex-row">
             <Link
               href={helpCentreHref(lang)}
-              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-zinc-700 px-4 text-sm font-black hover:bg-zinc-900"
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-zinc-700 px-4 text-sm font-bold hover:bg-zinc-900"
             >
               {copy.allHelp}
             </Link>
@@ -283,7 +283,7 @@ export function ChatWorkspaceGuide() {
                   cta_location: "chat_workspace_guide",
                 })
               }
-              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-black hover:bg-blue-500"
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-bold hover:bg-blue-500"
             >
               {copy.openChat}
               <ExternalLink className="h-4 w-4" aria-hidden="true" />

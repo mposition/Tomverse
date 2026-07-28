@@ -90,7 +90,7 @@ export function UsageLimitModal({
         <div className="flex items-start justify-between gap-3">
           <h2
             id="usage-limit-modal-title"
-            className="text-base font-black text-zinc-900 dark:text-zinc-100"
+            className="text-base font-bold text-zinc-900 dark:text-zinc-100"
           >
             {isGuestMode ? t("chat.guestLimitReachedTitle") : t("chat.accountLimitReachedTitle")}
           </h2>
@@ -133,7 +133,7 @@ export function UsageLimitModal({
               onClick={() => currentChatId && writePendingGuestImportIntent(currentChatId)}
               className="flex flex-col items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-center text-white transition hover:bg-blue-500"
             >
-              <span className="text-sm font-black">{t("chat.continueConversationCta")}</span>
+              <span className="text-sm font-bold">{t("chat.continueConversationCta")}</span>
               <span className="mt-0.5 text-xs font-medium text-blue-100">
                 {t("chat.continueConversationCtaSubtext")}
               </span>
@@ -142,7 +142,7 @@ export function UsageLimitModal({
             <>
               <CreditPackPurchaseButton
                 trigger="limit_hit"
-                className="flex items-center justify-center rounded-xl bg-zinc-900 px-4 py-2.5 text-sm font-black text-white transition hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200"
+                className="flex items-center justify-center rounded-xl bg-zinc-900 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200"
               >
                 {t("chat.continueWithAdditionalCredits")}
               </CreditPackPurchaseButton>
@@ -154,7 +154,7 @@ export function UsageLimitModal({
                   ctaLocation="credit_limit_banner"
                   planCreditsRemaining={planCreditsRemaining}
                   addonCreditsRemaining={purchasedCreditsRemaining}
-                  className="flex items-center justify-center rounded-xl border border-zinc-200 px-4 py-2.5 text-sm font-black text-zinc-800 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-zinc-900"
+                  className="flex items-center justify-center rounded-xl border border-zinc-200 px-4 py-2.5 text-sm font-bold text-zinc-800 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-zinc-900"
                 >
                   {accountPlan === "Pro" ? t("chat.viewMaxPlan") : t("chat.viewProPlan")}
                 </UpgradeCtaLink>

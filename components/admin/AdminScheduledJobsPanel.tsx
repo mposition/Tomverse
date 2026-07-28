@@ -63,7 +63,7 @@ export function AdminScheduledJobsPanel() {
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-300">Automation health</p>
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">Automation health</p>
           <h2 className="mt-2 text-2xl font-black text-white">Scheduled jobs</h2>
           <p className="mt-2 text-sm text-zinc-400">
             A job is marked delayed when Railway has not called it within its expected interval.
@@ -73,7 +73,7 @@ export function AdminScheduledJobsPanel() {
           type="button"
           onClick={() => void load()}
           disabled={loading}
-          className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 px-3 text-xs font-black text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
+          className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 px-3 text-xs font-bold text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
         >
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
           Refresh

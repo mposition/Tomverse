@@ -193,7 +193,7 @@ export function RefundRequestsPanel({ rows }: Props) {
     <section id="refunds" className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
-          <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-300">
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
             Refunds
           </p>
           <h2 className="mt-2 text-2xl font-black text-white">
@@ -204,14 +204,14 @@ export function RefundRequestsPanel({ rows }: Props) {
             membership to Free, and send transactional email updates.
           </p>
         </div>
-        <span className="inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-black text-amber-200">
+        <span className="inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-200">
           <RotateCcw className="h-3.5 w-3.5" />
           {visiblePendingCount} {pendingLabel}
         </span>
         <button
           type="button"
           onClick={exportCsv}
-          className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-black text-zinc-200 transition hover:bg-zinc-900"
+          className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-200 transition hover:bg-zinc-900"
         >
           <Download className="h-3.5 w-3.5" />
           Export CSV
@@ -243,15 +243,15 @@ export function RefundRequestsPanel({ rows }: Props) {
 
         <div className="grid gap-3 md:grid-cols-3">
           <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4">
-            <p className="text-xs font-black uppercase tracking-[0.16em] text-amber-200/80">Pending</p>
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-amber-200/80">Pending</p>
             <p className="mt-1 text-2xl font-black text-white">{visiblePendingCount}</p>
           </div>
           <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4">
-            <p className="text-xs font-black uppercase tracking-[0.16em] text-emerald-200/80">Approved</p>
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-200/80">Approved</p>
             <p className="mt-1 text-2xl font-black text-white">{approvedCount}</p>
           </div>
           <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-4">
-            <p className="text-xs font-black uppercase tracking-[0.16em] text-red-200/80">Rejected</p>
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-red-200/80">Rejected</p>
             <p className="mt-1 text-2xl font-black text-white">{rejectedCount}</p>
           </div>
         </div>
@@ -269,17 +269,17 @@ export function RefundRequestsPanel({ rows }: Props) {
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className={`rounded-full border px-2.5 py-1 text-xs font-black ${statusClass(request.status)}`}>
+                      <span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${statusClass(request.status)}`}>
                         {request.status}
                       </span>
-                      <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-2.5 py-1 text-xs font-black text-blue-200">
+                      <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-2.5 py-1 text-xs font-bold text-blue-200">
                         {request.plan || "Unknown plan"}
                       </span>
                       <span className="text-xs text-zinc-500">
                         Requested {dateLabel(request.requestedAt)}
                       </span>
                     </div>
-                    <h3 className="mt-3 truncate text-base font-black text-white">
+                    <h3 className="mt-3 truncate text-base font-bold text-white">
                       {request.email || "No email"}
                     </h3>
                     <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-zinc-300">
@@ -307,7 +307,7 @@ export function RefundRequestsPanel({ rows }: Props) {
 
                 {request.creditRisk?.requiresReview ? (
                   <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4">
-                    <p className="text-xs font-black uppercase tracking-[0.16em] text-red-200">
+                    <p className="text-xs font-bold uppercase tracking-[0.16em] text-red-200">
                       Credit balance and cost review required
                     </p>
                     <div className="mt-3 grid gap-2 text-xs text-red-100 sm:grid-cols-2 lg:grid-cols-4">
@@ -340,7 +340,7 @@ export function RefundRequestsPanel({ rows }: Props) {
 
                 {request.timelineEvents && request.timelineEvents.length > 0 ? (
                   <div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950/70 p-3">
-                    <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500">
+                    <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">
                       Timeline
                     </p>
                     <div className="mt-3 grid gap-2">
@@ -384,7 +384,7 @@ export function RefundRequestsPanel({ rows }: Props) {
                           )
                         }
                         onClick={() => updateRequest(request.id, "approve")}
-                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-black text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
                         Approve
@@ -393,7 +393,7 @@ export function RefundRequestsPanel({ rows }: Props) {
                         type="button"
                         disabled={Boolean(busyId)}
                         onClick={() => updateRequest(request.id, "reject")}
-                        className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-500/30 px-4 py-2.5 text-sm font-black text-red-200 transition hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-500/30 px-4 py-2.5 text-sm font-bold text-red-200 transition hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         <XCircle className="h-4 w-4" />
                         Reject

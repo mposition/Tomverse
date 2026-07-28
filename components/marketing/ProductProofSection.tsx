@@ -260,7 +260,7 @@ export function ProductProofSection() {
     <section id="how-it-works" className="py-16 sm:py-20">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="max-w-3xl">
-          <p className="text-xs font-black uppercase tracking-[0.22em] text-blue-600 dark:text-blue-400">{content.eyebrow}</p>
+          <p className="text-xs font-bold uppercase tracking-[0.22em] text-blue-600 dark:text-blue-400">{content.eyebrow}</p>
           <h2 className="mt-3 text-3xl font-black sm:text-4xl">{content.title}</h2>
           <p className="mt-4 text-base leading-7 text-zinc-600 dark:text-zinc-300">{content.description}</p>
         </div>
@@ -268,8 +268,8 @@ export function ProductProofSection() {
         <div className="mt-9 grid gap-6 lg:grid-cols-[1.3fr_0.7fr]">
           <article className="overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-950 shadow-2xl shadow-blue-950/20">
             <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3 text-white">
-              <span className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-blue-300"><PlayCircle className="h-4 w-4" />Tomverse product walkthrough</span>
-              <span className="text-[10px] font-bold text-zinc-500">20–25 sec</span>
+              <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-blue-300"><PlayCircle className="h-4 w-4" />Tomverse product walkthrough</span>
+              <span className="text-[11px] font-bold text-zinc-500">20–25 sec</span>
             </div>
             <video
               src="/marketing-proof/tomverse-review-workflow.webm"
@@ -288,19 +288,19 @@ export function ProductProofSection() {
             <div className="p-5 text-white">
               <h3 className="text-xl font-black">{content.videoTitle}</h3>
               <p className="mt-3 text-sm leading-6 text-zinc-300">{content.videoBody}</p>
-              <p className="mt-3 text-[10px] font-black uppercase tracking-wider text-zinc-500">{content.videoDisclosure}</p>
+              <p className="mt-3 text-xs font-medium leading-5 text-zinc-500">{content.videoDisclosure}</p>
             </div>
           </article>
 
           <div className="space-y-3">
             {content.steps.map((step, index) => (
               <article key={step.title} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40">
-                <div className="flex items-start gap-3"><span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-600 text-xs font-black text-white">{index + 1}</span><div><h3 className="font-black">{step.title}</h3><p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400">{step.description}</p></div></div>
+                <div className="flex items-start gap-3"><span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-600 text-xs font-bold text-white">{index + 1}</span><div><h3 className="font-bold">{step.title}</h3><p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400">{step.description}</p></div></div>
               </article>
             ))}
             {visibleMetrics.length > 0 && (
               <article className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-4">
-                <p className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-emerald-600 dark:text-emerald-400"><BarChart3 className="h-4 w-4" />{content.metricPeriod}</p>
+                <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400"><BarChart3 className="h-4 w-4" />{content.metricPeriod}</p>
                 <div className="mt-3 space-y-2">{visibleMetrics.map((metric) => <p key={metric.label} className="text-sm"><strong className="text-lg font-black">{metric.value.toLocaleString()}+</strong> <span className="text-zinc-500">{metric.label}</span></p>)}</div>
                 <p className="mt-3 text-[11px] leading-5 text-zinc-500">{content.metricDisclosure}</p>
               </article>
@@ -318,7 +318,7 @@ export function ProductProofSection() {
                 <h3 className="mt-4 text-lg font-black">{item.title}</h3>
                 <p className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-400">{item.description}</p>
                 <p className="mt-4 flex gap-2 text-sm font-bold leading-6"><CheckCircle2 className="mt-1 h-4 w-4 shrink-0 text-emerald-500" />{item.result}</p>
-                <Link href={localizedPath(lang, casePaths[index])} className="mt-5 inline-flex items-center gap-2 text-sm font-black text-blue-600 hover:text-blue-500 dark:text-blue-400">{item.link}<ArrowRight className="h-4 w-4" /></Link>
+                <Link href={localizedPath(lang, casePaths[index])} className="mt-5 inline-flex items-center gap-2 text-sm font-bold text-blue-600 hover:text-blue-500 dark:text-blue-400">{item.link}<ArrowRight className="h-4 w-4" /></Link>
               </article>
             );
           })}

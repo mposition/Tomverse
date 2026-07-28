@@ -438,14 +438,14 @@ export function ChatMessageList({
                           }
                           title={detail}
                           aria-label={detail ? `${label} — ${detail}` : undefined}
-                          className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[9px] font-bold text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
+                          className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[11px] font-semibold text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
                         >
                           {label}
                         </span>
                       );
                     })()}
                     {isActivelyGenerating && msg.content && (
-                      <span className="text-[10px] font-bold uppercase tracking-wide text-blue-500 dark:text-blue-400">
+                      <span className="text-[11px] font-bold uppercase tracking-wide text-blue-500 dark:text-blue-400">
                         {t("chat.generatingStatus")}
                       </span>
                     )}
@@ -456,7 +456,7 @@ export function ChatMessageList({
                         onClick={onStopGenerating}
                         title={t("chat.stopThisResponse")}
                         aria-label={t("chat.stopThisResponse")}
-                        className="ml-auto flex items-center gap-1 rounded-full border border-zinc-300 px-2 py-0.5 text-[10px] font-bold text-zinc-500 hover:border-zinc-400 hover:text-zinc-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-600 dark:hover:text-zinc-200"
+                        className="ml-auto flex items-center gap-1 rounded-full border border-zinc-300 px-2 py-0.5 text-[11px] font-bold text-zinc-500 hover:border-zinc-400 hover:text-zinc-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-600 dark:hover:text-zinc-200"
                       >
                         <Square className="h-2.5 w-2.5 fill-current" aria-hidden="true" />
                         {t("chat.stop")}
@@ -601,7 +601,7 @@ export function ChatMessageList({
                         data-testid="search-citation-list"
                         className="mt-3 border-t border-zinc-200 pt-2 dark:border-zinc-700/60"
                       >
-                        <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
+                        <p className="mb-1 text-[11px] font-bold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
                           {t("chat.searchCitationsLabel")}
                         </p>
                         <ul className="space-y-1">
@@ -635,7 +635,7 @@ export function ChatMessageList({
                       <div className="mt-3 border-t border-red-200 pt-3 dark:border-red-800">
                         {errorCategory === "attachment" && (
                           <div className="mb-3 rounded-xl border border-red-200 bg-white/80 p-3 text-xs leading-5 text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-100">
-                            <p className="font-black">{t("chat.fileErrorHelpTitle")}</p>
+                            <p className="font-bold">{t("chat.fileErrorHelpTitle")}</p>
                             <ul className="mt-1 list-disc space-y-1 pl-4">
                               <li>{t("chat.fileErrorHelpResave")}</li>
                               <li>{t("chat.fileErrorHelpLimit")}</li>
@@ -643,7 +643,7 @@ export function ChatMessageList({
                             </ul>
                             <Link
                               href="/support/help-centre"
-                              className="mt-2 inline-flex font-black text-red-700 underline underline-offset-2 dark:text-red-100"
+                              className="mt-2 inline-flex font-bold text-red-700 underline underline-offset-2 dark:text-red-100"
                             >
                               {t("chat.fileErrorHelpLink")}
                             </Link>
@@ -730,7 +730,7 @@ export function ChatMessageList({
                             {errorAuxiliaryLines.map((line, lineIndex) => (
                               <p
                                 key={lineIndex}
-                                className="text-[10px] leading-4 text-red-500/70 dark:text-red-300/60"
+                                className="text-[11px] leading-4 text-red-500/70 dark:text-red-300/60"
                               >
                                 {line}
                               </p>

@@ -258,7 +258,7 @@ export function ModelFinder({ enabled, onComplete }: ModelFinderProps) {
                     setStage("tasks");
                     trackProductEvent("model_finder_started", 0);
                   }}
-                  className="flex w-full items-center justify-between rounded-2xl bg-blue-600 px-5 py-4 text-sm font-black text-white transition hover:bg-blue-500"
+                  className="flex w-full items-center justify-between rounded-2xl bg-blue-600 px-5 py-4 text-sm font-bold text-white transition hover:bg-blue-500"
                 >
                   {t("modelFinder.start")}
                   <ChevronRight className="h-5 w-5" />
@@ -276,7 +276,7 @@ export function ModelFinder({ enabled, onComplete }: ModelFinderProps) {
           ) : stage === "result" ? (
             <div>
               <div className="text-center">
-                <span className="inline-flex items-center gap-2 rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-black text-emerald-600 dark:text-emerald-400">
+                <span className="inline-flex items-center gap-2 rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-600 dark:text-emerald-400">
                   <Check className="h-3.5 w-3.5" />
                   {t("modelFinder.primary")}
                 </span>
@@ -332,11 +332,11 @@ export function ModelFinder({ enabled, onComplete }: ModelFinderProps) {
                       <span className="flex items-start gap-3">
                         <ModelLogo model={model} size="md" />
                         <span className="min-w-0 flex-1">
-                          <span className="block truncate text-sm font-black text-zinc-950 dark:text-white">
+                          <span className="block truncate text-sm font-bold text-zinc-950 dark:text-white">
                             {model.name}
                           </span>
                           <span
-                            className={`mt-0.5 block text-[10px] font-black uppercase tracking-wider ${
+                            className={`mt-0.5 block text-[11px] font-bold uppercase tracking-wider ${
                               isAdvanced ? "text-amber-600" : "text-blue-500"
                             }`}
                           >
@@ -344,7 +344,7 @@ export function ModelFinder({ enabled, onComplete }: ModelFinderProps) {
                           </span>
                         </span>
                         <span
-                          className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black ${
+                          className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold ${
                             isSelected
                               ? "bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-200"
                               : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
@@ -396,7 +396,7 @@ export function ModelFinder({ enabled, onComplete }: ModelFinderProps) {
                   type="button"
                   disabled={isSaving || selectedModelIds.size === 0}
                   onClick={() => void handleComplete(false)}
-                  className="flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-4 text-sm font-black text-white hover:bg-blue-500 disabled:opacity-50"
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-4 text-sm font-bold text-white hover:bg-blue-500 disabled:opacity-50"
                 >
                   {isSaving ? t("modelFinder.saving") : t("modelFinder.useOnce")}
                   {!isSaving && <ChevronRight className="h-5 w-5" />}
@@ -423,7 +423,7 @@ export function ModelFinder({ enabled, onComplete }: ModelFinderProps) {
                   <ArrowLeft className="h-4 w-4" />
                 </button>
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs font-black uppercase tracking-wider text-blue-500">
+                  <p className="text-xs font-bold uppercase tracking-wider text-blue-500">
                     {t("modelFinder.progress").replaceAll(
                       "{current}",
                       String(stageNumber(stage))
@@ -528,7 +528,7 @@ export function ModelFinder({ enabled, onComplete }: ModelFinderProps) {
                     setStage("result");
                   }
                 }}
-                className="mt-7 flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-4 text-sm font-black text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-40"
+                className="mt-7 flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-4 text-sm font-bold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {t("modelFinder.next")}
                 <ChevronRight className="h-5 w-5" />

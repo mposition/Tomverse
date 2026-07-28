@@ -108,7 +108,7 @@ export function AdminApprovalsPanel() {
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div>
-          <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-300">
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
             Approval workflow
           </p>
           <h2 className="mt-2 text-2xl font-black text-white">High-risk admin approvals</h2>
@@ -117,7 +117,7 @@ export function AdminApprovalsPanel() {
             the original requester must retry the same action before expiry; successful execution consumes it once.
           </p>
         </div>
-        <span className="inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-black text-amber-200">
+        <span className="inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-200">
           <ShieldCheck className="h-3.5 w-3.5" />
           {pendingCount} pending
         </span>
@@ -139,7 +139,7 @@ export function AdminApprovalsPanel() {
               <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className={`rounded-full border px-2.5 py-1 text-xs font-black ${statusClass(row.status)}`}>
+                    <span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${statusClass(row.status)}`}>
                       {row.status}
                     </span>
                     <span className="font-black text-white">{row.action}</span>
@@ -165,7 +165,7 @@ export function AdminApprovalsPanel() {
                       type="button"
                       onClick={() => void review(row.id, "approved")}
                       disabled={busyId === row.id}
-                      className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-black text-emerald-100 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-100 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {busyId === row.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
                       Approve
@@ -174,7 +174,7 @@ export function AdminApprovalsPanel() {
                       type="button"
                       onClick={() => void review(row.id, "rejected")}
                       disabled={busyId === row.id}
-                      className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-black text-red-100 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-100 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       <XCircle className="h-3.5 w-3.5" />
                       Reject

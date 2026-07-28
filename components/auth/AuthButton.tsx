@@ -751,7 +751,7 @@ export function AuthButton({
             onClick={() => setIsAccountMenuOpen((current) => !current)}
             className="flex min-w-0 flex-1 items-center gap-2 rounded-xl px-1.5 py-1 text-left transition hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:hover:bg-zinc-900"
           >
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-teal-600 text-sm font-black text-white ring-1 ring-teal-400/50 dark:bg-teal-700 dark:ring-teal-400/40">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-teal-600 text-sm font-bold text-white ring-1 ring-teal-400/50 dark:bg-teal-700 dark:ring-teal-400/40">
             {session.user.image ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -764,10 +764,10 @@ export function AuthButton({
             )}
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-xs font-black text-zinc-800 dark:text-zinc-100">
+            <span className="block truncate text-xs font-bold text-zinc-800 dark:text-zinc-100">
               {session.user.name || session.user.email || "Tomverse"}
             </span>
-            <span className="block truncate text-[10px] font-semibold text-zinc-400">
+            <span className="block truncate text-[11px] font-semibold text-zinc-400">
               {accountPlan ? t(`modelTiers.${accountPlan.toLowerCase()}`) : t("auth.loading")}
               {accountUsage
                 ? ` · ${formatCopy("auth.planCreditsCompact", {
@@ -790,12 +790,12 @@ export function AuthButton({
               planCreditsRemaining={accountUsage.balances.planRemainingCredits}
               addonCreditsRemaining={accountUsage.balances.purchasedRemainingCredits}
               testId="account-plan-upgrade-badge"
-              className="inline-flex h-8 shrink-0 items-center rounded-lg bg-blue-600 px-2 text-[10px] font-black text-white transition hover:bg-blue-500"
+              className="inline-flex h-8 shrink-0 items-center rounded-lg bg-blue-600 px-2 text-xs font-bold text-white transition hover:bg-blue-500"
             >
               {t("upgrade.upgradeShort")}
             </UpgradeCtaLink>
           ) : (
-            <span className={`shrink-0 rounded-lg px-2 py-1 text-[10px] font-black ${accountPlan === "Max" ? "bg-purple-500/10 text-purple-600 dark:text-purple-300" : "bg-zinc-100 text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400"}`}>
+            <span className={`shrink-0 rounded-lg px-2 py-1 text-xs font-bold ${accountPlan === "Max" ? "bg-purple-500/10 text-purple-600 dark:text-purple-300" : "bg-zinc-100 text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400"}`}>
               {accountPlan ? t(`modelTiers.${accountPlan.toLowerCase()}`) : t("auth.loading")}
             </span>
           )}
@@ -819,18 +819,18 @@ export function AuthButton({
               className="fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[90] max-h-[calc(100dvh-1.5rem)] overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-3 shadow-2xl overscroll-contain dark:border-zinc-700 dark:bg-zinc-950 md:absolute md:inset-x-0 md:bottom-[calc(100%+0.5rem)]"
             >
               <div className="flex min-w-0 items-center gap-2 border-b border-zinc-200 pb-3 dark:border-zinc-800">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-teal-600 text-sm font-black text-white">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-teal-600 text-sm font-bold text-white">
                   {(session.user.name?.[0] || session.user.email?.[0] || "T").toUpperCase()}
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-black text-zinc-900 dark:text-zinc-100">
+                  <span className="block truncate text-sm font-bold text-zinc-900 dark:text-zinc-100">
                     {session.user.name || session.user.email || "Tomverse"}
                   </span>
                   {session.user.name && session.user.email ? (
                     <span className="block truncate text-[11px] text-zinc-400">{session.user.email}</span>
                   ) : null}
                 </span>
-                <span className="rounded-full bg-zinc-100 px-2 py-1 text-[10px] font-black text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
+                <span className="rounded-full bg-zinc-100 px-2 py-1 text-xs font-bold text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
                   {accountPlan ? t(`modelTiers.${accountPlan.toLowerCase()}`) : t("auth.loading")}
                 </span>
               </div>
@@ -842,11 +842,11 @@ export function AuthButton({
                     data-testid="account-daily-credits"
                   >
                     <div className="flex items-start justify-between gap-3">
-                      <span className="block text-[10px] font-bold text-blue-700 dark:text-blue-300">
+                      <span className="block text-[11px] font-bold text-blue-700 dark:text-blue-300">
                         {t("auth.dailyCreditsRemaining")}
                       </span>
                       {hasDailyCreditGuardrail && dailyCreditsResetLabel ? (
-                        <span className="text-right text-[9px] leading-4 text-blue-500 dark:text-blue-400">
+                        <span className="text-right text-[11px] leading-4 text-blue-500 dark:text-blue-400">
                           {formatCopy("auth.dailyCreditsResetAt", {
                             time: dailyCreditsResetLabel,
                           })}
@@ -860,7 +860,7 @@ export function AuthButton({
                     </strong>
                   </div>
                   <div className="rounded-xl bg-zinc-100 p-2.5 dark:bg-zinc-900">
-                    <span className="block text-[10px] font-bold text-zinc-500 dark:text-zinc-400">
+                    <span className="block text-[11px] font-bold text-zinc-500 dark:text-zinc-400">
                       {t("auth.planCreditsRemaining")}
                     </span>
                     <strong className="mt-1 block text-sm text-zinc-900 dark:text-zinc-100">
@@ -868,7 +868,7 @@ export function AuthButton({
                     </strong>
                   </div>
                   <div className="rounded-xl bg-emerald-50 p-2.5 dark:bg-emerald-950/30">
-                    <span className="block text-[10px] font-bold text-emerald-700 dark:text-emerald-300">
+                    <span className="block text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
                       {t("auth.purchasedCreditsRemaining")}
                     </span>
                     <strong className="mt-1 block text-sm text-zinc-900 dark:text-zinc-100">
@@ -919,7 +919,7 @@ export function AuthButton({
                     addonCreditsRemaining={accountUsage.balances.purchasedRemainingCredits}
                     testId="account-plan-view"
                     onClick={() => setIsAccountMenuOpen(false)}
-                    className="flex min-h-11 w-full items-center gap-2 rounded-xl bg-blue-600 px-3 text-sm font-black text-white transition hover:bg-blue-500"
+                    className="flex min-h-11 w-full items-center gap-2 rounded-xl bg-blue-600 px-3 text-sm font-bold text-white transition hover:bg-blue-500"
                   >
                     <Crown className="h-4 w-4" />
                     {mobileUpgradePlan === "Pro"
@@ -1216,7 +1216,7 @@ export function AuthButton({
                                                 closeSettingsModal();
                                                 requestAnimationFrame(() => openModelFinder());
                                             }}
-                                            className="flex w-full items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-3 text-sm font-black text-blue-700 transition hover:bg-blue-100 dark:border-blue-900/60 dark:bg-blue-950/20 dark:text-blue-200 dark:hover:bg-blue-950/40"
+                                            className="flex w-full items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-3 text-sm font-bold text-blue-700 transition hover:bg-blue-100 dark:border-blue-900/60 dark:bg-blue-950/20 dark:text-blue-200 dark:hover:bg-blue-950/40"
                                         >
                                             <Bot className="h-4 w-4" />
                                             {t("modelFinder.findAgain")}
@@ -1336,7 +1336,7 @@ export function AuthButton({
                                                         type="button"
                                                         onClick={handleCancelSubscription}
                                                         disabled={isCancellingSubscription || subscriptionCancelAtPeriodEnd}
-                                                        className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-blue-300 bg-white px-3 py-3 text-sm font-black text-blue-700 transition-colors hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-900/60 dark:bg-blue-950/40 dark:text-blue-100 dark:hover:bg-blue-950/70"
+                                                        className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-blue-300 bg-white px-3 py-3 text-sm font-bold text-blue-700 transition-colors hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-900/60 dark:bg-blue-950/40 dark:text-blue-100 dark:hover:bg-blue-950/70"
                                                     >
                                                         <CreditCard className="h-4 w-4" />
                                                         {subscriptionCancelAtPeriodEnd
@@ -1371,7 +1371,7 @@ export function AuthButton({
                                                         type="button"
                                                         onClick={handleRequestRefund}
                                                         disabled={isRequestingRefund || Boolean(refundRequestedAt)}
-                                                        className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-amber-300 bg-white px-3 py-3 text-sm font-black text-amber-700 transition-colors hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-100 dark:hover:bg-amber-950/70"
+                                                        className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-amber-300 bg-white px-3 py-3 text-sm font-bold text-amber-700 transition-colors hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-100 dark:hover:bg-amber-950/70"
                                                     >
                                                         <LifeBuoy className="h-4 w-4" />
                                                         {refundRequestedAt
@@ -1435,14 +1435,14 @@ export function AuthButton({
                                             {accountPlan !== "Max" && <UpgradeInterestButton
                                                 plan={accountPlan === "Pro" ? "Max" : "Pro"}
                                                 trigger="account"
-                                                className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-3 text-sm font-black text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-70"
+                                                className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-3 text-sm font-bold text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-70"
                                             >
                                                 <CreditCard className="h-4 w-4" />
                                                 {accountPlan === "Pro" ? (globalLang === "ko" ? "Max로 업그레이드" : "Upgrade to Max") : t("billing.joinProWaitlist")}
                                             </UpgradeInterestButton>}
                                             <CreditPackPurchaseButton
                                                 trigger="account"
-                                                className="flex w-full items-center justify-center gap-2 rounded-xl border border-purple-300 bg-purple-50 px-3 py-3 text-sm font-black text-purple-700 transition-colors hover:bg-purple-100 disabled:cursor-not-allowed disabled:opacity-70 dark:border-purple-900/60 dark:bg-purple-950/30 dark:text-purple-200 dark:hover:bg-purple-950/50"
+                                                className="flex w-full items-center justify-center gap-2 rounded-xl border border-purple-300 bg-purple-50 px-3 py-3 text-sm font-bold text-purple-700 transition-colors hover:bg-purple-100 disabled:cursor-not-allowed disabled:opacity-70 dark:border-purple-900/60 dark:bg-purple-950/30 dark:text-purple-200 dark:hover:bg-purple-950/50"
                                             >
                                                 <CreditCard className="h-4 w-4" />
                                                 {globalLang === "ko" ? "추가 크레딧 구매" : "Buy additional credits"}
@@ -1459,7 +1459,7 @@ export function AuthButton({
                                     <UpgradeInterestButton
                                         plan={mobileUpgradePlan}
                                         trigger="account"
-                                        className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black text-white transition-colors disabled:cursor-not-allowed disabled:opacity-70 ${
+                                        className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-70 ${
                                             mobileUpgradePlan === "Max"
                                                 ? "bg-purple-600 hover:bg-purple-500"
                                                 : "bg-blue-600 hover:bg-blue-500"
@@ -1522,7 +1522,7 @@ export function AuthButton({
                         aria-labelledby="delete-account-modal-title"
                     >
                         <div className="flex items-start justify-between gap-4">
-                            <h3 id="delete-account-modal-title" className="text-sm font-black text-red-700 dark:text-red-200">
+                            <h3 id="delete-account-modal-title" className="text-sm font-bold text-red-700 dark:text-red-200">
                                 {t("auth.deleteAccountImmediateTitle")}
                             </h3>
                             <button
@@ -1575,7 +1575,7 @@ export function AuthButton({
                                 type="button"
                                 onClick={handleDeleteAccount}
                                 disabled={isRequestingDeletion || !accountDeletionConsent || accountDeletionConfirmation !== "DELETE MY ACCOUNT"}
-                                className="flex items-center justify-center gap-2 rounded-xl border border-red-300 bg-red-600 px-4 py-2 text-sm font-black text-white transition-colors hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-800"
+                                className="flex items-center justify-center gap-2 rounded-xl border border-red-300 bg-red-600 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-800"
                             >
                                 <Trash2 className="h-4 w-4" />
                                 {isRequestingDeletion
@@ -1603,7 +1603,7 @@ export function AuthButton({
                         aria-labelledby="add-email-modal-title"
                     >
                         <div className="flex items-start justify-between gap-4">
-                            <h3 id="add-email-modal-title" className="text-sm font-black">
+                            <h3 id="add-email-modal-title" className="text-sm font-bold">
                                 {t("auth.addLoginMethod")}
                             </h3>
                             <button
@@ -1658,7 +1658,7 @@ export function AuthButton({
                                         type="button"
                                         onClick={handleVerifyAddEmailCode}
                                         disabled={isVerifyingAddEmailCode || addEmailCode.trim().length !== 6}
-                                        className="flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-black text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                                        className="flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
                                     >
                                         {t("auth.emailLoginVerifyButton")}
                                     </button>

@@ -93,7 +93,7 @@ export function AdminWebhookPanel() {
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div>
-          <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-300">
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
             Stripe webhooks
           </p>
           <h2 className="mt-2 text-2xl font-black text-white">Billing event monitor</h2>
@@ -105,7 +105,7 @@ export function AdminWebhookPanel() {
           type="button"
           onClick={load}
           disabled={loading}
-          className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-sm font-black text-zinc-200 transition hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-sm font-bold text-zinc-200 transition hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
           Refresh
@@ -114,11 +114,11 @@ export function AdminWebhookPanel() {
 
       <div className="mt-5 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
         <div className="flex items-center justify-between gap-3">
-          <div className="inline-flex items-center gap-2 text-sm font-black text-white">
+          <div className="inline-flex items-center gap-2 text-sm font-bold text-white">
             <Webhook className="h-4 w-4 text-blue-300" />
             Recent webhook events
           </div>
-          <span className={`rounded-full border px-2.5 py-1 text-xs font-black ${failedCount ? "border-red-500/30 bg-red-500/10 text-red-200" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"}`}>
+          <span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${failedCount ? "border-red-500/30 bg-red-500/10 text-red-200" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"}`}>
             {failedCount} failed
           </span>
         </div>

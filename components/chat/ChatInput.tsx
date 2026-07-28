@@ -1767,14 +1767,14 @@ export function ChatInput({
           )}
           {isUsageLimitReached && (
             <div className="mb-2 flex items-center justify-between gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
-              <span className="font-black">
+              <span className="font-bold">
                 {isGuestMode ? t("chat.guestLimitReachedTitle") : t("chat.accountLimitReachedTitle")}
               </span>
               <button
                 type="button"
                 data-testid="usage-limit-view-options"
                 onClick={() => setIsUsageLimitModalOpen(true)}
-                className="shrink-0 font-black text-amber-900 underline underline-offset-2 dark:text-amber-100"
+                className="shrink-0 font-bold text-amber-900 underline underline-offset-2 dark:text-amber-100"
               >
                 {t("chat.viewOptions")}
               </button>
@@ -1820,7 +1820,7 @@ export function ChatInput({
               <div className="mb-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3 dark:border-amber-900/60 dark:bg-amber-950/20">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                   <div className="min-w-0 flex-1">
-                    <p className="text-xs font-black text-zinc-900 dark:text-white">
+                    <p className="text-xs font-bold text-zinc-900 dark:text-white">
                       {t(
                         contextualSuggestion.reason === "research"
                           ? "modelFinder.contextualTitleResearch"
@@ -1854,7 +1854,7 @@ export function ChatInput({
                           }
                         );
                       }}
-                      className="rounded-xl bg-amber-600 px-3 py-2 text-[11px] font-black text-white hover:bg-amber-500"
+                      className="rounded-xl bg-amber-600 px-3 py-2 text-[11px] font-bold text-white hover:bg-amber-500"
                     >
                       {t("modelFinder.contextualUse").replace(
                         "{model}",
@@ -1881,7 +1881,7 @@ export function ChatInput({
             >
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs font-black text-zinc-900 dark:text-white">
+                  <p className="text-xs font-bold text-zinc-900 dark:text-white">
                     {t("chat.webSearchSuggestionTitle")}
                   </p>
                 </div>
@@ -1900,7 +1900,7 @@ export function ChatInput({
                         setDismissedWebSearchSuggestionKey(webSearchSuggestionKey);
                       }
                     }}
-                    className="rounded-xl bg-sky-600 px-3 py-2 text-[11px] font-black text-white hover:bg-sky-500"
+                    className="rounded-xl bg-sky-600 px-3 py-2 text-[11px] font-bold text-white hover:bg-sky-500"
                   >
                     {t("chat.webSearchSuggestionAccept")}
                   </button>
@@ -2035,7 +2035,7 @@ export function ChatInput({
               className="mb-2 flex flex-col gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100 sm:flex-row sm:items-center"
             >
               <p className="min-w-0 flex-1 leading-5">
-                <span className="font-black">{t("chat.imageUnsupportedSelected")}</span>{" "}
+                <span className="font-bold">{t("chat.imageUnsupportedSelected")}</span>{" "}
                 {imageUnsupportedSelectedModels.map((model) => model.name).join(", ")}
               </p>
               <button
@@ -2164,7 +2164,7 @@ export function ChatInput({
                 size="xs"
               />
             ) : (
-              <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[9px] font-black text-white">
+              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[11px] font-bold text-white">
                 {activeSelectedModels.length}
               </span>
             )}
@@ -2535,10 +2535,10 @@ export function ChatInput({
                           data-testid="model-combo-complementary-suggestion"
                           className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 dark:border-amber-900/60 dark:bg-amber-950/20"
                         >
-                          <p className="text-[11px] font-black text-zinc-900 dark:text-white">
+                          <p className="text-[11px] font-bold text-zinc-900 dark:text-white">
                             {t("modelFinder.complementaryTitle")}
                           </p>
-                          <p className="mt-0.5 text-[10px] leading-4 text-zinc-600 dark:text-zinc-300">
+                          <p className="mt-0.5 text-[11px] leading-4 text-zinc-600 dark:text-zinc-300">
                             {t(
                               complementarySuggestion.reason === "reasoning"
                                 ? "modelFinder.complementaryReasoning"
@@ -2560,7 +2560,7 @@ export function ChatInput({
                                   { model_id: complementaryModel.id }
                                 );
                               }}
-                              className={`inline-flex items-center justify-center rounded-lg bg-amber-600 px-2.5 text-[10px] font-black text-white hover:bg-amber-500 ${isMobileShell ? "min-h-11" : "py-1.5"}`}
+                              className={`inline-flex items-center justify-center rounded-lg bg-amber-600 px-2.5 text-xs font-bold text-white hover:bg-amber-500 ${isMobileShell ? "min-h-11" : "py-1.5"}`}
                             >
                               {t("modelFinder.complementaryAdd").replace(
                                 "{model}",
@@ -2574,7 +2574,7 @@ export function ChatInput({
                                   complementarySuggestion.modelId
                                 )
                               }
-                              className={`inline-flex items-center justify-center rounded-lg border border-amber-300 bg-white px-2.5 text-[10px] font-bold text-amber-900 hover:bg-amber-100 dark:border-amber-800 dark:bg-zinc-950 dark:text-amber-200 ${isMobileShell ? "min-h-11" : "py-1.5"}`}
+                              className={`inline-flex items-center justify-center rounded-lg border border-amber-300 bg-white px-2.5 text-xs font-semibold text-amber-900 hover:bg-amber-100 dark:border-amber-800 dark:bg-zinc-950 dark:text-amber-200 ${isMobileShell ? "min-h-11" : "py-1.5"}`}
                             >
                               {t("modelFinder.complementaryDismiss")}
                             </button>
@@ -2588,7 +2588,7 @@ export function ChatInput({
                             closeMenu(false);
                             openModelFinder();
                           }}
-                          className={`inline-flex items-center justify-center gap-1.5 self-start rounded-full border border-blue-200 bg-blue-50 px-3 text-[11px] font-black text-blue-700 transition hover:bg-blue-100 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200 dark:hover:bg-blue-950 ${isMobileShell ? "min-h-11" : "py-1.5"}`}
+                          className={`inline-flex items-center justify-center gap-1.5 self-start rounded-full border border-blue-200 bg-blue-50 px-3 text-[11px] font-bold text-blue-700 transition hover:bg-blue-100 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200 dark:hover:bg-blue-950 ${isMobileShell ? "min-h-11" : "py-1.5"}`}
                         >
                           <Sparkles className="h-3 w-3" aria-hidden="true" />
                           {t("modelFinder.pickerCta")}
@@ -2703,7 +2703,7 @@ export function ChatInput({
       {!hideDisclaimer && (
         <p
           data-testid="chat-ai-disclaimer"
-          className="mt-1.5 px-2 text-center text-[10px] leading-4 text-zinc-400 dark:text-zinc-500 md:text-[11px]"
+          className="mt-1.5 px-2 text-center text-[11px] leading-4 text-zinc-400 dark:text-zinc-500 md:text-xs"
         >
           {t("chat.aiDisclaimer")}
         </p>

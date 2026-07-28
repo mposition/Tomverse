@@ -52,7 +52,7 @@ export function AdminRiskPanels({ promoRisks, slaRows, funnel, adminAccess }: Pr
   return (
     <div className="grid gap-4 xl:grid-cols-2">
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
-        <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-300">
+        <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
           Revenue protection
         </p>
         <h2 className="mt-2 text-2xl font-black text-white">Promotion risk monitor</h2>
@@ -70,7 +70,7 @@ export function AdminRiskPanels({ promoRisks, slaRows, funnel, adminAccess }: Pr
               <div key={promo.code} className="rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div className="font-black text-white">{promo.code}</div>
-                  <span className="rounded-full border border-amber-500/30 px-2.5 py-1 text-xs font-black text-amber-100">
+                  <span className="rounded-full border border-amber-500/30 px-2.5 py-1 text-xs font-bold text-amber-100">
                     {promo.risk}
                   </span>
                 </div>
@@ -93,7 +93,7 @@ export function AdminRiskPanels({ promoRisks, slaRows, funnel, adminAccess }: Pr
       </section>
 
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
-        <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-300">
+        <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
           Support SLA
         </p>
         <h2 className="mt-2 text-2xl font-black text-white">Open support age</h2>
@@ -114,7 +114,7 @@ export function AdminRiskPanels({ promoRisks, slaRows, funnel, adminAccess }: Pr
               >
                 <div className="flex items-center justify-between gap-3">
                   <div className="font-black text-white">{row.email || row.id}</div>
-                  <span className="rounded-full border border-red-500/30 px-2.5 py-1 text-xs font-black text-red-100">
+                  <span className="rounded-full border border-red-500/30 px-2.5 py-1 text-xs font-bold text-red-100">
                     {row.ageHours}h
                   </span>
                 </div>
@@ -128,7 +128,7 @@ export function AdminRiskPanels({ promoRisks, slaRows, funnel, adminAccess }: Pr
       </section>
 
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
-        <div className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-[0.18em] text-blue-300">
+        <div className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
           <TrendingUp className="h-4 w-4" />
           Funnel
         </div>
@@ -141,7 +141,7 @@ export function AdminRiskPanels({ promoRisks, slaRows, funnel, adminAccess }: Pr
             ["Paid users", funnel.paidUsers, pct(funnel.paidUsers, funnel.totalUsers)],
           ].map(([label, value, rate]) => (
             <div key={label} className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
-              <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500">{label}</p>
+              <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">{label}</p>
               <p className="mt-2 text-2xl font-black text-white">{value}</p>
               <p className="mt-1 text-xs text-zinc-500">{rate}</p>
             </div>
@@ -150,7 +150,7 @@ export function AdminRiskPanels({ promoRisks, slaRows, funnel, adminAccess }: Pr
       </section>
 
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
-        <div className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-[0.18em] text-blue-300">
+        <div className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
           <BookOpen className="h-4 w-4" />
           Runbooks
         </div>
@@ -176,7 +176,7 @@ export function AdminRiskPanels({ promoRisks, slaRows, funnel, adminAccess }: Pr
       </section>
 
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5 xl:col-span-2">
-        <div className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-[0.18em] text-blue-300">
+        <div className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
           <KeyRound className="h-4 w-4" />
           Admin permissions
         </div>

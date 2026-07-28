@@ -331,7 +331,7 @@ function ProviderRow({
               </h2>
               <Link
                 href={`/admin/providers/${provider.provider}`}
-                className="rounded-full border border-zinc-700 bg-zinc-900 px-2.5 py-1 text-xs font-black text-zinc-300 transition hover:border-blue-500/40 hover:text-blue-200"
+                className="rounded-full border border-zinc-700 bg-zinc-900 px-2.5 py-1 text-xs font-bold text-zinc-300 transition hover:border-blue-500/40 hover:text-blue-200"
               >
                 Workspace
               </Link>
@@ -823,7 +823,7 @@ function ProviderRow({
                   <div className="flex items-start gap-2">
                     <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-blue-300" />
                     <div className="min-w-0">
-                      <p className="text-xs font-black text-blue-100">
+                      <p className="text-xs font-bold text-blue-100">
                         {selectedError.code}
                       </p>
                       <p className="mt-1 text-xs leading-5 text-zinc-400">

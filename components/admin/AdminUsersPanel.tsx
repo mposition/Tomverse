@@ -689,7 +689,7 @@ export function AdminUsersPanel({
       <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4 sm:p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-300">
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
               User overview
             </p>
             <h2 className="mt-2 text-xl font-black text-white">All-database account statistics</h2>
@@ -766,7 +766,7 @@ export function AdminUsersPanel({
 
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div className="mt-5">
-          <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-300">
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
             Users
           </p>
           <h2 className="mt-2 text-2xl font-black text-white">{title}</h2>
@@ -778,7 +778,7 @@ export function AdminUsersPanel({
           <a
             href={`/api/admin/users/export?q=${encodeURIComponent(appliedQuery)}&segment=${encodeURIComponent(segment)}`}
             download
-            className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-black text-zinc-200 transition hover:bg-zinc-900"
+            className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-200 transition hover:bg-zinc-900"
           >
             <Download className="h-3.5 w-3.5" />
             Export current result
@@ -786,7 +786,7 @@ export function AdminUsersPanel({
           <a
             href="/api/admin/users/export?q=&segment=all"
             download
-            className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-blue-500/40 bg-blue-500/10 px-3 py-2 text-xs font-black text-blue-100 transition hover:bg-blue-500/20"
+            className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-blue-500/40 bg-blue-500/10 px-3 py-2 text-xs font-bold text-blue-100 transition hover:bg-blue-500/20"
           >
             <Download className="h-3.5 w-3.5" />
             Export all users
@@ -813,7 +813,7 @@ export function AdminUsersPanel({
         <button
           type="submit"
           disabled={isSearching}
-          className="inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-black text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-bold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
           Search
@@ -877,7 +877,7 @@ export function AdminUsersPanel({
                   </Link>
                 </td>
                 <td className="px-3 py-3">
-                  <span className={`rounded-full border px-2.5 py-1 text-xs font-black ${planClass(user.plan)}`}>
+                  <span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${planClass(user.plan)}`}>
                     {user.plan || "Free"}
                   </span>
                 </td>
@@ -941,7 +941,7 @@ export function AdminUsersPanel({
           type="button"
           onClick={showPreviousPage}
           disabled={pageIndex === 0 || isSearching}
-          className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-black text-zinc-100 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
+          className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-bold text-zinc-100 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <ChevronLeft className="h-4 w-4" />
           Previous
@@ -957,7 +957,7 @@ export function AdminUsersPanel({
           type="button"
           onClick={showNextPage}
           disabled={!nextCursor || isSearching}
-          className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-black text-zinc-100 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
+          className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-bold text-zinc-100 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
         >
           Next
           <ChevronRight className="h-4 w-4" />
@@ -976,7 +976,7 @@ export function AdminUsersPanel({
           <div className={detailMode === "page" ? "w-full overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950" : "max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-3xl border border-zinc-800 bg-zinc-950 shadow-2xl shadow-black"}>
             <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-zinc-800 bg-zinc-950/95 p-5 backdrop-blur">
               <div>
-                <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-300">
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
                   Customer detail
                 </p>
                 <h3 className="mt-2 text-2xl font-black text-white">
@@ -1008,15 +1008,15 @@ export function AdminUsersPanel({
 
             <div className="grid gap-4 p-5 lg:grid-cols-3">
               <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
-                <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500">
+                <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">
                   Plan
                 </p>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <span className={`rounded-full border px-2.5 py-1 text-xs font-black ${planClass(detailUser.plan)}`}>
+                  <span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${planClass(detailUser.plan)}`}>
                     {detailUser.plan}
                   </span>
                   {detailUser.subscriptionCancelAtPeriodEnd ? (
-                    <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-black text-amber-200">
+                    <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-bold text-amber-200">
                       Cancels at period end
                     </span>
                   ) : null}
@@ -1030,7 +1030,7 @@ export function AdminUsersPanel({
                   type="button"
                   onClick={() => resyncBilling(detailUser.id)}
                   disabled={Boolean(billingAction)}
-                  className="mt-4 inline-flex cursor-pointer items-center gap-2 rounded-xl border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs font-black text-blue-100 transition hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="mt-4 inline-flex cursor-pointer items-center gap-2 rounded-xl border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs font-bold text-blue-100 transition hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {billingAction === "resync" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
                   Resync Stripe
@@ -1038,7 +1038,7 @@ export function AdminUsersPanel({
               </div>
 
               <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
-                <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500">
+                <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">
                   Usage
                 </p>
                 <div className="mt-3 grid grid-cols-3 gap-3">
@@ -1061,7 +1061,7 @@ export function AdminUsersPanel({
               </div>
 
               <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
-                <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500">
+                <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">
                   Stripe
                 </p>
                 <div className="mt-3 space-y-1 text-xs text-zinc-400">
@@ -1085,7 +1085,7 @@ export function AdminUsersPanel({
                       Last login: {dateTimeLabel(detailUser.lastLoginAt, detailUser.usage.timeZone)} · Active sessions: {detailUser._count.sessions}
                     </p>
                   </div>
-                  <div className="flex flex-wrap gap-2 text-xs font-black">
+                  <div className="flex flex-wrap gap-2 text-xs font-bold">
                     <span className={`rounded-full border px-2.5 py-1 ${
                       detailUser.accountStatus === "suspended"
                         ? "border-red-500/30 bg-red-500/10 text-red-200"
@@ -1148,7 +1148,7 @@ export function AdminUsersPanel({
                       type="button"
                       onClick={() => applySecurityAction(detailUser.id, "restore_account")}
                       disabled={Boolean(billingAction)}
-                      className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-black text-emerald-100 hover:bg-emerald-500/20 disabled:opacity-50"
+                      className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-100 hover:bg-emerald-500/20 disabled:opacity-50"
                     >
                       Cancel deletion & restore account
                     </button>
@@ -1157,7 +1157,7 @@ export function AdminUsersPanel({
                       type="button"
                       onClick={() => applySecurityAction(detailUser.id, detailUser.accountStatus === "suspended" ? "unsuspend" : "suspend")}
                       disabled={Boolean(billingAction)}
-                      className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-black text-red-100 hover:bg-red-500/20 disabled:opacity-50"
+                      className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-100 hover:bg-red-500/20 disabled:opacity-50"
                     >
                       {detailUser.accountStatus === "suspended" ? "Unsuspend account" : "Suspend account"}
                     </button>
@@ -1166,7 +1166,7 @@ export function AdminUsersPanel({
                     type="button"
                     onClick={() => applySecurityAction(detailUser.id, detailUser.aiUsageRestricted ? "unrestrict_ai" : "restrict_ai")}
                     disabled={Boolean(billingAction)}
-                    className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-black text-amber-100 hover:bg-amber-500/20 disabled:opacity-50"
+                    className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-bold text-amber-100 hover:bg-amber-500/20 disabled:opacity-50"
                   >
                     {detailUser.aiUsageRestricted ? "Restore AI usage" : "Restrict AI usage"}
                   </button>
@@ -1174,7 +1174,7 @@ export function AdminUsersPanel({
                     type="button"
                     onClick={() => applySecurityAction(detailUser.id, "revoke_sessions")}
                     disabled={Boolean(billingAction)}
-                    className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-xs font-black text-white hover:bg-zinc-800 disabled:opacity-50"
+                    className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-xs font-bold text-white hover:bg-zinc-800 disabled:opacity-50"
                   >
                     Revoke all sessions
                   </button>
@@ -1188,7 +1188,7 @@ export function AdminUsersPanel({
                         type="button"
                         onClick={() => applySecurityAction(detailUser.id, "unlink_oauth", account.provider)}
                         disabled={Boolean(billingAction)}
-                        className="rounded-lg border border-red-500/30 px-2.5 py-1.5 text-xs font-black text-red-200 hover:bg-red-500/10 disabled:opacity-50"
+                        className="rounded-lg border border-red-500/30 px-2.5 py-1.5 text-xs font-bold text-red-200 hover:bg-red-500/10 disabled:opacity-50"
                       >
                         Unlink {account.provider}
                       </button>
@@ -1242,7 +1242,7 @@ export function AdminUsersPanel({
                       type="button"
                       onClick={() => releaseBillingHold(detailUser.id)}
                       disabled={Boolean(billingAction) || riskReleaseReason.trim().length < 5 || riskReleaseConfirm !== "RELEASE BILLING HOLD"}
-                      className="rounded-xl bg-red-600 px-4 py-2 text-sm font-black text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="rounded-xl bg-red-600 px-4 py-2 text-sm font-bold text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {billingAction === "risk" ? "Releasing..." : "Release hold"}
                     </button>
@@ -1459,7 +1459,7 @@ export function AdminUsersPanel({
                     type="button"
                     onClick={() => adjustUserPlan(detailUser.id)}
                     disabled={Boolean(billingAction) || adjustConfirm !== "ADJUST PLAN" || adjustReason.trim().length < 5}
-                    className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-amber-600 px-3 py-2 text-sm font-black text-white transition hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-amber-600 px-3 py-2 text-sm font-bold text-white transition hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {billingAction === "adjust" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                     Save

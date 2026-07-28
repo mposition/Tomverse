@@ -205,7 +205,7 @@ export function AiReviewDemo({
       <div className="grid gap-0 lg:grid-cols-[0.9fr_1.1fr]">
         <div className="border-b border-blue-100 bg-gradient-to-br from-blue-50 via-white to-violet-50 p-5 dark:border-blue-900/40 dark:from-blue-950/40 dark:via-zinc-950 dark:to-violet-950/30 sm:p-7 lg:border-b-0 lg:border-r">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-cyan-700 via-blue-600 to-purple-600 px-3 py-1 text-xs font-black text-white">
+            <span className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-cyan-700 via-blue-600 to-purple-600 px-3 py-1 text-xs font-bold text-white">
               <Sparkles className="h-3.5 w-3.5" />
               {text.eyebrow}
             </span>
@@ -221,7 +221,7 @@ export function AiReviewDemo({
           </p>
 
           <div className="mt-6 rounded-2xl border border-zinc-200 bg-white/90 p-4 dark:border-zinc-800 dark:bg-zinc-950/80">
-            <p className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-600 dark:text-blue-300">
+            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-blue-600 dark:text-blue-300">
               {text.promptLabel}
             </p>
             <p className="mt-2 text-sm font-bold leading-6 text-zinc-800 dark:text-zinc-100">
@@ -229,7 +229,7 @@ export function AiReviewDemo({
             </p>
           </div>
 
-          <p className="mt-6 text-xs font-black uppercase tracking-[0.16em] text-zinc-500">
+          <p className="mt-6 text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">
             {text.before}
           </p>
           <div className="mt-3 grid gap-2">
@@ -238,7 +238,7 @@ export function AiReviewDemo({
                 key={answer}
                 className="flex gap-3 rounded-xl border border-zinc-200 bg-white/80 p-3 text-xs leading-5 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-300"
               >
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-zinc-900 text-[10px] font-black text-white dark:bg-zinc-100 dark:text-zinc-900">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-zinc-900 text-[11px] font-bold text-white dark:bg-zinc-100 dark:text-zinc-900">
                   {String.fromCharCode(65 + index)}
                 </span>
                 {answer}
@@ -248,7 +248,7 @@ export function AiReviewDemo({
         </div>
 
         <div className="bg-zinc-950 p-5 text-white sm:p-7">
-          <p className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.16em] text-tomverse-review-selected-text">
+          <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-tomverse-review-selected-text">
             <span
               aria-hidden="true"
               className="h-1.5 w-1.5 shrink-0 rounded-full bg-gradient-to-br from-cyan-400 via-blue-400 to-purple-400"
@@ -269,7 +269,7 @@ export function AiReviewDemo({
                   }`}
                 >
                   <Icon className={`h-4 w-4 ${warning ? "text-amber-300" : "text-blue-300"}`} />
-                  <h3 className="mt-3 text-sm font-black">{finding.title}</h3>
+                  <h3 className="mt-3 text-sm font-bold">{finding.title}</h3>
                   <p className="mt-2 text-xs leading-5 text-zinc-300">{finding.body}</p>
                 </article>
               );
@@ -290,7 +290,7 @@ export function AiReviewDemo({
                     cta_location: "ai_review_demo_learn_more",
                   })
                 }
-                className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-zinc-700 px-4 text-sm font-black text-white transition hover:bg-zinc-900"
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-zinc-700 px-4 text-sm font-bold text-white transition hover:bg-zinc-900"
               >
                 {text.learnMore}
                 <ArrowRight className="h-4 w-4" />
@@ -303,7 +303,7 @@ export function AiReviewDemo({
                   cta_location: "ai_review_demo_try",
                 })
               }
-              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-black text-white transition hover:bg-blue-500"
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-bold text-white transition hover:bg-blue-500"
             >
               {text.tryReview}
               <ArrowRight className="h-4 w-4" />

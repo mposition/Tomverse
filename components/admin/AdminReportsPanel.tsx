@@ -55,7 +55,7 @@ export function AdminReportsPanel() {
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div>
-          <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-300">
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
             Reports
           </p>
           <h2 className="mt-2 text-2xl font-black text-white">Operations report</h2>
@@ -67,7 +67,7 @@ export function AdminReportsPanel() {
           type="button"
           onClick={createReport}
           disabled={busy}
-          className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-black text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
           Generate report
@@ -78,7 +78,7 @@ export function AdminReportsPanel() {
           <article key={report.id} className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
             <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
               <div>
-                <h3 className="text-sm font-black text-white">{report.title}</h3>
+                <h3 className="text-sm font-bold text-white">{report.title}</h3>
                 <p className="mt-1 text-xs text-zinc-500">
                   {dateLabel(report.createdAt)} UTC / {report.status}
                 </p>
@@ -89,7 +89,7 @@ export function AdminReportsPanel() {
                   void navigator.clipboard.writeText(report.body);
                   dispatchAppToast("Report copied.", "success");
                 }}
-                className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-black text-zinc-200 transition hover:bg-zinc-800"
+                className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-200 transition hover:bg-zinc-800"
               >
                 <Clipboard className="h-3.5 w-3.5" />
                 Copy
