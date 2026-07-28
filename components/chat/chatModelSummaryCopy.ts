@@ -19,6 +19,13 @@ export type ChatModelSummaryCopy = {
   openPicker: string;
   /** Complete accessible name for the header summary button. */
   accessibleName: (input: ChatModelSummaryLabelInput) => string;
+  /**
+   * The whole visible label of the compact multi-model header entry point --
+   * "3 models". The model tab strip immediately below already names every
+   * model and marks the one on screen, so repeating a model name up here only
+   * costs a header row. The full selection stays in `accessibleName`.
+   */
+  compactLabel: (activeCount: number) => string;
 };
 
 const plural = (count: number, singular: string, pluralForm: string) =>
@@ -36,6 +43,7 @@ export const chatModelSummaryCopy: Record<Language, ChatModelSummaryCopy> = {
       const paused = pausedCount > 0 ? ` 일시정지 ${pausedCount}개.` : "";
       return `${selection} 활성 모델 총 ${activeCount}개.${paused} 모델 선택기 열기.`;
     },
+    compactLabel: (activeCount) => `${activeCount}개 모델`,
   },
   en: {
     openPicker: "Open model picker",
@@ -51,6 +59,7 @@ export const chatModelSummaryCopy: Record<Language, ChatModelSummaryCopy> = {
           : "";
       return `${selection} ${activeCount} active ${plural(activeCount, "model", "models")} total.${paused} Open model picker.`;
     },
+    compactLabel: (activeCount) => `${activeCount} ${plural(activeCount, "model", "models")}`,
   },
   zh: {
     openPicker: "打开模型选择器",
@@ -63,6 +72,7 @@ export const chatModelSummaryCopy: Record<Language, ChatModelSummaryCopy> = {
       const paused = pausedCount > 0 ? ` 已暂停 ${pausedCount} 个。` : "";
       return `${selection}当前活跃模型共 ${activeCount} 个。${paused}打开模型选择器。`;
     },
+    compactLabel: (activeCount) => `${activeCount} 个模型`,
   },
   fr: {
     openPicker: "Ouvrir le sélecteur de modèles",
@@ -78,6 +88,7 @@ export const chatModelSummaryCopy: Record<Language, ChatModelSummaryCopy> = {
           : "";
       return `${selection} ${activeCount} modèle${activeCount > 1 ? "s" : ""} actif${activeCount > 1 ? "s" : ""} au total.${paused} Ouvrir le sélecteur de modèles.`;
     },
+    compactLabel: (activeCount) => `${activeCount} modèle${activeCount > 1 ? "s" : ""}`,
   },
   de: {
     openPicker: "Modellauswahl öffnen",
@@ -93,6 +104,7 @@ export const chatModelSummaryCopy: Record<Language, ChatModelSummaryCopy> = {
           : "";
       return `${selection} Insgesamt ${activeCount} aktive${activeCount > 1 ? "" : "s"} Modell${activeCount > 1 ? "e" : ""}.${paused} Modellauswahl öffnen.`;
     },
+    compactLabel: (activeCount) => `${activeCount} Modell${activeCount > 1 ? "e" : ""}`,
   },
   es: {
     openPicker: "Abrir el selector de modelos",
@@ -108,6 +120,7 @@ export const chatModelSummaryCopy: Record<Language, ChatModelSummaryCopy> = {
           : "";
       return `${selection} ${activeCount} modelo${activeCount > 1 ? "s" : ""} activo${activeCount > 1 ? "s" : ""} en total.${paused} Abrir el selector de modelos.`;
     },
+    compactLabel: (activeCount) => `${activeCount} modelo${activeCount > 1 ? "s" : ""}`,
   },
   pt: {
     openPicker: "Abrir o seletor de modelos",
@@ -123,5 +136,6 @@ export const chatModelSummaryCopy: Record<Language, ChatModelSummaryCopy> = {
           : "";
       return `${selection} ${activeCount} modelo${activeCount > 1 ? "s" : ""} ativo${activeCount > 1 ? "s" : ""} no total.${paused} Abrir o seletor de modelos.`;
     },
+    compactLabel: (activeCount) => `${activeCount} modelo${activeCount > 1 ? "s" : ""}`,
   },
 };

@@ -1,13 +1,16 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { ChevronUp, Lock } from "lucide-react";
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import { FeatureHelpPopover } from "@/components/chat/FeatureHelpPopover";
 import { chatHelpCopy } from "@/components/chat/chatHelpCopy";
 import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
 import { useLanguage } from "@/components/LanguageProvider";
-import type { ComparisonReadiness } from "@/lib/comparisonReadiness";
+import {
+  isComparisonRailSteadyState,
+  type ComparisonReadiness,
+} from "@/lib/comparisonReadiness";
 
 /**
  * Both comparison actions operate on *completed answers*, so they belong to
@@ -76,6 +79,24 @@ export function comparisonRailStatusText(
   return parts.join(" · ");
 }
 
+/**
+ * The cross-review action and its help control. On desktop they stay a tightly
+ * coupled pair inside their own box, exactly as before. On mobile they become
+ * two siblings of the rail's single row, so the row can divide its width
+ * between three items instead of squeezing a 44px help button inside the
+ * action's own share of it.
+ */
+function ReviewActionGroup({
+  isMobile,
+  children,
+}: {
+  isMobile: boolean;
+  children: ReactNode;
+}) {
+  if (isMobile) return <>{children}</>;
+  return <div className="flex min-w-0 items-center gap-0.5">{children}</div>;
+}
+
 type ComparisonActionRailProps = {
   layout: "desktop" | "mobile";
   readiness: ComparisonReadiness;
@@ -114,6 +135,13 @@ export function ComparisonActionRail({
   const baseId = useId();
   const titleId = `${baseId}-title`;
   const statusId = `${baseId}-status`;
+  // The two actions cost different numbers of credits, so a single shared
+  // description made "not enough credits" read against whichever button the
+  // sentence happened to be written for. Each action now owns a description
+  // that names its own comparison target, its own price and its own reason for
+  // being unavailable.
+  const quickDescriptionId = `${baseId}-quick-description`;
+  const reviewDescriptionId = `${baseId}-review-description`;
   const [isExpandedWhileCompact, setIsExpandedWhileCompact] = useState(false);
   // Expanding is scoped to one compact session: once the keyboard retracts (or
   // the phone returns to portrait) the rail is fully visible on its own, and
@@ -161,25 +189,72 @@ export function ComparisonActionRail({
     : interpolate(t("chat.quickDifferenceSummaryApproximateCost"), {
         credits: QUICK_SUMMARY_CREDITS,
       });
-  const quickAccessibleName = [
-    t("chat.quickDifferenceSummary"),
-    statusText,
-    quickCostLabel,
-  ].join(" · ");
-  const reviewAccessibleName = [
-    t("chat.aiReviewButton"),
-    statusText,
+  // The accessible *name* is now the action alone. Scope, price and blocked
+  // reason live in the description instead of being concatenated into the
+  // name, so a screen reader no longer reads the same sentence twice (once as
+  // the button's name, once as its description).
+  const quickAccessibleName = t("chat.quickDifferenceSummary");
+  const reviewAccessibleName = t("chat.aiReviewButton");
+  const describeAction = (costLabel: string, reason: string | null) => {
+    const parts = [statusText, costLabel];
+    if (reason && reason !== statusText) parts.push(reason);
+    return parts.join(" · ");
+  };
+  const quickDescription = describeAction(quickCostLabel, quickReason);
+  const reviewDescription = describeAction(
     `${AI_REVIEW_CREDITS} ${t("chat.aiReviewCredits")}`,
-  ].join(" · ");
+    reviewReason
+  );
+
+  const isSteadyState = isComparisonRailSteadyState({
+    readiness,
+    isBusy: isCompareSummaryLoading,
+    isAnyActionUnaffordable: creditsShortFor(quickCredits) || creditsShortFor(AI_REVIEW_CREDITS),
+  });
+  // A short, per-action sentence for the one blocked reason the shared status
+  // text cannot express: two prices, one balance. "AI cross-review · 4 credits
+  // needed · 2 available" beats a generic "not enough credits" that leaves the
+  // 1-credit action looking equally unaffordable.
+  const creditShortfallNotes = [
+    creditsShortFor(quickCredits)
+      ? interpolate(t("chat.comparisonRailStatusInsufficientCreditsFor"), {
+          action: t("chat.quickDifferenceSummaryShort"),
+          required: quickCredits,
+          available: Math.max(0, availableCredits ?? 0),
+        })
+      : null,
+    creditsShortFor(AI_REVIEW_CREDITS)
+      ? interpolate(t("chat.comparisonRailStatusInsufficientCreditsFor"), {
+          action: t("chat.aiReviewButtonShort"),
+          required: AI_REVIEW_CREDITS,
+          available: Math.max(0, availableCredits ?? 0),
+        })
+      : null,
+  ].filter((note): note is string => note !== null);
+  const visibleStatusText =
+    readiness.canRun && creditShortfallNotes.length > 0
+      ? creditShortfallNotes.join(" · ")
+      : statusText;
+  // Only genuinely *changing* progress is announced. The steady description is
+  // a persistent property of each button, reachable on focus, and announcing it
+  // as a live update every time the rail re-renders is noise.
+  const liveAnnouncement =
+    readiness.state === "generating" || isCompareSummaryLoading ? statusText : "";
 
   // Collapsed only while the visible viewport genuinely cannot afford the full
   // rail; the expand control dismisses the keyboard rather than competing with
   // it for the same rows.
   const isCollapsed = isMobile && isCompactViewport && !isExpandedWhileCompact;
+  // Mobile only: desktop has the vertical budget for the sentence and keeps
+  // showing it in every state, exactly as before.
+  const isStatusVisuallyHidden = isMobile && (isCollapsed || isSteadyState);
 
   const sectionClassName = isMobile
     ? `w-full shrink-0 border-t border-zinc-200 bg-white px-2 pt-1.5 dark:border-zinc-800 dark:bg-zinc-950 ${
-        isCollapsed ? "pb-1.5" : ""
+        // With the sentence gone the row is the last thing in the rail, so the
+        // padding it used to carry moves onto the section rather than being
+        // dropped -- the buttons must not sit flush against the composer.
+        isStatusVisuallyHidden ? "pb-1.5" : ""
       }`
     : "w-full shrink-0 border-t border-zinc-200 bg-white px-4 pt-2 dark:border-zinc-800 dark:bg-zinc-950 md:px-6";
 
@@ -189,13 +264,20 @@ export function ComparisonActionRail({
       data-layout={layout}
       data-state={readiness.state}
       data-collapsed={isCollapsed ? "true" : "false"}
+      data-steady={isSteadyState ? "true" : "false"}
+      data-status-hidden={isStatusVisuallyHidden ? "true" : "false"}
       data-ready-count={readiness.readyCount}
       data-comparable-count={readiness.comparableCount}
       data-excluded-count={readiness.excludedCount}
       aria-labelledby={titleId}
       className={sectionClassName}
     >
-      <div className="mx-auto flex w-full max-w-4xl flex-col gap-1.5">
+      {/*
+        No `gap` on this column: the status sentence goes `sr-only` (absolutely
+        positioned, out of flow) in the steady state, and a flex gap would keep
+        charging the rail for a row that is no longer painted.
+      */}
+      <div className="mx-auto flex w-full max-w-4xl flex-col">
         <h2 id={titleId} className="sr-only">
           {t("chat.comparisonRailTitle")}
         </h2>
@@ -225,7 +307,12 @@ export function ComparisonActionRail({
           <div
             className={
               isMobile
-                ? "grid grid-cols-2 gap-2"
+                // One compact row: two actions plus the help control, each
+                // sharing the width evenly. The help control is a sibling
+                // rather than a passenger inside the cross-review button --
+                // sharing a cell with it used to cost that button 44 of its
+                // 148 pixels at 320px and truncate its label to "AI ...".
+                ? "flex items-center gap-1.5"
                 : "flex flex-wrap items-center gap-2"
             }
           >
@@ -238,8 +325,10 @@ export function ComparisonActionRail({
               }}
               aria-disabled={quickBlocked}
               aria-label={quickAccessibleName}
-              aria-describedby={statusId}
-              className={`flex min-h-11 w-full items-center justify-between gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-3 text-[11px] font-black text-blue-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200 md:w-auto md:text-xs ${
+              aria-describedby={quickDescriptionId}
+              className={`flex min-h-11 items-center justify-between gap-1.5 rounded-xl border border-blue-200 bg-blue-50 text-[11px] font-black text-blue-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200 ${
+                isMobile ? "min-w-0 flex-1 px-2.5" : "w-full px-3 text-xs md:w-auto"
+              } ${
                 quickBlocked
                   ? "cursor-not-allowed opacity-50"
                   : "hover:bg-blue-100 dark:hover:bg-blue-950"
@@ -264,7 +353,9 @@ export function ComparisonActionRail({
                 type="button"
                 data-testid="ai-review-guest-locked"
                 onClick={onGuestSignInPrompt}
-                className="flex min-h-11 w-full items-center justify-center gap-1.5 rounded-xl border border-zinc-200 bg-zinc-50 px-3 text-[11px] font-black text-zinc-600 transition-colors hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 md:w-auto md:text-xs"
+                className={`flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-zinc-200 bg-zinc-50 text-[11px] font-black text-zinc-600 transition-colors hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 ${
+                  isMobile ? "min-w-0 flex-1 px-2.5" : "w-full px-3 text-xs md:w-auto"
+                }`}
               >
                 <Lock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                 <span className="min-w-0 truncate">
@@ -272,7 +363,9 @@ export function ComparisonActionRail({
                 </span>
               </button>
             ) : (
-              <div className="flex min-w-0 items-center gap-0.5">
+              // Mobile lays the action and its help control out as two
+              // siblings of the row; desktop keeps the tight pair it had.
+              <ReviewActionGroup isMobile={isMobile}>
                 <button
                   type="button"
                   data-testid="ai-review-button"
@@ -282,16 +375,23 @@ export function ComparisonActionRail({
                   }}
                   aria-disabled={reviewBlocked}
                   aria-label={reviewAccessibleName}
-                  aria-describedby={statusId}
-                  className={`flex min-h-11 min-w-0 flex-1 items-center justify-between gap-1.5 rounded-xl bg-blue-600 px-3 text-[11px] font-black text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 md:text-xs ${
+                  aria-describedby={reviewDescriptionId}
+                  className={`flex min-h-11 min-w-0 flex-1 items-center justify-between gap-1.5 rounded-xl bg-blue-600 text-[11px] font-black text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 ${
+                    isMobile ? "px-2.5" : "px-3 text-xs"
+                  } ${
                     reviewBlocked ? "cursor-not-allowed opacity-50" : "hover:bg-blue-500"
                   }`}
                 >
                   <span className="flex min-w-0 items-center gap-1.5">
-                    <span
-                      aria-hidden="true"
-                      className="h-1.5 w-1.5 shrink-0 rounded-full bg-gradient-to-br from-cyan-300 via-white to-purple-300"
-                    />
+                    {/* Decoration only, and the first thing to give way: at
+                        320px it costs the label the 12px it needs to stay
+                        whole. */}
+                    {!isMobile && (
+                      <span
+                        aria-hidden="true"
+                        className="h-1.5 w-1.5 shrink-0 rounded-full bg-gradient-to-br from-cyan-300 via-white to-purple-300"
+                      />
+                    )}
                     <span className="min-w-0 truncate">
                       {isMobile
                         ? t("chat.aiReviewButtonShort")
@@ -318,35 +418,54 @@ export function ComparisonActionRail({
                   align="right"
                   testId={isMobile ? "ai-review-help-mobile" : "ai-review-help"}
                 />
-              </div>
+              </ReviewActionGroup>
             )}
           </div>
         )}
         {/*
-          One status line for both actions -- the disabled reason, the number
-          of answers being compared and any excluded answer all live here
-          instead of in a `title` no keyboard or screen-reader user can reach.
+          The status line for both actions -- how many answers are in scope,
+          what is still generating and what was excluded. It stays in the DOM
+          in every state; on mobile it goes visually hidden (never removed)
+          once there is nothing left to act on, because the two buttons
+          already carry the same information in their own labels, badges and
+          descriptions.
         */}
         <p
           id={statusId}
           data-testid="comparison-action-rail-status"
-          // A live region rather than role="status": behaviourally identical
-          // for assistive tech (polite + atomic is what role=status maps to),
-          // but this is a persistent description of the rail, not a transient
-          // status message, so it must not be picked up as one.
-          aria-live="polite"
-          aria-atomic="true"
-          // Collapsed, the status goes visually hidden rather than away: the
-          // disclosure's own label already carries the answer count, and the
-          // whole point of collapsing is to hand those rows back to the
-          // composer -- but the description must still be there to be read.
+          data-visually-hidden={isStatusVisuallyHidden ? "true" : "false"}
           className={
-            isCollapsed
+            isStatusVisuallyHidden
               ? "sr-only"
-              : "px-0.5 pb-1.5 text-[10px] font-semibold leading-4 text-zinc-500 dark:text-zinc-400 md:text-[11px]"
+              : "mt-1.5 px-0.5 pb-1.5 text-[10px] font-semibold leading-4 text-zinc-500 dark:text-zinc-400 md:text-[11px]"
           }
         >
-          {quickReason ?? reviewReason ?? statusText}
+          {visibleStatusText}
+        </p>
+        {/*
+          Each action's own description: its comparison target, its own price
+          and its own reason for being unavailable -- never the other action's.
+          Referenced by aria-describedby, so it is reachable on focus without
+          costing a row, and never depends on a `title` attribute.
+        */}
+        <p id={quickDescriptionId} data-testid="quick-comparison-description" className="sr-only">
+          {quickDescription}
+        </p>
+        <p id={reviewDescriptionId} data-testid="ai-review-description" className="sr-only">
+          {reviewDescription}
+        </p>
+        {/*
+          Only progress that actually changes under the user gets announced.
+          The descriptions above are persistent properties of their buttons,
+          so announcing them politely on every re-render would be noise.
+        */}
+        <p
+          data-testid="comparison-action-rail-live"
+          aria-live="polite"
+          aria-atomic="true"
+          className="sr-only"
+        >
+          {liveAnnouncement}
         </p>
       </div>
     </section>

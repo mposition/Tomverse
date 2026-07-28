@@ -1,9 +1,19 @@
 import { expect, test, type Page } from "@playwright/test";
 import {
   expectNoHorizontalOverflow,
+  mockAuthenticatedApi,
   openRecentConversation,
   prepareGuestPage,
+  type QaConversationMessage,
 } from "./support/app-fixtures";
+import {
+  freezeAnimations,
+  installChatModelStub,
+  mockUserUsage,
+  restoreActiveConversation,
+  submitComposer,
+  type ChatModelStubSpec,
+} from "./support/chat-state-fixtures";
 
 // The two comparison actions act on *finished answers*, so they are their own
 // labelled section rather than another row of composer controls -- but they
@@ -351,5 +361,335 @@ test.describe("comparison readiness states", () => {
       "aria-label",
       /About 1 credit .*Long answers may use more/
     );
+  });
+});
+
+// ===========================================================================
+// The mobile status sentence: hidden when it has nothing left to say, on
+// screen the moment it does.
+//
+// "Comparing 3 completed answers" is the state a user is in almost all of the
+// time, and on a phone it cost a whole row under two buttons that already say
+// what they do and what they cost. It is now visually hidden in exactly that
+// state -- and only there -- while staying in the accessibility tree, where
+// each action points at its *own* description: its own comparison target, its
+// own price and its own reason for being unavailable. Two actions at two
+// different prices sharing one "not enough credits" sentence is what made the
+// 1-credit action look as unaffordable as the 4-credit one.
+// ===========================================================================
+
+const AUTH_MODELS = ["gpt-5-4-mini", "claude-sonnet-5", "gemini-3-5-flash"];
+const MOBILE_VIEWPORT = { width: 390, height: 680 };
+
+const completedMessages = (
+  models: string[],
+  statuses: Record<string, string> = {}
+): QaConversationMessage[] => [
+  { id: "u1", role: "user", content: "Compare these." },
+  ...models.map((modelId, index) => ({
+    id: `a${index + 1}`,
+    role: "assistant" as const,
+    modelId,
+    status: statuses[modelId] || "normal",
+    content: `Answer from ${modelId}.`,
+  })),
+];
+
+async function enterAuthenticatedComparison(
+  page: Page,
+  options: {
+    models?: string[];
+    statuses?: Record<string, string>;
+    viewport?: { width: number; height: number };
+    lang?: string;
+    credits?: number;
+    modelStub?: ChatModelStubSpec;
+    messages?: QaConversationMessage[];
+  } = {}
+) {
+  const {
+    models = AUTH_MODELS,
+    statuses = {},
+    viewport = MOBILE_VIEWPORT,
+    lang = "en",
+    credits,
+    modelStub,
+    messages,
+  } = options;
+
+  await prepareGuestPage(page, "en");
+  await mockAuthenticatedApi(page, {
+    selectedModels: models,
+    messages: messages ?? completedMessages(models, statuses),
+  });
+  if (credits !== undefined) {
+    await mockUserUsage(page, {
+      balances: { planRemainingCredits: credits, purchasedRemainingCredits: 0 },
+      limits: { creditsDay: credits },
+      usage: { creditsDay: 0 },
+    });
+  }
+  await restoreActiveConversation(page);
+  if (modelStub) await installChatModelStub(page, modelStub);
+
+  await page.setViewportSize(viewport);
+  await page.goto(`/chat?lang=${lang}`);
+  await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
+  await freezeAnimations(page);
+}
+
+const status = (page: Page) => page.getByTestId("comparison-action-rail-status");
+
+/** On screen means it really paints a row, not that it survives in the DOM. */
+async function expectStatusOnScreen(page: Page) {
+  await expect(status(page)).toBeVisible();
+  const box = await status(page).boundingBox();
+  expect(box!.height, "status sentence renders no row").toBeGreaterThan(8);
+}
+
+test.describe("mobile status disclosure policy", () => {
+  test.use({ hasTouch: true });
+
+  test.beforeEach(async ({}, testInfo) => {
+    test.skip(
+      testInfo.project.name !== "desktop-chromium",
+      "Driven at explicit mobile viewports on one engine; run with --project=desktop-chromium."
+    );
+  });
+
+  test("every answer complete: the sentence is hidden visually, not removed", async ({
+    page,
+  }) => {
+    await enterAuthenticatedComparison(page);
+
+    await expect(rail(page)).toHaveAttribute("data-steady", "true");
+    await expect(rail(page)).toHaveAttribute("data-status-hidden", "true");
+
+    // Still in the DOM, still readable, still the right sentence.
+    await expect(status(page)).toHaveCount(1);
+    await expect(status(page)).toContainText("Comparing 3 completed answers");
+    // ...and genuinely out of the layout, measured rather than assumed from a
+    // class name: a 1px clipped box costs the rail no row, but Playwright's
+    // toBeVisible() still counts it, so this reads the geometry directly.
+    const statusBox = await status(page).boundingBox();
+    expect(statusBox!.height, "visually hidden status still occupies a row").toBeLessThanOrEqual(1);
+
+    // Both actions and their prices stay on screen.
+    await expect(quickButton(page)).toBeVisible();
+    await expect(page.getByTestId("ai-review-button")).toBeVisible();
+    await expect(page.getByTestId("quick-comparison-credit-cost")).toBeVisible();
+    await expect(page.getByTestId("ai-review-entry-credit-cost")).toBeVisible();
+    await expect(page.getByTestId("ai-review-help-mobile")).toBeVisible();
+  });
+
+  test("an excluded failure puts the sentence back on screen", async ({ page }) => {
+    await enterAuthenticatedComparison(page, {
+      statuses: { "gemini-3-5-flash": "error" },
+    });
+
+    await expect(rail(page)).toHaveAttribute("data-steady", "false");
+    await expectStatusOnScreen(page);
+    await expect(status(page)).toContainText("Comparing 2 completed answers");
+    await expect(status(page)).toContainText("1 unfinished excluded");
+  });
+
+  test("too few completed answers puts the sentence back on screen", async ({
+    page,
+  }) => {
+    await enterAuthenticatedComparison(page, {
+      statuses: { "claude-sonnet-5": "error", "gemini-3-5-flash": "error" },
+    });
+
+    await expect(rail(page)).toHaveAttribute("data-state", "needsMore");
+    await expectStatusOnScreen(page);
+    await expect(status(page)).toContainText("one more completed answer is needed");
+  });
+
+  test("answers still generating put the sentence back on screen, and announce", async ({
+    page,
+  }) => {
+    await enterAuthenticatedComparison(page, {
+      messages: [],
+      modelStub: {
+        "gpt-5-4-mini": { kind: "success", chunks: ["Paris."], intervalMs: 15 },
+        "claude-sonnet-5": { kind: "hold" },
+        "gemini-3-5-flash": { kind: "hold" },
+      },
+    });
+
+    await submitComposer(page, "Which city is the capital of France?", MOBILE_VIEWPORT.width);
+
+    await expect(rail(page)).toHaveAttribute("data-state", "generating");
+    await expectStatusOnScreen(page);
+    await expect(status(page)).toContainText("still generating");
+    // Progress -- and only progress -- is what the live region carries.
+    await expect(page.getByTestId("comparison-action-rail-live")).toContainText(
+      "still generating"
+    );
+  });
+
+  test("the live region stays silent once everything has settled", async ({ page }) => {
+    await enterAuthenticatedComparison(page);
+
+    await expect(rail(page)).toHaveAttribute("data-steady", "true");
+    await expect(page.getByTestId("comparison-action-rail-live")).toHaveText("");
+  });
+
+  test("desktop keeps showing the sentence in the steady state", async ({ page }) => {
+    await prepareGuestPage(page, "en");
+    await mockAuthenticatedApi(page, {
+      selectedModels: AUTH_MODELS,
+      messages: completedMessages(AUTH_MODELS),
+    });
+    await restoreActiveConversation(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/chat?lang=en");
+
+    await expect(rail(page)).toHaveAttribute("data-layout", "desktop");
+    await expect(rail(page)).toHaveAttribute("data-status-hidden", "false");
+    await expect(status(page)).toBeVisible();
+    await expect(status(page)).toContainText("Comparing 3 completed answers");
+  });
+});
+
+test.describe("per-action descriptions", () => {
+  test.use({ hasTouch: true });
+
+  test.beforeEach(async ({}, testInfo) => {
+    test.skip(
+      testInfo.project.name !== "desktop-chromium",
+      "Driven at explicit mobile viewports on one engine; run with --project=desktop-chromium."
+    );
+  });
+
+  test("the two actions point at two different descriptions", async ({ page }) => {
+    await enterAuthenticatedComparison(page);
+
+    const quickId = await quickButton(page).getAttribute("aria-describedby");
+    const reviewId = await page
+      .getByTestId("ai-review-button")
+      .getAttribute("aria-describedby");
+    expect(quickId).toBeTruthy();
+    expect(reviewId).toBeTruthy();
+    expect(quickId).not.toBe(reviewId);
+
+    // Each description names that action's own comparison target and price.
+    await expect(page.locator(`#${quickId}`)).toContainText(
+      "Comparing 3 completed answers"
+    );
+    await expect(page.locator(`#${quickId}`)).toContainText("About 1 credit");
+    await expect(page.locator(`#${reviewId}`)).toContainText(
+      "Comparing 3 completed answers"
+    );
+    await expect(page.locator(`#${reviewId}`)).toContainText("4 credits");
+    // The name is the action alone -- the description is not read twice.
+    await expect(quickButton(page)).toHaveAccessibleName("Quick difference summary");
+    await expect(page.getByTestId("ai-review-button")).toHaveAccessibleName(
+      "AI answer cross-review"
+    );
+  });
+
+  test("a 2-credit balance blocks only the action that costs more than 2", async ({
+    page,
+  }) => {
+    await enterAuthenticatedComparison(page, { credits: 2 });
+
+    // 1 credit is affordable; 4 is not, and only the 4-credit action is gated.
+    await expect(quickButton(page)).toHaveAttribute("aria-disabled", "false");
+    await expect(page.getByTestId("ai-review-button")).toHaveAttribute(
+      "aria-disabled",
+      "true"
+    );
+
+    const quickId = await quickButton(page).getAttribute("aria-describedby");
+    const reviewId = await page
+      .getByTestId("ai-review-button")
+      .getAttribute("aria-describedby");
+    // The affordable action is not told it cannot afford itself.
+    await expect(page.locator(`#${quickId}`)).not.toContainText("Not enough credits");
+    // The blocked one quotes its own price against the real balance.
+    await expect(page.locator(`#${reviewId}`)).toContainText(
+      "Not enough credits: 4 needed, 2 available"
+    );
+
+    // Insufficient credits is an exception, so the sentence is on screen and
+    // says which action it is about.
+    await expect(rail(page)).toHaveAttribute("data-steady", "false");
+    await expectStatusOnScreen(page);
+    await expect(status(page)).toContainText("AI review · 4 credits needed · 2 available");
+  });
+
+  test("the blocked reason survives keyboard focus without a title attribute", async ({
+    page,
+  }) => {
+    await enterAuthenticatedComparison(page, { credits: 2 });
+
+    const review = page.getByTestId("ai-review-button");
+    await review.focus();
+    await expect(review).toBeFocused();
+    await expect(review).not.toHaveAttribute("title", /./);
+    await review.click({ force: true });
+    await expect(page.getByTestId("comparison-review-setup")).toHaveCount(0);
+  });
+});
+
+test.describe("mobile rail geometry", () => {
+  test.use({ hasTouch: true });
+
+  test.beforeEach(async ({}, testInfo) => {
+    test.skip(
+      testInfo.project.name !== "desktop-chromium",
+      "Driven at explicit mobile viewports on one engine; run with --project=desktop-chromium."
+    );
+  });
+
+  for (const lang of ["en", "ko"]) {
+    for (const width of [320, 360, 390, 430]) {
+      test(`[${lang}] both actions keep their whole label and a 44px target at ${width}px`, async ({
+        page,
+      }) => {
+        await enterAuthenticatedComparison(page, {
+          lang,
+          viewport: { width, height: 680 },
+        });
+
+        await expect(rail(page)).toBeVisible();
+        for (const testId of ["quick-comparison-button", "ai-review-button"]) {
+          const box = await page.getByTestId(testId).boundingBox();
+          expect(box, testId).not.toBeNull();
+          expect(box!.height, `${testId} height`).toBeGreaterThanOrEqual(43.5);
+          expect(box!.width, `${testId} width`).toBeGreaterThanOrEqual(43.5);
+
+          const label = page.getByTestId(testId).locator("span.truncate").first();
+          const clipped = await label.evaluate(
+            (node) => node.scrollWidth > node.clientWidth + 1
+          );
+          expect(clipped, `${testId} label truncated at ${width}px in ${lang}`).toBe(
+            false
+          );
+        }
+
+        const help = await page.getByTestId("ai-review-help-mobile").boundingBox();
+        expect(Math.min(help!.width, help!.height)).toBeGreaterThanOrEqual(43.5);
+
+        await expectNoHorizontalOverflow(page);
+      });
+    }
+  }
+
+  test("the steady rail is shorter than the one that still has to explain itself", async ({
+    page,
+  }) => {
+    await enterAuthenticatedComparison(page);
+    const steady = await rail(page).boundingBox();
+
+    await enterAuthenticatedComparison(page, {
+      statuses: { "gemini-3-5-flash": "error" },
+    });
+    const explaining = await rail(page).boundingBox();
+
+    expect(steady!.height).toBeLessThan(explaining!.height);
+    // The row itself is untouched; only the sentence under it goes away.
+    expect(explaining!.height - steady!.height).toBeGreaterThanOrEqual(16);
   });
 });

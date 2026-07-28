@@ -206,6 +206,13 @@ export async function mockAuthenticatedApi(
      * tab strip has to seed this as well as `selectedModels`.
      */
     messages?: QaConversationMessage[];
+    /**
+     * Seeds the conversation's saved web-search mode, the same field
+     * ChatPageClient restores from. "always" with a mix of search-capable and
+     * search-incapable models is what puts the composer's tool-status chip
+     * into its partial-support state.
+     */
+    webSearchMode?: "off" | "auto" | "always";
   } = {}
 ): Promise<AuthenticatedQaState> {
   await page.addInitScript((showSidebarTour) => {
@@ -242,6 +249,7 @@ export async function mockAuthenticatedApi(
     title: state.title,
     selectedModels: options.selectedModels || ["gpt-5-4-mini"],
     disabledPanels: [],
+    webSearchMode: options.webSearchMode || "off",
     isLocked: state.locked,
     shareEnabled: state.shared,
     shareExpiresAt: state.shared ? "2099-01-01T00:00:00.000Z" : null,

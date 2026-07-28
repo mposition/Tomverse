@@ -533,6 +533,23 @@ export function ChatInput({
       : webSearchMode === "auto"
         ? t("chat.webSearchChipAuto")
         : t("chat.webSearchChipOn");
+  // The mobile chip no longer owns a row of its own -- it shares the
+  // composer's first input line -- so it drops the separator and the word
+  // "supported" while keeping every state distinguishable: "Web search",
+  // "Web search auto", "Web search 2/3", "No web search". The full sentence is
+  // still what assistive tech gets (web-search-state-description below), and a
+  // blocking state additionally keeps its own full-width notice, so no state is
+  // ever reduced to a bare icon.
+  const webSearchChipCompactLabel = webSearchState.allUnsupported
+    ? t("chat.webSearchChipUnavailableCompact")
+    : webSearchState.hasException
+      ? interpolateCopy(t("chat.webSearchChipPartialCompact"), {
+          supported: webSearchState.supportedCount,
+          total: webSearchState.selectedCount,
+        })
+      : webSearchMode === "auto"
+        ? t("chat.webSearchChipAutoCompact")
+        : t("chat.webSearchChipOnCompact");
   const webSearchStateDescription =
     webSearchMode === "always"
       ? interpolateCopy(t("chat.webSearchChipDescriptionAlways"), {
@@ -1577,6 +1594,108 @@ export function ChatInput({
     }
   };
 
+  // Both composer tool chips, extracted so the same markup can sit either in
+  // its own row above the textarea (desktop) or on the textarea's own first
+  // line (mobile), without the two placements drifting apart.
+  const hasToolStatusChips = webSearchState.isVisible || isDeepResearchPending;
+  const toolStatusChips = hasToolStatusChips ? (
+    <>
+    {webSearchState.isVisible && (
+      <div
+        data-testid="web-search-mode-chip"
+        data-tone={webSearchState.tone}
+        data-supported-count={webSearchState.supportedCount}
+        data-unsupported-count={webSearchState.unsupportedCount}
+        className={`flex h-9 shrink-0 items-center gap-1.5 rounded-full border pl-3 pr-1.5 text-xs font-bold ${
+          webSearchState.tone === "blocked"
+            ? "border-red-200 bg-red-50 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
+            : webSearchState.tone === "warning"
+              ? "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100"
+              : "border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-200"
+        }`}
+      >
+        <Globe2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        {/*
+          When nothing can search there is no "which ones" worth
+          expanding -- the blocking notice below already names the
+          two ways out, so the chip stays a plain label.
+        */}
+        {webSearchState.hasException && !webSearchState.allUnsupported ? (
+          <button
+            type="button"
+            data-testid="web-search-exception-toggle"
+            aria-expanded={isWebSearchExceptionOpen}
+            aria-controls="web-search-exception-detail"
+            aria-describedby="web-search-state-description"
+            onClick={() => setIsWebSearchExceptionOpen((open) => !open)}
+            // The chip itself is 36px tall, so the toggle borrows
+            // vertical hit area from a pseudo-element rather than
+            // growing the chip. Horizontal inset stays small so it
+            // never overlaps the adjacent remove control.
+            className={`relative truncate rounded-full text-left underline decoration-dotted underline-offset-2 before:absolute before:content-[''] before:-inset-x-1 ${
+              isMobileShell ? "before:-inset-y-3.5" : "before:-inset-y-1"
+            }`}
+          >
+            {isMobileShell ? webSearchChipCompactLabel : webSearchChipLabel}
+          </button>
+        ) : (
+          <span
+            className="truncate"
+            aria-describedby="web-search-state-description"
+          >
+            {isMobileShell ? webSearchChipCompactLabel : webSearchChipLabel}
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={() => onWebSearchModeChange?.("off")}
+          aria-label={t("chat.removeWebSearchMode")}
+          title={t("chat.removeWebSearchMode")}
+          className={`relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full before:absolute before:content-[''] hover:bg-black/5 dark:hover:bg-white/10 ${isMobileShell ? "before:-inset-2.5" : "before:-inset-1"}`}
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    )}
+    {isDeepResearchPending && (
+      <div
+        data-testid="deep-research-chip"
+        className="flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-violet-200 bg-violet-50 pl-3 pr-1.5 text-xs font-bold text-violet-800 dark:border-violet-900/60 dark:bg-violet-950/30 dark:text-violet-200"
+        title={t("chat.deepResearchChipTooltip")}
+      >
+        <Microscope className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        <span className="truncate">{t("chat.deepResearchChipLabel")}</span>
+        <button
+          type="button"
+          onClick={() => onDismissDeepResearchChip?.()}
+          aria-label={t("chat.removeDeepResearchChip")}
+          title={t("chat.removeDeepResearchChip")}
+          className={`relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-violet-500 before:absolute before:content-[''] hover:bg-violet-100 dark:hover:bg-violet-900/40 ${isMobileShell ? "before:-inset-2.5" : "before:-inset-1"}`}
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    )}
+    </>
+  ) : null;
+  const webSearchExceptionDetail =
+    webSearchState.hasException &&
+    !webSearchState.allUnsupported &&
+    isWebSearchExceptionOpen ? (
+      <p
+        id="web-search-exception-detail"
+        data-testid="web-search-exception-detail"
+        className={`px-1 text-[11px] leading-4 text-zinc-600 dark:text-zinc-300 ${
+          isMobileShell ? "mt-1.5" : "mb-2"
+        }`}
+      >
+        {interpolateCopy(t("chat.webSearchUnsupportedModels"), {
+          models: webSearchUnsupportedModelNames,
+        })}{" "}
+        {t("chat.webSearchUnsupportedBehavior")}
+      </p>
+    ) : null;
+
   // Drives which model-picker layout renders below: the original compact,
   // single-scroll mobile sheet (filters scroll away together with the
   // list, matching this same breakpoint's MobileModelMenuPortal decision
@@ -1790,87 +1909,17 @@ export function ChatInput({
               </div>
             </div>
           )}
-          {(webSearchState.isVisible || isDeepResearchPending) && (
+          {/*
+            On mobile these chips share the textarea's first line (see below)
+            instead of claiming a full row above it.
+          */}
+          {!isMobileShell && hasToolStatusChips && (
             <div
               data-testid="tool-status-chip-row"
+              data-placement="row"
               className="mb-2 flex max-w-full gap-1.5 overflow-x-auto overscroll-x-contain pb-1 md:mb-3 md:flex-wrap md:overflow-visible md:pb-0"
             >
-              {webSearchState.isVisible && (
-                <div
-                  data-testid="web-search-mode-chip"
-                  data-tone={webSearchState.tone}
-                  data-supported-count={webSearchState.supportedCount}
-                  data-unsupported-count={webSearchState.unsupportedCount}
-                  className={`flex h-9 shrink-0 items-center gap-1.5 rounded-full border pl-3 pr-1.5 text-xs font-bold ${
-                    webSearchState.tone === "blocked"
-                      ? "border-red-200 bg-red-50 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
-                      : webSearchState.tone === "warning"
-                        ? "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100"
-                        : "border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-200"
-                  }`}
-                >
-                  <Globe2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                  {/*
-                    When nothing can search there is no "which ones" worth
-                    expanding -- the blocking notice below already names the
-                    two ways out, so the chip stays a plain label.
-                  */}
-                  {webSearchState.hasException && !webSearchState.allUnsupported ? (
-                    <button
-                      type="button"
-                      data-testid="web-search-exception-toggle"
-                      aria-expanded={isWebSearchExceptionOpen}
-                      aria-controls="web-search-exception-detail"
-                      aria-describedby="web-search-state-description"
-                      onClick={() => setIsWebSearchExceptionOpen((open) => !open)}
-                      // The chip itself is 36px tall, so the toggle borrows
-                      // vertical hit area from a pseudo-element rather than
-                      // growing the chip. Horizontal inset stays small so it
-                      // never overlaps the adjacent remove control.
-                      className={`relative truncate rounded-full text-left underline decoration-dotted underline-offset-2 before:absolute before:content-[''] before:-inset-x-1 ${
-                        isMobileShell ? "before:-inset-y-3.5" : "before:-inset-y-1"
-                      }`}
-                    >
-                      {webSearchChipLabel}
-                    </button>
-                  ) : (
-                    <span
-                      className="truncate"
-                      aria-describedby="web-search-state-description"
-                    >
-                      {webSearchChipLabel}
-                    </span>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => onWebSearchModeChange?.("off")}
-                    aria-label={t("chat.removeWebSearchMode")}
-                    title={t("chat.removeWebSearchMode")}
-                    className={`relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full before:absolute before:content-[''] hover:bg-black/5 dark:hover:bg-white/10 ${isMobileShell ? "before:-inset-2.5" : "before:-inset-1"}`}
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              )}
-              {isDeepResearchPending && (
-                <div
-                  data-testid="deep-research-chip"
-                  className="flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-violet-200 bg-violet-50 pl-3 pr-1.5 text-xs font-bold text-violet-800 dark:border-violet-900/60 dark:bg-violet-950/30 dark:text-violet-200"
-                  title={t("chat.deepResearchChipTooltip")}
-                >
-                  <Microscope className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                  <span className="truncate">{t("chat.deepResearchChipLabel")}</span>
-                  <button
-                    type="button"
-                    onClick={() => onDismissDeepResearchChip?.()}
-                    aria-label={t("chat.removeDeepResearchChip")}
-                    title={t("chat.removeDeepResearchChip")}
-                    className={`relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-violet-500 before:absolute before:content-[''] hover:bg-violet-100 dark:hover:bg-violet-900/40 ${isMobileShell ? "before:-inset-2.5" : "before:-inset-1"}`}
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              )}
+              {toolStatusChips}
             </div>
           )}
           {/*
@@ -1885,20 +1934,10 @@ export function ChatInput({
               {webSearchStateDescription}
             </p>
           )}
-          {webSearchState.hasException &&
-            !webSearchState.allUnsupported &&
-            isWebSearchExceptionOpen && (
-            <p
-              id="web-search-exception-detail"
-              data-testid="web-search-exception-detail"
-              className="mb-2 px-1 text-[11px] leading-4 text-zinc-600 dark:text-zinc-300"
-            >
-              {interpolateCopy(t("chat.webSearchUnsupportedModels"), {
-                models: webSearchUnsupportedModelNames,
-              })}{" "}
-              {t("chat.webSearchUnsupportedBehavior")}
-            </p>
-          )}
+          {/* Desktop keeps the detail directly under the chip row it expands
+              from. On mobile the chip sits on the input line below, so the
+              detail follows it there rather than appearing above the chip. */}
+          {!isMobileShell && webSearchExceptionDetail}
           {webSearchState.allUnsupported && (
             <div
               role="status"
@@ -2005,6 +2044,26 @@ export function ChatInput({
             </button>
           </div>
         )}
+        {/*
+          Mobile: the tool status shares the composer's first input line rather
+          than claiming a row of its own above it. `flex-wrap` plus a minimum
+          textarea width is what makes that safe at every width -- when the
+          chips and a usable input box no longer fit side by side (a 320px
+          phone with two chips, or 200% zoom), the textarea drops to its own
+          full-width line instead of being squeezed. The chips never shrink
+          below their own label, so a partial- or blocked-search state stays
+          readable rather than scrolling out of sight.
+        */}
+        <div className="flex flex-wrap items-start gap-x-1.5 gap-y-1">
+        {isMobileShell && hasToolStatusChips && (
+          <div
+            data-testid="tool-status-chip-row"
+            data-placement="inline"
+            className="flex max-w-full shrink-0 items-center gap-1.5 overflow-x-auto overscroll-x-contain"
+          >
+            {toolStatusChips}
+          </div>
+        )}
         <textarea
           data-testid="chat-textarea"
           ref={textareaRef}
@@ -2022,8 +2081,9 @@ export function ChatInput({
           disabled={isDisabled}
           enterKeyHint={isMobileShell ? "enter" : undefined}
           rows={1}
-          className={`w-full max-h-[92px] min-h-[36px] resize-none overflow-y-auto border-0 bg-transparent px-1 py-1.5 text-base leading-5 text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-500 md:max-h-[200px] md:min-h-[52px] md:py-2 md:text-sm md:leading-6 ${preserveFormatting ? "overflow-x-auto whitespace-pre font-mono" : ""}`}
+          className={`w-full max-h-[92px] min-h-[36px] min-w-[11rem] flex-1 resize-none overflow-y-auto border-0 bg-transparent px-1 py-1.5 text-base leading-5 text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-500 md:max-h-[200px] md:min-h-[52px] md:py-2 md:text-sm md:leading-6 ${preserveFormatting ? "overflow-x-auto whitespace-pre font-mono" : ""}`}
         />
+        </div>
         <div className="relative flex items-center justify-between gap-1.5" ref={menuRef}>
         <div className="flex shrink-0 items-center gap-1.5">
           <button
@@ -2599,6 +2659,8 @@ export function ChatInput({
             </MobileModelMenuPortal>
           )}
         </div>
+
+        {isMobileShell && webSearchExceptionDetail}
 
         <input
           ref={fileInputRef}

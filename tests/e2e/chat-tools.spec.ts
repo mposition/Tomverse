@@ -95,7 +95,15 @@ test("selecting a web search mode shows a removable status chip", async ({ page 
   const chip = page.getByTestId("web-search-mode-chip");
   await expect(chip).toBeVisible();
   await expect(chip).toHaveAttribute("data-tone", "blocked");
-  await expect(chip).toContainText("Web search unavailable");
+  // The mobile chip rides the composer's input line and says the same thing
+  // more tightly ("No web search"); the blocking notice below is unchanged in
+  // both shells, so the state is never reduced to a bare icon.
+  const placement = await page
+    .getByTestId("tool-status-chip-row")
+    .getAttribute("data-placement");
+  await expect(chip).toContainText(
+    placement === "inline" ? "No web search" : "Web search unavailable"
+  );
   await expect(chip).not.toContainText("Use web search");
 
   const notice = page.getByTestId("web-search-unavailable-notice");
