@@ -29,6 +29,15 @@ review comment:
   badge or control may take, cover or scroll across it. Changes need
   bounding-box, overlap, horizontal-overflow, Korean IME, 320px and 200%
   text-scaling coverage — see `tests/e2e/mobile-composer-contract.spec.ts`.
+- [Comparison action rail](docs/ui-contracts/comparison-action-rail.md) —
+  `components/chat/ComparisonActionRail.tsx`, `lib/comparisonReadiness.ts` and
+  the bottom workflow dock in both shells. Desktop and mobile share one
+  state-driven disclosure policy: the "Comparing N completed answers" sentence
+  is visually hidden (but kept in the accessibility tree) in the normal
+  all-complete state, and on screen for every generating, excluded,
+  needs-more, running or credit-blocked state. Changes need the desktop and
+  mobile state matrix — `tests/comparisonReadiness.test.mjs` and
+  `tests/e2e/comparison-action-rail.spec.ts`.
 
 `AGENTS.md` carries the short version of the same rules for coding agents.
 
@@ -1072,7 +1081,12 @@ UI-contract suites worth running directly when touching the chat composer (see
 ```text
 npx playwright test --project=desktop-chromium tests/e2e/mobile-composer-contract.spec.ts
 npx playwright test --project=desktop-chromium tests/e2e/mobile-message-visibility.spec.ts
+npx playwright test --project=desktop-chromium tests/e2e/comparison-action-rail.spec.ts
 ```
+
+The comparison rail's state matrix also runs as fast unit tests
+(`npm run test:unit`, `tests/comparisonReadiness.test.mjs`) — see
+[docs/ui-contracts/comparison-action-rail.md](docs/ui-contracts/comparison-action-rail.md).
 
 Configure these GitHub repository **Actions secrets** (Railway variables are not
 automatically available to GitHub Actions):
