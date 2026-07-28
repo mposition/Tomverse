@@ -462,7 +462,7 @@ export const zh = {
         switchTo: "切换到",
         switchFromTo: "将{from}替换为{to}",
         tryLater: "请稍后再试，或选择其他模型。",
-        noHealthyFallback: "目前没有状态正常的替代模型。",
+        noHealthyFallback: "目前没有可推荐的替代模型。请稍后重试，或刷新供应商状态。",
         fallbackDegraded: "这些替代模型目前也报告了问题。",
         fallbackUnverified: "无法确认这些替代模型的可用性。",
         refresh: "刷新提供商状态",

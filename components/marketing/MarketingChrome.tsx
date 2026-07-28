@@ -379,7 +379,7 @@ export function MarketingFooter({ maxWidth = "max-w-7xl" }: { maxWidth?: string 
 
   return (
     <footer className="border-t border-zinc-200 bg-white py-10 dark:border-zinc-800 dark:bg-zinc-950">
-      <div className={`mx-auto flex ${maxWidth} flex-col gap-5 px-4 text-sm text-zinc-500 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8`}>
+      <div className={`mx-auto flex ${maxWidth} flex-col gap-5 px-4 text-sm text-zinc-500 dark:text-zinc-400 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8`}>
         <div className="flex items-center gap-3">
           <span className="flex h-8 w-8 overflow-hidden rounded-lg bg-white ring-1 ring-zinc-200 dark:ring-zinc-800">
             {/* eslint-disable-next-line @next/next/no-img-element */}

@@ -8,15 +8,15 @@
 | # | ID | 최종 판정 |
 |---|---|---|
 | 1 | `STG-F003` | **Fixed locally, not verified on staging** |
-| 2 | `FINAL-F002` | **Not verified** (승인 요청안 §9에 작성) |
+| 2 | `FINAL-F002` | **Not verified** (계획 승인됨 · 자격증명 부재로 미실행 — §9) |
 | 3 | `RECON-A11Y-001` | **Fixed locally, not verified on staging** |
 | 4 | `FINAL-F003` | **Partially fixed** (8개 전이 중 4개 검증, 4개 미검증) |
 | 5 | `FINAL-F006` | **Fixed locally, not verified on staging** |
-| 6 | `RECON-UX-001` | **Partially fixed** (locale 의존성 제거·검증 / 잔여 4px 미해결) |
+| 6 | `RECON-UX-001` | **Fixed locally, not verified on staging** (승인된 market mapping 적용, 40조합 전부 0px) |
 | 7 | `RECON-A11Y-002` | **Fixed locally, not verified on staging** |
-| 8 | `RECON-A11Y-003` | **Blocked — user decision required** (게이트 SHA에서 재현됨) |
+| 8 | `RECON-A11Y-003` | **Partially fixed** (`/`·`/status` 0건 / `/pricing` 강조 카드 10건 잔여 — §4.8) |
 | 9 | `RECON-OPS-001` | **Fixed locally, not verified on staging** |
-| 10 | `EXT-REAUDIT-F001` | **Partially fixed** (Windows 경로 해결 / canonical browser `Not verified`) |
+| 10 | `EXT-REAUDIT-F001` | **Fixed locally, not verified on staging** (Windows 경로 + canonical 정책 확정; canonical 실행 자체는 `Not verified`) |
 | 11 | `RECON-QA-001` | **Environment dependent** (consent flake 재현 불가, visual은 `Not verified`) |
 
 가장 중요한 결과 두 가지입니다.
@@ -95,6 +95,11 @@ staging은 read-only `/api/build-info` 조회만 수행했습니다.
 | `components/chat/ProviderStatusBanner.tsx` | `RECON-OPS-001` |
 | `components/marketing/PricingPageContent.tsx` | `RECON-UX-001`, `RECON-A11Y-002` |
 | `components/marketing/usePublicBilling.ts` | `RECON-UX-001` |
+| `lib/billingMarkets.ts` | `RECON-UX-001` (market 기반 표기) |
+| `app/(application)/status/page.tsx` | `RECON-A11Y-003` |
+| `components/marketing/ProductProofSection.tsx` | `RECON-A11Y-003` |
+| `components/marketing/MarketingChrome.tsx` | `RECON-A11Y-003` |
+| `components/marketing/LandingPageContent.tsx` | `RECON-A11Y-003` |
 | `locales/{en,ko,zh,fr,de,es,pt}.ts` | `RECON-A11Y-001`, `RECON-OPS-001` |
 
 ### 테스트·QA 도구 (7)
@@ -107,7 +112,9 @@ staging은 read-only `/api/build-info` 조회만 수행했습니다.
 | `tests/e2e/remediation-accessibility.spec.ts` *(신규)* | `RECON-A11Y-001/002/003` axe 계측 |
 | `tests/providerFallbackCandidates.test.mjs` *(신규)* | `RECON-OPS-001` unit 7건 |
 | `tests/typographyPolicy.test.mjs` | `EXT-REAUDIT-F001` Windows 경로 |
-| `playwright.config.ts` | `EXT-REAUDIT-F001` browser capability fallback |
+| `playwright.config.ts` | `EXT-REAUDIT-F001` browser capability fallback + canonical rendering 고정 |
+| `docs/qa/canonical-visual-baseline.md` *(신규)* | `EXT-REAUDIT-F001` canonical snapshot 정책 |
+| `.github/workflows/e2e.yml`, `.github/workflows/nightly-visual-regression.yml` | `EXT-REAUDIT-F001` runner `ubuntu-24.04` 고정 |
 
 **assertion을 삭제하거나 약화한 곳은 없습니다. snapshot/golden을 갱신하지
 않았습니다. console/network filter를 추가하지 않았습니다.**
@@ -361,7 +368,7 @@ capability matrix: native 0/1/혼합/3은 기존 spec이 커버합니다. **nati
 
 ### 4.6 `RECON-UX-001` — browser locale 의존 pricing reflow
 
-**판정: `Partially fixed`**
+**판정: `Fixed locally, not verified on staging`**
 
 #### 재현 (게이트 SHA) — 그리고 guard가 왜 통과하고 있었는가
 
@@ -389,13 +396,31 @@ overflow를 일으킨 요소: `span.text-[clamp(1.5rem,10vw,2.25rem)].font-black
 (= 가격). 보고된 51/147/135/128px과 절대값은 다르지만(측정 SHA·조건이 다름)
 **locale에 따라 갈린다는 성질은 동일하게 재현**됐습니다.
 
+#### 승인된 정책
+
+표시 locale을 **UI 언어**에 묶는 1차 시안(en → `en-AU` → `USD 19.00`)은
+en-US 사용자의 표기까지 바꾸므로 **승인되지 않았습니다.** 승인된 정책은
+**currency/market 기반의 결정적 표기**입니다.
+
 #### 구현
 
-1. **표시 locale 명시** — `usePublicBilling.formatPlanPrice`에 `displayLocale`
-   인자를 추가하고, `PricingPageContent`가 **페이지가 이미 날짜에 쓰고 있는
-   locale**(`promotionDateLocale[lang]`)을 넘깁니다. 통화·금액·billing market
-   의미는 그대로이며, 표기가 "읽는 사람의 속성"에서 "페이지의 속성"으로
-   바뀝니다. 할인가(`formatSalePrice`)도 같은 locale을 씁니다.
+1. **market mapping** — `lib/billingMarkets.ts`에 통화별 표시 locale을
+   고정했습니다. `formatBillingAmount`의 `locale` 기본값이
+   `undefined`(=브라우저)에서 이 표를 따르도록 바뀌었고, `currencyDisplay:
+   "narrowSymbol"`로 ICU 기본값이 흔들려도 `US$`/`CN¥`로 새지 않게 했습니다.
+
+   | currency | 표시 locale | 결과 |
+   |---|---|---|
+   | USD | `en-US` | `$19.00` |
+   | AUD | `en-AU` | `A$19.00` (기존 하드코딩 유지) |
+   | CNY | `zh-CN` | `¥19.00` |
+   | EUR | `de-DE` | `19,00 €` |
+   | KRW | `ko-KR` | `₩19,000` |
+
+   기본값이 함수 안에 있으므로 `usePublicBilling`, `PricingPageContent`,
+   `UpgradeInterestButton` **모든 호출부가 한 번에** 결정적으로 바뀝니다.
+   1차 시안에서 넣었던 UI-locale 인자 전달은 **되돌렸습니다** — 표기의 출처가
+   둘이 되면 안 되기 때문입니다.
 2. **레이아웃** — 가격 clamp 하한을 `1.5rem`(24px) → `1.125rem`(18px)로
    낮추고 `[overflow-wrap:anywhere]`를 부여했습니다. 18px는
    `docs/ui-contracts/typography.md`가 `font-black`에 허용하는 최소값이며,
@@ -404,42 +429,26 @@ overflow를 일으킨 요소: `span.text-[clamp(1.5rem,10vw,2.25rem)].font-black
    항상 완전히 보입니다.**
 3. **guard** — spec에 browser locale 축(en-US/en-AU/en-GB/ko-KR/de-DE ×
    320/390 × 100/125/150/200%)과, 5개 locale에서 **가격 문자열이 동일해야
-   한다**는 test를 추가했습니다.
+   한다**는 test를 추가했습니다. mock도 production처럼 market pricing을
+   보냅니다.
+
+**실제 금액·통화·checkout currency는 변경하지 않았습니다.** 표시 형식만
+바뀝니다.
 
 #### 결과
 
+`tests/e2e/pricing-promotion-reflow.spec.ts` **61/61 통과**.
+
 | 항목 | 결과 |
 |---|---|
-| locale에 따른 차이 | **제거됨** — 5개 locale 전부 동일 수치 |
-| 40조합 중 overflow ≤1px | **35 / 40** |
-| 잔여 실패 | 5개 locale 전부 `320@200%`에서 **각 4px** (5건) |
+| 5 locale × 2 viewport × 4 scaling = **40조합** | **전부 overflow 0px** |
+| 기존 `lang` 축 16 test (promotion/baseline 32 측정) | 전부 0px |
+| 5개 locale의 렌더 가격 | 전부 `["$0.00","$19.00","$49.00"]` — 동일 |
+| `US$` / `USD ` 표기 | **0건** |
 
-#### 잔여 — 미해결
-
-`320@200%`에서 **locale과 무관한 4px** overflow가 남습니다. 진단 결과 원인은
-plan card grid입니다.
-
-```
-div.mt-14.grid.gap-5   scrollWidth 148 / clientWidth 128   (overflow-x: visible)
-```
-
-가격 토큰을 18px + `overflow-wrap:anywhere`로 만든 뒤에도 이 4px은 남았으므로
-**가격만이 원인은 아니며**, card 내부의 다른 min-content 기여자가 있습니다.
-남은 시간 안에 특정하지 못했습니다.
-
-이 4px은 **기존 mock이 감추고 있던 절대 overflow**입니다(기존 `lang` 축의
-`320@200% (en)`도 이제 같은 4px로 실패합니다). **assertion을 약화하지 않고
-그대로 실패하도록 두었습니다.**
-
-#### `[USER DECISION REQUIRED]` — 통화 표기 정책
-
-표시 locale을 고정하면 누군가에게는 표기가 바뀝니다. 현재 선택
-(`promotionDateLocale[lang]`, en → `en-AU`)에서는 **en 사용자에게 `USD 19.00`**
-로 보입니다. 오늘 en-US 사용자가 보던 `$19.00`과 다릅니다.
-
-대안은 `currencyDisplay: "narrowSymbol"`(모두 `$19.00`) 또는 AUD가 이미
-`A$`를 하드코딩한 선례를 따라 `US$19.00`으로 고정하는 것입니다. 어느 쪽도
-**Product/Legal 결정**이므로 임의로 정하지 않았습니다(§13-11).
+1차 보고에서 남겼던 `320@200%`의 **4px 잔여 overflow도 함께 해소**됐습니다.
+`$19.00`이 `USD 19.00`보다 짧아 plan card의 min-content가 grid track 안에
+들어왔기 때문입니다.
 
 ---
 
@@ -476,45 +485,80 @@ div.mt-14.grid.gap-5   scrollWidth 148 / clientWidth 128   (overflow-x: visible)
 
 ### 4.8 `RECON-A11Y-003` — color contrast
 
-**판정: `Blocked — user decision required`** (재현됨, 미수정)
+**판정: `Partially fixed`** — 승인된 국소 수정 적용, `/pricing` 강조 카드 10건 잔여
 
 #### 게이트 SHA 실측 (axe `color-contrast`, Chromium 141)
 
-| Route | light | dark |
-|---|---:|---:|
-| `/` | **3** | **14** |
-| `/pricing` | **19** | **21** |
-| `/status` | **4** | **4** |
+| Route | 수정 전 light | 수정 전 dark | **수정 후 light** | **수정 후 dark** |
+|---|---:|---:|---:|---:|
+| `/` | 3 | 14 | **0** | **0** |
+| `/status` | 4 | 4 | **0** | **0** |
+| `/pricing` | 19 | 21 | **10** | **10** |
 
-**재현됩니다.** 다만 절대 수치는 보고치(`/status` 70, `/pricing` 27, `/` 4)와
-다릅니다 — 특히 `/status`는 70이 아니라 **4**입니다. 보고치는 제품 코드가 다른
-과거 SHA에서 수집된 것이므로 현재 수치를 채택했습니다.
+보고치(`/status` 70, `/pricing` 27, `/` 4)와는 다릅니다. 보고치는 제품 코드가
+다른 과거 SHA의 수치이므로 현재 실측을 채택했습니다.
 
-#### 대표 위반 node
+#### 승인 조건
 
-- `/status` (4건, light·dark 동일):
-  `.bg-zinc-900\/60 > .text-zinc-500.text-xs.tracking-[0.16em]`
-- `/` :
-  `.text-zinc-500.text-[11px]`, `.ml-1.font-semibold.text-zinc-500`
-- `/pricing` :
-  `.text-blue-100`, `.border-white\/20 > span`, `.ring-white\/20`
-  (강조 plan surface의 on-color foreground)
+전역 `text-zinc-500` 변경과 전역 zinc palette 변경은 **승인되지 않았습니다.**
+재현된 실패 노드만 국소 수정하고, 역할 색은 role namespace 안에서 다루며,
+raw `purple`/`emerald` utility 우회를 쓰지 않는 조건입니다.
 
-#### 왜 고치지 않았는가
+#### 구현 — 재현된 노드만, 전역 토큰 무변경
 
-두 원인 모두 **전역 결정**입니다.
+| 대상 | 실측 | 수정 |
+|---|---|---|
+| `/status` 상태 legend 4개 (`bg-zinc-900/60`, 항상 어두움) | 3.87 | `text-zinc-500` → `text-zinc-400` |
+| `/` proof 섹션 2개 (`#09090b`, 두 테마 모두 어두움) | 4.12 | `text-zinc-500` → `text-zinc-400` |
+| marketing footer (light는 4.83로 통과, dark만 실패) | 4.12 | `dark:text-zinc-400` **추가** (light 무변경) |
+| `/` plan teaser `/ month` (light 4.48 · dark 3.86) | 양쪽 실패 | `text-zinc-600 dark:text-zinc-400` |
+| `/pricing` usage-class chip (light만) | 4.39 | `text-zinc-500` → `text-zinc-600` (dark는 이미 `zinc-300`) |
+| `/pricing` 입력 배수 안내 heading | 4.45 | `text-amber-700` → `text-amber-800` |
+| `/pricing` `accent-promotion-500` on `500/10` | **2.16** | `text-accent-promotion-700 dark:text-accent-promotion-300` |
+| `/pricing` promotion CTA (white on `600`) | 3.65 | `bg-accent-promotion-700` (hover `600`) |
 
-1. `text-zinc-500` — 제품 전반의 중립 label 토큰. 보고서가 지목한 `#71717b`
-   계열과 일치합니다. 이 토큰을 올리면 admin console을 포함한 모든 표면이
-   함께 움직입니다.
-2. 강조 plan surface(`bg-blue-600`) 위의 `text-blue-100` 계열 — 브랜드
-   on-color 대비 결정입니다.
+- **전역 zinc palette 값은 건드리지 않았습니다.** 실패한 지점의 *단계*만
+  바꿨습니다.
+- **raw emerald utility를 쓰지 않았습니다.** promotion 두 건은 기존
+  `accent-promotion-*` role namespace 안의 단계(700/300)로만 이동했습니다.
+  새 토큰이 필요하지 않았습니다.
+- `npm run check:accent-tokens` **통과** (10 guarded files, 10 roles).
+- 기존 대비 계측 suite `tests/e2e/ui-state-contrast.spec.ts` **전부 통과** —
+  light/dark 회귀 0.
 
-§6.8은 "전역 토큰 변경이 불가피하면 중단 후 `[USER DECISION REQUIRED]`",
-§13-12는 "디자인 토큰 전역 변경"을 승인 대상으로 명시합니다. 따라서 **색을
-바꾸지 않았고**, 대신 위 수치를 재현·기록하는 axe test를 남겼습니다. 이
-test들은 **현재 실패 상태이며, 그것이 이 finding의 정확한 상태입니다.**
-`npm run check:accent-tokens`는 통과합니다(10 guarded files, 10 roles).
+#### 잔여 10건 — `[USER DECISION REQUIRED]`
+
+`/pricing`에 남은 10건은 **전부 강조 plan card 위**이며, 승인 문구와 전제가
+다릅니다.
+
+| 실측 | 배경 | 전경 | 요소 |
+|---:|---|---|---|
+| 4.29 | `#155dfc` (`bg-blue-600`) | `#dbeafe` (`text-blue-100`) | eyebrow / `per month` / `3,000 credits` |
+| 4.10 | `#3875fc` (`bg-white/15`) | `#ffffff` | `Recommended` 배지, credit chip 3개 |
+| 4.10 | `#2c6dfc` (`border-white/20` 패널) | `#eff6ff` | `Annual`, `$144` |
+| 3.66 | `#2c6dfc` | `#dbeafe` | checkout 안내문 |
+
+**승인 문구는 "Max plan은 `accent-plan-max-*` namespace 안에서 on-color token
+추가·조정"이었으나, 실제 실패 카드는 Max가 아니라 Pro이고 색도 purple이
+아니라 blue입니다.**
+
+- 강조되는 카드는 `highlighted: true`인 **Pro**입니다 (eyebrow "For everyday
+  productivity", "3,000 credits / month").
+- `accent-plan-max-*`(purple)은 `/pricing`에서 **한 번도 쓰이지 않으며**,
+  `components/auth/AuthButton.tsx`의 계정 메뉴에만 존재합니다.
+- `blue`는 `AGENTS.md`와 `scripts/check-accent-tokens.mjs`가 **role hue에서
+  명시적으로 제외**한 기본 palette입니다.
+
+따라서 이 노드들에 `accent-plan-max-*`를 적용하면 Pro 카드가 purple이 되고,
+`AGENTS.md` 규칙 2(역할이 다르면 token 분리)를 정면으로 위반합니다.
+
+**그리고 전경색을 더 밝게 할 수 없습니다** — 이미 `#ffffff`인데도 4.10입니다.
+AA를 만족시키는 유일한 방법은 **강조 카드의 파란 표면을 어둡게** 하는 것
+(`bg-blue-600` → `bg-blue-700`, 그에 맞춰 `bg-white/15`·`border-white/20`
+패널 조정)이며, 이는 /pricing에서 가장 눈에 띄는 카드의 **가시적인 브랜드
+변경**입니다.
+
+전제가 어긋나므로 **임의로 진행하지 않았습니다.** 확인 후 적용하겠습니다.
 
 ---
 
@@ -557,17 +601,21 @@ test들은 **현재 실패 상태이며, 그것이 이 finding의 정확한 상�
   후보 0개 → `none` / 비공개 모델 제외 / 추천 없음 / 중복 제거
 - `tests/e2e/provider-status.spec.ts` — 기존 전체 통과(회귀 0)
 
-#### `[USER DECISION REQUIRED]` — 후보 0개일 때의 문구 정책
+#### `[USER DECISION REQUIRED]` → **해소됨 (승인)**
 
-§6.9의 지시대로 "현재 안전한 대체 모델이 없음"을 **정직한 기본값**으로
-구현했습니다. 다만 이것이 최종 제품 문구인지, 그리고 incident 후보를 완전히
-제거하는 필터링 정책이 맞는지는 §13-13에 따라 확인이 필요합니다.
+후보 0개일 때의 문구가 승인되어 반영했습니다. 이전 문구는 후보가 없는데도
+"다른 모델을 선택해 주세요"라고 안내해 모순이 있었습니다.
+
+- **KO**: `현재 추천할 수 있는 대체 모델이 없습니다. 잠시 후 다시 시도하거나 공급자 상태를 새로고침해 주세요.`
+- **EN**: `No eligible fallback model is available right now. Try again later or refresh provider status.`
+
+7개 locale 전부에 반영했습니다.
 
 ---
 
 ### 4.10 `EXT-REAUDIT-F001` — cross-platform QA tooling
 
-**판정: `Partially fixed`**
+**판정: `Fixed locally, not verified on staging`**
 
 #### Windows path — 해결
 
@@ -589,12 +637,44 @@ canonical project를 돌릴 수 있게 했습니다. **미설정이 기본이며
 머신은 동작이 전혀 바뀌지 않습니다)**, 설정된 실행은 canonical이 아니므로
 그 스크린샷을 golden 근거로 써서는 안 됩니다.
 
-#### 미해결 — `[USER DECISION REQUIRED]`
+#### Canonical snapshot 정책 — 승인되어 확정
 
-- **canonical snapshot OS/browser 정책의 문서화**와 WebKit clipboard capability
-  검사는 하지 못했습니다. 이 환경에서 WebKit을 설치할 수 없어 capability별
-  결과를 수집할 수 없습니다.
-- **새 golden을 만들지 않았습니다** (§6.10의 중단 조건).
+정책이 승인되어 문서와 config에 고정했습니다.
+
+**`docs/qa/canonical-visual-baseline.md` (신규)** 에 전체 정책을 적었습니다:
+canonical OS `Linux x64`, runner `ubuntu-24.04`(`ubuntu-latest` 금지),
+Playwright는 lockfile의 `1.62.0`, browser는 그 버전의 bundled
+`desktop-chromium`, Windows·WebKit은 **기능 회귀 전용이며 golden 판정 근거가
+아님**, golden 갱신은 canonical 환경에서 diff 검토·승인을 거쳐서만.
+
+config에 실제로 고정한 것:
+
+| 항목 | 고정 위치 |
+|---|---|
+| runner `ubuntu-24.04` | `.github/workflows/e2e.yml`, `.github/workflows/nightly-visual-regression.yml` |
+| locale `en-US` | `playwright.config.ts`의 `canonicalRendering` |
+| timezone `UTC` | 〃 |
+| DPR | **project별 device preset 유지** (아래 주의) |
+| animation | `toHaveScreenshot`의 Playwright 기본값(비활성) |
+
+> **DPR 주의.** 승인 문구의 "DPR 고정"을 전 project 공통 `deviceScaleFactor: 1`로
+> 적용하면 `mobile-chromium`(Pixel 5, DPR **2.625**)의 golden이 전부 다시
+> 래스터라이즈됩니다. 그래서 desktop project에만 `1`을 명시하고 mobile은 device
+> preset 값을 유지했습니다. DPR은 이미 host가 아니라 preset이 정하므로
+> 결정성은 확보돼 있습니다.
+
+locale 고정은 표기뿐 아니라 **font stack 선택**에도 영향을 줍니다 —
+`docs/ui-contracts/typography.md`의 `:lang()` 규칙이 `Noto Sans KR/SC`를
+subtree 단위로 고릅니다. 그래서 locale이 흔들리면 같은 markup이 다른 glyph로
+렌더됩니다.
+
+#### 미해결
+
+- **WebKit clipboard capability 검사**는 하지 못했습니다. 이 환경에서 WebKit을
+  설치할 수 없어 capability별 결과를 수집할 수 없습니다.
+- **canonical 환경에서의 실제 실행은 이 세션에서 불가**하므로, 정책은 확정됐지만
+  golden 판정 자체는 여전히 `Not verified`입니다(§4.11).
+- **새 golden을 만들지 않았습니다.**
 
 ---
 
@@ -672,15 +752,21 @@ without a title attribute`가 대규모 batch 실행에서 1회 실패했습니�
 | 16 | `comparison-action-rail.spec.ts:945 --repeat-each=5` | **5/5 pass** | Flake/race |
 | 17 | `mobile-composer-contract.spec.ts` golden ×2 | **failed** (906px, 글리프만) | Environment problem |
 | 18 | accessibility/contrast/provider/web-search/rail/composer/font batch (desktop+mobile) | **155 passed / 3 failed / 86 skipped** | 실패 3건은 #16·#17 |
-| 19 | **전체 `--project=desktop-chromium` (704 tests)** | **617 passed / 14 failed / 73 skipped** | 아래 분류 참조 |
+| 19 | `pricing-promotion-reflow.spec.ts` (승인된 market mapping 적용 후) | **61/61 pass** | — |
+| 20 | `remediation-accessibility.spec.ts` + `accessibility-core-tasks` + `ui-state-contrast` + `pricing-accessible-price` | **27 passed / 2 failed** | 실패 2건 = `/pricing` 강조 카드 (§4.8) |
+| 21 | **전체 `--project=desktop-chromium` (704 tests)** | **627 passed / 4 failed / 73 skipped** | 아래 분류 참조 |
 
-#### #19 전체 실행의 14개 실패 — 전부 분류됨 (unexplained 0)
+#### #21 전체 실행의 4개 실패 — 전부 분류됨 (unexplained 0)
+
+승인 반영 전 14건 → **4건**으로 줄었습니다.
 
 | 건수 | 대상 | 분류 |
 |---:|---|---|
 | 2 | `mobile-composer-contract.spec.ts` visual golden (320px·390px) | **Environment problem** — canonical Chromium 미설치, 글리프 전용 diff (§4.11) |
-| 6 | `pricing-promotion-reflow.spec.ts` `320@200%` (5 browser locale + 기존 `lang` 축 en) | **Confirmed product regression** — `RECON-UX-001` 잔여 4px, 미해결 (§4.6) |
-| 6 | `remediation-accessibility.spec.ts` `RECON-A11Y-003` | **Confirmed product regression** — 디자인 토큰 결정 대기, 의도적 미수정 (§4.8) |
+| 2 | `remediation-accessibility.spec.ts` `RECON-A11Y-003` `/pricing` (light·dark) | **Confirmed product regression** — 강조 plan card 10 node, 승인 전제 불일치로 보류 (§4.8) |
+
+해소된 것: `pricing-promotion-reflow` 6건(=`RECON-UX-001` 잔여 4px),
+`RECON-A11Y-003`의 `/`·`/status` 4건.
 
 `analytics-settings-target.spec.ts`는 **전체 실행에서도 전부 통과**했고,
 `comparison-action-rail.spec.ts:945`도 이 실행에서는 통과했습니다.
@@ -832,19 +918,27 @@ web search는 **off**로 고정합니다(모델당 +8 surcharge 방지).
 - 부분 실패 후 refund가 ledger와 일치하지 않으면 중단하고 보고합니다.
 - 계정·권한·결제 변경이 필요해지면 중단합니다.
 
-### 9.9 `[USER DECISION REQUIRED]` — 기본 모델 incident 시 처리
+### 9.9 기본 모델 incident 시 처리 — **승인됨**
 
 2026-07-28 13:11 UTC 기준 기본 3종 중 **`gemini-2-5-flash`가 incident**
-(9회 연속 probe 실패)였습니다. 검증 시점에 기본 모델 중 하나가 incident라면
-다음 중 무엇을 택할지 결정이 필요합니다.
+(9회 연속 probe 실패)였습니다. 승인된 정책은 다음과 같습니다.
 
-| 안 | 내용 | 대가 |
-|---|---|---|
-| A | 복구까지 **대기** | gate closure 지연 |
-| B | 건강한 모델로 **대체**해 3-model 유지 | "기본 3종" 조건에서 벗어남 |
-| C | 2-model **부분 검증** 허용 | 3-model fan-out 미검증 |
+- 기본 모델 중 **하나라도 `incident` / `unavailable`이면 실호출 검증을 중단**
+  합니다.
+- **임의 fallback으로 교체해 통과 처리하지 않습니다.**
+- 상태·시각·근거를 기록하고 `FINAL-F002: Not verified`와 `No-Go`를
+  **유지**합니다.
+- **모든 기본 모델이 operational로 회복된 뒤 재실행**합니다.
+- 장기 incident 때문에 기본 모델 구성을 바꿔야 한다면, 그것은 **별도의 제품
+  결정과 재기준선 승인**이 필요한 사안입니다.
+- **degraded/incident 상태를 partial-failure 시험 fixture처럼 이용하지
+  않습니다.** 환불·부분 실패 검증은 의도적으로 만든 조건에서 수행합니다.
 
-기본값을 정하지 않았습니다.
+### 9.10 이 세션에서 실행하지 못한 이유
+
+계획과 40 credit 상한이 승인됐으나, **검증 전용 계정과 자격증명이 이 세션에
+없고** staging은 read-only이므로 실호출을 수행하지 않았습니다. 따라서
+`FINAL-F002`는 계획 승인 상태이며 판정은 **`Not verified`** 그대로입니다.
 
 ---
 
@@ -852,15 +946,16 @@ web search는 **off**로 고정합니다(모델당 +8 surcharge 방지).
 
 ### `[USER DECISION REQUIRED]`
 
-| # | 항목 | 근거 |
+| # | 항목 | 상태 |
 |---|---|---|
-| 1 | `RECON-A11Y-003` **디자인 토큰 전역 변경** (`text-zinc-500`, 강조 plan surface on-color) | §13-12 |
-| 2 | `RECON-UX-001` **통화 표기 정책** (`USD 19.00` vs `US$19.00` vs `$19.00`) | §13-11 |
-| 3 | `RECON-OPS-001` **operational 후보 0개일 때의 제품 문구** | §13-13 |
-| 4 | `EXT-REAUDIT-F001` **canonical snapshot OS/browser 정책** 확정 및 golden 재기록 | §13-8 |
-| 5 | `FINAL-F002` **검증 계정 발급 및 실제 Provider·credit 사용 승인** | §13-3, §13-4 |
-| 6 | `FINAL-F002` **기본 모델 incident 시 처리** (§9.9) | — |
-| 7 | AU analytics opt-out 정책 적합성 (범위 밖, 미판단) | §5-D |
+| 1 | `RECON-A11Y-003` 디자인 토큰 | ✅ **조건부 승인 → 적용 완료** (전역 변경 없이 국소 수정) |
+| 2 | `RECON-UX-001` 통화 표기 정책 | ✅ **승인 → 적용 완료** (market mapping, `$19.00`) |
+| 3 | `RECON-OPS-001` 후보 0개 문구 | ✅ **승인 → 적용 완료** |
+| 4 | `EXT-REAUDIT-F001` canonical snapshot 정책 | ✅ **승인 → 문서·config 확정** |
+| 5 | `FINAL-F002` 검증 계정 / 40 credit 상한 | ✅ **승인** — 자격증명 부재로 **미실행** |
+| 6 | `FINAL-F002` 기본 모델 incident 처리 | ✅ **승인** (중단·대기, §9.9) |
+| 7 | **`RECON-A11Y-003` 강조 plan card 10건** | ⏸ **미해결** — 승인 전제(Max/purple)와 실제(Pro/blue)가 달라 보류 (§4.8) |
+| 8 | AU analytics opt-out 정책 적합성 (범위 밖, 미판단) | §5-D |
 
 ### 미검증으로 남은 것
 
@@ -878,12 +973,12 @@ web search는 **off**로 고정합니다(모델당 +8 surcharge 방지).
 
 | # | 항목 | 심각도 | 상태 |
 |---|---|---|---|
-| 1 | `FINAL-F002` 실제 Provider·AI Review·credit **완전 미검증** | **P1 blocker** | 승인 대기 |
-| 2 | `RECON-A11Y-003` contrast **미해결** (`/pricing` 21, `/` 14, `/status` 4) | P2 | 결정 대기 |
-| 3 | `RECON-UX-001` **320@200% 4px** 잔여 overflow | P2 | 미해결 |
-| 4 | canonical browser 미설치 → visual 무결성 **`Not verified`** | P2 QA | 환경 |
-| 5 | `FINAL-F003` 전이 3종 미검증 | P2 | 잔여 |
-| 6 | `comparison-action-rail.spec.ts:945` 대규모 실행에서 간헐 실패 | P3 | flake 분류 |
+| 1 | `FINAL-F002` 실제 Provider·AI Review·credit **완전 미검증** | **P1 blocker** | 계획 승인 · 자격증명 부재로 미실행 |
+| 2 | `RECON-A11Y-003` `/pricing` 강조 plan card **10 node** | P2 | 승인 전제 불일치로 보류 (§4.8) |
+| 3 | canonical browser 미설치 → visual 무결성 **`Not verified`** | P2 QA | 환경 (정책은 확정) |
+| 4 | `FINAL-F003` 전이 6·7·8 및 native-2 조합 미검증 | P2 | 잔여 |
+| 5 | WebKit 전 범위 미실행 | P2 QA | 환경 |
+| 6 | `comparison-action-rail.spec.ts:945` 대규모 실행에서 간헐 실패 | P3 | flake 분류 (5/5·전체 실행 통과) |
 
 ### 범위 밖에서 발견한 사항 (수정하지 않음, 기록만)
 
@@ -910,7 +1005,7 @@ web search는 **off**로 고정합니다(모델당 +8 surcharge 방지).
 |---|---|---|
 | 1 | `STG-F003` 수정 후 20회 이상 연속 통과 | ✅ **충족** (220/220) |
 | 2 | `RECON-A11Y-001` axe critical 0 | ✅ **충족** (`select-name` 0, `aria-prohibited-attr` 0) |
-| 3 | B범위 P2 완료 또는 명시적 risk acceptance | ⚠️ `RECON-A11Y-003`·`RECON-UX-001` 잔여 |
+| 3 | B범위 P2 완료 또는 명시적 risk acceptance | ⚠️ `RECON-A11Y-003` 강조 카드 10건만 잔여 (`RECON-UX-001`은 해소) |
 | 4 | 게이트 SHA 고정 + staging 배포 동결 | ✅ 유지 |
 | 5 | `FINAL-F002` 승인 후 3-model 3회 + AI Review 1회 실호출 + ledger 대조 | ❌ **미충족** |
 | 6 | 원시 증거 번들 전달 | ⚠️ `test-results/` 에 보존, 미전달 |

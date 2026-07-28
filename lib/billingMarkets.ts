@@ -44,10 +44,40 @@ export const billingMinorToMajor = (amountMinor: number, currency: BillingCurren
 export const billingMajorToMinor = (amount: number, currency: BillingCurrency) =>
   Math.round(amount * 10 ** billingCurrencyFractionDigits(currency));
 
+/**
+ * RECON-UX-001. How each billing market writes its own price.
+ *
+ * `locale` used to default to `undefined`, which makes Intl fall back to the
+ * *browser's* locale: one USD price rendered "$19.00" to an en-US visitor,
+ * "US$19.00" to en-GB and ko-KR, and "USD 19.00" to en-AU. The amount and the
+ * currency were never in doubt -- only how wide the notation came out -- and
+ * that width decided whether a plan card fit its grid track under zoom, so
+ * /pricing overflowed for some visitors and not others.
+ *
+ * The notation is a property of the market being billed, not of whoever is
+ * looking, so it is pinned per currency here. AUD already worked this way with
+ * its hard-coded "A$"; this simply gives the other four the same treatment.
+ * `narrowSymbol` keeps USD as "$" rather than "US$" and CNY as "¥" rather than
+ * "CN¥" even if ICU's defaults shift under us.
+ *
+ * This changes presentation only. The amount charged, the currency, and the
+ * checkout currency are untouched.
+ */
+const BILLING_DISPLAY_LOCALE: Record<BillingCurrency, string> = {
+  USD: "en-US", // $19.00
+  AUD: "en-AU", // A$19.00, composed below
+  CNY: "zh-CN", // ¥19.00
+  EUR: "de-DE", // 19,00 €
+  KRW: "ko-KR", // ₩19,000
+};
+
+export const billingDisplayLocale = (currency: BillingCurrency) =>
+  BILLING_DISPLAY_LOCALE[currency];
+
 export const formatBillingAmount = (
   amount: number,
   currency: BillingCurrency,
-  locale?: string,
+  locale: string = BILLING_DISPLAY_LOCALE[currency],
   fractionDigits = billingCurrencyFractionDigits(currency)
 ) => {
   if (currency === "AUD") {
@@ -59,6 +89,7 @@ export const formatBillingAmount = (
   return new Intl.NumberFormat(locale, {
     style: "currency",
     currency,
+    currencyDisplay: "narrowSymbol",
     minimumFractionDigits: fractionDigits,
     maximumFractionDigits: fractionDigits,
   }).format(amount);

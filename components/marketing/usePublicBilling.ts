@@ -81,24 +81,12 @@ export function usePublicBilling() {
 
   return useMemo(() => {
     const planById = new Map(config?.plans.map((plan) => [plan.id, plan]));
-    /**
-     * RECON-UX-001. `displayLocale` used to be left undefined here, which
-     * makes Intl fall back to the *browser's* locale: the same USD price came
-     * out "$19.00" for an en-US visitor, "US$19.00" for en-GB and ko-KR and
-     * "USD 19.00" for en-AU. The amount and the currency were never in doubt
-     * -- only how wide the notation rendered -- and that width decided
-     * whether a plan card fit its grid track under zoom, so /pricing
-     * overflowed for some visitors and not others while CI, which never
-     * varies the browser locale, reported it clean.
-     *
-     * Callers pass the locale the surrounding page is already localized in,
-     * so the price is a property of the page rather than of whoever is
-     * reading it.
-     */
+    // RECON-UX-001: the display locale is decided per billing market inside
+    // formatBillingAmount, so nothing here -- and no caller -- can make the
+    // price depend on the visitor's browser locale again.
     const formatPlanPrice = (
       planId: "free" | "pro" | "max",
-      billingInterval: "monthly" | "annual" = "monthly",
-      displayLocale?: string
+      billingInterval: "monthly" | "annual" = "monthly"
     ) => {
       const plan = planById.get(planId);
       if (!plan) return null;
@@ -116,7 +104,7 @@ export function usePublicBilling() {
         return formatBillingAmount(
           displayAmount,
           plan.displayCurrency as BillingCurrency,
-          displayLocale,
+          undefined,
           digits
         );
       }

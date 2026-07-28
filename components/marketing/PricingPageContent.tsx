@@ -825,11 +825,6 @@ export function PricingPageContent() {
   const creditPackGuide = creditPackCopy[lang];
   const publicCreditPacks = billing.config?.creditPacks ?? [];
   const numberFormatter = new Intl.NumberFormat(promotionDateLocale[lang]);
-  // RECON-UX-001: prices are formatted in the locale this page is localized
-  // in -- the same one its dates already use -- so the currency notation, and
-  // therefore the width of the price, no longer depends on the visitor's
-  // browser locale.
-  const priceDisplayLocale = promotionDateLocale[lang];
   // FINAL-F006: one place that decides "1 credit" vs "2 credits", and one
   // place that glues a billing period onto a price, so the plain, sale, and
   // struck-through regular prices can never drift apart again.
@@ -896,7 +891,7 @@ export function PricingPageContent() {
       return formatBillingAmount(
         plan.displayMonthlyPriceAmount * discountMultiplier,
         plan.displayCurrency as BillingCurrency,
-        priceDisplayLocale,
+        undefined,
         digits
       );
     }
@@ -954,10 +949,10 @@ export function PricingPageContent() {
           {content.plans.map((plan) => {
             const planId = plan.name === "Max" ? "max" : plan.name === "Pro" ? "pro" : "free";
             const displayPrice =
-              billing.formatPlanPrice(planId, "monthly", priceDisplayLocale) || plan.price;
+              billing.formatPlanPrice(planId) || plan.price;
             const annualFallback = planId === "max" ? "$240" : planId === "pro" ? "$144" : "$0";
             const annualPrice =
-              billing.formatPlanPrice(planId, "annual", priceDisplayLocale) ||
+              billing.formatPlanPrice(planId, "annual") ||
               annualFallback;
             const promotionEligible = Boolean(
               featuredPromotion &&
@@ -1113,7 +1108,7 @@ export function PricingPageContent() {
                 }`}>
                   <div className="flex items-center justify-between gap-3">
                     <span>{annualCopy.annual}</span>
-                    <span className={`rounded-full px-2.5 py-1 ${plan.highlighted ? "bg-white text-blue-700" : "bg-accent-promotion-500/10 text-accent-promotion-500"}`}>
+                    <span className={`rounded-full px-2.5 py-1 ${plan.highlighted ? "bg-white text-blue-700" : "bg-accent-promotion-500/10 text-accent-promotion-700 dark:text-accent-promotion-300"}`}>
                       {annualCopy.save}
                     </span>
                   </div>
@@ -1195,7 +1190,7 @@ export function PricingPageContent() {
                   cta_location: "pricing_credit_pack_section",
                 })
               }
-              className="inline-flex h-11 items-center justify-center rounded-xl bg-accent-promotion-600 px-5 text-sm font-bold text-white transition hover:bg-accent-promotion-500"
+              className="inline-flex h-11 items-center justify-center rounded-xl bg-accent-promotion-700 px-5 text-sm font-bold text-white transition hover:bg-accent-promotion-600"
             >
               {creditPackGuide.purchaseCta}
             </Link>
@@ -1392,7 +1387,7 @@ export function PricingPageContent() {
                             className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold ${
                               plan.id === "pro"
                                 ? "bg-white/15 text-white"
-                                : "bg-zinc-100 text-zinc-500 dark:bg-zinc-900 dark:text-zinc-300"
+                                : "bg-zinc-100 text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300"
                             }`}
                           >
                             {formatCredits(example.cost)}
@@ -1411,7 +1406,7 @@ export function PricingPageContent() {
 
           <div className="grid gap-4 border-t border-zinc-200 p-4 dark:border-zinc-800 sm:p-6 lg:grid-cols-2">
             <article className="rounded-2xl border border-amber-500/25 bg-amber-500/10 p-5">
-              <div className="flex items-center gap-2 text-amber-700 dark:text-amber-300">
+              <div className="flex items-center gap-2 text-amber-800 dark:text-amber-300">
                 <FileText className="h-5 w-5" />
                 <h3 className="font-bold">{creditGuide.longContextTitle}</h3>
               </div>

@@ -42,7 +42,10 @@ concurrency:
 jobs:
   visual-regression:
     name: Chat state visual regression goldens
-    runs-on: ubuntu-latest
+    # Canonical visual baseline: pinned image, not ubuntu-latest, so a
+    # runner-image bump cannot silently re-rasterise every golden.
+    # See docs/qa/canonical-visual-baseline.md.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     # Same deterministic Turnstile configuration the other Playwright
     # workflows build with. This is a public test key, not a credential, and

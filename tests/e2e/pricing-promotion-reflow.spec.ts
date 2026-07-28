@@ -292,21 +292,21 @@ for (const browserLocale of BROWSER_LOCALES) {
       await mockPublicProofMetrics(page);
       await page.goto("/pricing?lang=en");
 
-      // The page is localized by `lang`, so its prices are formatted in the
-      // same display locale its dates already use. That makes the notation a
-      // property of the page rather than of whoever is looking at it: all five
-      // browser locales must read back the identical string. Before the fix
-      // this produced "$19.00", "US$19.00" and "USD 19.00" from the same
-      // response, and the widest of those decided whether the plan card fit.
+      // The notation belongs to the billing market, not to the reader: all
+      // five browser locales must read back the identical string. Before the
+      // fix the same USD response produced "$19.00", "US$19.00" and
+      // "USD 19.00" depending on the visitor, and the widest of those decided
+      // whether the plan card fit its grid track under zoom.
       const prices = page.getByTestId("pricing-plan-price");
       await expect(prices.first()).toBeVisible();
       const rendered = await prices.allInnerTexts();
       console.log(
         `RECON-UX-001 prices under ${browserLocale}: ${JSON.stringify(rendered)}`
       );
-      // en -> en-AU (promotionDateLocale.en), which renders USD as "USD 19.00".
-      expect(rendered.join("|")).toMatch(/USD\s*19\.00/);
+      // USD is an en-US market price: "$19.00", never "US$" and never "USD ".
+      expect(rendered.join("|")).toMatch(/\$19\.00/);
       expect(rendered.join("|")).not.toMatch(/US\$/);
+      expect(rendered.join("|")).not.toMatch(/USD\s/);
     });
   });
 }

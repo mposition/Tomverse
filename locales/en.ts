@@ -580,7 +580,7 @@ export const en = {
         switchTo: "Switch to",
         switchFromTo: "Switch {from} for {to}",
         tryLater: "Please try again later or choose another model.",
-        noHealthyFallback: "No replacement model is healthy right now.",
+        noHealthyFallback: "No eligible fallback model is available right now. Try again later or refresh provider status.",
         fallbackDegraded: "These replacements are also reporting problems right now.",
         fallbackUnverified: "Availability of these replacements could not be verified.",
         refresh: "Refresh provider status",

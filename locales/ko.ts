@@ -580,7 +580,7 @@ export const ko = {
         switchTo: "전환",
         switchFromTo: "{from}을(를) {to}(으)로 교체",
         tryLater: "잠시 후 다시 시도하거나 다른 모델을 선택해 주세요.",
-        noHealthyFallback: "지금 정상 상태인 대체 모델이 없습니다.",
+        noHealthyFallback: "현재 추천할 수 있는 대체 모델이 없습니다. 잠시 후 다시 시도하거나 공급자 상태를 새로고침해 주세요.",
         fallbackDegraded: "이 대체 모델들도 현재 문제가 보고되고 있습니다.",
         fallbackUnverified: "이 대체 모델의 가용성은 확인되지 않았습니다.",
         refresh: "공급자 상태 새로고침",

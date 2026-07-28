@@ -431,7 +431,7 @@ export const de = {
         switchTo: "Wechseln zu",
         switchFromTo: "{from} durch {to} ersetzen",
         tryLater: "Bitte später erneut versuchen oder ein anderes Modell wählen.",
-        noHealthyFallback: "Derzeit ist kein Ersatzmodell verfügbar.",
+        noHealthyFallback: "Derzeit ist kein geeignetes Ersatzmodell verfügbar. Bitte später erneut versuchen oder den Anbieterstatus aktualisieren.",
         fallbackDegraded: "Diese Ersatzmodelle melden aktuell ebenfalls Probleme.",
         fallbackUnverified: "Die Verfügbarkeit dieser Ersatzmodelle konnte nicht geprüft werden.",
         refresh: "Anbieterstatus aktualisieren",
