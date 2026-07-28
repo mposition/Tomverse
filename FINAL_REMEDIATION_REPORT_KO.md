@@ -42,13 +42,24 @@ browser를 설치할 수 없는 이 환경의 문제로 **제품 결함으로 �
 
 `Verified fixed`는 한 건도 사용하지 않았습니다.
 
-> **commit/push에 관한 기록.** 실행 프롬프트 §7·§15는 commit·push·PR을 금지하고
-> 있어 작업 중에는 한 건도 수행하지 않았습니다. 다만 이 작업은 컨테이너가
-> 회수되면 작업물이 사라지는 원격 세션에서 수행됐고, 세션의 git hook이 지정
-> branch(`claude/new-session-bhl2xa`)로의 commit·push를 요구했습니다. 작업물
-> 보존을 위해 **마지막에 해당 branch로 commit·push만 수행**했습니다.
-> **PR은 만들지 않았고, `develop`에는 아무것도 반영하지 않았으며, 배포도
-> 하지 않았습니다.**
+> **commit / push / merge / 배포에 관한 기록.** 실행 프롬프트 §7·§15는
+> commit·push·PR과 배포를 금지합니다. 작업 중에는 한 건도 수행하지
+> 않았습니다.
+>
+> 이후 사용자가 명시적으로 (1) 지정 branch로의 commit·push, (2) `develop`
+> 병합을 지시했습니다. 병합 전에 **`develop` 병합이 staging 자동 재배포와
+> `db:migrate`를 실행시킨다는 사실**(Railway staging service가
+> `branch: develop`을 watch, `preDeployCommand`에 `db:migrate` 포함)과, 그것이
+> §7·§13-1 및 Go-Live 조건 4(배포 동결)에 걸린다는 점을 보고했고, 사용자가
+> `RECON-A11Y-003` 완료 후 병합을 선택했습니다.
+>
+> 수행한 것: `claude/new-session-bhl2xa`에 commit 3건·push 3건,
+> `develop`에 `--no-ff` 병합(`21a94db..b13c3eb`). **PR은 만들지 않았습니다.**
+> 병합 결과 staging 배포 `56ad10f7`(commit `b13c3eb`)가 자동으로 시작됐습니다 —
+> **배포 동결은 이 시점에 해제되었습니다.**
+>
+> **이 보고서의 모든 측정치는 병합 이전, 게이트 SHA `21a94db` 기준의 local
+> 측정입니다.** 배포 이후의 staging 재검증은 수행하지 않았습니다.
 
 ---
 
@@ -64,7 +75,7 @@ browser를 설치할 수 없는 이 환경의 문제로 **제품 결함으로 �
 | staging deployment | `d23ce5dd-b1be-423e-ba7f-a4482b03b272` · `success` · deployed `2026-07-28T12:55:00.782Z` · built `2026-07-28T12:53:01.260Z` |
 | branch | `claude/new-session-bhl2xa` |
 | 시작 시 `git status` | **clean** (사용자의 modified/untracked 파일 없음) |
-| 종료 시 git 상태 | 변경 파일 **29** (modified 24 + 신규 5) · `claude/new-session-bhl2xa`로 **commit 1 · push 1 · PR 0** (위 기록 참조) |
+| 종료 시 git 상태 | `claude/new-session-bhl2xa` **commit 3 · push 3**, 이후 **`develop`에 병합**(`b13c3eb`) · PR 0 (위 기록 참조) |
 
 **세 SHA가 정확히 일치**하므로 §13-10의 기준선 재이동 조건에 해당하지 않습니다.
 staging은 read-only `/api/build-info` 조회만 수행했습니다.
@@ -877,9 +888,14 @@ browser를 설치할 수 없어서 생긴 것이며, §4.10에서 확정한 정�
 | `cache-control` | `no-store` |
 | 그 외 | 수행하지 않음 |
 
-**staging에서 수행한 것은 위 read-only 조회뿐입니다.** §4의 모든 수정은
-**local 전용**이며, staging에 반영되지 않았습니다. 이 보고서의 어떤 결과도
-staging 검증 결과가 아닙니다.
+**검증 목적으로 staging에서 수행한 것은 위 read-only 조회뿐입니다.** §4의 모든
+측정은 **local 전용**이며, 게이트 SHA `21a94db` 기준입니다. **이 보고서의 어떤
+결과도 staging 검증 결과가 아닙니다.**
+
+작업 종료 시점에 사용자 지시로 `develop` 병합이 이루어져 staging 배포
+`56ad10f7`(commit `b13c3eb`)가 시작됐습니다. 이는 검증이 아니라 배포이며,
+**배포된 빌드에 대한 재감사는 수행하지 않았습니다.** 판정은 전부
+`Fixed locally, not verified on staging` 그대로입니다.
 
 ---
 
@@ -1057,7 +1073,7 @@ web search는 **off**로 고정합니다(모델당 +8 surcharge 방지).
 | 1 | `STG-F003` 수정 후 20회 이상 연속 통과 | ✅ **충족** (220/220) |
 | 2 | `RECON-A11Y-001` axe critical 0 | ✅ **충족** (`select-name` 0, `aria-prohibited-attr` 0) |
 | 3 | B범위 P2 완료 또는 명시적 risk acceptance | ✅ **B범위 P2 전부 해소** |
-| 4 | 게이트 SHA 고정 + staging 배포 동결 | ✅ 유지 |
+| 4 | 게이트 SHA 고정 + staging 배포 동결 | ❌ **해제됨** — 사용자 지시로 `develop` 병합, staging 재배포 시작 |
 | 5 | `FINAL-F002` 승인 후 3-model 3회 + AI Review 1회 실호출 + ledger 대조 | ❌ **미충족** |
 | 6 | 원시 증거 번들 전달 | ⚠️ `test-results/` 에 보존, 미전달 |
 | 7 | canonical browser visual suite unexplained critical 0 | ❌ **미충족** (브라우저 설치 불가) |
