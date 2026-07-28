@@ -177,9 +177,23 @@ test.describe("sign-in legal consent localization", () => {
     // Clicking the legal links must not start any auth request or navigate
     // the sign-in tab away from itself -- they open the legal docs in a new
     // tab and the callback URL stays intact underneath.
+    // next-auth's useSession() keeps /api/auth/session warm in the
+    // background and refetches it on window focus -- and closing the popup
+    // below is itself a focus change. Matching every /api/auth/* request
+    // therefore counted that passive poll as "an auth request was started",
+    // which made this assertion fail intermittently whenever the refetch
+    // happened to land inside the observation window (reliably so under
+    // load, never in an isolated run). Only endpoints that actually begin or
+    // end an authentication count.
+    const PASSIVE_AUTH_ENDPOINTS = /\/api\/auth\/(session|csrf|providers|_log)\b/;
     let authRequestFired = false;
+    const firedAuthUrls: string[] = [];
     await page.route("**/api/auth/**", (route) => {
-      authRequestFired = true;
+      const url = route.request().url();
+      if (!PASSIVE_AUTH_ENDPOINTS.test(url)) {
+        authRequestFired = true;
+        firedAuthUrls.push(url.replace(/^https?:\/\/[^/]+/, ""));
+      }
       return route.continue();
     });
     const [popup] = await Promise.all([
@@ -190,7 +204,10 @@ test.describe("sign-in legal consent localization", () => {
         .click(),
     ]);
     await popup.close();
-    expect(authRequestFired).toBe(false);
+    expect(
+      authRequestFired,
+      `clicking a legal link started an auth request: ${firedAuthUrls.join(", ")}`
+    ).toBe(false);
     await expect(page).toHaveURL(/\/auth\/signin\?callbackUrl=/);
     expect(page.url()).toContain(encodeURIComponent("/chat?foo=bar"));
   });
