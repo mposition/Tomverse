@@ -15,12 +15,11 @@ import { expect, test, type Browser, type Page } from "@playwright/test";
  * - No React hydration error is logged in any locale or theme.
  * - The card's structure is identical before and after hydration: same
  *   headings, same labels, same legal destinations, same paragraph count.
- * - `?lang=ko` **does** change the visible text on hydration. The server
- *   renders the English strings and the client swaps them to Korean, so a
- *   Korean visitor briefly reads English legal links. That is a real,
- *   reproducible finding -- and a new one, outside the approved scope of this
- *   work order -- so it is recorded here as a known gap awaiting its own
- *   ticket, not silently fixed and not silently deleted.
+ * - `?lang=ko` used to change the visible text on hydration: the server
+ *   rendered the English strings and the client swapped them to Korean, so a
+ *   Korean visitor briefly read English legal links. Fixed by resolving the
+ *   parameter on the server (see app/(application)/auth/signin/page.tsx); the
+ *   Korean case below is the regression test for it.
  *
  * The SHA under test is logged so a run can be tied to a build.
  */
@@ -151,18 +150,15 @@ test("English sign-in copy is byte-identical before and after hydration", async 
   }
 });
 
-// Known gap, reproduced by this suite and reported rather than fixed: the
-// server renders /auth/signin?lang=ko with the English strings and the client
-// swaps them to Korean, so a Korean visitor reads English legal links for one
-// frame. Fixing it means resolving the language on the server, which is a
-// change to the localization boundary and outside this work order's approved
-// scope. Remove the `fixme` in the same change that fixes it -- the assertion
-// below is already the acceptance criterion.
-test.fixme(
-  "Korean sign-in copy is byte-identical before and after hydration",
-  async ({ page, browser }) => {
-    const serverRendered = await readServerRenderedCard(browser, "ko");
-    const hydrated = await gotoHydratedSignIn(page, "ko");
-    expect(hydrated).toEqual(serverRendered);
-  }
-);
+// VAL-003, now fixed at the source: `/auth/signin` resolves `?lang=` on the
+// server, so the Korean strings are in the first paint instead of arriving a
+// tick after hydration. This is the assertion that was `fixme` while the gap
+// was open, unchanged.
+test("Korean sign-in copy is byte-identical before and after hydration", async ({
+  page,
+  browser,
+}) => {
+  const serverRendered = await readServerRenderedCard(browser, "ko");
+  const hydrated = await gotoHydratedSignIn(page, "ko");
+  expect(hydrated).toEqual(serverRendered);
+});

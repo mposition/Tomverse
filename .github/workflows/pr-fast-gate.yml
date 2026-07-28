@@ -97,6 +97,13 @@ jobs:
         timeout-minutes: 10
         run: npm run test:unit
 
+      # UI-012: semantic accent colours must stay addressed by role inside the
+      # guarded components. Cheap, no browser, so it sits with the other static
+      # checks rather than in the browser tier.
+      - name: Accent token usage
+        timeout-minutes: 5
+        run: npm run check:accent-tokens
+
       - name: Strict encoding validation
         timeout-minutes: 5
         run: npm run check:encoding:strict

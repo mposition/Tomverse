@@ -895,18 +895,18 @@ export function PricingPageContent() {
           <h1 className={`mt-4 text-4xl font-black leading-tight sm:text-6xl ${displayHeadingClass(lang)}`}>{content.title}</h1>
           <p className="mx-auto mt-5 max-w-2xl text-lg leading-8 text-zinc-600 dark:text-zinc-300">{content.description}</p>
           {featuredPromotion ? (
-          <div className="mx-auto mt-6 max-w-3xl overflow-hidden rounded-3xl border border-emerald-400/40 bg-gradient-to-br from-emerald-400/15 via-blue-500/10 to-transparent p-1 text-left shadow-2xl shadow-emerald-950/10">
+          <div className="mx-auto mt-6 max-w-3xl overflow-hidden rounded-3xl border border-accent-promotion-400/40 bg-gradient-to-br from-accent-promotion-400/15 via-blue-500/10 to-transparent p-1 text-left shadow-2xl shadow-accent-promotion-950/10">
             <div className="rounded-[1.35rem] bg-white/80 px-5 py-4 backdrop-blur dark:bg-zinc-950/75">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <span className="inline-flex w-fit rounded-full bg-emerald-500 px-3 py-1 text-xs font-black uppercase tracking-[0.16em] text-white">
+                  <span className="inline-flex w-fit rounded-full bg-accent-promotion-500 px-3 py-1 text-xs font-black uppercase tracking-[0.16em] text-white">
                     {saleCopy.badge}
                   </span>
-                  <p className="mt-3 text-4xl font-black tracking-tight text-emerald-700 dark:text-emerald-200">
+                  <p className="mt-3 text-4xl font-black tracking-tight text-accent-promotion-700 dark:text-accent-promotion-200">
                     {featuredPromotion.discountPercent}% OFF
                   </p>
                 </div>
-                <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm font-black text-emerald-700 dark:text-emerald-200">
+                <div className="rounded-2xl border border-accent-promotion-500/20 bg-accent-promotion-500/10 px-4 py-3 text-sm font-black text-accent-promotion-700 dark:text-accent-promotion-200">
                   {saleCopy.duration}
                 </div>
               </div>
@@ -948,7 +948,12 @@ export function PricingPageContent() {
             return (
             <article
               key={plan.name}
-              className={`relative flex min-h-full flex-col rounded-[1.75rem] border p-6 shadow-sm ${
+              // UI-005. `min-width: auto` is a grid item's default, so this
+              // card refused to shrink below its own min-content width and
+              // overflowed its track -- 287px inside a 224px column at 320px
+              // with 125% zoom, which is what pushed the whole page sideways.
+              // `min-w-0` lets the track win; the content inside wraps instead.
+              className={`relative flex min-h-full min-w-0 flex-col rounded-[1.75rem] border p-6 shadow-sm ${
                 plan.highlighted ? "border-blue-500 bg-blue-600 text-white shadow-2xl shadow-blue-950/20"
                   : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/40"
               }`}
@@ -957,12 +962,19 @@ export function PricingPageContent() {
                 <div className={`absolute -top-4 right-6 rounded-full px-4 py-2 text-xs font-black shadow-xl ${
                   plan.highlighted
                     ? "bg-white text-blue-700 shadow-blue-950/20"
-                    : "bg-emerald-500 text-white shadow-emerald-950/20"
+                    : "bg-accent-promotion-500 text-white shadow-accent-promotion-950/20"
                 }`}>
                   {featuredPromotion.discountPercent}% OFF
                 </div>
               ) : null}
-              <div className="flex min-h-8 items-start justify-between gap-3">
+              {/*
+                UI-005. The eyebrow wraps but the badge is `shrink-0`, so on a
+                narrow column the pair demanded more width than the card had and
+                took the page with it. Wrapping lets the badge drop to its own
+                line instead of widening the card, and the badge keeps its full
+                label rather than being squeezed.
+              */}
+              <div className="flex min-h-8 flex-wrap items-start justify-between gap-x-3 gap-y-2">
                 <p className={`text-xs font-black uppercase tracking-[0.18em] ${plan.highlighted ? "text-blue-100" : "text-blue-600 dark:text-blue-400"}`}>
                   {plan.eyebrow}
                 </p>
@@ -977,9 +989,14 @@ export function PricingPageContent() {
                 {plan.description}
               </p>
               {planId === "free" || !promotionEligible ? (
-                <div className="mt-8">
+                // UI-005. A 36px price and its period label sat on one inline
+                // line; at 320px with 200% zoom the pair was wider than the
+                // card's content box and pushed the page sideways by the last
+                // few pixels. A wrapping baseline row lets the period drop
+                // under the price instead.
+                <div className="mt-8 flex flex-wrap items-baseline gap-x-2">
                   <span className="text-4xl font-black">{displayPrice}</span>
-                  <span className={`ml-2 text-sm font-bold ${plan.highlighted ? "text-blue-100" : "text-zinc-500 dark:text-zinc-400"}`}>
+                  <span className={`text-sm font-bold ${plan.highlighted ? "text-blue-100" : "text-zinc-500 dark:text-zinc-400"}`}>
                     {formatBillingPeriodLabel(plan.period, lang)}
                   </span>
                 </div>
@@ -987,13 +1004,13 @@ export function PricingPageContent() {
                 <div className={`mt-8 rounded-2xl border p-4 ${
                   plan.highlighted
                     ? "border-white/25 bg-white/15"
-                    : "border-emerald-500/30 bg-emerald-500/10"
+                    : "border-accent-promotion-500/30 bg-accent-promotion-500/10"
                 }`}>
                   <div className="flex items-center justify-between gap-3">
-                    <span className={`rounded-full px-3 py-1 text-xs font-black ${plan.highlighted ? "bg-white text-blue-700" : "bg-emerald-500 text-white"}`}>
+                    <span className={`rounded-full px-3 py-1 text-xs font-black ${plan.highlighted ? "bg-white text-blue-700" : "bg-accent-promotion-500 text-white"}`}>
                       {saleCopy.badge}
                     </span>
-                    <span className={`text-xs font-black ${plan.highlighted ? "text-blue-50" : "text-emerald-600 dark:text-emerald-400"}`}>
+                    <span className={`text-xs font-black ${plan.highlighted ? "text-blue-50" : "text-accent-promotion-600 dark:text-accent-promotion-400"}`}>
                       {featuredPromotion?.discountPercent}% OFF
                     </span>
                   </div>
@@ -1020,7 +1037,7 @@ export function PricingPageContent() {
                 }`}>
                   <div className="flex items-center justify-between gap-3">
                     <span>{annualCopy.annual}</span>
-                    <span className={`rounded-full px-2.5 py-1 ${plan.highlighted ? "bg-white text-blue-700" : "bg-emerald-500/10 text-emerald-500"}`}>
+                    <span className={`rounded-full px-2.5 py-1 ${plan.highlighted ? "bg-white text-blue-700" : "bg-accent-promotion-500/10 text-accent-promotion-500"}`}>
                       {annualCopy.save}
                     </span>
                   </div>
@@ -1062,9 +1079,16 @@ export function PricingPageContent() {
               )}
               <ul className="mt-8 space-y-3">
                 {plan.features.map((feature) => (
+                  // UI-005. The bullet's icon is `shrink-0` and the label was a
+                  // bare text node, so the row's minimum width was the icon plus
+                  // the longest word -- more than the card's content box has at
+                  // 320px with 200% zoom. Wrapping the label in a `min-w-0`
+                  // block lets the row shrink, and `break-words` breaks a word
+                  // that could not have fitted a line anyway rather than
+                  // widening the page.
                   <li key={feature} className={`flex gap-3 text-sm font-semibold leading-6 ${plan.highlighted ? "text-white" : "text-zinc-700 dark:text-zinc-300"}`}>
                     <CheckCircle2 className={`mt-0.5 h-4 w-4 shrink-0 ${plan.highlighted ? "text-white" : "text-blue-600 dark:text-blue-400"}`} />
-                    {feature}
+                    <span className="min-w-0 break-words">{feature}</span>
                   </li>
                 ))}
               </ul>
@@ -1075,11 +1099,11 @@ export function PricingPageContent() {
 
         <section
           data-testid="pricing-credit-packs"
-          className="mt-16 overflow-hidden rounded-[2rem] border border-emerald-500/25 bg-gradient-to-br from-emerald-500/10 via-white to-blue-500/5 dark:via-zinc-950 dark:to-blue-950/20"
+          className="mt-16 overflow-hidden rounded-[2rem] border border-accent-promotion-500/25 bg-gradient-to-br from-accent-promotion-500/10 via-white to-blue-500/5 dark:via-zinc-950 dark:to-blue-950/20"
         >
           <div className="grid gap-6 p-5 sm:p-7 lg:grid-cols-[1fr_auto] lg:items-end">
             <div className="max-w-3xl">
-              <p className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.18em] text-emerald-700 dark:text-emerald-300">
+              <p className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.18em] text-accent-promotion-700 dark:text-accent-promotion-300">
                 <Coins className="h-4 w-4" />
                 {creditPackGuide.eyebrow}
               </p>
@@ -1095,13 +1119,13 @@ export function PricingPageContent() {
                   cta_location: "pricing_credit_pack_section",
                 })
               }
-              className="inline-flex h-11 items-center justify-center rounded-xl bg-emerald-600 px-5 text-sm font-black text-white transition hover:bg-emerald-500"
+              className="inline-flex h-11 items-center justify-center rounded-xl bg-accent-promotion-600 px-5 text-sm font-black text-white transition hover:bg-accent-promotion-500"
             >
               {creditPackGuide.purchaseCta}
             </Link>
           </div>
 
-          <div className="grid gap-4 border-t border-emerald-500/20 p-5 sm:p-7 lg:grid-cols-3">
+          <div className="grid gap-4 border-t border-accent-promotion-500/20 p-5 sm:p-7 lg:grid-cols-3">
             {publicCreditPacks.length === 0 ? (
               <p className="text-sm font-semibold text-zinc-500 dark:text-zinc-400 lg:col-span-3">
                 {creditPackGuide.loading}
@@ -1116,11 +1140,11 @@ export function PricingPageContent() {
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <h3 className="text-lg font-black">{creditPackGuide.packNames[pack.id]}</h3>
-                      <p className="mt-2 text-xs font-black uppercase tracking-[0.12em] text-emerald-700 dark:text-emerald-300">
+                      <p className="mt-2 text-xs font-black uppercase tracking-[0.12em] text-accent-promotion-700 dark:text-accent-promotion-300">
                         {creditPackGuide.availableFor}: {pack.allowedPlans.join(" / ")}
                       </p>
                     </div>
-                    <span className="shrink-0 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[10px] font-black text-emerald-700 dark:text-emerald-300">
+                    <span className="shrink-0 rounded-full bg-accent-promotion-500/10 px-2.5 py-1 text-[10px] font-black text-accent-promotion-700 dark:text-accent-promotion-300">
                       {creditPackGuide.oneTime}
                     </span>
                   </div>
@@ -1128,7 +1152,7 @@ export function PricingPageContent() {
                     {numberFormatter.format(pack.credits)}{" "}
                     <span className="text-sm text-zinc-500 dark:text-zinc-400">{creditPackGuide.credits}</span>
                   </p>
-                  <p className="mt-1 text-xl font-black text-emerald-700 dark:text-emerald-300">
+                  <p className="mt-1 text-xl font-black text-accent-promotion-700 dark:text-accent-promotion-300">
                     {formatBillingMinor(
                       pack.priceMinor,
                       pack.currency as BillingCurrency,
@@ -1146,7 +1170,7 @@ export function PricingPageContent() {
             )}
           </div>
 
-          <div className="grid gap-5 border-t border-emerald-500/20 bg-white/60 p-5 dark:bg-zinc-950/40 sm:p-7 lg:grid-cols-[0.75fr_1.25fr]">
+          <div className="grid gap-5 border-t border-accent-promotion-500/20 bg-white/60 p-5 dark:bg-zinc-950/40 sm:p-7 lg:grid-cols-[0.75fr_1.25fr]">
             <div>
               <h3 className="font-black">{creditPackGuide.policyTitle}</h3>
               <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">
@@ -1156,7 +1180,7 @@ export function PricingPageContent() {
             <ul className="grid gap-3">
               {creditPackGuide.policies.map((policy) => (
                 <li key={policy} className="flex gap-3 text-sm font-semibold leading-6 text-zinc-700 dark:text-zinc-200">
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-300" />
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-accent-promotion-600 dark:text-accent-promotion-300" />
                   {policy}
                 </li>
               ))}
@@ -1182,7 +1206,7 @@ export function PricingPageContent() {
                   {creditGuide.description}
                 </p>
               </div>
-              <span className="w-fit rounded-full border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-xs font-black text-emerald-700 dark:text-emerald-300">
+              <span className="w-fit rounded-full border border-accent-promotion-500/30 bg-accent-promotion-500/10 px-4 py-2 text-xs font-black text-accent-promotion-700 dark:text-accent-promotion-300">
                 {creditGuide.typicalLabel}
               </span>
             </div>

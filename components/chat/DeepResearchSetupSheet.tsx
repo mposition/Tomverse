@@ -93,7 +93,7 @@ export function DeepResearchSetupSheet({
         <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-zinc-300 dark:bg-zinc-700 md:hidden" aria-hidden="true" />
         <div className="mb-4 flex items-start justify-between gap-3">
           <div className="flex items-center gap-2.5">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-violet-500/10 text-violet-500">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-deep-research-500/10 text-accent-deep-research-500">
               <Microscope className="h-5 w-5" />
             </span>
             <p className="text-base font-bold text-zinc-900 dark:text-zinc-100">
@@ -154,7 +154,7 @@ export function DeepResearchSetupSheet({
                   onClick={() => setDepth(option)}
                   className={`flex w-full items-center justify-between gap-3 rounded-xl border px-3 py-2.5 text-left transition ${
                     depth === option
-                      ? "border-violet-400 bg-violet-50 dark:border-violet-700 dark:bg-violet-950/30"
+                      ? "border-accent-deep-research-400 bg-accent-deep-research-50 dark:border-accent-deep-research-700 dark:bg-accent-deep-research-950/30"
                       : "border-zinc-200 hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
                   }`}
                 >
@@ -167,7 +167,7 @@ export function DeepResearchSetupSheet({
                     </span>
                   </span>
                   {depth === option && (
-                    <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-violet-500" aria-hidden="true" />
+                    <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-accent-deep-research-500" aria-hidden="true" />
                   )}
                 </button>
               ))}
@@ -204,7 +204,7 @@ export function DeepResearchSetupSheet({
                 data-testid="deep-research-confirm-start"
                 disabled={!hasDraftText}
                 onClick={() => onConfirm(depth)}
-                className="flex-1 rounded-xl bg-violet-600 px-3 py-2.5 text-sm font-black text-white hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-40"
+                className="flex-1 rounded-xl bg-accent-deep-research-600 px-3 py-2.5 text-sm font-black text-white hover:bg-accent-deep-research-500 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {t("chat.deepResearchStart")}
               </button>

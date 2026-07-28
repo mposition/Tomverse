@@ -177,7 +177,7 @@ export function QuoteBadge({
     <div
       className={`mt-1.5 flex items-start gap-1.5 rounded-lg border px-2 py-1.5 text-xs leading-5 ${
         verified
-          ? "border-emerald-200 bg-emerald-50/60 text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:text-emerald-200"
+          ? "border-status-success-200 bg-status-success-50/60 text-status-success-900 dark:border-status-success-900/50 dark:bg-status-success-950/20 dark:text-status-success-200"
           : "border-amber-200 bg-amber-50/60 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-200"
       }`}
       title={verified ? verifiedLabel : unverifiedLabel}
@@ -316,7 +316,7 @@ export function VerifyItemButton({
   if (state.phase === "done") {
     const toneClass =
       state.result.status === "supported"
-        ? "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:text-emerald-200"
+        ? "border-status-success-200 bg-status-success-50 text-status-success-900 dark:border-status-success-900/50 dark:bg-status-success-950/20 dark:text-status-success-200"
         : state.result.status === "unsupported"
           ? "border-red-200 bg-red-50 text-red-900 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-200"
           : "border-zinc-200 bg-zinc-50 text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300";
@@ -528,7 +528,7 @@ export function ComparisonReviewDialog({
             <div className="flex items-center gap-2">
               <span
                 aria-hidden="true"
-                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-cyan-700 via-blue-600 to-purple-600"
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-accent-ai-review-start-700 via-accent-ai-review-mid-600 to-accent-ai-review-end-600"
               >
                 <Sparkles className="h-3.5 w-3.5 text-white" />
               </span>
@@ -593,7 +593,7 @@ export function ComparisonReviewDialog({
                               onClick={() => setActiveReviewer(key)}
                               className={`rounded-xl border px-3 py-2 text-xs font-black transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-zinc-900 ${
                                 isActive
-                                  ? "border-transparent bg-gradient-to-r from-cyan-600 via-blue-600 to-purple-600 text-white"
+                                  ? "border-transparent bg-gradient-to-r from-accent-ai-review-start-600 via-accent-ai-review-mid-600 to-accent-ai-review-end-600 text-white"
                                   : "border-transparent bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
                               }`}
                             >
@@ -631,7 +631,7 @@ export function ComparisonReviewDialog({
 
                   <div className="flex flex-wrap items-center gap-2">
                     {review.cached ? (
-                      <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-black text-emerald-600 dark:text-emerald-300">
+                      <span className="rounded-full bg-status-success-500/10 px-3 py-1 text-xs font-black text-status-success-600 dark:text-status-success-300">
                         {t("chat.aiReviewCached")}
                       </span>
                     ) : (
@@ -771,7 +771,7 @@ export function ComparisonReviewDialog({
                           <h4 className="font-black text-blue-600 dark:text-blue-300">
                             {modelNames.get(assessment.responseId) || assessment.responseId}
                           </h4>
-                          <p className="mt-2 text-xs font-black uppercase tracking-wide text-emerald-600 dark:text-emerald-300">
+                          <p className="mt-2 text-xs font-black uppercase tracking-wide text-status-success-600 dark:text-status-success-300">
                             {t("chat.aiReviewStrengths")}
                           </p>
                           <ul className="mt-1 space-y-1 text-sm leading-5 text-zinc-700 dark:text-zinc-300">
@@ -795,7 +795,7 @@ export function ComparisonReviewDialog({
                   {activeResult.synthesis && (
                     <section
                       data-testid="ai-review-synthesis"
-                      className="rounded-2xl border border-tomverse-review-border bg-gradient-to-br from-cyan-50 via-blue-50 to-violet-50 p-4 dark:from-cyan-950/25 dark:via-blue-950/25 dark:to-violet-950/25"
+                      className="rounded-2xl border border-tomverse-review-border bg-gradient-to-br from-accent-ai-review-start-50 via-accent-ai-review-mid-50 to-accent-ai-review-end-50 p-4 dark:from-accent-ai-review-start-950/25 dark:via-accent-ai-review-mid-950/25 dark:to-accent-ai-review-end-950/25"
                     >
                       <h3 className="flex items-center gap-1.5 text-sm font-black text-zinc-900 dark:text-zinc-100">
                         <Sparkles
@@ -853,7 +853,7 @@ export function ComparisonReviewDialog({
                           {mode === item.id && (
                             <span
                               aria-hidden="true"
-                              className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-cyan-600 via-blue-600 to-purple-600"
+                              className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-accent-ai-review-start-600 via-accent-ai-review-mid-600 to-accent-ai-review-end-600"
                             >
                               <Check className="h-2.5 w-2.5 text-white" strokeWidth={3} />
                             </span>

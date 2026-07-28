@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import {
   expectNoHorizontalOverflow,
   mockAuthenticatedApi,
@@ -58,6 +58,45 @@ async function countLinesForWord(
     },
     { selector, word }
   );
+}
+
+// Locator-based variant of countLinesForWord.
+//
+// The block below used to stamp a `data-ko-heading` attribute on the element
+// and then look it up by selector. React can re-render (or recreate) the
+// heading between those two steps -- the pricing page hydrates its runtime
+// prices -- and the mark goes with it, so the measurement failed with
+// "Selector not found" rather than with anything about wrapping. Measuring
+// through the locator's own element handle removes the window entirely.
+async function countLinesForWordIn(locator: Locator, word: string): Promise<number> {
+  return locator.evaluate((el, target) => {
+    const fullText = el.textContent ?? "";
+    const wordStart = fullText.indexOf(target);
+    if (wordStart === -1) {
+      throw new Error(`Word "${target}" not found in "${fullText}"`);
+    }
+    const wordEnd = wordStart + target.length;
+
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const lineTops = new Set<number>();
+    let node: Node | null;
+    let consumed = 0;
+    while ((node = walker.nextNode())) {
+      const text = node.textContent ?? "";
+      const nodeStart = consumed;
+      const nodeEnd = consumed + text.length;
+      const from = Math.max(nodeStart, wordStart);
+      const to = Math.min(nodeEnd, wordEnd);
+      for (let i = from; i < to; i++) {
+        const range = document.createRange();
+        range.setStart(node, i - nodeStart);
+        range.setEnd(node, i - nodeStart + 1);
+        lineTops.add(Math.round(range.getBoundingClientRect().top));
+      }
+      consumed = nodeEnd;
+    }
+    return lineTops.size;
+  }, word);
 }
 
 // Counts rendered lines of an element by clustering the top offsets of every
@@ -248,10 +287,8 @@ test.describe("Korean typography: display headings keep 어절 intact", () => {
         }
         const locator = page.locator(heading.selector).first();
         await expect(locator, `${heading.label} present`).toBeVisible();
-        await locator.evaluate((element) => element.setAttribute("data-ko-heading", "1"));
-        const lines = await countLinesForWord(page, "[data-ko-heading]", heading.word);
+        const lines = await countLinesForWordIn(locator, heading.word);
         expect(lines, `${heading.label}: "${heading.word}" split across lines`).toBe(1);
-        await locator.evaluate((element) => element.removeAttribute("data-ko-heading"));
       }
       await expectNoHorizontalOverflow(page);
     });
@@ -274,8 +311,8 @@ test.describe("Korean typography: display headings keep 어절 intact", () => {
     await selectLanguage(page, "ko");
 
     const heading = page.locator("h1:has-text('선택하세요')").first();
-    await heading.evaluate((element) => element.setAttribute("data-ko-heading", "1"));
-    expect(await countLinesForWord(page, "[data-ko-heading]", "선택하세요")).toBe(1);
+    await expect(heading).toBeVisible();
+    expect(await countLinesForWordIn(heading, "선택하세요")).toBe(1);
   });
 
   test("English and Chinese headings keep their existing wrapping", async ({ page }) => {

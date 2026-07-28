@@ -249,7 +249,17 @@ export function MarketingHeader({
             data-testid="marketing-brand-name"
             className="whitespace-nowrap text-sm font-black"
           >
-            <span className="sm:hidden">Tomverse</span>
+            {/*
+              UI-005. Below ~240px of viewport -- a 320px phone at 200% zoom,
+              which WCAG reflow expects to work -- the row's three fixed items
+              (logo, language switcher, menu button) already need every pixel,
+              and the brand word was what tipped the header into horizontal
+              overflow. It goes screen-reader-only there rather than truncating
+              to a fragment, so the link keeps its accessible name and the logo
+              still reads as home. FINAL-F004's "never a partial word" contract
+              is preserved: the word is either whole or absent.
+            */}
+            <span className="max-[240px]:sr-only sm:hidden">Tomverse</span>
             <span className="hidden sm:inline">Tomverse Insight</span>
           </span>
         </Link>

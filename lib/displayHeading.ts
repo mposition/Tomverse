@@ -15,5 +15,10 @@
  * trades a rare bad break for consistently ragged lines.
  */
 export function displayHeadingClass(lang: string): string {
-  return lang === "ko" ? "break-keep break-words" : "";
+  // `break-word` is not Korean-specific: it is the overflow escape hatch for
+  // every language. UI-005 found the English comparison heading pushing
+  // `/pricing` sideways at 320px with 200% zoom, where a 30px word is wider
+  // than the whole column -- without it the browser has no legal break point
+  // and overflows the page instead.
+  return lang === "ko" ? "break-keep break-words" : "break-words";
 }

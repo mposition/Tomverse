@@ -345,7 +345,7 @@ export function ModelPickerPanel({
       aria-label={`${stepCopy.openAllModels} · ${openAllHint}`}
       className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-xl border border-zinc-200 px-3 text-left transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
     >
-      <Boxes className="h-4 w-4 shrink-0 text-purple-500" aria-hidden="true" />
+      <Boxes className="h-4 w-4 shrink-0 text-accent-model-catalogue-500" aria-hidden="true" />
       <span className="min-w-0 flex-1 truncate text-[13px] font-bold text-zinc-900 dark:text-zinc-100">
         {stepCopy.openAllModels}
       </span>
@@ -362,7 +362,7 @@ export function ModelPickerPanel({
       onClick={openAllModels}
       className={`flex w-full items-center gap-3 rounded-xl border border-zinc-200 px-3 text-left transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800 ${touchTarget ? "min-h-14 py-2" : "py-2.5"}`}
     >
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-purple-500/10 text-purple-500">
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-model-catalogue-500/10 text-accent-model-catalogue-500">
         <Boxes className="h-5 w-5" aria-hidden="true" />
       </span>
       <span className="flex min-w-0 flex-1 flex-col">

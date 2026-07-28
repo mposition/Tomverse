@@ -389,7 +389,7 @@ export function ComparisonActionRail({
                     {!isMobile && (
                       <span
                         aria-hidden="true"
-                        className="h-1.5 w-1.5 shrink-0 rounded-full bg-gradient-to-br from-cyan-300 via-white to-purple-300"
+                        className="h-1.5 w-1.5 shrink-0 rounded-full bg-gradient-to-br from-accent-ai-review-start-300 via-white to-accent-ai-review-end-300"
                       />
                     )}
                     <span className="min-w-0 truncate">

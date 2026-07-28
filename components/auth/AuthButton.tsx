@@ -751,7 +751,7 @@ export function AuthButton({
             onClick={() => setIsAccountMenuOpen((current) => !current)}
             className="flex min-w-0 flex-1 items-center gap-2 rounded-xl px-1.5 py-1 text-left transition hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:hover:bg-zinc-900"
           >
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-teal-700 text-sm font-black text-white ring-1 ring-teal-400/50 dark:bg-teal-700 dark:ring-teal-400/40">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-accent-account-700 text-sm font-black text-white ring-1 ring-accent-account-400/50 dark:bg-accent-account-700 dark:ring-accent-account-400/40">
             {session.user.image ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -795,7 +795,7 @@ export function AuthButton({
               {t("upgrade.upgradeShort")}
             </UpgradeCtaLink>
           ) : (
-            <span className={`shrink-0 rounded-lg px-2 py-1 text-[10px] font-black ${accountPlan === "Max" ? "bg-purple-500/10 text-purple-600 dark:text-purple-300" : "bg-zinc-100 text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400"}`}>
+            <span className={`shrink-0 rounded-lg px-2 py-1 text-[10px] font-black ${accountPlan === "Max" ? "bg-accent-plan-max-500/10 text-accent-plan-max-600 dark:text-accent-plan-max-300" : "bg-zinc-100 text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400"}`}>
               {accountPlan ? t(`modelTiers.${accountPlan.toLowerCase()}`) : t("auth.loading")}
             </span>
           )}
@@ -819,7 +819,7 @@ export function AuthButton({
               className="fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[90] max-h-[calc(100dvh-1.5rem)] overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-3 shadow-2xl overscroll-contain dark:border-zinc-700 dark:bg-zinc-950 md:absolute md:inset-x-0 md:bottom-[calc(100%+0.5rem)]"
             >
               <div className="flex min-w-0 items-center gap-2 border-b border-zinc-200 pb-3 dark:border-zinc-800">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-teal-700 text-sm font-black text-white">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent-account-700 text-sm font-black text-white">
                   {(session.user.name?.[0] || session.user.email?.[0] || "T").toUpperCase()}
                 </span>
                 <span className="min-w-0 flex-1">
@@ -867,8 +867,8 @@ export function AuthButton({
                       {accountUsage.balances.planRemainingCredits.toLocaleString(globalLang)}
                     </strong>
                   </div>
-                  <div className="rounded-xl bg-emerald-50 p-2.5 dark:bg-emerald-950/30">
-                    <span className="block text-[10px] font-bold text-emerald-700 dark:text-emerald-300">
+                  <div className="rounded-xl bg-status-success-50 p-2.5 dark:bg-status-success-950/30">
+                    <span className="block text-[10px] font-bold text-status-success-700 dark:text-status-success-300">
                       {t("auth.purchasedCreditsRemaining")}
                     </span>
                     <strong className="mt-1 block text-sm text-zinc-900 dark:text-zinc-100">
@@ -933,7 +933,7 @@ export function AuthButton({
                     onClick={() => openSettingsTab("plan")}
                     className="flex min-h-11 w-full items-center gap-2 rounded-xl px-3 text-sm font-bold text-zinc-700 transition hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-900"
                   >
-                    <CreditCard className="h-4 w-4 text-purple-500" />
+                    <CreditCard className="h-4 w-4 text-accent-plan-max-500" />
                     {t("upgrade.viewCurrentPlan")}
                   </button>
                 ) : null}
@@ -1039,7 +1039,7 @@ export function AuthButton({
                                         </section>
                                         <section className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60">
                                             <div className="flex items-start gap-3">
-                                                <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-500" />
+                                                <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-status-success-500" />
                                                 <div>
                                                     <h4 className="text-sm font-bold">{t("auth.securityStatus")}</h4>
                                                     <p className="mt-1 text-sm leading-6 text-zinc-500">{t("auth.securityStatusDescription")}</p>
@@ -1293,7 +1293,7 @@ export function AuthButton({
                                                         {accountPlan ? t(`auth.${accountPlan.toLowerCase()}Plan`) : t("auth.loading")}
                                                     </h4>
                                                 </div>
-                                                <span className={`rounded-full px-3 py-1 text-xs font-bold text-white ${accountPlan === "Free" ? "bg-emerald-600" : accountPlan === "Pro" ? "bg-blue-600" : accountPlan === "Max" ? "bg-purple-600" : "bg-zinc-600"}`}>
+                                                <span className={`rounded-full px-3 py-1 text-xs font-bold text-white ${accountPlan === "Free" ? "bg-status-success-600" : accountPlan === "Pro" ? "bg-blue-600" : accountPlan === "Max" ? "bg-accent-plan-max-600" : "bg-zinc-600"}`}>
                                                     {accountPlan ? t(`modelTiers.${accountPlan.toLowerCase()}`) : t("auth.loading")}
                                                 </span>
                                             </div>
@@ -1407,8 +1407,8 @@ export function AuthButton({
                                                         {t("auth.planCreditsRemaining")}: {accountUsage.balances.planRemainingCredits.toLocaleString(globalLang)}
                                                     </p>
                                                 </div>
-                                                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-900/50 dark:bg-emerald-950/20">
-                                                    <p className="text-xs font-bold uppercase tracking-wide text-emerald-600 dark:text-emerald-300">
+                                                <div className="rounded-2xl border border-status-success-200 bg-status-success-50 p-4 dark:border-status-success-900/50 dark:bg-status-success-950/20">
+                                                    <p className="text-xs font-bold uppercase tracking-wide text-status-success-600 dark:text-status-success-300">
                                                         {t("auth.purchasedCreditsRemaining")}
                                                     </p>
                                                     <p className="mt-2 text-lg font-black text-zinc-900 dark:text-zinc-100">
@@ -1442,7 +1442,7 @@ export function AuthButton({
                                             </UpgradeInterestButton>}
                                             <CreditPackPurchaseButton
                                                 trigger="account"
-                                                className="flex w-full items-center justify-center gap-2 rounded-xl border border-purple-300 bg-purple-50 px-3 py-3 text-sm font-black text-purple-700 transition-colors hover:bg-purple-100 disabled:cursor-not-allowed disabled:opacity-70 dark:border-purple-900/60 dark:bg-purple-950/30 dark:text-purple-200 dark:hover:bg-purple-950/50"
+                                                className="flex w-full items-center justify-center gap-2 rounded-xl border border-accent-plan-max-300 bg-accent-plan-max-50 px-3 py-3 text-sm font-black text-accent-plan-max-700 transition-colors hover:bg-accent-plan-max-100 disabled:cursor-not-allowed disabled:opacity-70 dark:border-accent-plan-max-900/60 dark:bg-accent-plan-max-950/30 dark:text-accent-plan-max-200 dark:hover:bg-accent-plan-max-950/50"
                                             >
                                                 <CreditCard className="h-4 w-4" />
                                                 {globalLang === "ko" ? "추가 크레딧 구매" : "Buy additional credits"}
@@ -1461,7 +1461,7 @@ export function AuthButton({
                                         trigger="account"
                                         className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black text-white transition-colors disabled:cursor-not-allowed disabled:opacity-70 ${
                                             mobileUpgradePlan === "Max"
-                                                ? "bg-purple-600 hover:bg-purple-500"
+                                                ? "bg-accent-plan-max-600 hover:bg-accent-plan-max-500"
                                                 : "bg-blue-600 hover:bg-blue-500"
                                         }`}
                                     >

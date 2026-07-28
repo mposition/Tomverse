@@ -1,16 +1,59 @@
-# Tomverse accent 사용 inventory (UI-012 / VAL-006)
+# Tomverse accent 역할 정책 (UI-012 / VAL-006)
 
-> **이 문서는 inventory이며, recolor를 승인하지 않습니다.**
-> 작업명령서 TASK-009는 `[DESIGN DECISION REQUIRED]`가 해결되기 전에는
-> component 색상을 변경하지 않도록 명시합니다. 따라서 이번 작업에서 accent
-> 색상 자체는 한 곳도 바꾸지 않았습니다. 유일한 예외는 아래 "대비 때문에
-> 변경한 항목"에 기록한 account avatar 1건이며, 이는 semantic 역할 변경이
-> 아니라 UI-003의 WCAG AA 실패를 닫기 위한 같은 색상 계열 내 명도 조정입니다.
+> **상태: B안 승인·구현 완료.** 역할별 semantic accent token을 정의하고
+> guarded component를 token으로 이관했습니다. **색상 값은 하나도 바꾸지
+> 않았습니다** — 모든 token이 기존에 쓰던 Tailwind palette step을
+> `var(--color-<hue>-<step>)`로 참조하므로 렌더 결과가 동일합니다.
+> 유일한 색 변경은 아래 5장의 account avatar 1건이며, UI-012이 아니라
+> UI-003의 WCAG AA 실패를 닫기 위한 같은 hue 내 명도 조정입니다.
+>
+> 규칙 본문은 `AGENTS.md`의 "Accent colour roles", 정의는
+> `app/globals.css`, 강제는 `scripts/check-accent-tokens.mjs`
+> (`npm run check:accent-tokens`, PR Fast Gate static 단계)에 있습니다.
 
-기준 SHA: `e062da8` 기반 작업 branch `claude/tomverse-insight-ui-audit-3m2k1c`.
-집계 방법: `components/`, `app/` 전체에서 `(bg|text|border|ring|from|via|to)-<hue>-<step>` utility 출현 수.
+기준: `origin/develop` `39194ea` 위의 작업 branch
+`claude/tomverse-insight-ui-audit-3m2k1c`.
 
-## 1. 전체 사용량
+## 0. 승인된 정책 (B안)
+
+1. 현재 시각 결과를 유지한다.
+2. 역할별 semantic accent token을 정의한다.
+3. `cyan → blue → purple` **전체 gradient 조합은 AI Review 전용으로 예약**한다.
+4. Deep Research, Web Search, Model Catalogue, Max plan, Promotion,
+   Account identity는 각각 별도 token을 쓴다.
+5. 값이 같아도 역할이 다르면 token을 분리한다
+   (`accent-promotion` ≠ `status-success`, `accent-model-catalogue` ≠
+   `accent-plan-max`).
+6. 신규 component가 raw accent utility를 추가하지 못하도록 규칙과 검증을
+   문서화한다.
+
+## 0-1. 구현 결과
+
+| 역할 | token 접두사 | palette | 이관한 파일 |
+|---|---|---|---|
+| AI Review | `accent-ai-review-start\|mid\|end-*` | cyan / blue / purple·violet | `ComparisonReviewDialog`, `AiReviewDemo`, `ModelSelectionBadge`, `ComparisonActionRail` |
+| Deep Research | `accent-deep-research-*` | violet | `DeepResearchSetupSheet`, `ChatInput` |
+| Web Search | `accent-web-search-*` | sky | `ChatInput` |
+| Model Catalogue | `accent-model-catalogue-*` | purple | `ModelPickerPanel`, `ChatInput` |
+| Max plan | `accent-plan-max-*` | purple | `AuthButton` |
+| Promotion | `accent-promotion-*` | emerald | `PricingPageContent` |
+| Account identity | `accent-account-*` | teal | `AuthButton`, `SidebarAccountRailButton` |
+| 성공·검증 상태 | `status-success-*` | emerald | `ChatInput`, `AuthButton`, `ComparisonReviewDialog` |
+
+총 62개 token, guarded 파일 10개. AI Review의 3px gradient bar와 review surface는
+이미 `--tomverse-accent-*` / `--tomverse-review-*`로 token화돼 있어 그대로 둡니다.
+
+**시각 동일성 근거** `[테스트]` chat state golden 74개가 전부 통과합니다.
+AI Review(desktop light·mobile dark), Deep Research, composer를 포함하므로
+이관한 색이 렌더 단계에서 바뀌지 않았음을 pixel 수준에서 확인한 것입니다.
+(모바일 golden 6장은 `develop`의 `7cd1367` 헤더 레이아웃 변경 때문에
+재생성했고, 색이 아니라 세로 배치가 달라진 것을 diff로 확인했습니다.)
+
+**검증 방법** `npm run check:accent-tokens`가 guarded 파일에서
+① raw accent utility, ② 등록되지 않은 역할 이름, ③ token 정의 누락,
+④ AI Review 외 component의 `accent-ai-review-*` 사용을 각각 실패로 처리합니다.
+
+## 1. 전체 사용량 (이관 전 기준)
 
 | Hue | 출현 수 | 주 사용처 |
 |---|---:|---|
@@ -76,9 +119,14 @@ brand accent가 이를 덮지 않는다는 제약을 유지합니다.
 이 한 건 외에 `teal`·`purple`·`emerald`·`violet`·`cyan`·`sky`의 역할이나
 색상은 변경하지 않았습니다.
 
-## 6. 다음 단계
+## 6. 남은 범위
 
-1. 4장의 A/B 중 하나를 승인합니다.
-2. 승인된 정책을 token 이름과 usage rule로 이 문서에 확정합니다.
-3. 그때 비로소 TASK-009의 component 변경 ticket을 생성합니다. 승인 전 recolor는
-   금지입니다.
+guarded 목록은 역할이 token으로 옮겨진 파일만 담고 있습니다. 아직 대상이 아닌
+것:
+
+- admin console 패널의 accent (역할 정의가 없고 소비자 화면이 아님)
+- `red` / `amber` 상태 색 (별도 관례로 이미 일관됨)
+- `blue` / `zinc` 기본 인상 (accent가 아님)
+
+이들을 넣으려면 역할 정의가 먼저이고, 그 다음 token, 그 다음 guarded 목록
+확장입니다. 순서를 바꾸면 검사가 의미를 잃습니다.

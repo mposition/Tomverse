@@ -73,7 +73,7 @@ export function SidebarAccountRailButton({
                 aria-haspopup="menu"
                 aria-expanded={isOpen}
                 onClick={() => setIsOpen((current) => !current)}
-                className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-teal-700 text-sm font-black text-white ring-1 ring-teal-400/50 transition hover:ring-2 hover:ring-teal-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:bg-teal-700 dark:ring-teal-400/40"
+                className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-accent-account-700 text-sm font-black text-white ring-1 ring-accent-account-400/50 transition hover:ring-2 hover:ring-accent-account-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:bg-accent-account-700 dark:ring-accent-account-400/40"
             >
                 {user ? (
                     user.image ? (
@@ -103,7 +103,7 @@ export function SidebarAccountRailButton({
                     {user ? (
                         <>
                             <div className="flex min-w-0 items-center gap-2 border-b border-zinc-200 p-2 pb-3 dark:border-zinc-800">
-                                <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-teal-700 text-sm font-black text-white">
+                                <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-accent-account-700 text-sm font-black text-white">
                                     {user.image ? (
                                         // eslint-disable-next-line @next/next/no-img-element
                                         <img src={user.image} alt="" className="h-full w-full object-cover" />

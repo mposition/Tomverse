@@ -652,7 +652,10 @@ const checks = [
       ];
       const pricing = read("components/marketing/PricingPageContent.tsx");
       const checkout = read("components/marketing/UpgradeInterestButton.tsx");
-      const signup = read("app/(application)/auth/signin/page.tsx");
+      // The sign-in route is a server component that resolves `?lang=` before
+      // rendering (VAL-003); the interactive half, and the page-view event,
+      // live in its client child.
+      const signup = read("app/(application)/auth/signin/SignInPageContent.tsx");
       const chatInput = read("components/chat/ChatInput.tsx");
       const migration = read(
         "prisma/migrations/20260714233000_expand_product_analytics_funnel/migration.sql"
@@ -1672,6 +1675,12 @@ const checks = [
         // The UI-001/002/003/006/007 regressions are merge-blocking on
         // develop, not something main finds after the fact.
         prWorkflow.includes("npm run test:e2e:ui-risk") &&
+        // UI-012: accent colours stay addressed by role, checked before the
+        // browser tier because it needs neither a build nor a browser.
+        prWorkflow.includes("npm run check:accent-tokens") &&
+        packageSource.includes(
+          '"check:accent-tokens": "node scripts/check-accent-tokens.mjs"'
+        ) &&
         prWorkflow.includes("playwright install --with-deps chromium") &&
         !prWorkflow.includes("chromium webkit") &&
         // Goldens are never rewritten by CI, on any tier.

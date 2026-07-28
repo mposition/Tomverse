@@ -2,28 +2,29 @@ import { expect, test, type Page } from "@playwright/test";
 import { mockPublicProofMetrics, prepareGuestPage } from "./support/app-fixtures";
 
 /**
- * VAL-002. The audit reported that `/pricing` overflows horizontally at small
- * widths under zoom *while a promotion is active*, and both re-audits recorded
- * "could not reproduce" -- because no promotion was active in the runtime they
- * measured. "The state did not exist" is not an answer, so this pins the state
- * down: `featuredPromotion` comes only from `/api/billing/config`, which is
- * mockable, and each case measures the same page twice with only that field
- * changed.
+ * UI-005 (Revise) / VAL-002. `/pricing` overflowed horizontally at narrow
+ * widths under zoom. The audit attributed it to an active promotion; measuring
+ * the same combination with the banner and without it showed the promotion
+ * contributes exactly 0px, so the diagnosis was wrong while the defect was
+ * real. The cause was the plan card's intrinsic width:
  *
- * What this suite asserts is the attribution, because that is the open
- * question: **the promotion must not make the page any wider than it already
- * is.** The absolute overflow is logged alongside it.
+ * - the card is a grid item, so `min-width: auto` kept it at its 287px
+ *   min-content inside a 224px track;
+ * - its eyebrow/badge row could not wrap, so the pair set that min-content;
+ * - the price and its period label shared one inline line;
+ * - each feature bullet was an icon plus a bare text node, so the row's
+ *   minimum was the icon plus the longest word;
+ * - and the display headings had no overflow escape hatch in English.
  *
- * Result at the time of writing (see .github/audits/ui-insight-followup.md):
+ * All five are fixed at the source rather than clipped. This suite asserts two
+ * separate things, both able to fail:
  *
- * - The promotion never adds a single pixel of overflow. Every combination
- *   measures identically with the banner and without it.
- * - `/pricing` *does* overflow at 320px from 125% zoom (en) and 200% (ko), and
- *   at 390px from 150% (en) / 200% (ko) -- with or without a promotion. The
- *   offending element is a plan `<article>` whose minimum width exceeds the
- *   column. That is a real finding, but a different one from UI-005 and
- *   outside this work order's approved scope, so it is reported rather than
- *   fixed here.
+ * 1. **Absolute**: every one of the 16 viewport x zoom x language combinations
+ *    stays within 1px of its own client width, with the promotion active and
+ *    with it inactive -- 32 measurements.
+ * 2. **Attribution**: the promotion never widens the page relative to the same
+ *    combination without it, so a future promotion layout cannot reintroduce
+ *    UI-005 unnoticed.
  *
  * Browser zoom is emulated by shrinking the viewport, matching
  * ui-zoom-reflow.spec.ts: that is what zoom does -- it changes how many CSS
@@ -148,7 +149,7 @@ for (const base of BASE_VIEWPORTS) {
   for (const zoom of ZOOM_LEVELS) {
     for (const lang of ["ko", "en"] as const) {
       const label = `${base.name} @${zoom * 100}% (${lang})`;
-      test(`an active promotion adds no pricing overflow at ${label}`, async ({ page }) => {
+      test(`pricing reflows without overflow at ${label}`, { tag: "@ui-risk" }, async ({ page }) => {
         const viewport = {
           width: Math.round(base.width / zoom),
           height: Math.round(base.height / zoom),
@@ -173,6 +174,18 @@ for (const base of BASE_VIEWPORTS) {
           )}`
         );
 
+        // 1. Absolute: the page fits, in both promotion states.
+        expect(
+          withoutPromotion.overflowPx,
+          `horizontal overflow with no promotion: ${JSON.stringify(withoutPromotion)}`
+        ).toBeLessThanOrEqual(1);
+        expect(
+          withPromotion.overflowPx,
+          `horizontal overflow with an active promotion: ${JSON.stringify(withPromotion)}`
+        ).toBeLessThanOrEqual(1);
+
+        // 2. Attribution: the banner is not what widens it, whatever happens
+        //    to the absolute number later.
         expect(
           withPromotion.overflowPx,
           `the promotion banner widened the page: ${JSON.stringify(

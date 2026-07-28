@@ -9,6 +9,7 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 
 | Tier | Workflow | 명령 | 실행 시점 | merge 차단 |
 |---|---|---|---|---|
+| PR static | `pr-fast-gate.yml` | `npm run check:accent-tokens` (UI-012 역할 token 강제) | 모든 PR | 예 |
 | PR contract | `pr-fast-gate.yml` | `npm run test:e2e:smoke` (`--grep=@smoke`, `desktop-chromium`) | 모든 PR | 예 |
 | PR high-risk UI | `pr-fast-gate.yml` | `npm run test:e2e:ui-risk` (`--grep=@ui-risk`, `desktop-chromium` + `mobile-chromium`) | 모든 PR | 예 |
 | Main regression | `e2e.yml` | `npm run test:e2e:chromium` (필터 없음) | `main` push | 아니오 |
@@ -28,8 +29,9 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 | `analytics-settings-target.spec.ts` | 44px target ×3 route, content intersection ×3 route, keyboard 도달, light/dark AA | UI-002 | 양쪽 |
 | `ui-state-contrast.spec.ts` | full/partial error, mobile header·composer, sidebar, desktop model panel의 light/dark AA, 11px floor ×2 | UI-003, UI-007 | desktop-chromium (다른 project는 skip) |
 | `korean-typography.spec.ts` | display heading 어절 보존 ×4 viewport, 150% zoom | UI-006 | 양쪽 |
+| `pricing-promotion-reflow.spec.ts` | 16개 viewport×zoom×언어 조합의 절대 overflow ≤1px + promotion 귀속 | UI-005 | desktop-chromium |
 
-검토 시점 실측: **44 test 통과 / 14 skip / 46초** (두 project 합계, 단일 worker).
+검토 시점 실측: **76 test 통과 / 14 skip / 67초** (두 project 합계, 단일 worker).
 
 ## PR tier에 두지 않는 것과 그 이유
 

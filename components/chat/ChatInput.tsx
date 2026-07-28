@@ -1612,7 +1612,7 @@ export function ChatInput({
             ? "border-red-200 bg-red-50 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
             : webSearchState.tone === "warning"
               ? "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100"
-              : "border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-200"
+              : "border-accent-web-search-200 bg-accent-web-search-50 text-accent-web-search-800 dark:border-accent-web-search-900/60 dark:bg-accent-web-search-950/30 dark:text-accent-web-search-200"
         }`}
       >
         <Globe2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -1661,7 +1661,7 @@ export function ChatInput({
     {isDeepResearchPending && (
       <div
         data-testid="deep-research-chip"
-        className="flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-violet-200 bg-violet-50 pl-3 pr-1.5 text-xs font-bold text-violet-800 dark:border-violet-900/60 dark:bg-violet-950/30 dark:text-violet-200"
+        className="flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-accent-deep-research-200 bg-accent-deep-research-50 pl-3 pr-1.5 text-xs font-bold text-accent-deep-research-800 dark:border-accent-deep-research-900/60 dark:bg-accent-deep-research-950/30 dark:text-accent-deep-research-200"
         title={t("chat.deepResearchChipTooltip")}
       >
         <Microscope className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -1671,7 +1671,7 @@ export function ChatInput({
           onClick={() => onDismissDeepResearchChip?.()}
           aria-label={t("chat.removeDeepResearchChip")}
           title={t("chat.removeDeepResearchChip")}
-          className={`relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-violet-500 before:absolute before:content-[''] hover:bg-violet-100 dark:hover:bg-violet-900/40 ${isMobileShell ? "before:-inset-2.5" : "before:-inset-1"}`}
+          className={`relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-accent-deep-research-500 before:absolute before:content-[''] hover:bg-accent-deep-research-100 dark:hover:bg-accent-deep-research-900/40 ${isMobileShell ? "before:-inset-2.5" : "before:-inset-1"}`}
         >
           <X className="h-3.5 w-3.5" />
         </button>
@@ -1760,7 +1760,7 @@ export function ChatInput({
             </div>
           )}
           {addOnCreditsForRequest > 0 && (
-            <div className="mb-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold leading-5 text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-100">
+            <div className="mb-2 rounded-xl border border-status-success-200 bg-status-success-50 px-3 py-2 text-xs font-semibold leading-5 text-status-success-900 dark:border-status-success-900/60 dark:bg-status-success-950/30 dark:text-status-success-100">
               {interpolateCopy(t("chat.addOnCreditsWillBeUsed"), {
                 credits: addOnCreditsForRequest,
               })}
@@ -1878,7 +1878,7 @@ export function ChatInput({
           {showWebSearchSuggestion && (
             <div
               data-testid="web-search-auto-suggestion"
-              className="mb-2 rounded-2xl border border-sky-200 bg-sky-50 px-3 py-3 dark:border-sky-900/60 dark:bg-sky-950/20"
+              className="mb-2 rounded-2xl border border-accent-web-search-200 bg-accent-web-search-50 px-3 py-3 dark:border-accent-web-search-900/60 dark:bg-accent-web-search-950/20"
             >
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                 <div className="min-w-0 flex-1">
@@ -1901,7 +1901,7 @@ export function ChatInput({
                         setDismissedWebSearchSuggestionKey(webSearchSuggestionKey);
                       }
                     }}
-                    className="rounded-xl bg-sky-600 px-3 py-2 text-[11px] font-black text-white hover:bg-sky-500"
+                    className="rounded-xl bg-accent-web-search-600 px-3 py-2 text-[11px] font-black text-white hover:bg-accent-web-search-500"
                   >
                     {t("chat.webSearchSuggestionAccept")}
                   </button>
@@ -1918,7 +1918,7 @@ export function ChatInput({
                         setDismissedWebSearchSuggestionKey(webSearchSuggestionKey);
                       }
                     }}
-                    className="rounded-xl border border-sky-300 bg-white px-3 py-2 text-[11px] font-bold text-sky-900 hover:bg-sky-100 dark:border-sky-800 dark:bg-zinc-950 dark:text-sky-200"
+                    className="rounded-xl border border-accent-web-search-300 bg-white px-3 py-2 text-[11px] font-bold text-accent-web-search-900 hover:bg-accent-web-search-100 dark:border-accent-web-search-800 dark:bg-zinc-950 dark:text-accent-web-search-200"
                   >
                     {t("chat.webSearchSuggestionDecline")}
                   </button>
@@ -2363,7 +2363,7 @@ export function ChatInput({
                     onClick={() => setMenuView("webSearch")}
                     className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
                   >
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-sky-500/10 text-sky-500">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-web-search-500/10 text-accent-web-search-500">
                       <Globe2 className="h-5 w-5" />
                     </span>
                     <span className="flex min-w-0 flex-col">
@@ -2413,7 +2413,7 @@ export function ChatInput({
                         }}
                         className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-zinc-800"
                       >
-                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-violet-500/10 text-violet-500">
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-deep-research-500/10 text-accent-deep-research-500">
                           <Microscope className="h-5 w-5" />
                         </span>
                         <span className="flex min-w-0 flex-col">
@@ -2456,7 +2456,7 @@ export function ChatInput({
                     }}
                     className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
                   >
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-purple-500/10 text-purple-500">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-model-catalogue-500/10 text-accent-model-catalogue-500">
                       <Boxes className="h-5 w-5" />
                     </span>
                     <span className="flex min-w-0 flex-col">
@@ -2493,10 +2493,10 @@ export function ChatInput({
                         closeMenu(false);
                       }}
                       className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
-                        webSearchMode === mode ? "bg-sky-500/10" : ""
+                        webSearchMode === mode ? "bg-accent-web-search-500/10" : ""
                       }`}
                     >
-                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-sky-500/10 text-sky-500">
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-web-search-500/10 text-accent-web-search-500">
                         <Globe2 className="h-5 w-5" />
                       </span>
                       <span className="flex min-w-0 flex-1 flex-col">
@@ -2516,7 +2516,7 @@ export function ChatInput({
                         </span>
                       </span>
                       {webSearchMode === mode && (
-                        <Check className="h-4 w-4 shrink-0 text-sky-500" aria-hidden="true" />
+                        <Check className="h-4 w-4 shrink-0 text-accent-web-search-500" aria-hidden="true" />
                       )}
                     </button>
                   ))}

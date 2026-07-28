@@ -20,7 +20,7 @@ import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { ProviderStatusBanner } from "@/components/chat/ProviderStatusBanner";
 import { ComparisonActionRail } from "@/components/chat/ComparisonActionRail";
 import { ModeInfoSheet } from "@/components/chat/ModeInfoSheet";
-import { useCompactBottomDock } from "@/components/chat/useCompactBottomDock";
+import { useCompactBottomDock } from "@/components/chat/useVisualViewport";
 import { chatModelSummaryCopy } from "@/components/chat/chatModelSummaryCopy";
 import { deriveComparisonReadiness } from "@/lib/comparisonReadiness";
 import { buildChatModelSummary } from "@/lib/chatModelSummary";
