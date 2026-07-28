@@ -1,5 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
-import { mockAuthenticatedApi } from "./support/app-fixtures";
+import {
+  mockAuthenticatedApi,
+  openRecentConversation,
+} from "./support/app-fixtures";
 
 // The "+" trigger (opens the tools/actions sheet) is the first of the two
 // chat-input-popover triggers; the model-selector button (used by
@@ -132,6 +135,12 @@ test("web search mode selection does not repeat across a new chat", async ({ pag
     ],
   });
   await page.goto("/chat?lang=en");
+
+  // Seeding history is not enough on its own: /chat opens on the welcome
+  // screen with no active conversation, so the panel still reports itself
+  // empty and the mobile header still hides its button. The seeded
+  // conversation has to actually be opened first.
+  await openRecentConversation(page);
 
   await toolsMenuTrigger(page).click();
   await page.getByTestId("tools-web-search-row").click();

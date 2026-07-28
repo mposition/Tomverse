@@ -68,7 +68,7 @@ async function prepareSingleModelChat(page: Page) {
 }
 
 test.describe("chat send survives a late conversation-history response", () => {
-  test.beforeEach(async ({ page }, testInfo) => {
+  test.beforeEach(async ({}, testInfo) => {
     test.skip(
       !testInfo.project.name.startsWith("desktop"),
       "Enter-to-send drives this flow on desktop projects."
