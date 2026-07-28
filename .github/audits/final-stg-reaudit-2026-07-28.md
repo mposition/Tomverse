@@ -19,7 +19,7 @@
 | 항목 | 값 |
 |---|---|
 | 재감사 시작 | 2026-07-28 00:29:29 UTC (컨테이너 로컬 TZ = UTC, 동일) |
-| 재감사 종료 | 2026-07-28 01:34 UTC |
+| 재감사 종료 | 2026-07-28 01:58 UTC |
 | 최종 점수 | **78 / 100** (직전 81 → 78) |
 | 최종 판정 | **No-Go** (동시에 `Needs operational verification`) |
 | 검증 branch | `develop` |
@@ -27,7 +27,7 @@
 | origin/develop SHA | `8d02fc1d35f988d5c9d61ab9463fea01a3f0b3b6` |
 | staging SHA | `8d02fc1d35f988d5c9d61ab9463fea01a3f0b3b6` |
 | deployment ID | `2351b283-29a3-4b98-8ada-038da7324c6d` (SUCCESS) |
-| 실제 Provider 호출 | **수행하지 않음** (승인 없음) |
+| 실제 Provider 호출 | **승인 후 시도함 — Provider 도달 0회, 소비 credit 0** (Turnstile 차단, §3-A 참조) |
 | Verified fixed | 5 (FINAL-F001, F003, F004, F005, F006) |
 | Partially fixed | 1 (FINAL-F002) |
 | Regressed | 0 |
@@ -105,7 +105,7 @@ prefetch와 `/api/models/status`의 `ERR_ABORTED`(페이지 전환 시 정상 �
 | ID | 과거 심각도 | 판정 | Staging 증거 | Test 증거 | 남은 위험 |
 |---|---|---|---|---|---|
 | FINAL-F001 | P1 | **Verified fixed** | 24개 조합 실측 + hit-test | `marketing-consent-hero.spec.ts` 통과 | 없음 |
-| FINAL-F002 | P1 | **Partially fixed / 실호출 Not verified** | 상태 페이지·API 실측 | 해당 없음(mock 불가) | **출시 blocker** |
+| FINAL-F002 | P1 | **Partially fixed / 실호출 Environment dependent → Not verified** | 상태 페이지·API 실측 + 승인된 실호출 시도(§3-A) | 해당 없음(mock 불가) | **출시 blocker** |
 | FINAL-F003 | P1 | **Verified fixed** | mock 런타임 독립 재현 | 회귀 테스트 **부재** | REAUDIT-F006 |
 | FINAL-F004 | P2 | **Verified fixed** | 320–430px + 640/320 CSS px | `marketing-consent-hero.spec.ts` 통과 | 없음 |
 | FINAL-F005 | P2 | **Verified fixed** | 3rd-party 요청 0건 | `security:regression` 113건 통과 | 없음 |
@@ -248,12 +248,64 @@ notice는 composer 위 예약된 slot(높이 80px)에 있고 composer 컨트롤�
   Google이 Incident였고, 그 순간에도 `/api/models/status`는 gemini 모델을 `available`로
   보고했습니다 → 사용자 경고 부재 (REAUDIT-F001의 두 번째 측면).
 
-**승인된 실제 검증**: 수행하지 않았습니다. 사용자 승인이 없었고, 감사 원칙 4에 따라
-mock 결과를 상용 가용성 근거로 승격하지 않습니다. 따라서 아래 항목은 전부
-**`Not verified`** 입니다 — 3-model 비교 3회 실행, panel별 완료, latency, expected/actual
-credit 일치, partial failure recovery, AI Review 실행 및 과금, 실패 요청 환불.
+**승인된 실제 검증**: 사용자 승인을 받아 부록 A 범위대로 실행했습니다. 결과는 §3-A에
+분리해 기록합니다. **결론적으로 Provider에 도달한 요청은 0건이므로 상용 가용성은 여전히
+`Not verified`** 입니다.
 
-승인 요청안은 §14 뒤 「부록 A」에 제시했습니다.
+---
+
+### 3-A. 승인된 실제 호출 시도 결과 (2026-07-28 01:41–01:57 UTC)
+
+**실행 범위 (승인 범위 준수)**: staging 한정, guest 세션, web search `off`,
+prompt `"In one sentence, what is the capital city of France?"`, 비교 3회 시도.
+
+| 항목 | 결과 |
+|---|---|
+| `/api/chat` POST 총 시도 | **20건** (비교 3회 + 진단 2회) |
+| HTTP 200 | **0건** |
+| HTTP 403 | **20건 전부** |
+| 응답 body | `{"error":"Guest verification is required.","code":"TURNSTILE_REQUIRED"}` |
+| **Provider 도달 횟수** | **0회** |
+| **실제 소비 credit** | **0** (승인 상한 17 대비 0) |
+| 전송된 `webSearchMode` | 모든 요청에서 **필드 부재** (mode `off`와 일치 ✅) |
+| 전송된 modelId | `gpt-5-4-mini`, `claude-haiku-4-5`, `gemini-2-5-flash` — 기본 3-model 정확 ✅ |
+| 전체 AI Review | 시도 불가 — guest에게는 `ai-review-guest-locked`로 로그인 게이트 |
+| Guest quick summary | 시도했으나 비교 자체가 실패해 실행 조건 미충족 |
+
+**원인 분류: 제품 결함 아님 — 감사 도구의 환경 제약.**
+`TURNSTILE_REQUIRED`는 Cloudflare Turnstile이 **자동화 브라우저(headless Chromium,
+감사 프록시 경유)에 토큰 발급을 거부**한 결과입니다. 클라이언트는 설계대로 이 코드를
+받아 대화형 챌린지를 시도하고 재요청했으나, 자동화 환경에서는 챌린지를 통과할 수
+없습니다. 즉 **guest 남용 방지가 의도대로 작동한 것**이며, credential·egress·Provider
+장애의 증거가 아닙니다. 이 항목은 `Environment dependent`로 분류합니다.
+
+**이 시도에서 부수적으로 확인된 긍정 근거**
+
+1. **실 송신 경로의 guest 보호가 실제로 강제**됩니다 — 우회 없이 100% 차단.
+2. **실패 recovery UX가 정상 동작합니다** `[브라우저]`. 챌린지 시도(약 20초) 후 3개
+   panel 모두가 스핀 상태에 갇히지 않고 명확한 오류 상태로 전환되었습니다:
+   오류 문구 + **Retry** + **Report error** + *"You can also select another model and
+   try again."* + **Trace ID** 노출. t+25s / t+40s 관측에서 동일하게 안정.
+   초기 관측에서 의심했던 "0/3 answers complete · 3 still generating" 고착은
+   챌린지 대기 중의 과도기 상태였고, **영구 고착이 아님을 확인해 발견점에서
+   제외**했습니다.
+3. **live staging에서도 `off` 모드가 `webSearchMode` 필드를 전송하지 않음**을 확인 —
+   §9 matrix의 mock 결과가 실환경과 일치합니다.
+4. 요청 거부가 Provider 디스패치 **이전**에 일어나 credit 예약조차 발생하지
+   않았습니다 — 과금 안전성 측면의 긍정 신호.
+
+**여전히 `Not verified`로 남는 항목**: panel별 실제 completion, latency, response
+status 200, expected/actual credit 일치, partial failure 시 환불, 전체 AI Review 실행
+및 과금.
+
+**다음 검증 경로 (권장)**: (a) 비자동화 브라우저에서 수동 1회 실행, 또는
+(b) staging 인증 계정 자격증명 제공(전체 AI Review까지 검증 가능), 또는
+(c) staging 한정 Turnstile 우회 키를 부여한 일회성 세션. 어느 쪽이든 §부록 A의
+상한·중단 조건을 그대로 적용하면 됩니다.
+
+**부수 관찰(발견점 아님)**: 모델 id `gemini-2-5-flash`의 표시명이
+`Gemini 3.1 Flash-Lite`입니다. 요청 body는 id를 정확히 사용하므로 기능상 문제는 없으나,
+id와 브랜드명이 세대 표기상 어긋나 운영 로그 해석 시 혼동 여지가 있습니다.
 
 ---
 
@@ -825,12 +877,12 @@ TLS 종단 프록시가 TLS 1.3 handshake를 리셋해 브라우저 계측 시 `
 
 | 항목 | 사유 |
 |---|---|
-| 기본 3-model 실제 비교 3회 | 사용자 승인 없음 (감사 원칙 4) |
-| 각 panel completion / latency / response status | 동일 |
-| AI Review 실제 실행 및 과금 | 동일 |
-| expected vs actual credit 일치 | 동일 |
-| 실패 요청의 실제 환불 | 동일 |
-| partial failure recovery 실동작 | 동일 |
+| 기본 3-model 실제 비교 (Provider 도달) | 승인 후 시도했으나 Turnstile이 자동화 브라우저를 차단 — 20/20 요청이 403 `TURNSTILE_REQUIRED` (§3-A) |
+| 각 panel completion / latency / response status 200 | 동일 |
+| 전체 AI Review 실제 실행 및 과금 | guest는 로그인 게이트(`ai-review-guest-locked`), staging 인증 계정 자격증명 없음 |
+| expected vs actual credit 일치 | 요청이 Provider 디스패치 전에 거부되어 소비 0 |
+| 실패 요청의 실제 환불 | 동일 (예약 자체가 발생하지 않음) |
+| partial failure recovery 실동작 | **부분 확인됨** — 요청 거부 시 Retry/Report error/Trace ID 노출까지는 실측(§3-A). Provider 부분 실패 경로는 미검증 |
 | 부족한 credit에서 provider request 0건 | credit 잔액 조작 필요, 승인 범위 밖 |
 | Provider 응답 내용 정확도 | 가용성 검사와 분리했고 이번 범위 아님 |
 | staging DB 직접 조회 (`ProviderProbeResult` 등) | DB 접근 권한 없음 — 공개 API·상태 페이지·Railway 메타로 대체 |
@@ -854,7 +906,7 @@ TLS 종단 프록시가 TLS 1.3 handshake를 리셋해 브라우저 계측 시 `
 | 1 | `no_probe_model` Provider의 probe 실패 카운터를 무효화하고 상태를 `unknown`으로 보낼 것. Perplexity의 202 카운터를 1회성 정리 | Provider monitoring | `/status`에서 프로브 대상이 아닌 Provider가 `incident`로 표시되지 않음 |
 | 2 | `/status`와 `/api/models/status`가 동일한 `publicStatus`를 읽도록 통일하거나, incident Provider의 모델에 사용자 경고·대체 경로를 부여 | Provider monitoring / Chat UI | 임의 시각 동시 조회 시 두 소스가 모순되지 않음 |
 | 3 | 카탈로그 reconciliation 크론을 1회 수동 실행해 `llama-4-scout` 비활성화를 확인 | Model registry / Ops | `/api/models/status`에서 해당 모델이 사라지거나 `unavailable` + fallback 제공 |
-| 4 | 승인 하에 기본 3-model 비교 3회 + AI Review 1회를 staging에서 실행하고 credit 정합성·환불을 실측 | Ops / Billing | §9의 `[미검증]` 행이 실측값으로 채워짐 |
+| 4 | 기본 3-model 비교 + AI Review를 **비자동화 브라우저 또는 인증된 staging 계정**으로 실행해 credit 정합성·환불을 실측. 자동화 경로는 Turnstile로 차단됨(§3-A) | Ops / Billing | §9의 `[미검증]` 행이 실측값으로 채워짐 |
 | 5 | `chat-tools.spec.ts:114`를 데스크톱 한정으로 조정하거나 모바일 경로를 수정 | QA | 3개 chromium project 전체 suite 실패 0 |
 | 6 | `chat-keyboard-policy` 모바일 flake의 원인(공유 상태·타이머·focus race)을 수정. timeout 증량 금지 | QA | 해당 스펙 5회 연속 실패 0 |
 | 7 | preflight body의 `webSearchMode`를 잠그는 회귀 테스트 추가 (§3의 5개 전이) | Chat / QA | 3개 이상 전이 케이스 단언 존재 |
@@ -892,7 +944,7 @@ TLS 종단 프록시가 TLS 1.3 handshake를 리셋해 브라우저 계측 시 `
 | Accessibility | 15 | **12** | 자동·키보드 근거는 양호하나 실기기·스크린리더 전무(−2), forced-colors·reduced-motion·text-zoom 미검증(−1) | §7 | 중간 |
 | Trust, status, credit transparency | 15 | **9** | 영구 허위 Incident(−3), 상태 UI ↔ API 모순(−2), Operational이 전부 probe 근거이며 real traffic 14.5h stale(−1) | §8, REAUDIT-F001 | **높음** |
 | Security & privacy | 15 | **15** | 감점 없음. CSP 완화 0, 동의 전 추적 0, no-store·HSTS 유지, 113개 보안 검사 통과 | §10 | 없음 |
-| Operational readiness | 10 | **6** | 승인된 실호출 부재(−3), 카탈로그 reconciliation 실효 미확인(−1) | §8, §13 | 높음 |
+| Operational readiness | 10 | **6** | 승인된 실호출이 Turnstile로 차단되어 상용 경로 미확인(−3), 카탈로그 reconciliation 실효 미확인(−1) | §8, §3-A, §13 | 높음 |
 | Internationalization / content quality | 5 | **5** | 감점 없음. en/ko/de/fr 문법·통화 표기 정확 | §3 F006 | 없음 |
 | QA traceability & automation reliability | 5 | **3** | 결정적 실패 1건 상시 red(−1), 미해결 flake(−0.5), FINAL-F003 회귀 테스트 부재(−0.5) | §6, REAUDIT-F004/005/006 | 중간 |
 | **합계** | **100** | **78** | | | |
@@ -911,8 +963,10 @@ TLS 종단 프록시가 TLS 1.3 handshake를 리셋해 브라우저 계측 시 `
 - ✅ *"공개 Provider 상태가 실제 근거와 일치"* 위반 — REAUDIT-F001
 - ✅ *"기본 Provider 경로에 근거 없는 정상 표시"* 위반 — REAUDIT-F002
   (`llama-4-scout`가 근거 없이 `available`)
-- ✅ *"UI·코드·mock 검사는 통과했지만 실제 3-model 및 AI Review 호출 승인이 없음"* —
-  FINAL-F002
+- ✅ *"production-like credential/egress 경로를 확인하지 못함"* — FINAL-F002.
+  승인은 받았고 시도도 했으나 Turnstile이 자동화 경로를 차단해 Provider에 도달하지
+  못했습니다(§3-A). 승인 부재가 아니라 **검증 경로 부재**로 사유가 바뀌었을 뿐,
+  판정은 동일하게 `Not verified`입니다.
 
 **No-Go에 해당하지 않는 항목 (명시)**
 
@@ -925,5 +979,10 @@ TLS 종단 프록시가 TLS 1.3 handshake를 리셋해 브라우저 계측 시 `
 
 **공정한 평가**: 직전 감사의 6개 발견점 중 5개는 근본 원인까지 해결되었고, 특히 보안·
 개인정보 영역은 감점 없이 통과했습니다. 남은 blocker 3건은 모두 **Provider 상태 정합성과
-실호출 검증**이라는 좁은 영역에 몰려 있습니다. REAUDIT-F001·F002를 수정하고 §부록 A의
-실호출 검증이 통과하면 **Conditional Go**로 전환 가능한 상태입니다.
+실호출 검증**이라는 좁은 영역에 몰려 있습니다. REAUDIT-F001·F002를 수정하고 §3-A가
+제시한 대체 경로로 실호출 검증이 통과하면 **Conditional Go**로 전환 가능한 상태입니다.
+
+**점수 재확인**: 승인된 실호출 시도 이후에도 총점은 **78점 그대로**입니다. Provider
+도달이 0회라 가용성 근거는 늘지 않았고, 반대로 guest 보호·실패 recovery·`off` 모드
+전송 정확성이 실환경에서 확인되어 감점 요인도 늘지 않았기 때문입니다. 점수를 임의로
+조정하지 않고 근거 변화가 없음을 명시합니다.

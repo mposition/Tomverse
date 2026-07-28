@@ -42,11 +42,16 @@ const MODEL_B = "claude-sonnet-5";
 const MODEL_C = "gemini-3-5-flash";
 const THREE_MODELS = [MODEL_A, MODEL_B, MODEL_C];
 
-/** Header height, safe-area excluded (the test browser reports 0 insets). */
-const HEADER_MIN_HEIGHT = 76;
-const HEADER_MAX_HEIGHT = 82;
+/**
+ * Header height, safe-area excluded (the test browser reports 0 insets). One
+ * row -- title plus model picker -- in every state, so this single band covers
+ * the hydration placeholder, a single-model chat and a restored multi-model
+ * comparison alike, and any of them drifting apart is a layout shift.
+ */
+const HEADER_MIN_HEIGHT = 56;
+const HEADER_MAX_HEIGHT = 66;
 /** Breathing room between the last header content and the divider below it. */
-const DIVIDER_GAP_MIN = 8;
+const DIVIDER_GAP_MIN = 7;
 const DIVIDER_GAP_MAX = 12;
 /** 44px targets, with the sub-pixel slack the other suites already allow. */
 const TOUCH_MIN = 43.5;
@@ -58,6 +63,7 @@ const header = (page: Page) => page.getByTestId("mobile-chat-header");
 const statusRow = (page: Page) => page.getByTestId("mobile-header-status-row");
 const summary = (page: Page) => page.getByTestId("mobile-header-model-summary");
 const extraCount = (page: Page) => page.getByTestId("mobile-header-extra-model-count");
+const modelCount = (page: Page) => page.getByTestId("mobile-header-model-count");
 
 type HeaderMetrics = {
   hasStatus: boolean;
@@ -78,6 +84,9 @@ type HeaderMetrics = {
   headerRight: number;
   isExtraCountClipped: boolean;
   isTitleClipped: boolean;
+  /** The compact multi-model header's "3 models" button, when it is the one rendered. */
+  modelCountRight: number | null;
+  isModelCountClipped: boolean;
 };
 
 async function readHeaderMetrics(page: Page): Promise<HeaderMetrics> {
@@ -93,7 +102,9 @@ async function readHeaderMetrics(page: Page): Promise<HeaderMetrics> {
     const statusNode = document.querySelector<HTMLElement>(
       '[data-testid="mobile-header-status-row"]'
     );
-    const titleNode = headerNode.querySelector<HTMLElement>("p");
+    const titleNode = headerNode.querySelector<HTMLElement>(
+      '[data-testid="mobile-header-title"]'
+    ) ?? headerNode.querySelector<HTMLElement>("p");
     const newChatNode = headerNode.querySelector<HTMLElement>(
       'button:not([data-testid]):not([aria-haspopup])'
     );
@@ -104,6 +115,9 @@ async function readHeaderMetrics(page: Page): Promise<HeaderMetrics> {
     const titleRect = titleNode?.getBoundingClientRect() ?? null;
     const extraNode = document.querySelector<HTMLElement>(
       '[data-testid="mobile-header-extra-model-count"]'
+    );
+    const modelCountNode = document.querySelector<HTMLElement>(
+      '[data-testid="mobile-header-model-count"]'
     );
 
     const lastContentBottom = statusRect
@@ -126,6 +140,10 @@ async function readHeaderMetrics(page: Page): Promise<HeaderMetrics> {
         : false,
       isTitleClipped: titleNode
         ? titleNode.getBoundingClientRect().right > headerRect.right + 0.5
+        : false,
+      modelCountRight: modelCountNode?.getBoundingClientRect().right ?? null,
+      isModelCountClipped: modelCountNode
+        ? modelCountNode.scrollWidth > modelCountNode.clientWidth + 1
         : false,
     };
   });
@@ -309,10 +327,10 @@ test.describe("Default header (no status)", () => {
     });
   }
 
-  test("an existing signed-in conversation keeps the same tight header", async ({
+  test("an existing single-model conversation keeps the same tight header", async ({
     page,
   }) => {
-    await enterMobileChat(page, { existingConversation: true, selectedModels: THREE_MODELS });
+    await enterMobileChat(page, { existingConversation: true, selectedModels: [MODEL_A] });
 
     await expect(statusRow(page)).toHaveCount(0);
     const metrics = await readHeaderMetrics(page);
@@ -320,6 +338,29 @@ test.describe("Default header (no status)", () => {
     expect(metrics.height).toBeLessThanOrEqual(HEADER_MAX_HEIGHT);
     expect(metrics.lastContentToDivider).toBeGreaterThanOrEqual(DIVIDER_GAP_MIN);
     expect(metrics.lastContentToDivider).toBeLessThanOrEqual(DIVIDER_GAP_MAX);
+  });
+
+  test("a multi-model conversation names the count, not a model", async ({
+    page,
+  }) => {
+    await enterMobileChat(page, {
+      existingConversation: true,
+      selectedModels: THREE_MODELS,
+    });
+
+    await expect(statusRow(page)).toHaveCount(0);
+    // The name row is gone, not merely restyled: the model tab strip below is
+    // where the model on screen is identified now.
+    await expect(page.getByTestId("mobile-header-primary-model")).toHaveCount(0);
+    await expect(modelCount(page)).toHaveText("3 models");
+
+    const metrics = await readHeaderMetrics(page);
+    expect(metrics.height).toBeGreaterThanOrEqual(HEADER_MIN_HEIGHT);
+    expect(metrics.height).toBeLessThanOrEqual(HEADER_MAX_HEIGHT);
+    // Still a 44px picker, and its accessible name still carries the whole
+    // selection rather than only the number on its face.
+    expect(metrics.summaryHeight).toBeGreaterThanOrEqual(TOUCH_MIN);
+    await expect(summary(page)).toHaveAccessibleName(/3 active models total/);
   });
 
   test("the header is not pinned to a fixed height", async ({ page }) => {
@@ -548,14 +589,25 @@ test.describe("Model configuration", () => {
 
       await expect(statusRow(page)).toHaveCount(0);
       const metrics = await readHeaderMetrics(page);
-      expect(metrics.height).toBeGreaterThanOrEqual(HEADER_MIN_HEIGHT);
-      expect(metrics.height).toBeLessThanOrEqual(HEADER_MAX_HEIGHT);
+      const isCompact = models.length > 1;
+      expect(metrics.height).toBeGreaterThanOrEqual(
+        isCompact ? HEADER_MIN_HEIGHT : HEADER_MIN_HEIGHT
+      );
+      expect(metrics.height).toBeLessThanOrEqual(
+        isCompact ? HEADER_MAX_HEIGHT : HEADER_MAX_HEIGHT
+      );
 
-      if (models.length > 1) {
-        await expect(extraCount(page)).toHaveText(`+${models.length - 1}`);
-        expect(metrics.isExtraCountClipped, "+N clipped by its own box").toBe(false);
-        expect(metrics.extraCountRight!).toBeLessThanOrEqual(metrics.headerRight + 0.5);
+      if (isCompact) {
+        await expect(modelCount(page)).toHaveText(`${models.length} models`);
+        expect(metrics.isModelCountClipped, "model count clipped by its own box").toBe(
+          false
+        );
+        expect(metrics.modelCountRight!).toBeLessThanOrEqual(metrics.headerRight + 0.5);
+        await expect(extraCount(page)).toHaveCount(0);
       } else {
+        // A single-model conversation has no tab strip to fall back on, so it
+        // keeps naming its model in the header.
+        await expect(page.getByTestId("mobile-header-primary-model")).toBeVisible();
         await expect(extraCount(page)).toHaveCount(0);
       }
 
@@ -578,6 +630,14 @@ test.describe("Long titles and locales", () => {
     de: "Vergleich der Zusammenfassungsqualität bei langen Kontexten über drei Spitzenmodelle für den Quartalsbericht",
   };
 
+  // The compact header's picker label, per locale -- the long-title test asserts
+  // it survives a title that wants the whole row.
+  const MODEL_COUNT_LABELS: Record<string, string> = {
+    en: "3 models",
+    ko: "3개 모델",
+    de: "3 Modelle",
+  };
+
   for (const [lang, title] of Object.entries(LONG_TITLES)) {
     test(`[${lang}] a long title truncates without overlapping the header controls`, async ({
       page,
@@ -598,8 +658,8 @@ test.describe("Long titles and locales", () => {
           `[${lang}] title overlaps the new-chat button`
         ).toBeLessThanOrEqual(metrics.newChatLeft + 0.5);
       }
-      expect(metrics.isExtraCountClipped).toBe(false);
-      await expect(extraCount(page)).toHaveText("+2");
+      expect(metrics.isModelCountClipped).toBe(false);
+      await expect(modelCount(page)).toHaveText(MODEL_COUNT_LABELS[lang]);
       // Still no reserved status strip once the title takes all the room.
       await expect(statusRow(page)).toHaveCount(0);
       expect(metrics.height).toBeLessThanOrEqual(HEADER_MAX_HEIGHT);
@@ -622,7 +682,7 @@ test.describe("Long titles and locales", () => {
     const metrics = await readHeaderMetrics(page);
     expect(metrics.height).toBeGreaterThanOrEqual(HEADER_MIN_HEIGHT);
     expect(metrics.height).toBeLessThanOrEqual(HEADER_MAX_HEIGHT);
-    await expect(extraCount(page)).toBeVisible();
+    await expect(modelCount(page)).toBeVisible();
     await expectNoHorizontalOverflow(page);
 
     // In RTL the hamburger flips to the right; it must still be the thing a
@@ -730,7 +790,7 @@ test.describe("Hydration", () => {
           if (height > 0 && heights[heights.length - 1] !== height) heights.push(height);
         }
         const extra = document
-          .querySelector('[data-testid="mobile-header-extra-model-count"]')
+          .querySelector('[data-testid="mobile-header-model-count"]')
           ?.textContent?.trim();
         if (extra && counts[counts.length - 1] !== extra) counts.push(extra);
       };
@@ -747,18 +807,19 @@ test.describe("Hydration", () => {
     await page.goto("/chat?lang=en");
     await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
     await settleModelSummary(page);
-    await expect(extraCount(page)).toHaveText("+2");
+    await expect(modelCount(page)).toHaveText("3 models");
 
     const recorded = await page.evaluate(() => ({
       heights: (window as unknown as { __headerHeights: number[] }).__headerHeights,
       counts: (window as unknown as { __extraCounts: string[] }).__extraCounts,
     }));
 
-    // "+1" before "+2" would mean the header briefly claimed fewer models
-    // than the restored conversation really has.
-    expect(recorded.counts).toEqual(["+2"]);
+    // "1 model" before "3 models" would mean the header briefly claimed fewer
+    // models than the restored conversation really has.
+    expect(recorded.counts).toEqual(["3 models"]);
     // Every height the header ever painted stays inside the target band --
-    // no frame reserved the old empty status strip on the way in.
+    // no frame reserved the old empty status strip, and none paid for the
+    // two-row layout the compact header replaces.
     for (const height of recorded.heights) {
       expect(height, `header height sample ${height}`).toBeGreaterThanOrEqual(
         HEADER_MIN_HEIGHT

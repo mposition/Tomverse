@@ -11,6 +11,7 @@ import {
 import { createPortal } from "react-dom";
 import { useChatConsentSlotRef } from "@/components/analytics/AnalyticsProvider";
 import { ANALYTICS_PREFERENCES_OPEN_EVENT } from "@/lib/analyticsPreferencesEvents";
+import { AiDisclaimerNotice } from "@/components/chat/AiDisclaimerNotice";
 import { ChatApp } from "@/components/chat/ChatApp";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { ChatWelcomeScreen } from "@/components/chat/ChatWelcomeScreen";
@@ -18,6 +19,8 @@ import { ModelLogo } from "@/components/chat/ModelLogo";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { ProviderStatusBanner } from "@/components/chat/ProviderStatusBanner";
 import { ComparisonActionRail } from "@/components/chat/ComparisonActionRail";
+import { GuestVerificationSheet } from "@/components/chat/GuestVerificationSheet";
+import { useGuestVerification } from "@/components/chat/GuestVerificationProvider";
 import { ModeInfoSheet } from "@/components/chat/ModeInfoSheet";
 import { useCompactBottomDock } from "@/components/chat/useCompactBottomDock";
 import { chatModelSummaryCopy } from "@/components/chat/chatModelSummaryCopy";
@@ -150,6 +153,10 @@ export function MobileChatShell({
   const { models: AVAILABLE_MODELS } = useModelCatalog();
   const { t, lang } = useLanguage();
   const registerChatConsentSlot = useChatConsentSlotRef();
+  // The verification bottom sheet is portalled out of this tree, so while it
+  // is up the whole shell behind it goes inert: no pointer input, and nothing
+  // for a screen reader to wander into.
+  const { isChallengeVisible: isGuestVerificationOpen } = useGuestVerification();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const drawerPanelRef = useRef<HTMLDivElement | null>(null);
   const drawerCloseButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -446,16 +453,29 @@ export function MobileChatShell({
     isCurrentLocked ||
     isCurrentShared ||
     (isAnyWorkingOrError && selectedModels.length > 1);
-  // With a status row the row's own bottom edge is the last content, and the
-  // badges carry their own padding; without one the model summary button ends
-  // the header and needs a real gap of its own before the divider. Its
-  // -my-0.5 pull means the visible gap is this padding minus 2px, so pb-3
-  // lands in the 8-12px band. Kept as one token instead of two ad-hoc values.
-  const headerBottomPadding = hasHeaderStatus ? "pb-1.5" : "pb-3";
+  // A multi-model conversation renders the full model tab strip immediately
+  // below this header -- every model named, the one on screen marked, each with
+  // its own live status. Repeating "GPT-5.4 mini +2" plus an avatar stack one
+  // row above that is the same information twice, and the duplicate cost a
+  // whole header row on the state where vertical space is scarcest.
+  //
+  // So the header is one row in every state: the title, and a model picker
+  // button beside it. With several models that button is a short "3 models"
+  // (the tabs below identify which one is on screen); with a single model --
+  // where there is no tab strip to fall back on -- it names the model itself.
+  // Its accessible name carries the complete selection either way. One layout
+  // for every state also means the header never changes height between the
+  // hydration placeholder, a single-model chat and a restored comparison.
+  const isMultiModelConversation = selectedModels.length > 1;
+  // With a status row the badges carry their own padding and end the header;
+  // without one the picker button does, and needs a real gap of its own before
+  // the divider. Kept as one token instead of two ad-hoc values.
+  const headerBottomPadding = hasHeaderStatus ? "pb-1.5" : "pb-2";
 
   return (
     <main
       data-testid="mobile-chat-shell"
+      inert={isGuestVerificationOpen || undefined}
       className="flex h-[100dvh] w-full max-w-full flex-col overflow-hidden bg-white text-[13px] text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100"
     >
       <header
@@ -473,72 +493,64 @@ export function MobileChatShell({
         >
           <Menu className="h-5 w-5" />
         </button>
-        <div className="flex min-w-0 flex-1 flex-col">
-          <p className="truncate text-[13px] font-bold">
-            {currentConversation?.title || t("sidebar.newChat")}
-          </p>
-          {isModelSelectionReady ? (
-            <button
-              type="button"
-              data-testid="mobile-header-model-summary"
-              onClick={handleOpenModelPicker}
-              aria-haspopup="dialog"
-              aria-label={modelSummaryLabel}
-              title={modelSummary.entries.map((entry) => entry.name).join(", ")}
-              className="-mx-1 -my-0.5 flex min-h-11 min-w-0 max-w-full items-center gap-1 rounded-lg px-1 py-0.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 active:bg-zinc-100 dark:active:bg-zinc-900"
-            >
-              {/* Avatars are a supplement, never the only signal: the model
-                  name and "+N" carry the same information, and the stack is
-                  the first thing to go when the viewport cannot afford it. */}
-              {modelSummary.avatars.length > 1 && (
+        <p
+          data-testid="mobile-header-title"
+          className="min-w-0 flex-1 truncate text-[13px] font-bold"
+        >
+          {currentConversation?.title || t("sidebar.newChat")}
+        </p>
+        {isModelSelectionReady ? (
+          <button
+            type="button"
+            data-testid="mobile-header-model-summary"
+            onClick={handleOpenModelPicker}
+            aria-haspopup="dialog"
+            aria-label={modelSummaryLabel}
+            className="flex h-11 min-w-0 max-w-[52%] shrink-0 items-center gap-1 rounded-xl border border-zinc-200 bg-zinc-50 px-2 text-[11px] font-bold text-zinc-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 active:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:active:bg-zinc-800"
+          >
+            {isMultiModelConversation ? (
+              <>
                 <span
-                  data-testid="mobile-header-model-avatars"
-                  className="hidden shrink-0 items-center -space-x-1 min-[360px]:flex"
                   aria-hidden="true"
+                  className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[9px] font-black text-white"
                 >
-                  {modelSummary.avatars.map((entry) => (
-                    <ModelLogo
-                      key={entry.modelId}
-                      model={entry.model}
-                      size="xs"
-                      className={entry.isPaused ? "opacity-40" : ""}
-                    />
-                  ))}
-                  {modelSummary.avatarOverflowCount > 0 && (
-                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-zinc-200 text-[9px] font-black text-zinc-600 ring-1 ring-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:ring-zinc-700">
-                      +{modelSummary.avatarOverflowCount}
-                    </span>
-                  )}
+                  {modelSummary.activeCount}
                 </span>
-              )}
-              <span
-                data-testid="mobile-header-primary-model"
-                className="min-w-0 flex-1 truncate text-[10px] font-medium text-zinc-500"
-              >
-                {modelSummary.primary?.name || t("chat.modelSelect")}
-              </span>
-              {modelSummary.extraActiveCount > 0 && (
                 <span
-                  data-testid="mobile-header-extra-model-count"
-                  className="shrink-0 rounded-full bg-blue-500/10 px-1.5 py-px text-[10px] font-black leading-4 text-blue-600 dark:text-blue-300"
+                  data-testid="mobile-header-model-count"
+                  className="min-w-0 truncate"
                 >
-                  +{modelSummary.extraActiveCount}
+                  {summaryCopy.compactLabel(modelSummary.activeCount)}
                 </span>
-              )}
-              <ChevronDown className="h-3 w-3 shrink-0 text-zinc-400" aria-hidden="true" />
-            </button>
-          ) : (
-            // Never paint "1 model" and correct it to "3" a frame later: until
-            // the restored selection is known there is no honest number to show.
-            <span
-              data-testid="mobile-header-model-summary-skeleton"
-              className="-my-0.5 flex min-h-11 items-center py-0.5"
-              aria-hidden="true"
-            >
-              <span className="h-3 w-24 animate-pulse rounded-full bg-zinc-200 dark:bg-zinc-800" />
-            </span>
-          )}
-        </div>
+              </>
+            ) : (
+              // With a single model there is no tab strip below to name it, so
+              // the picker button carries the name itself.
+              <>
+                <ModelLogo model={modelSummary.primary?.model} size="xs" />
+                <span
+                  data-testid="mobile-header-primary-model"
+                  className="min-w-0 truncate"
+                >
+                  {modelSummary.primary?.name || t("chat.modelSelect")}
+                </span>
+              </>
+            )}
+            <ChevronDown className="h-3 w-3 shrink-0 text-zinc-400" aria-hidden="true" />
+          </button>
+        ) : (
+          // Never paint "1 model" and correct it to "3" a frame later: until
+          // the restored selection is known there is no honest number to show.
+          // The placeholder is the same 44px row the real button is, so the
+          // header never changes height on the way in either.
+          <span
+            data-testid="mobile-header-model-summary-skeleton"
+            className="flex h-11 shrink-0 items-center"
+            aria-hidden="true"
+          >
+            <span className="h-6 w-20 animate-pulse rounded-xl bg-zinc-200 dark:bg-zinc-800" />
+          </span>
+        )}
         {!isActiveConversationEmpty && (
           <button
             type="button"
@@ -813,12 +825,7 @@ export function MobileChatShell({
           inputPortalTarget
         )}
 
-      <p
-        data-testid="chat-ai-disclaimer-mobile"
-        className="shrink-0 px-2 pb-[calc(0.4rem+env(safe-area-inset-bottom))] pt-1 text-center text-[10px] leading-4 text-zinc-400 dark:text-zinc-500"
-      >
-        {t("chat.aiDisclaimer")}
-      </p>
+      <AiDisclaimerNotice testId="chat-ai-disclaimer-mobile" />
 
       {isDrawerOpen && (
         <div
@@ -885,6 +892,13 @@ export function MobileChatShell({
         maxGuestMessages={maxGuestMessages}
         activeModelCount={selectedModels.length}
       />
+
+      {/*
+        Portalled to <body>, so it is neither part of the composer's height
+        calculation nor inside the message list -- and, while closed, consumes
+        no layout at all.
+      */}
+      <GuestVerificationSheet />
     </main>
   );
 }

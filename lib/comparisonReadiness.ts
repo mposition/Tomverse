@@ -26,8 +26,12 @@ export type ComparisonReadinessState =
   | "ready";
 
 export type ComparisonReadiness = {
+  /** Every selected model, paused ones included. */
+  selectedCount: number;
   /** Selected models that are not paused -- the population a comparison draws from. */
   comparableCount: number;
+  /** Selected models the user has paused, so they are outside the comparison. */
+  pausedCount: number;
   /** Comparable models with a finished, non-error, non-cancelled answer. */
   readyCount: number;
   /** Comparable models still loading or streaming. */
@@ -114,7 +118,9 @@ export function deriveComparisonReadiness({
           : null;
 
   return {
+    selectedCount: selectedModelIds.length,
     comparableCount,
+    pausedCount: selectedModelIds.length - comparableCount,
     readyCount,
     generatingCount,
     excludedCount,
@@ -123,4 +129,68 @@ export function deriveComparisonReadiness({
     canRun: isVisible && blockedReason === null,
     blockedReason,
   };
+}
+
+export type ComparisonRailStatusInput = {
+  readiness: ComparisonReadiness;
+  isBusy?: boolean;
+  isAnyActionUnaffordable?: boolean;
+};
+
+/**
+ * True only for the one state where the status sentence has nothing left to
+ * tell a *sighted* user: every selected model produced a finished answer,
+ * nothing is streaming, nothing was excluded, nothing is paused, no analysis
+ * is in flight and both actions are affordable. In that state the two buttons
+ * -- which already name themselves and carry their own credit badge -- say
+ * everything the sentence would, and the model panels/tabs above say it again.
+ *
+ * Any deviation -- generating, needsMore, an excluded failure, a paused panel,
+ * a running analysis, an unaffordable action -- is a state the user has to act
+ * on, so the sentence comes back on screen.
+ */
+export function isComparisonRailSteadyState({
+  readiness,
+  isBusy = false,
+  isAnyActionUnaffordable = false,
+}: ComparisonRailStatusInput) {
+  return (
+    readiness.state === "ready" &&
+    readiness.canRun &&
+    !isBusy &&
+    !isAnyActionUnaffordable &&
+    readiness.generatingCount === 0 &&
+    readiness.excludedCount === 0 &&
+    readiness.pausedCount === 0 &&
+    readiness.readyCount === readiness.comparableCount &&
+    readiness.readyCount === readiness.selectedCount
+  );
+}
+
+/**
+ * Whether the rail's status sentence earns a *visible* row -- the single
+ * policy both shells ask, so "desktop has the space for it" can never become
+ * a reason for the two to disagree about what the user is told. Screen-reader
+ * access to the same sentence is not this function's business: the sentence
+ * stays in the DOM either way (see the rail's `sr-only` branch and its
+ * per-action descriptions).
+ *
+ * `isCollapsed` is the one shell-shaped input, and it is a *viewport* fact
+ * rather than a desktop/mobile one: the rail is behind its disclosure button
+ * because the visible viewport cannot afford it (an on-screen keyboard,
+ * landscape), so the sentence rides that button's own description until it is
+ * expanded again.
+ */
+export function shouldShowVisualStatus({
+  readiness,
+  isBusy = false,
+  isAnyActionUnaffordable = false,
+  isCollapsed = false,
+}: ComparisonRailStatusInput & { isCollapsed?: boolean }) {
+  if (isCollapsed) return false;
+  return !isComparisonRailSteadyState({
+    readiness,
+    isBusy,
+    isAnyActionUnaffordable,
+  });
 }

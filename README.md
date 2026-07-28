@@ -16,6 +16,31 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+## UI contracts
+
+Some parts of the UI carry non-negotiable product invariants. Read the contract
+before changing the code it covers — a violation is a release blocker, not a
+review comment:
+
+- [Mobile chat composer](docs/ui-contracts/mobile-chat-composer.md) —
+  `components/chat/ChatInput.tsx`, `components/chat/MobileChatShell.tsx`, the
+  composer's tool chips and the mobile bottom dock. The textarea always owns a
+  dedicated full-width row with at least one complete visible line; no chip,
+  badge or control may take, cover or scroll across it. Changes need
+  bounding-box, overlap, horizontal-overflow, Korean IME, 320px and 200%
+  text-scaling coverage — see `tests/e2e/mobile-composer-contract.spec.ts`.
+- [Comparison action rail](docs/ui-contracts/comparison-action-rail.md) —
+  `components/chat/ComparisonActionRail.tsx`, `lib/comparisonReadiness.ts` and
+  the bottom workflow dock in both shells. Desktop and mobile share one
+  state-driven disclosure policy: the "Comparing N completed answers" sentence
+  is visually hidden (but kept in the accessibility tree) in the normal
+  all-complete state, and on screen for every generating, excluded,
+  needs-more, running or credit-blocked state. Changes need the desktop and
+  mobile state matrix — `tests/comparisonReadiness.test.mjs` and
+  `tests/e2e/comparison-action-rail.spec.ts`.
+
+`AGENTS.md` carries the short version of the same rules for coding agents.
+
 ## AI Usage Limits
 
 Chat access is enforced on the server. Guests can use `Free` models only by
@@ -1049,6 +1074,19 @@ npm run test:e2e:chromium # existing build, all Chromium projects
 npm run test:e2e:run      # existing build, every configured browser project
 npm run test:e2e          # local convenience: build, then full E2E
 ```
+
+UI-contract suites worth running directly when touching the chat composer (see
+[docs/ui-contracts/mobile-chat-composer.md](docs/ui-contracts/mobile-chat-composer.md)):
+
+```text
+npx playwright test --project=desktop-chromium tests/e2e/mobile-composer-contract.spec.ts
+npx playwright test --project=desktop-chromium tests/e2e/mobile-message-visibility.spec.ts
+npx playwright test --project=desktop-chromium tests/e2e/comparison-action-rail.spec.ts
+```
+
+The comparison rail's state matrix also runs as fast unit tests
+(`npm run test:unit`, `tests/comparisonReadiness.test.mjs`) — see
+[docs/ui-contracts/comparison-action-rail.md](docs/ui-contracts/comparison-action-rail.md).
 
 Configure these GitHub repository **Actions secrets** (Railway variables are not
 automatically available to GitHub Actions):

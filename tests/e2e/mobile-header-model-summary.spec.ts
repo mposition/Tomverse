@@ -8,9 +8,15 @@ import {
 // STG-F009: on mobile the header showed a single representative model name
 // ("GPT-5.4 mini") while the composer showed "3 AIs", so a multi-model
 // comparison looked like a single-model chat until the picker was reopened.
-// The header now derives its summary from the same selection state as the
-// composer and shows "<model> +N", where N is the number of *additional
-// active* models -- paused panels are excluded from both.
+// The header derives its summary from the same selection state as the
+// composer -- paused panels are excluded from both.
+//
+// It now says that as a count ("3 models") rather than "<model> +N": the model
+// tab strip immediately below already names every model and marks the one on
+// screen, so the header's copy of that was a duplicate costing a whole row on
+// the smallest screens. A single-model chat has no tab strip to fall back on
+// and still names its model here. Either way the button's accessible name
+// carries the entire selection, paused panels included.
 
 const MODELS = ["gpt-5-4-mini", "claude-haiku-4-5", "gemini-2-5-flash"];
 const MODEL_NAMES: Record<string, string> = {
@@ -33,7 +39,7 @@ const VIEWPORTS = [
 
 const summary = (page: Page) => page.getByTestId("mobile-header-model-summary");
 const primaryModel = (page: Page) => page.getByTestId("mobile-header-primary-model");
-const extraCount = (page: Page) => page.getByTestId("mobile-header-extra-model-count");
+const modelCount = (page: Page) => page.getByTestId("mobile-header-model-count");
 const composerCount = (page: Page) => page.getByTestId("composer-active-model-count");
 
 async function seedGuestConversation(
@@ -98,20 +104,25 @@ test.beforeEach(async ({ page }, testInfo) => {
   await prepareGuestPage(page, "en");
 });
 
-test("header names the model on screen and counts the other active ones", async ({
+test("header counts the active models and leaves naming them to the tabs", async ({
   page,
 }) => {
   await seedGuestConversation(page, MODELS);
   await openSeededConversation(page);
 
-  // The name in the header is always the panel actually on screen.
+  await expect(modelCount(page)).toHaveText("3 models");
+  // The duplicate is gone from the layout, not merely restyled.
+  await expect(primaryModel(page)).toHaveCount(0);
+  // ...and the tab strip is where the panel on screen is identified.
   const selectedModelId = await page
     .locator('[role="tab"][aria-selected="true"] [data-testid="mobile-model-tab"]')
     .getAttribute("data-model-id");
   expect(selectedModelId).toBeTruthy();
-  await expect(primaryModel(page)).toHaveText(MODEL_NAMES[selectedModelId!]);
-  await expect(extraCount(page)).toHaveText("+2");
+  await expect(
+    page.locator('[role="tab"][aria-selected="true"] [data-testid="mobile-model-tab"]')
+  ).toContainText(MODEL_NAMES[selectedModelId!]);
 
+  // The full selection is still what a screen reader gets from the button.
   await showPanel(page, MODELS[0]);
   await expect(summary(page)).toHaveAttribute(
     "aria-label",
@@ -124,7 +135,7 @@ test("a single model shows its full name and no +N", async ({ page }) => {
   await openSeededConversation(page);
 
   await expect(primaryModel(page)).toHaveText(MODEL_NAMES[MODELS[0]]);
-  await expect(extraCount(page)).toHaveCount(0);
+  await expect(modelCount(page)).toHaveCount(0);
   await expect(summary(page)).toHaveAttribute(
     "aria-label",
     `${MODEL_NAMES[MODELS[0]]} selected. 1 active model total. Open model picker.`
@@ -135,9 +146,9 @@ test("header and composer report the same active model count", async ({ page }) 
   await seedGuestConversation(page, MODELS);
   await openSeededConversation(page);
 
-  // "<primary> +2" up top must mean the same three models the composer is
-  // about to send to.
-  await expect(extraCount(page)).toHaveText("+2");
+  // "3 models" up top must mean the same three models the composer is about
+  // to send to.
+  await expect(modelCount(page)).toHaveText("3 models");
   await expect(composerCount(page)).toHaveText("3 AIs");
 });
 
@@ -148,7 +159,7 @@ test("a paused panel drops out of both the header count and the composer", async
   await openSeededConversation(page);
   await showPanel(page, MODELS[0]);
 
-  await expect(extraCount(page)).toHaveText("+1");
+  await expect(modelCount(page)).toHaveText("2 models");
   await expect(composerCount(page)).toHaveText("2 AIs");
   await expect(summary(page)).toHaveAttribute(
     "aria-label",
@@ -156,18 +167,24 @@ test("a paused panel drops out of both the header count and the composer", async
   );
 });
 
-test("switching the visible panel moves the representative name, not the count", async ({
+test("switching the visible panel moves the tab selection, not the header count", async ({
   page,
 }) => {
   await seedGuestConversation(page, MODELS);
   await openSeededConversation(page);
   await showPanel(page, MODELS[0]);
-  await expect(primaryModel(page)).toHaveText(MODEL_NAMES[MODELS[0]]);
+  await expect(modelCount(page)).toHaveText("3 models");
 
   await showPanel(page, MODELS[1]);
 
-  await expect(primaryModel(page)).toHaveText(MODEL_NAMES[MODELS[1]]);
-  await expect(extraCount(page)).toHaveText("+2");
+  // The header count is a property of the selection, not of the panel on
+  // screen, so switching panels must leave it alone -- while the button's
+  // accessible name follows the panel, since that is what names it now.
+  await expect(modelCount(page)).toHaveText("3 models");
+  await expect(summary(page)).toHaveAttribute(
+    "aria-label",
+    `${MODEL_NAMES[MODELS[1]]} and 2 more models selected. 3 active models total. Open model picker.`
+  );
 });
 
 test("tapping the summary opens the existing model picker and returns focus", async ({
@@ -212,7 +229,7 @@ test("no smaller intermediate count is painted while the conversation restores",
     (window as unknown as { __extraCountHistory: string[] }).__extraCountHistory = seen;
     const sample = () => {
       const node = document.querySelector(
-        '[data-testid="mobile-header-extra-model-count"]'
+        '[data-testid="mobile-header-model-count"]'
       );
       const value = node?.textContent?.trim() ?? "";
       if (value && seen[seen.length - 1] !== value) seen.push(value);
@@ -230,14 +247,14 @@ test("no smaller intermediate count is painted while the conversation restores",
   });
 
   await openSeededConversation(page);
-  await expect(extraCount(page)).toHaveText("+2");
+  await expect(modelCount(page)).toHaveText("3 models");
 
   const history = await page.evaluate(
     () => (window as unknown as { __extraCountHistory: string[] }).__extraCountHistory
   );
-  // "+1" appearing before "+2" would mean the header briefly claimed fewer
-  // models than the restored conversation actually has.
-  expect(history).toEqual(["+2"]);
+  // "1 model" appearing before "3 models" would mean the header briefly
+  // claimed fewer models than the restored conversation actually has.
+  expect(history).toEqual(["3 models"]);
 });
 
 for (const viewport of VIEWPORTS) {
@@ -248,18 +265,18 @@ for (const viewport of VIEWPORTS) {
     await seedGuestConversation(page, MODELS);
     await openSeededConversation(page);
 
-    await expect(primaryModel(page)).toBeVisible();
-    await expect(extraCount(page)).toBeVisible();
-    await expect(extraCount(page)).toHaveText("+2");
+    await expect(modelCount(page)).toBeVisible();
+    await expect(modelCount(page)).toHaveText("3 models");
     await expect(composerCount(page)).toHaveText("3 AIs");
 
     // The header's own controls must survive next to the summary.
     await expect(page.getByTestId("mobile-sidebar-open")).toBeVisible();
     await expectNoHorizontalOverflow(page);
 
-    // "+2" is the load-bearing part: the model name may ellipsize, the count
-    // may not be clipped by its own box or pushed outside the header.
-    const countBox = await extraCount(page).boundingBox();
+    // "3 models" is the load-bearing part: the conversation title may
+    // ellipsize, the count may not be clipped by its own box or pushed
+    // outside the header.
+    const countBox = await modelCount(page).boundingBox();
     const headerBox = await page
       .getByTestId("mobile-chat-shell")
       .locator("header")
@@ -269,7 +286,7 @@ for (const viewport of VIEWPORTS) {
     expect(countBox!.x + countBox!.width).toBeLessThanOrEqual(
       headerBox!.x + headerBox!.width + 0.5
     );
-    const isCountClipped = await extraCount(page).evaluate(
+    const isCountClipped = await modelCount(page).evaluate(
       (node) => node.scrollWidth > node.clientWidth + 1
     );
     expect(isCountClipped).toBe(false);
