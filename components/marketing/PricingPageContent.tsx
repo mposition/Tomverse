@@ -30,6 +30,7 @@ import {
 import {
   formatBillingPeriodLabel,
   formatCountedUnit,
+  formatPriceWithPeriod,
 } from "@/lib/pricingFormat";
 
 const annualLabelByLanguage: Partial<Record<Language, { annual: string; save: string; checkout: string }>> = {
@@ -977,9 +978,20 @@ export function PricingPageContent() {
               </p>
               {planId === "free" || !promotionEligible ? (
                 <div className="mt-8">
-                  <span className="text-4xl font-black">{displayPrice}</span>
-                  <span className={`ml-2 text-sm font-bold ${plan.highlighted ? "text-blue-100" : "text-zinc-500 dark:text-zinc-400"}`}>
-                    {formatBillingPeriodLabel(plan.period, lang)}
+                  {/* The price and the period render as separate spans so they
+                      can carry different type sizes, which leaves no text node
+                      between them -- assistive tech read the pair as
+                      "$15per month". The spoken form is supplied once here and
+                      the visual pair is hidden from the accessibility tree, so
+                      the phrase is announced exactly once. */}
+                  <span className="sr-only">
+                    {formatPriceWithPeriod(displayPrice, plan.period, lang)}
+                  </span>
+                  <span aria-hidden="true">
+                    <span className="text-4xl font-black">{displayPrice}</span>
+                    <span className={`ml-2 text-sm font-bold ${plan.highlighted ? "text-blue-100" : "text-zinc-500 dark:text-zinc-400"}`}>
+                      {formatBillingPeriodLabel(plan.period, lang)}
+                    </span>
                   </span>
                 </div>
               ) : (
@@ -996,7 +1008,26 @@ export function PricingPageContent() {
                       {featuredPromotion?.discountPercent}% OFF
                     </span>
                   </div>
-                  <div className="mt-3 flex flex-wrap items-end gap-x-3 gap-y-1">
+                  {/* Same split-span problem as the plain price above, plus a
+                      struck-through regular price that reads as a bare number
+                      out of context. Both are replaced by one spoken sale
+                      phrase, with the visual row hidden from the
+                      accessibility tree. */}
+                  <span className="sr-only">
+                    {`${formatPriceWithPeriod(
+                      salePrice ?? displayPrice,
+                      plan.period,
+                      lang
+                    )}. ${saleCopy.regular}: ${formatPriceWithPeriod(
+                      displayPrice,
+                      plan.period,
+                      lang
+                    )}.`}
+                  </span>
+                  <div
+                    aria-hidden="true"
+                    className="mt-3 flex flex-wrap items-end gap-x-3 gap-y-1"
+                  >
                     <span className="text-5xl font-black">{salePrice}</span>
                     <span className={`pb-1 text-sm font-black ${plan.highlighted ? "text-blue-50" : "text-zinc-700 dark:text-zinc-200"}`}>
                       {formatBillingPeriodLabel(plan.period, lang)}

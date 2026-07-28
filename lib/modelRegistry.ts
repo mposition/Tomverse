@@ -7,6 +7,7 @@ import {
   AVAILABLE_MODELS,
   getModelBillingProfile,
   getModelUsageProfile,
+  isRetiredModel,
   type AiModel,
   type ModelInputCapabilities,
   type ModelMinimumPlan,
@@ -135,12 +136,66 @@ export const registryRowToModel = (row: ModelRegistryEntry): AiModel => {
 let bootstrapPromise: Promise<void> | null = null;
 let didWarnAboutRegistrySchema = false;
 
+// Retirement is a deliberate, human-authored lifecycle decision (a provider
+// stopped serving the model), unlike the tunable fields -- name, blurb,
+// pricing, sort order -- that an admin may legitimately diverge from the
+// bootstrap catalog on.
+const STATIC_RETIRED_MODELS = STATIC_RUNTIME_MODELS.filter(isRetiredModel);
+
+// `createMany({ skipDuplicates: true })` only ever inserts, so a model that
+// was already in the runtime registry before it was retired in
+// `lib/models.ts` kept its old `enabled`/`publiclyListed`/`status` values
+// forever -- the public model API and the picker went on offering a model no
+// provider would serve. Retirement is therefore replayed onto existing rows
+// on every bootstrap. `catalogDeleted` is deliberately untouched: it stays
+// human-controlled.
+async function applyStaticRetirements() {
+  if (STATIC_RETIRED_MODELS.length === 0) return;
+
+  for (const model of STATIC_RETIRED_MODELS) {
+    const result = await prisma.modelRegistryEntry.updateMany({
+      where: {
+        id: model.id,
+        OR: [
+          { enabled: true },
+          { publiclyListed: true },
+          { status: { not: "disabled" } },
+        ],
+      },
+      data: {
+        enabled: false,
+        publiclyListed: false,
+        status: "disabled",
+        ...(model.replacementModelId
+          ? { replacementModelId: model.replacementModelId }
+          : {}),
+        ...(model.operationalReason
+          ? { operationalReason: model.operationalReason }
+          : {}),
+        ...(model.userVisibleNote
+          ? { userVisibleNote: model.userVisibleNote }
+          : {}),
+      },
+    });
+
+    if (result.count > 0) {
+      console.warn(
+        "Model registry: applied static catalog retirement to runtime row.",
+        {
+          modelId: model.id,
+          replacementModelId: model.replacementModelId ?? null,
+        }
+      );
+    }
+  }
+}
+
 export async function ensureModelRegistrySeeded() {
   if (E2E_DATABASE_DISABLED) return;
   if (!bootstrapPromise) {
     bootstrapPromise = prisma.modelRegistryEntry
       .createMany({ data: staticSeedRows(), skipDuplicates: true })
-      .then(() => undefined)
+      .then(() => applyStaticRetirements())
       .catch((error) => {
         bootstrapPromise = null;
         throw error;

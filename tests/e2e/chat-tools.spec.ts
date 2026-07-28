@@ -112,7 +112,25 @@ test("selecting a web search mode shows a removable status chip", async ({ page 
 });
 
 test("web search mode selection does not repeat across a new chat", async ({ page }) => {
-  await mockAuthenticatedApi(page);
+  // Seeded with history on purpose. The mobile shell deliberately hides its
+  // header "New chat" button while the open conversation is still empty
+  // (components/chat/MobileChatShell.tsx), so driving this contract from the
+  // welcome screen made the test wait on a control that is never meant to
+  // exist there -- it failed deterministically on mobile-chromium while
+  // passing on desktop. Starting from a non-empty conversation exercises the
+  // same reset through the affordance each shell actually offers.
+  await mockAuthenticatedApi(page, {
+    selectedModels: ["gpt-5-4-mini"],
+    messages: [
+      { id: "seed-user", role: "user", content: "seeded question" },
+      {
+        id: "seed-assistant",
+        role: "assistant",
+        content: "seeded answer",
+        modelId: "gpt-5-4-mini",
+      },
+    ],
+  });
   await page.goto("/chat?lang=en");
 
   await toolsMenuTrigger(page).click();
@@ -120,7 +138,10 @@ test("web search mode selection does not repeat across a new chat", async ({ pag
   await page.getByTestId("web-search-mode-option-always").click();
   await expect(page.getByTestId("web-search-mode-chip")).toBeVisible();
 
-  await page.getByRole("button", { name: "New chat" }).first().click();
+  const newChatButton = page.getByRole("button", { name: "New chat" }).first();
+  await expect(newChatButton).toBeVisible();
+  await newChatButton.click();
+
   await expect(page.getByTestId("web-search-mode-chip")).toHaveCount(0);
 });
 

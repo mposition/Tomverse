@@ -132,7 +132,15 @@ function ChatAppComponent({
   
   const isSendingRef = useRef(false);
   const streamingChatIdRef = useRef<string | null>(null);
-  const lastFetchedConversationKeyRef = useRef<string | null>(null);
+  // Guards for the message-view loader below. `requestedViewKeyRef` dedupes
+  // repeat loads of the same view; `loadRequestIdRef` identifies the newest
+  // load so a superseded one settles nothing and the current one always does.
+  const requestedViewKeyRef = useRef<string | null>(null);
+  const loadRequestIdRef = useRef(0);
+  // Bumped whenever this panel adds messages of its own. Lets an in-flight
+  // history load tell "still describes the current conversation" from
+  // "superseded by a send that happened while I was loading".
+  const localMessageRevisionRef = useRef(0);
   const abortControllerRef = useRef<AbortController | null>(null);
     const loadedChatIdRef = useRef<string | null>(null);
   const lastPromptRef = useRef<{
@@ -327,61 +335,85 @@ function ChatAppComponent({
     });
   }, [initialConversationId, isCurrentMessageViewLoaded, messages, pollDeepResearchJob]);
 
-    useEffect(() => {
-        if (!isGuestMode && !sessionUserId) {
-        return;
-    }
-
-	  let isMounted = true;
-    queueMicrotask(() => {
-    if (!isMounted) return;
+  // Loads the message view for the current (account, conversation, model)
+  // triple. Two rules keep it deterministic:
+  //
+  //  * Only the newest load may settle `isMessagesLoaded` /
+  //    `loadedMessageViewKey`, tracked by `loadRequestIdRef` rather than by
+  //    invalidating the in-flight load from the effect cleanup. The old
+  //    cleanup-based version combined with a dedup guard that returned
+  //    *before* settling, so an effect re-run while a fetch was in flight
+  //    left the view permanently unloaded: the previous run could no longer
+  //    settle it and the new run returned early without settling it either.
+  //    The panel then rendered its loading placeholder forever, which is why
+  //    a send could clear the composer and create the sidebar conversation
+  //    while the main panel showed no user message at all.
+  //  * The current load always settles, including when it bails out because
+  //    this panel started streaming in the meantime.
+  useEffect(() => {
+    if (!isGuestMode && !sessionUserId) return;
 
     if (isGuestMode) {
-      setIsMessagesLoaded(false);
+      // Resolves synchronously from localStorage, so no interim "loading"
+      // state is needed: `isCurrentMessageViewLoaded` already reads as false
+      // for this view until `loadedMessageViewKey` catches up below.
+      // Bookkeeping stays synchronous so a second effect run in the same tick
+      // cannot start a competing load; only the state writes are deferred.
+      const requestId = (loadRequestIdRef.current += 1);
+      requestedViewKeyRef.current = expectedMessageViewKey;
+
+      queueMicrotask(() => {
+        if (loadRequestIdRef.current !== requestId) return;
 
         if (initialConversationId) {
-            loadedChatIdRef.current = initialConversationId;
+          loadedChatIdRef.current = initialConversationId;
 
-        const storageKey = `guest_messages_${initialConversationId}_${modelId}`;
-        const savedMessages = localStorage.getItem(storageKey);
-        if (savedMessages) {
-          try {
-            setMessages(JSON.parse(savedMessages));
-          } catch (e) {
-            console.error("Failed to load guest messages:", e);
-            setMessages([]);
+          const storageKey = `guest_messages_${initialConversationId}_${modelId}`;
+          const savedMessages = localStorage.getItem(storageKey);
+          if (savedMessages) {
+            try {
+              setMessages(JSON.parse(savedMessages));
+            } catch (e) {
+              console.error("Failed to load guest messages:", e);
+              setMessages([]);
+            }
+          } else {
+            setMessages([
+              { id: "welcome", role: "assistant", content: t("chat.guestWelcome"), status: "normal" },
+            ]);
           }
         } else {
-          setMessages([
-            { id: "welcome", role: "assistant", content: t("chat.guestWelcome"), status: "normal" }
-          ]);
+          setMessages([]);
         }
-      } else {
-        setMessages([]);
-      }
 
-      setIsMessagesLoaded(true);
-      setLoadedMessageViewKey(expectedMessageViewKey);
+        setIsMessagesLoaded(true);
+        setLoadedMessageViewKey(expectedMessageViewKey);
+      });
       return;
     }
 
-	if (initialConversationId && initialConversationId !== "guest-chat") {
-      const conversationKey = `${sessionUserId || "guest"}:${initialConversationId}:${modelId}`;
-      if (conversationKey === lastFetchedConversationKeyRef.current) return;
-      lastFetchedConversationKeyRef.current = conversationKey;
-	  setIsMessagesLoaded(false);
-	  
+    if (initialConversationId && initialConversationId !== "guest-chat") {
+      // Already loaded, or a load for this exact view is still running.
+      // Safe to skip only because that load is guaranteed to settle.
+      if (requestedViewKeyRef.current === expectedMessageViewKey) return;
+
+      requestedViewKeyRef.current = expectedMessageViewKey;
+      const requestId = (loadRequestIdRef.current += 1);
+      const isCurrentLoad = () => loadRequestIdRef.current === requestId;
+      const revisionAtStart = localMessageRevisionRef.current;
+      setIsMessagesLoaded(false);
+
       const fetchPastMessages = async () => {
         try {
           const modelQuery = `modelId=${encodeURIComponent(modelId)}`;
-		      const response = await fetch(`/api/conversations/${initialConversationId}?${modelQuery}`, {
+          const response = await fetch(`/api/conversations/${initialConversationId}?${modelQuery}`, {
             cache: "no-store",
             headers: { 'Cache-Control': 'no-cache' }
-          });			
+          });
           if (response.ok) {
             const data = await response.json();
             let nextCursor = data.messagePage?.nextCursor;
-            while (data.messagePage?.hasMore && nextCursor && isMounted) {
+            while (data.messagePage?.hasMore && nextCursor && isCurrentLoad()) {
               const pageResponse = await fetch(
                 `/api/conversations/${initialConversationId}?${modelQuery}&cursor=${encodeURIComponent(nextCursor)}`,
                 {
@@ -397,7 +429,17 @@ function ChatAppComponent({
               data.messagePage = pageData.messagePage;
               nextCursor = pageData.messagePage?.nextCursor;
             }
-			    if (!isMounted) return;
+            if (!isCurrentLoad()) return;
+            // This panel sent something while the history request was in
+            // flight, so the response describes the conversation as it was
+            // before that send. Applying it would replace the optimistic user
+            // message and the reply with pre-send history -- which is exactly
+            // how a completed send could end up showing an empty panel when
+            // the two responses landed in the wrong order. Checking a
+            // revision counter rather than `isSendingRef` also covers the
+            // window just *after* streaming finishes, where the old guard had
+            // already been released.
+            if (localMessageRevisionRef.current !== revisionAtStart) return;
             if (isSendingRef.current && streamingChatIdRef.current === initialConversationId) {
               return;
             }
@@ -411,12 +453,12 @@ function ChatAppComponent({
                         seenUserIds.add(msg.id);
                         filteredMessages.push(msg);
                     }
-                } 
+                }
                 else if (msg.role === "assistant" && msg.modelId === modelId) {
                   filteredMessages.push(msg);
 					      }
 				    }
-				
+
               setMessages(filteredMessages.length > 0 ? filteredMessages : [{ id: "welcome", role: "assistant", content: t("chat.welcome"), status: "normal" }]);
           } else {
               setMessages([{ id: "welcome", role: "assistant", content: t("chat.welcome"), status: "normal" }]);
@@ -426,8 +468,10 @@ function ChatAppComponent({
         }
       } catch (error) {
         console.error("Failed to load conversation messages:", error);
+        // Let a later re-run retry instead of pinning the view to a failed load.
+        if (isCurrentLoad()) requestedViewKeyRef.current = null;
       } finally {
-        if (isMounted) {
+        if (isCurrentLoad()) {
           setIsMessagesLoaded(true);
           setLoadedMessageViewKey(expectedMessageViewKey);
         }
@@ -435,26 +479,26 @@ function ChatAppComponent({
     };
 
       fetchPastMessages();
-  } 
-    else {
-	    lastFetchedConversationKeyRef.current = null;
-	  
-        setMessages([
+      return;
+    }
+
+    // No conversation selected yet: nothing to fetch, just the welcome view.
+    const requestId = (loadRequestIdRef.current += 1);
+    requestedViewKeyRef.current = expectedMessageViewKey;
+
+    queueMicrotask(() => {
+      if (loadRequestIdRef.current !== requestId) return;
+      setMessages([
         {
           id: "welcome",
           role: "assistant",
-                content: t("chat.welcome"),
+          content: t("chat.welcome"),
           status: "normal",
         },
-        ]);
-        setIsMessagesLoaded(true);
-        setLoadedMessageViewKey(expectedMessageViewKey);
-    }
+      ]);
+      setIsMessagesLoaded(true);
+      setLoadedMessageViewKey(expectedMessageViewKey);
     });
-	
-	  return () => {
-      isMounted = false;
-    };	
   }, [
     initialConversationId,
     isGuestMode,
@@ -484,6 +528,10 @@ function ChatAppComponent({
   	if ((!text && attachments.length === 0) || isSendingRef.current) return;
 
     lastPromptRef.current = { text, targetChatId, attachments };
+    // Marks this panel's history as locally advanced. A history load that was
+    // already in flight when this send started describes the conversation as
+    // it was *before* the send, so it must not be applied afterwards.
+    localMessageRevisionRef.current += 1;
     setIsSending(true);
 	isSendingRef.current = true;
     streamingChatIdRef.current = targetChatId;
