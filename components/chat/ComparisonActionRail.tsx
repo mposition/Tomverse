@@ -113,6 +113,13 @@ type ComparisonActionRailProps = {
   isQuickSummaryCached?: boolean;
   /** Spendable credits, or null when unknown (guest / usage not loaded yet). */
   availableCredits?: number | null;
+  /**
+   * The shell's guest-verification surface. Rendered as the last item of the
+   * action row, so the real Cloudflare widget sits immediately to the right of
+   * the cross-review action -- and after it in DOM and screen-reader order.
+   * It renders nothing at all unless verification is actually running.
+   */
+  verificationSlot?: ReactNode;
   onCompareSummary: () => void;
   onComparisonReview: () => void;
   onGuestSignInPrompt: () => void;
@@ -126,6 +133,7 @@ export function ComparisonActionRail({
   isCompareSummaryLoading = false,
   isQuickSummaryCached = false,
   availableCredits = null,
+  verificationSlot = null,
   onCompareSummary,
   onComparisonReview,
   onGuestSignInPrompt,
@@ -420,6 +428,7 @@ export function ComparisonActionRail({
                 />
               </ReviewActionGroup>
             )}
+            {verificationSlot}
           </div>
         )}
         {/*
