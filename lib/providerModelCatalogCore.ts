@@ -170,3 +170,105 @@ export const missingConfirmationRuns = (value: string | undefined) => {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed >= 2 && parsed <= 7 ? parsed : 2;
 };
+
+// F-05 reconciliation. Kept here, pure, for the same reason the parsing above
+// is: the decision about whether a model has really been retired is worth
+// testing directly, without a database in the way. lib/providerModelCatalog
+// Reconciliation.ts does the I/O and nothing else.
+
+export const AUTO_DISABLE_REASON =
+  "Auto-disabled: absent from consecutive successful provider catalog scans.";
+
+export const isAutoDisabledReason = (operationalReason: string | null) =>
+  Boolean(operationalReason?.startsWith(AUTO_DISABLE_REASON));
+
+export type CatalogReconciliationCheck = {
+  provider: AiProvider;
+  status: "checked" | "skipped" | "failed";
+  missing: ReadonlyArray<{
+    modelId: string;
+    apiModel: string;
+    consecutiveMissing: number;
+  }>;
+  mapped: readonly string[];
+};
+
+export type CatalogRegistryRow = {
+  id: string;
+  apiModel: string;
+  enabled: boolean;
+  operationalReason: string | null;
+};
+
+export type CatalogReconciliationPlan = {
+  disable: Array<{
+    provider: AiProvider;
+    modelId: string;
+    apiModel: string;
+    consecutiveMissing: number;
+  }>;
+  restore: Array<{ provider: AiProvider; modelId: string; apiModel: string }>;
+  hold: Array<{
+    provider: AiProvider;
+    reason: "would_disable_every_enabled_model";
+    modelIds: string[];
+  }>;
+};
+
+export function planCatalogReconciliation(input: {
+  check: CatalogReconciliationCheck;
+  registry: readonly CatalogRegistryRow[];
+  confirmationRuns: number;
+}): CatalogReconciliationPlan {
+  const plan: CatalogReconciliationPlan = { disable: [], restore: [], hold: [] };
+  // Only a completed check proves anything. A failed or skipped provider says
+  // nothing about its models, and treating that silence as evidence is the
+  // exact mistake the confirmation threshold exists to prevent.
+  if (input.check.status !== "checked") return plan;
+
+  const rowById = new Map(input.registry.map((row) => [row.id, row]));
+  const enabledIds = new Set(
+    input.registry.filter((row) => row.enabled).map((row) => row.id)
+  );
+
+  const confirmed = input.check.missing.filter(
+    (item) =>
+      item.consecutiveMissing >= input.confirmationRuns &&
+      enabledIds.has(item.modelId)
+  );
+
+  if (confirmed.length > 0 && confirmed.length === enabledIds.size) {
+    // A provider retiring its entire lineup at once and a catalog endpoint
+    // returning a truncated list are indistinguishable from here, and only one
+    // of them should take a whole provider offline.
+    plan.hold.push({
+      provider: input.check.provider,
+      reason: "would_disable_every_enabled_model",
+      modelIds: confirmed.map((item) => item.modelId),
+    });
+  } else {
+    for (const item of confirmed) {
+      plan.disable.push({
+        provider: input.check.provider,
+        modelId: item.modelId,
+        apiModel: item.apiModel,
+        consecutiveMissing: item.consecutiveMissing,
+      });
+    }
+  }
+
+  // Only restore what this automation took away, so a transient catalog gap
+  // does no permanent damage while an entry an operator disabled on purpose is
+  // never quietly turned back on.
+  for (const modelId of input.check.mapped) {
+    const row = rowById.get(modelId);
+    if (!row || row.enabled || !isAutoDisabledReason(row.operationalReason)) continue;
+    plan.restore.push({
+      provider: input.check.provider,
+      modelId,
+      apiModel: row.apiModel,
+    });
+  }
+
+  return plan;
+}

@@ -5,6 +5,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { checkProviderModelCatalogs } from "@/lib/providerModelCatalogMonitor";
+import { reconcileCatalogWithRegistry } from "@/lib/providerModelCatalogReconciliation";
 import { sendProviderModelCatalogReport } from "@/lib/providerModelCatalogReport";
 import {
   completeScheduledJob,
@@ -37,8 +38,19 @@ export async function POST(request: Request) {
   try {
     const generatedAt = new Date();
     const results = await checkProviderModelCatalogs(generatedAt);
+    // Acts on the checks before they are reported, so the daily report states
+    // what the registry now looks like rather than what it looked like when
+    // the scan started. A failure here must not lose the report -- detection
+    // staying visible is worth more than the automation succeeding.
+    const reconciliation = await reconcileCatalogWithRegistry({ results }).catch(
+      (error) => {
+        console.error("Provider model catalog reconciliation failed:", error);
+        return undefined;
+      }
+    );
     const notification = await sendProviderModelCatalogReport({
       results,
+      reconciliation,
       generatedAt,
       test: new URL(request.url).searchParams.get("test") === "true",
     });
@@ -64,7 +76,24 @@ export async function POST(request: Request) {
       lifecycleWarnings,
       slackDelivered: notification.slack.delivered,
       emailDelivered: notification.email.filter((item) => item.delivered).length,
+      registryDisabled: reconciliation?.disabled.length ?? 0,
+      registryRestored: reconciliation?.restored.length ?? 0,
+      registryHeld: reconciliation?.held.length ?? 0,
     };
+    // A provider whose every enabled model went missing at once is far more
+    // likely to be a broken catalog response than a real mass retirement.
+    // The reconciler refuses to act on it, which means somebody has to look.
+    if (reconciliation?.held.length) {
+      await reportOperationalIncident({
+        code: "PROVIDER_MODEL_CATALOG_RECONCILIATION_HELD",
+        title: "Model catalog reconciliation held back a full-provider disable",
+        severity: "warning",
+        context: {
+          component: "provider_model_catalog_monitor",
+          providers: reconciliation.held.map((item) => item.provider).join(","),
+        },
+      }).catch(() => undefined);
+    }
     if (checked === 0) {
       throw new Error("No provider model catalog check completed successfully.");
     }
