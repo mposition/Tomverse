@@ -1,4 +1,21 @@
 name: PR Fast Gate
+#
+# Four jobs, one required status check.
+#
+# ############################################################################
+# # `fast-gate` below MUST keep the name                                     #
+# #     Security, unit, build, and Chromium smoke tests                      #
+# # Branch protection on develop and main references check runs by NAME, and #
+# # that string is the required check. The three jobs it aggregates are      #
+# # deliberately NOT registered as required checks -- adding them would mean #
+# # reconfiguring branch protection, and renaming this one would leave every #
+# # open PR waiting forever on a check that no longer exists.                #
+# ############################################################################
+#
+# secret-scan, static-and-unit and build-and-e2e run concurrently; fast-gate
+# waits for all three and fails unless every one of them succeeded. Nothing
+# merges on a green fast-gate that did not pass all three, and no upstream
+# job can go green by being skipped -- see the aggregation step.
 
 on:
   pull_request:
@@ -13,35 +30,44 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  fast-gate:
-    name: Security, unit, build, and Chromium smoke tests
+  # This duplicates the scan Secret History Scan performs on the same PR
+  # (gitleaks-action scans base..head on pull_request in both), but it is
+  # deliberately kept: fast-gate is the only required status check on develop
+  # and main, so removing this would take secret scanning off the
+  # merge-blocking path entirely. Remove it only after
+  # "Scan repository history for secrets" is itself made a required check.
+  # `fetch-depth: 0` exists for this job, and only for this job.
+  secret-scan:
+    name: Secret scan (PR commits)
     runs-on: ubuntu-latest
-    timeout-minutes: 40
-    # NEXT_PUBLIC values are embedded by `next build`. Guest E2E tests mock
-    # Turnstile in the browser, but the client still requires a configured key.
-    env:
-      NEXTAUTH_URL: http://127.0.0.1:3100
-      NEXT_PUBLIC_TURNSTILE_SITE_KEY: tomverse-playwright-turnstile-site-key
-
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      # This duplicates the scan Secret History Scan performs on the same PR
-      # (gitleaks-action scans base..head on pull_request in both), but it is
-      # deliberately kept: this job's name is the only required status check
-      # on develop and main, so removing this step would take secret scanning
-      # off the merge-blocking path entirely. Remove it only after
-      # "Scan repository history for secrets" is itself made a required
-      # check. `fetch-depth: 0` above exists for this step.
       - name: Scan pull-request commits for secrets
+        timeout-minutes: 5
         uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_COMMENTS: "false"
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+
+  # Everything that needs node_modules but neither a build nor a browser.
+  # Runs unconditionally, including on documentation-only PRs: the encoding
+  # check is exactly the check a Markdown-only change needs, and the rest is
+  # cheap enough that scoping it would buy less than it risks.
+  static-and-unit:
+    name: Security, lint, encoding, and unit tests
+    runs-on: ubuntu-latest
+    # Measured 83s of work (run #130 step timings); 15 minutes covers a cold
+    # npm cache with room to spare.
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -49,7 +75,114 @@ jobs:
           node-version: 22
           cache: npm
 
+      # `--no-audit` skips the registry advisory round-trip npm otherwise
+      # makes on every install; it does not weaken the audit itself, which
+      # Daily Security Audit runs deliberately (`npm audit --omit=dev`) and
+      # reports on. `--no-fund` drops the funding banner. Neither flag changes
+      # which packages are installed -- `npm ci` still resolves solely from
+      # the lockfile.
+      - name: Install dependencies
+        timeout-minutes: 10
+        run: npm ci --no-audit --no-fund
+
+      - name: Security regression checks
+        timeout-minutes: 5
+        run: npm run security:regression
+
+      - name: Unit and API policy tests
+        timeout-minutes: 10
+        run: npm run test:unit
+
+      - name: Strict encoding validation
+        timeout-minutes: 5
+        run: npm run check:encoding:strict
+
+      # `npm run check` still runs both locally and in the daily audit. They
+      # are split here so the step timings in this log attribute time to the
+      # right stage, and so a lint failure reports without paying for a build.
+      - name: ESLint
+        timeout-minutes: 10
+        run: npx eslint . --max-warnings=0
+
+  build-and-e2e:
+    name: Production build and Chromium smoke tests
+    runs-on: ubuntu-latest
+    # Measured 143s of work with a warm cache (run #130 step timings, minus
+    # the steps that moved to static-and-unit). 20 minutes is ~8x that: still
+    # generous for a cold npm/Playwright cache, but a hung Playwright web
+    # server now stops burning runner time at 20 minutes instead of 40.
+    # Step-level timeouts bound each stage under that, so a hang says which
+    # stage hung rather than only that the job did.
+    timeout-minutes: 20
+    # NEXT_PUBLIC values are embedded by `next build`. Guest E2E tests mock
+    # Turnstile in the browser, but the client still requires a configured key.
+    env:
+      NEXTAUTH_URL: http://127.0.0.1:3100
+      NEXT_PUBLIC_TURNSTILE_SITE_KEY: tomverse-playwright-turnstile-site-key
+
+    steps:
+      # Full history so the scope check below can diff against the PR base.
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      # Documentation-only PRs skip this job's expensive half. The rule is a
+      # deliberately narrow allowlist: top-level Markdown and audit reports
+      # only. A Markdown file anywhere else -- under app/, tests/, scripts/,
+      # public/ -- does NOT qualify, because those trees can hold fixtures
+      # and generated content. Shared code, configuration, the lockfile,
+      # workflows and tests all put the full gate back, as does detection
+      # failing for any reason at all: `code=true` is the fallback on every
+      # error path, so the failure mode is "ran too much", never "skipped a
+      # check". `--no-renames` lists both sides of a rename so a file moved
+      # out of documentation is still seen.
+      - name: Determine whether this PR touches anything but documentation
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -uo pipefail
+          if ! changed=$(git diff --no-renames --name-only "$BASE_SHA"...HEAD); then
+            echo "Could not diff against $BASE_SHA; running the full gate."
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "$changed" ]; then
+            echo "Diff reported no changed paths; running the full gate."
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Changed paths:"
+          echo "$changed"
+          code=false
+          while IFS= read -r path; do
+            case "$path" in
+              .github/audits/*) ;;
+              docs/*.md) ;;
+              */*) code=true ;;
+              *.md) ;;
+              *) code=true ;;
+            esac
+            if [ "$code" = "true" ]; then
+              echo "Non-documentation path found: $path"
+              break
+            fi
+          done <<< "$changed"
+          if [ "$code" = "false" ]; then
+            echo "Documentation-only PR: skipping build, Chromium and smoke tests."
+          fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node.js
+        if: steps.scope.outputs.code == 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
       - name: Restore Next.js build cache
+        if: steps.scope.outputs.code == 'true'
         continue-on-error: true
         uses: actions/cache@v5
         with:
@@ -60,27 +193,30 @@ jobs:
             ${{ runner.os }}-next-
 
       - name: Install dependencies
-        run: npm ci
+        if: steps.scope.outputs.code == 'true'
+        timeout-minutes: 10
+        run: npm ci --no-audit --no-fund
 
-      - name: Security regression checks
-        run: npm run security:regression
-
-      - name: Unit and API policy tests
-        run: npm run test:unit
-
-      - name: Strict encoding validation
-        run: npm run check:encoding:strict
-
-      # `npm run check` still runs both locally and in the daily audit. They
-      # are split here so the step timings in this log attribute time to the
-      # right stage, and so a lint failure reports without paying for a build.
-      - name: ESLint
-        run: npx eslint . --max-warnings=0
+      # As early in this job as it can run, and still before the smoke tests
+      # -- the ordering is what makes the tier sound: a smoke set that has
+      # silently lost the billing/credit/auth contracts fails here rather
+      # than passing a green-but-empty gate below. The check is
+      # `playwright test --list`, so it needs node_modules and nothing else
+      # (no build, no browser) and costs ~2s measured. Running it here rather
+      # than next to the smoke tests reports a broken manifest ~50s into the
+      # job instead of ~110s.
+      - name: Verify smoke coverage manifest
+        if: steps.scope.outputs.code == 'true'
+        timeout-minutes: 5
+        run: npm run verify:smoke-coverage
 
       - name: Production build
+        if: steps.scope.outputs.code == 'true'
+        timeout-minutes: 15
         run: npm run build
 
       - name: Restore Playwright Chromium cache
+        if: steps.scope.outputs.code == 'true'
         continue-on-error: true
         uses: actions/cache@v5
         with:
@@ -90,34 +226,30 @@ jobs:
             ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}-
 
       - name: Install Chromium
+        if: steps.scope.outputs.code == 'true'
+        timeout-minutes: 10
         run: npx playwright install --with-deps chromium
-
-      # Runs before the smoke tests: listing does not launch a browser, and a
-      # smoke set that has silently lost the billing/credit/auth contracts
-      # should fail here rather than pass a green-but-empty gate below.
-      - name: Verify smoke coverage manifest
-        run: npm run verify:smoke-coverage
 
       # The @smoke tier only. Every other desktop-chromium test still runs --
       # on main push via Main Chromium Regression, and nightly via Daily
       # Security Audit and Nightly Visual Regression. See
       # scripts/verify-smoke-coverage.mjs for what this tier must cover.
+      #
+      # Workers stay at the config default of 1. `--workers=2` was measured
+      # here and bought nothing: 30s in run #133 against 30s at one worker in
+      # run #130, to the second. `fullyParallel: false` parallelises by file
+      # rather than by test, and at 20 tests over 9 files the step is
+      # dominated by the Next server boot, not by test execution -- so a
+      # second worker only adds CPU contention on a 4 vCPU runner. Revisit
+      # only if this tier grows enough for execution to dominate again.
       - name: Run desktop Chromium smoke tests
+        if: steps.scope.outputs.code == 'true'
+        timeout-minutes: 10
         run: npm run test:e2e:smoke
-
-      # Dedicated, zero-retry run of the state-golden visual suite: the
-      # broader smoke-test step above shares the global CI retries: 2
-      # (playwright.config.ts), which absorbs real CI-load flakiness across
-      # the whole suite but can also let a genuinely-flaky visual state
-      # slip through as "passed on retry" without anyone noticing. This
-      # step enforces the stricter bar UI-P1-03 requires: every golden
-      # passes on the very first attempt, on a clean run, or the check
-      # fails outright.
-      - name: Run visual-regression suite (retries=0)
-        run: npx playwright test tests/e2e/chat-state-visual-regression.spec.ts --project=desktop-chromium --workers=1 --retries=0
 
       - name: Upload failed test evidence
         if: failure()
+        timeout-minutes: 5
         uses: actions/upload-artifact@v7
         with:
           name: pr-fast-gate-playwright-${{ github.run_id }}
@@ -126,3 +258,47 @@ jobs:
             playwright-report
           if-no-files-found: ignore
           retention-days: 14
+
+  # The required status check. Its name is load-bearing -- see the header.
+  fast-gate:
+    name: Security, unit, build, and Chromium smoke tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [secret-scan, static-and-unit, build-and-e2e]
+    # `always()` so this reports a red check instead of going pending when an
+    # upstream job fails, is cancelled, or is skipped. The step below decides
+    # the verdict; reaching it is not itself a pass.
+    if: always()
+    steps:
+      # Every upstream job must have concluded `success`. `skipped` and
+      # `cancelled` are failures here on purpose: a job that never ran has
+      # not verified anything, and treating either as a pass is exactly how
+      # an aggregating gate goes green without gating. Documentation-only
+      # PRs skip *steps* inside build-and-e2e, never the job, so the job
+      # still concludes `success` and this stays a simple all-must-pass.
+      - name: Enforce upstream job results
+        env:
+          SECRET_SCAN: ${{ needs.secret-scan.result }}
+          STATIC_AND_UNIT: ${{ needs.static-and-unit.result }}
+          BUILD_AND_E2E: ${{ needs.build-and-e2e.result }}
+        run: |
+          set -uo pipefail
+          failed=0
+          for entry in \
+            "secret-scan=$SECRET_SCAN" \
+            "static-and-unit=$STATIC_AND_UNIT" \
+            "build-and-e2e=$BUILD_AND_E2E"
+          do
+            job="${entry%%=*}"
+            result="${entry#*=}"
+            echo "$job: $result"
+            if [ "$result" != "success" ]; then
+              echo "::error::PR Fast Gate job '$job' concluded '$result', not 'success'."
+              failed=1
+            fi
+          done
+          if [ "$failed" -ne 0 ]; then
+            echo "PR Fast Gate failed. See the job listed above for the cause."
+            exit 1
+          fi
+          echo "All PR Fast Gate jobs passed."

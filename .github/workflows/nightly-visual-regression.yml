@@ -14,6 +14,11 @@ name: Nightly Visual Regression
 # standalone red check with the actual/expected/diff PNGs attached, instead
 # of one line inside a twelve-check audit report.
 #
+# It does mean a broken golden no longer blocks a merge and can be found up
+# to a day later, on this schedule or on the next main push -- an accepted
+# trade for taking ~82s (30%) off every PR. The zero-retry bar that made the
+# PR-tier run meaningful moved here with it; see the test step below.
+#
 # Goldens are never refreshed here, and this workflow must never commit: a
 # baseline mismatch is a failure to be looked at, and auto-accepting one
 # would silently rewrite the baseline it is supposed to defend. The
@@ -86,8 +91,23 @@ jobs:
 
       # Goldens are captured on desktop-chromium only, which is also the one
       # project this suite does not skip itself on.
+      #
+      # `--retries=0` overrides the config's CI `retries: 2`. That default
+      # absorbs real CI-load flakiness across the wider suites, but here it
+      # would let a genuinely flaky golden slip through as "passed on retry"
+      # with nobody looking -- which is the one thing this workflow exists to
+      # catch. UI-P1-03 requires every golden to pass on the very first
+      # attempt, on a clean run, or the check fails outright. PR Fast Gate
+      # used to carry that bar; it now lives here, and the
+      # security-regression check asserts the flag is still present.
+      #
+      # Workers stay at the config default of 1. This suite is no longer on
+      # anyone's critical path, and screenshot comparison is the part of the
+      # test set most sensitive to render timing under CPU contention, so
+      # there is nothing to buy by parallelising it and a golden's stability
+      # to lose.
       - name: Run chat state visual regression suite
-        run: npm run test:e2e:visual
+        run: npm run test:e2e:visual -- --retries=0
 
       # `if: always()` so the actual/expected/diff PNGs a failing golden
       # writes into test-results are uploaded -- that evidence is the entire
