@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative, sep } from "node:path";
 
 import { EMAIL_FONT_STACK, EMAIL_MONO_FONT_STACK } from "../lib/emailTypography.ts";
 
@@ -17,7 +17,13 @@ function collectTsx(dir, out = []) {
 }
 
 const ALL_TSX = [...collectTsx(join(ROOT, "app")), ...collectTsx(join(ROOT, "components"))];
-const rel = (file) => file.slice(ROOT.length + 1);
+// EXT-REAUDIT-F001. These paths are compared against POSIX-shaped literals --
+// the "/admin/" exclusion just below, and the `file:line` keys in
+// BRAND_EXPRESSION_ALLOWLIST -- so the separator is normalized once here
+// rather than at every comparison. Unnormalized, a Windows run made the admin
+// console look like customer UI and missed every allowlist entry, so the suite
+// failed on the platform rather than on the policy it is meant to enforce.
+const rel = (file) => relative(ROOT, file).split(sep).join("/");
 // The admin console inherits the same tokens but is an internal, desktop-only
 // surface; the size floor below is a customer-UI guarantee.
 const CUSTOMER_TSX = ALL_TSX.filter((file) => !rel(file).includes("/admin/"));

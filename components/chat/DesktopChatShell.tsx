@@ -7,6 +7,7 @@ import { useChatConsentSlotRef } from "@/components/analytics/AnalyticsProvider"
 import { useSidebarCollapsePreference } from "@/components/chat/useSidebarCollapse";
 import { ChatApp } from "@/components/chat/ChatApp";
 import { ChatInput } from "@/components/chat/ChatInput";
+import { useComposerPortalHost } from "@/components/chat/useComposerPortalHost";
 import { ChatWelcomeScreen } from "@/components/chat/ChatWelcomeScreen";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
@@ -15,6 +16,7 @@ import { ComparisonActionRail } from "@/components/chat/ComparisonActionRail";
 import { GuestVerificationDesktopSlot } from "@/components/chat/GuestVerificationDesktopSlot";
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import { deriveComparisonReadiness } from "@/lib/comparisonReadiness";
+import { englishCreditUnit, formatCountedUnit } from "@/lib/pricingFormat";
 import {
   getModelUsageProfile,
   type ChatAttachment,
@@ -23,6 +25,12 @@ import {
 import { useLanguage } from "@/components/LanguageProvider";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import type { WebSearchMode } from "@/lib/appDefaults";
+
+const interpolate = (template: string, values: Record<string, string | number>) =>
+  Object.entries(values).reduce(
+    (copy, [key, value]) => copy.replaceAll(`{${key}}`, String(value)),
+    template
+  );
 
 type PromptPayload = {
   id: string;
@@ -222,6 +230,10 @@ export function DesktopChatShell({
   const inputPortalTarget = isConversationEmpty
     ? welcomeInputSlot ?? bottomInputSlot
     : bottomInputSlot ?? welcomeInputSlot;
+  // STG-F003: portal into a host we move between the two slots, never into
+  // the slots themselves -- switching containers would rebuild the composer
+  // and drop whatever the user had just typed into it.
+  const composerPortalHost = useComposerPortalHost(inputPortalTarget);
   // Mirrors inputPortalTarget above: the composer (and so the consent
   // notice slot right next to it) lives in one of two DOM positions
   // depending on whether the welcome screen is showing.
@@ -512,18 +524,31 @@ export function DesktopChatShell({
                             <CreditCostBadge
                               credits={usageProfile.credits}
                               size="xs"
-                              label={lang === "ko" ? `기본 ${usageProfile.credits}크레딧 차감` : `Base cost ${usageProfile.credits} credits`}
+                              label={lang === "ko" ? `기본 ${usageProfile.credits}크레딧 차감` : `Base cost ${formatCountedUnit(usageProfile.credits, englishCreditUnit, "en")}`}
                             />
                           )}
                         </span>
                       </span>
                     ) : (
                       <span className="flex min-w-0 flex-col">
+                        {/*
+                          RECON-A11Y-001: the selected model name is this
+                          control's only visible text, so a screen reader
+                          announced three identical "combo box"es and gave no
+                          way to tell which panel was about to change models
+                          -- and changing the wrong panel spends credits.
+                          Named by panel position rather than by model, so the
+                          name stays stable across a selection change and the
+                          three names stay unique.
+                        */}
                         <select
                           value={modelId}
                           onChange={(event) => onChangePanelModel(modelId, event.target.value)}
                           disabled={isPanelDisabled || !isModelSelectionReady}
                           aria-busy={!isModelSelectionReady}
+                          aria-label={interpolate(t("chat.panelModelSelectLabel"), {
+                            position: panelIndex + 1,
+                          })}
                           className="min-w-0 cursor-pointer truncate bg-transparent text-sm font-semibold text-zinc-800 outline-none hover:text-zinc-950 dark:text-zinc-100 dark:hover:text-white"
                         >
                           {ENABLED_MODELS.map((model) => {
@@ -546,7 +571,7 @@ export function DesktopChatShell({
                             <CreditCostBadge
                               credits={usageProfile.credits}
                               size="xs"
-                              label={lang === "ko" ? `기본 ${usageProfile.credits}크레딧 차감` : `Base cost ${usageProfile.credits} credits`}
+                              label={lang === "ko" ? `기본 ${usageProfile.credits}크레딧 차감` : `Base cost ${formatCountedUnit(usageProfile.credits, englishCreditUnit, "en")}`}
                             />
                           )}
                         </span>
@@ -648,7 +673,7 @@ export function DesktopChatShell({
           <div ref={setBottomConsentSlot} className="mx-auto w-full max-w-4xl" />
         </div>
         <div ref={setBottomInputSlot} />
-        {inputPortalTarget &&
+        {composerPortalHost &&
           createPortal(
             <ChatInput
               value={inputValue}
@@ -678,7 +703,7 @@ export function DesktopChatShell({
               variant={isConversationEmpty ? "floating" : "bar"}
               hideTopBorder={comparisonReadiness.isVisible}
             />,
-            inputPortalTarget
+            composerPortalHost
           )}
       </section>
     </main>

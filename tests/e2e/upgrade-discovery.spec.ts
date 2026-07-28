@@ -330,6 +330,101 @@ test.describe("value-moment upgrade prompt", () => {
     await expect(page.getByTestId("value-upgrade-prompt")).toBeVisible();
   });
 
+  /**
+   * STG-F003 root cause. The composer is portalled into one of two slots --
+   * the welcome screen's while the conversation is empty, the bottom dock
+   * once it is not -- and `isConversationEmpty` only settles once every panel
+   * has reported back whether it has messages. Portalling straight into those
+   * two elements meant the switch unmounted the whole ChatInput subtree and
+   * built a new one, replacing the <textarea> DOM node: the text already
+   * typed into the old node was dropped, focus was lost, and the Enter that
+   * followed hit an empty composer. The user saw no request, no error, and no
+   * prompt.
+   *
+   * Here the per-model message loads are held back so the switch lands after
+   * the prompt is typed, which is exactly the window that produced the 25%
+   * failure rate on the persistence test above.
+   */
+  test("a prompt typed while the panels are still loading is not lost", async ({
+    page,
+  }) => {
+    let preflightCount = 0;
+    await page.route(
+      /.*\/api\/conversations\/qa-conversation\?.*modelId=.*/,
+      async (route) => {
+        await new Promise((resolve) => setTimeout(resolve, 900));
+        await route.fallback();
+      }
+    );
+    await page.unroute("**/api/chat/preflight");
+    await page.route("**/api/chat/preflight", async (route) => {
+      preflightCount += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true, modelCount: 2, requiredCredits: 2 }),
+      });
+    });
+
+    const textarea = page.getByTestId("chat-textarea");
+    await textarea.fill("Typed while the panels were still loading");
+    // The composer must still hold the prompt after the panels settle and the
+    // welcome screen gives way to the conversation view.
+    await expect
+      .poll(() => textarea.inputValue(), { timeout: 5_000 })
+      .toBe("Typed while the panels were still loading");
+    await expect(page.getByTestId("chat-textarea")).toBeFocused();
+
+    await textarea.press("Enter");
+    await expect.poll(() => preflightCount).toBe(1);
+  });
+
+  /**
+   * STG-F003. Nothing marks the composer busy until after the conversation
+   * create, the model-settings flush and the preflight have all resolved, so
+   * a second Enter inside that window used to run a second, independent
+   * submit: two preflights, two saved user messages, two charges for one
+   * intent.
+   */
+  test("a second Enter during a slow preflight does not start a second comparison", async ({
+    page,
+  }) => {
+    let preflightCount = 0;
+    let messagePostCount = 0;
+    await page.unroute("**/api/chat/preflight");
+    await page.route("**/api/chat/preflight", async (route) => {
+      preflightCount += 1;
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true, modelCount: 2, requiredCredits: 2 }),
+      });
+    });
+    await page.route(
+      "**/api/conversations/qa-conversation/messages**",
+      async (route) => {
+        if (route.request().method() === "POST") messagePostCount += 1;
+        await route.fulfill({
+          status: route.request().method() === "POST" ? 201 : 200,
+          contentType: "application/json",
+          body: "{}",
+        });
+      }
+    );
+
+    const textarea = page.getByTestId("chat-textarea");
+    await textarea.fill("Only one of these may run");
+    await textarea.press("Enter");
+    await textarea.press("Enter");
+    await textarea.press("Enter");
+
+    await expect.poll(() => preflightCount, { timeout: 10_000 }).toBe(1);
+    await expect(page.getByTestId("value-upgrade-prompt")).toBeVisible();
+    expect(preflightCount).toBe(1);
+    expect(messagePostCount).toBeLessThanOrEqual(1);
+  });
+
   test("panel-only send waits for a changed model selection to persist", async ({
     page,
   }) => {

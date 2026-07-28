@@ -7,11 +7,19 @@ import { useModelCatalog } from "@/components/ModelCatalogProvider";
 
 type PublicModelStatus = "available" | "limited" | "unavailable";
 
+// RECON-OPS-001: how healthy the replacements offered for this model are
+// right now. "degraded" means every candidate is itself limited, "none" that
+// there is no usable candidate at all, "unknown" that provider health could
+// not be read -- all three have to be said out loud rather than rendered as a
+// bare list that reads like a safe swap.
+type FallbackHealth = "operational" | "degraded" | "none" | "unknown";
+
 type PublicModelStatusRecord = {
   id: string;
   provider: string;
   status: PublicModelStatus;
   fallbackModelIds: string[];
+  fallbackHealth: FallbackHealth;
 };
 
 type ProviderStatusBannerProps = {
@@ -58,6 +66,7 @@ export function ProviderStatusBanner({
               provider?: unknown;
               status?: unknown;
               fallbackModelIds?: unknown;
+              fallbackHealth?: unknown;
             };
             if (
               typeof record.id !== "string" ||
@@ -79,6 +88,12 @@ export function ProviderStatusBanner({
                     .filter((id) => PUBLIC_MODEL_IDS.has(id))
                     .slice(0, 3)
                 : [],
+              fallbackHealth:
+                record.fallbackHealth === "operational" ||
+                record.fallbackHealth === "degraded" ||
+                record.fallbackHealth === "none"
+                  ? record.fallbackHealth
+                  : "unknown",
             };
           })
           .filter((item): item is PublicModelStatusRecord => Boolean(item))
@@ -131,10 +146,27 @@ export function ProviderStatusBanner({
           .slice(0, 3)
       : [];
 
+    // The caveat has to describe the models actually on offer, so it is the
+    // worst health among the impacted models that contributed one. With no
+    // candidate left the banner says so instead of falling back to the
+    // generic "try again later", which hid that every alternative was out.
+    const contributing = visibleUnavailable.filter((model) =>
+      model.fallbackModelIds.some((id) => fallbackIds.includes(id))
+    );
+    const fallbackHealth: FallbackHealth =
+      fallbackIds.length === 0
+        ? "none"
+        : contributing.some((model) => model.fallbackHealth === "unknown")
+          ? "unknown"
+          : contributing.every((model) => model.fallbackHealth === "degraded")
+            ? "degraded"
+            : "operational";
+
     return {
       impacted: visibleUnavailable,
       fallbackIds,
       fallbackNames,
+      fallbackHealth,
       swapSuggestions,
       isSelectedOnly,
     };
@@ -144,6 +176,16 @@ export function ProviderStatusBanner({
 
   const hasImpact = bannerState.impacted.length > 0;
   if (!hasImpact) return null;
+
+  // Never silent about a suggestion the snapshot itself says is shaky.
+  const fallbackCaveat =
+    bannerState.fallbackHealth === "degraded"
+      ? t("providerStatus.fallbackDegraded")
+      : bannerState.fallbackHealth === "unknown" && bannerState.fallbackIds.length > 0
+        ? t("providerStatus.fallbackUnverified")
+        : bannerState.fallbackHealth === "none"
+          ? t("providerStatus.tryLater")
+          : "";
 
   if (compact) {
     return (
@@ -166,10 +208,11 @@ export function ProviderStatusBanner({
                 {bannerState.impacted.length} {t("providerStatus.unavailable")}
               </span>
             </div>
-            <p className="mt-0.5 truncate text-[11px] font-medium opacity-80">
+            <p className="mt-0.5 text-[11px] font-medium opacity-80">
               {bannerState.fallbackNames.length > 0
                 ? `${t("providerStatus.tryFallback")} ${bannerState.fallbackNames.join(", ")}`
-                : t("providerStatus.tryLater")}
+                : t("providerStatus.noHealthyFallback")}
+              {fallbackCaveat ? ` ${fallbackCaveat}` : ""}
             </p>
           </div>
           <button
@@ -247,7 +290,8 @@ export function ProviderStatusBanner({
             {bannerState.impacted.slice(0, 3).map((model) => modelName(model.id)).join(", ")}
             {bannerState.fallbackNames.length > 0
               ? ` ${t("providerStatus.tryFallback")} ${bannerState.fallbackNames.join(", ")}`
-              : ` ${t("providerStatus.tryLater")}`}
+              : ` ${t("providerStatus.noHealthyFallback")}`}
+            {fallbackCaveat ? ` ${fallbackCaveat}` : ""}
           </p>
           {onSwapModel && bannerState.swapSuggestions.length > 0 ? (
             <div className="mt-2 flex flex-wrap gap-1.5">

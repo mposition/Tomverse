@@ -99,6 +99,7 @@ export const en = {
         inactivePanel: "No active AI panel.",
         chooseModel: "Please select a model on the right side of the input field below.",
         compareTabsLabel: "Model comparison tabs",
+        panelModelSelectLabel: "Model for comparison panel {position}",
         inUsed: " (In Use)",
         recentConversationsLabel: "Continue a recent chat",
         recentConversationsDisclosure: "View {count} recent chats",
@@ -579,6 +580,9 @@ export const en = {
         switchTo: "Switch to",
         switchFromTo: "Switch {from} for {to}",
         tryLater: "Please try again later or choose another model.",
+        noHealthyFallback: "No replacement model is healthy right now.",
+        fallbackDegraded: "These replacements are also reporting problems right now.",
+        fallbackUnverified: "Availability of these replacements could not be verified.",
         refresh: "Refresh provider status",
     },
     modelTiers: {

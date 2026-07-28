@@ -22,6 +22,22 @@ const allowedRequestHosts = [
   "localhost:3100",
 ].filter((host, index, hosts) => hosts.indexOf(host) === index);
 
+// EXT-REAUDIT-F001. Some runners cannot reach cdn.playwright.dev, so
+// `npx playwright install` fails and the Chromium projects cannot launch at
+// all. Those images ship a pre-provisioned Chromium instead; pointing
+// PLAYWRIGHT_CHROMIUM_EXECUTABLE at it lets the canonical projects run there.
+//
+// This is a capability fallback, never the default: unset -- which is the
+// case in CI and on developer machines -- Playwright uses its own pinned
+// build and nothing about the canonical projects changes. A run that sets it
+// is NOT canonical, so its screenshots must not be treated as golden
+// evidence (see docs/qa/browser-capability.md).
+const chromiumExecutablePath =
+  process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined;
+const chromiumLaunchOptions = chromiumExecutablePath
+  ? { launchOptions: { executablePath: chromiumExecutablePath } }
+  : {};
+
 export default defineConfig({
   testDir: "./tests/e2e",
   fullyParallel: false,
@@ -60,11 +76,19 @@ export default defineConfig({
   projects: [
     {
       name: "desktop-chromium",
-      use: { ...devices["Desktop Chrome"], viewport: { width: 1920, height: 1080 } },
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 1920, height: 1080 },
+        ...chromiumLaunchOptions,
+      },
     },
     {
       name: "desktop-compact",
-      use: { ...devices["Desktop Chrome"], viewport: { width: 1366, height: 768 } },
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 1366, height: 768 },
+        ...chromiumLaunchOptions,
+      },
     },
     {
       name: "mobile-safari",
@@ -75,6 +99,7 @@ export default defineConfig({
       use: {
         ...devices["Pixel 5"],
         viewport: { width: 412, height: 915 },
+        ...chromiumLaunchOptions,
       },
     },
   ],

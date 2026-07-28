@@ -431,6 +431,9 @@ export const pt = {
         switchTo: "Mudar para",
         switchFromTo: "Trocar {from} por {to}",
         tryLater: "Tente novamente mais tarde ou escolha outro modelo.",
+        noHealthyFallback: "Nenhum modelo substituto está saudável no momento.",
+        fallbackDegraded: "Estes substitutos também estão relatando problemas.",
+        fallbackUnverified: "Não foi possível verificar a disponibilidade destes substitutos.",
         refresh: "Atualizar status dos provedores",
     },
     modelTiers: {

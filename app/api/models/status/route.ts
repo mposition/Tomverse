@@ -5,6 +5,7 @@ import { getPublicRuntimeModels } from "@/lib/modelRegistry";
 import { resolveModelRuntimeAvailability } from "@/lib/modelAvailability";
 import { getProviderHealthDashboard } from "@/lib/providerMonitoring";
 import { getAnonymousClientKey } from "@/lib/clientIp";
+import { selectFallbackCandidates } from "@/lib/providerFallbackCandidates";
 import {
   apiSecurityResponse,
   consumeApiRateLimit,
@@ -40,6 +41,10 @@ const fallbackModelStatus = (publicModels: Awaited<ReturnType<typeof getPublicRu
     fallbackModelIds: model.replacementModelId
       ? [model.replacementModelId]
       : [],
+    // RECON-OPS-001: with no dashboard there is no evidence about the
+    // replacement either, so it is offered as unverified rather than as a
+    // safe swap.
+    fallbackHealth: "unknown" as const,
     recentFailureCount5m: 0,
     recentErrorCode: null,
   })),
@@ -87,8 +92,8 @@ export async function GET(req: Request) {
     );
 
     const publicModelIds = new Set(publicModels.map((model) => model.id));
-    const models = publicModels.map((model) => {
-      const replacementModelId = model.replacementModelId;
+
+    const resolveStatus = (model: (typeof publicModels)[number]) => {
       const provider = providerStatus.get(model.provider);
       const incident = modelIncidents.get(model.id);
       let status: "available" | "limited" | "unavailable" =
@@ -113,6 +118,28 @@ export async function GET(req: Request) {
           status = "limited";
         }
       }
+      return status;
+    };
+
+    // RECON-OPS-001: every model's status is resolved once up front so the
+    // replacement candidates below can be judged against the same snapshot
+    // this response reports, instead of against the static registry alone.
+    const modelStatuses = new Map(
+      publicModels.map((model) => [model.id, resolveStatus(model)] as const)
+    );
+
+    const models = publicModels.map((model) => {
+      const provider = providerStatus.get(model.provider);
+      const status = modelStatuses.get(model.id) ?? "available";
+      const { fallbackModelIds, fallbackHealth } =
+        status === "unavailable"
+          ? selectFallbackCandidates({
+              replacementModelId: model.replacementModelId,
+              recommendedModelIds: provider?.fallback.recommendedModelIds,
+              isPublicModel: (modelId) => publicModelIds.has(modelId),
+              statusOf: (modelId) => modelStatuses.get(modelId),
+            })
+          : { fallbackModelIds: [] as string[], fallbackHealth: "none" as const };
 
       return {
         id: model.id,
@@ -120,17 +147,8 @@ export async function GET(req: Request) {
         status,
         providerStatus: provider?.publicStatus ?? "unknown",
         providerStatusReason: provider?.publicStatusReasonText ?? null,
-        fallbackModelIds:
-          status === "unavailable"
-            ? Array.from(
-                new Set([
-                  ...(replacementModelId
-                    ? [replacementModelId]
-                    : []),
-                  ...(provider?.fallback.recommendedModelIds || []),
-                ])
-              ).filter((modelId) => publicModelIds.has(modelId))
-            : [],
+        fallbackModelIds,
+        fallbackHealth,
       };
     });
 

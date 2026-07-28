@@ -99,6 +99,7 @@ export const ko = {
         inactivePanel: "활성화된 AI 패널이 없습니다.",
         chooseModel: "아래 입력창 오른쪽에서 사용할 모델을 선택해 주세요.",
         compareTabsLabel: "모델 비교 탭",
+        panelModelSelectLabel: "비교 패널 {position}의 모델",
         inUsed: " (사용 중)",
         recentConversationsLabel: "최근 대화 이어하기",
         recentConversationsDisclosure: "최근 대화 {count}개 보기",
@@ -579,6 +580,9 @@ export const ko = {
         switchTo: "전환",
         switchFromTo: "{from}을(를) {to}(으)로 교체",
         tryLater: "잠시 후 다시 시도하거나 다른 모델을 선택해 주세요.",
+        noHealthyFallback: "지금 정상 상태인 대체 모델이 없습니다.",
+        fallbackDegraded: "이 대체 모델들도 현재 문제가 보고되고 있습니다.",
+        fallbackUnverified: "이 대체 모델의 가용성은 확인되지 않았습니다.",
         refresh: "공급자 상태 새로고침",
     },
     modelTiers: {

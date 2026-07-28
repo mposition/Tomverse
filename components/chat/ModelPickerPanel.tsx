@@ -43,6 +43,7 @@ import {
   type ModelRecommendation,
 } from "@/lib/modelRecommendations";
 import { deriveModelSelectionLimit } from "@/lib/modelSelectionLimit";
+import { englishCreditUnit, formatCountedUnit } from "@/lib/pricingFormat";
 import {
   countActiveModelCatalogueFilters,
   EMPTY_MODEL_CATALOGUE_FILTERS,
@@ -624,7 +625,7 @@ export function ModelPickerPanel({
                   creditsLabel={
                     language === "ko"
                       ? `기본 ${recommendation.credits}크레딧 차감`
-                      : `Base cost ${recommendation.credits} credits`
+                      : `Base cost ${formatCountedUnit(recommendation.credits, englishCreditUnit, "en")}`
                   }
                   limitedLabel={t("modelStatusReasons.limited")}
                   limitDescriptionId={
@@ -688,7 +689,7 @@ export function ModelPickerPanel({
             label={
               language === "ko"
                 ? `기본 예상 ${selectedBaseCredits}크레딧`
-                : `Base estimate ${selectedBaseCredits} credits`
+                : `Base estimate ${formatCountedUnit(selectedBaseCredits, englishCreditUnit, "en")}`
             }
           />
         </p>

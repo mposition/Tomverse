@@ -68,6 +68,22 @@ export const formatCountedUnit = (
   formatNumber: (value: number) => string = (value) => String(value)
 ) => `${formatNumber(count)} ${pluralizeUnit(count, unit, lang)}`;
 
+/**
+ * The credit unit as it appears in English chat copy -- "Base cost 1 credit",
+ * "Base estimate 2 credits".
+ *
+ * FINAL-F006 was only ever fixed on /pricing, which owns its own localized
+ * copy table because it translates the whole surrounding sentence. The chat
+ * surfaces (model picker, catalogue, desktop panels, model finder) render
+ * this label in Korean or English only, and Korean has no plural, so English
+ * is the single form that needs CLDR selection. Exported from here rather
+ * than restated per component so the four surfaces cannot drift apart again.
+ */
+export const englishCreditUnit: CountableUnit = {
+  one: "credit",
+  other: "credits",
+};
+
 // How a billing period attaches to a price. English, French, German,
 // Spanish and Portuguese period strings are already prepositional phrases
 // ("per month", "par mois"), so a slash in front of them is ungrammatical.

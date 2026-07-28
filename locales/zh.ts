@@ -107,6 +107,7 @@ export const zh = {
         inactivePanel: "没有启用的 AI 面板。",
         chooseModel: "请在下方输入框右侧选择模型。",
         compareTabsLabel: "模型比较标签页",
+        panelModelSelectLabel: "比较面板 {position} 的模型",
         inUsed: "（使用中）",
         recentConversationsLabel: "继续最近的对话",
         onGuestMode: "访客模式已启用",
@@ -461,6 +462,9 @@ export const zh = {
         switchTo: "切换到",
         switchFromTo: "将{from}替换为{to}",
         tryLater: "请稍后再试，或选择其他模型。",
+        noHealthyFallback: "目前没有状态正常的替代模型。",
+        fallbackDegraded: "这些替代模型目前也报告了问题。",
+        fallbackUnverified: "无法确认这些替代模型的可用性。",
         refresh: "刷新提供商状态",
     },
     modelTiers: {
