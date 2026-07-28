@@ -26,7 +26,11 @@ import { expect, type Locator, type Page } from "@playwright/test";
  * This is an emulation, not a device. It is faithful about the one property
  * under test (the gap between the layout and visual viewports) and says
  * nothing about keyboard animation timing or browser-specific scroll-into-view
- * behaviour, so a real-device pass is still what closes VAL-001.
+ * behaviour. Those were confirmed once on real iOS Safari and Android Chrome
+ * (see .github/audits/ui-insight-followup.md); what runs on every PR is this,
+ * and it is what stops the geometry from regressing. A change that reworks the
+ * keyboard layout deserves another look on a device -- the emulation will not
+ * notice an animation or scroll-anchoring regression.
  */
 export async function openOnScreenKeyboard(page: Page, keyboardHeight = 300) {
   await page.evaluate((height) => {

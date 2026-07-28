@@ -2,7 +2,8 @@
 
 > 이 문서는 `TOMVERSE_INSIGHT_UI_AUDIT_FINAL_REPORT.md` 기준 작업명령서
 > (UI-001~UI-012, VAL-001~VAL-007)의 **실행 결과 기록**입니다.
-> 표기: `[코드]` 소스 확인, `[테스트]` 자동화 실행 결과, `[미검증]` 근거 미확보.
+> 표기: `[코드]` 소스 확인, `[테스트]` 자동화 실행 결과,
+> `[실기기]` 실기기 확인 결과, `[미검증]` 근거 미확보.
 
 ## 1. 실행 baseline
 
@@ -15,14 +16,14 @@
 | 실행 환경 | Linux 컨테이너, Chromium 1194 (`/opt/pw-browsers`), Playwright 1.62 |
 | 실행 project | `desktop-chromium`, `desktop-compact`, `mobile-chromium` |
 | webkit (`mobile-safari`) | **[미검증]** 이 컨테이너에 webkit 빌드가 없고 proxy가 다운로드를 차단함. nightly `daily-security-audit.yml`이 chromium+webkit을 실행함 |
+| UI-001 실기기 확인 | **완료** — iOS Safari / Android Chrome, 제품 담당 직접 확인 (2026-07-28). 4장 참조 |
 | 실제 provider 호출 / 결제 / DB write | **없음** (모든 상태는 route mock과 in-page fetch stub) |
 
 ## 2. 완료 건수
 
 | 구분 | 건수 | 내역 |
 |---|---:|---|
-| 구현 완료 | 9 | UI-002, UI-003, UI-004, UI-005, UI-006, UI-007, UI-008, UI-009, UI-010 |
-| 구현 완료·판정 보류 | 1 | UI-001 (`Partially Confirmed`, 실기기 대기) |
+| 구현 완료 | 10 | UI-001, UI-002, UI-003, UI-004, UI-005, UI-006, UI-007, UI-008, UI-009, UI-010 |
 | 정책 승인 후 구현 | 1 | UI-012 (B안) |
 | 검증 → 신규 결함 → 수정 | 1 | VAL-003 |
 | 검증 → 진단 기각 + 결함 수정 | 1 | UI-005 / VAL-002 |
@@ -31,13 +32,17 @@
 
 작업명령서의 Accept·Revise 이슈 10건은 전부 처리됐고, `Needs Validation`이던
 UI-005는 검토 결정에 따라 `Revise`로 바뀌어 구현에 포함됐습니다.
-**Go-Live 판정은 UI-001 실기기 확인 전까지 보류입니다.**
+
+**최종 완료 기준 14개 항목이 모두 충족됐습니다.** 마지막까지 남아 있던
+UI-001 실기기 확인이 완료되어, `P1`에 `FAIL`·`PARTIAL`·`NOT VERIFIED`가
+남아 있지 않습니다(기준 14). 남은 항목은 작업명령서 분류상 출시를 막지 않는
+것들이며 12장에 정리했습니다.
 
 ## 3. 이슈별 결과
 
 | ID | 상태 | 근거 |
 |---|---|---|
-| UI-001 | **Partially Confirmed** (승격 안 함) | fixture에서는 통과하나 실기기 미검증. 4장 참조. **이 항목이 열려 있는 동안 Go-Live READY로 판정하지 않음** |
+| UI-001 | **PASS** | 정확한 visual viewport fixture 통과 + iOS Safari·Android Chrome 실기기 확인 완료. 4장 참조 |
 | UI-002 | **Fixed** | 320~430px 5개 폭 × 3개 route에서 44×44 + 5점 hit-test + content 교차 0px² |
 | UI-003 | **Fixed** | 오류/복구/상태 text가 light·dark 모두 AA 통과 (pixel 합성 측정) |
 | UI-004 | **Fixed** | golden 49 → 63장. 320 dark 복구 4종, 영어 복구 4종, AI Review 5종, Deep Research 실패 활성 1종 추가 |
@@ -92,23 +97,29 @@ sibling `position: fixed` overlay가 여전히 layout viewport 전체 높이(844
 - pointer·keyboard 모두로 완료 — 통과 (후보 탭 → Done focus → Enter → 닫힘)
 - 320/390 normal baseline·desktop dialog 회귀 — 통과 (기존 15개 test 유지)
 
-**한계와 최종 판정** `[미검증]`
-실기기(iOS Safari / Android Chrome) 검증은 수행하지 못했습니다.
+**실기기 확인** `[실기기]`
+iOS Safari와 Android Chrome에서 각 1회, **제품 담당이 직접 확인해 통과**했습니다
+(2026-07-28). 이로써 UI-001의 마지막 미검증 조건이 닫히고 상태는 **`PASS`**
+입니다.
 
-미검증 사유: 이 컨테이너에는 WebKit 빌드가 없고(`mobile-safari` project 실행
-불가), proxy가 `cdn.playwright.dev`와
-`playwright.download.prss.microsoft.com`을 차단해 내려받을 수도 없습니다.
-실기기는 이 실행 환경에서 접근할 수 없습니다. 덧붙여 Playwright의 Linux
-WebKit은 iOS Safari가 아니고 on-screen keyboard 자체가 없으므로, 설치가
-가능했더라도 이 항목의 실기기 근거를 대체하지 못합니다.
+이 확인이 필요했던 이유는 fixture의 범위가 좁기 때문입니다. `openOnScreenKeyboard`는
+layout viewport와 visual viewport의 분리라는 **한 가지 속성**에만 충실하고,
+keyboard animation 타이밍, browser별 scroll-into-view, 실기기 폰트 metric은
+재현하지 않습니다. 그 셋은 실기기에서만 확인할 수 있고, 이제 확인됐습니다.
 
-fixture는 layout viewport와 visual viewport의 분리라는 **한 가지 속성에
-대해서만** 충실합니다. keyboard animation 타이밍, browser별 scroll-into-view,
-실기기 폰트 metric은 재현하지 않습니다.
+**자동화가 계속 담당하는 부분** 실기기 확인은 1회성 확증이고, 회귀를 막는 것은
+fixture입니다. `@ui-risk` tier가 develop PR마다 390×844(336px keyboard)와
+320×568(216px keyboard)에서 완료 button·검색·후보 도달 가능성과 sheet 안
+scroller 1개 규칙을 merge-blocking으로 검사합니다. 실기기에서만 드러나는
+회귀는 이 방식으로 잡히지 않으므로, keyboard 관련 layout을 크게 바꿀 때는
+실기기 확인을 다시 하는 편이 안전합니다.
 
-따라서 검토 결정에 따라 UI-001의 상태는 **`Partially Confirmed`로 유지**하며
-`PASS`로 올리지 않습니다. iOS Safari와 Android Chrome에서 각 1회 확인하기
-전까지 **이 작업 전체를 `Go-Live READY`로 판정하지 않습니다.**
+**이 환경의 제약(참고)** `[미검증]`
+이 컨테이너 자체에서는 실기기·WebKit 검증이 불가능합니다. WebKit 빌드가 없고
+proxy가 `cdn.playwright.dev`와 `playwright.download.prss.microsoft.com`을
+차단합니다. 덧붙여 Playwright의 Linux WebKit은 iOS Safari가 아니고 on-screen
+keyboard 자체가 없어서, 설치가 가능했더라도 위 실기기 확인을 대체하지
+못했을 것입니다.
 
 ## 5. UI-005 (Revise) / VAL-002 — pricing overflow
 
@@ -332,22 +343,19 @@ scan, smoke manifest, `--update-snapshots` 금지, main·nightly의 무필터 �
 
 ## 12. 남은 항목
 
-### 12-1. Go-Live를 막는 것
+작업명령서 기준으로 **출시를 막는 항목은 없습니다.** 최종 완료 기준 14개가
+모두 충족됐고, `P1`에 `FAIL`·`PARTIAL`·`NOT VERIFIED`가 남아 있지 않습니다.
+아래는 열려 있으나 작업명령서가 비차단으로 분류한 것들입니다.
 
-1. **UI-001 실기기 확인** — iOS Safari, Android Chrome 각 1회. 상태는
-   `Partially Confirmed`이며 이 확인 전까지 **`Go-Live READY`로 판정하지
-   않습니다.** 미검증 사유는 4장에 기록했습니다.
-
-### 12-2. Go-Live를 막지 않는 것
-
-2. **UI-012** — `P3`, B안 구현 완료. 단독으로 출시를 막지 않습니다.
-3. **`?lang=` 없는 저장 언어의 SSR 불일치** — cookie가 필요한 별도 범위(6장).
-4. **VAL-004** (fine-pointer 좁은 화면 정책), **VAL-005** (Deep Research 실패
-   tab 자동 활성화 여부) — 결정 전까지 제품 동작을 바꾸지 않았습니다. golden은
-   실패 tab을 명시적으로 선택하는 방식으로 캡처했습니다.
-5. **VAL-007** (기준 감사 원본 screenshot) — 확보하지 못했습니다.
-   `Not Verifiable`.
-6. **webkit 검증** — 이 환경에서 불가(4장). nightly가 담당합니다.
+| 항목 | 분류 | 상태 |
+|---|---|---|
+| UI-012 | `P3` | B안 구현 완료. 작업명령서 명시상 단독으로 출시를 막지 않음 |
+| VAL-004 (fine-pointer 좁은 화면 정책) | 결정 대기 | `[DESIGN DECISION REQUIRED]`. 결정 전까지 제품 동작 불변 |
+| VAL-005 (Deep Research 실패 tab 자동 활성화) | 결정 대기 | 동일. golden은 실패 tab을 명시적으로 선택해 캡처 |
+| VAL-007 (기준 감사 원본 screenshot) | `Not Verifiable` | 원본을 확보하지 못함. 현재 DOM·render 검증으로 대체 |
+| `?lang=` 없는 저장 언어의 SSR 불일치 | 범위 밖 | cookie가 필요한 별도 작업(6장) |
+| `attachment-flow`·`conversation-title` flake | 사전 존재 | baseline에서 더 자주 실패함을 수치로 확인(13장) |
+| webkit 로컬 실행 | 환경 제약 | nightly `daily-security-audit.yml`이 chromium+webkit 담당 |
 
 ## 13. 전체 회귀 실행 결과와 사전 존재 실패 2건 수정
 
@@ -447,3 +455,32 @@ append보다 늦게 도착하면 **실제 transcript가 빈 seed로 덮이면서
 552 test 중), `npm run check:accent-tokens` 통과(guarded 10파일·10역할),
 `npm run check:encoding:strict` 통과.
 
+## 14. 최종 판정
+
+작업명령서의 **최종 완료 기준 14개 항목이 모두 충족**됐습니다.
+
+| 기준 | 결과 |
+|---|---|
+| 1. UI-001 keyboard | **충족** — fixture 통과 + 실기기 확인 완료. 기존 항상-참 test는 실효화됨 |
+| 2. UI-002 settings 44×44 + 5점 hit-test + 교차 | 충족 |
+| 3. UI-003 오류/복구/상태 text AA (light·dark) | 충족 |
+| 4. UI-007 보조 text readable token, 320px 밀도 회귀 없음 | 충족 (예외 3건 명시) |
+| 5. UI-004 320 dark·영어·AI Review error/retry·DR 실패 활성 | 충족 (golden 63장 / 74 test) |
+| 6. UI-006 ko display heading 어절 분절 0 | 충족 |
+| 7. UI-008 focused tier가 develop merge-blocking, heavy는 main/nightly `retries=0` | 충족 |
+| 8. UI-009 canonical English legal title 1개 | 충족 |
+| 9. UI-010 selection count 1회 | 충족 |
+| 10. UI-012 승인된 정책·token mapping 문서화, 무단 recolor 없음 | 충족 (B안, 색상 값 변경 0) |
+| 11. 정량 회귀 기준선 8개 항목 | 충족 (11장) |
+| 12. VAL-003 로그인 hydration 기록 | 충족 — 기록에 그치지 않고 결함을 수정하고 assertion을 활성화 |
+| 13. test 명령의 pass/fail/skip, SHA, viewport/locale/theme/zoom 기록 | 충족 (13장 및 각 장) |
+| 14. `P1`에 `FAIL`·`PARTIAL`·`NOT VERIFIED` 없음 | **충족** — UI-001이 `PASS`로 확정되어 마지막 `PARTIAL`이 해소됨 |
+
+기준 14의 차단 조건이 해소됐으므로, 이 작업 범위에서 **출시를 막는 항목은
+없습니다.** 열려 있는 항목은 12장의 표대로 전부 작업명령서가 비차단으로
+분류한 것들입니다(UI-012는 `P3`, VAL-004·005는 design decision 대기,
+VAL-007은 `Not Verifiable`).
+
+`Go-Live READY` 선언 자체는 이 문서의 권한이 아니라 배포 결정권자의 판정입니다.
+이 문서가 제공하는 것은 그 판정에 필요한 증거이며, 위 14개 항목에 대해 그
+증거가 모두 갖춰졌습니다.
