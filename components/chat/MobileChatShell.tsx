@@ -19,6 +19,8 @@ import { ModelLogo } from "@/components/chat/ModelLogo";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { ProviderStatusBanner } from "@/components/chat/ProviderStatusBanner";
 import { ComparisonActionRail } from "@/components/chat/ComparisonActionRail";
+import { GuestVerificationSheet } from "@/components/chat/GuestVerificationSheet";
+import { useGuestVerification } from "@/components/chat/GuestVerificationProvider";
 import { ModeInfoSheet } from "@/components/chat/ModeInfoSheet";
 import { useCompactBottomDock } from "@/components/chat/useCompactBottomDock";
 import { chatModelSummaryCopy } from "@/components/chat/chatModelSummaryCopy";
@@ -151,6 +153,10 @@ export function MobileChatShell({
   const { models: AVAILABLE_MODELS } = useModelCatalog();
   const { t, lang } = useLanguage();
   const registerChatConsentSlot = useChatConsentSlotRef();
+  // The verification bottom sheet is portalled out of this tree, so while it
+  // is up the whole shell behind it goes inert: no pointer input, and nothing
+  // for a screen reader to wander into.
+  const { isChallengeVisible: isGuestVerificationOpen } = useGuestVerification();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const drawerPanelRef = useRef<HTMLDivElement | null>(null);
   const drawerCloseButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -469,6 +475,7 @@ export function MobileChatShell({
   return (
     <main
       data-testid="mobile-chat-shell"
+      inert={isGuestVerificationOpen || undefined}
       className="flex h-[100dvh] w-full max-w-full flex-col overflow-hidden bg-white text-[13px] text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100"
     >
       <header
@@ -885,6 +892,13 @@ export function MobileChatShell({
         maxGuestMessages={maxGuestMessages}
         activeModelCount={selectedModels.length}
       />
+
+      {/*
+        Portalled to <body>, so it is neither part of the composer's height
+        calculation nor inside the message list -- and, while closed, consumes
+        no layout at all.
+      */}
+      <GuestVerificationSheet />
     </main>
   );
 }

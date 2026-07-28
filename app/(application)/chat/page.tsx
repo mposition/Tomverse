@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { getPublicAppSettings } from "@/lib/appSettings";
+import { GuestVerificationProvider } from "@/components/chat/GuestVerificationProvider";
 import { ChatPageClient } from "./ChatPageClient";
 
 // The chat UI itself is a Client Component (state, storage, streaming), so
@@ -27,5 +28,14 @@ export default async function ChatPage() {
     });
   }
 
-  return <ChatPageClient guestDefaultModelId={guestDefaultModelId} />;
+  // The verification coordinator wraps the page rather than living inside it,
+  // so ChatPageClient itself can ask for a token for a user-initiated action
+  // while both shells (and every model panel below them) share the one widget.
+  return (
+    <GuestVerificationProvider
+      siteKey={process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY}
+    >
+      <ChatPageClient guestDefaultModelId={guestDefaultModelId} />
+    </GuestVerificationProvider>
+  );
 }
