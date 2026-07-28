@@ -131,14 +131,19 @@ export function deriveComparisonReadiness({
   };
 }
 
+export type ComparisonRailStatusInput = {
+  readiness: ComparisonReadiness;
+  isBusy?: boolean;
+  isAnyActionUnaffordable?: boolean;
+};
+
 /**
  * True only for the one state where the status sentence has nothing left to
  * tell a *sighted* user: every selected model produced a finished answer,
  * nothing is streaming, nothing was excluded, nothing is paused, no analysis
  * is in flight and both actions are affordable. In that state the two buttons
  * -- which already name themselves and carry their own credit badge -- say
- * everything the sentence would, so mobile drops it from the layout (never
- * from the accessibility tree; see the rail's per-action descriptions).
+ * everything the sentence would, and the model panels/tabs above say it again.
  *
  * Any deviation -- generating, needsMore, an excluded failure, a paused panel,
  * a running analysis, an unaffordable action -- is a state the user has to act
@@ -148,11 +153,7 @@ export function isComparisonRailSteadyState({
   readiness,
   isBusy = false,
   isAnyActionUnaffordable = false,
-}: {
-  readiness: ComparisonReadiness;
-  isBusy?: boolean;
-  isAnyActionUnaffordable?: boolean;
-}) {
+}: ComparisonRailStatusInput) {
   return (
     readiness.state === "ready" &&
     readiness.canRun &&
@@ -164,4 +165,32 @@ export function isComparisonRailSteadyState({
     readiness.readyCount === readiness.comparableCount &&
     readiness.readyCount === readiness.selectedCount
   );
+}
+
+/**
+ * Whether the rail's status sentence earns a *visible* row -- the single
+ * policy both shells ask, so "desktop has the space for it" can never become
+ * a reason for the two to disagree about what the user is told. Screen-reader
+ * access to the same sentence is not this function's business: the sentence
+ * stays in the DOM either way (see the rail's `sr-only` branch and its
+ * per-action descriptions).
+ *
+ * `isCollapsed` is the one shell-shaped input, and it is a *viewport* fact
+ * rather than a desktop/mobile one: the rail is behind its disclosure button
+ * because the visible viewport cannot afford it (an on-screen keyboard,
+ * landscape), so the sentence rides that button's own description until it is
+ * expanded again.
+ */
+export function shouldShowVisualStatus({
+  readiness,
+  isBusy = false,
+  isAnyActionUnaffordable = false,
+  isCollapsed = false,
+}: ComparisonRailStatusInput & { isCollapsed?: boolean }) {
+  if (isCollapsed) return false;
+  return !isComparisonRailSteadyState({
+    readiness,
+    isBusy,
+    isAnyActionUnaffordable,
+  });
 }

@@ -432,6 +432,16 @@ export function ComparisonReviewDialog({
   const modelName = (modelId: string) =>
     catalogModels.find((model) => model.id === modelId)?.name || modelId;
 
+  // How many answers this run covers -- read from the run itself once there is
+  // one, and from the setup payload before that. It is the same number the
+  // rail states in its accessible descriptions, so the user can check the
+  // scope both before spending credits and on the finished analysis.
+  const comparedAnswerCount =
+    review?.responseMap?.length ??
+    setup?.responses?.length ??
+    setup?.assistantMessageIds?.length ??
+    0;
+
   // The API still returns the bucket under its legacy `confidence` name; it is
   // relabelled here so the agreement line reads as a grounding comparison
   // rather than as two models reporting how sure they feel.
@@ -656,6 +666,19 @@ export function ComparisonReviewDialog({
                     <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-bold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
                       {t("chat.aiReviewedBy")}: {modelName(activeEntry.reviewerModelId)}
                     </span>
+                    {/* What the analysis actually covered, kept with the run
+                        rather than only on the screen that started it. */}
+                    {comparedAnswerCount > 0 && (
+                      <span
+                        data-testid="ai-review-compared-count"
+                        className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-bold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+                      >
+                        {t("chat.comparisonRailStatusHiddenHint").replaceAll(
+                          "{ready}",
+                          String(comparedAnswerCount)
+                        )}
+                      </span>
+                    )}
                   </div>
 
                   <div className="grid gap-4 md:grid-cols-2">
@@ -833,6 +856,25 @@ export function ComparisonReviewDialog({
               <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-300">
                 {t("chat.aiReviewDescription")}
               </p>
+
+              {/*
+                The rail no longer keeps "Comparing N completed answers" on
+                screen in the steady state (see
+                docs/ui-contracts/comparison-action-rail.md), so the scope is
+                named here instead -- before anything is spent, on the screen
+                where the user confirms the run.
+              */}
+              {setup?.available && comparedAnswerCount > 0 && (
+                <p
+                  data-testid="comparison-review-scope"
+                  className="text-xs font-bold leading-5 text-zinc-500 dark:text-zinc-400"
+                >
+                  {t("chat.comparisonRailStatusHiddenHint").replaceAll(
+                    "{ready}",
+                    String(comparedAnswerCount)
+                  )}
+                </p>
+              )}
 
               {setup?.available ? (
                 <>

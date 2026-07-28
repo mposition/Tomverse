@@ -9,6 +9,7 @@ import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
 import { useLanguage } from "@/components/LanguageProvider";
 import {
   isComparisonRailSteadyState,
+  shouldShowVisualStatus,
   type ComparisonReadiness,
 } from "@/lib/comparisonReadiness";
 
@@ -206,10 +207,12 @@ export function ComparisonActionRail({
     reviewReason
   );
 
+  const isAnyActionUnaffordable =
+    creditsShortFor(quickCredits) || creditsShortFor(AI_REVIEW_CREDITS);
   const isSteadyState = isComparisonRailSteadyState({
     readiness,
     isBusy: isCompareSummaryLoading,
-    isAnyActionUnaffordable: creditsShortFor(quickCredits) || creditsShortFor(AI_REVIEW_CREDITS),
+    isAnyActionUnaffordable,
   });
   // A short, per-action sentence for the one blocked reason the shared status
   // text cannot express: two prices, one balance. "AI cross-review · 4 credits
@@ -245,18 +248,28 @@ export function ComparisonActionRail({
   // rail; the expand control dismisses the keyboard rather than competing with
   // it for the same rows.
   const isCollapsed = isMobile && isCompactViewport && !isExpandedWhileCompact;
-  // Mobile only: desktop has the vertical budget for the sentence and keeps
-  // showing it in every state, exactly as before.
-  const isStatusVisuallyHidden = isMobile && (isCollapsed || isSteadyState);
+  // One policy, both shells (docs/ui-contracts/comparison-action-rail.md).
+  // Desktop having the vertical budget for the sentence is not a reason to
+  // keep repeating what the panels and the two buttons already say; when the
+  // sentence has something to act on, both shells show it.
+  const isStatusVisuallyHidden = !shouldShowVisualStatus({
+    readiness,
+    isBusy: isCompareSummaryLoading,
+    isAnyActionUnaffordable,
+    isCollapsed,
+  });
 
+  // With the sentence gone the action row is the last thing in the rail, so
+  // the bottom padding the sentence used to carry moves onto the section --
+  // the buttons must not sit flush against the composer, and the rail must
+  // not keep an empty row's worth of height either.
   const sectionClassName = isMobile
     ? `w-full shrink-0 border-t border-zinc-200 bg-white px-2 pt-1.5 dark:border-zinc-800 dark:bg-zinc-950 ${
-        // With the sentence gone the row is the last thing in the rail, so the
-        // padding it used to carry moves onto the section rather than being
-        // dropped -- the buttons must not sit flush against the composer.
         isStatusVisuallyHidden ? "pb-1.5" : ""
       }`
-    : "w-full shrink-0 border-t border-zinc-200 bg-white px-4 pt-2 dark:border-zinc-800 dark:bg-zinc-950 md:px-6";
+    : `w-full shrink-0 border-t border-zinc-200 bg-white px-4 pt-2 dark:border-zinc-800 dark:bg-zinc-950 md:px-6 ${
+        isStatusVisuallyHidden ? "pb-2" : ""
+      }`;
 
   return (
     <section
@@ -425,10 +438,10 @@ export function ComparisonActionRail({
         {/*
           The status line for both actions -- how many answers are in scope,
           what is still generating and what was excluded. It stays in the DOM
-          in every state; on mobile it goes visually hidden (never removed)
-          once there is nothing left to act on, because the two buttons
-          already carry the same information in their own labels, badges and
-          descriptions.
+          in every state and in both shells; it goes visually hidden (never
+          removed) once there is nothing left to act on, because the two
+          buttons already carry the same information in their own labels,
+          badges and descriptions, and the panels above name the models.
         */}
         <p
           id={statusId}
