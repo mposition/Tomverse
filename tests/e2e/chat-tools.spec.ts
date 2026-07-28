@@ -1,5 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
-import { mockAuthenticatedApi } from "./support/app-fixtures";
+import {
+  mockAuthenticatedApi,
+  openRecentConversation,
+} from "./support/app-fixtures";
 
 // The "+" trigger (opens the tools/actions sheet) is the first of the two
 // chat-input-popover triggers; the model-selector button (used by
@@ -119,38 +122,43 @@ test("selecting a web search mode shows a removable status chip", async ({ page 
   await expect(page.getByTestId("web-search-unavailable-notice")).toHaveCount(0);
 });
 
-/**
- * Starts a new chat through whichever affordance the current shell offers.
- *
- * On the mobile shell the header's New Chat button only renders once the
- * current conversation has content -- starting a new chat from an empty one is
- * a no-op, so the product deliberately leaves it out. This test begins on an
- * empty conversation, so the header button is legitimately absent there and
- * the drawer is the path a phone user actually takes. Reaching for a
- * desktop-only control was why this failed on every mobile project.
- */
-async function startNewChat(page: Page) {
-  const drawerTrigger = page.getByTestId("mobile-sidebar-open");
-  if (await drawerTrigger.isVisible()) {
-    await drawerTrigger.click();
-    const drawer = page.getByTestId("mobile-chat-shell").getByRole("dialog");
-    await expect(drawer).toBeVisible();
-    await drawer.getByTestId("sidebar-new-chat").click();
-    return;
-  }
-  await page.getByRole("button", { name: "New chat" }).first().click();
-}
-
 test("web search mode selection does not repeat across a new chat", async ({ page }) => {
-  await mockAuthenticatedApi(page);
+  // Seeded with history on purpose. The mobile shell deliberately hides its
+  // header "New chat" button while the open conversation is still empty
+  // (components/chat/MobileChatShell.tsx), so driving this contract from the
+  // welcome screen made the test wait on a control that is never meant to
+  // exist there -- it failed deterministically on mobile-chromium while
+  // passing on desktop. Starting from a non-empty conversation exercises the
+  // same reset through the affordance each shell actually offers.
+  await mockAuthenticatedApi(page, {
+    selectedModels: ["gpt-5-4-mini"],
+    messages: [
+      { id: "seed-user", role: "user", content: "seeded question" },
+      {
+        id: "seed-assistant",
+        role: "assistant",
+        content: "seeded answer",
+        modelId: "gpt-5-4-mini",
+      },
+    ],
+  });
   await page.goto("/chat?lang=en");
+
+  // Seeding history is not enough on its own: /chat opens on the welcome
+  // screen with no active conversation, so the panel still reports itself
+  // empty and the mobile header still hides its button. The seeded
+  // conversation has to actually be opened first.
+  await openRecentConversation(page);
 
   await toolsMenuTrigger(page).click();
   await page.getByTestId("tools-web-search-row").click();
   await page.getByTestId("web-search-mode-option-always").click();
   await expect(page.getByTestId("web-search-mode-chip")).toBeVisible();
 
-  await startNewChat(page);
+  const newChatButton = page.getByRole("button", { name: "New chat" }).first();
+  await expect(newChatButton).toBeVisible();
+  await newChatButton.click();
+
   await expect(page.getByTestId("web-search-mode-chip")).toHaveCount(0);
 });
 

@@ -2,6 +2,90 @@ import { expect, type Page, type TestInfo } from "@playwright/test";
 
 export type QaLanguage = "en" | "ko" | "zh";
 
+/** How the mocked Cloudflare widget behaves when it is executed. */
+export type QaTurnstileScript =
+  /** Passes without any interaction -- the user must never see verification UI. */
+  | "silent"
+  /** Fires before-interactive-callback and then waits for the test to act. */
+  | "interactive"
+  | "error"
+  | "timeout"
+  | "expired"
+  | "unsupported"
+  /** Never calls back at all: the coordinator's own timeout has to end it. */
+  | "hang";
+
+export type QaTurnstileSnapshot = {
+  script: QaTurnstileScript;
+  renders: number;
+  executes: number;
+  issuedTokens: string[];
+  widgets: { id: string; action: string; size: string; interactive: boolean }[];
+};
+
+type QaTurnstileControl = {
+  script: QaTurnstileScript;
+  renders: number;
+  executes: number;
+  issuedTokens: string[];
+  usedTokens: string[];
+  snapshot: () => QaTurnstileSnapshot;
+  widgetCount: () => number;
+  interactiveCount: () => number;
+  completeInteractive: () => boolean;
+  failInteractive: (
+    kind?: "error" | "timeout" | "expired" | "unsupported"
+  ) => boolean;
+};
+
+declare global {
+  interface Window {
+    __qaTurnstile?: QaTurnstileControl;
+  }
+}
+
+/**
+ * Picks the widget script for the next document load. Registered after
+ * prepareGuestPage's own init script, so it runs once the mock exists.
+ */
+export async function installTurnstileScript(
+  page: Page,
+  script: QaTurnstileScript
+) {
+  await page.addInitScript((value) => {
+    if (window.__qaTurnstile) window.__qaTurnstile.script = value;
+  }, script);
+}
+
+/** Switches the script for the document that is already open. */
+export async function setTurnstileScript(page: Page, script: QaTurnstileScript) {
+  await page.evaluate((value) => {
+    if (window.__qaTurnstile) window.__qaTurnstile.script = value;
+  }, script);
+}
+
+/** Solves the challenge that is currently on screen. */
+export async function completeTurnstileChallenge(page: Page) {
+  return page.evaluate(
+    () => window.__qaTurnstile?.completeInteractive() ?? false
+  );
+}
+
+/** Ends the challenge that is currently on screen with a Cloudflare failure. */
+export async function failTurnstileChallenge(
+  page: Page,
+  kind: "error" | "timeout" | "expired" | "unsupported" = "error"
+) {
+  return page.evaluate(
+    (value) => window.__qaTurnstile?.failInteractive(value) ?? false,
+    kind
+  );
+}
+
+export async function readTurnstileState(page: Page) {
+  return page.evaluate(() => window.__qaTurnstile?.snapshot() ?? null);
+}
+
 type JsonValue =
   | null
   | boolean
@@ -118,24 +202,180 @@ export async function prepareGuestPage(page: Page, language: QaLanguage = "ko") 
   );
 
   await page.addInitScript((lang) => {
-    const callbacks = new Map<string, (token: string) => void>();
-    window.turnstile = {
-      render: (_container, options) => {
-        const widgetId = "qa-turnstile-widget";
-        const callback = options.callback;
-        if (typeof callback === "function") {
-          callbacks.set(widgetId, callback as (token: string) => void);
+    // A scriptable stand-in for Cloudflare's widget. The default -- "silent" --
+    // is what every pre-existing spec relies on: verification passes without
+    // any interaction, so no verification UI is ever supposed to appear. The
+    // other scripts drive the exact callbacks Turnstile can fire, so the
+    // coordinator's state machine can be tested without the network.
+    type Callbacks = Record<string, unknown>;
+    const widgets = new Map<
+      string,
+      {
+        id: string;
+        action: string;
+        size: string;
+        callbacks: Callbacks;
+        box: HTMLElement;
+        interactive: boolean;
+      }
+    >();
+    let widgetSeq = 0;
+    let tokenSeq = 0;
+
+    const control = {
+      script: "silent" as
+        | "silent"
+        | "interactive"
+        | "error"
+        | "timeout"
+        | "expired"
+        | "unsupported"
+        | "hang",
+      renders: 0,
+      executes: 0,
+      issuedTokens: [] as string[],
+      usedTokens: [] as string[],
+      snapshot: () => ({
+        script: control.script,
+        renders: control.renders,
+        executes: control.executes,
+        issuedTokens: [...control.issuedTokens],
+        widgets: Array.from(widgets.values()).map((widget) => ({
+          id: widget.id,
+          action: widget.action,
+          size: widget.size,
+          interactive: widget.interactive,
+        })),
+      }),
+      /** Every widget currently rendered, however it was placed. */
+      widgetCount: () => widgets.size,
+      interactiveCount: () =>
+        Array.from(widgets.values()).filter((widget) => widget.interactive)
+          .length,
+      /** The user solves the visible challenge. */
+      completeInteractive: () => {
+        for (const widget of widgets.values()) {
+          if (!widget.interactive) continue;
+          const callback = widget.callbacks.callback;
+          const after = widget.callbacks["after-interactive-callback"];
+          if (typeof after === "function") (after as () => void)();
+          if (typeof callback === "function") {
+            const token = `qa-turnstile-token-${++tokenSeq}`;
+            control.issuedTokens.push(token);
+            (callback as (value: string) => void)(token);
+          }
+          return true;
         }
+        return false;
+      },
+      /** The visible challenge ends badly. */
+      failInteractive: (
+        kind: "error" | "timeout" | "expired" | "unsupported" = "error"
+      ) => {
+        for (const widget of widgets.values()) {
+          if (!widget.interactive) continue;
+          const callback = widget.callbacks[`${kind}-callback`];
+          if (typeof callback === "function") (callback as () => void)();
+          return true;
+        }
+        return false;
+      },
+    };
+    window.__qaTurnstile = control;
+
+    /**
+     * Stands in for Cloudflare's iframe, including its `interaction-only`
+     * behaviour: zero size until an interaction is actually required, then the
+     * real widget's documented dimensions so geometry assertions mean
+     * something.
+     */
+    const sizeWidget = (widget: { box: HTMLElement; size: string }) => {
+      const box = widget.box;
+      if (widget.size === "compact") {
+        box.style.width = "150px";
+        box.style.height = "140px";
+      } else if (widget.size === "flexible") {
+        box.style.width = "100%";
+        box.style.maxWidth = "100%";
+        box.style.height = "65px";
+      } else {
+        box.style.width = "300px";
+        box.style.height = "65px";
+      }
+      box.style.maxWidth = "100%";
+      box.style.background = "#e6edf7";
+      box.style.border = "1px solid #b9c8de";
+      box.style.borderRadius = "4px";
+      box.style.boxSizing = "border-box";
+    };
+
+    window.turnstile = {
+      render: (container, options) => {
+        const widgetId = `qa-turnstile-widget-${++widgetSeq}`;
+        const box = document.createElement("div");
+        box.setAttribute("data-testid", "qa-turnstile-widget");
+        box.setAttribute("data-widget-id", widgetId);
+        box.setAttribute("data-action", String(options.action ?? ""));
+        box.setAttribute("data-size", String(options.size ?? "normal"));
+        box.style.width = "0px";
+        box.style.height = "0px";
+        box.style.overflow = "hidden";
+        container.appendChild(box);
+        widgets.set(widgetId, {
+          id: widgetId,
+          action: String(options.action ?? ""),
+          size: String(options.size ?? "normal"),
+          callbacks: options as Callbacks,
+          box,
+          interactive: false,
+        });
+        control.renders += 1;
         return widgetId;
       },
       execute: (widgetId) => {
+        const widget = widgets.get(widgetId);
+        if (!widget) return;
+        control.executes += 1;
         queueMicrotask(() => {
-          callbacks.get(widgetId)?.("qa-turnstile-token");
+          if (!widgets.has(widgetId)) return;
+          const callbacks = widget.callbacks;
+          const call = (name: string) => {
+            const handler = callbacks[name];
+            if (typeof handler === "function") (handler as () => void)();
+          };
+
+          if (control.script === "silent") {
+            const callback = callbacks.callback;
+            if (typeof callback === "function") {
+              const token = `qa-turnstile-token-${++tokenSeq}`;
+              control.issuedTokens.push(token);
+              (callback as (value: string) => void)(token);
+            }
+            return;
+          }
+          if (control.script === "hang") return;
+          if (control.script === "interactive") {
+            widget.interactive = true;
+            widget.box.setAttribute("data-interactive", "true");
+            sizeWidget(widget);
+            call("before-interactive-callback");
+            return;
+          }
+          call(`${control.script}-callback`);
         });
       },
-      reset: () => {},
+      reset: (widgetId) => {
+        const widget = widgets.get(widgetId);
+        if (!widget) return;
+        widget.interactive = false;
+        widget.box.removeAttribute("data-interactive");
+        widget.box.style.width = "0px";
+        widget.box.style.height = "0px";
+      },
       remove: (widgetId) => {
-        callbacks.delete(widgetId);
+        const widget = widgets.get(widgetId);
+        widget?.box.remove();
+        widgets.delete(widgetId);
       },
     };
 

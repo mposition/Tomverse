@@ -33,7 +33,13 @@ test("account controls remain fully visible at a 150 percent scaled viewport", a
   // way, just via a different control depending on which sidebar state won.
   const expandedControls = page.getByTestId("sidebar-account-controls");
   const railControls = page.getByTestId("sidebar-rail-account-trigger");
-  const accountControls = (await railControls.count()) > 0 ? railControls : expandedControls;
+  // Wait for whichever sidebar state won rather than branching on a
+  // point-in-time count(). count() does not auto-wait, so under load it ran
+  // before the sidebar had rendered at all, saw zero rail triggers, and
+  // committed to the expanded control -- which then never appeared, because
+  // the sidebar had in fact collapsed to a rail. The test spent its whole
+  // timeout waiting on the branch it had already ruled out.
+  const accountControls = railControls.or(expandedControls).first();
   await expect(accountControls).toBeVisible();
 
   const accountBox = await accountControls.boundingBox();

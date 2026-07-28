@@ -11,6 +11,7 @@ import {
 } from "react";
 import {
   AVAILABLE_MODELS,
+  isPubliclySelectableModel,
   type AiModel,
 } from "@/lib/models";
 
@@ -24,9 +25,8 @@ type ModelCatalogContextValue = {
   reload: () => Promise<void>;
 };
 
-const STATIC_PUBLIC_MODELS: readonly AiModel[] = AVAILABLE_MODELS.filter(
-  (model) => (model as AiModel).publiclyListed !== false
-);
+const STATIC_PUBLIC_MODELS: readonly AiModel[] =
+  AVAILABLE_MODELS.filter(isPubliclySelectableModel);
 
 const fallbackValue = (): ModelCatalogContextValue => {
   const modelMap = new Map<string, AiModel>(
@@ -82,9 +82,7 @@ export function ModelCatalogProvider({
     const enabledModels = models.filter(
       (model) => model.enabled && !model.catalogDeleted
     );
-    const publicModels = models.filter(
-      (model) => model.publiclyListed !== false && !model.catalogDeleted
-    );
+    const publicModels = models.filter(isPubliclySelectableModel);
     return {
       models,
       enabledModels,

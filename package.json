@@ -26,6 +26,7 @@
     "validate:week1-marketing-kit:en": "node scripts/validate-week1-marketing-kit-en.mjs",
     "test:db:integration": "node scripts/run-db-integration-tests.mjs",
     "test:unit": "node scripts/run-unit-tests.mjs",
+    "test:server-contract": "node scripts/run-server-contract-tests.mjs",
     "lint": "eslint",
     "check": "eslint . --max-warnings=0 && next build",
     "typecheck": "next typegen && tsc --noEmit --incremental false",

@@ -12,6 +12,7 @@ import { ModelLogo } from "@/components/chat/ModelLogo";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { ProviderStatusBanner } from "@/components/chat/ProviderStatusBanner";
 import { ComparisonActionRail } from "@/components/chat/ComparisonActionRail";
+import { GuestVerificationDesktopSlot } from "@/components/chat/GuestVerificationDesktopSlot";
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import { deriveComparisonReadiness } from "@/lib/comparisonReadiness";
 import {
@@ -627,10 +628,21 @@ export function DesktopChatShell({
           isCompareSummaryLoading={isCompareSummaryLoading}
           isQuickSummaryCached={isQuickSummaryCached}
           availableCredits={availableCredits}
+          verificationSlot={<GuestVerificationDesktopSlot variant="rail" />}
           onCompareSummary={onCompareSummary}
           onComparisonReview={onComparisonReview}
           onGuestSignInPrompt={onGuestSignInPrompt}
         />
+
+        {/*
+          The shared fallback: with a single model there is no comparison rail
+          to host the widget, but the verification surface still has to exist
+          somewhere predictable -- a full-width row of its own directly above
+          the composer, never inside a model panel.
+        */}
+        {!comparisonReadiness.isVisible && (
+          <GuestVerificationDesktopSlot variant="fallback" />
+        )}
 
         <div className="w-full shrink-0 px-4 md:px-6">
           <div ref={setBottomConsentSlot} className="mx-auto w-full max-w-4xl" />
