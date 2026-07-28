@@ -14,6 +14,18 @@
 
 2026-07-28 (교차검증 수행 구간 01:45–02:35 UTC)
 
+> **개정 이력 — 2026-07-28 02:16 UTC (개정 1)**
+> 외부 측이 양쪽 자료를 통합한 최종본을 회신함에 따라, 그들이 "환경 제약으로 확인 불가"로
+> 남긴 두 항목을 이 감사가 실측해 반영했습니다. 상세는 §11 참조.
+> - **기준선 이동**: `origin/develop`가 `e062da86bf572c2076f56fe41726fefd0dfd4c75`로,
+>   staging도 같은 SHA로 재배포되었습니다(deployment
+>   `95bee9e2-d705-4398-8b1f-5e7eebea1e8f`, deployedAt `2026-07-28T01:40:31.481Z`,
+>   `SUCCESS`). `8d02fc1…`와의 차이는 **`.github/audits/final-stg-reaudit-2026-07-28.md`
+>   추가 1건뿐이며 `app`/`components`/`lib`/`tests`/`scripts`/`package.json` 제품 소스
+>   변경은 0건**입니다. 따라서 본 보고서의 모든 발견점은 그대로 유효합니다.
+> - **UX-002·UX-004 증거 등급 상향**: `검증 필요`/`부분 확인` → **`확인됨`**
+>   (동일 시점 대조 완료).
+
 ### 검토 범위
 
 두 개의 독립 재감사 결과를 비교·검증하고, 현재 제품에서 직접 확인 가능한 사실을 기준으로
@@ -289,8 +301,8 @@ Incident → Degraded → Operational로 변동했습니다. 이는 Google의 �
 | 최종 검토에서 새로 발견한 이슈 수 | 1 |
 | P0 | 0 |
 | P1 | 5 |
-| P2 | 3 |
-| P3 | 8 |
+| P2 | 5 (개정 1: 3 → 5) |
+| P3 | 6 (개정 1: 8 → 6) |
 
 ---
 
@@ -335,7 +347,11 @@ Incident → Degraded → Operational로 변동했습니다. 이는 Google의 �
   - 외부 감사 01:27Z: Google = Degraded, 같은 API `available`
   - 소스: `app/api/models/status/route.ts` — 공개 판정 `publicStatus`가 아니라 내부
     `provider.status === "outage"`만 참조. `/status`와 admin 패널은 `publicStatus`를 사용
-- **검증 상태**: **확인됨** (3개 시점, 2개 Provider)
+  - **[개정 1] 동일 시점 대조 (2026-07-28 02:16:19Z, `generatedAt` 초 단위 일치)**:
+    `/status` 11개 Provider 중 Perplexity만 `Incident`, 나머지 10개 `Operational`.
+    같은 순간 `/api/models/status`는 **33개 모델 전부 `available`,
+    non-available 0건**. 즉 가용성 투영이 사실상 상수이며 공개 판정을 전혀 반영하지 않음
+- **검증 상태**: **확인됨** (4개 시점, 2개 Provider, 동일 시점 대조 1건)
 - **권장 개선 방향**: 공개 상태·모델 API·picker·배너·전송 가드가 동일한 판정과 동일한
   `generatedAt` 스냅샷을 사용하게 합니다. 기본 모델이 degraded/incident일 때 사용자에게
   상태와 대안을 제시하되, 사용자에게 알리지 않는 자동 교체는 하지 않습니다.
@@ -380,8 +396,9 @@ Incident → Degraded → Operational로 변동했습니다. 이는 Google의 �
 - **확인 근거**:
   - 소스 확인: `lib/models.ts:156` — `publiclyListed: false, enabled: false,
     status: "disabled", replacementModelId: "llama-3-3"`
-  - 라이브 확인: `/api/models/status` 2026-07-28 01:52:08Z — `llama-4-scout` `available`,
-    `fallbackModelIds: []` (전체 33개 모델에 포함)
+  - 라이브 확인: `/api/models/status` 2026-07-28 01:52:08Z 및 **02:16:19Z(재배포 후)**
+    — `llama-4-scout` `available`, `fallbackModelIds: []` (전체 33개 모델에 포함,
+    non-available 0건). 재배포(`e062da86`) 후에도 동일하므로 배포 타이밍 문제가 아님
   - 배경: 커밋 `8a59091` 메시지가 *"sat at seven consecutive misses for six days while
     staying enabled and user-selectable, failing every call with HTTP 404"* 및
     *"lib/models.ts is a seed, not the runtime source … reconciliation … on the next
@@ -484,7 +501,13 @@ Incident → Degraded → Operational로 변동했습니다. 이는 Google의 �
 
 ---
 
-### UX-009 · P3 · preflight 거절 시 provider-zero 보장의 비결정성
+### UX-009 · P2 · preflight 거절 시 provider-zero 보장의 비결정성
+
+> **개정 1**: P3 → **P2**로 상향. 외부 측 지적을 수용합니다. flake 자체는 재현되지
+> 않았으나(8/8 통과), **테스트가 `/api/chat`을 mock하므로 서버측 권위 가드의
+> "Provider adapter 0회·credit mutation 0"이 어떤 테스트로도 증명되지 않는다**는 커버리지
+> 공백은 flake 재현 여부와 무관하게 성립합니다. 심각도의 근거를 "저빈도 flake"가 아니라
+> "안전 경계 미검증"으로 교체합니다.
 
 - **화면/흐름**: 인증 2+ model 비교 — preflight 거절
 - **문제**: preflight 429 상황에서 `/api/chat` 요청이 0건이어야 하는데, 외부 감사에서
@@ -556,7 +579,10 @@ Incident → Degraded → Operational로 변동했습니다. 이는 Google의 �
 
 ---
 
-### UX-013 · P3 · 실기기 보조기술·모바일 키보드 미검증
+### UX-013 · P2 · 실기기 보조기술·모바일 키보드 미검증
+
+> **개정 1**: P3 → **P2**로 상향. 외부 측 지적을 수용합니다. UX-001이 **외부 키보드
+> 경로에서 재현**되므로 물리 키보드·IME 검증의 가치가 당초 평가보다 높습니다.
 
 - **화면/흐름**: 전 구간
 - **문제**: NVDA/JAWS, VoiceOver, TalkBack, Gboard, 삼성 키보드, iOS 한국어 키보드, 물리

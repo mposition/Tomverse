@@ -1,7 +1,18 @@
 # Tomverse Insight 최종 UX 작업명령서
 
 연결 문서: `Tomverse-Insight-UX-Audit-Final-Report.md`
-기준 SHA: `8d02fc1d35f988d5c9d61ab9463fea01a3f0b3b6` (branch `develop`)
+감사 기준 SHA: `8d02fc1d35f988d5c9d61ab9463fea01a3f0b3b6` (branch `develop`)
+
+> **개정 1 — 2026-07-28 02:16 UTC**
+> - **현재 `origin/develop` = `e062da86bf572c2076f56fe41726fefd0dfd4c75`**, staging도 같은
+>   SHA로 재배포됨(deployment `95bee9e2-d705-4398-8b1f-5e7eebea1e8f`,
+>   deployedAt `2026-07-28T01:40:31.481Z`, `SUCCESS`).
+>   감사 기준 SHA와의 차이는 `.github/audits/final-stg-reaudit-2026-07-28.md` 추가
+>   **1건뿐이며 제품 소스 변경 0건**이므로 모든 작업이 그대로 유효합니다.
+>   **작업 시작 시 `e062da86` 이후 추가 변경 여부를 다시 확인하십시오.**
+> - **TASK-09 P3 → P2**, **TASK-13 P3 → P2** (근거는 각 작업 항목 참조).
+> - 재배포 후에도 `/api/models/status`는 33개 모델 전부 `available`(non-available 0건),
+>   `llama-4-scout` 포함 — TASK-04는 배포 타이밍 문제가 아님이 확정되었습니다.
 
 ---
 
@@ -689,12 +700,16 @@ TASK-01 이후(전송이 안정화되어야 (A)안이 안정적으로 동작).
 |---|---|
 | **작업 ID** | TASK-09 |
 | **연결 UX 이슈** | UX-009 |
-| **우선순위** | P3 |
+| **우선순위** | **P2** (개정 1: P3 → P2) |
 | **예상 규모** | M |
 
 **작업 목적**
 preflight 거절 시 Provider 호출과 credit 변동이 0임을 client와 server 양쪽에서 결정적으로
 증명합니다.
+
+> **개정 1 심각도 상향 근거**: flake 자체는 재현되지 않았으나(8/8 통과), 현재 테스트가
+> `/api/chat`을 mock하므로 **서버측 권위 가드의 "Provider adapter 0회·credit mutation 0"이
+> 어떤 테스트로도 증명되지 않습니다.** 이 커버리지 공백은 flake 재현 여부와 무관합니다.
 
 **대상 화면 또는 사용자 흐름**
 인증 2+ model 비교 — preflight 거절
@@ -949,11 +964,14 @@ cold/warm 조건을 섞지 않습니다.
 |---|---|
 | **작업 ID** | TASK-13 |
 | **연결 UX 이슈** | UX-013 |
-| **우선순위** | P3 |
+| **우선순위** | **P2** (개정 1: P3 → P2) |
 | **예상 규모** | 추가 조사 필요 |
 
 **작업 목적**
 자동 검사로 대체할 수 없는 실사용 접근성을 표본 확인합니다.
+
+> **개정 1 심각도 상향 근거**: UX-001이 **외부 키보드 경로에서 재현**되므로 물리 키보드·
+> IME 검증의 가치가 당초 평가보다 높습니다.
 
 **대상 화면 또는 사용자 흐름**
 랜딩, 요금제, 모델 선택, 비교 전송, 실패 복구
@@ -1217,6 +1235,7 @@ curl -s https://staging.tomverse.app/status
 ```
 
 `/api/build-info`의 `commitSha`가 배포한 커밋과 일치하는지 **먼저** 확인합니다.
+(개정 1 시점 기준값: `e062da86…`, deployment `95bee9e2-d705-4398-8b1f-5e7eebea1e8f`)
 **staging SHA와 local/origin SHA가 다르면 검증 결과를 신뢰하지 마십시오.**
 `/status`와 `/api/models/status`는 **같은 시각에** 조회해 대조합니다.
 
