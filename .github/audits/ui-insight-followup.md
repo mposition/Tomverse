@@ -501,6 +501,81 @@ mobile 두 project에서 **90 passed**.
 `npm run security:regression` **113 검사**, `npm run check:accent-tokens`,
 `npm run check:encoding`, `next build` 모두 통과.
 
+### 13-6. `develop` 추가 병합(`4073568`·`174a62b`)
+
+`develop`이 계속 움직여 두 차례 더 병합했습니다.
+
+**`4073568`** — guest Turnstile, chat send/render race, 서버 계약 test 등 16
+commit. 충돌 3건이었고 모두 이 작업이 손댄 줄을 `develop`이 다시 손댄 경우입니다.
+
+| 파일 | 해소 |
+|---|---|
+| `LanguageProvider.tsx` | `develop`의 `lookup` hoist·`t` memo화 + 이 작업의 `lib/language` import. `develop`이 남긴 지역 `isLanguage` 사본 제거 |
+| `PricingPageContent.tsx` | `develop`의 `sr-only` 낭독 문장 + `aria-hidden` 시각 쌍 구조 위에 이 작업의 wrapping baseline row를 얹음 |
+| `chat-tools.spec.ts` | 같은 mobile 실패를 양쪽이 각자 고침. seed 대화를 먼저 열어 두 shell을 assertion 하나로 덮는 `develop` 쪽이 나아서 그것을 택하고, 이 작업의 shell 분기 helper는 삭제 |
+
+**`174a62b`** — font system 전면 도입(145파일). locale별 family routing,
+`type-*` 역할, 11px 하한, headline 크기 이상에만 `font-black`.
+
+충돌 **34건**이 13개 component에 걸쳐 났고, 대부분 같은 모양입니다 — `develop`이
+굵기를 낮추거나 크기를 올린 바로 그 줄을 이 작업이 역할 token으로 옮겼거나 대비를
+고친 줄이었습니다. 원칙은 **양쪽 유지**입니다: 이 작업의 token·dark 변형·
+`displayHeadingClass()`·UI-005 줄바꿈에 `develop`의 굵기·크기 정책을 얹었습니다.
+그 밖의 판단은 아래와 같습니다.
+
+| 대상 | 판단 |
+|---|---|
+| model 수 badge (`ChatInput`·`MobileChatShell`) | 16px 원 안 9px → `develop`의 20px 원 + 11px. UI-007 예외(`data-allow-small-text`) 자체가 불필요해져 제거. 같은 수가 button의 accessible name에 있으므로 `aria-hidden`은 유지 |
+| `AuthButton` plan chip·credit pack badge | 이 작업의 10px 대신 `develop`의 12px·11px |
+| analytics 설정 button, chat 오류 trace 줄 | 이 작업 쪽 유지. `develop`도 11px로 올렸지만 44×44 target과 AA 대비 수정은 이 branch에만 있음 |
+
+**병합 후 전체 실행: 512 passed / 59 failed / 73 skipped** — 실패를 셋으로
+갈랐습니다.
+
+**(1) 실제 회귀 1건 — 수정함.** `pricing-promotion-reflow › 320 @200% (en)`이
+가로 overflow **9px**로 결정적으로 실패했습니다. 16개 조합 중 이 하나뿐입니다.
+폰트가 넓어지면서 UI-005가 고쳤던 결함이 다시 난 것이고, probe로 두 원인을
+측정해 확인했습니다.
+
+- 요금 표시(`$25.00`)가 36px 고정이라 끊을 수 없는 한 덩어리 → 그 자체가 card의
+  min-content이고, grid item은 그 밑으로 줄지 않음
+- FAQ 제목 — `break-words`는 긴 단어의 줄바꿈을 허용할 뿐 **명세상 min-content
+  폭을 낮추지 않으므로**, 30px "questions" 폭을 그대로 요구
+
+둘 다 `clamp()`로 바꿨고, clamp가 걸리는 구간은 CSS 폭 360~375px 아래(확대한
+화면)뿐이라 실제 폰 폭에서는 기존 크기 그대로입니다. 중간에 시도한 credit pack
+card·credit guide 행 보강은 측정값을 움직이지 못해 되돌렸습니다.
+`typographyPolicy`가 clamp 크기를 못 읽어 오탐하기에 `text-[clamp(...)]`를
+파싱해 양쪽 경계를 돌려주도록 넓혔고(하한 검사는 최솟값, 굵기 검사는 최댓값),
+임시 component로 8px clamp 하한과 16px에서 잘리는 `font-black` clamp가 여전히
+잡히는지 확인했습니다. 이후 `pricing-promotion-reflow` **16/16**.
+
+**(2) golden 52장 — 검토 후 재기록.** 폰트 변경이 이 화면들의 모든 문자열을
+다시 그리므로, TASK-004에서 이 branch가 추가한 baseline이 더 이상 맞지
+않습니다. `develop`은 자기 쪽에 있던 golden만 다시 찍었고 이들은 남겨졌습니다.
+`typography.md`의 요구대로 **재기록 전에 사람이 검토**했습니다 — desktop light
+비교 화면, 320px dark 부분 실패, 영어 mobile 오류 카드, AI 교차검토 dialog 네
+쌍을 전/후로 나란히 놓고 확인했습니다. 차이는 전부 typographic입니다: 한국어가
+system fallback 대신 Noto Sans KR로, Latin이 Geist로 그려지고 넓어진 Latin
+metric 때문에 문단 몇 개가 다시 줄바꿈됩니다. 잘림·겹침·잘려나간 문구·control
+이동은 없고 320px 경우도 viewport 안에 머뭅니다. 재기록 후 **74/74**.
+
+**(3) 남은 3건 — 이번 범위 밖.**
+
+| 실패 | 근거 |
+|---|---|
+| `mobile-composer-contract` golden 2장 (320px·390px) | **`174a62b`를 그대로 빌드한 기준선에서도 동일하게 실패**하고, 이 branch의 render와 `develop`의 render는 **0픽셀 차이**입니다. `develop` 쪽에서 별도 처리하기로 결정 |
+| `source-grounding › the metric is scoped to the whole review` | 단독 재실행 통과. 부하 flake |
+| `conversation-title` | 사전 존재 flake(13-3) |
+
+**`comparison-action-rail` flake 진단** `4073568` 시점 전체 실행에서 1회 실패한
+`steady and excluded states hide/show identically`는 약 300회 중 2회 수준이고,
+기준선 단독 6/6·전체 실행 통과로 이 작업과 무관합니다. 원인은 test 쪽 race로
+보입니다 — 해당 test는 `enterAuthenticatedComparison()` 직후 `getAttribute()`로
+**한 번만 읽어서**, `expect().toHaveAttribute()`와 달리 재시도가 없습니다. 바로
+아래 형제 test는 측정 전에 재시도 assertion으로 기다립니다. `develop`의 spec이고
+범위 밖이라 고치지 않았습니다.
+
 ## 14. 최종 판정
 
 작업명령서의 **최종 완료 기준 14개 항목이 모두 충족**됐습니다.
