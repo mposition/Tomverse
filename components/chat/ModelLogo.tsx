@@ -36,7 +36,7 @@ export function ModelLogo({
 
   return (
     <span
-      className={`flex shrink-0 items-center justify-center bg-gradient-to-br text-[10px] font-black text-zinc-700 ring-1 ring-zinc-200 dark:ring-zinc-700 ${frameSize[size]} ${brand.className} ${className}`}
+      className={`flex shrink-0 items-center justify-center bg-gradient-to-br text-[11px] font-bold text-zinc-700 ring-1 ring-zinc-200 dark:ring-zinc-700 ${frameSize[size]} ${brand.className} ${className}`}
       aria-hidden="true"
       title={label}
     >

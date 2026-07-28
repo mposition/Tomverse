@@ -69,7 +69,7 @@ function AllowanceBar({ value }: { value: number | null }) {
 function StatusBadge({ status }: { status: InfrastructureStatus }) {
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-black capitalize ${statusStyle[status]}`}
+      className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-bold capitalize ${statusStyle[status]}`}
     >
       {statusIcon(status)}
       {status}
@@ -181,7 +181,7 @@ export function AdminInfrastructurePanel({
       <div className="rounded-3xl border border-zinc-800 bg-zinc-950/80 p-5">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-xs font-black uppercase tracking-[0.18em] text-blue-200">
+            <div className="inline-flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-xs font-bold uppercase tracking-[0.18em] text-blue-200">
               <Activity className="h-3.5 w-3.5" />
               Infrastructure audit
             </div>
@@ -197,7 +197,7 @@ export function AdminInfrastructurePanel({
             type="button"
             onClick={() => void load()}
             disabled={loading}
-            className="inline-flex h-10 cursor-pointer items-center justify-center gap-2 rounded-xl border border-zinc-700 px-4 text-sm font-black text-zinc-200 transition hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex h-10 cursor-pointer items-center justify-center gap-2 rounded-xl border border-zinc-700 px-4 text-sm font-bold text-zinc-200 transition hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {loading ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -239,7 +239,7 @@ export function AdminInfrastructurePanel({
             </p>
             {data.railway.warningReasons.length > 0 ? (
               <div className="mt-3 rounded-xl border border-amber-500/25 bg-amber-500/5 p-3">
-                <p className="text-xs font-black text-amber-200">Warning details</p>
+                <p className="text-xs font-bold text-amber-200">Warning details</p>
                 <div className="mt-2 space-y-2">
                   {data.railway.warningReasons.map((reason) => (
                     <div key={reason.code} className="text-xs leading-5 text-zinc-400">
@@ -320,7 +320,7 @@ export function AdminInfrastructurePanel({
             </div>
             {canManageCosts ? (
               <div className="mt-4 rounded-xl border border-purple-500/20 bg-purple-500/5 p-3">
-                <div className="flex items-center gap-2 text-xs font-black text-purple-100">
+                <div className="flex items-center gap-2 text-xs font-bold text-purple-100">
                   <Coins className="h-4 w-4" /> Monthly credit
                 </div>
                 <div className="mt-3 grid gap-2">
@@ -346,7 +346,7 @@ export function AdminInfrastructurePanel({
                     type="button"
                     onClick={() => void saveCredit()}
                     disabled={!creditValid || saving}
-                    className="inline-flex h-10 cursor-pointer items-center justify-center gap-2 rounded-xl bg-purple-600 px-3 text-sm font-black text-white transition hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex h-10 cursor-pointer items-center justify-center gap-2 rounded-xl bg-purple-600 px-3 text-sm font-bold text-white transition hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {saving ? (
                       <Loader2 className="h-4 w-4 animate-spin" />

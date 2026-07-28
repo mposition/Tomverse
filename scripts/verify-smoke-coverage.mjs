@@ -58,6 +58,12 @@ const MANIFEST = [
   { file: "ui-contracts.spec.ts", title: "desktop exposes stable QA contracts", categories: ["uiContractDesktop"] },
   { file: "ui-contracts.spec.ts", title: "mobile exposes stable QA contracts", categories: ["uiContractMobile"] },
 
+  // --- typography ----------------------------------------------------------
+  // The font system's whole point: the UI must render in the family it
+  // declares. The bug this guards against shipped silently once already --
+  // a Geist variable on <html> with Arial actually drawn on screen.
+  { file: "font-system.spec.ts", title: "English UI renders in Geist and never falls back to Arial", categories: ["typography"], mandatory: true },
+
   // --- deployment integrity ------------------------------------------------
   // The real, unmocked endpoint: proves the route is wired, exposes exactly
   // the public field set with no-store, and never fabricates deployment
@@ -79,6 +85,7 @@ const CATEGORY_MINIMUMS = {
   uiContractDesktop: 1,
   uiContractMobile: 1,
   buildInfo: 1,
+  typography: 1,
 };
 
 // The PR tier is a gate, not a second regression suite. Growing past this

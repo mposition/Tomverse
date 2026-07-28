@@ -43,7 +43,7 @@ export function BuildStagingBadge() {
   return (
     <span
       data-testid="build-staging-badge"
-      className="shrink-0 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-amber-700 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
+      className="shrink-0 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-amber-700 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
     >
       {buildInfoCopy[lang].environmentNames.staging}
     </span>

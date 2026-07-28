@@ -93,7 +93,7 @@ export function AdminProviderTabs({
                   <Icon className="h-4 w-4" />
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="flex items-center gap-2 text-sm font-black">
+                  <span className="flex items-center gap-2 text-sm font-bold">
                     {tab.label}
                     {badge !== null ? (
                       <span

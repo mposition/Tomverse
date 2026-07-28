@@ -136,7 +136,7 @@ export function AdminSlackTemplatesPanel() {
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-300">
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-300">
             Slack messages
           </p>
           <h2 className="mt-2 text-2xl font-black text-white">
@@ -149,7 +149,7 @@ export function AdminSlackTemplatesPanel() {
             automatically starts with &lt;!channel&gt; to notify the channel.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2 text-xs font-black">
+        <div className="flex flex-wrap gap-2 text-xs font-bold">
           <span className="inline-flex items-center gap-2 rounded-full border border-zinc-700 px-3 py-2 text-zinc-300">
             <Clock3 className="h-3.5 w-3.5" /> Daily {schedule}
           </span>
@@ -181,7 +181,7 @@ export function AdminSlackTemplatesPanel() {
                   </div>
                   <p className="mt-1 text-xs leading-5 text-zinc-500">{template.description}</p>
                 </div>
-                <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-black text-zinc-300">
+                <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-bold text-zinc-300">
                   <input
                     type="checkbox"
                     checked={template.enabled}
@@ -192,7 +192,7 @@ export function AdminSlackTemplatesPanel() {
               </div>
               <div className="mt-4 grid gap-3">
                 <label>
-                  <span className="text-[11px] font-black uppercase tracking-[0.14em] text-zinc-500">Title</span>
+                  <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-zinc-500">Title</span>
                   <input
                     value={template.titleTemplate}
                     onChange={(event) => update(template.key, { titleTemplate: event.target.value })}
@@ -201,7 +201,7 @@ export function AdminSlackTemplatesPanel() {
                   />
                 </label>
                 <label>
-                  <span className="text-[11px] font-black uppercase tracking-[0.14em] text-zinc-500">Message body</span>
+                  <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-zinc-500">Message body</span>
                   <textarea
                     value={template.bodyTemplate}
                     onChange={(event) => update(template.key, { bodyTemplate: event.target.value })}
@@ -219,7 +219,7 @@ export function AdminSlackTemplatesPanel() {
                   type="button"
                   onClick={() => void sendTest(template.key)}
                   disabled={testingKey === template.key || !webhookConfigured[template.key]}
-                  className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/30 px-3 py-2 text-xs font-black text-emerald-200 hover:bg-emerald-500/10 disabled:opacity-50"
+                  className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/30 px-3 py-2 text-xs font-bold text-emerald-200 hover:bg-emerald-500/10 disabled:opacity-50"
                 >
                   {testingKey === template.key ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
                   Send test
@@ -228,7 +228,7 @@ export function AdminSlackTemplatesPanel() {
                   type="button"
                   onClick={() => void save(template)}
                   disabled={savingKey === template.key}
-                  className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-xs font-black text-white hover:bg-blue-500 disabled:opacity-50"
+                  className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold text-white hover:bg-blue-500 disabled:opacity-50"
                 >
                   {savingKey === template.key ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
                   Save

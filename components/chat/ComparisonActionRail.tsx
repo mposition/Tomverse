@@ -315,7 +315,7 @@ export function ComparisonActionRail({
               if (active instanceof HTMLElement) active.blur();
               setIsExpandedWhileCompact(true);
             }}
-            className="flex min-h-11 w-full items-center justify-between gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-3 text-[11px] font-black text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200"
+            className="flex min-h-11 w-full items-center justify-between gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-3 text-[11px] font-bold text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200"
           >
             <span className="min-w-0 truncate">
               {interpolate(t("chat.comparisonRailExpand"), {
@@ -333,7 +333,9 @@ export function ComparisonActionRail({
                 // rather than a passenger inside the cross-review button --
                 // sharing a cell with it used to cost that button 44 of its
                 // 148 pixels at 320px and truncate its label to "AI ...".
-                ? "flex items-center gap-1.5"
+                // The row runs to the pixel at 320px in English: padding and
+                // gaps here are the label's width budget, not decoration.
+                ? "flex items-center gap-1"
                 : "flex flex-wrap items-center gap-2"
             }
           >
@@ -347,8 +349,8 @@ export function ComparisonActionRail({
               aria-disabled={quickBlocked}
               aria-label={quickAccessibleName}
               aria-describedby={quickDescriptionId}
-              className={`flex min-h-11 items-center justify-between gap-1.5 rounded-xl border border-blue-200 bg-blue-50 text-[11px] font-black text-blue-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200 ${
-                isMobile ? "min-w-0 flex-1 px-2.5" : "w-full px-3 text-xs md:w-auto"
+              className={`flex min-h-11 items-center justify-between gap-1 rounded-xl border border-blue-200 bg-blue-50 text-[11px] font-bold text-blue-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200 ${
+                isMobile ? "min-w-0 flex-1 px-2" : "w-full px-3 text-xs md:w-auto"
               } ${
                 quickBlocked
                   ? "cursor-not-allowed opacity-50"
@@ -374,8 +376,8 @@ export function ComparisonActionRail({
                 type="button"
                 data-testid="ai-review-guest-locked"
                 onClick={onGuestSignInPrompt}
-                className={`flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-zinc-200 bg-zinc-50 text-[11px] font-black text-zinc-600 transition-colors hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 ${
-                  isMobile ? "min-w-0 flex-1 px-2.5" : "w-full px-3 text-xs md:w-auto"
+                className={`flex min-h-11 items-center justify-center gap-1 rounded-xl border border-zinc-200 bg-zinc-50 text-[11px] font-bold text-zinc-600 transition-colors hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 ${
+                  isMobile ? "min-w-0 flex-1 px-2" : "w-full px-3 text-xs md:w-auto"
                 }`}
               >
                 <Lock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -397,8 +399,8 @@ export function ComparisonActionRail({
                   aria-disabled={reviewBlocked}
                   aria-label={reviewAccessibleName}
                   aria-describedby={reviewDescriptionId}
-                  className={`flex min-h-11 min-w-0 flex-1 items-center justify-between gap-1.5 rounded-xl bg-blue-600 text-[11px] font-black text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 ${
-                    isMobile ? "px-2.5" : "px-3 text-xs"
+                  className={`flex min-h-11 min-w-0 flex-1 items-center justify-between gap-1 rounded-xl bg-blue-600 text-[11px] font-bold text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 ${
+                    isMobile ? "px-2" : "px-3 text-xs"
                   } ${
                     reviewBlocked ? "cursor-not-allowed opacity-50" : "hover:bg-blue-500"
                   }`}
@@ -459,7 +461,7 @@ export function ComparisonActionRail({
           className={
             isStatusVisuallyHidden
               ? "sr-only"
-              : "mt-1.5 px-0.5 pb-1.5 text-[10px] font-semibold leading-4 text-zinc-500 dark:text-zinc-400 md:text-[11px]"
+              : "mt-1.5 px-0.5 pb-1.5 text-[11px] font-semibold leading-4 text-zinc-500 dark:text-zinc-400 md:text-xs"
           }
         >
           {visibleStatusText}

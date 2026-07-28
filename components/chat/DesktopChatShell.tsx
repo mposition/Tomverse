@@ -424,7 +424,7 @@ export function DesktopChatShell({
                       <span className="block truncate text-xs font-bold text-zinc-800 dark:text-zinc-100">
                         {model?.name || modelId}
                       </span>
-                      <span className="block truncate text-[10px] text-zinc-400">
+                      <span className="block truncate text-[11px] text-zinc-400">
                         {model?.provider}
                       </span>
                     </span>
@@ -433,7 +433,7 @@ export function DesktopChatShell({
                     ) : status === "error" ? (
                       <span className="h-2 w-2 shrink-0 rounded-full bg-red-500" aria-hidden="true" />
                     ) : status === "paused" ? (
-                      <span className="shrink-0 text-[9px] font-bold text-zinc-400">OFF</span>
+                      <span className="shrink-0 text-[11px] font-semibold text-zinc-400">OFF</span>
                     ) : status === "idle" ? (
                       <Check className="h-3 w-3 shrink-0 text-emerald-500" aria-hidden="true" />
                     ) : null}
@@ -506,7 +506,7 @@ export function DesktopChatShell({
                     {isPanelDisabled ? (
                       <span className="flex min-w-0 select-none flex-col truncate">
                         <span className="truncate text-sm font-semibold text-zinc-600 dark:text-zinc-300">{modelInfo?.name}</span>
-                        <span className="flex items-center gap-1.5 text-[10px] font-medium text-zinc-400">
+                        <span className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-400">
                           <span className="truncate">{modelInfo?.provider}</span>
                           {usageProfile && (
                             <CreditCostBadge
@@ -540,7 +540,7 @@ export function DesktopChatShell({
                             );
                           })}
                         </select>
-                        <span className="flex items-center gap-1.5 text-[10px] font-medium text-zinc-400">
+                        <span className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-400">
                           <span className="truncate">{modelInfo?.provider}</span>
                           {usageProfile && (
                             <CreditCostBadge
@@ -564,7 +564,7 @@ export function DesktopChatShell({
                           title={isPanelDisabled ? t("chat.resumePanel") : t("chat.pausePanel")}
                           aria-pressed={!isPanelDisabled}
                         >
-                          <span className="text-[10px] font-bold text-zinc-500">
+                          <span className="text-[11px] font-bold text-zinc-500">
                             {isPanelDisabled ? "OFF" : "ON"}
                           </span>
                           <div className={`h-4 w-8 rounded-full p-0.5 transition-colors ${!isPanelDisabled ? "bg-blue-500" : "bg-zinc-700"}`}>

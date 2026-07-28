@@ -119,7 +119,7 @@ export function CreditBreakdownSheet({
           </div>
         )}
         <div className="mt-3 flex items-center justify-between border-t border-zinc-200 pt-3 dark:border-zinc-800">
-          <span className="text-sm font-black text-zinc-900 dark:text-zinc-100">
+          <span className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
             {pickerCopy.total}
           </span>
           <CreditCostBadge credits={total} size="sm" label={`${total}`} />

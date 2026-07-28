@@ -1191,7 +1191,11 @@ const checks = [
         // overflow whenever the notice's *container* was narrower than the
         // viewport (the max-w-sm sign-in card on a 1440px desktop): the row is
         // now sized by container queries and may always wrap as a last resort.
-        source.includes("flex-wrap items-center gap-2 @md/notice:") &&
+        // The gap value itself is spacing, not a guarantee -- it was retuned
+        // when the Latin UI face changed and the copy needed the width back --
+        // so match the wrap-capable, container-query-driven row instead of a
+        // literal gap step.
+        /flex-wrap items-center gap-[\d.]+ @md\/notice:/.test(source) &&
         source.includes("@container/notice") &&
         // Matched inside a className only -- the paragraph above deliberately
         // names the old utility while explaining why it went away.

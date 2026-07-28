@@ -111,7 +111,7 @@ export function AdminAlertPolicyPanel() {
   return (
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
       <div>
-        <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-300">
+        <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
           Alert policy
         </p>
         <h2 className="mt-2 text-2xl font-black text-white">Budget and incident thresholds</h2>
@@ -133,7 +133,7 @@ export function AdminAlertPolicyPanel() {
               <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                 <div className="grid flex-1 gap-3 md:grid-cols-4">
                   <label className="block">
-                    <span className="text-xs font-black uppercase tracking-[0.14em] text-zinc-500">Name</span>
+                    <span className="text-xs font-bold uppercase tracking-[0.14em] text-zinc-500">Name</span>
                     <input
                       value={policy.name}
                       onChange={(event) => updatePolicy(policy.id, { name: event.target.value })}
@@ -141,7 +141,7 @@ export function AdminAlertPolicyPanel() {
                     />
                   </label>
                   <label className="block">
-                    <span className="text-xs font-black uppercase tracking-[0.14em] text-zinc-500">Budget %</span>
+                    <span className="text-xs font-bold uppercase tracking-[0.14em] text-zinc-500">Budget %</span>
                     <input
                       value={parseThresholds(policy.budgetThresholds).join(",")}
                       onChange={(event) =>
@@ -155,7 +155,7 @@ export function AdminAlertPolicyPanel() {
                     />
                   </label>
                   <label className="block">
-                    <span className="text-xs font-black uppercase tracking-[0.14em] text-zinc-500">Provider fail</span>
+                    <span className="text-xs font-bold uppercase tracking-[0.14em] text-zinc-500">Provider fail</span>
                     <input
                       type="number"
                       min={1}
@@ -170,7 +170,7 @@ export function AdminAlertPolicyPanel() {
                     />
                   </label>
                   <label className="block">
-                    <span className="text-xs font-black uppercase tracking-[0.14em] text-zinc-500">Model fail</span>
+                    <span className="text-xs font-bold uppercase tracking-[0.14em] text-zinc-500">Model fail</span>
                     <input
                       type="number"
                       min={1}
@@ -193,7 +193,7 @@ export function AdminAlertPolicyPanel() {
                   ].map(([key, label]) => (
                     <label
                       key={key}
-                      className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs font-black text-zinc-300"
+                      className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs font-bold text-zinc-300"
                     >
                       <input
                         type="checkbox"
@@ -211,7 +211,7 @@ export function AdminAlertPolicyPanel() {
                     type="button"
                     onClick={() => void save(policy)}
                     disabled={savingId === policy.id}
-                    className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-xs font-black text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {savingId === policy.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
                     Save

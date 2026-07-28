@@ -140,7 +140,7 @@ export function PlatformSettingsPanel({ settings }: Props) {
               type="button"
               onClick={save}
               disabled={isLoading || isSaving}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-black text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isSaving ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -160,7 +160,7 @@ export function PlatformSettingsPanel({ settings }: Props) {
               <ShieldAlert className="h-5 w-5" />
             </span>
             <div className="min-w-0 flex-1">
-              <p className="text-xs font-black uppercase tracking-[0.18em] text-red-300">Emergency kill switches</p>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-red-300">Emergency kill switches</p>
               <h3 className="mt-2 text-xl font-black text-white">Operational feature controls</h3>
               <p className="mt-2 text-sm leading-6 text-zinc-400">
                 Disabled features are blocked by the server immediately. Attachment deletion and share revocation remain available for safe cleanup.
@@ -171,7 +171,7 @@ export function PlatformSettingsPanel({ settings }: Props) {
                   ["Attachments", attachmentsEnabled, setAttachmentsEnabled],
                   ["Public sharing", publicSharingEnabled, setPublicSharingEnabled],
                 ] as const).map(([label, enabled, setEnabled]) => (
-                  <label key={label} className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm font-black text-white">
+                  <label key={label} className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm font-bold text-white">
                     <span>{label}</span>
                     <input
                       type="checkbox"
@@ -191,7 +191,7 @@ export function PlatformSettingsPanel({ settings }: Props) {
               <Bot className="h-5 w-5" />
             </span>
             <div className="min-w-0 flex-1">
-              <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-300">
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
                 Guest default model
               </p>
               <h3 className="mt-2 text-xl font-black text-white">
@@ -224,7 +224,7 @@ export function PlatformSettingsPanel({ settings }: Props) {
         </div>
 
         <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5">
-          <p className="text-xs font-black uppercase tracking-[0.18em] text-zinc-500">
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-zinc-500">
             Current selection
           </p>
           {selectedModel ? (

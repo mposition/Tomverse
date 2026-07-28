@@ -1,6 +1,7 @@
 import "server-only";
 
 import { sendTransactionalEmail } from "@/lib/email";
+import { EMAIL_FONT_STACK } from "@/lib/emailTypography";
 
 type EmailLanguage = "en" | "ko" | "zh" | "fr" | "de" | "es" | "pt";
 
@@ -267,7 +268,7 @@ const renderSteps = (steps: string[]) =>
 const shell = (copyItem: WelcomeCopy, body: string) => {
   const workspaceUrl = `${appUrl()}/chat`;
   return `
-  <div style="margin:0;padding:0;background:#edf2f8;font-family:Inter,Segoe UI,Arial,sans-serif;color:#111827;">
+  <div style="margin:0;padding:0;background:#edf2f8;font-family:${EMAIL_FONT_STACK};color:#111827;">
     <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">
       ${escapeHtml(copyItem.preview)}
     </div>

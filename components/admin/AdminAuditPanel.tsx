@@ -168,7 +168,7 @@ export function AdminAuditPanel({ rows }: Props) {
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <div>
-          <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-300">
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
             Audit
           </p>
           <h2 className="mt-2 text-2xl font-black text-white">Admin activity log</h2>
@@ -179,19 +179,19 @@ export function AdminAuditPanel({ rows }: Props) {
         </div>
         <div className="grid gap-2 sm:grid-cols-3">
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 px-4 py-3">
-            <p className="text-[11px] font-black uppercase tracking-[0.16em] text-zinc-500">
+            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-zinc-500">
               Events
             </p>
             <p className="mt-1 text-xl font-black text-white">{rows.length}</p>
           </div>
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 px-4 py-3">
-            <p className="text-[11px] font-black uppercase tracking-[0.16em] text-zinc-500">
+            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-zinc-500">
               Actors
             </p>
             <p className="mt-1 text-xl font-black text-white">{uniqueActors}</p>
           </div>
           <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3">
-            <p className="text-[11px] font-black uppercase tracking-[0.16em] text-red-200/80">
+            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-red-200/80">
               High risk
             </p>
             <p className="mt-1 text-xl font-black text-red-100">{highRiskCount}</p>
@@ -263,7 +263,7 @@ export function AdminAuditPanel({ rows }: Props) {
                   </div>
                 </td>
                 <td className="px-3 py-3">
-                  <span className={`rounded-full border px-2.5 py-1 text-xs font-black ${actionTone(log.action)}`}>
+                  <span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${actionTone(log.action)}`}>
                     {log.action}
                   </span>
                 </td>
@@ -317,7 +317,7 @@ export function AdminAuditPanel({ rows }: Props) {
           <div className="max-h-[86vh] w-full max-w-3xl overflow-y-auto rounded-3xl border border-zinc-800 bg-zinc-950 p-5 shadow-2xl shadow-black">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-300">
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
                   Audit detail
                 </p>
                 <h3 className="mt-2 text-xl font-black text-white">{detail.action}</h3>
@@ -335,22 +335,22 @@ export function AdminAuditPanel({ rows }: Props) {
             </div>
             <div className="mt-5 grid gap-3 sm:grid-cols-2">
               <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
-                <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500">Target</p>
-                <p className="mt-2 text-sm font-black text-white">{detail.targetType}</p>
+                <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">Target</p>
+                <p className="mt-2 text-sm font-bold text-white">{detail.targetType}</p>
                 <p className="mt-1 break-all text-xs text-zinc-400">{detail.targetId || "-"}</p>
               </div>
               <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
-                <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500">Request</p>
+                <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">Request</p>
                 <p className="mt-2 break-all text-xs text-zinc-400">IP: {detail.ipAddress || "-"}</p>
                 <p className="mt-1 break-all text-xs text-zinc-400">UA: {detail.userAgent || "-"}</p>
               </div>
             </div>
             <div className="mt-3 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
-              <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500">Summary</p>
+              <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">Summary</p>
               <p className="mt-2 text-sm leading-6 text-zinc-200">{detail.summary}</p>
             </div>
             <div className="mt-3 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
-              <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500">Metadata</p>
+              <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">Metadata</p>
               <pre className="mt-3 max-h-96 overflow-auto rounded-xl bg-zinc-950 p-3 text-xs leading-5 text-zinc-300">
                 {JSON.stringify(detail.metadata || {}, null, 2)}
               </pre>

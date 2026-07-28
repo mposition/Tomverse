@@ -8,6 +8,17 @@
   --foreground: #171717;
 
   /*
+   * One UI family per locale. Every font-family in the app resolves through
+   * --font-ui, and the :lang() rules below re-point it, so a mixed
+   * "AI Review 결과" string is drawn by a single family instead of splitting
+   * Latin and Hangul across two. See docs/ui-contracts/typography.md.
+   */
+  --font-ui: var(--font-geist-sans), system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-code: var(--font-geist-mono), ui-monospace, SFMono-Regular, "SF Mono",
+    Menlo, Consolas, "Liberation Mono", monospace;
+
+  /*
    * Tomverse brand accent -- reserved for AI Review and the "Tomverse
    * generated this" selected state. Mirrors the cyan/blue/purple logo
    * gradient (see the chat shell skeleton's brand mark), anchored on the
@@ -29,11 +40,31 @@
   --tomverse-review-selected-text: #3730a3; /* indigo-800 */
 }
 
+/*
+ * `lang` is set on <html> by LanguageProvider, so these re-point the whole
+ * subtree rather than patching individual glyphs through a fallback.
+ */
+:lang(ko) {
+  --font-ui: var(--font-noto-sans-kr), "Apple SD Gothic Neo", "Malgun Gothic",
+    system-ui, sans-serif;
+  --font-code: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo,
+    Consolas, var(--font-noto-sans-kr), "Apple SD Gothic Neo", monospace;
+}
+
+:lang(zh) {
+  --font-ui: var(--font-noto-sans-sc), "PingFang SC", "Microsoft YaHei",
+    system-ui, sans-serif;
+  --font-code: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo,
+    Consolas, var(--font-noto-sans-sc), "PingFang SC", monospace;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* `inline` keeps these as var() references in the emitted utilities, so
+     `font-sans` follows the :lang() cascade instead of freezing one family. */
+  --font-sans: var(--font-ui);
+  --font-mono: var(--font-code);
 
   --color-tomverse-accent-start: var(--tomverse-accent-start);
   --color-tomverse-accent-mid: var(--tomverse-accent-mid);
@@ -64,7 +95,75 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-ui);
+}
+
+/*
+ * Semantic typography roles. Documented in docs/ui-contracts/typography.md;
+ * every role inherits the locale family through --font-ui / --font-code.
+ */
+@utility type-display {
+  font-family: var(--font-ui);
+  font-size: clamp(2.25rem, 6vw, 3.5rem);
+  line-height: 1.05;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+@utility type-page-title {
+  font-family: var(--font-ui);
+  font-size: clamp(1.75rem, 4vw, 2.25rem);
+  line-height: 1.15;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+
+@utility type-section-title {
+  font-family: var(--font-ui);
+  font-size: 1.25rem;
+  line-height: 1.3;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+@utility type-body {
+  font-family: var(--font-ui);
+  font-size: 1rem;
+  line-height: 1.65;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+@utility type-body-compact {
+  font-family: var(--font-ui);
+  font-size: 0.875rem;
+  line-height: 1.55;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+@utility type-control-label {
+  font-family: var(--font-ui);
+  font-size: 0.875rem;
+  line-height: 1.25;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+@utility type-caption {
+  font-family: var(--font-ui);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  font-weight: 500;
+  letter-spacing: 0.005em;
+}
+
+@utility type-code {
+  font-family: var(--font-code);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  font-weight: 400;
+  letter-spacing: 0;
 }
 
 button:not(:disabled),

@@ -21,7 +21,7 @@ export function AdminCreditLedgerPanel({ rows }: { rows: AdminCreditLedgerRow[] 
     <section className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.18em] text-blue-300"><CircleDollarSign className="h-4 w-4" /> Credit ledger</div>
+          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-blue-300"><CircleDollarSign className="h-4 w-4" /> Credit ledger</div>
           <h2 className="mt-2 text-xl font-black text-white">Recent credit movements</h2>
           <p className="mt-1 text-sm text-zinc-500">Reserve, settlement, refund, purchase, expiry, and administrative entries. Open a customer for the complete account timeline.</p>
         </div>

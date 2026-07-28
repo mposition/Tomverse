@@ -45,7 +45,7 @@ export function AdminModelMetricsPanel({ rows }: { rows: AdminModelMetricRow[] }
   return (
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
       <div>
-        <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-300">
+        <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
           Model metrics
         </p>
         <h2 className="mt-2 text-2xl font-black text-white">
@@ -63,7 +63,7 @@ export function AdminModelMetricsPanel({ rows }: { rows: AdminModelMetricRow[] }
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className={`rounded-full border px-2.5 py-1 text-xs font-black ${statusClass(row.status)}`}>
+                  <span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${statusClass(row.status)}`}>
                     {row.status}
                   </span>
                   <h3 className="truncate font-black text-white">{row.modelName}</h3>

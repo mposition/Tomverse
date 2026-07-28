@@ -188,7 +188,7 @@ export function AdminProviderOpsPanel({ models, incidents, checks }: Props) {
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div>
-          <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-300">
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
             Provider operations
           </p>
           <h2 className="mt-2 text-2xl font-black text-white">
@@ -198,7 +198,7 @@ export function AdminProviderOpsPanel({ models, incidents, checks }: Props) {
             Run readiness checks, limit or disable an affected provider or model, and resolve incidents when traffic can resume.
           </p>
         </div>
-        <div className="inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-black text-amber-200">
+        <div className="inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-200">
           <ShieldAlert className="h-3.5 w-3.5" />
           {activeIncidents.length} active incidents
         </div>
@@ -206,7 +206,7 @@ export function AdminProviderOpsPanel({ models, incidents, checks }: Props) {
 
       <div className="mt-5 grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
-          <h3 className="text-sm font-black uppercase tracking-[0.16em] text-zinc-300">
+          <h3 className="text-sm font-bold uppercase tracking-[0.16em] text-zinc-300">
             Incident mode
           </h3>
           <div className="mt-4 grid gap-3">
@@ -276,7 +276,7 @@ export function AdminProviderOpsPanel({ models, incidents, checks }: Props) {
               type="button"
               onClick={createIncident}
               disabled={busy === "create" || title.trim().length < 3}
-              className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-3 text-sm font-black text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {busy === "create" ? <Loader2 className="h-4 w-4 animate-spin" /> : <AlertTriangle className="h-4 w-4" />}
               Enable incident mode
@@ -285,7 +285,7 @@ export function AdminProviderOpsPanel({ models, incidents, checks }: Props) {
         </div>
 
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
-          <h3 className="text-sm font-black uppercase tracking-[0.16em] text-zinc-300">
+          <h3 className="text-sm font-bold uppercase tracking-[0.16em] text-zinc-300">
             Provider readiness tests
           </h3>
           <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
@@ -332,14 +332,14 @@ export function AdminProviderOpsPanel({ models, incidents, checks }: Props) {
               <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className={`rounded-full border px-2.5 py-1 text-xs font-black ${statusClass(incident.status)}`}>
+                    <span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${statusClass(incident.status)}`}>
                       {incident.status}
                     </span>
                     <span className="text-xs text-zinc-500">
                       {incident.provider || incident.modelId || "unknown target"}
                     </span>
                   </div>
-                  <h3 className="mt-2 text-base font-black text-white">{incident.title}</h3>
+                  <h3 className="mt-2 text-base font-bold text-white">{incident.title}</h3>
                   <p className="mt-1 text-sm leading-6 text-zinc-400">{incident.message || "No operator note."}</p>
                   <p className="mt-2 text-xs text-zinc-600">
                     Created {dateLabel(incident.createdAt)} UTC by {incident.createdByEmail || "unknown admin"}
@@ -350,7 +350,7 @@ export function AdminProviderOpsPanel({ models, incidents, checks }: Props) {
                     type="button"
                     onClick={() => resolveIncident(incident.id)}
                     disabled={Boolean(busy)}
-                    className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-black text-emerald-100 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-100 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {busy === `resolve-${incident.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
                     Resolve

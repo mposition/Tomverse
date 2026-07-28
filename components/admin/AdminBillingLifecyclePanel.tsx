@@ -33,7 +33,7 @@ function Card({
           : "border-emerald-500/25 bg-emerald-500/10 text-emerald-200";
   return (
     <div className={`rounded-2xl border p-4 ${toneClass}`}>
-      <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.16em]">
+      <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em]">
         {icon}
         {label}
       </div>
@@ -54,7 +54,7 @@ export function AdminBillingLifecyclePanel({
   return (
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
       <div>
-        <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-300">
+        <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
           Billing lifecycle
         </p>
         <h2 className="mt-2 text-2xl font-black text-white">

@@ -100,7 +100,7 @@ export function AdminRetentionPanel() {
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div>
-          <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-300">
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
             Retention
           </p>
           <h2 className="mt-2 text-2xl font-black text-white">
@@ -114,7 +114,7 @@ export function AdminRetentionPanel() {
           type="button"
           onClick={load}
           disabled={loading}
-          className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-sm font-black text-zinc-200 transition hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-sm font-bold text-zinc-200 transition hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
           Refresh
@@ -126,7 +126,7 @@ export function AdminRetentionPanel() {
           <article key={item.key} className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h3 className="text-sm font-black text-white">{item.label}</h3>
+                <h3 className="text-sm font-bold text-white">{item.label}</h3>
                 <p className="mt-1 text-xs leading-5 text-zinc-500">{item.policy}</p>
               </div>
               <Database className="h-4 w-4 shrink-0 text-blue-300" />
@@ -151,7 +151,7 @@ export function AdminRetentionPanel() {
       </div>
 
       <div className="mt-5 rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4">
-        <h3 className="text-sm font-black uppercase tracking-[0.16em] text-amber-100">
+        <h3 className="text-sm font-bold uppercase tracking-[0.16em] text-amber-100">
           Manual cleanup
         </h3>
         <p className="mt-2 text-sm leading-6 text-amber-100/75">
@@ -168,7 +168,7 @@ export function AdminRetentionPanel() {
             type="button"
             onClick={() => runCleanup("dry-run")}
             disabled={Boolean(running)}
-            className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-sm font-black text-zinc-100 transition hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-sm font-bold text-zinc-100 transition hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {running === "dry-run" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             Dry run
@@ -177,7 +177,7 @@ export function AdminRetentionPanel() {
             type="button"
             onClick={() => runCleanup("execute")}
             disabled={Boolean(running) || confirmText !== "RUN CLEANUP"}
-            className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-amber-600 px-3 py-2 text-sm font-black text-white transition hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-amber-600 px-3 py-2 text-sm font-bold text-white transition hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {running === "execute" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             Execute cleanup

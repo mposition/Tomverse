@@ -790,7 +790,7 @@ export function ChatSidebar({
                             role="menu"
                             className="absolute right-0 top-full z-[75] mt-2 block w-64 rounded-2xl border border-zinc-200 bg-white p-2 text-left shadow-2xl dark:border-zinc-700 dark:bg-zinc-900"
                         >
-                            <span className="block px-3 py-2 text-xs font-black uppercase tracking-wide text-zinc-500">
+                            <span className="block px-3 py-2 text-xs font-bold uppercase tracking-wide text-zinc-500">
                                 {helpCopy.quickHelp}
                             </span>
                             <button
@@ -858,16 +858,16 @@ export function ChatSidebar({
                     >
                         <SlidersHorizontal className="h-3.5 w-3.5 shrink-0 text-blue-500" aria-hidden="true" />
                         <span className="min-w-0 flex-1">
-                            <span className="block text-[11px] font-black text-zinc-700 dark:text-zinc-200">
+                            <span className="block text-[11px] font-bold text-zinc-700 dark:text-zinc-200">
                                 {t("sidebar.organizerTools")}
                             </span>
                             {!organizerExpanded ? (
-                                <span className="block truncate text-[10px] font-medium text-zinc-400">
+                                <span className="block truncate text-[11px] font-medium text-zinc-400">
                                     {activeOrganizerSummary}
                                 </span>
                             ) : null}
                         </span>
-                        <span className="inline-flex shrink-0 items-center gap-1 text-[10px] font-bold text-zinc-500 dark:text-zinc-400">
+                        <span className="inline-flex shrink-0 items-center gap-1 text-[11px] font-bold text-zinc-500 dark:text-zinc-400">
                             {organizerExpanded
                                 ? t("sidebar.organizerCollapse")
                                 : t("sidebar.organizerExpand")}
@@ -890,7 +890,7 @@ export function ChatSidebar({
                     }`}
                 >
                     <div className="flex items-center gap-1">
-                        <span className="text-[10px] font-black uppercase tracking-wide text-zinc-500">
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">
                             {helpCopy.statusTitle}
                         </span>
                         <FeatureHelpPopover
@@ -936,7 +936,7 @@ export function ChatSidebar({
                     }`}
                 >
                     <div className="flex items-center gap-1">
-                        <span className="text-[10px] font-black uppercase tracking-wide text-zinc-500">
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">
                             {helpCopy.labelsTitle}
                         </span>
                         <FeatureHelpPopover
@@ -983,7 +983,7 @@ export function ChatSidebar({
                     }`}
                 >
                     <div className="flex items-center justify-between gap-2">
-                        <span className="inline-flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wide text-zinc-500">
+                        <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-zinc-500">
                             <Folder className="h-3.5 w-3.5" />
                             {t("sidebar.projects")}
                             <FeatureHelpPopover
@@ -1029,7 +1029,7 @@ export function ChatSidebar({
                                 type="button"
                                 onClick={() => void createProject()}
                                 disabled={!projectName.trim() || isCreatingProject}
-                                className="h-8 rounded-lg bg-blue-600 px-2 text-[11px] font-black text-white disabled:cursor-not-allowed disabled:opacity-50"
+                                className="h-8 rounded-lg bg-blue-600 px-2 text-[11px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
                             >
                                 {t("auth.ok")}
                             </button>
@@ -1039,7 +1039,7 @@ export function ChatSidebar({
                                     setShowProjectForm(false);
                                     setProjectName("");
                                 }}
-                                className="h-8 rounded-lg border border-zinc-200 px-2 text-[11px] font-black text-zinc-500 hover:bg-zinc-100 dark:border-zinc-800 dark:hover:bg-zinc-900"
+                                className="h-8 rounded-lg border border-zinc-200 px-2 text-[11px] font-bold text-zinc-500 hover:bg-zinc-100 dark:border-zinc-800 dark:hover:bg-zinc-900"
                             >
                                 {t("auth.cancel")}
                             </button>
@@ -1054,7 +1054,7 @@ export function ChatSidebar({
                                         setShowProjectForm(true);
                                         setProjectName("");
                                     }}
-                                    className="inline-flex items-center gap-1 text-[11px] font-black text-blue-600 hover:text-blue-500 dark:text-blue-300"
+                                    className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-600 hover:text-blue-500 dark:text-blue-300"
                                 >
                                     <FolderPlus className="h-3.5 w-3.5" aria-hidden="true" />
                                     {helpCopy.createProject}
@@ -1100,7 +1100,7 @@ export function ChatSidebar({
                                                     type="button"
                                                     onClick={() => void renameProject(project.id)}
                                                     disabled={!editingProjectName.trim() || renamingProjectId === project.id}
-                                                    className="h-7 rounded-md bg-blue-500 px-2 text-[10px] font-black text-white"
+                                                    className="h-7 rounded-md bg-blue-500 px-2 text-xs font-bold text-white"
                                                 >
                                                     {t("auth.ok")}
                                                 </button>
@@ -1110,7 +1110,7 @@ export function ChatSidebar({
                                                         setEditingProjectId(null);
                                                         setEditingProjectName("");
                                                     }}
-                                                    className="h-7 rounded-md px-2 text-[10px] font-black text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-800"
+                                                    className="h-7 rounded-md px-2 text-xs font-bold text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-800"
                                                 >
                                                     {t("auth.cancel")}
                                                 </button>
@@ -1129,8 +1129,8 @@ export function ChatSidebar({
                                                     className="flex min-w-0 flex-1 items-center justify-between gap-2 rounded-md px-1.5 py-1 text-left"
                                                     aria-pressed={isProjectActive}
                                                 >
-                                                    <span className="truncate text-[11px] font-black">{project.name}</span>
-                                                    <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-black ${
+                                                    <span className="truncate text-[11px] font-bold">{project.name}</span>
+                                                    <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[11px] font-bold ${
                                                         isProjectActive
                                                             ? "bg-white/15 text-white"
                                                             : "bg-white text-zinc-500 dark:bg-zinc-800 dark:text-zinc-300"
@@ -1183,7 +1183,7 @@ export function ChatSidebar({
             >
                 {messageSearchResults.length > 0 && (
                     <div className="mb-2 rounded-xl border border-blue-200 bg-blue-50 p-2 text-xs dark:border-blue-900/50 dark:bg-blue-950/20">
-                        <p className="px-1 pb-1 font-black text-blue-700 dark:text-blue-300">
+                        <p className="px-1 pb-1 font-bold text-blue-700 dark:text-blue-300">
                             {t("sidebar.messageMatches")}
                         </p>
                         {messageSearchResults.slice(0, 4).map((result) => (
@@ -1212,7 +1212,7 @@ export function ChatSidebar({
                                     href={chatWorkspaceGuideHref(lang, "labels")}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="mt-2 font-black text-blue-600 hover:text-blue-500 dark:text-blue-300"
+                                    className="mt-2 font-bold text-blue-600 hover:text-blue-500 dark:text-blue-300"
                                 >
                                     {helpCopy.labelGuide}
                                 </Link>
@@ -1249,29 +1249,29 @@ export function ChatSidebar({
                                 <span className="min-w-0 flex flex-col gap-1">
                                     <span className="truncate text-[13px] leading-4">{conv.title}</span>
                                     {conversationLabels[conv.id] && (
-                                        <span className="inline-flex w-fit items-center gap-1 rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-bold text-blue-500">
+                                        <span className="inline-flex w-fit items-center gap-1 rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[11px] font-bold text-blue-500">
                                             <Tag className="h-2.5 w-2.5" />
                                             {labelText(conversationLabels[conv.id])}
                                         </span>
                                     )}
                                     {getConversationProjectId(conv) && (
-                                        <span className="inline-flex w-fit max-w-full items-center gap-1 rounded-full bg-purple-500/10 px-1.5 py-0.5 text-[10px] font-bold text-purple-500">
+                                        <span className="inline-flex w-fit max-w-full items-center gap-1 rounded-full bg-purple-500/10 px-1.5 py-0.5 text-[11px] font-bold text-purple-500">
                                             <Folder className="h-2.5 w-2.5 shrink-0" />
                                             <span className="truncate">{projectText(getConversationProjectId(conv) || "")}</span>
                                         </span>
                                     )}
-                                    <span className="flex items-center gap-1.5 truncate text-[10px] font-medium text-zinc-400 dark:text-zinc-500">
+                                    <span className="flex items-center gap-1.5 truncate text-[11px] font-medium text-zinc-400 dark:text-zinc-500">
                                         {pinnedConversationIds.includes(conv.id) && <Pin className="h-3 w-3 shrink-0 text-blue-500" />}
                                         {favoriteConversationIds.includes(conv.id) && <Star className="h-3 w-3 shrink-0 fill-amber-400 text-amber-400" />}
                                         <Sparkles className="h-3 w-3 shrink-0" />
                                         <span className="truncate">{getConversationModelSummary(conv)}</span>
                                         {conv.shareEnabled && (
-                                            <span className="shrink-0 rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[9px] font-bold text-blue-500">
+                                            <span className="shrink-0 rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[11px] font-semibold text-blue-500">
                                                 {helpCopy.sharedBadge}
                                             </span>
                                         )}
                                         {conv.isLocked && (
-                                            <span className="shrink-0 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-bold text-amber-500">
+                                            <span className="shrink-0 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-semibold text-amber-500">
                                                 {helpCopy.lockedBadge}
                                             </span>
                                         )}
@@ -1360,7 +1360,7 @@ export function ChatSidebar({
                                         </button>
 
                                         <div className="my-1 border-t border-zinc-800" />
-                                        <div className="px-3 py-1 text-[10px] font-black uppercase tracking-wide text-zinc-500">
+                                        <div className="px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-zinc-500">
                                             {helpCopy.labelAssignment}
                                         </div>
                                         {(["work", "research", "personal"] as const).map((label) => (
@@ -1388,7 +1388,7 @@ export function ChatSidebar({
                                             </button>
                                         ))}
                                         <div className="my-1 border-t border-zinc-800" />
-                                        <div className="px-3 py-1 text-[10px] font-black uppercase tracking-wide text-zinc-500">
+                                        <div className="px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-zinc-500">
                                             {t("sidebar.moveToProject")}
                                         </div>
                                         {projects.length === 0 ? (
@@ -1617,7 +1617,7 @@ export function ChatSidebar({
                     aria-live="polite"
                 >
                     <div className="flex items-center justify-between gap-3">
-                        <span className="text-[10px] font-black uppercase tracking-[0.16em] text-blue-600 dark:text-blue-300">
+                        <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-blue-600 dark:text-blue-300">
                             {sidebarTourStep + 1} / {helpCopy.tourSteps.length}
                         </span>
                         <button
@@ -1629,7 +1629,7 @@ export function ChatSidebar({
                             {helpCopy.tourSkip}
                         </button>
                     </div>
-                    <h2 className="mt-2 text-sm font-black text-zinc-950 dark:text-white">
+                    <h2 className="mt-2 text-sm font-bold text-zinc-950 dark:text-white">
                         {helpCopy.tourSteps[sidebarTourStep].title}
                     </h2>
                     <p className="mt-1 text-xs font-medium leading-5 text-zinc-600 dark:text-zinc-300">
@@ -1639,7 +1639,7 @@ export function ChatSidebar({
                         type="button"
                         data-testid="sidebar-tour-next"
                         onClick={advanceSidebarTour}
-                        className="mt-3 flex h-9 w-full items-center justify-center rounded-xl bg-blue-600 px-4 text-xs font-black text-white hover:bg-blue-500"
+                        className="mt-3 flex h-9 w-full items-center justify-center rounded-xl bg-blue-600 px-4 text-xs font-bold text-white hover:bg-blue-500"
                     >
                         {sidebarTourStep === helpCopy.tourSteps.length - 1
                             ? helpCopy.tourDone
@@ -1711,7 +1711,7 @@ export function ChatSidebar({
                             <Share2 className="h-5 w-5" aria-hidden="true" />
                         </span>
                         <div>
-                            <h2 id="conversation-share-title" className="text-base font-black text-zinc-950 dark:text-white">
+                            <h2 id="conversation-share-title" className="text-base font-bold text-zinc-950 dark:text-white">
                                 {helpCopy.shareDialogTitle}
                             </h2>
                             <p className="mt-1 text-xs font-semibold text-zinc-500">{shareTarget.title}</p>
@@ -1742,7 +1742,7 @@ export function ChatSidebar({
                                 onShare(shareTarget.id, shareTarget.title);
                                 setShareTarget(null);
                             }}
-                            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-black text-white hover:bg-blue-500"
+                            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-500"
                         >
                             {shareTarget.shareEnabled
                                 ? t("sidebar.refreshShare")

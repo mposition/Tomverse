@@ -1,6 +1,7 @@
 import "server-only";
 
 import { sendTransactionalEmail } from "@/lib/email";
+import { EMAIL_FONT_STACK } from "@/lib/emailTypography";
 
 type EmailLanguage = "en" | "ko" | "zh" | "fr" | "de" | "es" | "pt";
 
@@ -686,7 +687,7 @@ const formatBillingInterval = (
 const shell = (title: string, body: string, language: EmailLanguage) => {
   const copy = emailCopy[language];
   return `
-  <div style="margin:0;padding:0;background:#f4f6fb;font-family:Inter,Arial,sans-serif;color:#111827;">
+  <div style="margin:0;padding:0;background:#f4f6fb;font-family:${EMAIL_FONT_STACK};color:#111827;">
     <div style="max-width:640px;margin:0 auto;padding:32px 18px;">
       <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:20px;overflow:hidden;">
         <div style="padding:28px 30px;background:#0b1020;color:#ffffff;">

@@ -300,9 +300,9 @@ export function AdminConsoleShell({
     <div className="flex h-full flex-col bg-[#08090c]">
       <div className="border-b border-zinc-800 px-4 py-4">
         <Link href="/admin/overview" className="flex items-center gap-3" onClick={() => setMobileNavOpen(false)}>
-          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-sm font-black text-white">T</span>
+          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-sm font-bold text-white">T</span>
           <span>
-            <span className="block text-sm font-black text-white">Tomverse</span>
+            <span className="block text-sm font-bold text-white">Tomverse</span>
             <span className="block text-xs font-bold text-blue-300">Admin Console</span>
           </span>
         </Link>
@@ -310,7 +310,7 @@ export function AdminConsoleShell({
       <nav className="min-h-0 flex-1 overflow-y-auto px-3 py-4" aria-label="Admin console navigation">
         {ADMIN_CONSOLE_NAVIGATION.map((group) => (
           <div key={group.label} className="mb-5">
-            <p className="mb-1.5 px-3 text-[10px] font-black uppercase tracking-[0.18em] text-zinc-600">{group.label}</p>
+            <p className="mb-1.5 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-zinc-600">{group.label}</p>
             <div className="grid gap-0.5">
               {group.items.map((item) => {
                 const Icon = item.icon;
@@ -328,7 +328,7 @@ export function AdminConsoleShell({
                   >
                     <Icon className="h-4 w-4 shrink-0" />
                     <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                    {!writable ? <span className="text-[9px] uppercase tracking-wide opacity-60">Read</span> : null}
+                    {!writable ? <span className="text-[11px] uppercase tracking-wide opacity-60">Read</span> : null}
                   </Link>
                 );
               })}
@@ -378,7 +378,7 @@ export function AdminConsoleShell({
               {alertsOpen ? (
                 <div className="absolute right-0 top-12 z-50 w-[min(24rem,calc(100vw-2rem))] rounded-2xl border border-zinc-800 bg-zinc-950 p-3 shadow-2xl">
                   <div className="flex items-center justify-between px-1 pb-2">
-                    <p className="text-sm font-black text-white">Notification center</p>
+                    <p className="text-sm font-bold text-white">Notification center</p>
                     <Link href="/admin/alerts" onClick={() => setAlertsOpen(false)} className="text-xs font-bold text-blue-300">View all</Link>
                   </div>
                   {loadingAlerts ? <Loader2 className="mx-auto my-6 h-5 w-5 animate-spin text-zinc-500" /> : notificationRows.length === 0 ? (
@@ -386,8 +386,8 @@ export function AdminConsoleShell({
                   ) : notificationRows.map((item) => (
                     <div key={item.id} className="mb-1 rounded-xl border border-zinc-800 bg-zinc-900/70 p-3">
                       <div className="flex items-center justify-between gap-2">
-                        <p className="truncate text-xs font-black text-zinc-100">{item.title}</p>
-                        <span className={`text-[10px] font-black uppercase ${item.status === "failed" ? "text-red-300" : "text-emerald-300"}`}>{item.status}</span>
+                        <p className="truncate text-xs font-bold text-zinc-100">{item.title}</p>
+                        <span className={`text-[10px] font-bold uppercase ${item.status === "failed" ? "text-red-300" : "text-emerald-300"}`}>{item.status}</span>
                       </div>
                       {item.detail ? <p className="mt-1 line-clamp-2 text-[11px] text-zinc-500">{item.detail}</p> : null}
                     </div>
@@ -398,7 +398,7 @@ export function AdminConsoleShell({
             <div className="hidden items-center gap-2 rounded-xl border border-zinc-800 px-2.5 py-1.5 md:flex">
               <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-zinc-800"><UserRound className="h-3.5 w-3.5" /></span>
               <span className="max-w-36 truncate text-xs font-bold text-zinc-300">{user.name || user.email || "Administrator"}</span>
-              <span className="rounded bg-purple-500/10 px-1.5 py-0.5 text-[9px] font-black uppercase text-purple-200">{role}</span>
+              <span className="rounded bg-purple-500/10 px-1.5 py-0.5 text-[11px] font-bold uppercase text-purple-200">{role}</span>
             </div>
           </div>
         </header>
@@ -422,11 +422,11 @@ export function AdminConsoleShell({
                 <p className="mt-1 text-sm text-zinc-500">{page.description}</p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {!pageWritable ? <span className="rounded-full border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs font-black text-zinc-400">Read-only for {role}</span> : null}
+                {!pageWritable ? <span className="rounded-full border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs font-bold text-zinc-400">Read-only for {role}</span> : null}
                 <button type="button" onClick={() => setAutoRefresh((value) => !value)} className={`rounded-xl border px-3 py-2 text-xs font-bold ${autoRefresh ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200" : "border-zinc-800 text-zinc-400"}`} aria-pressed={autoRefresh}>
                   {autoRefresh ? "Auto 60s" : "Manual refresh"}
                 </button>
-                <button type="button" onClick={() => refresh("manual")} className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs font-black text-white hover:bg-zinc-800">
+                <button type="button" onClick={() => refresh("manual")} className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs font-bold text-white hover:bg-zinc-800">
                   <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} /> Refresh
                 </button>
                 <span className="text-[11px] text-zinc-600">Updated {lastUpdated.toISOString().slice(11, 19)} UTC</span>
@@ -460,13 +460,13 @@ export function AdminConsoleShell({
             <div className="max-h-[calc(80vh-3.5rem)] overflow-y-auto p-3">
               {query.trim().length < 2 ? (
                 <>
-                  <p className="px-2 pb-2 text-[10px] font-black uppercase tracking-[0.16em] text-zinc-600">Recent</p>
+                  <p className="px-2 pb-2 text-[10px] font-bold uppercase tracking-[0.16em] text-zinc-600">Recent</p>
                   {recentItems.map(({ path, item }) => (
                     <button key={path} type="button" onClick={() => navigate(path)} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-zinc-900">
                       <FileClock className="h-4 w-4 text-zinc-500" /><span><span className="block text-sm font-bold text-zinc-200">{item.label}</span><span className="block text-xs text-zinc-600">{path}</span></span>
                     </button>
                   ))}
-                  <p className="mt-3 px-2 pb-2 text-[10px] font-black uppercase tracking-[0.16em] text-zinc-600">Pages</p>
+                  <p className="mt-3 px-2 pb-2 text-[10px] font-bold uppercase tracking-[0.16em] text-zinc-600">Pages</p>
                   {ALL_ITEMS.slice(0, 9).map((item) => (
                     <button key={item.href} type="button" onClick={() => navigate(item.href)} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-zinc-900">
                       <item.icon className="h-4 w-4 text-blue-300" /><span><span className="block text-sm font-bold text-zinc-200">{item.label}</span><span className="block text-xs text-zinc-600">{item.description}</span></span>
