@@ -412,19 +412,32 @@ append보다 늦게 도착하면 **실제 transcript가 빈 seed로 덮이면서
 
 ### 13-3. `develop` 재정렬 후 전체 실행
 
-`origin/develop` `39194ea` 위로 rebase한 뒤 재실행:
-**1008 passed / 3 failed / 645 skipped** (14.8분).
+`origin/develop` `39194ea` 위로 rebase한 뒤 두 차례 실행했습니다.
 
-실패 3건의 처리:
+**1차: 1008 passed / 3 failed / 645 skipped** (14.8분)
 
 | 실패 | 원인 | 조치 |
 |---|---|---|
-| `korean-typography › no mid-word break at 320x568` | **이번 작업이 넣은 test 결함.** 요소에 `data-ko-heading`을 찍고 selector로 다시 찾는 방식이라, 그 사이 React 재렌더가 mark를 지우면 "Selector not found"로 실패 | locator의 element handle에서 직접 측정하도록 수정. 4회 반복 × 2 project = **160/160 통과** |
-| `korean-typography › wraps within 4 lines at 320x568` | 기존 test의 `boundingBox()`가 부하 상황에서 `null` | 사전 존재. 위 160회에서는 재현되지 않음 |
-| `attachment-flow › PDF remains a friendly file card @smoke` | 부하 flake | 격리 실행 시 통과. 사전 존재 |
+| `korean-typography › no mid-word break at 320x568` | **이번 작업이 넣은 test 결함.** 요소에 `data-ko-heading`을 찍고 selector로 다시 찾는 방식이라, 그 사이 React 재렌더가 mark를 지우면 "Selector not found"로 실패 | locator의 element handle에서 직접 측정하도록 수정 |
+| `korean-typography › wraps within 4 lines at 320x568` | 기존 test의 `boundingBox()`가 부하 상황에서 `null` | 사전 존재 |
+| `attachment-flow › PDF … @smoke` | 부하 flake | 사전 존재 |
 
-앞선 실행에서 남아 있던 `conversation-title`, `chat-keyboard-policy`,
-`chat-tools` 실패는 이번 실행에서 나타나지 않았습니다.
+수정 후 `korean-typography` 4회 반복 × 2 project = **160/160 통과**.
+
+**2차(수정 반영): 5 failed** — `attachment-flow` 3건, `conversation-title` 2건.
+둘 다 사전 존재 flake이며 수치로 확인했습니다.
+
+| spec | 이 branch | `origin/develop` 제품 코드로 되돌린 baseline |
+|---|---:|---:|
+| `attachment-flow` (3 project × 3 반복 = 54) | 1~2 실패 | **5 실패** |
+| `conversation-title` (2 project × 5 반복 = 80) | 8 실패 | 6 실패 |
+
+`attachment-flow`는 오히려 baseline이 더 불안정하고, `conversation-title`은
+차이가 통계적으로 구분되지 않습니다. 둘 다 이번 변경과 무관하며 범위 밖이라
+수정하지 않았습니다.
+
+앞선 실행에서 남아 있던 `chat-keyboard-policy`와 `chat-tools` 실패는 13-1·13-2
+수정 이후 재현되지 않습니다.
 
 ### 13-4. 정적 검사
 
