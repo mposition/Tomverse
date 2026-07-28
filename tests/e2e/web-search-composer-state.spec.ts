@@ -65,22 +65,24 @@ const open = async (page: Page) => {
 const chip = (page: Page) => page.getByTestId("web-search-mode-chip");
 
 /**
- * The chip says the same thing in two lengths. On mobile it shares the
- * composer's first input line rather than owning a row above it, so it drops
- * the separator and the word "supported" -- every state stays distinguishable
- * and the full sentence is still what `#web-search-state-description` carries.
- * Which one is on screen is read from the row's own placement rather than from
- * the project name, so this holds wherever the shell decides to mount.
+ * The chip says the same thing in two lengths. The mobile shell shortens the
+ * *label* -- dropping the separator and the word "supported" -- but never the
+ * row: the chip owns its own row above the textarea in both shells, per
+ * docs/ui-contracts/mobile-chat-composer.md. Every state stays
+ * distinguishable, and the full sentence is still what
+ * `#web-search-state-description` carries. Which length is on screen is read
+ * from the row's own `data-label-variant` rather than from the project name,
+ * so this holds wherever the shell decides to mount.
  */
 async function expectChipLabel(
   page: Page,
-  labels: { row: string; inline: string }
+  labels: { full: string; compact: string }
 ) {
-  const placement = await page
+  const variant = await page
     .getByTestId("tool-status-chip-row")
-    .getAttribute("data-placement");
+    .getAttribute("data-label-variant");
   await expect(chip(page)).toContainText(
-    placement === "inline" ? labels.inline : labels.row
+    variant === "compact" ? labels.compact : labels.full
   );
 }
 
@@ -105,7 +107,7 @@ test("full support is one compact line with no 'Unsupported 0' row", async ({
 
   await expect(chip(page)).toHaveAttribute("data-tone", "neutral");
   await expect(chip(page)).toHaveAttribute("data-unsupported-count", "0");
-  await expectChipLabel(page, { row: "Web search on", inline: "Web search" });
+  await expectChipLabel(page, { full: "Web search on", compact: "Web search" });
   // The words "web search" appear once, not twice.
   await expect(chip(page)).not.toContainText("Use web search");
   await expect(page.getByTestId("web-search-readiness-summary")).toHaveCount(0);
@@ -151,8 +153,8 @@ test("partial support is the only case that earns a visible exception", async ({
 
   await expect(chip(page)).toHaveAttribute("data-tone", "warning");
   await expectChipLabel(page, {
-    row: "1/3 supported",
-    inline: "Web search 1/3",
+    full: "1/3 supported",
+    compact: "Web search 1/3",
   });
   await expect(page.getByTestId("web-search-exception-detail")).toHaveCount(0);
 
@@ -171,8 +173,8 @@ test("no capable model blocks with a way out instead of a silent fallback", asyn
 
   await expect(chip(page)).toHaveAttribute("data-tone", "blocked");
   await expectChipLabel(page, {
-    row: "Web search unavailable",
-    inline: "No web search",
+    full: "Web search unavailable",
+    compact: "No web search",
   });
 
   const notice = page.getByTestId("web-search-unavailable-notice");
@@ -190,8 +192,8 @@ test("auto mode never claims a search will happen", async ({ page }) => {
 
   await expect(chip(page)).toHaveAttribute("data-tone", "neutral");
   await expectChipLabel(page, {
-    row: "Web search · Auto",
-    inline: "Web search auto",
+    full: "Web search · Auto",
+    compact: "Web search auto",
   });
   // "Auto" only offers a search, so an unsupported model is not yet an
   // exception the user has to resolve before sending.

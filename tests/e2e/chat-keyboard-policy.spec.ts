@@ -180,6 +180,48 @@ test.describe("mobile chat keyboard policy", () => {
     await expect(textarea).toHaveValue("한글 모바일 조합 중");
   });
 
+  test("the input keeps its full-width row through an IME composition (guest)", async ({
+    page,
+  }) => {
+    // The composer contract (docs/ui-contracts/mobile-chat-composer.md) in the
+    // keyboard tests' own device projects: composing must not move, narrow or
+    // cover the box the user is reading their own text in.
+    await prepareGuestPage(page, "ko");
+    await mockChatStream(page, "Mobile keyboard QA response");
+    await page.goto("/chat");
+    await expect(page.getByTestId("chat-textarea")).toBeVisible();
+
+    const textarea = page.getByTestId("chat-textarea");
+    const before = (await textarea.boundingBox())!;
+    await textarea.click();
+    await textarea.fill("한글 조합");
+    await dispatchComposingEnter(page);
+    const during = (await textarea.boundingBox())!;
+
+    expect(during.width).toBeCloseTo(before.width, 1);
+    expect(during.x).toBeCloseTo(before.x, 1);
+
+    const covered = await page.evaluate(() => {
+      const box = document
+        .querySelector('[data-testid="chat-textarea"]')!
+        .getBoundingClientRect();
+      const composer = document.querySelector('[data-testid="chat-input"]')!;
+      return Array.from(composer.querySelectorAll<HTMLElement>("[data-testid]"))
+        .filter((node) => node.dataset.testid !== "chat-textarea")
+        .filter((node) => !node.contains(document.activeElement))
+        .filter((node) => {
+          const rect = node.getBoundingClientRect();
+          return (
+            Math.max(0, Math.min(rect.right, box.right) - Math.max(rect.left, box.left)) *
+              Math.max(0, Math.min(rect.bottom, box.bottom) - Math.max(rect.top, box.top)) >
+            0
+          );
+        })
+        .map((node) => node.dataset.testid);
+    });
+    expect(covered, "something overlaps the composing textarea").toEqual([]);
+  });
+
   test("a whitespace/newline-only message is not sendable (guest)", async ({ page }) => {
     await prepareGuestPage(page, "ko");
     await mockChatStream(page, "Mobile keyboard QA response");
