@@ -70,7 +70,17 @@ over: the next release needs its own reviewed run or its own waiver.
       per-provider contradiction between them
 - [ ] Model picker, provider banner and chat send agree with both of the above
 
-## 4. Scope notes
+## 4. Accessibility
+
+- [ ] `.github/ACCESSIBILITY_QA_MATRIX.md` filled in for this release SHA
+- [ ] No P0/P1 accessibility blocker outstanding
+- [ ] Any row still marked N/V is an accepted, named risk — not an oversight
+
+The automated rows in that matrix run in CI. The screen-reader, Korean-IME,
+external-keyboard and real-browser-zoom rows do not, and a green suite says
+nothing about them.
+
+## 5. Scope notes
 
 A green visual run is **not** an accessibility result. Screenshot goldens
 cannot see focus order, accessible names, announcements or contrast in forced
