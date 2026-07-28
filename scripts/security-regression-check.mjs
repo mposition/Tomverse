@@ -1630,9 +1630,22 @@ const checks = [
         !prWorkflow.includes("push:") &&
         prWorkflow.includes("actions: read") &&
         prWorkflow.includes("pull-requests: read") &&
-        // Secret scanning stays inline: this job's name is the only required
-        // status check on develop and main, so dropping the step would take
-        // gitleaks off the merge-blocking path.
+        // Branch protection on develop and main references check runs by
+        // name, and this is the required one. PR Fast Gate aggregates three
+        // parallel jobs, so the aggregating job must keep this exact name --
+        // renaming it leaves every open PR waiting on a check that no longer
+        // reports.
+        prWorkflow.includes(
+          "name: Security, unit, build, and Chromium smoke tests"
+        ) &&
+        // The aggregating job must treat anything other than `success` as a
+        // failure. A skipped or cancelled upstream job has verified nothing,
+        // and accepting either is how an aggregating gate goes green without
+        // gating.
+        prWorkflow.includes('if [ "$result" != "success" ]') &&
+        // Secret scanning stays in this workflow: the aggregating job is the
+        // only required status check on develop and main, so dropping the
+        // scan would take gitleaks off the merge-blocking path.
         prWorkflow.includes("gitleaks/gitleaks-action@v3") &&
         prWorkflow.includes('GITLEAKS_ENABLE_COMMENTS: "false"') &&
         prWorkflow.includes("fetch-depth: 0") &&
@@ -1669,10 +1682,19 @@ const checks = [
         dailyWorkflow.includes("chromium webkit") &&
         !dailyWorkflow.includes("--grep") &&
         // The visual-regression suite dropped from the PR tier has an
-        // explicit nightly home of its own.
+        // explicit nightly home of its own, and the zero-retry bar it is
+        // gated on lives there with it. `--retries=0` overrides the config's
+        // CI `retries: 2`; without it a flaky golden passes on retry and the
+        // one workflow that exists to catch that reports green.
         visualWorkflow.includes("npm run test:e2e:visual") &&
+        visualWorkflow.includes("--retries=0") &&
         visualWorkflow.includes("schedule:") &&
         visualWorkflow.includes("contents: read") &&
+        // ...and it must not creep back into the PR gate. The smoke-tier
+        // manifest already refuses the @smoke tag on this file, but naming
+        // the spec directly in a workflow step bypasses that check entirely,
+        // which is how it previously ended up costing every PR ~82s.
+        !prWorkflow.includes("chat-state-visual-regression") &&
         !prWorkflow.includes("ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION") &&
         !mainWorkflow.includes("ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION")
       );
