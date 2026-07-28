@@ -81,6 +81,9 @@ export function usePublicBilling() {
 
   return useMemo(() => {
     const planById = new Map(config?.plans.map((plan) => [plan.id, plan]));
+    // RECON-UX-001: the display locale is decided per billing market inside
+    // formatBillingAmount, so nothing here -- and no caller -- can make the
+    // price depend on the visitor's browser locale again.
     const formatPlanPrice = (
       planId: "free" | "pro" | "max",
       billingInterval: "monthly" | "annual" = "monthly"

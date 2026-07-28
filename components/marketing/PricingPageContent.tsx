@@ -484,6 +484,8 @@ type PricingCopy = {
   creditNotice: string;
   compareTitle: string;
   compareDescription: string;
+  /** Accessible name for the horizontally scrollable comparison table. */
+  compareScrollLabel: string;
   table: {
     feature: string;
     free: string;
@@ -507,6 +509,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     creditNotice:
       "Credit usage varies by each model's processing cost and reasoning method. You can review the estimated usage before sending a request.",
     compareTitle: "Compare what each plan unlocks",
+    compareScrollLabel: "Plan comparison table, scrolls horizontally",
     compareDescription:
       "Tomverse plans are designed around model access, usage allowance, file workflows, and sharing controls.",
     table: {
@@ -604,6 +607,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     billingNote: "출시 특가: Pro 또는 Max 첫 달 50% 할인. 언제든 취소할 수 있습니다.",
     creditNotice: "모델별 처리 비용과 추론 방식에 따라 크레딧 사용량이 다릅니다. 요청을 보내기 전에 예상 사용량을 확인할 수 있습니다.",
     compareTitle: "플랜별 제공 기능 비교",
+    compareScrollLabel: "플랜 비교표, 가로로 스크롤됩니다",
     compareDescription: "Tomverse 플랜은 모델 접근, 사용량, 파일 워크플로, 공유 제어를 기준으로 설계되었습니다.",
     table: {
       feature: "기능",
@@ -638,6 +642,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     billingNote: "发布特价：Pro 或 Max 首月享 50% 折扣。可随时取消。",
     creditNotice: "积分用量会因模型处理成本和推理方式而异。发送请求前可查看预计用量。",
     compareTitle: "比较每个方案解锁的功能",
+    compareScrollLabel: "方案比较表，可横向滚动",
     compareDescription: "Tomverse 方案围绕模型访问、使用额度、文件工作流和分享控制而设计。",
     table: {
       feature: "功能",
@@ -672,6 +677,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     billingNote: "Offre de lancement : -50 % sur Pro ou Max le premier mois. Annulation possible a tout moment.",
     creditNotice: "La consommation de crédits varie selon le coût de traitement et le mode de raisonnement du modèle. Vous pouvez consulter l'estimation avant d'envoyer une demande.",
     compareTitle: "Comparez ce que chaque plan débloque",
+    compareScrollLabel: "Tableau comparatif des plans, défilement horizontal",
     compareDescription: "Les plans Tomverse sont conçus autour de l'accès aux modèles, des quotas d'utilisation, des workflows avec fichiers et des options de partage.",
     table: {
       feature: "Fonctionnalité",
@@ -706,6 +712,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     billingNote: "Launch-Angebot: 50 % Rabatt auf Pro oder Max im ersten Monat. Jederzeit kündbar.",
     creditNotice: "Der Credit-Verbrauch variiert je nach Verarbeitungskosten und Schlussfolgerungsmethode des Modells. Die geschätzte Nutzung ist vor dem Absenden sichtbar.",
     compareTitle: "Vergleichen Sie, was jeder Plan freischaltet",
+    compareScrollLabel: "Plan-Vergleichstabelle, horizontal scrollbar",
     compareDescription: "Tomverse-Pläne sind rund um Modellzugriff, Nutzungskontingente, Datei-Workflows und Freigabefunktionen aufgebaut.",
     table: {
       feature: "Funktion",
@@ -740,6 +747,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     billingNote: "Oferta de lanzamiento: 50 % de descuento en Pro o Max durante el primer mes. Cancela cuando quieras.",
     creditNotice: "El consumo de créditos varía según el coste de procesamiento y el método de razonamiento del modelo. Puedes revisar el uso estimado antes de enviar una solicitud.",
     compareTitle: "Compara lo que desbloquea cada plan",
+    compareScrollLabel: "Tabla comparativa de planes, con desplazamiento horizontal",
     compareDescription: "Los planes de Tomverse se diseñan alrededor del acceso a modelos, límites de uso, archivos y controles para compartir.",
     table: {
       feature: "Función",
@@ -774,6 +782,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     billingNote: "Oferta de lançamento: 50% de desconto no Pro ou Max no primeiro mês. Cancele quando quiser.",
     creditNotice: "O uso de créditos varia conforme o custo de processamento e o método de raciocínio do modelo. Você pode conferir o uso estimado antes de enviar uma solicitação.",
     compareTitle: "Compare o que cada plano libera",
+    compareScrollLabel: "Tabela comparativa de planos, com rolagem horizontal",
     compareDescription: "Os planos Tomverse são pensados em torno de acesso a modelos, limites de uso, arquivos e compartilhamento.",
     table: {
       feature: "Recurso",
@@ -908,7 +917,7 @@ export function PricingPageContent() {
             <div className="rounded-[1.35rem] bg-white/80 px-5 py-4 backdrop-blur dark:bg-zinc-950/75">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <span className="inline-flex w-fit rounded-full bg-accent-promotion-500 px-3 py-1 text-xs font-bold uppercase tracking-[0.16em] text-white">
+                  <span className="inline-flex w-fit rounded-full bg-accent-promotion-700 px-3 py-1 text-xs font-bold uppercase tracking-[0.16em] text-white">
                     {saleCopy.badge}
                   </span>
                   <p className="mt-3 text-4xl font-black tracking-tight text-accent-promotion-700 dark:text-accent-promotion-200">
@@ -939,9 +948,12 @@ export function PricingPageContent() {
         <div className="mt-14 grid gap-5 lg:grid-cols-3">
           {content.plans.map((plan) => {
             const planId = plan.name === "Max" ? "max" : plan.name === "Pro" ? "pro" : "free";
-            const displayPrice = billing.formatPlanPrice(planId) || plan.price;
+            const displayPrice =
+              billing.formatPlanPrice(planId) || plan.price;
             const annualFallback = planId === "max" ? "$240" : planId === "pro" ? "$144" : "$0";
-            const annualPrice = billing.formatPlanPrice(planId, "annual") || annualFallback;
+            const annualPrice =
+              billing.formatPlanPrice(planId, "annual") ||
+              annualFallback;
             const promotionEligible = Boolean(
               featuredPromotion &&
               featuredPromotion.appliesToPlanIds.includes(planId) &&
@@ -963,7 +975,7 @@ export function PricingPageContent() {
               // with 125% zoom, which is what pushed the whole page sideways.
               // `min-w-0` lets the track win; the content inside wraps instead.
               className={`relative flex min-h-full min-w-0 flex-col rounded-[1.75rem] border p-6 shadow-sm ${
-                plan.highlighted ? "border-blue-500 bg-blue-600 text-white shadow-2xl shadow-blue-950/20"
+                plan.highlighted ? "border-blue-600 bg-blue-700 text-white shadow-2xl shadow-blue-950/20"
                   : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/40"
               }`}
             >
@@ -971,7 +983,7 @@ export function PricingPageContent() {
                 <div className={`absolute -top-4 right-6 rounded-full px-4 py-2 text-xs font-bold shadow-xl ${
                   plan.highlighted
                     ? "bg-white text-blue-700 shadow-blue-950/20"
-                    : "bg-accent-promotion-500 text-white shadow-accent-promotion-950/20"
+                    : "bg-accent-promotion-700 text-white shadow-accent-promotion-950/20"
                 }`}>
                   {featuredPromotion.discountPercent}% OFF
                 </div>
@@ -1019,9 +1031,22 @@ export function PricingPageContent() {
                       min-content, and a grid item cannot go below that -- it
                       pushes the page instead. The clamp only engages below
                       ~360px of CSS width, which in practice means a zoomed
-                      phone; every real phone width still renders it at 36px. */}
+                      phone; every real phone width still renders it at 36px.
+
+                      RECON-UX-001 lowered the clamp floor from 24px to 18px
+                      and made the token breakable. Once the display locale is
+                      pinned, the widest notation it can produce is "USD 19.00"
+                      -- whose space is a non-breaking space -- or "US$19.00",
+                      which has no space at all. Either one set a min-content
+                      of ~148px inside a 128px grid track at 320px/200% zoom
+                      and pushed the document sideways. 18px is the smallest
+                      size the typography contract lets font-black reach, and
+                      `overflow-wrap: anywhere` lowers the min-content to a
+                      single glyph so the grid item can fit, while still
+                      keeping the price on one line whenever it has the room.
+                      The price is never clipped or hidden. */}
                   <span aria-hidden="true" className="flex flex-wrap items-baseline gap-x-2">
-                    <span className="text-[clamp(1.5rem,10vw,2.25rem)] font-black">{displayPrice}</span>
+                    <span data-testid="pricing-plan-price" className="text-[clamp(1.125rem,10vw,2.25rem)] font-black [overflow-wrap:anywhere]">{displayPrice}</span>
                     <span className={`text-sm font-bold ${plan.highlighted ? "text-blue-100" : "text-zinc-500 dark:text-zinc-400"}`}>
                       {formatBillingPeriodLabel(plan.period, lang)}
                     </span>
@@ -1034,7 +1059,7 @@ export function PricingPageContent() {
                     : "border-accent-promotion-500/30 bg-accent-promotion-500/10"
                 }`}>
                   <div className="flex items-center justify-between gap-3">
-                    <span className={`rounded-full px-3 py-1 text-xs font-bold ${plan.highlighted ? "bg-white text-blue-700" : "bg-accent-promotion-500 text-white"}`}>
+                    <span className={`rounded-full px-3 py-1 text-xs font-bold ${plan.highlighted ? "bg-white text-blue-700" : "bg-accent-promotion-700 text-white"}`}>
                       {saleCopy.badge}
                     </span>
                     <span className={`text-xs font-bold ${plan.highlighted ? "text-blue-50" : "text-accent-promotion-600 dark:text-accent-promotion-400"}`}>
@@ -1083,7 +1108,7 @@ export function PricingPageContent() {
                 }`}>
                   <div className="flex items-center justify-between gap-3">
                     <span>{annualCopy.annual}</span>
-                    <span className={`rounded-full px-2.5 py-1 ${plan.highlighted ? "bg-white text-blue-700" : "bg-accent-promotion-500/10 text-accent-promotion-500"}`}>
+                    <span className={`rounded-full px-2.5 py-1 ${plan.highlighted ? "bg-white text-blue-700" : "bg-accent-promotion-500/10 text-accent-promotion-700 dark:text-accent-promotion-300"}`}>
                       {annualCopy.save}
                     </span>
                   </div>
@@ -1165,7 +1190,7 @@ export function PricingPageContent() {
                   cta_location: "pricing_credit_pack_section",
                 })
               }
-              className="inline-flex h-11 items-center justify-center rounded-xl bg-accent-promotion-600 px-5 text-sm font-bold text-white transition hover:bg-accent-promotion-500"
+              className="inline-flex h-11 items-center justify-center rounded-xl bg-accent-promotion-700 px-5 text-sm font-bold text-white transition hover:bg-accent-promotion-600"
             >
               {creditPackGuide.purchaseCta}
             </Link>
@@ -1333,7 +1358,7 @@ export function PricingPageContent() {
                   key={plan.id}
                   className={`rounded-2xl border p-5 ${
                     plan.id === "pro"
-                      ? "border-blue-500 bg-blue-600 text-white shadow-xl shadow-blue-950/15"
+                      ? "border-blue-600 bg-blue-700 text-white shadow-xl shadow-blue-950/15"
                       : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
                   }`}
                 >
@@ -1362,7 +1387,7 @@ export function PricingPageContent() {
                             className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold ${
                               plan.id === "pro"
                                 ? "bg-white/15 text-white"
-                                : "bg-zinc-100 text-zinc-500 dark:bg-zinc-900 dark:text-zinc-300"
+                                : "bg-zinc-100 text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300"
                             }`}
                           >
                             {formatCredits(example.cost)}
@@ -1381,7 +1406,7 @@ export function PricingPageContent() {
 
           <div className="grid gap-4 border-t border-zinc-200 p-4 dark:border-zinc-800 sm:p-6 lg:grid-cols-2">
             <article className="rounded-2xl border border-amber-500/25 bg-amber-500/10 p-5">
-              <div className="flex items-center gap-2 text-amber-700 dark:text-amber-300">
+              <div className="flex items-center gap-2 text-amber-800 dark:text-amber-300">
                 <FileText className="h-5 w-5" />
                 <h3 className="font-bold">{creditGuide.longContextTitle}</h3>
               </div>
@@ -1431,7 +1456,20 @@ export function PricingPageContent() {
             <h2 className={`text-3xl font-black ${displayHeadingClass(lang)}`}>{content.compareTitle}</h2>
             <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">{content.compareDescription}</p>
           </div>
-          <div className="mt-8 overflow-x-auto">
+          {/*
+            RECON-A11Y-002 (WCAG 2.1.1). At 390px this region hides 436px of
+            the Pro and Max columns behind a horizontal scrollbar, and it had
+            no focusable element inside it and no tabindex of its own -- a
+            keyboard-only visitor could not reach the Max column at all. A
+            scrollable region needs to be focusable and named; the table's own
+            semantics are untouched.
+          */}
+          <div
+            className="mt-8 overflow-x-auto rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 dark:focus-visible:outline-blue-400"
+            role="region"
+            aria-label={content.compareScrollLabel}
+            tabIndex={0}
+          >
             <table className="w-full min-w-[760px] border-separate border-spacing-0 text-left text-sm">
               <thead>
                 <tr>

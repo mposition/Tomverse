@@ -17,6 +17,7 @@ import { ModelSelectionBadge } from "@/components/chat/ModelSelectionBadge";
 import { useHasCoarsePointer } from "@/components/chat/useHasCoarsePointer";
 import { getModelUsageProfile } from "@/components/chat/types";
 import { getModelExperienceStatus } from "@/lib/modelExperience";
+import { englishCreditUnit, formatCountedUnit } from "@/lib/pricingFormat";
 import {
   canUseModelWithPlan,
   modelSupportsImageInput,
@@ -518,7 +519,7 @@ export function ModelCatalogue({
                           label={
                             lang === "ko"
                               ? `기본 ${usageProfile.credits}크레딧 차감`
-                              : `Base cost ${usageProfile.credits} credits`
+                              : `Base cost ${formatCountedUnit(usageProfile.credits, englishCreditUnit, "en")}`
                           }
                         />
                         <ModelSelectionBadge

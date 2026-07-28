@@ -2086,7 +2086,27 @@ export function ChatPageClient({
     status,
   ]);
   
+  // STG-F003: nothing marks the composer busy until well after the submit
+  // path has awaited a conversation create, the model-settings flush and the
+  // preflight, so a second Enter -- or an Enter racing the send button --
+  // inside that window used to start a second, fully independent comparison:
+  // two preflights, two saved user messages, two charges for one intent. One
+  // submit at a time, and the flag is released in `finally` so a rejected or
+  // aborted attempt can never wedge the composer shut.
+  const submitInFlightRef = useRef(false);
   const handleGlobalSubmit = async (options?: {
+    deepResearchDepth?: "quick" | "standard" | "deep";
+  }) => {
+    if (submitInFlightRef.current) return;
+    submitInFlightRef.current = true;
+    try {
+      await runGlobalSubmit(options);
+    } finally {
+      submitInFlightRef.current = false;
+    }
+  };
+
+  const runGlobalSubmit = async (options?: {
     deepResearchDepth?: "quick" | "standard" | "deep";
   }) => {
     const trimmed = inputValue.trim();

@@ -14,6 +14,7 @@ import { ANALYTICS_PREFERENCES_OPEN_EVENT } from "@/lib/analyticsPreferencesEven
 import { AiDisclaimerNotice } from "@/components/chat/AiDisclaimerNotice";
 import { ChatApp } from "@/components/chat/ChatApp";
 import { ChatInput } from "@/components/chat/ChatInput";
+import { useComposerPortalHost } from "@/components/chat/useComposerPortalHost";
 import { ChatWelcomeScreen } from "@/components/chat/ChatWelcomeScreen";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
@@ -406,6 +407,10 @@ export function MobileChatShell({
   const inputPortalTarget = isConversationEmpty
     ? welcomeInputSlot ?? bottomInputSlot
     : bottomInputSlot ?? welcomeInputSlot;
+  // STG-F003: portal into a host we move between the two slots, never into
+  // the slots themselves -- switching containers would rebuild the composer
+  // and drop whatever the user had just typed into it.
+  const composerPortalHost = useComposerPortalHost(inputPortalTarget);
   // Mirrors inputPortalTarget above: the composer (and so the consent
   // notice slot right next to it) lives in one of two DOM positions
   // depending on whether the welcome screen is showing.
@@ -797,7 +802,7 @@ export function MobileChatShell({
 
       <div ref={setBottomConsentSlot} className="shrink-0" />
       <div ref={setBottomInputSlot} />
-      {inputPortalTarget &&
+      {composerPortalHost &&
         createPortal(
           <ChatInput
             value={inputValue}
@@ -829,7 +834,7 @@ export function MobileChatShell({
             hideTopBorder={comparisonReadiness.isVisible}
             hideDisclaimer
           />,
-          inputPortalTarget
+          composerPortalHost
         )}
 
       <AiDisclaimerNotice testId="chat-ai-disclaimer-mobile" />

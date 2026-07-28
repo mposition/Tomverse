@@ -184,25 +184,25 @@ export default async function StatusPage() {
 
         <section className="grid gap-3 grid-cols-2 md:grid-cols-4">
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
-            <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-400">
               Operational
             </p>
             <p className="mt-2 text-3xl font-black text-emerald-200">{counts.operational}</p>
           </div>
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
-            <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-400">
               Degraded
             </p>
             <p className="mt-2 text-3xl font-black text-amber-200">{counts.degraded}</p>
           </div>
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
-            <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-400">
               Incident
             </p>
             <p className="mt-2 text-3xl font-black text-red-200">{counts.incident}</p>
           </div>
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
-            <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-400">
               Unknown
             </p>
             <p className="mt-2 text-3xl font-black text-zinc-300">{counts.unknown}</p>

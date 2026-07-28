@@ -550,7 +550,7 @@ export function LandingPageContent() {
           <div className="mt-9 grid gap-4 md:grid-cols-3">
             {content.plans.map((plan) => {
               const formatted = billing.formatPlanPrice(plan.id) || plan.fallbackPrice;
-              return <article key={plan.id} className={`rounded-2xl border p-5 ${plan.id === "pro" ? "border-blue-500 bg-blue-50/70 dark:bg-blue-950/20" : "border-zinc-200 dark:border-zinc-800"}`}><h3 className="text-lg font-black">{plan.title}</h3><p className="mt-4 text-3xl font-black">{formatted}<span className="ml-1 text-sm font-semibold text-zinc-500">{plan.id === "free" ? "" : content.monthly}</span></p><p className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-400">{plan.description}</p></article>;
+              return <article key={plan.id} className={`rounded-2xl border p-5 ${plan.id === "pro" ? "border-blue-500 bg-blue-50/70 dark:bg-blue-950/20" : "border-zinc-200 dark:border-zinc-800"}`}><h3 className="text-lg font-black">{plan.title}</h3><p className="mt-4 text-3xl font-black">{formatted}<span className="ml-1 text-sm font-semibold text-zinc-600 dark:text-zinc-400">{plan.id === "free" ? "" : content.monthly}</span></p><p className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-400">{plan.description}</p></article>;
             })}
           </div>
           <Link href="/pricing" className="mt-7 inline-flex items-center gap-2 rounded-xl bg-zinc-950 px-5 py-3 text-sm font-bold text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200">{content.pricingDetails}<ArrowRight className="h-4 w-4" /></Link>

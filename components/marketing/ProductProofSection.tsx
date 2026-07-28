@@ -269,7 +269,7 @@ export function ProductProofSection() {
           <article className="overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-950 shadow-2xl shadow-blue-950/20">
             <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3 text-white">
               <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-blue-300"><PlayCircle className="h-4 w-4" />Tomverse product walkthrough</span>
-              <span className="text-[11px] font-bold text-zinc-500">20–25 sec</span>
+              <span className="text-[11px] font-bold text-zinc-400">20–25 sec</span>
             </div>
             <video
               src="/marketing-proof/tomverse-review-workflow.webm"
@@ -288,7 +288,7 @@ export function ProductProofSection() {
             <div className="p-5 text-white">
               <h3 className="text-xl font-black">{content.videoTitle}</h3>
               <p className="mt-3 text-sm leading-6 text-zinc-300">{content.videoBody}</p>
-              <p className="mt-3 text-xs font-medium leading-5 text-zinc-500">{content.videoDisclosure}</p>
+              <p className="mt-3 text-xs font-medium leading-5 text-zinc-400">{content.videoDisclosure}</p>
             </div>
           </article>
 

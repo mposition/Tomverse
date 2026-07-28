@@ -27,7 +27,10 @@ concurrency:
 jobs:
   playwright:
     name: Chromium desktop and mobile regression
-    runs-on: ubuntu-latest
+    # Canonical visual baseline: pinned image, not ubuntu-latest, so a
+    # runner-image bump cannot silently re-rasterise every golden.
+    # See docs/qa/canonical-visual-baseline.md.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     # Keep the production client bundle on the same deterministic Turnstile
     # configuration used by the isolated Playwright server.

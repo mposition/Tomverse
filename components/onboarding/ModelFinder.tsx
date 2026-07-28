@@ -20,6 +20,7 @@ import {
   type ModelFinderTask,
 } from "@/lib/modelFinder";
 import { MODEL_FINDER_OPEN_EVENT } from "@/lib/modelFinderEvents";
+import { englishCreditUnit, formatCountedUnit } from "@/lib/pricingFormat";
 import { getModelUsageProfile } from "@/lib/models";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import {
@@ -367,7 +368,7 @@ export function ModelFinder({ enabled, onComplete }: ModelFinderProps) {
                         label={
                           lang === "ko"
                             ? `기본 ${usageProfile.credits}크레딧 차감`
-                            : `Base cost ${usageProfile.credits} credits`
+                            : `Base cost ${formatCountedUnit(usageProfile.credits, englishCreditUnit, "en")}`
                         }
                         testId="model-finder-credit-cost"
                       />

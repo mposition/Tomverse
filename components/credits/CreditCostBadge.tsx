@@ -1,4 +1,5 @@
 import type { HTMLAttributes } from "react";
+import { englishCreditUnit, formatCountedUnit } from "@/lib/pricingFormat";
 
 type CreditCoinIconProps = {
   className?: string;
@@ -83,15 +84,26 @@ export function CreditCostBadge({
   approximate = false,
   ...props
 }: CreditCostBadgeProps) {
+  // FINAL-F006: 12 of the 34 catalogue models weigh 1 credit -- including all
+  // three guest defaults -- so the hard-coded plural was reachable copy, not a
+  // theoretical edge. Goes through the same CLDR helper /pricing uses.
+  const countedCredits = formatCountedUnit(
+    credits,
+    englishCreditUnit,
+    "en",
+    formatCredits
+  );
   const accessibleLabel =
-    label ||
-    (approximate
-      ? `about ${formatCredits(credits)} credits`
-      : `${formatCredits(credits)} credits`);
+    label || (approximate ? `about ${countedCredits}` : countedCredits);
 
   return (
+    // RECON-A11Y-001: a bare <span> may not carry aria-label (axe
+    // `aria-prohibited-attr`). The badge is a coin glyph plus a numeral that
+    // together mean "N credits", which is exactly what role="img" describes,
+    // and it leaves the rendered box untouched.
     <span
       {...props}
+      role="img"
       data-testid={testId}
       data-approximate={approximate ? "true" : undefined}
       aria-label={accessibleLabel}

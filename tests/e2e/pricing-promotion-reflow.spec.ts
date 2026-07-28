@@ -40,16 +40,34 @@ const ZOOM_LEVELS = [1, 1.25, 1.5, 2] as const;
 
 const PROMOTION_CODE = "TOMVERSE-LAUNCH-50";
 
-async function mockBilling(page: Page, promotion: boolean) {
+async function mockBilling(
+  page: Page,
+  promotion: boolean,
+  // RECON-UX-001. Production sends market pricing -- `displayCurrency` plus a
+  // major-unit `displayMonthlyPriceAmount` -- and only that branch reaches
+  // `formatBillingAmount`, whose Intl.NumberFormat decides how wide the
+  // currency notation is. Without these fields the page falls back to a
+  // hard-coded `en-US` formatter, which is why this suite reported 0px for
+  // combinations that were visibly broken in a browser.
+  marketPricing = true
+) {
+  const marketFields = (monthly: number, annual: number) =>
+    marketPricing
+      ? {
+          displayCurrency: "USD",
+          displayMonthlyPriceAmount: monthly,
+          displayAnnualPriceAmount: annual,
+        }
+      : {};
   await page.context().route("**/api/billing/config**", (route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
         plans: [
-          { id: "free", name: "Free", monthlyCredits: 300, priceCents: 0, currency: "USD", interval: "month" },
-          { id: "pro", name: "Pro", monthlyCredits: 6000, priceCents: 1900, currency: "USD", interval: "month" },
-          { id: "max", name: "Max", monthlyCredits: 20000, priceCents: 4900, currency: "USD", interval: "month" },
+          { id: "free", name: "Free", monthlyCredits: 300, priceCents: 0, currency: "USD", interval: "month", ...marketFields(0, 0) },
+          { id: "pro", name: "Pro", monthlyCredits: 6000, priceCents: 1900, currency: "USD", interval: "month", ...marketFields(19, 190) },
+          { id: "max", name: "Max", monthlyCredits: 20000, priceCents: 4900, currency: "USD", interval: "month", ...marketFields(49, 490) },
         ],
         creditPacks: [],
         featuredPromotion: promotion
@@ -80,14 +98,20 @@ type OverflowReading = {
 
 async function measurePricingOverflow(
   page: Page,
-  options: { promotion: boolean; lang: "ko" | "en"; width: number; height: number }
+  options: {
+    promotion: boolean;
+    lang: "ko" | "en";
+    width: number;
+    height: number;
+    marketPricing?: boolean;
+  }
 ): Promise<OverflowReading> {
   await page.setViewportSize({ width: options.width, height: options.height });
   await prepareGuestPage(page, options.lang);
   // Registered after prepareGuestPage so it wins: Playwright routes are
   // last-registered-first, and the guest fixture installs a promotion-free
   // config of its own.
-  await mockBilling(page, options.promotion);
+  await mockBilling(page, options.promotion, options.marketPricing ?? true);
   await mockPublicProofMetrics(page);
   await page.goto(`/pricing?lang=${options.lang}`);
 
@@ -195,4 +219,94 @@ for (const base of BASE_VIEWPORTS) {
       });
     }
   }
+}
+
+/**
+ * RECON-UX-001 (WCAG 1.4.10 Reflow). The suite above varies the *UI* language
+ * via `?lang=`, which is not the axis that broke: `formatBillingAmount` calls
+ * `new Intl.NumberFormat(locale, { style: "currency" })`, and when `locale` is
+ * undefined that is the *browser's* locale, not the page's. The same USD price
+ * renders "$7.50" to an en-US visitor, "US$7.50" to en-GB and ko-KR, and
+ * "USD 7.50" to en-AU -- and the widest of those set the plan card's
+ * min-content width under zoom.
+ *
+ * So the guard has to move the browser locale, not the UI language. Each
+ * locale gets its own context (Playwright's `locale` is a context option), and
+ * the price string is asserted alongside the overflow so a future change to
+ * the currency notation cannot pass by silently narrowing the text.
+ */
+const BROWSER_LOCALES = ["en-US", "en-AU", "en-GB", "ko-KR", "de-DE"] as const;
+
+for (const browserLocale of BROWSER_LOCALES) {
+  test.describe(`browser locale ${browserLocale}`, () => {
+    test.use({ locale: browserLocale });
+
+    for (const base of BASE_VIEWPORTS) {
+      for (const zoom of ZOOM_LEVELS) {
+        const label = `${base.name} @${zoom * 100}% (${browserLocale})`;
+        test(`pricing reflows without overflow at ${label}`, { tag: "@ui-risk" }, async ({
+          page,
+        }) => {
+          const viewport = {
+            width: Math.round(base.width / zoom),
+            height: Math.round(base.height / zoom),
+          };
+
+          const withPromotion = await measurePricingOverflow(page, {
+            promotion: true,
+            lang: "en",
+            ...viewport,
+          });
+          const withoutPromotion = await measurePricingOverflow(page, {
+            promotion: false,
+            lang: "en",
+            ...viewport,
+          });
+
+          console.log(
+            `RECON-UX-001 ${label} promotion=${withPromotion.overflowPx}px baseline=${
+              withoutPromotion.overflowPx
+            }px offender=${JSON.stringify(
+              withPromotion.offender ?? withoutPromotion.offender
+            )}`
+          );
+
+          expect(
+            withoutPromotion.overflowPx,
+            `horizontal overflow with no promotion: ${JSON.stringify(withoutPromotion)}`
+          ).toBeLessThanOrEqual(1);
+          expect(
+            withPromotion.overflowPx,
+            `horizontal overflow with an active promotion: ${JSON.stringify(withPromotion)}`
+          ).toBeLessThanOrEqual(1);
+        });
+      }
+    }
+
+    test(`the rendered price does not depend on ${browserLocale}`, {
+      tag: "@ui-risk",
+    }, async ({ page }) => {
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await prepareGuestPage(page, "en");
+      await mockBilling(page, false);
+      await mockPublicProofMetrics(page);
+      await page.goto("/pricing?lang=en");
+
+      // The notation belongs to the billing market, not to the reader: all
+      // five browser locales must read back the identical string. Before the
+      // fix the same USD response produced "$19.00", "US$19.00" and
+      // "USD 19.00" depending on the visitor, and the widest of those decided
+      // whether the plan card fit its grid track under zoom.
+      const prices = page.getByTestId("pricing-plan-price");
+      await expect(prices.first()).toBeVisible();
+      const rendered = await prices.allInnerTexts();
+      console.log(
+        `RECON-UX-001 prices under ${browserLocale}: ${JSON.stringify(rendered)}`
+      );
+      // USD is an en-US market price: "$19.00", never "US$" and never "USD ".
+      expect(rendered.join("|")).toMatch(/\$19\.00/);
+      expect(rendered.join("|")).not.toMatch(/US\$/);
+      expect(rendered.join("|")).not.toMatch(/USD\s/);
+    });
+  });
 }

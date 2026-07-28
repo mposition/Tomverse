@@ -427,6 +427,120 @@ test.describe("native web search (webSearchMode: always)", () => {
     );
   });
 
+  /**
+   * FINAL-F003. The original defect was a stale closure: `runComparisonPreflight`
+   * did not list `webSearchMode` in its dependency array, so the preflight sent
+   * whatever mode had been current when the callback was last built. The source
+   * fix is in place; what was never proven is that the *transitions* agree --
+   * that the mode the composer shows, the mode `/api/chat/preflight` is told,
+   * and the mode every `/api/chat` fan-out request carries are one value at
+   * every point a user can reach.
+   *
+   * Each case below submits immediately after a transition, with no settling
+   * step in between, and reads the mode straight out of the request bodies.
+   */
+  const readModesOnSubmit = async (page: Page) => {
+    const preflightModes: (string | undefined)[] = [];
+    const chatModes: (string | undefined)[] = [];
+    await page.route("**/api/chat/preflight", async (route) => {
+      preflightModes.push(
+        (route.request().postDataJSON() as { webSearchMode?: string })
+          .webSearchMode
+      );
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true, modelCount: 2, requiredCredits: 2 }),
+      });
+    });
+    await page.route("**/api/chat", async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.fallback();
+        return;
+      }
+      chatModes.push(
+        (route.request().postDataJSON() as { webSearchMode?: string })
+          .webSearchMode
+      );
+      await route.fulfill({
+        status: 200,
+        contentType: "text/plain; charset=utf-8",
+        body: "Answered.",
+      });
+    });
+    return { preflightModes, chatModes };
+  };
+
+  const setWebSearchModeOff = async (page: Page) => {
+    await toolsMenuTrigger(page).click();
+    await page.getByTestId("tools-web-search-row").click();
+    await page.getByTestId("web-search-mode-option-off").click();
+  };
+
+  const prepareTwoModelChat = async (page: Page) => {
+    await prepareGuestPage(page, "en");
+    await mockAuthenticatedApi(page);
+    await asProPlan(page);
+    await seedFreshAccount(page);
+    await page.goto("/chat?lang=en");
+    await expect(
+      page.locator('[data-testid="desktop-model-panel"] select').first()
+    ).toBeEnabled();
+    await selectModelsViaPicker(page, ["gpt-5-5", "claude-sonnet-5"]);
+    await expect(page.locator('[data-testid="desktop-model-panel"] select')).toHaveCount(2);
+  };
+
+  test("a submit immediately after switching web search on carries the new mode everywhere", async ({
+    page,
+  }) => {
+    await prepareTwoModelChat(page);
+    const { preflightModes, chatModes } = await readModesOnSubmit(page);
+
+    await setWebSearchModeAlways(page);
+    await page.getByTestId("chat-textarea").fill("Search for the latest figure");
+    await page.getByTestId("chat-textarea").press("Enter");
+
+    await expect.poll(() => preflightModes.length).toBe(1);
+    expect(preflightModes[0]).toBe("always");
+    await expect.poll(() => chatModes.length).toBe(2);
+    expect(new Set(chatModes)).toEqual(new Set(["always"]));
+  });
+
+  test("a submit immediately after switching web search back off carries no stale 'always'", async ({
+    page,
+  }) => {
+    await prepareTwoModelChat(page);
+    const { preflightModes, chatModes } = await readModesOnSubmit(page);
+
+    await setWebSearchModeAlways(page);
+    await setWebSearchModeOff(page);
+    await page.getByTestId("chat-textarea").fill("Answer from what you know");
+    await page.getByTestId("chat-textarea").press("Enter");
+
+    await expect.poll(() => preflightModes.length).toBe(1);
+    expect(preflightModes[0]).not.toBe("always");
+    await expect.poll(() => chatModes.length).toBe(2);
+    expect(chatModes.filter((mode) => mode === "always")).toHaveLength(0);
+  });
+
+  test("rapid mode toggling before a submit settles on the last choice", async ({
+    page,
+  }) => {
+    await prepareTwoModelChat(page);
+    const { preflightModes, chatModes } = await readModesOnSubmit(page);
+
+    await setWebSearchModeAlways(page);
+    await setWebSearchModeOff(page);
+    await setWebSearchModeAlways(page);
+    await page.getByTestId("chat-textarea").fill("Latest figure please");
+    await page.getByTestId("chat-textarea").press("Enter");
+
+    await expect.poll(() => preflightModes.length).toBe(1);
+    expect(preflightModes[0]).toBe("always");
+    await expect.poll(() => chatModes.length).toBe(2);
+    expect(new Set(chatModes)).toEqual(new Set(["always"]));
+  });
+
   test("the credit estimate breakdown shows the web search reservation for native-capable models", async ({
     page,
   }) => {

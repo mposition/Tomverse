@@ -431,6 +431,9 @@ export const fr = {
         switchTo: "Passer à",
         switchFromTo: "Remplacer {from} par {to}",
         tryLater: "Réessayez plus tard ou choisissez un autre modèle.",
+        noHealthyFallback: "Aucun modèle de remplacement éligible n'est disponible pour le moment. Réessayez plus tard ou actualisez l'état des fournisseurs.",
+        fallbackDegraded: "Ces modèles de remplacement signalent eux aussi des problèmes.",
+        fallbackUnverified: "La disponibilité de ces modèles de remplacement n'a pas pu être vérifiée.",
         refresh: "Actualiser l'état des fournisseurs",
     },
     modelTiers: {
