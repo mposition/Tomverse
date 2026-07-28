@@ -123,7 +123,7 @@ export function ModelsPageContent() {
 
       <section className="mx-auto max-w-6xl px-4 py-14 sm:px-6 lg:py-20">
         <div className="max-w-3xl">
-          <p className="text-sm font-black uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">{content.eyebrow}</p>
+          <p className="text-sm font-bold uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">{content.eyebrow}</p>
           <h1 className="mt-4 text-4xl font-black leading-tight sm:text-6xl">{content.title}</h1>
           <p className="mt-5 text-lg leading-8 text-zinc-600 dark:text-zinc-300">{content.description}</p>
           <p className="mt-5 rounded-2xl border border-blue-500/20 bg-blue-500/10 px-4 py-3 text-sm font-semibold leading-6 text-blue-800 dark:text-blue-200">
@@ -143,7 +143,7 @@ export function ModelsPageContent() {
               <Activity className="h-5 w-5" />
             </span>
             <span>
-              <span className="block text-sm font-black text-emerald-700 dark:text-emerald-300">
+              <span className="block text-sm font-bold text-emerald-700 dark:text-emerald-300">
                 {content.liveStatus}
               </span>
               <span className="mt-0.5 block text-xs leading-5 text-zinc-600 dark:text-zinc-400">
@@ -167,7 +167,7 @@ export function ModelsPageContent() {
               className="rounded-2xl border border-zinc-200 bg-zinc-50 p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900/40"
             >
               <div className="flex items-start gap-3">
-                <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${brand.className} text-base font-black text-white shadow-sm ring-1 ring-zinc-200/70 dark:ring-zinc-800`}>
+                <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${brand.className} text-base font-bold text-white shadow-sm ring-1 ring-zinc-200/70 dark:ring-zinc-800`}>
                   {brand.image ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={brand.image} alt={`${model.name} logo`} className="h-8 w-8 object-contain" />
@@ -176,7 +176,7 @@ export function ModelsPageContent() {
                   )}
                 </span>
                 <div>
-                  <h2 className="font-black">{model.name}</h2>
+                  <h2 className="font-bold">{model.name}</h2>
                   <p className="text-xs font-semibold text-zinc-500">{model.id}</p>
                 </div>
               </div>
@@ -185,24 +185,24 @@ export function ModelsPageContent() {
               </p>
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {tags.map((tag) => (
-                  <span key={tag} className="rounded-full bg-white px-2 py-1 text-[10px] font-black text-zinc-500 ring-1 ring-zinc-200 dark:bg-zinc-950 dark:ring-zinc-800">
+                  <span key={tag} className="rounded-full bg-white px-2 py-1 text-[11px] font-bold text-zinc-500 ring-1 ring-zinc-200 dark:bg-zinc-950 dark:ring-zinc-800">
                     {t(`modelTags.${tag}`)}
                   </span>
                 ))}
               </div>
               <div className="mt-5 grid grid-cols-2 gap-3">
                 <div>
-                  <p className="text-[10px] font-bold uppercase text-zinc-500">{content.provider}</p>
-                  <p className="mt-1 truncate text-sm font-black capitalize">{model.provider}</p>
+                  <p className="text-[11px] font-bold uppercase text-zinc-500">{content.provider}</p>
+                  <p className="mt-1 truncate text-sm font-bold capitalize">{model.provider}</p>
                 </div>
                 <div>
-                  <p className="text-[10px] font-bold uppercase text-zinc-500">{content.usageClass}</p>
-                  <p className="mt-1 text-sm font-black">
+                  <p className="text-[11px] font-bold uppercase text-zinc-500">{content.usageClass}</p>
+                  <p className="mt-1 text-sm font-bold">
                     {t(`modelUsageClasses.${usageProfile.category.toLowerCase()}`)}
                   </p>
                 </div>
                 <div>
-                  <p className="text-[10px] font-bold uppercase text-zinc-500">{content.baseCharge}</p>
+                  <p className="text-[11px] font-bold uppercase text-zinc-500">{content.baseCharge}</p>
                   <CreditCostBadge
                     credits={usageProfile.credits}
                     size="md"
@@ -212,8 +212,8 @@ export function ModelsPageContent() {
                   />
                 </div>
                 <div>
-                  <p className="text-[10px] font-bold uppercase text-zinc-500">{content.status}</p>
-                  <p className={`mt-1 text-sm font-black ${status === "available" ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}`}>{content.enabled}</p>
+                  <p className="text-[11px] font-bold uppercase text-zinc-500">{content.status}</p>
+                  <p className={`mt-1 text-sm font-bold ${status === "available" ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}`}>{content.enabled}</p>
                 </div>
               </div>
             </article>

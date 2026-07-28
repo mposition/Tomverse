@@ -79,7 +79,7 @@ export function AdminGlobalSearchPanel() {
   return (
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
       <div>
-        <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-300">
+        <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
           Global search
         </p>
         <h2 className="mt-2 text-2xl font-black text-white">Find customers, tickets, refunds, and audit events</h2>
@@ -107,7 +107,7 @@ export function AdminGlobalSearchPanel() {
         <button
           type="submit"
           disabled={isSearching}
-          className="inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-black text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-bold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
           Search
@@ -127,10 +127,10 @@ export function AdminGlobalSearchPanel() {
               className="flex min-w-0 cursor-pointer items-center justify-between gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/70 px-4 py-3 transition hover:border-blue-500/40 hover:bg-zinc-900"
             >
               <span className="min-w-0">
-                <span className="inline-flex rounded-full border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 text-[11px] font-black uppercase tracking-[0.12em] text-blue-200">
+                <span className="inline-flex rounded-full border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 text-[11px] font-bold uppercase tracking-[0.12em] text-blue-200">
                   {result.type}
                 </span>
-                <span className="mt-2 block truncate text-sm font-black text-white">
+                <span className="mt-2 block truncate text-sm font-bold text-white">
                   {result.title}
                 </span>
                 <span className="mt-1 block truncate text-xs text-zinc-500">

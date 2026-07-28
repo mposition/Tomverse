@@ -50,8 +50,11 @@ type CreditCostBadgeProps = Omit<HTMLAttributes<HTMLSpanElement>, "children"> & 
 };
 
 const sizeClasses = {
-  xs: "gap-0.5 px-1.5 py-0.5 text-[9px] [&_svg]:h-3 [&_svg]:w-3",
-  sm: "gap-1 px-2 py-1 text-[10px] [&_svg]:h-3.5 [&_svg]:w-3.5",
+  // `xs` rides inside the comparison rail's two mobile actions at 320px, where
+  // the label has no width to spare. Raising the text to the 11px floor is paid
+  // for out of the badge's own padding, not out of the label beside it.
+  xs: "gap-0.5 px-0.5 py-0.5 text-[11px] [&_svg]:h-3 [&_svg]:w-3",
+  sm: "gap-1 px-2 py-1 text-[11px] [&_svg]:h-3.5 [&_svg]:w-3.5",
   md: "gap-1.5 px-2.5 py-1.5 text-xs [&_svg]:h-4 [&_svg]:w-4",
 } as const;
 
@@ -93,7 +96,7 @@ export function CreditCostBadge({
       data-approximate={approximate ? "true" : undefined}
       aria-label={accessibleLabel}
       title={title === undefined ? accessibleLabel : title}
-      className={`inline-flex shrink-0 items-center justify-center rounded-full border font-black tabular-nums leading-none ${sizeClasses[size]} ${toneClasses[tone]} ${className}`}
+      className={`inline-flex shrink-0 items-center justify-center rounded-full border font-bold tabular-nums leading-none ${sizeClasses[size]} ${toneClasses[tone]} ${className}`}
     >
       <CreditCoinIcon />
       {/*

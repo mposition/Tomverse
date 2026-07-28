@@ -6,6 +6,7 @@ import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import { chatErrorResponse } from "@/lib/chatSecurity";
 import { sendTransactionalEmail } from "@/lib/email";
+import { EMAIL_FONT_STACK } from "@/lib/emailTypography";
 import { prisma } from "@/lib/prisma";
 import {
   apiSecurityResponse,
@@ -102,7 +103,7 @@ export async function POST(req: Request) {
             body.message,
           ].join("\n"),
           html: `
-            <div style="font-family:Arial,sans-serif;color:#111827;line-height:1.6">
+            <div style="font-family:${EMAIL_FONT_STACK};color:#111827;line-height:1.6">
               <h2>New Tomverse support request</h2>
               <p><strong>Feedback ID:</strong> ${escapeHtml(feedback.id)}</p>
               <p><strong>Type:</strong> ${escapeHtml(body.type)}</p>

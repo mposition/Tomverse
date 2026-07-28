@@ -3136,7 +3136,7 @@ export function ChatPageClient({
               }}
               className="flex min-h-11 flex-col items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-center text-white hover:bg-blue-500"
             >
-              <span className="text-sm font-black">{t("chat.continueConversationCta")}</span>
+              <span className="text-sm font-bold">{t("chat.continueConversationCta")}</span>
               <span className="text-[11px] font-medium text-blue-100">
                 {t("chat.continueConversationCtaSubtext")}
               </span>
@@ -3182,7 +3182,7 @@ export function ChatPageClient({
                 toastTimerRef.current = null;
               }
             }}
-            className="shrink-0 rounded-lg px-2 py-1 text-sm font-black text-blue-600 hover:bg-blue-500/10 dark:text-blue-400"
+            className="shrink-0 rounded-lg px-2 py-1 text-sm font-bold text-blue-600 hover:bg-blue-500/10 dark:text-blue-400"
           >
             {toast.action.label}
           </button>
@@ -3221,7 +3221,7 @@ export function ChatPageClient({
               addonCreditsRemaining={accountUsage.balances.purchasedRemainingCredits}
               testId="locked-model-plan-cta"
               onClick={() => setUpgradeModelPrompt(null)}
-              className="flex min-h-11 items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-black text-white hover:bg-blue-500"
+              className="flex min-h-11 items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-500"
             >
               {t("upgrade.viewProPlan")}
             </UpgradeCtaLink>
@@ -3247,7 +3247,7 @@ export function ChatPageClient({
             <Sparkles className="h-4 w-4" aria-hidden="true" />
           </span>
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-black text-zinc-950 dark:text-white">
+            <p className="text-sm font-bold text-zinc-950 dark:text-white">
               {t("upgrade.valuePromptTitle")}
             </p>
             <p className="mt-1 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
@@ -3271,7 +3271,7 @@ export function ChatPageClient({
           planCreditsRemaining={accountUsage.balances.planRemainingCredits}
           addonCreditsRemaining={accountUsage.balances.purchasedRemainingCredits}
           onClick={() => setValueUpgradeSource(null)}
-          className="mt-3 flex min-h-10 w-full items-center justify-center rounded-xl bg-blue-600 px-3 py-2 text-xs font-black text-white hover:bg-blue-500"
+          className="mt-3 flex min-h-10 w-full items-center justify-center rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold text-white hover:bg-blue-500"
         >
           {t("upgrade.compareProPlan")}
         </UpgradeCtaLink>
@@ -3287,7 +3287,7 @@ export function ChatPageClient({
             <Sparkles className="h-4 w-4" aria-hidden="true" />
           </span>
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-black text-zinc-950 dark:text-white">
+            <p className="text-sm font-bold text-zinc-950 dark:text-white">
               {t("chat.guestSaveCompareTitle")}
             </p>
             <p className="mt-1 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
@@ -3315,7 +3315,7 @@ export function ChatPageClient({
               if (currentChatId) writePendingGuestImportIntent(currentChatId);
               setShowGuestSaveCompareCard(false);
             }}
-            className="flex min-h-10 items-center justify-center rounded-xl bg-blue-600 px-3 py-2 text-center text-xs font-black text-white hover:bg-blue-500"
+            className="flex min-h-10 items-center justify-center rounded-xl bg-blue-600 px-3 py-2 text-center text-xs font-bold text-white hover:bg-blue-500"
           >
             {t("chat.guestSaveCompareCta")}
           </a>
@@ -3357,7 +3357,7 @@ export function ChatPageClient({
             </div>
 
             <div className="mt-6 sm:mt-7">
-              <p className="pb-1 text-xs font-black uppercase leading-none tracking-[0.24em] text-blue-100">
+              <p className="pb-1 text-xs font-bold uppercase leading-none tracking-[0.24em] text-blue-100">
                 {billingSuccess.accessType === "founding_tester_pass"
                   ? t("billing.testerPassActivatedEyebrow")
                   : t("billing.paymentSuccessfulEyebrow")}
@@ -3412,7 +3412,7 @@ export function ChatPageClient({
               <button
                 type="button"
                 onClick={() => setBillingSuccess(null)}
-                className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 text-sm font-black text-white transition hover:bg-blue-500"
+                className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-blue-500"
               >
                 {t("billing.startTomverse")}
                 <ArrowRight className="h-4 w-4" aria-hidden="true" />
@@ -3423,7 +3423,7 @@ export function ChatPageClient({
                   setBillingSuccess(null);
                   showToast(t("billing.checkPlanToast"), "info");
                 }}
-                className="inline-flex flex-1 items-center justify-center rounded-2xl border border-white/10 px-5 py-3 text-sm font-black text-zinc-200 transition hover:bg-white/10 hover:text-white"
+                className="inline-flex flex-1 items-center justify-center rounded-2xl border border-white/10 px-5 py-3 text-sm font-bold text-zinc-200 transition hover:bg-white/10 hover:text-white"
               >
                 {t("billing.checkPlan")}
               </button>
@@ -3519,13 +3519,13 @@ export function ChatPageClient({
           </div>
           <div className="grid min-h-0 flex-1 touch-pan-y gap-4 overflow-y-auto overscroll-contain p-4 [scrollbar-gutter:stable] sm:p-5">
             <section data-testid="quick-summary-consensus" className="rounded-xl border border-blue-200 bg-blue-50/70 p-4 dark:border-blue-900/70 dark:bg-blue-950/30">
-              <h3 className="text-sm font-black text-blue-950 dark:text-blue-100">
+              <h3 className="text-sm font-bold text-blue-950 dark:text-blue-100">
                 {t("chat.quickSummaryCommonConclusions")}
               </h3>
               <ul className="mt-3 grid gap-3 text-sm leading-6 text-zinc-700 dark:text-zinc-200">
                 {compareSummary.result.commonConclusions.map((item, index) => (
                   <li key={`${index}-${item.text}`} className="flex gap-2">
-                    <span className="mt-1 font-black text-blue-600" aria-hidden="true">•</span>
+                    <span className="mt-1 font-bold text-blue-600" aria-hidden="true">•</span>
                     <div className="min-w-0 flex-1">
                       <span>{item.text}</span>
                       {item.citations.map((citation, citationIndex) => (
@@ -3547,14 +3547,14 @@ export function ChatPageClient({
             </section>
 
             <section data-testid="quick-summary-differences" className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950">
-              <h3 className="text-sm font-black text-zinc-900 dark:text-zinc-100">
+              <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
                 {t("chat.quickSummaryImportantDifferences")}
               </h3>
               {compareSummary.result.importantDifferences.length ? (
                 <ol className="mt-3 grid gap-3 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
                   {compareSummary.result.importantDifferences.map((item, index) => (
                     <li key={`${index}-${item.text}`} className="flex gap-3">
-                      <span className="mt-1 font-black text-zinc-400">{index + 1}.</span>
+                      <span className="mt-1 font-bold text-zinc-400">{index + 1}.</span>
                       <div className="min-w-0 flex-1">
                         <span>{item.text}</span>
                         {item.citations.map((citation, citationIndex) => (
@@ -3579,7 +3579,7 @@ export function ChatPageClient({
             </section>
 
             <section data-testid="quick-summary-model-claims">
-              <h3 className="text-sm font-black text-zinc-900 dark:text-zinc-100">
+              <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
                 {t("chat.quickSummaryModelClaims")}
               </h3>
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
@@ -3592,7 +3592,7 @@ export function ChatPageClient({
                       key={assessment.responseId}
                       className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950"
                     >
-                      <h4 className="text-sm font-black text-zinc-900 dark:text-zinc-100">
+                      <h4 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
                         {model?.modelName || assessment.responseId}
                       </h4>
                       <ul className="mt-2 grid gap-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
@@ -3619,14 +3619,14 @@ export function ChatPageClient({
             </section>
 
             <section data-testid="quick-summary-verification" className="rounded-xl border border-amber-200 bg-amber-50/70 p-4 dark:border-amber-900/70 dark:bg-amber-950/20">
-              <h3 className="text-sm font-black text-amber-950 dark:text-amber-100">
+              <h3 className="text-sm font-bold text-amber-950 dark:text-amber-100">
                 {t("chat.quickSummaryVerificationNeeded")}
               </h3>
               {compareSummary.result.verificationNeeded.length ? (
                 <ul className="mt-3 grid gap-2 text-sm leading-6 text-zinc-700 dark:text-zinc-200">
                   {compareSummary.result.verificationNeeded.map((item, index) => (
                     <li key={`${index}-${item}`} className="flex gap-2">
-                      <span className="font-black text-amber-600" aria-hidden="true">!</span>
+                      <span className="font-bold text-amber-600" aria-hidden="true">!</span>
                       <div className="min-w-0 flex-1">
                         <span>{item}</span>
                         {/* Guests never get a persisted conversationId, so
@@ -3663,7 +3663,7 @@ export function ChatPageClient({
                 data-testid="guest-save-review-prompt"
                 className="rounded-xl border border-blue-200 bg-blue-50/70 p-4 dark:border-blue-900/70 dark:bg-blue-950/30"
               >
-                <p className="text-sm font-black text-blue-950 dark:text-blue-100">
+                <p className="text-sm font-bold text-blue-950 dark:text-blue-100">
                   {t("chat.guestSaveReviewTitle")}
                 </p>
                 <p className="mt-1 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
@@ -3679,7 +3679,7 @@ export function ChatPageClient({
                     });
                     if (currentChatId) writePendingGuestImportIntent(currentChatId);
                   }}
-                  className="mt-3 flex min-h-10 w-full items-center justify-center rounded-xl bg-blue-600 px-3 py-2 text-xs font-black text-white hover:bg-blue-500"
+                  className="mt-3 flex min-h-10 w-full items-center justify-center rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold text-white hover:bg-blue-500"
                 >
                   {t("chat.guestSaveReviewCta")}
                 </a>

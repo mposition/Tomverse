@@ -581,7 +581,7 @@ export function AnalyticsProvider({
   // across the product as too small to read comfortably at a phone's viewing
   // distance.
   const consentButtonClass =
-    "inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-zinc-300 bg-white px-2.5 text-[11px] font-black text-zinc-700 transition-colors hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700 dark:focus-visible:ring-offset-zinc-900 @md/notice:px-3 @md/notice:text-xs";
+    "inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-zinc-300 bg-white px-2 text-[11px] font-bold text-zinc-700 transition-colors hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700 dark:focus-visible:ring-offset-zinc-900 @md/notice:px-3 @md/notice:text-xs";
 
   // Why container queries (@container/notice on the card below) instead of the
   // viewport-keyed `sm:` variants this used to carry: the notice is portalled
@@ -623,7 +623,7 @@ export function AnalyticsProvider({
     // container cannot query its own size, and keeping it inside the card
     // leaves the card's own padding/margins untouched.
     <div className="@container/notice">
-      <div className="flex flex-wrap items-center gap-2 @md/notice:justify-between @md/notice:gap-3">
+      <div className="flex flex-wrap items-center gap-1.5 @md/notice:justify-between @md/notice:gap-3">
         {/*
           The copy keeps a real minimum width so it can never be crushed to an
           unreadable sliver (the audit measured 34.6px at 320px), but the
@@ -643,7 +643,7 @@ export function AnalyticsProvider({
             </Link>
           </p>
           <div className="hidden @md/notice:block">
-            <p className="text-xs font-black text-zinc-900 dark:text-zinc-50">{promptCopy.title}</p>
+            <p className="text-xs font-bold text-zinc-900 dark:text-zinc-50">{promptCopy.title}</p>
             <p className="mt-0.5 text-[11px] leading-4 text-zinc-500 dark:text-zinc-400">{promptCopy.body}</p>
             <Link
               href="/privacy"
@@ -689,8 +689,8 @@ export function AnalyticsProvider({
                   inlineSlot === marketingConsentSlot
                     ? // The marketing slot already supplies the page gutter, so
                       // the card spans it and never needs its own max-width.
-                      "rounded-xl border border-zinc-200 bg-white/95 px-2 py-1.5 text-zinc-700 shadow-md shadow-zinc-900/5 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-black/20 sm:p-3"
-                    : "mx-2 mb-2 rounded-xl border border-zinc-200 bg-white/95 px-2 py-1.5 text-zinc-700 shadow-md shadow-zinc-900/5 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-black/20 sm:mx-4 sm:ml-auto sm:max-w-sm sm:p-3"
+                      "rounded-xl border border-zinc-200 bg-white/95 px-1.5 py-1.5 text-zinc-700 shadow-md shadow-zinc-900/5 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-black/20 sm:p-3"
+                    : "mx-2 mb-2 rounded-xl border border-zinc-200 bg-white/95 px-1.5 py-1.5 text-zinc-700 shadow-md shadow-zinc-900/5 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-black/20 sm:mx-4 sm:ml-auto sm:max-w-sm sm:p-3"
                 }
               >
                 {noticeInner}
@@ -703,7 +703,7 @@ export function AnalyticsProvider({
             role="region"
             aria-label={promptCopy.title}
             data-testid="chat-consent-notice"
-            className="fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] right-[max(0.75rem,env(safe-area-inset-right))] z-[100] w-[min(26rem,calc(100vw-1.5rem))] rounded-xl border border-zinc-200 bg-white/95 px-2 py-1.5 text-zinc-700 shadow-lg shadow-zinc-900/10 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-black/30 sm:p-3"
+            className="fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] right-[max(0.75rem,env(safe-area-inset-right))] z-[100] w-[min(26rem,calc(100vw-1.5rem))] rounded-xl border border-zinc-200 bg-white/95 px-1.5 py-1.5 text-zinc-700 shadow-lg shadow-zinc-900/10 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-black/30 sm:p-3"
           >
             {noticeInner}
           </aside>

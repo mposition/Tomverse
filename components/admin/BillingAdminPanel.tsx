@@ -991,7 +991,7 @@ export function BillingAdminPanel({
               type="button"
               onClick={requestSave}
               disabled={isSaving || isRefreshing}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-black text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
               Save to DB
@@ -1030,7 +1030,7 @@ export function BillingAdminPanel({
         </div>
         <div className="mt-5 grid gap-3 lg:grid-cols-[0.9fr_1.1fr]">
           <div className="rounded-2xl border border-blue-500/20 bg-blue-500/10 p-4">
-            <p className="text-xs font-black uppercase tracking-[0.16em] text-blue-200/80">
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-200/80">
               Unsaved changes
             </p>
             <p className="mt-2 text-sm font-bold text-blue-100">
@@ -1072,7 +1072,7 @@ export function BillingAdminPanel({
               <div className="flex items-start gap-3">
                 <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-200" />
                 <div>
-                  <p className="text-sm font-black text-amber-100">
+                  <p className="text-sm font-bold text-amber-100">
                     Review before publishing billing changes
                   </p>
                   <p className="mt-1 text-xs leading-5 text-amber-100/80">
@@ -1085,7 +1085,7 @@ export function BillingAdminPanel({
                 <button
                   type="button"
                   onClick={() => setShowSaveReview(false)}
-                  className="cursor-pointer rounded-xl border border-zinc-700 px-3 py-2 text-xs font-black text-zinc-200 transition hover:bg-zinc-900"
+                  className="cursor-pointer rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-200 transition hover:bg-zinc-900"
                 >
                   Keep editing
                 </button>
@@ -1093,7 +1093,7 @@ export function BillingAdminPanel({
                   type="button"
                   onClick={save}
                   disabled={isSaving}
-                  className="cursor-pointer rounded-xl bg-amber-500 px-3 py-2 text-xs font-black text-zinc-950 transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="cursor-pointer rounded-xl bg-amber-500 px-3 py-2 text-xs font-bold text-zinc-950 transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   Publish changes
                 </button>
@@ -1149,7 +1149,7 @@ export function BillingAdminPanel({
             type="button"
             onClick={validateStripeIds}
             disabled={isValidatingStripe}
-            className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-purple-500/30 bg-purple-500/10 px-3 py-2 text-xs font-black text-purple-100 hover:bg-purple-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-purple-500/30 bg-purple-500/10 px-3 py-2 text-xs font-bold text-purple-100 hover:bg-purple-500/20 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isValidatingStripe ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CreditCard className="h-3.5 w-3.5" />}
             Validate Stripe
@@ -1158,7 +1158,7 @@ export function BillingAdminPanel({
             type="button"
             onClick={requestSave}
             disabled={isSaving || isRefreshing}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-xs font-black text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
             Save changes
@@ -1169,7 +1169,7 @@ export function BillingAdminPanel({
       {stripeValidation.length > 0 ? (
         <div className="border-b border-zinc-800 px-5 py-4">
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
-            <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500">
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">
               Stripe validation
             </p>
             <div className="mt-3 grid gap-2 md:grid-cols-2">
@@ -1236,7 +1236,7 @@ export function BillingAdminPanel({
                   type="button"
                   onClick={save}
                   disabled={isSaving || isRefreshing}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-black text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                   Save to DB
@@ -1287,7 +1287,7 @@ export function BillingAdminPanel({
             type="button"
             onClick={save}
             disabled={isSaving || isRefreshing}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2 text-sm font-black text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2 text-sm font-bold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
             Save to DB

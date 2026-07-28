@@ -478,7 +478,7 @@ export function ModelPickerPanel({
       >
       {selectedModelIds.length > 0 && (
         <div className="mb-2 shrink-0 px-1">
-          <p className="mb-1 px-1 text-[11px] font-black uppercase tracking-wide text-zinc-400">
+          <p className="mb-1 px-1 text-[11px] font-bold uppercase tracking-wide text-zinc-400">
             {pickerCopy.selectedModelsLabel}
           </p>
           {/*
@@ -661,7 +661,7 @@ export function ModelPickerPanel({
             type="button"
             data-testid="model-picker-open-filters"
             onClick={openAllModelsWithFilters}
-            className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-xl border border-zinc-200 px-3 text-[11px] font-black text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-xl border border-zinc-200 px-3 text-[11px] font-bold text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
           >
             <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
             {activeFilterCount > 0
@@ -696,7 +696,7 @@ export function ModelPickerPanel({
           type="button"
           data-testid="model-picker-done"
           onClick={onDone}
-          className={`flex shrink-0 items-center justify-center rounded-xl bg-blue-600 px-3 text-xs font-black text-white transition hover:bg-blue-500 ${touchTarget ? "h-11" : "py-2"}`}
+          className={`flex shrink-0 items-center justify-center rounded-xl bg-blue-600 px-3 text-xs font-bold text-white transition hover:bg-blue-500 ${touchTarget ? "h-11" : "py-2"}`}
         >
           {pickerCopy.done}
         </button>

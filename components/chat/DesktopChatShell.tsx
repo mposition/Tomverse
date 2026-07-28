@@ -433,7 +433,7 @@ export function DesktopChatShell({
                     ) : status === "error" ? (
                       <span className="h-2 w-2 shrink-0 rounded-full bg-red-500" aria-hidden="true" />
                     ) : status === "paused" ? (
-                      <span className="shrink-0 text-[11px] font-bold text-zinc-500 dark:text-zinc-400">OFF</span>
+                      <span className="shrink-0 text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">OFF</span>
                     ) : status === "idle" ? (
                       <Check className="h-3 w-3 shrink-0 text-emerald-500" aria-hidden="true" />
                     ) : null}

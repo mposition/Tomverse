@@ -133,7 +133,7 @@ function ReviewList({
 }) {
   return (
     <section className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950/70">
-      <h3 className="text-sm font-black text-zinc-900 dark:text-zinc-100">{title}</h3>
+      <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{title}</h3>
       {items.length ? (
         <ul className="mt-3 space-y-2">
           {items.map((item, index) => (
@@ -216,7 +216,7 @@ function GroundedReviewList({
 }) {
   return (
     <section className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950/70">
-      <h3 className="text-sm font-black text-zinc-900 dark:text-zinc-100">{title}</h3>
+      <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{title}</h3>
       {items.length ? (
         <ul className="mt-3 space-y-3">
           {items.map((item, index) => (
@@ -542,7 +542,7 @@ export function ComparisonReviewDialog({
               >
                 <Sparkles className="h-3.5 w-3.5 text-white" />
               </span>
-              <span className="text-xs font-black uppercase tracking-[0.18em] text-tomverse-review-selected-text">
+              <span className="text-xs font-bold uppercase tracking-[0.18em] text-tomverse-review-selected-text">
                 {t("chat.aiReviewEyebrow")}
               </span>
             </div>
@@ -601,7 +601,7 @@ export function ComparisonReviewDialog({
                               role="tab"
                               aria-selected={isActive}
                               onClick={() => setActiveReviewer(key)}
-                              className={`rounded-xl border px-3 py-2 text-xs font-black transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-zinc-900 ${
+                              className={`rounded-xl border px-3 py-2 text-xs font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-zinc-900 ${
                                 isActive
                                   ? "border-transparent bg-gradient-to-r from-accent-ai-review-start-600 via-accent-ai-review-mid-600 to-accent-ai-review-end-600 text-white"
                                   : "border-transparent bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
@@ -641,7 +641,7 @@ export function ComparisonReviewDialog({
 
                   <div className="flex flex-wrap items-center gap-2">
                     {review.cached ? (
-                      <span className="rounded-full bg-status-success-500/10 px-3 py-1 text-xs font-black text-status-success-600 dark:text-status-success-300">
+                      <span className="rounded-full bg-status-success-500/10 px-3 py-1 text-xs font-bold text-status-success-600 dark:text-status-success-300">
                         {t("chat.aiReviewCached")}
                       </span>
                     ) : (
@@ -704,7 +704,7 @@ export function ComparisonReviewDialog({
                   </div>
 
                   <section className="rounded-2xl border border-zinc-200 p-4 dark:border-zinc-800">
-                    <h3 className="text-sm font-black text-zinc-900 dark:text-zinc-100">
+                    <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
                       {t("chat.aiReviewDifferences")}
                     </h3>
                     {activeResult.differences.length ? (
@@ -723,7 +723,7 @@ export function ComparisonReviewDialog({
                                   key={position.responseId}
                                   className="grid gap-1 px-3 py-2 text-sm sm:grid-cols-[10rem_1fr] sm:gap-3"
                                 >
-                                  <span className="font-black text-blue-600 dark:text-blue-300">
+                                  <span className="font-bold text-blue-600 dark:text-blue-300">
                                     {modelNames.get(position.responseId) ||
                                       `${t("chat.aiReviewResponse")} ${position.responseId}`}
                                   </span>
@@ -782,7 +782,7 @@ export function ComparisonReviewDialog({
                   </div>
 
                   <section className="rounded-2xl border border-zinc-200 p-4 dark:border-zinc-800">
-                    <h3 className="text-sm font-black text-zinc-900 dark:text-zinc-100">
+                    <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
                       {t("chat.aiReviewModelAssessments")}
                     </h3>
                     <div className="mt-3 grid gap-3 lg:grid-cols-3">
@@ -791,10 +791,10 @@ export function ComparisonReviewDialog({
                           key={assessment.responseId}
                           className="rounded-xl bg-zinc-50 p-3 dark:bg-zinc-950"
                         >
-                          <h4 className="font-black text-blue-600 dark:text-blue-300">
+                          <h4 className="font-bold text-blue-600 dark:text-blue-300">
                             {modelNames.get(assessment.responseId) || assessment.responseId}
                           </h4>
-                          <p className="mt-2 text-xs font-black uppercase tracking-wide text-status-success-600 dark:text-status-success-300">
+                          <p className="mt-2 text-xs font-bold uppercase tracking-wide text-status-success-600 dark:text-status-success-300">
                             {t("chat.aiReviewStrengths")}
                           </p>
                           <ul className="mt-1 space-y-1 text-sm leading-5 text-zinc-700 dark:text-zinc-300">
@@ -802,7 +802,7 @@ export function ComparisonReviewDialog({
                               <li key={item}>• {item}</li>
                             ))}
                           </ul>
-                          <p className="mt-3 text-xs font-black uppercase tracking-wide text-amber-600 dark:text-amber-300">
+                          <p className="mt-3 text-xs font-bold uppercase tracking-wide text-amber-600 dark:text-amber-300">
                             {t("chat.aiReviewCautions")}
                           </p>
                           <ul className="mt-1 space-y-1 text-sm leading-5 text-zinc-700 dark:text-zinc-300">
@@ -820,7 +820,7 @@ export function ComparisonReviewDialog({
                       data-testid="ai-review-synthesis"
                       className="rounded-2xl border border-tomverse-review-border bg-gradient-to-br from-accent-ai-review-start-50 via-accent-ai-review-mid-50 to-accent-ai-review-end-50 p-4 dark:from-accent-ai-review-start-950/25 dark:via-accent-ai-review-mid-950/25 dark:to-accent-ai-review-end-950/25"
                     >
-                      <h3 className="flex items-center gap-1.5 text-sm font-black text-zinc-900 dark:text-zinc-100">
+                      <h3 className="flex items-center gap-1.5 text-sm font-bold text-zinc-900 dark:text-zinc-100">
                         <Sparkles
                           className="h-3.5 w-3.5 shrink-0 text-tomverse-review-selected-text"
                           aria-hidden="true"
@@ -891,7 +891,7 @@ export function ComparisonReviewDialog({
                             : "border-zinc-200 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-950"
                         }`}
                       >
-                        <span className="flex items-center gap-2 text-sm font-black">
+                        <span className="flex items-center gap-2 text-sm font-bold">
                           {mode === item.id && (
                             <span
                               aria-hidden="true"
@@ -917,7 +917,7 @@ export function ComparisonReviewDialog({
                       className="mt-1 h-4 w-4 rounded border-zinc-300"
                     />
                     <span>
-                      <span className="block text-sm font-black">{t("chat.aiReviewIncludeSynthesis")}</span>
+                      <span className="block text-sm font-bold">{t("chat.aiReviewIncludeSynthesis")}</span>
                       <span className="mt-1 block text-xs leading-5 text-zinc-500">
                         {t("chat.aiReviewIncludeSynthesisDescription")}
                       </span>
@@ -990,7 +990,7 @@ export function ComparisonReviewDialog({
               type="button"
               onClick={runReview}
               disabled={running}
-              className="flex h-11 w-full items-center justify-between gap-3 rounded-xl bg-blue-600 px-4 text-sm font-black text-white hover:bg-blue-500 disabled:cursor-wait disabled:opacity-60 sm:ml-auto sm:w-auto sm:min-w-48"
+              className="flex h-11 w-full items-center justify-between gap-3 rounded-xl bg-blue-600 px-4 text-sm font-bold text-white hover:bg-blue-500 disabled:cursor-wait disabled:opacity-60 sm:ml-auto sm:w-auto sm:min-w-48"
             >
               <span className="flex min-w-0 items-center gap-2">
                 {running ? <LoaderCircle className="h-4 w-4 shrink-0 animate-spin" /> : <Sparkles className="h-4 w-4 shrink-0" />}

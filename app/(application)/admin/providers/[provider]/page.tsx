@@ -26,7 +26,7 @@ export default async function AdminProviderDetailPage({
   return (
     <section className="flex flex-col gap-4">
       <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5">
-        <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-300">Provider workspace</p>
+        <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">Provider workspace</p>
         <h2 className="mt-2 text-xl font-black text-white">{PROVIDER_DISPLAY_NAMES[providerId]}</h2>
         <p className="mt-1 text-sm text-zinc-500">Summary, usage diagnostics, billing profile, credit checkpoint, recent errors, fallback policy, and manual operations.</p>
       </div>

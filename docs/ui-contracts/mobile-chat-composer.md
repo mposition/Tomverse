@@ -173,6 +173,10 @@ Primary tests:
 - `tests/e2e/mobile-header-spacing.spec.ts`
 - relevant mobile visual-regression coverage (`tests/e2e/chat-state-visual-regression.spec.ts`)
 
+A change to the font system moves text metrics across the whole composer, so it
+is a composer change for the purposes of this contract: see
+`docs/ui-contracts/typography.md` and re-run the specs above.
+
 Run them with:
 
 ```bash

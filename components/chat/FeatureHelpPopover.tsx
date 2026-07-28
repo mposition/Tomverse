@@ -212,7 +212,7 @@ export function FeatureHelpPopover({
   const content = (
     <>
       <div className="flex items-start justify-between gap-3">
-        <h3 className="text-sm font-black text-zinc-950 dark:text-white">
+        <h3 className="text-sm font-bold text-zinc-950 dark:text-white">
           {title}
         </h3>
         {renderAsSheet ? (
@@ -234,7 +234,7 @@ export function FeatureHelpPopover({
           href={href}
           target="_blank"
           rel="noopener noreferrer"
-          className="mt-3 inline-flex items-center gap-1.5 text-xs font-black text-blue-600 hover:text-blue-500 dark:text-blue-300"
+          className="mt-3 inline-flex items-center gap-1.5 text-xs font-bold text-blue-600 hover:text-blue-500 dark:text-blue-300"
         >
           {learnMoreLabel}
           <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />

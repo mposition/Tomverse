@@ -900,27 +900,27 @@ export function PricingPageContent() {
 
       <section className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8 lg:py-20">
         <div className="mx-auto max-w-4xl text-center">
-          <p className="text-sm font-black uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">{content.eyebrow}</p>
-          <h1 className={`mt-4 text-4xl font-black leading-tight sm:text-6xl ${displayHeadingClass(lang)}`}>{content.title}</h1>
+          <p className="text-sm font-bold uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">{content.eyebrow}</p>
+          <h1 className={`mt-4 text-4xl font-bold leading-tight sm:text-6xl ${displayHeadingClass(lang)}`}>{content.title}</h1>
           <p className="mx-auto mt-5 max-w-2xl text-lg leading-8 text-zinc-600 dark:text-zinc-300">{content.description}</p>
           {featuredPromotion ? (
           <div className="mx-auto mt-6 max-w-3xl overflow-hidden rounded-3xl border border-accent-promotion-400/40 bg-gradient-to-br from-accent-promotion-400/15 via-blue-500/10 to-transparent p-1 text-left shadow-2xl shadow-accent-promotion-950/10">
             <div className="rounded-[1.35rem] bg-white/80 px-5 py-4 backdrop-blur dark:bg-zinc-950/75">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <span className="inline-flex w-fit rounded-full bg-accent-promotion-500 px-3 py-1 text-xs font-black uppercase tracking-[0.16em] text-white">
+                  <span className="inline-flex w-fit rounded-full bg-accent-promotion-500 px-3 py-1 text-xs font-bold uppercase tracking-[0.16em] text-white">
                     {saleCopy.badge}
                   </span>
                   <p className="mt-3 text-4xl font-black tracking-tight text-accent-promotion-700 dark:text-accent-promotion-200">
                     {featuredPromotion.discountPercent}% OFF
                   </p>
                 </div>
-                <div className="rounded-2xl border border-accent-promotion-500/20 bg-accent-promotion-500/10 px-4 py-3 text-sm font-black text-accent-promotion-700 dark:text-accent-promotion-200">
+                <div className="rounded-2xl border border-accent-promotion-500/20 bg-accent-promotion-500/10 px-4 py-3 text-sm font-bold text-accent-promotion-700 dark:text-accent-promotion-200">
                   {saleCopy.duration}
                 </div>
               </div>
               <p className="mt-3 text-sm font-bold text-zinc-700 dark:text-zinc-200">{content.billingNote}</p>
-              <div className="mt-3 flex flex-wrap gap-2 text-xs font-black text-zinc-700 dark:text-zinc-200">
+              <div className="mt-3 flex flex-wrap gap-2 text-xs font-bold text-zinc-700 dark:text-zinc-200">
                 <span className="rounded-full bg-zinc-950 px-3 py-1.5 text-white dark:bg-white dark:text-zinc-950">
                   {promotionDetail.code}: {featuredPromotion.code}
                 </span>
@@ -968,7 +968,7 @@ export function PricingPageContent() {
               }`}
             >
               {promotionEligible && featuredPromotion ? (
-                <div className={`absolute -top-4 right-6 rounded-full px-4 py-2 text-xs font-black shadow-xl ${
+                <div className={`absolute -top-4 right-6 rounded-full px-4 py-2 text-xs font-bold shadow-xl ${
                   plan.highlighted
                     ? "bg-white text-blue-700 shadow-blue-950/20"
                     : "bg-accent-promotion-500 text-white shadow-accent-promotion-950/20"
@@ -984,11 +984,11 @@ export function PricingPageContent() {
                 label rather than being squeezed.
               */}
               <div className="flex min-h-8 flex-wrap items-start justify-between gap-x-3 gap-y-2">
-                <p className={`text-xs font-black uppercase tracking-[0.18em] ${plan.highlighted ? "text-blue-100" : "text-blue-600 dark:text-blue-400"}`}>
+                <p className={`text-xs font-bold uppercase tracking-[0.18em] ${plan.highlighted ? "text-blue-100" : "text-blue-600 dark:text-blue-400"}`}>
                   {plan.eyebrow}
                 </p>
                 {plan.badge && (
-                  <span className="shrink-0 rounded-full bg-white/15 px-3 py-1 text-xs font-black text-white ring-1 ring-white/20">
+                  <span className="shrink-0 rounded-full bg-white/15 px-3 py-1 text-xs font-bold text-white ring-1 ring-white/20">
                     {plan.badge}
                   </span>
                 )}
@@ -1027,10 +1027,10 @@ export function PricingPageContent() {
                     : "border-accent-promotion-500/30 bg-accent-promotion-500/10"
                 }`}>
                   <div className="flex items-center justify-between gap-3">
-                    <span className={`rounded-full px-3 py-1 text-xs font-black ${plan.highlighted ? "bg-white text-blue-700" : "bg-accent-promotion-500 text-white"}`}>
+                    <span className={`rounded-full px-3 py-1 text-xs font-bold ${plan.highlighted ? "bg-white text-blue-700" : "bg-accent-promotion-500 text-white"}`}>
                       {saleCopy.badge}
                     </span>
-                    <span className={`text-xs font-black ${plan.highlighted ? "text-blue-50" : "text-accent-promotion-600 dark:text-accent-promotion-400"}`}>
+                    <span className={`text-xs font-bold ${plan.highlighted ? "text-blue-50" : "text-accent-promotion-600 dark:text-accent-promotion-400"}`}>
                       {featuredPromotion?.discountPercent}% OFF
                     </span>
                   </div>
@@ -1055,7 +1055,7 @@ export function PricingPageContent() {
                     className="mt-3 flex flex-wrap items-end gap-x-3 gap-y-1"
                   >
                     <span className="text-5xl font-black">{salePrice}</span>
-                    <span className={`pb-1 text-sm font-black ${plan.highlighted ? "text-blue-50" : "text-zinc-700 dark:text-zinc-200"}`}>
+                    <span className={`pb-1 text-sm font-bold ${plan.highlighted ? "text-blue-50" : "text-zinc-700 dark:text-zinc-200"}`}>
                       {formatBillingPeriodLabel(plan.period, lang)}
                     </span>
                     <span className={`pb-1 text-sm font-bold line-through ${plan.highlighted ? "text-blue-100/80" : "text-zinc-500 dark:text-zinc-400"}`}>
@@ -1086,7 +1086,7 @@ export function PricingPageContent() {
                   </p>
                 </div>
               ) : null}
-              <p className={`mt-3 text-sm font-black ${plan.highlighted ? "text-blue-50" : "text-zinc-700 dark:text-zinc-200"}`}>
+              <p className={`mt-3 text-sm font-bold ${plan.highlighted ? "text-blue-50" : "text-zinc-700 dark:text-zinc-200"}`}>
                 {plan.usage}
               </p>
               {planId === "free" ? (
@@ -1098,7 +1098,7 @@ export function PricingPageContent() {
                       cta_location: "pricing_plan_card",
                     })
                   }
-                  className={`mt-8 inline-flex h-12 w-full items-center justify-center rounded-xl text-sm font-black transition ${
+                  className={`mt-8 inline-flex h-12 w-full items-center justify-center rounded-xl text-sm font-bold transition ${
                     plan.highlighted ? "bg-white text-blue-700 hover:bg-blue-50"
                       : "border border-zinc-300 text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-zinc-800"
                   }`}
@@ -1108,7 +1108,7 @@ export function PricingPageContent() {
               ) : (
                 <UpgradeInterestButton
                   plan={plan.name === "Max" ? "Max" : "Pro"}
-                  className={`mt-8 inline-flex h-12 w-full items-center justify-center rounded-xl text-sm font-black transition ${
+                  className={`mt-8 inline-flex h-12 w-full items-center justify-center rounded-xl text-sm font-bold transition ${
                     plan.highlighted ? "bg-white text-blue-700 hover:bg-blue-50"
                       : "border border-zinc-300 text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-zinc-800"
                   }`}
@@ -1142,7 +1142,7 @@ export function PricingPageContent() {
         >
           <div className="grid gap-6 p-5 sm:p-7 lg:grid-cols-[1fr_auto] lg:items-end">
             <div className="max-w-3xl">
-              <p className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.18em] text-accent-promotion-700 dark:text-accent-promotion-300">
+              <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-accent-promotion-700 dark:text-accent-promotion-300">
                 <Coins className="h-4 w-4" />
                 {creditPackGuide.eyebrow}
               </p>
@@ -1158,7 +1158,7 @@ export function PricingPageContent() {
                   cta_location: "pricing_credit_pack_section",
                 })
               }
-              className="inline-flex h-11 items-center justify-center rounded-xl bg-accent-promotion-600 px-5 text-sm font-black text-white transition hover:bg-accent-promotion-500"
+              className="inline-flex h-11 items-center justify-center rounded-xl bg-accent-promotion-600 px-5 text-sm font-bold text-white transition hover:bg-accent-promotion-500"
             >
               {creditPackGuide.purchaseCta}
             </Link>
@@ -1214,11 +1214,11 @@ export function PricingPageContent() {
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <h3 className="text-lg font-black">{creditPackGuide.packNames[pack.id]}</h3>
-                      <p className="mt-2 text-xs font-black uppercase tracking-[0.12em] text-accent-promotion-700 dark:text-accent-promotion-300">
+                      <p className="mt-2 text-xs font-bold uppercase tracking-[0.12em] text-accent-promotion-700 dark:text-accent-promotion-300">
                         {creditPackGuide.availableFor}: {pack.allowedPlans.join(" / ")}
                       </p>
                     </div>
-                    <span className="shrink-0 rounded-full bg-accent-promotion-500/10 px-2.5 py-1 text-[10px] font-black text-accent-promotion-700 dark:text-accent-promotion-300">
+                    <span className="shrink-0 rounded-full bg-accent-promotion-500/10 px-2.5 py-1 text-[11px] font-bold text-accent-promotion-700 dark:text-accent-promotion-300">
                       {creditPackGuide.oneTime}
                     </span>
                   </div>
@@ -1246,7 +1246,7 @@ export function PricingPageContent() {
 
           <div className="grid gap-5 border-t border-accent-promotion-500/20 bg-white/60 p-5 dark:bg-zinc-950/40 sm:p-7 lg:grid-cols-[0.75fr_1.25fr]">
             <div>
-              <h3 className="font-black">{creditPackGuide.policyTitle}</h3>
+              <h3 className="font-bold">{creditPackGuide.policyTitle}</h3>
               <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">
                 {creditPackGuide.guidance}
               </p>
@@ -1269,7 +1269,7 @@ export function PricingPageContent() {
           <div className="border-b border-zinc-200 p-5 dark:border-zinc-800 sm:p-7">
             <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
               <div className="max-w-3xl">
-                <p className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.18em] text-blue-600 dark:text-blue-400">
+                <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-blue-600 dark:text-blue-400">
                   <Calculator className="h-4 w-4" />
                   {creditGuide.eyebrow}
                 </p>
@@ -1280,7 +1280,7 @@ export function PricingPageContent() {
                   {creditGuide.description}
                 </p>
               </div>
-              <span className="w-fit rounded-full border border-accent-promotion-500/30 bg-accent-promotion-500/10 px-4 py-2 text-xs font-black text-accent-promotion-700 dark:text-accent-promotion-300">
+              <span className="w-fit rounded-full border border-accent-promotion-500/30 bg-accent-promotion-500/10 px-4 py-2 text-xs font-bold text-accent-promotion-700 dark:text-accent-promotion-300">
                 {creditGuide.typicalLabel}
               </span>
             </div>
@@ -1352,7 +1352,7 @@ export function PricingPageContent() {
                         <div className="flex items-start justify-between gap-3">
                           <p className="text-xs font-bold leading-5">{example.label}</p>
                           <span
-                            className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black ${
+                            className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold ${
                               plan.id === "pro"
                                 ? "bg-white/15 text-white"
                                 : "bg-zinc-100 text-zinc-500 dark:bg-zinc-900 dark:text-zinc-300"
@@ -1376,7 +1376,7 @@ export function PricingPageContent() {
             <article className="rounded-2xl border border-amber-500/25 bg-amber-500/10 p-5">
               <div className="flex items-center gap-2 text-amber-700 dark:text-amber-300">
                 <FileText className="h-5 w-5" />
-                <h3 className="font-black">{creditGuide.longContextTitle}</h3>
+                <h3 className="font-bold">{creditGuide.longContextTitle}</h3>
               </div>
               <p className="mt-3 text-xs leading-6 text-zinc-600 dark:text-zinc-300">
                 {creditGuide.longContextBody}
@@ -1385,7 +1385,7 @@ export function PricingPageContent() {
                 {inputMultiplierBands.map((band) => (
                   <span
                     key={band.label}
-                    className="rounded-full border border-amber-500/20 bg-white/70 px-3 py-1.5 text-[11px] font-black text-amber-900 dark:bg-zinc-950/60 dark:text-amber-200"
+                    className="rounded-full border border-amber-500/20 bg-white/70 px-3 py-1.5 text-[11px] font-bold text-amber-900 dark:bg-zinc-950/60 dark:text-amber-200"
                   >
                     {band.label} {creditGuide.tokenUnit} · {band.multiplier}×
                   </span>
@@ -1396,14 +1396,14 @@ export function PricingPageContent() {
             <article className="rounded-2xl border border-blue-500/25 bg-blue-500/10 p-5">
               <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
                 <Info className="h-5 w-5" />
-                <h3 className="font-black">{creditGuide.preflightTitle}</h3>
+                <h3 className="font-bold">{creditGuide.preflightTitle}</h3>
               </div>
               <p className="mt-3 text-xs leading-6 text-zinc-600 dark:text-zinc-300">
                 {creditGuide.preflightBody}
               </p>
               <Link
                 href="/chat"
-                className="mt-4 inline-flex h-10 items-center justify-center rounded-xl bg-blue-600 px-4 text-xs font-black text-white transition hover:bg-blue-500"
+                className="mt-4 inline-flex h-10 items-center justify-center rounded-xl bg-blue-600 px-4 text-xs font-bold text-white transition hover:bg-blue-500"
               >
                 {creditGuide.preflightCta}
               </Link>
@@ -1429,7 +1429,7 @@ export function PricingPageContent() {
               <thead>
                 <tr>
                   {[content.table.feature, content.table.free, content.table.pro, content.table.max].map((heading) => (
-                    <th key={heading} className="border-b border-zinc-200 px-4 py-3 font-black text-zinc-900 dark:border-zinc-800 dark:text-white">
+                    <th key={heading} className="border-b border-zinc-200 px-4 py-3 font-bold text-zinc-900 dark:border-zinc-800 dark:text-white">
                       {heading}
                     </th>
                   ))}
@@ -1438,7 +1438,7 @@ export function PricingPageContent() {
               <tbody>
                 {content.table.rows.map((row) => (
                   <tr key={row.label}>
-                    <td className="border-b border-zinc-200 px-4 py-4 font-black dark:border-zinc-800">{row.label}</td>
+                    <td className="border-b border-zinc-200 px-4 py-4 font-bold dark:border-zinc-800">{row.label}</td>
                     {[row.free, row.pro, row.max].map((value, index) => (
                       <td key={`${row.label}-${index}`} className="border-b border-zinc-200 px-4 py-4 font-semibold text-zinc-600 dark:border-zinc-800 dark:text-zinc-300">
                         {value === "-" ? <Minus className="h-4 w-4 text-zinc-400" /> : value}
@@ -1458,7 +1458,7 @@ export function PricingPageContent() {
               .filter((faq) => !faq.promotionOnly || featuredPromotion)
               .map((faq) => (
               <article key={faq.question} className="rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900/40">
-                <h3 className="font-black">{faq.question}</h3>
+                <h3 className="font-bold">{faq.question}</h3>
                 <p className="mt-2 text-sm leading-7 text-zinc-600 dark:text-zinc-300">{faq.answer}</p>
               </article>
               ))}

@@ -126,7 +126,7 @@ export function DeepResearchSetupSheet({
                   onClose();
                   onGuestSignInPrompt();
                 }}
-                className="mt-3 rounded-xl bg-amber-600 px-3 py-2 text-xs font-black text-white hover:bg-amber-500"
+                className="mt-3 rounded-xl bg-amber-600 px-3 py-2 text-xs font-bold text-white hover:bg-amber-500"
               >
                 {t("chat.aiReviewLoginToUnlock")}
               </button>
@@ -204,7 +204,7 @@ export function DeepResearchSetupSheet({
                 data-testid="deep-research-confirm-start"
                 disabled={!hasDraftText}
                 onClick={() => onConfirm(depth)}
-                className="flex-1 rounded-xl bg-accent-deep-research-600 px-3 py-2.5 text-sm font-black text-white hover:bg-accent-deep-research-500 disabled:cursor-not-allowed disabled:opacity-40"
+                className="flex-1 rounded-xl bg-accent-deep-research-600 px-3 py-2.5 text-sm font-bold text-white hover:bg-accent-deep-research-500 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {t("chat.deepResearchStart")}
               </button>

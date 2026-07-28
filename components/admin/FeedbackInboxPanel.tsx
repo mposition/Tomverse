@@ -219,7 +219,7 @@ export function FeedbackInboxPanel({ rows }: Props) {
     <section id="feedback" className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
-          <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-300">
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
             Feedback
           </p>
           <h2 className="mt-2 text-2xl font-black text-white">Support inbox</h2>
@@ -228,14 +228,14 @@ export function FeedbackInboxPanel({ rows }: Props) {
             support states without leaving the Admin console.
           </p>
         </div>
-        <span className="inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-black text-amber-200">
+        <span className="inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-200">
           <MessageSquare className="h-3.5 w-3.5" />
           {openCount} open
         </span>
         <button
           type="button"
           onClick={exportCsv}
-          className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-black text-zinc-200 transition hover:bg-zinc-900"
+          className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-200 transition hover:bg-zinc-900"
         >
           <Download className="h-3.5 w-3.5" />
           Export CSV
@@ -293,7 +293,7 @@ export function FeedbackInboxPanel({ rows }: Props) {
                 <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-2.5 py-1 text-xs font-black text-blue-200">
+                      <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-2.5 py-1 text-xs font-bold text-blue-200">
                         {feedback.type}
                       </span>
                       <span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${statusClass(feedback.status)}`}>
@@ -303,7 +303,7 @@ export function FeedbackInboxPanel({ rows }: Props) {
                         {dateLabel(feedback.createdAt)} UTC
                       </span>
                     </div>
-                    <div className="mt-3 text-sm font-black text-white">
+                    <div className="mt-3 text-sm font-bold text-white">
                       {feedback.email || "guest"}
                     </div>
                     <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-zinc-200">

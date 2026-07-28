@@ -324,7 +324,7 @@ export function AdminModelRegistryPanel() {
     <section className="overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-950/80">
       <div className="flex flex-col gap-4 border-b border-zinc-800 bg-zinc-900/50 p-5 xl:flex-row xl:items-center xl:justify-between">
         <div>
-          <p className="text-xs font-black uppercase tracking-[0.2em] text-blue-300">DB Model Registry</p>
+          <p className="text-xs font-bold uppercase tracking-[0.2em] text-blue-300">DB Model Registry</p>
           <h2 className="mt-2 text-2xl font-black text-white">Model catalogue and API configuration</h2>
           <p className="mt-2 max-w-4xl text-sm leading-6 text-zinc-400">
             Add and edit model identity, plan access, credits, capabilities, context, and token prices without a code deployment. Provider endpoints and API-key environment names are fixed in server code and cannot be changed from this console.
@@ -334,7 +334,7 @@ export function AdminModelRegistryPanel() {
           <button type="button" onClick={() => void load()} disabled={loading || saving} className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-900 disabled:opacity-50">
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} Reload
           </button>
-          <button type="button" onClick={beginCreate} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-black text-white hover:bg-blue-500">
+          <button type="button" onClick={beginCreate} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-500">
             <Plus className="h-4 w-4" /> Add model
           </button>
         </div>
@@ -392,10 +392,10 @@ export function AdminModelRegistryPanel() {
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <h3 className="font-black text-white">{model.name}</h3>
-                  <span className={`rounded-full border px-2 py-0.5 text-[10px] font-black uppercase ${model.status === "limited" ? "border-amber-500/30 bg-amber-500/10 text-amber-200" : model.enabled && !model.catalogDeleted ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" : "border-zinc-700 bg-zinc-950 text-zinc-400"}`}>
+                  <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${model.status === "limited" ? "border-amber-500/30 bg-amber-500/10 text-amber-200" : model.enabled && !model.catalogDeleted ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" : "border-zinc-700 bg-zinc-950 text-zinc-400"}`}>
                     {model.catalogDeleted ? "Archived" : model.status}
                   </span>
-                  <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-black text-amber-200">{model.creditWeight || 1} credits</span>
+                  <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-200">{model.creditWeight || 1} credits</span>
                 </div>
                 <p className="mt-1 break-all font-mono text-xs text-zinc-500">{model.id} → {model.apiModel}</p>
                 <p className="mt-2 truncate text-xs text-zinc-400">{model.apiBaseUrl}</p>
@@ -432,7 +432,7 @@ export function AdminModelRegistryPanel() {
           <div className="my-auto w-full max-w-5xl overflow-hidden rounded-3xl border border-zinc-700 bg-zinc-950 shadow-2xl">
             <div className="sticky top-0 z-10 flex items-center justify-between border-b border-zinc-800 bg-zinc-950/95 p-5 backdrop-blur">
               <div>
-                <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-300">{copySourceId ? "Duplicate registry entry" : editingId === "new" ? "New registry entry" : "Edit registry entry"}</p>
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">{copySourceId ? "Duplicate registry entry" : editingId === "new" ? "New registry entry" : "Edit registry entry"}</p>
                 <h3 className="mt-1 text-xl font-black text-white">{form.name || "Untitled model"}</h3>
                 {copySourceId ? (
                   <p className="mt-1 text-xs text-amber-200">
@@ -445,13 +445,13 @@ export function AdminModelRegistryPanel() {
 
             <div className="grid gap-6 p-5">
               <fieldset className="grid gap-4 rounded-2xl border border-zinc-800 p-4 md:grid-cols-2">
-                <legend className="px-2 text-sm font-black text-white">Identity and provider API</legend>
+                <legend className="px-2 text-sm font-bold text-white">Identity and provider API</legend>
                 <label className={labelClass}>Registry ID<input disabled={editingId !== "new"} value={form.id} onChange={(e) => setField("id", e.target.value)} className={`${inputClass} disabled:opacity-60`} placeholder="provider/model-name" /></label>
                 <label className={labelClass}>Display name<input value={form.name} onChange={(e) => setField("name", e.target.value)} className={inputClass} /></label>
                 <label className={labelClass}>Provider<select value={form.provider} onChange={(e) => selectProvider(e.target.value as AiProvider)} className={inputClass}>{AI_PROVIDERS.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
                 <label className={labelClass}>Provider API model ID<input value={form.apiModel} onChange={(e) => setField("apiModel", e.target.value)} className={inputClass} placeholder="Exact model ID sent to provider" /></label>
                 <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3 md:col-span-2">
-                  <p className="text-xs font-black uppercase tracking-[0.12em] text-emerald-200">Server-enforced provider connection</p>
+                  <p className="text-xs font-bold uppercase tracking-[0.12em] text-emerald-200">Server-enforced provider connection</p>
                   <p className="mt-2 break-all font-mono text-xs text-zinc-300">{PROVIDER_API_CONFIGURATION[form.provider].baseUrl}</p>
                   <p className="mt-1 font-mono text-xs text-zinc-400">{PROVIDER_API_CONFIGURATION[form.provider].apiKeyEnvName}</p>
                   <p className="mt-2 text-xs leading-5 text-zinc-400">These values are allowlisted in server code. Model registry requests cannot override the destination or select another server secret.</p>
@@ -461,7 +461,7 @@ export function AdminModelRegistryPanel() {
               </fieldset>
 
               <fieldset className="grid gap-4 rounded-2xl border border-zinc-800 p-4 md:grid-cols-4">
-                <legend className="px-2 text-sm font-black text-white">Catalogue, access, and credits</legend>
+                <legend className="px-2 text-sm font-bold text-white">Catalogue, access, and credits</legend>
                 <label className={labelClass}>Minimum plan<select value={form.minimumPlan} onChange={(e) => setField("minimumPlan", e.target.value as ModelMinimumPlan)} className={inputClass}><option>Guest</option><option>Free</option><option>Pro</option></select></label>
                 <label className={labelClass}>Internal usage class<select value={form.usageClass} onChange={(e) => setField("usageClass", e.target.value as ModelUsageClass)} className={inputClass}>{["standard","advanced","premium","reasoning","premium-reasoning","research","deep-research"].map((item) => <option key={item}>{item}</option>)}</select></label>
                 <label className={labelClass}>Base credit weight<input type="number" min={1} max={1000} value={form.creditWeight} onChange={(e) => setField("creditWeight", Number(e.target.value))} className={inputClass} /></label>
@@ -474,7 +474,7 @@ export function AdminModelRegistryPanel() {
               </fieldset>
 
               <fieldset className="grid gap-4 rounded-2xl border border-zinc-800 p-4 md:grid-cols-4">
-                <legend className="px-2 text-sm font-black text-white">Capabilities and context</legend>
+                <legend className="px-2 text-sm font-bold text-white">Capabilities and context</legend>
                 <label className="flex items-center gap-2 text-sm font-bold text-zinc-300"><input type="checkbox" checked={form.supportsImage} onChange={(e) => setField("supportsImage", e.target.checked)} /> Image input</label>
                 <label className="flex items-center gap-2 text-sm font-bold text-zinc-300"><input type="checkbox" checked={form.supportsNativePdf} onChange={(e) => setField("supportsNativePdf", e.target.checked)} /> Native PDF</label>
                 <label className={labelClass}>Reasoning<select value={form.reasoning} onChange={(e) => setField("reasoning", e.target.value as FormState["reasoning"])} className={inputClass}><option value="none">None</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
@@ -484,7 +484,7 @@ export function AdminModelRegistryPanel() {
               </fieldset>
 
               <fieldset className="grid gap-4 rounded-2xl border border-zinc-800 p-4 md:grid-cols-3">
-                <legend className="px-2 text-sm font-black text-white">Token limits and cost snapshot (USD per 1M tokens)</legend>
+                <legend className="px-2 text-sm font-bold text-white">Token limits and cost snapshot (USD per 1M tokens)</legend>
                 <label className={labelClass}>Max output tokens<input type="number" value={form.maxOutputTokens ?? ""} onChange={(e) => setField("maxOutputTokens", numericValue(e.target.value))} className={inputClass} /></label>
                 <label className={labelClass}>Reservation output tokens<input type="number" value={form.reservationOutputTokens ?? ""} onChange={(e) => setField("reservationOutputTokens", numericValue(e.target.value))} className={inputClass} /></label>
                 <label className={labelClass}>Cached input multiplier<input type="number" min={0} max={1} step="0.01" value={form.cachedInputPriceMultiplier ?? ""} onChange={(e) => setField("cachedInputPriceMultiplier", numericValue(e.target.value))} className={inputClass} /></label>
@@ -509,7 +509,7 @@ export function AdminModelRegistryPanel() {
               </div>
               <div className="flex flex-wrap gap-2">
                 <button type="button" onClick={() => void validate()} disabled={saving} className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-900 disabled:opacity-50"><CheckCircle2 className="h-4 w-4" /> Validate</button>
-                <button type="button" onClick={() => void save()} disabled={saving} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2 text-sm font-black text-white hover:bg-blue-500 disabled:opacity-50">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} {form.id && models.find((model) => model.id === form.id)?.catalogDeleted ? "Restore and save" : "Save model"}</button>
+                <button type="button" onClick={() => void save()} disabled={saving} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2 text-sm font-bold text-white hover:bg-blue-500 disabled:opacity-50">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} {form.id && models.find((model) => model.id === form.id)?.catalogDeleted ? "Restore and save" : "Save model"}</button>
               </div>
             </div>
           </div>

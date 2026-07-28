@@ -55,7 +55,7 @@ export function MarketingInfoPage({
         className="mx-auto max-w-6xl px-4 py-14 sm:px-6 lg:py-20"
       >
         <div className="max-w-3xl">
-          <p className="text-sm font-black uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">{page.eyebrow}</p>
+          <p className="text-sm font-bold uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">{page.eyebrow}</p>
           <h1 className="mt-4 text-4xl font-black leading-tight sm:text-6xl">{page.title}</h1>
           <p className="mt-5 text-lg leading-8 text-zinc-600 dark:text-zinc-300">{page.description}</p>
           {page.updated && <p className="mt-4 text-sm font-semibold text-zinc-500 dark:text-zinc-400">{page.updated}</p>}
@@ -94,7 +94,7 @@ export function MarketingInfoPage({
                       }
                       target={section.link.external ? "_blank" : undefined}
                       rel={section.link.external ? "noopener noreferrer" : undefined}
-                      className="mt-5 inline-flex items-center gap-2 text-sm font-black text-blue-600 hover:text-blue-500 dark:text-blue-300"
+                      className="mt-5 inline-flex items-center gap-2 text-sm font-bold text-blue-600 hover:text-blue-500 dark:text-blue-300"
                     >
                       {section.link.label}
                       <ArrowRight className="h-4 w-4" />
@@ -115,7 +115,7 @@ export function MarketingInfoPage({
                         : "marketing_info_page",
                   })
                 }
-                className="mt-10 inline-flex h-12 items-center gap-2 rounded-xl bg-blue-600 px-6 text-sm font-black text-white transition hover:bg-blue-500"
+                className="mt-10 inline-flex h-12 items-center gap-2 rounded-xl bg-blue-600 px-6 text-sm font-bold text-white transition hover:bg-blue-500"
               >
                 {page.cta.label}
                 <ArrowRight className="h-4 w-4" />

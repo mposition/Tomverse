@@ -168,7 +168,7 @@ export function CreditPackPurchaseButton({
           setError("");
           setOpen(true);
         }}
-        className={className || "font-black text-amber-900 underline underline-offset-2 dark:text-amber-100"}
+        className={className || "font-bold text-amber-900 underline underline-offset-2 dark:text-amber-100"}
       >
         {children || text.title}
       </button>
@@ -186,10 +186,10 @@ export function CreditPackPurchaseButton({
               {packs === null && !error && <p className="text-sm text-zinc-500">{text.loading}</p>}
               {packs?.map((pack) => (
                 <article key={pack.id} className="rounded-2xl border border-zinc-200 p-4 dark:border-zinc-800">
-                  <p className="text-sm font-black text-zinc-950 dark:text-white">{pack.name}</p>
+                  <p className="text-sm font-bold text-zinc-950 dark:text-white">{pack.name}</p>
                   <p className="mt-2 text-2xl font-black text-zinc-950 dark:text-white">{pack.credits.toLocaleString(lang)} <span className="text-sm text-zinc-500">credits</span></p>
                   <p className="mt-1 text-xs text-zinc-500">{text.expiry}</p>
-                  <button type="button" disabled={Boolean(buying)} onClick={() => void buy(pack.id)} className="mt-4 w-full rounded-xl bg-emerald-600 px-3 py-2.5 text-sm font-black text-white hover:bg-emerald-500 disabled:opacity-60">
+                  <button type="button" disabled={Boolean(buying)} onClick={() => void buy(pack.id)} className="mt-4 w-full rounded-xl bg-emerald-600 px-3 py-2.5 text-sm font-bold text-white hover:bg-emerald-500 disabled:opacity-60">
                     {buying === pack.id
                       ? text.loading
                       : `${text.buy} · ${formatBillingMinor(pack.priceMinor, pack.currency, lang)}`}

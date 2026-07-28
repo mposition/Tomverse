@@ -16,7 +16,7 @@ export function AdminAccessPanel({ access }: { access: ConfiguredAdminAccess[] }
   return (
     <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
       <section className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5">
-        <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.18em] text-blue-300">
+        <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
           <KeyRound className="h-4 w-4" /> Role matrix
         </div>
         <h2 className="mt-2 text-xl font-black text-white">Least-privilege access</h2>
@@ -47,7 +47,7 @@ export function AdminAccessPanel({ access }: { access: ConfiguredAdminAccess[] }
       </section>
 
       <section className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5">
-        <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.18em] text-blue-300">
+        <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
           <ShieldCheck className="h-4 w-4" /> Configured administrators
         </div>
         <div className="mt-4 grid gap-2">
@@ -56,7 +56,7 @@ export function AdminAccessPanel({ access }: { access: ConfiguredAdminAccess[] }
           ) : access.map((entry) => (
             <article key={`${entry.identityType}:${entry.identity}`} className="flex flex-col gap-3 rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
-                <p className="truncate text-sm font-black text-white">{entry.identity}</p>
+                <p className="truncate text-sm font-bold text-white">{entry.identity}</p>
                 <p className="mt-1 text-xs text-zinc-500">
                   {entry.identityType} · {entry.expiresAt ? `Expires ${dateLabel(entry.expiresAt)} UTC` : "No expiry"}
                 </p>
@@ -66,7 +66,7 @@ export function AdminAccessPanel({ access }: { access: ConfiguredAdminAccess[] }
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <span className={`h-2.5 w-2.5 rounded-full ${entry.accessEnabled ? "bg-emerald-400" : "bg-red-400"}`} aria-label={entry.accessEnabled ? "Access enabled" : "Access disabled"} />
-                <span className={`rounded-full border px-2.5 py-1 text-xs font-black uppercase ${entry.accessEnabled ? "border-blue-500/30 bg-blue-500/10 text-blue-200" : "border-red-500/30 bg-red-500/10 text-red-200"}`}>{entry.role}</span>
+                <span className={`rounded-full border px-2.5 py-1 text-xs font-bold uppercase ${entry.accessEnabled ? "border-blue-500/30 bg-blue-500/10 text-blue-200" : "border-red-500/30 bg-red-500/10 text-red-200"}`}>{entry.role}</span>
               </div>
             </article>
           ))}

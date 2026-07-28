@@ -1,6 +1,7 @@
 import "server-only";
 
 import { sendTransactionalEmail } from "@/lib/email";
+import { EMAIL_FONT_STACK } from "@/lib/emailTypography";
 import { sendManagedSlackMessage } from "@/lib/managedSlack";
 import type { ProviderModelCatalogResult } from "@/lib/providerModelCatalogMonitor";
 import type { CatalogReconciliationResult } from "@/lib/providerModelCatalogReconciliation";
@@ -212,7 +213,7 @@ export async function sendProviderModelCatalogReport(input: {
           to: recipient,
           subject,
           text: detail,
-          html: `<div style="font-family:Arial,sans-serif;white-space:pre-wrap;line-height:1.55">${htmlEscape(detail)}</div>`,
+          html: `<div style="font-family:${EMAIL_FONT_STACK};white-space:pre-wrap;line-height:1.55">${htmlEscape(detail)}</div>`,
         });
         const status = sent.sent ? "sent" : "skipped";
         await recordEmail({ title: subject, detail, recipient, status });

@@ -247,7 +247,7 @@ export function MarketingHeader({
           </span>
           <span
             data-testid="marketing-brand-name"
-            className="whitespace-nowrap text-sm font-black"
+            className="whitespace-nowrap text-sm font-bold"
           >
             {/*
               UI-005. Below ~240px of viewport -- a 320px phone at 200% zoom,
@@ -334,7 +334,7 @@ export function MarketingHeader({
                 }
                 data-testid={item.href === "/status" ? "mobile-status-link" : undefined}
                 onClick={() => setIsMenuOpen(false)}
-                className="flex items-center gap-2 rounded-xl px-3 py-3 text-base font-black text-zinc-800 transition hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-900"
+                className="flex items-center gap-2 rounded-xl px-3 py-3 text-base font-bold text-zinc-800 transition hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-900"
               >
                 {item.label}
                 {item.href === "/status" && (
@@ -350,7 +350,7 @@ export function MarketingHeader({
                   cta_location: "marketing_mobile_menu",
                 });
               }}
-              className={`mt-3 inline-flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-black transition ${headerCtaClass}`}
+              className={`mt-3 inline-flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-bold transition ${headerCtaClass}`}
             >
               {labels.app}
               <ArrowRight className="h-4 w-4" />

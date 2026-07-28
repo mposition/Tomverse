@@ -821,22 +821,29 @@ test.describe("the two shells agree on the policy", () => {
   test("steady and excluded states hide/show identically on desktop and mobile", async ({
     page,
   }) => {
-    const seen: Record<string, { steady: string; hidden: string }> = {};
-    for (const shell of SHELLS) {
-      await enterAuthenticatedComparison(page, { viewport: shell.viewport });
-      seen[`${shell.name}-steady`] = {
+    // The setup helper returns as soon as the shell mounts, but the rail's
+    // state is derived from answers that land after that. Every other test
+    // here reads it through a retrying `expect`; this one captures raw
+    // attributes, so it waits for the rail itself first -- the rail only
+    // renders once readiness has been computed from the loaded answers.
+    const captureRail = async (): Promise<{ steady: string; hidden: string }> => {
+      await expect(rail(page)).toBeVisible();
+      return {
         steady: (await rail(page).getAttribute("data-steady"))!,
         hidden: (await rail(page).getAttribute("data-status-hidden"))!,
       };
+    };
+
+    const seen: Record<string, { steady: string; hidden: string }> = {};
+    for (const shell of SHELLS) {
+      await enterAuthenticatedComparison(page, { viewport: shell.viewport });
+      seen[`${shell.name}-steady`] = await captureRail();
 
       await enterAuthenticatedComparison(page, {
         viewport: shell.viewport,
         statuses: { "gemini-3-5-flash": "error" },
       });
-      seen[`${shell.name}-excluded`] = {
-        steady: (await rail(page).getAttribute("data-steady"))!,
-        hidden: (await rail(page).getAttribute("data-status-hidden"))!,
-      };
+      seen[`${shell.name}-excluded`] = await captureRail();
     }
 
     expect(seen["desktop-steady"]).toEqual({ steady: "true", hidden: "true" });

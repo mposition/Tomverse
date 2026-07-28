@@ -193,7 +193,7 @@ function CommercialKpiCard({
                         : "border-zinc-800 bg-zinc-900/60";
     return (
         <div className={`rounded-2xl border p-4 ${toneClass}`}>
-            <p className="text-[11px] font-black uppercase tracking-[0.16em] text-zinc-500">
+            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-zinc-500">
                 {label}
             </p>
             <p className="mt-2 text-2xl font-black text-white">{value}</p>
@@ -213,7 +213,7 @@ function SectionHeader({
 }) {
     return (
         <div>
-            <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-300">
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
                 {eyebrow}
             </p>
             <h2 className="mt-2 text-2xl font-black text-white">{title}</h2>
@@ -1020,13 +1020,13 @@ export async function AdminWorkspace({ activeView }: { activeView: AdminWorkspac
                                         title="Latest administrator changes"
                                         description="The most recent operational changes, plan actions, incident updates, and governance events."
                                     />
-                                    <Link href="/admin/audit" className="shrink-0 text-xs font-black text-blue-300 hover:text-blue-200">Open audit log</Link>
+                                    <Link href="/admin/audit" className="shrink-0 text-xs font-bold text-blue-300 hover:text-blue-200">Open audit log</Link>
                                 </div>
                                 <div className="mt-4 grid gap-2">
                                     {auditRows.slice(0, 8).map((entry) => (
                                         <div key={entry.id} className="grid gap-2 rounded-xl border border-zinc-800 bg-zinc-900/60 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto]">
                                             <div className="min-w-0">
-                                                <p className="truncate text-sm font-black text-zinc-100">{entry.summary}</p>
+                                                <p className="truncate text-sm font-bold text-zinc-100">{entry.summary}</p>
                                                 <p className="mt-1 truncate text-xs text-zinc-500">{entry.actorEmail || "Administrator"} · {entry.action}</p>
                                             </div>
                                             <span className="text-xs text-zinc-600">{new Date(entry.createdAt).toISOString().replace("T", " ").slice(0, 16)} UTC</span>

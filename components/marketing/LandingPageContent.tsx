@@ -498,7 +498,7 @@ export function LandingPageContent() {
                 href={primaryChatHref}
                 data-testid="landing-primary-cta"
                 onClick={() => trackProductEvent("cta_start_click", 0, { cta_location: "landing_hero_chat" })}
-                className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-blue-600 px-6 text-sm font-black text-white shadow-lg shadow-blue-950/20 transition hover:bg-blue-500"
+                className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-blue-600 px-6 text-sm font-bold text-white shadow-lg shadow-blue-950/20 transition hover:bg-blue-500"
               >
                 {status === "authenticated" ? content.signedInCta : content.primaryCta}
                 <ArrowRight className="h-4 w-4" aria-hidden="true" />
@@ -515,19 +515,19 @@ export function LandingPageContent() {
             <div className="rounded-[1.25rem] border border-zinc-800 bg-zinc-950 text-white">
               <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
                 <span className="flex items-center gap-2 text-xs font-bold text-zinc-300"><Bot className="h-4 w-4 text-blue-400" />{content.previewTitle}</span>
-                <span className="rounded-full bg-emerald-500/10 px-2 py-1 text-[10px] font-black text-emerald-300">{content.previewCount}</span>
+                <span className="rounded-full bg-emerald-500/10 px-2 py-1 text-[11px] font-bold text-emerald-300">{content.previewCount}</span>
               </div>
               <div className="grid gap-2 p-3 sm:grid-cols-3">
                 {["GPT", "Claude", "Gemini"].map((model, index) => (
                   <article key={model} className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-3">
-                    <div className="flex items-center justify-between"><span className="text-sm font-black">{model}</span><span className="h-2 w-2 rounded-full bg-zinc-500" /></div>
+                    <div className="flex items-center justify-between"><span className="text-sm font-bold">{model}</span><span className="h-2 w-2 rounded-full bg-zinc-500" /></div>
                     <div className="mt-4 space-y-2"><div className="h-2 w-4/5 rounded-full bg-zinc-700" /><div className="h-2 w-full rounded-full bg-zinc-800" /></div>
                     <p className="mt-4 rounded-xl border border-zinc-700 bg-zinc-800 p-2.5 text-xs font-bold leading-5 text-zinc-200">{content.previewAnswers[index]}</p>
                   </article>
                 ))}
               </div>
               <div className="mx-3 mb-3 rounded-2xl border border-blue-500/30 bg-blue-500/10 p-3">
-                <div className="flex items-center gap-2 text-xs font-black text-blue-200"><Sparkles className="h-3.5 w-3.5" />{content.reviewTitle}</div>
+                <div className="flex items-center gap-2 text-xs font-bold text-blue-200"><Sparkles className="h-3.5 w-3.5" />{content.reviewTitle}</div>
                 <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
                   {content.reviewItems.map((item, index) => (
                     <span key={item} className="flex items-center gap-1.5 rounded-lg bg-black/20 px-2 py-2 text-[11px] font-bold text-zinc-200">
@@ -553,14 +553,14 @@ export function LandingPageContent() {
               return <article key={plan.id} className={`rounded-2xl border p-5 ${plan.id === "pro" ? "border-blue-500 bg-blue-50/70 dark:bg-blue-950/20" : "border-zinc-200 dark:border-zinc-800"}`}><h3 className="text-lg font-black">{plan.title}</h3><p className="mt-4 text-3xl font-black">{formatted}<span className="ml-1 text-sm font-semibold text-zinc-500">{plan.id === "free" ? "" : content.monthly}</span></p><p className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-400">{plan.description}</p></article>;
             })}
           </div>
-          <Link href="/pricing" className="mt-7 inline-flex items-center gap-2 rounded-xl bg-zinc-950 px-5 py-3 text-sm font-black text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200">{content.pricingDetails}<ArrowRight className="h-4 w-4" /></Link>
-          <h2 className={`mt-16 text-3xl font-black sm:text-4xl ${displayHeadingClass(lang)}`}>{content.faqTitle}</h2>
+          <Link href="/pricing" className="mt-7 inline-flex items-center gap-2 rounded-xl bg-zinc-950 px-5 py-3 text-sm font-bold text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200">{content.pricingDetails}<ArrowRight className="h-4 w-4" /></Link>
+          <h2 className={`mt-16 text-3xl font-bold sm:text-4xl ${displayHeadingClass(lang)}`}>{content.faqTitle}</h2>
           <div className="mt-8 grid gap-4 lg:grid-cols-3">
-            {content.faqs.map((item) => <details key={item.question} className="group rounded-2xl border border-zinc-200 p-5 dark:border-zinc-800"><summary className="cursor-pointer list-none font-black">{item.question}</summary><p className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-400">{item.answer}</p></details>)}
+            {content.faqs.map((item) => <details key={item.question} className="group rounded-2xl border border-zinc-200 p-5 dark:border-zinc-800"><summary className="cursor-pointer list-none font-bold">{item.question}</summary><p className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-400">{item.answer}</p></details>)}
           </div>
           <div className="mt-12 flex flex-col items-start justify-between gap-6 rounded-3xl bg-zinc-950 p-7 text-white sm:p-9 lg:flex-row lg:items-center dark:border dark:border-zinc-800">
-            <div className="max-w-2xl"><h2 className={`text-3xl font-black ${displayHeadingClass(lang)}`}>{content.ctaTitle}</h2><p className="mt-3 leading-7 text-zinc-300">{content.ctaDescription}</p></div>
-            <Link href={primaryChatHref} onClick={() => trackProductEvent("cta_start_click", 0, { cta_location: "landing_final_chat" })} className="inline-flex min-h-12 shrink-0 items-center justify-center gap-2 rounded-xl bg-white px-6 text-sm font-black text-zinc-950 hover:bg-zinc-200">{status === "authenticated" ? content.signedInCta : content.primaryCta}<ArrowRight className="h-4 w-4" /></Link>
+            <div className="max-w-2xl"><h2 className={`text-3xl font-bold ${displayHeadingClass(lang)}`}>{content.ctaTitle}</h2><p className="mt-3 leading-7 text-zinc-300">{content.ctaDescription}</p></div>
+            <Link href={primaryChatHref} onClick={() => trackProductEvent("cta_start_click", 0, { cta_location: "landing_final_chat" })} className="inline-flex min-h-12 shrink-0 items-center justify-center gap-2 rounded-xl bg-white px-6 text-sm font-bold text-zinc-950 hover:bg-zinc-200">{status === "authenticated" ? content.signedInCta : content.primaryCta}<ArrowRight className="h-4 w-4" /></Link>
           </div>
         </div>
       </section>

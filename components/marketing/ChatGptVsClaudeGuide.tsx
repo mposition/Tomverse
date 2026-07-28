@@ -339,7 +339,7 @@ export function ChatGptVsClaudeGuide() {
   return (
     <div className="mt-10 space-y-16 lg:mt-14 lg:space-y-20">
       <nav aria-label={copy.jumpLabel} className="flex flex-wrap items-center gap-2 rounded-2xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/50">
-        <span className="px-2 text-xs font-black uppercase tracking-[0.15em] text-zinc-500">{copy.jumpLabel}</span>
+        <span className="px-2 text-xs font-bold uppercase tracking-[0.15em] text-zinc-500">{copy.jumpLabel}</span>
         {copy.jumpLinks.map((item) => (
           <a key={item.href} href={item.href} className="rounded-full bg-white px-3 py-1.5 text-xs font-bold text-zinc-700 ring-1 ring-zinc-200 transition hover:text-blue-600 dark:bg-zinc-950 dark:text-zinc-200 dark:ring-zinc-800 dark:hover:text-blue-400">
             {item.label}
@@ -348,18 +348,18 @@ export function ChatGptVsClaudeGuide() {
       </nav>
 
       <section className="overflow-hidden rounded-3xl border border-blue-200 bg-gradient-to-br from-blue-50 via-white to-orange-50 p-5 dark:border-blue-900/60 dark:from-blue-950/35 dark:via-zinc-950 dark:to-orange-950/20 sm:p-7">
-        <p className="text-xs font-black uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">{copy.scopeEyebrow}</p>
+        <p className="text-xs font-bold uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">{copy.scopeEyebrow}</p>
         <h2 className="mt-3 max-w-3xl text-2xl font-black sm:text-3xl">{copy.scopeTitle}</h2>
         <div className="mt-6 grid gap-3 md:grid-cols-2">
           <div className="rounded-2xl border border-zinc-200 bg-white/90 p-4 dark:border-zinc-800 dark:bg-zinc-950/80">
-            <p className="text-xs font-black uppercase tracking-wider text-zinc-500">{copy.modelsLabel}</p>
+            <p className="text-xs font-bold uppercase tracking-wider text-zinc-500">{copy.modelsLabel}</p>
             <div className="mt-3 flex flex-wrap gap-3">
               <ModelBadge image="/model-icons/chatgpt.png" name="GPT-5.4 mini" provider="OpenAI" />
               <ModelBadge image="/model-icons/claude.png" name="Claude Haiku 4.5" provider="Anthropic" />
             </div>
           </div>
           <div className="rounded-2xl border border-zinc-200 bg-white/90 p-4 dark:border-zinc-800 dark:bg-zinc-950/80">
-            <p className="text-xs font-black uppercase tracking-wider text-zinc-500">{copy.reviewedLabel}</p>
+            <p className="text-xs font-bold uppercase tracking-wider text-zinc-500">{copy.reviewedLabel}</p>
             <p className="mt-3 text-lg font-black">{copy.reviewedDate}</p>
             <p className="mt-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">{copy.scopeNote}</p>
           </div>
@@ -373,14 +373,14 @@ export function ChatGptVsClaudeGuide() {
             <thead className="bg-zinc-950 text-white">
               <tr>
                 {[copy.taskHeader, copy.gptHeader, copy.claudeHeader, copy.decisionHeader].map((header) => (
-                  <th key={header} scope="col" className="px-4 py-3 text-xs font-black uppercase tracking-wider">{header}</th>
+                  <th key={header} scope="col" className="px-4 py-3 text-xs font-bold uppercase tracking-wider">{header}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {copy.tasks.map((row) => (
                 <tr key={row.task} className="border-t border-zinc-200 align-top dark:border-zinc-800">
-                  <th scope="row" className="w-32 bg-zinc-50 px-4 py-4 font-black dark:bg-zinc-900/60">{row.task}</th>
+                  <th scope="row" className="w-32 bg-zinc-50 px-4 py-4 font-bold dark:bg-zinc-900/60">{row.task}</th>
                   <td className="px-4 py-4 leading-6 text-zinc-600 dark:text-zinc-300">{row.gpt}</td>
                   <td className="px-4 py-4 leading-6 text-zinc-600 dark:text-zinc-300">{row.claude}</td>
                   <td className="px-4 py-4 font-semibold leading-6 text-zinc-800 dark:text-zinc-100">{row.decision}</td>
@@ -395,7 +395,7 @@ export function ChatGptVsClaudeGuide() {
         <h2 className="text-2xl font-black sm:text-3xl">{copy.resultTitle}</h2>
         <p className="mt-3 max-w-3xl text-sm leading-7 text-zinc-300">{copy.resultBody}</p>
         <div className="mt-6 rounded-2xl border border-zinc-700 bg-zinc-900 p-4">
-          <p className="text-xs font-black uppercase tracking-wider text-blue-300">{copy.samplePromptLabel}</p>
+          <p className="text-xs font-bold uppercase tracking-wider text-blue-300">{copy.samplePromptLabel}</p>
           <p className="mt-2 text-sm font-semibold leading-6 text-white">{copy.samplePrompt}</p>
         </div>
         <div className="mt-4 grid gap-4 md:grid-cols-2">
@@ -411,7 +411,7 @@ export function ChatGptVsClaudeGuide() {
         <ol className="mt-7 grid gap-4 sm:grid-cols-2">
           {copy.methodSteps.map((step, index) => (
             <li key={step} className="flex gap-4 rounded-2xl border border-zinc-200 p-5 dark:border-zinc-800">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-600 text-sm font-black text-white">{index + 1}</span>
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-600 text-sm font-bold text-white">{index + 1}</span>
               <span className="text-sm font-semibold leading-6 text-zinc-700 dark:text-zinc-200">{step}</span>
             </li>
           ))}
@@ -435,8 +435,8 @@ export function ChatGptVsClaudeGuide() {
         <div className="mt-7 grid gap-4 md:grid-cols-2">
           {copy.promptExamples.map((example) => (
             <article key={example.label} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-5 dark:border-zinc-800 dark:bg-zinc-900/40">
-              <p className="text-xs font-black uppercase tracking-wider text-blue-600 dark:text-blue-400">{example.label}</p>
-              <p className="mt-3 font-mono text-sm leading-6 text-zinc-700 dark:text-zinc-200">{example.prompt}</p>
+              <p className="text-xs font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">{example.label}</p>
+              <p className="mt-3 text-sm leading-6 text-zinc-700 dark:text-zinc-200">{example.prompt}</p>
             </article>
           ))}
         </div>
@@ -447,7 +447,7 @@ export function ChatGptVsClaudeGuide() {
         <div className="mt-7 grid gap-4 md:grid-cols-3">
           {copy.fitCards.map((card) => (
             <article key={card.title} className="rounded-2xl border border-zinc-200 p-5 dark:border-zinc-800">
-              <h3 className="font-black">{card.title}</h3>
+              <h3 className="font-bold">{card.title}</h3>
               <p className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-300">{card.body}</p>
             </article>
           ))}
@@ -459,7 +459,7 @@ export function ChatGptVsClaudeGuide() {
         <div className="mt-7 divide-y divide-zinc-200 overflow-hidden rounded-2xl border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800">
           {copy.faqs.map((faq) => (
             <details key={faq.question} className="group bg-white px-5 py-4 open:bg-zinc-50 dark:bg-zinc-950 dark:open:bg-zinc-900/50">
-              <summary className="cursor-pointer list-none pr-8 font-black marker:hidden">{faq.question}</summary>
+              <summary className="cursor-pointer list-none pr-8 font-bold marker:hidden">{faq.question}</summary>
               <p className="mt-3 max-w-4xl text-sm leading-7 text-zinc-600 dark:text-zinc-300">{faq.answer}</p>
             </details>
           ))}
@@ -471,7 +471,7 @@ export function ChatGptVsClaudeGuide() {
         <div className="mt-5 grid gap-4 md:grid-cols-3">
           {copy.relatedLinks.map((item) => (
             <Link key={item.href} href={item.href} className="group rounded-2xl border border-zinc-200 p-5 transition hover:border-blue-400 hover:bg-blue-50/50 dark:border-zinc-800 dark:hover:border-blue-700 dark:hover:bg-blue-950/20">
-              <span className="flex items-center justify-between gap-3 font-black group-hover:text-blue-600 dark:group-hover:text-blue-400">
+              <span className="flex items-center justify-between gap-3 font-bold group-hover:text-blue-600 dark:group-hover:text-blue-400">
                 {item.label}
                 <ArrowRight className="h-4 w-4" />
               </span>
@@ -482,13 +482,13 @@ export function ChatGptVsClaudeGuide() {
       </section>
 
       <section className="rounded-3xl bg-blue-600 p-6 text-white sm:p-9">
-        <p className="text-xs font-black uppercase tracking-[0.2em] text-blue-100">{copy.ctaEyebrow}</p>
+        <p className="text-xs font-bold uppercase tracking-[0.2em] text-blue-100">{copy.ctaEyebrow}</p>
         <h2 className="mt-3 max-w-3xl text-3xl font-black sm:text-4xl">{copy.ctaTitle}</h2>
         <p className="mt-4 max-w-3xl text-sm leading-7 text-blue-50">{copy.ctaBody}</p>
         <Link
           href={comparisonHref}
           onClick={() => trackProductEvent("cta_start_click", 2, { cta_location: "chatgpt_vs_claude_guide" })}
-          className="mt-6 inline-flex min-h-12 items-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-black text-blue-700 transition hover:bg-blue-50"
+          className="mt-6 inline-flex min-h-12 items-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-bold text-blue-700 transition hover:bg-blue-50"
         >
           {copy.ctaLabel}
           <ArrowRight className="h-4 w-4" />
@@ -515,7 +515,7 @@ function ModelBadge({ image, name, provider }: { image: string; name: string; pr
   return (
     <span className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900">
       <Image unoptimized src={image} width={32} height={32} alt="" className="h-8 w-8 rounded-lg object-contain" />
-      <span><span className="block text-sm font-black">{name}</span><span className="block text-[11px] text-zinc-500">{provider}</span></span>
+      <span><span className="block text-sm font-bold">{name}</span><span className="block text-[11px] text-zinc-500">{provider}</span></span>
     </span>
   );
 }
@@ -523,7 +523,7 @@ function ModelBadge({ image, name, provider }: { image: string; name: string; pr
 function ResultCard({ image, title, body, accent }: { image: string; title: string; body: string; accent: "blue" | "orange" }) {
   return (
     <article className={`rounded-2xl border p-4 ${accent === "blue" ? "border-blue-400/30 bg-blue-500/10" : "border-orange-400/30 bg-orange-500/10"}`}>
-      <div className="flex items-center gap-3"><Image unoptimized src={image} width={36} height={36} alt="" className="h-9 w-9 rounded-lg bg-white object-contain" /><h3 className="font-black">{title}</h3></div>
+      <div className="flex items-center gap-3"><Image unoptimized src={image} width={36} height={36} alt="" className="h-9 w-9 rounded-lg bg-white object-contain" /><h3 className="font-bold">{title}</h3></div>
       <p className="mt-4 text-sm leading-7 text-zinc-300">{body}</p>
     </article>
   );
@@ -532,7 +532,7 @@ function ResultCard({ image, title, body, accent }: { image: string; title: stri
 function PreviewPanel({ image, model, body }: { image: string; model: string; body: string }) {
   return (
     <article className="min-h-56 rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
-      <div className="flex items-center gap-3 border-b border-zinc-800 pb-3"><Image unoptimized src={image} width={34} height={34} alt="" className="h-[34px] w-[34px] rounded-lg bg-white object-contain" /><div><h3 className="text-sm font-black text-white">{model}</h3><p className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">Available</p></div></div>
+      <div className="flex items-center gap-3 border-b border-zinc-800 pb-3"><Image unoptimized src={image} width={34} height={34} alt="" className="h-[34px] w-[34px] rounded-lg bg-white object-contain" /><div><h3 className="text-sm font-bold text-white">{model}</h3><p className="text-[11px] font-bold uppercase tracking-wider text-emerald-400">Available</p></div></div>
       <p className="mt-4 text-sm leading-7 text-zinc-300">{body}</p>
     </article>
   );

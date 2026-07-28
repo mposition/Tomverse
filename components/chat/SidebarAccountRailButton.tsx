@@ -73,7 +73,7 @@ export function SidebarAccountRailButton({
                 aria-haspopup="menu"
                 aria-expanded={isOpen}
                 onClick={() => setIsOpen((current) => !current)}
-                className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-accent-account-700 text-sm font-black text-white ring-1 ring-accent-account-400/50 transition hover:ring-2 hover:ring-accent-account-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:bg-accent-account-700 dark:ring-accent-account-400/40"
+                className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-accent-account-700 text-sm font-bold text-white ring-1 ring-accent-account-400/50 transition hover:ring-2 hover:ring-accent-account-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:bg-accent-account-700 dark:ring-accent-account-400/40"
             >
                 {user ? (
                     user.image ? (
@@ -103,7 +103,7 @@ export function SidebarAccountRailButton({
                     {user ? (
                         <>
                             <div className="flex min-w-0 items-center gap-2 border-b border-zinc-200 p-2 pb-3 dark:border-zinc-800">
-                                <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-accent-account-700 text-sm font-black text-white">
+                                <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-accent-account-700 text-sm font-bold text-white">
                                     {user.image ? (
                                         // eslint-disable-next-line @next/next/no-img-element
                                         <img src={user.image} alt="" className="h-full w-full object-cover" />
@@ -112,7 +112,7 @@ export function SidebarAccountRailButton({
                                     )}
                                 </span>
                                 <span className="min-w-0 flex-1">
-                                    <span className="block truncate text-sm font-black text-zinc-900 dark:text-zinc-100">
+                                    <span className="block truncate text-sm font-bold text-zinc-900 dark:text-zinc-100">
                                         {user.name || user.email || "Tomverse"}
                                     </span>
                                     {user.name && user.email ? (
@@ -120,7 +120,7 @@ export function SidebarAccountRailButton({
                                     ) : null}
                                 </span>
                                 {plan ? (
-                                    <span className="shrink-0 rounded-full bg-zinc-100 px-2 py-1 text-[10px] font-black text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                                    <span className="shrink-0 rounded-full bg-zinc-100 px-2 py-1 text-xs font-bold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
                                         {t(`modelTiers.${plan.toLowerCase()}`)}
                                     </span>
                                 ) : null}
@@ -148,7 +148,7 @@ export function SidebarAccountRailButton({
                                         addonCreditsRemaining={accountUsage.balances.purchasedRemainingCredits}
                                         testId="sidebar-rail-upgrade-cta"
                                         onClick={() => setIsOpen(false)}
-                                        className="flex min-h-11 w-full items-center gap-2 rounded-xl bg-blue-600 px-3 text-sm font-black text-white transition hover:bg-blue-500"
+                                        className="flex min-h-11 w-full items-center gap-2 rounded-xl bg-blue-600 px-3 text-sm font-bold text-white transition hover:bg-blue-500"
                                     >
                                         <Crown className="h-4 w-4" aria-hidden="true" />
                                         {upgradeTargetPlan === "Pro" ? t("upgrade.viewProPlan") : t("upgrade.viewMaxPlan")}
@@ -207,7 +207,7 @@ export function SidebarAccountRailButton({
                         </>
                     ) : (
                         <div className="p-1">
-                            <p className="px-2 text-sm font-black text-zinc-900 dark:text-zinc-100">
+                            <p className="px-2 text-sm font-bold text-zinc-900 dark:text-zinc-100">
                                 {t("sidebar.guestMenuTitle")}
                             </p>
                             <p className="mt-1 px-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
@@ -222,7 +222,7 @@ export function SidebarAccountRailButton({
                                     });
                                     void signIn(undefined, { callbackUrl: chatCallbackUrl });
                                 }}
-                                className="mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 text-sm font-black text-white transition hover:bg-blue-500"
+                                className="mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 text-sm font-bold text-white transition hover:bg-blue-500"
                             >
                                 {t("sidebar.guestMenuCreateAccount")}
                             </button>

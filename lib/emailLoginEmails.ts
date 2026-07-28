@@ -1,6 +1,7 @@
 import "server-only";
 
 import { sendTransactionalEmail } from "@/lib/email";
+import { EMAIL_FONT_STACK, EMAIL_MONO_FONT_STACK } from "@/lib/emailTypography";
 
 type EmailLanguage = "en" | "ko" | "zh" | "fr" | "de" | "es" | "pt";
 
@@ -107,9 +108,9 @@ export async function sendEmailLoginCodeEmail(input: {
       copy.ignore,
     ].join("\n"),
     html: `
-      <div style="font-family:Arial,sans-serif;color:#111827;line-height:1.6">
+      <div style="font-family:${EMAIL_FONT_STACK};color:#111827;line-height:1.6">
         <p>${escapeHtml(copy.intro)}</p>
-        <p style="font-size:32px;font-weight:700;letter-spacing:4px;margin:24px 0">${escapeHtml(input.code)}</p>
+        <p style="font-family:${EMAIL_MONO_FONT_STACK};font-size:32px;font-weight:700;letter-spacing:4px;margin:24px 0">${escapeHtml(input.code)}</p>
         <p><a href="${input.verifyUrl}" style="display:inline-block;padding:10px 20px;background:#2563eb;color:#fff;border-radius:8px;text-decoration:none;font-weight:600">${escapeHtml(copy.linkLabel)}</a></p>
         <p style="color:#6b7280;font-size:13px">${escapeHtml(copy.expiry)}</p>
         <p style="color:#6b7280;font-size:13px">${escapeHtml(copy.ignore)}</p>
@@ -197,7 +198,7 @@ export async function sendLoginMethodChangedEmail(input: {
     subject,
     text: `${body}\n\n${copy.contact}`,
     html: `
-      <div style="font-family:Arial,sans-serif;color:#111827;line-height:1.6">
+      <div style="font-family:${EMAIL_FONT_STACK};color:#111827;line-height:1.6">
         <p>${escapeHtml(body)}</p>
         <p style="color:#6b7280;font-size:13px">${escapeHtml(copy.contact)}</p>
       </div>

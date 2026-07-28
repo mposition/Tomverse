@@ -110,7 +110,7 @@ export function GuestImportModal({
         <div className="flex items-start justify-between gap-3">
           <h2
             id="guest-import-modal-title"
-            className="text-base font-black text-zinc-900 dark:text-zinc-100"
+            className="text-base font-bold text-zinc-900 dark:text-zinc-100"
           >
             {t("chat.guestImportModalTitle")}
           </h2>
@@ -140,7 +140,7 @@ export function GuestImportModal({
               type="button"
               onClick={handleRetryFailed}
               disabled={isImporting}
-              className="flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-black text-white transition hover:bg-blue-500 disabled:opacity-60"
+              className="flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-blue-500 disabled:opacity-60"
             >
               {t("chat.guestImportRetry")}
             </button>
@@ -158,7 +158,7 @@ export function GuestImportModal({
               type="button"
               onClick={handleImportCurrentOnly}
               disabled={isImporting}
-              className="flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-black text-white transition hover:bg-blue-500 disabled:opacity-60"
+              className="flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-blue-500 disabled:opacity-60"
             >
               {t("chat.guestImportCurrentOnly")}
             </button>
@@ -166,7 +166,7 @@ export function GuestImportModal({
               type="button"
               onClick={handleImportAll}
               disabled={isImporting}
-              className="flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-black text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              className="flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-bold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
             >
               {interpolateCopy(t("chat.guestImportAll"), { count: conversations.length })}
             </button>

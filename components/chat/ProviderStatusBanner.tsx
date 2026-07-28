@@ -156,13 +156,13 @@ export function ProviderStatusBanner({
         <div className="flex items-center gap-2">
           <AlertTriangle className="h-4 w-4 shrink-0" />
           <div className="min-w-0 flex-1">
-            <div className="flex min-w-0 items-center gap-2 font-black">
+            <div className="flex min-w-0 items-center gap-2 font-bold">
               <span className="truncate">
                 {bannerState.isSelectedOnly
                   ? t("providerStatus.selectedIssue")
                   : t("providerStatus.globalIssue")}
               </span>
-              <span className="shrink-0 rounded-full bg-black/5 px-2 py-0.5 text-[10px] dark:bg-white/10">
+              <span className="shrink-0 rounded-full bg-black/5 px-2 py-0.5 text-[11px] dark:bg-white/10">
                 {bannerState.impacted.length} {t("providerStatus.unavailable")}
               </span>
             </div>
@@ -192,7 +192,7 @@ export function ProviderStatusBanner({
                 key={removeModelId}
                 type="button"
                 onClick={() => onSwapModel(removeModelId, addModelId)}
-                className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full bg-black/5 px-2 text-[11px] font-black transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
+                className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full bg-black/5 px-2 text-[11px] font-bold transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
               >
                 <Shuffle className="h-3 w-3" />
                 {t("providerStatus.switchFromTo")
@@ -210,7 +210,7 @@ export function ProviderStatusBanner({
                   key={modelId}
                   type="button"
                   onClick={() => onToggleModel(modelId)}
-                  className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full bg-black/5 px-2 text-[11px] font-black transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
+                  className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full bg-black/5 px-2 text-[11px] font-bold transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
                 >
                   <Shuffle className="h-3 w-3" />
                   {modelName(modelId)}
@@ -233,13 +233,13 @@ export function ProviderStatusBanner({
       <div className="flex items-start gap-2">
         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 font-black">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 font-bold">
             <span>
               {bannerState.isSelectedOnly
                 ? t("providerStatus.selectedIssue")
                 : t("providerStatus.globalIssue")}
             </span>
-            <span className="rounded-full bg-black/5 px-2 py-0.5 text-[10px] dark:bg-white/10">
+            <span className="rounded-full bg-black/5 px-2 py-0.5 text-[11px] dark:bg-white/10">
               {bannerState.impacted.length} {t("providerStatus.unavailable")}
             </span>
           </div>
@@ -256,7 +256,7 @@ export function ProviderStatusBanner({
                   key={removeModelId}
                   type="button"
                   onClick={() => onSwapModel(removeModelId, addModelId)}
-                  className="inline-flex items-center gap-1 rounded-full bg-black/5 px-2.5 py-1 text-[11px] font-black transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
+                  className="inline-flex items-center gap-1 rounded-full bg-black/5 px-2.5 py-1 text-[11px] font-bold transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
                 >
                   <Shuffle className="h-3 w-3" />
                   {t("providerStatus.switchFromTo")
@@ -274,7 +274,7 @@ export function ProviderStatusBanner({
                     key={modelId}
                     type="button"
                     onClick={() => onToggleModel(modelId)}
-                    className="inline-flex items-center gap-1 rounded-full bg-black/5 px-2.5 py-1 text-[11px] font-black transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
+                    className="inline-flex items-center gap-1 rounded-full bg-black/5 px-2.5 py-1 text-[11px] font-bold transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
                   >
                     <Shuffle className="h-3 w-3" />
                     {t("providerStatus.switchTo")} {modelName(modelId)}
