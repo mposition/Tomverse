@@ -43,7 +43,7 @@ UI-001 실기기 확인이 완료되어, `P1`에 `FAIL`·`PARTIAL`·`NOT VERIFIE
 | ID | 상태 | 근거 |
 |---|---|---|
 | UI-001 | **PASS** | 정확한 visual viewport fixture 통과 + iOS Safari·Android Chrome 실기기 확인 완료. 4장 참조 |
-| UI-002 | **Fixed** | 320~430px 5개 폭 × 3개 route에서 44×44 + 5점 hit-test + content 교차 0px² |
+| UI-002 | **Fixed** | 320~430px 5개 폭 × 3개 route에서 44×44 + 5점 hit-test + content 가림 0건(13-7) |
 | UI-003 | **Fixed** | 오류/복구/상태 text가 light·dark 모두 AA 통과 (pixel 합성 측정) |
 | UI-004 | **Fixed** | golden 49 → 63장. 320 dark 복구 4종, 영어 복구 4종, AI Review 5종, Deep Research 실패 활성 1종 추가 |
 | UI-005 | **Revise → Fixed** | promotion 원인 진단은 기각. 좁은 폭+확대 overflow는 plan card intrinsic width 문제로 확정하고 수정. 5장 참조 |
@@ -576,6 +576,37 @@ metric 때문에 문단 몇 개가 다시 줄바꿈됩니다. 잘림·겹침·�
 아래 형제 test는 측정 전에 재시도 assertion으로 기다립니다. `develop`의 spec이고
 범위 밖이라 고치지 않았습니다.
 
+### 13-7. UI-002 가림 기준 재정의 (승인 후 변경)
+
+폰트 병합 뒤 `analytics settings never covers pricing content`가 실패했습니다.
+`/pricing`(ko, 390×844, scroll 0)에서 설정 pill이 "무료로 시작" CTA와
+**36.6×2px(73px²)** 겹칩니다. 계측값은 pill `x 312.4–382 / y 792–836`,
+CTA `x 41–349 / y 746–794` — 폰트가 layout을 2px 밀어 CTA 아래 모서리가 pill
+위쪽에 닿은 것입니다.
+
+**기존 assertion이 지킬 수 없는 성질이었습니다.** pill은 `position: fixed`
+overlay이므로 스크롤하면 어느 페이지에서든 무언가를 덮습니다. scroll 0에서
+교차 0px²를 요구한 것은 사실상 "지금 layout에서 우연히 아무것도 그 자리에
+없다"를 고정한 것이고, 2px 이동에 깨졌지만 button은 완전히 사용 가능한 상태
+그대로였습니다.
+
+**승인받아 규칙을 바꿨습니다.** layout 우연이 아니라 사용자가 실제로 잃는 것을
+검사합니다.
+
+1. **탭 가능성** — pill 사각형을 뺀 나머지가 여전히 44×44 정사각형을 담아야
+   합니다. 원래 그보다 작은 control이면 자기 크기만큼.
+2. **가독성** — pill이 대상의 **자기 text**(control의 이름) 위에 놓이면 안
+   됩니다. element box가 아니라 `Range.getClientRects()`의 text 사각형으로
+   판정합니다.
+
+현재 CTA는 308×48 중 좌측 271.4×48이 비어 있어 1번을 통과하고, 가운데 정렬된
+"무료로 시작" text는 pill과 만나지 않아 2번을 통과합니다.
+
+**비어 있지 않다는 근거** 임시 spec으로 pill을 부풀려 두 규칙이 각각 발화하는
+것을 확인했습니다 — 전폭 CTA를 삼키는 배치는 `too small`, CTA text 위에 놓는
+배치는 `covers text`. 두 경우 모두 finding이 나옵니다. 확인 후 임시 spec은
+삭제했습니다.
+
 ## 14. 최종 판정
 
 작업명령서의 **최종 완료 기준 14개 항목이 모두 충족**됐습니다.
@@ -583,7 +614,7 @@ metric 때문에 문단 몇 개가 다시 줄바꿈됩니다. 잘림·겹침·�
 | 기준 | 결과 |
 |---|---|
 | 1. UI-001 keyboard | **충족** — fixture 통과 + 실기기 확인 완료. 기존 항상-참 test는 실효화됨 |
-| 2. UI-002 settings 44×44 + 5점 hit-test + 교차 | 충족 |
+| 2. UI-002 settings 44×44 + 5점 hit-test + 가림 | 충족 (가림 기준은 13-7에서 재정의) |
 | 3. UI-003 오류/복구/상태 text AA (light·dark) | 충족 |
 | 4. UI-007 보조 text readable token, 320px 밀도 회귀 없음 | 충족 (예외 3건 명시) |
 | 5. UI-004 320 dark·영어·AI Review error/retry·DR 실패 활성 | 충족 (golden 63장 / 74 test) |
