@@ -14,7 +14,7 @@
 | 5 | `FINAL-F006` | **Fixed locally, not verified on staging** |
 | 6 | `RECON-UX-001` | **Fixed locally, not verified on staging** (승인된 market mapping 적용, 40조합 전부 0px) |
 | 7 | `RECON-A11Y-002` | **Fixed locally, not verified on staging** |
-| 8 | `RECON-A11Y-003` | **Partially fixed** (`/`·`/status` 0건 / `/pricing` 강조 카드 10건 잔여 — §4.8) |
+| 8 | `RECON-A11Y-003` | **Fixed locally, not verified on staging** (3개 route × light/dark 전부 0건) |
 | 9 | `RECON-OPS-001` | **Fixed locally, not verified on staging** |
 | 10 | `EXT-REAUDIT-F001` | **Fixed locally, not verified on staging** (Windows 경로 + canonical 정책 확정; canonical 실행 자체는 `Not verified`) |
 | 11 | `RECON-QA-001` | **Environment dependent** (consent flake 재현 불가, visual은 `Not verified`) |
@@ -33,6 +33,13 @@
   `formatBillingAmount` 자체에 **도달하지 못했습니다**. 두 축을 모두 고친 뒤
   결함이 재현됐고, locale 의존성은 제거했습니다.
 
+이후 사용자 승인 6건(디자인 토큰 조건부, 통화 표기, fallback 문구, canonical
+snapshot 정책, 검증 계정, incident 처리)을 반영해 `RECON-UX-001`·
+`RECON-A11Y-003`·`EXT-REAUDIT-F001`을 추가로 해소했습니다. 전체
+desktop-chromium 스위트는 **631 passed / 2 failed**이며, 남은 2건은 canonical
+browser를 설치할 수 없는 이 환경의 문제로 **제품 결함으로 남은 실패는
+0건**입니다.
+
 `Verified fixed`는 한 건도 사용하지 않았습니다.
 
 > **commit/push에 관한 기록.** 실행 프롬프트 §7·§15는 commit·push·PR을 금지하고
@@ -50,7 +57,7 @@
 | 항목 | 값 |
 |---|---|
 | 시작 | 2026-07-28 13:38 UTC / 2026-07-28 23:38 AEST |
-| 종료 | 2026-07-28 16:05 UTC / 2026-07-29 02:05 AEST |
+| 종료 | 2026-07-28 18:20 UTC / 2026-07-29 04:20 AEST |
 | local HEAD (시작) | `21a94db510e8a7a88541bc7bad1771f1c1772b06` |
 | `origin/develop` | `21a94db510e8a7a88541bc7bad1771f1c1772b06` |
 | staging `/api/build-info` | `21a94db510e8a7a88541bc7bad1771f1c1772b06` |
@@ -526,10 +533,10 @@ raw `purple`/`emerald` utility 우회를 쓰지 않는 조건입니다.
 - 기존 대비 계측 suite `tests/e2e/ui-state-contrast.spec.ts` **전부 통과** —
   light/dark 회귀 0.
 
-#### 잔여 10건 — `[USER DECISION REQUIRED]`
+#### 강조 plan card 10건 — 전제 정정 후 승인받아 해소
 
-`/pricing`에 남은 10건은 **전부 강조 plan card 위**이며, 승인 문구와 전제가
-다릅니다.
+`/pricing`에 남았던 10건은 **전부 강조 plan card 위**였고, 승인 문구와 전제가
+달랐습니다.
 
 | 실측 | 배경 | 전경 | 요소 |
 |---:|---|---|---|
@@ -552,13 +559,53 @@ raw `purple`/`emerald` utility 우회를 쓰지 않는 조건입니다.
 따라서 이 노드들에 `accent-plan-max-*`를 적용하면 Pro 카드가 purple이 되고,
 `AGENTS.md` 규칙 2(역할이 다르면 token 분리)를 정면으로 위반합니다.
 
-**그리고 전경색을 더 밝게 할 수 없습니다** — 이미 `#ffffff`인데도 4.10입니다.
-AA를 만족시키는 유일한 방법은 **강조 카드의 파란 표면을 어둡게** 하는 것
-(`bg-blue-600` → `bg-blue-700`, 그에 맞춰 `bg-white/15`·`border-white/20`
-패널 조정)이며, 이는 /pricing에서 가장 눈에 띄는 카드의 **가시적인 브랜드
-변경**입니다.
+**그리고 전경색을 더 밝게 할 수 없습니다** — 이미 `#ffffff`인데도 4.10이었습니다.
+AA를 만족시키는 유일한 방법은 표면을 어둡게 하는 것이며, 이는 가시적인 브랜드
+변경이므로 임의로 진행하지 않고 전제를 정정해 보고했습니다.
 
-전제가 어긋나므로 **임의로 진행하지 않았습니다.** 확인 후 적용하겠습니다.
+**정정된 전제로 `bg-blue-700` 국소 조정이 승인**되어 적용했습니다.
+
+| 변경 | 위치 |
+|---|---|
+| 강조 plan card `bg-blue-600` → `bg-blue-700` (`border-blue-500` → `600`) | `PricingPageContent.tsx` |
+| credit guide의 Pro 카드도 동일 처리 | 〃 (같은 blue-600 표면을 재사용하고 있었음) |
+| promotion 배지 3곳 white on `accent-promotion-500`(≈2.3:1) → `700` | 〃 |
+
+- `bg-white/10`·`bg-white/15` 중첩 표면과 `text-blue-100/80` opacity 텍스트는
+  **표면을 어둡게 한 것만으로 전부 AA를 넘겨** 별도 조정이 필요 없었습니다.
+- badge/CTA의 `bg-white text-blue-700` 조합은 **유지**했습니다.
+- `app/globals.css`는 **변경하지 않았습니다** — 전역 blue/zinc palette 무변경.
+- blue-700 변경은 `PricingPageContent.tsx` 2곳에만 있으며 **다른 화면에
+  영향이 없습니다.**
+
+#### 검증 — axe 0건 + 실제 합성 픽셀 ratio
+
+승인 조건이 "axe 0건 **및** 실제 computed ratio ≥4.5:1"이므로 두 가지를 모두
+측정했습니다. axe만으로는 부족한 이유가 두 가지 있습니다.
+
+1. 강조 카드는 자기 파란 표면 위에 `bg-white/10`·`bg-white/15`를 겹치므로,
+   **실제로 칠해지는 색은 어떤 computed style에도 없는 합성값**입니다.
+2. 취소선 정가(`text-blue-100/80`)는 **promotion이 활성일 때만 렌더**되므로
+   기본 페이지 로드에서는 axe가 본 적이 없습니다.
+
+그래서 `tests/e2e/support/ui-audit.ts`의 `measureContrastInScope`(canvas로
+실제 칠해진 픽셀을 읽음)로 카드 내부 모든 텍스트를 promotion 활성 상태에서
+측정하고, 표본 수가 0이 아님을 함께 단언했습니다 — "위반 없음"이 "측정 안 됨"을
+뜻하지 않도록.
+
+이 측정이 **axe가 놓친 실제 결함 1건을 잡아냈습니다**: promotion 배너 배지의
+`bg-accent-promotion-500` + `text-white`(≈2.3:1). promotion이 살아 있을 때만
+그려지는 노드라 과거 어떤 측정에도 잡히지 않았습니다.
+
+| Route | light | dark |
+|---|---:|---:|
+| `/` | **0** | **0** |
+| `/status` | **0** | **0** |
+| `/pricing` | **0** | **0** |
+| 강조 카드 합성 표본 (promotion 활성) | **전부 ≥4.5:1** | **전부 ≥4.5:1** |
+
+`tests/e2e/remediation-accessibility.spec.ts` **12/12 통과**,
+`npm run check:accent-tokens` 통과, 기존 `ui-state-contrast.spec.ts` 회귀 0.
 
 ---
 
@@ -754,19 +801,23 @@ without a title attribute`가 대규모 batch 실행에서 1회 실패했습니�
 | 18 | accessibility/contrast/provider/web-search/rail/composer/font batch (desktop+mobile) | **155 passed / 3 failed / 86 skipped** | 실패 3건은 #16·#17 |
 | 19 | `pricing-promotion-reflow.spec.ts` (승인된 market mapping 적용 후) | **61/61 pass** | — |
 | 20 | `remediation-accessibility.spec.ts` + `accessibility-core-tasks` + `ui-state-contrast` + `pricing-accessible-price` | **27 passed / 2 failed** | 실패 2건 = `/pricing` 강조 카드 (§4.8) |
-| 21 | **전체 `--project=desktop-chromium` (704 tests)** | **627 passed / 4 failed / 73 skipped** | 아래 분류 참조 |
+| 21 | `remediation-accessibility.spec.ts` (합성 픽셀 측정 포함) | **12/12 pass** | — |
+| 22 | **전체 `--project=desktop-chromium` (706 tests)** | **631 passed / 2 failed / 73 skipped** | 아래 분류 참조 |
 
-#### #21 전체 실행의 4개 실패 — 전부 분류됨 (unexplained 0)
+#### #22 전체 실행의 2개 실패 — 전부 분류됨 (unexplained 0)
 
-승인 반영 전 14건 → **4건**으로 줄었습니다.
+승인 반영 과정에서 **14건 → 4건 → 2건**으로 줄었습니다.
 
 | 건수 | 대상 | 분류 |
 |---:|---|---|
 | 2 | `mobile-composer-contract.spec.ts` visual golden (320px·390px) | **Environment problem** — canonical Chromium 미설치, 글리프 전용 diff (§4.11) |
-| 2 | `remediation-accessibility.spec.ts` `RECON-A11Y-003` `/pricing` (light·dark) | **Confirmed product regression** — 강조 plan card 10 node, 승인 전제 불일치로 보류 (§4.8) |
 
-해소된 것: `pricing-promotion-reflow` 6건(=`RECON-UX-001` 잔여 4px),
-`RECON-A11Y-003`의 `/`·`/status` 4건.
+**제품 결함으로 남은 실패는 0건입니다.** 남은 2건은 이 실행 환경이 canonical
+browser를 설치할 수 없어서 생긴 것이며, §4.10에서 확정한 정책에 따라
+`Not verified`이지 실패가 아닙니다.
+
+해소된 것: `pricing-promotion-reflow` 6건(`RECON-UX-001`),
+`RECON-A11Y-003` 6건(`/`·`/status` 4건 + `/pricing` 2건).
 
 `analytics-settings-target.spec.ts`는 **전체 실행에서도 전부 통과**했고,
 `comparison-action-rail.spec.ts:945`도 이 실행에서는 통과했습니다.
@@ -954,7 +1005,7 @@ web search는 **off**로 고정합니다(모델당 +8 surcharge 방지).
 | 4 | `EXT-REAUDIT-F001` canonical snapshot 정책 | ✅ **승인 → 문서·config 확정** |
 | 5 | `FINAL-F002` 검증 계정 / 40 credit 상한 | ✅ **승인** — 자격증명 부재로 **미실행** |
 | 6 | `FINAL-F002` 기본 모델 incident 처리 | ✅ **승인** (중단·대기, §9.9) |
-| 7 | **`RECON-A11Y-003` 강조 plan card 10건** | ⏸ **미해결** — 승인 전제(Max/purple)와 실제(Pro/blue)가 달라 보류 (§4.8) |
+| 7 | `RECON-A11Y-003` 강조 plan card | ✅ **전제 정정 후 승인 → 적용·검증 완료** (§4.8) |
 | 8 | AU analytics opt-out 정책 적합성 (범위 밖, 미판단) | §5-D |
 
 ### 미검증으로 남은 것
@@ -974,7 +1025,7 @@ web search는 **off**로 고정합니다(모델당 +8 surcharge 방지).
 | # | 항목 | 심각도 | 상태 |
 |---|---|---|---|
 | 1 | `FINAL-F002` 실제 Provider·AI Review·credit **완전 미검증** | **P1 blocker** | 계획 승인 · 자격증명 부재로 미실행 |
-| 2 | `RECON-A11Y-003` `/pricing` 강조 plan card **10 node** | P2 | 승인 전제 불일치로 보류 (§4.8) |
+| 2 | ~~`RECON-A11Y-003` `/pricing` 강조 plan card~~ | — | **해소** (§4.8) |
 | 3 | canonical browser 미설치 → visual 무결성 **`Not verified`** | P2 QA | 환경 (정책은 확정) |
 | 4 | `FINAL-F003` 전이 6·7·8 및 native-2 조합 미검증 | P2 | 잔여 |
 | 5 | WebKit 전 범위 미실행 | P2 QA | 환경 |
@@ -1005,7 +1056,7 @@ web search는 **off**로 고정합니다(모델당 +8 surcharge 방지).
 |---|---|---|
 | 1 | `STG-F003` 수정 후 20회 이상 연속 통과 | ✅ **충족** (220/220) |
 | 2 | `RECON-A11Y-001` axe critical 0 | ✅ **충족** (`select-name` 0, `aria-prohibited-attr` 0) |
-| 3 | B범위 P2 완료 또는 명시적 risk acceptance | ⚠️ `RECON-A11Y-003` 강조 카드 10건만 잔여 (`RECON-UX-001`은 해소) |
+| 3 | B범위 P2 완료 또는 명시적 risk acceptance | ✅ **B범위 P2 전부 해소** |
 | 4 | 게이트 SHA 고정 + staging 배포 동결 | ✅ 유지 |
 | 5 | `FINAL-F002` 승인 후 3-model 3회 + AI Review 1회 실호출 + ledger 대조 | ❌ **미충족** |
 | 6 | 원시 증거 번들 전달 | ⚠️ `test-results/` 에 보존, 미전달 |

@@ -5,6 +5,10 @@ import {
   openRecentConversation,
   prepareGuestPage,
 } from "./support/app-fixtures";
+import {
+  formatContrastSample,
+  measureContrastInScope,
+} from "./support/ui-audit";
 
 /**
  * RECON-A11Y-001, RECON-A11Y-002 and RECON-A11Y-003 were reported as axe
@@ -224,3 +228,88 @@ test.describe("RECON-A11Y-003: colour contrast at the gate SHA", () => {
     }
   }
 });
+
+/**
+ * RECON-A11Y-003, highlighted plan card. axe reporting zero is necessary but
+ * not sufficient here, for two reasons:
+ *
+ *  - the card stacks translucent surfaces (`bg-white/10`, `bg-white/15`) over
+ *    its own blue, so the colour that actually gets painted is a composite
+ *    that no single computed style holds;
+ *  - the struck-through regular price (`text-blue-100/80`) only renders while
+ *    a promotion is active, so a default page load never puts it on screen for
+ *    axe to look at.
+ *
+ * This measures the composited pixels for every text node inside the card, in
+ * both themes, with the promotion on -- so a sample cannot pass by being
+ * absent, and "no violations" cannot mean "not evaluated".
+ */
+const PROMOTION_CODE = "TOMVERSE-LAUNCH-50";
+
+async function mockPromotionalBilling(page: Page) {
+  await page.context().route("**/api/billing/config**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        plans: [
+          { id: "free", name: "Free", monthlyCredits: 300, priceCents: 0, currency: "USD", interval: "month", displayCurrency: "USD", displayMonthlyPriceAmount: 0, displayAnnualPriceAmount: 0 },
+          { id: "pro", name: "Pro", monthlyCredits: 3000, priceCents: 1900, currency: "USD", interval: "month", displayCurrency: "USD", displayMonthlyPriceAmount: 19, displayAnnualPriceAmount: 190 },
+          { id: "max", name: "Max", monthlyCredits: 10000, priceCents: 4900, currency: "USD", interval: "month", displayCurrency: "USD", displayMonthlyPriceAmount: 49, displayAnnualPriceAmount: 490 },
+        ],
+        creditPacks: [],
+        featuredPromotion: {
+          code: PROMOTION_CODE,
+          discountPercent: 50,
+          discountAmountCents: null,
+          durationMonths: 1,
+          appliesToPlanIds: ["pro", "max"],
+          billingIntervals: ["month"],
+          endsAt: "2099-03-01T00:00:00.000Z",
+        },
+        promotionPolicy: {
+          codesListed: true,
+          validation: "server_only",
+          annualDiscountStacking: "promotion_specific_default_denied",
+        },
+      }),
+    })
+  );
+}
+
+for (const scheme of ["light", "dark"] as const) {
+  test(`[${scheme}] the highlighted plan card meets AA on every composited surface`, async ({
+    page,
+  }) => {
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.setViewportSize({ width: 1280, height: 1000 });
+    await prepareGuestPage(page, "en");
+    await mockPromotionalBilling(page);
+    await mockPublicProofMetrics(page);
+    await page.goto("/pricing?lang=en");
+    await expect(page.getByText(PROMOTION_CODE)).toBeVisible();
+
+    // The blue card, and the credit-guide card that repeats its treatment.
+    const cards = page.locator(".bg-blue-700");
+    const cardCount = await cards.count();
+    expect(cardCount, "highlighted surfaces present").toBeGreaterThan(0);
+
+    const failures: string[] = [];
+    let measured = 0;
+    for (let index = 0; index < cardCount; index++) {
+      for (const sample of await measureContrastInScope(cards.nth(index))) {
+        measured += 1;
+        if (!sample.passes) {
+          failures.push(formatContrastSample(`card${index}/${sample.selector}`, sample));
+        }
+      }
+    }
+    // A silent zero would mean the walk found no text, not that it passed.
+    expect(measured, "text samples measured inside the card").toBeGreaterThan(8);
+    expect(failures, failures.join("\n")).toEqual([]);
+
+    // And the page as a whole, with the promotion-only markup on screen.
+    const violations = await runAxe(page, { rules: ["color-contrast"] });
+    expect(violations, summarize(violations)).toEqual([]);
+  });
+}

@@ -917,7 +917,7 @@ export function PricingPageContent() {
             <div className="rounded-[1.35rem] bg-white/80 px-5 py-4 backdrop-blur dark:bg-zinc-950/75">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <span className="inline-flex w-fit rounded-full bg-accent-promotion-500 px-3 py-1 text-xs font-bold uppercase tracking-[0.16em] text-white">
+                  <span className="inline-flex w-fit rounded-full bg-accent-promotion-700 px-3 py-1 text-xs font-bold uppercase tracking-[0.16em] text-white">
                     {saleCopy.badge}
                   </span>
                   <p className="mt-3 text-4xl font-black tracking-tight text-accent-promotion-700 dark:text-accent-promotion-200">
@@ -975,7 +975,7 @@ export function PricingPageContent() {
               // with 125% zoom, which is what pushed the whole page sideways.
               // `min-w-0` lets the track win; the content inside wraps instead.
               className={`relative flex min-h-full min-w-0 flex-col rounded-[1.75rem] border p-6 shadow-sm ${
-                plan.highlighted ? "border-blue-500 bg-blue-600 text-white shadow-2xl shadow-blue-950/20"
+                plan.highlighted ? "border-blue-600 bg-blue-700 text-white shadow-2xl shadow-blue-950/20"
                   : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/40"
               }`}
             >
@@ -983,7 +983,7 @@ export function PricingPageContent() {
                 <div className={`absolute -top-4 right-6 rounded-full px-4 py-2 text-xs font-bold shadow-xl ${
                   plan.highlighted
                     ? "bg-white text-blue-700 shadow-blue-950/20"
-                    : "bg-accent-promotion-500 text-white shadow-accent-promotion-950/20"
+                    : "bg-accent-promotion-700 text-white shadow-accent-promotion-950/20"
                 }`}>
                   {featuredPromotion.discountPercent}% OFF
                 </div>
@@ -1059,7 +1059,7 @@ export function PricingPageContent() {
                     : "border-accent-promotion-500/30 bg-accent-promotion-500/10"
                 }`}>
                   <div className="flex items-center justify-between gap-3">
-                    <span className={`rounded-full px-3 py-1 text-xs font-bold ${plan.highlighted ? "bg-white text-blue-700" : "bg-accent-promotion-500 text-white"}`}>
+                    <span className={`rounded-full px-3 py-1 text-xs font-bold ${plan.highlighted ? "bg-white text-blue-700" : "bg-accent-promotion-700 text-white"}`}>
                       {saleCopy.badge}
                     </span>
                     <span className={`text-xs font-bold ${plan.highlighted ? "text-blue-50" : "text-accent-promotion-600 dark:text-accent-promotion-400"}`}>
@@ -1358,7 +1358,7 @@ export function PricingPageContent() {
                   key={plan.id}
                   className={`rounded-2xl border p-5 ${
                     plan.id === "pro"
-                      ? "border-blue-500 bg-blue-600 text-white shadow-xl shadow-blue-950/15"
+                      ? "border-blue-600 bg-blue-700 text-white shadow-xl shadow-blue-950/15"
                       : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
                   }`}
                 >
