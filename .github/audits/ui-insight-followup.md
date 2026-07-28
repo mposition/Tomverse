@@ -607,6 +607,31 @@ overlay이므로 스크롤하면 어느 페이지에서든 무언가를 덮습�
 배치는 `covers text`. 두 경우 모두 finding이 나옵니다. 확인 후 임시 spec은
 삭제했습니다.
 
+### 13-8. 최종 전체 실행
+
+`desktop-chromium` **564 passed / 7 failed / 73 skipped**.
+
+| 실패 | 분류 | 근거 |
+|---|---|---|
+| `mobile-composer-contract` golden 2장 | `develop` 몫 | 기준선에서도 동일 실패, render 0픽셀 차이(13-6) |
+| `comparison-review › does not flash an unavailable setup before loading` | 사전 존재 flake | 아래 |
+| `account-flow`·`chat-keyboard-policy`·`comparison-review`(다른 1건)·`language-detection` | 부하 flake | 재실행 시 통과 |
+
+**`comparison-review` flake 귀속** 처음 12회 반복에서 이 branch 2회 실패,
+`develop` 기준선 0회로 나와 이 작업이 원인일 가능성을 의심했습니다. 그래서
+같은 부하 조건을 맞추려고 두 branch를 **번갈아 12회씩** 다시 돌렸습니다.
+
+| 회차 | 이 branch | `develop` 기준선 |
+|---|---:|---:|
+| 1 | 1/12 실패 | 4/12 실패 |
+| 2 | 2/12 실패 | 0/12 실패 |
+| 누계(초기 측정 포함) | **6/42** | **4/42** |
+
+양쪽이 같은 수준이며, 처음의 `0/18`은 우연이었습니다. 실패 지점은 `main`이
+`Loading...`인 채로 `recent-conversations-disclosure`를 5초 안에 찾지 못하는
+것으로, `source-grounding` flake와 같은 signature입니다. `develop`의 helper와
+mock을 그대로 쓰므로 이 작업과 무관합니다.
+
 ## 14. 최종 판정
 
 작업명령서의 **최종 완료 기준 14개 항목이 모두 충족**됐습니다.
