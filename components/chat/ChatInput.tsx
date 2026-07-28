@@ -83,6 +83,7 @@ import { UsageLimitModal } from "@/components/chat/UsageLimitModal";
 import { getChatCreditAllocation } from "@/lib/chatCreditAllocation";
 import { looksLikeStructuredText } from "@/lib/structuredPasteDetection";
 import { useIsMobileShell } from "@/components/chat/useIsMobileShell";
+import { useKeyboardInset } from "@/components/chat/useVisualViewport";
 import {
   getChatEnterKeyAction,
   isComposingKeydown,
@@ -1629,7 +1630,7 @@ export function ChatInput({
             ? "border-red-200 bg-red-50 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
             : webSearchState.tone === "warning"
               ? "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100"
-              : "border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-200"
+              : "border-accent-web-search-200 bg-accent-web-search-50 text-accent-web-search-800 dark:border-accent-web-search-900/60 dark:bg-accent-web-search-950/30 dark:text-accent-web-search-200"
         }`}
       >
         <Globe2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -1678,7 +1679,7 @@ export function ChatInput({
     {isDeepResearchPending && (
       <div
         data-testid="deep-research-chip"
-        className={`flex min-w-0 max-w-full items-center gap-1.5 rounded-full border border-violet-200 bg-violet-50 pl-3 pr-1.5 text-xs font-bold text-violet-800 dark:border-violet-900/60 dark:bg-violet-950/30 dark:text-violet-200 ${isMobileShell ? "h-8" : "h-9"}`}
+        className={`flex min-w-0 max-w-full items-center gap-1.5 rounded-full border border-accent-deep-research-200 bg-accent-deep-research-50 pl-3 pr-1.5 text-xs font-bold text-accent-deep-research-800 dark:border-accent-deep-research-900/60 dark:bg-accent-deep-research-950/30 dark:text-accent-deep-research-200 ${isMobileShell ? "h-8" : "h-9"}`}
         title={t("chat.deepResearchChipTooltip")}
       >
         <Microscope className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -1688,7 +1689,7 @@ export function ChatInput({
           onClick={() => onDismissDeepResearchChip?.()}
           aria-label={t("chat.removeDeepResearchChip")}
           title={t("chat.removeDeepResearchChip")}
-          className={`relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-violet-500 before:absolute before:content-[''] hover:bg-violet-100 dark:hover:bg-violet-900/40 ${isMobileShell ? "before:-inset-2.5" : "before:-inset-1"}`}
+          className={`relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-accent-deep-research-500 before:absolute before:content-[''] hover:bg-accent-deep-research-100 dark:hover:bg-accent-deep-research-900/40 ${isMobileShell ? "before:-inset-2.5" : "before:-inset-1"}`}
         >
           <X className="h-3.5 w-3.5" />
         </button>
@@ -1721,6 +1722,22 @@ export function ChatInput({
     getMobileModelMenuSnapshot,
     getServerMobileModelMenuSnapshot
   );
+
+  // UI-001. The sheet below is `position: fixed`, and a fixed element is laid
+  // out against the *layout* viewport -- which iOS Safari (and Android Chrome
+  // in its default mode) leaves at full height when the keyboard opens. So
+  // `bottom: 0.5rem` resolves to half a rem above the bottom of a viewport the
+  // user can no longer see, and the footer that carries "Done" plus the last
+  // candidate rows go under the keyboard. `dvh` does not help: it tracks the
+  // dynamic viewport (URL bar), not the keyboard.
+  //
+  // Adding the occluded height back as a bottom inset is the whole fix. The
+  // sheet's own `flex` contract does the rest: header, search, selected summary
+  // and footer are all `shrink-0`, the candidate list is the only `flex-1`
+  // region, so a shorter sheet takes the height out of the list -- which
+  // scrolls -- and never out of the controls that end the task.
+  const keyboardInset = useKeyboardInset();
+  const compactSheetKeyboardInset = isMobileModelMenu ? keyboardInset : 0;
 
   return (
       <div className={variant === "floating"
@@ -1759,7 +1776,7 @@ export function ChatInput({
             </div>
           )}
           {addOnCreditsForRequest > 0 && (
-            <div className="mb-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold leading-5 text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-100">
+            <div className="mb-2 rounded-xl border border-status-success-200 bg-status-success-50 px-3 py-2 text-xs font-semibold leading-5 text-status-success-900 dark:border-status-success-900/60 dark:bg-status-success-950/30 dark:text-status-success-100">
               {interpolateCopy(t("chat.addOnCreditsWillBeUsed"), {
                 credits: addOnCreditsForRequest,
               })}
@@ -1877,7 +1894,7 @@ export function ChatInput({
           {showWebSearchSuggestion && (
             <div
               data-testid="web-search-auto-suggestion"
-              className="mb-2 rounded-2xl border border-sky-200 bg-sky-50 px-3 py-3 dark:border-sky-900/60 dark:bg-sky-950/20"
+              className="mb-2 rounded-2xl border border-accent-web-search-200 bg-accent-web-search-50 px-3 py-3 dark:border-accent-web-search-900/60 dark:bg-accent-web-search-950/20"
             >
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                 <div className="min-w-0 flex-1">
@@ -1900,7 +1917,7 @@ export function ChatInput({
                         setDismissedWebSearchSuggestionKey(webSearchSuggestionKey);
                       }
                     }}
-                    className="rounded-xl bg-sky-600 px-3 py-2 text-[11px] font-bold text-white hover:bg-sky-500"
+                    className="rounded-xl bg-accent-web-search-600 px-3 py-2 text-[11px] font-bold text-white hover:bg-accent-web-search-500"
                   >
                     {t("chat.webSearchSuggestionAccept")}
                   </button>
@@ -1917,7 +1934,7 @@ export function ChatInput({
                         setDismissedWebSearchSuggestionKey(webSearchSuggestionKey);
                       }
                     }}
-                    className="rounded-xl border border-sky-300 bg-white px-3 py-2 text-[11px] font-bold text-sky-900 hover:bg-sky-100 dark:border-sky-800 dark:bg-zinc-950 dark:text-sky-200"
+                    className="rounded-xl border border-accent-web-search-300 bg-white px-3 py-2 text-[11px] font-bold text-accent-web-search-900 hover:bg-accent-web-search-100 dark:border-accent-web-search-800 dark:bg-zinc-950 dark:text-accent-web-search-200"
                   >
                     {t("chat.webSearchSuggestionDecline")}
                   </button>
@@ -2164,7 +2181,14 @@ export function ChatInput({
                 size="xs"
               />
             ) : (
-              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[11px] font-bold text-white">
+              // The same number is the visible label beside it
+              // ("3 AIs") and part of the button's accessible name, so the
+              // badge is a decorative repeat and stays out of the
+              // accessibility tree.
+              <span
+                aria-hidden="true"
+                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[11px] font-bold text-white"
+              >
                 {activeSelectedModels.length}
               </span>
             )}
@@ -2273,6 +2297,18 @@ export function ChatInput({
                     : t("chat.moreActions")
               }
               tabIndex={-1}
+              // Exposed for the responsive suite so a keyboard fixture can
+              // assert the sheet actually reacted, rather than inferring it
+              // from a rect that would also pass with no keyboard at all.
+              data-keyboard-inset={compactSheetKeyboardInset || undefined}
+              style={
+                compactSheetKeyboardInset > 0
+                  ? {
+                      bottom: `calc(${compactSheetKeyboardInset}px + 0.5rem + env(safe-area-inset-bottom))`,
+                      maxHeight: `calc(100dvh - ${compactSheetKeyboardInset}px - 1rem - env(safe-area-inset-top) - env(safe-area-inset-bottom))`,
+                    }
+                  : undefined
+              }
               className={`fixed inset-x-2 z-[100] flex max-w-[calc(100%_-_1rem)] flex-col overflow-hidden rounded-3xl border border-zinc-200 bg-white p-2 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900 md:rounded-2xl ${
                 menuView === "models"
                   ? "bottom-[calc(0.5rem+env(safe-area-inset-bottom))] top-[calc(0.5rem+env(safe-area-inset-top))] max-h-none md:inset-x-auto md:left-1/2 md:right-auto md:-translate-x-1/2 md:top-[5vh] md:bottom-[5vh] md:h-[90vh] md:max-h-[900px] md:w-[min(94vw,1000px)] md:max-w-[min(94vw,1000px)]"
@@ -2289,13 +2325,20 @@ export function ChatInput({
                         ? t("chat.toolsWebSearch")
                         : t("chat.moreActions")}
                   </p>
-                  <p className="text-xs text-zinc-500">
-                    {menuView === "models"
-                      ? `${selectedModels.length}/${maxSelectableModels} ${selectedModels.length === 1 ? t("chat.modelsSelectedOne") : t("chat.modelsSelectedOther")}`
-                      : menuView === "webSearch"
+                  {/*
+                    UI-010: the selection count belongs to the picker panel's
+                    own header, immediately above the candidates it applies to.
+                    Repeating it here put "3/3" twice in consecutive rows and
+                    pushed the first candidate further down a phone screen --
+                    the row this header still owns is the dialog's purpose.
+                  */}
+                  {menuView !== "models" && (
+                    <p className="text-xs text-zinc-500">
+                      {menuView === "webSearch"
                         ? t("chat.toolsWebSearchDescription")
                         : t("chat.uploadFromComputer")}
-                  </p>
+                    </p>
+                  )}
                 </div>
                 <button
                   type="button"
@@ -2349,7 +2392,7 @@ export function ChatInput({
                     onClick={() => setMenuView("webSearch")}
                     className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
                   >
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-sky-500/10 text-sky-500">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-web-search-500/10 text-accent-web-search-500">
                       <Globe2 className="h-5 w-5" />
                     </span>
                     <span className="flex min-w-0 flex-col">
@@ -2399,7 +2442,7 @@ export function ChatInput({
                         }}
                         className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-zinc-800"
                       >
-                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-violet-500/10 text-violet-500">
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-deep-research-500/10 text-accent-deep-research-500">
                           <Microscope className="h-5 w-5" />
                         </span>
                         <span className="flex min-w-0 flex-col">
@@ -2442,7 +2485,7 @@ export function ChatInput({
                     }}
                     className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
                   >
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-purple-500/10 text-purple-500">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-model-catalogue-500/10 text-accent-model-catalogue-500">
                       <Boxes className="h-5 w-5" />
                     </span>
                     <span className="flex min-w-0 flex-col">
@@ -2479,10 +2522,10 @@ export function ChatInput({
                         closeMenu(false);
                       }}
                       className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
-                        webSearchMode === mode ? "bg-sky-500/10" : ""
+                        webSearchMode === mode ? "bg-accent-web-search-500/10" : ""
                       }`}
                     >
-                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-sky-500/10 text-sky-500">
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-web-search-500/10 text-accent-web-search-500">
                         <Globe2 className="h-5 w-5" />
                       </span>
                       <span className="flex min-w-0 flex-1 flex-col">
@@ -2502,7 +2545,7 @@ export function ChatInput({
                         </span>
                       </span>
                       {webSearchMode === mode && (
-                        <Check className="h-4 w-4 shrink-0 text-sky-500" aria-hidden="true" />
+                        <Check className="h-4 w-4 shrink-0 text-accent-web-search-500" aria-hidden="true" />
                       )}
                     </button>
                   ))}
@@ -2606,6 +2649,7 @@ export function ChatInput({
                         isGuestMode={isGuestMode}
                         isMobileShell={isMobileShell}
                         isCompactLayout={isMobileModelMenu}
+                        isKeyboardCompact={compactSheetKeyboardInset > 0}
                         modelStatuses={liveModelStatuses}
                         hasImageAttachments={hasImageAttachments}
                         favoriteModelIds={favoriteModelIds}

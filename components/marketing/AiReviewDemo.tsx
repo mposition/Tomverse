@@ -203,9 +203,9 @@ export function AiReviewDemo({
         className="h-[3px] w-full bg-gradient-to-r from-tomverse-accent-start via-tomverse-accent-mid to-tomverse-accent-end"
       />
       <div className="grid gap-0 lg:grid-cols-[0.9fr_1.1fr]">
-        <div className="border-b border-blue-100 bg-gradient-to-br from-blue-50 via-white to-violet-50 p-5 dark:border-blue-900/40 dark:from-blue-950/40 dark:via-zinc-950 dark:to-violet-950/30 sm:p-7 lg:border-b-0 lg:border-r">
+        <div className="border-b border-blue-100 bg-gradient-to-br from-accent-ai-review-mid-50 via-white to-accent-ai-review-end-50 p-5 dark:border-blue-900/40 dark:from-accent-ai-review-mid-950/40 dark:via-zinc-950 dark:to-accent-ai-review-end-950/30 sm:p-7 lg:border-b-0 lg:border-r">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-cyan-700 via-blue-600 to-purple-600 px-3 py-1 text-xs font-bold text-white">
+            <span className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-accent-ai-review-start-700 via-accent-ai-review-mid-600 to-accent-ai-review-end-600 px-3 py-1 text-xs font-bold text-white">
               <Sparkles className="h-3.5 w-3.5" />
               {text.eyebrow}
             </span>
@@ -251,7 +251,7 @@ export function AiReviewDemo({
           <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-tomverse-review-selected-text">
             <span
               aria-hidden="true"
-              className="h-1.5 w-1.5 shrink-0 rounded-full bg-gradient-to-br from-cyan-400 via-blue-400 to-purple-400"
+              className="h-1.5 w-1.5 shrink-0 rounded-full bg-gradient-to-br from-accent-ai-review-start-400 via-accent-ai-review-mid-400 to-accent-ai-review-end-400"
             />
             {text.after}
           </p>

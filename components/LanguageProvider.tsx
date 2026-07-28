@@ -9,8 +9,9 @@ import { fr } from "@/locales/fr";
 import { de } from "@/locales/de";
 import { es } from "@/locales/es";
 import { pt } from "@/locales/pt";
+import { isLanguage, type Language } from "@/lib/language";
 
-export type Language = "ko" | "en" | "zh" | "fr" | "de" | "es" | "pt";
+export type { Language };
 
 interface LanguageContextType {
     lang: Language;
@@ -22,15 +23,6 @@ const LanguageContext = createContext<LanguageContextType | undefined>(undefined
 
 const dictionaries = { ko, en, zh, fr, de, es, pt };
 const LANGUAGE_STORAGE_KEY = "tomverse_language";
-
-const isLanguage = (value: unknown): value is Language =>
-    value === "ko" ||
-    value === "en" ||
-    value === "zh" ||
-    value === "fr" ||
-    value === "de" ||
-    value === "es" ||
-    value === "pt";
 
 const lookup = (dictionary: unknown, keys: string[]) => {
     let value = dictionary;

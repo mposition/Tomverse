@@ -102,9 +102,14 @@ test.describe("sign-in legal consent localization", () => {
 
     await expect(
       card.getByText(
-        "By logging in, you agree to Tomverse's Terms of Service and Privacy Policy."
+        "By logging in, you agree to Tomverse's Terms and Conditions and Privacy Policy."
       )
     ).toHaveCount(1);
+
+    // UI-009: the body sentence, the link label and the destination page all
+    // name the same document. "Terms of Service" must not come back as a
+    // second name for it.
+    expect(await card.innerText()).not.toContain("Terms of Service");
 
     const termsLink = card.getByRole("link", {
       name: "Terms and Conditions",

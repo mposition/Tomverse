@@ -22,7 +22,7 @@ import { ComparisonActionRail } from "@/components/chat/ComparisonActionRail";
 import { GuestVerificationSheet } from "@/components/chat/GuestVerificationSheet";
 import { useGuestVerification } from "@/components/chat/GuestVerificationProvider";
 import { ModeInfoSheet } from "@/components/chat/ModeInfoSheet";
-import { useCompactBottomDock } from "@/components/chat/useCompactBottomDock";
+import { useCompactBottomDock } from "@/components/chat/useVisualViewport";
 import { chatModelSummaryCopy } from "@/components/chat/chatModelSummaryCopy";
 import { deriveComparisonReadiness } from "@/lib/comparisonReadiness";
 import { buildChatModelSummary } from "@/lib/chatModelSummary";
@@ -510,6 +510,13 @@ export function MobileChatShell({
           >
             {isMultiModelConversation ? (
               <>
+                {/*
+                  Glyph-sized count drawn inside a 16px badge, already
+                  aria-hidden, with the same number spelled out in the label
+                  beside it and in the button's accessible name. A deliberate
+                  exception to the 11px consumer-text floor (UI-007), marked so
+                  the audit can see it rather than infer it.
+                */}
                 <span
                   aria-hidden="true"
                   className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[11px] font-bold text-white"

@@ -74,6 +74,96 @@
   --color-tomverse-review-selected: var(--tomverse-review-selected);
   --color-tomverse-review-selected-border: var(--tomverse-review-selected-border);
   --color-tomverse-review-selected-text: var(--tomverse-review-selected-text);
+
+  /*
+   * UI-012 (option B): one namespace per semantic role.
+   *
+   * Every entry resolves to the Tailwind palette step the role already
+   * rendered, so this names the existing colours rather than changing them.
+   * Roles stay separate even when two of them resolve to the same value --
+   * accent-promotion and status-success are both emerald today, and a change
+   * to one must not silently move the other.
+   *
+   * See AGENTS.md "Accent colour roles" for the usage rule and
+   * scripts/check-accent-tokens.mjs for what enforces it.
+   */
+  /* accent-account: Account identity (avatar). */
+  --color-accent-account-400: var(--color-teal-400);
+  --color-accent-account-700: var(--color-teal-700);
+
+  /* accent-ai-review: AI Review only. The cyan -> blue -> purple sequence is reserved for it; no other role may use the full gradient. */
+  --color-accent-ai-review-end-50: var(--color-violet-50);
+  --color-accent-ai-review-mid-50: var(--color-blue-50);
+  --color-accent-ai-review-start-50: var(--color-cyan-50);
+  --color-accent-ai-review-end-300: var(--color-purple-300);
+  --color-accent-ai-review-start-300: var(--color-cyan-300);
+  --color-accent-ai-review-end-400: var(--color-purple-400);
+  --color-accent-ai-review-mid-400: var(--color-blue-400);
+  --color-accent-ai-review-start-400: var(--color-cyan-400);
+  --color-accent-ai-review-end-600: var(--color-purple-600);
+  --color-accent-ai-review-mid-600: var(--color-blue-600);
+  --color-accent-ai-review-start-600: var(--color-cyan-600);
+  --color-accent-ai-review-start-700: var(--color-cyan-700);
+  --color-accent-ai-review-end-950: var(--color-violet-950);
+  --color-accent-ai-review-mid-950: var(--color-blue-950);
+  --color-accent-ai-review-start-950: var(--color-cyan-950);
+
+  /* accent-deep-research: Deep Research tool. */
+  --color-accent-deep-research-50: var(--color-violet-50);
+  --color-accent-deep-research-100: var(--color-violet-100);
+  --color-accent-deep-research-200: var(--color-violet-200);
+  --color-accent-deep-research-400: var(--color-violet-400);
+  --color-accent-deep-research-500: var(--color-violet-500);
+  --color-accent-deep-research-600: var(--color-violet-600);
+  --color-accent-deep-research-700: var(--color-violet-700);
+  --color-accent-deep-research-800: var(--color-violet-800);
+  --color-accent-deep-research-900: var(--color-violet-900);
+  --color-accent-deep-research-950: var(--color-violet-950);
+
+  /* accent-model-catalogue: The model catalogue entry point. */
+  --color-accent-model-catalogue-500: var(--color-purple-500);
+
+  /* accent-plan-max: Max plan identity. */
+  --color-accent-plan-max-50: var(--color-purple-50);
+  --color-accent-plan-max-100: var(--color-purple-100);
+  --color-accent-plan-max-200: var(--color-purple-200);
+  --color-accent-plan-max-300: var(--color-purple-300);
+  --color-accent-plan-max-500: var(--color-purple-500);
+  --color-accent-plan-max-600: var(--color-purple-600);
+  --color-accent-plan-max-700: var(--color-purple-700);
+  --color-accent-plan-max-900: var(--color-purple-900);
+  --color-accent-plan-max-950: var(--color-purple-950);
+
+  /* accent-promotion: Pricing promotions. Separate from status-success on purpose: same value today, different meaning. */
+  --color-accent-promotion-200: var(--color-emerald-200);
+  --color-accent-promotion-300: var(--color-emerald-300);
+  --color-accent-promotion-400: var(--color-emerald-400);
+  --color-accent-promotion-500: var(--color-emerald-500);
+  --color-accent-promotion-600: var(--color-emerald-600);
+  --color-accent-promotion-700: var(--color-emerald-700);
+  --color-accent-promotion-950: var(--color-emerald-950);
+
+  /* accent-web-search: Web search tool. */
+  --color-accent-web-search-50: var(--color-sky-50);
+  --color-accent-web-search-100: var(--color-sky-100);
+  --color-accent-web-search-200: var(--color-sky-200);
+  --color-accent-web-search-300: var(--color-sky-300);
+  --color-accent-web-search-500: var(--color-sky-500);
+  --color-accent-web-search-600: var(--color-sky-600);
+  --color-accent-web-search-800: var(--color-sky-800);
+  --color-accent-web-search-900: var(--color-sky-900);
+  --color-accent-web-search-950: var(--color-sky-950);
+
+  /* status-success: Success / verified state. Separate from accent-promotion on purpose. */
+  --color-status-success-50: var(--color-emerald-50);
+  --color-status-success-100: var(--color-emerald-100);
+  --color-status-success-200: var(--color-emerald-200);
+  --color-status-success-300: var(--color-emerald-300);
+  --color-status-success-500: var(--color-emerald-500);
+  --color-status-success-600: var(--color-emerald-600);
+  --color-status-success-700: var(--color-emerald-700);
+  --color-status-success-900: var(--color-emerald-900);
+  --color-status-success-950: var(--color-emerald-950);
 }
 
 :root.dark {

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { displayHeadingClass } from "@/lib/displayHeading";
 import { useEffect, useRef } from "react";
 import {
   Calculator,
@@ -900,21 +901,21 @@ export function PricingPageContent() {
       <section className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8 lg:py-20">
         <div className="mx-auto max-w-4xl text-center">
           <p className="text-sm font-bold uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">{content.eyebrow}</p>
-          <h1 className="mt-4 text-4xl font-black leading-tight sm:text-6xl">{content.title}</h1>
+          <h1 className={`mt-4 text-4xl font-bold leading-tight sm:text-6xl ${displayHeadingClass(lang)}`}>{content.title}</h1>
           <p className="mx-auto mt-5 max-w-2xl text-lg leading-8 text-zinc-600 dark:text-zinc-300">{content.description}</p>
           {featuredPromotion ? (
-          <div className="mx-auto mt-6 max-w-3xl overflow-hidden rounded-3xl border border-emerald-400/40 bg-gradient-to-br from-emerald-400/15 via-blue-500/10 to-transparent p-1 text-left shadow-2xl shadow-emerald-950/10">
+          <div className="mx-auto mt-6 max-w-3xl overflow-hidden rounded-3xl border border-accent-promotion-400/40 bg-gradient-to-br from-accent-promotion-400/15 via-blue-500/10 to-transparent p-1 text-left shadow-2xl shadow-accent-promotion-950/10">
             <div className="rounded-[1.35rem] bg-white/80 px-5 py-4 backdrop-blur dark:bg-zinc-950/75">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <span className="inline-flex w-fit rounded-full bg-emerald-500 px-3 py-1 text-xs font-bold uppercase tracking-[0.16em] text-white">
+                  <span className="inline-flex w-fit rounded-full bg-accent-promotion-500 px-3 py-1 text-xs font-bold uppercase tracking-[0.16em] text-white">
                     {saleCopy.badge}
                   </span>
-                  <p className="mt-3 text-4xl font-black tracking-tight text-emerald-700 dark:text-emerald-200">
+                  <p className="mt-3 text-4xl font-black tracking-tight text-accent-promotion-700 dark:text-accent-promotion-200">
                     {featuredPromotion.discountPercent}% OFF
                   </p>
                 </div>
-                <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm font-bold text-emerald-700 dark:text-emerald-200">
+                <div className="rounded-2xl border border-accent-promotion-500/20 bg-accent-promotion-500/10 px-4 py-3 text-sm font-bold text-accent-promotion-700 dark:text-accent-promotion-200">
                   {saleCopy.duration}
                 </div>
               </div>
@@ -956,7 +957,12 @@ export function PricingPageContent() {
             return (
             <article
               key={plan.name}
-              className={`relative flex min-h-full flex-col rounded-[1.75rem] border p-6 shadow-sm ${
+              // UI-005. `min-width: auto` is a grid item's default, so this
+              // card refused to shrink below its own min-content width and
+              // overflowed its track -- 287px inside a 224px column at 320px
+              // with 125% zoom, which is what pushed the whole page sideways.
+              // `min-w-0` lets the track win; the content inside wraps instead.
+              className={`relative flex min-h-full min-w-0 flex-col rounded-[1.75rem] border p-6 shadow-sm ${
                 plan.highlighted ? "border-blue-500 bg-blue-600 text-white shadow-2xl shadow-blue-950/20"
                   : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/40"
               }`}
@@ -965,12 +971,19 @@ export function PricingPageContent() {
                 <div className={`absolute -top-4 right-6 rounded-full px-4 py-2 text-xs font-bold shadow-xl ${
                   plan.highlighted
                     ? "bg-white text-blue-700 shadow-blue-950/20"
-                    : "bg-emerald-500 text-white shadow-emerald-950/20"
+                    : "bg-accent-promotion-500 text-white shadow-accent-promotion-950/20"
                 }`}>
                   {featuredPromotion.discountPercent}% OFF
                 </div>
               ) : null}
-              <div className="flex min-h-8 items-start justify-between gap-3">
+              {/*
+                UI-005. The eyebrow wraps but the badge is `shrink-0`, so on a
+                narrow column the pair demanded more width than the card had and
+                took the page with it. Wrapping lets the badge drop to its own
+                line instead of widening the card, and the badge keeps its full
+                label rather than being squeezed.
+              */}
+              <div className="flex min-h-8 flex-wrap items-start justify-between gap-x-3 gap-y-2">
                 <p className={`text-xs font-bold uppercase tracking-[0.18em] ${plan.highlighted ? "text-blue-100" : "text-blue-600 dark:text-blue-400"}`}>
                   {plan.eyebrow}
                 </p>
@@ -980,7 +993,7 @@ export function PricingPageContent() {
                   </span>
                 )}
               </div>
-              <h2 className="mt-4 text-3xl font-black">{plan.name}</h2>
+              <h2 className={`mt-4 text-3xl font-black ${displayHeadingClass(lang)}`}>{plan.name}</h2>
               <p className={`mt-3 min-h-14 text-sm leading-6 ${plan.highlighted ? "text-blue-50" : "text-zinc-600 dark:text-zinc-300"}`}>
                 {plan.description}
               </p>
@@ -995,9 +1008,21 @@ export function PricingPageContent() {
                   <span className="sr-only">
                     {formatPriceWithPeriod(displayPrice, plan.period, lang)}
                   </span>
-                  <span aria-hidden="true">
-                    <span className="text-4xl font-black">{displayPrice}</span>
-                    <span className={`ml-2 text-sm font-bold ${plan.highlighted ? "text-blue-100" : "text-zinc-500 dark:text-zinc-400"}`}>
+                  {/* UI-005. A 36px price and its period label sat on one
+                      inline line; at 320px with 200% zoom the pair was wider
+                      than the card's content box and pushed the page sideways
+                      by the last few pixels. A wrapping baseline row lets the
+                      period drop under the price instead.
+
+                      The price itself also has to be able to shrink. It is one
+                      unbreakable token, so at a fixed 36px it *is* the card's
+                      min-content, and a grid item cannot go below that -- it
+                      pushes the page instead. The clamp only engages below
+                      ~360px of CSS width, which in practice means a zoomed
+                      phone; every real phone width still renders it at 36px. */}
+                  <span aria-hidden="true" className="flex flex-wrap items-baseline gap-x-2">
+                    <span className="text-[clamp(1.5rem,10vw,2.25rem)] font-black">{displayPrice}</span>
+                    <span className={`text-sm font-bold ${plan.highlighted ? "text-blue-100" : "text-zinc-500 dark:text-zinc-400"}`}>
                       {formatBillingPeriodLabel(plan.period, lang)}
                     </span>
                   </span>
@@ -1006,13 +1031,13 @@ export function PricingPageContent() {
                 <div className={`mt-8 rounded-2xl border p-4 ${
                   plan.highlighted
                     ? "border-white/25 bg-white/15"
-                    : "border-emerald-500/30 bg-emerald-500/10"
+                    : "border-accent-promotion-500/30 bg-accent-promotion-500/10"
                 }`}>
                   <div className="flex items-center justify-between gap-3">
-                    <span className={`rounded-full px-3 py-1 text-xs font-bold ${plan.highlighted ? "bg-white text-blue-700" : "bg-emerald-500 text-white"}`}>
+                    <span className={`rounded-full px-3 py-1 text-xs font-bold ${plan.highlighted ? "bg-white text-blue-700" : "bg-accent-promotion-500 text-white"}`}>
                       {saleCopy.badge}
                     </span>
-                    <span className={`text-xs font-bold ${plan.highlighted ? "text-blue-50" : "text-emerald-600 dark:text-emerald-400"}`}>
+                    <span className={`text-xs font-bold ${plan.highlighted ? "text-blue-50" : "text-accent-promotion-600 dark:text-accent-promotion-400"}`}>
                       {featuredPromotion?.discountPercent}% OFF
                     </span>
                   </div>
@@ -1058,7 +1083,7 @@ export function PricingPageContent() {
                 }`}>
                   <div className="flex items-center justify-between gap-3">
                     <span>{annualCopy.annual}</span>
-                    <span className={`rounded-full px-2.5 py-1 ${plan.highlighted ? "bg-white text-blue-700" : "bg-emerald-500/10 text-emerald-500"}`}>
+                    <span className={`rounded-full px-2.5 py-1 ${plan.highlighted ? "bg-white text-blue-700" : "bg-accent-promotion-500/10 text-accent-promotion-500"}`}>
                       {annualCopy.save}
                     </span>
                   </div>
@@ -1100,9 +1125,16 @@ export function PricingPageContent() {
               )}
               <ul className="mt-8 space-y-3">
                 {plan.features.map((feature) => (
+                  // UI-005. The bullet's icon is `shrink-0` and the label was a
+                  // bare text node, so the row's minimum width was the icon plus
+                  // the longest word -- more than the card's content box has at
+                  // 320px with 200% zoom. Wrapping the label in a `min-w-0`
+                  // block lets the row shrink, and `break-words` breaks a word
+                  // that could not have fitted a line anyway rather than
+                  // widening the page.
                   <li key={feature} className={`flex gap-3 text-sm font-semibold leading-6 ${plan.highlighted ? "text-white" : "text-zinc-700 dark:text-zinc-300"}`}>
                     <CheckCircle2 className={`mt-0.5 h-4 w-4 shrink-0 ${plan.highlighted ? "text-white" : "text-blue-600 dark:text-blue-400"}`} />
-                    {feature}
+                    <span className="min-w-0 break-words">{feature}</span>
                   </li>
                 ))}
               </ul>
@@ -1113,15 +1145,15 @@ export function PricingPageContent() {
 
         <section
           data-testid="pricing-credit-packs"
-          className="mt-16 overflow-hidden rounded-[2rem] border border-emerald-500/25 bg-gradient-to-br from-emerald-500/10 via-white to-blue-500/5 dark:via-zinc-950 dark:to-blue-950/20"
+          className="mt-16 overflow-hidden rounded-[2rem] border border-accent-promotion-500/25 bg-gradient-to-br from-accent-promotion-500/10 via-white to-blue-500/5 dark:via-zinc-950 dark:to-blue-950/20"
         >
           <div className="grid gap-6 p-5 sm:p-7 lg:grid-cols-[1fr_auto] lg:items-end">
             <div className="max-w-3xl">
-              <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-emerald-700 dark:text-emerald-300">
+              <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-accent-promotion-700 dark:text-accent-promotion-300">
                 <Coins className="h-4 w-4" />
                 {creditPackGuide.eyebrow}
               </p>
-              <h2 className="mt-3 text-3xl font-black sm:text-4xl">{creditPackGuide.title}</h2>
+              <h2 className={`mt-3 text-3xl font-black sm:text-4xl ${displayHeadingClass(lang)}`}>{creditPackGuide.title}</h2>
               <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">
                 {creditPackGuide.description}
               </p>
@@ -1133,13 +1165,13 @@ export function PricingPageContent() {
                   cta_location: "pricing_credit_pack_section",
                 })
               }
-              className="inline-flex h-11 items-center justify-center rounded-xl bg-emerald-600 px-5 text-sm font-bold text-white transition hover:bg-emerald-500"
+              className="inline-flex h-11 items-center justify-center rounded-xl bg-accent-promotion-600 px-5 text-sm font-bold text-white transition hover:bg-accent-promotion-500"
             >
               {creditPackGuide.purchaseCta}
             </Link>
           </div>
 
-          <div className="grid gap-4 border-t border-emerald-500/20 p-5 sm:p-7 lg:grid-cols-3">
+          <div className="grid gap-4 border-t border-accent-promotion-500/20 p-5 sm:p-7 lg:grid-cols-3">
             {publicCreditPacks.length === 0 ? (
               // Placeholders reserve the geometry the real packs will occupy.
               // A single line of loading text here meant the section grew by
@@ -1189,11 +1221,11 @@ export function PricingPageContent() {
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <h3 className="text-lg font-black">{creditPackGuide.packNames[pack.id]}</h3>
-                      <p className="mt-2 text-xs font-bold uppercase tracking-[0.12em] text-emerald-700 dark:text-emerald-300">
+                      <p className="mt-2 text-xs font-bold uppercase tracking-[0.12em] text-accent-promotion-700 dark:text-accent-promotion-300">
                         {creditPackGuide.availableFor}: {pack.allowedPlans.join(" / ")}
                       </p>
                     </div>
-                    <span className="shrink-0 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
+                    <span className="shrink-0 rounded-full bg-accent-promotion-500/10 px-2.5 py-1 text-[11px] font-bold text-accent-promotion-700 dark:text-accent-promotion-300">
                       {creditPackGuide.oneTime}
                     </span>
                   </div>
@@ -1201,7 +1233,7 @@ export function PricingPageContent() {
                     {numberFormatter.format(pack.credits)}{" "}
                     <span className="text-sm text-zinc-500 dark:text-zinc-400">{creditPackGuide.credits}</span>
                   </p>
-                  <p className="mt-1 text-xl font-black text-emerald-700 dark:text-emerald-300">
+                  <p className="mt-1 text-xl font-black text-accent-promotion-700 dark:text-accent-promotion-300">
                     {formatBillingMinor(
                       pack.priceMinor,
                       pack.currency as BillingCurrency,
@@ -1219,7 +1251,7 @@ export function PricingPageContent() {
             )}
           </div>
 
-          <div className="grid gap-5 border-t border-emerald-500/20 bg-white/60 p-5 dark:bg-zinc-950/40 sm:p-7 lg:grid-cols-[0.75fr_1.25fr]">
+          <div className="grid gap-5 border-t border-accent-promotion-500/20 bg-white/60 p-5 dark:bg-zinc-950/40 sm:p-7 lg:grid-cols-[0.75fr_1.25fr]">
             <div>
               <h3 className="font-bold">{creditPackGuide.policyTitle}</h3>
               <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">
@@ -1229,7 +1261,7 @@ export function PricingPageContent() {
             <ul className="grid gap-3">
               {creditPackGuide.policies.map((policy) => (
                 <li key={policy} className="flex gap-3 text-sm font-semibold leading-6 text-zinc-700 dark:text-zinc-200">
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-300" />
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-accent-promotion-600 dark:text-accent-promotion-300" />
                   {policy}
                 </li>
               ))}
@@ -1248,14 +1280,14 @@ export function PricingPageContent() {
                   <Calculator className="h-4 w-4" />
                   {creditGuide.eyebrow}
                 </p>
-                <h2 className="mt-3 text-3xl font-black sm:text-4xl">
+                <h2 className={`mt-3 text-3xl font-black sm:text-4xl ${displayHeadingClass(lang)}`}>
                   {creditGuide.title}
                 </h2>
                 <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">
                   {creditGuide.description}
                 </p>
               </div>
-              <span className="w-fit rounded-full border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-xs font-bold text-emerald-700 dark:text-emerald-300">
+              <span className="w-fit rounded-full border border-accent-promotion-500/30 bg-accent-promotion-500/10 px-4 py-2 text-xs font-bold text-accent-promotion-700 dark:text-accent-promotion-300">
                 {creditGuide.typicalLabel}
               </span>
             </div>
@@ -1307,7 +1339,7 @@ export function PricingPageContent() {
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <h3 className="text-2xl font-black">{plan.name}</h3>
+                      <h3 className={`text-2xl font-black ${displayHeadingClass(lang)}`}>{plan.name}</h3>
                       <p
                         className={`mt-1 text-xs font-bold ${
                           plan.id === "pro"
@@ -1396,7 +1428,7 @@ export function PricingPageContent() {
 
         <section className="mt-16 rounded-[2rem] border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40 sm:p-6">
           <div className="max-w-3xl">
-            <h2 className="text-3xl font-black">{content.compareTitle}</h2>
+            <h2 className={`text-3xl font-black ${displayHeadingClass(lang)}`}>{content.compareTitle}</h2>
             <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">{content.compareDescription}</p>
           </div>
           <div className="mt-8 overflow-x-auto">
@@ -1427,7 +1459,15 @@ export function PricingPageContent() {
         </section>
 
         <section className="mt-16 grid gap-5 lg:grid-cols-[0.7fr_1.3fr]">
-          <h2 className="text-3xl font-black">{content.faqTitle}</h2>
+          {/*
+            UI-005. `break-words` lets a long word wrap, but by spec it does
+            not lower the element's min-content width -- so as a grid item this
+            heading still demanded the width of "questions" set at 30px, which
+            at 320px/200% is wider than the column and pushed the page. Letting
+            the size fall below ~375px of CSS width fixes the cause; every real
+            phone width still renders it at 30px.
+          */}
+          <h2 className={`text-[clamp(1.5rem,8vw,1.875rem)] font-black ${displayHeadingClass(lang)}`}>{content.faqTitle}</h2>
           <div className="grid gap-4">
             {content.faqs
               .filter((faq) => !faq.promotionOnly || featuredPromotion)

@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import {
   expectNoHorizontalOverflow,
   mockAuthenticatedApi,
@@ -58,6 +58,45 @@ async function countLinesForWord(
     },
     { selector, word }
   );
+}
+
+// Locator-based variant of countLinesForWord.
+//
+// The block below used to stamp a `data-ko-heading` attribute on the element
+// and then look it up by selector. React can re-render (or recreate) the
+// heading between those two steps -- the pricing page hydrates its runtime
+// prices -- and the mark goes with it, so the measurement failed with
+// "Selector not found" rather than with anything about wrapping. Measuring
+// through the locator's own element handle removes the window entirely.
+async function countLinesForWordIn(locator: Locator, word: string): Promise<number> {
+  return locator.evaluate((el, target) => {
+    const fullText = el.textContent ?? "";
+    const wordStart = fullText.indexOf(target);
+    if (wordStart === -1) {
+      throw new Error(`Word "${target}" not found in "${fullText}"`);
+    }
+    const wordEnd = wordStart + target.length;
+
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const lineTops = new Set<number>();
+    let node: Node | null;
+    let consumed = 0;
+    while ((node = walker.nextNode())) {
+      const text = node.textContent ?? "";
+      const nodeStart = consumed;
+      const nodeEnd = consumed + text.length;
+      const from = Math.max(nodeStart, wordStart);
+      const to = Math.min(nodeEnd, wordEnd);
+      for (let i = from; i < to; i++) {
+        const range = document.createRange();
+        range.setStart(node, i - nodeStart);
+        range.setEnd(node, i - nodeStart + 1);
+        lineTops.add(Math.round(range.getBoundingClientRect().top));
+      }
+      consumed = nodeEnd;
+    }
+    return lineTops.size;
+  }, word);
 }
 
 // Counts rendered lines of an element by clustering the top offsets of every
@@ -199,6 +238,96 @@ test.describe("Korean typography: landing hero", () => {
 
     const wordLines = await countLinesForWord(page, "[data-testid='landing-hero-title']", "비교하세요");
     expect(wordLines).toBe(1);
+    await expectNoHorizontalOverflow(page);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// UI-006. Word preservation was only enforced on the landing H1. Everything
+// else in the Korean display hierarchy -- the landing section headings, the
+// pricing H1 and its section headings -- wrapped with the browser default,
+// which treats every Hangul syllable as a break opportunity and produces
+// "선택하\n세요". The rule now lives in one place (lib/displayHeading.ts) and
+// this block is what keeps it applied where it belongs.
+//
+// Line positions come from Range rects, not from string indices: with a
+// system font substituted for the product's, a character-count heuristic
+// measures the test runner's font stack rather than the layout.
+// ---------------------------------------------------------------------------
+const KO_DISPLAY_HEADINGS = [
+  { route: "/", selector: "[data-testid='landing-hero-title']", word: "비교하세요", label: "landing H1" },
+  { route: "/", selector: "h2:has-text('업그레이드하세요')", word: "업그레이드하세요", label: "landing pricing H2" },
+  { route: "/", selector: "h2:has-text('시작됩니다')", word: "시작됩니다", label: "landing CTA H2" },
+  { route: "/pricing", selector: "h1:has-text('선택하세요')", word: "선택하세요", label: "pricing H1" },
+  { route: "/pricing", selector: "h2:has-text('플랜별 제공 기능 비교')", word: "제공", label: "pricing compare H2" },
+] as const;
+
+const KO_HEADING_VIEWPORTS = [
+  { width: 320, height: 568 },
+  { width: 390, height: 844 },
+  { width: 768, height: 1024 },
+  { width: 1440, height: 900 },
+] as const;
+
+test.describe("Korean typography: display headings keep 어절 intact", () => {
+  test.beforeEach(async ({ page }) => {
+    await mockPublicBillingConfig(page);
+    await mockPublicProofMetrics(page);
+  });
+
+  for (const viewport of KO_HEADING_VIEWPORTS) {
+    test(`no mid-word break at ${viewport.width}x${viewport.height}`, { tag: "@ui-risk" }, async ({ page }) => {
+      await page.setViewportSize(viewport);
+      let currentRoute = "";
+      for (const heading of KO_DISPLAY_HEADINGS) {
+        if (heading.route !== currentRoute) {
+          await page.goto(heading.route);
+          await selectLanguage(page, "ko");
+          currentRoute = heading.route;
+        }
+        const locator = page.locator(heading.selector).first();
+        await expect(locator, `${heading.label} present`).toBeVisible();
+        const lines = await countLinesForWordIn(locator, heading.word);
+        expect(lines, `${heading.label}: "${heading.word}" split across lines`).toBe(1);
+      }
+      await expectNoHorizontalOverflow(page);
+    });
+  }
+
+  // Browser zoom is emulated the way ui-zoom-reflow.spec.ts does it -- by
+  // shrinking the viewport -- because that is what real zoom does: it changes
+  // how many CSS pixels the viewport holds, it does not change CSS pixel
+  // sizes. (`document.documentElement.style.zoom` scales the page instead,
+  // which is pinch-zoom, and reflows nothing.)
+  //
+  // 150% of 390 leaves a 260px column, which still fits a five-syllable 어절
+  // at the display scale. Below that the column is narrower than the word
+  // itself, and no wrapping policy can keep it whole without pushing the page
+  // into horizontal overflow -- see lib/displayHeading.ts for why the escape
+  // hatch wins that trade.
+  test("150% zoom keeps 어절 intact", { tag: "@ui-risk" }, async ({ page }) => {
+    await page.setViewportSize({ width: 260, height: 563 });
+    await page.goto("/pricing");
+    await selectLanguage(page, "ko");
+
+    const heading = page.locator("h1:has-text('선택하세요')").first();
+    await expect(heading).toBeVisible();
+    expect(await countLinesForWordIn(heading, "선택하세요")).toBe(1);
+  });
+
+  test("English and Chinese headings keep their existing wrapping", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 568 });
+    await page.goto("/pricing");
+
+    // English is unaffected: `keep-all` is only applied for ko.
+    const englishHeading = page.locator("h1").first();
+    const englishWordBreak = await englishHeading.evaluate(
+      (element) => getComputedStyle(element).wordBreak
+    );
+    expect(englishWordBreak).not.toBe("keep-all");
+    await expectNoHorizontalOverflow(page);
+
+    await selectLanguage(page, "zh");
     await expectNoHorizontalOverflow(page);
   });
 });

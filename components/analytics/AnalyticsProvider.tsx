@@ -718,15 +718,21 @@ export function AnalyticsProvider({
             type="button"
             data-testid="analytics-settings-button"
             onClick={() => setShowPreferences(true)}
-            className={`fixed right-2 z-[60] rounded-full border border-zinc-700 bg-zinc-950/90 px-2.5 py-1 text-[11px] font-bold text-zinc-400 shadow-lg backdrop-blur hover:text-zinc-100 ${
+            // UI-002. This is the only way back into the analytics choice on
+            // marketing, pricing and sign-in, and it used to be a 25px-tall
+            // pill: a real target, not a decorative one. It now carries the
+            // same 44x44 floor and focus treatment as the consent actions
+            // above, and it is inset by the safe area so a notched phone's
+            // rounded corner cannot eat the corner of the box.
+            className={`fixed right-[max(0.5rem,env(safe-area-inset-right))] z-[60] min-h-11 min-w-11 items-center justify-center rounded-full border border-zinc-300 bg-white/95 px-3 text-[11px] font-bold text-zinc-700 shadow-lg backdrop-blur transition-colors hover:bg-zinc-50 hover:text-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:border-zinc-600 dark:bg-zinc-900/95 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:focus-visible:ring-offset-zinc-900 ${
               pathname === "/chat"
                 ? // The chat sidebar/drawer offers its own path back to this
                   // (the account menu for signed-in users, an inline button
                   // next to "Login" for guests), so this floating overlay
                   // only needs to cover desktop, where it doesn't compete
                   // with the composer for space.
-                  "hidden bottom-[5.5rem] md:inline-flex md:bottom-2"
-                : "bottom-2"
+                  "bottom-[max(0.5rem,env(safe-area-inset-bottom))] hidden md:inline-flex"
+                : "bottom-[max(0.5rem,env(safe-area-inset-bottom))] inline-flex"
             }`}
           >
             {copy.settings}

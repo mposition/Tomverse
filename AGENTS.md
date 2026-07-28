@@ -4,6 +4,65 @@
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
 
+# 소통 언어
+
+이 저장소에서 작업할 때는 **사용자와의 모든 대화를 한국어로** 진행합니다.
+설명, 계획, 작업 결과 보고, 질문, 확인 요청 모두 해당됩니다. 사용자가 영어로
+질문하더라도 별도 요청이 없으면 한국어로 답합니다.
+
+한국어로 쓰지 않는 것 — 저장소에 이미 자리 잡은 관례를 따릅니다.
+
+- code identifier, 파일명, `data-testid`, test 제목
+- 소스 코드 주석
+- commit message, PR 제목과 본문
+- 사용자에게 보이는 제품 문구(`locales/*.ts`가 언어별로 관리)
+
+즉, **사람에게 말할 때는 한국어, 저장소에 남기는 코드·이력은 기존 영어 관례**
+입니다. `.github/audits/` 아래 감사·작업 보고서처럼 이미 한국어로 작성된
+문서는 계속 한국어로 씁니다.
+
+# Accent colour roles
+
+UI-012에서 승인된 정책(B안)입니다. accent 색은 **hue가 아니라 역할로** 지정합니다.
+`app/globals.css`에 역할별 token이 정의돼 있고, `npm run check:accent-tokens`가
+아래 규칙을 강제합니다. PR Fast Gate의 static 단계에서 실행됩니다.
+
+## 역할과 token
+
+| 역할 | token 접두사 | 현재 palette |
+|---|---|---|
+| AI Review | `accent-ai-review-start\|mid\|end-*`, `tomverse-accent-*`, `tomverse-review-*` | cyan → blue → purple |
+| Deep Research | `accent-deep-research-*` | violet |
+| Web Search | `accent-web-search-*` | sky |
+| Model Catalogue | `accent-model-catalogue-*` | purple |
+| Max plan | `accent-plan-max-*` | purple |
+| Promotion | `accent-promotion-*` | emerald |
+| Account identity | `accent-account-*` | teal |
+| 성공·검증 상태 | `status-success-*` | emerald |
+
+## 규칙
+
+1. **`cyan → blue → purple` gradient 전체 조합은 AI Review 전용으로 예약**합니다.
+   다른 기능은 이 조합을 쓰지 않습니다. `accent-ai-review-*` token을 AI Review
+   외 component에서 쓰면 검사에서 실패합니다.
+2. **역할이 다르면 값이 같아도 token을 분리**합니다. `accent-promotion`과
+   `status-success`는 오늘 둘 다 emerald지만 별개 결정이며, 한쪽을 바꿔도
+   다른 쪽이 따라 움직여서는 안 됩니다. `accent-model-catalogue`와
+   `accent-plan-max`(둘 다 purple)도 같습니다.
+3. **guarded 파일 안에서는 raw accent utility 금지.** `bg-violet-500`,
+   `text-emerald-600` 같은 직접 지정 대신 역할 token을 씁니다. 대상 hue는
+   `cyan`, `emerald`, `fuchsia`, `purple`, `sky`, `teal`, `violet`입니다.
+   `blue`·`zinc`(기본 인상)와 `red`·`amber`(오류·크레딧 상태)는 대상이 아닙니다.
+4. **신규 역할은 token부터.** `app/globals.css`에 역할 namespace를 추가하고
+   `scripts/check-accent-tokens.mjs`의 `KNOWN_ROLES`에 등록한 뒤 사용합니다.
+   token 없는 역할 utility는 검사에서 실패합니다.
+5. **guarded 목록은 역할을 token으로 옮긴 파일만** 포함합니다
+   (`scripts/check-accent-tokens.mjs`의 `GUARDED_FILES`). admin console과
+   일반 status 색은 아직 대상이 아니며, design decision 없이 범위를 넓히지
+   않습니다.
+
+예외가 필요하면 이 문서에 근거를 적고 나서 추가합니다.
+
 <!-- BEGIN:mobile-chat-composer-invariant -->
 ## Mobile chat composer invariant
 

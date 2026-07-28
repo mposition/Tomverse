@@ -19,7 +19,7 @@ export function ModelSelectionBadge({
       aria-hidden="true"
       className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border ${
         isSelected
-          ? "border-transparent bg-gradient-to-br from-cyan-600 via-blue-600 to-purple-600 text-white"
+          ? "border-transparent bg-gradient-to-br from-accent-ai-review-start-600 via-blue-600 to-accent-ai-review-end-600 text-white"
           : "border-zinc-300 text-zinc-400 dark:border-zinc-600 dark:text-zinc-500"
       }`}
     >

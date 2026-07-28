@@ -715,13 +715,13 @@ export function ChatMessageList({
                             triggerClassName={secondaryButtonClass}
                           />
                           {(errorCategory === "generic" || errorCategory === "attachment") && (
-                            <span className="flex items-center text-xs font-semibold text-red-600/80 dark:text-red-200/80">
+                            <span className="flex items-center text-xs font-semibold text-red-700 dark:text-red-200">
                               {t("chat.tryAnotherModelHint")}
                             </span>
                           )}
                         </div>
                         {errorCategory === "quota" && isGuestMode && (
-                          <p className="mt-2 text-xs leading-5 text-red-600/80 dark:text-red-200/80">
+                          <p className="mt-2 text-xs leading-5 text-red-700 dark:text-red-200">
                             {t("chat.guestQuotaLoginBenefitHint")}
                           </p>
                         )}
@@ -730,7 +730,13 @@ export function ChatMessageList({
                             {errorAuxiliaryLines.map((line, lineIndex) => (
                               <p
                                 key={lineIndex}
-                                className="text-[11px] leading-4 text-red-500/70 dark:text-red-300/60"
+                                // UI-003/UI-007. The trace ID is what a user
+                                // has to read back to support, and at
+                                // 10px/red-500-at-70% it measured 2.63:1 on
+                                // light and 3.84:1 on dark against the card it
+                                // sits on. Solid red at the readable floor
+                                // clears AA in both themes.
+                                className="text-[11px] leading-4 text-red-700 dark:text-red-200"
                               >
                                 {line}
                               </p>

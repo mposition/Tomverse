@@ -2,6 +2,7 @@
 
 import { useSession } from "next-auth/react";
 import { useLanguage } from "@/components/LanguageProvider";
+import { displayHeadingClass } from "@/lib/displayHeading";
 import { Bot, History } from "lucide-react";
 
 type ChatWelcomeScreenProps = {
@@ -57,9 +58,7 @@ export function ChatWelcomeScreen({
       </div>
       <p
         data-testid="chat-welcome-greeting"
-        className={`text-xl font-bold text-zinc-800 dark:text-zinc-100 sm:text-2xl ${
-          lang === "ko" ? "break-keep" : ""
-        }`}
+        className={`text-xl font-bold text-zinc-800 dark:text-zinc-100 sm:text-2xl ${displayHeadingClass(lang)}`}
       >
         {welcomeGreeting}
       </p>

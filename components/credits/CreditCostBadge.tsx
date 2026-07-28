@@ -99,7 +99,13 @@ export function CreditCostBadge({
       className={`inline-flex shrink-0 items-center justify-center rounded-full border font-bold tabular-nums leading-none ${sizeClasses[size]} ${toneClasses[tone]} ${className}`}
     >
       <CreditCoinIcon />
-      <span aria-hidden="true">
+      {/*
+        The numeral sits inside a coin-sized pill and is aria-hidden: the whole
+        badge already carries "N credits" as its accessible name and its title.
+        It is a deliberate exception to the 11px consumer-text floor (UI-007),
+        marked so the audit can see it rather than infer it.
+      */}
+      <span aria-hidden="true" data-allow-small-text>
         {approximate ? "~" : ""}
         {formatCredits(credits)}
       </span>

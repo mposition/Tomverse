@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { displayHeadingClass } from "@/lib/displayHeading";
 import { ArrowRight, Bot, Sparkles } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { useEffect, useRef } from "react";
@@ -480,9 +481,7 @@ export function LandingPageContent() {
             </p>
             <h1
               data-testid="landing-hero-title"
-              className={`mt-6 max-w-4xl whitespace-pre-line text-4xl font-black leading-[1.05] tracking-tight sm:text-6xl lg:text-7xl ${
-                lang === "ko" ? "break-keep" : ""
-              }`}
+              className={`mt-6 max-w-4xl whitespace-pre-line text-4xl font-black leading-[1.05] tracking-tight sm:text-6xl lg:text-7xl ${displayHeadingClass(lang)}`}
             >
               {content.title}
             </h1>
@@ -547,7 +546,7 @@ export function LandingPageContent() {
 
       <section id="pricing" className="border-y border-zinc-200 bg-zinc-50 py-16 dark:border-zinc-800 dark:bg-zinc-900/30 sm:py-20">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="max-w-3xl"><h2 className="text-3xl font-black sm:text-4xl">{content.pricingTitle}</h2><p className="mt-4 text-base leading-7 text-zinc-600 dark:text-zinc-300">{content.pricingDescription}</p></div>
+          <div className="max-w-3xl"><h2 className={`text-3xl font-black sm:text-4xl ${displayHeadingClass(lang)}`}>{content.pricingTitle}</h2><p className="mt-4 text-base leading-7 text-zinc-600 dark:text-zinc-300">{content.pricingDescription}</p></div>
           <div className="mt-9 grid gap-4 md:grid-cols-3">
             {content.plans.map((plan) => {
               const formatted = billing.formatPlanPrice(plan.id) || plan.fallbackPrice;
@@ -555,12 +554,12 @@ export function LandingPageContent() {
             })}
           </div>
           <Link href="/pricing" className="mt-7 inline-flex items-center gap-2 rounded-xl bg-zinc-950 px-5 py-3 text-sm font-bold text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200">{content.pricingDetails}<ArrowRight className="h-4 w-4" /></Link>
-          <h2 className="mt-16 text-3xl font-black sm:text-4xl">{content.faqTitle}</h2>
+          <h2 className={`mt-16 text-3xl font-bold sm:text-4xl ${displayHeadingClass(lang)}`}>{content.faqTitle}</h2>
           <div className="mt-8 grid gap-4 lg:grid-cols-3">
             {content.faqs.map((item) => <details key={item.question} className="group rounded-2xl border border-zinc-200 p-5 dark:border-zinc-800"><summary className="cursor-pointer list-none font-bold">{item.question}</summary><p className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-400">{item.answer}</p></details>)}
           </div>
           <div className="mt-12 flex flex-col items-start justify-between gap-6 rounded-3xl bg-zinc-950 p-7 text-white sm:p-9 lg:flex-row lg:items-center dark:border dark:border-zinc-800">
-            <div className="max-w-2xl"><h2 className="text-3xl font-black">{content.ctaTitle}</h2><p className="mt-3 leading-7 text-zinc-300">{content.ctaDescription}</p></div>
+            <div className="max-w-2xl"><h2 className={`text-3xl font-bold ${displayHeadingClass(lang)}`}>{content.ctaTitle}</h2><p className="mt-3 leading-7 text-zinc-300">{content.ctaDescription}</p></div>
             <Link href={primaryChatHref} onClick={() => trackProductEvent("cta_start_click", 0, { cta_location: "landing_final_chat" })} className="inline-flex min-h-12 shrink-0 items-center justify-center gap-2 rounded-xl bg-white px-6 text-sm font-bold text-zinc-950 hover:bg-zinc-200">{status === "authenticated" ? content.signedInCta : content.primaryCta}<ArrowRight className="h-4 w-4" /></Link>
           </div>
         </div>
