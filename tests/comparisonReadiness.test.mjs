@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   deriveComparisonReadiness,
   isComparisonRailSteadyState,
+  shouldShowVisualStatus,
 } from "../lib/comparisonReadiness.ts";
 
 const MODELS = ["a", "b", "c"];
@@ -188,5 +189,60 @@ test("a running analysis or an unaffordable action leaves the steady state", () 
   assert.equal(
     isComparisonRailSteadyState({ readiness: state, isAnyActionUnaffordable: true }),
     false
+  );
+});
+
+// ---------------------------------------------------------------------------
+// shouldShowVisualStatus: the one policy both shells ask. The state matrix
+// lives here rather than in a browser, so a regression is a unit-test failure
+// rather than a screenshot argument. See
+// docs/ui-contracts/comparison-action-rail.md.
+// ---------------------------------------------------------------------------
+
+test("the status row is hidden only in the steady state, whatever the shell", () => {
+  const steady = readiness({ a: "idle", b: "idle", c: "idle" });
+  assert.equal(shouldShowVisualStatus({ readiness: steady }), false);
+
+  // Every exception earns the row back.
+  const cases = [
+    ["generating", readiness({ a: "idle", b: "idle", c: "responding" })],
+    ["needsMore", readiness({ a: "idle", b: "error", c: "error" })],
+    ["excluded", readiness({ a: "idle", b: "idle", c: "error" })],
+    [
+      "paused",
+      readiness({ a: "idle", b: "idle", c: "paused" }, { disabledModelIds: ["c"] }),
+    ],
+  ];
+  for (const [label, state] of cases) {
+    assert.equal(shouldShowVisualStatus({ readiness: state }), true, label);
+  }
+
+  assert.equal(shouldShowVisualStatus({ readiness: steady, isBusy: true }), true);
+  assert.equal(
+    shouldShowVisualStatus({ readiness: steady, isAnyActionUnaffordable: true }),
+    true
+  );
+});
+
+test("a collapsed rail hides the row even when there is an exception to show", () => {
+  // The disclosure button that replaces the rail carries the same sentence
+  // through its own description; the row itself has nowhere to paint.
+  const excluded = readiness({ a: "idle", b: "idle", c: "error" });
+  assert.equal(shouldShowVisualStatus({ readiness: excluded }), true);
+  assert.equal(
+    shouldShowVisualStatus({ readiness: excluded, isCollapsed: true }),
+    false
+  );
+});
+
+test("the policy is a pure function of state, not of the shell", () => {
+  // There is no shell argument to pass -- which is the point: desktop and
+  // mobile cannot answer this question differently.
+  const steady = readiness({ a: "idle", b: "idle", c: "idle" });
+  assert.deepEqual(Object.keys({ readiness: steady }), ["readiness"]);
+  assert.equal(shouldShowVisualStatus({ readiness: steady }), false);
+  assert.equal(
+    shouldShowVisualStatus({ readiness: steady }),
+    !isComparisonRailSteadyState({ readiness: steady })
   );
 });
