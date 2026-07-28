@@ -119,6 +119,28 @@ test("selecting a web search mode shows a removable status chip", async ({ page 
   await expect(page.getByTestId("web-search-unavailable-notice")).toHaveCount(0);
 });
 
+/**
+ * Starts a new chat through whichever affordance the current shell offers.
+ *
+ * On the mobile shell the header's New Chat button only renders once the
+ * current conversation has content -- starting a new chat from an empty one is
+ * a no-op, so the product deliberately leaves it out. This test begins on an
+ * empty conversation, so the header button is legitimately absent there and
+ * the drawer is the path a phone user actually takes. Reaching for a
+ * desktop-only control was why this failed on every mobile project.
+ */
+async function startNewChat(page: Page) {
+  const drawerTrigger = page.getByTestId("mobile-sidebar-open");
+  if (await drawerTrigger.isVisible()) {
+    await drawerTrigger.click();
+    const drawer = page.getByTestId("mobile-chat-shell").getByRole("dialog");
+    await expect(drawer).toBeVisible();
+    await drawer.getByTestId("sidebar-new-chat").click();
+    return;
+  }
+  await page.getByRole("button", { name: "New chat" }).first().click();
+}
+
 test("web search mode selection does not repeat across a new chat", async ({ page }) => {
   await mockAuthenticatedApi(page);
   await page.goto("/chat?lang=en");
@@ -128,7 +150,7 @@ test("web search mode selection does not repeat across a new chat", async ({ pag
   await page.getByTestId("web-search-mode-option-always").click();
   await expect(page.getByTestId("web-search-mode-chip")).toBeVisible();
 
-  await page.getByRole("button", { name: "New chat" }).first().click();
+  await startNewChat(page);
   await expect(page.getByTestId("web-search-mode-chip")).toHaveCount(0);
 });
 

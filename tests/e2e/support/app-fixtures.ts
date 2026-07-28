@@ -437,8 +437,35 @@ export async function mockAuthenticatedApi(
     await route.fulfill(json(conversation(), 201));
   });
 
+  // The transcript this conversation reports, which grows as the app saves to
+  // it -- exactly like the real endpoint pair.
+  //
+  // It used to be a static echo of `options.messages`: POST /messages returned
+  // `{}` and threw the body away, and GET /:id always replayed the seed. The
+  // app pre-saves the user turn before streaming and re-reads the conversation
+  // afterwards, so whenever that read landed after the optimistic append it
+  // replaced a real transcript with the empty seed and the shell fell back to
+  // its welcome screen -- a send that had already created the conversation,
+  // saved the message, streamed /api/chat and generated a title showed nothing
+  // at all. That was the ~30% flake in the mobile keyboard suite, and it was
+  // the mock disagreeing with itself rather than anything the product does.
+  const savedMessages: QaConversationMessage[] = [...(options.messages || [])];
+
   await page.route("**/api/conversations/qa-conversation/messages**", async (route) => {
-    await route.fulfill(json({}, route.request().method() === "POST" ? 201 : 200));
+    if (route.request().method() === "POST") {
+      const body = route.request().postDataJSON() as {
+        messages?: QaConversationMessage[];
+      };
+      for (const message of body?.messages ?? []) {
+        if (!message?.id || savedMessages.some((saved) => saved.id === message.id)) {
+          continue;
+        }
+        savedMessages.push(message);
+      }
+      await route.fulfill(json({}, 201));
+      return;
+    }
+    await route.fulfill(json({}));
   });
 
   await page.route("**/api/conversations/qa-conversation/verify", async (route) => {
@@ -499,7 +526,7 @@ export async function mockAuthenticatedApi(
     await route.fulfill(
       json({
         ...conversation(),
-        messages: (options.messages || []) as unknown as JsonValue,
+        messages: savedMessages as unknown as JsonValue,
         nextCursor: null,
       })
     );

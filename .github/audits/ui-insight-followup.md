@@ -232,25 +232,91 @@ scan, smoke manifest, `--update-snapshots` 금지, main·nightly의 무필터 �
    `Not Verifiable`.
 7. **webkit 검증** — 이 환경에서 불가. nightly가 담당.
 
-## 11. 전체 회귀 실행 결과
+## 11. 전체 회귀 실행 결과와 사전 존재 실패 2건 수정
 
-`desktop-chromium` + `desktop-compact` + `mobile-chromium` 전체 1회 실행
-(14.6분): **963 passed / 6 failed / 570 skipped**.
+`desktop-chromium` + `desktop-compact` + `mobile-chromium` 전체 실행에서 처음
+6건이 실패했고, 그중 4건은 부하로 인한 일시 실패(격리 실행 시 통과), 2건은
+`git stash` 후 재빌드한 baseline에서도 재현되는 사전 존재 실패였습니다.
+그 2건을 이번 작업에 포함해 수정했습니다. **둘 다 제품 결함이 아니라 테스트
+쪽 결함**이며, 원인이 서로 다릅니다.
 
-실패 6건은 모두 이번 변경과 무관합니다.
+### 11-1. `chat-tools › web search mode selection does not repeat across a new chat`
 
-| 실패 | 판정 | 근거 |
-|---|---|---|
-| `attachment-flow › PDF remains a friendly file card` (desktop-chromium) | 부하 flake | 격리 실행 시 통과 |
-| `attachment-flow › selected image previews` (desktop-compact) | 부하 flake | 격리 실행 시 통과 |
-| `conversation-title › composer stays fully usable…` (desktop-chromium) | 부하 flake | 격리 실행 시 통과 |
-| `tab-resume › session revalidation…` (desktop-compact) | 부하 flake | 격리 실행 시 통과 |
-| `chat-keyboard-policy › Cmd+Enter sends from an external keyboard` (mobile-chromium) | **사전 존재 flake** | 변경본 5회 중 2회 실패, `git stash` 후 재빌드한 baseline도 5회 중 1회 실패 |
-| `chat-tools › web search mode selection does not repeat across a new chat` (mobile-chromium) | **사전 존재 실패** | baseline 재빌드에서도 동일하게 실패 |
+**증상** `mobile-chromium`에서 항상 실패. `getByRole("button", { name: "New
+chat" })`가 30초 타임아웃.
 
-두 사전 존재 항목은 이번 작업 범위 밖이라 수정하지 않았습니다.
+**원인** `[코드]` 이 테스트는 빈 대화에서 시작하는데, 모바일 shell의 header
+New Chat button은 `!isActiveConversationEmpty`일 때만 렌더됩니다
+(`MobileChatShell.tsx:549`). 빈 대화에서 새 대화를 시작하는 것은 아무 일도
+하지 않으므로 제품이 의도적으로 노출하지 않는 것입니다. 즉 **테스트가
+데스크톱 전용 진입점을 모바일에서 찾고 있었습니다.** 제품 동작은 정상입니다.
 
-정적 검사: `eslint --max-warnings=0` 통과, `tsc --noEmit` 통과,
+**수정** shell에 맞는 진입점을 쓰는 `startNewChat()` 헬퍼를 도입했습니다.
+모바일에서는 drawer(`mobile-sidebar-open` → `sidebar-new-chat`)를 거치는데,
+이는 실제 사용자가 밟는 경로이기도 하므로 커버리지가 줄지 않고 늘어납니다.
+
+**검증** `mobile-chromium` + `desktop-chromium` × 3회 반복 = 60/60 통과.
+
+### 11-2. `chat-keyboard-policy › Cmd+Enter sends from an external keyboard`
+
+**증상** `mobile-chromium`에서 약 30% 확률로 사용자 메시지 개수가 1이 아닌 0.
+
+**진단 과정** `[테스트]` 실패 시점의 상태를 계측한 결과:
+
+- POST 순서는 성공/실패가 **완전히 동일**했습니다 —
+  `/api/conversations` → `/api/conversations/qa-conversation/messages` →
+  `/api/chat` → `.../generate-title`. 즉 전송은 끝까지 성공했습니다.
+- 그런데 화면에는 `chat-empty-state`와 welcome 인사가 떠 있었습니다. 전송된
+  메시지가 렌더되지 않은 것이 아니라 **transcript 자체가 비어 있었습니다**.
+- 50ms 간격 3초 샘플링에서 메시지가 잠깐 보였다 사라진 것이 아니라 처음부터
+  끝까지 0이었습니다.
+
+**원인** `[코드]` `mockAuthenticatedApi`의 mock 두 개가 서로 모순이었습니다.
+`POST /api/conversations/qa-conversation/messages`는 body를 버리고 `{}`만
+반환하고, `GET /api/conversations/qa-conversation`은 언제나 최초 seed
+(`options.messages`, 이 테스트에서는 빈 배열)를 되돌려줬습니다. 앱은 스트리밍
+전에 사용자 turn을 pre-save하고 이후 대화를 다시 읽으므로, 그 읽기가 optimistic
+append보다 늦게 도착하면 **실제 transcript가 빈 seed로 덮이면서** welcome
+화면으로 되돌아갑니다. 순서에 따라 갈리므로 flaky했습니다.
+
+실제 API는 이렇게 동작하지 않습니다. POST한 메시지는 이후 GET에 포함됩니다.
+즉 mock이 실제 endpoint 쌍의 계약을 지키지 않은 것이 원인입니다.
+
+**수정** mock이 POST된 메시지를 기억해 GET에 포함하도록 했습니다(id 기준
+중복 제거). 제품 코드는 건드리지 않았고, assertion도 약화하지 않았습니다.
+
+**검증** 수정 전 24회 중 7회 실패 → 수정 후 **24/24 통과**.
+(비교를 위해 같은 24회를 baseline fixture로도 돌려 7건 실패를 확인했습니다.)
+
+**폐기한 가설** 처음에는 `prepareGuestPage` + `mockAuthenticatedApi`를 함께
+쓰는 bootstrap 경합을 의심해 인증 전용 fixture를 분리해 봤지만, 24회 중 8회
+실패로 개선이 없어 되돌렸습니다. 근거 없는 shared fixture refactor를 남기지
+않기 위해서입니다.
+
+### 11-3. 수정 후 전체 실행
+
+`desktop-chromium` + `desktop-compact` + `mobile-chromium` 전체 재실행:
+**965 passed / 4 failed / 570 skipped** (14.6분). 수정 전 6건 → 4건.
+목표했던 2건은 사라졌습니다.
+
+남은 4건은 `conversation-title` 3건과 `attachment-flow › PDF remains a friendly
+file card @smoke` 1건이며, 격리 실행에서는 28/28 통과합니다.
+
+`conversation-title`은 "부하 때문"이라고만 적기에는 부정확해서 따로
+측정했습니다. 두 project × 5회 반복(80 실행) 기준:
+
+| | 실패 |
+|---|---:|
+| 이 branch | 8 / 80 |
+| `app-fixtures.ts`만 되돌린 baseline | 6 / 80 |
+
+즉 **약 8%의 사전 존재 flake이며 이번 변경과 무관**합니다. 이번 작업 범위
+밖이라 수정하지 않았고, 원하시면 별도로 다루겠습니다.
+
+### 11-4. 정적 검사
+
+`eslint --max-warnings=0` 통과, `tsc --noEmit` 통과,
 `npm run test:unit` 499/499 통과, `npm run security:regression` 113 검사 통과,
-`npm run verify:smoke-coverage` 통과 (@smoke 20개 유지),
+`npm run verify:smoke-coverage` 통과(@smoke 20개 유지),
 `npm run check:encoding:strict` 통과.
+
