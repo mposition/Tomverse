@@ -5,6 +5,13 @@ import {
   openModelCatalogue,
   prepareGuestPage,
 } from "./support/app-fixtures";
+import {
+  closeOnScreenKeyboard,
+  expectInsideVisibleViewport,
+  expectTappableInVisibleViewport,
+  openOnScreenKeyboard,
+  readVisualViewport,
+} from "./support/ui-audit";
 
 /**
  * STG-F008 responsive contract. The picker is a full-height sheet on phones and
@@ -211,7 +218,124 @@ test("mouse-only desktop keeps the compact favourite control", async ({ page }) 
   expect(box!.height, "mouse-only desktop keeps the 32px star").toBeLessThan(44);
 });
 
-test("the picker footer clears the mobile keyboard and safe area", async ({ page }) => {
+// ---------------------------------------------------------------------------
+// UI-001 / VAL-001: the on-screen keyboard.
+//
+// The test this replaces focused the search field and then asserted the
+// footer's bottom was inside `visualViewport.height`. Focus does not raise a
+// keyboard in a headless browser, so `visualViewport.height` was still the full
+// 844 and the assertion held with or without a fix -- it could never fail.
+//
+// `openOnScreenKeyboard` shrinks the visual viewport while leaving the layout
+// viewport alone, which is exactly the split iOS Safari (and Android Chrome in
+// its default mode) produces. Each case proves the split is real by measuring
+// the backdrop -- a sibling `position: fixed; inset: 0` element -- which still
+// runs the full layout height while the sheet has been pulled above the
+// keyboard. That is the occlusion the sheet used to share.
+// ---------------------------------------------------------------------------
+const KEYBOARD_VIEWPORTS = [
+  { name: "390x844", width: 390, height: 844, keyboard: 336 },
+  { name: "320x568", width: 320, height: 568, keyboard: 216 },
+] as const;
+
+test.describe("the picker stays completable while the keyboard is up", () => {
+  test.use({ hasTouch: true });
+
+  for (const viewport of KEYBOARD_VIEWPORTS) {
+    test(`model selection can be finished at ${viewport.name} with the keyboard open`, {
+      tag: "@ui-risk",
+    }, async ({ page }, testInfo) => {
+      test.skip(
+        !testInfo.project.name.startsWith("mobile"),
+        "The compact sheet layout only renders on touch (mobile-*) projects."
+      );
+
+      await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      await prepareGuestPage(page, "en");
+      await page.goto("/chat");
+
+      await modelMenuTrigger(page).click();
+      const dialog = page.locator("#chat-input-popover");
+      const done = dialog.getByTestId("model-picker-done");
+      await expect(dialog).toBeVisible();
+      await expect(done).toBeVisible();
+
+      const search = dialog.getByTestId("model-search-input");
+      await search.click();
+      await openOnScreenKeyboard(page, viewport.keyboard);
+
+      // 1. The fixture really did what a keyboard does.
+      const metrics = await readVisualViewport(page);
+      expect(metrics.layoutHeight, "layout viewport is unchanged").toBe(viewport.height);
+      expect(metrics.visualHeight, "visual viewport shrank by the keyboard").toBe(
+        viewport.height - viewport.keyboard
+      );
+
+      // 2. A fixed element that does not compensate is still occluded, which is
+      //    the bug this covers -- the sheet is the one that had to move.
+      const backdropBottom = await page.evaluate(() => {
+        const backdrop = document.querySelector<HTMLElement>(
+          'button.fixed.inset-0[class*="z-\\\\[90\\\\]"]'
+        );
+        return backdrop ? backdrop.getBoundingClientRect().bottom : null;
+      });
+      if (backdropBottom !== null) {
+        expect(
+          backdropBottom,
+          "sanity: a non-compensating fixed element still spans the layout viewport"
+        ).toBeGreaterThan(metrics.visualHeight);
+      }
+
+      // 3. The sheet compensated by exactly the occluded height.
+      await expect(dialog).toHaveAttribute(
+        "data-keyboard-inset",
+        String(viewport.keyboard)
+      );
+
+      // 4. Everything needed to finish is inside what the user can see.
+      await expectInsideVisibleViewport(page, dialog, "picker sheet");
+      await expectInsideVisibleViewport(page, done, "done control");
+      await expectInsideVisibleViewport(page, search, "search input");
+      await expect(dialog.getByTestId("selected-model-chip").first()).toBeVisible();
+
+      // 5. There is exactly one scroll container inside the sheet, whichever
+      //    mode it is in -- no nested scrollers for a thumb to fight.
+      const scrollers = await dialog.evaluate((sheet) =>
+        Array.from(sheet.querySelectorAll("*")).filter((node) => {
+          const style = getComputedStyle(node);
+          const scrollable = /(auto|scroll)/.test(style.overflowY);
+          return scrollable && node.scrollHeight > node.clientHeight + 1;
+        }).length
+      );
+      expect(scrollers, "no nested scroll regions inside the sheet").toBeLessThanOrEqual(1);
+
+      // 6. Searching still yields a reachable candidate, and the footer holds.
+      await search.fill("sonar");
+      const firstResult = dialog.getByTestId("model-option").first();
+      await expect(firstResult).toBeVisible();
+      await expectTappableInVisibleViewport(page, firstResult, "first search result");
+      await expectInsideVisibleViewport(page, done, "done control after searching");
+      await expectNoHorizontalOverflow(page);
+
+      // 7. Pointer completion: tapping the candidate's centre selects it.
+      await firstResult.click();
+      await expect(dialog.getByTestId("selected-model-chip").first()).toBeVisible();
+
+      // 8. Keyboard completion: Done is focusable and activates from the
+      //    keyboard, so the flow ends without a pointer at all.
+      await done.focus();
+      await expect(done).toBeFocused();
+      await page.keyboard.press("Enter");
+      await expect(dialog).toBeHidden();
+
+      await closeOnScreenKeyboard(page);
+    });
+  }
+});
+
+test("the picker footer clears the safe area with no keyboard", { tag: "@ui-risk" }, async ({
+  page,
+}) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await prepareGuestPage(page, "en");
   await page.goto("/chat");
@@ -221,19 +345,10 @@ test("the picker footer clears the mobile keyboard and safe area", async ({ page
   const done = dialog.getByTestId("model-picker-done");
   await expect(done).toBeVisible();
 
-  // Focusing the search field is what raises the on-screen keyboard; the sheet
-  // is bottom-inset by env(safe-area-inset-bottom) so the footer must stay
-  // inside the visual viewport rather than sliding under it.
-  await dialog.getByTestId("model-search-input").focus();
-  const metrics = await page.evaluate(() => {
-    const footer = document.querySelector('[data-testid="model-selection-summary"]');
-    const rect = footer!.getBoundingClientRect();
-    return {
-      bottom: rect.bottom,
-      visualHeight: window.visualViewport?.height ?? window.innerHeight,
-    };
-  });
-  expect(metrics.bottom).toBeLessThanOrEqual(metrics.visualHeight + 1);
+  // No keyboard means no compensation: the sheet must keep its plain CSS
+  // positioning rather than acquiring a stale inline offset.
+  await expect(dialog).not.toHaveAttribute("data-keyboard-inset", /.+/);
+  await expectInsideVisibleViewport(page, dialog.getByTestId("model-selection-summary"), "footer");
   await expectNoHorizontalOverflow(page);
 });
 

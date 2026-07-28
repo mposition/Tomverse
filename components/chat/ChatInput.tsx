@@ -83,6 +83,7 @@ import { UsageLimitModal } from "@/components/chat/UsageLimitModal";
 import { getChatCreditAllocation } from "@/lib/chatCreditAllocation";
 import { looksLikeStructuredText } from "@/lib/structuredPasteDetection";
 import { useIsMobileShell } from "@/components/chat/useIsMobileShell";
+import { useKeyboardInset } from "@/components/chat/useVisualViewport";
 import {
   getChatEnterKeyAction,
   isComposingKeydown,
@@ -1706,6 +1707,22 @@ export function ChatInput({
     getServerMobileModelMenuSnapshot
   );
 
+  // UI-001. The sheet below is `position: fixed`, and a fixed element is laid
+  // out against the *layout* viewport -- which iOS Safari (and Android Chrome
+  // in its default mode) leaves at full height when the keyboard opens. So
+  // `bottom: 0.5rem` resolves to half a rem above the bottom of a viewport the
+  // user can no longer see, and the footer that carries "Done" plus the last
+  // candidate rows go under the keyboard. `dvh` does not help: it tracks the
+  // dynamic viewport (URL bar), not the keyboard.
+  //
+  // Adding the occluded height back as a bottom inset is the whole fix. The
+  // sheet's own `flex` contract does the rest: header, search, selected summary
+  // and footer are all `shrink-0`, the candidate list is the only `flex-1`
+  // region, so a shorter sheet takes the height out of the list -- which
+  // scrolls -- and never out of the controls that end the task.
+  const keyboardInset = useKeyboardInset();
+  const compactSheetKeyboardInset = isMobileModelMenu ? keyboardInset : 0;
+
   return (
       <div className={variant === "floating"
         ? "w-full max-w-full shrink-0 overflow-hidden px-0 py-0 md:overflow-visible"
@@ -2146,7 +2163,15 @@ export function ChatInput({
                 size="xs"
               />
             ) : (
-              <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[9px] font-black text-white">
+              // Glyph inside a 16px badge. The same number is the visible
+              // label beside it ("3 AIs") and part of the button's accessible
+              // name, so this is a decorative repeat rather than the only
+              // place the count is readable (UI-007 exception).
+              <span
+                data-allow-small-text
+                aria-hidden="true"
+                className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[9px] font-black text-white"
+              >
                 {activeSelectedModels.length}
               </span>
             )}
@@ -2243,6 +2268,18 @@ export function ChatInput({
                     : t("chat.moreActions")
               }
               tabIndex={-1}
+              // Exposed for the responsive suite so a keyboard fixture can
+              // assert the sheet actually reacted, rather than inferring it
+              // from a rect that would also pass with no keyboard at all.
+              data-keyboard-inset={compactSheetKeyboardInset || undefined}
+              style={
+                compactSheetKeyboardInset > 0
+                  ? {
+                      bottom: `calc(${compactSheetKeyboardInset}px + 0.5rem + env(safe-area-inset-bottom))`,
+                      maxHeight: `calc(100dvh - ${compactSheetKeyboardInset}px - 1rem - env(safe-area-inset-top) - env(safe-area-inset-bottom))`,
+                    }
+                  : undefined
+              }
               className={`fixed inset-x-2 z-[100] flex max-w-[calc(100%_-_1rem)] flex-col overflow-hidden rounded-3xl border border-zinc-200 bg-white p-2 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900 md:rounded-2xl ${
                 menuView === "models"
                   ? "bottom-[calc(0.5rem+env(safe-area-inset-bottom))] top-[calc(0.5rem+env(safe-area-inset-top))] max-h-none md:inset-x-auto md:left-1/2 md:right-auto md:-translate-x-1/2 md:top-[5vh] md:bottom-[5vh] md:h-[90vh] md:max-h-[900px] md:w-[min(94vw,1000px)] md:max-w-[min(94vw,1000px)]"
@@ -2259,13 +2296,20 @@ export function ChatInput({
                         ? t("chat.toolsWebSearch")
                         : t("chat.moreActions")}
                   </p>
-                  <p className="text-xs text-zinc-500">
-                    {menuView === "models"
-                      ? `${selectedModels.length}/${maxSelectableModels} ${selectedModels.length === 1 ? t("chat.modelsSelectedOne") : t("chat.modelsSelectedOther")}`
-                      : menuView === "webSearch"
+                  {/*
+                    UI-010: the selection count belongs to the picker panel's
+                    own header, immediately above the candidates it applies to.
+                    Repeating it here put "3/3" twice in consecutive rows and
+                    pushed the first candidate further down a phone screen --
+                    the row this header still owns is the dialog's purpose.
+                  */}
+                  {menuView !== "models" && (
+                    <p className="text-xs text-zinc-500">
+                      {menuView === "webSearch"
                         ? t("chat.toolsWebSearchDescription")
                         : t("chat.uploadFromComputer")}
-                  </p>
+                    </p>
+                  )}
                 </div>
                 <button
                   type="button"
@@ -2576,6 +2620,7 @@ export function ChatInput({
                         isGuestMode={isGuestMode}
                         isMobileShell={isMobileShell}
                         isCompactLayout={isMobileModelMenu}
+                        isKeyboardCompact={compactSheetKeyboardInset > 0}
                         modelStatuses={liveModelStatuses}
                         hasImageAttachments={hasImageAttachments}
                         favoriteModelIds={favoriteModelIds}

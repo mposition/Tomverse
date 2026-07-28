@@ -924,7 +924,15 @@ export function ComparisonReviewDialog({
           )}
 
           {error && (
-            <div className="mt-5 flex gap-3 rounded-2xl border border-red-300 bg-red-50 p-4 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
+            // UI-004: a review that fails after the user has committed the
+            // click is an error they must notice, not a paragraph that
+            // silently appears below the fold -- so it announces like every
+            // other failure surface in the product does.
+            <div
+              role="alert"
+              data-testid="comparison-review-error"
+              className="mt-5 flex gap-3 rounded-2xl border border-red-300 bg-red-50 p-4 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
+            >
               <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
               <p className="min-w-0 break-words text-sm leading-6">{error}</p>
             </div>

@@ -729,7 +729,10 @@ export function ChatSidebar({
 
     return (
         <>
-        <aside className={`relative flex h-full w-full shrink-0 select-none flex-col border-r border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 ${isMobileDrawer ? "" : "md:w-80"}`}>
+        <aside
+            data-testid="chat-sidebar"
+            className={`relative flex h-full w-full shrink-0 select-none flex-col border-r border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 ${isMobileDrawer ? "" : "md:w-80"}`}
+        >
 
             <div className={`${isMobileDrawer ? "p-3 pr-16" : "p-4"} border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-2.5`}>
                 <span className={`flex items-center justify-center overflow-hidden rounded-xl bg-white ring-1 ring-zinc-200 shadow-sm dark:ring-zinc-800 ${isMobileDrawer ? "h-8 w-8" : "h-9 w-9"}`}>
@@ -862,7 +865,7 @@ export function ChatSidebar({
                                 {t("sidebar.organizerTools")}
                             </span>
                             {!organizerExpanded ? (
-                                <span className="block truncate text-[10px] font-medium text-zinc-400">
+                                <span className="block truncate text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
                                     {activeOrganizerSummary}
                                 </span>
                             ) : null}
@@ -1260,7 +1263,7 @@ export function ChatSidebar({
                                             <span className="truncate">{projectText(getConversationProjectId(conv) || "")}</span>
                                         </span>
                                     )}
-                                    <span className="flex items-center gap-1.5 truncate text-[10px] font-medium text-zinc-400 dark:text-zinc-500">
+                                    <span className="flex items-center gap-1.5 truncate text-[11px] font-medium text-zinc-600 dark:text-zinc-400">
                                         {pinnedConversationIds.includes(conv.id) && <Pin className="h-3 w-3 shrink-0 text-blue-500" />}
                                         {favoriteConversationIds.includes(conv.id) && <Star className="h-3 w-3 shrink-0 fill-amber-400 text-amber-400" />}
                                         <Sparkles className="h-3 w-3 shrink-0" />

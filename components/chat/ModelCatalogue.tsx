@@ -79,6 +79,8 @@ type ModelCatalogueProps = {
   currentPlan: ModelTier | "Guest";
   isGuestMode: boolean;
   isMobileShell: boolean;
+  /** See ModelPickerPanel: the panel owns the single scroller in this mode. */
+  isKeyboardCompact?: boolean;
   modelStatuses: Record<string, ModelCatalogueStatusRecord>;
   hasImageAttachments: boolean;
   favoriteModelIds: string[];
@@ -104,6 +106,7 @@ export function ModelCatalogue({
   currentPlan,
   isGuestMode,
   isMobileShell,
+  isKeyboardCompact = false,
   modelStatuses,
   hasImageAttachments,
   favoriteModelIds,
@@ -278,7 +281,7 @@ export function ModelCatalogue({
   const taskFilterOptions = ["all", ...MODEL_RECOMMENDATION_USE_CASES] as const;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className={`flex min-h-0 flex-col ${isKeyboardCompact ? "" : "flex-1"}`}>
       <div className="shrink-0 space-y-2 px-1 pb-2">
         <div className="flex items-center gap-2">
           <label className="sr-only" htmlFor="model-catalogue-task-filter">
@@ -338,7 +341,11 @@ export function ModelCatalogue({
 
       <div
         data-testid="model-picker-scroll-region"
-        className="h-0 min-h-0 flex-1 touch-pan-y space-y-3 overflow-x-hidden overflow-y-scroll overscroll-y-contain px-1 pb-4 pr-2 [scrollbar-gutter:stable] [-webkit-overflow-scrolling:touch] @container/list"
+        className={
+          isKeyboardCompact
+            ? "min-h-0 shrink-0 space-y-3 overflow-x-hidden px-1 pb-4 pr-2 @container/list"
+            : "h-0 min-h-0 flex-1 touch-pan-y space-y-3 overflow-x-hidden overflow-y-scroll overscroll-y-contain px-1 pb-4 pr-2 [scrollbar-gutter:stable] [-webkit-overflow-scrolling:touch] @container/list"
+        }
       >
         {groupedModels.map((group) => (
           <div key={group.provider || "all"} className="space-y-1">

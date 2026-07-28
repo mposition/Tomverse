@@ -18,6 +18,9 @@ export const DESKTOP_VIEWPORT = { width: 1440, height: 900 };
 export const MOBILE_VIEWPORT = { width: 390, height: 844 };
 export const MOBILE_MIN_VIEWPORT = { width: 320, height: 568 };
 
+/** The default comparison set every state fixture starts from. */
+export const THREE_MODELS = ["gpt-5-4-mini", "claude-sonnet-5", "gemini-3-5-flash"];
+
 export type Theme = "light" | "dark";
 
 export type StreamAttempt =
@@ -438,6 +441,100 @@ export async function expectNoUnexpectedTransientUi(
 // genuinely missing state badge, wrong color, or shifted CTA (which
 // moves far more than 0.6% of pixels) still fails. See the UI-P1-03
 // completion report for the full measurement.
+/**
+ * Enters an authenticated three-model conversation in a known theme, language
+ * and viewport. Shared by the golden-screenshot suite and the contrast /
+ * typography audits so both measure the same real screens rather than two
+ * subtly different fixtures.
+ */
+export async function enterConversation(
+  page: Page,
+  options: {
+    theme: Theme;
+    viewport: { width: number; height: number };
+    lang?: "ko" | "en";
+    selectedModels?: string[];
+    holdMessagesFetch?: boolean;
+    // Installed here (before page.goto) rather than left to the caller,
+    // because installChatModelStub relies on page.addInitScript -- which
+    // only takes effect on navigations that happen *after* it's
+    // registered. Calling it post-goto silently no-ops: the real request
+    // reaches the real E2E server instead of the stub.
+    modelStub?: ChatModelStubSpec;
+    // Same reasoning as modelStub, but for GET /api/user/usage: the
+    // useUserUsage() hook fires on mount, so a route override registered
+    // after page.goto() can lose the race to the default (Free-plan) route
+    // mockAuthenticatedApi already installed, leaving the account looking
+    // like Free plan even when a test asked for Pro.
+    usagePatch?: UsagePatch;
+  }
+) {
+  const {
+    theme,
+    viewport,
+    lang = "ko",
+    selectedModels = THREE_MODELS,
+    holdMessagesFetch = false,
+    modelStub,
+    usagePatch,
+  } = options;
+  const authState = await mockAuthenticatedApi(page, { selectedModels });
+  authState.theme = theme;
+  // Deterministic, pre-navigation theme source: see setDeterministicTheme's
+  // docstring for why this -- not the mocked GET /api/user/settings response
+  // above -- is what actually controls the very first paint's theme.
+  await setDeterministicTheme(page, theme);
+  await suppressTransientUi(page);
+  await restoreActiveConversation(page);
+  if (modelStub) {
+    await installChatModelStub(page, modelStub);
+  }
+  if (usagePatch) {
+    await mockUserUsage(page, usagePatch);
+  }
+
+  if (holdMessagesFetch) {
+    // Registered after mockAuthenticatedApi's own conversation route, so it
+    // runs first (Playwright routes are LIFO) and can selectively hold only
+    // the per-panel message GET pending, forever, within this test -- while
+    // still falling back to the earlier handler for PATCH/DELETE.
+    await page.route(/.*\/api\/conversations\/qa-conversation(\?.*)?$/, async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.fallback();
+        return;
+      }
+      // Never fulfilled: this is the direct, deterministic entry point for
+      // the per-panel "loading" state, not a timing race against a real
+      // fetch that happens to resolve slowly.
+    });
+  }
+
+  await page.setViewportSize(viewport);
+  await page.goto(`/chat?lang=${lang}`);
+  await freezeAnimations(page);
+
+  const shellTestId = viewport.width < 768 ? "mobile-chat-shell" : "desktop-chat-shell";
+  await expect(page.getByTestId(shellTestId)).toBeVisible();
+  if (viewport.width < 768) {
+    // Wait on the positive signal -- the real model summary -- rather than
+    // only on the skeleton's absence, so a header that rendered neither
+    // fails here instead of passing a screenshot of an empty slot.
+    // The default expect timeout is deliberate: isModelSelectionReady now
+    // resolves on every bootstrap path (see ChatPageClient's restore and
+    // comparison-preset effects), so needing longer means a real regression,
+    // not a loaded runner.
+    await expect(page.getByTestId("mobile-header-model-summary")).toBeVisible();
+    await expect(page.getByTestId("mobile-header-model-summary-skeleton")).toHaveCount(0);
+  }
+  // Belt-and-suspenders on top of the deterministic pre-navigation
+  // localStorage write above: fails loudly (not silently mislabels a
+  // golden) if the theme somehow still didn't land by the time the shell
+  // is interactive.
+  await expectThemeApplied(page, theme);
+
+  return authState;
+}
+
 export const GOLDEN_MAX_DIFF_PIXEL_RATIO = 0.006;
 
 export type StableScreenshotOptions = {

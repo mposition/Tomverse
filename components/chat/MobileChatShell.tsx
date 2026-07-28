@@ -503,8 +503,16 @@ export function MobileChatShell({
           >
             {isMultiModelConversation ? (
               <>
+                {/*
+                  Glyph-sized count drawn inside a 16px badge, already
+                  aria-hidden, with the same number spelled out in the label
+                  beside it and in the button's accessible name. A deliberate
+                  exception to the 11px consumer-text floor (UI-007), marked so
+                  the audit can see it rather than infer it.
+                */}
                 <span
                   aria-hidden="true"
+                  data-allow-small-text
                   className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[9px] font-black text-white"
                 >
                   {modelSummary.activeCount}
@@ -645,7 +653,7 @@ export function MobileChatShell({
                     ) : status === "cancelled" ? (
                       <span className={`h-2 w-2 shrink-0 rounded-full ${isActive ? "bg-white/70" : "bg-zinc-400"}`} />
                     ) : status === "paused" ? (
-                      <span className="shrink-0 text-[9px]">OFF</span>
+                      <span className="shrink-0 text-[11px] font-bold">OFF</span>
                     ) : status === "idle" ? (
                       <Check className={`h-3 w-3 shrink-0 ${isActive ? "text-white" : "text-emerald-500"}`} />
                     ) : null}

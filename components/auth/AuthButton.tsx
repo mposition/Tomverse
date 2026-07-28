@@ -751,7 +751,7 @@ export function AuthButton({
             onClick={() => setIsAccountMenuOpen((current) => !current)}
             className="flex min-w-0 flex-1 items-center gap-2 rounded-xl px-1.5 py-1 text-left transition hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:hover:bg-zinc-900"
           >
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-teal-600 text-sm font-black text-white ring-1 ring-teal-400/50 dark:bg-teal-700 dark:ring-teal-400/40">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-teal-700 text-sm font-black text-white ring-1 ring-teal-400/50 dark:bg-teal-700 dark:ring-teal-400/40">
             {session.user.image ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -767,7 +767,7 @@ export function AuthButton({
             <span className="block truncate text-xs font-black text-zinc-800 dark:text-zinc-100">
               {session.user.name || session.user.email || "Tomverse"}
             </span>
-            <span className="block truncate text-[10px] font-semibold text-zinc-400">
+            <span className="block truncate text-[11px] font-semibold text-zinc-600 dark:text-zinc-400">
               {accountPlan ? t(`modelTiers.${accountPlan.toLowerCase()}`) : t("auth.loading")}
               {accountUsage
                 ? ` · ${formatCopy("auth.planCreditsCompact", {
@@ -819,7 +819,7 @@ export function AuthButton({
               className="fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[90] max-h-[calc(100dvh-1.5rem)] overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-3 shadow-2xl overscroll-contain dark:border-zinc-700 dark:bg-zinc-950 md:absolute md:inset-x-0 md:bottom-[calc(100%+0.5rem)]"
             >
               <div className="flex min-w-0 items-center gap-2 border-b border-zinc-200 pb-3 dark:border-zinc-800">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-teal-600 text-sm font-black text-white">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-teal-700 text-sm font-black text-white">
                   {(session.user.name?.[0] || session.user.email?.[0] || "T").toUpperCase()}
                 </span>
                 <span className="min-w-0 flex-1">

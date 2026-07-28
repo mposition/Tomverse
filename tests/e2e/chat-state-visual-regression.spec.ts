@@ -9,6 +9,7 @@ import {
   DESKTOP_VIEWPORT,
   MOBILE_VIEWPORT,
   MOBILE_MIN_VIEWPORT,
+  enterConversation,
   expectStableScreenshot,
   expectThemeApplied,
   freezeAnimations,
@@ -17,14 +18,18 @@ import {
   mockDeepResearchStatus,
   mockGuestUsage,
   mockUserUsage,
-  restoreActiveConversation,
   setDeterministicTheme,
+  THREE_MODELS,
   submitComposer,
   suppressTransientUi,
-  type ChatModelStubSpec,
   type Theme,
-  type UsagePatch,
 } from "./support/chat-state-fixtures";
+import {
+  mockComparisonReview,
+  mockConversationHistory,
+  openReviewConversation,
+  reviewModels,
+} from "./support/comparison-review-fixtures";
 
 // -----------------------------------------------------------------------
 // UI-P1-03: state fixtures + golden screenshots for the Tomverse Insight
@@ -63,7 +68,6 @@ test.use({ hasTouch: true });
 const MODEL_A = "gpt-5-4-mini"; // OpenAI, standard tier
 const MODEL_B = "claude-sonnet-5"; // Anthropic, advanced tier
 const MODEL_C = "gemini-3-5-flash"; // Google, standard tier
-const THREE_MODELS = [MODEL_A, MODEL_B, MODEL_C];
 const DEEP_RESEARCH_MODEL = "perplexity/sonar-deep-research";
 
 const SHORT_ANSWER = "The capital of France is Paris.";
@@ -90,94 +94,6 @@ const LONG_ERROR_KO =
   "요청을 처리하는 동안 내부 안전 한도에 도달하여 응답을 완료하지 못했습니다. 이는 일시적인 공급자 측 혼잡 또는 계정에 설정된 일일 비용 보호 장치 때문일 수 있습니다. 잠시 후 다시 시도하거나, 더 가벼운 모델을 선택하거나, 문제가 계속되면 지원팀에 추적 ID와 함께 문의해 주세요.";
 const LONG_ERROR_EN =
   "The request could not be completed because an internal safety limit was reached while generating a response. This can happen during temporary provider-side congestion or because of a daily cost-safety guardrail configured on this account. Please try again shortly, choose a lighter-weight model, or contact support with the trace ID below if this keeps happening.";
-
-async function enterConversation(
-  page: Page,
-  options: {
-    theme: Theme;
-    viewport: { width: number; height: number };
-    lang?: "ko" | "en";
-    selectedModels?: string[];
-    holdMessagesFetch?: boolean;
-    // Installed here (before page.goto) rather than left to the caller,
-    // because installChatModelStub relies on page.addInitScript -- which
-    // only takes effect on navigations that happen *after* it's
-    // registered. Calling it post-goto silently no-ops: the real request
-    // reaches the real E2E server instead of the stub.
-    modelStub?: ChatModelStubSpec;
-    // Same reasoning as modelStub, but for GET /api/user/usage: the
-    // useUserUsage() hook fires on mount, so a route override registered
-    // after page.goto() can lose the race to the default (Free-plan) route
-    // mockAuthenticatedApi already installed, leaving the account looking
-    // like Free plan even when a test asked for Pro.
-    usagePatch?: UsagePatch;
-  }
-) {
-  const {
-    theme,
-    viewport,
-    lang = "ko",
-    selectedModels = THREE_MODELS,
-    holdMessagesFetch = false,
-    modelStub,
-    usagePatch,
-  } = options;
-  const authState = await mockAuthenticatedApi(page, { selectedModels });
-  authState.theme = theme;
-  // Deterministic, pre-navigation theme source: see setDeterministicTheme's
-  // docstring for why this -- not the mocked GET /api/user/settings response
-  // above -- is what actually controls the very first paint's theme.
-  await setDeterministicTheme(page, theme);
-  await suppressTransientUi(page);
-  await restoreActiveConversation(page);
-  if (modelStub) {
-    await installChatModelStub(page, modelStub);
-  }
-  if (usagePatch) {
-    await mockUserUsage(page, usagePatch);
-  }
-
-  if (holdMessagesFetch) {
-    // Registered after mockAuthenticatedApi's own conversation route, so it
-    // runs first (Playwright routes are LIFO) and can selectively hold only
-    // the per-panel message GET pending, forever, within this test -- while
-    // still falling back to the earlier handler for PATCH/DELETE.
-    await page.route(/.*\/api\/conversations\/qa-conversation(\?.*)?$/, async (route) => {
-      if (route.request().method() !== "GET") {
-        await route.fallback();
-        return;
-      }
-      // Never fulfilled: this is the direct, deterministic entry point for
-      // the per-panel "loading" state, not a timing race against a real
-      // fetch that happens to resolve slowly.
-    });
-  }
-
-  await page.setViewportSize(viewport);
-  await page.goto(`/chat?lang=${lang}`);
-  await freezeAnimations(page);
-
-  const shellTestId = viewport.width < 768 ? "mobile-chat-shell" : "desktop-chat-shell";
-  await expect(page.getByTestId(shellTestId)).toBeVisible();
-  if (viewport.width < 768) {
-    // Wait on the positive signal -- the real model summary -- rather than
-    // only on the skeleton's absence, so a header that rendered neither
-    // fails here instead of passing a screenshot of an empty slot.
-    // The default expect timeout is deliberate: isModelSelectionReady now
-    // resolves on every bootstrap path (see ChatPageClient's restore and
-    // comparison-preset effects), so needing longer means a real regression,
-    // not a loaded runner.
-    await expect(page.getByTestId("mobile-header-model-summary")).toBeVisible();
-    await expect(page.getByTestId("mobile-header-model-summary-skeleton")).toHaveCount(0);
-  }
-  // Belt-and-suspenders on top of the deterministic pre-navigation
-  // localStorage write above: fails loudly (not silently mislabels a
-  // golden) if the theme somehow still didn't land by the time the shell
-  // is interactive.
-  await expectThemeApplied(page, theme);
-
-  return authState;
-}
 
 const CORE_VIEWPORTS: Array<[{ width: number; height: number }, string]> = [
   [DESKTOP_VIEWPORT, "desktop"],
@@ -1020,5 +936,312 @@ test.describe("Mobile touch targets", () => {
       expect(box.x).toBeGreaterThanOrEqual(0);
       expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
     }
+  });
+});
+
+// ===========================================================================
+// 12. UI-004 matrix gaps.
+//
+// The matrix above is deep on Korean, light-theme desktop and 390px, and
+// thin exactly where a regression is hardest to notice by eye: the smallest
+// phone in dark theme, the English strings, and the two flows that only exist
+// behind a click (AI Review, and a Deep Research failure whose panel is not
+// the active tab). Everything below is added for coverage, not for volume --
+// each entry is a state where the *recovery* affordance is what would break.
+// ===========================================================================
+test.describe("UI-004: dark 320px recovery states", () => {
+  test("chat-error-mobile-min-dark-ko", async ({ page }) => {
+    await enterConversation(page, { theme: "dark", viewport: MOBILE_MIN_VIEWPORT });
+    await installChatModelStub(page, {
+      [MODEL_A]: { kind: "error", status: 500, message: "QA fixture: request failed." },
+      [MODEL_B]: { kind: "error", status: 500, message: "QA fixture: request failed." },
+      [MODEL_C]: { kind: "error", status: 500, message: "QA fixture: request failed." },
+    });
+    await submitComposer(page, "Trigger a full failure.", MOBILE_MIN_VIEWPORT.width);
+
+    await expect(
+      page.locator('[data-testid="chat-message"][data-message-role="assistant"] [role="alert"]')
+    ).toHaveCount(3);
+    await expectStableScreenshot(page, "chat-error-mobile-min-dark-ko.png", { theme: "dark" });
+  });
+
+  test("chat-partial-failure-mobile-min-dark-ko", async ({ page }) => {
+    await enterConversation(page, { theme: "dark", viewport: MOBILE_MIN_VIEWPORT });
+    await installChatModelStub(page, {
+      [MODEL_A]: { kind: "success", chunks: [SHORT_ANSWER], intervalMs: 5 },
+      [MODEL_B]: { kind: "success", chunks: [SHORT_ANSWER], intervalMs: 5 },
+      [MODEL_C]: { kind: "error", status: 500, message: "QA fixture: model C failed." },
+    });
+    await submitComposer(page, "Trigger a single-model failure.", MOBILE_MIN_VIEWPORT.width);
+
+    await expect(page.getByText(SHORT_ANSWER).first()).toBeVisible();
+    await expectStableScreenshot(page, "chat-partial-failure-mobile-min-dark-ko.png", {
+      theme: "dark",
+    });
+  });
+
+  test("chat-retry-mobile-min-dark-ko", async ({ page }) => {
+    await enterConversation(page, { theme: "dark", viewport: MOBILE_MIN_VIEWPORT });
+    await installChatModelStub(page, {
+      [MODEL_A]: { kind: "error", status: 500, message: "QA fixture: retryable failure." },
+      [MODEL_B]: { kind: "success", chunks: [SHORT_ANSWER], intervalMs: 5 },
+      [MODEL_C]: { kind: "success", chunks: [SHORT_ANSWER], intervalMs: 5 },
+    });
+    await submitComposer(page, "Trigger a retryable failure.", MOBILE_MIN_VIEWPORT.width);
+
+    const retryButton = page.getByRole("button", { name: "다시 시도" }).first();
+    await expect(retryButton).toBeVisible();
+    await expect(retryButton).toBeEnabled();
+    await expectStableScreenshot(page, "chat-retry-mobile-min-dark-ko.png", { theme: "dark" });
+  });
+
+  test("chat-insufficient-credits-mobile-min-dark-ko", async ({ page }) => {
+    await enterConversation(page, { theme: "dark", viewport: MOBILE_MIN_VIEWPORT });
+    await mockUserUsage(page, {
+      plan: "Free",
+      balances: { planRemainingCredits: 0, purchasedRemainingCredits: 0, dailyRemainingCredits: 0 },
+    });
+    await page.reload();
+    await freezeAnimations(page);
+    await expectThemeApplied(page, "dark");
+    await expect(page.getByText("플랜 한도에 도달했습니다").first()).toBeVisible();
+
+    await expectStableScreenshot(page, "chat-insufficient-credits-mobile-min-dark-ko.png", {
+      theme: "dark",
+      allowTransientUi: ["usage-limit-modal"],
+    });
+  });
+});
+
+test.describe("UI-004: English recovery states", () => {
+  test("chat-partial-failure-desktop-dark-en", async ({ page }) => {
+    await enterConversation(page, { theme: "dark", viewport: DESKTOP_VIEWPORT, lang: "en" });
+    await installChatModelStub(page, {
+      [MODEL_A]: { kind: "success", chunks: [SHORT_ANSWER], intervalMs: 5 },
+      [MODEL_B]: { kind: "success", chunks: [LONG_ANSWER], intervalMs: 5 },
+      [MODEL_C]: { kind: "error", status: 500, message: "QA fixture: model C failed." },
+    });
+    await submitComposer(page, "Trigger a single-model failure.", DESKTOP_VIEWPORT.width);
+
+    await expect(page.getByText(SHORT_ANSWER)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeVisible();
+    await expectStableScreenshot(page, "chat-partial-failure-desktop-dark-en.png", {
+      theme: "dark",
+    });
+  });
+
+  test("chat-error-mobile-light-en", async ({ page }) => {
+    await enterConversation(page, { theme: "light", viewport: MOBILE_VIEWPORT, lang: "en" });
+    await installChatModelStub(page, {
+      [MODEL_A]: { kind: "error", status: 500, message: LONG_ERROR_EN },
+      [MODEL_B]: { kind: "error", status: 500, message: LONG_ERROR_EN },
+      [MODEL_C]: { kind: "error", status: 500, message: LONG_ERROR_EN },
+    });
+    await submitComposer(page, "Trigger a full failure.", MOBILE_VIEWPORT.width);
+
+    await expect(
+      page.locator('[data-testid="chat-message"][data-message-role="assistant"] [role="alert"]')
+    ).toHaveCount(3);
+    await expectStableScreenshot(page, "chat-error-mobile-light-en.png", { theme: "light" });
+  });
+
+  test("chat-retry-mobile-dark-en", async ({ page }) => {
+    await enterConversation(page, { theme: "dark", viewport: MOBILE_VIEWPORT, lang: "en" });
+    await installChatModelStub(page, {
+      [MODEL_A]: { kind: "error", status: 500, message: "QA fixture: retryable failure." },
+      [MODEL_B]: { kind: "success", chunks: [SHORT_ANSWER], intervalMs: 5 },
+      [MODEL_C]: { kind: "success", chunks: [SHORT_ANSWER], intervalMs: 5 },
+    });
+    await submitComposer(page, "Trigger a retryable failure.", MOBILE_VIEWPORT.width);
+
+    await expect(page.getByRole("button", { name: "Retry", exact: true }).first()).toBeVisible();
+    await expectStableScreenshot(page, "chat-retry-mobile-dark-en.png", { theme: "dark" });
+  });
+
+  test("chat-insufficient-credits-desktop-light-en", async ({ page }) => {
+    await enterConversation(page, { theme: "light", viewport: DESKTOP_VIEWPORT, lang: "en" });
+    await mockUserUsage(page, {
+      plan: "Free",
+      balances: { planRemainingCredits: 0, purchasedRemainingCredits: 0, dailyRemainingCredits: 0 },
+    });
+    await page.reload();
+    await freezeAnimations(page);
+    await expectThemeApplied(page, "light");
+    await expect(page.getByTestId("usage-limit-modal")).toBeVisible();
+
+    await expectStableScreenshot(page, "chat-insufficient-credits-desktop-light-en.png", {
+      theme: "light",
+      allowTransientUi: ["usage-limit-modal"],
+    });
+  });
+});
+
+test.describe("UI-004: AI Review dialog states", () => {
+  // The review dialog is a distinct product surface with its own loading,
+  // result and failure chrome, and none of it was under a golden. It runs
+  // against the same mocked comparison-review API the behavioural suite uses,
+  // so no reviewer model is ever called.
+  async function enterReviewConversation(
+    page: Page,
+    options: {
+      theme: Theme;
+      viewport: { width: number; height: number };
+      failRun?: boolean | "first";
+      deferSetup?: boolean;
+    }
+  ) {
+    const { theme, viewport, failRun, deferSetup } = options;
+    await prepareGuestPage(page, "ko");
+    const authState = await mockAuthenticatedApi(page, { selectedModels: reviewModels });
+    authState.theme = theme;
+    await setDeterministicTheme(page, theme);
+    await suppressTransientUi(page);
+    await mockConversationHistory(page);
+    const reviewApi = await mockComparisonReview(page, { failRun, deferSetup });
+
+    await page.setViewportSize(viewport);
+    await page.goto("/chat?lang=ko");
+    await freezeAnimations(page);
+    await openReviewConversation(page);
+    await expectThemeApplied(page, theme);
+    return reviewApi;
+  }
+
+  async function openReviewDialog(page: Page) {
+    const entry = page.getByRole("button", { name: "AI 답변 교차검토" });
+    await expect(entry).toBeVisible({ timeout: 30_000 });
+    await entry.click();
+    const dialog = page.getByRole("dialog", { name: "AI 답변 교차검토" });
+    await expect(dialog).toBeVisible();
+    return dialog;
+  }
+
+  async function runReview(page: Page) {
+    const dialog = page.getByRole("dialog", { name: "AI 답변 교차검토" });
+    await expect(dialog.getByTestId("comparison-review-setup")).toBeVisible({
+      timeout: 15_000,
+    });
+    await dialog.getByRole("button", { name: /교차검토 실행/ }).click();
+    return dialog;
+  }
+
+  test("chat-ai-review-loading-desktop-light-ko", async ({ page }) => {
+    test.setTimeout(60_000);
+    const reviewApi = await enterReviewConversation(page, {
+      theme: "light",
+      viewport: DESKTOP_VIEWPORT,
+      deferSetup: true,
+    });
+    const dialog = await openReviewDialog(page);
+    await expect(dialog.getByTestId("comparison-review-loading")).toBeVisible();
+
+    await expectStableScreenshot(page, "chat-ai-review-loading-desktop-light-ko.png", {
+      theme: "light",
+    });
+    reviewApi.releaseSetup();
+  });
+
+  test("chat-ai-review-success-desktop-light-ko", async ({ page }) => {
+    test.setTimeout(60_000);
+    await enterReviewConversation(page, { theme: "light", viewport: DESKTOP_VIEWPORT });
+    await openReviewDialog(page);
+    const dialog = await runReview(page);
+    await expect(dialog.getByText("1. 공통된 내용")).toBeVisible();
+    await dialog.getByText("1. 공통된 내용").scrollIntoViewIfNeeded();
+
+    await expectStableScreenshot(page, "chat-ai-review-success-desktop-light-ko.png", {
+      theme: "light",
+    });
+  });
+
+  for (const [viewport, viewportName, theme] of [
+    [DESKTOP_VIEWPORT, "desktop", "light"],
+    [MOBILE_VIEWPORT, "mobile", "dark"],
+  ] as const) {
+    test(`chat-ai-review-error-${viewportName}-${theme}-ko`, async ({ page }) => {
+      test.setTimeout(60_000);
+      await enterReviewConversation(page, { theme, viewport, failRun: true });
+      await openReviewDialog(page);
+      const dialog = await runReview(page);
+
+      // The failure has to say what went wrong and leave the run control in
+      // place -- an error the user can read but not act on is not a recovery
+      // state.
+      const alert = dialog.getByTestId("comparison-review-error");
+      await expect(alert).toBeVisible();
+      await expect(alert).toHaveAttribute("role", "alert");
+      await expect(alert).toContainText("QA fixture: comparison review failed.");
+      await expect(dialog.getByRole("button", { name: /교차검토 실행/ })).toBeVisible();
+      // The dialog body scrolls independently, and the failure lands at its
+      // end. Capturing without scrolling would golden the setup form and
+      // silently protect nothing.
+      await alert.scrollIntoViewIfNeeded();
+
+      await expectStableScreenshot(
+        page,
+        `chat-ai-review-error-${viewportName}-${theme}-ko.png`,
+        { theme }
+      );
+    });
+  }
+
+  test("chat-ai-review-retry-desktop-light-ko", async ({ page }) => {
+    test.setTimeout(60_000);
+    await enterReviewConversation(page, {
+      theme: "light",
+      viewport: DESKTOP_VIEWPORT,
+      failRun: "first",
+    });
+    await openReviewDialog(page);
+    const dialog = await runReview(page);
+    await expect(dialog.getByTestId("comparison-review-error")).toBeVisible();
+
+    // Second attempt succeeds: the error clears and the result replaces it,
+    // rather than the two stacking.
+    await dialog.getByRole("button", { name: /교차검토 실행/ }).click();
+    await expect(dialog.getByText("1. 공통된 내용")).toBeVisible();
+    await expect(dialog.getByTestId("comparison-review-error")).toHaveCount(0);
+    await dialog.getByText("1. 공통된 내용").scrollIntoViewIfNeeded();
+
+    await expectStableScreenshot(page, "chat-ai-review-retry-desktop-light-ko.png", {
+      theme: "light",
+    });
+  });
+});
+
+test.describe("UI-004: Deep Research failure detail", () => {
+  // The existing mobile golden captures the tab strip with the failed model
+  // *not* selected, so the error card it is supposed to protect is off-screen.
+  // This one selects the failed tab and asserts the recovery affordances are
+  // the thing in the frame.
+  test("chat-deep-research-failed-active-mobile-dark-ko", async ({ page }) => {
+    await enterProConversation(page, "dark", MOBILE_VIEWPORT);
+    await installChatModelStub(page, {
+      [MODEL_B]: { kind: "success", chunks: [SHORT_ANSWER], intervalMs: 5 },
+      [MODEL_C]: { kind: "success", chunks: [SHORT_ANSWER], intervalMs: 5 },
+      [DEEP_RESEARCH_MODEL]: { kind: "async-job", jobId: "qa-job-failed" },
+    });
+    await mockDeepResearchStatus(page, {
+      status: "failed",
+      error: "QA fixture: deep research job failed.",
+    });
+    await startDeepResearch(page, MOBILE_VIEWPORT.width);
+
+    await page
+      .locator(`[data-testid="mobile-model-tab"][data-model-id="${DEEP_RESEARCH_MODEL}"]`)
+      .click();
+
+    const alert = page
+      .locator('[data-testid="chat-message"][data-message-role="assistant"] [role="alert"]')
+      .first();
+    await expect(alert).toBeVisible();
+    await expect(alert).toContainText("QA fixture: deep research job failed.");
+    await expect(page.getByRole("button", { name: "오류 신고" }).first()).toBeVisible();
+
+    await expectStableScreenshot(
+      page,
+      "chat-deep-research-failed-active-mobile-dark-ko.png",
+      { theme: "dark" }
+    );
   });
 });

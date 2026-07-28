@@ -723,7 +723,11 @@ export const en = {
         loginMethodAlreadyLinkedElsewhere: "That account is already linked to a different Tomverse account.",
         loginMethodLinkFailed: "Could not link that login method. Please try again.",
         description: "Log in to your personal AI chat hub",
-        privacy: "By logging in, you agree to Tomverse's Terms of Service and Privacy Policy.",
+        // UI-009: one name for one document. `/terms` is titled "Terms and
+        // Conditions" -- in its page metadata, in the marketing info content
+        // and in the link right below this sentence -- so calling it "Terms of
+        // Service" here read as a second, separate agreement.
+        privacy: "By logging in, you agree to Tomverse's Terms and Conditions and Privacy Policy.",
         termsLink: "Terms and Conditions",
         privacyPolicyLink: "Privacy Policy",
         signedAs: "Signed as",

@@ -12,6 +12,10 @@ name: PR Fast Gate
 # # open PR waiting forever on a check that no longer exists.                #
 # ############################################################################
 #
+# The build-and-e2e job runs two Playwright tiers: the @smoke contract set and
+# the @ui-risk layout/accessibility set (UI-008). Neither is the full suite --
+# see .github/audits/ui-test-tiers.md for what runs where.
+#
 # secret-scan, static-and-unit and build-and-e2e run concurrently; fast-gate
 # waits for all three and fails unless every one of them succeeded. Nothing
 # merges on a green fast-gate that did not pass all three, and no upstream
@@ -246,6 +250,27 @@ jobs:
         if: steps.scope.outputs.code == 'true'
         timeout-minutes: 10
         run: npm run test:e2e:smoke
+
+      # UI-008. The @smoke tier covers the commercial contracts (sign-in,
+      # billing, credit preflight, attachments); it deliberately covers none of
+      # the layout and accessibility regressions the Insight UI audit found,
+      # which is why those went unnoticed until a manual audit. This is the
+      # focused, deterministic subset of that follow-up work:
+      #
+      #   UI-001  the model picker under a real reduced visual viewport
+      #   UI-002  the analytics settings target, hit area and overlap
+      #   UI-003  composited-pixel contrast on the failure/recovery surfaces
+      #   UI-006  Korean display headings that must not break mid-어절
+      #   UI-007  the 11px floor on consumer auxiliary text
+      #
+      # Measured 46s for 44 tests over both Chromium projects. The full 63-
+      # golden visual matrix stays out of the PR tier -- it runs unfiltered on
+      # main push and nightly, and the assertion below still forbids naming it
+      # here.
+      - name: Run high-risk UI regression checks
+        if: steps.scope.outputs.code == 'true'
+        timeout-minutes: 10
+        run: npm run test:e2e:ui-risk
 
       - name: Upload failed test evidence
         if: failure()

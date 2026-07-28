@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { displayHeadingClass } from "@/lib/displayHeading";
 import { useEffect, useRef } from "react";
 import {
   Calculator,
@@ -891,7 +892,7 @@ export function PricingPageContent() {
       <section className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8 lg:py-20">
         <div className="mx-auto max-w-4xl text-center">
           <p className="text-sm font-black uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">{content.eyebrow}</p>
-          <h1 className="mt-4 text-4xl font-black leading-tight sm:text-6xl">{content.title}</h1>
+          <h1 className={`mt-4 text-4xl font-black leading-tight sm:text-6xl ${displayHeadingClass(lang)}`}>{content.title}</h1>
           <p className="mx-auto mt-5 max-w-2xl text-lg leading-8 text-zinc-600 dark:text-zinc-300">{content.description}</p>
           {featuredPromotion ? (
           <div className="mx-auto mt-6 max-w-3xl overflow-hidden rounded-3xl border border-emerald-400/40 bg-gradient-to-br from-emerald-400/15 via-blue-500/10 to-transparent p-1 text-left shadow-2xl shadow-emerald-950/10">
@@ -971,7 +972,7 @@ export function PricingPageContent() {
                   </span>
                 )}
               </div>
-              <h2 className="mt-4 text-3xl font-black">{plan.name}</h2>
+              <h2 className={`mt-4 text-3xl font-black ${displayHeadingClass(lang)}`}>{plan.name}</h2>
               <p className={`mt-3 min-h-14 text-sm leading-6 ${plan.highlighted ? "text-blue-50" : "text-zinc-600 dark:text-zinc-300"}`}>
                 {plan.description}
               </p>
@@ -1082,7 +1083,7 @@ export function PricingPageContent() {
                 <Coins className="h-4 w-4" />
                 {creditPackGuide.eyebrow}
               </p>
-              <h2 className="mt-3 text-3xl font-black sm:text-4xl">{creditPackGuide.title}</h2>
+              <h2 className={`mt-3 text-3xl font-black sm:text-4xl ${displayHeadingClass(lang)}`}>{creditPackGuide.title}</h2>
               <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">
                 {creditPackGuide.description}
               </p>
@@ -1174,7 +1175,7 @@ export function PricingPageContent() {
                   <Calculator className="h-4 w-4" />
                   {creditGuide.eyebrow}
                 </p>
-                <h2 className="mt-3 text-3xl font-black sm:text-4xl">
+                <h2 className={`mt-3 text-3xl font-black sm:text-4xl ${displayHeadingClass(lang)}`}>
                   {creditGuide.title}
                 </h2>
                 <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">
@@ -1233,7 +1234,7 @@ export function PricingPageContent() {
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <h3 className="text-2xl font-black">{plan.name}</h3>
+                      <h3 className={`text-2xl font-black ${displayHeadingClass(lang)}`}>{plan.name}</h3>
                       <p
                         className={`mt-1 text-xs font-bold ${
                           plan.id === "pro"
@@ -1322,7 +1323,7 @@ export function PricingPageContent() {
 
         <section className="mt-16 rounded-[2rem] border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40 sm:p-6">
           <div className="max-w-3xl">
-            <h2 className="text-3xl font-black">{content.compareTitle}</h2>
+            <h2 className={`text-3xl font-black ${displayHeadingClass(lang)}`}>{content.compareTitle}</h2>
             <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">{content.compareDescription}</p>
           </div>
           <div className="mt-8 overflow-x-auto">
@@ -1353,7 +1354,7 @@ export function PricingPageContent() {
         </section>
 
         <section className="mt-16 grid gap-5 lg:grid-cols-[0.7fr_1.3fr]">
-          <h2 className="text-3xl font-black">{content.faqTitle}</h2>
+          <h2 className={`text-3xl font-black ${displayHeadingClass(lang)}`}>{content.faqTitle}</h2>
           <div className="grid gap-4">
             {content.faqs
               .filter((faq) => !faq.promotionOnly || featuredPromotion)

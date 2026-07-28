@@ -101,6 +101,16 @@ export type ModelPickerPanelProps = {
   isMobileShell: boolean;
   /** Single-column sheet layout, matching the mobile portal breakpoint. */
   isCompactLayout: boolean;
+  /**
+   * UI-001. True while an on-screen keyboard has taken enough of the visible
+   * viewport that the sheet's pinned chrome no longer fits above its own
+   * footer. At 320x568 with a 216px keyboard there are 352 visible px and the
+   * header, search, selected chips, catalogue entry and footer alone want ~390
+   * of them, so *something* has to scroll. Rather than hide any of it, the
+   * middle band -- chips, candidates, catalogue entry -- becomes one scroll
+   * region while the header, the search box and the footer stay pinned.
+   */
+  isKeyboardCompact: boolean;
   modelStatuses: Record<string, ModelCatalogueStatusRecord>;
   hasImageAttachments: boolean;
   favoriteModelIds: string[];
@@ -137,6 +147,7 @@ export function ModelPickerPanel({
   isGuestMode,
   isMobileShell,
   isCompactLayout,
+  isKeyboardCompact,
   modelStatuses,
   hasImageAttachments,
   favoriteModelIds,
@@ -365,7 +376,11 @@ export function ModelPickerPanel({
   );
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div
+      data-testid="model-picker-body"
+      data-keyboard-compact={isKeyboardCompact ? "true" : undefined}
+      className="flex min-h-0 flex-1 flex-col"
+    >
       {/*
         One header for every layout. It used to be duplicated (a desktop-only
         row plus a mobile-only row), which left two "back" controls in the DOM
@@ -437,6 +452,30 @@ export function ModelPickerPanel({
         </div>
       </div>
 
+      {/*
+        UI-001. Everything between the search box and the footer becomes one
+        scroll region while the keyboard is up.
+        
+        At 320x568 with a 216px keyboard there are 352 visible px, and the
+        sheet's pinned rows -- header, search, the selected chips, the
+        catalogue entry point and the footer -- want ~390 of them on their own.
+        Something has to give, and the only acceptable answer is "scroll", not
+        "hide": the chips, the catalogue entry and the candidates all stay
+        reachable, while the search box the user is typing into and the footer
+        that ends the task stay put.
+
+        `display: contents` is what keeps the normal-height layout byte-for-byte
+        identical -- the wrapper vanishes from the flex formatting context, so
+        the candidate list is still the panel's own `flex-1` child.
+      */}
+      <div
+        data-testid="model-picker-keyboard-scroll"
+        className={
+          isKeyboardCompact
+            ? "min-h-0 flex-1 touch-pan-y overflow-x-hidden overflow-y-auto overscroll-y-contain [scroll-padding-block:0.5rem]"
+            : "contents"
+        }
+      >
       {selectedModelIds.length > 0 && (
         <div className="mb-2 shrink-0 px-1">
           <p className="mb-1 px-1 text-[11px] font-black uppercase tracking-wide text-zinc-400">
@@ -529,6 +568,7 @@ export function ModelPickerPanel({
           currentPlan={currentPlan}
           isGuestMode={isGuestMode}
           isMobileShell={isMobileShell}
+          isKeyboardCompact={isKeyboardCompact}
           modelStatuses={modelStatuses}
           hasImageAttachments={hasImageAttachments}
           favoriteModelIds={favoriteModelIds}
@@ -541,7 +581,13 @@ export function ModelPickerPanel({
       ) : (
         <div
           data-testid="model-picker-scroll-region"
-          className="h-0 min-h-0 flex-1 touch-pan-y space-y-2 overflow-x-hidden overflow-y-scroll overscroll-y-contain px-1 pb-4 pr-2 [scrollbar-gutter:stable] [-webkit-overflow-scrolling:touch]"
+          className={
+            isKeyboardCompact
+              ? // The panel above is the scroller in this mode; this region
+                // just lays out, so the sheet never nests two scrollbars.
+                "min-h-0 shrink-0 space-y-2 overflow-x-hidden px-1 pb-4 pr-2"
+              : "h-0 min-h-0 flex-1 touch-pan-y space-y-2 overflow-x-hidden overflow-y-scroll overscroll-y-contain px-1 pb-4 pr-2 [scrollbar-gutter:stable] [-webkit-overflow-scrolling:touch]"
+          }
         >
           <p className="px-1 text-[11px] leading-4 text-zinc-500 dark:text-zinc-400">
             {stepCopy.recommendedSubtitle}
@@ -624,6 +670,7 @@ export function ModelPickerPanel({
           </button>
         </div>
       )}
+      </div>
 
       <div
         data-testid="model-selection-summary"
