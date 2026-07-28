@@ -235,15 +235,17 @@ jobs:
       # Security Audit and Nightly Visual Regression. See
       # scripts/verify-smoke-coverage.mjs for what this tier must cover.
       #
-      # `--workers=2` on a 4 vCPU runner: this tier takes no screenshots, so
-      # it is not sensitive to render timing under load, and it keeps the
-      # config's CI `retries: 2` to absorb genuine contention. The golden
-      # suite, which is sensitive and runs at retries=0, is not run here --
-      # it has its own nightly workflow.
+      # Workers stay at the config default of 1. `--workers=2` was measured
+      # here and bought nothing: 30s in run #133 against 30s at one worker in
+      # run #130, to the second. `fullyParallel: false` parallelises by file
+      # rather than by test, and at 20 tests over 9 files the step is
+      # dominated by the Next server boot, not by test execution -- so a
+      # second worker only adds CPU contention on a 4 vCPU runner. Revisit
+      # only if this tier grows enough for execution to dominate again.
       - name: Run desktop Chromium smoke tests
         if: steps.scope.outputs.code == 'true'
         timeout-minutes: 10
-        run: npm run test:e2e:smoke -- --workers=2
+        run: npm run test:e2e:smoke
 
       - name: Upload failed test evidence
         if: failure()
