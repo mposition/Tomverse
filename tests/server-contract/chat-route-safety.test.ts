@@ -51,17 +51,40 @@ type Spies = {
  * Every mock keeps the module's real exports and replaces only what is being
  * observed, so the guard logic under test stays real.
  */
+// The mocks are installed exactly once and write to whichever Spies object
+// this points at. They cannot be re-registered per test: mock.module replaces
+// an ESM registry entry, and re-registering does not rebind the module
+// instance the route already holds. A per-test registration therefore left
+// the route calling the FIRST test's closures, so every later test asserted
+// zero-counts on a Spies object nothing ever wrote to -- green, and hollow.
+let activeSpies: Spies = {
+  adapterCalls: [],
+  streamTextCalls: 0,
+  creditReservations: 0,
+  surchargeArgs: [],
+};
+let mocksInstalled = false;
+let sessionOverride: unknown = null;
+
 async function loadRouteWithSpies(options: {
   session?: unknown;
 } = {}): Promise<{ POST: (req: Request) => Promise<Response>; spies: Spies }> {
-  mock.reset();
-
   const spies: Spies = {
     adapterCalls: [],
     streamTextCalls: 0,
     creditReservations: 0,
     surchargeArgs: [],
   };
+  activeSpies = spies;
+  sessionOverride = options.session ?? null;
+
+  if (mocksInstalled) {
+    const cached = (await import(
+      `${mod("app/api/chat/route.ts")}?spy=cached`
+    )) as { POST: (req: Request) => Promise<Response> };
+    return { POST: cached.POST, spies };
+  }
+  mocksInstalled = true;
 
   // Originals come from the CommonJS cache, which is separate from the ESM
   // registry mock.module operates on. Loading them with a dynamic import
@@ -85,7 +108,7 @@ async function loadRouteWithSpies(options: {
   mock.module(mod("lib/activeAiModel.ts"), {
     namedExports: {
       getActiveAiModel: (model: { id?: string }) => {
-        spies.adapterCalls.push(model?.id ?? "unknown");
+        activeSpies.adapterCalls.push(model?.id ?? "unknown");
         return realActiveAiModel.getActiveAiModel(model);
       },
     },
@@ -97,7 +120,7 @@ async function loadRouteWithSpies(options: {
   mock.module("ai", {
     namedExports: {
       streamText: (...args: unknown[]) => {
-        spies.streamTextCalls += 1;
+        activeSpies.streamTextCalls += 1;
         throw new Error(
           `streamText must not be reached for a rejected chat request (${args.length} args)`
         );
@@ -116,7 +139,7 @@ async function loadRouteWithSpies(options: {
         estimatedInputTokens: unknown,
         options?: { webSearchSurchargeCredits?: number }
       ) => {
-        spies.surchargeArgs.push({
+        activeSpies.surchargeArgs.push({
           mode: options?.webSearchSurchargeCredits,
           capability: (model as { id?: string })?.id,
         });
@@ -130,7 +153,7 @@ async function loadRouteWithSpies(options: {
         )(kind, model, estimatedInputTokens, options);
       },
       acquireChatAccess: (...args: unknown[]) => {
-        spies.creditReservations += 1;
+        activeSpies.creditReservations += 1;
         throw new Error(
           `acquireChatAccess must not reserve credits for a rejected chat request (${args.length} args)`
         );
@@ -144,16 +167,29 @@ async function loadRouteWithSpies(options: {
   // already mocked above, and it receives the surcharge the route derived from
   // the request's webSearchMode -- so this sees the value that actually feeds
   // the credit reservation.
+  // --- guest verification ------------------------------------------------
+  // Turnstile is not what these tests are about, and its real implementation
+  // needs a Next request scope (cookies()) that a plain node process does not
+  // provide. Neutralised so the guest path can reach the budget/credit seams.
+  // Production behaviour is untouched; guest protection has its own coverage.
+  const realTurnstile = original("lib/turnstile.ts");
+  mock.module(mod("lib/turnstile.ts"), {
+    namedExports: {
+      ...realTurnstile,
+      ensureGuestVerified: async () => undefined,
+    },
+  });
+
   // --- session ---------------------------------------------------------------
   // getServerSession is the route's only runtime import from next-auth/next.
   mock.module("next-auth/next", {
     namedExports: {
-      getServerSession: async () => options.session ?? null,
+      getServerSession: async () => sessionOverride,
     },
   });
 
   const route = (await import(
-    `${mod("app/api/chat/route.ts")}?spy=${Math.random()}`
+    `${mod("app/api/chat/route.ts")}?spy=cached`
   )) as { POST: (req: Request) => Promise<Response> };
 
   return { POST: route.POST, spies };
@@ -259,3 +295,64 @@ test("an empty message list is rejected without touching the provider or credits
 //   * tests/webSearchCredits*.test.* -- the mode -> surcharge table.
 // The join between them, inside the route, is still unverified. Closing it
 // needs either a Next request-scope harness or a throwaway database.
+
+// UX-F006. The surcharge that feeds the credit reservation must be derived
+// from the webSearchMode the request actually carried. If a refactor drops
+// webSearchMode anywhere between validateChatPayload and createChatBudget,
+// an "always" request silently reserves the "off" surcharge, and nothing in
+// the repository noticed -- the E2E suite mocks /api/chat, so it never sees
+// what the server budgeted.
+//
+// claude-haiku-4-5 is used because it has verified provider-native search
+// (lib/webSearchCapability.ts) AND is available to guests. On a model without
+// native search the surcharge is 0 for every mode, so the assertion would
+// hold no matter how badly the mode was plumbed.
+test("the requested webSearchMode reaches the credit surcharge", async () => {
+  const NATIVE_SEARCH_GUEST_MODEL = "claude-haiku-4-5";
+  const expectedSurcharge = { off: 0, auto: 0, always: 8 } as const;
+
+  for (const mode of ["off", "auto", "always"] as const) {
+    const { POST, spies } = await loadRouteWithSpies();
+
+    await POST(
+      chatRequest({
+        messages: [{ role: "user", content: "hello" }],
+        modelId: NATIVE_SEARCH_GUEST_MODEL,
+        webSearchMode: mode,
+      })
+    );
+
+    assert.equal(
+      spies.surchargeArgs.length,
+      1,
+      `webSearchMode=${mode}: expected exactly one budget, saw ${spies.surchargeArgs.length} -- the contract is unverified`
+    );
+    assert.equal(
+      spies.surchargeArgs[0]!.mode,
+      expectedSurcharge[mode],
+      `webSearchMode=${mode}: the credit budget reserved ${JSON.stringify(spies.surchargeArgs[0]!.mode)} search credits instead of ${expectedSurcharge[mode]}`
+    );
+  }
+});
+
+// A request that is allowed through still must not reach a provider without
+// a credit reservation happening first. This pins the ordering the safety
+// tests above depend on: acquireChatAccess precedes streamText.
+test("an allowed request reserves credits before it can reach the provider", async () => {
+  const { POST, spies } = await loadRouteWithSpies();
+
+  await POST(
+    chatRequest({
+      messages: [{ role: "user", content: "hello" }],
+      modelId: "claude-haiku-4-5",
+      webSearchMode: "off",
+    })
+  );
+
+  assert.equal(spies.creditReservations, 1, "credits were never reserved");
+  assert.equal(
+    spies.streamTextCalls,
+    0,
+    "streamText ran even though the credit reservation failed"
+  );
+});
