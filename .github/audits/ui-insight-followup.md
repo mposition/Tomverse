@@ -354,7 +354,7 @@ scan, smoke manifest, `--update-snapshots` 금지, main·nightly의 무필터 �
 | VAL-005 (Deep Research 실패 tab 자동 활성화) | 결정 대기 | 동일. golden은 실패 tab을 명시적으로 선택해 캡처 |
 | VAL-007 (기준 감사 원본 screenshot) | `Not Verifiable` | 원본을 확보하지 못함. 현재 DOM·render 검증으로 대체 |
 | `?lang=` 없는 저장 언어의 SSR 불일치 | 범위 밖 | cookie가 필요한 별도 작업(6장) |
-| `attachment-flow`·`conversation-title` flake | 사전 존재 | baseline에서 더 자주 실패함을 수치로 확인(13장) |
+| `attachment-flow`·`conversation-title` flake | 사전 존재 | baseline에서 더 자주 실패함을 수치로 확인(13장). `develop` 병합 후에도 동일(13-5) |
 | webkit 로컬 실행 | 환경 제약 | nightly `daily-security-audit.yml`이 chromium+webkit 담당 |
 
 ## 13. 전체 회귀 실행 결과와 사전 존재 실패 2건 수정
@@ -454,6 +454,52 @@ append보다 늦게 도착하면 **실제 transcript가 빈 seed로 덮이면서
 통과, `npm run verify:smoke-coverage` 통과(@smoke 20개 유지, desktop-chromium
 552 test 중), `npm run check:accent-tokens` 통과(guarded 10파일·10역할),
 `npm run check:encoding:strict` 통과.
+
+### 13-5. `develop` 병합(`0891ef9`) 후 재실행
+
+rebase 기준점(`39194ea`) 이후 `develop`에 두 commit이 더 올라와 병합했습니다.
+`54de734`가 mobile composer의 textarea 행을, `0891ef9`가 comparison rail의
+정상 상태 문장 노출을 각각 계약 문서와 함께 재정의합니다.
+
+**충돌 2건**
+
+| 파일 | 성격 | 해소 |
+|---|---|---|
+| `AGENTS.md` | 양쪽 다 추가 | marker로 감싼 두 invariant 블록을 이 작업의 「소통 언어」·「Accent colour roles」 뒤에 배치. 생성 블록끼리 붙여 다음 추가 시 문서가 섞이지 않게 함 |
+| `ChatInput.tsx` | Deep Research chip 1줄 | `develop`의 box model(`min-w-0 max-w-full`, shell별 `h-8`/`h-9`)과 이 작업의 `accent-deep-research-*` token을 함께 채택. 어느 쪽도 다른 쪽을 포함하지 않음 |
+
+나머지는 자동 병합됐습니다. 13-1의 New Chat 경로 수정과 `develop`의 chip label
+assertion 재작성(`data-placement` → `data-label-variant`)이 같은 파일의 다른
+구역이고, 13-2가 만든 message 저장 mock은 `develop`의 새 composer spec들도
+그대로 사용합니다.
+
+**병합 후 전체 실행: 514 passed / 4 failed / 73 skipped** (desktop-chromium,
+10.5분)
+
+| 실패 | 원인 | 조치 |
+|---|---|---|
+| `chat-deep-research-mobile-dark-ko` | **`develop`이 흘린 golden.** rail markup 변경 시 desktop 4장만 갱신하고 이 mobile 장을 누락 | 재기록 |
+| `chat-ai-review-error-desktop-light-ko` | 이 작업의 golden. `ComparisonReviewDialog`가 비교 대상 수 문장을 추가하면서 dialog 본문이 한 줄만큼 밀림 | 재기록 |
+| `conversation-title` 1건 | 사전 존재 flake(13-3) | 없음 |
+| `upgrade-discovery › pending model selection…` | 부하 flake. 단독 3회 반복 3/3 통과 | 없음 |
+
+**golden 2장의 귀속 근거** `origin/develop`을 별도 worktree로 체크아웃·빌드해
+`chat-deep-research-mobile-dark-ko`만 실행한 결과 **`develop`에서도 실패**했고,
+이 branch의 render와 `develop`의 render를 픽셀 비교하면 390×844 중 **7픽셀,
+최대 편차 4**("1/3 responding" 배지의 안티에일리어싱)뿐입니다. 즉 병합이
+render를 옮기지 않았습니다. golden 대비 실제의 차이는 rail이 2~3px 높아진 것
+하나이고 잘림·겹침은 없습니다. 두 장 모두 diff를 눈으로 확인한 뒤 재기록했고,
+바뀐 snapshot이 그 2장뿐임을 `git status`로 확인했습니다.
+
+**재기록 후** `chat-state-visual-regression` **74/74 통과**, `@ui-risk` tier
+**76 passed / 14 skipped**, `mobile-composer-contract`·`chat-keyboard-policy`·
+`chat-tools`·`web-search-composer-state`·`mobile-message-visibility`를 desktop·
+mobile 두 project에서 **90 passed**.
+
+**정적 검사 재실행** `eslint --max-warnings=0`, `tsc --noEmit`,
+`npm run test:unit` **508/508**(`develop`이 `comparisonReadiness` test를 추가),
+`npm run security:regression` **113 검사**, `npm run check:accent-tokens`,
+`npm run check:encoding`, `next build` 모두 통과.
 
 ## 14. 최종 판정
 
