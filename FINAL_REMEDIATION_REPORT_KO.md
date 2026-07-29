@@ -8,7 +8,7 @@
 | # | ID | 최종 판정 |
 |---|---|---|
 | 1 | `STG-F003` | **Fixed locally, not verified on staging** |
-| 2 | `FINAL-F002` | **실호출 검증 완료 (성공 경로)** · refund 경로 미검증 — §4.2 |
+| 2 | `FINAL-F002` | **실호출 검증 완료** (성공 경로 + refund 경로) — §4.2 |
 | 3 | `RECON-A11Y-001` | **Fixed locally, not verified on staging** |
 | 4 | `FINAL-F003` | **Partially fixed** (8개 전이 중 4개 검증, 4개 미검증) |
 | 5 | `FINAL-F006` | **Fixed locally, not verified on staging** |
@@ -263,7 +263,7 @@ createPortal(<ChatInput … />, inputPortalTarget)
 
 ### 4.2 `FINAL-F002` — 실제 Provider·AI Review·credit 운영 gate
 
-**판정: 실호출 검증 완료 (성공 경로) · refund 경로 미검증** — 제품 코드 변경 0건.
+**판정: 실호출 검증 완료 (성공 경로 + refund 경로)** — 제품 코드 변경 0건.
 
 승인 후 staging에서 사람이 로그인한 실제 세션으로 실행했습니다. **Turnstile을
 우회하지 않았습니다** — `app/api/chat/route.ts:757`이 `access.kind === "guest"`
@@ -294,7 +294,7 @@ createPortal(<ChatInput … />, inputPortalTarget)
 | 비교당 `/api/chat/preflight` | 1건 | **1건** |
 | 비교당 `/api/chat` | 3건 | **3건** |
 | panel 응답 | 3/3 수신 | **3/3** |
-| 부분 실패 | — | **없음** |
+| 부분 실패 | — | **없음** (환불은 아래 별도 조건에서 검증) |
 
 #### credit ledger 대조
 
@@ -311,14 +311,32 @@ createPortal(<ChatInput … />, inputPortalTarget)
 `preflight` 1건 / `chat` 3건이 실제 배포 환경에서 확인된 것은, `STG-F003`
 수정이 프로덕션 경로에서도 유지됨을 보여주는 유일한 실측입니다.
 
-#### 미검증으로 남은 것 — refund 경로
+#### refund 경로 — 별도 조건에서 검증 완료
 
-부분 실패가 발생하지 않아 **예약 credit 환불 경로는 실행되지 않았습니다.**
-
-이는 결함이 아니라 **승인된 정책의 결과**입니다. §9.9가
+1차 실행에서는 부분 실패가 없어 환불 경로가 실행되지 않았습니다. §9.9가
 "degraded/incident 상태를 partial-failure 시험 fixture처럼 이용하지 않음"을
-명시하므로 실패를 인위적으로 만들지 않았습니다. 환불 검증은 의도적으로 구성한
-조건에서 별도로 수행해야 합니다.
+금지하므로 **장애를 인위적으로 만들지 않고**, 제품이 설계상 제공하는 환불
+동작으로 확인했습니다.
+
+`lib/creditLedger.ts:194-227`의 환불은 실패 전용 경로가 아닙니다. 예약분에서
+실제 사용분을 뺀 차액을 lot에 되돌리고 `type: "refund"` ledger 항목을
+생성하며, `outcome`은 `completed`도 가능합니다. web search가 정확히 그 조건을
+만듭니다 — 검색 가능 모델에 검색을 요청했는데 실제로 검색하지 않으면 예약된
+surcharge가 환불됩니다(`webSearchChipDescriptionAlways`,
+`searchStatusRequestedNotExecuted`).
+
+**조건**: 기본 3종 + web search `항상` + 검색이 불필요한 프롬프트
+(`What is 17 x 23?`). `lib/webSearchCapability.ts` 기준 native search 지원은
+`claude-haiku-4-5` 하나뿐이므로 surcharge는 8만 예약됩니다.
+
+| 단계 | 기대 | 실측 |
+|---|---:|---|
+| 예약 (base 3 + surcharge 8) | 11 | — |
+| 검색 미실행 → 환불 | −8 | panel 배지 **`Not searched · 8 credits refunded`** |
+| **순차감** | **3** | **2,980 → 2,977 = 3** ✅ |
+
+예약·환불·정산이 모두 설계대로 동작했고, **환불 사실이 사용자에게 명시적으로
+표시**됩니다. 청구액은 실제 수행된 작업분(3)만입니다.
 
 mock 결과를 실제 Provider 증거로 표현하지 않았습니다.
 
@@ -1195,7 +1213,6 @@ web search는 **off**로 고정합니다(모델당 +8 surcharge 방지).
 |---|---|
 | 조건 7 — canonical visual suite | ❌ 이 환경에서 canonical browser 설치 불가 (§4.11). §4.10에서 확정한 canonical runner에서 재실행 필요 |
 | 조건 6 — 원시 증거 번들 전달 | ⚠️ `test-results/` 보존, 미전달 |
-| refund 경로 | 미검증 (§4.2) — 의도적으로 구성한 조건에서 별도 수행 |
 | 조건 4 — 배포 동결 | 사용자 지시로 해제됨. 재판정 시 기준 SHA를 다시 고정해야 함 |
 
 **조건 7이 미충족이므로 `No-Go`를 자동 해제하지 않았습니다.** canonical
