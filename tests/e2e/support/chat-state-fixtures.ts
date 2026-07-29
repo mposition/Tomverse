@@ -560,6 +560,16 @@ export async function expectStableScreenshot(
 ) {
   await expectThemeApplied(page, theme);
   await expectNoUnexpectedTransientUi(page, allowTransientUi);
+  // Every golden here is mostly text, and the webfonts are self-hosted with
+  // `preload: false` (docs/ui-contracts/typography.md), so capturing before
+  // they apply records the fallback face's metrics instead of the product's.
+  // That is not hypothetical: korean-typography.spec.ts was measuring exactly
+  // that until the same wait was added to it. Measured here before adding it --
+  // document.fonts.status already read "loaded" at this point and the Korean
+  // paragraph's box was identical either side of the wait -- so this changes no
+  // image today. It removes the possibility, which is the part a baseline
+  // cannot afford to leave to load order.
+  await page.evaluate(() => document.fonts.ready);
   await expect(page).toHaveScreenshot(name, {
     animations: "disabled",
     maxDiffPixelRatio: maxDiffPixelRatio ?? GOLDEN_MAX_DIFF_PIXEL_RATIO,
