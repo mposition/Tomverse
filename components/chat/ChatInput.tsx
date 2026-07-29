@@ -12,6 +12,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import {
+  AlertTriangle,
   ArrowLeft,
   ArrowUp,
   Boxes,
@@ -23,10 +24,12 @@ import {
   HardDrive,
   Globe2,
   Link2,
+  Loader2,
   Microscope,
   Paperclip,
   Plus,
   Presentation,
+  RefreshCw,
   Sheet,
   Sparkles,
   Square,
@@ -204,6 +207,25 @@ const fileToDataUrl = (file: File) =>
 
 const hasDraggedFiles = (dataTransfer: DataTransfer | null) =>
   Boolean(dataTransfer && Array.from(dataTransfer.types).includes("Files"));
+
+// UI-STATE-002. An attachment that is still on its way in. `stage` is the
+// step actually running, so "uploading" (bytes leaving the browser) and
+// "processing" (server validating/extracting them) are two different states
+// on screen and in the accessibility tree, not one shared spinner.
+type PendingAttachment = {
+  id: string;
+  name: string;
+  stage: "uploading" | "processing";
+};
+
+// A file that did not make it. `file` is retained so retry can re-run this
+// one file's pipeline; without it "retry" could only reopen the picker.
+type FailedAttachment = {
+  id: string;
+  name: string;
+  reason: string;
+  file: File;
+};
 
 const getAttachmentLabel = (attachment: ChatAttachment) => {
   const extension = attachment.name.split(".").pop();
@@ -435,6 +457,19 @@ export function ChatInput({
     null
   );
   const [isUploading, setIsUploading] = useState(false);
+  // UI-STATE-002. See uploadOneFile: the composer distinguishes the transfer
+  // step from the server-side finalize step, and keeps a failed file around
+  // so retry is a real action rather than a dead button.
+  const [pendingAttachments, setPendingAttachments] = useState<
+    PendingAttachment[]
+  >([]);
+  const [failedAttachments, setFailedAttachments] = useState<
+    FailedAttachment[]
+  >([]);
+  const latestAttachmentsRef = useRef<ChatAttachment[]>(attachments);
+  useEffect(() => {
+    latestAttachmentsRef.current = attachments;
+  }, [attachments]);
   const [isDragActive, setIsDragActive] = useState(false);
   const [preserveFormatting, setPreserveFormatting] = useState(false);
   useEffect(() => {
@@ -1294,34 +1329,54 @@ export function ChatInput({
     }
   };
 
-  const handleFilesSelected = async (files: FileList | File[] | null) => {
-    if (!files?.length) return;
+  /**
+   * UI-STATE-002. Uploading one file is three sequential network steps --
+   * prepare (PUT), transfer to object storage (PUT), then server-side
+   * finalize/extract (PATCH) -- but the composer used to represent all of it
+   * with one boolean and a spinner on the attach button. Nothing named the
+   * file, nothing said which step was running, and a failure only ever
+   * surfaced as a toast that took the file down with it. That is why the
+   * "uploading" and "processing" goldens were byte-identical: they really
+   * were the same picture.
+   *
+   * Each file now carries its own stage while it is in flight, and a failure
+   * keeps the File itself so "retry" can re-run that one file's pipeline
+   * rather than asking the user to find it in the picker again.
+   */
+  const uploadOneFile = useCallback(
+    async (file: File, trackingId: string) => {
+      const mediaType = getFileMediaType(file);
+      const fail = (reason: string) => {
+        setPendingAttachments((current) =>
+          current.filter((item) => item.id !== trackingId)
+        );
+        setFailedAttachments((current) => [
+          ...current.filter((item) => item.id !== trackingId),
+          { id: trackingId, name: file.name, reason, file },
+        ]);
+      };
 
-    const availableSlots = MAX_ATTACHMENTS - attachments.length;
-    if (availableSlots <= 0) {
-      dispatchAppToast(t("chat.attachmentCountError"), "error");
-      return;
-    }
+      if (
+        !ACCEPTED_FILE_TYPES.split(",").includes(mediaType) &&
+        !OFFICE_FILE_TYPES.has(mediaType)
+      ) {
+        fail(t("chat.attachmentTypeError"));
+        return;
+      }
+      if (file.size > MAX_ATTACHMENT_SIZE) {
+        fail(t("chat.attachmentSizeError"));
+        return;
+      }
 
-    const selectedFiles = Array.from(files).slice(0, availableSlots);
-    const nextAttachments: ChatAttachment[] = [];
-    setIsUploading(true);
+      setFailedAttachments((current) =>
+        current.filter((item) => item.id !== trackingId)
+      );
+      setPendingAttachments((current) => [
+        ...current.filter((item) => item.id !== trackingId),
+        { id: trackingId, name: file.name, stage: "uploading" },
+      ]);
 
-    try {
-      for (const file of selectedFiles) {
-        const mediaType = getFileMediaType(file);
-        if (
-          !ACCEPTED_FILE_TYPES.split(",").includes(mediaType) &&
-          !OFFICE_FILE_TYPES.has(mediaType)
-        ) {
-          dispatchAppToast(t("chat.attachmentTypeError"), "error");
-          continue;
-        }
-        if (file.size > MAX_ATTACHMENT_SIZE) {
-          dispatchAppToast(t("chat.attachmentSizeError"), "error");
-          continue;
-        }
-
+      try {
         const prepareResponse = await fetch("/api/chat", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -1347,6 +1402,16 @@ export function ChatInput({
         if (!uploadResponse.ok) {
           throw new Error(`R2 upload failed: ${uploadResponse.status}`);
         }
+
+        // The bytes have left the browser; what remains is the server
+        // validating and extracting them. That is a different wait with a
+        // different explanation, so it is a different stage on screen.
+        setPendingAttachments((current) =>
+          current.map((item) =>
+            item.id === trackingId ? { ...item, stage: "processing" } : item
+          )
+        );
+
         const finalizeResponse = await fetch("/api/chat", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -1361,7 +1426,7 @@ export function ChatInput({
         }
         const finalized = await finalizeResponse.json();
 
-        nextAttachments.push({
+        const attachment: ChatAttachment = {
           id: crypto.randomUUID(),
           name: file.name,
           mediaType,
@@ -1371,18 +1436,64 @@ export function ChatInput({
             ? await fileToDataUrl(file)
             : undefined,
           kind: TEXT_FILE_TYPES.has(mediaType) ? "text" : "file",
-        });
+        };
+        setPendingAttachments((current) =>
+          current.filter((item) => item.id !== trackingId)
+        );
+        // Read through the ref rather than the captured `attachments` prop:
+        // several files can finish while this closure is still holding the
+        // list as it looked when the batch started, and appending to a stale
+        // copy silently drops whichever one landed first.
+        onAttachmentsChange([...latestAttachmentsRef.current, attachment]);
+      } catch (error) {
+        console.error("Attachment upload failed:", error);
+        fail(t("chat.attachmentUploadError"));
       }
+    },
+    [onAttachmentsChange, t]
+  );
 
-      onAttachmentsChange([...attachments, ...nextAttachments]);
-    } catch (error) {
-      console.error("Attachment upload failed:", error);
-      dispatchAppToast(t("chat.attachmentUploadError"), "error");
-    } finally {
-      setIsUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+  const runUploadBatch = useCallback(
+    async (entries: Array<{ file: File; trackingId: string }>) => {
+      setIsUploading(true);
+      try {
+        for (const entry of entries) {
+          await uploadOneFile(entry.file, entry.trackingId);
+        }
+      } finally {
+        setIsUploading(false);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      }
+    },
+    [uploadOneFile]
+  );
+
+  const handleFilesSelected = async (files: FileList | File[] | null) => {
+    if (!files?.length) return;
+
+    const availableSlots =
+      MAX_ATTACHMENTS - attachments.length - pendingAttachments.length;
+    if (availableSlots <= 0) {
+      dispatchAppToast(t("chat.attachmentCountError"), "error");
+      return;
     }
+
+    const entries = Array.from(files)
+      .slice(0, availableSlots)
+      .map((file) => ({ file, trackingId: crypto.randomUUID() }));
+    await runUploadBatch(entries);
   };
+
+  const handleRetryFailedAttachment = useCallback(
+    (failed: FailedAttachment) => {
+      void runUploadBatch([{ file: failed.file, trackingId: failed.id }]);
+    },
+    [runUploadBatch]
+  );
+
+  const handleDismissFailedAttachment = useCallback((id: string) => {
+    setFailedAttachments((current) => current.filter((item) => item.id !== id));
+  }, []);
 
   useEffect(() => {
     const preventFileNavigation = (event: DragEvent) => {
@@ -1993,12 +2104,126 @@ export function ChatInput({
               </button>
             </div>
           )}
-          {attachments.length > 0 && (
-            <div className="mb-2 rounded-2xl bg-zinc-50 p-1.5 dark:bg-zinc-950/70 md:mb-3 md:bg-transparent md:p-0">
+          {(attachments.length > 0 ||
+            pendingAttachments.length > 0 ||
+            failedAttachments.length > 0) && (
+            <div
+              data-testid="attachment-tray"
+              className="mb-2 rounded-2xl bg-zinc-50 p-1.5 dark:bg-zinc-950/70 md:mb-3 md:bg-transparent md:p-0"
+            >
             <div className="flex max-w-full gap-2 overflow-x-auto overscroll-x-contain pb-1 md:flex-wrap md:overflow-visible md:pb-0">
+              {/* UI-STATE-002. In-flight files are cards of their own, in the
+                  same tray as finished ones, so the user can see which file
+                  is where. Each names the file and the step actually running;
+                  neither offers a cancel button, because the upload pipeline
+                  has no abort path today and a control that does nothing is
+                  worse than the honest "please wait" this gives instead. */}
+              {pendingAttachments.map((pending) => {
+                const stageLabel =
+                  pending.stage === "uploading"
+                    ? t("chat.attachmentUploadingLabel")
+                    : t("chat.attachmentProcessingLabel");
+                const stageHint =
+                  pending.stage === "uploading"
+                    ? t("chat.attachmentUploadingHint")
+                    : t("chat.attachmentProcessingHint");
+                return (
+                  <div
+                    key={pending.id}
+                    role="status"
+                    aria-live="polite"
+                    data-testid="attachment-pending"
+                    data-stage={pending.stage}
+                    aria-describedby={`attachment-stage-${pending.id}`}
+                    className="relative flex h-14 min-w-44 max-w-56 shrink-0 items-center gap-2.5 rounded-xl border border-zinc-200 bg-white py-2 pl-2 pr-2 text-zinc-700 shadow-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 md:h-16 md:min-w-52 md:max-w-64"
+                  >
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white text-zinc-500 ring-1 ring-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:ring-zinc-700">
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                    </span>
+                    <span className="flex min-w-0 flex-col">
+                      <span
+                        data-testid="attachment-pending-name"
+                        className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100"
+                      >
+                        {pending.name}
+                      </span>
+                      <span
+                        data-testid="attachment-pending-stage"
+                        className="truncate text-[11px] font-semibold text-zinc-600 dark:text-zinc-300"
+                      >
+                        {stageLabel}
+                      </span>
+                    </span>
+                    {/* The wait explanation is the accessible description
+                        rather than a third visible line: the tray is beside a
+                        composer that must keep its own full-width row. */}
+                    <span id={`attachment-stage-${pending.id}`} className="sr-only">
+                      {`${pending.name}: ${stageLabel}. ${stageHint}`}
+                    </span>
+                  </div>
+                );
+              })}
+              {failedAttachments.map((failed) => (
+                <div
+                  key={failed.id}
+                  role="alert"
+                  data-testid="attachment-failed"
+                  // The failure card is allowed to be taller than the chips
+                  // beside it: the reason is the point of the card, so it
+                  // wraps rather than truncating to an ellipsis the user then
+                  // has no way to read.
+                  className="relative flex min-h-14 min-w-44 max-w-72 shrink-0 items-center gap-2.5 rounded-xl border border-red-300 bg-red-50 px-2 py-2 text-red-900 shadow-sm dark:border-red-800 dark:bg-red-950/40 dark:text-red-100 md:min-h-16 md:min-w-56"
+                >
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white text-red-600 ring-1 ring-red-200 dark:bg-zinc-900 dark:text-red-300 dark:ring-red-900">
+                    <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+                  </span>
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span
+                      data-testid="attachment-failed-name"
+                      className="truncate text-sm font-medium"
+                    >
+                      {failed.name}
+                    </span>
+                    <span
+                      data-testid="attachment-failed-reason"
+                      className="text-[11px] font-semibold leading-4"
+                    >
+                      {failed.reason}
+                    </span>
+                  </span>
+                  <span className="flex shrink-0 items-center gap-0.5">
+                    {/* Both actions really run: retry re-uploads the File this
+                        entry still holds, remove drops the entry. Each names
+                        the file so two failures are told apart by voice. */}
+                    <button
+                      type="button"
+                      data-testid="attachment-retry"
+                      onClick={() => handleRetryFailedAttachment(failed)}
+                      aria-label={`${t("chat.attachmentRetry")}: ${failed.name}`}
+                      className={`relative flex items-center justify-center rounded-full text-red-800 transition hover:bg-red-200 dark:text-red-100 dark:hover:bg-red-900/60 ${
+                        isMobileShell ? "h-11 w-11" : "h-7 w-7"
+                      }`}
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="attachment-failed-dismiss"
+                      onClick={() => handleDismissFailedAttachment(failed.id)}
+                      aria-label={`${t("chat.removeAttachment")}: ${failed.name}`}
+                      className={`relative flex items-center justify-center rounded-full text-red-800 transition hover:bg-red-200 dark:text-red-100 dark:hover:bg-red-900/60 ${
+                        isMobileShell ? "h-11 w-11" : "h-7 w-7"
+                      }`}
+                    >
+                      <X className="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
+                  </span>
+                </div>
+              ))}
               {attachments.map((attachment) => (
                 <div
                   key={attachment.id}
+                  data-testid="attachment-complete"
                   className={
                     attachment.data
                       ? "relative h-14 w-14 shrink-0 overflow-hidden rounded-xl border border-zinc-200 bg-zinc-100 shadow-sm dark:border-zinc-700 dark:bg-zinc-900 md:h-20 md:w-20"
@@ -2749,7 +2974,12 @@ export function ChatInput({
       {!hideDisclaimer && (
         <p
           data-testid="chat-ai-disclaimer"
-          className="mt-1.5 px-2 text-center text-[11px] leading-4 text-zinc-400 dark:text-zinc-500 md:text-xs"
+          // UI-CONTRAST-001. Aligned with AiDisclaimerNotice's mobile copy of
+          // the same supporting-text role, which already measures above AA.
+          // The previous zinc-400/zinc-500 pair composited to 2.62:1 on the
+          // light composer surface and 3.67:1 on the dark one -- both below
+          // the 4.5:1 this 11-12px, 400-weight body text requires.
+          className="mt-1.5 px-2 text-center text-[11px] leading-4 text-zinc-600 dark:text-zinc-300 md:text-xs"
         >
           {t("chat.aiDisclaimer")}
         </p>

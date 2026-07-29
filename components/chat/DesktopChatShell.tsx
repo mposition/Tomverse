@@ -486,7 +486,14 @@ export function DesktopChatShell({
         )}
         <div className="relative flex min-h-0 flex-1 gap-4 overflow-hidden bg-zinc-100/80 px-4 pb-4 pt-3 dark:bg-zinc-950">
           {isConversationEmpty && (
-            <div className="absolute inset-0 z-10 bg-zinc-100/80 dark:bg-zinc-950">
+            // UI-EMPTY-001. The light overlay has always been translucent, so
+            // the three comparison panels stay legible behind the welcome
+            // screen and the first screen still reads as a comparison
+            // product. Dark was opaque, which erased that structure entirely.
+            // Matching the light alpha is the smallest change that restores
+            // it; the welcome text sits on its own surfaces inside
+            // ChatWelcomeScreen, so its contrast is unaffected either way.
+            <div className="absolute inset-0 z-10 bg-zinc-100/80 dark:bg-zinc-950/80">
               <ChatWelcomeScreen
                 recentConversations={recentConversations}
                 onSelectConversation={onSelectConversation}
@@ -524,6 +531,15 @@ export function DesktopChatShell({
                     }
                   : {})}
                 aria-hidden={!isPanelVisible}
+                // UI-EMPTY-001. The welcome overlay sits above these panels and
+                // already swallows pointer events, but the panel's own controls
+                // (per-model ON toggle, close, follow-up input) stayed in the
+                // tab order and in the accessibility tree underneath it -- so a
+                // keyboard or screen-reader user could reach a comparison the
+                // conversation does not have yet. `inert` is what makes the
+                // panels match what the overlay already does visually, and it
+                // matters more now that the dark overlay is translucent.
+                inert={isConversationEmpty || undefined}
                 style={isPanelVisible ? undefined : { contentVisibility: "hidden" }}
                 className={`relative flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm shadow-zinc-200/60 transition-all duration-300 ease-in-out dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/20 ${
                   !isPanelVisible ? "hidden" : isPanelDisabled ? "flex w-44 shrink-0" : "flex min-w-0 flex-1"

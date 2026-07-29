@@ -3,10 +3,13 @@ import {
   DESKTOP_VIEWPORT,
   MOBILE_VIEWPORT,
   enterConversation,
+  expectThemeApplied,
   installChatModelStub,
+  setDeterministicTheme,
   submitComposer,
   type Theme,
 } from "./support/chat-state-fixtures";
+import { prepareGuestPage } from "./support/app-fixtures";
 import {
   findUndersizedText,
   formatContrastSample,
@@ -198,3 +201,72 @@ test("full-error recovery copy carries no sub-11px text", { tag: "@ui-risk" }, a
       .join("\n")}`
   ).toEqual([]);
 });
+
+/**
+ * UI-CONTRAST-001. Everything above measures a *state container* -- an error
+ * card, a retry affordance -- entered through the chat fixtures. That left
+ * the ordinary, always-on body and supporting text of the routes a customer
+ * actually lands on unmeasured, which is how the composer's AI disclaimer
+ * (2.62:1 light, 3.67:1 dark) and the sign-in "or" divider (2.62:1 light)
+ * stayed AA failures while this suite was green.
+ *
+ * This sweep measures every visible text-bearing element on the four required
+ * routes, in both locales and both themes, at the two required viewports.
+ * `measureContrastInScope` composites the real painted pixels through a
+ * canvas (Tailwind v4 emits `oklch()`, Chromium serialises `lab()`, and the
+ * product leans on `/70`-style alpha), and it already skips `.sr-only`,
+ * replaced-element fallback content, and disabled controls -- the last of
+ * which WCAG 2.2 SC 1.4.3 exempts as an inactive user interface component.
+ */
+const REQUIRED_ROUTES = ["/", "/chat", "/auth/signin", "/pricing"] as const;
+const REQUIRED_LOCALES = ["ko", "en"] as const;
+const REQUIRED_VIEWPORTS = [
+  { width: 1440, height: 900, name: "desktop" },
+  { width: 390, height: 844, name: "mobile" },
+] as const;
+
+for (const viewport of REQUIRED_VIEWPORTS) {
+  for (const route of REQUIRED_ROUTES) {
+    test(
+      `${route} meets WCAG 2.2 AA for body and supporting text (${viewport.name})`,
+      { tag: "@ui-risk" },
+      async ({ page }) => {
+        test.setTimeout(120_000);
+        const failures: string[] = [];
+        let measured = 0;
+
+        for (const lang of REQUIRED_LOCALES) {
+          for (const theme of THEMES) {
+            await page.setViewportSize({
+              width: viewport.width,
+              height: viewport.height,
+            });
+            await prepareGuestPage(page, lang);
+            await setDeterministicTheme(page, theme);
+            await page.goto(`${route}?lang=${lang}`);
+            await page.waitForLoadState("networkidle").catch(() => undefined);
+            // Webfont metrics decide which glyphs are painted, and the Korean
+            // and Latin faces are self-hosted with preload: false.
+            await page.evaluate(() => document.fonts.ready);
+            await expectThemeApplied(page, theme);
+
+            const samples = await measureContrastInScope(page.locator("body"));
+            measured += samples.length;
+            for (const sample of samples) {
+              if (sample.passes) continue;
+              failures.push(
+                formatContrastSample(`${lang}/${theme}${sample.selector}`, sample)
+              );
+            }
+          }
+        }
+
+        expect(measured, `${route}: found no measurable text`).toBeGreaterThan(0);
+        expect(
+          failures,
+          `WCAG 2.2 AA failures on ${route} (${viewport.name}):\n${failures.join("\n")}`
+        ).toEqual([]);
+      }
+    );
+  }
+}

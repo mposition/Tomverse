@@ -104,6 +104,37 @@ const THEMES: Theme[] = ["light", "dark"];
 // ===========================================================================
 // 1. Loading
 // ===========================================================================
+/**
+ * UI-STATE-001. The loading golden used to be checked only for "not the
+ * welcome screen, and the word 'loading' appears somewhere" -- which a shell
+ * built for one model satisfies just as well as one built for three. It did
+ * exactly that: entering a saved 3-model conversation rendered a single wide
+ * panel, "1 model" in the composer and a one-model credit estimate, then
+ * rearranged into three panels and a three-model price the moment the
+ * conversation detail landed.
+ *
+ * These assertions describe the shell instead of the spinner, and they are
+ * written against whatever the conversation actually selects rather than a
+ * hardcoded 3 / 6 -- so they keep holding if THREE_MODELS or the credit
+ * weights change, and they fail if loading and success ever disagree again.
+ */
+async function readShellShape(page: Page, viewportWidth: number) {
+  const isMobile = viewportWidth < 768;
+  const modelSlots = isMobile
+    ? page.getByTestId("mobile-model-tab")
+    : page.getByTestId("desktop-model-panel");
+  const modelIds = await modelSlots.evaluateAll((nodes) =>
+    nodes.map((node) => node.getAttribute("data-model-id"))
+  );
+  const creditEstimate = (
+    await page.getByTestId("request-credit-estimate").first().innerText()
+  ).trim();
+  const modelButton = (
+    await page.locator('button[aria-controls="chat-input-popover"]').nth(1).innerText()
+  ).trim();
+  return { modelIds, creditEstimate, modelButton };
+}
+
 test.describe("Loading state", () => {
   for (const [viewport, viewportName] of CORE_VIEWPORTS) {
     for (const theme of THEMES) {
@@ -115,9 +146,118 @@ test.describe("Loading state", () => {
         await expect(page.getByTestId("chat-empty-state")).toHaveCount(0);
         await expect(page.getByText("불러오는 중...")).not.toHaveCount(0);
 
+        // The shell is already the conversation's shell: one slot per selected
+        // model, each identifiable, before a single message has arrived.
+        const loadingShape = await readShellShape(page, viewport.width);
+        expect(
+          loadingShape.modelIds,
+          "loading must build one panel/tab per selected model, in order"
+        ).toEqual([...THREE_MODELS]);
+        expect(
+          loadingShape.modelButton,
+          "composer must summarise the conversation's models, not the bootstrap default"
+        ).toContain(String(THREE_MODELS.length));
+
         await expectStableScreenshot(page, `chat-loading-${viewportName}-${theme}-ko.png`, { theme });
       });
     }
+  }
+
+  // The invariant the golden cannot express: loading and success are the same
+  // shell with different contents. Run once per viewport (theme does not move
+  // model counts) against the same conversation, so a regression in either
+  // direction -- loading under-building, or success over-building -- fails.
+  for (const [viewport, viewportName] of CORE_VIEWPORTS) {
+    test(`loading and success agree on models and price (${viewportName})`, async ({
+      page,
+    }) => {
+      await enterConversation(page, {
+        theme: "light",
+        viewport,
+        holdMessagesFetch: true,
+      });
+      await expect(page.getByText("불러오는 중...")).not.toHaveCount(0);
+      const loading = await readShellShape(page, viewport.width);
+
+      await enterConversation(page, { theme: "light", viewport });
+      await expect(page.getByText("불러오는 중...")).toHaveCount(0);
+      const settled = await readShellShape(page, viewport.width);
+
+      // The composer's summary and price are present in both states on both
+      // shells, and they are what the user reads before committing a request.
+      expect(
+        loading.creditEstimate,
+        "credit estimate must mean the same thing before and after the detail fetch"
+      ).toBe(settled.creditEstimate);
+      expect(loading.modelButton, "model summary must not change on load").toBe(
+        settled.modelButton
+      );
+
+      // Panel identity is compared on desktop only: the mobile tab strip is
+      // deliberately hidden for a conversation with no messages (see
+      // mockAuthenticatedApi's `messages` docstring), so a settled empty
+      // conversation legitimately has no tabs to compare against.
+      if (viewport.width >= 768) {
+        expect(loading.modelIds, "model identity must not change on load").toEqual(
+          settled.modelIds
+        );
+      }
+    });
+  }
+
+  // "desktop panel count == mobile tab count" from the acceptance matrix: the
+  // same loading conversation must build the same number of model slots in
+  // both shells, whatever that number is.
+  test("loading builds the same model-slot count on both shells", async ({ page }) => {
+    await enterConversation(page, {
+      theme: "light",
+      viewport: DESKTOP_VIEWPORT,
+      holdMessagesFetch: true,
+    });
+    await expect(page.getByText("불러오는 중...")).not.toHaveCount(0);
+    const desktop = await readShellShape(page, DESKTOP_VIEWPORT.width);
+
+    await enterConversation(page, {
+      theme: "light",
+      viewport: MOBILE_VIEWPORT,
+      holdMessagesFetch: true,
+    });
+    await expect(page.getByText("불러오는 중...")).not.toHaveCount(0);
+    const mobile = await readShellShape(page, MOBILE_VIEWPORT.width);
+
+    expect(mobile.modelIds).toEqual(desktop.modelIds);
+    expect(mobile.creditEstimate).toBe(desktop.creditEstimate);
+  });
+
+  // The desktop tab/panel switch straddles 1058px. The loading shell has to
+  // honour it too, or the fix above would have traded one inconsistent layout
+  // for another at the breakpoint.
+  for (const width of [1057, 1058]) {
+    test(`loading honours the ${width}px comparison breakpoint`, async ({ page }) => {
+      await enterConversation(page, {
+        theme: "light",
+        viewport: { width, height: 900 },
+        holdMessagesFetch: true,
+      });
+      await expect(page.getByText("불러오는 중...")).not.toHaveCount(0);
+
+      const panels = page.getByTestId("desktop-model-panel");
+      await expect(panels).toHaveCount(THREE_MODELS.length);
+
+      const tabs = page.getByTestId("model-compare-tab");
+      const visiblePanels = await panels.evaluateAll(
+        (nodes) => nodes.filter((node) => (node as HTMLElement).offsetParent !== null).length
+      );
+      if (await tabs.count()) {
+        // Tabs layout: every model still has a tab, one panel shown at a time.
+        await expect(tabs).toHaveCount(THREE_MODELS.length);
+        expect(visiblePanels, "tabs layout shows exactly one panel").toBe(1);
+      } else {
+        expect(visiblePanels, "panel layout shows every model").toBe(
+          THREE_MODELS.length
+        );
+      }
+    });
   }
 });
 
@@ -732,6 +872,21 @@ test.describe("File attachment states", () => {
       .toBeDisabled({ timeout: 1000 })
       .catch(() => undefined);
 
+    // UI-STATE-002. The spinner alone is what made this golden and the
+    // processing one below byte-for-byte identical (same MD5, same 81,263
+    // bytes): it says "busy" and nothing else. What the user needs is which
+    // file, and which of the three upload steps is running.
+    const pending = page.getByTestId("attachment-pending");
+    await expect(pending).toHaveCount(1);
+    await expect(pending).toHaveAttribute("data-stage", "uploading");
+    await expect(pending.getByTestId("attachment-pending-name")).toHaveText(
+      "qa-image.png"
+    );
+    await expect(pending.getByTestId("attachment-pending-stage")).toHaveText("업로드 중");
+    // The wait explanation reaches assistive tech even though it is not a
+    // third visible line in the composer's tray.
+    await expect(pending).toHaveAccessibleDescription(/파일을 전송하고 있습니다/);
+
     await expectStableScreenshot(page, "chat-attachment-uploading-desktop-light-ko.png", { theme: "light" });
   });
 
@@ -769,7 +924,154 @@ test.describe("File attachment states", () => {
     await expect.poll(() => finalizeHeld).toBe(true);
     await expect(actionMenuTrigger(page).locator(".animate-spin")).toBeVisible();
 
+    // The same three checks as the uploading test, with the values that make
+    // this a different state: a different file and a different stage. If the
+    // two states ever collapse back into one shared spinner, one of these
+    // pairs stops disagreeing and the suite says so.
+    const pending = page.getByTestId("attachment-pending");
+    await expect(pending).toHaveCount(1);
+    await expect(pending).toHaveAttribute("data-stage", "processing");
+    await expect(pending.getByTestId("attachment-pending-name")).toHaveText(
+      "qa-document.pdf"
+    );
+    await expect(pending.getByTestId("attachment-pending-stage")).toHaveText("확인 중");
+    await expect(pending).toHaveAccessibleDescription(/서버에서 파일을 검사하고/);
+
     await expectStableScreenshot(page, "chat-attachment-processing-desktop-light-ko.png", { theme: "light" });
+  });
+
+  // UI-STATE-002. The two states above are asserted separately, so this one
+  // asserts the thing that actually failed before: that they differ. Both
+  // labels and both accessible descriptions are read from the running product
+  // rather than compared against hardcoded strings, so a copy change cannot
+  // make this pass by accident.
+  test("uploading and processing are distinguishable states, not one shared spinner", async ({
+    page,
+  }) => {
+    const stageOf = async (hold: "prepare" | "finalize") => {
+      await enterConversation(page, { theme: "light", viewport: DESKTOP_VIEWPORT });
+      await page.route("**/api/chat", async (route) => {
+        const method = route.request().method();
+        if (method === "PUT") {
+          if (hold === "prepare") return; // held pending
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({
+              key: "attachments/qa-file-1",
+              uploadUrl: "http://127.0.0.1:3100/__qa_upload__",
+              uploadHeaders: { "Content-Type": "application/octet-stream" },
+            }),
+          });
+          return;
+        }
+        if (method === "PATCH") return; // held pending
+        await route.fallback();
+      });
+      await page.route("**/__qa_upload__", (route) => route.fulfill({ status: 200, body: "" }));
+      await attachFromComputer(page, {
+        name: "qa-document.pdf",
+        mimeType: "application/pdf",
+        buffer: createQaPdfBuffer(),
+      });
+      const pending = page.getByTestId("attachment-pending");
+      await expect(pending).toHaveCount(1);
+      await expect(pending).toHaveAttribute(
+        "data-stage",
+        hold === "prepare" ? "uploading" : "processing"
+      );
+      return {
+        label: await pending.getByTestId("attachment-pending-stage").innerText(),
+        description: (await pending.getAttribute("aria-describedby"))
+          ? await page
+              .locator(`#${await pending.getAttribute("aria-describedby")}`)
+              .innerText()
+          : "",
+        name: await pending.getByTestId("attachment-pending-name").innerText(),
+      };
+    };
+
+    const uploading = await stageOf("prepare");
+    const processing = await stageOf("finalize");
+
+    expect(uploading.label.trim()).not.toBe(processing.label.trim());
+    expect(uploading.description.trim()).not.toBe(processing.description.trim());
+    // Both still name the file: a stage label with no filename is only half
+    // the answer when several attachments are in flight.
+    expect(uploading.name).toContain("qa-document.pdf");
+    expect(processing.name).toContain("qa-document.pdf");
+  });
+
+  // The error state's two actions have to be real. Retry re-runs the upload
+  // (and succeeds once the route stops failing), remove drops the entry --
+  // neither is a decorative button, which is what the acceptance forbids.
+  test("a failed attachment names its cause and offers a retry that actually retries", async ({
+    page,
+  }) => {
+    await enterConversation(page, { theme: "light", viewport: DESKTOP_VIEWPORT });
+    let failNext = true;
+    await page.route("**/api/chat", async (route) => {
+      const method = route.request().method();
+      if (method === "PUT") {
+        if (failNext) {
+          await route.fulfill({
+            status: 500,
+            contentType: "application/json",
+            body: JSON.stringify({ error: "upload failed" }),
+          });
+          return;
+        }
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            key: "attachments/qa-file-1",
+            uploadUrl: "http://127.0.0.1:3100/__qa_upload__",
+            uploadHeaders: { "Content-Type": "application/octet-stream" },
+          }),
+        });
+        return;
+      }
+      // The retry has to be able to reach the end of the pipeline, so the
+      // finalize step is mocked too -- left to fall through it would hit the
+      // E2E server's real handler (no object storage, no database) and the
+      // "retry succeeded" leg could never be observed.
+      if (method === "PATCH") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ size: 128 }),
+        });
+        return;
+      }
+      await route.fallback();
+    });
+    await page.route("**/__qa_upload__", (route) => route.fulfill({ status: 200, body: "" }));
+
+    await attachFromComputer(page, {
+      name: "qa-image.png",
+      mimeType: "image/png",
+      buffer: createQaPngBuffer(),
+    });
+
+    const failed = page.getByTestId("attachment-failed");
+    await expect(failed).toHaveCount(1);
+    await expect(failed.getByTestId("attachment-failed-name")).toHaveText("qa-image.png");
+    await expect(failed.getByTestId("attachment-failed-reason")).toHaveText(
+      "파일을 업로드하지 못했습니다. 다시 시도해 주세요."
+    );
+    // Each action names the file it acts on, so two failures are told apart.
+    await expect(failed.getByTestId("attachment-retry")).toHaveAccessibleName(
+      /qa-image\.png/
+    );
+    await expect(failed.getByTestId("attachment-failed-dismiss")).toHaveAccessibleName(
+      /qa-image\.png/
+    );
+
+    failNext = false;
+    await failed.getByTestId("attachment-retry").click();
+    await expect(page.getByTestId("attachment-failed")).toHaveCount(0);
+    await expect(page.getByTestId("attachment-complete")).toHaveCount(1);
   });
 
   test("chat-attachment-complete-desktop-light-ko: attachment chip persists after send", async ({ page }) => {

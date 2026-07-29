@@ -1064,16 +1064,35 @@ export function PricingPageContent() {
                   </span>
                 </div>
               ) : (
-                <div className={`mt-8 rounded-2xl border p-4 ${
+                <div
+                  data-testid="pricing-sale-block"
+                  className={`mt-8 rounded-2xl border p-4 ${
                   plan.highlighted
                     ? "border-white/25 bg-white/15"
                     : "border-accent-promotion-500/30 bg-accent-promotion-500/10"
                 }`}>
-                  <div className="flex items-center justify-between gap-3">
-                    <span className={`rounded-full px-3 py-1 text-xs font-bold ${plan.highlighted ? "bg-white text-blue-700" : "bg-accent-promotion-700 text-white"}`}>
+                  {/* UI-REFLOW-001. Two non-shrinking pills on one
+                      `justify-between` row: at a 160px layout viewport (320px
+                      at 200% zoom) "Launch special" and "50% OFF" together are
+                      3px wider than the card, and neither could give way --
+                      flex items default to `min-width: auto`, so a shrink
+                      factor alone never takes them below their content. The
+                      row now wraps, and each pill may break a word it cannot
+                      otherwise fit, which is the same treatment the price span
+                      above already uses. Both labels stay whole; only their
+                      arrangement changes. */}
+                  <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                    <span className={`min-w-0 rounded-full px-3 py-1 text-xs font-bold [overflow-wrap:anywhere] ${plan.highlighted ? "bg-white text-blue-700" : "bg-accent-promotion-700 text-white"}`}>
                       {saleCopy.badge}
                     </span>
-                    <span className={`text-xs font-bold ${plan.highlighted ? "text-blue-50" : "text-accent-promotion-600 dark:text-accent-promotion-400"}`}>
+                    <span
+                      data-testid="pricing-discount-badge"
+                      // UI-CONTRAST-001. On the non-highlighted card the sale
+                      // block's surface is `bg-accent-promotion-500/10` over
+                      // white, and the 600 step measured below AA against it.
+                      // One step darker in light only; dark already passed.
+                      className={`min-w-0 text-xs font-bold [overflow-wrap:anywhere] ${plan.highlighted ? "text-blue-50" : "text-accent-promotion-700 dark:text-accent-promotion-400"}`}
+                    >
                       {featuredPromotion?.discountPercent}% OFF
                     </span>
                   </div>
@@ -1101,11 +1120,26 @@ export function PricingPageContent() {
                     <span className={`pb-1 text-sm font-bold ${plan.highlighted ? "text-blue-50" : "text-zinc-700 dark:text-zinc-200"}`}>
                       {formatBillingPeriodLabel(plan.period, lang)}
                     </span>
-                    <span className={`pb-1 text-sm font-bold line-through ${plan.highlighted ? "text-blue-100/80" : "text-zinc-500 dark:text-zinc-400"}`}>
+                    {/* UI-CONTRAST-001. `text-blue-100/80` composited to
+                        3.26:1 against the highlighted plan's blue card, and
+                        full-strength blue-100 only reached 4.19:1 -- both
+                        below AA for this 14px/700 text. It now uses the same
+                        blue-50 as the period label beside it, which already
+                        measures above AA on this surface. The strike-through
+                        is what marks this as the superseded price; the colour
+                        was never carrying that meaning. Invisible until the
+                        promotion fixture started rendering the sale block. */}
+                    <span className={`pb-1 text-sm font-bold line-through ${plan.highlighted ? "text-blue-50" : "text-zinc-600 dark:text-zinc-400"}`}>
                       {displayPrice}
                     </span>
                   </div>
-                  <p className={`mt-2 text-xs font-bold ${plan.highlighted ? "text-blue-100" : "text-zinc-600 dark:text-zinc-300"}`}>
+                  {/* UI-CONTRAST-001. Same surface as the struck price above:
+                      the sale block lays `bg-white/15` over the blue card, so
+                      the composited background is lighter than the plain card
+                      and blue-100 falls to 4.19:1 here even though it clears
+                      AA elsewhere on the same plan. blue-50 is what this
+                      surface needs. */}
+                  <p className={`mt-2 text-xs font-bold ${plan.highlighted ? "text-blue-50" : "text-zinc-600 dark:text-zinc-300"}`}>
                     {saleCopy.duration}. {saleCopy.regular}: {displayPrice}{" "}
                     {formatBillingPeriodLabel(plan.period, lang)}.
                   </p>

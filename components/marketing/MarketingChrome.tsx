@@ -298,7 +298,10 @@ export function MarketingHeader({
                 cta_location: "marketing_header",
               })
             }
-            className={`hidden h-10 items-center gap-2 rounded-xl px-4 text-sm font-bold transition sm:inline-flex ${headerCtaClass}`}
+            // Matches the 44px floor its two row-mates now carry (UI-TOUCH-001)
+            // so the header's controls stay a single, even row rather than a
+            // 40px CTA flanked by 44px neighbours.
+            className={`hidden h-11 items-center gap-2 rounded-xl px-4 text-sm font-bold transition sm:inline-flex ${headerCtaClass}`}
           >
             {labels.app}
             <ArrowRight className="h-4 w-4" />
@@ -308,7 +311,11 @@ export function MarketingHeader({
             aria-label={isMenuOpen ? labels.close : labels.menu}
             aria-expanded={isMenuOpen}
             onClick={() => setIsMenuOpen((open) => !open)}
-            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-zinc-300 bg-white text-zinc-800 shadow-sm transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800 lg:hidden"
+            // UI-TOUCH-001. This is the only way to reach the top menu below
+            // `lg`, so it is a core mobile action and owns a real 44x44 box
+            // rather than a 40x40 one grown by a pseudo-element -- the header
+            // has the room, and a real box is what a hit test can prove.
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-zinc-300 bg-white text-zinc-800 shadow-sm transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800 lg:hidden"
           >
             {isMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </button>

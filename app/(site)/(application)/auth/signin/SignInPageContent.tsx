@@ -289,7 +289,12 @@ function SignInButtons() {
 
             <div className="flex items-center gap-3 py-1">
                 <div className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
-                <span className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+                {/* UI-CONTRAST-001. zinc-400 composited to 2.62:1 against the
+                    light card surface; dark already passed. Moved onto the
+                    same supporting-text pair the rest of the product uses so
+                    the divider label is legible in both themes without
+                    outweighing the provider buttons beside it. */}
+                <span className="text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">
                     {t("auth.orDivider")}
                 </span>
                 <div className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
