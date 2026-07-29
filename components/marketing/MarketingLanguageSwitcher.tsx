@@ -12,6 +12,7 @@ import {
   getLocaleLaunchPolicy,
   localeLaunchPolicy,
 } from "@/lib/localeLaunchPolicy";
+import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { MARKETING_LOCALE_NOTICE_ID } from "./LocaleSupportNotice";
 
 const languageOptions: Language[] = ["ko", "en", "zh", "fr", "de", "es", "pt"];
@@ -66,8 +67,24 @@ export function MarketingLanguageSwitcher() {
         value={lang}
         onChange={(event) => {
           const nextLanguage = event.target.value as Language;
-          setLang(nextLanguage);
           const basePath = localizedBasePath();
+          // RECON-I18N-001. Emitted before anything else in this handler,
+          // because `router.push` below leaves the localized routes' own root
+          // layout and therefore reloads the document -- an event queued after
+          // it would race the unload. The delivery itself is `keepalive`, so
+          // the request survives the navigation either way; this only makes
+          // sure it is issued.
+          //
+          // `navigation` is the reason this event exists: switching language
+          // costs about 2x when it crosses the root boundary, and that cost
+          // was accepted on the argument that the path is rare. This is what
+          // lets that argument be checked.
+          trackProductEvent("marketing_language_switched", 0, {
+            language_from: lang,
+            language_to: nextLanguage,
+            navigation: basePath ? "document" : "client",
+          });
+          setLang(nextLanguage);
           if (basePath) router.push(localizedPath(nextLanguage, basePath));
         }}
         className="min-w-0 flex-1 cursor-pointer truncate bg-transparent text-sm font-bold text-zinc-800 outline-none [color-scheme:light] dark:text-zinc-100 dark:[color-scheme:dark]"

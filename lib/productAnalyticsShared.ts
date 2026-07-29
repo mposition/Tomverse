@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { BILLING_CURRENCIES, type BillingCurrency } from "@/lib/billingMarkets";
+import { SUPPORTED_LANGUAGES } from "@/lib/language";
 
 export const PRODUCT_ANALYTICS_EVENT_NAMES = [
   "landing_view",
@@ -72,6 +73,15 @@ export const PRODUCT_ANALYTICS_EVENT_NAMES = [
   // search this turn -- distinct from unsupported/failed. Always paired
   // with a full surcharge refund (see getSettledUsageCredits).
   "web_search_native_not_executed",
+  // RECON-I18N-001. The localized marketing routes have their own root layout,
+  // so switching language from an English page is a document navigation rather
+  // than a client one -- about 2x slower, and 2.6s slower on a mid-tier phone
+  // over 4G. Keeping that cost was decided on the structural argument that the
+  // path is rare (Korean traffic lands on /ko from search, and /chat resolves
+  // Accept-Language), with nothing measuring whether that is true. This event
+  // is the missing input: `navigation` says whether a given switch actually
+  // crossed a root boundary and paid for it.
+  "marketing_language_switched",
 ] as const;
 
 export type ProductAnalyticsEventName =
@@ -198,6 +208,14 @@ export const analyticsPropertiesSchema = z
     search_provider: z
       .enum(["openai", "anthropic", "google", "perplexity"])
       .optional(),
+    // Language the visitor switched away from / to. `language` already exists
+    // as an attribution field, but it records the language at send time, which
+    // for a switch is only half the story.
+    language_from: z.enum(SUPPORTED_LANGUAGES).optional(),
+    language_to: z.enum(SUPPORTED_LANGUAGES).optional(),
+    // "document" when the switch crossed the (site)/[locale] root boundary and
+    // reloaded, "client" when it stayed in the same document.
+    navigation: z.enum(["document", "client"]).optional(),
   })
   .strict()
   .superRefine((properties, context) => {

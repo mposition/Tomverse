@@ -164,16 +164,35 @@ root layout이 하나가 아니게 되어 `scripts/security-regression-check.mjs
 - 유일하게 효과가 큰 완화책(prerender)은 CSP inline script 정책을 건드리므로,
   빈도 근거 없이 지금 도입할 만한 거래가 아닙니다.
 
-### 4.5 이 결정의 한계 — 빈도 데이터가 없습니다
+### 4.5 이 결정의 한계 — 빈도 데이터가 없었습니다 → 계측을 붙였습니다
 
-`MarketingLanguageSwitcher`에는 `trackProductEvent` 호출이 없어 **언어 전환이
-계측되지 않습니다.** 따라서 "2.6초 x 몇 명"인지는 알 수 없고, 위 결정은
+결정 시점에 `MarketingLanguageSwitcher`에는 `trackProductEvent` 호출이 없어
+언어 전환이 계측되지 않았습니다. "2.6초 x 몇 명"인지 알 수 없었고, 결정은
 빈도가 낮다는 *구조적 추정*(한국어 사용자는 검색으로 `/ko`에 직접 도착하고
 `/chat`은 `Accept-Language`로 자동 판별되므로, 이 선택기를 쓰는 사람은 영어
-`/`에 먼저 도착한 비영어권 방문자로 좁혀진다)에 기대고 있습니다.
+`/`에 먼저 도착한 비영어권 방문자로 좁혀진다)에 기대고 있었습니다.
 
-빈도가 실제로 높다면 결정을 다시 볼 근거가 됩니다. 선택기에 이벤트를 하나
-붙이는 것은 작은 작업이며, 이 문서의 결정을 뒤집을 수 있는 유일한 입력입니다.
+§4.4를 뒤집을 수 있는 유일한 입력이었으므로 `marketing_language_switched`를
+추가했습니다. 결정 자체는 그대로이고, 이제 확인이 가능해졌을 뿐입니다.
+
+| 속성 | 값 |
+|---|---|
+| `language_from` / `language_to` | 전환 전후 언어 |
+| `navigation` | `document`(root 경계를 넘어 full reload) / `client` |
+
+`navigation`이 이 이벤트의 핵심입니다. 비용이 드는 것은 root 경계를 넘는
+전환뿐이라, 전환 횟수만으로는 §4.4를 다시 볼 수 없습니다.
+
+구현에서 두 가지가 걸려 있습니다.
+
+- 이벤트는 handler의 **첫 문장**입니다. 뒤따르는 `router.push`가 문서를
+  내리기 때문입니다.
+- 전송은 `keepalive`라 그 unload를 넘겨 살아남습니다. **이 성질은 e2e가
+  잡지 못합니다** — route interception은 요청이 *발행되는* 시점을 보는데,
+  `keepalive` 없이 보낸 요청도 발행은 되고 취소는 그 다음에 일어납니다.
+  실제로 flag를 꺼도 e2e 두 건이 모두 통과하는 것을 확인했습니다. 그래서
+  이 성질은 `tests/productAnalyticsDelivery.test.mjs`가 대신 고정합니다
+  (flag를 끄면 실패). e2e는 from/to와 `navigation` 분류만 책임집니다.
 
 ## 5. 부수 수정 — `korean-typography.spec.ts`
 
@@ -207,6 +226,8 @@ CI·staging 판정은 별도이며, 같은 시점의 canonical visual gate 상�
 `.github/audits/ui-go-live-remediation-2026-07-29.md`와 아래를 참조하세요.
 
 - cross-root 전환 시간 수용 여부: **현행 유지로 확정** (§4.4). 재검토를 부르는
-  유일한 입력은 언어 전환 빈도이며, 현재 계측되지 않습니다 (§4.5).
+  유일한 입력인 언어 전환 빈도는 이제 `marketing_language_switched`로
+  계측됩니다 (§4.5). 데이터가 쌓이면 `navigation="document"` 비율로 재검토
+  여부를 판단할 수 있습니다.
 - `?lang=` query locale(예: `/pricing?lang=ko`)의 정적 route hydration flash:
   승인대로 **별도 i18n route migration으로 분리**, 이번 범위 밖
