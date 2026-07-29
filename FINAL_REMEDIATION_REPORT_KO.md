@@ -17,7 +17,7 @@
 | 8 | `RECON-A11Y-003` | **Fixed locally, not verified on staging** (3개 route × light/dark 전부 0건) |
 | 9 | `RECON-OPS-001` | **Fixed locally, not verified on staging** |
 | 10 | `EXT-REAUDIT-F001` | **Fixed locally, not verified on staging** (Windows 경로 + canonical 정책 확정; canonical 실행 자체는 `Not verified`) |
-| 11 | `RECON-QA-001` | **Environment dependent** (consent flake 재현 불가; visual은 canonical 실행 후에도 `Not verified` — golden 63장이 non-canonical 산출물, §4.11) |
+| 11 | `RECON-QA-001` | **Fixed locally, not verified on staging** (consent flake 재현 불가; visual은 canonical 재기록 후 74/74 — golden 49장이 non-canonical 산출물이었음, §4.11) |
 
 가장 중요한 결과 두 가지입니다.
 
@@ -45,13 +45,16 @@ browser를 설치할 수 없는 이 환경의 문제로 **제품 결함으로 �
 
 - visual golden 49건 실패는 **제품 회귀가 아니라 golden 쪽이 non-canonical
   산출물**이기 때문입니다. 같은 코드가 Chromium 141에서 74/74 통과하고
-  canonical에서 49/74 실패합니다. golden 재기록 전까지 visual은 계속
-  **`Not verified`** 입니다.
+  canonical에서 49/74 실패합니다. 사용자 승인을 받아 canonical에서 재기록·
+  검토·병합했고, 재실행에서 **74/74·변경 0**입니다.
 - **canonical에서만 재현되는 제품 결함 1건이 새로 나왔습니다** —
   320×568에서 model catalogue의 첫 행이 한 줄도 온전히 보이지 않습니다
-  (`model-picker-limit-state.spec.ts:111`, 3회 연속 실패). 합의된 11개 finding
-  밖이므로 §7에 따라 **기록만 하고 고치지 않았습니다.** 즉 "제품 결함으로 남은
-  실패 0건"은 이 컨테이너 기준의 문장이며, canonical 기준으로는 **1건**입니다.
+  (`model-picker-limit-state.spec.ts:111`, 3회 연속 실패). 사용자 지시로
+  수정했습니다: 중복 제목 행을 없애 목록 129px→194px, 첫 행 여유
+  15.8px→73.8px.
+- 재기록이 **또 다른 결함 1건**을 드러냈습니다 — canonical 렌더링에서
+  `Reduce the number of models` 버튼 레이블이 2줄로 감깁니다. 합의 범위 밖이라
+  §7에 따라 **기록만 했습니다**(§11-9).
 
 `Verified fixed`는 한 건도 사용하지 않았습니다.
 
@@ -912,6 +915,64 @@ golden에서는 **golden 쪽이 non-canonical 산출물**입니다. 141 대 151 
   경로이며, 이는 정책 문서가 요구하는 **승인 절차**에 해당합니다
   (§10 `[USER DECISION REQUIRED]`).
 
+#### 사용자 승인 후 — canonical 재기록 완료
+
+사용자가 재기록을 승인해 `Record Visual Baseline` workflow를 만들고 실행했습니다.
+정책 문서의 모순(“canonical에서만 재기록” + “CI에서 snapshot flag 금지”, 그런데
+canonical이 곧 CI)을 먼저 풀어야 했습니다 — snapshot flag를 허용하는 workflow는
+이 하나뿐이고, 수동 dispatch 전용·고정 이미지·임시 branch push로 제한되며,
+`scripts/security-regression-check.mjs`가 그 네 조건을 강제합니다.
+
+| 실행 | SHA | 결과 |
+|---|---|---|
+| run #10 (재기록) | `dcdc5bd` | baseline 대조 **49 failed / 25 passed** → 재기록 74 passed → 재확인 74 passed |
+| run #12 (검증) | `e7f076b` | baseline 대조 **74 passed**, 재기록해도 **변경 0** |
+
+**49장을 병합 전에 pixel 단위로 검토했습니다**(연결 성분 분석, threshold 12).
+
+| 지표 | 값 |
+|---|---|
+| 이미지 크기 변경 | **0건** |
+| 가장 큰 차이 덩어리 높이 — 중앙값 | **13px** (텍스트 한 줄) |
+| 40px보다 높은 덩어리 | **1건** |
+| snapshot 디렉터리 밖 변경 | **0건** |
+
+고배율 대조 결과 **글자체가 양쪽 동일**합니다 — Latin은 Geist, 한글은
+Noto Sans KR로 letterform이 같고, 차이는 glyph advance의 반올림이 문자열에
+누적된 것입니다. 폰트 로딩 경합도 아니었습니다: capture 시점에
+`document.fonts.status`가 이미 `loaded`였고 한글 문단의 box가 대기 전후 모두
+`232x32`였습니다.
+
+눈에 보이는 결과가 있는 것은 2건이고 둘 다 같은 원인의 귀결입니다.
+
+- `chat-ai-review-error-desktop-light-ko` — dialog가 세로 중앙 정렬인데 한글
+  본문이 2줄→1줄이 되어 dialog 전체가 약 10px 내려갔습니다.
+- `chat-error-long-message-desktop-light-en` — Latin advance는 반대로 넓어져
+  `Reduce the number of models` 버튼 레이블이 한 줄에 들어가지 않고 2줄로
+  감깁니다. **baseline으로 덮지 않고 §11에 결함으로 등재했습니다.**
+
+병합: `origin/develop` ← `8413e84`(golden) + `e7f076b`(폰트 대기).
+
+#### capture 직전 webfont 대기가 없었습니다
+
+`expectStableScreenshot`은 이 suite의 유일한 capture 지점인데
+`document.fonts.ready`를 기다리지 않았습니다. webfont는 self-hosted이고
+`preload: false`이므로, 적용 전에 찍으면 제품이 아니라 fallback face의 metric이
+baseline에 남습니다. `korean-typography.spec.ts`가 실제로 그 상태였고
+(PR #134에서 수정), 이 suite에는 끝까지 없었습니다.
+
+추가 후 canonical에서 재실행한 run #12가 **변경 0**을 보고했습니다. 즉 오늘
+이미지는 하나도 바뀌지 않으며, 방금 병합한 baseline이 **로드 순서에 의존하지
+않는다는 것이 증명**됐습니다.
+
+#### 이제 이 컨테이너는 golden을 판정할 수 없습니다
+
+같은 코드로 Chromium 141에서 돌리면 **49 failed / 25 passed** — canonical 실행의
+정확한 거울상입니다. baseline이 141에서 canonical로 넘어갔다는 증거이자,
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE` 우회 환경에서 이 suite를 돌리면 앞으로 49건이
+실패로 보인다는 뜻입니다. 정책이 그 실행을 canonical로 인정하지 않으므로
+**정상 동작**이며, 판정은 canonical runner에서만 합니다.
+
 #### canonical 실행이 새로 드러낸 결함 — `model-picker-limit-state.spec.ts:111`
 
 golden이 아니라 **실제 치수 assertion**이므로 별건입니다.
@@ -1226,8 +1287,9 @@ web search는 **off**로 고정합니다(모델당 +8 surcharge 방지).
 | 6 | `FINAL-F002` 기본 모델 incident 처리 | ✅ **승인** (중단·대기, §9.9) |
 | 7 | `RECON-A11Y-003` 강조 plan card | ✅ **전제 정정 후 승인 → 적용·검증 완료** (§4.8) |
 | 8 | AU analytics opt-out 정책 적합성 (범위 밖, 미판단) | §5-D |
-| 9 | `chat-state-visual-regression` golden 63장 **canonical 재기록** | ⛔ **미결** — canonical runner에서 `--update-snapshots` 1회 허용 + diff 검토 + 승인이 필요 (§4.11) |
-| 10 | `model-picker-limit-state` 320×568 레이아웃 수정 | ⛔ **미결** — 합의 범위 밖 결함, 수정 여부가 제품 결정 (§4.11) |
+| 9 | `chat-state-visual-regression` golden 63장 **canonical 재기록** | ✅ **승인 → 완료** — `Record Visual Baseline` workflow 신설, 49장 재기록·검토·병합, 재실행 변경 0 (§4.11) |
+| 10 | `model-picker-limit-state` 320×568 레이아웃 수정 | ✅ **승인 → 완료** — 중복 제목 행 제거로 목록 129px→194px, 여유 15.8px→73.8px (§4.11) |
+| 11 | `Reduce the number of models` 버튼 2줄 감김 | ⛔ **미결** — canonical 재기록이 드러낸 새 결함, 수정 여부가 제품 결정 (§11-9) |
 
 ### 미검증으로 남은 것
 
@@ -1247,11 +1309,12 @@ web search는 **off**로 고정합니다(모델당 +8 surcharge 방지).
 |---|---|---|---|
 | 1 | `FINAL-F002` 실제 Provider·AI Review·credit **완전 미검증** | **P1 blocker** | 계획 승인 · 자격증명 부재로 미실행 |
 | 2 | ~~`RECON-A11Y-003` `/pricing` 강조 plan card~~ | — | **해소** (§4.8) |
-| 3 | visual 무결성 **`Not verified`** | P2 QA | **원인 확정** — golden 63장이 non-canonical(141) 산출물, canonical 재기록 필요 (§4.11) |
+| 3 | ~~visual 무결성 `Not verified`~~ | — | **해소** — canonical 재기록 후 74/74, 재실행 변경 0 (§4.11) |
 | 4 | `FINAL-F003` 전이 6·7·8 및 native-2 조합 미검증 | P2 | 잔여 |
 | 5 | WebKit 전 범위 미실행 | P2 QA | 환경 |
 | 6 | `comparison-action-rail.spec.ts:945` 대규모 실행에서 간헐 실패 | P3 | flake 분류 (5/5·전체 실행 통과) |
-| 7 | **320×568에서 model catalogue 행이 한 줄도 온전히 보이지 않음** | **P2** | canonical 한정 재현 3/3, 여유 15.8px, **미수정** (§4.11) |
+| 7 | ~~320×568에서 model catalogue 행이 한 줄도 온전히 보이지 않음~~ | — | **해소** — 여유 15.8px→73.8px (§4.11) |
+| 9 | **`Reduce the number of models` 버튼이 2줄로 감김** | **P3** | canonical 렌더링에서 재현, **미수정** (아래 9번) |
 | 8 | `nightly-visual-regression.yml`이 Actions에 **등록되지 않음** | P2 운영 | `develop`에만 존재, default branch(`main`) 부재로 cron 미발화 — 야간 visual 회귀 감시가 실제로는 없었음 |
 
 ### 범위 밖에서 발견한 사항 (수정하지 않음, 기록만)
@@ -1343,6 +1406,46 @@ web search는 **off**로 고정합니다(모델당 +8 surcharge 방지).
    갱신했습니다(모든 시나리오가 잔액 0 또는 2에서 돌아 의도한 부족 상태를
    그대로 검증합니다).
 
+7. **`nightly-visual-regression.yml`이 Actions에 등록돼 있지 않습니다.** (P2, 운영)
+
+   `develop`에만 있고 default branch(`main`)에는 없습니다. GitHub은
+   `workflow_dispatch`와 `schedule`을 **default branch의 정의에서만** 해석하므로,
+   이 workflow의 cron은 **한 번도 발화한 적이 없습니다.** 야간 visual 감시가
+   설계상 존재했을 뿐 실제로는 돌지 않았습니다.
+
+   `main`에 올리기만 하면 되는 문제는 아닙니다 — `main`은 develop보다 128 커밋
+   뒤에 있어 `test:e2e:visual` script도 해당 spec도 없습니다. 지금 등록하면 매일
+   밤 실패합니다. **suite가 `main`에 도착한 뒤에 따라가야 합니다.**
+
+   같은 이유로 `Record Visual Baseline`은 workflow 파일만 `main`에 별도
+   PR(#137·#139)로 올렸습니다.
+
+8. **workflow YAML이 깨져 있어도 아무도 알려주지 않습니다.** (P2, 운영)
+
+   `visual-baseline-record.yml`을 처음 추가했을 때 `run: |` 블록 안의 여러 줄
+   문자열 continuation을 column 0에 두어 block scalar가 끊겼습니다. GitHub은
+   이 파일을 거부하지 않고 **파일명으로, 이름도 trigger도 없이 등록**했으며,
+   dispatch에 `422 Workflow does not have 'workflow_dispatch' trigger`로
+   답했습니다 — **default branch에 파일이 아예 없을 때와 같은 메시지**입니다.
+
+   기존 workflow 검사는 전부 substring match여서, 파싱되지 않는 파일에서도
+   전부 통과했습니다. `scripts/security-regression-check.mjs`가 이제 내용보다
+   **구조를 먼저** 검사합니다(column 0에서 시작하는 줄이 top-level key·주석·
+   document marker가 아니면 실패). 양방향 확인했습니다.
+
+9. **`Reduce the number of models` 버튼이 canonical 렌더링에서 2줄로 감깁니다.** (P3)
+
+   `chat-error-long-message-desktop-light-en`(desktop 1440×900)의 error card
+   안에서, canonical browser는 Latin advance를 조금 넓게 잡아 이 CTA 레이블이
+   한 줄에 들어가지 않습니다. 버튼이 2줄 높이가 되고 아이콘만 첫 줄 옆에
+   남습니다.
+
+   잘리거나 겹치지 않으므로 P3이지만, **그 폭에서 레이블에 여유가 전혀 없다**는
+   뜻입니다 — 텍스트를 조금 넓게 재는 브라우저에서는 실사용자 화면에서도
+   그렇게 됩니다. canonical 재기록으로 드러났고, **baseline으로 덮지 않고
+   결함으로 남겼습니다.** 합의된 11개 finding 밖이라 §7에 따라 수정하지
+   않았습니다.
+
 ---
 
 ## 12. Go-Live 재검토 조건
@@ -1355,22 +1458,26 @@ web search는 **off**로 고정합니다(모델당 +8 surcharge 방지).
 | 4 | 게이트 SHA 고정 + staging 배포 동결 | ❌ **해제됨** — 사용자 지시로 `develop` 병합, staging 재배포 시작 |
 | 5 | `FINAL-F002` 승인 후 3-model 3회 + AI Review 1회 실호출 + ledger 대조 | ✅ **충족** (17 credits, 예상 일치 — §4.2) |
 | 6 | 원시 증거 번들 전달 | ⚠️ `test-results/` 에 보존, 미전달 |
-| 7 | canonical browser visual suite unexplained critical 0 | ❌ **미충족** — 실행은 했으나 실패 50건 (§4.11) |
+| 7 | canonical browser visual suite unexplained critical 0 | ✅ **충족** — `chat-state` 74/74, unexplained 0 (§4.11) |
 
-**1·2·5가 모두 충족되어 Go-Live 재판정에 착수할 수 있는 상태입니다.**
+**1·2·5·7이 충족되어 Go-Live 재판정에 착수할 수 있는 상태입니다.**
+
+조건 7의 경과: run #35에서 실패 50건 → 49건은 non-canonical baseline이 원인으로
+확인돼 canonical 재기록·검토·병합, 1건(`model-picker` 320×568)은 실제 결함으로
+수정. 재기록 후 canonical 재실행에서 **74/74, 변경 0**입니다.
 
 다만 `No-Go` 해제는 별도 판단이며, 남은 항목이 있습니다.
 
 | 항목 | 상태 |
 |---|---|
-| 조건 7 — canonical visual suite | ❌ canonical runner에서 실행 완료(run #35). 실패 50건 중 49건은 **stale golden**으로 설명되고 1건은 **실제 결함**이므로, 남은 unexplained는 0이지만 **critical 0은 아닙니다.** golden 재기록 + `model-picker` 결함 처리 후 재실행 필요 |
-| 조건 6 — 원시 증거 번들 전달 | ⚠️ `test-results/` + run #35 artifact `8710914900` 보존, 미전달 |
+| 조건 6 — 원시 증거 번들 전달 | ⚠️ `test-results/` + run artifact(`8710914900`, `8717156750`) 보존, 미전달 |
 | 조건 4 — 배포 동결 | 사용자 지시로 해제됨. 재판정 시 기준 SHA를 다시 고정해야 함 |
+| 전체 canonical suite 재실행 | ⚠️ `chat-state` 골든만 canonical에서 재확인했습니다. **1377건 전체 suite는 재기록 이후 아직 한 번도 돌지 않았습니다** — 게이트 SHA 고정과 함께 `e2e.yml`을 1회 실행해야 조건 7을 전체 범위로 말할 수 있습니다 |
+| §11-9 버튼 감김 | 새 결함, 미수정 (P3) |
 
-**조건 7이 미충족이므로 `No-Go`를 자동 해제하지 않았습니다.** 이제 남은 것은
-브라우저 확보가 아니라 두 가지 결정입니다 — golden 63장을 canonical에서
-재기록할 것인지(§10-9), 320×568 catalogue 결함을 이번 게이트에 포함할
-것인지(§10-10).
+**남은 것은 브라우저나 baseline 문제가 아니라 절차입니다** — 게이트 SHA를 다시
+고정하고, 그 SHA에서 canonical suite 전체를 1회 돌린 뒤 재판정하면 됩니다.
+현재 develop head는 `e7f076b`입니다.
 
 ---
 
