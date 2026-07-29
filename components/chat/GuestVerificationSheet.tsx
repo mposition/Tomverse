@@ -57,6 +57,7 @@ export function GuestVerificationSheet() {
     failure,
     lastOutcome,
     isChallengeVisible,
+    isLongWait,
     cancel,
     registerHost,
     setHostSize,
@@ -363,6 +364,21 @@ export function GuestVerificationSheet() {
           data-testid="guest-verification-widget"
           className="flex w-full min-w-0 justify-center"
         />
+        {/*
+          EXT-REAUDIT-F004. Announced, not alerting: this is not a failure and
+          must not read like one, so it is role="status" (polite) rather than
+          role="alert". The challenge stays live underneath it -- the escape
+          route it points at is the close control that was already there.
+        */}
+        {isOpen && isLongWait && !failure ? (
+          <p
+            role="status"
+            data-testid="guest-verification-long-wait"
+            className="mt-3 text-[11px] font-semibold leading-4 text-zinc-600 break-keep dark:text-zinc-300"
+          >
+            {t("chat.guestVerificationLongWait")}
+          </p>
+        ) : null}
         {isOpen && failure ? (
           <p
             role="alert"

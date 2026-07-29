@@ -94,6 +94,7 @@ export const fr = {
         guestVerificationTitle: "Confirmez pour continuer",
         guestVerificationDescription: "Une vérification rapide qui limite les requêtes automatisées. Elle se termine généralement toute seule.",
         guestVerificationClose: "Annuler la vérification",
+        guestVerificationLongWait: "Cette vérification prend plus de temps que d'habitude. Vous pouvez continuer à attendre ou l'annuler et réessayer.",
         guestVerificationFailed: "La vérification n'a pas pu aboutir. Veuillez réessayer.",
         guestVerificationUnavailable: "Le service de vérification est indisponible pour le moment. Réessayez dans quelques instants.",
         guestVerificationCancelled: "Vérification annulée. Votre message et vos pièces jointes ont été conservés : renvoyez-le pour réessayer.",

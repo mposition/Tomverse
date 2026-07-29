@@ -13,7 +13,8 @@ export const evidenceSourceLabel = (reasonCode: PublicStatusReasonCode): string 
   }
   if (
     reasonCode === "PROBE_SUCCESS_CONFIRMED" ||
-    reasonCode === "PROBE_REPEATED_FAILURE"
+    reasonCode === "PROBE_REPEATED_FAILURE" ||
+    reasonCode === "PROBE_FAILURE_STALE"
   ) {
     return "(from an automated synthetic check, not real user traffic)";
   }

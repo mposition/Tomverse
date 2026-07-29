@@ -1007,3 +1007,147 @@ test.describe("Guest verification: background vs user-initiated", () => {
     expect(summaryTokens[1]).not.toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// EXT-REAUDIT-F004: a stalled interactive challenge must not stay silent
+// ---------------------------------------------------------------------------
+
+test.describe("Guest verification: long-wait feedback", () => {
+  // The "interactive" script fires before-interactive-callback and then never
+  // calls back -- exactly what an unreachable Cloudflare looks like from the
+  // app's side. The app clears its own silent timeout at that point on purpose
+  // (a person mid-challenge is never cancelled out from under themselves), so
+  // without this notice the surface says nothing until Cloudflare's terminal
+  // callback finally lands, which took ~126s on a blocked network.
+  const LONG_WAIT_BUDGET_MS = 40_000;
+
+  test("a stalled challenge explains itself within 40s and stays cancellable", async ({
+    page,
+  }) => {
+    test.setTimeout(LONG_WAIT_BUDGET_MS + 90_000);
+
+    const chat = await enterGuestChat(page, {
+      models: ONE_MODEL,
+      viewport: MOBILE_VIEWPORT,
+      script: "interactive",
+    });
+
+    const textarea = page.getByTestId("chat-textarea");
+    await textarea.fill("A draft that must survive the stall");
+    await page.getByTestId("chat-send-button").click();
+    await expect(mockWidget(page)).toBeVisible();
+
+    const notice = page.getByTestId("guest-verification-long-wait");
+    // Not immediately: a challenge that resolves normally must never see it.
+    await expect(notice).toHaveCount(0);
+
+    const startedAt = Date.now();
+    await expect(notice).toBeVisible({ timeout: LONG_WAIT_BUDGET_MS });
+    const elapsed = Date.now() - startedAt;
+    expect(
+      elapsed,
+      `long-wait notice took ${elapsed}ms; the budget is ${LONG_WAIT_BUDGET_MS}ms`
+    ).toBeLessThan(LONG_WAIT_BUDGET_MS);
+
+    // Announced politely, not as an error: this is not a failure.
+    await expect(notice).toHaveAttribute("role", "status");
+    await expect(page.getByTestId("guest-verification-error")).toHaveCount(0);
+
+    // The challenge is still live -- the notice must not have cancelled it,
+    // consumed it, or spent a token.
+    await expect(mockWidget(page)).toBeVisible();
+    await expect(
+      page.getByTestId("guest-verification-sheet-layer")
+    ).toHaveAttribute("data-state", "open");
+    expect(chat.spentTokens).toHaveLength(0);
+    expect(chat.attempts.every((attempt) => attempt.token === null)).toBe(true);
+
+    // The escape route it points at actually works, and a retry still passes.
+    await page.getByTestId("guest-verification-close").click();
+    await expect(
+      page.getByTestId("guest-verification-sheet-layer")
+    ).toHaveAttribute("data-state", "closed");
+
+    await setTurnstileScript(page, "silent");
+    await textarea.fill("Second attempt after the stall");
+    await page.getByTestId("chat-send-button").click();
+    await expect(page.getByText("Answer from gemini-2-5-flash.")).toBeVisible();
+  });
+
+  test("solving a challenge before the budget never shows the long-wait notice", async ({
+    page,
+  }) => {
+    await enterGuestChat(page, {
+      models: ONE_MODEL,
+      viewport: MOBILE_VIEWPORT,
+      script: "interactive",
+    });
+
+    await page.getByTestId("chat-textarea").fill("Solved quickly");
+    await page.getByTestId("chat-send-button").click();
+    await expect(mockWidget(page)).toBeVisible();
+    expect(await completeTurnstileChallenge(page)).toBe(true);
+
+    await expect(page.getByText("Answer from gemini-2-5-flash.")).toBeVisible();
+    await expect(page.getByTestId("guest-verification-long-wait")).toHaveCount(0);
+  });
+
+  test("a terminal failure replaces the long-wait notice with the failure copy", async ({
+    page,
+  }) => {
+    test.setTimeout(LONG_WAIT_BUDGET_MS + 90_000);
+
+    await enterGuestChat(page, {
+      models: ONE_MODEL,
+      viewport: MOBILE_VIEWPORT,
+      script: "interactive",
+    });
+
+    await page.getByTestId("chat-textarea").fill("Stall then fail");
+    await page.getByTestId("chat-send-button").click();
+    await expect(mockWidget(page)).toBeVisible();
+    await expect(page.getByTestId("guest-verification-long-wait")).toBeVisible({
+      timeout: LONG_WAIT_BUDGET_MS,
+    });
+
+    // Cloudflare's own timeout still decides the outcome.
+    expect(await failTurnstileChallenge(page, "timeout")).toBe(true);
+    await expect(page.getByTestId("guest-verification-error")).toBeVisible();
+    await expect(page.getByTestId("guest-verification-long-wait")).toHaveCount(0);
+  });
+
+  test("the long-wait notice fits a 320px sheet in Korean at a 200% text scale", async ({
+    page,
+  }) => {
+    test.setTimeout(LONG_WAIT_BUDGET_MS + 90_000);
+
+    await enterGuestChat(page, {
+      models: ONE_MODEL,
+      viewport: { width: 320, height: 568 },
+      lang: "ko",
+      script: "interactive",
+    });
+
+    await page.getByTestId("chat-textarea").fill("한국어 확인");
+    await page.getByTestId("chat-send-button").click();
+    await expect(mockWidget(page)).toBeVisible();
+
+    const notice = page.getByTestId("guest-verification-long-wait");
+    await expect(notice).toBeVisible({ timeout: LONG_WAIT_BUDGET_MS });
+
+    await page.addStyleTag({ content: "html{font-size:32px !important}" });
+    await page.waitForTimeout(300);
+
+    // Still readable, still inside the viewport, and the escape route is still
+    // a real 44x44 target.
+    await expect(notice).toBeVisible();
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+    );
+    expect(overflow, "[ko/200%] horizontal overflow").toBeLessThanOrEqual(1);
+
+    const closeBox = (await page.getByTestId("guest-verification-close").boundingBox())!;
+    expect(closeBox.width).toBeGreaterThanOrEqual(43.5);
+    expect(closeBox.height).toBeGreaterThanOrEqual(43.5);
+  });
+});

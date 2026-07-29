@@ -272,6 +272,66 @@ test.describe("build-info UI", () => {
     expect(clipboardText).toContain("Deployment: staging-20260725-042436");
   });
 
+  // STG-F010 (R-07). Every UI test above mocks the endpoint so the awkward
+  // shapes (missing deployedAt, production vs staging) can be exercised
+  // deterministically. None of them proves the unmocked wiring: that what the
+  // panel renders is what this deployment's own /api/build-info actually says.
+  // This one takes the live response and requires every non-null field to be
+  // present in the panel, so a field that silently stops being wired through
+  // -- or gets rendered from a different source -- fails here.
+  test("the panel renders the live endpoint's own values, field for field", async ({
+    page,
+  }, testInfo) => {
+    await prepareGuestPage(page, "en");
+    await page.goto("/chat");
+
+    const live = await page.evaluate(async () => {
+      const response = await fetch("/api/build-info", { cache: "no-store" });
+      return {
+        status: response.status,
+        cacheControl: response.headers.get("cache-control"),
+        body: (await response.json()) as Record<string, unknown>,
+      };
+    });
+    expect(live.status).toBe(200);
+    expect(live.cacheControl).toContain("no-store");
+
+    await openSidebarIfNeeded(page, testInfo);
+    await clickSidebarHelpButton(page);
+    await page.getByTestId("sidebar-build-info-toggle").click();
+    const panel = page.getByTestId("build-info-panel");
+    await expect(panel).toBeVisible();
+    const panelText = (await panel.innerText()).replace(/\s+/g, " ");
+
+    // The short SHA, the deployment id and every timestamp the endpoint
+    // actually reports have to be readable in the panel.
+    for (const field of [
+      "shortCommitSha",
+      "deploymentId",
+      "builtAt",
+      "deploymentStartedAt",
+      "deployedAt",
+    ] as const) {
+      const value = live.body[field];
+      if (typeof value !== "string" || value.length === 0) continue;
+      expect(
+        panelText,
+        `${field} ("${value}") must be visible in the build-info panel`
+      ).toContain(value);
+    }
+
+    // The full SHA stays reachable rather than being truncated away.
+    if (typeof live.body.commitSha === "string" && live.body.commitSha) {
+      await expect(
+        panel.locator(`[title="${live.body.commitSha}"]`),
+        "the full commit SHA must remain reachable"
+      ).toHaveCount(1);
+    }
+
+    // And nothing beyond the documented shape leaks into the UI.
+    expect(panelText).not.toMatch(/DATABASE_URL|NEXTAUTH_SECRET|sk-|postgres:\/\//i);
+  });
+
   test("build-info toggle has a real hit area and the panel does not overflow at 320px", async ({
     page,
   }, testInfo) => {

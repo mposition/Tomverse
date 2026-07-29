@@ -226,7 +226,30 @@ export function MarketingHeader({
   return (
     <>
       <header className="sticky top-0 z-40 border-b border-zinc-200/80 bg-white/90 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/85">
-      <div className={`mx-auto flex h-16 ${maxWidth} items-center justify-between gap-3 px-4 sm:px-6 lg:px-8`}>
+      {/*
+        FINAL-F001 / EXT-REAUDIT-F002 (WCAG 1.4.4 Resize text). UI-TOUCH-001
+        gave this row's three controls a real 44px box, which is the right call
+        for touch -- but it expressed them in rem, so at a 200% root font size
+        they became 88px and pushed /pricing 102px past a 320px viewport (94px
+        before, so the target fix made the overflow slightly worse).
+
+        The fix keeps every 44px target exactly as UI-TOUCH-001 intended and
+        removes the rem growth instead: the controls are sized in px, and so is
+        this row's non-text chrome -- the gutter, the gaps and the logo square.
+        Those are decoration and spacing, not customer text, so freezing them
+        costs nothing at 200% while leaving room for the text that does scale.
+
+        The row stays `h-16` and non-wrapping on purpose. `flex-wrap` also
+        fixes 200%, but it regresses the ordinary case: the right-hand group's
+        max-content width exceeds what is left after the brand at 320 and
+        360px, so the browser wraps instead of letting the language switcher
+        shrink -- a two-row, 92px header on the most common phone widths.
+        Shrinking is what FINAL-F004 chose deliberately, so it is preserved.
+
+        Verified at 320/390px on /, /pricing, /privacy and /chat, in English
+        and Korean, by tests/e2e/root-font-resize-text.spec.ts.
+      */}
+      <div className={`mx-auto flex h-16 ${maxWidth} items-center justify-between gap-[12px] px-[16px] sm:px-6 lg:px-8`}>
         {/*
           FINAL-F004: the brand used to be the only shrinkable item in this
           row, so the language switcher's 10.5rem cap pushed it down to 60px
@@ -238,10 +261,10 @@ export function MarketingHeader({
         */}
         <Link
           href="/"
-          className="flex shrink-0 items-center gap-2 sm:gap-3"
+          className="flex shrink-0 items-center gap-[8px] sm:gap-3"
           onClick={() => setIsMenuOpen(false)}
         >
-          <span className="flex h-9 w-9 shrink-0 overflow-hidden rounded-xl bg-white ring-1 ring-zinc-200 dark:ring-zinc-800">
+          <span className="flex h-[36px] w-[36px] shrink-0 overflow-hidden rounded-xl bg-white ring-1 ring-zinc-200 dark:ring-zinc-800">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/tomverse-logo.png" alt="" className="h-full w-full object-cover" />
           </span>
@@ -289,7 +312,7 @@ export function MarketingHeader({
             </Link>
           ))}
         </nav>
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 items-center gap-[8px]">
           <MarketingLanguageSwitcher />
           <Link
             href={chatHref}
@@ -300,8 +323,10 @@ export function MarketingHeader({
             }
             // Matches the 44px floor its two row-mates now carry (UI-TOUCH-001)
             // so the header's controls stay a single, even row rather than a
-            // 40px CTA flanked by 44px neighbours.
-            className={`hidden h-11 items-center gap-2 rounded-xl px-4 text-sm font-bold transition sm:inline-flex ${headerCtaClass}`}
+            // 40px CTA flanked by 44px neighbours. Expressed in px, not rem,
+            // so a 200% root font cannot double it into the overflow that
+            // FINAL-F001 tracks -- the label inside still scales.
+            className={`hidden h-[44px] items-center gap-2 rounded-xl px-4 text-sm font-bold transition sm:inline-flex ${headerCtaClass}`}
           >
             {labels.app}
             <ArrowRight className="h-4 w-4" />
@@ -311,11 +336,17 @@ export function MarketingHeader({
             aria-label={isMenuOpen ? labels.close : labels.menu}
             aria-expanded={isMenuOpen}
             onClick={() => setIsMenuOpen((open) => !open)}
+            data-testid="marketing-menu-button"
             // UI-TOUCH-001. This is the only way to reach the top menu below
             // `lg`, so it is a core mobile action and owns a real 44x44 box
             // rather than a 40x40 one grown by a pseudo-element -- the header
             // has the room, and a real box is what a hit test can prove.
-            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-zinc-300 bg-white text-zinc-800 shadow-sm transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800 lg:hidden"
+            //
+            // FINAL-F001: that box is in px rather than rem. As `h-11 w-11` it
+            // was 44x44 normally but 88x88 at a 200% root font size, which is
+            // what carried the header off-screen; px keeps the target at the
+            // minimum at every text scale, and the icon still scales.
+            className="inline-flex h-[44px] w-[44px] shrink-0 items-center justify-center rounded-xl border border-zinc-300 bg-white text-zinc-800 shadow-sm transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800 lg:hidden"
           >
             {isMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </button>

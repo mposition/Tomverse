@@ -292,6 +292,7 @@ export const ko = {
         guestVerificationTitle: "계속하려면 확인해 주세요",
         guestVerificationDescription: "자동화된 요청을 줄이기 위한 간단한 확인입니다. 대부분 자동으로 끝납니다.",
         guestVerificationClose: "확인 취소",
+        guestVerificationLongWait: "확인이 평소보다 오래 걸리고 있습니다. 그대로 기다리거나, 취소하고 다시 시도할 수 있습니다.",
         guestVerificationFailed: "확인을 완료하지 못했습니다. 다시 시도해 주세요.",
         guestVerificationUnavailable: "지금은 확인 서비스를 사용할 수 없습니다. 잠시 후 다시 시도해 주세요.",
         guestVerificationCancelled: "확인을 취소했습니다. 작성한 내용과 첨부파일은 그대로 있습니다. 다시 보내면 재시도합니다.",

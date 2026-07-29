@@ -486,7 +486,20 @@ export function LandingPageContent() {
               {content.title}
             </h1>
             <p className="mt-6 max-w-2xl whitespace-pre-line text-lg leading-8 text-zinc-600 dark:text-zinc-300">{content.description}</p>
-            {status === "unauthenticated" && (
+            {/*
+              EXT-REAUDIT-F001: gated on "not authenticated" rather than on
+              "unauthenticated" so it renders during `loading` too. `status`
+              starts as "loading" and only resolves once the session probe
+              returns (~900ms on a cold mobile load), and this note plus the
+              guest note below are worth 78px of hero height. Gating them on
+              the resolved state meant the whole page below the hero jumped
+              down when the probe landed -- 0.2667 median CLS at 360x640, the
+              single largest layout shift on the landing page. A logged-out
+              visitor is the default case for a marketing landing page, so
+              rendering it immediately is both the accurate guess and the
+              stable one; the copy itself is unchanged.
+            */}
+            {status !== "authenticated" && (
               <p data-testid="landing-hero-signup-note" className="mt-3 max-w-2xl text-base font-semibold text-zinc-700 dark:text-zinc-200">
                 {content.heroSignupNote}
               </p>
@@ -503,7 +516,7 @@ export function LandingPageContent() {
                 {status === "authenticated" ? content.signedInCta : content.primaryCta}
                 <ArrowRight className="h-4 w-4" aria-hidden="true" />
               </Link>
-              {status === "unauthenticated" && (
+              {status !== "authenticated" && (
                 <p data-testid="landing-guest-note" className="text-sm font-medium text-zinc-500 dark:text-zinc-400">
                   {content.guestNote}
                 </p>
