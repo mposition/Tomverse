@@ -1,15 +1,18 @@
 import type { Metadata } from "next";
-import { headers } from "next/headers";
-import "./globals.css";
 import { SITE_NAME, SITE_ORIGIN } from "@/lib/seo";
-import { ThemeController } from "@/components/ThemeController";
-import { fontVariables } from "@/lib/fonts";
-import {
-  DOCUMENT_LANGUAGE_HEADER,
-  isSupportedDocumentLanguage,
-} from "@/lib/documentLanguage";
 
-export const metadata: Metadata = {
+/**
+ * The document-level metadata every root layout shares.
+ *
+ * VAL-004 / RECON-I18N-001. The app has more than one root layout -- the
+ * localized marketing routes need `<html lang>` to come from their own route
+ * param, which a shared layout above them cannot see. Splitting the layouts
+ * would have duplicated this block per root, and a title template or an
+ * `metadataBase` that drifted between roots is the kind of difference nobody
+ * notices until a share card renders wrong. It lives here instead, and each
+ * root re-exports it.
+ */
+export const rootMetadata: Metadata = {
   metadataBase: new URL(SITE_ORIGIN),
   applicationName: SITE_NAME,
   title: {
@@ -69,35 +72,3 @@ export const metadata: Metadata = {
       : {}),
   },
 };
-
-export default async function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
-  // VAL-004. The proxy resolves the document language for the request; see
-  // lib/documentLanguage.ts for why the attribute has to be right in the
-  // served markup rather than corrected after hydration.
-  //
-  // On a statically prerendered route this header is absent, and "en" is the
-  // correct answer there: those routes are built once, with English copy, and
-  // the localized marketing routes declare their own language on the content
-  // they render.
-  const documentLanguage = (await headers()).get(DOCUMENT_LANGUAGE_HEADER);
-  const lang = isSupportedDocumentLanguage(documentLanguage)
-    ? documentLanguage
-    : "en";
-
-  return (
-    <html
-      lang={lang}
-      suppressHydrationWarning
-      className={`${fontVariables} h-full antialiased`}
-    >
-      <body className="min-h-full flex flex-col">
-        <ThemeController />
-        {children}
-      </body>
-    </html>
-  );
-}

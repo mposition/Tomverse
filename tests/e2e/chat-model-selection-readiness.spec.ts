@@ -8,7 +8,7 @@ import {
 // commit c7744e6): the desktop per-panel model <select> used to stay
 // interactive while the initial conversation/model selection was still
 // loading, so a change made during that window could be silently discarded
-// once the real conversation data arrived. app/(application)/chat/page.tsx
+// once the real conversation data arrived. app/(site)/(application)/chat/page.tsx
 // now derives isModelSelectionReady and DesktopChatShell disables the
 // select (and marks it aria-busy) until that resolves.
 

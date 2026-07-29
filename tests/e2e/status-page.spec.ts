@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 // The E2E environment deliberately points DATABASE_URL at an unreachable
 // host (see playwright.config.ts), which makes this the real integration
 // test for the "provider health data can't be loaded" fallback path
-// (app/(application)/status/page.tsx's try/catch around
+// (app/(site)/(application)/status/page.tsx's try/catch around
 // getProviderHealthDashboard()) -- no mocking needed, the DB really is down.
 test("status page never 500s when provider health data can't be loaded, and falls back to Unknown", async ({
   page,
@@ -53,7 +53,7 @@ test("status page headline and timestamp are accessible and UTC-labeled", async 
 
 // AUD-R001: with the DB unreachable, getScheduledJobsDashboard() also fails
 // and is caught the same way getProviderHealthDashboard() is (see
-// app/(application)/status/page.tsx) -- the page must show the single
+// app/(site)/(application)/status/page.tsx) -- the page must show the single
 // "data could not be loaded" notice, not also surface a contradictory
 // "monitoring delayed" notice derived from the same missing data.
 test("status page never shows a probe-scheduler-delay notice on top of the general data-unavailable notice", async ({

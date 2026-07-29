@@ -655,7 +655,7 @@ const checks = [
       // The sign-in route is a server component that resolves `?lang=` before
       // rendering (VAL-003); the interactive half, and the page-view event,
       // live in its client child.
-      const signup = read("app/(application)/auth/signin/SignInPageContent.tsx");
+      const signup = read("app/(site)/(application)/auth/signin/SignInPageContent.tsx");
       const chatInput = read("components/chat/ChatInput.tsx");
       const migration = read(
         "prisma/migrations/20260714233000_expand_product_analytics_funnel/migration.sql"
@@ -884,45 +884,70 @@ const checks = [
       !source.includes('path: "/share"'),
   },
   {
+    // RECON-I18N-001. The metadata moved out of the deleted `app/layout.tsx`
+    // into one module, so the two root layouts cannot drift on canonical
+    // origin or social cards. Both roots are checked to actually export it --
+    // a root that forgot to would silently lose every card and the canonical
+    // base for its whole tree.
     name: "Global metadata provides canonical origin, social cards, and optional webmaster verification",
-    file: "app/layout.tsx",
+    file: "lib/rootMetadata.ts",
     test: (source) =>
       source.includes("metadataBase: new URL(SITE_ORIGIN)") &&
       source.includes('card: "summary_large_image"') &&
       source.includes('url: "/opengraph-image"') &&
       source.includes('url: "/twitter-image"') &&
       source.includes("GOOGLE_SITE_VERIFICATION") &&
-      source.includes("BING_SITE_VERIFICATION"),
+      source.includes("BING_SITE_VERIFICATION") &&
+      [read("app/(site)/layout.tsx"), read("app/[locale]/layout.tsx")].every(
+        (layout) => layout.includes("export const metadata = rootMetadata")
+      ),
   },
   {
     name: "Marketing routes are static while application routes retain request-time rendering",
-    file: "app/(marketing)/layout.tsx",
+    file: "app/(site)/(marketing)/layout.tsx",
     test: (source) => {
-      const rootLayout = read("app/layout.tsx");
-      const applicationLayout = read("app/(application)/layout.tsx");
-      const rootLayoutRequestReads = [
-        ...rootLayout.matchAll(/\(await headers\(\)\)\.get\(([^)]*)\)/g),
-      ].map((match) => match[1].trim());
+      const applicationLayout = read("app/(site)/(application)/layout.tsx");
+      // RECON-I18N-001. There is no single `app/layout.tsx` any more: the
+      // localized marketing routes need `<html lang>` to come from their own
+      // route param, which only a root layout at or below `[locale]` can see.
+      // Both roots are checked, because the property this rule protects is
+      // "nothing above a whole route tree pulls per-user state", and that has
+      // to hold for each root independently rather than for one file.
+      const rootLayouts = [
+        read("app/(site)/layout.tsx"),
+        read("app/[locale]/layout.tsx"),
+      ];
+      const requestReadsIn = (layout) =>
+        [...layout.matchAll(/\(await headers\(\)\)\.get\(([^)]*)\)/g)].map(
+          (match) => match[1].trim()
+        );
+      const siteReads = requestReadsIn(rootLayouts[0]);
+      const localeReads = requestReadsIn(rootLayouts[1]);
       return (
         source.includes('export const dynamic = "force-static"') &&
         source.includes("export const revalidate = false") &&
         applicationLayout.includes('export const dynamic = "force-dynamic"') &&
         applicationLayout.includes("getServerSession(authOptions)") &&
-        // VAL-004 narrowed this rule rather than relaxing it. The root layout
-        // is the only place `<html lang>` can be set, so it has to read the
-        // document language the proxy resolved -- but reading a *session*, a
-        // cookie or the database there would put per-user state above every
-        // route, which is what this check exists to prevent. The one permitted
-        // request-time read is named explicitly, and the marketing group keeps
-        // its `force-static` config, so those routes still prerender -- which
-        // is also what lib/staticMarketingCsp.ts needs, since it hashes the
-        // built HTML and a route that stopped prerendering would have none.
-        rootLayoutRequestReads.length === 1 &&
-        rootLayoutRequestReads[0] === "DOCUMENT_LANGUAGE_HEADER" &&
-        rootLayout.includes('import { headers } from "next/headers"') &&
-        !rootLayout.includes("cookies()") &&
-        !rootLayout.includes("getServerSession") &&
-        !rootLayout.includes("prisma")
+        // VAL-004 narrowed this rule rather than relaxing it. A root layout may
+        // read the document language the proxy resolved and nothing else --
+        // reading a session, a cookie or the database there would put per-user
+        // state above every route under that root.
+        siteReads.length === 1 &&
+        siteReads[0] === "DOCUMENT_LANGUAGE_HEADER" &&
+        rootLayouts[0].includes('import { headers } from "next/headers"') &&
+        // The localized root takes its language from `params`, so it needs no
+        // request-time read at all and must stay prerenderable: an accidental
+        // header read there would drop 45 SEO pages out of the prerender, and
+        // lib/staticMarketingCsp.ts hashes that built HTML.
+        localeReads.length === 0 &&
+        !rootLayouts[1].includes('from "next/headers"') &&
+        rootLayouts[1].includes('export const dynamic = "force-static"') &&
+        rootLayouts.every(
+          (layout) =>
+            !layout.includes("cookies()") &&
+            !layout.includes("getServerSession") &&
+            !layout.includes("prisma")
+        )
       );
     },
   },
@@ -993,8 +1018,10 @@ const checks = [
     },
   },
   {
+    // RECON-I18N-001. The graph moved into MarketingShell so the English and
+    // localized marketing roots render the same one.
     name: "Structured data is sanitized and identifies the organization and software application",
-    file: "app/(marketing)/layout.tsx",
+    file: "components/marketing/MarketingShell.tsx",
     test: (source) =>
       source.includes('"@type": "Organization"') &&
       source.includes('"@type": "SoftwareApplication"') &&
@@ -1005,7 +1032,7 @@ const checks = [
   },
   {
     name: "Search-intent pages have localized content and server metadata",
-    file: "app/(marketing)/[locale]/[intent]/page.tsx",
+    file: "app/[locale]/[intent]/page.tsx",
     test: (source) =>
       source.includes("generateStaticParams") &&
       source.includes("createPageMetadata") &&
@@ -1039,12 +1066,12 @@ const checks = [
   },
   {
     name: "Authenticated application surfaces are explicitly noindex",
-    file: "app/(application)/chat/layout.tsx",
+    file: "app/(site)/(application)/chat/layout.tsx",
     test: (source) =>
       source.includes("index: false") &&
-      read("app/(application)/auth/layout.tsx").includes("index: false") &&
-      read("app/(application)/admin/layout.tsx").includes("index: false") &&
-      read("app/(application)/share/[shareToken]/page.tsx").includes("index: false"),
+      read("app/(site)/(application)/auth/layout.tsx").includes("index: false") &&
+      read("app/(site)/(application)/admin/layout.tsx").includes("index: false") &&
+      read("app/(site)/(application)/share/[shareToken]/page.tsx").includes("index: false"),
   },
   {
     name: "Paid-launch legal pages disclose recurring billing, refunds, and operator contact",
@@ -1167,7 +1194,7 @@ const checks = [
         !guide.includes('aria-modal="true"') &&
         source.includes('onFocus={() => dismissGuestQuickStart("completed")}') &&
         source.includes('tomverse_guest_quick_start_seen_v2') &&
-        !read("app/(application)/chat/page.tsx").includes("GoLiveOnboarding")
+        !read("app/(site)/(application)/chat/page.tsx").includes("GoLiveOnboarding")
       );
     },
   },
@@ -1310,7 +1337,7 @@ const checks = [
       source.includes('source: "chatgpt-vs-claude"') &&
       source.includes('/model-icons/chatgpt.png') &&
       source.includes('/model-icons/claude.png') &&
-      read("app/(marketing)/chatgpt-vs-claude/page.tsx").includes(
+      read("app/(site)/(marketing)/chatgpt-vs-claude/page.tsx").includes(
         'template="chatgpt-vs-claude"'
       ),
   },
@@ -1319,7 +1346,7 @@ const checks = [
     // STG-F006 split the old monolithic page.tsx into a thin server component
     // (just resolving the guest default model) plus this client component,
     // which now holds all the state and logic this check protects.
-    file: "app/(application)/chat/ChatPageClient.tsx",
+    file: "app/(site)/(application)/chat/ChatPageClient.tsx",
     test: (source) =>
       source.includes("comparisonPresetAppliedRef") &&
       source.includes(".filter(isEnabledModelId)") &&
