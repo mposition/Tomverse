@@ -108,12 +108,14 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "$branch"
           git add -- '*-snapshots'
-          git commit -m "Re-record visual goldens on the canonical environment
-
-Recorded by Record Visual Baseline, run ${{ github.run_id }}, on
-ubuntu-24.04 with the Chromium bundled with the pinned Playwright version.
-Reviewed and merged separately -- see the run's baseline-evidence artifact
-for the diff against the previous baseline."
+          # Two -m flags rather than one multi-line string: an unindented
+          # continuation line ends the YAML block scalar, which makes the whole
+          # workflow unparseable -- and an unparseable workflow is registered
+          # under its filename with no triggers at all, so dispatching it
+          # answers 422 as if it had never been added.
+          git commit \
+            -m "Re-record visual goldens on the canonical environment" \
+            -m "Recorded by Record Visual Baseline, run ${{ github.run_id }}, on ubuntu-24.04 with the Chromium bundled with the pinned Playwright version. Reviewed and merged separately -- see the run's baseline-evidence artifact for the diff against the previous baseline."
           git push origin "$branch"
           echo "Pushed $branch"
 
