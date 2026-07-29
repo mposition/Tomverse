@@ -7,6 +7,11 @@ import { AnalyticsProvider } from "@/components/analytics/AnalyticsProvider";
 import SessionProviderWrapper from "@/components/auth/SessionProviderWrapper";
 import { LanguageProvider, type Language } from "@/components/LanguageProvider";
 import {
+  DOCUMENT_LANGUAGE_HEADER,
+  DOCUMENT_LANGUAGE_SOURCE_HEADER,
+  isSupportedDocumentLanguage,
+} from "@/lib/documentLanguage";
+import {
   normalizeAnalyticsCountry,
   resolveAnalyticsConsentPolicy,
 } from "@/lib/analyticsConsentPolicy";
@@ -14,27 +19,6 @@ import { authOptions } from "@/lib/auth";
 import { ModelCatalogProvider } from "@/components/ModelCatalogProvider";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { AVAILABLE_MODELS } from "@/lib/models";
-
-const detectInitialLanguage = (acceptLanguage: string | null): Language => {
-  const candidates =
-    acceptLanguage
-      ?.toLowerCase()
-      .split(",")
-      .map((part) => part.split(";")[0]?.trim())
-      .filter(Boolean) ?? [];
-
-  for (const candidate of candidates) {
-    if (candidate === "ko" || candidate.startsWith("ko-")) return "ko";
-    if (candidate === "zh" || candidate.startsWith("zh-")) return "zh";
-    if (candidate === "fr" || candidate.startsWith("fr-")) return "fr";
-    if (candidate === "de" || candidate.startsWith("de-")) return "de";
-    if (candidate === "es" || candidate.startsWith("es-")) return "es";
-    if (candidate === "pt" || candidate.startsWith("pt-")) return "pt";
-    if (candidate === "en" || candidate.startsWith("en-")) return "en";
-  }
-
-  return "en";
-};
 
 const normalizePlan = (
   value: unknown,
@@ -52,7 +36,20 @@ export default async function ApplicationLayout({
   let session: Session | null = null;
   let e2eAnalyticsEnabled = false;
   const requestHeaders = await headers();
-  const initialLang = detectInitialLanguage(requestHeaders.get("accept-language"));
+  // VAL-004. The same resolution the root layout puts in `<html lang>`, so the
+  // language this layout *renders* and the language the document *declares*
+  // can never disagree. It used to read `Accept-Language` alone, which meant
+  // `/chat?lang=ko` from an English-preferring browser server-rendered English
+  // copy -- and would now have shipped it under `lang="ko"`.
+  const resolvedLang = requestHeaders.get(DOCUMENT_LANGUAGE_HEADER);
+  const initialLang: Language = isSupportedDocumentLanguage(resolvedLang)
+    ? resolvedLang
+    : "en";
+  // An explicit `?lang=` is pinned so the client cannot restore a different
+  // saved language over the one the server just rendered (VAL-003). Anything
+  // inferred stays overridable, exactly as before.
+  const forceInitialLang =
+    requestHeaders.get(DOCUMENT_LANGUAGE_SOURCE_HEADER) === "search";
   const nonce = requestHeaders.get("x-nonce");
   const analyticsCountry = normalizeAnalyticsCountry(
     requestHeaders.get("cf-ipcountry") ||
@@ -102,7 +99,10 @@ export default async function ApplicationLayout({
 
   return (
     <SessionProviderWrapper session={session}>
-      <LanguageProvider initialLang={initialLang}>
+      <LanguageProvider
+        initialLang={initialLang}
+        forceInitialLang={forceInitialLang}
+      >
         <AnalyticsProvider
           country={analyticsCountry}
           initialPlan={normalizePlan(session?.user?.plan, Boolean(session?.user?.id))}

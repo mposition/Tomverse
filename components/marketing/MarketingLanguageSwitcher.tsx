@@ -45,7 +45,14 @@ export function MarketingLanguageSwitcher() {
   return (
     <label
       data-market-tier={selectedPolicy.marketTier}
-      className="inline-flex h-10 min-w-0 max-w-[10.5rem] items-center gap-2 overflow-hidden rounded-xl border border-zinc-300 bg-white px-2.5 text-sm font-bold text-zinc-700 shadow-sm transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800 sm:max-w-none sm:px-3"
+      // REAUDIT-F005. The select carries `outline-none` so its native focus
+      // ring cannot clash with the pill, but nothing replaced it: focused and
+      // unfocused screenshots of this control were identical, and it was the
+      // only control in the marketing header without a visible focus state
+      // (WCAG 2.4.7). The ring goes on the label rather than the select
+      // because the label is `overflow-hidden` -- an outline drawn inside it
+      // would be clipped, while a ring on the label's own box is not.
+      className="inline-flex h-10 min-w-0 max-w-[10.5rem] items-center gap-2 overflow-hidden rounded-xl border border-zinc-300 bg-white px-2.5 text-sm font-bold text-zinc-700 shadow-sm transition hover:bg-zinc-50 focus-within:ring-2 focus-within:ring-blue-600 focus-within:ring-offset-2 dark:focus-within:ring-blue-400 dark:focus-within:ring-offset-zinc-950 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800 sm:max-w-none sm:px-3"
     >
       <Languages className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
       <span className="sr-only">Language</span>

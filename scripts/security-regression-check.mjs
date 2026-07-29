@@ -900,12 +900,27 @@ const checks = [
     test: (source) => {
       const rootLayout = read("app/layout.tsx");
       const applicationLayout = read("app/(application)/layout.tsx");
+      const rootLayoutRequestReads = [
+        ...rootLayout.matchAll(/\(await headers\(\)\)\.get\(([^)]*)\)/g),
+      ].map((match) => match[1].trim());
       return (
         source.includes('export const dynamic = "force-static"') &&
         source.includes("export const revalidate = false") &&
         applicationLayout.includes('export const dynamic = "force-dynamic"') &&
         applicationLayout.includes("getServerSession(authOptions)") &&
-        !rootLayout.includes('from "next/headers"') &&
+        // VAL-004 narrowed this rule rather than relaxing it. The root layout
+        // is the only place `<html lang>` can be set, so it has to read the
+        // document language the proxy resolved -- but reading a *session*, a
+        // cookie or the database there would put per-user state above every
+        // route, which is what this check exists to prevent. The one permitted
+        // request-time read is named explicitly, and the marketing group keeps
+        // its `force-static` config, so those routes still prerender -- which
+        // is also what lib/staticMarketingCsp.ts needs, since it hashes the
+        // built HTML and a route that stopped prerendering would have none.
+        rootLayoutRequestReads.length === 1 &&
+        rootLayoutRequestReads[0] === "DOCUMENT_LANGUAGE_HEADER" &&
+        rootLayout.includes('import { headers } from "next/headers"') &&
+        !rootLayout.includes("cookies()") &&
         !rootLayout.includes("getServerSession") &&
         !rootLayout.includes("prisma")
       );

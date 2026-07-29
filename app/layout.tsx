@@ -1,8 +1,13 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import "./globals.css";
 import { SITE_NAME, SITE_ORIGIN } from "@/lib/seo";
 import { ThemeController } from "@/components/ThemeController";
 import { fontVariables } from "@/lib/fonts";
+import {
+  DOCUMENT_LANGUAGE_HEADER,
+  isSupportedDocumentLanguage,
+} from "@/lib/documentLanguage";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_ORIGIN),
@@ -65,14 +70,27 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // VAL-004. The proxy resolves the document language for the request; see
+  // lib/documentLanguage.ts for why the attribute has to be right in the
+  // served markup rather than corrected after hydration.
+  //
+  // On a statically prerendered route this header is absent, and "en" is the
+  // correct answer there: those routes are built once, with English copy, and
+  // the localized marketing routes declare their own language on the content
+  // they render.
+  const documentLanguage = (await headers()).get(DOCUMENT_LANGUAGE_HEADER);
+  const lang = isSupportedDocumentLanguage(documentLanguage)
+    ? documentLanguage
+    : "en";
+
   return (
     <html
-      lang="en"
+      lang={lang}
       suppressHydrationWarning
       className={`${fontVariables} h-full antialiased`}
     >
