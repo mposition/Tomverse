@@ -685,7 +685,7 @@ for (const shell of SHELLS) {
       await expect(rail(page)).toHaveAttribute("data-steady", "false");
       await expectStatusOnScreen(page);
       await expect(status(page)).toContainText(
-        "AI review · 4 credits needed · 2 available"
+        "AI review · 8 credits needed · 2 available"
       );
       // The 1-credit action is not dragged into the other's shortfall.
       await expect(status(page)).not.toContainText("1 credit needed");
@@ -700,7 +700,7 @@ for (const shell of SHELLS) {
 
       await expectStatusOnScreen(page);
       await expect(status(page)).toContainText("Differences · 1 credits needed");
-      await expect(status(page)).toContainText("AI review · 4 credits needed");
+      await expect(status(page)).toContainText("AI review · 8 credits needed");
       await expect(quickButton(page)).toHaveAttribute("aria-disabled", "true");
       await expect(page.getByTestId("ai-review-button")).toHaveAttribute(
         "aria-disabled",
@@ -904,7 +904,7 @@ test.describe("per-action descriptions", () => {
     await expect(page.locator(`#${reviewId}`)).toContainText(
       "Comparing 3 completed answers"
     );
-    await expect(page.locator(`#${reviewId}`)).toContainText("4 credits");
+    await expect(page.locator(`#${reviewId}`)).toContainText("8 credits");
     // The name is the action alone -- the description is not read twice.
     await expect(quickButton(page)).toHaveAccessibleName("Quick difference summary");
     await expect(page.getByTestId("ai-review-button")).toHaveAccessibleName(
@@ -917,7 +917,7 @@ test.describe("per-action descriptions", () => {
   }) => {
     await enterAuthenticatedComparison(page, { credits: 2 });
 
-    // 1 credit is affordable; 4 is not, and only the 4-credit action is gated.
+    // 1 credit is affordable; 8 is not, and only the 8-credit action is gated.
     await expect(quickButton(page)).toHaveAttribute("aria-disabled", "false");
     await expect(page.getByTestId("ai-review-button")).toHaveAttribute(
       "aria-disabled",
@@ -932,14 +932,14 @@ test.describe("per-action descriptions", () => {
     await expect(page.locator(`#${quickId}`)).not.toContainText("Not enough credits");
     // The blocked one quotes its own price against the real balance.
     await expect(page.locator(`#${reviewId}`)).toContainText(
-      "Not enough credits: 4 needed, 2 available"
+      "Not enough credits: 8 needed, 2 available"
     );
 
     // Insufficient credits is an exception, so the sentence is on screen and
     // says which action it is about.
     await expect(rail(page)).toHaveAttribute("data-steady", "false");
     await expectStatusOnScreen(page);
-    await expect(status(page)).toContainText("AI review · 4 credits needed · 2 available");
+    await expect(status(page)).toContainText("AI review · 8 credits needed · 2 available");
   });
 
   test("the blocked reason survives keyboard focus without a title attribute", async ({

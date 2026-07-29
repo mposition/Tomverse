@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
+import { buildPlanAdjustPayload } from "@/lib/adminPlanAdjustCore";
 import type {
   AdminUserRow,
   AdminUserSegment,
@@ -257,7 +258,6 @@ export function AdminUsersPanel({
   const [loadingDetailId, setLoadingDetailId] = useState<string | null>(null);
   const [billingAction, setBillingAction] = useState<string | null>(null);
   const [adjustPlan, setAdjustPlan] = useState<"Free" | "Pro" | "Max">("Free");
-  const [adjustPeriodEnd, setAdjustPeriodEnd] = useState<string | null>(null);
   const [adjustReason, setAdjustReason] = useState("");
   const [adjustConfirm, setAdjustConfirm] = useState("");
   const [riskReleaseReason, setRiskReleaseReason] = useState("");
@@ -484,23 +484,19 @@ export function AdminUsersPanel({
     if (billingAction) return;
     setBillingAction("adjust");
     try {
-      const periodEnd =
-        adjustPlan === "Free"
-          ? null
-          : adjustPeriodEnd ||
-            new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-      if (adjustPlan !== "Free" && !adjustPeriodEnd) setAdjustPeriodEnd(periodEnd);
+      // Carries no clock-derived value on purpose: a second administrator
+      // approves this exact payload, and the requester then has to re-send it
+      // byte-for-byte. See buildPlanAdjustPayload.
       const response = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/plan-adjust`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          plan: adjustPlan,
-          reason: adjustReason,
-          confirmText: adjustConfirm,
-          subscriptionStatus: "manually_adjusted",
-          billingInterval: adjustPlan === "Free" ? null : "monthly",
-          periodEnd,
-        }),
+        body: JSON.stringify(
+          buildPlanAdjustPayload({
+            plan: adjustPlan,
+            reason: adjustReason,
+            confirmText: adjustConfirm,
+          })
+        ),
       });
       const data = (await response.json().catch(() => null)) as
         | { user?: Partial<AdminUserDetail>; error?: string }
@@ -511,7 +507,6 @@ export function AdminUsersPanel({
       setDetailUser((current) => (current ? { ...current, ...data.user } : current));
       setAdjustReason("");
       setAdjustConfirm("");
-      setAdjustPeriodEnd(null);
       dispatchAppToast("User plan adjusted.", "success");
     } catch (error) {
       dispatchAppToast(
@@ -1433,10 +1428,9 @@ export function AdminUsersPanel({
                 <div className="mt-3 grid gap-3 md:grid-cols-[10rem_1fr_10rem_auto]">
                   <select
                     value={adjustPlan}
-                    onChange={(event) => {
-                      setAdjustPlan(event.target.value as "Free" | "Pro" | "Max");
-                      setAdjustPeriodEnd(null);
-                    }}
+                    onChange={(event) =>
+                      setAdjustPlan(event.target.value as "Free" | "Pro" | "Max")
+                    }
                     className="h-11 rounded-xl border border-zinc-800 bg-zinc-950 px-3 text-sm font-bold text-white outline-none focus:border-blue-500"
                   >
                     <option value="Free">Free</option>
