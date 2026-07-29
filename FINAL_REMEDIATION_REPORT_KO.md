@@ -55,6 +55,9 @@ browser를 설치할 수 없는 이 환경의 문제로 **제품 결함으로 �
 - 재기록이 **또 다른 결함 1건**을 드러냈습니다 — canonical 렌더링에서
   `Reduce the number of models` 버튼 레이블이 2줄로 감깁니다. 합의 범위 밖이라
   §7에 따라 **기록만 했습니다**(§11-9).
+- **게이트 SHA는 `8386443`이고, 그 SHA의 canonical 전체 실행은
+  1441 passed / 0 failed입니다.** 이 컨테이너 기준이 아니라 canonical 기준으로
+  제품 결함으로 남은 실패는 **0건**입니다(미수정 P3 §11-9 제외).
 
 `Verified fixed`는 한 건도 사용하지 않았습니다.
 
@@ -1102,6 +1105,39 @@ browser를 설치할 수 없어서 생긴 것이며, §4.10에서 확정한 정�
 없습니다. 그래서 `e2e.yml`을 수동 dispatch했습니다. 이 자체가 별도의 운영
 결함이며 §11에 기록했습니다.
 
+#### 게이트 SHA 확정 실행
+
+golden 재기록과 `model-picker` 수정을 마친 뒤, 게이트 SHA를 고정하기 위해
+전체 suite를 다시 돌렸습니다. 두 번 걸렸습니다.
+
+| run | SHA | 결과 |
+|---|---|---|
+| #42 (`30442678702`) | `5f987fd` | **1407 passed / 36 failed** — 전부 낡은 test 기대값 |
+| #43 (`30445545230`) | **`8386443`** | **1441 passed / 857 skipped / 0 failed / 0 flaky (32.1m)** |
+
+run #42의 36건은 프로젝트당 12건씩 두 spec에 몰려 있었고, **제품 결함은
+0건**이었습니다.
+
+- `comparison-review.spec.ts` 9건 — `AI_REVIEW_CREDITS`를 4→8로 올릴 때
+  `comparison-action-rail.spec.ts`만 갱신하고 여기를 놓쳤습니다
+  (`Expected "4" / Received "~8"`). dialog의 숫자는 서버가 선택한 설정에 맞춰
+  계산한 값이고 entry badge는 rail의 근사 상수이므로, 같은 수가 아니라는 점을
+  주석으로 남기고 따로 assert하도록 했습니다.
+- `font-system.spec.ts` 27건 — `selectLanguage`가 localized route의 root layout
+  도입 이전에 쓰였습니다. 언어 전환이 document navigation이 되어
+  `selectOption` 직후의 evaluate가 파괴된 context에 떨어지고
+  (`Execution context was destroyed`), `documentElement.lang`만 기다리면
+  이전 document가 화면에 있는 채로 반환됩니다. **같은 결함을
+  `korean-typography.spec.ts`에서는 이미 고쳤는데 이 spec은 손대지 않았고**,
+  검증 범위(`@ui-risk`·SSR-language tier)에 이 spec이 없어 전체 suite가 돌
+  때까지 드러나지 않았습니다.
+
+수정본은 형제 spec과 두 군데가 다릅니다. destination을 switcher 자신의
+`localizedPath`로 구성하고(영어도 `/en` route가 있어 "prefix 없음" 가정은 오지
+않을 URL을 기다립니다 — 실제로 3건이 timeout으로 실패해 잡았습니다), 현재
+경로의 locale prefix를 먼저 벗깁니다(이미 localized된 route에서 전환하려면
+필요하며 형제 spec에는 없습니다).
+
 ### 미실행
 
 | 항목 | 사유 |
@@ -1455,29 +1491,32 @@ web search는 **off**로 고정합니다(모델당 +8 surcharge 방지).
 | 1 | `STG-F003` 수정 후 20회 이상 연속 통과 | ✅ **충족** (220/220) |
 | 2 | `RECON-A11Y-001` axe critical 0 | ✅ **충족** (`select-name` 0, `aria-prohibited-attr` 0) |
 | 3 | B범위 P2 완료 또는 명시적 risk acceptance | ✅ **B범위 P2 전부 해소** |
-| 4 | 게이트 SHA 고정 + staging 배포 동결 | ❌ **해제됨** — 사용자 지시로 `develop` 병합, staging 재배포 시작 |
+| 4 | 게이트 SHA 고정 + staging 배포 동결 | ⚠️ **SHA는 `8386443`로 재고정** — 배포 동결은 사용자 지시로 해제된 상태 유지 |
 | 5 | `FINAL-F002` 승인 후 3-model 3회 + AI Review 1회 실호출 + ledger 대조 | ✅ **충족** (17 credits, 예상 일치 — §4.2) |
 | 6 | 원시 증거 번들 전달 | ⚠️ `test-results/` 에 보존, 미전달 |
-| 7 | canonical browser visual suite unexplained critical 0 | ✅ **충족** — `chat-state` 74/74, unexplained 0 (§4.11) |
+| 7 | canonical browser visual suite unexplained critical 0 | ✅ **충족** — 전체 suite **1441 passed / 0 failed** (§5) |
+
+**게이트 SHA: `8386443`**
 
 **1·2·5·7이 충족되어 Go-Live 재판정에 착수할 수 있는 상태입니다.**
 
 조건 7의 경과: run #35에서 실패 50건 → 49건은 non-canonical baseline이 원인으로
 확인돼 canonical 재기록·검토·병합, 1건(`model-picker` 320×568)은 실제 결함으로
-수정. 재기록 후 canonical 재실행에서 **74/74, 변경 0**입니다.
+수정. 이후 run #42에서 낡은 test 기대값 36건이 드러나 수정했고, **run #43에서
+1441 passed / 857 skipped / 0 failed / 0 flaky**입니다. golden 재기록 검증
+실행도 **변경 0**입니다.
 
 다만 `No-Go` 해제는 별도 판단이며, 남은 항목이 있습니다.
 
 | 항목 | 상태 |
 |---|---|
 | 조건 6 — 원시 증거 번들 전달 | ⚠️ `test-results/` + run artifact(`8710914900`, `8717156750`) 보존, 미전달 |
-| 조건 4 — 배포 동결 | 사용자 지시로 해제됨. 재판정 시 기준 SHA를 다시 고정해야 함 |
-| 전체 canonical suite 재실행 | ⚠️ `chat-state` 골든만 canonical에서 재확인했습니다. **1377건 전체 suite는 재기록 이후 아직 한 번도 돌지 않았습니다** — 게이트 SHA 고정과 함께 `e2e.yml`을 1회 실행해야 조건 7을 전체 범위로 말할 수 있습니다 |
+| 조건 4 — 배포 동결 | 사용자 지시로 해제된 상태입니다. SHA는 `8386443`로 고정했으나, **`develop`에 merge가 들어가면 그 즉시 무효**가 되므로 재판정까지는 절차적으로 막아야 합니다 |
+| WebKit·`FINAL-F003` 잔여 전이 | ⚠️ 미실행 (§10) |
 | §11-9 버튼 감김 | 새 결함, 미수정 (P3) |
 
-**남은 것은 브라우저나 baseline 문제가 아니라 절차입니다** — 게이트 SHA를 다시
-고정하고, 그 SHA에서 canonical suite 전체를 1회 돌린 뒤 재판정하면 됩니다.
-현재 develop head는 `e7f076b`입니다.
+**기술적 관문은 닫혔습니다.** 남은 것은 증거 번들 전달과, 재판정까지
+`8386443`을 유지하는 절차입니다.
 
 ---
 
