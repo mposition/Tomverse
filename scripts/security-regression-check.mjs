@@ -1,6 +1,37 @@
-import { readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 
 const read = (path) => readFileSync(path, "utf8");
+
+const WORKFLOW_DIR = ".github/workflows";
+
+const workflowFiles = () =>
+  readdirSync(WORKFLOW_DIR)
+    .filter((name) => name.endsWith(".yml") || name.endsWith(".yaml"))
+    .map((name) => `${WORKFLOW_DIR}/${name}`);
+
+/**
+ * Lines a workflow file may start in column 0: a top-level key, a document
+ * marker, a comment, or nothing.
+ *
+ * Anything else there is almost always a `run: |` block whose continuation
+ * was not indented -- an easy edit to make in a long shell step, and one with
+ * no local symptom whatsoever. GitHub does not reject the file; it registers
+ * the workflow under its *filename*, with no name and no triggers, so
+ * dispatching it answers `422 Workflow does not have 'workflow_dispatch'
+ * trigger` as though it had never been added. Substring assertions about a
+ * workflow's contents all keep passing while it is dead.
+ */
+const UNINDENTED_LINE_IS_ALLOWED = /^(["']?[A-Za-z_][\w.-]*["']?:|#|---|\.\.\.)/;
+
+const unparseableWorkflowLines = (source) =>
+  source
+    .split("\n")
+    .map((line, number) => ({ line, number: number + 1 }))
+    // Indented lines belong to whatever block they are in; only a line that
+    // starts in column 0 claims to be top-level, and only that claim can be
+    // wrong in the way this catches.
+    .filter(({ line }) => /^\S/.test(line))
+    .filter(({ line }) => !UNINDENTED_LINE_IS_ALLOWED.test(line));
 
 const checks = [
   {
@@ -1659,6 +1690,18 @@ const checks = [
         ".github/workflows/visual-baseline-record.yml"
       );
       const smokeVerifier = read("scripts/verify-smoke-coverage.mjs");
+      // Every assertion below is a substring match, and a substring match
+      // cannot tell a live workflow from a dead one. Structure is checked
+      // first so the rest means something.
+      const structurallyBroken = workflowFiles().filter(
+        (path) => unparseableWorkflowLines(read(path)).length > 0
+      );
+      if (structurallyBroken.length > 0) {
+        console.error(
+          `Workflow files break out of a YAML block: ${structurallyBroken.join(", ")}`
+        );
+        return false;
+      }
       return (
         source.includes("tomverse-e2e-nextauth-secret-only-2026") &&
         source.includes("NEXTAUTH_SECRET: e2eNextAuthSecret") &&
