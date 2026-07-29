@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { LOCALIZED_SEO_PATHS } from "@/lib/seo";
 import {
   expectNoHorizontalOverflow,
   mockAuthenticatedApi,
@@ -126,9 +127,55 @@ async function countRenderedLines(page: Page, selector: string): Promise<number>
 
 async function selectLanguage(page: Page, lang: "ko" | "en" | "zh") {
   const select = page.getByLabel("Language");
-  if ((await select.inputValue()) !== lang) {
-    await select.selectOption(lang);
+  if ((await select.inputValue()) === lang) return;
+
+  // The switcher pushes to the localized route for pages that have one
+  // (lib/seo.ts LOCALIZED_SEO_PATHS), and those routes have their own root
+  // layout, so it is a *document* navigation rather than a client one. Two
+  // things follow, and both bit this helper:
+  //
+  // - an evaluate issued straight after `selectOption` can hit the destroyed
+  //   context of the old document;
+  // - `LanguageProvider` sets `documentElement.lang` on the *old* page before
+  //   the navigation even starts, so waiting for the language alone returns
+  //   while the old document is still on screen, and the measurement races
+  //   the navigation.
+  //
+  // Waiting for the URL first pins which document is being measured. On a
+  // route with no localized variant (e.g. /pricing) no navigation happens and
+  // the path simply stays put.
+  const before = new URL(page.url()).pathname;
+  const localizable = LOCALIZED_SEO_PATHS.includes(
+    before as (typeof LOCALIZED_SEO_PATHS)[number]
+  );
+  await select.selectOption(lang);
+  if (localizable) {
+    const destination = before === "/" ? `/${lang}` : `/${lang}${before}`;
+    await page.waitForURL((url) => url.pathname === destination);
+    await page.waitForLoadState("load");
   }
+
+  // Only now the fonts: ko and zh re-point `--font-ui` through `:lang()`, and
+  // those faces are `preload: false` by policy
+  // (docs/ui-contracts/typography.md), so they are fetched once the language
+  // changes. Measuring line breaks before the swap settles measures the
+  // *fallback* face's metrics -- the same heading wraps differently, and an
+  // intact "비교하세요" reads as split across lines.
+  await expect
+    .poll(
+      async () => {
+        try {
+          return await page.evaluate(async () => {
+            await document.fonts.ready;
+            return document.documentElement.lang;
+          });
+        } catch {
+          return null;
+        }
+      },
+      { message: `language did not settle on "${lang}"` }
+    )
+    .toBe(lang);
 }
 
 test.describe("Korean typography: landing hero", () => {

@@ -18,7 +18,7 @@ import { expect, test, type Browser, type Page } from "@playwright/test";
  * - `?lang=ko` used to change the visible text on hydration: the server
  *   rendered the English strings and the client swapped them to Korean, so a
  *   Korean visitor briefly read English legal links. Fixed by resolving the
- *   parameter on the server (see app/(application)/auth/signin/page.tsx); the
+ *   parameter on the server (see app/(site)/(application)/auth/signin/page.tsx); the
  *   Korean case below is the regression test for it.
  *
  * The SHA under test is logged so a run can be tied to a build.

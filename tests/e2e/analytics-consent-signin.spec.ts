@@ -6,7 +6,7 @@ import { prepareGuestPage } from "./support/app-fixtures";
 // which could cross over the sign-in card's OAuth buttons, email input, or
 // terms/privacy links on short viewports. The sign-in page now registers its
 // own in-flow slot right after the card
-// (app/(application)/auth/signin/page.tsx), so the notice portals there
+// (app/(site)/(application)/auth/signin/page.tsx), so the notice portals there
 // instead of floating fixed -- it can only ever push page content, never
 // cover it, and a tall page simply scrolls.
 
@@ -376,7 +376,7 @@ for (const { mode, country } of CONSENT_MODES) {
         await enableAnalyticsCookie(page);
         await prepareGuestPage(page, lang);
         // The sign-in page resolves the consent mode on the server from the
-        // edge country header (app/(application)/layout.tsx), so the
+        // edge country header (app/(site)/(application)/layout.tsx), so the
         // long-label notice_opt_out copy is reached by asking as that region
         // rather than by mocking the client-side policy endpoint.
         await page.setExtraHTTPHeaders({ "cf-ipcountry": country });

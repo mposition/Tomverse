@@ -24,13 +24,16 @@ import { expect, test, type Page } from "@playwright/test";
  * 2. hydration does not change it -- the client agrees with the server rather
  *    than overwriting it.
  *
- * Statically prerendered marketing routes are asserted as `en` on purpose:
- * they are built once, they serve English copy to every visitor, and their
- * language only changes on the client. The localized marketing routes
- * (`/ko`, `/ko/<intent>`) are prerendered per locale and declare their
- * language on the content they render; that declaration is asserted below,
- * and the gap between it and the root attribute is recorded in
- * .github/audits/ui-insight-followup.md rather than papered over here.
+ * Statically prerendered *English* marketing routes are asserted as `en` on
+ * purpose: they are built once, they serve English copy to every visitor, and
+ * their language only changes on the client.
+ *
+ * RECON-I18N-001. The localized marketing routes used to be the exception --
+ * prerendered Korean, Chinese, French copy under a root that still said
+ * `lang="en"`, because the layout rendering `<html>` sat above the `[locale]`
+ * segment and could not read its param. They now have a root layout of their
+ * own (`app/[locale]/layout.tsx`), so the root attribute is generated per
+ * locale at build time and is asserted here like any other.
  */
 
 const KOREAN_BROWSER = "ko-KR,ko;q=0.9,en;q=0.5";
@@ -122,18 +125,54 @@ for (const testCase of SERVED_LANGUAGE_CASES) {
 }
 
 // The localized marketing routes are prerendered per locale, so the language
-// travels with the content rather than with the request. What matters for the
-// font contract is that `:lang()` has something to match in the served bytes.
-for (const path of ["/ko", "/ko/compare-ai-models"]) {
-  test(`localized marketing route ${path} declares its language in the served HTML`, {
+// travels with the route rather than with the request: the same bytes are
+// served to every visitor and the root attribute has to be right in them.
+const LOCALIZED_ROUTES: Array<{ path: string; expected: string }> = [
+  { path: "/ko", expected: "ko" },
+  { path: "/ko/compare-ai-models", expected: "ko" },
+  { path: "/zh", expected: "zh" },
+  { path: "/fr/chatgpt-vs-claude", expected: "fr" },
+  { path: "/en", expected: "en" },
+];
+
+for (const { path, expected } of LOCALIZED_ROUTES) {
+  test(`localized marketing route ${path} is served as lang="${expected}"`, {
     tag: "@ui-risk",
   }, async ({ request }, testInfo) => {
     test.skip(
       testInfo.project.name !== "desktop-chromium",
       "The served bytes do not depend on the viewport; covered once."
     );
-    const html = await (await request.get(path)).text();
-    expect(html).toContain('lang="ko"');
+    const response = await request.get(path);
+    expect(response.ok()).toBe(true);
+    const html = await response.text();
+    expect(
+      rootLangOf(html),
+      `${path} serves ${expected} copy, so the document must declare it`
+    ).toBe(expected);
+    // The content keeps its own declaration too: it is what `:lang()` matched
+    // before this route had a root of its own, and removing it would make the
+    // fix depend on a single attribute with nothing behind it.
+    expect(html).toContain(`lang="${expected}"`);
+  });
+}
+
+// The legacy aliases redirect to the canonical locale rather than rendering a
+// second copy under a different path.
+for (const { path, to } of [
+  { path: "/kr", to: "/ko" },
+  { path: "/cn", to: "/zh" },
+]) {
+  test(`legacy locale alias ${path} redirects to ${to}`, { tag: "@ui-risk" }, async ({
+    request,
+  }, testInfo) => {
+    test.skip(
+      testInfo.project.name !== "desktop-chromium",
+      "Redirect behaviour does not depend on the viewport; covered once."
+    );
+    const response = await request.get(path, { maxRedirects: 0 });
+    expect([307, 308]).toContain(response.status());
+    expect(response.headers()["location"]).toBe(to);
   });
 }
 

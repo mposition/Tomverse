@@ -2,16 +2,24 @@ import { MarketingProviders } from "@/components/marketing/MarketingProviders";
 import { StructuredData } from "@/components/seo/StructuredData";
 import { SITE_NAME, SITE_ORIGIN } from "@/lib/seo";
 
-export const dynamic = "force-static";
-export const revalidate = false;
-
 const configuredMeasurementId = process.env.GA4_MEASUREMENT_ID?.trim();
 const measurementId =
   configuredMeasurementId && /^G-[A-Z0-9]+$/.test(configuredMeasurementId)
     ? configuredMeasurementId
     : null;
 
-export default function MarketingLayout({
+/**
+ * The chrome every marketing page carries: the organisation / application
+ * structured data, and the marketing provider stack.
+ *
+ * RECON-I18N-001. This used to live directly in `app/(marketing)/layout.tsx`.
+ * The localized routes moved out of that group so they could have their own
+ * root layout (see components/DocumentShell.tsx), and they need the same
+ * chrome -- so it is a component now instead of being copied into the second
+ * layout, where the structured-data graph or the GA4 gate could have drifted
+ * between the English and localized pages without anything noticing.
+ */
+export function MarketingShell({
   children,
 }: Readonly<{
   children: React.ReactNode;
