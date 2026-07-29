@@ -11,6 +11,11 @@ import {
   hasValidMutationOrigin,
   requiresMutationOriginCheck,
 } from "@/lib/requestOrigin";
+import {
+  DOCUMENT_LANGUAGE_HEADER,
+  DOCUMENT_LANGUAGE_SOURCE_HEADER,
+  resolveDocumentLanguage,
+} from "@/lib/documentLanguage";
 
 const blockedOriginResponse = () =>
   new NextResponse("Misdirected Request", {
@@ -123,6 +128,17 @@ export function proxy(request: NextRequest) {
     : "Content-Security-Policy-Report-Only";
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set("x-tomverse-pathname", request.nextUrl.pathname);
+  // VAL-004. The root layout needs the document language before it renders
+  // `<html>`, and it is the only place that can set that attribute. Only the
+  // proxy sees the query string, the path prefix and `Accept-Language` at
+  // once, so the resolution happens here and travels as one header.
+  const documentLanguage = resolveDocumentLanguage({
+    pathname: request.nextUrl.pathname,
+    searchLanguage: request.nextUrl.searchParams.get("lang"),
+    acceptLanguage: request.headers.get("accept-language"),
+  });
+  requestHeaders.set(DOCUMENT_LANGUAGE_HEADER, documentLanguage.language);
+  requestHeaders.set(DOCUMENT_LANGUAGE_SOURCE_HEADER, documentLanguage.source);
   if (nonce) requestHeaders.set("x-nonce", nonce);
   requestHeaders.set(policyHeader, csp);
 

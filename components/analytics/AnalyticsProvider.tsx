@@ -571,6 +571,33 @@ export function AnalyticsProvider({
     consentPromptReady &&
     (consent === "unset" || showPreferences);
 
+  const showSettingsButton =
+    !disabled &&
+    consentPromptReady &&
+    !showPreferences &&
+    !isMobileChatTextEntryActive &&
+    !(pathname === "/chat" && initialPlan !== "Guest") &&
+    (consent === "accepted" || consent === "declined");
+
+  // UI-P1-04. The settings pill is a viewport-fixed overlay, which is fine on
+  // a long marketing page but not on /auth/signin: the login card is centred,
+  // so on a phone the bottom-right corner the pill occupies is exactly where
+  // the OAuth buttons and the terms/privacy links sit. Measured on a 320x568
+  // sign-in page it covered 3864px^2 of the Google button in English and
+  // 1120px^2 of Microsoft in Korean, and took every click that landed on it
+  // because it is the topmost layer. It only looked harmless on tall
+  // viewports, which is why earlier audits disagreed about the numbers.
+  //
+  // The sign-in page already registers a slot in normal document flow for the
+  // consent notice (see SignInPageContent). Reusing it for the settings pill
+  // means the page grows and scrolls instead of stacking controls, so there is
+  // no width or consent state at which the two can compete. The notice and the
+  // pill are mutually exclusive -- one needs `consent === "unset"` or the
+  // preferences panel open, the other needs a settled choice and the panel
+  // closed -- so the slot never has to hold both.
+  const settingsUsesInlineSlot = pathname === "/auth/signin";
+  const settingsInlineSlot = settingsUsesInlineSlot ? authConsentSlot : null;
+
   // Secondary, non-alarming styling: a light card on light theme and a
   // muted dark card on dark theme (instead of the old always-black
   // high-contrast bar), so the notice reads as an ordinary compact toast
@@ -708,12 +735,24 @@ export function AnalyticsProvider({
             {noticeInner}
           </aside>
         ) : null}
-        {!disabled &&
-        consentPromptReady &&
-        !showPreferences &&
-        !isMobileChatTextEntryActive &&
-        !(pathname === "/chat" && initialPlan !== "Guest") &&
-        (consent === "accepted" || consent === "declined") ? (
+        {showSettingsButton && settingsInlineSlot
+          ? createPortal(
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  data-testid="analytics-settings-button"
+                  onClick={() => setShowPreferences(true)}
+                  // Same 44x44 floor and focus treatment as the fixed variant
+                  // below; only the positioning differs.
+                  className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full border border-zinc-300 bg-white/95 px-3 text-[11px] font-bold text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50 hover:text-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:border-zinc-600 dark:bg-zinc-900/95 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:focus-visible:ring-offset-zinc-900"
+                >
+                  {copy.settings}
+                </button>
+              </div>,
+              settingsInlineSlot
+            )
+          : null}
+        {showSettingsButton && !settingsUsesInlineSlot ? (
           <button
             type="button"
             data-testid="analytics-settings-button"

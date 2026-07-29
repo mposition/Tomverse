@@ -392,7 +392,25 @@ export function DesktopChatShell({
           onToggleModel={onToggleModel}
           onSwapModel={onSwapModel}
         />
-        {!isConversationEmpty && useTabsLayout && (
+        {/*
+          UI-P1-05. The tab bar used to be suppressed while the conversation
+          was empty, on the reasoning that the welcome screen covers the panels
+          anyway so there is nothing to switch between. But panel visibility is
+          decided by `useTabsLayout` alone: at 768-1024px two of the three
+          panels are already `display:none` and `aria-hidden` before a single
+          message exists. With the tab bar hidden as well, nothing on screen
+          named them -- the composer said "3 models" while two of the three
+          were neither identifiable nor reachable, by pointer or by keyboard.
+          At >=1058px all three panels render side by side, so the same empty
+          state never had the problem there, which is why it went unnoticed.
+
+          The tab bar is the thing that already names every selected model,
+          carries the WAI-ARIA roving tabindex, and offers per-model removal.
+          Showing it whenever the tabs layout is in force -- empty or not --
+          is the smallest change that makes the selection legible, and it
+          costs nothing at the widths that render all three panels.
+        */}
+        {useTabsLayout && (
           <div
             role="tablist"
             aria-label={t("chat.compareTabsLabel")}

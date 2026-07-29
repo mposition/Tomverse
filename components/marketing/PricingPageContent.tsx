@@ -996,11 +996,22 @@ export function PricingPageContent() {
                 label rather than being squeezed.
               */}
               <div className="flex min-h-8 flex-wrap items-start justify-between gap-x-3 gap-y-2">
-                <p className={`text-xs font-bold uppercase tracking-[0.18em] ${plan.highlighted ? "text-blue-100" : "text-blue-600 dark:text-blue-400"}`}>
+                {/*
+                  VAL-002. Wrapping the row was not enough on its own: a flex
+                  item still refuses to shrink below its own min-content, and
+                  this label's min-content is its longest *word* -- inflated by
+                  0.18em of tracking on every character, so an English eyebrow
+                  like "For everyday productivity" measured 123px against the
+                  80px the card has at 320px with 200% zoom, and took the whole
+                  document sideways by 4px. It is what the reflow guard still
+                  named as the deepest offender after the currency notation was
+                  pinned, because the two were never the same defect.
+                */}
+                <p className={`min-w-0 [overflow-wrap:anywhere] text-xs font-bold uppercase tracking-[0.18em] ${plan.highlighted ? "text-blue-100" : "text-blue-600 dark:text-blue-400"}`}>
                   {plan.eyebrow}
                 </p>
                 {plan.badge && (
-                  <span className="shrink-0 rounded-full bg-white/15 px-3 py-1 text-xs font-bold text-white ring-1 ring-white/20">
+                  <span className="min-w-0 [overflow-wrap:anywhere] rounded-full bg-white/15 px-3 py-1 text-xs font-bold text-white ring-1 ring-white/20">
                     {plan.badge}
                   </span>
                 )}
@@ -1086,7 +1097,7 @@ export function PricingPageContent() {
                     aria-hidden="true"
                     className="mt-3 flex flex-wrap items-end gap-x-3 gap-y-1"
                   >
-                    <span className="text-5xl font-black">{salePrice}</span>
+                    <span className="text-[clamp(1.5rem,13vw,3rem)] font-black [overflow-wrap:anywhere]">{salePrice}</span>
                     <span className={`pb-1 text-sm font-bold ${plan.highlighted ? "text-blue-50" : "text-zinc-700 dark:text-zinc-200"}`}>
                       {formatBillingPeriodLabel(plan.period, lang)}
                     </span>
@@ -1106,13 +1117,13 @@ export function PricingPageContent() {
                     ? "border-white/20 bg-white/10 text-blue-50"
                     : "border-zinc-200 bg-zinc-50 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950/60 dark:text-zinc-300"
                 }`}>
-                  <div className="flex items-center justify-between gap-3">
-                    <span>{annualCopy.annual}</span>
+                  <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                    <span className="min-w-0 [overflow-wrap:anywhere]">{annualCopy.annual}</span>
                     <span className={`rounded-full px-2.5 py-1 ${plan.highlighted ? "bg-white text-blue-700" : "bg-accent-promotion-500/10 text-accent-promotion-700 dark:text-accent-promotion-300"}`}>
                       {annualCopy.save}
                     </span>
                   </div>
-                  <div className="mt-1 text-lg font-black">{annualPrice}</div>
+                  <div className="mt-1 text-[clamp(0.875rem,4.5vw,1.125rem)] font-bold [overflow-wrap:anywhere]">{annualPrice}</div>
                   <p className={plan.highlighted ? "text-blue-100" : "text-zinc-500 dark:text-zinc-400"}>
                     {annualCopy.checkout}
                   </p>

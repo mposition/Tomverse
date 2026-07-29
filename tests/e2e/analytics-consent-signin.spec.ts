@@ -251,26 +251,44 @@ test("UI-P1-02: accepting analytics from the sign-in notice hides it and persist
     .toBe("accepted");
 
   // UI-P2-01: answering must leave no reserved gap behind. The slot is
-  // `empty:hidden`, so once the notice unmounts it costs no box and no flex
-  // gap -- the card is the last thing on the page again.
+  // `empty:hidden`, so it can only occupy space when something is actually in
+  // it. UI-P1-04 moved the "Analytics settings" control into this same slot --
+  // it used to be a viewport-fixed pill that landed on the OAuth buttons -- so
+  // after answering, the slot holds exactly that control and nothing else.
+  // What is still being asserted is the original property: no *blank* band. A
+  // box taller than the control it contains would be the spacer this test was
+  // written to catch.
   const layout = await page.evaluate(() => {
     const slot = document.querySelector('[data-testid="signin-card"]')
       ?.parentElement?.lastElementChild as HTMLElement | null;
     const card = document.querySelector('[data-testid="signin-card"]')!;
     const cardRect = card.getBoundingClientRect();
+    const settings = document.querySelector(
+      '[data-testid="analytics-settings-button"]'
+    ) as HTMLElement | null;
     return {
-      slotDisplay: slot ? getComputedStyle(slot).display : null,
       slotHeight: slot ? slot.getBoundingClientRect().height : null,
+      slotContainsSettings: Boolean(slot && settings && slot.contains(settings)),
+      settingsHeight: settings ? settings.getBoundingClientRect().height : null,
       cardBottom: cardRect.bottom,
       pageBottomGap:
         document.documentElement.scrollHeight - (cardRect.bottom + window.scrollY),
     };
   });
-  expect(layout.slotDisplay, "resolved consent slot is display:none").toBe("none");
-  expect(layout.slotHeight, "resolved consent slot has no height").toBe(0);
-  // Only the page's own bottom padding may remain under the card
-  // (pb-[max(2rem,safe-area)] = 32px), never a notice-sized hole.
-  expect(layout.pageBottomGap, "no empty spacer under the card").toBeLessThanOrEqual(40);
+  expect(
+    layout.slotContainsSettings,
+    "the resolved-consent slot holds the analytics settings control"
+  ).toBe(true);
+  expect(layout.settingsHeight, "settings control height").not.toBeNull();
+  expect(
+    layout.slotHeight,
+    "the slot is exactly as tall as the control it holds -- no reserved band"
+  ).toBeCloseTo(layout.settingsHeight!, 0);
+  // The control, one flex gap (12px) and the page's own bottom padding
+  // (pb-[max(2rem,safe-area)] = 32px) -- never a notice-sized hole.
+  expect(layout.pageBottomGap, "no empty spacer under the card").toBeLessThanOrEqual(
+    layout.settingsHeight! + 52
+  );
   const cardAfter = await page.getByTestId("signin-card").boundingBox();
   expect(cardBefore, "card box before").not.toBeNull();
   expect(cardAfter, "card box after").not.toBeNull();
