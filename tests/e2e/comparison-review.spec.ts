@@ -133,7 +133,11 @@ test("AI comparison review does not flash an unavailable setup before loading", 
 
   const reviewButton = page.getByRole("button", { name: "AI 답변 교차검토" });
   await expect(reviewButton).toBeVisible({ timeout: 30_000 });
-  await expect(reviewButton.getByTestId("ai-review-entry-credit-cost")).toContainText("4");
+  // The entry badge is the rail's own approximate figure, and it says 8
+  // because a review runs two reviewers. The dialog below quotes the server's
+  // exact price for the chosen setup, which is why the two numbers are
+  // asserted separately rather than shared.
+  await expect(reviewButton.getByTestId("ai-review-entry-credit-cost")).toContainText("8");
   await expect(reviewButton.getByTestId("credit-coin-icon")).toBeVisible();
   await reviewButton.click();
   const dialog = page.getByRole("dialog", { name: "AI 답변 교차검토" });
@@ -162,7 +166,7 @@ for (const viewport of [
     await openReviewConversation(page);
 
     const reviewEntryButton = page.getByRole("button", { name: "AI 답변 교차검토" });
-    await expect(reviewEntryButton.getByTestId("ai-review-entry-credit-cost")).toContainText("4");
+    await expect(reviewEntryButton.getByTestId("ai-review-entry-credit-cost")).toContainText("8");
     await reviewEntryButton.click();
     const dialog = page.getByRole("dialog", { name: "AI 답변 교차검토" });
     await expect(dialog).toBeVisible();

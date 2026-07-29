@@ -5,6 +5,8 @@ import {
   mockPublicProofMetrics,
   prepareGuestPage,
 } from "./support/app-fixtures";
+import { marketingLocaleFor } from "@/lib/marketingLocale";
+import { LOCALIZED_SEO_PATHS, localizedPath } from "@/lib/seo";
 
 /**
  * Font-system regression contract -- see docs/ui-contracts/typography.md.
@@ -55,15 +57,65 @@ async function waitForFonts(page: Page) {
   await page.evaluate(() => document.fonts.ready.then(() => undefined));
 }
 
+// The path with any `/{locale}` prefix removed. `/ko` and `/zh/pricing` both
+// answer from the localized routes, so switching away from one means composing
+// the destination from what is underneath, not from the current path.
+function unlocalizedPath(pathname: string): string {
+  const [first, ...rest] = pathname.split("/").filter(Boolean);
+  if (first && marketingLocaleFor(first)) {
+    return `/${rest.join("/")}`;
+  }
+  return pathname;
+}
+
 async function selectLanguage(page: Page, lang: "ko" | "en" | "zh") {
   const select = page.getByLabel("Language");
-  if ((await select.inputValue()) !== lang) {
-    await select.selectOption(lang);
+  if ((await select.inputValue()) === lang) return;
+
+  // Since the localized marketing routes got their own root layout, the
+  // switcher crosses a *document* boundary on any page that has a localized
+  // variant. Two things follow, and this helper was written before both:
+  //
+  // - an evaluate issued straight after `selectOption` lands in the old
+  //   document's destroyed context ("Execution context was destroyed");
+  // - LanguageProvider sets `documentElement.lang` on the *old* page before
+  //   the navigation starts, so waiting on the language alone returns while
+  //   the previous document is still on screen and the measurement races it.
+  //
+  // korean-typography.spec.ts hit exactly this and was fixed; this suite has
+  // the same helper and was not, so it stayed red until the full Chromium
+  // suite ran. Waiting for the URL first pins which document is measured.
+  const base = unlocalizedPath(new URL(page.url()).pathname) || "/";
+  const localizable = LOCALIZED_SEO_PATHS.includes(
+    base as (typeof LOCALIZED_SEO_PATHS)[number]
+  );
+  await select.selectOption(lang);
+  if (localizable) {
+    // Composed with the switcher's own helper rather than by hand: English is
+    // not served unprefixed here, it has a `/en` route like every other SEO
+    // locale, and assuming otherwise waits for a URL that never arrives.
+    await page.waitForURL((url) => url.pathname === localizedPath(lang, base));
+    await page.waitForLoadState("load");
   }
+
+  // Only then the fonts: ko and zh re-point `--font-ui` through `:lang()` and
+  // those faces are `preload: false` by policy, so they are fetched once the
+  // language changes. The poll tolerates a context torn down mid-evaluate.
   await expect
-    .poll(() => page.evaluate(() => document.documentElement.lang))
+    .poll(
+      async () => {
+        try {
+          return await page.evaluate(async () => {
+            await document.fonts.ready;
+            return document.documentElement.lang;
+          });
+        } catch {
+          return null;
+        }
+      },
+      { message: `language did not settle on "${lang}"` }
+    )
     .toBe(lang);
-  await waitForFonts(page);
 }
 
 test.describe("font system: locale families", () => {
