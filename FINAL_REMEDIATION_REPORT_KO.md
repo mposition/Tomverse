@@ -1081,6 +1081,21 @@ browser를 설치할 수 없어서 생긴 것이며, §4.10에서 확정한 정�
 - `test-results/mobile-composer-contract-M-748b6-…/mobile-composer-partial-web-search-320-diff.png`
   (글리프 전용 diff)
 
+**정정 — 위 local artifact는 더 이상 존재하지 않습니다.** `test-results/`는 매
+Playwright 실행이 시작할 때 비워지고, 이후 같은 컨테이너에서 suite를 여러 번
+다시 돌렸습니다. 게다가 이 컨테이너는 세션이 끝나면 회수됩니다.
+
+**남아 있는 증거는 GitHub Actions artifact입니다** (보존 14일).
+
+| artifact | 내용 |
+|---|---|
+| `8710914900` (run #35) | 최초 canonical 실패 50건의 trace·screenshot·video·diff |
+| `8717156750` (recording run) | 재기록 전 diff 증거 + 재기록된 golden 63장 |
+| run #43 (`30445545230`) | green 실행 로그 — 실패가 없어 artifact는 없습니다 |
+
+조건 6(원시 증거 번들 전달)을 만족시키려면 **이 artifact들을 만료 전에
+내려받아 보관**해야 합니다.
+
 ### canonical runner 실행 (사후 추가)
 
 이 컨테이너의 측정이 끝난 뒤, canonical 환경에서 suite를 1회 실행했습니다.
