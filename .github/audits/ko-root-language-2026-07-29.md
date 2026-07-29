@@ -100,41 +100,80 @@ root layout이 하나가 아니게 되어 `scripts/security-regression-check.mjs
   깨지기 때문
 - 두 root 모두 `cookies()` / `getServerSession` / `prisma` 금지
 
-## 4. cross-root 전환 시간 실측 (승인 조건)
+## 4. cross-root 전환 시간 실측 → **현행 유지로 확정**
 
-같은 브라우저·같은 빌드에서 CTA 클릭 → 도착 화면 가시까지, 5회 median.
+승인 조건이었던 "실제 CTA 전환 시간을 측정해 수용 여부를 판단"의 결과입니다.
 
-| 전환 | 종류 | median | 이전 대비 |
-|---|---|---:|---|
-| `/` → `/chat` | same root (client nav) | **321ms** | 변화 없음 |
-| `/ko` → `/chat` | **cross root (document load)** | **1173ms** | **+852ms (3.7×)** |
-| `/` → `/pricing` | same root (client nav) | **203ms** | 변화 없음 |
-| `/ko` → `/pricing` | **cross root (document load)** | **469ms** | **+266ms (2.3×)** |
-| `/` → `/ko` (헤더 언어 선택) | **cross root (document load)** | **2060ms** | 이전에는 client `router.push` |
+### 4.1 전/후 대조 (median, 각 5회, 같은 세션·같은 빌드 방식)
 
-### 읽는 법 — 두 가지 단서를 함께 봐야 합니다
+첫 측정은 변경 후 단독값(2060ms)이라 기준선이 없었습니다. 아래는 변경 전
+(`1ca1603`)과 변경 후를 같은 조건에서 짝지어 다시 잰 값입니다.
 
-- **localhost 측정이라 하한값입니다.** 네트워크 RTT가 0이고 CDN도 없습니다.
-  실제 모바일 네트워크에서는 document 왕복이 더해집니다. 반대로 JS 번들은
-  대부분 캐시에 남아 있으므로 실사용 격차가 5배로 벌어지지는 않습니다.
-- **예상하지 못했던 항목이 하나 있습니다.** 헤더의 언어 선택기는 `/`에서
-  `/ko`로 `router.push`를 하는데, 이제 그 경로가 root 경계를 넘으므로
-  **client navigation이 document navigation으로 바뀌었습니다(2060ms)**. 이번
-  변경에서 가장 큰 전환 비용이며, 승인 시점에 논의된 "localized 페이지의 CTA"가
-  아니라 **영어 페이지에서 한국어로 바꾸는 동작**입니다.
+| 시나리오 | 조건 | 변경 전 | 변경 후 | 델타 |
+|---|---|---:|---:|---:|
+| **`/` → `/ko` 언어 전환** | 무제한 | 630ms | 1272ms | **+642ms (2.0x)** |
+| **`/` → `/ko` 언어 전환** | 4G + CPU 4x | 2689ms | 5285ms | **+2596ms (2.0x)** |
+| `/ko` 직접 진입 (cold) | 무제한 | 905ms | 703ms | -202ms |
+| `/ko` 직접 진입 (cold) | 4G + CPU 4x | 3008ms | 3224ms | +216ms |
+| `/` → `/chat` (same root) | 무제한 | 244ms | 248ms | ~0 |
+| `/` → `/chat` (same root) | 4G + CPU 4x | 987ms | 964ms | ~0 |
 
-### 수용 여부 판단에 필요한 것
+`4G + CPU 4x`는 CDP `Network.emulateNetworkConditions`(9 Mbps / 85ms RTT)와
+`Emulation.setCPUThrottlingRate(4)`로 중급 단말을 근사한 것입니다.
 
-- `/ko` → `/chat` (localized 페이지의 주 CTA): +852ms
-- `/` → `/ko` (언어 전환): 2060ms ← **새로 발견된 항목, 별도 판단 필요**
+### 4.2 세 가지 관찰
 
-완화가 필요하다면 선택지는 두 가지입니다.
-1. localized landing에 목적지 document `prefetch`/speculation rules 추가 —
-   CSP가 inline script를 해시로 통제하므로 추가 작업이 따릅니다.
-2. 언어 전환을 `/ko`로 이동시키지 않고 현재 경로에 머무르게 변경 — SEO 정책
-   (localized canonical URL)과 충돌하므로 별도 결정이 필요합니다.
+1. **범위 제한이 의도대로 작동했습니다.** 주 전환 경로 `/` → `/chat`은 전후
+   차이가 없습니다. `(site)` route group이 marketing과 application을 한 root에
+   묶어둔 결과입니다.
+2. **SEO 유입은 무비용입니다.** `/ko`로 직접 들어오는 트래픽 — 검색에서 오는
+   한국어 사용자 대부분 — 은 노이즈 범위 내에서 동일합니다.
+3. **회귀는 한 동작에 갇혀 있고, 그 동작은 2배입니다.** 영어 `/`에서 헤더
+   언어 선택기로 한국어를 고르는 경우이며, 실기기 근사 조건에서 약 2.6초가
+   더 듭니다.
 
-두 안 모두 이번 범위 밖이라 구현하지 않았습니다.
+### 4.3 비용 구조
+
+변경 후 언어 전환의 phase 분해 (4G + CPU 4x):
+
+| 구간 | 값 |
+|---|---:|
+| TTFB | 278ms |
+| document 다운로드 | 92ms (12KB) |
+| **domInteractive (JS 파싱·실행·hydration)** | **2774ms** |
+| load | 3096ms |
+
+비용의 약 90%가 네트워크가 아니라 **새 문서를 다시 hydration하는 클라이언트
+작업**입니다. 이 사실이 완화책의 유효성을 가릅니다.
+
+| 완화책 | 실제 절감 | 비용 |
+|---|---|---|
+| `<link rel="prefetch">`로 `/ko` 문서 선반입 | 약 370ms (TTFB+다운로드)뿐, hydration은 그대로 | 낮음, CSP 무관 |
+| Speculation Rules `prerender` | 거의 전부 | inline script → CSP hash/nonce 작업 |
+| 언어 전환 시 이동 없음 | 전부 | localized canonical URL 정책과 충돌 |
+
+즉 prefetch로는 의미 있게 줄지 않습니다.
+
+### 4.4 결정
+
+**현행 유지로 확정합니다(완화책 미적용).** 근거:
+
+- 전환 퍼널의 두 축(주 CTA, SEO 직접 진입)이 무비용입니다.
+- 회귀가 세션당 한 번 일어나는 설정성 동작 하나에 한정됩니다. 전환 이후
+  한국어 페이지에서의 이용 속도는 영향받지 않습니다.
+- 유일하게 효과가 큰 완화책(prerender)은 CSP inline script 정책을 건드리므로,
+  빈도 근거 없이 지금 도입할 만한 거래가 아닙니다.
+
+### 4.5 이 결정의 한계 — 빈도 데이터가 없습니다
+
+`MarketingLanguageSwitcher`에는 `trackProductEvent` 호출이 없어 **언어 전환이
+계측되지 않습니다.** 따라서 "2.6초 x 몇 명"인지는 알 수 없고, 위 결정은
+빈도가 낮다는 *구조적 추정*(한국어 사용자는 검색으로 `/ko`에 직접 도착하고
+`/chat`은 `Accept-Language`로 자동 판별되므로, 이 선택기를 쓰는 사람은 영어
+`/`에 먼저 도착한 비영어권 방문자로 좁혀진다)에 기대고 있습니다.
+
+빈도가 실제로 높다면 결정을 다시 볼 근거가 됩니다. 선택기에 이벤트를 하나
+붙이는 것은 작은 작업이며, 이 문서의 결정을 뒤집을 수 있는 유일한 입력입니다.
 
 ## 5. 부수 수정 — `korean-typography.spec.ts`
 
@@ -167,6 +206,7 @@ root layout이 하나가 아니게 되어 `scripts/security-regression-check.mjs
 CI·staging 판정은 별도이며, 같은 시점의 canonical visual gate 상태는
 `.github/audits/ui-go-live-remediation-2026-07-29.md`와 아래를 참조하세요.
 
-- cross-root 전환 시간 수용 여부: **미결 — §4의 두 수치로 판단 필요**
+- cross-root 전환 시간 수용 여부: **현행 유지로 확정** (§4.4). 재검토를 부르는
+  유일한 입력은 언어 전환 빈도이며, 현재 계측되지 않습니다 (§4.5).
 - `?lang=` query locale(예: `/pricing?lang=ko`)의 정적 route hydration flash:
   승인대로 **별도 i18n route migration으로 분리**, 이번 범위 밖
