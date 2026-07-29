@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Info, RefreshCw, Shuffle } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
+import { useIsMobileShell } from "@/components/chat/useIsMobileShell";
 
 type PublicModelStatus = "available" | "limited" | "unavailable";
 
@@ -45,6 +46,12 @@ export function ProviderStatusBanner({
     [AVAILABLE_MODELS]
   );
   const { t } = useLanguage();
+  // UI-TOUCH-001. `compact` is a density flag both shells set, so it cannot
+  // decide touch sizing on its own -- the desktop workspace renders this same
+  // compact banner. The 44px floor keys off the shell signal the composer
+  // already uses for exactly this (see ChatInput's isMobileShell branches), so
+  // phones get a real tap target and the desktop keeps its mouse-sized one.
+  const isMobileShell = useIsMobileShell();
   const [models, setModels] = useState<PublicModelStatusRecord[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -218,7 +225,11 @@ export function ProviderStatusBanner({
           <button
             type="button"
             onClick={() => void loadStatus()}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-black/5 transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
+            // The icon itself stays 16px: only the box around it grows.
+            className={`flex shrink-0 items-center justify-center rounded-xl bg-black/5 transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15 ${
+              isMobileShell ? "h-11 w-11" : "h-8 w-8"
+            }`}
+            data-testid="provider-status-refresh"
             aria-label={t("providerStatus.refresh")}
           >
             {isLoading ? (
@@ -235,7 +246,14 @@ export function ProviderStatusBanner({
                 key={removeModelId}
                 type="button"
                 onClick={() => onSwapModel(removeModelId, addModelId)}
-                className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full bg-black/5 px-2 text-[11px] font-bold transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
+                data-testid="provider-status-swap"
+                // A real box rather than a pseudo-element inset: these chips
+                // sit 6px apart in a scrolling row, so an inset large enough
+                // to reach 44px would overlap the next chip's tap area and
+                // steal its taps.
+                className={`inline-flex shrink-0 items-center gap-1 rounded-full bg-black/5 text-[11px] font-bold transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15 ${
+                  isMobileShell ? "h-11 min-w-11 px-3" : "h-7 px-2"
+                }`}
               >
                 <Shuffle className="h-3 w-3" />
                 {t("providerStatus.switchFromTo")
@@ -253,7 +271,11 @@ export function ProviderStatusBanner({
                   key={modelId}
                   type="button"
                   onClick={() => onToggleModel(modelId)}
-                  className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full bg-black/5 px-2 text-[11px] font-bold transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
+                  data-testid="provider-status-fallback"
+                  // Same reasoning as the swap chip above.
+                  className={`inline-flex shrink-0 items-center gap-1 rounded-full bg-black/5 text-[11px] font-bold transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15 ${
+                    isMobileShell ? "h-11 min-w-11 px-3" : "h-7 px-2"
+                  }`}
                 >
                   <Shuffle className="h-3 w-3" />
                   {modelName(modelId)}
@@ -300,6 +322,7 @@ export function ProviderStatusBanner({
                   key={removeModelId}
                   type="button"
                   onClick={() => onSwapModel(removeModelId, addModelId)}
+                  data-testid="provider-status-swap"
                   className="inline-flex items-center gap-1 rounded-full bg-black/5 px-2.5 py-1 text-[11px] font-bold transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
                 >
                   <Shuffle className="h-3 w-3" />
@@ -318,6 +341,7 @@ export function ProviderStatusBanner({
                     key={modelId}
                     type="button"
                     onClick={() => onToggleModel(modelId)}
+                    data-testid="provider-status-fallback"
                     className="inline-flex items-center gap-1 rounded-full bg-black/5 px-2.5 py-1 text-[11px] font-bold transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
                   >
                     <Shuffle className="h-3 w-3" />
@@ -331,7 +355,11 @@ export function ProviderStatusBanner({
         <button
           type="button"
           onClick={() => void loadStatus()}
+          // Desktop keeps its pre-existing, mouse-appropriate size: the 44px
+          // floor is a touch requirement and this variant only renders in the
+          // desktop shell (see DesktopChatShell / MobileChatShell).
           className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-black/5 transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
+          data-testid="provider-status-refresh"
           aria-label={t("providerStatus.refresh")}
         >
           {isLoading ? (

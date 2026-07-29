@@ -264,7 +264,9 @@ async function mockPromotionalBilling(page: Page) {
           discountAmountCents: null,
           durationMonths: 1,
           appliesToPlanIds: ["pro", "max"],
-          billingIntervals: ["month"],
+          // See pricing-promotion-reflow.spec.ts: the promotion contract's
+          // value is "monthly", not the plan interval's "month".
+          billingIntervals: ["monthly"],
           endsAt: "2099-03-01T00:00:00.000Z",
         },
         promotionPolicy: {

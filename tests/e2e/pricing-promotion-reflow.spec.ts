@@ -77,7 +77,15 @@ async function mockBilling(
               discountAmountCents: null,
               durationMonths: 1,
               appliesToPlanIds: ["pro", "max"],
-              billingIntervals: ["month"],
+              // The public billing contract's own value. lib/billingConfig.ts
+              // emits "monthly" | "annual", usePublicBilling.ts types it as
+              // exactly that, and PricingPageContent gates the sale block on
+              // includes("monthly"). "month" -- the plan *interval* field's
+              // vocabulary, not the promotion's -- made this guard render the
+              // regular-price layout, so it measured a page that has no sale
+              // block, no 50% OFF badge, and none of the reflow this test
+              // exists to protect.
+              billingIntervals: ["monthly"],
               endsAt: "2099-03-01T00:00:00.000Z",
             }
           : null,
@@ -118,10 +126,22 @@ async function measurePricingOverflow(
   // Fail here rather than measuring a page that quietly rendered the other
   // layout -- the promotion state is the independent variable.
   const banner = page.getByText(PROMOTION_CODE);
+  const saleBlocks = page.getByTestId("pricing-sale-block");
+  const discountBadges = page.getByTestId("pricing-discount-badge");
   if (options.promotion) {
     await expect(banner).toBeVisible();
+    // The banner is not enough on its own: it renders for any featured
+    // promotion, while the per-plan sale block is gated on
+    // `billingIntervals.includes("monthly")`. A fixture that sent the wrong
+    // interval string therefore produced a *banner* over *regular-price*
+    // cards -- the page this guard was written to measure minus every
+    // element it was written to measure. Assert the branch itself.
+    await expect(saleBlocks.first()).toBeVisible();
+    await expect(discountBadges.first()).toBeVisible();
+    await expect(discountBadges.first()).toContainText("%");
   } else {
     await expect(banner).toHaveCount(0);
+    await expect(saleBlocks).toHaveCount(0);
   }
 
   return page.evaluate(() => {
@@ -299,14 +319,22 @@ for (const browserLocale of BROWSER_LOCALES) {
       // whether the plan card fit its grid track under zoom.
       const prices = page.getByTestId("pricing-plan-price");
       await expect(prices.first()).toBeVisible();
-      const rendered = await prices.allInnerTexts();
-      console.log(
-        `RECON-UX-001 prices under ${browserLocale}: ${JSON.stringify(rendered)}`
-      );
+      // The cards render the catalogue's placeholder amounts for the frame or
+      // two before GET /api/billing/config resolves, so a single read can
+      // sample the pre-mock page and report "$0|$15|$25" -- a flake that says
+      // nothing about currency notation. Poll until the mocked market price
+      // is on screen, then assert the notation on that settled string.
+      await expect
+        .poll(async () => (await prices.allInnerTexts()).join("|"), {
+          message: `mocked market price never rendered under ${browserLocale}`,
+        })
+        .toMatch(/\$19\.00/);
+      const rendered = (await prices.allInnerTexts()).join("|");
+      console.log(`RECON-UX-001 prices under ${browserLocale}: ${rendered}`);
       // USD is an en-US market price: "$19.00", never "US$" and never "USD ".
-      expect(rendered.join("|")).toMatch(/\$19\.00/);
-      expect(rendered.join("|")).not.toMatch(/US\$/);
-      expect(rendered.join("|")).not.toMatch(/USD\s/);
+      expect(rendered).toMatch(/\$19\.00/);
+      expect(rendered).not.toMatch(/US\$/);
+      expect(rendered).not.toMatch(/USD\s/);
     });
   });
 }

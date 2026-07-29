@@ -184,3 +184,143 @@ test("clicking the banner's suggestion swaps the failed model instead of silentl
   // just added on top (which the cap would have rejected outright).
   await expect(page.getByTestId("desktop-model-panel")).toHaveCount(3);
 });
+
+// UI-TOUCH-001. The outage banner is the recovery path when a selected model
+// is down, so on a phone its refresh and its swap/fallback chips have to be
+// tappable. They were 32x32 and 28px tall. The desktop copy of the same
+// banner deliberately keeps its smaller, mouse-appropriate sizing, so both
+// directions are asserted here rather than only the one that was failing.
+test.describe("outage banner touch targets (UI-TOUCH-001)", () => {
+  const MIN_TARGET = 44;
+  const TOLERANCE = 0.5;
+
+  async function unavailableSelectedModel(page: Page) {
+    await page.route("**/api/models/status", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          generatedAt: new Date().toISOString(),
+          models: [
+            {
+              id: "gemini-2-5-flash",
+              provider: "google",
+              status: "unavailable",
+              fallbackModelIds: ["deepseek-v4-flash"],
+              fallbackHealth: "operational",
+            },
+          ],
+        }),
+      });
+    });
+  }
+
+  test("compact (phone) banner actions meet 44x44 and hit-test to themselves", async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      !testInfo.project.name.startsWith("mobile"),
+      "The compact banner is the mobile shell's rendering."
+    );
+    await prepareGuestPage(page, "en");
+    await unavailableSelectedModel(page);
+
+    for (const viewport of [
+      { width: 320, height: 568 },
+      { width: 390, height: 844 },
+    ]) {
+      await page.setViewportSize(viewport);
+      await page.goto("/chat");
+      const banner = page.getByTestId("provider-outage-banner");
+      await expect(banner).toBeVisible();
+      const label = `[${viewport.width}x${viewport.height}]`;
+
+      const actions = [
+        banner.getByTestId("provider-status-refresh"),
+        // Whichever of the two the banner chose for this state.
+        banner.getByTestId("provider-status-swap"),
+        banner.getByTestId("provider-status-fallback"),
+      ];
+      let checked = 0;
+      const boxes: Array<{ x: number; y: number; width: number; height: number }> = [];
+      for (const action of actions) {
+        const count = await action.count();
+        for (let index = 0; index < count; index++) {
+          const item = action.nth(index);
+          await item.scrollIntoViewIfNeeded();
+          const box = (await item.boundingBox())!;
+          expect(box.width, `${label} action width`).toBeGreaterThanOrEqual(
+            MIN_TARGET - TOLERANCE
+          );
+          expect(box.height, `${label} action height`).toBeGreaterThanOrEqual(
+            MIN_TARGET - TOLERANCE
+          );
+          // Centre and the four points 22px away must all land on this
+          // control, so the 44px box is real rather than a neighbour's.
+          const cx = box.x + box.width / 2;
+          const cy = box.y + box.height / 2;
+          const half = MIN_TARGET / 2 - TOLERANCE;
+          for (const [dx, dy] of [
+            [0, 0],
+            [-half, 0],
+            [half, 0],
+            [0, -half],
+            [0, half],
+          ] as Array<[number, number]>) {
+            const resolvesToSelf = await item.evaluate((element, [px, py]) => {
+              const hit = document.elementFromPoint(px, py);
+              return hit === element || Boolean(hit && element.contains(hit));
+            }, [cx + dx, cy + dy] as [number, number]);
+            expect(
+              resolvesToSelf,
+              `${label} hit-test at (${dx}, ${dy}) must resolve to this action`
+            ).toBe(true);
+          }
+          boxes.push(box);
+          checked += 1;
+        }
+      }
+      expect(checked, `${label} expected the banner to render actions`).toBeGreaterThan(0);
+
+      // No two actions may overlap: growing a chip must not steal its
+      // neighbour's taps.
+      for (let a = 0; a < boxes.length; a++) {
+        for (let b = a + 1; b < boxes.length; b++) {
+          const overlaps =
+            boxes[a].x < boxes[b].x + boxes[b].width &&
+            boxes[a].x + boxes[a].width > boxes[b].x &&
+            boxes[a].y < boxes[b].y + boxes[b].height &&
+            boxes[a].y + boxes[a].height > boxes[b].y;
+          expect(overlaps, `${label} banner actions must not overlap`).toBe(false);
+        }
+      }
+
+      const overflow = await page.evaluate(
+        () =>
+          document.documentElement.scrollWidth - document.documentElement.clientWidth
+      );
+      expect(overflow, `${label} horizontal overflow`).toBeLessThanOrEqual(1);
+    }
+  });
+
+  test("desktop banner keeps its original compact sizing", async ({ page }, testInfo) => {
+    test.skip(
+      testInfo.project.name.startsWith("mobile"),
+      "This checks the non-touch desktop path specifically."
+    );
+    await prepareGuestPage(page, "en");
+    await unavailableSelectedModel(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/chat");
+
+    const refresh = page
+      .getByTestId("provider-outage-banner")
+      .getByTestId("provider-status-refresh");
+    await expect(refresh).toBeVisible();
+    const box = (await refresh.boundingBox())!;
+    expect(
+      box.width < MIN_TARGET - TOLERANCE || box.height < MIN_TARGET - TOLERANCE,
+      "desktop refresh should not have been enlarged with the mobile fix"
+    ).toBe(true);
+  });
+});

@@ -1604,6 +1604,31 @@ export function ChatPageClient({
 
     if (!sessionUserId) return;
 
+    // UI-STATE-001. The comparison shell is built from selectedModels, so
+    // until this conversation's models are known the workspace renders the
+    // single bootstrap default: one wide panel, "1 model" in the composer,
+    // and a credit estimate priced for one request -- then jumps to three
+    // panels and a three-model price the moment the detail response lands.
+    // The conversation list already carries selectedModels/disabledPanels/
+    // webSearchMode (GET /api/conversations returns them per row), so the
+    // shell can be assembled from what is already known and the detail
+    // response only refines it. This mirrors what the guest branch above
+    // has always done; the authenticated branch was the one waiting.
+    const knownConversation = conversations.find((c) => c.id === id);
+    if (knownConversation) {
+      applyConversationSettings(
+        {
+          selectedModels: knownConversation.selectedModels,
+          disabledPanels: knownConversation.disabledPanels,
+          webSearchMode: knownConversation.webSearchMode,
+        },
+        // No targetChatId: this is an optimistic read of the list, not the
+        // server's confirmation of what this conversation is saved as, so it
+        // must not seed confirmedModelSettingsRef and suppress the real sync.
+        undefined
+      );
+    }
+
 	try {
 	  const res = await fetch(`/api/conversations/${id}`, { cache: "no-store" });
       if (res.ok) {

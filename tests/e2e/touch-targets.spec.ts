@@ -390,6 +390,92 @@ test.describe("mobile touch targets (STG-F005)", () => {
   });
 });
 
+// UI-TOUCH-001. The marketing header is the first thing a phone user meets,
+// and on `/` two of its three controls were under the minimum: the menu
+// button was 40x40 and the language switcher's real hit area (the label the
+// select fills) was 40px tall. Neither is inside the chat shell, so nothing
+// in the block above covered them.
+test.describe("marketing header touch targets (UI-TOUCH-001)", () => {
+  const MARKETING_VIEWPORTS = [
+    { width: 320, height: 568 },
+    { width: 390, height: 844 },
+  ];
+
+  test.beforeEach(async ({ page }, testInfo) => {
+    test.skip(
+      !testInfo.project.name.startsWith("mobile"),
+      "Touch-target sizing only applies on touch-emulating (mobile-*) projects."
+    );
+    await prepareGuestPage(page, "en");
+  });
+
+  for (const lang of ["en", "ko"] as const) {
+    test(`menu button and language switcher meet the minimum at every mobile width (${lang})`, async ({
+      page,
+    }) => {
+      for (const viewport of MARKETING_VIEWPORTS) {
+        await page.setViewportSize(viewport);
+        await page.goto(`/?lang=${lang}`);
+        const label = `[${lang} ${viewport.width}x${viewport.height}]`;
+
+        // The switcher's hit area is the label, not the select: the label is
+        // `overflow-hidden`, so anything the select could paint outside it
+        // would be clipped and would not be tappable.
+        const switcher = page.locator('label:has(select[aria-label="Language"])');
+        await assertMinTouchTarget(switcher, `${label} language switcher`);
+        await assertHitTestReturnsSelf(switcher, `${label} language switcher`);
+
+        const menuButton = page.locator("header button[aria-expanded]").first();
+        await assertMinTouchTarget(menuButton, `${label} mobile menu`);
+        await assertHitTestReturnsSelf(menuButton, `${label} mobile menu`);
+        await assertMinHitArea(menuButton, `${label} mobile menu`);
+
+        // Neither may have grown into the other, and neither may have pushed
+        // the header wider than the document.
+        const switcherBox = (await switcher.boundingBox())!;
+        const menuBox = (await menuButton.boundingBox())!;
+        const overlaps =
+          switcherBox.x < menuBox.x + menuBox.width &&
+          switcherBox.x + switcherBox.width > menuBox.x &&
+          switcherBox.y < menuBox.y + menuBox.height &&
+          switcherBox.y + switcherBox.height > menuBox.y;
+        expect(overlaps, `${label} switcher and menu must not overlap`).toBe(false);
+
+        const overflow = await page.evaluate(
+          () =>
+            document.documentElement.scrollWidth -
+            document.documentElement.clientWidth
+        );
+        expect(overflow, `${label} horizontal overflow`).toBeLessThanOrEqual(1);
+      }
+    });
+  }
+
+  // REAUDIT-F005's focus indicator is the reason the switcher grew a real box
+  // rather than a pseudo-element inset, so it is checked in the same place.
+  test("the language switcher keeps a visible, unclipped focus indicator", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/?lang=en");
+    const select = page.locator('select[aria-label="Language"]');
+    await select.focus();
+    const ring = await page
+      .locator('label:has(select[aria-label="Language"])')
+      .evaluate((element) => {
+        const style = getComputedStyle(element);
+        return {
+          shadow: style.boxShadow,
+          overflowHidden: style.overflow === "hidden",
+        };
+      });
+    // Tailwind's focus-within:ring-2 paints as a box-shadow on the label's own
+    // border box -- outside the clip, which is exactly why it survives.
+    expect(ring.shadow, "focus ring must be painted").not.toBe("none");
+    expect(ring.overflowHidden, "label is still the clipping box").toBe(true);
+  });
+});
+
 // Kept outside the mobile-only describe block above: this test verifies the
 // opposite condition (no touch emulation keeps the pre-existing compact
 // sizing), so it needs its own beforeEach without the mobile-only skip.

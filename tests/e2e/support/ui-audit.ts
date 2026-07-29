@@ -397,6 +397,25 @@ async function measureContrastSamples(
       if (!element || seen.has(element)) continue;
       seen.add(element);
       if (element.closest(".sr-only")) continue;
+      // Fallback content of a replaced element. A <video>/<audio>/<canvas>/
+      // <object> paints its own media over its children, so this text is
+      // only ever shown by a browser that cannot render the element at all.
+      // It still owns a non-zero rect (the element's), so without this the
+      // walker measures the fallback string against the media's own
+      // background and reports a failure for text no user ever sees.
+      if (element.closest("video, audio, canvas, object")) continue;
+      // WCAG 2.2 SC 1.4.3 exempts "text or images of text that are part of
+      // an inactive user interface component". A disabled control is
+      // deliberately de-emphasised to signal that it cannot be used; holding
+      // it to 4.5:1 would erase the only cue that says so.
+      const inactive = element.closest("button, input, select, textarea, fieldset, [aria-disabled='true']");
+      if (
+        inactive &&
+        ((inactive as HTMLButtonElement).disabled === true ||
+          inactive.getAttribute("aria-disabled") === "true")
+      ) {
+        continue;
+      }
       const style = getComputedStyle(element);
       if (style.visibility === "hidden" || style.display === "none") continue;
       const rect = element.getBoundingClientRect();
