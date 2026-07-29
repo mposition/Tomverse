@@ -1655,6 +1655,9 @@ const checks = [
       const mainWorkflow = read(".github/workflows/e2e.yml");
       const dailyWorkflow = read(".github/workflows/daily-security-audit.yml");
       const visualWorkflow = read(".github/workflows/nightly-visual-regression.yml");
+      const recorderWorkflow = read(
+        ".github/workflows/visual-baseline-record.yml"
+      );
       const smokeVerifier = read("scripts/verify-smoke-coverage.mjs");
       return (
         source.includes("tomverse-e2e-nextauth-secret-only-2026") &&
@@ -1729,9 +1732,22 @@ const checks = [
         ) &&
         prWorkflow.includes("playwright install --with-deps chromium") &&
         !prWorkflow.includes("chromium webkit") &&
-        // Goldens are never rewritten by CI, on any tier.
+        // No tier that *judges* a golden may rewrite one.
         !prWorkflow.includes("--update-snapshots") &&
         !visualWorkflow.includes("--update-snapshots") &&
+        !mainWorkflow.includes("--update-snapshots") &&
+        !dailyWorkflow.includes("--update-snapshots") &&
+        // Recording is allowed in exactly one workflow, and only under the
+        // conditions that make it reviewable: run by hand, on the canonical
+        // image, onto a throwaway branch. Without these it would be an
+        // automatic way to overwrite the baseline that the tiers above exist
+        // to defend.
+        recorderWorkflow.includes("workflow_dispatch:") &&
+        !/^\s{2}(push|pull_request|schedule):/m.test(recorderWorkflow) &&
+        recorderWorkflow.includes("runs-on: ubuntu-24.04") &&
+        recorderWorkflow.includes("--update-snapshots") &&
+        recorderWorkflow.includes('branch="visual-baseline/') &&
+        !/git push origin (main|develop)\b/.test(recorderWorkflow) &&
         // The smoke tier is a reviewed manifest, not a tag count, and it is
         // capped so it cannot grow back into a second regression suite.
         smokeVerifier.includes("MANIFEST") &&

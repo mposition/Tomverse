@@ -26,7 +26,19 @@ import {
  */
 
 export const QUICK_SUMMARY_CREDITS = 1;
-export const AI_REVIEW_CREDITS = 4;
+// Two independent reviewers run for every cross-review -- the route starts a
+// second one from a different provider once the first succeeds, which doubles
+// the cost on purpose (see the comparison-reviews route). This constant used
+// to carry a single reviewer's weight, so the rail advertised 4 while 8 was
+// charged, and `creditsShortFor` let the action look affordable at a balance
+// of 4-7 that could not actually pay for it.
+//
+// It stays an estimate: reviewer models come from COMPARISON_REVIEW_MODEL_IDS
+// and are filtered by plan and runtime availability, so the exact figure is
+// only knowable server-side. The dialog fetches it before anything is spent
+// and is authoritative; this is the shelf price, marked approximate the same
+// way the quick summary's is.
+export const AI_REVIEW_CREDITS = 8;
 
 const interpolate = (template: string, values: Record<string, string | number>) =>
   Object.entries(values).reduce(
@@ -425,6 +437,7 @@ export function ComparisonActionRail({
                     credits={AI_REVIEW_CREDITS}
                     size="xs"
                     tone="onColor"
+                    approximate
                     label={`${AI_REVIEW_CREDITS} ${t("chat.aiReviewCredits")}`}
                     testId="ai-review-entry-credit-cost"
                     className="border-0 bg-white/20"

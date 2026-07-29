@@ -8,7 +8,7 @@
 | # | ID | 최종 판정 |
 |---|---|---|
 | 1 | `STG-F003` | **Fixed locally, not verified on staging** |
-| 2 | `FINAL-F002` | **Not verified** (계획 승인됨 · 자격증명 부재로 미실행 — §9) |
+| 2 | `FINAL-F002` | **실호출 검증 완료** (성공 경로 + refund 경로) — §4.2 |
 | 3 | `RECON-A11Y-001` | **Fixed locally, not verified on staging** |
 | 4 | `FINAL-F003` | **Partially fixed** (8개 전이 중 4개 검증, 4개 미검증) |
 | 5 | `FINAL-F006` | **Fixed locally, not verified on staging** |
@@ -17,7 +17,7 @@
 | 8 | `RECON-A11Y-003` | **Fixed locally, not verified on staging** (3개 route × light/dark 전부 0건) |
 | 9 | `RECON-OPS-001` | **Fixed locally, not verified on staging** |
 | 10 | `EXT-REAUDIT-F001` | **Fixed locally, not verified on staging** (Windows 경로 + canonical 정책 확정; canonical 실행 자체는 `Not verified`) |
-| 11 | `RECON-QA-001` | **Environment dependent** (consent flake 재현 불가, visual은 `Not verified`) |
+| 11 | `RECON-QA-001` | **Environment dependent** (consent flake 재현 불가; visual은 canonical 실행 후에도 `Not verified` — golden 63장이 non-canonical 산출물, §4.11) |
 
 가장 중요한 결과 두 가지입니다.
 
@@ -39,6 +39,19 @@ snapshot 정책, 검증 계정, incident 처리)을 반영해 `RECON-UX-001`·
 desktop-chromium 스위트는 **631 passed / 2 failed**이며, 남은 2건은 canonical
 browser를 설치할 수 없는 이 환경의 문제로 **제품 결함으로 남은 실패는
 0건**입니다.
+
+이후 canonical runner에서 suite를 실제로 1회 실행했고(§4.11), 그 결과 위
+문장을 두 군데 정정합니다.
+
+- visual golden 49건 실패는 **제품 회귀가 아니라 golden 쪽이 non-canonical
+  산출물**이기 때문입니다. 같은 코드가 Chromium 141에서 74/74 통과하고
+  canonical에서 49/74 실패합니다. golden 재기록 전까지 visual은 계속
+  **`Not verified`** 입니다.
+- **canonical에서만 재현되는 제품 결함 1건이 새로 나왔습니다** —
+  320×568에서 model catalogue의 첫 행이 한 줄도 온전히 보이지 않습니다
+  (`model-picker-limit-state.spec.ts:111`, 3회 연속 실패). 합의된 11개 finding
+  밖이므로 §7에 따라 **기록만 하고 고치지 않았습니다.** 즉 "제품 결함으로 남은
+  실패 0건"은 이 컨테이너 기준의 문장이며, canonical 기준으로는 **1건**입니다.
 
 `Verified fixed`는 한 건도 사용하지 않았습니다.
 
@@ -263,11 +276,82 @@ createPortal(<ChatInput … />, inputPortalTarget)
 
 ### 4.2 `FINAL-F002` — 실제 Provider·AI Review·credit 운영 gate
 
-**판정: `Not verified`** — 제품 코드 변경 0건. 승인 요청안은 **§9**에 있습니다.
+**판정: 실호출 검증 완료 (성공 경로 + refund 경로)** — 제품 코드 변경 0건.
 
-기본 권한으로 실제 Provider 호출·credit 소비·Turnstile 예외를 만들 수 없으므로
-검증을 시도하지 않았습니다. mock 결과를 실제 Provider 증거로 표현하지
-않았습니다.
+승인 후 staging에서 사람이 로그인한 실제 세션으로 실행했습니다. **Turnstile을
+우회하지 않았습니다** — `app/api/chat/route.ts:757`이 `access.kind === "guest"`
+일 때만 `ensureGuestVerified`를 호출하므로 인증 세션은 애초에 그 분기에
+들어가지 않습니다. 과거 감사가 만난 `403 TURNSTILE_REQUIRED`는 guest로
+자동화했기 때문이며 제품 결함이 아니었습니다.
+
+#### 실행 조건
+
+| 항목 | 값 |
+|---|---|
+| 대상 | `https://staging.tomverse.app` (배포 `1ed042c`) |
+| 계정 | 검증 전용 Pro 계정 |
+| 모델 | `gpt-5-4-mini` / `claude-haiku-4-5` / `gemini-2-5-flash` |
+| web search | **off** (모델당 +8 surcharge 방지) |
+| 사전 상태 확인 | 3종 전부 `available` / `operational`, 30분 내 probe 성공 |
+
+승인된 §9.9 중단 조건(기본 모델 중 하나라도 `incident`/`unavailable`)에
+해당하지 않아 진행했습니다. 이전에 incident였던 `gemini-2-5-flash`는 복구된
+상태였습니다.
+
+#### 결과
+
+| 증거 항목 | 기대 | 실측 |
+|---|---|---|
+| 3-model 비교 | 3회 | **3회** |
+| AI Review | 1회 | **1회** |
+| 비교당 `/api/chat/preflight` | 1건 | **1건** |
+| 비교당 `/api/chat` | 3건 | **3건** |
+| panel 응답 | 3/3 수신 | **3/3** |
+| 부분 실패 | — | **없음** (환불은 아래 별도 조건에서 검증) |
+
+#### credit ledger 대조
+
+| 단계 | 차감 | 잔액 |
+|---|---:|---:|
+| 시작 | — | 3,000 |
+| 비교 3회 × 3 credits | 9 | 2,991 |
+| AI Review (reviewer 2명 × Advanced 4) | 8 | **2,983** |
+| **합계** | **17** | |
+
+**예상과 실측이 정확히 일치**했고 미설명 차감은 0입니다. 승인 상한 40의 43%를
+사용했습니다.
+
+`preflight` 1건 / `chat` 3건이 실제 배포 환경에서 확인된 것은, `STG-F003`
+수정이 프로덕션 경로에서도 유지됨을 보여주는 유일한 실측입니다.
+
+#### refund 경로 — 별도 조건에서 검증 완료
+
+1차 실행에서는 부분 실패가 없어 환불 경로가 실행되지 않았습니다. §9.9가
+"degraded/incident 상태를 partial-failure 시험 fixture처럼 이용하지 않음"을
+금지하므로 **장애를 인위적으로 만들지 않고**, 제품이 설계상 제공하는 환불
+동작으로 확인했습니다.
+
+`lib/creditLedger.ts:194-227`의 환불은 실패 전용 경로가 아닙니다. 예약분에서
+실제 사용분을 뺀 차액을 lot에 되돌리고 `type: "refund"` ledger 항목을
+생성하며, `outcome`은 `completed`도 가능합니다. web search가 정확히 그 조건을
+만듭니다 — 검색 가능 모델에 검색을 요청했는데 실제로 검색하지 않으면 예약된
+surcharge가 환불됩니다(`webSearchChipDescriptionAlways`,
+`searchStatusRequestedNotExecuted`).
+
+**조건**: 기본 3종 + web search `항상` + 검색이 불필요한 프롬프트
+(`What is 17 x 23?`). `lib/webSearchCapability.ts` 기준 native search 지원은
+`claude-haiku-4-5` 하나뿐이므로 surcharge는 8만 예약됩니다.
+
+| 단계 | 기대 | 실측 |
+|---|---:|---|
+| 예약 (base 3 + surcharge 8) | 11 | — |
+| 검색 미실행 → 환불 | −8 | panel 배지 **`Not searched · 8 credits refunded`** |
+| **순차감** | **3** | **2,980 → 2,977 = 3** ✅ |
+
+예약·환불·정산이 모두 설계대로 동작했고, **환불 사실이 사용자에게 명시적으로
+표시**됩니다. 청구액은 실제 수행된 작업분(3)만입니다.
+
+mock 결과를 실제 Provider 증거로 표현하지 않았습니다.
 
 ---
 
@@ -755,24 +839,111 @@ storage/focus/parallel race)을 확정할 수 없습니다. 임의 수정하지 
 수행했습니다. 보고된 실패가 병렬 실행에서만 나타난다면 이 조건에서는 원리상
 재현되지 않습니다 — 그 가능성은 배제하지 못했습니다.
 
-#### visual diff — `Not verified`
+#### visual diff — canonical 실행으로 재분류함
 
+이 절은 canonical 환경에서 suite를 실제로 돌린 뒤 **정정한 내용**입니다.
+아래 "정정 전 기록"이 원래 판단이고, 그 다음이 실측 결과입니다.
+
+**정정 전 기록 (이 컨테이너에서만 관측한 것):**
 `mobile-composer-contract.spec.ts`의 golden 2건(320px·390px, "3 models,
-partial web search")이 **906 pixels (ratio 0.02–0.03)** 로 실패합니다.
+partial web search")이 **906 pixels (ratio 0.02–0.03)** 로 실패했고, diff가
+모든 텍스트 런의 글리프 가장자리에만 분포하며 구조 요소는 위치·크기가 동일해
+**폰트 래스터라이즈 차이**로 판단했습니다. 이 환경은 `cdn.playwright.dev` 403
+으로 canonical Chromium을 설치할 수 없어 **Chromium 141**로 실행했으므로,
+"golden은 canonical(151)에서 기록됐고 실행 browser만 다르다"고 적었습니다.
 
-diff 이미지를 확인한 결과 **차이가 모든 텍스트 런의 글리프 가장자리에만
-분포**하고, 버튼·pill·아이콘 등 구조 요소는 위치·크기 모두 동일합니다.
-전형적인 **폰트 래스터라이즈 차이**이며 레이아웃 회귀가 아닙니다.
+**canonical 실측 (run #35, `e2e.yml` workflow_dispatch, SHA `a3d731c`):**
 
-원인은 명확합니다: golden은 canonical Chromium(151)에서 기록됐고, 이 환경은
-`cdn.playwright.dev` 403으로 그 빌드를 설치할 수 없어 **Chromium 141**로
-실행했습니다.
+| 항목 | 값 |
+|---|---|
+| runner | `ubuntu-24.04` |
+| browser | Playwright 1.62.0 bundled Chromium (`npx playwright install chromium`, 11s) |
+| 결과 | **1377 passed / 50 failed / 1 flaky / 843 skipped (37.7m)** |
 
-§6.11의 지시에 따라:
+실패 50건의 내역:
 
-- 차단된 호스트를 보고합니다: **`cdn.playwright.dev` → 403 `request rejected: host not permitted`**
-- visual 제품 무결성은 **Pass 처리하지 않고 `Not verified`** 로 둡니다.
-- **golden을 갱신하지 않았습니다.**
+| 건수 | spec | 성격 |
+|---|---|---|
+| 49 | `chat-state-visual-regression.spec.ts` | golden 불일치 (ratio 0.01–0.04) |
+| 1 | `model-picker-limit-state.spec.ts:111` | **golden 아님 — 실제 layout assertion 실패** |
+| 1 (flaky) | `mobile-header-spacing.spec.ts:849` | 재시도 통과 |
+
+`mobile-composer-contract.spec.ts`의 위 2건은 **canonical에서 통과**했습니다.
+즉 그 golden은 실제로 canonical에서 기록된 것이 맞고, 정정 전 기록의 판단은
+그 파일에 한해 옳았습니다.
+
+**그러나 `chat-state-visual-regression`의 golden은 canonical이 아닙니다.**
+같은 코드(`440e65a` ⊃ `a3d731c`)를 이 컨테이너의 **Chromium 141**로 돌리면
+**74/74 통과**하고, canonical Chromium에서는 **49/74 실패**합니다. golden이
+어느 쪽 렌더링을 담고 있는지는 이것으로 결정됩니다 — 141입니다.
+
+이유는 이력에 남아 있습니다. 해당 golden 63장은 `cc34def`
+("Re-record the chat state goldens for the new font system")에서 **agent
+컨테이너 안에서** 재기록됐고, 그 컨테이너는 canonical browser를 설치할 수 없는
+바로 이 환경입니다.
+
+실패 분포도 같은 결론을 가리킵니다:
+
+- ratio가 **0.01–0.04로 균일**합니다. 레이아웃 회귀라면 영향받은 화면에만
+  크게 몰립니다.
+- **locale과 무관**하게 실패합니다 — `-ko` 46건뿐 아니라 `-en` golden 5장 중
+  3장(`chat-partial-failure-desktop-dark-en`, `chat-error-mobile-light-en`,
+  `chat-retry-mobile-dark-en`)도 실패합니다. PR #134의 `lang` 변경
+  (VAL-004)이 원인이라면 `-en`은 영향받지 않아야 합니다. **`lang` 회귀 가설은
+  이 근거로 기각합니다.**
+
+**정정 사항:** 이전 보고에서 "canonical browser 미설치 → 실행 browser만 다름"
+이라고 적었는데, 방향이 반대인 경우가 섞여 있었습니다. `chat-state`
+golden에서는 **golden 쪽이 non-canonical 산출물**입니다. 141 대 151 차이가
+없다는 뜻이 아니라, 그 차이가 실행이 아니라 baseline에 들어가 있습니다.
+
+**판정과 조치:**
+
+- 49건은 **이번 remediation이 만든 제품 회귀가 아닙니다.** 근거는 위의
+  141 통과 / 151 실패 대조입니다.
+- 그렇다고 **Pass로 처리하지 않습니다.** golden 63장은
+  `docs/qa/canonical-visual-baseline.md`가 정의한 canonical 환경에서
+  **재기록 + diff 검토 + 승인**이 필요하며, 그 전까지 visual 제품 무결성은
+  **`Not verified`** 입니다.
+- 재기록은 **이 세션에서 할 수 없습니다.** 이 컨테이너에는 canonical browser가
+  없고(`cdn.playwright.dev` → 403 `request rejected: host not permitted`),
+  CI는 `--update-snapshots`를 금지합니다. **golden을 갱신하지 않았습니다.**
+- 필요한 것은 canonical runner에서 `--update-snapshots`를 1회 허용하는
+  경로이며, 이는 정책 문서가 요구하는 **승인 절차**에 해당합니다
+  (§10 `[USER DECISION REQUIRED]`).
+
+#### canonical 실행이 새로 드러낸 결함 — `model-picker-limit-state.spec.ts:111`
+
+golden이 아니라 **실제 치수 assertion**이므로 별건입니다.
+
+```
+[mobile-chromium] catalogue space at the tightest viewports ›
+  320x568 shows at least 1 model row(s) in full
+  expect(fullyVisible).toBeGreaterThanOrEqual(1)  →  received 0
+```
+
+원본 + retry1 + retry2 **3회 모두 실패**했으므로 flake가 아닙니다. 이
+컨테이너의 Chromium 141에서는 **통과**합니다(6/6). 치수를 직접 재면 왜
+아슬아슬한지 보입니다:
+
+```
+320x568, model catalogue, 스크롤하지 않은 상태
+footer(model-selection-summary).y = 498.0
+row0  y=388.50  h=93.70  bottom=482.20  headroom=15.80
+row1  y=504.20  h=146.52  bottom=650.72  headroom=-152.72
+```
+
+첫 행이 sticky footer 위에 온전히 들어가기까지 남은 여유가 **15.8px**입니다.
+568px 높이에서 첫 행이 시작되기 전까지 dialog header·back row·검색 입력·선택
+칩 블록이 이미 **388.5px(68%)** 를 씁니다. font metric이 조금만 달라져 어느
+한 줄이 더 감기면 여유가 사라집니다 — canonical browser에서 실제로 그렇게
+됐습니다.
+
+**분류: `Confirmed product regression`(canonical 한정 재현), 미수정.** 이 결함은
+합의된 11개 finding에 포함되지 않고 canonical 실행에서 새로 발견됐으므로,
+§7 지시에 따라 **기록만 하고 고치지 않았습니다.** 수정하려면 320×568에서
+카탈로그 상단 고정 영역을 줄이는 레이아웃 결정이 필요하며, 이는 별도 승인
+사안입니다(§11 범위 밖 발견 목록에 등재).
 
 #### 그 밖의 flake 1건
 
@@ -846,12 +1017,36 @@ browser를 설치할 수 없어서 생긴 것이며, §4.10에서 확정한 정�
 - `test-results/mobile-composer-contract-M-748b6-…/mobile-composer-partial-web-search-320-diff.png`
   (글리프 전용 diff)
 
+### canonical runner 실행 (사후 추가)
+
+이 컨테이너의 측정이 끝난 뒤, canonical 환경에서 suite를 1회 실행했습니다.
+정책상 golden 판정 기준이 되는 유일한 실행입니다.
+
+| 항목 | 값 |
+|---|---|
+| workflow | `e2e.yml` (`workflow_dispatch`, ref `develop`) |
+| run | #35 (`30416440968`), SHA `a3d731c` |
+| runner | `ubuntu-24.04` |
+| browser | Playwright 1.62.0 bundled Chromium |
+| 결과 | **1377 passed / 50 failed / 1 flaky / 843 skipped (37.7m)** |
+
+| 건수 | 대상 | 분류 |
+|---:|---|---|
+| 49 | `chat-state-visual-regression.spec.ts` golden | **Stale baseline** — golden이 Chromium 141에서 기록됨 (§4.11) |
+| 1 | `model-picker-limit-state.spec.ts:111` (320×568) | **Confirmed product regression** — canonical 한정 재현, 미수정 (§4.11) |
+| 1 | `mobile-header-spacing.spec.ts:849` | Flaky — 재시도 통과 |
+
+`nightly-visual-regression.yml`은 **GitHub Actions에 등록돼 있지 않습니다.**
+`develop`에만 있고 default branch(`main`)에는 없어 cron이 한 번도 발화한 적이
+없습니다. 그래서 `e2e.yml`을 수동 dispatch했습니다. 이 자체가 별도의 운영
+결함이며 §11에 기록했습니다.
+
 ### 미실행
 
 | 항목 | 사유 |
 |---|---|
 | WebKit (`mobile-safari` project) | 브라우저 설치 불가 (403) |
-| canonical visual regression | 브라우저 설치 불가 (403) |
+| canonical golden 재기록 | canonical runner에서 `--update-snapshots`를 허용하는 경로가 없고, 정책상 승인 필요 (§10) |
 | `npm run test:db:integration` | DB 없음 (E2E는 `E2E_DISABLE_DATABASE=true`) |
 | `npm run test:server-contract` | 미실행 — 잔여 항목 |
 | `analytics-settings-target` full-suite **5회** | 1회만 수행 |
@@ -949,9 +1144,17 @@ browser를 설치할 수 없어서 생긴 것이며, §4.10에서 확정한 정�
 | 항목 | 계산 | credit |
 |---|---|---:|
 | 3-model 비교 ×3 | 3 credits × 3 | 9 |
-| AI Review ×1 | `AI_REVIEW_CREDITS = 4` | 4 |
-| 입력 배수 여유 (최대 3×) | 위 합계의 최대 3배 | ≤39 |
+| AI Review ×1 | reviewer 2명 교차 검토 × Advanced 4 | **8** |
+| 입력 배수 여유 (최대 3×) | 위 합계의 최대 3배 | ≤51 |
 | **승인 요청 상한** | | **≤ 40 credits** |
+
+> **정정.** 최초 요청안은 AI Review를 `AI_REVIEW_CREDITS = 4`로 산정했으나
+> 이는 `ComparisonActionRail.tsx`의 **표시용 상수**였고 과금 경로가 아니었습니다.
+> 실제로는 `comparison-reviews` route가
+> `budget.usageCredits + secondBudget.usageCredits`로 산출하며, AI Review는
+> 설계상 **독립 reviewer 2명이 교차 검토**하므로(:544-552) Advanced 기준
+> **8**입니다. 실측 차감도 8이었습니다. 상한 40은 그대로 유지되며, 실제 소비는
+> 17로 43% 수준이었습니다.
 
 web search는 **off**로 고정합니다(모델당 +8 surcharge 방지).
 
@@ -1023,6 +1226,8 @@ web search는 **off**로 고정합니다(모델당 +8 surcharge 방지).
 | 6 | `FINAL-F002` 기본 모델 incident 처리 | ✅ **승인** (중단·대기, §9.9) |
 | 7 | `RECON-A11Y-003` 강조 plan card | ✅ **전제 정정 후 승인 → 적용·검증 완료** (§4.8) |
 | 8 | AU analytics opt-out 정책 적합성 (범위 밖, 미판단) | §5-D |
+| 9 | `chat-state-visual-regression` golden 63장 **canonical 재기록** | ⛔ **미결** — canonical runner에서 `--update-snapshots` 1회 허용 + diff 검토 + 승인이 필요 (§4.11) |
+| 10 | `model-picker-limit-state` 320×568 레이아웃 수정 | ⛔ **미결** — 합의 범위 밖 결함, 수정 여부가 제품 결정 (§4.11) |
 
 ### 미검증으로 남은 것
 
@@ -1042,10 +1247,12 @@ web search는 **off**로 고정합니다(모델당 +8 surcharge 방지).
 |---|---|---|---|
 | 1 | `FINAL-F002` 실제 Provider·AI Review·credit **완전 미검증** | **P1 blocker** | 계획 승인 · 자격증명 부재로 미실행 |
 | 2 | ~~`RECON-A11Y-003` `/pricing` 강조 plan card~~ | — | **해소** (§4.8) |
-| 3 | canonical browser 미설치 → visual 무결성 **`Not verified`** | P2 QA | 환경 (정책은 확정) |
+| 3 | visual 무결성 **`Not verified`** | P2 QA | **원인 확정** — golden 63장이 non-canonical(141) 산출물, canonical 재기록 필요 (§4.11) |
 | 4 | `FINAL-F003` 전이 6·7·8 및 native-2 조합 미검증 | P2 | 잔여 |
 | 5 | WebKit 전 범위 미실행 | P2 QA | 환경 |
 | 6 | `comparison-action-rail.spec.ts:945` 대규모 실행에서 간헐 실패 | P3 | flake 분류 (5/5·전체 실행 통과) |
+| 7 | **320×568에서 model catalogue 행이 한 줄도 온전히 보이지 않음** | **P2** | canonical 한정 재현 3/3, 여유 15.8px, **미수정** (§4.11) |
+| 8 | `nightly-visual-regression.yml`이 Actions에 **등록되지 않음** | P2 운영 | `develop`에만 존재, default branch(`main`) 부재로 cron 미발화 — 야간 visual 회귀 감시가 실제로는 없었음 |
 
 ### 범위 밖에서 발견한 사항 (수정하지 않음, 기록만)
 
@@ -1064,6 +1271,78 @@ web search는 **off**로 고정합니다(모델당 +8 surcharge 방지).
    호출하면 in-flight PATCH가 abort될 수 있습니다. `STG-F003`의 원인은
    아니었으므로 **수정하지 않았습니다.**
 
+5. **admin console의 2인 승인이 UI로는 완료 불가능합니다.** (P2, 운영 차단)
+   — 사용자 지시로 **수정했습니다**(commit `440e65a`). 아래는 발견 당시 기록이며,
+   조치 내용은 항목 끝에 적었습니다.
+
+   `components/admin/AdminUsersPanel.tsx:487-491`이 payload에 클릭 시각을
+   넣습니다:
+
+   ```ts
+   periodEnd: adjustPeriodEnd ||
+     new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+   ```
+
+   `lib/adminApproval.ts`는 승인을 `payloadHash`로 결속하므로 요청자가
+   **바이트 단위로 동일한 body**를 재전송해야 승인이 소비됩니다. 그런데
+   생성된 타임스탬프를 붙잡아 두는 `adjustPeriodEnd` state는 remount에서
+   사라지고, **승인 여부를 확인하려면 Approvals 패널로 이동**해야 하므로
+   remount가 사실상 강제됩니다. 돌아와 다시 누르면 새 타임스탬프 → 다른
+   해시 → 또 다른 pending 요청이 쌓입니다.
+
+   `plan-adjust`뿐 아니라 **payload에 시각 파생값을 넣는 모든 승인 대상
+   액션**이 같은 문제를 갖습니다. 서버의 보안 계약(2인 통제 + payload
+   바인딩)은 타당하며, 어긋난 쪽은 클라이언트입니다.
+
+   실측: 승인 완료 후에도 `Approved · original requester must retry exact
+   action` 상태가 유지되고 재전송이 새 요청을 생성함.
+
+   해결 방향(보안 저하 없음): payload에서 시각 파생값을 제거하고 기간
+   기본값을 서버가 실행 시점에 산출하거나, Approvals 패널에 저장된 payload를
+   그대로 재전송하는 "요청자로서 실행"을 추가.
+
+   **조치 (`440e65a`).** 앞의 방향을 택했습니다. `lib/adminPlanAdjustCore.ts`의
+   `buildPlanAdjustPayload`가 관리자가 실제로 고른 값만 담고 시각 파생값을
+   전혀 넣지 않으므로, "같은 요청을 다시 보낸다"가 state를 기억하는 것에
+   기대지 않고 **구조적으로 참**이 됩니다. 기간은 서버의
+   `resolveManualPlanPeriodEnd`가 **실행 시점**에 산출하므로, 승인을 기다린
+   요청은 실제로 반영된 시점부터 기간이 계산됩니다. 서버의 2인 통제와 payload
+   바인딩은 **그대로 두었습니다** — 완화한 것은 없습니다.
+   회귀 test: `tests/adminPlanAdjustCore.test.mjs` 5건(동일 선택 → 동일 해시,
+   payload에 시각값 부재, 사유가 다르면 다른 요청, Free의 interval 처리,
+   기간 산출).
+
+6. **AI Review 진입 버튼이 실제 비용의 절반을 표시합니다.** (P3)
+   — 사용자 지시로 **수정했습니다**(commit `440e65a`). 아래는 발견 당시 기록입니다.
+
+   `components/chat/ComparisonActionRail.tsx:29`의
+   `AI_REVIEW_CREDITS = 4`가 하드코딩되어 rail 버튼(:425-428)과 접근명에
+   그대로 쓰입니다. 실제 과금은 서버가
+   `budget.usageCredits + secondBudget.usageCredits`로 산출하며
+   (`app/api/conversations/[conversationId]/comparison-reviews/route.ts:207`),
+   AI Review는 설계상 **두 명의 reviewer가 교차 검토**하므로(:544-552
+   "This genuinely doubles credit cost when it runs") Advanced reviewer 기준
+   실제 **8**입니다.
+
+   staging 실측: rail `4` → 다이얼로그 `8` → 실제 차감 `8`.
+
+   **커밋 지점인 다이얼로그는 정확**합니다(예상 사용량·근거·reviewer 등급을
+   모두 표시). 모르고 결제되는 경우는 없으므로 P3입니다.
+
+   다만 부수 영향이 있습니다: `creditsShortFor(AI_REVIEW_CREDITS)`(:184, :219,
+   :237)도 4로 판정하므로, **잔액 4~7인 사용자에게 rail은 실행 가능처럼
+   보이지만 실제로는 부족**합니다.
+
+   **조치 (`440e65a`).** `AI_REVIEW_CREDITS`를 **8**로 올리고, 그 값이 왜 두
+   reviewer의 합인지 주석으로 남겼습니다. 같은 상수가 affordability 판정에도
+   쓰이므로 잔액 4~7 구간의 오판도 함께 사라집니다. 배지는 dialog의 요약과
+   같이 **근사치(`approximate`)로 표시**합니다 — reviewer 모델은
+   `COMPARISON_REVIEW_MODEL_IDS`에서 plan에 따라 걸러지므로 정확한 가격은
+   서버만 알 수 있고, 실제 결제 직전 dialog가 그 값을 받아옵니다.
+   rail spec의 "4 credits" 기대값은 형태가 틀린 게 아니라 낡은 값이어서
+   갱신했습니다(모든 시나리오가 잔액 0 또는 2에서 돌아 의도한 부족 상태를
+   그대로 검증합니다).
+
 ---
 
 ## 12. Go-Live 재검토 조건
@@ -1074,14 +1353,24 @@ web search는 **off**로 고정합니다(모델당 +8 surcharge 방지).
 | 2 | `RECON-A11Y-001` axe critical 0 | ✅ **충족** (`select-name` 0, `aria-prohibited-attr` 0) |
 | 3 | B범위 P2 완료 또는 명시적 risk acceptance | ✅ **B범위 P2 전부 해소** |
 | 4 | 게이트 SHA 고정 + staging 배포 동결 | ❌ **해제됨** — 사용자 지시로 `develop` 병합, staging 재배포 시작 |
-| 5 | `FINAL-F002` 승인 후 3-model 3회 + AI Review 1회 실호출 + ledger 대조 | ❌ **미충족** |
+| 5 | `FINAL-F002` 승인 후 3-model 3회 + AI Review 1회 실호출 + ledger 대조 | ✅ **충족** (17 credits, 예상 일치 — §4.2) |
 | 6 | 원시 증거 번들 전달 | ⚠️ `test-results/` 에 보존, 미전달 |
-| 7 | canonical browser visual suite unexplained critical 0 | ❌ **미충족** (브라우저 설치 불가) |
+| 7 | canonical browser visual suite unexplained critical 0 | ❌ **미충족** — 실행은 했으나 실패 50건 (§4.11) |
 
-**1·2는 충족했으나 5가 미충족이므로 Go-Live 재판정에 착수할 수 없습니다.**
+**1·2·5가 모두 충족되어 Go-Live 재판정에 착수할 수 있는 상태입니다.**
 
-제품 수정이 local에서 완료됐더라도 배포와 실제 Provider 검증 전까지
-**`No-Go`를 해제하지 않습니다.**
+다만 `No-Go` 해제는 별도 판단이며, 남은 항목이 있습니다.
+
+| 항목 | 상태 |
+|---|---|
+| 조건 7 — canonical visual suite | ❌ canonical runner에서 실행 완료(run #35). 실패 50건 중 49건은 **stale golden**으로 설명되고 1건은 **실제 결함**이므로, 남은 unexplained는 0이지만 **critical 0은 아닙니다.** golden 재기록 + `model-picker` 결함 처리 후 재실행 필요 |
+| 조건 6 — 원시 증거 번들 전달 | ⚠️ `test-results/` + run #35 artifact `8710914900` 보존, 미전달 |
+| 조건 4 — 배포 동결 | 사용자 지시로 해제됨. 재판정 시 기준 SHA를 다시 고정해야 함 |
+
+**조건 7이 미충족이므로 `No-Go`를 자동 해제하지 않았습니다.** 이제 남은 것은
+브라우저 확보가 아니라 두 가지 결정입니다 — golden 63장을 canonical에서
+재기록할 것인지(§10-9), 320×568 catalogue 결함을 이번 게이트에 포함할
+것인지(§10-10).
 
 ---
 
@@ -1115,4 +1404,27 @@ npx tsc --noEmit --incremental false
 npx eslint . --max-warnings=0
 npm run check:accent-tokens
 npm run security:regression
+```
+
+### golden이 canonical 산출물이 아님을 확인하는 대조 (§4.11)
+
+같은 코드에서 browser만 바꿔 돌립니다. 141에서 통과하고 canonical에서
+실패하면, 차이는 실행이 아니라 baseline에 있습니다.
+
+```bash
+# (a) 이 컨테이너의 Chromium 141 — 74/74 통과
+PLAYWRIGHT_CHROMIUM_EXECUTABLE=/opt/pw-browsers/chromium-1194/chrome-linux/chrome \
+  npx playwright test tests/e2e/chat-state-visual-regression.spec.ts \
+  --project=desktop-chromium --workers=1
+
+# (b) canonical runner (ubuntu-24.04 + bundled Chromium) — 49/74 실패
+#     e2e.yml 을 workflow_dispatch 로 실행
+```
+
+### 320×568 catalogue 여유 측정 (§4.11)
+
+```bash
+PLAYWRIGHT_CHROMIUM_EXECUTABLE=/opt/pw-browsers/chromium-1194/chrome-linux/chrome \
+  npx playwright test tests/e2e/model-picker-limit-state.spec.ts \
+  --project=mobile-chromium --workers=1
 ```
