@@ -111,14 +111,90 @@ rebase는 `git stash push -u` → `git checkout -B <branch> origin/develop` →
 - **판정**: `Not verified`
 - **근본 원인**: 제품 결함이 아니라 검증 수단의 부재. Guest 계정은 AI Review가
   잠겨 있고, 실제 3-model comparison에는 인증 계정이 필요하다.
-- **수행**: 사용자에게 실행 승인을 요청해 "진행 — 계정과 credit 한도를 제공"을
-  받았다. 그러나 **실제 staging 인증 계정 자격증명이 제공되지 않아** 실행
-  단계에 진입하지 못했다.
-- **환경 확인(read-only)**: `challenges.cloudflare.com/turnstile/v0/api.js` → 302
-  (도달 가능). 즉 Turnstile 자체는 이 환경에서 차단되지 않는다. 남은 차단 요인은
-  계정 자격증명 하나다.
 - **변경한 제품 코드**: 없음.
-- **다음 승인**: staging 인증 계정 + 모델·실행 횟수·최대 credit을 명시한 재승인.
+- **실제 Provider 호출 0회, credit 소비 0.**
+
+**후속 실행 시도 (2026-07-29T22:00–23:15Z)**
+
+사용자가 QA 계정 `qaverify@tomverse.app`을 제시하고, 실행 범위를
+**3-model×3 + AI Review×1, 상한 40 credit, web search off**로 승인한 뒤
+로그인 코드까지 전달했다. 인증과 baseline 확보까지 성공했고, 실제 호출
+직전에 정지했다.
+
+*예상 credit 산출 (`lib/models.ts`)*
+
+공식 `ceil(usage class 가중치 × 입력 토큰 배수)`. 가중치 standard 1 /
+advanced 4 / premium 8 / reasoning 12 / premium-reasoning 16 / research 20.
+입력 배수 ≤16k 1× / >16k 1.5× / >50k 2× / >100k 3×. web search `always`는
+모델당 +8(미실행 시 환불).
+
+| 항목 | 구성 | credit |
+|---|---|---:|
+| 3-model comparison ×3 | `gpt-5-4-mini` + `claude-haiku-4-5` + `gemini-2-5-flash` (전부 standard, provider 3사) | 3/회 × 3 = 9 |
+| AI Review ×1 | 기본 reviewer `mistral-medium-3-1` + `claude-sonnet-5` + `llama-3-3` (전부 advanced) | 12 |
+| **예상 합계** | | **9–21** |
+| 최악 (프롬프트 >16k 토큰) | | 36 |
+| 승인된 hard cap | | **40** |
+
+*확보한 것*
+
+- **로그인 성공**: `POST /api/auth/callback/email-code` → 세션 확립.
+  계정 plan **Pro**, 세션 만료 2026-08-05.
+- **credit baseline** (`GET /api/user/usage`, 2026-07-29T23:10:21Z):
+  `creditsMonth=23`, `planRemainingCredits=2977`(월 한도 3000),
+  `purchasedRemainingCredits=0`, `creditDebt=0`, `maxModels=3`.
+- **실행 경로 확정**: `POST /api/conversations` → `POST /api/chat/preflight`
+  (expected credit) → `POST /api/chat` ×3 병렬(panel별 HTTP status·latency·
+  trace·완료 여부) → `GET /api/user/usage`(charged) →
+  `POST /api/conversations/{id}/comparison-reviews`. run별 before/after 기록.
+
+*차단 요인 2 — 이 환경의 브라우저가 staging에 도달하지 못한다*
+
+R-01은 본래 UI flow다. 그러나 Chromium이 `https://staging.tomverse.app`에
+도달하지 못한다. 5개 구성 전부 `net::ERR_CONNECTION_RESET`: Playwright `proxy`
+옵션, raw `--proxy-server`, 프록시 미사용, `--disable-http2`,
+`--ignore-certificate-errors`.
+
+- 같은 호스트에 **curl은 정상 도달**한다(`/api/build-info` 200).
+- agent proxy `__agentproxy/status`는 이 호스트에 대한 **정책 거부를 기록하지
+  않았다**(기록된 `connect_rejected`는 Chromium 자체 telemetry인
+  `www.google.com`·`android.clients.google.com`뿐). egress 정책 문제가 아니다.
+- `/root/.ccr/README.md`가 "report, do not work around"라고 명시하므로 로컬
+  reverse-proxy 등으로 브라우저 트래픽을 우회시키는 workaround는 **시도하지
+  않았다**. 그런 경로로 얻은 증거는 신뢰할 수 없다.
+
+이 때문에 UI 관찰(사용자가 보는 3개 panel 완료)은 이 환경에서 불가능하고,
+browserless API 경로만 남았다.
+
+*확인한 사실 — Turnstile은 guest 전용이다*
+
+- 로그인 코드 요청은 Turnstile 없이 성공한다
+  (`POST /api/auth/email-login/request` → `{"ok":true}` 200). 코드 TTL 최대 10분
+  (`EMAIL_LOGIN_CODE_TTL_MINUTES`).
+- Turnstile은 guest flow에만 걸린다(`guest_turnstile_grant` cookie,
+  `expectedAction = "guest_chat"`). **인증된 chat은 Turnstile을 요구하지 않는다.**
+  감사 기준선의 `403 TURNSTILE_REQUIRED` 3건이 모두 guest 시도였던 이유가 이것이며,
+  이는 Provider 장애의 증거가 아니었다는 기존 판단을 뒷받침한다.
+
+*차단 요인 3 — 실행 단계가 권한 classifier에 거부됨*
+
+실제 호출(`POST /api/conversations`, `/api/chat/preflight`, `/api/chat` ×3)이
+Claude Code auto-mode 권한 classifier에 의해 차단되었다. credit을 소비하고 외부
+Provider를 호출하는 되돌릴 수 없는 동작이므로 **정당한 게이트**이며, 지침에 따라
+우회하지 않고 정지했다.
+
+결과적으로 이 세션은 이 계정의 credit을 **한 번도 쓰지 않았다**
+(`creditsMonth`는 baseline과 동일한 23).
+
+- **다음 승인**: 아래 중 하나.
+  1. staging에 대한 authenticated POST를 허용하는 Bash 권한 규칙 추가 —— 세션이
+     2026-08-05까지 유효하므로 새 로그인 코드 없이 즉시 재개 가능하다.
+  2. 사람이 staging UI에서 직접 수행하고 metadata를 공유 —— 브라우저 도달 문제까지
+     함께 해소되므로 UI 충실도가 가장 높다.
+- **별도 보고 대상**: 브라우저의 staging 도달 불가는 세션 환경/프록시 제약이므로
+  관리자 또는 Anthropic 지원에 보고할 사안이다(README 지침).
+- **위생**: 세션 cookie는 저장소가 아니라 세션 scratchpad에만 있고 컨테이너와 함께
+  사라진다. 로그인 코드·cookie·token은 보고서와 artifact에 기록하지 않았다.
 
 ### R-02 — Stale probe failure freshness ✅
 
@@ -510,12 +586,15 @@ t=877ms value=0.1095
 
 | 항목 | 값 |
 |---|---|
-| 사용자 승인 | **받음** ("진행 — 계정과 credit 한도를 제공") |
+| 사용자 승인 | **받음** — 3-model×3 + Review×1, 상한 40 credit, web search off. 계정과 로그인 코드까지 제공됨 |
+| 인증 | **성공** — `qaverify@tomverse.app`, plan Pro, 세션 만료 2026-08-05 |
+| credit baseline | `creditsMonth=23`, `planRemaining=2977`/3000, purchased 0, debt 0 |
 | 실제 실행한 comparison | **0회** |
 | 실제 실행한 AI Review | **0회** |
 | 소비한 credit | **0** |
 | Provider 호출 | **0** |
-| 차단 사유 | staging 인증 계정 자격증명이 제공되지 않음 |
+| 차단 사유 | (1) 이 환경의 Chromium이 staging에 도달 불가 → UI 관찰 불가 (2) browserless 실행 POST가 권한 classifier에 거부 |
+| baseline 대비 변화 | **없음** — `creditsMonth`가 23으로 동일 |
 
 승인은 존재하지만 실행 수단이 없었다. Turnstile CDN 도달은 확인했으므로(302),
 남은 유일한 차단 요인은 계정이다. mock/unit/server-contract 결과를 actual
@@ -549,7 +628,7 @@ artifact에 기록하지 않았다.
 
 | 항목 | 상태 | 필요한 다음 조치 |
 |---|---|---|
-| **R-01 actual proof** | Not verified | staging 인증 계정 자격증명. 제공되면 model·실행 횟수·예상 최대 credit·중단 기준을 제시해 재승인 후 실행 |
+| **R-01 actual proof** | Not verified | 인증·baseline은 확보(Pro, 2977 credit). 남은 차단 요인 둘: 이 환경의 Chromium이 staging에 도달 못함(`ERR_CONNECTION_RESET`, curl은 정상), 실행 POST가 권한 classifier에 거부됨. Bash 권한 규칙 추가 또는 사람의 UI 실행이 필요. credit 소비 0 |
 | **QA-GATE-001 canonical 전체 E2E** | Not verified | canonical runner. 이 환경에서는 `cdn.playwright.dev`가 proxy에서 403(`host not permitted`)이라 고정 Chromium `1234`를 설치할 수 없고, 제공된 build는 `1194`다. OS는 canonical `ubuntu-24.04`로 일치한다. CI의 `ubuntu-24.04` job에서 실행해야 51개 visual diff와 axe/CSP 환경 차이를 종결할 수 있다 |
 | **visual snapshot 2건** | Not verified | canonical 환경 재현. diff는 906px 문서화된 rasterization 차이. 갱신 승인 요청 대상이며 임의 갱신하지 않았다 |
 | **R-02/R-04/R-05/R-08 staging 검증** | Fixed locally, not verified on staging | 배포 승인. 현재 staging(`ea56a6ba`)에는 이 수정들이 없다 |
