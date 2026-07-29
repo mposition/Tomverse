@@ -134,4 +134,64 @@ test.describe("catalogue space at the tightest viewports", () => {
       await expectNoHorizontalOverflow(page);
     });
   }
+
+  // The count above passes on a hairline. It did: at 320x568 the last visible
+  // row cleared the footer by 15.8px, which is less than one line of text, so
+  // the same build showed a full row on one Chromium and none on the canonical
+  // one -- a rasteriser a few pixels wider re-wrapped a row and pushed it under
+  // the footer. A margin narrower than a line of text is not headroom, so the
+  // margin itself is asserted rather than left implied.
+  const MIN_ROW_CLEARANCE = 24;
+
+  test("the last visible row clears the sticky footer by more than a line of text", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 320, height: 568 });
+    await page.goto("/chat?lang=en");
+    await openPicker(page);
+    const dialog = await openModelCatalogue(page);
+
+    const footerBox = await dialog
+      .getByTestId("model-selection-summary")
+      .boundingBox();
+    expect(footerBox).not.toBeNull();
+
+    let clearance = Number.NEGATIVE_INFINITY;
+    for (const row of await dialog.getByTestId("model-option").all()) {
+      const box = await row.boundingBox();
+      if (!box || box.y < 0) continue;
+      const gap = footerBox!.y - (box.y + box.height);
+      if (gap >= 0) clearance = Math.max(clearance, gap);
+    }
+
+    expect(
+      clearance,
+      `the first fully visible row clears the footer by ${clearance}px`
+    ).toBeGreaterThanOrEqual(MIN_ROW_CLEARANCE);
+  });
+
+  test("the models sheet spends one row on its title, not two", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 320, height: 568 });
+    await page.goto("/chat?lang=en");
+    const dialog = await openPicker(page);
+
+    // "Choose AI models" named the sheet while the picker's own header named
+    // the screen inside it, so a 568px phone paid 65px for two stacked titles.
+    // The dialog keeps the accessible name; only the duplicated visible row is
+    // gone, and the close control it used to own moved into the header below.
+    await expect(dialog).toHaveAttribute("aria-label", "Choose AI models");
+    await expect(dialog.getByText("Choose AI models")).toHaveCount(0);
+    await expect(dialog.getByTestId("model-picker-title")).toBeVisible();
+
+    const close = dialog.getByTestId("model-picker-close");
+    await expect(close).toBeVisible();
+    const closeBox = await close.boundingBox();
+    expect(closeBox!.width).toBeGreaterThanOrEqual(44);
+    expect(closeBox!.height).toBeGreaterThanOrEqual(44);
+
+    await close.click();
+    await expect(page.locator("#chat-input-popover")).toHaveCount(0);
+  });
 });

@@ -2316,39 +2316,41 @@ export function ChatInput({
               }`}
             >
               <div className="mx-auto mb-2 mt-0.5 h-1 w-10 rounded-full bg-zinc-300 dark:bg-zinc-700 md:hidden" aria-hidden="true" />
-              <div className="mb-2 flex items-center justify-between border-b border-zinc-200 px-2 pb-2 pt-1 dark:border-zinc-800 md:hidden">
-                <div>
-                  <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
-                    {menuView === "models"
-                      ? t("chat.modelSelect")
-                      : menuView === "webSearch"
+              {/*
+                The models view supplies its own header -- a back control, the
+                screen title and the selection count -- so this row would be the
+                second title in a row: "Choose AI models" stacked directly on
+                "All models". Two headers cost 65px, and at 320x568 the model
+                list is only 129px tall, which is how a catalogue of 30+ models
+                ended up unable to show one complete row. The dialog keeps its
+                accessible name either way; it lives on the dialog element, not
+                on this text. The picker's own header carries the close control
+                on the compact sheet.
+              */}
+              {menuView !== "models" && (
+                <div className="mb-2 flex items-center justify-between border-b border-zinc-200 px-2 pb-2 pt-1 dark:border-zinc-800 md:hidden">
+                  <div>
+                    <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
+                      {menuView === "webSearch"
                         ? t("chat.toolsWebSearch")
                         : t("chat.moreActions")}
-                  </p>
-                  {/*
-                    UI-010: the selection count belongs to the picker panel's
-                    own header, immediately above the candidates it applies to.
-                    Repeating it here put "3/3" twice in consecutive rows and
-                    pushed the first candidate further down a phone screen --
-                    the row this header still owns is the dialog's purpose.
-                  */}
-                  {menuView !== "models" && (
+                    </p>
                     <p className="text-xs text-zinc-500">
                       {menuView === "webSearch"
                         ? t("chat.toolsWebSearchDescription")
                         : t("chat.uploadFromComputer")}
                     </p>
-                  )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => closeMenu(true)}
+                    className="flex h-11 w-11 items-center justify-center rounded-xl bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+                    aria-label={t("auth.cancel")}
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => closeMenu(true)}
-                  className="flex h-11 w-11 items-center justify-center rounded-xl bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
-                  aria-label={t("auth.cancel")}
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
+              )}
               {menuView === "actions" ? (
                 <div className="space-y-1">
                   <button

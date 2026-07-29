@@ -419,6 +419,25 @@ export function ModelPickerPanel({
               : t("chat.modelsSelectedOther")}
           </span>
         </div>
+        {/*
+          The compact sheet used to carry its own header above this one, and the
+          close control lived there. Removing that duplicated title row is what
+          gives the catalogue back the height it needs at 320x568, so the close
+          control moves here rather than disappearing -- the back arrow is not a
+          substitute, because from the catalogue it returns to the
+          recommendations instead of dismissing the sheet.
+        */}
+        {isCompactLayout && (
+          <button
+            type="button"
+            data-testid="model-picker-close"
+            onClick={onDone}
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-zinc-100 text-zinc-600 transition hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+            aria-label={t("auth.cancel")}
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
+        )}
       </div>
 
       <div className="mb-2 shrink-0 px-1">
