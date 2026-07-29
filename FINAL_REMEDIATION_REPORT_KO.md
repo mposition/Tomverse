@@ -8,7 +8,7 @@
 | # | ID | 최종 판정 |
 |---|---|---|
 | 1 | `STG-F003` | **Fixed locally, not verified on staging** |
-| 2 | `FINAL-F002` | **Not verified** (계획 승인됨 · 자격증명 부재로 미실행 — §9) |
+| 2 | `FINAL-F002` | **실호출 검증 완료 (성공 경로)** · refund 경로 미검증 — §4.2 |
 | 3 | `RECON-A11Y-001` | **Fixed locally, not verified on staging** |
 | 4 | `FINAL-F003` | **Partially fixed** (8개 전이 중 4개 검증, 4개 미검증) |
 | 5 | `FINAL-F006` | **Fixed locally, not verified on staging** |
@@ -263,11 +263,64 @@ createPortal(<ChatInput … />, inputPortalTarget)
 
 ### 4.2 `FINAL-F002` — 실제 Provider·AI Review·credit 운영 gate
 
-**판정: `Not verified`** — 제품 코드 변경 0건. 승인 요청안은 **§9**에 있습니다.
+**판정: 실호출 검증 완료 (성공 경로) · refund 경로 미검증** — 제품 코드 변경 0건.
 
-기본 권한으로 실제 Provider 호출·credit 소비·Turnstile 예외를 만들 수 없으므로
-검증을 시도하지 않았습니다. mock 결과를 실제 Provider 증거로 표현하지
-않았습니다.
+승인 후 staging에서 사람이 로그인한 실제 세션으로 실행했습니다. **Turnstile을
+우회하지 않았습니다** — `app/api/chat/route.ts:757`이 `access.kind === "guest"`
+일 때만 `ensureGuestVerified`를 호출하므로 인증 세션은 애초에 그 분기에
+들어가지 않습니다. 과거 감사가 만난 `403 TURNSTILE_REQUIRED`는 guest로
+자동화했기 때문이며 제품 결함이 아니었습니다.
+
+#### 실행 조건
+
+| 항목 | 값 |
+|---|---|
+| 대상 | `https://staging.tomverse.app` (배포 `1ed042c`) |
+| 계정 | 검증 전용 Pro 계정 |
+| 모델 | `gpt-5-4-mini` / `claude-haiku-4-5` / `gemini-2-5-flash` |
+| web search | **off** (모델당 +8 surcharge 방지) |
+| 사전 상태 확인 | 3종 전부 `available` / `operational`, 30분 내 probe 성공 |
+
+승인된 §9.9 중단 조건(기본 모델 중 하나라도 `incident`/`unavailable`)에
+해당하지 않아 진행했습니다. 이전에 incident였던 `gemini-2-5-flash`는 복구된
+상태였습니다.
+
+#### 결과
+
+| 증거 항목 | 기대 | 실측 |
+|---|---|---|
+| 3-model 비교 | 3회 | **3회** |
+| AI Review | 1회 | **1회** |
+| 비교당 `/api/chat/preflight` | 1건 | **1건** |
+| 비교당 `/api/chat` | 3건 | **3건** |
+| panel 응답 | 3/3 수신 | **3/3** |
+| 부분 실패 | — | **없음** |
+
+#### credit ledger 대조
+
+| 단계 | 차감 | 잔액 |
+|---|---:|---:|
+| 시작 | — | 3,000 |
+| 비교 3회 × 3 credits | 9 | 2,991 |
+| AI Review (reviewer 2명 × Advanced 4) | 8 | **2,983** |
+| **합계** | **17** | |
+
+**예상과 실측이 정확히 일치**했고 미설명 차감은 0입니다. 승인 상한 40의 43%를
+사용했습니다.
+
+`preflight` 1건 / `chat` 3건이 실제 배포 환경에서 확인된 것은, `STG-F003`
+수정이 프로덕션 경로에서도 유지됨을 보여주는 유일한 실측입니다.
+
+#### 미검증으로 남은 것 — refund 경로
+
+부분 실패가 발생하지 않아 **예약 credit 환불 경로는 실행되지 않았습니다.**
+
+이는 결함이 아니라 **승인된 정책의 결과**입니다. §9.9가
+"degraded/incident 상태를 partial-failure 시험 fixture처럼 이용하지 않음"을
+명시하므로 실패를 인위적으로 만들지 않았습니다. 환불 검증은 의도적으로 구성한
+조건에서 별도로 수행해야 합니다.
+
+mock 결과를 실제 Provider 증거로 표현하지 않았습니다.
 
 ---
 
@@ -949,9 +1002,17 @@ browser를 설치할 수 없어서 생긴 것이며, §4.10에서 확정한 정�
 | 항목 | 계산 | credit |
 |---|---|---:|
 | 3-model 비교 ×3 | 3 credits × 3 | 9 |
-| AI Review ×1 | `AI_REVIEW_CREDITS = 4` | 4 |
-| 입력 배수 여유 (최대 3×) | 위 합계의 최대 3배 | ≤39 |
+| AI Review ×1 | reviewer 2명 교차 검토 × Advanced 4 | **8** |
+| 입력 배수 여유 (최대 3×) | 위 합계의 최대 3배 | ≤51 |
 | **승인 요청 상한** | | **≤ 40 credits** |
+
+> **정정.** 최초 요청안은 AI Review를 `AI_REVIEW_CREDITS = 4`로 산정했으나
+> 이는 `ComparisonActionRail.tsx`의 **표시용 상수**였고 과금 경로가 아니었습니다.
+> 실제로는 `comparison-reviews` route가
+> `budget.usageCredits + secondBudget.usageCredits`로 산출하며, AI Review는
+> 설계상 **독립 reviewer 2명이 교차 검토**하므로(:544-552) Advanced 기준
+> **8**입니다. 실측 차감도 8이었습니다. 상한 40은 그대로 유지되며, 실제 소비는
+> 17로 43% 수준이었습니다.
 
 web search는 **off**로 고정합니다(모델당 +8 surcharge 방지).
 
@@ -1064,6 +1125,54 @@ web search는 **off**로 고정합니다(모델당 +8 surcharge 방지).
    호출하면 in-flight PATCH가 abort될 수 있습니다. `STG-F003`의 원인은
    아니었으므로 **수정하지 않았습니다.**
 
+5. **admin console의 2인 승인이 UI로는 완료 불가능합니다.** (P2, 운영 차단)
+
+   `components/admin/AdminUsersPanel.tsx:487-491`이 payload에 클릭 시각을
+   넣습니다:
+
+   ```ts
+   periodEnd: adjustPeriodEnd ||
+     new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+   ```
+
+   `lib/adminApproval.ts`는 승인을 `payloadHash`로 결속하므로 요청자가
+   **바이트 단위로 동일한 body**를 재전송해야 승인이 소비됩니다. 그런데
+   생성된 타임스탬프를 붙잡아 두는 `adjustPeriodEnd` state는 remount에서
+   사라지고, **승인 여부를 확인하려면 Approvals 패널로 이동**해야 하므로
+   remount가 사실상 강제됩니다. 돌아와 다시 누르면 새 타임스탬프 → 다른
+   해시 → 또 다른 pending 요청이 쌓입니다.
+
+   `plan-adjust`뿐 아니라 **payload에 시각 파생값을 넣는 모든 승인 대상
+   액션**이 같은 문제를 갖습니다. 서버의 보안 계약(2인 통제 + payload
+   바인딩)은 타당하며, 어긋난 쪽은 클라이언트입니다.
+
+   실측: 승인 완료 후에도 `Approved · original requester must retry exact
+   action` 상태가 유지되고 재전송이 새 요청을 생성함.
+
+   해결 방향(보안 저하 없음): payload에서 시각 파생값을 제거하고 기간
+   기본값을 서버가 실행 시점에 산출하거나, Approvals 패널에 저장된 payload를
+   그대로 재전송하는 "요청자로서 실행"을 추가.
+
+6. **AI Review 진입 버튼이 실제 비용의 절반을 표시합니다.** (P3)
+
+   `components/chat/ComparisonActionRail.tsx:29`의
+   `AI_REVIEW_CREDITS = 4`가 하드코딩되어 rail 버튼(:425-428)과 접근명에
+   그대로 쓰입니다. 실제 과금은 서버가
+   `budget.usageCredits + secondBudget.usageCredits`로 산출하며
+   (`app/api/conversations/[conversationId]/comparison-reviews/route.ts:207`),
+   AI Review는 설계상 **두 명의 reviewer가 교차 검토**하므로(:544-552
+   "This genuinely doubles credit cost when it runs") Advanced reviewer 기준
+   실제 **8**입니다.
+
+   staging 실측: rail `4` → 다이얼로그 `8` → 실제 차감 `8`.
+
+   **커밋 지점인 다이얼로그는 정확**합니다(예상 사용량·근거·reviewer 등급을
+   모두 표시). 모르고 결제되는 경우는 없으므로 P3입니다.
+
+   다만 부수 영향이 있습니다: `creditsShortFor(AI_REVIEW_CREDITS)`(:184, :219,
+   :237)도 4로 판정하므로, **잔액 4~7인 사용자에게 rail은 실행 가능처럼
+   보이지만 실제로는 부족**합니다.
+
 ---
 
 ## 12. Go-Live 재검토 조건
@@ -1074,14 +1183,24 @@ web search는 **off**로 고정합니다(모델당 +8 surcharge 방지).
 | 2 | `RECON-A11Y-001` axe critical 0 | ✅ **충족** (`select-name` 0, `aria-prohibited-attr` 0) |
 | 3 | B범위 P2 완료 또는 명시적 risk acceptance | ✅ **B범위 P2 전부 해소** |
 | 4 | 게이트 SHA 고정 + staging 배포 동결 | ❌ **해제됨** — 사용자 지시로 `develop` 병합, staging 재배포 시작 |
-| 5 | `FINAL-F002` 승인 후 3-model 3회 + AI Review 1회 실호출 + ledger 대조 | ❌ **미충족** |
+| 5 | `FINAL-F002` 승인 후 3-model 3회 + AI Review 1회 실호출 + ledger 대조 | ✅ **충족** (17 credits, 예상 일치 — §4.2) |
 | 6 | 원시 증거 번들 전달 | ⚠️ `test-results/` 에 보존, 미전달 |
 | 7 | canonical browser visual suite unexplained critical 0 | ❌ **미충족** (브라우저 설치 불가) |
 
-**1·2는 충족했으나 5가 미충족이므로 Go-Live 재판정에 착수할 수 없습니다.**
+**1·2·5가 모두 충족되어 Go-Live 재판정에 착수할 수 있는 상태입니다.**
 
-제품 수정이 local에서 완료됐더라도 배포와 실제 Provider 검증 전까지
-**`No-Go`를 해제하지 않습니다.**
+다만 `No-Go` 해제는 별도 판단이며, 남은 항목이 있습니다.
+
+| 항목 | 상태 |
+|---|---|
+| 조건 7 — canonical visual suite | ❌ 이 환경에서 canonical browser 설치 불가 (§4.11). §4.10에서 확정한 canonical runner에서 재실행 필요 |
+| 조건 6 — 원시 증거 번들 전달 | ⚠️ `test-results/` 보존, 미전달 |
+| refund 경로 | 미검증 (§4.2) — 의도적으로 구성한 조건에서 별도 수행 |
+| 조건 4 — 배포 동결 | 사용자 지시로 해제됨. 재판정 시 기준 SHA를 다시 고정해야 함 |
+
+**조건 7이 미충족이므로 `No-Go`를 자동 해제하지 않았습니다.** canonical
+환경(`ubuntu-24.04` + lockfile의 Playwright 1.62.0)에서 visual suite를 한 번
+돌려 unexplained critical 0을 확인하면 마지막 기술적 관문이 닫힙니다.
 
 ---
 
