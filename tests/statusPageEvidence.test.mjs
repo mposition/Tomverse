@@ -10,7 +10,11 @@ test("evidenceSourceLabel attributes an operator-declared incident correctly", (
 });
 
 test("evidenceSourceLabel marks probe-based reason codes as synthetic, not real traffic", () => {
-  for (const code of ["PROBE_SUCCESS_CONFIRMED", "PROBE_REPEATED_FAILURE"]) {
+  for (const code of [
+    "PROBE_SUCCESS_CONFIRMED",
+    "PROBE_REPEATED_FAILURE",
+    "PROBE_FAILURE_STALE",
+  ]) {
     const label = evidenceSourceLabel(code);
     assert.match(label, /synthetic/i);
     assert.match(label, /not real user traffic/i);

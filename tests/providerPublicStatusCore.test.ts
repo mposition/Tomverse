@@ -220,9 +220,14 @@ test("no real evidence but a fresh probe success -> operational (PROBE_SUCCESS_C
   assert.equal(result.isFresh, true);
 });
 
+// recordProviderProbeFailure always writes lastProbeFailureAt = NOW() in the
+// same statement that increments consecutiveProbeFailures, so every fixture
+// carrying a failure count also carries the timestamp production would have
+// written alongside it.
 test("a single probe failure with no real success -> degraded, not incident", () => {
   const result = evaluatePublicProviderStatus({
     ...baseInput,
+    lastProbeFailureAt: minutesAgo(3),
     consecutiveProbeFailures: 1,
   });
   assert.equal(result.status, "degraded");
@@ -232,6 +237,7 @@ test("a single probe failure with no real success -> degraded, not incident", ()
 test("repeated probe failures at the threshold with no real success -> incident", () => {
   const result = evaluatePublicProviderStatus({
     ...baseInput,
+    lastProbeFailureAt: minutesAgo(3),
     consecutiveProbeFailures: DEFAULT_PROBE_INCIDENT_CONSECUTIVE_FAILURE_THRESHOLD,
   });
   assert.equal(result.status, "incident");
@@ -241,6 +247,7 @@ test("repeated probe failures at the threshold with no real success -> incident"
 test("probe failures below the incident threshold stay degraded, never escalate alone", () => {
   const result = evaluatePublicProviderStatus({
     ...baseInput,
+    lastProbeFailureAt: minutesAgo(3),
     consecutiveProbeFailures: DEFAULT_PROBE_INCIDENT_CONSECUTIVE_FAILURE_THRESHOLD - 1,
   });
   assert.equal(result.status, "degraded");
@@ -250,6 +257,7 @@ test("a fresh real success overrides probe failures entirely", () => {
   const result = evaluatePublicProviderStatus({
     ...baseInput,
     lastSuccessAt: minutesAgo(2),
+    lastProbeFailureAt: minutesAgo(3),
     consecutiveProbeFailures: 10,
   });
   assert.equal(result.status, "operational");
@@ -351,4 +359,152 @@ test("fixture matrix: OpenAI/Anthropic/Google/Perplexity/Mistral produce the doc
 
   const summary = summarizeMonitoredStatuses(statuses as never);
   assert.doesNotMatch(summary.headline, /all monitored providers are operational/i);
+});
+
+// --- STG-F004 / R-02: probe failure evidence expires on the freshness window -
+
+test("STG-F004 regression: a 38-hour-old Perplexity failure count no longer reads as a current incident", () => {
+  // The audit baseline: 202 accumulated probe failures whose last recorded
+  // failure was ~38 hours old because the scheduler had stopped running,
+  // while every other provider had been checked within the hour. Before the
+  // fix this pinned the provider to "incident" indefinitely.
+  const result = evaluatePublicProviderStatus({
+    ...baseInput,
+    lastProbeFailureAt: minutesAgo(38 * 60),
+    consecutiveProbeFailures: 202,
+  });
+  assert.equal(result.status, "unknown");
+  assert.equal(result.reasonCode, "PROBE_FAILURE_STALE");
+  assert.equal(result.isFresh, false);
+  // The reason text must not present the expired count as live evidence.
+  assert.doesNotMatch(result.reasonText, /\b202\b/);
+  assert.match(result.reasonText, /older than the 30-minute freshness window/i);
+});
+
+test("a fresh probe failure at the incident threshold still escalates", () => {
+  const result = evaluatePublicProviderStatus({
+    ...baseInput,
+    lastProbeFailureAt: minutesAgo(29),
+    freshnessMinutes: 30,
+    consecutiveProbeFailures: DEFAULT_PROBE_INCIDENT_CONSECUTIVE_FAILURE_THRESHOLD,
+  });
+  assert.equal(result.status, "incident");
+  assert.equal(result.reasonCode, "PROBE_REPEATED_FAILURE");
+});
+
+test("a probe failure one minute past the window stops escalating", () => {
+  const result = evaluatePublicProviderStatus({
+    ...baseInput,
+    lastProbeFailureAt: minutesAgo(31),
+    freshnessMinutes: 30,
+    consecutiveProbeFailures: DEFAULT_PROBE_INCIDENT_CONSECUTIVE_FAILURE_THRESHOLD,
+  });
+  assert.equal(result.status, "unknown");
+  assert.equal(result.reasonCode, "PROBE_FAILURE_STALE");
+});
+
+test("probe failure freshness uses the same window as success freshness", () => {
+  const failureAt = minutesAgo(45);
+  const tight = evaluatePublicProviderStatus({
+    ...baseInput,
+    lastProbeFailureAt: failureAt,
+    freshnessMinutes: 30,
+    consecutiveProbeFailures: DEFAULT_PROBE_INCIDENT_CONSECUTIVE_FAILURE_THRESHOLD,
+  });
+  const loose = evaluatePublicProviderStatus({
+    ...baseInput,
+    lastProbeFailureAt: failureAt,
+    freshnessMinutes: 90,
+    consecutiveProbeFailures: DEFAULT_PROBE_INCIDENT_CONSECUTIVE_FAILURE_THRESHOLD,
+  });
+  assert.equal(tight.status, "unknown");
+  assert.equal(loose.status, "incident");
+});
+
+test("a stale probe failure never suppresses a fresh real-traffic success", () => {
+  const result = evaluatePublicProviderStatus({
+    ...baseInput,
+    lastSuccessAt: minutesAgo(2),
+    lastProbeFailureAt: minutesAgo(38 * 60),
+    consecutiveProbeFailures: 202,
+  });
+  assert.equal(result.status, "operational");
+  assert.equal(result.reasonCode, "RECENT_SUCCESS_CONFIRMED");
+});
+
+test("a stale probe failure never suppresses a fresh probe success", () => {
+  const result = evaluatePublicProviderStatus({
+    ...baseInput,
+    lastProbeSuccessAt: minutesAgo(4),
+    lastProbeFailureAt: minutesAgo(38 * 60),
+    consecutiveProbeFailures: 202,
+  });
+  assert.equal(result.status, "operational");
+  assert.equal(result.reasonCode, "PROBE_SUCCESS_CONFIRMED");
+});
+
+test("a null probe failure timestamp cannot back a current verdict", () => {
+  const result = evaluatePublicProviderStatus({
+    ...baseInput,
+    lastProbeFailureAt: null,
+    consecutiveProbeFailures: 202,
+  });
+  assert.equal(result.status, "unknown");
+  assert.equal(result.reasonCode, "PROBE_FAILURE_STALE");
+  assert.match(result.reasonText, /without a usable timestamp/i);
+});
+
+test("future and invalid probe failure timestamps are never treated as fresh", () => {
+  for (const lastProbeFailureAt of [
+    minutesFromNow(10),
+    new Date(Number.NaN),
+  ]) {
+    const result = evaluatePublicProviderStatus({
+      ...baseInput,
+      lastProbeFailureAt,
+      consecutiveProbeFailures: DEFAULT_PROBE_INCIDENT_CONSECUTIVE_FAILURE_THRESHOLD,
+    });
+    assert.equal(result.status, "unknown");
+    assert.equal(result.reasonCode, "PROBE_FAILURE_STALE");
+  }
+});
+
+test("stale probe failure evidence does not override a real-traffic verdict", () => {
+  // The real-traffic branches sit above the probe branch and must keep winning.
+  const declared = evaluatePublicProviderStatus({
+    ...baseInput,
+    hasPublicIncident: true,
+    lastProbeFailureAt: minutesAgo(38 * 60),
+    consecutiveProbeFailures: 202,
+  });
+  assert.equal(declared.reasonCode, "PUBLIC_INCIDENT_DECLARED");
+
+  const outage = evaluatePublicProviderStatus({
+    ...baseInput,
+    internalStatus: "outage",
+    lastProbeFailureAt: minutesAgo(38 * 60),
+    consecutiveProbeFailures: 202,
+  });
+  assert.equal(outage.reasonCode, "INTERNAL_OUTAGE_DETECTED");
+
+  const realFailure = evaluatePublicProviderStatus({
+    ...baseInput,
+    lastSuccessAt: minutesAgo(90),
+    lastFailureAt: minutesAgo(2),
+    lastProbeFailureAt: minutesAgo(38 * 60),
+    consecutiveProbeFailures: 202,
+  });
+  assert.equal(realFailure.status, "degraded");
+  assert.equal(realFailure.reasonCode, "RECENT_FAILURE_EVIDENCE");
+});
+
+test("stale success plus stale probe failure still reports the stale failure honestly", () => {
+  const result = evaluatePublicProviderStatus({
+    ...baseInput,
+    lastSuccessAt: minutesAgo(120),
+    lastProbeFailureAt: minutesAgo(38 * 60),
+    consecutiveProbeFailures: 202,
+  });
+  assert.equal(result.status, "unknown");
+  assert.equal(result.reasonCode, "PROBE_FAILURE_STALE");
 });

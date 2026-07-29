@@ -86,6 +86,21 @@ const WIDGET_READY_TIMEOUT_MS = 15_000;
  * timeout-callback is what ends a stalled challenge.
  */
 const SILENT_VERIFICATION_TIMEOUT_MS = 20_000;
+/**
+ * EXT-REAUDIT-F004. Once `before-interactive-callback` fires, the silent
+ * timeout above is cleared on purpose -- a person part-way through a challenge
+ * must never be cancelled out from under themselves -- and the app then waits
+ * for Cloudflare's terminal callback. On a network that cannot reach
+ * Cloudflare, that terminal callback took about 126 seconds to arrive, and the
+ * UI said nothing at all for the whole of it.
+ *
+ * This timer changes nothing about that contract: it does not cancel the
+ * challenge, does not touch the token, and does not shorten Cloudflare's own
+ * timeout. It only makes the wait legible -- after this long the surface says
+ * the check is taking longer than usual and points at the cancel control that
+ * was always there. Kept well inside the 40s the audit asked for.
+ */
+const LONG_WAIT_NOTICE_MS = 25_000;
 const SUCCESS_RESET_MS = 800;
 /** A failure stays announced long enough to read, then clears itself. */
 const FAILURE_RESET_MS = 12_000;
@@ -115,6 +130,12 @@ type GuestVerificationContextValue = {
   lastOutcome: GuestVerificationOutcome | null;
   /** True while a challenge (or its error) should be on screen. */
   isChallengeVisible: boolean;
+  /**
+   * An interactive challenge has been on screen long enough that the user
+   * deserves to be told it is slow. Never implies failure, and never ends the
+   * challenge -- Cloudflare's terminal callback still decides the outcome.
+   */
+  isLongWait: boolean;
   requestToken: (
     action: GuestVerificationAction
   ) => Promise<string | undefined>;
@@ -185,6 +206,12 @@ export function GuestVerificationProvider({
   const requestIdRef = useRef(0);
   const readyTimerRef = useRef<number | null>(null);
   const silentTimerRef = useRef<number | null>(null);
+  /**
+   * The request the long-wait notice has been armed for, rather than a bare
+   * boolean: a replacement challenge (a shell swap, a second action) gets a
+   * fresh id, so it can never inherit the previous request's notice.
+   */
+  const [longWaitRequestId, setLongWaitRequestId] = useState<number | null>(null);
   // Serialises every verification: a second action never opens a second
   // widget, it queues behind the first.
   const queueRef = useRef<Promise<unknown>>(Promise.resolve());
@@ -434,6 +461,22 @@ export function GuestVerificationProvider({
     return () => window.clearTimeout(timer);
   }, [phase]);
 
+  // EXT-REAUDIT-F004: purely an announcement timer. It starts when Cloudflare
+  // puts a real challenge on screen and is torn down the moment the phase
+  // changes -- so a solved, cancelled, failed or re-run challenge clears it,
+  // and it can never outlive the surface it describes.
+  useEffect(() => {
+    if (phase !== "interactive" || !request) return;
+    const armedFor = request.id;
+    const timer = window.setTimeout(
+      () => setLongWaitRequestId(armedFor),
+      LONG_WAIT_NOTICE_MS
+    );
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [phase, request]);
+
   // Leaving the chat page mid-challenge must not strand an awaiting caller.
   useEffect(
     () => () => {
@@ -457,6 +500,11 @@ export function GuestVerificationProvider({
       failure,
       lastOutcome,
       isChallengeVisible: isEnabled && isVisiblePhase(phase, failure),
+      isLongWait:
+        isEnabled &&
+        phase === "interactive" &&
+        longWaitRequestId !== null &&
+        longWaitRequestId === request?.id,
       requestToken,
       runGuestChatRequest,
       cancel,
@@ -467,8 +515,10 @@ export function GuestVerificationProvider({
       cancel,
       failure,
       isEnabled,
+      longWaitRequestId,
       lastOutcome,
       phase,
+      request,
       registerHost,
       requestToken,
       runGuestChatRequest,
@@ -494,6 +544,7 @@ const DISABLED_VALUE: GuestVerificationContextValue = {
   failure: null,
   lastOutcome: null,
   isChallengeVisible: false,
+  isLongWait: false,
   requestToken: () => Promise.resolve(undefined),
   runGuestChatRequest: ({ sendWithToken }) => sendWithToken(undefined),
   cancel: () => {},

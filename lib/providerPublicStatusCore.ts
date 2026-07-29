@@ -19,6 +19,7 @@ export type PublicStatusReasonCode =
   | "RECENT_SUCCESS_CONFIRMED"
   | "PROBE_SUCCESS_CONFIRMED"
   | "PROBE_REPEATED_FAILURE"
+  | "PROBE_FAILURE_STALE"
   | "NO_SUCCESS_RECORDED"
   | "SUCCESS_STALE"
   | "HEALTH_DATA_UNAVAILABLE";
@@ -101,11 +102,15 @@ export const evaluatePublicProviderStatus = ({
   elevatedLatency = false,
   hasActiveModelIncident = false,
   lastProbeSuccessAt = null,
-  // lastProbeFailureAt is accepted on the input type for API completeness
-  // (mirroring lastFailureAt) and future use, but consecutiveProbeFailures
-  // alone is sufficient evidence for the merge policy below -- both fields
-  // are written atomically together by recordProviderProbeFailure, so there
-  // is no case where one is stale relative to the other.
+  // STG-F004: consecutiveProbeFailures alone is NOT sufficient evidence.
+  // recordProviderProbeFailure does write both fields atomically, so neither
+  // can be stale *relative to the other* -- but that only rules out internal
+  // disagreement. When the probe scheduler itself stops running, both fields
+  // freeze together and an old failure count would otherwise stay "current"
+  // evidence forever (a provider read as Incident on a 38-hour-old count).
+  // So the failure timestamp gates the probe escalation below, giving failure
+  // evidence the same expiry that success evidence already has.
+  lastProbeFailureAt = null,
   consecutiveProbeFailures = 0,
   probeIncidentConsecutiveFailureThreshold = DEFAULT_PROBE_INCIDENT_CONSECUTIVE_FAILURE_THRESHOLD,
 }: PublicProviderStatusInput): PublicProviderStatusResult => {
@@ -119,6 +124,9 @@ export const evaluatePublicProviderStatus = ({
   const validProbeSuccessAt = isValidPast(lastProbeSuccessAt ?? null, now)
     ? lastProbeSuccessAt
     : null;
+  const validProbeFailureAt = isValidPast(lastProbeFailureAt ?? null, now)
+    ? lastProbeFailureAt
+    : null;
 
   const isFresh =
     validSuccessAt !== null &&
@@ -127,6 +135,13 @@ export const evaluatePublicProviderStatus = ({
   const isFreshFromProbe =
     validProbeSuccessAt !== null &&
     minutesBetween(now, validProbeSuccessAt) <= safeFreshnessMinutes;
+
+  // STG-F004: probe *failure* evidence expires on the same window as success
+  // evidence. A null/invalid/future timestamp is not usable proof that the
+  // failures are happening now, so it can never back a current verdict either.
+  const isProbeFailureFresh =
+    validProbeFailureAt !== null &&
+    minutesBetween(now, validProbeFailureAt) <= safeFreshnessMinutes;
 
   // Either stream is legitimate "the provider is alive" evidence for the
   // purpose of clearing "unknown" -- this is the actual AUD-R001 fix (idle
@@ -233,11 +248,15 @@ export const evaluatePublicProviderStatus = ({
   //      flaky probe must never override or race with an actual working
   //      provider (principle #3: don't let absence-of-real-failure be
   //      silently overridden by probe noise).
-  if (!isFresh) {
-    const safeConsecutiveProbeFailures = Math.max(
-      0,
-      Math.floor(consecutiveProbeFailures)
-    );
+  const safeConsecutiveProbeFailures = Math.max(
+    0,
+    Math.floor(consecutiveProbeFailures)
+  );
+
+  //      The failure count only escalates while its own timestamp is still
+  //      inside the freshness window (STG-F004) -- otherwise a scheduler that
+  //      stopped running would pin the provider to Incident indefinitely.
+  if (!isFresh && isProbeFailureFresh) {
     if (
       safeConsecutiveProbeFailures >=
       Math.max(1, Math.floor(probeIncidentConsecutiveFailureThreshold))
@@ -274,7 +293,22 @@ export const evaluatePublicProviderStatus = ({
     );
   }
 
-  // 11. No success evidence at all, from either stream.
+  // 11. STG-F004: probe failures exist but their timestamp has expired (or was
+  //     never usable), and nothing fresh contradicts or confirms them. Report
+  //     the honest verdict -- we do not currently know -- and say why, rather
+  //     than presenting an expired count as a live incident or silently
+  //     dropping the fact that the last thing we saw was a failure.
+  if (safeConsecutiveProbeFailures >= 1) {
+    return result(
+      "unknown",
+      "PROBE_FAILURE_STALE",
+      validProbeFailureAt === null
+        ? `${safeConsecutiveProbeFailures} automated probe failures are recorded, but without a usable timestamp they cannot confirm the provider's current state.`
+        : `The last automated probe failure is older than the ${safeFreshnessMinutes}-minute freshness window, so it no longer describes the provider's current state.`
+    );
+  }
+
+  // 12. No success evidence at all, from either stream.
   if (validSuccessAt === null && validProbeSuccessAt === null) {
     return result(
       "unknown",
@@ -283,7 +317,7 @@ export const evaluatePublicProviderStatus = ({
     );
   }
 
-  // 12. Success evidence exists in at least one stream but is older than the
+  // 13. Success evidence exists in at least one stream but is older than the
   //     freshness window in both.
   return result(
     "unknown",

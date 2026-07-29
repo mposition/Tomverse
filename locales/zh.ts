@@ -91,6 +91,7 @@ export const zh = {
         guestVerificationTitle: "请确认后继续",
         guestVerificationDescription: "这是为了减少自动化请求的快速确认，通常会自动完成。",
         guestVerificationClose: "取消确认",
+        guestVerificationLongWait: "本次确认耗时比平常更久。您可以继续等待，也可以取消后重试。",
         guestVerificationFailed: "未能完成确认，请重试。",
         guestVerificationUnavailable: "确认服务当前不可用，请稍后再试。",
         guestVerificationCancelled: "已取消确认。你输入的内容和附件都已保留，重新发送即可再次尝试。",

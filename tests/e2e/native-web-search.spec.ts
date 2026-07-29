@@ -541,6 +541,147 @@ test.describe("native web search (webSearchMode: always)", () => {
     expect(new Set(chatModes)).toEqual(new Set(["always"]));
   });
 
+  // FINAL-F003 (R-06). The original defect was a stale closure: the submit
+  // handler captured `webSearchMode` without listing it as a dependency, so a
+  // send could carry the previous mode. That specific bug is fixed (the
+  // dependency array now includes it), and the three tests above cover
+  // toggling the mode itself. What was still uncovered is the other half of
+  // the same class of bug: a *lifecycle* event between the user's choice and
+  // the submit -- changing the model set, forcing the composer to re-render,
+  // or switching conversations. Each one rebuilds the handler, and each one is
+  // a place a stale mode could be reintroduced without any of the existing
+  // tests noticing. The assertion in all three is the same: what the UI shows,
+  // what preflight reserves, and what every /api/chat body carries agree.
+
+  const expectModeEverywhere = async (
+    page: Page,
+    preflightModes: (string | undefined)[],
+    chatModes: (string | undefined)[],
+    expected: "always" | "off",
+    panels: number
+  ) => {
+    await expect.poll(() => preflightModes.length).toBe(1);
+    await expect.poll(() => chatModes.length).toBe(panels);
+    if (expected === "always") {
+      expect(preflightModes[0]).toBe("always");
+      expect(new Set(chatModes)).toEqual(new Set(["always"]));
+    } else {
+      expect(preflightModes[0]).not.toBe("always");
+      expect(chatModes.filter((mode) => mode === "always")).toHaveLength(0);
+    }
+  };
+
+  test("a submit immediately after changing the model set keeps the chosen mode", async ({
+    page,
+  }) => {
+    await prepareTwoModelChat(page);
+    const { preflightModes, chatModes } = await readModesOnSubmit(page);
+
+    await setWebSearchModeAlways(page);
+    // The model change happens after the mode choice and before the submit.
+    // Swapping a panel's own model is the narrowest way to trigger it: it
+    // rebuilds the submit handler without touching the mode.
+    await page
+      .locator('[data-testid="desktop-model-panel"] select')
+      .first()
+      .selectOption("gemini-2-5-flash");
+    await expect(
+      page.locator('[data-testid="desktop-model-panel"] select').first()
+    ).toHaveValue("gemini-2-5-flash");
+
+    await page.getByTestId("chat-textarea").fill("Latest figure after a model swap");
+    await page.getByTestId("chat-textarea").press("Enter");
+
+    await expectModeEverywhere(page, preflightModes, chatModes, "always", 2);
+  });
+
+  test("a submit immediately after changing the model set carries no stale 'always'", async ({
+    page,
+  }) => {
+    await prepareTwoModelChat(page);
+    const { preflightModes, chatModes } = await readModesOnSubmit(page);
+
+    await setWebSearchModeAlways(page);
+    await setWebSearchModeOff(page);
+    await page
+      .locator('[data-testid="desktop-model-panel"] select')
+      .first()
+      .selectOption("gemini-2-5-flash");
+    await expect(
+      page.locator('[data-testid="desktop-model-panel"] select').first()
+    ).toHaveValue("gemini-2-5-flash");
+
+    await page.getByTestId("chat-textarea").fill("Answer from what you know");
+    await page.getByTestId("chat-textarea").press("Enter");
+
+    await expectModeEverywhere(page, preflightModes, chatModes, "off", 2);
+  });
+
+  test("a submit immediately after the composer re-renders keeps the chosen mode", async ({
+    page,
+  }) => {
+    await prepareTwoModelChat(page);
+    const { preflightModes, chatModes } = await readModesOnSubmit(page);
+
+    await setWebSearchModeAlways(page);
+
+    // A viewport change swaps the shell and re-renders the composer, which
+    // rebuilds the submit handler -- the cheapest deterministic way to force
+    // exactly the re-render the finding describes.
+    await page.setViewportSize({ width: 820, height: 900 });
+    await expect(page.getByTestId("chat-textarea")).toBeVisible();
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expect(page.getByTestId("chat-textarea")).toBeVisible();
+
+    await page.getByTestId("chat-textarea").fill("Latest figure after a re-render");
+    await page.getByTestId("chat-textarea").press("Enter");
+
+    await expectModeEverywhere(page, preflightModes, chatModes, "always", 2);
+  });
+
+  test("switching conversations applies the target conversation's own mode, not the previous one", async ({
+    page,
+  }) => {
+    await prepareTwoModelChat(page);
+    // Registered once: re-registering mid-test would leave the first handler
+    // in place and silently split the record across two sets of arrays.
+    const { preflightModes, chatModes } = await readModesOnSubmit(page);
+
+    // Conversation one runs with web search on.
+    await setWebSearchModeAlways(page);
+    await page.getByTestId("chat-textarea").fill("First conversation question");
+    await page.getByTestId("chat-textarea").press("Enter");
+    await expect.poll(() => preflightModes.length).toBe(1);
+    expect(preflightModes[0]).toBe("always");
+    // Both panels, not "at least one": snapshotting mid-flight would put the
+    // first conversation's second body on the wrong side of the slice below.
+    await expect.poll(() => chatModes.length).toBe(2);
+    const firstConversationCount = chatModes.length;
+    expect(new Set(chatModes)).toEqual(new Set(["always"]));
+
+    // A new conversation resets the mode to the app default; the next submit
+    // must carry that, not conversation one's "always". New Chat also resets
+    // the panel set to a single default model, and a single-model send skips
+    // preflight entirely -- so the two-model selection is restored first,
+    // keeping the second submit comparable to the first.
+    await page.getByTestId("sidebar-new-chat").click();
+    await expect(page.getByTestId("chat-textarea")).toBeEmpty();
+    await selectModelsViaPicker(page, ["gpt-5-5", "claude-sonnet-5"]);
+    await expect(
+      page.locator('[data-testid="desktop-model-panel"] select')
+    ).toHaveCount(2);
+
+    await page.getByTestId("chat-textarea").fill("Second conversation question");
+    await page.getByTestId("chat-textarea").press("Enter");
+
+    await expect.poll(() => preflightModes.length).toBe(2);
+    expect(preflightModes[1]).not.toBe("always");
+    await expect.poll(() => chatModes.length).toBe(firstConversationCount + 2);
+    expect(
+      chatModes.slice(firstConversationCount).filter((mode) => mode === "always")
+    ).toHaveLength(0);
+  });
+
   test("the credit estimate breakdown shows the web search reservation for native-capable models", async ({
     page,
   }) => {
