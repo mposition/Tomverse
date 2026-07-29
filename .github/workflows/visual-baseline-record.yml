@@ -1,0 +1,130 @@
+name: Record Visual Baseline
+#
+# The one place a screenshot golden may be rewritten.
+#
+# docs/qa/canonical-visual-baseline.md requires a golden to be recorded on the
+# canonical environment and nowhere else. That environment is CI -- so
+# "re-record canonically" and "never update snapshots in CI" cannot both be
+# absolute, and this workflow is where they are reconciled. It is the single
+# job allowed to pass a snapshot-updating flag; Main Chromium Regression,
+# Nightly Visual Regression and PR Fast Gate judge goldens and must never
+# rewrite one, which scripts/security-regression-check.mjs still asserts.
+#
+# Four properties keep that reconciliation honest, and the same check asserts
+# each of them:
+#
+#   * `workflow_dispatch` only. Nothing recording a baseline may fire from a
+#     push, a pull request or a schedule.
+#   * The pinned canonical image and the bundled Chromium, identical to the
+#     workflows that judge the result. A baseline recorded anywhere else is
+#     the defect this whole policy exists to prevent.
+#   * The result is pushed to a fresh `visual-baseline/<run id>` branch, never
+#     to a long-lived one. This workflow cannot move develop or main.
+#   * The images are also uploaded as an artifact, so the diff is reviewable
+#     without checking the branch out.
+#
+# So the baseline still changes only through a reviewed commit, exactly like
+# any other change to the repository -- the recording is automated, the
+# acceptance is not.
+
+on:
+  workflow_dispatch:
+    inputs:
+      spec:
+        description: Spec file to re-record (default = the chat state goldens)
+        required: false
+        default: tests/e2e/chat-state-visual-regression.spec.ts
+
+permissions:
+  contents: write
+
+concurrency:
+  group: visual-baseline-record-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  record:
+    name: Record goldens on the canonical image
+    # Canonical visual baseline: pinned image, not ubuntu-latest, so a
+    # runner-image bump cannot silently re-rasterise every golden.
+    # See docs/qa/canonical-visual-baseline.md.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      NEXTAUTH_URL: http://127.0.0.1:3100
+      NEXT_PUBLIC_TURNSTILE_SITE_KEY: tomverse-playwright-turnstile-site-key
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build once for the Chromium test server
+        run: npm run build
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      # A first pass captures what the current baselines disagree about, so
+      # the recording can be reviewed against evidence rather than accepted on
+      # trust. It is expected to fail -- that failure is the input to step two.
+      - name: Capture the diff against the current baseline
+        continue-on-error: true
+        run: npx playwright test "${{ inputs.spec }}" --project=desktop-chromium --retries=0
+
+      - name: Preserve the diff evidence
+        if: always()
+        run: |
+          mkdir -p baseline-evidence
+          if [ -d test-results ]; then
+            cp -r test-results baseline-evidence/diff-against-previous
+          fi
+
+      - name: Re-record on the canonical environment
+        run: |
+          npx playwright test "${{ inputs.spec }}" \
+            --project=desktop-chromium --retries=0 --update-snapshots
+
+      - name: Confirm the new baseline is stable on a clean run
+        run: npx playwright test "${{ inputs.spec }}" --project=desktop-chromium --retries=0
+
+      - name: Push the recording to a review branch
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- '*-snapshots'; then
+            echo "No golden changed; nothing to push."
+            exit 0
+          fi
+          branch="visual-baseline/${{ github.run_id }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add -- '*-snapshots'
+          git commit -m "Re-record visual goldens on the canonical environment
+
+Recorded by Record Visual Baseline, run ${{ github.run_id }}, on
+ubuntu-24.04 with the Chromium bundled with the pinned Playwright version.
+Reviewed and merged separately -- see the run's baseline-evidence artifact
+for the diff against the previous baseline."
+          git push origin "$branch"
+          echo "Pushed $branch"
+
+      - name: Upload the recording and its evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: visual-baseline-${{ github.run_id }}
+          path: |
+            baseline-evidence
+            tests/e2e/**/*-snapshots/**
+            playwright-report
+          if-no-files-found: ignore
+          retention-days: 14
