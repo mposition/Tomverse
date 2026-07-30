@@ -24,7 +24,12 @@ const GUARDED_FILES = [
   "components/chat/ModelSelectionBadge.tsx",
   "components/chat/SidebarAccountRailButton.tsx",
   "components/marketing/AiReviewDemo.tsx",
+  "components/marketing/EvidenceSection.tsx",
+  "components/marketing/LandingPageContent.tsx",
+  "components/marketing/ModelCatalogueSection.tsx",
   "components/marketing/PricingPageContent.tsx",
+  "components/marketing/ProductProofSection.tsx",
+  "components/marketing/TrustSection.tsx",
 ];
 
 // The hues that carry a semantic role in this product. `blue` and `zinc` are

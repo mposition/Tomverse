@@ -52,7 +52,7 @@ export default function OpenGraphImage() {
             Tomverse Insight · Multi-AI Comparison & Review
           </div>
           <div style={{ fontSize: 28, color: "#bfdbfe" }}>
-            Compare GPT, Claude, and Gemini side by side, then use AI Review to catch what&apos;s missing
+            Compare GPT, Claude, and Gemini side by side, run AI Review, then check what still needs verifying
           </div>
         </div>
       </div>

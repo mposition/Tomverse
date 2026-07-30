@@ -230,6 +230,17 @@ export const PUBLIC_MODELS: readonly AiModel[] = AVAILABLE_MODELS.filter(
     (model) => (model as AiModel).publiclyListed !== false
 );
 
+// Distinct providers a visitor can actually reach today. Derived rather than
+// counted by hand so marketing copy cannot drift from the catalogue the way
+// the landing FAQ's fixed provider list did.
+export const PUBLIC_MODEL_PROVIDERS: readonly AiProvider[] = Array.from(
+    new Set(
+        PUBLIC_MODELS.filter((model) => model.enabled).map(
+            (model) => model.provider
+        )
+    )
+);
+
 export const getModel = (modelId: string) => modelMap.get(modelId);
 
 export const modelSupportsImageInput = (

@@ -27,6 +27,24 @@ const pluralLocale: Record<Language, string> = {
   pt: "pt",
 };
 
+const integerFormatterCache = new Map<string, Intl.NumberFormat>();
+
+/**
+ * A grouped integer for `lang` -- "3,000" in en, "3.000" in de/es/pt,
+ * "3 000" in fr. Resolved against the same CLDR language as `pluralizeUnit`,
+ * so a count and the unit beside it can never be formatted for two different
+ * languages.
+ */
+export const formatLocalizedInteger = (value: number, lang: Language) => {
+  const locale = pluralLocale[lang] ?? "en";
+  let formatter = integerFormatterCache.get(locale);
+  if (!formatter) {
+    formatter = new Intl.NumberFormat(locale, { maximumFractionDigits: 0 });
+    integerFormatterCache.set(locale, formatter);
+  }
+  return formatter.format(value);
+};
+
 export type CountableUnit = {
   /** Form used for the CLDR "one" plural category. */
   one: string;

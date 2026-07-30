@@ -1328,27 +1328,48 @@ const checks = [
   {
     name: "Landing uses one state-aware chat CTA and defers signup until after value",
     file: "components/marketing/LandingPageContent.tsx",
-    test: (source) =>
-      source.includes('primaryCta: "Start chatting free"') &&
-      source.includes('primaryCta: "무료로 채팅 시작하기"') &&
-      source.includes('guestNote: "No sign-up required—compare GPT, Claude, and Gemini side by side."') &&
-      source.includes('data-testid="landing-guest-note"') &&
-      !source.includes('data-testid="landing-guest-cta"') &&
-      source.includes("const primaryChatHref =") &&
-      source.includes('cta_location: "landing_hero_chat"') &&
-      source.includes("Get a one-minute recommendation after sign-up"),
+    test: (source) => {
+      const copy = read("components/marketing/landingContent.ts");
+      return (
+        copy.includes('primaryCta: "Start chatting free"') &&
+        copy.includes('primaryCta: "무료로 채팅 시작하기"') &&
+        copy.includes(
+          'guestNote: "No sign-up required—compare GPT, Claude, and Gemini side by side."'
+        ) &&
+        copy.includes("Get a one-minute recommendation after sign-up") &&
+        source.includes('data-testid="landing-guest-note"') &&
+        !source.includes('data-testid="landing-guest-cta"') &&
+        // The account CTA belongs to the post-comparison section, never the
+        // hero: signup is still offered only after the page has shown what an
+        // account is for.
+        !source.includes('data-testid="landing-signup-cta"') &&
+        read("components/marketing/WorkflowContinuitySection.tsx").includes(
+          'href="/auth/signin?callbackUrl=%2Fchat"'
+        ) &&
+        source.includes("const primaryChatHref =") &&
+        source.includes('cta_location: "landing_hero_chat"')
+      );
+    },
   },
   {
     name: "Landing hero carries Tomverse Insight brand messaging and no stale single-model guest copy",
     file: "components/marketing/LandingPageContent.tsx",
-    test: (source) =>
-      source.includes('badge: "Tomverse Insight · Multi-AI Comparison & Review"') &&
-      source.includes('brandNote: "Tomverse Insight is the multi-AI comparison and review experience from Tomverse."') &&
-      source.includes('heroSignupNote: "No sign-up required—start with three models."') &&
-      source.includes('data-testid="landing-brand-note"') &&
-      source.includes('data-testid="landing-hero-signup-note"') &&
-      !source.includes("try a free model") &&
-      !source.includes("adds more models, higher daily limits"),
+    test: (source) => {
+      const copy = read("components/marketing/landingContent.ts");
+      return (
+        copy.includes('badge: "Tomverse Insight · Multi-AI Comparison & Review"') &&
+        copy.includes(
+          'brandNote: "Tomverse Insight is the multi-AI comparison and review experience from Tomverse."'
+        ) &&
+        copy.includes(
+          'heroSignupNote: "No sign-up required—start with three models."'
+        ) &&
+        source.includes('data-testid="landing-brand-note"') &&
+        source.includes('data-testid="landing-hero-signup-note"') &&
+        !copy.includes("try a free model") &&
+        !copy.includes("adds more models, higher daily limits")
+      );
+    },
   },
   {
     name: "ChatGPT versus Claude search page contains a full comparison guide and prepared CTA",
@@ -1406,33 +1427,67 @@ const checks = [
     name: "Landing product proof covers comparison, AI Review, and permission-safe evidence",
     file: "components/marketing/ProductProofSection.tsx",
     test: (source) => {
-      const capture = read("scripts/capture-marketing-proof.mjs");
+      const copy = read("components/marketing/landingContent.ts");
+      const landing = read("components/marketing/LandingPageContent.tsx");
+      const trust = read("components/marketing/TrustSection.tsx");
+      const evidence = read("components/marketing/EvidenceSection.tsx");
       return (
-        source.includes("/marketing-proof/tomverse-review-workflow.webm") &&
-        source.includes("/marketing-proof/tomverse-review-workflow-poster.png") &&
-        source.includes('fetch("/api/public/proof-metrics"') &&
-        source.includes("controlled demo data") &&
-        source.includes("18-page readiness brief") &&
-        source.includes("AI Review compares only the supplied answers") &&
-        read("components/marketing/LandingPageContent.tsx").includes(
-          "<ProductProofSection />"
+        // Every section the page promises actually gets rendered.
+        landing.includes("<ComparisonBasicsSection />") &&
+        landing.includes("<EvidenceSection />") &&
+        landing.includes("<ProductProofSection />") &&
+        landing.includes("<WorkflowContinuitySection />") &&
+        landing.includes("<ModelCatalogueSection />") &&
+        landing.includes("<TrustSection />") &&
+        // The public usage counts keep their threshold-and-rounding
+        // disclosure, and still come from the permission-safe endpoint.
+        trust.includes('fetch("/api/public/proof-metrics"') &&
+        copy.includes(
+          "Only privacy-safe counts above the public threshold are shown, rounded down to the nearest ten."
         ) &&
-        capture.includes('page.route("**/api/chat"') &&
-        capture.includes("comparison-reviews") &&
-        capture.includes("All three answers recommend measurable launch gates") &&
-        capture.includes("One question. Multiple AI answers") &&
-        capture.includes('"gpt-5-4-mini"') &&
-        capture.includes('"claude-haiku-4-5"') &&
-        capture.includes('"gemini-2-5-flash"') &&
-        capture.includes("posterPath") &&
-        !capture.includes("api.openai.com") &&
-        !capture.includes("api.anthropic.com") &&
-        statSync("public/marketing-proof/tomverse-review-workflow.webm").size >
-          100_000 &&
-        statSync("public/marketing-proof/tomverse-review-workflow-poster.png").size >
-          20_000
+        // The AI Review boundary survives, and now says where a web check is
+        // actually available instead of implying none exists.
+        copy.includes("AI Review compares only the supplied answers") &&
+        copy.includes("you can run a separate web check on it from the review") &&
+        // Evidence features are named with their real conditions.
+        evidence.includes('"landing-deep-research-card"') &&
+        evidence.includes('"landing-web-search-card"') &&
+        evidence.includes('"landing-source-grounding-card"') &&
+        evidence.includes('"landing-item-verification-card"') &&
+        copy.includes("Pro plan and above. Uses credits.") &&
+        copy.includes("It measures quote matching") &&
+        // The walkthrough is an illustration, not a stale capture: the
+        // 2026-07-27 recording showed a superseded credit figure and the
+        // pre-rename "Review confidence" label, so the landing page must not
+        // embed it and must not claim to be a product recording.
+        !source.includes('src="/marketing-proof/') &&
+        !source.includes('poster="/marketing-proof/') &&
+        !source.includes("<video") &&
+        !copy.includes("Real product UI") &&
+        !copy.includes("Review confidence") &&
+        !copy.includes("4 credits used") &&
+        copy.includes("Illustrative diagram, not a product recording") &&
+        // Claims the product does not make: no source-linked extraction
+        // guarantee on the file case.
+        !copy.includes("source-linked")
       );
     },
+  },
+  {
+    name: "Help-centre walkthrough asset is present and served locally",
+    file: "components/marketing/ChatWorkspaceGuide.tsx",
+    test: (source) =>
+      // The landing page no longer embeds this capture (it showed a
+      // superseded credit figure), but the help-centre guide still does, and
+      // it must keep pointing at a real local file rather than a 0-byte stub
+      // or a third-party host.
+      source.includes('src="/marketing-proof/tomverse-review-workflow.webm"') &&
+      source.includes('poster="/marketing-proof/tomverse-review-workflow-poster.png"') &&
+      !source.includes("http://") &&
+      statSync("public/marketing-proof/tomverse-review-workflow.webm").size >
+        100_000 &&
+      statSync("public/marketing-proof/tomverse-review-workflow-poster.png").size >
+        20_000,
   },
   {
     name: "Pricing explains credit value using the production model weights",
