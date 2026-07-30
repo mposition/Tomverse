@@ -32,7 +32,7 @@ production `Go`를 선언하지 않는다. R-01, R-05, `QA-GATE-001` 셋이 모�
 | `R-06` | P2 | **성공** | 3개 lifecycle 전이 coverage 추가, 11/11 통과 |
 | `R-07` | P2 verification | **성공** | live `/api/build-info` ↔ UI field 일치 검증 추가 |
 | `R-08` | P3 | **성공** (staging 미배포) | stall 25초 내 안내, security semantics 무변경 |
-| `QA-GATE-001` | release gate | **Fail → 기능 2건 해결, visual 8건 잔존** | 이번 변경의 canonical regression은 **0건**. 기능 2건은 근본 원인이 제품 결함이 아니라 UI-EMPTY-001 계약과 충돌하는 낡은 test였음을 계측으로 확정하고 **수정 완료(28/28 통과)**. visual 8건은 #145가 loading shell·attachment stages를 바꾸며 golden을 재촬영하지 않은 것으로, canonical diff 확인 후 재촬영 승인이 필요하다. §6.5 |
+| `QA-GATE-001` | release gate | **Not verified — 설명되지 않은 실패 0건** | 이번 변경의 canonical regression은 **0건**. 기능 2건은 UI-EMPTY-001 계약과 충돌하는 낡은 test였음을 계측으로 확정하고 **수정 완료(28/28)**. visual 8건은 canonical diff로 #145의 의도적 대비 변경(`UI-CONTRAST-001`: overlay 반투명화)이 원인이고 제품 동작 정상임을 확인 —— **golden 재촬영 승인만 남았다.** §6.5 |
 
 ---
 
@@ -967,25 +967,67 @@ stages**". #145는 `ChatInput.tsx`(+304)와 `DesktopChatShell.tsx`(+18)로 바�
 두 영역의 UI를 의도적으로 변경했으면서 해당 8개 golden을 **재촬영하지 않았다.**
 따라서 golden이 의도된 새 렌더링에 대해 stale하다.
 
-**미확보 증거**: canonical의 actual/expected/diff 이미지를 확인하지 못했다
-(CI artifact 75MB, 이 환경에 인증 다운로드 경로가 없다). 따라서 "새 렌더링이
-올바르고 golden만 낡았다"는 것은 **원인 규명 수준이며 제품 동작 정상 확인은
-아니다.**
+**canonical diff 확인 (사용자가 artifact 전달, 2026-07-30)**
 
-참고로 로컬에서 이 8건을 재현했을 때 diff는 13,083–18,987 pixels였으나,
-**그 수치는 판정에 쓸 수 없다** —— 로컬은 비-canonical Chromium `1194`이고 diff
-이미지에서 라틴 문자(`Claude Sonnet 5`, `google`, `ON`)까지 전부 차이로 표시되어
-문서화된 glyph-edge 노이즈가 full-page에서 확대된 것임이 드러난다.
+diff 이미지에서 읽히는 것:
 
-**분류**: 원인은 규명됐으나 제품 동작 정상 확인이 없으므로, 사용자 표의
-"별도 이슈 가능"에 아직 도달하지 못한다. 종결에는 canonical diff 확인 후
-**golden 재촬영 승인**이 필요하다.
+- 페이지의 **모든 text run**이 차이로 표시된다 —— 한국어뿐 아니라 라틴 문자
+  (`GPT-5.4 mini`, `Claude Sonnet 5`, `openai`, `google`, `ON`)까지 동일하게.
+- "AI 답변 교차검토" 버튼과 per-model `ON` 토글은 **통째로 채워진 면**으로
+  표시된다 —— glyph 윤곽이 아니라 **색 차이**다.
+- **이동하거나 사라진 요소가 없다.** 레이아웃 위치는 golden과 일치한다.
+
+면 차이는 rasterization으로 설명되지 않는다. 원인은 #145의 의도적 대비 변경
+(`UI-CONTRAST-001` / `UI-EMPTY-001`)이다.
+
+```
+- <div className="absolute inset-0 z-10 bg-zinc-100/80 dark:bg-zinc-950">
++ <div className="absolute inset-0 z-10 bg-zinc-100/80 dark:bg-zinc-950/80">
+- className="... text-zinc-400 dark:text-zinc-500 ..."   (composer disclaimer)
++ className="... text-zinc-600 dark:text-zinc-300 ..."
+```
+
+welcome overlay가 dark에서 **불투명 → 반투명(80%)** 으로 바뀌었다.
+`DesktopChatShell.tsx:489–495`의 주석이 의도를 명시한다 —— "Dark was opaque,
+which erased that structure entirely. Matching the light alpha is the smallest
+change that restores it." 그 결과 overlay 아래 3개 comparison panel이 비쳐
+보이므로 **해당 영역의 모든 픽셀이 달라지고, 레이아웃은 그대로다.** diff가
+보여주는 것과 정확히 일치한다.
+
+그리고 **#145는 golden PNG를 단 하나도 갱신하지 않았다**
+(`git diff --stat a1e13fec..ea56a6b -- ...spec.ts-snapshots/` 결과 없음).
+실패한 8건이 `chat-loading`·`chat-attachment`인 이유도 이것이다 —— 그 상태들이
+빈 대화의 welcome overlay 아래에서 촬영되는 상태다.
+
+**앞선 판단 하나를 정정한다.** 로컬(비-canonical Chromium `1194`) diff를 browser
+노이즈로 귀속했으나, canonical diff가 **같은 모습**이다. golden과 동일한 browser로
+찍어도 같은 차이가 나오므로 이는 browser 차이가 아니라 **앱 렌더링 변경**이다.
+§6.2의 `mobile-composer-contract` 2건(906px, 문서화된 수치와 일치)만 browser
+노이즈로 남는다.
+
+**분류**: 사용자 표의 "동일한 visual 차이가 trunk에도 존재하고 **제품 동작은
+정상**" —— 요소 이동·누락이 없고, 차이가 특정 의도적 접근성 변경으로 완전히
+추적되며, trunk와 candidate가 동일하다. 따라서 **별도 이슈로 분리 가능**하다.
+
+**권고 처리**: golden 8건을 canonical 환경에서 **재촬영**한다. 새 렌더링이
+UI-CONTRAST-001·UI-EMPTY-001이 의도한 결과이므로 golden이 낡은 쪽이다.
+`docs/qa/canonical-visual-baseline.md`의 절차대로 canonical runner에서 재기록하고
+diff 이유를 변경 설명에 남겨야 하며, **재촬영은 승인 사항**이므로 이번 작업에서는
+수행하지 않았다.
 
 #### C. gate 판정
 
 실행 프롬프트는 `QA-GATE-001`에 **canonical suite unexpected failure 0**을
-요구한다. 현재 10건이 남아 있고 그중 2건은 이연 불가 기능 결함이므로,
-**`QA-GATE-001`은 `Fail`로 유지한다.**
+요구한다.
+
+- 기능 2건: **해결 완료.** 제품 결함이 아니라 UI-EMPTY-001 계약과 충돌하는 낡은
+  test였고, 수정 후 28/28 통과.
+- visual 8건: 원인이 #145의 의도적 대비 변경으로 완전히 규명되고 제품 동작 정상이
+  확인됐다. **golden 재촬영으로 종결 가능하며, 승인이 필요하다.**
+
+재촬영 승인 전까지는 unexpected failure가 0이 아니므로 **`QA-GATE-001`은
+`Not verified`로 유지한다**(설명되지 않은 실패는 이제 0건이지만, gate 문구는
+failure 0을 요구한다).
 
 이번 branch의 canonical regression이 **0건**이라는 사실은 별개로 성립한다
 (candidate와 trunk의 passed 수가 1509로 동일).
