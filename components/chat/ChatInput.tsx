@@ -91,6 +91,10 @@ import {
   getChatEnterKeyAction,
   isComposingKeydown,
 } from "@/lib/chatKeyboardPolicy";
+import {
+  draftKeyFor,
+  type AttachmentsChangeHandler,
+} from "@/components/chat/useConversationDrafts";
 
 type PublicModelStatus = "available" | "limited" | "unavailable";
 type PublicModelStatusRecord = {
@@ -212,10 +216,15 @@ const hasDraggedFiles = (dataTransfer: DataTransfer | null) =>
 // step actually running, so "uploading" (bytes leaving the browser) and
 // "processing" (server validating/extracting them) are two different states
 // on screen and in the accessibility tree, not one shared spinner.
+// `scopeId` is the draft key of the conversation the file was picked in. An
+// upload belongs to that conversation's question, so its in-flight and failed
+// cards are only ever shown there -- switching conversations must not surface
+// another conversation's uploads, and coming back must still show them.
 type PendingAttachment = {
   id: string;
   name: string;
   stage: "uploading" | "processing";
+  scopeId: string;
 };
 
 // A file that did not make it. `file` is retained so retry can re-run this
@@ -225,6 +234,7 @@ type FailedAttachment = {
   name: string;
   reason: string;
   file: File;
+  scopeId: string;
 };
 
 const getAttachmentLabel = (attachment: ChatAttachment) => {
@@ -312,7 +322,7 @@ type ChatInputProps = {
   onToggleModel: (modelId: string) => boolean;
   onSwapModel: (removeModelId: string, addModelId: string) => boolean;
   attachments: ChatAttachment[];
-  onAttachmentsChange: (attachments: ChatAttachment[]) => void;
+  onAttachmentsChange: AttachmentsChangeHandler;
   canAttach?: boolean;
   isGuestMode?: boolean;
   guestPreviewMode?: boolean;
@@ -450,7 +460,19 @@ export function ChatInput({
   const isMobileShell = useIsMobileShell();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const previousAttachmentsRef = useRef<ChatAttachment[]>([]);
+  // The draft this composer is currently editing. Everything scoped below is
+  // scoped to this, not to the component instance: the composer is shared by
+  // every conversation and is deliberately never remounted between them (that
+  // would take the portal host, focus and in-flight uploads with it).
+  const draftScopeId = draftKeyFor(currentChatId);
+  const draftScopeIdRef = useRef(draftScopeId);
+  useEffect(() => {
+    draftScopeIdRef.current = draftScopeId;
+  }, [draftScopeId]);
+  const previousAttachmentsRef = useRef<{
+    scopeId: string;
+    items: ChatAttachment[];
+  }>({ scopeId: draftScopeId, items: attachments });
   const hasHandledFocusTokenRef = useRef(false);
   const guestQuickStartActiveRef = useRef(false);
   const trackedLimitScopeRef = useRef<"guest" | "daily" | "monthly" | null>(
@@ -466,10 +488,17 @@ export function ChatInput({
   const [failedAttachments, setFailedAttachments] = useState<
     FailedAttachment[]
   >([]);
-  const latestAttachmentsRef = useRef<ChatAttachment[]>(attachments);
-  useEffect(() => {
-    latestAttachmentsRef.current = attachments;
-  }, [attachments]);
+  // Only this conversation's uploads are on screen. The entries for other
+  // conversations stay in state so returning to one still shows its own
+  // in-flight and failed files.
+  const scopedPendingAttachments = useMemo(
+    () => pendingAttachments.filter((item) => item.scopeId === draftScopeId),
+    [draftScopeId, pendingAttachments]
+  );
+  const scopedFailedAttachments = useMemo(
+    () => failedAttachments.filter((item) => item.scopeId === draftScopeId),
+    [draftScopeId, failedAttachments]
+  );
   const [isDragActive, setIsDragActive] = useState(false);
   const [preserveFormatting, setPreserveFormatting] = useState(false);
   useEffect(() => {
@@ -1300,9 +1329,18 @@ export function ChatInput({
   }, [focusToken]);
 
   useEffect(() => {
-    const currentIds = new Set(attachments.map((attachment) => attachment.id));
+    // Only a removal *within one conversation* frees a preview. When the list
+    // changes because another conversation was opened, the previous entries
+    // are still that conversation's draft: revoking them here is what used to
+    // make an attachment unrecoverable the moment the user looked away.
+    // Drafts that are genuinely spent (sent, or their conversation deleted)
+    // are released by the draft store that owns them.
+    const previous = previousAttachmentsRef.current;
+    previousAttachmentsRef.current = { scopeId: draftScopeId, items: attachments };
+    if (previous.scopeId !== draftScopeId) return;
 
-    previousAttachmentsRef.current.forEach((attachment) => {
+    const currentIds = new Set(attachments.map((attachment) => attachment.id));
+    previous.items.forEach((attachment) => {
       if (
         !currentIds.has(attachment.id) &&
         attachment.data?.startsWith("blob:")
@@ -1310,9 +1348,7 @@ export function ChatInput({
         URL.revokeObjectURL(attachment.data);
       }
     });
-
-    previousAttachmentsRef.current = attachments;
-  }, [attachments]);
+  }, [attachments, draftScopeId]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     const action = getChatEnterKeyAction(
@@ -1344,7 +1380,7 @@ export function ChatInput({
    * rather than asking the user to find it in the picker again.
    */
   const uploadOneFile = useCallback(
-    async (file: File, trackingId: string) => {
+    async (file: File, trackingId: string, scopeId: string) => {
       const mediaType = getFileMediaType(file);
       const fail = (reason: string) => {
         setPendingAttachments((current) =>
@@ -1352,7 +1388,7 @@ export function ChatInput({
         );
         setFailedAttachments((current) => [
           ...current.filter((item) => item.id !== trackingId),
-          { id: trackingId, name: file.name, reason, file },
+          { id: trackingId, name: file.name, reason, file, scopeId },
         ]);
       };
 
@@ -1373,7 +1409,7 @@ export function ChatInput({
       );
       setPendingAttachments((current) => [
         ...current.filter((item) => item.id !== trackingId),
-        { id: trackingId, name: file.name, stage: "uploading" },
+        { id: trackingId, name: file.name, stage: "uploading", scopeId },
       ]);
 
       try {
@@ -1440,11 +1476,13 @@ export function ChatInput({
         setPendingAttachments((current) =>
           current.filter((item) => item.id !== trackingId)
         );
-        // Read through the ref rather than the captured `attachments` prop:
-        // several files can finish while this closure is still holding the
+        // Appended through a reducer rather than by rebuilding the list this
+        // closure captured: several files can finish while it still holds the
         // list as it looked when the batch started, and appending to a stale
-        // copy silently drops whichever one landed first.
-        onAttachmentsChange([...latestAttachmentsRef.current, attachment]);
+        // copy silently drops whichever one landed first. `scopeId` sends it
+        // to the conversation the file was picked in, which may no longer be
+        // the one on screen.
+        onAttachmentsChange((current) => [...current, attachment], scopeId);
       } catch (error) {
         console.error("Attachment upload failed:", error);
         fail(t("chat.attachmentUploadError"));
@@ -1454,11 +1492,16 @@ export function ChatInput({
   );
 
   const runUploadBatch = useCallback(
-    async (entries: Array<{ file: File; trackingId: string }>) => {
+    async (
+      entries: Array<{ file: File; trackingId: string }>,
+      // Read once, when the batch starts, so every file in it is attributed to
+      // the conversation the user actually picked it in.
+      scopeId: string = draftScopeIdRef.current
+    ) => {
       setIsUploading(true);
       try {
         for (const entry of entries) {
-          await uploadOneFile(entry.file, entry.trackingId);
+          await uploadOneFile(entry.file, entry.trackingId, scopeId);
         }
       } finally {
         setIsUploading(false);
@@ -1472,7 +1515,7 @@ export function ChatInput({
     if (!files?.length) return;
 
     const availableSlots =
-      MAX_ATTACHMENTS - attachments.length - pendingAttachments.length;
+      MAX_ATTACHMENTS - attachments.length - scopedPendingAttachments.length;
     if (availableSlots <= 0) {
       dispatchAppToast(t("chat.attachmentCountError"), "error");
       return;
@@ -1486,7 +1529,12 @@ export function ChatInput({
 
   const handleRetryFailedAttachment = useCallback(
     (failed: FailedAttachment) => {
-      void runUploadBatch([{ file: failed.file, trackingId: failed.id }]);
+      // Retried into the conversation it originally failed in, which is the
+      // only one its card is ever shown in.
+      void runUploadBatch(
+        [{ file: failed.file, trackingId: failed.id }],
+        failed.scopeId
+      );
     },
     [runUploadBatch]
   );
@@ -2105,8 +2153,8 @@ export function ChatInput({
             </div>
           )}
           {(attachments.length > 0 ||
-            pendingAttachments.length > 0 ||
-            failedAttachments.length > 0) && (
+            scopedPendingAttachments.length > 0 ||
+            scopedFailedAttachments.length > 0) && (
             <div
               data-testid="attachment-tray"
               className="mb-2 rounded-2xl bg-zinc-50 p-1.5 dark:bg-zinc-950/70 md:mb-3 md:bg-transparent md:p-0"
@@ -2118,7 +2166,7 @@ export function ChatInput({
                   neither offers a cancel button, because the upload pipeline
                   has no abort path today and a control that does nothing is
                   worse than the honest "please wait" this gives instead. */}
-              {pendingAttachments.map((pending) => {
+              {scopedPendingAttachments.map((pending) => {
                 const stageLabel =
                   pending.stage === "uploading"
                     ? t("chat.attachmentUploadingLabel")
@@ -2163,7 +2211,7 @@ export function ChatInput({
                   </div>
                 );
               })}
-              {failedAttachments.map((failed) => (
+              {scopedFailedAttachments.map((failed) => (
                 <div
                   key={failed.id}
                   role="alert"

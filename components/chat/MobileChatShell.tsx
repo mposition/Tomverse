@@ -14,6 +14,7 @@ import { ANALYTICS_PREFERENCES_OPEN_EVENT } from "@/lib/analyticsPreferencesEven
 import { AiDisclaimerNotice } from "@/components/chat/AiDisclaimerNotice";
 import { ChatApp } from "@/components/chat/ChatApp";
 import { ChatInput } from "@/components/chat/ChatInput";
+import type { AttachmentsChangeHandler } from "@/components/chat/useConversationDrafts";
 import { useComposerPortalHost } from "@/components/chat/useComposerPortalHost";
 import { ChatWelcomeScreen } from "@/components/chat/ChatWelcomeScreen";
 import { ModelLogo } from "@/components/chat/ModelLogo";
@@ -71,7 +72,7 @@ type MobileChatShellProps = {
   setInputValue: (value: string) => void;
   personalizedPrompt?: string | null;
   attachments: ChatAttachment[];
-  setAttachments: (attachments: ChatAttachment[]) => void;
+  setAttachments: AttachmentsChangeHandler;
   isSending: boolean;
   focusToken: number;
   isGuestMode: boolean;

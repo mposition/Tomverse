@@ -30,6 +30,8 @@ import {
 } from "@/lib/perplexityUsageCapture";
 import {
     DEEP_RESEARCH_DEPTH_PARAMS,
+    describeDeepResearchMessages,
+    PerplexityDeepResearchMessageError,
     submitDeepResearchJob,
 } from "@/lib/perplexityDeepResearch";
 import { assertModelRuntimeAvailable } from "@/lib/modelAvailability";
@@ -173,7 +175,9 @@ const logRequestError = (
     event: string,
     traceId: string,
     error: unknown,
-    modelId?: string
+    modelId?: string,
+    // Non-sensitive request shape only (roles, counts). Never message content.
+    details?: Record<string, unknown>
 ) => {
     console.error(
         JSON.stringify({
@@ -181,6 +185,7 @@ const logRequestError = (
             traceId,
             modelId,
             ...safeErrorMetadata(error),
+            ...details,
             message: safeErrorMessage(error)?.slice(0, 1_000),
         })
     );
@@ -1229,6 +1234,10 @@ export async function POST(req: Request) {
                 );
             }
 
+            // Set once Perplexity has accepted the job. If persisting the
+            // local rows then fails, this is the id an operator needs to
+            // reconcile a provider job that has no Message or job row here.
+            let submittedPerplexityJobId: string | null = null;
             try {
                 const depthParams =
                     DEEP_RESEARCH_DEPTH_PARAMS[deepResearchDepth || "standard"];
@@ -1239,6 +1248,7 @@ export async function POST(req: Request) {
                         depthParams.reasoningEffort ||
                         (modelConfig.reasoning === "high" ? "high" : undefined),
                 });
+                submittedPerplexityJobId = perplexityJobId;
 
                 await linkChatReservationProviderRequest(
                     usageReservation.reservationId,
@@ -1287,40 +1297,68 @@ export async function POST(req: Request) {
                     }
                 );
             } catch (error) {
+                // A message-contract rejection is this app's own bug: the
+                // request never left the process, so Perplexity must not be
+                // marked as failing (and its status page must not react).
+                // The credit refund below is unconditional either way.
+                const isMessageContractError =
+                    error instanceof PerplexityDeepResearchMessageError;
                 await settleChatUsage(usageReservation, {
                     inputTokens: 0,
                     outputTokens: 0,
                     outcome: "failed",
                 }).catch(() => {});
                 usageReservation = null;
-                await recordProviderFailure(
-                    modelConfig.provider,
-                    "DEEP_RESEARCH_SUBMIT_FAILED",
-                    {
-                        modelId: requestedModelId,
-                        phase: "request",
-                        traceId,
-                        message:
-                            error instanceof Error ? error.message : String(error),
-                    }
-                ).catch(() => {});
-                await recordModelFailure(
-                    requestedModelId,
-                    modelConfig.provider,
-                    "DEEP_RESEARCH_SUBMIT_FAILED"
-                ).catch(() => {});
+                if (!isMessageContractError) {
+                    await recordProviderFailure(
+                        modelConfig.provider,
+                        "DEEP_RESEARCH_SUBMIT_FAILED",
+                        {
+                            modelId: requestedModelId,
+                            phase: "request",
+                            traceId,
+                            message:
+                                error instanceof Error
+                                    ? error.message
+                                    : String(error),
+                        }
+                    ).catch(() => {});
+                    await recordModelFailure(
+                        requestedModelId,
+                        modelConfig.provider,
+                        "DEEP_RESEARCH_SUBMIT_FAILED"
+                    ).catch(() => {});
+                }
                 logRequestError(
-                    "deep_research_submit_failed",
+                    isMessageContractError
+                        ? "deep_research_message_contract_failed"
+                        : "deep_research_submit_failed",
                     traceId,
                     error,
-                    requestedModelId
+                    requestedModelId,
+                    {
+                        // Shape of the conversation this request carried, so a
+                        // recurrence is diagnosable without logging its content.
+                        messageShape:
+                            describeDeepResearchMessages(formattedMessages),
+                        ...(submittedPerplexityJobId
+                            ? { submittedPerplexityJobId }
+                            : {}),
+                    }
                 );
-                return tracedJsonError(
-                    "Failed to start the deep research job. Reserved credits were refunded.",
-                    "DEEP_RESEARCH_SUBMIT_FAILED",
-                    502,
-                    traceId
-                );
+                return isMessageContractError
+                    ? tracedJsonError(
+                          "This deep research request had no question to research. Reserved credits were refunded.",
+                          "DEEP_RESEARCH_INVALID_MESSAGES",
+                          400,
+                          traceId
+                      )
+                    : tracedJsonError(
+                          "Failed to start the deep research job. Reserved credits were refunded.",
+                          "DEEP_RESEARCH_SUBMIT_FAILED",
+                          502,
+                          traceId
+                      );
             }
         }
 
