@@ -31,7 +31,18 @@ jobs:
     # runner-image bump cannot silently re-rasterise every golden.
     # See docs/qa/canonical-visual-baseline.md.
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    # The unfiltered suite has been growing into this budget for several
+    # releases -- 33m, then 41m43s, then 42m23s -- and the go-live regression
+    # specs took it past 45m, where the run is killed and reported as
+    # "cancelled" rather than as a timeout, which reads like someone stopped it.
+    # Raised for headroom, not because anything here got slower: no single spec
+    # regressed, the suite simply has more of them.
+    #
+    # This buys time rather than fixing the shape. `test:e2e:chromium` runs
+    # desktop-chromium, desktop-compact and mobile-chromium in one job; a matrix
+    # over the three projects would cut wall-clock roughly threefold and is the
+    # real fix. That is a change to make on its own, not during a release.
+    timeout-minutes: 75
     # Keep the production client bundle on the same deterministic Turnstile
     # configuration used by the isolated Playwright server.
     env:
