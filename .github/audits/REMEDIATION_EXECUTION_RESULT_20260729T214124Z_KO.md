@@ -1595,6 +1595,83 @@ artifact에 기록하지 않았다.
 | **visual snapshot 2건** | Not verified | canonical 환경 재현. diff는 906px 문서화된 rasterization 차이. 갱신 승인 요청 대상이며 임의 갱신하지 않았다 |
 | **`visual-baseline/30513363879` 병합** | ⏸️ **보류 —— 병합 조건 미충족** | 아래 §11.2 |
 
+### 11.3 staging 검증 —— 배포는 이미 되어 있었다
+
+*배포 조치는 불필요했다*
+
+Railway `staging` 환경은 `develop` push마다 **자동 배포**된다. 확인 시점의 staging은
+이미 `#146`보다 앞서 있었으므로 R-02·R-04·R-08은 **이미 배포된 상태**였고, 이
+실행이 새로 배포를 트리거하지 않았다.
+
+| 항목 | 값 |
+|---|---|
+| staging build SHA | `490d58997313aece26b953660af2b1e59e5933be` (`490d589`, #151) |
+| deployment ID | `8a230521-dc7e-4428-afcb-4b9db56e198d` |
+| deploymentStartedAt | `2026-07-30T06:45:58.550Z` |
+| deployedAt | `2026-07-30T06:50:49.449Z` |
+| status | `success` |
+| 출처 | `/api/build-info` (`cache-control: no-store`) + Railway `list-deployments` |
+
+`cb57c8d7`(#146)는 `490d5899`의 조상이므로 R-02·R-04·R-05(hero 부분)·R-08이 모두
+포함된다. **이 branch의 R-05-A(`f775339`)와 R-05-KO(`4d9a99a`)는 아직 `develop`에
+없으므로 staging에도 없다.**
+
+*동작 축은 이 환경에서 도달할 수 없다 —— 우회하지 않고 보고한다*
+
+Chromium이 staging에 닿지 못한다. proxy 미지정과 `HTTPS_PROXY` 지정 양쪽 모두
+`net::ERR_CONNECTION_RESET`이다(`curl`은 정상). `/root/.ccr/README.md`의 지침대로
+TLS 검증 해제나 `HTTPS_PROXY` 해제 같은 우회를 하지 않았다. 따라서 staging에서
+**layout 측정과 상호작용 시나리오는 판정할 수 없다.**
+
+| 축 | 결과 | 증거 등급 |
+|---|---|---|
+| **R-04** 배포본에 수정 포함 | ✅ `/pricing` HTML에 `data-testid="marketing-menu-button"` + `h-[44px] w-[44px]`, header row `h-16 … gap-[12px] px-[16px]`, brand logo `h-[36px]`, `gap-[8px]` ×2 | **배포 artifact** (layout 미측정) |
+| **R-04** 320/390px·200% 실측 | ❌ 도달 불가 | — |
+| **R-08** 배포본에 수정 포함 | ✅ chat chunk `1h_wohb00ik04.js`에 `role="status"`, `data-testid="guest-verification-long-wait"`, `isOpen && isLongWait && !failure` gate, `chat.guestVerificationLongWait` | **배포 artifact** |
+| **R-08** stall/cancel/retry 실측 | ❌ 도달 불가 | — |
+| **R-02** evidence 귀속 문구 | ✅ `/status`에 `(from an automated synthetic check, not real user traffic)`와 `(from real request traffic monitoring)`가 **분리되어 출력** —— `statusPageEvidence` 변경이 배포본에서 동작 | **staging 실측** |
+| **R-05** cold/warm × locale × consent | ❌ 해당 없음 —— R-05-A·R-05-KO가 staging에 없다 | — |
+
+*R-02: staging에서 확인된 것과, 새로 드러난 것*
+
+11개 provider의 실제 판정을 `/status`에서 추출했다(2026-07-30 07:09 UTC 기준).
+
+| provider | 상태 | last automated check | 근거 출처 |
+|---|---|---|---|
+| Anthropic·Google Gemini·xAI·DeepSeek·Mistral·Moonshot Kimi·Qwen·Zhipu GLM | Operational | 2026-07-30 07:00 | synthetic probe |
+| Groq | Incident | 2026-07-30 07:00 | **real request traffic** (5 consecutive) |
+| **Perplexity** | **Incident** | **2026-07-27 23:30** | **real request traffic** (5 consecutive) |
+
+두 가지가 나온다.
+
+1. **probe scheduler가 Perplexity에 대해서만 55시간째 갱신되지 않았다.** 나머지
+   10개는 전부 `07:00`인데 Perplexity만 `2026-07-27 23:30`이다. §12에 "probe
+   scheduler 자체의 감시가 필요하다"고 적었던 잔여 위험이 **staging에서 특정
+   provider로 실체화**한 것이다.
+2. **R-02와 동일한 결함 class가 real-traffic 경로에 남아 있다 (신규, 소스 확인).**
+   `lib/providerPublicStatusCore.ts:203-212`의 `CONSECUTIVE_FAILURES_THRESHOLD`는
+   `consecutiveFailures`를 **freshness 검사 없이** 그대로 쓴다. 앞 단계(1~3) 어디에도
+   시간 gate가 없다. R-02가 probe 쪽에 넣은 `PROBE_FAILURE_STALE` 만료가
+   real-traffic 쪽에는 **없다.**
+
+   ```ts
+   // 4. Consecutive-failure floor …
+   if (Math.max(0, Math.floor(consecutiveFailures)) >=
+       Math.max(1, Math.floor(incidentConsecutiveFailureThreshold))) {
+     return result("incident", "CONSECUTIVE_FAILURES_THRESHOLD", …);
+   }
+   ```
+
+   staging의 Perplexity Incident가 실제로 오래된 count에서 나온 것인지는 **이
+   화면만으로 판단할 수 없다** —— page가 그 5건이 *언제* 실패했는지 표시하지 않기
+   때문이다. 그리고 그 정보 부재 자체가 R-02가 문제 삼은 투명성 결함이다.
+   구조적 gap은 소스로 확정되지만, 이 Incident가 거짓이라고 단정하지는 않는다.
+
+**따라서 R-02는 "고친 결함은 배포본에서 동작하나, 같은 class의 두 번째 사례가
+real-traffic 경로에 남아 있다"로 기록한다.** 이번 범위에서 수정하지 않았다 ——
+R-02의 승인 범위는 probe 경로였고, real-traffic 만료는 "실패 증거를 언제 만료시킬
+것인가"라는 별도 정책 결정이기 때문이다. 사용자 결정 사항으로 §13에 올린다.
+
 ### 11.2 `visual-baseline/30513363879` —— 지금 병합하지 않는다
 
 사용자가 제시한 병합 조건 7개 중 **"recording 대상 SHA가 최종 candidate와 일치"가
@@ -1625,7 +1702,7 @@ font 변경이 한 번 더 들어갈 수 있다.
 
 **따라서 최종 R-05 코드가 확정된 뒤 새 baseline run을 생성하는 것이 맞다.**
 baseline을 먼저 병합해 test를 초록색으로 만드는 방식은 금지한다.
-| **R-02/R-04/R-05/R-08 staging 검증** | Fixed locally, not verified on staging | 배포 승인. 현재 staging(`ea56a6ba`)에는 이 수정들이 없다 |
+| **R-02/R-04/R-05/R-08 staging 검증** | ✅ **artifact 축 검증 완료 / 동작 축은 도달 불가** | 아래 §11.3 |
 | **R-05 잔여 CLS 0.1095** | 완료 조건 미달 | 설계 결정: (a) 수용, (b) marketing page 동적 전환, (c) consent slot 높이 예약 |
 | **실제 browser zoom 200%** | Not verified | 진짜 zoom을 제어할 수 있는 실기기/도구 |
 | **R-07 staging 인증 UI** | 해당 없음으로 처리 | local authenticated fixture로 충족. staging 계정 접근은 요청하지 않았다 |
