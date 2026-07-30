@@ -24,7 +24,7 @@ production `Go`를 선언하지 않는다. R-01, R-05, `QA-GATE-001` 셋이 모�
 
 | ID | 최종 심각도 | 판정 | 근거 |
 |---|---|---|---|
-| `R-01` | P1 release blocker | **Not verified** | 계정·승인·로그인까지 확보(Pro, baseline 기록)했으나 브라우저가 staging에 도달 못하고 실행 POST가 권한 classifier에 거부됨. 사람이 UI에서 수행하는 방식으로 진행 결정. credit 소비 0 |
+| `R-01` | P1 release blocker | **부분 검증 — 1/3 run 완료** | 사람이 staging UI에서 comparison 1회 + Review 1회 실행. expected/charged가 정책과 정확히 일치(3, 8), 3개 provider 실제 응답, 중복 차감·debt 없음. 남은 것: comparison run 2·3, 환불 경로 actual 검증, provider-start 내부 counter |
 | `R-02` | P1 release gate | **성공** (staging 미배포) | source 수정 + 38개 unit test, stale failure → `unknown` |
 | `R-03` | P1 release gate | **성공 (upstream PR #145)** | 3개 control 모두 실제 44×44, upstream이 해결·검증 |
 | `R-04` | P2 release blocker (`B4`) | **성공** (staging 미배포) | 320/390px × 4 route × en/ko = 24/24 조합 overflow 0px |
@@ -204,6 +204,59 @@ Provider를 호출하는 되돌릴 수 없는 동작이므로 **정당한 게이
   관리자 또는 Anthropic 지원에 보고할 사안이다(README 지침).
 - **위생**: 세션 cookie는 저장소가 아니라 세션 scratchpad에만 있고 컨테이너와 함께
   사라진다. 로그인 코드·cookie·token은 보고서와 artifact에 기록하지 않았다.
+
+**실제 실행 결과 (사람이 staging UI에서 수행, 2026-07-30)**
+
+(b) 경로로 사람이 staging UI에서 직접 실행하고 metadata를 공유했다. **이번
+remediation 전체에서 유일한 actual Provider 트래픽이다.**
+
+| 단계 | creditsMonth | planRemaining | purchased | debt | charged |
+|---|---:|---:|---:|---:|---:|
+| baseline | 23 | 2977 | 0 | 0 | — |
+| 3-model comparison run 1 | 26 | 2974 | 0 | 0 | **3** |
+| AI Review ×1 | 34 | 2966 | 0 | 0 | **8** |
+| 누적 | | | | | **11** (상한 40) |
+
+*comparison run 1 — 4축 대조*
+
+| 축 | 관측값 | 정책값 | 판정 |
+|---|---|---|---|
+| expected | UI 추정 칩 **3**, `preflight` 응답 `requiredCredits: 3` (`modelCount: 3`, `comparisonId: 1785373195068`) | 3 (standard×3 = 1+1+1, 입력 배수 1×) | ✅ 두 독립 출처가 일치 |
+| charged | `creditsMonth` +3, `planRemaining` −3 | 3 | ✅ 두 counter가 서로 일치 |
+| refunded | 차감액 == 예약액, 환불 없음 | 실패·미소비분이 없으므로 환불이 발생할 이유가 없음 | ⚠️ 아래 참고 |
+| provider-start | Gemini 200 OK 1.32s / Claude 200 OK 1.42s / GPT 200 OK 2.56s, **3개 panel 모두 답변 완료** | 3 | ✅ 관측 가능한 대체 지표 충족 |
+
+*AI Review — 예측 정정*
+
+charged **8**이다. 이 보고서의 앞선 예측은 12였고 **그것이 틀렸다**.
+`reviewerIds()`가 반환하는 3개가 모두 실행된다고 읽었으나, 실제 코드는
+`candidates[0]`과 그와 다른 **두 번째 후보 하나**만 실행하고 나머지는 fallback
+후보다(`app/api/conversations/[conversationId]/comparison-reviews/route.ts:199–207`,
+주석도 "roughly doubled"라고 명시). 두 reviewer 모두 `advanced`(가중치 4)이므로
+정책값은 4+4 = **8**이고, **관측값과 정확히 일치한다.**
+
+따라서 §4 R-01의 예상 credit 표에서 Review 항목 12는 8로, 합계 9–21은
+**9–17**로 읽어야 한다.
+
+*아직 닫히지 않은 것*
+
+1. **comparison은 3회 중 1회만 실행됐다.** 완료 조건은 "3회 모두 3개 panel 완료"
+   이므로 run 2·3이 남았다.
+2. **환불 경로는 actual 트래픽으로 검증되지 않았다.** run 1은 3개 panel이 모두
+   성공하고 차감액이 예약액과 같아 환불이 발생할 상황 자체가 아니었다. partial
+   failure 시 미소비분 환불은 여전히 unit/server-contract 수준에서만 검증돼 있다.
+3. **provider-start의 내부 counter는 사용자에게 노출되지 않는다.** 위 ✅는
+   "3개 provider가 서로 다른 latency로 200을 반환하고 답변을 완료했다"는 대체
+   관찰이다. 진짜 counter는 서버 로그/admin 경로에서 별도로 확인해야 한다.
+
+*확인된 긍정 신호*
+
+- `purchased`와 `debt`가 전 구간 0을 유지했다 —— 구매 credit 소진이나 debt
+  누적 없이 plan credit만 정상적으로 사용됐다.
+- 두 개의 독립 counter(`creditsMonth` 증가분, `planRemaining` 감소분)가 두 단계
+  모두에서 일치했다 —— 중복 차감 징후 없음.
+- 세 provider(OpenAI·Anthropic·Google)가 모두 실제로 응답했다. 감사 기준선의
+  "성공한 실제 3-model comparison 0회"는 이로써 **1회**가 됐다.
 
 ### R-02 — Stale probe failure freshness ✅
 
