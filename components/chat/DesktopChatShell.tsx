@@ -7,6 +7,7 @@ import { useChatConsentSlotRef } from "@/components/analytics/AnalyticsProvider"
 import { useSidebarCollapsePreference } from "@/components/chat/useSidebarCollapse";
 import { ChatApp } from "@/components/chat/ChatApp";
 import { ChatInput } from "@/components/chat/ChatInput";
+import type { AttachmentsChangeHandler } from "@/components/chat/useConversationDrafts";
 import { useComposerPortalHost } from "@/components/chat/useComposerPortalHost";
 import { ChatWelcomeScreen } from "@/components/chat/ChatWelcomeScreen";
 import { ModelLogo } from "@/components/chat/ModelLogo";
@@ -51,7 +52,7 @@ type DesktopChatShellProps = {
   setInputValue: (value: string) => void;
   personalizedPrompt?: string | null;
   attachments: ChatAttachment[];
-  setAttachments: (attachments: ChatAttachment[]) => void;
+  setAttachments: AttachmentsChangeHandler;
   isSending: boolean;
   focusToken: number;
   isGuestMode: boolean;
