@@ -461,6 +461,30 @@ cell당 5–10회. 모든 shift source를 기록해 "추가 source"가 top-N 절
 | **기존 동의 (accepted)** | **0** | 5/5 회 |
 | **거부 (declined)** | **0** | 5/5 회 |
 
+*세 기여분을 분리해 기록 (사용자 요청)*
+
+사용자가 "동의 직후"의 의미를 분명히 하라고 지적했다 —— 클릭 후 500ms 이내의
+shift는 표준 CLS에서 `hadRecentInput`으로 제외될 수 있으므로 위 표의
+"just-accepted" 행만으로는 slot 제거 기여분이 보이지 않는다. 그래서 세 갈래로
+따로 측정했다(`cls-split.mjs`, 360×640 en, 5회 median).
+
+| 기여분 | 값 | 측정 방법 |
+|---|---:|---|
+| ① page load 중 prompt 삽입 | **0.1095** | 클릭 이전 entry만, `hadRecentInput=false` |
+| ② accept 클릭 후 slot 제거 | **0.1095** | 클릭 시각 이후 raw entry 전체, **`hadRecentInput` filter를 의도적으로 끄고** 집계 |
+| ③ 기존 accepted 방문자 reload | **0** | `localStorage` seed 후 cold load |
+| ③ 기존 declined 방문자 reload | **0** | 동일 |
+
+②는 표준 CLS에 **집계되지 않는다**(사용자 조작 직후이므로). 여기 적은 값은
+"필터를 껐을 때 실제로 존재하는 shift"이며, 필드 지표가 아니라 설계 판단용
+근거다. ①과 ③이 Go-Live 판정 대상이다.
+
+*C1 rollback 확인 (사용자 권고 1단계)*
+
+`AnalyticsProvider.tsx`가 수정 없는 상태임을 `git status`로 확인하고 재측정한
+결과가 C1 이전 baseline과 **정확히 일치**했다: 360 en 0.1095 / 320 en 0.1466 /
+360 ko 0.116(max 0.2141) / 320 ko 0.1486(max 0.2295). 되돌림이 완결됐다.
+
 **판정: 조건부 수용 조건을 충족하지 못한다. (a)를 적용하지 않는다.**
 
 배제 기준 두 개가 걸린다.
@@ -603,11 +627,15 @@ the header"로 명시한다. 따라서 **영구 `min-height`는 이 계약을 �
 client에서 붙는다. 그 결과 shift가 "notice 78px 삽입"에서 "예약 94px 삽입"으로
 **커졌다**(0.1095 × 94/78 ≈ 0.132, 관측값과 일치).
 
-예약을 첫 프레임에 넣으려면 prerender된 HTML에 들어가야 하는데, 그러면 방문자의
-저장된 consent를 build 시점에 알 수 없으므로 **모든** 방문자에게 예약이 그려지고,
-기존 동의·거부 방문자(현재 0)에서 붕괴 shift가 새로 생긴다. 서버가 방문자
-consent를 알아야 하고 그것은 cookie를 요청 시점에 읽는 **동적 렌더링**을
-요구하는데, 이는 사용자가 명시적으로 제외한 (b)다.
+예약을 첫 프레임에 넣으려면 prerender된 HTML에 들어가야 한다.
+
+> **정정 (아래 "C2 pre-paint spike" 참조).** 이 문단은 원래 "그러면 방문자의
+> 저장된 consent를 build 시점에 알 수 없으므로 **모든** 방문자에게 예약이 그려지고,
+> 기존 동의·거부 방문자에서 붕괴 shift가 새로 생긴다"고 단정했다. **이 단정은
+> 틀렸다.** prerender된 HTML 안의 pre-paint inline script가 `localStorage`를
+> **동기적으로** 읽어 `<html>`에 attribute를 세우면, 예약은 첫 paint 프레임에
+> 존재하면서도 **미해결 방문자에게만** 적용된다. 즉 서버가 consent를 알 필요가
+> 없고 (b) 동적 전환도 필요 없다. 이 경로를 C2로 명명하고 실제로 측정했다.
 
 *결론*
 
@@ -631,8 +659,111 @@ R-05-A를 해결하려면 셋 중 하나가 필요하다.
 - **(c) 고정 높이 예약**은 최초 방문·동의 완료·기존 동의·거부 네 상태 모두에서
   삽입·제거 CLS가 발생하지 않음이 증명된 경우에만 후속 개선으로 적용한다.
 
-- **남은 작업**: 한국어 hero shift의 근본 원인 확증, (c) 설계·4상태 검증,
-  그리고 한국어·320px 축은 별도 작업으로 분리할지에 대한 결정.
+#### C2 pre-paint spike — 첫 시도는 **측정 자체가 무효**였다
+
+사용자 권고 순서 3단계로 격리 spike를 수행했다. 첫 실행은 "C2는 개선이 없다"는
+결과를 냈고 나는 그것을 폐기 근거로 삼으려 했다. **그 측정은 무효였다.**
+
+진단 script(`c2-diag.mjs`)가 첫 프레임부터 `requestAnimationFrame`으로
+표본을 떠 보니 `data-consent-pending` attribute도, 주입한 `<style>` 태그도
+**아예 존재하지 않았다**(`attr=null`, `styleIn=null`). 원인은 harness다.
+Playwright `page.addInitScript`는 문서 파싱 이전의 placeholder document에서
+실행되므로, `document.documentElement`에 세운 attribute와 거기 붙인 `<style>`은
+실제 응답 HTML이 파싱될 때 **함께 폐기된다**. 같은 spike의 `PerformanceObserver`
+주입은 `window`에만 등록하므로 살아남았고, 그래서 실패가 조용히 통과했다.
+중앙값이 baseline과 소수점까지 동일했던 것(0.1095 / 0.1466 / 0.1498)이 단서였다.
+
+재측정은 제품 변경과 동일한 메커니즘으로 했다 —— 응답 HTML의 `<head>`에 inline
+script를 삽입하고, 그 script/style의 sha256 hash를 CSP header에 더했다
+(`c2-spike2.mjs`). script가 실제로 실행됐음을 `attr=1`, `slotH=94`,
+`minH=94px`로 확인했다.
+
+| cell | BASE median | C2 median | C2 max |
+|---|---|---|---|
+| 360×640 en 미해결 | 0.1095 | **0** | 0 |
+| 320×568 en 미해결 | 0.1466 | **0** | 0 |
+| 360×640 ko 미해결 | 0.1172 | **0.0074** | 0.0843 |
+| 320×568 ko 미해결 | 0.2048 | **0.0226** | 0.0641 |
+| 360×640 en 기존 accepted | 0 | **0** | 0 |
+| 360×640 en 기존 declined | 0 | **0** | 0 |
+
+**C2는 R-05-A를 제거한다.** 그리고 한국어 잔여값이 0.107 → 0.0074로 함께 내려간
+것은 R-05-KO가 사라졌기 때문이 아니라, 예약된 band가 hero를 아래로 밀어 font
+swap이 움직이는 영역의 viewport 점유율(impact fraction)이 줄었기 때문이다.
+원인은 남아 있다.
+
+**CSP 복잡성은 작다.** static marketing은 hash 기반이고
+`getStaticMarketingCspHashes`(`lib/staticMarketingCsp.ts:20-39`)가 prerender된
+`.next/server/app/<route>.html`에서 `src` 없는 inline `<script>`와 `<style>`의
+hash를 자동 수집한다. CSP header는 `CSP_MODE`에 따라 enforce/report-only 중
+**하나만** 발행된다(`proxy.ts:125-128`). 따라서 수동 allowlist도 nonce도 필요
+없다. 관측된 `[Report Only]` 위반 4건은 제품 결함이 아니라 harness가
+`Content-Security-Policy-Report-Only` header 이름을 갱신하지 않은 결과다.
+삽입 지점도 하나로 끝난다: `MarketingShell`은 두 marketing layout
+(`app/(site)/(marketing)/layout.tsx`, `app/[locale]/layout.tsx`) **에서만**
+쓰이고 둘 다 `force-static`이므로, dynamic route(nonce + `strict-dynamic`)에는
+전혀 노출되지 않는다. CSS는 `app/globals.css`에 두면 hash 대상에서 아예 빠진다.
+
+#### 그런데 예약 높이 표가 곡면을 따라가지 못한다 —— C2의 실제 약점
+
+`min-height`는 floor로만 작동하므로 **예약값 ≥ 실제값인 cell에서는 shift가 정확히
+0**이다(360 en에서 실제 78 < 예약 94인데도 0이 나온 이유). 반대로 예약값이
+실제보다 작으면 그만큼 성장 shift가 남는다. 그래서 예약값은 모든 cell의 실제
+높이를 **상한으로 덮어야** 한다. 21개 width × en/ko × `opt_in`/`notice_opt_out`
+× 100%/200% 확대로 slot 높이를 훑었다(`slot-sweep.mjs`, 총 168 load).
+
+| band | 100% 최대 | 200% 최대 |
+|---|---|---|
+| `<640` (320–480px) | 94px | 222px |
+| `<640` (540–639px) | **152px** | 146px |
+| `640–767` | 148px | 170px |
+| `768–1279` | 132px | **262px** (1100px) |
+| `≥1280` | 116px | 230px |
+
+세 가지가 드러났다.
+
+1. **`<640` band이 균일하지 않다.** 320–480px는 최대 94px인데 540–639px는 152px다.
+   실제 높이 breakpoint가 Tailwind `sm:`(640px)와 어긋나 있고, 경계는 480–540px
+   사이 어딘가로 미측정이다. `<640`에 152px를 예약하면 320px 전화기에서 실제
+   94px 대신 152px —— header 아래 **58px의 죽은 공간**이 최초 방문자에게 생긴다.
+2. **200% 확대에서 표의 값뿐 아니라 모양이 바뀐다.** px 예약은 200%에서 대량
+   부족하고(94 예약 vs 222 필요), rem 예약은 100%에서 대량 초과한다. notice는
+   확대 시 약 2.4배가 되는데 `rem`은 2배만 따라가므로 어느 단위도 두 배율을
+   동시에 만족하지 못한다. `min-height: max(94px, 6.94rem)` 같은 조합으로 band별
+   튜닝은 가능하지만(100%에서 17–37px 초과, 200%에서 근사 일치), 그것은 magic
+   constant를 band마다 두 개씩 두는 것이다.
+3. **나는 en/ko만 측정했고 locale은 7개다.** zh·de·es·fr·pt 각각이 이 곡면 전체를
+   다시 만든다. 예약 표를 지켜 줄 자동 guard는 없고, consent copy가 한 줄
+   길어지는 순간 조용히 부족해진다.
+
+*판정 —— 사용자 권고 5단계 규칙의 적용*
+
+사용자 규칙은 "C2가 한 상태라도 불안정하거나 CSP 복잡성이 크면 폐기하고 (b)"다.
+CSP 복잡성은 **작다**(위). 사용자가 열거한 네 consent 상태는 320/360 en/ko에서
+**모두 통과**한다. 그러나 정확성이 7 locale × 전 width × 전 확대 배율을 덮는
+정적 높이 표에 의존하고 그 표를 지킬 guard가 없다는 점에서, 이 형태의 C2는
+**불안정하다**. 따라서 **높이 표 방식의 C2는 폐기한다.**
+
+*다만 폐기 대상은 "높이 표"이지 "pre-paint"가 아니다*
+
+측정 과정에서 표를 아예 없애는 변형이 드러났다. 예약 상자의 높이를 추측하지 않고
+**notice markup 자체를 prerender된 HTML에 넣고** pre-paint script가 세운
+attribute로 표시 여부만 제어하면, 예약 상자가 곧 notice 상자이므로 width·locale·
+확대 배율 전체에서 구조적으로 0이 된다(marketing route는 locale별로 따로
+prerender되므로 언어도 자동으로 맞는다). 남는 결함은 하나다: 정책 mode는 서버
+geo로 결정되므로 static HTML은 `opt_in` copy를 담게 되고, `notice_opt_out`
+지역에서 copy가 교체될 때 최대 32px의 높이 차가 남는다(위 표의 mode 간 차이).
+
+(b) cookie 기반 동적 SSR은 그 마지막 결함까지 없앤다 —— 서버가 consent와 정책
+mode를 **둘 다** 알고 실제 notice를 첫 HTML에 렌더하므로 추측이 사라진다. 대가는
+marketing 20개 route + locale 변형의 `force-static` 상실과 CSP 경로가 hash에서
+nonce로 이동하는 것이다. 사용자는 R-05 조건부 수용 당시 (b)를 "변경 범위가
+과도하다"며 제외했고, 이후 권고 순서에서는 C2 실패 시의 대안으로 (b)를 지목했다.
+두 지시가 충돌하므로 **어느 것을 구현할지는 사용자 결정 사항으로 남긴다**(§13).
+
+- **남은 작업**: R-05-A 해결 경로 확정(prerendered-notice C2 변형 / (b) 동적 SSR),
+  4상태 × `opt_in`/`notice_opt_out` × 320·360px × en/ko 검증, R-05-KO(한국어
+  webfont swap) 대응, 그리고 accept/decline 직후 slot 제거 기여분 재측정.
 
 ### R-06 — Authenticated web-search state transitions ✅
 
