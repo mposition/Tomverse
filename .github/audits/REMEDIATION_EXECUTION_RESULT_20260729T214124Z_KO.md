@@ -842,6 +842,28 @@ cookie가 필요한 이유는 `LanguageProvider`의 선호가 `localStorage`에 
 자체가 소멸했다는 뜻이며, 이전에 남아 있던 한국어 0.097·중국어 0.1637이 정확히
 그 값이었다.
 
+*전체 언어에서 `lang`·copy·URL 일치 재측정 (권고 2단계)*
+
+지원 7개 언어 전부에 대해 `/`로 진입해 세 가지가 서로 맞는지 확인했다 ——
+도달 URL, **서버가 보낸 HTML의 `<html lang>`**, hydration 후 client `lang`. 셋 중
+하나라도 어긋나면 그것이 곧 R-05-LANG 결함이다(`all-locales.mjs`, 320px,
+`consent=declined`, cold cache, cell당 3회).
+
+| 브라우저 | 도달 URL | 서버 `<html lang>` | client `lang` | median | max | 일치 | 첫 paint hero |
+|---|---|---|---|---:|---:|---|---|
+| en-US | `/` | en | en | 0 | 0 | ✅ | `Ask once. Compare multiple A…` |
+| ko-KR | `/ko` | ko | ko | 0.0012 | 0.0012 | ✅ | `한 번 질문하고, 여러 AI 답변을…` |
+| zh-CN | `/zh` | zh | zh | 0 | 0.0076 | ✅ | `问一次， 比较多个 AI 的回答。` |
+| de-DE | `/de` | de | de | 0 | 0 | ✅ | `Einmal fragen. Antworten meh…` |
+| es-ES | `/es` | es | es | 0 | 0 | ✅ | `Pregunta una vez. Compara re…` |
+| fr-FR | `/fr` | fr | fr | 0 | 0 | ✅ | `Posez une question. Comparez…` |
+| pt-BR | `/pt` | pt | pt | 0 | 0 | ✅ | `Pergunte uma vez. Compare re…` |
+
+**7개 전부 일치하며, hero copy가 첫 paint부터 해당 언어다.** de·es·fr·pt는 이번
+작업에서 한 번도 측정한 적이 없던 축인데 모두 0이다 —— 이 네 locale은 copy 길이가
+영어와 가까워 재렌더 shift가 작았을 뿐 구조적으로는 같은 결함을 안고 있었고,
+redirect가 원인 자체를 제거했다.
+
 *닫히지 않는 범위 —— 명시한다*
 
 1. **localized 대응이 있는 route만 처리된다.** locale별로 생성되는 것은 `/`와
