@@ -133,7 +133,6 @@ export function ProviderStatusBanner({
     )
       .filter((id) => !selectedSet.has(id))
       .slice(0, 3);
-    const fallbackNames = fallbackIds.map(modelName);
 
     // When the impacted model is actually one of the user's selections, each
     // gets its own 1:1 replacement pick instead of the flattened fallbackIds
@@ -172,17 +171,16 @@ export function ProviderStatusBanner({
     return {
       impacted: visibleUnavailable,
       fallbackIds,
-      fallbackNames,
       fallbackHealth,
       swapSuggestions,
       isSelectedOnly,
     };
-  }, [modelName, models, selectedModels]);
+  }, [models, selectedModels]);
 
   if (models.length === 0) return null;
 
-  const hasImpact = bannerState.impacted.length > 0;
-  if (!hasImpact) return null;
+  const impactedCount = bannerState.impacted.length;
+  if (impactedCount === 0) return null;
 
   // Never silent about a suggestion the snapshot itself says is shaky.
   const fallbackCaveat =
@@ -193,6 +191,45 @@ export function ProviderStatusBanner({
         : bannerState.fallbackHealth === "none"
           ? t("providerStatus.tryLater")
           : "";
+
+  const title = bannerState.isSelectedOnly
+    ? t("providerStatus.selectedIssue")
+    : t("providerStatus.globalIssue");
+
+  // RECON-OPS-002. The count is one whole translated sentence rather than a
+  // number glued to the word "unavailable": assembled from fragments it read
+  // as a bare tally next to a row of N suggestion buttons, so "6 unavailable"
+  // looked like it was counting the buttons. A full sentence also lets each
+  // language pick its own word order and counter unit.
+  const unavailableCountLabel = (
+    impactedCount === 1
+      ? t("providerStatus.unavailableCountOne")
+      : t("providerStatus.unavailableCount")
+  ).replace("{count}", String(impactedCount));
+
+  // Which action shape this banner offers has to be known before the guidance
+  // sentence is written, because that sentence may only promise a replacement
+  // when a button actually offers one. Swap wins when it applies: it is the
+  // only variant that still works at the selection cap.
+  const swapActions = onSwapModel ? bannerState.swapSuggestions : [];
+  const fallbackActions =
+    swapActions.length > 0 ? [] : onToggleModel ? bannerState.fallbackIds : [];
+  const hasFallbackActions = swapActions.length + fallbackActions.length > 0;
+
+  // The suggested model names live in the buttons and nowhere else. This line
+  // used to be "Try: A, B, C" directly above buttons A, B, C, which read as
+  // two separate offers and left the outage count competing with a second,
+  // unlabelled quantity.
+  const fallbackGuidance = hasFallbackActions
+    ? t("providerStatus.fallbackIntro")
+    : t("providerStatus.noHealthyFallback");
+
+  const switchToLabel = (modelId: string) =>
+    t("providerStatus.switchToModel").replace("{model}", modelName(modelId));
+  const switchFromToLabel = (removeModelId: string, addModelId: string) =>
+    t("providerStatus.switchFromTo")
+      .replace("{from}", modelName(removeModelId))
+      .replace("{to}", modelName(addModelId));
 
   if (compact) {
     return (
@@ -205,20 +242,28 @@ export function ProviderStatusBanner({
         <div className="flex items-center gap-2">
           <AlertTriangle className="h-4 w-4 shrink-0" />
           <div className="min-w-0 flex-1">
-            <div className="flex min-w-0 items-center gap-2 font-bold">
-              <span className="truncate">
-                {bannerState.isSelectedOnly
-                  ? t("providerStatus.selectedIssue")
-                  : t("providerStatus.globalIssue")}
-              </span>
-              <span className="shrink-0 rounded-full bg-black/5 px-2 py-0.5 text-[11px] dark:bg-white/10">
-                {bannerState.impacted.length} {t("providerStatus.unavailable")}
+            {/*
+              Wraps rather than truncates. Measured on the compact banner at
+              320px the title had 198px to work with and `truncate` hid 98px of
+              it -- "Some models are temporarily unavai..." -- so the one
+              sentence stating what is wrong was the first thing to go. The
+              count keeps `shrink-0` so it drops to its own line intact instead
+              of clipping its own sentence.
+            */}
+            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 font-bold">
+              <span data-testid="provider-status-title">{title}</span>
+              <span
+                className="shrink-0 rounded-full bg-black/5 px-2 py-0.5 text-[11px] dark:bg-white/10"
+                data-testid="provider-status-count"
+              >
+                {unavailableCountLabel}
               </span>
             </div>
-            <p className="mt-0.5 text-[11px] font-medium opacity-80">
-              {bannerState.fallbackNames.length > 0
-                ? `${t("providerStatus.tryFallback")} ${bannerState.fallbackNames.join(", ")}`
-                : t("providerStatus.noHealthyFallback")}
+            <p
+              className="mt-0.5 text-[11px] font-medium opacity-80"
+              data-testid="provider-status-guidance"
+            >
+              {fallbackGuidance}
               {fallbackCaveat ? ` ${fallbackCaveat}` : ""}
             </p>
           </div>
@@ -239,9 +284,9 @@ export function ProviderStatusBanner({
             )}
           </button>
         </div>
-        {onSwapModel && bannerState.swapSuggestions.length > 0 ? (
+        {onSwapModel && swapActions.length > 0 ? (
           <div className="mt-1.5 flex gap-1.5 overflow-x-auto overscroll-x-contain pb-0.5">
-            {bannerState.swapSuggestions.map(({ removeModelId, addModelId }) => (
+            {swapActions.map(({ removeModelId, addModelId }) => (
               <button
                 key={removeModelId}
                 type="button"
@@ -256,17 +301,15 @@ export function ProviderStatusBanner({
                 }`}
               >
                 <Shuffle className="h-3 w-3" />
-                {t("providerStatus.switchFromTo")
-                  .replace("{from}", modelName(removeModelId))
-                  .replace("{to}", modelName(addModelId))}
+                {switchFromToLabel(removeModelId, addModelId)}
               </button>
             ))}
           </div>
         ) : (
           onToggleModel &&
-          bannerState.fallbackIds.length > 0 && (
+          fallbackActions.length > 0 && (
             <div className="mt-1.5 flex gap-1.5 overflow-x-auto overscroll-x-contain pb-0.5">
-              {bannerState.fallbackIds.map((modelId) => (
+              {fallbackActions.map((modelId) => (
                 <button
                   key={modelId}
                   type="button"
@@ -278,7 +321,13 @@ export function ProviderStatusBanner({
                   }`}
                 >
                   <Shuffle className="h-3 w-3" />
-                  {modelName(modelId)}
+                  {/*
+                    The name alone left the shuffle glyph as the only clue to
+                    what the chip does. Naming the action in the label keeps
+                    the accessible name self-describing without an aria-label
+                    that says something different from the visible text.
+                  */}
+                  {switchToLabel(modelId)}
                 </button>
               ))}
             </div>
@@ -299,25 +348,22 @@ export function ProviderStatusBanner({
         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 font-bold">
-            <span>
-              {bannerState.isSelectedOnly
-                ? t("providerStatus.selectedIssue")
-                : t("providerStatus.globalIssue")}
-            </span>
-            <span className="rounded-full bg-black/5 px-2 py-0.5 text-[11px] dark:bg-white/10">
-              {bannerState.impacted.length} {t("providerStatus.unavailable")}
+            <span data-testid="provider-status-title">{title}</span>
+            <span
+              className="rounded-full bg-black/5 px-2 py-0.5 text-[11px] dark:bg-white/10"
+              data-testid="provider-status-count"
+            >
+              {unavailableCountLabel}
             </span>
           </div>
-          <p className="mt-1 leading-5 opacity-90">
+          <p className="mt-1 leading-5 opacity-90" data-testid="provider-status-guidance">
             {bannerState.impacted.slice(0, 3).map((model) => modelName(model.id)).join(", ")}
-            {bannerState.fallbackNames.length > 0
-              ? ` ${t("providerStatus.tryFallback")} ${bannerState.fallbackNames.join(", ")}`
-              : ` ${t("providerStatus.noHealthyFallback")}`}
+            {` ${fallbackGuidance}`}
             {fallbackCaveat ? ` ${fallbackCaveat}` : ""}
           </p>
-          {onSwapModel && bannerState.swapSuggestions.length > 0 ? (
+          {onSwapModel && swapActions.length > 0 ? (
             <div className="mt-2 flex flex-wrap gap-1.5">
-              {bannerState.swapSuggestions.map(({ removeModelId, addModelId }) => (
+              {swapActions.map(({ removeModelId, addModelId }) => (
                 <button
                   key={removeModelId}
                   type="button"
@@ -326,17 +372,15 @@ export function ProviderStatusBanner({
                   className="inline-flex items-center gap-1 rounded-full bg-black/5 px-2.5 py-1 text-[11px] font-bold transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
                 >
                   <Shuffle className="h-3 w-3" />
-                  {t("providerStatus.switchFromTo")
-                    .replace("{from}", modelName(removeModelId))
-                    .replace("{to}", modelName(addModelId))}
+                  {switchFromToLabel(removeModelId, addModelId)}
                 </button>
               ))}
             </div>
           ) : (
             onToggleModel &&
-            bannerState.fallbackIds.length > 0 && (
+            fallbackActions.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-1.5">
-                {bannerState.fallbackIds.map((modelId) => (
+                {fallbackActions.map((modelId) => (
                   <button
                     key={modelId}
                     type="button"
@@ -345,7 +389,7 @@ export function ProviderStatusBanner({
                     className="inline-flex items-center gap-1 rounded-full bg-black/5 px-2.5 py-1 text-[11px] font-bold transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
                   >
                     <Shuffle className="h-3 w-3" />
-                    {t("providerStatus.switchTo")} {modelName(modelId)}
+                    {switchToLabel(modelId)}
                   </button>
                 ))}
               </div>
