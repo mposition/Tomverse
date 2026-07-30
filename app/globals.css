@@ -397,11 +397,3 @@ html[data-consent-pending] [data-testid="marketing-consent-slot"] {
     scroll-behavior: auto !important;
   }
 }
-
-/* Korean and Chinese break between arbitrary syllables by default, splitting
-   words mid-word. `keep-all` keeps words intact; `anywhere` retains the long
-   URL / unbroken-token protection that `break-words` provides today. */
-:where(:lang(ko), :lang(zh)) {
-  word-break: keep-all;
-  overflow-wrap: anywhere;
-}
