@@ -28,7 +28,7 @@ production `Go`를 선언하지 않는다. R-01, R-05, `QA-GATE-001` 셋이 모�
 | `R-02` | P1 release gate | **성공** (staging 미배포) | source 수정 + 38개 unit test, stale failure → `unknown` |
 | `R-03` | P1 release gate | **성공 (upstream PR #145)** | 3개 control 모두 실제 44×44, upstream이 해결·검증 |
 | `R-04` | P2 release blocker (`B4`) | **성공** (staging 미배포) | 320/390px × 4 route × en/ko = 24/24 조합 overflow 0px |
-| `R-05` | P2 | **R-05-A 종결 / R-05-KO 조건부 / R-05-ZH 실패 — 전체는 완료 조건 미달** | 두 원인으로 분해했다. **R-05-A**(consent slot 삽입)는 pre-paint 예약으로 종결 —— 영어 4상태 × 두 정책 mode × 320·360px **20 cell 전부 0**. **R-05-KO**(한국어 webfont swap)는 기존 accepted·declined 방문자에서 0.1061–0.1082로 **0.1 초과**. 한국어 최댓값은 0.2295 → 0.1082로 내려갔다. 근본 원인은 typography contract의 잘못된 전제(생성된 metric-override face가 `local(Arial)`이고 Arial에 Hangul glyph가 없음). **R-05-KO**는 유도한 metric fallback으로 9 cell 전부 median·max ≤0.1이 됐으나 실기기 검증이 남아 Pass로 닫지 않았다. **R-05-ZH**(신규 분리)는 같은 결함의 중국어 축이며 이번에 처음 측정해 **0.1357–0.1959로 전 cell FAIL** —— 수정 전 한국어(0.1082)보다 나쁘다 |
+| `R-05` | P2 | **R-05-A 종결 / R-05-KO 조건부 / R-05-ZH 판정 철회 / R-05-LANG 신규 실패 — 전체는 완료 조건 미달** | 두 원인으로 분해했다. **R-05-A**(consent slot 삽입)는 pre-paint 예약으로 종결 —— 영어 4상태 × 두 정책 mode × 320·360px **20 cell 전부 0**. **R-05-KO**(한국어 webfont swap)는 기존 accepted·declined 방문자에서 0.1061–0.1082로 **0.1 초과**. 한국어 최댓값은 0.2295 → 0.1082로 내려갔다. 근본 원인은 typography contract의 잘못된 전제(생성된 metric-override face가 `local(Arial)`이고 Arial에 Hangul glyph가 없음). **R-05-KO**는 유도한 metric fallback으로 9 cell 전부 median·max ≤0.1이 됐으나 실기기 검증이 남아 Pass로 닫지 않았다. **R-05-ZH**는 같은 결함의 중국어 축이지만, 그 FAIL 수치가 `/?lang=zh`에서 나온 것이어서 **판정을 철회**했다 —— 실제 route `/zh`는 0.0076 PASS다. 대신 세 번째 원인 **R-05-LANG**을 분리했다: 정적 영어 root의 client-side locale 재렌더로, query 없이 `/`에 온 zh-CN 브라우저가 **0.1959**(재방문 0.1713)이고 copy 교체 단독 기여가 0.1637이다. 남은 실패는 webfont가 아니라 이쪽이다 |
 | `R-06` | P2 | **성공** | 3개 lifecycle 전이 coverage 추가, 11/11 통과 |
 | `R-07` | P2 verification | **성공** | live `/api/build-info` ↔ UI field 일치 검증 추가 |
 | `R-08` | P3 | **성공** (staging 미배포) | stall 25초 내 안내, security semantics 무변경 |
@@ -724,6 +724,38 @@ copy 교체(다수)와 webfont swap(소수). 아래 R-05-ZH 절의 "전 cell FAI
 
 `MarketingLanguageSwitcher`는 `/kr`·`/zh`로 **navigate**하므로 사용자가 직접
 바꾸는 경로는 이 결함을 통과하지 않는다. 문제는 **load 시점의 자동 감지**다.
+
+*대조군과 격리*
+
+| cell | median | max | `<html lang>` | 판정 |
+|---|---:|---:|---|---|
+| `/kr` (ko-KR 브라우저) | 0.0012 | 0.0012 | **ko→ko** | PASS |
+| `/zh` (zh-CN 브라우저) | 0.0076 | 0.0076 | **zh→zh** | PASS |
+| `/` ko-KR, **webfont 전면 차단** | **0.097** | 0.097 | en→ko | PASS(경계) |
+| `/` zh-CN, **webfont 전면 차단** | **0.1637** | 0.1637 | en→zh | **FAIL** |
+| `/kr` ko-KR, webfont 전면 차단 | **0** | 0 | ko→ko | PASS |
+| `/zh` zh-CN, webfont 전면 차단 | **0** | 0 | zh→zh | PASS |
+
+prerender된 localized route는 `<html lang>`이 서버에서 이미 목표 locale이므로
+재렌더가 없다. 반대로 webfont를 전부 차단해도 `/`의 값이 그대로 남는다 ——
+**copy 교체 단독 기여분이 한국어 0.097, 중국어 0.1637**이다. 한국어는 gate를
+겨우 밑돌 뿐이고, 중국어는 단독으로 초과한다.
+
+#### R-05 최종 판정 (정정)
+
+| 하위 항목 | 원인 | 판정 |
+|---|---|---|
+| **R-05-A** | consent slot 삽입 | ✅ **종결** —— 영어 cold·warm 전 cell 0, 4상태 × 두 정책 mode × 320/360px 20 cell 0 |
+| **R-05-KO** | `Noto Sans KR` swap의 metric 불일치 | ✅ **기술적으로 해결, 실기기 검증 대기** —— `/kr` 0.0012. 단 override 값의 platform 검증이 남아 Pass로 닫지 않는다 |
+| **R-05-ZH** | `Noto Sans SC` swap의 동일 구조 | ⚠️ **판정 정정** —— 이전의 "전 cell FAIL"은 `/?lang=zh`에서 측정한 값이었다. 실제 route `/zh`는 **0.0076 PASS**. 구조적 결함(Arial 기반 fallback)은 그대로 남아 있으므로 `Known limitation`은 유지하되 **Fail 표기는 철회한다** |
+| **R-05-LANG** (신규) | 정적 영어 root의 client-side locale 재렌더 | ❌ **Fail** —— `/`에서 zh-CN 브라우저 0.1959(재방문 0.1713), copy 교체 단독 0.1637. 한국어는 0.097로 경계 |
+
+**R-05 전체는 여전히 Pass가 아니다.** 다만 남은 실패의 정체가 바뀌었다 ——
+webfont가 아니라 **`/`의 locale 재렌더**다. 그리고 이 결함은 R-05-KO·R-05-ZH와
+달리 **font 정책 결정을 필요로 하지 않는다.** 서버가 이미 `Accept-Language`를
+읽어 `<html lang>`을 정하고 있으므로(`resolveDocumentLanguage`, `proxy.ts:135-141`),
+같은 신호로 localized route에 보내거나 해당 locale copy를 렌더하면 원인이 사라진다.
+다만 이는 marketing route의 정적/동적 성격을 건드리므로 **범위 결정이 필요하다.**
 
 #### R-05-ZH — 중국어의 동일 구조 (`Known limitation / Not verified`)
 
@@ -1858,13 +1890,15 @@ baseline을 먼저 병합해 test를 초록색으로 만드는 방식은 금지�
 3. R-02·R-04·R-08이 staging에 배포되고 배포본에서 재확인
 4. R-05: `/` median CLS ≤0.1 달성 —— 단 360px/en뿐 아니라 **320px과 한국어에서도**.
    조건부 수용은 배제 기준에 걸려 현재 선택지가 아니다(§4 R-05).
-   **진행 상황**: R-05-A는 종결됐다(영어 cold·warm 전 cell 0). 남은 것은 둘이다.
-   **R-05-KO**는 유도한 metric fallback 적용 후 320/360/390px × 3상태 9 cell
-   전부 median·max ≤0.1(0.0196–0.0797)이 됐으나, 이 컨테이너에 `Apple SD Gothic
-   Neo`·`Malgun Gothic`·Android 한국어 face가 없어 **실기기 검증이 남아 Pass로
-   닫지 않았다**. **R-05-ZH**는 이번에 처음 측정해 **cold·warm 양쪽 9 cell 전부
-   0.1357–0.1959로 FAIL**이고 remediation 미실행이다. 둘 다 닫히기 전에는 R-05를
-   Pass로 표기하지 않는다.
+   **진행 상황 (정정됨)**: R-05-A는 종결됐다(영어 cold·warm 전 cell 0).
+   **R-05-KO**는 유도한 metric fallback 적용 후 실제 route `/kr`에서 0.0012이나,
+   이 컨테이너에 `Apple SD Gothic Neo`·`Malgun Gothic`·Android 한국어 face가 없어
+   **실기기 검증이 남아 Pass로 닫지 않았다**. **R-05-ZH**의 "전 cell FAIL"은
+   `/?lang=zh`에서 측정한 값이었으므로 **판정을 철회**한다 —— 실제 route `/zh`는
+   0.0076이다. 구조적 결함은 남아 있으므로 `Known limitation`은 유지한다.
+   남은 실패는 **R-05-LANG** 하나다: query 없는 `/`에서 zh-CN 브라우저가 0.1959,
+   재방문 0.1713, copy 교체 단독 0.1637. 이것이 닫히기 전에는 R-05를 Pass로
+   표기하지 않는다.
 5. `STG-F008`·`STG-F009` 사용자 결정 종결
 6. visual snapshot 2건이 canonical 환경에서 pass 또는 정당한 근거로 갱신 승인
 
