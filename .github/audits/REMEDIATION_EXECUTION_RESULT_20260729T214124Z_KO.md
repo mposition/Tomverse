@@ -826,13 +826,21 @@ cookie가 필요한 이유는 `LanguageProvider`의 선호가 `localStorage`에 
 
 *효과*
 
-| cell | 이전 | 이후 | `<html lang>` |
+| cell | 이전 median / max | 이후 median / max | `<html lang>` |
 |---|---:|---:|---|
-| `/` `Accept-Language: zh-CN` | **0.1959** | **0.0076** | en→zh ⇒ **zh→zh** |
-| `/` `Accept-Language: ko-KR` | 0.0012 / max 0.0717 | **0.0012 / max 0.0012** | en→ko ⇒ **ko→ko** |
-| `/` `Accept-Language: en-US` | 0 | 0 | en→en (변화 없음) |
+| `/` `Accept-Language: zh-CN` | **0.1959** / 0.1959 | **0.0076** / 0.0076 | en→zh ⇒ **zh→zh** |
+| `/` zh-CN + 저장된 `zh` (재방문) | **0.1713** / 0.1959 | **0.0076** / 0.0076 | en→zh ⇒ **zh→zh** |
+| `/` `Accept-Language: ko-KR` | 0.0012 / **0.0717** | 0.0012 / **0.0012** | en→ko ⇒ **ko→ko** |
+| `/` ko-KR + 저장된 `ko` (재방문) | 0.0717 / 0.0717 | **0.0012** / 0.0012 | en→ko ⇒ **ko→ko** |
+| `/` `Accept-Language: en-US` | 0 / 0 | 0 / 0 | en→en (변화 없음) |
+| **`/` ko-KR, webfont 전면 차단** | **0.097** / 0.097 | **0** / 0 | en→ko ⇒ **ko→ko** |
+| **`/` zh-CN, webfont 전면 차단** | **0.1637** / 0.1637 | **0** / 0 | en→zh ⇒ **zh→zh** |
+| `/kr`·`/zh` (대조군) | 0.0012 / 0.0076 | 변화 없음 | 이미 서버 렌더 |
 
 `<html lang>`이 서버에서 이미 목표 locale이 되어 client 재렌더가 사라진다.
+**webfont를 전면 차단한 격리 측정이 0이 된 것이 결정적이다** —— copy 교체 기여분
+자체가 소멸했다는 뜻이며, 이전에 남아 있던 한국어 0.097·중국어 0.1637이 정확히
+그 값이었다.
 
 *닫히지 않는 범위 —— 명시한다*
 
