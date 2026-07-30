@@ -1593,11 +1593,78 @@ artifact에 기록하지 않았다.
 | **R-01 actual proof** | Not verified | 인증·baseline은 확보(Pro, 2977 credit). 남은 차단 요인 둘: 이 환경의 Chromium이 staging에 도달 못함(`ERR_CONNECTION_RESET`, curl은 정상), 실행 POST가 권한 classifier에 거부됨. Bash 권한 규칙 추가 또는 사람의 UI 실행이 필요. credit 소비 0 |
 | **QA-GATE-001 canonical 전체 E2E** | Not verified | canonical runner. 이 환경에서는 `cdn.playwright.dev`가 proxy에서 403(`host not permitted`)이라 고정 Chromium `1234`를 설치할 수 없고, 제공된 build는 `1194`다. OS는 canonical `ubuntu-24.04`로 일치한다. CI의 `ubuntu-24.04` job에서 실행해야 51개 visual diff와 axe/CSP 환경 차이를 종결할 수 있다 |
 | **visual snapshot 2건** | Not verified | canonical 환경 재현. diff는 906px 문서화된 rasterization 차이. 갱신 승인 요청 대상이며 임의 갱신하지 않았다 |
+| **`visual-baseline/30513363879` 병합** | ⏸️ **보류 —— 병합 조건 미충족** | 아래 §11.2 |
+
+### 11.2 `visual-baseline/30513363879` —— 지금 병합하지 않는다
+
+사용자가 제시한 병합 조건 7개 중 **"recording 대상 SHA가 최종 candidate와 일치"가
+충족되지 않는다.**
+
+| 조건 | 상태 |
+|---|---|
+| canonical `ubuntu-24.04` | ✅ workflow가 canonical runner에서 실행 |
+| Playwright 1.62.0 + 고정 Chromium | ✅ 동일 |
+| **recording 대상 SHA = 최종 candidate** | ❌ **불일치.** baseline은 `cb57c8d7`(#146)에서 기록됐고, 그 뒤 이 branch에 R-05-A(`f775339`)와 R-05-KO(`4d9a99a`) 제품 변경이 들어갔다 |
+| branch에 snapshot 외 예상치 못한 제품 변경 없음 | ✅ diff는 PNG 8개뿐, 소스 변경 0 |
+| outgoing/new/diff 이미지 사람이 직접 검토 | ⏳ 사용자 몫 |
+| geometry 변화가 의도된 변경과 일치 | ✅ 8개 전부 `-ko`, #145의 contrast 작업(welcome overlay 불투명→80%, composer disclaimer 색)과 일치. 이동한 요소 없음 |
+| 재기록 후 같은 runner에서 안정적 재통과 | ⏳ 병합 후 gate 재실행 필요 |
+
+*구조적으로는 golden이 바뀌지 않을 가능성이 높다 —— 그러나 그것이 병합 근거는 아니다*
+
+golden은 `document.fonts.ready` **이후**에 촬영한다
+(`tests/e2e/support/chat-state-fixtures.ts:572`, 주석이 이유를 명시). 그 시점에는
+`Noto Sans KR`이 활성 face이므로, R-05-KO가 바꾼 **fallback** face의 metric은
+촬영 결과에 관여하지 않는다. R-05-A의 예약도 `marketing-consent-slot`만 대상으로
+하고 재촬영된 8개는 전부 chat 상태 golden이다.
+
+그러나 이는 **추론이지 canonical 측정이 아니다.** 이 컨테이너의 Chromium은
+`1194`이고 golden은 `1234`로 기록됐으므로 여기서 golden을 판정할 수 없다
+(`docs/qa/canonical-visual-baseline.md`). 그리고 R-05-ZH remediation이 결정되면
+font 변경이 한 번 더 들어갈 수 있다.
+
+**따라서 최종 R-05 코드가 확정된 뒤 새 baseline run을 생성하는 것이 맞다.**
+baseline을 먼저 병합해 test를 초록색으로 만드는 방식은 금지한다.
 | **R-02/R-04/R-05/R-08 staging 검증** | Fixed locally, not verified on staging | 배포 승인. 현재 staging(`ea56a6ba`)에는 이 수정들이 없다 |
 | **R-05 잔여 CLS 0.1095** | 완료 조건 미달 | 설계 결정: (a) 수용, (b) marketing page 동적 전환, (c) consent slot 높이 예약 |
 | **실제 browser zoom 200%** | Not verified | 진짜 zoom을 제어할 수 있는 실기기/도구 |
 | **R-07 staging 인증 UI** | 해당 없음으로 처리 | local authenticated fixture로 충족. staging 계정 접근은 요청하지 않았다 |
-| **`STG-F008` / `STG-F009`** | 미착수 | 사용자 결정 |
+| **`STG-F008` / `STG-F009`** | ✅ **종결 —— 사용자 결정으로 승인, 제품 변경 없음** | 아래 §11.1 |
+
+### 11.1 `STG-F008` / `STG-F009` —— 제품 정책 결정으로 종결
+
+두 항목 모두 **코드 변경 없이** 현재 동작을 정책으로 승인해 닫았다. 사용자
+결정이며, 이 실행이 판단한 것이 아니다.
+
+**`STG-F008` —— 추천 5개 / catalogue 28개: 승인.**
+
+다만 **28을 영구 계약값으로 고정하지 않는다.** 모델 수는 incident, lifecycle,
+공개 여부에 따라 변하므로 계약은 수가 아니라 성질로 정의한다.
+
+> 추천 영역은 현재 사용 가능한 모델 중 **최대 8개 이내**의 유의미한 후보를
+> 제공한다. 전체 catalogue는 **해당 시점의 eligible public model을 누락 없이**
+> 제공하며 search/filter로 탐색할 수 있어야 한다.
+
+- 추천 **5개**: 승인
+- catalogue **28개**: **해당 build의 관찰값으로** 승인(계약값 아님)
+- **6–8개 / 30개 이상을 맞추기 위한 임의 모델 추가는 금지**한다
+- 외부 marketing이 "30+"를 보장한다면 문구와 실제 catalogue를 별도로 정합화해야
+  한다 —— catalogue를 문구에 맞추는 방향이 아니다
+
+**`STG-F009` —— 가시 `3 models` + accessible name의 대표 모델·총수 조합: 승인.**
+
+모바일 header에 `GPT-5.4 mini +2`를 **항상 표시하지 않는다.** 그렇게 하면 임의의
+대표 모델이 과도하게 강조되고, 긴 모델명에서 truncation이 생기며, count와 실제
+비교 구조가 덜 명확해진다.
+
+승인된 계약:
+
+| 층위 | 내용 |
+|---|---|
+| 가시 label | `3 models` |
+| accessible name | `GPT-5.4 mini and 2 more models selected` |
+| activation 시 | picker/tab에서 전체 모델명 확인 가능 |
+| generating·paused·error | 별도 가시 정보로 제공 |
 
 ---
 
