@@ -634,7 +634,6 @@ export function MobileChatShell({
       <ProviderStatusBanner
         selectedModels={selectedModels}
         compact
-        onToggleModel={onToggleModel}
         onSwapModel={onSwapModel}
       />
 

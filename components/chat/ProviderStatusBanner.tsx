@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Info, RefreshCw, Shuffle } from "lucide-react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { AlertTriangle, Info, RefreshCw, Shuffle, SlidersHorizontal } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { useIsMobileShell } from "@/components/chat/useIsMobileShell";
+import { openChatModelPicker } from "@/lib/chatModelPickerEvents";
 
 type PublicModelStatus = "available" | "limited" | "unavailable";
 
@@ -26,14 +27,30 @@ type PublicModelStatusRecord = {
 type ProviderStatusBannerProps = {
   selectedModels?: string[];
   compact?: boolean;
-  onToggleModel?: (modelId: string) => void;
   onSwapModel?: (removeModelId: string, addModelId: string) => void;
 };
 
+/**
+ * Contextual outage disclosure.
+ *
+ * This banner used to have two modes: a selected-model one, and a global one
+ * that fired whenever *any* public model was unavailable. The second mode is
+ * gone. A red workspace warning about six models the user never picked reads
+ * as "your next message will fail" when nothing of the sort is true, and its
+ * "Try: <model>" chip called the plain add/toggle handler -- which no-ops once
+ * the selection is at its cap, so the one action on offer did nothing.
+ *
+ * Operational status is still disclosed in full, just where it is actionable:
+ * the model picker/catalogue keeps every unavailable model's status, its
+ * disabled selection and its reason (see ModelCatalogue, which reads the same
+ * /api/models/status snapshot independently of this component). What changed is
+ * only *which* outages are allowed to interrupt the chat workspace and to
+ * announce themselves on a live region: the ones the user's own selection is
+ * standing on.
+ */
 export function ProviderStatusBanner({
   selectedModels = [],
   compact = false,
-  onToggleModel,
   onSwapModel,
 }: ProviderStatusBannerProps) {
   const { models: AVAILABLE_MODELS, publicModels: PUBLIC_MODELS } = useModelCatalog();
@@ -54,6 +71,8 @@ export function ProviderStatusBanner({
   const isMobileShell = useIsMobileShell();
   const [models, setModels] = useState<PublicModelStatusRecord[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const headingId = useId();
+  const actionsId = useId();
 
   const loadStatus = useCallback(async () => {
     setIsLoading(true);
@@ -121,115 +140,221 @@ export function ProviderStatusBanner({
 
   const bannerState = useMemo(() => {
     const selectedSet = new Set(selectedModels);
-    const unavailable = models.filter((model) => model.status === "unavailable");
-    const selectedUnavailable =
-      selectedSet.size > 0
-        ? unavailable.filter((model) => selectedSet.has(model.id))
-        : [];
-    const isSelectedOnly = selectedUnavailable.length > 0;
-    const visibleUnavailable = isSelectedOnly ? selectedUnavailable : unavailable;
-    const fallbackIds = Array.from(
-      new Set(visibleUnavailable.flatMap((model) => model.fallbackModelIds))
-    )
-      .filter((id) => !selectedSet.has(id))
-      .slice(0, 3);
-
-    // When the impacted model is actually one of the user's selections, each
-    // gets its own 1:1 replacement pick instead of the flattened fallbackIds
-    // list above -- that's what lets the banner call onSwapModel(impacted,
-    // suggestion) so it works even when selectedModels is already at the cap
-    // (a plain "add" would silently no-op there instead).
-    const swapSuggestions = isSelectedOnly
-      ? selectedUnavailable
-          .map((model) => ({
-            removeModelId: model.id,
-            addModelId: model.fallbackModelIds.find((id) => !selectedSet.has(id)),
-          }))
-          .filter(
-            (suggestion): suggestion is { removeModelId: string; addModelId: string } =>
-              Boolean(suggestion.addModelId)
-          )
-          .slice(0, 3)
-      : [];
-
-    // The caveat has to describe the models actually on offer, so it is the
-    // worst health among the impacted models that contributed one. With no
-    // candidate left the banner says so instead of falling back to the
-    // generic "try again later", which hid that every alternative was out.
-    const contributing = visibleUnavailable.filter((model) =>
-      model.fallbackModelIds.some((id) => fallbackIds.includes(id))
+    // The whole disclosure policy in one filter: an outage reaches the
+    // workspace only through a model the user is actually about to send to.
+    // `limited` stays out of here as it always has -- the model still answers,
+    // so its warning belongs to the picker, not to a red workspace banner.
+    const impacted = models.filter(
+      (model) => model.status === "unavailable" && selectedSet.has(model.id)
     );
+
+    // One replacement per impacted model, so every offer names the model it
+    // repairs. `claimed` stops two impacted models from pointing at the same
+    // replacement: accepting both offers would then remove two selections and
+    // add one, quietly shrinking the comparison.
+    //
+    // A candidate this same snapshot reports as unavailable is never offered.
+    // The route already drops those (see lib/providerFallbackCandidates), but
+    // the banner is holding the same evidence and must not print a replacement
+    // its own data says is down -- a stale or hand-rolled payload would
+    // otherwise turn into a swap straight onto another outage. `limited`
+    // candidates are still offered, with the caveat fallbackHealth carries.
+    const statusById = new Map(models.map((model) => [model.id, model.status]));
+    const claimed = new Set<string>();
+    const recoveries = impacted.map((model) => {
+      const addModelId = model.fallbackModelIds.find(
+        (id) =>
+          !selectedSet.has(id) &&
+          !claimed.has(id) &&
+          statusById.get(id) !== "unavailable"
+      );
+      if (addModelId) claimed.add(addModelId);
+      return {
+        modelId: model.id,
+        addModelId,
+        fallbackHealth: model.fallbackHealth,
+      };
+    });
+
+    const offered = recoveries.filter((recovery) => Boolean(recovery.addModelId));
+
+    // The caveat has to describe the replacements actually on offer, so it is
+    // the worst health among the models that contributed one. With no
+    // candidate left the banner says so instead of the generic "try again
+    // later", which hid that every alternative was out.
+    //
+    // `some`, not `every`: each impacted model now owns its own replacement,
+    // so one healthy offer must not vouch for a shaky one sitting next to it.
+    // Under the old pooled list "all of them are degraded" was the same
+    // question; per-model it is the difference between warning and hiding.
     const fallbackHealth: FallbackHealth =
-      fallbackIds.length === 0
+      offered.length === 0
         ? "none"
-        : contributing.some((model) => model.fallbackHealth === "unknown")
+        : offered.some((recovery) => recovery.fallbackHealth === "unknown")
           ? "unknown"
-          : contributing.every((model) => model.fallbackHealth === "degraded")
+          : offered.some((recovery) => recovery.fallbackHealth === "degraded")
             ? "degraded"
             : "operational";
 
-    return {
-      impacted: visibleUnavailable,
-      fallbackIds,
-      fallbackHealth,
-      swapSuggestions,
-      isSelectedOnly,
-    };
+    return { impacted, recoveries, fallbackHealth };
   }, [models, selectedModels]);
 
+  const hasImpact = bannerState.impacted.length > 0;
+
+  // Accessibility contract 7 and 9. Taking the swap -- or a refresh that finds
+  // the provider recovered -- removes the very control that was focused, and
+  // the browser then drops focus on <body>, stranding keyboard and screen
+  // reader users at the top of the document. Anything the banner does that can
+  // unmount it therefore names where focus should land instead.
+  const restoreFocusRef = useRef<string | null>(null);
+  const rememberFocusTarget = useCallback(
+    (preferredModelId?: string) => {
+      restoreFocusRef.current = preferredModelId ?? selectedModels[0] ?? "";
+    },
+    [selectedModels]
+  );
+
+  useEffect(() => {
+    if (hasImpact) return;
+    const preferred = restoreFocusRef.current;
+    if (preferred === null) return;
+    restoreFocusRef.current = null;
+    // Only step in if focus really was dropped: a click with a mouse leaves
+    // <body> active too, but so does nothing else worth fighting over.
+    const active = document.activeElement;
+    if (active && active !== document.body && active !== document.documentElement) {
+      return;
+    }
+    const escaped = preferred ? CSS.escape(preferred) : "";
+    // Nearest thing that still means "your models", per shell: the replaced
+    // model's own tab, then the header summary, then the composer's model
+    // selector. Never the composer textarea -- pulling focus there would raise
+    // the phone keyboard over the workspace the user was just reading.
+    const selectors = [
+      ...(escaped
+        ? [
+            `[data-testid="mobile-model-tab"][data-model-id="${escaped}"]`,
+            `[data-testid="model-compare-tab"][data-model-id="${escaped}"]`,
+          ]
+        : []),
+      '[data-testid="mobile-header-model-summary"]',
+      '[data-testid="composer-model-select"]',
+    ];
+    for (const selector of selectors) {
+      const target = document.querySelector<HTMLElement>(selector);
+      if (!target) continue;
+      target.focus({ preventScroll: true });
+      if (document.activeElement === target) return;
+    }
+  }, [hasImpact]);
+
   if (models.length === 0) return null;
+  if (!hasImpact) return null;
 
-  const impactedCount = bannerState.impacted.length;
-  if (impactedCount === 0) return null;
+  const title =
+    bannerState.impacted.length === 1
+      ? t("providerStatus.selectedUnavailableOne").replace(
+          "{model}",
+          modelName(bannerState.impacted[0].id)
+        )
+      : t("providerStatus.selectedUnavailableMany").replace(
+          "{count}",
+          String(bannerState.impacted.length)
+        );
 
-  // Never silent about a suggestion the snapshot itself says is shaky.
-  const fallbackCaveat =
+  // Never silent about a replacement the snapshot itself says is shaky, and
+  // never silent about there being none.
+  const detail =
     bannerState.fallbackHealth === "degraded"
       ? t("providerStatus.fallbackDegraded")
-      : bannerState.fallbackHealth === "unknown" && bannerState.fallbackIds.length > 0
+      : bannerState.fallbackHealth === "unknown"
         ? t("providerStatus.fallbackUnverified")
         : bannerState.fallbackHealth === "none"
-          ? t("providerStatus.tryLater")
+          ? t("providerStatus.noHealthyFallback")
           : "";
 
-  const title = bannerState.isSelectedOnly
-    ? t("providerStatus.selectedIssue")
-    : t("providerStatus.globalIssue");
+  // One action per impacted model. A model with a healthy, eligible
+  // replacement gets an atomic remove-and-add so it works at the selection cap
+  // as well; a model without one gets the picker, which is a real recovery
+  // path rather than "try again later".
+  const actions = bannerState.recoveries.map((recovery) => {
+    const addModelId = recovery.addModelId;
+    if (onSwapModel && addModelId) {
+      return {
+        key: recovery.modelId,
+        kind: "swap" as const,
+        label: t("providerStatus.switchFromTo")
+          .replace("{from}", modelName(recovery.modelId))
+          .replace("{to}", modelName(addModelId)),
+        run: () => {
+          rememberFocusTarget(addModelId);
+          onSwapModel(recovery.modelId, addModelId);
+        },
+      };
+    }
+    return {
+      key: recovery.modelId,
+      kind: "picker" as const,
+      label:
+        bannerState.impacted.length === 1
+          ? t("providerStatus.chooseAnother")
+          : t("providerStatus.chooseAnotherFor").replace(
+              "{model}",
+              modelName(recovery.modelId)
+            ),
+      run: (element: HTMLElement) => {
+        // The picker owns focus while it is open and returns it here on close;
+        // it is also what will change the selection, so the effect above takes
+        // over from there if this banner goes away.
+        rememberFocusTarget();
+        openChatModelPicker(element);
+      },
+    };
+  });
 
-  // RECON-OPS-002. The count is one whole translated sentence rather than a
-  // number glued to the word "unavailable": assembled from fragments it read
-  // as a bare tally next to a row of N suggestion buttons, so "6 unavailable"
-  // looked like it was counting the buttons. A full sentence also lets each
-  // language pick its own word order and counter unit.
-  const unavailableCountLabel = (
-    impactedCount === 1
-      ? t("providerStatus.unavailableCountOne")
-      : t("providerStatus.unavailableCount")
-  ).replace("{count}", String(impactedCount));
+  const renderActions = (rowClassName: string, chipClassName: string) => (
+    <div id={actionsId} className={rowClassName}>
+      {actions.map((action) => (
+        <button
+          key={action.key}
+          type="button"
+          onClick={(event) => action.run(event.currentTarget)}
+          data-testid={
+            action.kind === "swap"
+              ? "provider-status-swap"
+              : "provider-status-choose-model"
+          }
+          className={chipClassName}
+        >
+          {action.kind === "swap" ? (
+            <Shuffle className="h-3 w-3 shrink-0" aria-hidden="true" />
+          ) : (
+            <SlidersHorizontal className="h-3 w-3 shrink-0" aria-hidden="true" />
+          )}
+          {action.label}
+        </button>
+      ))}
+    </div>
+  );
 
-  // Which action shape this banner offers has to be known before the guidance
-  // sentence is written, because that sentence may only promise a replacement
-  // when a button actually offers one. Swap wins when it applies: it is the
-  // only variant that still works at the selection cap.
-  const swapActions = onSwapModel ? bannerState.swapSuggestions : [];
-  const fallbackActions =
-    swapActions.length > 0 ? [] : onToggleModel ? bannerState.fallbackIds : [];
-  const hasFallbackActions = swapActions.length + fallbackActions.length > 0;
-
-  // The suggested model names live in the buttons and nowhere else. This line
-  // used to be "Try: A, B, C" directly above buttons A, B, C, which read as
-  // two separate offers and left the outage count competing with a second,
-  // unlabelled quantity.
-  const fallbackGuidance = hasFallbackActions
-    ? t("providerStatus.fallbackIntro")
-    : t("providerStatus.noHealthyFallback");
-
-  const switchToLabel = (modelId: string) =>
-    t("providerStatus.switchToModel").replace("{model}", modelName(modelId));
-  const switchFromToLabel = (removeModelId: string, addModelId: string) =>
-    t("providerStatus.switchFromTo")
-      .replace("{from}", modelName(removeModelId))
-      .replace("{to}", modelName(addModelId));
+  const refreshButton = (className: string) => (
+    <button
+      type="button"
+      onClick={() => {
+        rememberFocusTarget();
+        void loadStatus();
+      }}
+      className={className}
+      data-testid="provider-status-refresh"
+      aria-label={t("providerStatus.refresh")}
+    >
+      {isLoading ? (
+        <Info className="h-4 w-4 animate-pulse" />
+      ) : (
+        <RefreshCw className="h-4 w-4" />
+      )}
+    </button>
+  );
 
   if (compact) {
     return (
@@ -237,101 +362,47 @@ export function ProviderStatusBanner({
         className="mx-3 mt-2 rounded-2xl border border-red-200 bg-red-50 px-2.5 py-2 text-xs text-red-800 shadow-sm dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
         role="status"
         aria-live="polite"
+        aria-labelledby={headingId}
+        aria-describedby={actionsId}
         data-testid="provider-outage-banner"
       >
-        <div className="flex items-center gap-2">
-          <AlertTriangle className="h-4 w-4 shrink-0" />
+        <div className="flex items-start gap-2">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
           <div className="min-w-0 flex-1">
-            {/*
-              Wraps rather than truncates. Measured on the compact banner at
-              320px the title had 198px to work with and `truncate` hid 98px of
-              it -- "Some models are temporarily unavai..." -- so the one
-              sentence stating what is wrong was the first thing to go. The
-              count keeps `shrink-0` so it drops to its own line intact instead
-              of clipping its own sentence.
-            */}
-            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 font-bold">
-              <span data-testid="provider-status-title">{title}</span>
-              <span
-                className="shrink-0 rounded-full bg-black/5 px-2 py-0.5 text-[11px] dark:bg-white/10"
-                data-testid="provider-status-count"
-              >
-                {unavailableCountLabel}
-              </span>
-            </div>
+            {/* Not truncated: the model name is the whole point of the
+                sentence, and at 320px or 200% text scaling a single-line clamp
+                is exactly where it would be cut off. */}
             <p
-              className="mt-0.5 text-[11px] font-medium opacity-80"
-              data-testid="provider-status-guidance"
+              id={headingId}
+              data-testid="provider-status-title"
+              className="min-w-0 break-words font-bold"
             >
-              {fallbackGuidance}
-              {fallbackCaveat ? ` ${fallbackCaveat}` : ""}
+              {title}
             </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => void loadStatus()}
-            // The icon itself stays 16px: only the box around it grows.
-            className={`flex shrink-0 items-center justify-center rounded-xl bg-black/5 transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15 ${
-              isMobileShell ? "h-11 w-11" : "h-8 w-8"
-            }`}
-            data-testid="provider-status-refresh"
-            aria-label={t("providerStatus.refresh")}
-          >
-            {isLoading ? (
-              <Info className="h-4 w-4 animate-pulse" />
-            ) : (
-              <RefreshCw className="h-4 w-4" />
-            )}
-          </button>
-        </div>
-        {onSwapModel && swapActions.length > 0 ? (
-          <div className="mt-1.5 flex gap-1.5 overflow-x-auto overscroll-x-contain pb-0.5">
-            {swapActions.map(({ removeModelId, addModelId }) => (
-              <button
-                key={removeModelId}
-                type="button"
-                onClick={() => onSwapModel(removeModelId, addModelId)}
-                data-testid="provider-status-swap"
-                // A real box rather than a pseudo-element inset: these chips
-                // sit 6px apart in a scrolling row, so an inset large enough
-                // to reach 44px would overlap the next chip's tap area and
-                // steal its taps.
-                className={`inline-flex shrink-0 items-center gap-1 rounded-full bg-black/5 text-[11px] font-bold transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15 ${
-                  isMobileShell ? "h-11 min-w-11 px-3" : "h-7 px-2"
-                }`}
+            {detail ? (
+              <p
+                data-testid="provider-status-guidance"
+                className="mt-0.5 break-words text-[11px] font-medium opacity-80"
               >
-                <Shuffle className="h-3 w-3" />
-                {switchFromToLabel(removeModelId, addModelId)}
-              </button>
-            ))}
+                {detail}
+              </p>
+            ) : null}
           </div>
-        ) : (
-          onToggleModel &&
-          fallbackActions.length > 0 && (
-            <div className="mt-1.5 flex gap-1.5 overflow-x-auto overscroll-x-contain pb-0.5">
-              {fallbackActions.map((modelId) => (
-                <button
-                  key={modelId}
-                  type="button"
-                  onClick={() => onToggleModel(modelId)}
-                  data-testid="provider-status-fallback"
-                  // Same reasoning as the swap chip above.
-                  className={`inline-flex shrink-0 items-center gap-1 rounded-full bg-black/5 text-[11px] font-bold transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15 ${
-                    isMobileShell ? "h-11 min-w-11 px-3" : "h-7 px-2"
-                  }`}
-                >
-                  <Shuffle className="h-3 w-3" />
-                  {/*
-                    The name alone left the shuffle glyph as the only clue to
-                    what the chip does. Naming the action in the label keeps
-                    the accessible name self-describing without an aria-label
-                    that says something different from the visible text.
-                  */}
-                  {switchToLabel(modelId)}
-                </button>
-              ))}
-            </div>
-          )
+          {refreshButton(
+            // The icon itself stays 16px: only the box around it grows.
+            `flex shrink-0 items-center justify-center rounded-xl bg-black/5 transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15 ${
+              isMobileShell ? "h-11 w-11" : "h-8 w-8"
+            }`
+          )}
+        </div>
+        {renderActions(
+          "mt-1.5 flex gap-1.5 overflow-x-auto overscroll-x-contain pb-0.5",
+          // A real box rather than a pseudo-element inset: these chips sit 6px
+          // apart in a scrolling row, so an inset large enough to reach 44px
+          // would overlap the next chip's tap area and steal its taps.
+          `inline-flex shrink-0 items-center gap-1 rounded-full bg-black/5 text-[11px] font-bold transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15 ${
+            isMobileShell ? "h-11 min-w-11 px-3" : "h-7 px-2"
+          }`
         )}
       </div>
     );
@@ -342,76 +413,39 @@ export function ProviderStatusBanner({
       className="mx-3 mt-3 rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800 shadow-sm dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200 md:mx-4"
       role="status"
       aria-live="polite"
+      aria-labelledby={headingId}
+      aria-describedby={actionsId}
       data-testid="provider-outage-banner"
     >
       <div className="flex items-start gap-2">
-        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 font-bold">
-            <span data-testid="provider-status-title">{title}</span>
-            <span
-              className="rounded-full bg-black/5 px-2 py-0.5 text-[11px] dark:bg-white/10"
-              data-testid="provider-status-count"
-            >
-              {unavailableCountLabel}
-            </span>
-          </div>
-          <p className="mt-1 leading-5 opacity-90" data-testid="provider-status-guidance">
-            {bannerState.impacted.slice(0, 3).map((model) => modelName(model.id)).join(", ")}
-            {` ${fallbackGuidance}`}
-            {fallbackCaveat ? ` ${fallbackCaveat}` : ""}
+          <p
+            id={headingId}
+            data-testid="provider-status-title"
+            className="min-w-0 break-words font-bold"
+          >
+            {title}
           </p>
-          {onSwapModel && swapActions.length > 0 ? (
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {swapActions.map(({ removeModelId, addModelId }) => (
-                <button
-                  key={removeModelId}
-                  type="button"
-                  onClick={() => onSwapModel(removeModelId, addModelId)}
-                  data-testid="provider-status-swap"
-                  className="inline-flex items-center gap-1 rounded-full bg-black/5 px-2.5 py-1 text-[11px] font-bold transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
-                >
-                  <Shuffle className="h-3 w-3" />
-                  {switchFromToLabel(removeModelId, addModelId)}
-                </button>
-              ))}
-            </div>
-          ) : (
-            onToggleModel &&
-            fallbackActions.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {fallbackActions.map((modelId) => (
-                  <button
-                    key={modelId}
-                    type="button"
-                    onClick={() => onToggleModel(modelId)}
-                    data-testid="provider-status-fallback"
-                    className="inline-flex items-center gap-1 rounded-full bg-black/5 px-2.5 py-1 text-[11px] font-bold transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
-                  >
-                    <Shuffle className="h-3 w-3" />
-                    {switchToLabel(modelId)}
-                  </button>
-                ))}
-              </div>
-            )
+          {detail ? (
+            <p
+              data-testid="provider-status-guidance"
+              className="mt-1 break-words leading-5 opacity-90"
+            >
+              {detail}
+            </p>
+          ) : null}
+          {renderActions(
+            "mt-2 flex flex-wrap gap-1.5",
+            "inline-flex items-center gap-1 rounded-full bg-black/5 px-2.5 py-1 text-[11px] font-bold transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
           )}
         </div>
-        <button
-          type="button"
-          onClick={() => void loadStatus()}
-          // Desktop keeps its pre-existing, mouse-appropriate size: the 44px
-          // floor is a touch requirement and this variant only renders in the
-          // desktop shell (see DesktopChatShell / MobileChatShell).
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-black/5 transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
-          data-testid="provider-status-refresh"
-          aria-label={t("providerStatus.refresh")}
-        >
-          {isLoading ? (
-            <Info className="h-4 w-4 animate-pulse" />
-          ) : (
-            <RefreshCw className="h-4 w-4" />
-          )}
-        </button>
+        {/* Desktop keeps its pre-existing, mouse-appropriate size: the 44px
+            floor is a touch requirement and this variant only renders in the
+            desktop shell (see DesktopChatShell / MobileChatShell). */}
+        {refreshButton(
+          "flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-black/5 transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
+        )}
       </div>
     </div>
   );

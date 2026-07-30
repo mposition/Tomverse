@@ -2439,6 +2439,10 @@ export function ChatInput({
               trackProductEvent("model_picker_opened", selectedModels.length, {});
             }}
             className={`flex min-w-0 max-w-[112px] touch-manipulation items-center gap-1 rounded-full border border-zinc-300 bg-zinc-50 px-2.5 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-800 ${isMobileShell ? "h-11" : "h-10"}`}
+            // Named so the outage banner can hand focus back to the model
+            // selector when a swap or a recovered provider unmounts the
+            // control the user was standing on (ProviderStatusBanner).
+            data-testid="composer-model-select"
             title={activeModelNames.join(", ")}
             aria-label={t("chat.modelSelect")}
             aria-expanded={isMenuOpen && menuView === "models"}

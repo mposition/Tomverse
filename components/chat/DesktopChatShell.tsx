@@ -390,7 +390,6 @@ export function DesktopChatShell({
         <ProviderStatusBanner
           selectedModels={selectedModels}
           compact
-          onToggleModel={onToggleModel}
           onSwapModel={onSwapModel}
         />
         {/*
