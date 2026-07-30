@@ -23,6 +23,17 @@ import type { WebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
 const processedPromptKeys = new Set<string>();
 const CHAT_STREAM_IDLE_TIMEOUT_MS = 90_000;
 
+// The greeting bubble an empty conversation renders. It is UI, not
+// transcript: it is never persisted, and it must never be sent to
+// /api/chat. Doing so put an assistant turn ahead of the first user turn,
+// which Perplexity's async deep-research endpoint rejects outright
+// ("user or tool message(s) should alternate with assistant message(s)")
+// and every other provider merely pays for as a wasted input turn.
+const WELCOME_MESSAGE_ID = "welcome";
+
+const isTranscriptMessage = (message: Message) =>
+  message.id !== WELCOME_MESSAGE_ID;
+
 const toChatRequestMessage = (message: Message): Message => {
   if (!message.attachments?.length) return message;
 
@@ -108,7 +119,7 @@ function ChatAppComponent({
 
   const [messages, setMessages] = useState<Message[]>([
     {
-      id: "welcome",
+      id: WELCOME_MESSAGE_ID,
       role: "assistant",
           content: t("chat.welcome"),
 	  status: "normal",
@@ -193,7 +204,8 @@ function ChatAppComponent({
   }, []);
 
   const isConversationEmpty =
-    messages.length === 0 || (messages.length === 1 && messages[0]?.id === "welcome");
+    messages.length === 0 ||
+    (messages.length === 1 && messages[0]?.id === WELCOME_MESSAGE_ID);
 
   useLayoutEffect(() => {
     if (!isCurrentMessageViewLoaded) return;
@@ -372,7 +384,7 @@ function ChatAppComponent({
             }
           } else {
             setMessages([
-              { id: "welcome", role: "assistant", content: t("chat.guestWelcome"), status: "normal" },
+              { id: WELCOME_MESSAGE_ID, role: "assistant", content: t("chat.guestWelcome"), status: "normal" },
             ]);
           }
         } else {
@@ -452,9 +464,9 @@ function ChatAppComponent({
 					      }
 				    }
 
-              setMessages(filteredMessages.length > 0 ? filteredMessages : [{ id: "welcome", role: "assistant", content: t("chat.welcome"), status: "normal" }]);
+              setMessages(filteredMessages.length > 0 ? filteredMessages : [{ id: WELCOME_MESSAGE_ID, role: "assistant", content: t("chat.welcome"), status: "normal" }]);
           } else {
-              setMessages([{ id: "welcome", role: "assistant", content: t("chat.welcome"), status: "normal" }]);
+              setMessages([{ id: WELCOME_MESSAGE_ID, role: "assistant", content: t("chat.welcome"), status: "normal" }]);
           }
         } else {
           throw new Error(`Conversation message load failed: ${response.status}`);
@@ -483,7 +495,7 @@ function ChatAppComponent({
       if (loadRequestIdRef.current !== requestId) return;
       setMessages([
         {
-          id: "welcome",
+          id: WELCOME_MESSAGE_ID,
           role: "assistant",
           content: t("chat.welcome"),
           status: "normal",
@@ -583,7 +595,17 @@ function ChatAppComponent({
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            messages: [...messages, userMessage].map(toChatRequestMessage),
+            // UI-only turns never go to a provider, and this turn's own user
+            // message is appended exactly once -- `messages` is the pre-send
+            // snapshot, and the id filter keeps a re-render or a resend from
+            // duplicating it.
+            messages: [
+              ...messages.filter(
+                (message) =>
+                  isTranscriptMessage(message) && message.id !== userMessage.id
+              ),
+              userMessage,
+            ].map(toChatRequestMessage),
             modelId: modelId,
             ...(turnstileToken ? { turnstileToken } : {}),
             ...(!isGuestMode
@@ -947,7 +969,7 @@ function ChatAppComponent({
           {t("auth.loading")}
         </div>
       ) : useCenteredWelcome && isConversationEmpty ? null : <ChatMessageList
-        messages={useCenteredWelcome ? messages.filter((message) => message.id !== "welcome") : messages}
+        messages={useCenteredWelcome ? messages.filter(isTranscriptMessage) : messages}
         onRetryLast={handleRetryLast}
         onRetryWithoutAttachments={handleRetryWithoutAttachments}
         onRequestCloseModel={onRequestCloseModel}
