@@ -28,7 +28,7 @@ production `Go`를 선언하지 않는다. R-01, R-05, `QA-GATE-001` 셋이 모�
 | `R-02` | P1 release gate | **성공** (staging 미배포) | source 수정 + 38개 unit test, stale failure → `unknown` |
 | `R-03` | P1 release gate | **성공 (upstream PR #145)** | 3개 control 모두 실제 44×44, upstream이 해결·검증 |
 | `R-04` | P2 release blocker (`B4`) | **성공** (staging 미배포) | 320/390px × 4 route × en/ko = 24/24 조합 overflow 0px |
-| `R-05` | P2 | **부분 성공 — 완료 조건 미달, 조건부 수용도 불가** | `/` 0.2667 → 0.1095, `/pricing`·`/chat` 0. 그러나 320px·한국어·200%에서 최대 0.2385까지 커지고 한국어에서는 hero 본문이라는 추가 shift source가 나타나 배제 기준에 걸림 |
+| `R-05` | P2 | **R-05-A 종결 / R-05-KO 미종결 — 전체는 완료 조건 미달** | 두 원인으로 분해했다. **R-05-A**(consent slot 삽입)는 pre-paint 예약으로 종결 —— 영어 4상태 × 두 정책 mode × 320·360px **20 cell 전부 0**. **R-05-KO**(한국어 webfont swap)는 기존 accepted·declined 방문자에서 0.1061–0.1082로 **0.1 초과**. 한국어 최댓값은 0.2295 → 0.1082로 내려갔다. 근본 원인은 typography contract의 잘못된 전제(생성된 metric-override face가 `local(Arial)`이고 Arial에 Hangul glyph가 없음) |
 | `R-06` | P2 | **성공** | 3개 lifecycle 전이 coverage 추가, 11/11 통과 |
 | `R-07` | P2 verification | **성공** | live `/api/build-info` ↔ UI field 일치 검증 추가 |
 | `R-08` | P3 | **성공** (staging 미배포) | stall 25초 내 안내, security semantics 무변경 |
@@ -842,8 +842,66 @@ Next.js 공식 지침(`node_modules/next/dist/docs/01-app/02-guides/preventing-f
 inline-script 패턴을 그대로 따랐고, dev의 `<script>` 렌더 경고와 soft navigation
 재실행 문제는 문서가 제시한 `type` 전환 + `suppressHydrationWarning`으로 처리했다.
 
-- **남은 작업**: 4단계 검증 결과 반영, R-05-KO(한국어 webfont swap) 대응, 그리고
-  200% 확대·미측정 locale의 부분 개선 범위를 잔여 위험으로 문서화.
+#### 4단계 검증 —— 4상태 × 두 정책 mode × 320·360px × en/ko
+
+사용자가 요구한 검증 표면 전체를 돌렸다(`step4.mjs`, cell당 5회, 총 200 load,
+cold context, 40ms/10Mbps). `1.policy-pending`은 `/api/analytics/consent-policy`
+응답을 2.5초 붙잡아 두고 그 **대기 중에** slot 상태를 표본했다.
+
+| state | 320 en | 360 en | 320 ko | 360 ko |
+|---|---:|---:|---:|---:|
+| 1. 정책 fetch 대기 | **0** | **0** | 0.0827 | 0.0855 |
+| 2. 최초 방문 prompt 표시 | **0** | **0** | 0.0815 | 0.0855 |
+| 3. 기존 accepted 첫 paint | **0** | **0** | **0.1082** | **0.1061** |
+| 4. 기존 declined 첫 paint | **0** | **0** | **0.1082** | **0.1061** |
+
+`opt_in`과 `notice_opt_out` 두 mode의 값이 **동일하다**(표는 두 mode 공통).
+예약값이 두 mode의 최댓값을 덮으므로 mode 차이가 shift로 나타나지 않는다 ——
+이것이 mode를 모른 채 예약해도 되는 이유다.
+
+부수 관측:
+
+- **정책 fetch 대기 중 `noticeMounted=false`, `slotH=94`, `attr=true`.** 예약이
+  첫 프레임부터 존재하고 notice가 그 안으로 들어온다. 대기 상태의 en CLS가
+  0이라는 것은 대기 자체가 shift를 만들지 않는다는 직접 증거다.
+- **accept 클릭 직후 slot 제거 기여분**: 320px 0.1466, 360px 0.132
+  (`hadRecentInput` filter를 끈 값). 예약 band(94px)가 notice(360px에서 78px)보다
+  크므로 C2 이전(0.1095)보다 **커졌다.** 표준 CLS에는 집계되지 않지만 숨기지
+  않고 기록한다.
+
+*판정*
+
+| 하위 항목 | 판정 | 근거 |
+|---|---|---|
+| **R-05-A** (consent slot 삽입) | ✅ **종결** | 영어 20 cell 전부 0. 한국어에서도 더 이상 shift source로 등장하지 않는다(`section` 소멸) |
+| **R-05-KO** (한국어 webfont swap) | ❌ **미종결** | 기존 accepted·declined 한국어 방문자 0.1061–0.1082로 **0.1 초과** |
+
+**R-05 전체는 여전히 Pass가 아니다.** 사용자 정책("한국어/320px를 R-05 closure와
+Go-Live 판정에서 제외하지 않는다")에 따라 R-05는 열린 상태로 유지한다.
+
+*C2가 기존 방문자 cell을 악화시킨 것이 아니다*
+
+3·4 상태에서 `attr=false`, `slotH=0`이다 —— pre-paint script가 저장된 결정을
+읽고 attribute를 세우지 않았으므로 **C2는 이 cell들에서 구조적으로 no-op**이다.
+0.1061은 예약이 없어 hero가 높은 위치에 있는 상태에서 font swap이 온전한
+impact fraction으로 작동한 값이며, C2 유무와 무관하다. 반대로 미해결 cell에서
+한국어가 0.0855까지 내려간 것은 예약 band가 hero를 아래로 밀어 swap이 움직이는
+영역의 viewport 점유율을 줄인 부수 효과다.
+
+전체적으로 **한국어 최댓값은 0.2295 → 0.1082로 내려갔다.** 실질 개선이지만
+gate는 넘지 못한다. 남은 초과분의 원인은 하나뿐이다 —— R-05-KO.
+
+*계약 test 확인*
+
+| suite | 결과 |
+|---|---|
+| `marketing-consent-hero.spec.ts` + `root-font-resize-text.spec.ts` (desktop) | ✅ **21/21 passed** —— FINAL-F001의 "해결된 consent는 layout 비용 0" 단정 포함 |
+| `mobile-composer-contract` + `web-search-composer-state` | 40 passed, 9 failed —— **전부 이 변경과 무관**. `mobile-safari` 7건은 이 컨테이너에 WebKit이 없어서 launch 실패(`webkit-2336` 부재), composer golden 2건은 **정확히 906 pixels**의 기존 noise pair(non-canonical browser) |
+| `test:unit` | ✅ 562/562 |
+| `npm run check` (eslint `--max-warnings=0` + `next build`) | ✅ exit 0 |
+
+- **남은 작업**: R-05-KO 처리 방향 결정(위 세 선택지), 200% 확대·미측정 5개
+  locale의 부분 개선 범위 문서화, staging 배포본에서의 재확인.
 
 ### R-06 — Authenticated web-search state transitions ✅
 
@@ -1446,7 +1504,12 @@ artifact에 기록하지 않았다.
    review merge와 merge 후 gate 재실행이며, 둘 다 승인 사항이다.
 3. R-02·R-04·R-08이 staging에 배포되고 배포본에서 재확인
 4. R-05: `/` median CLS ≤0.1 달성 —— 단 360px/en뿐 아니라 **320px과 한국어에서도**.
-   조건부 수용은 배제 기준에 걸려 현재 선택지가 아니다(§4 R-05)
+   조건부 수용은 배제 기준에 걸려 현재 선택지가 아니다(§4 R-05).
+   **진행 상황**: R-05-A는 종결됐고(영어 20 cell 전부 0, 한국어 미해결 상태도
+   0.0827–0.0855로 gate 이내) 남은 것은 **R-05-KO 하나뿐**이다 —— 기존
+   accepted·declined 한국어 방문자 0.1061–0.1082. 이 조건을 닫으려면 §4의
+   R-05-KO 세 선택지 중 하나를 채택해야 하며, 셋 모두 한국어 렌더링 글꼴을
+   바꾸므로 typography 설계 결정이 필요하다.
 5. `STG-F008`·`STG-F009` 사용자 결정 종결
 6. visual snapshot 2건이 canonical 환경에서 pass 또는 정당한 근거로 갱신 승인
 
