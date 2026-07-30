@@ -272,3 +272,58 @@ input[type="reset"]:disabled,
 [aria-disabled="true"] {
   cursor: not-allowed;
 }
+
+/*
+ * R-05-A. The consent slot's reserved height while the decision is unresolved.
+ * `components/analytics/MarketingConsentReservation.tsx` sets
+ * `data-consent-pending` before the first paint; `AnalyticsProvider` removes it
+ * as soon as the decision resolves, so the band collapses and an
+ * accepted/declined visitor still costs no layout box.
+ *
+ * `display: block` is needed because the slot is `empty:hidden` -- it has no
+ * children until the notice mounts. These rules are deliberately unlayered so
+ * they win over that utility.
+ *
+ * The values are the measured maxima of the rendered notice, taken across
+ * en/ko and both consent policy modes (`opt_in` shows a prompt,
+ * `notice_opt_out` shows a longer notice), because the script cannot know which
+ * mode a visitor's region resolves to. `min-height` is a floor, so a value at
+ * or above the real height produces no shift at all, and a value below it still
+ * shrinks the shift rather than adding one -- an under-reservation degrades, it
+ * does not regress.
+ *
+ * The breakpoints look like Tailwind's but are not: the notice sizes itself
+ * with container queries (`@container/notice`), so its height steps when the
+ * slot's content box crosses them. Measured step: 500px of viewport width, not
+ * 640px. Values above are the 100%-text-scale maxima; at a 200% root font the
+ * notice grows roughly 2.4x, which no static value tracks, so those visitors
+ * get a partial reduction rather than zero.
+ */
+html[data-consent-pending] [data-testid="marketing-consent-slot"] {
+  display: block;
+  min-height: 94px;
+}
+
+@media (min-width: 500px) {
+  html[data-consent-pending] [data-testid="marketing-consent-slot"] {
+    min-height: 184px;
+  }
+}
+
+@media (min-width: 640px) {
+  html[data-consent-pending] [data-testid="marketing-consent-slot"] {
+    min-height: 148px;
+  }
+}
+
+@media (min-width: 768px) {
+  html[data-consent-pending] [data-testid="marketing-consent-slot"] {
+    min-height: 132px;
+  }
+}
+
+@media (min-width: 1280px) {
+  html[data-consent-pending] [data-testid="marketing-consent-slot"] {
+    min-height: 116px;
+  }
+}

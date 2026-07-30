@@ -359,6 +359,31 @@ export function AnalyticsProvider({
     };
   }, [disabled]);
 
+  // R-05-A. Releases the pre-paint reservation set by
+  // `MarketingConsentReservation`. Once the decision is known the slot must cost
+  // no layout box -- `empty:hidden` handles that on its own, but only if the
+  // reserved `min-height` is gone. Keeping it would trade one shift for a
+  // permanent gap under the header, which
+  // `tests/e2e/marketing-consent-hero.spec.ts` asserts against.
+  //
+  // `showPreferences` re-opens the notice after a decision, so the attribute
+  // goes back on: the slot is about to be occupied again.
+  //
+  // `loading` deliberately does nothing. The pre-paint script read the same
+  // stored value this state is resolving from, so during `loading` its answer is
+  // already the right one -- and *adding* the attribute here would put a
+  // reservation in front of a returning accepted visitor, whose CLS is 0 today,
+  // only to drop it a microtask later. That is a shift this exists to prevent.
+  useEffect(() => {
+    if (consent === "loading") return;
+    const pending = consent === "unset" || showPreferences;
+    if (pending) {
+      document.documentElement.setAttribute("data-consent-pending", "");
+    } else {
+      document.documentElement.removeAttribute("data-consent-pending");
+    }
+  }, [consent, showPreferences]);
+
   useEffect(() => {
     let cancelled = false;
     const scheduleChatConsentReady = (ready: boolean) => {

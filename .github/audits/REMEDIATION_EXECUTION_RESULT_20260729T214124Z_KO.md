@@ -541,6 +541,54 @@ contract와 맞물린 늦은 font swap이 유력한 설명이지만 **아직 확
 typography contract가 이를 `preload: false`로 규정하므로, 이 파일들이 늦게
 도착해 swap이 일어나며 한국어 hero 전체가 재배치된다.
 
+#### R-05-KO의 근본 원인 —— typography contract의 전제가 사실과 다르다
+
+`docs/ui-contracts/typography.md`는 같은 주장을 두 번 한다.
+
+> "It has metric-override fallback data in `next/font`, so the swap does not
+> move layout." (§Why Noto Sans KR over Pretendard)
+>
+> "`display: swap` plus a metric-override fallback means text paints immediately
+> and the webfont swaps in **without moving layout**." (§preload/bytes)
+
+**이 전제는 Hangul에 대해 성립하지 않는다.** build 산출물을 직접 확인했다.
+
+```
+@font-face{font-family:Noto Sans KR Fallback;src:local(Arial);
+  ascent-override:110.73%;descent-override:27.49%;line-gap-override:0.0%;
+  size-adjust:104.76%}
+--font-noto-sans-kr:"Noto Sans KR", "Noto Sans KR Fallback"
+```
+
+`next/font`가 생성한 metric-override face의 실체는 **`local(Arial)`** 이다.
+Arial에는 **Hangul glyph가 없다.** 따라서 한국어 본문은 이 보정된 face를 한 번도
+쓰지 못하고 `:lang(ko)` stack의 다음 항목
+(`Apple SD Gothic Neo → Malgun Gothic → system-ui → sans-serif`,
+`app/globals.css:47-52`)으로 떨어지는데, **그쪽에는 어떤 override도 없다.**
+그래서 `Noto Sans KR`이 도착하는 순간 Hangul 줄의 metric이 그대로 바뀌고
+hero가 재배치된다 —— 320px 한국어에서 `h1`의 높이가 160→154→117→128px로 움직인
+관측이 이 경로 그대로다. metric override는 **Latin 구간에서만** 작동한다.
+
+즉 R-05-KO는 구현 실수가 아니라 **contract의 근거 자체가 틀렸기 때문에 생긴
+결함**이다. 이 문서는 `lib/fonts.ts` 변경 시 필독으로 지정돼 있으므로, 위 두
+문장은 정정 대상이다.
+
+*가능한 처리 —— 전부 typography 설계 결정이 필요하다*
+
+1. **CJK face를 `display: "optional"`로.** swap을 아예 없애 shift를 제거한다.
+   대가: cold cache의 한국어 방문자는 그 load에서 system Korean face를 본다.
+   contract가 CJK를 `preload: false`로 둔 의도("첫 paint에 그 비용을 지불하지
+   않는다")와 방향이 같다.
+2. **Hangul용 metric-matched fallback face를 직접 선언.** `local(Arial)` 대신
+   한국어 system face를 기준으로 `size-adjust`·`ascent-override`를 재보정한다.
+   platform별 face가 달라 값이 하나로 수렴하지 않는다.
+3. **`:lang(ko)` stack 교체.** contract가 "market별 비용 조정의 lever는 preload
+   정책이 아니라 `:lang()` stack"이라고 명시한 경로다.
+
+세 안 모두 **한국어 사용자에게 렌더링되는 글꼴을 바꾼다.** `AGENTS.md`가 contract
+위반을 release blocker로 규정하고 있으므로, 근거를 문서에 남기기 전에 일방적으로
+적용하지 않았다. **선택은 사용자 결정 사항으로 남긴다**(§13).
+
 *따라서 R-05의 원인은 확정적으로 둘이다.*
 
 | 하위 항목 | 원인 | shifted node | 영향 범위 |
@@ -736,34 +784,66 @@ hash를 자동 수집한다. CSP header는 `CSP_MODE`에 따라 enforce/report-o
    다시 만든다. 예약 표를 지켜 줄 자동 guard는 없고, consent copy가 한 줄
    길어지는 순간 조용히 부족해진다.
 
+band 경계도 추측이 아니라 측정으로 확정했다. notice는 viewport breakpoint가 아니라
+**container query**(`@container/notice`, `AnalyticsProvider.tsx:611-627`)로 크기를
+정하므로, 높이는 slot의 content box가 threshold를 넘을 때 계단식으로 바뀐다.
+실제 전환점은 Tailwind `sm:`(640px)가 아니라 **viewport 500px**이고, 그 지점에서
+`notice_opt_out`이 184px까지 올라간다(`boundary.mjs`).
+
+| viewport band | 100% 최대 높이 | 예약값 | 최대 죽은 공간 |
+|---|---:|---:|---:|
+| `<500` | 94px (320 en `opt_in`) | 94px | 20px (390px에서) |
+| `500–639` | 184px (500 en `notice_opt_out`) | 184px | 32px |
+| `640–767` | 148px | 148px | 32px |
+| `768–1279` | 132px | 132px | 16px |
+| `≥1280` | 116px | 116px | 16px |
+
 *판정 —— 사용자 권고 5단계 규칙의 적용*
 
-사용자 규칙은 "C2가 한 상태라도 불안정하거나 CSP 복잡성이 크면 폐기하고 (b)"다.
-CSP 복잡성은 **작다**(위). 사용자가 열거한 네 consent 상태는 320/360 en/ko에서
-**모두 통과**한다. 그러나 정확성이 7 locale × 전 width × 전 확대 배율을 덮는
-정적 높이 표에 의존하고 그 표를 지킬 guard가 없다는 점에서, 이 형태의 C2는
-**불안정하다**. 따라서 **높이 표 방식의 C2는 폐기한다.**
+규칙은 "C2가 한 상태라도 불안정하거나 CSP 복잡성이 크면 폐기하고 (b)"다.
 
-*다만 폐기 대상은 "높이 표"이지 "pre-paint"가 아니다*
+- **CSP 복잡성: 작다.** 위 근거에 더해, 실제로 build한 뒤 확인했다. prerender된
+  `.next/server/app/index.html`에서 script를 찾아 sha384를 계산하고 live 응답의
+  CSP header와 대조하니 **hash가 이미 들어 있었다**. 수동 작업은 0이다.
+- **네 consent 상태: 아래 4단계 검증 표.**
+- **높이 표의 취약성은 "불안정"이 아니라 "부분 개선"으로 끝난다.** `min-height`는
+  floor이므로 예약값이 실제보다 **작으면 shift가 줄어들 뿐 늘지 않는다.** 200%
+  확대(notice가 약 2.4배)와 미측정 5개 locale에서 예약이 부족할 수 있지만, 그
+  cell의 결과는 baseline보다 나쁘지 않다. 회귀 위험이 없으므로 폐기 사유에
+  해당하지 않는다.
 
-측정 과정에서 표를 아예 없애는 변형이 드러났다. 예약 상자의 높이를 추측하지 않고
-**notice markup 자체를 prerender된 HTML에 넣고** pre-paint script가 세운
-attribute로 표시 여부만 제어하면, 예약 상자가 곧 notice 상자이므로 width·locale·
-확대 배율 전체에서 구조적으로 0이 된다(marketing route는 locale별로 따로
-prerender되므로 언어도 자동으로 맞는다). 남는 결함은 하나다: 정책 mode는 서버
-geo로 결정되므로 static HTML은 `opt_in` copy를 담게 되고, `notice_opt_out`
-지역에서 copy가 교체될 때 최대 32px의 높이 차가 남는다(위 표의 mode 간 차이).
+따라서 **C2를 구현하고 4단계 검증으로 판정한다.** (b)는 보류한다.
 
-(b) cookie 기반 동적 SSR은 그 마지막 결함까지 없앤다 —— 서버가 consent와 정책
-mode를 **둘 다** 알고 실제 notice를 첫 HTML에 렌더하므로 추측이 사라진다. 대가는
-marketing 20개 route + locale 변형의 `force-static` 상실과 CSP 경로가 hash에서
-nonce로 이동하는 것이다. 사용자는 R-05 조건부 수용 당시 (b)를 "변경 범위가
-과도하다"며 제외했고, 이후 권고 순서에서는 C2 실패 시의 대안으로 (b)를 지목했다.
-두 지시가 충돌하므로 **어느 것을 구현할지는 사용자 결정 사항으로 남긴다**(§13).
+*구현 (최소 변경)*
 
-- **남은 작업**: R-05-A 해결 경로 확정(prerendered-notice C2 변형 / (b) 동적 SSR),
-  4상태 × `opt_in`/`notice_opt_out` × 320·360px × en/ko 검증, R-05-KO(한국어
-  webfont swap) 대응, 그리고 accept/decline 직후 slot 제거 기여분 재측정.
+| 파일 | 변경 |
+|---|---|
+| `components/analytics/MarketingConsentReservation.tsx` | 신규. pre-paint inline script. `localStorage`를 동기 판독해 미해결 방문자에게만 `<html data-consent-pending>` |
+| `components/marketing/MarketingShell.tsx` | 위 component를 subtree 최선두에 렌더 |
+| `app/globals.css` | `html[data-consent-pending]` 키의 band별 `min-height` (표 위) |
+| `components/analytics/AnalyticsProvider.tsx` | 결정 확정 시 attribute 제거 (`showPreferences`면 복원) |
+| `lib/productAnalyticsShared.ts` | `ANALYTICS_CONSENT_STORAGE_KEY` 노출 —— script와 판독자가 어긋나지 않게 단일 출처화 |
+| `lib/productAnalyticsClient.ts` | 위 상수를 사용 |
+
+설계상 주의한 두 지점.
+
+1. **`consent === "loading"` 동안 attribute를 건드리지 않는다.** 여기서
+   attribute를 *추가*하면 기존 accepted 방문자(현재 CLS 0)에게 예약이 생겼다가
+   microtask 뒤 사라져 **없던 shift가 새로 생긴다.** pre-paint script가 이미 같은
+   저장값을 읽었으므로 `loading` 동안은 그 판단이 곧 정답이다.
+2. **결정 후에는 attribute를 반드시 제거한다.** `marketing-consent-hero.spec.ts:176`
+   이 "해결된 consent는 예약 공간을 남기지 않는다"며 slot 높이가 **정확히 0**임을
+   단정한다. 제거하지 않으면 shift 하나를 header 아래 영구 공백으로 바꾸는 셈이다.
+
+`MarketingShell`은 `force-static` marketing layout 2곳에서만 쓰이므로
+(`app/(site)/(marketing)/layout.tsx`, `app/[locale]/layout.tsx`) nonce +
+`strict-dynamic`을 쓰는 dynamic route에는 이 script가 도달하지 않는다.
+Next.js 공식 지침(`node_modules/next/dist/docs/01-app/02-guides/preventing-flash-before-hydration.md`)의
+inline-script 패턴을 그대로 따랐고, dev의 `<script>` 렌더 경고와 soft navigation
+재실행 문제는 문서가 제시한 `type` 전환 + `suppressHydrationWarning`으로 처리했다.
+
+- **남은 작업**: 4단계 검증 결과 반영, R-05-KO(한국어 webfont swap) 대응, 그리고
+  200% 확대·미측정 locale의 부분 개선 범위를 잔여 위험으로 문서화.
 
 ### R-06 — Authenticated web-search state transitions ✅
 
@@ -1329,9 +1409,18 @@ artifact에 기록하지 않았다.
 4. **R-04는 여유 폭이 크지 않다.** 200%에서 overflow 0을 달성했지만 header는
    빈틈이 넉넉하지 않다. locale 추가나 promotion 문구 변경이 다시 넘칠 수 있다.
    신규 spec이 320/390px × 4 route × en/ko를 지키므로 조용히 재발하지는 않는다.
-5. **`ea56a6ba`와 이 branch의 변경이 아직 합쳐지지 않았다.** commit이 승인 범위
-   밖이므로 uncommitted 상태다. rebase는 완료했고 build·lint·typecheck·unit·
-   security는 새 base에서 전부 통과한다.
+5. **branch 정렬 상태 (갱신).** R-02·R-04·R-05(hero 부분)·R-08과 신규
+   `root-font-resize-text.spec.ts`는 **`#146`으로 squash merge되어 이미
+   `develop`에 있다**(`cb57c8d7`). `develop`은 그 뒤 `#148`(`ee0da18`)까지
+   움직였고, 이 branch를 `ee0da18` 위로 rebase해 원래의 R-02/R-04/R-05/R-08
+   commit은 중복으로 자동 제거됐다. 새 base에서 `test:unit` **562/562**,
+   `npm run check`(eslint `--max-warnings=0` + `next build`) **exit 0**,
+   `typecheck` 통과.
+8. **typography contract의 근거 문장 2개가 사실과 다르다 (신규 발견).**
+   "metric-override fallback이 있으므로 swap이 layout을 움직이지 않는다"는 주장이
+   Hangul에서 성립하지 않는다 —— 생성된 fallback face가 `local(Arial)`이고
+   Arial에 Hangul glyph가 없다(§4 R-05-KO 근본 원인). R-05-KO는 이 잘못된 전제의
+   결과이며, 문서 정정과 세 선택지 중 하나의 채택이 필요하다.
 6. **R-02는 source 판정만 고쳤다.** Perplexity probe가 38시간 멈춰 있었던 운영
    원인은 그대로다. 이제 stale count가 거짓 Incident를 만들지는 않지만, probe가
    멈추면 `unknown`이 되므로 **scheduler 자체의 감시**가 여전히 필요하다.
@@ -1345,7 +1434,16 @@ artifact에 기록하지 않았다.
    확인** 둘이다
 2. QA-GATE-001: canonical에서 unexpected failure 0. 현재 10건은 **trunk의 기존
    실패**로 확정됐으므로(이번 변경 regression 0건) trunk 쪽 신규 작업으로 처리해야
-   한다 —— `-ko` golden 8건과 `upgrade-discovery.spec.ts:428` 2건
+   한다 —— `-ko` golden 8건과 `upgrade-discovery.spec.ts:428` 2건.
+   **진행 상황**: functional 2건은 이 branch에서 수정 완료(UI-EMPTY-001의 `inert`
+   때문에 빈 대화에서는 panel 단독 send가 불가능하므로 history를 seed하도록 test를
+   고쳤다). visual 8건은 승인받아 canonical recorder를 실행했고
+   (`visual-baseline-record.yml` run **#13**, `30513363879`, `develop`
+   `cb57c8d7`, 결과 success) branch `visual-baseline/30513363879`가 생성됐다.
+   **바뀐 golden은 정확히 8개이고 전부 `-ko` 변형이다** —— 추적한 8건과 일치하며,
+   `mobile-composer-contract` 2건은 **바뀌지 않았다**(906px browser noise 판정을
+   뒷받침한다). 남은 절차는 `docs/qa/canonical-visual-baseline.md` 4단계의 정식
+   review merge와 merge 후 gate 재실행이며, 둘 다 승인 사항이다.
 3. R-02·R-04·R-08이 staging에 배포되고 배포본에서 재확인
 4. R-05: `/` median CLS ≤0.1 달성 —— 단 360px/en뿐 아니라 **320px과 한국어에서도**.
    조건부 수용은 배제 기준에 걸려 현재 선택지가 아니다(§4 R-05)

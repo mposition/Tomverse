@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ANALYTICS_CONSENT_STORAGE_KEY,
   PRODUCT_ANALYTICS_EVENT_NAMES,
   analyticsClientEventSchema,
   analyticsPropertiesSchema,
@@ -21,7 +22,7 @@ declare global {
 }
 
 const CONTEXT_STORAGE_KEY = "tomverse_analytics_context_v1";
-const CONSENT_STORAGE_KEY = "tomverse_analytics_consent_v1";
+const CONSENT_STORAGE_KEY = ANALYTICS_CONSENT_STORAGE_KEY;
 const SIGNUP_STORAGE_KEY = "tomverse_analytics_signup_v1";
 const SESSION_STORAGE_KEY = "tomverse_analytics_session_v1";
 const PRECONSENT_ATTRIBUTION_STORAGE_KEY =

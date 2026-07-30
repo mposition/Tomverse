@@ -1,3 +1,4 @@
+import { MarketingConsentReservation } from "@/components/analytics/MarketingConsentReservation";
 import { MarketingProviders } from "@/components/marketing/MarketingProviders";
 import { StructuredData } from "@/components/seo/StructuredData";
 import { SITE_NAME, SITE_ORIGIN } from "@/lib/seo";
@@ -26,6 +27,9 @@ export function MarketingShell({
 }>) {
   return (
     <>
+      {/* First thing in the marketing subtree, so it runs before the header --
+          and therefore the consent slot -- is parsed. */}
+      <MarketingConsentReservation />
       <StructuredData
         data={{
           "@context": "https://schema.org",
