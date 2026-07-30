@@ -32,7 +32,7 @@ production `Go`를 선언하지 않는다. R-01, R-05, `QA-GATE-001` 셋이 모�
 | `R-06` | P2 | **성공** | 3개 lifecycle 전이 coverage 추가, 11/11 통과 |
 | `R-07` | P2 verification | **성공** | live `/api/build-info` ↔ UI field 일치 검증 추가 |
 | `R-08` | P3 | **성공** (staging 미배포) | stall 25초 내 안내, security semantics 무변경 |
-| `QA-GATE-001` | release gate | **Fail (1509/10/908)** | 이번 변경의 canonical regression은 **0건**(trunk와 passed 수 동일). 그러나 10건 전부 **#145가 유입**시킨 것으로 확인 —— 기능 2건(panel send 순서·데이터 정합성, **이연 불가**)과 golden 미갱신 8건. #145 이전 run #43은 success였다. §6.5 |
+| `QA-GATE-001` | release gate | **Fail → 기능 2건 해결, visual 8건 잔존** | 이번 변경의 canonical regression은 **0건**. 기능 2건은 근본 원인이 제품 결함이 아니라 UI-EMPTY-001 계약과 충돌하는 낡은 test였음을 계측으로 확정하고 **수정 완료(28/28 통과)**. visual 8건은 #145가 loading shell·attachment stages를 바꾸며 golden을 재촬영하지 않은 것으로, canonical diff 확인 후 재촬영 승인이 필요하다. §6.5 |
 
 ---
 
@@ -840,20 +840,55 @@ R-01–R-08 범위 밖의 **신규 항목**이다.
 | canonical runner | 예 |
 | baseline 변경 | 없음 (visual test 아님) |
 
-**제품 영향**: test는 panel의 model을 바꾼 뒤 그 panel에서 전송할 때, 메시지
-POST가 conversation PATCH(model 선택 영속화) **완료 후에** 일어나야 한다고
-요구하며 PATCH를 400ms 지연시켜 순서를 강제한다. 현재는 **메시지가 model 변경
-저장 전에 먼저 저장된다.** 즉 메시지가 이전 model 선택 상태에 귀속될 수 있는
-**순서·데이터 정합성 결함**이다.
+**근본 원인 (계측으로 확정) — 제품 결함이 아니라 계약과 충돌하는 낡은 test다.**
 
-**귀속**: #145는 이 spec을 건드리지 않았지만 send 경로인
-`ChatPageClient.tsx`(+25, `UI-STATE-001`로 conversation 목록의
-`selectedModels`를 낙관적으로 적용)와 `ChatInput.tsx`(+304)를 변경했다.
-#145 이전 green → #145 이후 fail이므로 **#145가 회귀 지점**이다.
+브라우저 계측으로 실제 동작을 추적한 결과, 메시지가 "잘못된 순서로 저장"되는
+것이 아니라 **아예 저장되지 않았다.** `messageSavedAfterPatch`는 POST 시점에만
+대입되므로, POST가 한 번도 일어나지 않으면 초기값 `false`가 남아 assertion이
+`Received: false`로 실패한다 —— 순서 오류처럼 보이지만 실제로는 전송 자체가
+발생하지 않은 것이다.
 
-**분류**: 사용자 표의 "기능·접근성·보안·credit·데이터 정합성 실패" →
-**trunk 기존 결함이어도 Go-Live 전 처리 또는 명시적 No-Go.** 별도 이슈로
-이연할 수 없다. 그리고 이 결함은 **현재 staging에 배포된 상태다.**
+계측 timeline (PATCH 지연 400ms, 대상 `desktop-model-panel` 1번 panel):
+
+```
+2852ms  selectOption("gemini-2-5-flash")
+2889ms  UNMOUNT panel gpt-5-4-mini
+2890ms  MOUNT   panel gemini-2-5-flash      ← 이후 remount 없음, panel 안정
+3031ms  DOM: textarea 1개, placeholder "이 모델에게만 추가 질문", disabled=false
+3086ms  fill() 직후에도 value="" · onChange 미발생
+3086ms  press("Enter") → keydown 미발생
+        elementFromPoint(textarea 중앙) = div.flex (textarea가 아님)
+```
+
+원인은 `components/chat/DesktopChatShell.tsx:542`의
+**`inert={isConversationEmpty || undefined}`** 다. UI-EMPTY-001이 빈 대화에서
+comparison panel 전체를 의도적으로 `inert`로 만든다. 같은 파일의 주석이 이유를
+명시한다 —— panel의 control이 "tab order와 accessibility tree에 남아 있어
+keyboard·screen-reader 사용자가 아직 존재하지 않는 comparison에 도달할 수
+있었다". `inert`는 focus와 pointer 상호작용을 제거하므로 위의 모든 증상이
+정확히 설명된다.
+
+per-panel follow-up 입력은 그 subtree 안에 있다. 그리고 이 test가 속한
+`value-moment upgrade prompt` describe는 `mockAuthenticatedApi`에 `messages`를
+seed하지 않는다 —— fixture 주석대로 "Panels report themselves empty without it".
+즉 **빈 대화에서는 panel-only 전송이 제품 설계상 불가능**하다.
+
+정리하면 이 test는 UI-EMPTY-001 계약보다 앞서 작성됐고, 그 계약이 정당하게
+불가능하게 만든 상호작용을 계속 요구하고 있었다. 같은 describe의 다른 test들이
+통과하는 이유도 이것이다 —— 그것들은 panel 입력이 아니라 공용 composer
+(`chat-textarea`)를 쓴다.
+
+**따라서 §6.5 초판의 "메시지가 model 변경 저장 전에 먼저 저장된다 / 데이터
+정합성 결함"이라는 서술은 틀렸다.** 실제로는 전송이 발생하지 않았고, 그 이유는
+접근성 목적의 `inert`였다. 제품 코드에 결함은 없다.
+
+**수정**: 이 test가 지키려던 순서 계약은 여전히 가치가 있으므로 assertion을
+약화하지 않고, panel 입력이 동작하도록 **대화에 history를 seed**해
+UI-EMPTY-001이 허용하는 유일한 상태에서 검증하게 했다. panel이 `inert`가 아닌
+것도 명시적으로 확인한다. 변경 파일: `tests/e2e/upgrade-discovery.spec.ts`.
+
+**결과**: `desktop-chromium`·`desktop-compact` 양쪽 **2/2 통과**. 같은 spec 전체와
+인접 spec까지 **28/28 통과**. 제품 코드는 건드리지 않았다.
 
 #### B. visual 실패 8건 — #145의 golden 미갱신, 원인은 규명됨
 
