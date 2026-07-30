@@ -28,7 +28,7 @@ production `Go`를 선언하지 않는다. R-01, R-05, `QA-GATE-001` 셋이 모�
 | `R-02` | P1 release gate | **성공** (staging 미배포) | source 수정 + 38개 unit test, stale failure → `unknown` |
 | `R-03` | P1 release gate | **성공 (upstream PR #145)** | 3개 control 모두 실제 44×44, upstream이 해결·검증 |
 | `R-04` | P2 release blocker (`B4`) | **성공** (staging 미배포) | 320/390px × 4 route × en/ko = 24/24 조합 overflow 0px |
-| `R-05` | P2 | **R-05-A 종결 / R-05-KO 미종결 — 전체는 완료 조건 미달** | 두 원인으로 분해했다. **R-05-A**(consent slot 삽입)는 pre-paint 예약으로 종결 —— 영어 4상태 × 두 정책 mode × 320·360px **20 cell 전부 0**. **R-05-KO**(한국어 webfont swap)는 기존 accepted·declined 방문자에서 0.1061–0.1082로 **0.1 초과**. 한국어 최댓값은 0.2295 → 0.1082로 내려갔다. 근본 원인은 typography contract의 잘못된 전제(생성된 metric-override face가 `local(Arial)`이고 Arial에 Hangul glyph가 없음) |
+| `R-05` | P2 | **R-05-A 종결 / R-05-KO 조건부 / R-05-ZH 실패 — 전체는 완료 조건 미달** | 두 원인으로 분해했다. **R-05-A**(consent slot 삽입)는 pre-paint 예약으로 종결 —— 영어 4상태 × 두 정책 mode × 320·360px **20 cell 전부 0**. **R-05-KO**(한국어 webfont swap)는 기존 accepted·declined 방문자에서 0.1061–0.1082로 **0.1 초과**. 한국어 최댓값은 0.2295 → 0.1082로 내려갔다. 근본 원인은 typography contract의 잘못된 전제(생성된 metric-override face가 `local(Arial)`이고 Arial에 Hangul glyph가 없음). **R-05-KO**는 유도한 metric fallback으로 9 cell 전부 median·max ≤0.1이 됐으나 실기기 검증이 남아 Pass로 닫지 않았다. **R-05-ZH**(신규 분리)는 같은 결함의 중국어 축이며 이번에 처음 측정해 **0.1357–0.1959로 전 cell FAIL** —— 수정 전 한국어(0.1082)보다 나쁘다 |
 | `R-06` | P2 | **성공** | 3개 lifecycle 전이 coverage 추가, 11/11 통과 |
 | `R-07` | P2 verification | **성공** | live `/api/build-info` ↔ UI field 일치 검증 추가 |
 | `R-08` | P3 | **성공** (staging 미배포) | stall 25초 내 안내, security semantics 무변경 |
@@ -684,19 +684,52 @@ fallback 렌더링에 적용되지 않는다. cold load에서 `:lang(zh)`는 `Pi
 어떤 override도 없다. 즉 **"metric-adjusted fallback이 있으므로 CJK swap이 layout을
 이동시키지 않는다"는 기존 보장은 중국어에도 성립하지 않는다.**
 
+*계측 결과 —— 추정이 아니라 실측이다. 그리고 한국어보다 나쁘다.*
+
+제품 build에서 `/?lang=zh`를 cold cache로 측정했다(`final-cls.mjs`, cell당 5회,
+40ms/10Mbps). 이 축은 이번에 **처음** 측정한 것이다.
+
+| cell | median | max | 판정 |
+|---|---:|---:|---|
+| 320 zh unset | 0.1573 | 0.1573 | **FAIL** |
+| 320 zh accepted | **0.1959** | 0.1959 | **FAIL** |
+| 320 zh declined | **0.1959** | 0.1959 | **FAIL** |
+| 360 zh unset | 0.1376 | 0.1376 | **FAIL** |
+| 360 zh accepted | 0.1658 | 0.1658 | **FAIL** |
+| 360 zh declined | 0.1658 | 0.1658 | **FAIL** |
+| 390 zh unset | 0.1357 | 0.1357 | **FAIL** |
+| 390 zh accepted | 0.1569 | 0.1569 | **FAIL** |
+| 390 zh declined | 0.1569 | 0.1569 | **FAIL** |
+
+warm cache에서도 같다(360 unset 0.1376, accepted 0.1658). 같은 run의 대조군:
+**영어는 cold·warm 모두 전 cell 0**, **한국어는 0.0196–0.0797로 전 cell 통과**.
+즉 이 값은 환경 잡음이 아니라 locale 고유의 결함이다.
+
+`R-05-ZH`의 최악값 0.1959는 **R-05-KO의 수정 전 최악값(0.1082)보다 크고**,
+R-05-A 수정 전의 `/` 영어값(0.1466)보다도 크다. 중국어가 15 chunk / 807.2 KB를
+받고 한국어가 21 chunk / 494.6 KB를 받는 차이 —— chunk 수는 적지만 총량은 1.6배 ——
+가 여기에 그대로 나타난다.
+
 | 축 | 상태 |
 |---|---|
-| `/zh` cold-load raw CLS (320/360px × accepted/declined) | 계측 진행 중 |
+| `/zh` cold-load raw CLS (320/360/390px × unset/accepted/declined) | ✅ **측정 완료 —— 전 cell FAIL** (위 표) |
+| warm cache | ✅ 측정 완료 —— cold와 동일 |
 | font 지연(1500ms)·차단 상태 | 계측 진행 중 |
 | 실제 rasterized font (`CSS.getPlatformFontsForNode`) | 계측 진행 중 |
 | 주요 platform(`PingFang SC`, `Microsoft YaHei`) 실기기 검증 | **미실행** |
 | remediation | **미실행** |
 
-**판정: `Known limitation / Not verified`.** 위 축이 모두 닫히기 전에는 중국어를
-`Pass`나 "영향 없음"으로 표기하지 않는다. locale별 font 다운로드량(중국어 15
-chunk / 807.2 KB vs 한국어 21 chunk / 494.6 KB), system fallback, wrapping이 모두
-다르므로 영어나 한국어 측정값으로 대체할 수 없다. `display: "optional"`을 한국어에만
-적용하는 것도, 측정 없이 CJK 전체에 일괄 적용하는 것도 근거가 되지 않는다.
+**판정: `Fail` (측정된 축) + `Not verified` (platform 축).** 더 이상 "잠재
+결함"이 아니다 —— cold·warm 양쪽에서 9 cell 전부 gate를 넘는다. 남은 축이 닫히기
+전에는 중국어를 `Pass`나 "영향 없음"으로 표기하지 않는다. locale별 font
+다운로드량, system fallback, wrapping이 모두 다르므로 영어나 한국어 측정값으로
+대체할 수 없다 —— 이번 측정이 그 이유를 그대로 보여준다. `display: "optional"`을
+한국어에만 적용하는 것도, 측정 없이 CJK 전체에 일괄 적용하는 것도 근거가 되지
+않는다.
+
+**Go-Live 함의**: `/zh`는 marketing route이고 중국어는 지원 locale이다. R-05를
+"median CLS ≤0.1"로 판정하는 기준을 locale에 무관하게 적용한다면, R-05-ZH는
+R-05-KO와 동급의 미충족 항목이다.
 
 한국어 변경 시 **중국어 regression test는 반드시 실행**한다
 (`tests/e2e/font-system.spec.ts`, `tests/e2e/korean-typography.spec.ts` ——
@@ -716,7 +749,7 @@ preload 무증가, composer·200% 통과)은 사용자가 제시한 그대로 �
 |---|---|---|---|
 | **R-05-A (c)** | `/api/analytics/consent-policy` 비동기 해석 후 consent slot 삽입 | `section.relative.border-b…`(hero section이 아래로 밀림) | 전 locale·전 viewport |
 | **R-05-KO** | `Noto Sans KR` 21+개 non-preload subset의 늦은 swap | hero의 `h1`·`p`·brand note·CTA 블록 | 한국어 전용, 320px에서 최대 |
-| **R-05-ZH** (신규 분리) | `Noto Sans SC`의 동일 구조 —— `Noto Sans SC Fallback`도 `local(Arial)` 기반이고 Arial에는 Han glyph가 없다 | **미계측** | 중국어. `Known limitation / Not verified` |
+| **R-05-ZH** (신규 분리) | `Noto Sans SC`의 동일 구조 —— `Noto Sans SC Fallback`도 `local(Arial)` 기반이고 Arial에는 Han glyph가 없다 | hero (한국어와 같은 계열) | 중국어. **측정 완료: 0.1357–0.1959로 전 cell FAIL**, platform 축은 `Not verified` |
 
 **추가로 드러난 제약 —— (c)만으로는 320px에서도 부족하다.**
 
@@ -1627,11 +1660,13 @@ artifact에 기록하지 않았다.
 3. R-02·R-04·R-08이 staging에 배포되고 배포본에서 재확인
 4. R-05: `/` median CLS ≤0.1 달성 —— 단 360px/en뿐 아니라 **320px과 한국어에서도**.
    조건부 수용은 배제 기준에 걸려 현재 선택지가 아니다(§4 R-05).
-   **진행 상황**: R-05-A는 종결됐고(영어 20 cell 전부 0, 한국어 미해결 상태도
-   0.0827–0.0855로 gate 이내) 남은 것은 **R-05-KO 하나뿐**이다 —— 기존
-   accepted·declined 한국어 방문자 0.1061–0.1082. 이 조건을 닫으려면 §4의
-   R-05-KO 세 선택지 중 하나를 채택해야 하며, 셋 모두 한국어 렌더링 글꼴을
-   바꾸므로 typography 설계 결정이 필요하다.
+   **진행 상황**: R-05-A는 종결됐다(영어 cold·warm 전 cell 0). 남은 것은 둘이다.
+   **R-05-KO**는 유도한 metric fallback 적용 후 320/360/390px × 3상태 9 cell
+   전부 median·max ≤0.1(0.0196–0.0797)이 됐으나, 이 컨테이너에 `Apple SD Gothic
+   Neo`·`Malgun Gothic`·Android 한국어 face가 없어 **실기기 검증이 남아 Pass로
+   닫지 않았다**. **R-05-ZH**는 이번에 처음 측정해 **cold·warm 양쪽 9 cell 전부
+   0.1357–0.1959로 FAIL**이고 remediation 미실행이다. 둘 다 닫히기 전에는 R-05를
+   Pass로 표기하지 않는다.
 5. `STG-F008`·`STG-F009` 사용자 결정 종결
 6. visual snapshot 2건이 canonical 환경에서 pass 또는 정당한 근거로 갱신 승인
 
