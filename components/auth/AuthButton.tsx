@@ -1695,7 +1695,13 @@ export function AuthButton({
           )}
         </select>
       </label>
-      <div className="flex gap-2">
+      {/*
+        SHORT-VIEWPORT-001: wrapping, not overflowing. At 200% text scaling the
+        analytics button's own label is wider than the whole sidebar drawer, and
+        as a `shrink-0` item on a nowrap row it pushed 168px of itself outside
+        the panel. It now takes a second row instead, and can shrink from there.
+      */}
+      <div className="flex flex-wrap gap-2">
         <button
           onClick={() => {
             trackProductEvent("cta_start_click", 0, {
@@ -1712,7 +1718,7 @@ export function AuthButton({
             type="button"
             data-testid="guest-analytics-cookie-settings"
             onClick={() => openAnalyticsPreferences()}
-            className="shrink-0 rounded-xl border border-zinc-200 bg-zinc-100 px-3 py-2.5 text-xs font-bold text-zinc-600 transition-colors hover:bg-zinc-200 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            className="min-w-0 rounded-xl border border-zinc-200 bg-zinc-100 px-3 py-2.5 text-xs font-bold text-zinc-600 transition-colors hover:bg-zinc-200 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
           >
             {t("auth.analyticsCookieSettings")}
           </button>

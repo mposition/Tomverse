@@ -25,13 +25,20 @@ const MIN_COMFORTABLE_HEIGHT = 480;
 const MIN_KEYBOARD_INSET = 48;
 
 const subscribeToVisualViewport = (onStoreChange: () => void) => {
-  const viewport = typeof window === "undefined" ? null : window.visualViewport;
-  if (!viewport) return () => {};
-  viewport.addEventListener("resize", onStoreChange);
-  viewport.addEventListener("scroll", onStoreChange);
+  if (typeof window === "undefined") return () => {};
+  const viewport = window.visualViewport;
+  // The window listener is the fallback for a browser without
+  // `visualViewport`, where the layout viewport is the only thing any of these
+  // snapshots can read -- without it a rotation would change nothing at all.
+  window.addEventListener("resize", onStoreChange);
+  window.addEventListener("orientationchange", onStoreChange);
+  viewport?.addEventListener("resize", onStoreChange);
+  viewport?.addEventListener("scroll", onStoreChange);
   return () => {
-    viewport.removeEventListener("resize", onStoreChange);
-    viewport.removeEventListener("scroll", onStoreChange);
+    window.removeEventListener("resize", onStoreChange);
+    window.removeEventListener("orientationchange", onStoreChange);
+    viewport?.removeEventListener("resize", onStoreChange);
+    viewport?.removeEventListener("scroll", onStoreChange);
   };
 };
 
@@ -65,8 +72,33 @@ const getKeyboardInsetSnapshot = () => {
   return occluded >= MIN_KEYBOARD_INSET ? Math.round(occluded) : 0;
 };
 
+/**
+ * SHORT-VIEWPORT-001. The mobile sidebar drawer's pinned layout -- fixed
+ * header, fixed account footer, a scrolling conversation list between them --
+ * needs about 658 CSS px before the footer starts falling off the bottom of the
+ * panel: 245px of chrome above the list, the list's own 10rem floor, and up to
+ * 253px of account footer. 700px is that measurement rounded up for locale,
+ * font-size and rounding slack; below it the drawer has to become a single
+ * scroll region instead.
+ *
+ * Measured against the *visible* viewport, never `window.innerHeight` or a CSS
+ * `max-height` query. Both of those still report the full 844px of a phone
+ * whose bottom 320px is covered by the keyboard, which is exactly the case
+ * where the footer disappears.
+ */
+const MIN_PINNED_DRAWER_HEIGHT = 700;
+
+const getShortViewportSnapshot = () => {
+  const viewport = typeof window === "undefined" ? null : window.visualViewport;
+  const layoutHeight = typeof window === "undefined" ? 0 : window.innerHeight;
+  const visibleHeight = viewport?.height ?? layoutHeight;
+  if (!visibleHeight) return false;
+  return visibleHeight < MIN_PINNED_DRAWER_HEIGHT;
+};
+
 const getServerCompactBottomDockSnapshot = () => false;
 const getServerKeyboardInsetSnapshot = () => 0;
+const getServerShortViewportSnapshot = () => false;
 
 /**
  * True when the *visible* viewport is too short to afford a full-height bottom
@@ -93,5 +125,19 @@ export function useKeyboardInset() {
     subscribeToVisualViewport,
     getKeyboardInsetSnapshot,
     getServerKeyboardInsetSnapshot
+  );
+}
+
+/**
+ * True when the visible viewport is too short for the sidebar drawer to keep
+ * its header and account footer pinned around a scrolling conversation list.
+ * The drawer becomes one scroll region for as long as this holds -- including
+ * mid-session, when the keyboard rises or the phone is rotated.
+ */
+export function useShortViewport() {
+  return useSyncExternalStore(
+    subscribeToVisualViewport,
+    getShortViewportSnapshot,
+    getServerShortViewportSnapshot
   );
 }
