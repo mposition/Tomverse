@@ -495,6 +495,80 @@ contract와 맞물린 늦은 font swap이 유력한 설명이지만 **아직 확
 - **(c)만으로는 부족하다.** 한국어·320px의 지배적 원인은 consent slot이 아니라
   hero 본문 재배치이므로, slot 높이 예약은 그 부분을 해결하지 못한다.
 
+**두 원인의 확증 (2026-07-30, font 차단 대조 실험)**
+
+사용자가 R-05 closure 요건으로 "두 원인의 raw layout-shift entry와 shifted node
+확인"을 요구했다. webfont 요청을 `route.abort()`로 차단한 대조 실험으로 둘을
+분리해 확증했다(cell당 5회, 그 외 조건 동일).
+
+| cell | fonts 로드 | fonts 차단 | 차단 시 남는 shift source |
+|---|---:|---:|---|
+| 360 ko | median 0.1160 / max **0.2174** | median **0.1095** / max 0.1095 | `section`(consent slot)만 |
+| 320 ko | median 0.1486 / max **0.2282** | median **0.1216** / max 0.1216 | `section`만 |
+| 360 en | 0.1095 | 0.1095 | `section`만 |
+| 320 en | 0.1466 | 0–0.1466 (timing 의존) | `section`만 |
+
+차단 시 한국어에서만 나타났던 source —— `h1[landing-hero-title]`,
+`p[landing-hero-signup-note]`, `p[landing-brand-note]`, hero 본문 `p`,
+`div.mt-8`(CTA 블록) —— 이 **전부 소멸한다.**
+
+**font 요청 수가 결정적 증거다**: `/?lang=en`은 webfont **1개**를 요청하고,
+`/?lang=ko`는 **21–22개**를 요청한다. `Noto Sans KR`이 subset으로 쪼개져 있고
+typography contract가 이를 `preload: false`로 규정하므로, 이 파일들이 늦게
+도착해 swap이 일어나며 한국어 hero 전체가 재배치된다.
+
+*따라서 R-05의 원인은 확정적으로 둘이다.*
+
+| 하위 항목 | 원인 | shifted node | 영향 범위 |
+|---|---|---|---|
+| **R-05-A (c)** | `/api/analytics/consent-policy` 비동기 해석 후 consent slot 삽입 | `section.relative.border-b…`(hero section이 아래로 밀림) | 전 locale·전 viewport |
+| **R-05-KO** | `Noto Sans KR` 21+개 non-preload subset의 늦은 swap | hero의 `h1`·`p`·brand note·CTA 블록 | 한국어 전용, 320px에서 최대 |
+
+**추가로 드러난 제약 —— (c)만으로는 320px에서도 부족하다.**
+
+font를 차단해 R-05-KO를 제거해도 **320px의 consent slot 단독 기여가 0.1216(ko)·
+0.1466(en)** 으로 이미 0.1을 넘는다. 즉 (c)는 slot shift를 "줄이는" 수준이 아니라
+**제거**해야 한다.
+
+**(c)의 설계 제약 —— 기존 계약과 정면으로 충돌한다**
+
+`tests/e2e/marketing-consent-hero.spec.ts`의 FINAL-F001 test는 동의 해결 후
+`marketing-consent-slot`의 높이가 **정확히 0**이어야 한다고 요구한다. 주석은
+그 이유를 "otherwise the fix would trade an overlap for a permanent gap under
+the header"로 명시한다. 따라서 **영구 `min-height`는 이 계약을 위반한다.**
+
+측정에서 나온 해결의 단서는 예약 게이트를 무엇으로 잡느냐다.
+
+- `analyticsConsent()`는 localStorage를 **microtask에서** 읽는다. 반면
+  `resolvedPolicy`는 network fetch(~900ms)를 기다린다.
+- 따라서 게이트를 **"policy 대기 중"이 아니라 `consent === "unset"`** 으로 잡으면,
+  기존 accepted·declined 방문자는 microtask 시점에 이미 해결되어 **예약 자체가
+  발생하지 않는다** —— 측정된 0 CLS(5/5회)와 일치하고 FINAL-F001도 유지된다.
+- 최초 방문자가 accept/decline하는 순간의 붕괴는 **사용자 조작**이므로
+  `hadRecentInput`으로 CLS에서 제외된다.
+
+남는 위험은 예약 높이가 실제 notice 높이와 다를 때의 잔여 shift다. 측정된 notice
+높이는 폭·locale에 따라 **74–94px**로 변동한다.
+
+**(c) 검증에 반드시 포함할 상태 (사용자 요구)**
+
+1. 정책 fetch 대기 상태
+2. 최초 방문자의 prompt 표시 상태
+3. 기존 accepted 방문자의 첫 paint
+4. 기존 declined 방문자의 첫 paint
+5. accept/decline **직후** slot 제거
+6. `opt_in` vs `notice_opt_out` 정책 차이
+
+"prompt가 표시된다"만 확인하는 것으로는 불충분하다.
+
+**R-05 closure 정책 (사용자 결정)**
+
+- (c)와 R-05-KO는 **구현 티켓을 분리해도 되지만 둘 다 R-05의 하위 항목으로
+  유지하고, 동일 Go-Live milestone에서 검증한다.**
+- 한국어는 지원 locale이고 320px는 저장소의 명시적 모바일 계약 범위이므로,
+  **한국어/320px를 R-05 closure와 Go-Live 판정에서 제외하지 않는다.**
+- consent slot만 고치고 R-05를 Pass로 닫을 수 없다.
+
 *사용자 결정으로 제외된 선택지*
 
 - **(b) marketing route 동적 전환은 적용하지 않는다** —— 성능·캐시 영향에 비해
