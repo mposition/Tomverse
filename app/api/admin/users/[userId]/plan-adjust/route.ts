@@ -10,6 +10,7 @@ import {
 } from "@/lib/adminApproval";
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
+import { resolveManualPlanPeriodEnd } from "@/lib/adminPlanAdjustCore";
 import { sendAdminPlanChangedEmail } from "@/lib/billingEmails";
 import {
   apiSecurityResponse,
@@ -86,9 +87,14 @@ export async function PATCH(req: Request, context: RouteContext) {
           data: {
             plan: body.plan,
             subscriptionStatus: body.subscriptionStatus || "manually_adjusted",
-            subscriptionCurrentPeriodEnd: body.periodEnd
-              ? new Date(body.periodEnd)
-              : null,
+            // Settled here, not in the browser: a clock-derived value in the
+            // request body would differ between the first attempt and the
+            // post-approval retry, and the approval is bound to the payload
+            // hash. Measured from when the change actually takes effect.
+            subscriptionCurrentPeriodEnd: resolveManualPlanPeriodEnd(
+              body.plan,
+              body.periodEnd
+            ),
             subscriptionBillingInterval: body.billingInterval || null,
             subscriptionCancelAtPeriodEnd: body.cancelAtPeriodEnd || false,
             ...(body.plan === "Free"

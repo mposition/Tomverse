@@ -24,6 +24,7 @@ import {
   trackProductEvent,
   trackProductEventOnce,
 } from "@/lib/productAnalyticsClient";
+import { getLandingCopy } from "./landingContent";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
 import {
   chatWorkspaceGuideContent,
@@ -76,7 +77,7 @@ function GuideSection({ section }: { section: WorkspaceGuideSection }) {
             key={`${section.id}-${item.term}`}
             className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950/70"
           >
-            <dt className="text-sm font-black text-zinc-950 dark:text-white">
+            <dt className="text-sm font-bold text-zinc-950 dark:text-white">
               {item.term}
             </dt>
             <dd className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
@@ -97,6 +98,9 @@ function GuideSection({ section }: { section: WorkspaceGuideSection }) {
 export function ChatWorkspaceGuide() {
   const { lang } = useLanguage();
   const copy = chatWorkspaceGuideContent[lang];
+  // Shared with the landing walkthrough so the stage wording and its
+  // "illustration, not a recording" disclosure exist once.
+  const { stages: workflowStages, workflowDisclosure } = getLandingCopy(lang).proof;
 
   useEffect(() => {
     trackProductEventOnce(
@@ -125,14 +129,14 @@ export function ChatWorkspaceGuide() {
       <article lang={lang} className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8 lg:py-16">
         <Link
           href={helpCentreHref(lang)}
-          className="inline-flex items-center gap-2 text-sm font-black text-blue-600 hover:text-blue-500 dark:text-blue-300"
+          className="inline-flex items-center gap-2 text-sm font-bold text-blue-600 hover:text-blue-500 dark:text-blue-300"
         >
           <ArrowLeft className="h-4 w-4" aria-hidden="true" />
           {copy.allHelp}
         </Link>
 
         <header className="mt-8 max-w-4xl">
-          <div className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-black uppercase tracking-[0.16em] text-blue-700 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300">
+          <div className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-bold uppercase tracking-[0.16em] text-blue-700 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300">
             <HelpCircle className="h-4 w-4" aria-hidden="true" />
             {copy.eyebrow}
           </div>
@@ -151,7 +155,7 @@ export function ChatWorkspaceGuide() {
           aria-label={copy.contents}
           className="mt-10 rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/45"
         >
-          <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500">
+          <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">
             {copy.contents}
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
@@ -183,7 +187,7 @@ export function ChatWorkspaceGuide() {
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src="/tomverse-logo.png" alt="" className="h-full w-full object-cover" />
                 </span>
-                <span className="font-black">Tomverse AI</span>
+                <span className="font-black">Tomverse Insight</span>
                 <HelpCircle className="ml-auto h-5 w-5 text-blue-300" aria-hidden="true" />
               </div>
               <div className="mt-5 grid gap-3">
@@ -196,7 +200,7 @@ export function ChatWorkspaceGuide() {
                       onClick={() => trackTopic(index === 5 ? "project" : index === 4 ? "labels" : "workspace")}
                       className="group flex items-center gap-3 rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 transition hover:border-blue-500 hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
                     >
-                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-black">
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-bold">
                         {index + 1}
                       </span>
                       <Icon className="h-4 w-4 shrink-0 text-zinc-400 group-hover:text-blue-300" aria-hidden="true" />
@@ -220,7 +224,7 @@ export function ChatWorkspaceGuide() {
                     id={`tour-${index + 1}`}
                     className="scroll-mt-24 rounded-2xl bg-zinc-50 p-4 dark:bg-zinc-950/70"
                   >
-                    <dt className="flex items-center gap-2 text-sm font-black">
+                    <dt className="flex items-center gap-2 text-sm font-bold">
                       <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-[11px] text-white">
                         {index + 1}
                       </span>
@@ -240,22 +244,44 @@ export function ChatWorkspaceGuide() {
           {copy.sections.map((section) => (
             <div key={section.id}>
               {section.id === "ai-review" ? (
-                <div className="mb-6 overflow-hidden rounded-3xl border border-blue-200 bg-blue-50 p-5 sm:p-7 dark:border-blue-900/70 dark:bg-blue-950/20">
+                <div className="mb-6 overflow-hidden rounded-3xl border border-blue-200 bg-blue-50 p-[20px] sm:p-[28px] dark:border-blue-900/70 dark:bg-blue-950/20">
                   <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
                     <Sparkles className="h-5 w-5" aria-hidden="true" />
-                    <h3 className="font-black">{copy.reviewVideoTitle}</h3>
+                    <h3 className="font-bold break-words">{copy.reviewVideoTitle}</h3>
                   </div>
-                  <video
-                    className="mt-5 aspect-video w-full rounded-2xl border border-zinc-200 bg-zinc-950 object-cover shadow-lg dark:border-zinc-800"
-                    controls
-                    preload="metadata"
-                    poster="/marketing-proof/tomverse-review-workflow-poster.png"
+                  {/*
+                    This used to embed the 2026-07-27 walkthrough recording,
+                    which still showed "4 credits used" -- superseded two days
+                    later, since two independent reviewers run -- and "Review
+                    confidence", the pre-rename source-grounding label. Both
+                    are server-side values, so a recording cannot stay correct.
+                    The stage copy is shared with the landing page rather than
+                    translated twice.
+                  */}
+                  <ol
+                    data-testid="guide-review-workflow"
+                    className="mt-5 grid gap-3 sm:grid-cols-2"
                   >
-                    <source src="/marketing-proof/tomverse-review-workflow.webm" type="video/webm" />
-                  </video>
+                    {workflowStages.map((stage, index) => (
+                      <li
+                        key={stage.title}
+                        className="min-w-0 rounded-2xl border border-blue-200 bg-white p-[16px] dark:border-blue-900/70 dark:bg-zinc-950/40"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="flex h-[24px] w-[24px] shrink-0 items-center justify-center rounded-lg bg-blue-600 text-[11px] font-bold text-white">
+                            {index + 1}
+                          </span>
+                          <span className="text-sm font-bold break-words">{stage.title}</span>
+                        </div>
+                        <p className="mt-2 text-xs leading-5 text-zinc-600 break-words dark:text-zinc-300">
+                          {stage.caption}
+                        </p>
+                      </li>
+                    ))}
+                  </ol>
                   <p className="mt-3 flex items-start gap-2 text-xs font-semibold leading-5 text-blue-900 dark:text-blue-100">
                     <FileText className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                    {copy.reviewVideoCaption}
+                    {workflowDisclosure}
                   </p>
                 </div>
               ) : null}
@@ -267,12 +293,12 @@ export function ChatWorkspaceGuide() {
         <div className="mt-10 flex flex-col gap-3 rounded-3xl bg-zinc-950 p-6 text-white sm:flex-row sm:items-center sm:justify-between sm:p-8">
           <div className="flex items-center gap-3">
             <Sparkles className="h-6 w-6 text-blue-300" aria-hidden="true" />
-            <span className="text-lg font-black">Tomverse AI</span>
+            <span className="text-lg font-black">Tomverse Insight</span>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row">
             <Link
               href={helpCentreHref(lang)}
-              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-zinc-700 px-4 text-sm font-black hover:bg-zinc-900"
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-zinc-700 px-4 text-sm font-bold hover:bg-zinc-900"
             >
               {copy.allHelp}
             </Link>
@@ -283,7 +309,7 @@ export function ChatWorkspaceGuide() {
                   cta_location: "chat_workspace_guide",
                 })
               }
-              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-black hover:bg-blue-500"
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-bold hover:bg-blue-500"
             >
               {copy.openChat}
               <ExternalLink className="h-4 w-4" aria-hidden="true" />

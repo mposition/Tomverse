@@ -77,6 +77,7 @@ jobs:
       # the recording can be reviewed against evidence rather than accepted on
       # trust. It is expected to fail -- that failure is the input to step two.
       - name: Capture the diff against the current baseline
+        id: baseline
         continue-on-error: true
         run: npx playwright test "${{ inputs.spec }}" --project=desktop-chromium --retries=0
 
@@ -97,17 +98,41 @@ jobs:
         run: npx playwright test "${{ inputs.spec }}" --project=desktop-chromium --retries=0
 
       - name: Push the recording to a review branch
+        env:
+          BASELINE_OUTCOME: ${{ steps.baseline.outcome }}
         run: |
           set -euo pipefail
-          if git diff --quiet -- '*-snapshots'; then
-            echo "No golden changed; nothing to push."
+          # Playwright's default snapshot location: the spec path plus a
+          # suffix. Naming it exactly matters -- `git diff -- '*-snapshots'`
+          # looks like it covers this directory and matches nothing at all,
+          # because a wildcard pathspec is matched against whole paths and the
+          # changed files end in `.png`, not in `-snapshots`. The first run of
+          # this workflow re-recorded all 63 goldens correctly and then
+          # reported "nothing to push".
+          snapshots="${{ inputs.spec }}-snapshots"
+          if [ ! -d "$snapshots" ]; then
+            echo "Expected a snapshot directory at $snapshots and found none."
+            exit 1
+          fi
+          if git diff --quiet -- "$snapshots"; then
+            # Re-recording after a baseline that passed is a legitimate no-op.
+            # Re-recording after one that failed is not: the run just proved
+            # the images on disk disagree with what this environment renders,
+            # so an unchanged tree means the recording did not land where it
+            # was looked for. Fail rather than report success and push nothing.
+            if [ "$BASELINE_OUTCOME" = "failure" ]; then
+              echo "The baseline run failed, yet re-recording changed nothing in $snapshots."
+              echo "The recording did not land where this step looks for it."
+              exit 1
+            fi
+            echo "The baseline already matched; nothing to record."
             exit 0
           fi
           branch="visual-baseline/${{ github.run_id }}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "$branch"
-          git add -- '*-snapshots'
+          git add -- "$snapshots"
           # Two -m flags rather than one multi-line string: an unindented
           # continuation line ends the YAML block scalar, which makes the whole
           # workflow unparseable -- and an unparseable workflow is registered

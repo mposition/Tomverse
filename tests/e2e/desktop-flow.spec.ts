@@ -1,14 +1,13 @@
 import { expect, test } from "@playwright/test";
 import {
   expectNoHorizontalOverflow,
+  modelMenuTrigger,
+  openModelPickerCatalogue,
   prepareGuestPage,
 } from "./support/app-fixtures";
 
 const actionMenuTrigger = (page: import("@playwright/test").Page) =>
   page.locator('button[aria-controls="chat-input-popover"]').first();
-
-const modelMenuTrigger = (page: import("@playwright/test").Page) =>
-  page.locator('button[aria-controls="chat-input-popover"]').nth(1);
 
 test.beforeEach(async ({ page }) => {
   await prepareGuestPage(page, "ko");
@@ -28,7 +27,19 @@ test("desktop shell fits compact viewport", async ({ page }) => {
 test("account controls remain fully visible at a 150 percent scaled viewport", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
 
-  const accountControls = page.getByTestId("sidebar-account-controls");
+  // STG-F002: at 1280x720 with 3 guest-default models, the sidebar now
+  // auto-collapses to a rail (too little room to keep it expanded and give
+  // every panel a usable width) -- account controls stay reachable either
+  // way, just via a different control depending on which sidebar state won.
+  const expandedControls = page.getByTestId("sidebar-account-controls");
+  const railControls = page.getByTestId("sidebar-rail-account-trigger");
+  // Wait for whichever sidebar state won rather than branching on a
+  // point-in-time count(). count() does not auto-wait, so under load it ran
+  // before the sidebar had rendered at all, saw zero rail triggers, and
+  // committed to the expanded control -- which then never appeared, because
+  // the sidebar had in fact collapsed to a rail. The test spent its whole
+  // timeout waiting on the branch it had already ruled out.
+  const accountControls = railControls.or(expandedControls).first();
   await expect(accountControls).toBeVisible();
 
   const accountBox = await accountControls.boundingBox();
@@ -37,12 +48,13 @@ test("account controls remain fully visible at a 150 percent scaled viewport", a
   expect(accountBox!.y + accountBox!.height).toBeLessThanOrEqual(720);
 });
 
-test("guest model selector keeps one panel and explains sign-in for comparison", async ({ page }) => {
-  await expect(page.getByTestId("desktop-model-panel")).toHaveCount(1);
+test("guest model selector opens a swap dialog once the 3-model cap is reached", { tag: "@smoke" }, async ({ page }) => {
+  // Guests now default to a 3-model comparison (Gemini/GPT/Claude), already
+  // at the selection cap, so picking another free model swaps a panel
+  // instead of adding a 4th one or asking the guest to sign in.
+  await expect(page.getByTestId("desktop-model-panel")).toHaveCount(3);
 
-  await modelMenuTrigger(page).click();
-  const dialog = page.locator("#chat-input-popover");
-  await expect(dialog).toBeVisible();
+  const dialog = await openModelPickerCatalogue(page);
 
   const freeUnselectedModel = dialog
     .locator(
@@ -53,13 +65,12 @@ test("guest model selector keeps one panel and explains sign-in for comparison",
   await freeUnselectedModel.click();
 
   await expect(page.getByRole("dialog").last()).toBeVisible();
-  await expect(page.getByTestId("desktop-model-panel")).toHaveCount(1);
+  await expect(page.getByTestId("desktop-model-panel")).toHaveCount(3);
   await expectNoHorizontalOverflow(page);
 });
 
 test("model names remain readable in the narrow selector", async ({ page }) => {
-  await modelMenuTrigger(page).click();
-  const dialog = page.locator("#chat-input-popover");
+  const dialog = await openModelPickerCatalogue(page);
   const longName = dialog
     .locator('[data-model-id="perplexity/sonar-deep-research"]')
     .getByTestId("model-option-name");
@@ -78,11 +89,10 @@ test("model names remain readable in the narrow selector", async ({ page }) => {
   expect(styles.overflow).not.toBe("hidden");
 });
 
-test("model picker prioritizes exact credits and shows the final input estimate", async ({ page }) => {
-  await modelMenuTrigger(page).click();
-  const dialog = page.locator("#chat-input-popover");
-
-  await expect(dialog.getByTestId("recommended-model-option")).toHaveCount(3);
+test("model picker prioritizes exact credits and shows the final input estimate", { tag: "@smoke" }, async ({ page }) => {
+  // STG-F008: the picker opens on recommendations, so the exact-credit
+  // assertions for the catalogue rows live one step in.
+  const dialog = await openModelPickerCatalogue(page);
   await expect.poll(() => dialog.getByTestId("model-option").count()).toBeGreaterThan(3);
 
   const gptMini = dialog.locator(
@@ -96,11 +106,19 @@ test("model picker prioritizes exact credits and shows the final input estimate"
   await expect(gptMini).not.toContainText("Best for");
   await expect(dialog.getByTestId("model-selection-summary")).toBeVisible();
 
+  // Escape is layered now: the first press returns to the recommended screen,
+  // the second closes the picker.
   await page.keyboard.press("Escape");
+  await expect(dialog.getByTestId("recommended-model-option").first()).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+
   await page.getByTestId("chat-textarea").fill("x".repeat(64_004));
   const estimate = page.getByTestId("request-credit-estimate");
   await expect(estimate).toContainText("1.5×");
-  await expect(estimate).toContainText("2");
+  // Guests default to the 3-model brand trio, so the base estimate is the
+  // combined cost of all three selected models (6), not a single model's.
+  await expect(estimate).toContainText("6");
   await expect(estimate.getByTestId("credit-coin-icon").first()).toBeVisible();
 });
 

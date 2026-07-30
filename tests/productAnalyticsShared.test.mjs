@@ -353,3 +353,28 @@ test("analytics rejects unknown top-level fields", () => {
     false
   );
 });
+
+test("comparison reviews report source grounding under a name that is not confidence", () => {
+  for (const level of ["low", "medium", "high", "not_available"]) {
+    assert.equal(
+      analyticsClientEventSchema.safeParse({
+        ...safeEvent,
+        event_name: "comparison_review_completed",
+        properties: { review_mode: "evidence", source_grounding_level: level },
+      }).success,
+      true,
+      `expected source_grounding_level=${level} to be accepted`
+    );
+  }
+
+  // The stored field name must not leak into analytics, where "confidence"
+  // would be read as the model's certainty about the answer (STG-F007).
+  assert.equal(
+    analyticsClientEventSchema.safeParse({
+      ...safeEvent,
+      event_name: "comparison_review_completed",
+      properties: { confidence: "high" },
+    }).success,
+    false
+  );
+});

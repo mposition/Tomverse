@@ -7,16 +7,16 @@ import {
   apiSecurityResponse,
   consumeApiRateLimit,
 } from "@/lib/apiSecurity";
+import { getAnonymousClientKey } from "@/lib/clientIp";
 import {
   getDefaultBillingPlans,
   getPublicBillingConfig,
 } from "@/lib/billingConfig";
 import { withDisplayCurrency } from "@/lib/billingCurrency";
 import { getPublicCreditPackCatalog } from "@/lib/creditPacks";
+import { isE2EFixtureMode } from "@/lib/e2eTestMode";
 
-const isDatabaseDisabledForE2e = () =>
-  process.env.E2E_AUTH_BYPASS === "true" &&
-  process.env.E2E_DISABLE_DATABASE === "true";
+const isDatabaseDisabledForE2e = isE2EFixtureMode;
 
 export async function GET(req: Request) {
   try {
@@ -38,10 +38,14 @@ export async function GET(req: Request) {
     }
 
     const session = await getServerSession(authOptions);
-    await consumeApiRateLimit(req, session?.user?.id || "guest", "billing-config-read", {
-      minute: 60,
-      day: 2_000,
-    });
+    // Per-caller, not a single shared "guest" bucket: the public pricing page
+    // depends on this route, so one client must not be able to 429 everyone.
+    await consumeApiRateLimit(
+      req,
+      session?.user?.id || `guest:${getAnonymousClientKey(req)}`,
+      "billing-config-read",
+      { minute: 60, day: 2_000 }
+    );
     const config = await getPublicBillingConfig();
     return NextResponse.json(await withDisplayCurrency(config, req), {
       headers: { "Cache-Control": "no-store, max-age=0" },

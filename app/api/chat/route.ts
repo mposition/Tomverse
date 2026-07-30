@@ -18,11 +18,22 @@ import {
 } from "@/lib/models";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { getActiveAiModel } from "@/lib/activeAiModel";
+import { getWebSearchCapability } from "@/lib/webSearchCapability";
+import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
+import { buildWebSearchToolConfig, WEB_SEARCH_TOOL_NAMES } from "@/lib/webSearchToolConfig";
+import { normalizeWebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
+import { buildSearchMetadataTrailerChunk } from "@/lib/webSearchStreamTrailer";
 import {
     consumePerplexityUsage,
     discardPerplexityUsage,
     perplexityUsageHeaders,
 } from "@/lib/perplexityUsageCapture";
+import {
+    DEEP_RESEARCH_DEPTH_PARAMS,
+    describeDeepResearchMessages,
+    PerplexityDeepResearchMessageError,
+    submitDeepResearchJob,
+} from "@/lib/perplexityDeepResearch";
 import { assertModelRuntimeAvailable } from "@/lib/modelAvailability";
 import { parseOfficeSafely } from "@/lib/officeSecurity";
 import {
@@ -76,7 +87,20 @@ import {
 } from "@/lib/billingEntitlements";
 import { getOperationalFeatureFlags } from "@/lib/appSettings";
 import { estimateNativeAttachmentTokens } from "@/lib/chatAttachmentTokens";
+import {
+    getGuestAttachmentSecret,
+    guestAttachmentPrefix,
+    isOwnGuestAttachmentKey,
+    GUEST_ATTACHMENT_TYPES,
+    GUEST_MAX_ATTACHMENT_BYTES,
+    GUEST_MAX_ATTACHMENTS_PER_MESSAGE,
+} from "@/lib/guestAttachments";
 import { isChatCostSafetyCode } from "@/lib/chatCostSafetyCore";
+import {
+    providerDiagnosticCode,
+    safeErrorMessage,
+    safeErrorMetadata,
+} from "@/lib/providerErrorClassification";
 
 const MAX_ATTACHMENTS = 5;
 // Every request resends the full conversation history (including past
@@ -84,6 +108,11 @@ const MAX_ATTACHMENTS = 5;
 // this is a generous safety ceiling on total reprocessing cost, not a
 // per-message limit — see MAX_ATTACHMENTS for the per-send cap.
 const MAX_CONVERSATION_ATTACHMENTS = 30;
+// Guests resend their whole local history on every turn too, so this bounds
+// how much ephemeral storage one guest chat can force the server to re-read.
+// Far below the account ceiling on purpose: a guest chat is a trial, not an
+// archive.
+const GUEST_MAX_CONVERSATION_ATTACHMENTS = 5;
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
 const MAX_TOTAL_ATTACHMENT_SIZE = 25 * 1024 * 1024;
 const MAX_EXTRACTED_ATTACHMENT_CHARACTERS = 300_000;
@@ -108,48 +137,6 @@ const parseStoredModelIds = (value: unknown) => {
     return Array.isArray(parsed)
         ? parsed.filter((item): item is string => typeof item === "string")
         : [];
-};
-
-const safeErrorMetadata = (error: unknown) => {
-    if (!error || typeof error !== "object") {
-        return { name: "UnknownError" };
-    }
-
-    const candidate = error as {
-        name?: unknown;
-        code?: unknown;
-        status?: unknown;
-        statusCode?: unknown;
-        isRetryable?: unknown;
-    };
-    return {
-        name:
-            typeof candidate.name === "string"
-                ? candidate.name.slice(0, 80)
-                : "Error",
-        code:
-            typeof candidate.code === "string" &&
-            /^[A-Za-z0-9_.-]{1,80}$/.test(candidate.code)
-                ? candidate.code
-                : undefined,
-        statusCode:
-            typeof candidate.statusCode === "number"
-                ? candidate.statusCode
-                : typeof candidate.status === "number"
-                  ? candidate.status
-                  : undefined,
-        isRetryable:
-            typeof candidate.isRetryable === "boolean"
-                ? candidate.isRetryable
-                : undefined,
-    };
-};
-
-const safeErrorMessage = (error: unknown) => {
-    if (!error || typeof error !== "object" || !("message" in error)) {
-        return undefined;
-    }
-    return typeof error.message === "string" ? error.message : undefined;
 };
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
@@ -197,23 +184,13 @@ const isClosedStreamControllerError = (error: unknown) => {
     );
 };
 
-const providerDiagnosticCode = (fallback: string, error: unknown) => {
-    const metadata = safeErrorMetadata(error);
-    return [
-        fallback,
-        metadata.code || metadata.name,
-        metadata.statusCode ? `HTTP_${metadata.statusCode}` : null,
-        metadata.isRetryable === true ? "RETRYABLE" : null,
-    ]
-        .filter((value): value is string => Boolean(value))
-        .join(".");
-};
-
 const logRequestError = (
     event: string,
     traceId: string,
     error: unknown,
-    modelId?: string
+    modelId?: string,
+    // Non-sensitive request shape only (roles, counts). Never message content.
+    details?: Record<string, unknown>
 ) => {
     console.error(
         JSON.stringify({
@@ -221,6 +198,8 @@ const logRequestError = (
             traceId,
             modelId,
             ...safeErrorMetadata(error),
+            ...details,
+            message: safeErrorMessage(error)?.slice(0, 1_000),
         })
     );
 };
@@ -651,6 +630,8 @@ export async function POST(req: Request) {
             conversationId,
             assistantMessageId,
             turnstileToken,
+            deepResearchDepth,
+            webSearchMode,
         } = validateChatPayload(body);
         const requestedModelId = modelId || APP_DEFAULTS.defaultModelId;
         requestedModelIdForLog = requestedModelId;
@@ -691,6 +672,14 @@ export async function POST(req: Request) {
             );
         }
         requestedProviderForLog = modelConfig.provider;
+        // webSearchMode === "always" only ever enables a model's OWN
+        // provider-native search tool when its exact catalog id is
+        // confirmed-supported -- it never adds or swaps in a different
+        // model (see lib/webSearchCapability.ts for the support matrix).
+        const webSearchCapability = getWebSearchCapability(modelConfig.id);
+        const webSearchRequested = webSearchMode === "always";
+        const nativeSearchEnabled =
+            webSearchRequested && webSearchCapability.support === "native";
         const requestAttachments = messages.flatMap((message) =>
             Array.isArray(message.attachments)
                 ? (message.attachments as IncomingAttachment[])
@@ -750,27 +739,6 @@ export async function POST(req: Request) {
             ? await getUserBillingPlan(session.user.id)
             : null;
         const userPlan = billingPlan?.tier;
-        if (requestAttachments.length > 0) {
-            if (!(await getOperationalFeatureFlags()).attachmentsEnabled) {
-                return tracedJsonError(
-                    "Attachments are temporarily disabled for operational maintenance.",
-                    "ATTACHMENTS_DISABLED_BY_ADMIN",
-                    503,
-                    traceId
-                );
-            }
-            if (!session?.user?.id) {
-                return tracedJsonError(
-                    "Authentication is required for attachments.",
-                    "ATTACHMENT_AUTHENTICATION_REQUIRED",
-                    401,
-                    traceId
-                );
-            }
-            if (!billingPlan?.allowAttachments) {
-                return featureNotIncludedResponse("attachments");
-            }
-        }
         const access = identifyChatCaller(
             req,
             session?.user?.id,
@@ -782,6 +750,44 @@ export async function POST(req: Request) {
                   }
                 : undefined
         );
+        // Attachments are gated per access kind rather than by "is there a
+        // session". A guest may send one ephemeral file per message, uploaded
+        // through /api/chat/guest-attachment and already validated and parsed
+        // there; an account keeps the durable, plan-gated flow unchanged.
+        if (requestAttachments.length > 0) {
+            if (!(await getOperationalFeatureFlags()).attachmentsEnabled) {
+                return tracedJsonError(
+                    "Attachments are temporarily disabled for operational maintenance.",
+                    "ATTACHMENTS_DISABLED_BY_ADMIN",
+                    503,
+                    traceId
+                );
+            }
+            if (access.kind === "guest") {
+                if (
+                    latestMessageAttachmentCount >
+                    GUEST_MAX_ATTACHMENTS_PER_MESSAGE
+                ) {
+                    throw new ChatAccessError(
+                        413,
+                        "GUEST_TOO_MANY_ATTACHMENTS",
+                        "Guests can attach one file per message. Sign in to send more."
+                    );
+                }
+                if (
+                    requestAttachments.length >
+                    GUEST_MAX_CONVERSATION_ATTACHMENTS
+                ) {
+                    throw new ChatAccessError(
+                        413,
+                        "GUEST_TOO_MANY_CONVERSATION_ATTACHMENTS",
+                        "This guest chat has reached its file limit. Sign in to keep attaching files."
+                    );
+                }
+            } else if (!billingPlan?.allowAttachments) {
+                return featureNotIncludedResponse("attachments");
+            }
+        }
         assertModelAccess(access, modelConfig);
         if (access.kind === "guest") {
             turnstileGrantCookie = await ensureGuestVerified(req, turnstileToken);
@@ -864,6 +870,17 @@ export async function POST(req: Request) {
                 .digest("hex")
                 .slice(0, 20)}/`
             : null;
+        // One guest's storage scope, derived from their own signed identity.
+        // Computed here rather than compared against a value from the request,
+        // so a crafted objectKey can only ever resolve inside the caller's own
+        // prefix -- there is nothing to guess and nothing to enumerate.
+        const guestObjectPrefix =
+            access.kind === "guest"
+                ? guestAttachmentPrefix(
+                      access.subjectKey,
+                      getGuestAttachmentSecret()
+                  )
+                : null;
 
         const activeModel = getActiveAiModel(modelConfig);
         let estimatedInputTokens = 0;
@@ -917,21 +934,61 @@ export async function POST(req: Request) {
                 let extractedPdfText: string | undefined;
                 let pdfFilePartBuffer: Buffer | undefined;
 
+                const isGuestObject =
+                    typeof attachment.objectKey === "string" &&
+                    Boolean(guestObjectPrefix) &&
+                    isOwnGuestAttachmentKey(
+                        attachment.objectKey,
+                        access.subjectKey,
+                        getGuestAttachmentSecret()
+                    );
+                if (isGuestObject && !GUEST_ATTACHMENT_TYPES[attachment.mediaType]) {
+                    throw new ChatAccessError(
+                        400,
+                        "GUEST_ATTACHMENT_UNSUPPORTED_TYPE",
+                        "This file type cannot be attached as a guest."
+                    );
+                }
+                const attachmentSizeLimit = isGuestObject
+                    ? GUEST_MAX_ATTACHMENT_BYTES
+                    : MAX_ATTACHMENT_SIZE;
+
                 if (typeof attachment.objectKey === "string") {
-                    if (
-                        !userObjectPrefix ||
-                        !attachment.objectKey.startsWith(userObjectPrefix)
-                    ) {
+                    const isOwnUserObject =
+                        Boolean(userObjectPrefix) &&
+                        attachment.objectKey.startsWith(userObjectPrefix!);
+                    if (!isOwnUserObject && !isGuestObject) {
                         throw new Error("Attachment access denied.");
                     }
 
-                    attachmentBuffer = await readR2Object(
-                        attachment.objectKey,
-                        {
-                            maxBytes: MAX_ATTACHMENT_SIZE,
-                            expectedContentType: attachment.mediaType,
+                    try {
+                        attachmentBuffer = await readR2Object(
+                            attachment.objectKey,
+                            {
+                                maxBytes: attachmentSizeLimit,
+                                expectedContentType: attachment.mediaType,
+                            }
+                        );
+                    } catch (error) {
+                        // A guest object is ephemeral by design, so "gone" is
+                        // an ordinary outcome (the TTL sweep took it), not a
+                        // server fault. Say so instead of returning a 500 the
+                        // user cannot act on.
+                        if (isGuestObject) {
+                            logRequestError(
+                                "guest_attachment_unavailable",
+                                traceId,
+                                error,
+                                requestedModelId
+                            );
+                            throw new ChatAccessError(
+                                410,
+                                "GUEST_ATTACHMENT_EXPIRED",
+                                "The attached file is no longer available. Attach it again, or sign in to keep files with your chat."
+                            );
                         }
-                    );
+                        throw error;
+                    }
                     attachmentBytes = attachmentBuffer.byteLength;
                     attachmentData =
                         attachment.kind === "text"
@@ -941,7 +998,7 @@ export async function POST(req: Request) {
                     throw new Error("Attachment data is missing.");
                 }
 
-                if (attachmentBytes > MAX_ATTACHMENT_SIZE) {
+                if (attachmentBytes > attachmentSizeLimit) {
                     throw new ChatAccessError(
                         413,
                         "ATTACHMENT_TOO_LARGE",
@@ -1196,7 +1253,13 @@ export async function POST(req: Request) {
         const budget = createChatBudget(
             access.kind,
             modelConfig,
-            estimatedInputTokens
+            estimatedInputTokens,
+            {
+                webSearchSurchargeCredits: getWebSearchSurchargeCredits(
+                    webSearchMode ?? "off",
+                    webSearchCapability
+                ),
+            }
         );
         if (
             modelConfig.contextWindowTokens &&
@@ -1226,6 +1289,163 @@ export async function POST(req: Request) {
             );
         }
 
+        // Perplexity's "sonar-deep-research" model doesn't stream like every
+        // other model here -- it's a submit-then-poll async job that can run
+        // well past 30 minutes. Submit it, persist a "pending" message + job
+        // row, and hand off polling to the client (app/api/chat/deep-research/
+        // status) instead of holding this request or the 120s concurrency
+        // lease open for the job's lifetime.
+        if (modelConfig.usageClass === "deep-research") {
+            const activeLeaseId = leaseId;
+            leaseId = null;
+            await releaseChatAccess(activeLeaseId);
+
+            if (!conversationId || !assistantMessageId || !session?.user?.id) {
+                await settleChatUsage(usageReservation, {
+                    inputTokens: 0,
+                    outputTokens: 0,
+                    outcome: "failed",
+                });
+                usageReservation = null;
+                return tracedJsonError(
+                    "Deep research requires a saved conversation.",
+                    "CONVERSATION_REQUIRED",
+                    400,
+                    traceId
+                );
+            }
+
+            // Set once Perplexity has accepted the job. If persisting the
+            // local rows then fails, this is the id an operator needs to
+            // reconcile a provider job that has no Message or job row here.
+            let submittedPerplexityJobId: string | null = null;
+            try {
+                const depthParams =
+                    DEEP_RESEARCH_DEPTH_PARAMS[deepResearchDepth || "standard"];
+                const { perplexityJobId } = await submitDeepResearchJob({
+                    messages: formattedMessages,
+                    maxOutputTokens: depthParams.maxOutputTokens,
+                    reasoningEffort:
+                        depthParams.reasoningEffort ||
+                        (modelConfig.reasoning === "high" ? "high" : undefined),
+                });
+                submittedPerplexityJobId = perplexityJobId;
+
+                await linkChatReservationProviderRequest(
+                    usageReservation.reservationId,
+                    { providerRequestId: perplexityJobId }
+                ).catch(() => {});
+
+                await prisma.$transaction(async (tx) => {
+                    await assertMessageCapacity(
+                        tx,
+                        session.user!.id,
+                        conversationId,
+                        1,
+                        0
+                    );
+                    await tx.message.create({
+                        data: {
+                            id: assistantMessageId,
+                            conversationId,
+                            role: "assistant",
+                            content: "",
+                            status: "pending",
+                            modelId: requestedModelId,
+                            pendingJobId: perplexityJobId,
+                        },
+                    });
+                    await tx.perplexityAsyncJob.create({
+                        data: {
+                            perplexityJobId,
+                            conversationId,
+                            assistantMessageId,
+                            modelId: requestedModelId,
+                            reservationId: usageReservation!.reservationId,
+                            traceId,
+                            status: "submitted",
+                        },
+                    });
+                });
+
+                return Response.json(
+                    { deepResearchJobId: assistantMessageId, status: "submitted" },
+                    {
+                        headers: {
+                            "X-Request-ID": traceId,
+                            "X-Chat-Response-Mode": "async-job",
+                        },
+                    }
+                );
+            } catch (error) {
+                // A message-contract rejection is this app's own bug: the
+                // request never left the process, so Perplexity must not be
+                // marked as failing (and its status page must not react).
+                // The credit refund below is unconditional either way.
+                const isMessageContractError =
+                    error instanceof PerplexityDeepResearchMessageError;
+                await settleChatUsage(usageReservation, {
+                    inputTokens: 0,
+                    outputTokens: 0,
+                    outcome: "failed",
+                }).catch(() => {});
+                usageReservation = null;
+                if (!isMessageContractError) {
+                    await recordProviderFailure(
+                        modelConfig.provider,
+                        "DEEP_RESEARCH_SUBMIT_FAILED",
+                        {
+                            modelId: requestedModelId,
+                            phase: "request",
+                            traceId,
+                            message:
+                                error instanceof Error
+                                    ? error.message
+                                    : String(error),
+                        }
+                    ).catch(() => {});
+                    await recordModelFailure(
+                        requestedModelId,
+                        modelConfig.provider,
+                        "DEEP_RESEARCH_SUBMIT_FAILED"
+                    ).catch(() => {});
+                }
+                logRequestError(
+                    isMessageContractError
+                        ? "deep_research_message_contract_failed"
+                        : "deep_research_submit_failed",
+                    traceId,
+                    error,
+                    requestedModelId,
+                    {
+                        // Shape of the conversation this request carried, so a
+                        // recurrence is diagnosable without logging its content.
+                        messageShape:
+                            describeDeepResearchMessages(formattedMessages),
+                        ...(submittedPerplexityJobId
+                            ? { submittedPerplexityJobId }
+                            : {}),
+                    }
+                );
+                return isMessageContractError
+                    ? tracedJsonError(
+                          "This deep research request had no question to research. Reserved credits were refunded.",
+                          "DEEP_RESEARCH_INVALID_MESSAGES",
+                          400,
+                          traceId
+                      )
+                    : tracedJsonError(
+                          "Failed to start the deep research job. Reserved credits were refunded.",
+                          "DEEP_RESEARCH_SUBMIT_FAILED",
+                          502,
+                          traceId
+                      );
+            }
+        }
+
+        const webSearchToolConfig = nativeSearchEnabled
+            ? buildWebSearchToolConfig(webSearchCapability)
+            : null;
         const result = await streamText({
             model: activeModel,
             messages: formattedMessages,
@@ -1235,6 +1455,7 @@ export async function POST(req: Request) {
                 modelConfig.provider === "perplexity"
                     ? perplexityUsageHeaders(traceId)
                     : undefined,
+            ...(webSearchToolConfig ?? {}),
         });
 
         const sourceReader = result.textStream.getReader();
@@ -1252,12 +1473,26 @@ export async function POST(req: Request) {
                       Math.ceil(Buffer.byteLength(generatedText, "utf8") / 4)
                   )
                 : 0;
+        // Used only by settleSafely("cancelled") call sites that fire before
+        // the stream's tool-result content ever resolves (mid-stream abort,
+        // client disconnect, transport error) -- a search cannot have been
+        // confirmed executed at that point, so treat any reserved surcharge
+        // as unearned and let the cancelled-outcome proration exclude it.
+        const earlyCancelSearchFields = {
+            searchSurchargeCredits: getWebSearchSurchargeCredits(
+                webSearchMode ?? "off",
+                webSearchCapability
+            ),
+            searchExecuted: false,
+        };
         const settleSafely = (
             outcome: "completed" | "cancelled" | "failed" | "empty",
             usage?: {
                 inputTokens?: number;
                 cachedInputTokens?: number;
                 outputTokens?: number;
+                searchSurchargeCredits?: number;
+                searchExecuted?: boolean;
             }
         ) => {
             if (usageSettlement) return usageSettlement;
@@ -1277,6 +1512,8 @@ export async function POST(req: Request) {
                             usage?.outputTokens ??
                             estimatedGeneratedOutputTokens(),
                         outcome,
+                        searchSurchargeCredits: usage?.searchSurchargeCredits,
+                        searchExecuted: usage?.searchExecuted,
                     }, {
                         providerUsageSnapshot,
                     });
@@ -1406,6 +1643,7 @@ export async function POST(req: Request) {
                             result.finishReason,
                             result.rawFinishReason,
                             result.providerMetadata,
+                            result.content,
                         ] as const);
                         const [
                             responseResult,
@@ -1413,6 +1651,7 @@ export async function POST(req: Request) {
                             finishReasonResult,
                             rawFinishReasonResult,
                             providerMetadataResult,
+                            contentResult,
                         ] = completionResults;
                         const rejectedCompletion = completionResults.find(
                             (item): item is PromiseRejectedResult =>
@@ -1468,6 +1707,29 @@ export async function POST(req: Request) {
                             );
                         }
 
+                        const webSearchExecution = normalizeWebSearchExecution({
+                            capability: webSearchCapability,
+                            searchRequested: webSearchRequested,
+                            provider: modelConfig.provider,
+                            toolName: webSearchCapability.provider
+                                ? WEB_SEARCH_TOOL_NAMES[webSearchCapability.provider]
+                                : undefined,
+                            content:
+                                contentResult.status === "fulfilled"
+                                    ? contentResult.value
+                                    : undefined,
+                        });
+                        const searchSettlementFields = {
+                            searchSurchargeCredits: getWebSearchSurchargeCredits(
+                                webSearchMode ?? "off",
+                                webSearchCapability
+                            ),
+                            searchExecuted: webSearchExecution.executed,
+                            searchCostMicroUsd:
+                                webSearchExecution.costMetadata?.searchCostMicroUsd,
+                            searchQueryCount: webSearchExecution.queryCount,
+                        };
+
                         if (usageResult.status === "fulfilled") {
                             const usage = usageResult.value;
                             await settleSafely(
@@ -1477,11 +1739,13 @@ export async function POST(req: Request) {
                                     cachedInputTokens:
                                         usage.inputTokenDetails.cacheReadTokens,
                                     outputTokens: usage.outputTokens,
+                                    ...searchSettlementFields,
                                 }
                             );
                         } else {
                             await settleSafely(
-                                generatedText.trim() ? "completed" : "empty"
+                                generatedText.trim() ? "completed" : "empty",
+                                searchSettlementFields
                             );
                         }
                         if (
@@ -1535,6 +1799,7 @@ export async function POST(req: Request) {
                                             content: storedContent,
                                             status: "normal",
                                             modelId: requestedModelId,
+                                            searchMetadata: webSearchExecution,
                                         },
                                     });
                                 });
@@ -1623,6 +1888,16 @@ export async function POST(req: Request) {
                                 );
                             }
                         }
+                        // Sent as one final out-of-band chunk rather than a
+                        // second request or a response header -- the tool
+                        // result/source parts this depends on only resolve
+                        // once the whole turn settles, and this is the only
+                        // delivery path that also reaches guest sessions
+                        // (their messages are never persisted for a re-fetch).
+                        enqueueSafely(
+                            controller,
+                            buildSearchMetadataTrailerChunk(webSearchExecution)
+                        );
                         closeSafely(controller);
                         await releaseSafely();
                         return;
@@ -1630,7 +1905,7 @@ export async function POST(req: Request) {
                     generatedText += value;
                     if (!enqueueSafely(controller, value)) {
                         await cancelSourceSafely("response stream is no longer open");
-                        await settleSafely("cancelled");
+                        await settleSafely("cancelled", earlyCancelSearchFields);
                         await releaseSafely();
                     }
                 } catch (error) {
@@ -1649,7 +1924,7 @@ export async function POST(req: Request) {
                         }
                         streamState = "cancelled";
                         await cancelSourceSafely(error);
-                        await settleSafely("cancelled");
+                        await settleSafely("cancelled", earlyCancelSearchFields);
                         await releaseSafely();
                         return;
                     }
@@ -1700,7 +1975,7 @@ export async function POST(req: Request) {
             async cancel(reason) {
                 streamState = "cancelled";
                 await cancelSourceSafely(reason);
-                await settleSafely("cancelled");
+                await settleSafely("cancelled", earlyCancelSearchFields);
                 await releaseSafely();
             },
         });

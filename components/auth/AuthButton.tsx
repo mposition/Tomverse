@@ -17,9 +17,11 @@ import {
     Crown,
     Database,
     Download,
+    KeyRound,
     LifeBuoy,
     Languages,
     LogOut,
+    Mail,
     Palette,
     ShieldCheck,
     Settings,
@@ -54,8 +56,26 @@ import {
     type ThemePreference,
 } from "@/lib/theme";
 import { openAnalyticsPreferences } from "@/lib/analyticsPreferencesEvents";
+import {
+    ACCOUNT_SETTINGS_OPEN_EVENT,
+    type AccountSettingsTab,
+} from "@/lib/accountSettingsEvents";
+import { listImportableGuestConversations } from "@/lib/guestImport";
+import { openGuestImportModal } from "@/lib/guestImportModalEvents";
 
-export function AuthButton() {
+type LoginMethod =
+    | { type: "oauth"; provider: "google" | "azure-ad"; linked: boolean }
+    | { type: "email"; address: string; enabled: boolean };
+
+export function AuthButton({
+    showAnalyticsCookieButton = false,
+}: {
+    // Guests have no account menu to reach analytics preferences from, so
+    // the mobile shell (which drops the floating settings button to
+    // declutter the screen) passes this to put an inline substitute right
+    // next to the guest login button instead of removing the path entirely.
+    showAnalyticsCookieButton?: boolean;
+} = {}) {
     const { enabledModels: ENABLED_MODELS } = useModelCatalog();
   const { data: session, status } = useSession();
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -86,6 +106,16 @@ export function AuthButton() {
     const [isAccountDeleteArmed, setIsAccountDeleteArmed] = useState(false);
     const [accountDeletionConsent, setAccountDeletionConsent] = useState(false);
     const [accountDeletionConfirmation, setAccountDeletionConfirmation] = useState("");
+    const [isDeleteAccountModalOpen, setIsDeleteAccountModalOpen] = useState(false);
+    const [loginMethods, setLoginMethods] = useState<LoginMethod[]>([]);
+    const [canRemoveLoginMethod, setCanRemoveLoginMethod] = useState(false);
+    const [armedRemoveMethod, setArmedRemoveMethod] = useState<string | null>(null);
+    const [isRemovingLoginMethod, setIsRemovingLoginMethod] = useState(false);
+    const [isAddEmailModalOpen, setIsAddEmailModalOpen] = useState(false);
+    const [addEmailCodeSent, setAddEmailCodeSent] = useState(false);
+    const [addEmailCode, setAddEmailCode] = useState("");
+    const [isSendingAddEmailCode, setIsSendingAddEmailCode] = useState(false);
+    const [isVerifyingAddEmailCode, setIsVerifyingAddEmailCode] = useState(false);
     const [isRequestingRefund, setIsRequestingRefund] = useState(false);
     const [isCancellingSubscription, setIsCancellingSubscription] = useState(false);
     const [subscriptionCancelAtPeriodEnd, setSubscriptionCancelAtPeriodEnd] = useState(false);
@@ -158,6 +188,13 @@ export function AuthButton() {
         requestAnimationFrame(() => accountMenuButtonRef.current?.focus());
     }, []);
 
+    const closeDeleteAccountModal = useCallback(() => {
+        setIsDeleteAccountModalOpen(false);
+        setIsAccountDeleteArmed(false);
+        setAccountDeletionConsent(false);
+        setAccountDeletionConfirmation("");
+    }, []);
+
     const openSettingsTab = useCallback(
         (tab: "account" | "preferences" | "data" | "plan") => {
             setIsAccountMenuOpen(false);
@@ -166,6 +203,184 @@ export function AuthButton() {
         },
         []
     );
+
+    // Lets the collapsed sidebar rail's compact account button (which has no
+    // room for the full settings modal) open this same modal remotely.
+    useEffect(() => {
+        const handleOpenAccountSettings = (event: Event) => {
+            const tab = (event as CustomEvent<AccountSettingsTab>).detail || "account";
+            openSettingsTab(tab);
+        };
+        window.addEventListener(ACCOUNT_SETTINGS_OPEN_EVENT, handleOpenAccountSettings);
+        return () =>
+            window.removeEventListener(ACCOUNT_SETTINGS_OPEN_EVENT, handleOpenAccountSettings);
+    }, [openSettingsTab]);
+
+    const fetchLoginMethods = useCallback(async () => {
+        try {
+            const response = await fetch("/api/user/login-methods");
+            if (!response.ok) return;
+            const data = await response.json();
+            setLoginMethods(Array.isArray(data.methods) ? data.methods : []);
+            setCanRemoveLoginMethod(Boolean(data.canRemove));
+        } catch (error) {
+            console.error("Failed to load login methods:", error);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (isModalOpen && activeSettingsTab === "account" && session?.user) {
+            queueMicrotask(() => {
+                void fetchLoginMethods();
+            });
+        }
+    }, [isModalOpen, activeSettingsTab, session?.user, fetchLoginMethods]);
+
+    // Picks up the redirect from /api/user/login-methods/oauth/callback (the
+    // custom OAuth-provider-linking flow) and surfaces a toast, since that
+    // flow can't show one directly from a server redirect.
+    useEffect(() => {
+        if (typeof window === "undefined") return;
+        const params = new URLSearchParams(window.location.search);
+        const linked = params.get("loginMethodLinked");
+        const linkError = params.get("loginMethodLinkError");
+        if (!linked && !linkError) return;
+
+        if (linked) {
+            dispatchAppToast(t("auth.loginMethodLinkedSuccess"), "success");
+        } else if (linkError === "ALREADY_LINKED_ELSEWHERE") {
+            dispatchAppToast(t("auth.loginMethodAlreadyLinkedElsewhere"), "error");
+        } else {
+            dispatchAppToast(t("auth.loginMethodLinkFailed"), "error");
+        }
+        params.delete("loginMethodLinked");
+        params.delete("loginMethodLinkError");
+        const nextSearch = params.toString();
+        window.history.replaceState(
+            null,
+            "",
+            `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}`
+        );
+        queueMicrotask(() => {
+            setIsAccountMenuOpen(false);
+            setActiveSettingsTab("account");
+            setIsModalOpen(true);
+        });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    const handleAddOAuthLoginMethod = useCallback((provider: "google" | "azure-ad") => {
+        window.location.href = `/api/user/login-methods/oauth/start?provider=${provider}`;
+    }, []);
+
+    const handleRemoveLoginMethod = async (method: "google" | "azure-ad" | "email") => {
+        if (isRemovingLoginMethod) return;
+        if (armedRemoveMethod !== method) {
+            setArmedRemoveMethod(method);
+            dispatchAppToast(t("auth.confirmRemoveLoginMethod"), "info");
+            return;
+        }
+        setIsRemovingLoginMethod(true);
+        try {
+            const response = await fetch("/api/user/login-methods", {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ method }),
+            });
+            if (!response.ok) {
+                if (response.status === 428) {
+                    dispatchAppToast(t("auth.deleteAccountReauthRequired"), "error");
+                    await signOut({
+                        callbackUrl: `/auth/signin?callbackUrl=${encodeURIComponent(chatCallbackUrl)}`,
+                    });
+                    return;
+                }
+                if (response.status === 409) {
+                    dispatchAppToast(t("auth.removeLoginMethodBlocked"), "error");
+                    return;
+                }
+                if (response.status === 401) {
+                    // A previous removal (this tab or another) already
+                    // invalidated every session for this account, so this
+                    // request never even reached the remove logic -- there's
+                    // no live session left to keep working with.
+                    dispatchAppToast(t("auth.removeLoginMethodSignedOut"), "info");
+                    await signOut({
+                        callbackUrl: `/auth/signin?callbackUrl=${encodeURIComponent(chatCallbackUrl)}`,
+                    });
+                    return;
+                }
+                throw new Error(`Remove failed: ${response.status}`);
+            }
+            // A successful removal (whether this request performed it or a
+            // concurrent one beat it to it) just invalidated every session
+            // for this account, including this browser's own. Sign out
+            // immediately instead of making another authenticated call
+            // (e.g. fetchLoginMethods) that would now 401 and look like the
+            // removal itself failed.
+            dispatchAppToast(t("auth.removeLoginMethodSuccess"), "success");
+            await signOut({
+                callbackUrl: `/auth/signin?callbackUrl=${encodeURIComponent(chatCallbackUrl)}`,
+            });
+        } catch {
+            dispatchAppToast(t("auth.removeLoginMethodFailed"), "error");
+        } finally {
+            setIsRemovingLoginMethod(false);
+            setArmedRemoveMethod(null);
+        }
+    };
+
+    const closeAddEmailModal = useCallback(() => {
+        setIsAddEmailModalOpen(false);
+        setAddEmailCodeSent(false);
+        setAddEmailCode("");
+    }, []);
+
+    const handleRequestAddEmailCode = async () => {
+        if (isSendingAddEmailCode) return;
+        setIsSendingAddEmailCode(true);
+        try {
+            const response = await fetch("/api/user/login-methods/email/request", {
+                method: "POST",
+            });
+            if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+            setAddEmailCodeSent(true);
+            dispatchAppToast(t("auth.emailLoginCodeSentTitle"), "info");
+        } catch {
+            dispatchAppToast(t("auth.emailLoginRequestFailed"), "error");
+        } finally {
+            setIsSendingAddEmailCode(false);
+        }
+    };
+
+    const handleVerifyAddEmailCode = async () => {
+        if (isVerifyingAddEmailCode || addEmailCode.trim().length !== 6) return;
+        setIsVerifyingAddEmailCode(true);
+        try {
+            const response = await fetch("/api/user/login-methods/email/verify", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ code: addEmailCode.trim() }),
+            });
+            const data = await response.json().catch(() => null);
+            if (!response.ok || !data?.ok) {
+                dispatchAppToast(
+                    data?.code === "EMAIL_CODE_LOCKED"
+                        ? t("auth.emailLoginLocked")
+                        : t("auth.emailLoginInvalidCode"),
+                    "error"
+                );
+                return;
+            }
+            dispatchAppToast(t("auth.addEmailLoginSuccess"), "success");
+            closeAddEmailModal();
+            await fetchLoginMethods();
+        } catch {
+            dispatchAppToast(t("auth.emailLoginInvalidCode"), "error");
+        } finally {
+            setIsVerifyingAddEmailCode(false);
+        }
+    };
 
     const getSettingsFocusableElements = useCallback(() => {
         const dialog = settingsDialogRef.current;
@@ -250,11 +465,15 @@ export function AuthButton() {
         const handleKeyDown = (event: KeyboardEvent) => {
             if (event.key === "Escape") {
                 event.preventDefault();
-                closeSettingsModal();
+                if (isDeleteAccountModalOpen) {
+                    closeDeleteAccountModal();
+                } else {
+                    closeSettingsModal();
+                }
                 return;
             }
 
-            if (event.key !== "Tab") return;
+            if (event.key !== "Tab" || isDeleteAccountModalOpen) return;
 
             const focusableElements = getSettingsFocusableElements();
             if (focusableElements.length === 0) {
@@ -280,7 +499,7 @@ export function AuthButton() {
 
         document.addEventListener("keydown", handleKeyDown, true);
         return () => document.removeEventListener("keydown", handleKeyDown, true);
-    }, [closeSettingsModal, getSettingsFocusableElements, isModalOpen]);
+    }, [closeDeleteAccountModal, closeSettingsModal, getSettingsFocusableElements, isModalOpen, isDeleteAccountModalOpen]);
 
     useEffect(() => {
         if (!isAccountMenuOpen) return;
@@ -388,7 +607,7 @@ export function AuthButton() {
                 throw new Error(data?.error || `Delete failed: ${response.status}`);
             }
             dispatchAppToast(t("auth.deleteAllChatsSuccess"), "success");
-            window.location.href = "/chat";
+            window.location.href = chatCallbackUrl;
         } catch {
             dispatchAppToast(t("auth.deleteAllChatsFailed"), "error");
         } finally {
@@ -422,7 +641,19 @@ export function AuthButton() {
                     confirmationText: accountDeletionConfirmation,
                 }),
             });
-            if (!response.ok) throw new Error(`Delete failed: ${response.status}`);
+            const data = (await response.json().catch(() => null)) as
+                | { code?: string; error?: string }
+                | null;
+            if (!response.ok) {
+                if (response.status === 428 && data?.code === "ACCOUNT_REAUTHENTICATION_REQUIRED") {
+                    dispatchAppToast(t("auth.deleteAccountReauthRequired"), "error");
+                    await signOut({
+                        callbackUrl: `/auth/signin?callbackUrl=${encodeURIComponent(chatCallbackUrl)}`,
+                    });
+                    return;
+                }
+                throw new Error(data?.error || `Delete failed: ${response.status}`);
+            }
             localStorage.removeItem("tomverse_refund_requested_at");
             dispatchAppToast(t("auth.deleteAccountSuccess"), "success");
             await signOut({ callbackUrl: chatCallbackUrl });
@@ -520,7 +751,7 @@ export function AuthButton() {
             onClick={() => setIsAccountMenuOpen((current) => !current)}
             className="flex min-w-0 flex-1 items-center gap-2 rounded-xl px-1.5 py-1 text-left transition hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:hover:bg-zinc-900"
           >
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-teal-600 text-sm font-black text-white ring-1 ring-teal-400/50 dark:bg-teal-700 dark:ring-teal-400/40">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-accent-account-700 text-sm font-bold text-white ring-1 ring-accent-account-400/50 dark:bg-accent-account-700 dark:ring-accent-account-400/40">
             {session.user.image ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -533,10 +764,10 @@ export function AuthButton() {
             )}
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-xs font-black text-zinc-800 dark:text-zinc-100">
+            <span className="block truncate text-xs font-bold text-zinc-800 dark:text-zinc-100">
               {session.user.name || session.user.email || "Tomverse"}
             </span>
-            <span className="block truncate text-[10px] font-semibold text-zinc-400">
+            <span className="block truncate text-[11px] font-semibold text-zinc-600 dark:text-zinc-400">
               {accountPlan ? t(`modelTiers.${accountPlan.toLowerCase()}`) : t("auth.loading")}
               {accountUsage
                 ? ` · ${formatCopy("auth.planCreditsCompact", {
@@ -559,12 +790,12 @@ export function AuthButton() {
               planCreditsRemaining={accountUsage.balances.planRemainingCredits}
               addonCreditsRemaining={accountUsage.balances.purchasedRemainingCredits}
               testId="account-plan-upgrade-badge"
-              className="inline-flex h-8 shrink-0 items-center rounded-lg bg-blue-600 px-2 text-[10px] font-black text-white transition hover:bg-blue-500"
+              className="inline-flex h-8 shrink-0 items-center rounded-lg bg-blue-600 px-2 text-xs font-bold text-white transition hover:bg-blue-500"
             >
               {t("upgrade.upgradeShort")}
             </UpgradeCtaLink>
           ) : (
-            <span className={`shrink-0 rounded-lg px-2 py-1 text-[10px] font-black ${accountPlan === "Max" ? "bg-purple-500/10 text-purple-600 dark:text-purple-300" : "bg-zinc-100 text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400"}`}>
+            <span className={`shrink-0 rounded-lg px-2 py-1 text-xs font-bold ${accountPlan === "Max" ? "bg-accent-plan-max-500/10 text-accent-plan-max-600 dark:text-accent-plan-max-300" : "bg-zinc-100 text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400"}`}>
               {accountPlan ? t(`modelTiers.${accountPlan.toLowerCase()}`) : t("auth.loading")}
             </span>
           )}
@@ -588,18 +819,18 @@ export function AuthButton() {
               className="fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[90] max-h-[calc(100dvh-1.5rem)] overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-3 shadow-2xl overscroll-contain dark:border-zinc-700 dark:bg-zinc-950 md:absolute md:inset-x-0 md:bottom-[calc(100%+0.5rem)]"
             >
               <div className="flex min-w-0 items-center gap-2 border-b border-zinc-200 pb-3 dark:border-zinc-800">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-teal-600 text-sm font-black text-white">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent-account-700 text-sm font-bold text-white">
                   {(session.user.name?.[0] || session.user.email?.[0] || "T").toUpperCase()}
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-black text-zinc-900 dark:text-zinc-100">
+                  <span className="block truncate text-sm font-bold text-zinc-900 dark:text-zinc-100">
                     {session.user.name || session.user.email || "Tomverse"}
                   </span>
                   {session.user.name && session.user.email ? (
                     <span className="block truncate text-[11px] text-zinc-400">{session.user.email}</span>
                   ) : null}
                 </span>
-                <span className="rounded-full bg-zinc-100 px-2 py-1 text-[10px] font-black text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
+                <span className="rounded-full bg-zinc-100 px-2 py-1 text-xs font-bold text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
                   {accountPlan ? t(`modelTiers.${accountPlan.toLowerCase()}`) : t("auth.loading")}
                 </span>
               </div>
@@ -611,11 +842,11 @@ export function AuthButton() {
                     data-testid="account-daily-credits"
                   >
                     <div className="flex items-start justify-between gap-3">
-                      <span className="block text-[10px] font-bold text-blue-700 dark:text-blue-300">
+                      <span className="block text-[11px] font-bold text-blue-700 dark:text-blue-300">
                         {t("auth.dailyCreditsRemaining")}
                       </span>
                       {hasDailyCreditGuardrail && dailyCreditsResetLabel ? (
-                        <span className="text-right text-[9px] leading-4 text-blue-500 dark:text-blue-400">
+                        <span className="text-right text-[11px] leading-4 text-blue-500 dark:text-blue-400">
                           {formatCopy("auth.dailyCreditsResetAt", {
                             time: dailyCreditsResetLabel,
                           })}
@@ -629,15 +860,15 @@ export function AuthButton() {
                     </strong>
                   </div>
                   <div className="rounded-xl bg-zinc-100 p-2.5 dark:bg-zinc-900">
-                    <span className="block text-[10px] font-bold text-zinc-500 dark:text-zinc-400">
+                    <span className="block text-[11px] font-bold text-zinc-500 dark:text-zinc-400">
                       {t("auth.planCreditsRemaining")}
                     </span>
                     <strong className="mt-1 block text-sm text-zinc-900 dark:text-zinc-100">
                       {accountUsage.balances.planRemainingCredits.toLocaleString(globalLang)}
                     </strong>
                   </div>
-                  <div className="rounded-xl bg-emerald-50 p-2.5 dark:bg-emerald-950/30">
-                    <span className="block text-[10px] font-bold text-emerald-700 dark:text-emerald-300">
+                  <div className="rounded-xl bg-status-success-50 p-2.5 dark:bg-status-success-950/30">
+                    <span className="block text-[11px] font-bold text-status-success-700 dark:text-status-success-300">
                       {t("auth.purchasedCreditsRemaining")}
                     </span>
                     <strong className="mt-1 block text-sm text-zinc-900 dark:text-zinc-100">
@@ -688,7 +919,7 @@ export function AuthButton() {
                     addonCreditsRemaining={accountUsage.balances.purchasedRemainingCredits}
                     testId="account-plan-view"
                     onClick={() => setIsAccountMenuOpen(false)}
-                    className="flex min-h-11 w-full items-center gap-2 rounded-xl bg-blue-600 px-3 text-sm font-black text-white transition hover:bg-blue-500"
+                    className="flex min-h-11 w-full items-center gap-2 rounded-xl bg-blue-600 px-3 text-sm font-bold text-white transition hover:bg-blue-500"
                   >
                     <Crown className="h-4 w-4" />
                     {mobileUpgradePlan === "Pro"
@@ -702,7 +933,7 @@ export function AuthButton() {
                     onClick={() => openSettingsTab("plan")}
                     className="flex min-h-11 w-full items-center gap-2 rounded-xl px-3 text-sm font-bold text-zinc-700 transition hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-900"
                   >
-                    <CreditCard className="h-4 w-4 text-purple-500" />
+                    <CreditCard className="h-4 w-4 text-accent-plan-max-500" />
                     {t("upgrade.viewCurrentPlan")}
                   </button>
                 ) : null}
@@ -808,12 +1039,89 @@ export function AuthButton() {
                                         </section>
                                         <section className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60">
                                             <div className="flex items-start gap-3">
-                                                <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-500" />
+                                                <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-status-success-500" />
                                                 <div>
                                                     <h4 className="text-sm font-bold">{t("auth.securityStatus")}</h4>
                                                     <p className="mt-1 text-sm leading-6 text-zinc-500">{t("auth.securityStatusDescription")}</p>
                                                 </div>
                                             </div>
+                                        </section>
+                                        <section className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60">
+                                            <h4 className="text-sm font-bold">{t("auth.manageLoginMethods")}</h4>
+                                            <p className="mt-1 text-sm leading-6 text-zinc-500">{t("auth.manageLoginMethodsDescription")}</p>
+                                            <div className="mt-3 space-y-2">
+                                                {loginMethods.map((method) => {
+                                                    const key = method.type === "email" ? "email" : method.provider;
+                                                    const label =
+                                                        method.type === "email"
+                                                            ? t("auth.loginMethodEmail")
+                                                            : method.provider === "google"
+                                                                ? t("auth.google")
+                                                                : t("auth.microsoft");
+                                                    const isEnabled = method.type === "email" ? method.enabled : method.linked;
+                                                    const Icon = method.type === "email" ? Mail : KeyRound;
+                                                    const canRemoveThis = isEnabled && canRemoveLoginMethod;
+                                                    return (
+                                                        <div
+                                                            key={key}
+                                                            className="flex items-center justify-between gap-3 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-950/60"
+                                                        >
+                                                            <div className="flex min-w-0 items-center gap-2.5">
+                                                                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-zinc-500 ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-700">
+                                                                    <Icon className="h-4 w-4" />
+                                                                </span>
+                                                                <div className="min-w-0">
+                                                                    <p className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">{label}</p>
+                                                                    {method.type === "email" && (
+                                                                        <p className="truncate text-xs text-zinc-500">{method.address}</p>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                            {isEnabled ? (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleRemoveLoginMethod(method.type === "email" ? "email" : method.provider)}
+                                                                    disabled={isRemovingLoginMethod || !canRemoveThis}
+                                                                    title={!canRemoveThis ? t("auth.removeLoginMethodBlocked") : ""}
+                                                                    className="shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-bold text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-red-950/40"
+                                                                >
+                                                                    {armedRemoveMethod === (method.type === "email" ? "email" : method.provider)
+                                                                        ? t("auth.confirmRemoveLoginMethodButton")
+                                                                        : t("auth.removeLoginMethod")}
+                                                                </button>
+                                                            ) : method.type === "email" ? (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setIsAddEmailModalOpen(true)}
+                                                                    className="shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-bold text-blue-600 transition-colors hover:bg-blue-50 dark:hover:bg-blue-950/40"
+                                                                >
+                                                                    {t("auth.addLoginMethod")}
+                                                                </button>
+                                                            ) : (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleAddOAuthLoginMethod(method.provider)}
+                                                                    className="shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-bold text-blue-600 transition-colors hover:bg-blue-50 dark:hover:bg-blue-950/40"
+                                                                >
+                                                                    {t("auth.addLoginMethod")}
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </section>
+                                        <section className="rounded-2xl border border-red-200 bg-red-50 p-4 dark:border-red-950/70 dark:bg-red-950/20">
+                                            <h4 className="text-sm font-bold text-red-700 dark:text-red-300">{t("auth.dangerZone")}</h4>
+                                            <p className="mt-1 text-sm leading-6 text-red-700/80 dark:text-red-200/80">{t("auth.accountDangerZoneDescription")}</p>
+                                            <button
+                                                type="button"
+                                                onClick={() => setIsDeleteAccountModalOpen(true)}
+                                                className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-red-300 bg-white px-3 py-3 text-sm font-semibold text-red-600 transition-colors hover:bg-red-50 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200 dark:hover:bg-red-950/70"
+                                            >
+                                                <Trash2 className="h-4 w-4" />
+                                                {t("auth.deleteAccount")}
+                                            </button>
                                         </section>
                                     </div>
                                 )}
@@ -908,7 +1216,7 @@ export function AuthButton() {
                                                 closeSettingsModal();
                                                 requestAnimationFrame(() => openModelFinder());
                                             }}
-                                            className="flex w-full items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-3 text-sm font-black text-blue-700 transition hover:bg-blue-100 dark:border-blue-900/60 dark:bg-blue-950/20 dark:text-blue-200 dark:hover:bg-blue-950/40"
+                                            className="flex w-full items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-3 text-sm font-bold text-blue-700 transition hover:bg-blue-100 dark:border-blue-900/60 dark:bg-blue-950/20 dark:text-blue-200 dark:hover:bg-blue-950/40"
                                         >
                                             <Bot className="h-4 w-4" />
                                             {t("modelFinder.findAgain")}
@@ -918,6 +1226,20 @@ export function AuthButton() {
 
                                 {activeSettingsTab === "data" && (
                                     <div className="space-y-4">
+                                        {listImportableGuestConversations().length > 0 && (
+                                            <section className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950/60">
+                                                <h4 className="text-sm font-bold">{t("auth.guestImportSectionTitle")}</h4>
+                                                <p className="mt-1 text-sm leading-6 text-zinc-500">{t("auth.guestImportSectionDisclaimer")}</p>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => openGuestImportModal()}
+                                                    className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-3 text-sm font-semibold text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                                                >
+                                                    <Database className="h-4 w-4" />
+                                                    {t("auth.guestImportSectionTitle")}
+                                                </button>
+                                            </section>
+                                        )}
                                         <section className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950/60">
                                             <h4 className="text-sm font-bold">{t("auth.dataExportTitle")}</h4>
                                             <p className="mt-1 text-sm leading-6 text-zinc-500">{t("auth.dataExportDescription")}</p>
@@ -944,70 +1266,19 @@ export function AuthButton() {
                                         <section className="rounded-2xl border border-red-200 bg-red-50 p-4 dark:border-red-950/70 dark:bg-red-950/20">
                                             <h4 className="text-sm font-bold text-red-700 dark:text-red-300">{t("auth.dangerZone")}</h4>
                                             <p className="mt-1 text-sm leading-6 text-red-700/80 dark:text-red-200/80">{t("auth.dangerZoneDescription")}</p>
-                                            <div className="mt-4 grid gap-2 sm:grid-cols-2">
-                                                <button
-                                                    type="button"
-                                                    onClick={handleDeleteAllConversations}
-                                                    disabled={isDeletingChats}
-                                                    className="flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-white px-3 py-3 text-sm font-semibold text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200 dark:hover:bg-red-950/70"
-                                                >
-                                                    <Trash2 className="h-4 w-4" />
-                                                    {isDeletingChats
-                                                        ? t("auth.deleting")
-                                                        : isDeleteAllArmed
-                                                            ? t("auth.confirmDeleteAllChats")
-                                                            : t("auth.deleteAllChats")}
-                                                </button>
-                                                <div className="rounded-xl border border-red-300 bg-white p-3 dark:border-red-900/70 dark:bg-red-950/30 sm:col-span-2">
-                                                    <p className="text-sm font-black text-red-700 dark:text-red-200">
-                                                        {t("auth.deleteAccountImmediateTitle")}
-                                                    </p>
-                                                    <p className="mt-1 text-xs leading-5 text-red-700/80 dark:text-red-100/80">
-                                                        {t("auth.deleteAccountImmediateDescription")}
-                                                    </p>
-                                                    <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-800 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-100">
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={accountDeletionConsent}
-                                                            onChange={(event) => {
-                                                                setAccountDeletionConsent(event.target.checked);
-                                                                setIsAccountDeleteArmed(false);
-                                                            }}
-                                                            className="mt-0.5 h-4 w-4 cursor-pointer accent-red-600"
-                                                        />
-                                                        <span>
-                                                            {t("auth.deleteAccountConsent")}
-                                                        </span>
-                                                    </label>
-                                                    <label className="mt-3 block text-xs font-bold text-red-800 dark:text-red-100">
-                                                        {t("auth.deleteAccountConfirmationPrompt")}
-                                                        <input
-                                                            value={accountDeletionConfirmation}
-                                                            onChange={(event) => {
-                                                                setAccountDeletionConfirmation(event.target.value);
-                                                                setIsAccountDeleteArmed(false);
-                                                            }}
-                                                            autoComplete="off"
-                                                            spellCheck={false}
-                                                            className="mt-2 h-10 w-full rounded-lg border border-red-300 bg-white px-3 font-mono text-sm text-zinc-950 outline-none focus:border-red-500 focus:ring-4 focus:ring-red-500/10 dark:border-red-900 dark:bg-zinc-950 dark:text-white"
-                                                            placeholder="DELETE MY ACCOUNT"
-                                                        />
-                                                    </label>
-                                                    <button
-                                                        type="button"
-                                                        onClick={handleDeleteAccount}
-                                                        disabled={isRequestingDeletion || !accountDeletionConsent || accountDeletionConfirmation !== "DELETE MY ACCOUNT"}
-                                                        className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-red-300 bg-red-600 px-3 py-3 text-sm font-black text-white transition-colors hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-800"
-                                                    >
-                                                        <Trash2 className="h-4 w-4" />
-                                                        {isRequestingDeletion
-                                                            ? t("auth.deletingAccount")
-                                                            : isAccountDeleteArmed
-                                                                ? t("auth.confirmPermanentDelete")
-                                                                : t("auth.deleteAccount")}
-                                                    </button>
-                                                </div>
-                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={handleDeleteAllConversations}
+                                                disabled={isDeletingChats}
+                                                className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-red-200 bg-white px-3 py-3 text-sm font-semibold text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200 dark:hover:bg-red-950/70"
+                                            >
+                                                <Trash2 className="h-4 w-4" />
+                                                {isDeletingChats
+                                                    ? t("auth.deleting")
+                                                    : isDeleteAllArmed
+                                                        ? t("auth.confirmDeleteAllChats")
+                                                        : t("auth.deleteAllChats")}
+                                            </button>
                                         </section>
                                     </div>
                                 )}
@@ -1022,7 +1293,7 @@ export function AuthButton() {
                                                         {accountPlan ? t(`auth.${accountPlan.toLowerCase()}Plan`) : t("auth.loading")}
                                                     </h4>
                                                 </div>
-                                                <span className={`rounded-full px-3 py-1 text-xs font-bold text-white ${accountPlan === "Free" ? "bg-emerald-600" : accountPlan === "Pro" ? "bg-blue-600" : accountPlan === "Max" ? "bg-purple-600" : "bg-zinc-600"}`}>
+                                                <span className={`rounded-full px-3 py-1 text-xs font-bold text-white ${accountPlan === "Free" ? "bg-status-success-600" : accountPlan === "Pro" ? "bg-blue-600" : accountPlan === "Max" ? "bg-accent-plan-max-600" : "bg-zinc-600"}`}>
                                                     {accountPlan ? t(`modelTiers.${accountPlan.toLowerCase()}`) : t("auth.loading")}
                                                 </span>
                                             </div>
@@ -1065,7 +1336,7 @@ export function AuthButton() {
                                                         type="button"
                                                         onClick={handleCancelSubscription}
                                                         disabled={isCancellingSubscription || subscriptionCancelAtPeriodEnd}
-                                                        className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-blue-300 bg-white px-3 py-3 text-sm font-black text-blue-700 transition-colors hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-900/60 dark:bg-blue-950/40 dark:text-blue-100 dark:hover:bg-blue-950/70"
+                                                        className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-blue-300 bg-white px-3 py-3 text-sm font-bold text-blue-700 transition-colors hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-900/60 dark:bg-blue-950/40 dark:text-blue-100 dark:hover:bg-blue-950/70"
                                                     >
                                                         <CreditCard className="h-4 w-4" />
                                                         {subscriptionCancelAtPeriodEnd
@@ -1100,7 +1371,7 @@ export function AuthButton() {
                                                         type="button"
                                                         onClick={handleRequestRefund}
                                                         disabled={isRequestingRefund || Boolean(refundRequestedAt)}
-                                                        className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-amber-300 bg-white px-3 py-3 text-sm font-black text-amber-700 transition-colors hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-100 dark:hover:bg-amber-950/70"
+                                                        className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-amber-300 bg-white px-3 py-3 text-sm font-bold text-amber-700 transition-colors hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-100 dark:hover:bg-amber-950/70"
                                                     >
                                                         <LifeBuoy className="h-4 w-4" />
                                                         {refundRequestedAt
@@ -1136,8 +1407,8 @@ export function AuthButton() {
                                                         {t("auth.planCreditsRemaining")}: {accountUsage.balances.planRemainingCredits.toLocaleString(globalLang)}
                                                     </p>
                                                 </div>
-                                                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-900/50 dark:bg-emerald-950/20">
-                                                    <p className="text-xs font-bold uppercase tracking-wide text-emerald-600 dark:text-emerald-300">
+                                                <div className="rounded-2xl border border-status-success-200 bg-status-success-50 p-4 dark:border-status-success-900/50 dark:bg-status-success-950/20">
+                                                    <p className="text-xs font-bold uppercase tracking-wide text-status-success-600 dark:text-status-success-300">
                                                         {t("auth.purchasedCreditsRemaining")}
                                                     </p>
                                                     <p className="mt-2 text-lg font-black text-zinc-900 dark:text-zinc-100">
@@ -1164,14 +1435,14 @@ export function AuthButton() {
                                             {accountPlan !== "Max" && <UpgradeInterestButton
                                                 plan={accountPlan === "Pro" ? "Max" : "Pro"}
                                                 trigger="account"
-                                                className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-3 text-sm font-black text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-70"
+                                                className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-3 text-sm font-bold text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-70"
                                             >
                                                 <CreditCard className="h-4 w-4" />
                                                 {accountPlan === "Pro" ? (globalLang === "ko" ? "Max로 업그레이드" : "Upgrade to Max") : t("billing.joinProWaitlist")}
                                             </UpgradeInterestButton>}
                                             <CreditPackPurchaseButton
                                                 trigger="account"
-                                                className="flex w-full items-center justify-center gap-2 rounded-xl border border-purple-300 bg-purple-50 px-3 py-3 text-sm font-black text-purple-700 transition-colors hover:bg-purple-100 disabled:cursor-not-allowed disabled:opacity-70 dark:border-purple-900/60 dark:bg-purple-950/30 dark:text-purple-200 dark:hover:bg-purple-950/50"
+                                                className="flex w-full items-center justify-center gap-2 rounded-xl border border-accent-plan-max-300 bg-accent-plan-max-50 px-3 py-3 text-sm font-bold text-accent-plan-max-700 transition-colors hover:bg-accent-plan-max-100 disabled:cursor-not-allowed disabled:opacity-70 dark:border-accent-plan-max-900/60 dark:bg-accent-plan-max-950/30 dark:text-accent-plan-max-200 dark:hover:bg-accent-plan-max-950/50"
                                             >
                                                 <CreditCard className="h-4 w-4" />
                                                 {globalLang === "ko" ? "추가 크레딧 구매" : "Buy additional credits"}
@@ -1188,9 +1459,9 @@ export function AuthButton() {
                                     <UpgradeInterestButton
                                         plan={mobileUpgradePlan}
                                         trigger="account"
-                                        className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black text-white transition-colors disabled:cursor-not-allowed disabled:opacity-70 ${
+                                        className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-70 ${
                                             mobileUpgradePlan === "Max"
-                                                ? "bg-purple-600 hover:bg-purple-500"
+                                                ? "bg-accent-plan-max-600 hover:bg-accent-plan-max-500"
                                                 : "bg-blue-600 hover:bg-blue-500"
                                         }`}
                                     >
@@ -1236,6 +1507,167 @@ export function AuthButton() {
                     </div>
                 </div>
             )}
+
+            {isModalOpen && isDeleteAccountModalOpen && (
+                <div
+                    className="fixed inset-0 z-[95] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+                    onClick={(event) => {
+                        if (event.target === event.currentTarget) closeDeleteAccountModal();
+                    }}
+                >
+                    <div
+                        className="w-full max-w-md rounded-2xl border border-red-300 bg-white p-5 shadow-2xl dark:border-red-900/70 dark:bg-zinc-900"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="delete-account-modal-title"
+                    >
+                        <div className="flex items-start justify-between gap-4">
+                            <h3 id="delete-account-modal-title" className="text-sm font-bold text-red-700 dark:text-red-200">
+                                {t("auth.deleteAccountImmediateTitle")}
+                            </h3>
+                            <button
+                                type="button"
+                                onClick={closeDeleteAccountModal}
+                                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-white"
+                                aria-label={t("auth.cancel")}
+                            >
+                                <X className="h-4 w-4" />
+                            </button>
+                        </div>
+                        <p className="mt-2 text-xs leading-5 text-red-700/80 dark:text-red-100/80">
+                            {t("auth.deleteAccountImmediateDescription")}
+                        </p>
+                        <label className="mt-4 flex cursor-pointer items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-800 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-100">
+                            <input
+                                type="checkbox"
+                                checked={accountDeletionConsent}
+                                onChange={(event) => {
+                                    setAccountDeletionConsent(event.target.checked);
+                                    setIsAccountDeleteArmed(false);
+                                }}
+                                className="mt-0.5 h-4 w-4 cursor-pointer accent-red-600"
+                            />
+                            <span>{t("auth.deleteAccountConsent")}</span>
+                        </label>
+                        <label className="mt-3 block text-xs font-bold text-red-800 dark:text-red-100">
+                            {t("auth.deleteAccountConfirmationPrompt")}
+                            <input
+                                value={accountDeletionConfirmation}
+                                onChange={(event) => {
+                                    setAccountDeletionConfirmation(event.target.value);
+                                    setIsAccountDeleteArmed(false);
+                                }}
+                                autoComplete="off"
+                                spellCheck={false}
+                                className="mt-2 h-10 w-full rounded-lg border border-red-300 bg-white px-3 font-mono text-sm text-zinc-950 outline-none focus:border-red-500 focus:ring-4 focus:ring-red-500/10 dark:border-red-900 dark:bg-zinc-950 dark:text-white"
+                                placeholder="DELETE MY ACCOUNT"
+                            />
+                        </label>
+                        <div className="mt-4 flex justify-end gap-2">
+                            <button
+                                type="button"
+                                onClick={closeDeleteAccountModal}
+                                className="rounded-lg px-4 py-2 text-sm font-semibold text-zinc-600 transition-colors hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                            >
+                                {t("auth.cancel")}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleDeleteAccount}
+                                disabled={isRequestingDeletion || !accountDeletionConsent || accountDeletionConfirmation !== "DELETE MY ACCOUNT"}
+                                className="flex items-center justify-center gap-2 rounded-xl border border-red-300 bg-red-600 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-800"
+                            >
+                                <Trash2 className="h-4 w-4" />
+                                {isRequestingDeletion
+                                    ? t("auth.deletingAccount")
+                                    : isAccountDeleteArmed
+                                        ? t("auth.confirmPermanentDelete")
+                                        : t("auth.deleteAccount")}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {isModalOpen && isAddEmailModalOpen && (
+                <div
+                    className="fixed inset-0 z-[95] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+                    onClick={(event) => {
+                        if (event.target === event.currentTarget) closeAddEmailModal();
+                    }}
+                >
+                    <div
+                        className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="add-email-modal-title"
+                    >
+                        <div className="flex items-start justify-between gap-4">
+                            <h3 id="add-email-modal-title" className="text-sm font-bold">
+                                {t("auth.addLoginMethod")}
+                            </h3>
+                            <button
+                                type="button"
+                                onClick={closeAddEmailModal}
+                                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-white"
+                                aria-label={t("auth.cancel")}
+                            >
+                                <X className="h-4 w-4" />
+                            </button>
+                        </div>
+                        {!addEmailCodeSent ? (
+                            <>
+                                <p className="mt-2 text-sm leading-6 text-zinc-500">
+                                    {formatCopy("auth.emailLoginCodeSentBody", { email: session.user.email || "" })}
+                                </p>
+                                <button
+                                    type="button"
+                                    onClick={handleRequestAddEmailCode}
+                                    disabled={isSendingAddEmailCode}
+                                    className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-3 text-sm font-bold text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                    {t("auth.emailLoginButton")}
+                                </button>
+                            </>
+                        ) : (
+                            <>
+                                <p className="mt-2 text-sm leading-6 text-zinc-500">
+                                    {formatCopy("auth.emailLoginCodeSentBody", { email: session.user.email || "" })}
+                                </p>
+                                <label className="mt-3 block text-xs font-bold text-zinc-600 dark:text-zinc-300">
+                                    {t("auth.emailLoginCodeInputLabel")}
+                                    <input
+                                        value={addEmailCode}
+                                        onChange={(event) => setAddEmailCode(event.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
+                                        autoComplete="off"
+                                        inputMode="numeric"
+                                        spellCheck={false}
+                                        className="mt-2 h-10 w-full rounded-lg border border-zinc-300 bg-white px-3 font-mono text-lg tracking-widest text-zinc-950 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 dark:border-zinc-700 dark:bg-zinc-950 dark:text-white"
+                                        placeholder="000000"
+                                    />
+                                </label>
+                                <div className="mt-4 flex justify-end gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={closeAddEmailModal}
+                                        className="rounded-lg px-4 py-2 text-sm font-semibold text-zinc-600 transition-colors hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                                    >
+                                        {t("auth.cancel")}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleVerifyAddEmailCode}
+                                        disabled={isVerifyingAddEmailCode || addEmailCode.trim().length !== 6}
+                                        className="flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                                    >
+                                        {t("auth.emailLoginVerifyButton")}
+                                    </button>
+                                </div>
+                            </>
+                        )}
+                    </div>
+                </div>
+            )}
       </div>
     );
   }
@@ -1263,17 +1695,35 @@ export function AuthButton() {
           )}
         </select>
       </label>
-      <button
-        onClick={() => {
-          trackProductEvent("cta_start_click", 0, {
-            cta_location: "account_login",
-          });
-          void signIn(undefined, { callbackUrl: chatCallbackUrl });
-        }}
-        className="cursor-pointer w-full rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-blue-950/20 transition-all hover:bg-blue-500"
-      >
-        {t("auth.login")}
-      </button>
+      {/*
+        SHORT-VIEWPORT-001: wrapping, not overflowing. At 200% text scaling the
+        analytics button's own label is wider than the whole sidebar drawer, and
+        as a `shrink-0` item on a nowrap row it pushed 168px of itself outside
+        the panel. It now takes a second row instead, and can shrink from there.
+      */}
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={() => {
+            trackProductEvent("cta_start_click", 0, {
+              cta_location: "account_login",
+            });
+            void signIn(undefined, { callbackUrl: chatCallbackUrl });
+          }}
+          className="cursor-pointer flex-1 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-blue-950/20 transition-all hover:bg-blue-500"
+        >
+          {t("auth.login")}
+        </button>
+        {showAnalyticsCookieButton && (
+          <button
+            type="button"
+            data-testid="guest-analytics-cookie-settings"
+            onClick={() => openAnalyticsPreferences()}
+            className="min-w-0 rounded-xl border border-zinc-200 bg-zinc-100 px-3 py-2.5 text-xs font-bold text-zinc-600 transition-colors hover:bg-zinc-200 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          >
+            {t("auth.analyticsCookieSettings")}
+          </button>
+        )}
+      </div>
     </div>
   );
 }

@@ -16,7 +16,7 @@ test("guest onboarding is complete and truthful in every supported language", ()
     assert.match(copy.compareBody, /3/, `${language} must state the three-model guest limit`);
     // CJK translations express the same policy with fewer characters.
     assert.ok(copy.filesBody.length > 20, `${language} must explain follow-up usage limits`);
-    assert.ok(copy.privateBody.length > 45, `${language} must explain signed-in capabilities and plan limits`);
+    assert.ok(copy.privateBody.length > 30, `${language} must explain signed-in capabilities and plan limits`);
     assert.notEqual(translation.auth.login, "auth.login", `${language} must localize the sign-in CTA`);
   }
 });

@@ -992,7 +992,7 @@ export function UpgradeInterestButton({
             <div className="p-5 pb-3 sm:p-6 md:overflow-y-auto">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-600 dark:text-blue-300">
+                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-600 dark:text-blue-300">
                     {foundingPass ? passCopy.title : copy.secureCheckout}
                   </p>
                   <h2
@@ -1018,7 +1018,7 @@ export function UpgradeInterestButton({
               </div>
 
               <div className="mt-6">
-                <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500 dark:text-zinc-400">
+                <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500 dark:text-zinc-400">
                   {copy.billingCycle}
                 </p>
                 <div className="mt-2 grid gap-3 sm:grid-cols-2">
@@ -1050,11 +1050,11 @@ export function UpgradeInterestButton({
                       }`}
                     >
                       <span className="flex items-center justify-between gap-3">
-                        <span className="text-sm font-black text-zinc-950 dark:text-white">
+                        <span className="text-sm font-bold text-zinc-950 dark:text-white">
                           {label}
                         </span>
                         {value === "annual" ? (
-                          <span className="rounded-full bg-emerald-500/15 px-2 py-1 text-[11px] font-black text-emerald-600 dark:text-emerald-300">
+                          <span className="rounded-full bg-emerald-500/15 px-2 py-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-300">
                             {copy.annualOff}
                           </span>
                         ) : null}
@@ -1077,7 +1077,7 @@ export function UpgradeInterestButton({
               }`}>
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div>
-                    <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500 dark:text-zinc-400">
+                    <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500 dark:text-zinc-400">
                       {foundingPass ? passCopy.title : copy.paymentMethods}
                     </p>
                     <p className="mt-2 text-xs font-semibold leading-5 text-zinc-500 dark:text-zinc-400">
@@ -1090,7 +1090,7 @@ export function UpgradeInterestButton({
                     {["GPay", "Apple Pay", "Card"].map((method) => (
                       <span
                         key={method}
-                        className="rounded-full bg-zinc-200/70 px-3 py-1.5 text-[11px] font-black text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"
+                        className="rounded-full bg-zinc-200/70 px-3 py-1.5 text-[11px] font-bold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"
                       >
                         {method}
                       </span>
@@ -1101,7 +1101,7 @@ export function UpgradeInterestButton({
 
               <label
                 htmlFor={inputId}
-                className="mt-6 block text-xs font-black uppercase tracking-[0.16em] text-zinc-500 dark:text-zinc-400"
+                className="mt-6 block text-xs font-bold uppercase tracking-[0.16em] text-zinc-500 dark:text-zinc-400"
               >
                 {copy.promoLabel}
               </label>
@@ -1118,7 +1118,7 @@ export function UpgradeInterestButton({
                       setAppliedPromotion(null);
                     }
                   }}
-                  className="min-w-0 flex-1 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-base font-black uppercase text-zinc-950 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/15 dark:border-zinc-800 dark:bg-zinc-900 dark:text-white"
+                  className="min-w-0 flex-1 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-base font-bold uppercase text-zinc-950 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/15 dark:border-zinc-800 dark:bg-zinc-900 dark:text-white"
                   placeholder={copy.promoPlaceholder}
                   autoComplete="off"
                 />
@@ -1127,7 +1127,7 @@ export function UpgradeInterestButton({
                   onClick={applyPromotion}
                   disabled={isValidatingPromotion}
                   aria-busy={isValidatingPromotion}
-                  className="rounded-xl border border-zinc-200 px-4 py-3 text-sm font-black text-zinc-700 hover:bg-zinc-100 disabled:cursor-wait disabled:opacity-60 dark:border-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-900"
+                  className="rounded-xl border border-zinc-200 px-4 py-3 text-sm font-bold text-zinc-700 hover:bg-zinc-100 disabled:cursor-wait disabled:opacity-60 dark:border-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-900"
                 >
                   {copy.apply}
                 </button>
@@ -1144,14 +1144,14 @@ export function UpgradeInterestButton({
             <aside className="flex flex-col border-t border-zinc-200 bg-zinc-50 p-5 pb-3 dark:border-zinc-800 dark:bg-zinc-900/70 md:border-l md:border-t-0 sm:p-6">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500 dark:text-zinc-400">
+                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500 dark:text-zinc-400">
                     {copy.orderSummary}
                   </p>
                   <h3 className="mt-2 text-xl font-black text-zinc-950 dark:text-white">
-                    Tomverse AI {plan}
+                    Tomverse Insight {plan}
                   </h3>
                 </div>
-                <span className="rounded-full bg-blue-600 px-3 py-1 text-xs font-black text-white">
+                <span className="rounded-full bg-blue-600 px-3 py-1 text-xs font-bold text-white">
                   {billingInterval === "annual" ? copy.annual : copy.monthly}
                 </span>
               </div>
@@ -1161,7 +1161,7 @@ export function UpgradeInterestButton({
                   <span className="font-semibold text-zinc-500 dark:text-zinc-400">
                     {copy.plan}
                   </span>
-                  <span className="font-black text-zinc-950 dark:text-white">
+                  <span className="font-bold text-zinc-950 dark:text-white">
                     {plan}
                   </span>
                 </div>
@@ -1169,7 +1169,7 @@ export function UpgradeInterestButton({
                   <span className="font-semibold text-zinc-500 dark:text-zinc-400">
                     {copy.billing}
                   </span>
-                  <span className="font-black text-zinc-950 dark:text-white">
+                  <span className="font-bold text-zinc-950 dark:text-white">
                     {foundingPass
                       ? passCopy.billingLabel
                       : billingInterval === "annual"
@@ -1181,25 +1181,25 @@ export function UpgradeInterestButton({
                   <span className="font-semibold text-zinc-500 dark:text-zinc-400">
                     {copy.subtotal}
                   </span>
-                  <span className="font-black text-zinc-950 dark:text-white">
+                  <span className="font-bold text-zinc-950 dark:text-white">
                     {priceLabel || "-"}
                   </span>
                 </div>
                 {billingInterval === "annual" ? (
                   <div className="flex justify-between gap-4 text-sm text-emerald-600 dark:text-emerald-300">
                     <span className="font-semibold">{copy.annualSavings}</span>
-                    <span className="font-black">20%</span>
+                    <span className="font-bold">20%</span>
                   </div>
                 ) : null}
                 {appliedPromotion ? (
                   <div className="flex justify-between gap-4 text-sm text-blue-600 dark:text-blue-300">
                     <span className="font-semibold">{appliedPromoCode}</span>
-                    <span className="font-black">{discountLabel || copy.appliedAtCheckout}</span>
+                    <span className="font-bold">{discountLabel || copy.appliedAtCheckout}</span>
                   </div>
                 ) : null}
                 <div className="border-t border-zinc-200 pt-4 dark:border-zinc-800">
                   <div className="flex justify-between gap-4">
-                    <span className="font-black text-zinc-950 dark:text-white">
+                    <span className="font-bold text-zinc-950 dark:text-white">
                       {copy.dueToday}
                     </span>
                     <span className="text-2xl font-black text-zinc-950 dark:text-white">
@@ -1233,7 +1233,7 @@ export function UpgradeInterestButton({
                   href="/terms"
                   target="_blank"
                   rel="noreferrer"
-                  className="font-black text-blue-700 underline underline-offset-2 hover:text-blue-600 dark:text-blue-300 dark:hover:text-blue-200"
+                  className="font-bold text-blue-700 underline underline-offset-2 hover:text-blue-600 dark:text-blue-300 dark:hover:text-blue-200"
                 >
                   {legalCopy.terms}
                 </Link>
@@ -1242,7 +1242,7 @@ export function UpgradeInterestButton({
                   href="/refund"
                   target="_blank"
                   rel="noreferrer"
-                  className="font-black text-blue-700 underline underline-offset-2 hover:text-blue-600 dark:text-blue-300 dark:hover:text-blue-200"
+                  className="font-bold text-blue-700 underline underline-offset-2 hover:text-blue-600 dark:text-blue-300 dark:hover:text-blue-200"
                 >
                   {legalCopy.refund}
                 </Link>
@@ -1253,7 +1253,7 @@ export function UpgradeInterestButton({
                 <button
                   type="submit"
                   disabled={isSending || isValidatingPromotion}
-                  className="rounded-xl bg-blue-600 px-4 py-3 text-sm font-black text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {isSending
                     ? t("billing.sending")
@@ -1264,7 +1264,7 @@ export function UpgradeInterestButton({
                 <button
                   type="button"
                   onClick={() => setIsOpen(false)}
-                  className="rounded-xl border border-zinc-200 px-4 py-3 text-sm font-black text-zinc-700 hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-900"
+                  className="rounded-xl border border-zinc-200 px-4 py-3 text-sm font-bold text-zinc-700 hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-900"
                 >
                   {t("billing.cancel")}
                 </button>
@@ -1272,7 +1272,7 @@ export function UpgradeInterestButton({
             </aside>
             <div className="sticky bottom-0 z-20 border-t border-zinc-200 bg-white/95 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/95 md:hidden">
               <div className="mb-3 flex items-center justify-between gap-3">
-                <span className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500 dark:text-zinc-400">
+                <span className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500 dark:text-zinc-400">
                   {copy.dueToday}
                 </span>
                 <span className="text-xl font-black text-zinc-950 dark:text-white">
@@ -1282,7 +1282,7 @@ export function UpgradeInterestButton({
               <button
                 type="submit"
                 disabled={isSending || isValidatingPromotion}
-                className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-black text-white shadow-lg shadow-blue-950/20 hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-blue-950/20 hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {isSending
                   ? t("billing.sending")

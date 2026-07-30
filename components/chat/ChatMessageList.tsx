@@ -12,7 +12,6 @@ import {
   Bot,
   Braces,
   Check,
-  Clipboard,
   Copy,
   File as FileIcon,
   FileText,
@@ -20,19 +19,66 @@ import {
   Presentation,
   RotateCcw,
   Sheet,
+  Square,
   UserRound,
 } from "lucide-react";
 import { Message, type ChatAttachment } from "@/components/chat/types";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { useLanguage } from "@/components/LanguageProvider";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
+import { FeedbackButton } from "@/components/chat/FeedbackButton";
+import { writePendingGuestImportIntent } from "@/lib/guestImport";
+import {
+  nextModeForUserScroll,
+  type ChatScrollMode,
+} from "@/lib/chatAutoScroll";
+import { getWebSearchCapability } from "@/lib/webSearchCapability";
+import { WEB_SEARCH_SURCHARGE_CREDITS } from "@/lib/webSearchCredits";
 
 type ChatMessageListProps = {
   messages: Message[];
   onRetryLast?: () => void;
   onRetryWithoutAttachments?: () => void;
+  onRequestCloseModel?: () => void;
+  hasMultipleActiveModels?: boolean;
+  currentModelId?: string | null;
+  currentPlan?: string | null;
+  isGuestMode?: boolean;
+  currentChatId?: string | null;
+  // This panel's own in-flight state (not the other panels'), used to show
+  // "connecting" vs "generating" on the message currently streaming in --
+  // distinct from msg.status, which doesn't tell "still streaming" apart
+  // from "finished normally".
+  isSending?: boolean;
+  // Aborts only this panel's in-flight request, distinct from the shell's
+  // "stop all" button.
+  onStopGenerating?: () => void;
 };
 type MarkdownCodeProps = ComponentPropsWithoutRef<"code"> & ExtraProps;
+
+// Codes where the fix is changing what's being asked for (fewer/cheaper
+// models, a different model) rather than repeating the same request.
+const QUOTA_ERROR_CODES = new Set([
+  "CREDIT_BALANCE_INSUFFICIENT",
+  "CREDIT_COST_ALLOWANCE_INSUFFICIENT",
+  "PLAN_DAILY_CREDIT_LIMIT_REACHED",
+  "CHAT_QUOTA_EXCEEDED",
+  "FREE_PRO_MODEL_QUOTA_EXCEEDED",
+  "INTERNAL_DAILY_COST_SAFETY_LIMIT",
+  "INTERNAL_MONTHLY_COST_SAFETY_LIMIT",
+  "PROVIDER_DAILY_SPEND_LIMIT_REACHED",
+  "PROVIDER_SPEND_LIMIT_REACHED",
+  "CHAT_CONCURRENCY_EXCEEDED",
+]);
+
+type ErrorCategory = "quota" | "model_retired" | "attachment" | "generic";
+
+const classifyError = (message: Message): ErrorCategory => {
+  if (message.errorCode === "MODEL_RETIRED") return "model_retired";
+  if (message.errorCode && QUOTA_ERROR_CODES.has(message.errorCode)) return "quota";
+  if (message.errorHadAttachments && isFileParsingError(message.content)) return "attachment";
+  return "generic";
+};
 
 const getAttachmentLabel = (attachment: ChatAttachment) => {
   const extension = attachment.name.split(".").pop();
@@ -85,12 +131,18 @@ const isFileParsingError = (content: string) => {
   );
 };
 
-function TypingIndicator() {
+function TypingIndicator({ label }: { label?: string }) {
   return (
+    // The three bouncing dots are purely visual: without a text alternative,
+    // assistive technology has no way to tell that a model is generating a
+    // response. The announcement itself comes from the dedicated live region in
+    // ChatMessageList, so no role is needed (and adding one would make existing
+    // getByRole("status") toast assertions ambiguous).
     <div className="flex items-center gap-1 py-1">
-          <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 dark:bg-zinc-500 [animation-delay:-0.2s]" />
-          <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 dark:bg-zinc-500 [animation-delay:-0.1s]" />
-          <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 dark:bg-zinc-500" />
+      {label ? <span className="sr-only">{label}</span> : null}
+      <span aria-hidden="true" className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 motion-reduce:animate-none dark:bg-zinc-500 [animation-delay:-0.2s]" />
+      <span aria-hidden="true" className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 motion-reduce:animate-none dark:bg-zinc-500 [animation-delay:-0.1s]" />
+      <span aria-hidden="true" className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 motion-reduce:animate-none dark:bg-zinc-500" />
     </div>
   );
 }
@@ -99,26 +151,48 @@ export function ChatMessageList({
   messages,
   onRetryLast,
   onRetryWithoutAttachments,
+  onRequestCloseModel,
+  hasMultipleActiveModels = false,
+  currentModelId,
+  currentPlan,
+  isGuestMode = false,
+  currentChatId = null,
+  isSending = false,
+  onStopGenerating,
 }: ChatMessageListProps) {
   const { models: AVAILABLE_MODELS } = useModelCatalog();
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const previousLastMessageIdRef = useRef<string | null>(null);
+  const previousLastUserMessageIdRef = useRef<string | null>(null);
   const previousMessageCountRef = useRef(0);
-  const autoStickUntilRef = useRef(0);
-  const scheduledScrollsRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
-  const [isNearBottom, setIsNearBottom] = useState(true);
-  const showScrollButton = !isNearBottom;
+  // Mirrors scrollMode synchronously for callbacks that run outside React's
+  // render cycle (ResizeObserver, the native scroll listener) and would
+  // otherwise close over a stale value.
+  const scrollModeRef = useRef<ChatScrollMode>("following");
+  // True only for the lifetime of a scroll call this component itself
+  // triggered -- not a fixed time window. Lets the scroll listener tell "we
+  // just moved the viewport" apart from "the user (or their input device)
+  // moved it", however long that scroll actually takes to settle.
+  const isProgrammaticScrollRef = useRef(false);
+  const programmaticScrollRafRef = useRef<number | null>(null);
+  const [scrollMode, setScrollModeState] = useState<ChatScrollMode>("following");
     const { t } = useLanguage();
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const copiedResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const copyErrorDetails = async (content: string) => {
-    try {
-      await navigator.clipboard.writeText(content);
-    } catch (error) {
-      console.error("Failed to copy error details:", error);
-    }
-  };
+  // Coarse announcement of the response lifecycle. Deliberately NOT an
+  // aria-live region around the transcript itself: streaming token-by-token
+  // into a live region floods a screen reader with partial words. Only the
+  // start/finish/fail transitions are announced; the answer stays readable by
+  // navigating the transcript as normal.
+  const lastMessage = messages[messages.length - 1];
+  const liveStatusMessage = (() => {
+    if (!lastMessage || lastMessage.role !== "assistant") return "";
+    if (lastMessage.id === "welcome") return "";
+    if (!lastMessage.content) return t("chat.responseGenerating");
+    if (lastMessage.status === "error") return t("chat.responseFailed");
+    if (lastMessage.status === "cancelled") return t("chat.responseCancelled");
+    return t("chat.responseComplete");
+  })();
 
   const copyMessageContent = async (messageId: string, content: string) => {
     try {
@@ -138,89 +212,112 @@ export function ChatMessageList({
     };
   }, []);
 
-  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+  // Keeps scrollModeRef (readable synchronously from non-React callbacks)
+  // and the rendered scrollMode state in lockstep -- always go through this
+  // instead of calling setScrollModeState directly.
+  const setMode = useCallback((mode: ChatScrollMode) => {
+    scrollModeRef.current = mode;
+    setScrollModeState(mode);
+  }, []);
+
+  // Scrolls the container and marks the scroll that results as "ours" for
+  // exactly as long as it actually takes -- via the `scrollend` event where
+  // supported, with a couple of animation frames as a fallback/backstop --
+  // rather than guessing a fixed duration. See lib/chatAutoScroll.ts for why
+  // a clock-based window doesn't work once chunks arrive faster than it.
+  const scrollToBottomNow = useCallback((behavior: ScrollBehavior) => {
     const container = containerRef.current;
     if (!container) return;
 
-    container.scrollTo({ top: container.scrollHeight, behavior });
-  }, []);
+    if (programmaticScrollRafRef.current !== null) {
+      cancelAnimationFrame(programmaticScrollRafRef.current);
+      programmaticScrollRafRef.current = null;
+    }
+    isProgrammaticScrollRef.current = true;
 
-  const clearScheduledScrolls = useCallback(() => {
-    scheduledScrollsRef.current.forEach((timer) => clearTimeout(timer));
-    scheduledScrollsRef.current = [];
-  }, []);
-
-  const forceScrollToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
-    autoStickUntilRef.current = Date.now() + 650;
-    setIsNearBottom(true);
-    clearScheduledScrolls();
-
-    const run = () => {
-      scrollToBottom(behavior);
-      setIsNearBottom(true);
+    let cleared = false;
+    const clear = () => {
+      if (cleared) return;
+      cleared = true;
+      container.removeEventListener("scrollend", clear);
+      isProgrammaticScrollRef.current = false;
     };
 
-    run();
-    requestAnimationFrame(() => {
-      run();
-      requestAnimationFrame(run);
+    container.addEventListener("scrollend", clear, { once: true });
+    container.scrollTo({ top: container.scrollHeight, behavior });
+
+    // Covers browsers without `scrollend`, and is also normally how an
+    // "auto" (instant) scroll's own resulting scroll event gets seen.
+    programmaticScrollRafRef.current = requestAnimationFrame(() => {
+      programmaticScrollRafRef.current = requestAnimationFrame(clear);
     });
+  }, []);
 
-    scheduledScrollsRef.current = [60, 160, 320, 520].map((delay) =>
-      setTimeout(run, delay)
-    );
-  }, [clearScheduledScrolls, scrollToBottom]);
+  useEffect(() => {
+    return () => {
+      if (programmaticScrollRafRef.current !== null) {
+        cancelAnimationFrame(programmaticScrollRafRef.current);
+      }
+    };
+  }, []);
 
-  const checkIsNearBottom = () => {
+  // The only place a real (non-programmatic) scroll is interpreted. Covers
+  // wheel, trackpad, touch swipe, scrollbar drag, and keyboard paging
+  // uniformly -- all of them move scrollTop and fire this same native event;
+  // none need their own listener.
+  const handleScroll = useCallback(() => {
+    if (isProgrammaticScrollRef.current) return;
+
     const container = containerRef.current;
-    if (!container) return true;
+    if (!container) return;
 
-    const threshold = 80;
-    const distanceFromBottom =
-      container.scrollHeight - container.scrollTop - container.clientHeight;
+    setMode(
+      nextModeForUserScroll({
+        scrollTop: container.scrollTop,
+        scrollHeight: container.scrollHeight,
+        clientHeight: container.clientHeight,
+      })
+    );
+  }, [setMode]);
 
-    return distanceFromBottom < threshold;
-  };
+  useLayoutEffect(() => {
+    const messageCount = messages.length;
+    const previousMessageCount = previousMessageCountRef.current;
+    previousMessageCountRef.current = messageCount;
 
-  const handleScroll = () => {
-    if (Date.now() < autoStickUntilRef.current) {
-      setIsNearBottom(true);
+    const lastUserMessage = [...messages].reverse().find((message) => message.role === "user");
+    const lastUserMessageId = lastUserMessage?.id ?? null;
+    const isNewUserTurn =
+      lastUserMessageId !== null && lastUserMessageId !== previousLastUserMessageIdRef.current;
+    previousLastUserMessageIdRef.current = lastUserMessageId;
+
+    const isInitialLoad = previousMessageCount === 0 && messageCount > 0;
+
+    if (isInitialLoad || isNewUserTurn) {
+      // A fresh load or an explicitly-sent new message always follows the
+      // new response, even if the user was reading history a moment ago.
+      setMode("following");
+      scrollToBottomNow("auto");
       return;
     }
 
-    const nearBottom = checkIsNearBottom();
-    setIsNearBottom(nearBottom);
-  };
-
-  useLayoutEffect(() => {
-    const lastMessage = messages[messages.length - 1];
-    const lastMessageId = lastMessage?.id || null;
-    const previousLastMessageId = previousLastMessageIdRef.current;
-    const previousMessageCount = previousMessageCountRef.current;
-    const isInitialLoad =
-      previousMessageCount === 0 ||
-      (messages.length > 0 && previousLastMessageId === null);
-    const didAppendMessage =
-      messages.length > previousMessageCount ||
-      (lastMessageId !== null && lastMessageId !== previousLastMessageId);
-
-    previousLastMessageIdRef.current = lastMessageId;
-    previousMessageCountRef.current = messages.length;
-
-    if (!isInitialLoad && !didAppendMessage && !isNearBottom) return;
-
-    const behavior: ScrollBehavior = isInitialLoad ? "auto" : "smooth";
-    forceScrollToBottom(behavior);
-  }, [forceScrollToBottom, messages, isNearBottom]);
+    if (scrollModeRef.current === "following") {
+      scrollToBottomNow("auto");
+    }
+    // Paused: streamed content growing must never move scrollTop.
+  }, [messages, scrollToBottomNow, setMode]);
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container || typeof ResizeObserver === "undefined") return;
 
+    // Catches layout growth that doesn't come with a `messages` change --
+    // an image finishing decode, code-block syntax highlighting landing
+    // late, etc. Never allowed to touch scrollMode itself (only real user
+    // scroll input does that), so it can't silently cancel a pause.
     const observer = new ResizeObserver(() => {
-      if (Date.now() >= autoStickUntilRef.current) return;
-      scrollToBottom("auto");
-      setIsNearBottom(true);
+      if (scrollModeRef.current !== "following") return;
+      scrollToBottomNow("auto");
     });
 
     observer.observe(container);
@@ -230,27 +327,76 @@ export function ChatMessageList({
 
     return () => {
       observer.disconnect();
-      clearScheduledScrolls();
     };
-  }, [clearScheduledScrolls, scrollToBottom]);
+  }, [scrollToBottomNow]);
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
+      {/* aria-live + aria-atomic without role="status": the two are equivalent
+          for announcement purposes, and an extra `status` role in the tree would
+          make every existing getByRole("status") toast assertion ambiguous. */}
+      <p
+        data-testid="chat-response-status"
+        className="sr-only"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        {liveStatusMessage}
+      </p>
       <div
         data-testid="chat-message-list"
         ref={containerRef}
         onScroll={handleScroll}
-        className="min-h-0 flex-1 overflow-y-auto px-2.5 py-3 md:px-6 md:py-6"
+        // Focusable so PageUp/PageDown/Home/End/ArrowUp/ArrowDown reach this
+        // scroll container natively once the user clicks into it, the same
+        // as wheel/trackpad/touch/scrollbar input already does via the
+        // browser's own scroll handling -- no extra key handling needed.
+        tabIndex={0}
+        className="min-h-0 flex-1 overflow-y-auto px-2.5 py-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 md:px-6 md:py-6"
       >
         <div className="mx-auto flex w-full max-w-4xl flex-col gap-3.5 pb-3 md:gap-5 md:pb-4">
           {messages.map((msg, idx) => {
             const isUser = msg.role === "user";
 
-            const modelInfo = !isUser && msg.modelId 
-              ? AVAILABLE_MODELS.find(m => m.id === msg.modelId) 
+            const modelInfo = !isUser && msg.modelId
+              ? AVAILABLE_MODELS.find(m => m.id === msg.modelId)
               : null;
 
-              const assistantBoxClass = msg.status === "error"
+            // Only the message this panel is actually streaming right now
+            // (always the last one) gets the connecting/generating status --
+            // msg.status alone can't tell "still streaming" apart from
+            // "finished normally", both are "normal".
+            const isActivelyGenerating =
+              !isUser && isSending && idx === messages.length - 1 && msg.role === "assistant";
+
+            // Only shown before the first token arrives (msg.content is
+            // still empty) -- once real text starts streaming in, the
+            // generic "generating" label takes over. Perplexity models
+            // genuinely run a live web search first; a prior user turn with
+            // attachments genuinely gets read first. Anything else falls
+            // back to the plain "connecting" text rather than guessing.
+            const connectingStatusText =
+              modelInfo?.provider === "perplexity"
+                ? t("chat.searchingWebStatus")
+                : messages[idx - 1]?.attachments?.length
+                  ? t("chat.readingFileStatus")
+                  : t("chat.connectingStatus");
+
+              // Technical detail lines (trace IDs, internal cost figures) are
+            // appended to msg.content after a newline -- the first line is
+            // the primary, user-facing message; any remaining lines are
+            // rendered separately below as a de-emphasized auxiliary layer
+            // (see errorAuxiliaryLines) rather than dropped entirely.
+            const displayContent =
+              !isUser && msg.status === "error"
+                ? msg.content.split("\n")[0]
+                : msg.content;
+            const errorAuxiliaryLines =
+              !isUser && msg.status === "error"
+                ? msg.content.split("\n").slice(1).filter(Boolean)
+                : [];
+
+            const assistantBoxClass = msg.status === "error"
                   ? "bg-red-50 text-red-800 border border-red-200 dark:bg-red-950 dark:text-red-100 dark:border-red-800"
                   : msg.status === "cancelled"
                       ? "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-300 italic"
@@ -272,6 +418,82 @@ export function ChatMessageList({
                     <span className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
                       {modelInfo.name}
                     </span>
+                    {msg.content && msg.status !== "error" && msg.status !== "pending" && (() => {
+                      const meta = msg.searchMetadata;
+                      // meta is only absent for messages persisted before this
+                      // field existed -- fall back to the old provider/usageClass
+                      // heuristic so historical Perplexity answers don't regress
+                      // to "training knowledge".
+                      const status = !meta
+                        ? modelInfo.provider === "perplexity" && modelInfo.usageClass === "research"
+                          ? "executed"
+                          : "training-knowledge"
+                        : !meta.requested
+                          ? "training-knowledge"
+                          : !meta.supported
+                            ? "unsupported"
+                            : meta.failureCode
+                              ? "failed"
+                              : meta.executed
+                                ? "executed"
+                                : "requested-not-executed";
+                      // "requested-not-executed" only ever occurs for native
+                      // (surcharge-eligible) capability -- unsupported/unverified
+                      // models are routed to the "unsupported" status instead,
+                      // so the surcharge was always reserved (and refunded) here.
+                      const nativeSearchSurcharged =
+                        status === "executed" &&
+                        getWebSearchCapability(modelInfo.id).support === "native";
+                      const label =
+                        modelInfo.usageClass === "deep-research"
+                          ? t("chat.searchStatusDeepResearch")
+                          : status === "unsupported"
+                            ? t("chat.searchStatusUnsupported")
+                            : status === "failed"
+                              ? t("chat.searchStatusFailed")
+                              : status === "executed"
+                                ? nativeSearchSurcharged
+                                  ? `${t("chat.searchStatusWebSearch")} · +${WEB_SEARCH_SURCHARGE_CREDITS}`
+                                  : t("chat.searchStatusWebSearch")
+                                : status === "requested-not-executed"
+                                  ? t("chat.searchStatusRequestedNotExecuted")
+                                  : t("chat.searchStatusTrainingKnowledge");
+                      const detail =
+                        status === "requested-not-executed"
+                          ? t("chat.searchStatusRefundDetail")
+                          : undefined;
+                      return (
+                        <span
+                          data-testid="search-status-badge"
+                          data-search-status={
+                            modelInfo.usageClass === "deep-research" ? "deep-research" : status
+                          }
+                          title={detail}
+                          aria-label={detail ? `${label} — ${detail}` : undefined}
+                          className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[11px] font-semibold text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
+                        >
+                          {label}
+                        </span>
+                      );
+                    })()}
+                    {isActivelyGenerating && msg.content && (
+                      <span className="text-[11px] font-bold uppercase tracking-wide text-blue-500 dark:text-blue-400">
+                        {t("chat.generatingStatus")}
+                      </span>
+                    )}
+                    {isActivelyGenerating && onStopGenerating && (
+                      <button
+                        type="button"
+                        data-testid="stop-this-response"
+                        onClick={onStopGenerating}
+                        title={t("chat.stopThisResponse")}
+                        aria-label={t("chat.stopThisResponse")}
+                        className="ml-auto flex items-center gap-1 rounded-full border border-zinc-300 px-2 py-0.5 text-[11px] font-bold text-zinc-500 hover:border-zinc-400 hover:text-zinc-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-600 dark:hover:text-zinc-200"
+                      >
+                        <Square className="h-2.5 w-2.5 fill-current" aria-hidden="true" />
+                        {t("chat.stop")}
+                      </button>
+                    )}
                   </div>
                 )}
                 
@@ -294,6 +516,7 @@ export function ChatMessageList({
                 )}
 
                 <div
+                  role={!isUser && msg.status === "error" ? "alert" : undefined}
                   className={`relative max-w-[94%] break-words rounded-2xl px-3 py-2 text-[13px] leading-[1.55] shadow-sm md:max-w-[88%] md:px-4 md:py-3 md:text-[15px] md:leading-relaxed ${
                     isUser ? `${userBoxClass} rounded-br-md` : `${assistantBoxClass} rounded-bl-md`
                   } ${!isUser && msg.content && msg.status !== "error" ? "pr-8 md:pr-9" : ""}`}
@@ -357,8 +580,18 @@ export function ChatMessageList({
                     </div>
                   )}
                   {msg.role === "assistant" && !msg.content ? (
-                    <TypingIndicator />
+                    isActivelyGenerating ? (
+                      <div className="flex items-center gap-2">
+                        <TypingIndicator />
+                        <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                          {connectingStatusText}
+                        </span>
+                      </div>
+                    ) : (
+                      <TypingIndicator label={t("chat.responseGenerating")} />
+                    )
                   ) : msg.role === "assistant" ? (
+                    <>
                     <ReactMarkdown
                       remarkPlugins={[remarkGfm]}
                       rehypePlugins={[rehypeHighlight]}
@@ -367,6 +600,38 @@ export function ChatMessageList({
                         ul: ({ children }) => <ul className="mb-3 list-disc pl-5 last:mb-0">{children}</ul>,
                         ol: ({ children }) => <ol className="mb-3 list-decimal pl-5 last:mb-0">{children}</ol>,
                         li: ({ children }) => <li className="mb-1">{children}</li>,
+                        // Tailwind's preflight resets headings to `font-size:
+                        // inherit; font-weight: inherit` and zeroes every border,
+                        // so without these overrides a model's "## Heading"
+                        // rendered pixel-identical to a paragraph and GFM tables
+                        // came out borderless and unpadded.
+                        h1: ({ children }) => <h1 className="mb-2 mt-4 text-[1.35em] font-bold leading-snug first:mt-0">{children}</h1>,
+                        h2: ({ children }) => <h2 className="mb-2 mt-4 text-[1.2em] font-bold leading-snug first:mt-0">{children}</h2>,
+                        h3: ({ children }) => <h3 className="mb-2 mt-3 text-[1.08em] font-bold leading-snug first:mt-0">{children}</h3>,
+                        h4: ({ children }) => <h4 className="mb-1.5 mt-3 text-[1em] font-bold leading-snug first:mt-0">{children}</h4>,
+                        h5: ({ children }) => <h5 className="mb-1.5 mt-3 text-[0.95em] font-bold uppercase tracking-wide first:mt-0">{children}</h5>,
+                        h6: ({ children }) => <h6 className="mb-1.5 mt-3 text-[0.9em] font-bold uppercase tracking-wide first:mt-0">{children}</h6>,
+                        blockquote: ({ children }) => (
+                            <blockquote className="mb-3 border-l-2 border-zinc-300 pl-3 italic text-zinc-600 last:mb-0 dark:border-zinc-600 dark:text-zinc-300">
+                                {children}
+                            </blockquote>
+                        ),
+                        hr: () => <hr className="my-4 border-t border-zinc-200 dark:border-zinc-700" />,
+                        // The wrapper scrolls the table itself; without it a wide
+                        // table forces the whole message list to scroll sideways.
+                        table: ({ children }) => (
+                            <div className="mb-3 max-w-full overflow-x-auto last:mb-0">
+                                <table className="w-full border-collapse text-left text-[0.95em]">{children}</table>
+                            </div>
+                        ),
+                        th: ({ children }) => (
+                            <th className="border border-zinc-300 bg-zinc-100 px-2 py-1 font-bold dark:border-zinc-600 dark:bg-zinc-800">
+                                {children}
+                            </th>
+                        ),
+                        td: ({ children }) => (
+                            <td className="border border-zinc-300 px-2 py-1 align-top dark:border-zinc-600">{children}</td>
+                        ),
                         pre: ({ children }) => (
                           <pre className="mb-3 overflow-x-auto rounded-lg bg-zinc-950 p-3 text-zinc-100 last:mb-0 [&>code]:block [&>code]:rounded-none [&>code]:bg-transparent [&>code]:p-0 [&>code]:text-zinc-100">
                             {children}
@@ -387,62 +652,179 @@ export function ChatMessageList({
                         ),
                       }}
                     >
-                      {msg.content}
+                      {displayContent}
                     </ReactMarkdown>
+                    {isActivelyGenerating && (
+                      <span
+                        className="ml-0.5 inline-block h-3.5 w-[2px] animate-pulse bg-zinc-400 align-middle motion-reduce:animate-none dark:bg-zinc-500"
+                        aria-hidden="true"
+                      />
+                    )}
+                    {msg.searchMetadata && msg.searchMetadata.citations.length > 0 && (
+                      <div
+                        data-testid="search-citation-list"
+                        className="mt-3 border-t border-zinc-200 pt-2 dark:border-zinc-700/60"
+                      >
+                        <p className="mb-1 text-[11px] font-bold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
+                          {t("chat.searchCitationsLabel")}
+                        </p>
+                        <ul className="space-y-1">
+                          {msg.searchMetadata.citations.map((citation, citationIndex) => (
+                            <li key={`${citation.url}-${citationIndex}`} className="truncate">
+                              <a
+                                href={citation.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title={citation.url}
+                                className="text-[11px] font-medium text-blue-600 underline underline-offset-2 dark:text-blue-400"
+                              >
+                                {citation.title || citation.url}
+                              </a>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    </>
                   ) : (
                     <p className="whitespace-pre-wrap">{msg.content}</p>
                   )}
-                  {!isUser && msg.status === "error" && (
-                    <div className="mt-3 border-t border-red-200 pt-3 dark:border-red-800">
-                      {isFileParsingError(msg.content) && (
-                        <div className="mb-3 rounded-xl border border-red-200 bg-white/80 p-3 text-xs leading-5 text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-100">
-                          <p className="font-black">{t("chat.fileErrorHelpTitle")}</p>
-                          <ul className="mt-1 list-disc space-y-1 pl-4">
-                            <li>{t("chat.fileErrorHelpResave")}</li>
-                            <li>{t("chat.fileErrorHelpLimit")}</li>
-                            <li>{t("chat.fileErrorHelpRetry")}</li>
-                          </ul>
-                          <Link
-                            href="/support/help-centre"
-                            className="mt-2 inline-flex font-black text-red-700 underline underline-offset-2 dark:text-red-100"
-                          >
-                            {t("chat.fileErrorHelpLink")}
-                          </Link>
+                  {!isUser && msg.status === "error" && (() => {
+                    const errorCategory = classifyError(msg);
+                    const secondaryButtonClass =
+                      "inline-flex items-center gap-2 rounded-full border border-red-200 bg-white px-3 py-1.5 text-xs font-bold text-red-700 transition-colors hover:bg-red-50 dark:border-red-800 dark:bg-red-950 dark:text-red-100 dark:hover:bg-red-900";
+                    const primaryButtonClass =
+                      "inline-flex items-center gap-2 rounded-full bg-red-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition-colors hover:bg-red-500";
+                    return (
+                      <div className="mt-3 border-t border-red-200 pt-3 dark:border-red-800">
+                        {errorCategory === "attachment" && (
+                          <div className="mb-3 rounded-xl border border-red-200 bg-white/80 p-3 text-xs leading-5 text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-100">
+                            <p className="font-bold">{t("chat.fileErrorHelpTitle")}</p>
+                            <ul className="mt-1 list-disc space-y-1 pl-4">
+                              <li>{t("chat.fileErrorHelpResave")}</li>
+                              <li>{t("chat.fileErrorHelpLimit")}</li>
+                              <li>{t("chat.fileErrorHelpRetry")}</li>
+                            </ul>
+                            <Link
+                              href="/support/help-centre"
+                              className="mt-2 inline-flex font-bold text-red-700 underline underline-offset-2 dark:text-red-100"
+                            >
+                              {t("chat.fileErrorHelpLink")}
+                            </Link>
+                          </div>
+                        )}
+                        <div className="flex flex-wrap items-center gap-2">
+                          {errorCategory === "quota" && isGuestMode && (
+                            <Link
+                              href={`/auth/signin?callbackUrl=${encodeURIComponent("/chat")}`}
+                              onClick={() => currentChatId && writePendingGuestImportIntent(currentChatId)}
+                              className={primaryButtonClass}
+                            >
+                              {t("chat.continueConversationCta")}
+                            </Link>
+                          )}
+                          {(errorCategory === "model_retired" ||
+                            (errorCategory === "quota" && !isGuestMode)) &&
+                            onRequestCloseModel && (
+                              <button
+                                type="button"
+                                onClick={onRequestCloseModel}
+                                className={primaryButtonClass}
+                              >
+                                <RotateCcw className="h-3.5 w-3.5" />
+                                {errorCategory === "quota" && hasMultipleActiveModels
+                                  ? t("chat.reduceModelCount")
+                                  : t("chat.chooseAnotherModel")}
+                              </button>
+                            )}
+                          {errorCategory === "quota" && isGuestMode && onRequestCloseModel && (
+                            <button
+                              type="button"
+                              onClick={onRequestCloseModel}
+                              className={secondaryButtonClass}
+                            >
+                              <RotateCcw className="h-3.5 w-3.5" />
+                              {hasMultipleActiveModels
+                                ? t("chat.reduceModelCount")
+                                : t("chat.chooseAnotherModel")}
+                            </button>
+                          )}
+                          {(errorCategory === "generic" || errorCategory === "attachment") &&
+                            onRetryLast && (
+                              <button
+                                type="button"
+                                onClick={onRetryLast}
+                                className={primaryButtonClass}
+                              >
+                                <RotateCcw className="h-3.5 w-3.5" />
+                                {t("chat.retry")}
+                              </button>
+                            )}
+                          {errorCategory === "attachment" && onRetryWithoutAttachments && (
+                            <button
+                              type="button"
+                              onClick={onRetryWithoutAttachments}
+                              className={secondaryButtonClass}
+                            >
+                              <RotateCcw className="h-3.5 w-3.5" />
+                              {t("chat.retryWithoutFiles")}
+                            </button>
+                          )}
+                          <FeedbackButton
+                            currentModelId={currentModelId}
+                            currentPlan={currentPlan}
+                            attachmentCount={msg.errorHadAttachments ? 1 : 0}
+                            rawErrorDetails={msg.content}
+                            triggerLabel={t("chat.reportError")}
+                            triggerClassName={secondaryButtonClass}
+                          />
+                          {(errorCategory === "generic" || errorCategory === "attachment") && (
+                            <span className="flex items-center text-xs font-semibold text-red-700 dark:text-red-200">
+                              {t("chat.tryAnotherModelHint")}
+                            </span>
+                          )}
                         </div>
-                      )}
-                      <div className="flex flex-wrap gap-2">
+                        {errorCategory === "quota" && isGuestMode && (
+                          <p className="mt-2 text-xs leading-5 text-red-700 dark:text-red-200">
+                            {t("chat.guestQuotaLoginBenefitHint")}
+                          </p>
+                        )}
+                        {errorAuxiliaryLines.length > 0 && (
+                          <div data-testid="chat-error-auxiliary-info" className="mt-2 space-y-0.5">
+                            {errorAuxiliaryLines.map((line, lineIndex) => (
+                              <p
+                                key={lineIndex}
+                                // UI-003/UI-007. The trace ID is what a user
+                                // has to read back to support, and at
+                                // 10px/red-500-at-70% it measured 2.63:1 on
+                                // light and 3.84:1 on dark against the card it
+                                // sits on. Solid red at the readable floor
+                                // clears AA in both themes.
+                                className="text-[11px] leading-4 text-red-700 dark:text-red-200"
+                              >
+                                {line}
+                              </p>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                  {!isUser && msg.status === "cancelled" && (
+                    <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-zinc-200 pt-3 dark:border-zinc-700">
+                      <span className="inline-flex items-center rounded-full bg-zinc-200 px-2.5 py-1 text-[11px] font-bold text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300">
+                        {t("chat.stoppedBadge")}
+                      </span>
                       {onRetryLast && (
                         <button
                           type="button"
                           onClick={onRetryLast}
-                          className="inline-flex items-center gap-2 rounded-full bg-red-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition-colors hover:bg-red-500"
+                          className="inline-flex items-center gap-2 rounded-full border border-zinc-300 bg-white px-3 py-1.5 text-xs font-bold text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700"
                         >
                           <RotateCcw className="h-3.5 w-3.5" />
-                          {t("chat.retry")}
+                          {t("chat.regenerate")}
                         </button>
                       )}
-                      {onRetryWithoutAttachments && (
-                        <button
-                          type="button"
-                          onClick={onRetryWithoutAttachments}
-                          className="inline-flex items-center gap-2 rounded-full border border-red-200 bg-white px-3 py-1.5 text-xs font-bold text-red-700 transition-colors hover:bg-red-50 dark:border-red-800 dark:bg-red-950 dark:text-red-100 dark:hover:bg-red-900"
-                        >
-                          <RotateCcw className="h-3.5 w-3.5" />
-                          {t("chat.retryWithoutFiles")}
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => void copyErrorDetails(msg.content)}
-                        className="inline-flex items-center gap-2 rounded-full border border-red-200 bg-white px-3 py-1.5 text-xs font-bold text-red-700 transition-colors hover:bg-red-50 dark:border-red-800 dark:bg-red-950 dark:text-red-100 dark:hover:bg-red-900"
-                      >
-                        <Clipboard className="h-3.5 w-3.5" />
-                        {t("chat.copyErrorDetails")}
-                      </button>
-                      <span className="flex items-center text-xs font-semibold text-red-600/80 dark:text-red-200/80">
-                        {t("chat.tryAnotherModelHint")}
-                      </span>
-                      </div>
                     </div>
                   )}
                 </div>
@@ -452,18 +834,23 @@ export function ChatMessageList({
         </div>
       </div>
 
-      {showScrollButton && (
+      {scrollMode === "paused" && (
         <button
           type="button"
+          data-testid="scroll-to-latest-button"
           onClick={() => {
-            scrollToBottom("smooth");
-            setIsNearBottom(true);
+            const prefersReducedMotion =
+              typeof window !== "undefined" &&
+              window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+            setMode("following");
+            scrollToBottomNow(prefersReducedMotion ? "auto" : "smooth");
           }}
-          className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm text-zinc-100 shadow-lg hover:bg-zinc-800"
+          aria-label={isSending ? t("chat.newResponseAvailable") : t("chat.scrollToLatest")}
+          className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm text-zinc-100 shadow-lg hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
         >
           <span className="flex items-center gap-2">
             <ArrowDown className="h-4 w-4" />
-            {t("chat.scrollToLatest")}
+            {isSending ? t("chat.newResponseAvailable") : t("chat.scrollToLatest")}
           </span>
         </button>
       )}

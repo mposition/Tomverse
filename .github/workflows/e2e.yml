@@ -1,4 +1,15 @@
 name: Main Chromium Regression
+#
+# This workflow owns the desktop-chromium coverage that PR Fast Gate no
+# longer runs. PR Fast Gate runs only the ~20 `@smoke` contracts (see
+# scripts/verify-smoke-coverage.mjs); every other desktop-chromium test --
+# visual regression, typography, touch targets, keyboard policy, responsive
+# layout, analytics consent, i18n -- is still executed here, unfiltered, on
+# every main push. Nothing was deleted; the CI tier moved.
+#
+# `test:e2e:chromium` must therefore stay unfiltered. Adding a tag filter to
+# it would drop those tests from CI entirely, and the security-regression
+# check asserts that it has none.
 
 on:
   push:
@@ -16,8 +27,22 @@ concurrency:
 jobs:
   playwright:
     name: Chromium desktop and mobile regression
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # Canonical visual baseline: pinned image, not ubuntu-latest, so a
+    # runner-image bump cannot silently re-rasterise every golden.
+    # See docs/qa/canonical-visual-baseline.md.
+    runs-on: ubuntu-24.04
+    # The unfiltered suite has been growing into this budget for several
+    # releases -- 33m, then 41m43s, then 42m23s -- and the go-live regression
+    # specs took it past 45m, where the run is killed and reported as
+    # "cancelled" rather than as a timeout, which reads like someone stopped it.
+    # Raised for headroom, not because anything here got slower: no single spec
+    # regressed, the suite simply has more of them.
+    #
+    # This buys time rather than fixing the shape. `test:e2e:chromium` runs
+    # desktop-chromium, desktop-compact and mobile-chromium in one job; a matrix
+    # over the three projects would cut wall-clock roughly threefold and is the
+    # real fix. That is a change to make on its own, not during a release.
+    timeout-minutes: 75
     # Keep the production client bundle on the same deterministic Turnstile
     # configuration used by the isolated Playwright server.
     env:

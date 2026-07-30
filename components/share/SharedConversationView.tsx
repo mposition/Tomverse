@@ -142,7 +142,7 @@ export function SharedConversationView({
             <div className="flex min-w-0 items-start gap-4">
               <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white ring-1 ring-zinc-200 shadow-sm dark:ring-zinc-800">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/tomverse-logo.png" alt="Tomverse AI" className="h-full w-full object-cover" />
+                <img src="/tomverse-logo.png" alt="Tomverse Insight" className="h-full w-full object-cover" />
               </span>
               <div className="min-w-0">
                 <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-zinc-500">

@@ -5,6 +5,7 @@ import {
   mockAttachmentUpload,
   mockAuthenticatedApi,
   mockChatStream,
+  openModelCatalogue,
   prepareGuestPage,
   type AttachmentUploadQaState,
 } from "./support/app-fixtures";
@@ -78,7 +79,7 @@ test.describe("attachment UX", () => {
     await expect(page.getByTestId("chat-input")).toBeVisible();
   });
 
-  test("selected image previews before and after send", async ({ page }) => {
+  test("selected image previews before and after send", { tag: "@smoke" }, async ({ page }) => {
     await attachFromComputer(page, {
       name: "test-image.png",
       mimeType: "image/png",
@@ -98,7 +99,7 @@ test.describe("attachment UX", () => {
     expect(uploadState.finalizeCount).toBe(1);
   });
 
-  test("PDF remains a friendly file card and sends successfully", async ({ page }) => {
+  test("PDF remains a friendly file card and sends successfully", { tag: "@smoke" }, async ({ page }) => {
     await attachFromComputer(page, {
       name: "test-file.pdf",
       mimeType: "application/pdf",
@@ -137,7 +138,7 @@ test.describe("attachment UX", () => {
     expect(uploadState.finalizeCount).toBe(1);
   });
 
-  test("image attachments disable text-only Llama models and keep Scout available", async ({ page }) => {
+  test("image attachments disable text-only Llama models and keep Scout available", { tag: "@smoke" }, async ({ page }) => {
     await attachFromComputer(page, {
       name: "vision-model-check.png",
       mimeType: "image/png",
@@ -147,31 +148,38 @@ test.describe("attachment UX", () => {
     await actionMenuTrigger(page).click();
     await page
       .getByRole("dialog", { name: /더 많은 작업|More actions|更多操作/ })
-      .getByRole("button", { name: /모델 선택|Select model|选择模型/ })
+      .getByRole("button", { name: /AI 모델 선택|Choose AI models|选择 AI 模型/ })
       .click();
+    await openModelCatalogue(page);
 
     const textOnlyLlama = page.locator(
       '[data-testid="model-option"][data-model-id="llama-3-1"]'
     );
-    const scout = page.locator(
-      '[data-testid="model-option"][data-model-id="llama-4-scout"]'
+    // Was llama-4-scout until Groq stopped serving it and it was disabled;
+    // any enabled Guest-tier vision model exercises the same assertion.
+    const visionModel = page.locator(
+      '[data-testid="model-option"][data-model-id="gemini-2-5-flash"]'
     );
     await expect(textOnlyLlama).toBeDisabled();
     await expect(textOnlyLlama).toHaveAttribute("data-model-image-input", "false");
-    await expect(scout).toBeEnabled();
-    await expect(scout).toHaveAttribute("data-model-image-input", "true");
+    await expect(visionModel).toBeEnabled();
+    await expect(visionModel).toHaveAttribute("data-model-image-input", "true");
   });
 
   test("warns when a selected text-only model becomes incompatible with an image", async ({ page }) => {
     await actionMenuTrigger(page).click();
     await page
       .getByRole("dialog", { name: /더 많은 작업|More actions|更多操作/ })
-      .getByRole("button", { name: /모델 선택|Select model|选择模型/ })
+      .getByRole("button", { name: /AI 모델 선택|Choose AI models|选择 AI 模型/ })
       .click();
+    await openModelCatalogue(page);
     await page
       .locator('[data-testid="model-option"][data-model-id="llama-3-1"]')
       .click();
+    // Escape steps back to the recommendations first, then closes the picker.
     await page.keyboard.press("Escape");
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#chat-input-popover")).toBeHidden();
 
     await attachFromComputer(page, {
       name: "selected-model-warning.png",

@@ -1,13 +1,38 @@
 import { NextAuthOptions } from "next-auth";
 import type { Adapter, AdapterAccount } from "next-auth/adapters";
 import GoogleProvider from "next-auth/providers/google";
-import NaverProvider from "next-auth/providers/naver";
 import AzureADProvider from "next-auth/providers/azure-ad";
+import CredentialsProvider from "next-auth/providers/credentials";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/prisma";
 import { encryptOAuthAccountTokens } from "@/lib/oauthTokenCrypto";
 import { logAuthAuditEvent } from "@/lib/securityAudit";
 import { effectivePlanForAccess } from "@/lib/foundingTesterPassCore";
+import { verifyEmailLoginCode, verifyEmailLoginLink } from "@/lib/emailLogin";
+import { appUrl } from "@/lib/accountEmails";
+
+// next-auth v4's CredentialsProvider only exposes authorize()'s second
+// argument as a RequestInternal (plain headers object, not a Headers
+// instance) -- lib/emailLogin.ts's functions expect a real Request so they
+// can reuse the same rate-limit/IP/audit-log helpers used by ordinary route
+// handlers. This best-effort adapter is only used for IP/header extraction;
+// if the header shape is ever unexpected, it falls back to an empty Request
+// rather than failing the whole sign-in attempt.
+const toRequestLike = (headers: Record<string, unknown> | undefined): Request => {
+    try {
+        const normalized: Record<string, string> = {};
+        for (const [key, value] of Object.entries(headers || {})) {
+            if (typeof value === "string") normalized[key] = value;
+        }
+        return new Request("http://internal.invalid/auth/email-code", {
+            headers: new Headers(normalized),
+        });
+    } catch {
+        return new Request("http://internal.invalid/auth/email-code");
+    }
+};
+import { sessionRevocationReason } from "@/lib/sessionRevocationCore";
+import { readSessionSecuritySnapshot } from "@/lib/sessionSecurity";
 
 const SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
 const SESSION_UPDATE_AGE_SECONDS = 24 * 60 * 60;
@@ -34,10 +59,6 @@ export const authOptions: NextAuthOptions = {
             clientId: process.env.GOOGLE_ID as string,
             clientSecret: process.env.GOOGLE_SECRET as string,
         }),
-        NaverProvider({
-            clientId: process.env.NAVER_ID as string,
-            clientSecret: process.env.NAVER_SECRET as string,
-        }),
         ...(hasCompleteAzureConfiguration
             ? [
                   AzureADProvider({
@@ -47,6 +68,42 @@ export const authOptions: NextAuthOptions = {
                   }),
               ]
             : []),
+        CredentialsProvider({
+            id: "email-code",
+            name: "Email code",
+            credentials: {
+                email: { label: "Email", type: "email" },
+                code: { label: "Code", type: "text" },
+                linkToken: { label: "Link token", type: "text" },
+            },
+            async authorize(credentials, req) {
+                const request = toRequestLike(req?.headers);
+                const result = credentials?.linkToken
+                    ? await verifyEmailLoginLink(request, credentials.linkToken)
+                    : credentials?.email && credentials?.code
+                        ? await verifyEmailLoginCode(request, credentials.email, credentials.code)
+                        : null;
+                if (!result) throw new Error("EMAIL_CODE_INVALID");
+                if (!result.ok) {
+                    throw new Error(
+                        result.reason === "locked" ? "EMAIL_CODE_LOCKED" : "EMAIL_CODE_INVALID"
+                    );
+                }
+                return prisma.user.findUniqueOrThrow({
+                    where: { id: result.userId },
+                    select: {
+                        id: true,
+                        email: true,
+                        name: true,
+                        image: true,
+                        plan: true,
+                        createdAt: true,
+                        subscriptionStatus: true,
+                        subscriptionCurrentPeriodEnd: true,
+                    },
+                });
+            },
+        }),
     ],
     pages: {
         signIn: '/auth/signin',
@@ -89,6 +146,17 @@ export const authOptions: NextAuthOptions = {
                     });
                     return true;
                 }
+                if (security.accountStatus === "pending_deletion" || security.accountStatus === "deletion_processing") {
+                    // Only reachable after the provider already verified this
+                    // identity (OAuth completed, or the emailed code/link was
+                    // correct), so showing deletion-specific detail here does
+                    // not expose account status to someone who hasn't proven
+                    // ownership yet.
+                    logAuthAuditEvent("auth.sign_in_denied_pending_deletion", {
+                        userId: user.id,
+                    });
+                    return `${appUrl()}/auth/signin?error=AccountPendingDeletion`;
+                }
                 logAuthAuditEvent("auth.sign_in_denied_suspended", {
                     userId: user.id,
                 });
@@ -118,16 +186,41 @@ export const authOptions: NextAuthOptions = {
                         ? analyticsUser.createdAt.toISOString()
                         : undefined;
                 token.authenticatedAt = new Date().toISOString();
+                token.sessionIssuedAt = Date.now();
             }
             return token;
         },
         async session({ session, token }) {
-            if (session.user && token.id) {
-                session.user.id = token.id;
-                session.user.plan = token.plan;
-                session.user.createdAt = token.createdAt;
-                session.user.authenticatedAt = token.authenticatedAt;
+            if (!session.user || !token.id) return session;
+
+            // Sessions are JWTs, so there is no session row to delete. Check the
+            // server-side revocation epoch and account status on every
+            // resolution; otherwise a suspended or signed-out user keeps full
+            // API access until their token expires.
+            const snapshot = await readSessionSecuritySnapshot(token.id);
+            const revocation = sessionRevocationReason({
+                issuedAt: token.sessionIssuedAt ?? token.authenticatedAt,
+                snapshot,
+            });
+            if (revocation) {
+                logAuthAuditEvent("auth.session_rejected", {
+                    userId: token.id,
+                    reason: revocation,
+                });
+                // Strip the whole user object. Every authenticated route gates on
+                // `session.user.id`, and admin routes additionally match on
+                // email, so removing both makes the request unauthenticated
+                // everywhere rather than only on the id check.
+                return {
+                    expires: session.expires,
+                    user: {},
+                } as typeof session;
             }
+
+            session.user.id = token.id;
+            session.user.plan = token.plan;
+            session.user.createdAt = token.createdAt;
+            session.user.authenticatedAt = token.authenticatedAt;
             return session;
         },
     },

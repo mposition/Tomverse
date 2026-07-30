@@ -5,6 +5,7 @@ const eventGroups = [
   { label: "Acquisition", events: ["landing_view", "cta_start_click", "pricing_view", "plan_selected"] },
   { label: "Onboarding", events: ["onboarding_shown", "onboarding_completed", "onboarding_skipped"] },
   { label: "Model Finder", events: ["model_finder_viewed", "model_finder_started", "model_finder_completed", "model_finder_skipped", "recommended_model_accepted", "recommended_model_changed", "advanced_model_suggested", "advanced_model_selected"] },
+  { label: "Model picker", events: ["model_picker_opened", "model_picker_all_opened", "model_picker_search_used", "model_picker_filter_opened", "model_picker_filter_applied", "model_picker_selection_confirmed", "model_picker_max_reached", "model_picker_abandoned"] },
   { label: "First experience", events: ["chat_started", "first_response_completed"] },
   { label: "Core value", events: ["multi_model_compare_completed"] },
   { label: "AI Review", events: ["comparison_review_viewed", "comparison_review_started", "comparison_review_completed", "comparison_review_failed"] },
@@ -48,14 +49,14 @@ export function AdminProductAnalyticsPanel({
           <div>
             <div className="flex items-center gap-2 text-blue-300">
               <BarChart3 className="h-5 w-5" />
-              <span className="text-xs font-black uppercase tracking-[0.18em]">Product analytics</span>
+              <span className="text-xs font-bold uppercase tracking-[0.18em]">Product analytics</span>
             </div>
             <h2 className="mt-3 text-2xl font-black text-white">Go-live funnel and activation</h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
               First-party, consented events provide operational truth while GA4 supplies campaign analysis. Prompts, responses, filenames, file contents, email, and profile data are excluded.
             </p>
           </div>
-          <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-black ${dashboard.available ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" : "border-amber-500/30 bg-amber-500/10 text-amber-300"}`}>
+          <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-bold ${dashboard.available ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" : "border-amber-500/30 bg-amber-500/10 text-amber-300"}`}>
             {dashboard.available ? <CheckCircle2 className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
             {dashboard.available ? "Ledger ready" : "Migration required"}
           </span>
@@ -75,7 +76,7 @@ export function AdminProductAnalyticsPanel({
 
       <div className="rounded-3xl border border-blue-500/20 bg-blue-500/5 p-6">
         <div>
-          <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-300">AI Review conversion · 30d</p>
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">AI Review conversion · 30d</p>
           <h3 className="mt-2 text-xl font-black text-white">Cross-review to upgrade and checkout</h3>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
             Unique actors are sequenced from comparison_review_started to completed, then to upgrade intent, checkout, and purchase. Conversion rates after completion use completed reviewers as the denominator.
@@ -135,7 +136,7 @@ export function AdminProductAnalyticsPanel({
             </p>
             <div className="mt-4 overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950/70">
               <div className="border-b border-zinc-800 px-3 py-3">
-                <p className="text-xs font-black uppercase tracking-[0.14em] text-zinc-300">Key Event policy</p>
+                <p className="text-xs font-bold uppercase tracking-[0.14em] text-zinc-300">Key Event policy</p>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[30rem] text-left text-xs">

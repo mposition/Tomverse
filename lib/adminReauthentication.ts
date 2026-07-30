@@ -1,7 +1,10 @@
 import "server-only";
 
 import type { Session } from "next-auth";
-import { prisma } from "@/lib/prisma";
+import {
+  isRecentAdminAuthentication,
+  resolveRecentAuthMinutes,
+} from "@/lib/adminReauthenticationCore";
 
 export class AdminReauthenticationRequiredError extends Error {
   constructor() {
@@ -10,56 +13,26 @@ export class AdminReauthenticationRequiredError extends Error {
   }
 }
 
-const recentAuthMinutes = () => {
-  const parsed = Number(process.env.ADMIN_RECENT_AUTH_MINUTES || 30);
-  return Number.isFinite(parsed)
-    ? Math.min(240, Math.max(5, Math.trunc(parsed)))
-    : 30;
-};
-
-const sessionTokenFromRequest = (request: Request | undefined) => {
-  if (!request) return null;
-  const cookieHeader = request.headers.get("cookie") || "";
-  const cookies = new Map(
-    cookieHeader
-      .split(";")
-      .map((part) => part.trim())
-      .filter(Boolean)
-      .map((part) => {
-        const separator = part.indexOf("=");
-        const name = separator >= 0 ? part.slice(0, separator) : part;
-        const value = separator >= 0 ? part.slice(separator + 1) : "";
-        try {
-          return [name, decodeURIComponent(value)] as const;
-        } catch {
-          return [name, value] as const;
-        }
-      })
-  );
-  return (
-    cookies.get("__Secure-next-auth.session-token") ||
-    cookies.get("next-auth.session-token") ||
-    null
-  );
-};
-
-export async function assertRecentAdminAuthentication(
-  request: Request | undefined,
-  session: Session
-) {
+// Reads session.user.authenticatedAt (a JWT-derived timestamp stamped fresh on
+// every real sign-in, see callbacks.jwt/session in lib/auth.ts) rather than
+// looking up a Prisma Session row: this app uses session.strategy "jwt", under
+// which NextAuth never writes to the Session table, so a DB-session lookup
+// here would always fail to find a match and always throw.
+//
+// The decision itself lives in lib/adminReauthenticationCore.ts so it can be
+// unit-tested without a session or an environment, and so the clock-skew rule
+// (a claim dated far in the future buys no step-up window) has one home.
+export async function assertRecentAdminAuthentication(session: Session) {
   const userId = session.user?.id;
-  const sessionToken = sessionTokenFromRequest(request);
-  if (!userId || !sessionToken) throw new AdminReauthenticationRequiredError();
-  const currentSession = await prisma.session.findUnique({
-    where: { sessionToken },
-    select: { userId: true, createdAt: true, expires: true },
-  });
-  const cutoff = Date.now() - recentAuthMinutes() * 60_000;
+  if (!userId) throw new AdminReauthenticationRequiredError();
   if (
-    !currentSession ||
-    currentSession.userId !== userId ||
-    currentSession.expires.getTime() <= Date.now() ||
-    currentSession.createdAt.getTime() < cutoff
+    !isRecentAdminAuthentication({
+      authenticatedAt: session.user?.authenticatedAt,
+      recentAuthMinutes: resolveRecentAuthMinutes(
+        process.env.ADMIN_RECENT_AUTH_MINUTES
+      ),
+      now: new Date(),
+    })
   ) {
     throw new AdminReauthenticationRequiredError();
   }

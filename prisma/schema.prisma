@@ -41,10 +41,16 @@ model User {
   aiUsageRestrictedById         String?
   aiUsageRestrictedByEmail      String?
   securityIncidentNote          String?
+  // Session-invalidation epoch. Sessions use the JWT strategy, so there is no
+  // server-side session row to delete; any token issued at or before this
+  // instant is rejected. Bumped by revokeAllUserSessions().
+  sessionsRevokedAt             DateTime?
   accountDeletionRequestedAt    DateTime?
   accountDeletionScheduledFor   DateTime?
   lastLoginAt                   DateTime?
   createdAt                     DateTime?     @default(now())
+  emailLoginEnabled             Boolean       @default(true)
+  sessionsInvalidatedAt         DateTime?
   settings                      UserSettings?
 
   accounts               Account[]
@@ -139,6 +145,26 @@ model VerificationToken {
   @@unique([identifier, token])
 }
 
+// Passwordless email login: one row per outstanding "we sent you a code and
+// a link" request. Not related to VerificationToken above (that table's
+// token column is globally unique, a poor fit for a human-typed 6-digit
+// code, and it has no consumed/invalidated columns for single-use +
+// explicit-invalidation semantics). No relation to User: at request time the
+// email may not correspond to any existing account yet.
+model EmailLoginAttempt {
+  id            String    @id @default(cuid())
+  email         String
+  codeHash      String
+  linkTokenHash String    @unique
+  expiresAt     DateTime
+  consumedAt    DateTime?
+  invalidatedAt DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([email, consumedAt, invalidatedAt, expiresAt])
+  @@index([expiresAt])
+}
+
 // ==========================================
 // ==========================================
 
@@ -150,6 +176,7 @@ model Conversation {
 
   selectedModels String @default("[\"gpt-5-4-mini\"]")
   disabledPanels String @default("[]")
+  webSearchMode  String @default("off") // off | auto | always
 
   shareToken     String?   @unique
   shareEnabled   Boolean   @default(false)
@@ -165,8 +192,10 @@ model Conversation {
   createdAt         DateTime             @default(now())
   updatedAt         DateTime             @updatedAt
   password          String?
+  importedGuestKey  String?
 
   @@index([userId, projectId])
+  @@unique([userId, importedGuestKey])
 }
 
 model ConversationProject {
@@ -183,11 +212,13 @@ model ConversationProject {
 }
 
 model Message {
-  id      String  @id @default(cuid())
-  role    String
-  content String
-  status  String  @default("normal")
-  modelId String?
+  id             String  @id @default(cuid())
+  role           String
+  content        String
+  status         String  @default("normal")
+  modelId        String?
+  pendingJobId   String?
+  searchMetadata Json?
 
   conversationId String
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -274,6 +305,64 @@ model ProviderErrorEvent {
   @@index([provider, diagnosticCode, createdAt])
   @@index([modelId, createdAt])
   @@index([traceId])
+}
+
+// One row per provider, updated atomically on every recordProviderSuccess/
+// recordProviderFailure call. Unlike ChatUsageBucket's day/5-minute counters
+// (which reset on their own schedule and can't tell "no traffic since
+// midnight" apart from "no traffic in months"), this is the durable source
+// of truth for "when did we last actually hear from this provider" -- it's
+// what the public status page's freshness check is computed from.
+model ProviderHealthState {
+  provider            String    @id
+  lastSuccessAt       DateTime?
+  lastFailureAt       DateTime?
+  consecutiveFailures Int       @default(0)
+  // AUD-R001: synthetic-probe evidence, kept in separate fields from the
+  // real-user-traffic ones above so the two evidence streams never
+  // overwrite each other -- recordProviderProbeSuccess/Failure only ever
+  // touch these three, recordProviderSuccess/Failure only ever touch the
+  // three above. lib/providerPublicStatusCore.ts merges both explicitly.
+  lastProbeSuccessAt       DateTime?
+  lastProbeFailureAt       DateTime?
+  consecutiveProbeFailures Int       @default(0)
+  updatedAt           DateTime  @updatedAt
+
+  @@index([lastSuccessAt])
+  @@index([lastProbeSuccessAt])
+}
+
+// One row per (provider, model) synthetic probe attempt (AUD-R001). Distinct
+// from ProviderHealthCheck, which is an admin-triggered manual "is the API
+// key configured" check that never calls a provider live -- this table is
+// the automated scheduled prober's own attempt log. Deliberately excludes
+// anything sensitive: no API keys, no raw provider response body, no stack
+// traces, no user content -- enforced by the row-builder never receiving
+// those values in the first place (see lib/providerProbe.ts), and checked
+// by a static-scan unit test.
+model ProviderProbeResult {
+  id                 String   @id @default(cuid())
+  /// The owning ScheduledJobRun.id for this probe cycle.
+  runId              String
+  provider           String
+  modelId            String
+  environment        String
+  startedAt          DateTime
+  completedAt        DateTime
+  success            Boolean
+  timedOut           Boolean  @default(false)
+  latencyMs          Int?
+  /// Public-safe classification only, e.g. "TIMEOUT" | "AUTH" | "RATE_LIMIT" |
+  /// "SERVER_ERROR" | "NETWORK" | "UNKNOWN" -- never a raw provider message.
+  errorClassification String?
+  /// Sanitized diagnostic code in the same shape providerDiagnosticCode()
+  /// produces (e.g. "PROVIDER_PROBE_FAILED.ECONNRESET.HTTP_503.RETRYABLE").
+  diagnosticCode     String?
+  createdAt          DateTime @default(now())
+
+  @@index([provider, createdAt])
+  @@index([provider, modelId, createdAt])
+  @@index([runId])
 }
 
 model ChatRequestLease {
@@ -538,6 +627,31 @@ model ChatCreditReservation {
   @@index([traceId])
   @@index([providerRequestId])
   @@index([providerResponseId])
+}
+
+// Tracks a single Perplexity "sonar-deep-research" async job durably, since
+// the request can run well past 30 minutes -- long enough to outlive both
+// the request that submitted it and a page refresh. See lib/perplexityDeepResearch.ts
+// (submit/poll HTTP calls) and app/api/chat/deep-research/status/route.ts
+// (the client-polled endpoint that reads and advances this row).
+model PerplexityAsyncJob {
+  id                 String    @id @default(cuid())
+  perplexityJobId    String    @unique
+  conversationId     String
+  assistantMessageId String    @unique
+  modelId            String
+  reservationId      String
+  traceId            String
+  status             String    @default("submitted") // submitted | in_progress | completed | failed
+  resultText         String?
+  errorMessage       String?
+  submittedAt        DateTime  @default(now())
+  lastPolledAt       DateTime?
+  completedAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([status, lastPolledAt])
 }
 
 model AppSetting {

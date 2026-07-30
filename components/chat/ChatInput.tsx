@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -11,27 +12,28 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import {
+  AlertTriangle,
   ArrowLeft,
   ArrowUp,
-  Brain,
   Boxes,
   Braces,
+  Check,
   ChevronDown,
-  Code2,
   File as FileIcon,
   FileText,
   HardDrive,
   Globe2,
-  Image as ImageIcon,
-  LockKeyhole,
+  Link2,
+  Loader2,
+  Lock,
+  Microscope,
   Paperclip,
   Plus,
   Presentation,
-  Search,
+  RefreshCw,
   Sheet,
-  SlidersHorizontal,
+  Sparkles,
   Square,
-  Star,
   X,
 } from "lucide-react";
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
@@ -43,26 +45,21 @@ import {
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { useLanguage } from "@/components/LanguageProvider";
+import { FeatureHelpPopover } from "@/components/chat/FeatureHelpPopover";
+import { chatHelpCopy } from "@/components/chat/chatHelpCopy";
 import { dispatchAppToast } from "@/lib/appToast";
-import { getModelExperienceStatus } from "@/lib/modelExperience";
-import { APP_DEFAULTS } from "@/lib/appDefaults";
+import { APP_DEFAULTS, WEB_SEARCH_MODES, type WebSearchMode } from "@/lib/appDefaults";
 import {
   canUseModelWithPlan,
   getInputCreditMultiplier,
-  getWeightedUsageCredits,
   modelSupportsImageInput,
+  type AiModel,
 } from "@/lib/models";
+import { estimateRequestCredits } from "@/lib/webSearchCredits";
 import {
-  RECOMMENDED_MODEL_IDS,
-  getModelPickerDescription,
-  getModelPickerFeatures,
-  getModelPickerUsageBand,
-  modelMatchesCapability,
-  modelPickerCopy,
-  modelPickerFeatureLabels,
-  type ModelPickerCapability,
-  type ModelPickerUsageBand,
-} from "@/lib/modelPickerPresentation";
+  ModelPickerPanel,
+  type ModelPickerAnalyticsEvent,
+} from "@/components/chat/ModelPickerPanel";
 import { useUserUsage } from "@/components/chat/useUserUsage";
 import { withChatLanguage } from "@/lib/localizedCallbackUrl";
 import {
@@ -70,19 +67,40 @@ import {
   trackProductEventOnce,
 } from "@/lib/productAnalyticsClient";
 import {
+  CHAT_MODEL_PICKER_OPEN_EVENT,
+  type ChatModelPickerOpenDetail,
+} from "@/lib/chatModelPickerEvents";
+import {
+  getComplementaryModelSuggestion,
   getContextualModelSuggestion,
   getModelFinderRecommendations,
-  MODEL_FINDER_FILE_USAGE,
   MODEL_FINDER_PRIORITIES,
   MODEL_FINDER_TASKS,
-  type ModelFinderFileUsage,
   type ModelFinderPriority,
   type ModelFinderTask,
 } from "@/lib/modelFinder";
-import { CreditPackPurchaseButton } from "@/components/billing/CreditPackPurchaseButton";
-import { UpgradeCtaLink } from "@/components/billing/UpgradeCtaLink";
+import { draftSuggestionKey, suggestsCurrentInformationNeeded } from "@/lib/webSearchSuggestion";
+import { deriveWebSearchComposerState } from "@/lib/webSearchComposerState";
+import { openModelFinder } from "@/lib/modelFinderEvents";
 import { CreditBreakdownSheet } from "@/components/chat/CreditBreakdownSheet";
+import { UsageLimitModal } from "@/components/chat/UsageLimitModal";
 import { getChatCreditAllocation } from "@/lib/chatCreditAllocation";
+import { looksLikeStructuredText } from "@/lib/structuredPasteDetection";
+import { useIsMobileShell } from "@/components/chat/useIsMobileShell";
+import { useKeyboardInset } from "@/components/chat/useVisualViewport";
+import {
+  getChatEnterKeyAction,
+  isComposingKeydown,
+} from "@/lib/chatKeyboardPolicy";
+import {
+  draftKeyFor,
+  type AttachmentsChangeHandler,
+} from "@/components/chat/useConversationDrafts";
+import {
+  GUEST_ACCEPTED_MEDIA_TYPES,
+  type ChatAttachmentCapabilities,
+} from "@/lib/guestAttachmentPolicy";
+import { useGuestVerification } from "@/components/chat/GuestVerificationProvider";
 
 type PublicModelStatus = "available" | "limited" | "unavailable";
 type PublicModelStatusRecord = {
@@ -102,7 +120,6 @@ const RECENT_MODEL_STORAGE_KEY = "recent_model_ids";
 const GUEST_QUICK_START_STORAGE_KEY = "tomverse_guest_quick_start_seen_v2";
 const GUEST_QUICK_START_ACTIVE_KEY = "tomverse_guest_quick_start_active_v2";
 const GUEST_QUICK_START_EVENT = "tomverse:guest-quick-start";
-const PROVIDER_DISPLAY_ORDER = ["openai", "google", "anthropic", "deepseek", "mistral"];
 const MOBILE_MODEL_MENU_QUERY = "(max-width: 767px)";
 const subscribeToMobileModelMenu = (onChange: () => void) => {
   const mediaQuery = window.matchMedia(MOBILE_MODEL_MENU_QUERY);
@@ -172,17 +189,25 @@ const ACCEPTED_FILE_TYPES = [
   ...Object.keys(OFFICE_EXTENSION_TYPES).map((extension) => `.${extension}`),
 ].join(",");
 
-const PROMPT_SUGGESTIONS = [
-  "chat.promptSummarizeDocument",
-  "chat.promptCompareModels",
-  "chat.promptReviewCode",
-  "chat.promptDraftEmail",
-  "chat.promptAnalyzeImage",
-];
+// A guest's picker offers the same formats minus nothing the server would
+// refuse anyway; the extension aliases stay so a `.docx` whose browser-reported
+// type is empty is still selectable.
+const GUEST_ACCEPT_ATTRIBUTE = [
+  ...GUEST_ACCEPTED_MEDIA_TYPES,
+  ...Object.keys(OFFICE_EXTENSION_TYPES).map((extension) => `.${extension}`),
+].join(",");
 
-const getProviderSortRank = (provider: string) => {
-  const priorityIndex = PROVIDER_DISPLAY_ORDER.indexOf(provider);
-  return priorityIndex === -1 ? PROVIDER_DISPLAY_ORDER.length : priorityIndex;
+/**
+ * A signed-in account with an attachment-capable plan. The composer is used in
+ * places that never pass capabilities explicitly, so the permissive
+ * signed-in shape stays the default and guests are the narrowing.
+ */
+const DEFAULT_ATTACHMENT_CAPABILITIES: ChatAttachmentCapabilities = {
+  canAttachLocalFiles: true,
+  canConnectGoogleDrive: true,
+  maxAttachmentsPerMessage: MAX_ATTACHMENTS,
+  maxAttachmentBytes: MAX_ATTACHMENT_SIZE,
+  attachmentPersistence: "account",
 };
 
 const getFileMediaType = (file: File) => {
@@ -213,6 +238,31 @@ const fileToDataUrl = (file: File) =>
 
 const hasDraggedFiles = (dataTransfer: DataTransfer | null) =>
   Boolean(dataTransfer && Array.from(dataTransfer.types).includes("Files"));
+
+// UI-STATE-002. An attachment that is still on its way in. `stage` is the
+// step actually running, so "uploading" (bytes leaving the browser) and
+// "processing" (server validating/extracting them) are two different states
+// on screen and in the accessibility tree, not one shared spinner.
+// `scopeId` is the draft key of the conversation the file was picked in. An
+// upload belongs to that conversation's question, so its in-flight and failed
+// cards are only ever shown there -- switching conversations must not surface
+// another conversation's uploads, and coming back must still show them.
+type PendingAttachment = {
+  id: string;
+  name: string;
+  stage: "uploading" | "processing";
+  scopeId: string;
+};
+
+// A file that did not make it. `file` is retained so retry can re-run this
+// one file's pipeline; without it "retry" could only reopen the picker.
+type FailedAttachment = {
+  id: string;
+  name: string;
+  reason: string;
+  file: File;
+  scopeId: string;
+};
 
 const getAttachmentLabel = (attachment: ChatAttachment) => {
   const extension = attachment.name.split(".").pop();
@@ -291,15 +341,44 @@ type ChatInputProps = {
   isSending?: boolean;
   focusToken?: number;
   isNewConversation?: boolean;
+  currentChatId?: string | null;
   selectedModels: string[];
   disabledModelIds?: string[];
-  isGuestLimitReached?: boolean;
+  guestMessageCount?: number;
+  maxGuestMessages?: number;
   onToggleModel: (modelId: string) => boolean;
+  onSwapModel: (removeModelId: string, addModelId: string) => boolean;
   attachments: ChatAttachment[];
-  onAttachmentsChange: (attachments: ChatAttachment[]) => void;
-  canAttach?: boolean;
+  onAttachmentsChange: AttachmentsChangeHandler;
+  /**
+   * What this caller may actually do with files, as four independent facts
+   * rather than one boolean. `canAttach={!isGuestMode}` used to answer "may I
+   * attach at all", "how many", "from where" and "what happens afterwards"
+   * with a single "no" for guests, which is why the product promised a file
+   * upload the composer refused to offer.
+   */
+  attachmentCapabilities?: ChatAttachmentCapabilities;
+  /** Opens the shell's sign-in prompt from a capability the guest lacks. */
+  onGuestSignInPrompt?: () => void;
   isGuestMode?: boolean;
   guestPreviewMode?: boolean;
+  variant?: "bar" | "floating";
+  /**
+   * The bar variant normally draws the single boundary between the answer
+   * canvas and the bottom dock. When a comparison rail sits directly above it
+   * that rail owns the boundary instead, so the composer must not add a
+   * second full-width border to the same seam.
+   */
+  hideTopBorder?: boolean;
+  // MobileChatShell renders its own copy pinned to the true screen bottom
+  // (independent of the composer's floating/docked position) instead of
+  // this one, which always sits directly under the input box.
+  hideDisclaimer?: boolean;
+  webSearchMode?: WebSearchMode;
+  onWebSearchModeChange?: (mode: WebSearchMode) => void;
+  onOpenDeepResearchSetup?: () => void;
+  isDeepResearchPending?: boolean;
+  onDismissDeepResearchChip?: () => void;
 };
 
 type GooglePickerConfig = {
@@ -385,15 +464,27 @@ export function ChatInput({
   isSending = false,
   focusToken,
   isNewConversation = true,
+  currentChatId = null,
   selectedModels,
   disabledModelIds = [],
-  isGuestLimitReached = false,
+  guestMessageCount = 0,
+  maxGuestMessages = 20,
   onToggleModel,
+  onSwapModel,
   attachments,
   onAttachmentsChange,
-  canAttach: canAttachProp = true,
+  attachmentCapabilities = DEFAULT_ATTACHMENT_CAPABILITIES,
+  onGuestSignInPrompt,
   isGuestMode = false,
   guestPreviewMode = false,
+  variant = "bar",
+  hideTopBorder = false,
+  hideDisclaimer = false,
+  webSearchMode = "off",
+  onWebSearchModeChange,
+  onOpenDeepResearchSetup,
+  isDeepResearchPending = false,
+  onDismissDeepResearchChip,
 }: ChatInputProps) {
   const {
     models: AVAILABLE_MODELS,
@@ -403,30 +494,122 @@ export function ChatInput({
     () => new Set(PUBLIC_MODELS.map((model) => model.id)),
     [PUBLIC_MODELS]
   );
+  const isMobileShell = useIsMobileShell();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  /** True while an IME composition is in progress, so Enter must not submit. */
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const previousAttachmentsRef = useRef<ChatAttachment[]>([]);
+  // The draft this composer is currently editing. Everything scoped below is
+  // scoped to this, not to the component instance: the composer is shared by
+  // every conversation and is deliberately never remounted between them (that
+  // would take the portal host, focus and in-flight uploads with it).
+  const draftScopeId = draftKeyFor(currentChatId);
+  const draftScopeIdRef = useRef(draftScopeId);
+  useEffect(() => {
+    draftScopeIdRef.current = draftScopeId;
+  }, [draftScopeId]);
+  const previousAttachmentsRef = useRef<{
+    scopeId: string;
+    items: ChatAttachment[];
+  }>({ scopeId: draftScopeId, items: attachments });
   const hasHandledFocusTokenRef = useRef(false);
   const guestQuickStartActiveRef = useRef(false);
   const trackedLimitScopeRef = useRef<"guest" | "daily" | "monthly" | null>(
     null
   );
   const [isUploading, setIsUploading] = useState(false);
+  // UI-STATE-002. See uploadOneFile: the composer distinguishes the transfer
+  // step from the server-side finalize step, and keeps a failed file around
+  // so retry is a real action rather than a dead button.
+  const [pendingAttachments, setPendingAttachments] = useState<
+    PendingAttachment[]
+  >([]);
+  const [failedAttachments, setFailedAttachments] = useState<
+    FailedAttachment[]
+  >([]);
+  // Only this conversation's uploads are on screen. The entries for other
+  // conversations stay in state so returning to one still shows its own
+  // in-flight and failed files.
+  const scopedPendingAttachments = useMemo(
+    () => pendingAttachments.filter((item) => item.scopeId === draftScopeId),
+    [draftScopeId, pendingAttachments]
+  );
+  const scopedFailedAttachments = useMemo(
+    () => failedAttachments.filter((item) => item.scopeId === draftScopeId),
+    [draftScopeId, failedAttachments]
+  );
   const [isDragActive, setIsDragActive] = useState(false);
+  const [preserveFormatting, setPreserveFormatting] = useState(false);
+  useEffect(() => {
+    if (value.trim()) return;
+    queueMicrotask(() => setPreserveFormatting(false));
+  }, [value]);
   const [showGuestQuickStart, setShowGuestQuickStart] = useState(false);
   const [dismissedSuggestionKey, setDismissedSuggestionKey] = useState<string | null>(null);
+  // Collapsed by default: the exception detail (which models cannot search and
+  // what they do instead) is a user-initiated disclosure, never a permanent row.
+  const [isWebSearchExceptionOpen, setIsWebSearchExceptionOpen] = useState(false);
+  const [dismissedWebSearchSuggestionKey, setDismissedWebSearchSuggestionKey] = useState<
+    string | null
+  >(null);
+  const [dismissedComplementaryModelId, setDismissedComplementaryModelId] = useState<string | null>(null);
   const [isCreditBreakdownOpen, setIsCreditBreakdownOpen] = useState(false);
+  const [isUsageLimitModalOpen, setIsUsageLimitModalOpen] = useState(false);
     const { t, lang } = useLanguage();
+    const helpCopy = chatHelpCopy[lang];
     const modelsSelectedLabel = (count: number) =>
       `${count} ${count === 1 ? t("chat.modelsSelectedOne") : t("chat.modelsSelectedOther")}`;
-    const pickerCopy = modelPickerCopy[lang];
-    const pickerFeatureLabels = modelPickerFeatureLabels[lang];
     const signInCallbackUrl = withChatLanguage("/chat", lang);
     const accountUsage = useUserUsage(!isGuestMode);
+    // Local files and Google Drive are two separate permissions: a guest gets
+    // the first (one ephemeral file, validated and parsed server-side) and not
+    // the second, because Drive needs an OAuth grant an anonymous session
+    // cannot hold. The plan check only ever *removes* a capability.
     const canAttach =
-      canAttachProp &&
-      !isGuestMode &&
+      attachmentCapabilities.canAttachLocalFiles &&
       accountUsage?.limits.allowAttachments !== false;
+    const canConnectGoogleDrive =
+      attachmentCapabilities.canConnectGoogleDrive &&
+      accountUsage?.limits.allowAttachments !== false;
+    const maxAttachments = Math.max(
+      1,
+      attachmentCapabilities.maxAttachmentsPerMessage
+    );
+    const maxAttachmentBytes = attachmentCapabilities.maxAttachmentBytes;
+    const isEphemeralAttachment =
+      attachmentCapabilities.attachmentPersistence === "ephemeral";
+    const acceptedFileTypes = isEphemeralAttachment
+      ? GUEST_ACCEPT_ATTRIBUTE
+      : ACCEPTED_FILE_TYPES;
+    const { requestToken: requestGuestVerificationToken } = useGuestVerification();
+    // Every guest upload rejection the server can produce, mapped to the one
+    // sentence that tells the user what to do about it. An unrecognised code
+    // falls back to the generic "could not be processed" rather than surfacing
+    // a server string.
+    const guestAttachmentErrorMessage = useCallback(
+      (code?: string) => {
+        switch (code) {
+          case "GUEST_ATTACHMENT_UNSUPPORTED_TYPE":
+          case "GUEST_ATTACHMENT_TYPE_MISMATCH":
+            return t("chat.guestAttachmentUnsupported");
+          case "GUEST_ATTACHMENT_TOO_LARGE":
+            return interpolateCopy(t("chat.guestAttachmentSizeError"), {
+              megabytes: Math.floor(maxAttachmentBytes / (1024 * 1024)),
+            });
+          case "GUEST_ATTACHMENT_TEXT_TOO_LARGE":
+            return t("chat.guestAttachmentTextTooLarge");
+          case "GUEST_ATTACHMENT_NO_TEXT":
+          case "GUEST_ATTACHMENT_UNREADABLE":
+            return t("chat.guestAttachmentUnreadable");
+          case "API_RATE_LIMITED":
+            return t("chat.compareRateLimited");
+          case "ATTACHMENTS_DISABLED_BY_ADMIN":
+            return t("chat.guestAttachmentUnavailable");
+          default:
+            return t("chat.guestAttachmentFailed");
+        }
+      },
+      [maxAttachmentBytes, t]
+    );
   const maxSelectableModels = isGuestMode
       ? APP_DEFAULTS.maxGuestSelectedModels
       : accountUsage?.limits.maxModels || MAX_SELECTED_MODELS;
@@ -471,19 +654,75 @@ export function ChatInput({
     return Math.max(1, Math.ceil(textBytes / 4) + binaryAttachmentTokens);
   }, [attachments, value]);
   const inputCreditMultiplier = getInputCreditMultiplier(estimatedInputTokens);
-  const selectedBaseCredits = activeSelectedModels.reduce((sum, modelId) => {
-    const model = AVAILABLE_MODELS.find((item) => item.id === modelId);
-    return sum + (model ? getModelUsageProfile(model).credits : 0);
-  }, 0);
-  const estimatedRequestCredits = activeSelectedModels.reduce((sum, modelId) => {
-    const model = AVAILABLE_MODELS.find((item) => item.id === modelId);
-    return sum + (model ? getWeightedUsageCredits(model, estimatedInputTokens) : 0);
-  }, 0);
-  const creditBreakdown = activeSelectedModels
-    .map((modelId) => {
-      const model = AVAILABLE_MODELS.find((item) => item.id === modelId);
+  const activeSelectedModelObjects = activeSelectedModels
+    .map((modelId) => AVAILABLE_MODELS.find((item) => item.id === modelId))
+    .filter((model): model is AiModel => Boolean(model));
+  const requestCreditEstimate = estimateRequestCredits({
+    models: activeSelectedModelObjects,
+    estimatedInputTokens,
+    webSearchMode,
+  });
+  const selectedBaseCredits = requestCreditEstimate.baseCredits;
+  const estimatedRequestCredits = requestCreditEstimate.totalEstimatedCredits;
+  const webSearchReservationCredits = requestCreditEstimate.webSearchReservationCredits;
+  // Derived from the same active-model list the credit estimate uses, so the
+  // chip, its support counts and the reservation can never describe different
+  // selections -- changing or pausing a model updates all three together.
+  const webSearchState = deriveWebSearchComposerState({
+    webSearchMode,
+    selectedModelIds: activeSelectedModels,
+  });
+  const webSearchChipLabel = webSearchState.allUnsupported
+    ? t("chat.webSearchChipUnavailable")
+    : webSearchState.hasException
+      ? interpolateCopy(t("chat.webSearchChipPartial"), {
+          supported: webSearchState.supportedCount,
+          total: webSearchState.selectedCount,
+        })
+      : webSearchMode === "auto"
+        ? t("chat.webSearchChipAuto")
+        : t("chat.webSearchChipOn");
+  // The mobile chip no longer owns a row of its own -- it shares the
+  // composer's first input line -- so it drops the separator and the word
+  // "supported" while keeping every state distinguishable: "Web search",
+  // "Web search auto", "Web search 2/3", "No web search". The full sentence is
+  // still what assistive tech gets (web-search-state-description below), and a
+  // blocking state additionally keeps its own full-width notice, so no state is
+  // ever reduced to a bare icon.
+  const webSearchChipCompactLabel = webSearchState.allUnsupported
+    ? t("chat.webSearchChipUnavailableCompact")
+    : webSearchState.hasException
+      ? interpolateCopy(t("chat.webSearchChipPartialCompact"), {
+          supported: webSearchState.supportedCount,
+          total: webSearchState.selectedCount,
+        })
+      : webSearchMode === "auto"
+        ? t("chat.webSearchChipAutoCompact")
+        : t("chat.webSearchChipOnCompact");
+  const webSearchStateDescription =
+    webSearchMode === "always"
+      ? interpolateCopy(t("chat.webSearchChipDescriptionAlways"), {
+          supported: webSearchState.supportedCount,
+          total: webSearchState.selectedCount,
+          unsupported: webSearchState.unsupportedCount,
+          credits: webSearchState.estimatedSurchargeCredits,
+        })
+      : interpolateCopy(t("chat.webSearchChipDescriptionAuto"), {
+          supported: webSearchState.supportedCount,
+          total: webSearchState.selectedCount,
+          unsupported: webSearchState.unsupportedCount,
+        });
+  const webSearchUnsupportedModelNames = webSearchState.unsupportedModelIds
+    .map(
+      (modelId) =>
+        AVAILABLE_MODELS.find((model) => model.id === modelId)?.name || modelId
+    )
+    .join(", ");
+  const creditBreakdown = requestCreditEstimate.models
+    .map((entry) => {
+      const model = activeSelectedModelObjects.find((item) => item.id === entry.modelId);
       return model
-        ? { id: modelId, name: model.name, credits: getWeightedUsageCredits(model, estimatedInputTokens) }
+        ? { id: entry.modelId, name: model.name, credits: entry.totalCredits }
         : null;
     })
     .filter((item): item is { id: string; name: string; credits: number } => item !== null);
@@ -502,6 +741,13 @@ export function ChatInput({
     purchasedCreditsRemaining,
   });
   const totalAvailableCredits = creditAllocation.totalAccountCredits;
+  // Matches the pre-submit gate in the page-level handler: the modal opens
+  // as soon as *this* request would push the guest over the cap, not only
+  // once the cumulative counter has already reached it. The two used to
+  // disagree, so a request could be silently rejected (toast/inline error)
+  // with no login-prompt modal shown.
+  const isGuestLimitReached =
+    isGuestMode && guestMessageCount + estimatedRequestCredits > maxGuestMessages;
   const isAccountDailyLimitReached =
     !isGuestMode &&
     Boolean(accountUsage) &&
@@ -543,16 +789,19 @@ export function ChatInput({
     : t("chat.inputPlaceholder");
   
   const isDisabled = disabled || isSending || isUploading || isUsageLimitReached;
+
+  // Why Send is unavailable, for the cases a user cannot work out from the
+  // button itself. `title` alone does not reach a screen reader or a keyboard
+  // user, so this is rendered as text the button points at with
+  // aria-describedby (docs/ui-contracts/mobile-chat-composer.md).
+  const sendDisabledReason = isUsageLimitReached
+    ? t("chat.exceedDailyLimit")
+    : activeSelectedModels.length === 0
+      ? t("chat.chooseModel")
+      : null;
   
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [menuView, setMenuView] = useState<"actions" | "models">("actions");
-  const [modelSearchQuery, setModelSearchQuery] = useState("");
-  const [providerFilter, setProviderFilter] = useState("all");
-  const [usageBandFilter, setUsageBandFilter] = useState<ModelPickerUsageBand>("all");
-  const [capabilityFilter, setCapabilityFilter] = useState<ModelPickerCapability>("all");
-  const [showAdvancedModelFilters, setShowAdvancedModelFilters] = useState(false);
-  const [imageInputOnly, setImageInputOnly] = useState(false);
-  const [availableOnPlanOnly, setAvailableOnPlanOnly] = useState(false);
+  const [menuView, setMenuView] = useState<"actions" | "models" | "webSearch">("actions");
   const [personalizedRecommendationIds, setPersonalizedRecommendationIds] = useState<string[]>([]);
   const hasRequestedPickerRecommendationsRef = useRef(false);
   const [liveModelStatuses, setLiveModelStatuses] = useState<Record<string, PublicModelStatusRecord>>({});
@@ -569,6 +818,7 @@ export function ChatInput({
       return [];
     }
   });
+  const [replaceModelCandidate, setReplaceModelCandidate] = useState<AiModel | null>(null);
   const [recentModelIds, setRecentModelIds] = useState<string[]>(() => {
     if (typeof window === "undefined") return [];
     try {
@@ -608,12 +858,58 @@ export function ChatInput({
       !selectedModels.includes(contextualModel.id) &&
       contextualLiveStatus !== "unavailable"
   );
+  // "웹 검색: 자동" only ever shows this dismissible suggestion -- it never
+  // sends a search on its own. Never shown once a mode is already forced on
+  // (nothing to suggest), and never repeats for the exact same draft text.
+  const webSearchSuggestionKey =
+    webSearchMode === "auto" && suggestsCurrentInformationNeeded(value)
+      ? draftSuggestionKey(value)
+      : null;
+  const showWebSearchSuggestion = Boolean(
+    webSearchSuggestionKey && webSearchSuggestionKey !== dismissedWebSearchSuggestionKey
+  );
+  const trackedWebSearchSuggestionKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!showWebSearchSuggestion || !webSearchSuggestionKey) return;
+    if (trackedWebSearchSuggestionKeyRef.current === webSearchSuggestionKey) return;
+    trackedWebSearchSuggestionKeyRef.current = webSearchSuggestionKey;
+    trackProductEvent("web_search_suggestion_shown", selectedModels.length, {});
+  }, [showWebSearchSuggestion, webSearchSuggestionKey, selectedModels.length]);
+  // Model-picker-only counterpart to the message-content-driven
+  // contextualSuggestion above: nudges toward one complementary model based
+  // on what kind of thinking the *currently selected* models are missing,
+  // shown instead of the full AI-combination questionnaire once the picker
+  // already has 2 of the (guest-capped) 3 model slots filled.
+  const complementarySuggestion =
+    !isGuestMode && selectedModels.length === 2
+      ? getComplementaryModelSuggestion(selectedModels)
+      : null;
+  const complementaryModel = complementarySuggestion
+    ? AVAILABLE_MODELS.find(
+        (model) => model.id === complementarySuggestion.modelId && model.enabled
+      )
+    : undefined;
+  const complementaryProfile = complementaryModel
+    ? getModelUsageProfile(complementaryModel)
+    : null;
+  const showComplementarySuggestion = Boolean(
+    complementarySuggestion &&
+      complementaryModel &&
+      complementarySuggestion.modelId !== dismissedComplementaryModelId
+  );
+
   const menuRef = useRef<HTMLDivElement>(null);
   const menuPopoverRef = useRef<HTMLDivElement>(null);
+  // Set by ModelPickerPanel while the picker is mounted. Escape is layered:
+  // the panel closes its filter sheet, then the All-models step, and only
+  // returns false once there is nothing left but the dialog itself.
+  const modelPickerEscapeRef = useRef<(() => boolean) | null>(null);
   const actionMenuButtonRef = useRef<HTMLButtonElement | null>(null);
   const modelMenuButtonRef = useRef<HTMLButtonElement | null>(null);
   const modelSearchInputRef = useRef<HTMLInputElement | null>(null);
-  const lastMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
+  // Not always a button any more: the mobile header's model summary opens this
+  // same picker and expects focus back when it closes.
+  const lastMenuTriggerRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (
@@ -642,6 +938,7 @@ export function ChatInput({
   useEffect(() => {
     if (!limitScope || trackedLimitScopeRef.current === limitScope) return;
     trackedLimitScopeRef.current = limitScope;
+    setIsUsageLimitModalOpen(true);
     trackProductEvent("credit_limit_hit", activeSelectedModels.length, {
       limit_scope: limitScope,
       current_plan: accountUsage?.plan.toLowerCase() as
@@ -755,117 +1052,57 @@ export function ChatInput({
     ).filter((element) => element.offsetParent !== null);
   }, []);
 
-  const closeMenu = useCallback((restoreFocus = true) => {
-    setIsMenuOpen(false);
-    setMenuView("actions");
-
-    if (restoreFocus) {
-      requestAnimationFrame(() => {
-        lastMenuTriggerRef.current?.focus();
-      });
-    }
-  }, [setMenuView]);
-
-  const modelProviders = useMemo(
-    () =>
-      Array.from(new Set(PUBLIC_MODELS.map((model) => model.provider))).sort(
-        (a, b) =>
-          getProviderSortRank(a) - getProviderSortRank(b) ||
-          a.localeCompare(b)
-      ),
-    [PUBLIC_MODELS]
+  const trackModelPickerEvent = useCallback(
+    (
+      event: ModelPickerAnalyticsEvent,
+      properties: { model_id?: string; recommendation_rank?: number } = {}
+    ) => {
+      // Model names are catalogue metadata, but the search box can contain
+      // anything the user typed, so only the fact that a search ran is sent.
+      trackProductEvent(event, selectedModels.length, properties);
+    },
+    [selectedModels.length]
   );
 
+  const closeMenu = useCallback(
+    (restoreFocus = true, reason: "done" | "dismissed" = "dismissed") => {
+      if (menuView === "models") {
+        trackProductEvent(
+          reason === "done"
+            ? "model_picker_selection_confirmed"
+            : "model_picker_abandoned",
+          selectedModels.length,
+          {}
+        );
+      }
+      setIsMenuOpen(false);
+      setMenuView("actions");
+
+      if (restoreFocus) {
+        requestAnimationFrame(() => {
+          lastMenuTriggerRef.current?.focus();
+        });
+      }
+    },
+    [menuView, selectedModels.length]
+  );
+
+  // The mobile header's model summary opens this picker rather than shipping a
+  // second one with its own copy of the selection state (STG-F009).
+  useEffect(() => {
+    const openModelPicker = (event: Event) => {
+      const { trigger } = (event as CustomEvent<ChatModelPickerOpenDetail>).detail || {};
+      lastMenuTriggerRef.current = trigger ?? null;
+      setMenuView("models");
+      setIsMenuOpen(true);
+    };
+
+    window.addEventListener(CHAT_MODEL_PICKER_OPEN_EVENT, openModelPicker);
+    return () =>
+      window.removeEventListener(CHAT_MODEL_PICKER_OPEN_EVENT, openModelPicker);
+  }, []);
+
   const currentPlan = isGuestMode ? "Guest" : accountUsage?.plan ?? "Free";
-
-  const favoriteRecommendationModels = useMemo(() => {
-    return favoriteModelIds
-      .map((modelId) => PUBLIC_MODELS.find((model) => model.id === modelId))
-      .filter((model): model is (typeof PUBLIC_MODELS)[number] => Boolean(model?.enabled))
-      .slice(0, 3);
-  }, [PUBLIC_MODELS, favoriteModelIds]);
-
-  const recommendationModels = useMemo(() => {
-    if (favoriteRecommendationModels.length) return favoriteRecommendationModels;
-    const ids = personalizedRecommendationIds.length
-      ? personalizedRecommendationIds
-      : [...RECOMMENDED_MODEL_IDS];
-    return ids
-      .map((modelId) => PUBLIC_MODELS.find((model) => model.id === modelId))
-      .filter((model): model is (typeof PUBLIC_MODELS)[number] => Boolean(model?.enabled))
-      .slice(0, 3);
-  }, [PUBLIC_MODELS, favoriteRecommendationModels, personalizedRecommendationIds]);
-
-  const filteredModels = useMemo(() => {
-    const normalizedQuery = modelSearchQuery.trim().toLowerCase();
-
-    return PUBLIC_MODELS.filter((model) => {
-      const usageProfile = getModelUsageProfile(model);
-      const description = getModelPickerDescription(model, lang).toLowerCase();
-      const matchesQuery =
-        !normalizedQuery ||
-        model.name.toLowerCase().includes(normalizedQuery) ||
-        model.provider.toLowerCase().includes(normalizedQuery) ||
-        description.includes(normalizedQuery);
-      const matchesProvider =
-        providerFilter === "all" || model.provider === providerFilter;
-      const matchesUsageBand =
-        usageBandFilter === "all" ||
-        getModelPickerUsageBand(usageProfile.credits) === usageBandFilter;
-      const matchesCapability = modelMatchesCapability(model, capabilityFilter);
-      const matchesImageInput = !imageInputOnly || modelSupportsImageInput(model);
-      const matchesCurrentPlan =
-        !availableOnPlanOnly || canUseModelWithPlan(currentPlan, model);
-
-      return (
-        matchesQuery &&
-        matchesProvider &&
-        matchesUsageBand &&
-        matchesCapability &&
-        matchesImageInput &&
-        matchesCurrentPlan
-      );
-    });
-  }, [
-    availableOnPlanOnly,
-    capabilityFilter,
-    currentPlan,
-    imageInputOnly,
-    lang,
-    modelSearchQuery,
-    PUBLIC_MODELS,
-    providerFilter,
-    usageBandFilter,
-  ]);
-
-  const groupedModels = useMemo(() => {
-    const favoriteSet = new Set(favoriteModelIds);
-    const recentSet = new Set(recentModelIds);
-    const sortedModels = [...filteredModels].sort((a, b) => {
-      const providerDelta =
-        getProviderSortRank(a.provider) - getProviderSortRank(b.provider);
-      if (providerDelta !== 0) return providerDelta;
-      const providerNameDelta = a.provider.localeCompare(b.provider);
-      if (providerNameDelta !== 0) return providerNameDelta;
-      const favoriteDelta =
-        Number(favoriteSet.has(b.id)) - Number(favoriteSet.has(a.id));
-      if (favoriteDelta !== 0) return favoriteDelta;
-      const recentDelta = Number(recentSet.has(b.id)) - Number(recentSet.has(a.id));
-      if (recentDelta !== 0) return recentDelta;
-      return a.name.localeCompare(b.name);
-    });
-
-    return sortedModels.reduce<Array<{ provider: string; models: typeof filteredModels }>>(
-      (groups, model) => {
-        const provider = model.provider;
-        const group = groups.find((item) => item.provider === provider);
-        if (group) group.models.push(model);
-        else groups.push({ provider, models: [model] });
-        return groups;
-      },
-      []
-    );
-  }, [favoriteModelIds, filteredModels, recentModelIds]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -949,19 +1186,13 @@ export function ChatInput({
           )
             ? (record.preferredPriority as ModelFinderPriority)
             : null;
-        const fileUsage =
-          typeof record.usesFilesFrequently === "string" &&
-          (MODEL_FINDER_FILE_USAGE as readonly string[]).includes(
-            record.usesFilesFrequently
-          )
-            ? (record.usesFilesFrequently as ModelFinderFileUsage)
-            : null;
-
-        if (!tasks.length || !priority || !fileUsage) return;
+        if (!tasks.length || !priority) return;
         setPersonalizedRecommendationIds(
-          getModelFinderRecommendations({ tasks, priority, fileUsage }).map(
-            (recommendation) => recommendation.modelId
-          )
+          getModelFinderRecommendations({
+            tasks,
+            priority,
+            fileUsage: "rarely",
+          }).map((recommendation) => recommendation.modelId)
         );
       })
       .catch(() => {});
@@ -991,6 +1222,44 @@ export function ChatInput({
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [closeMenu]);
+
+  // The desktop popover is anchored to the bottom of the toolbar row via
+  // `bottom: 3rem`, so its bottom edge never moves — only its height does.
+  // `getBoundingClientRect().bottom` therefore tells us exactly how much
+  // vertical space is actually available above it on screen (accounting for
+  // the real input-bar height, browser zoom, and short viewports), which a
+  // static `calc(100dvh - 8rem)` cap can't know. Runs before paint so an
+  // oversized first layout never flashes.
+  useLayoutEffect(() => {
+    if (!isMenuOpen) return;
+
+    const popover = menuPopoverRef.current;
+    if (!popover) return;
+
+    const desktopQuery = window.matchMedia("(min-width: 768px)");
+
+    const clampPopoverHeight = () => {
+      if (!desktopQuery.matches) {
+        popover.style.maxHeight = "";
+        return;
+      }
+
+      const topMargin = 16;
+      const minHeight = 240;
+      const available = popover.getBoundingClientRect().bottom - topMargin;
+      popover.style.maxHeight = `${Math.max(minHeight, available)}px`;
+    };
+
+    clampPopoverHeight();
+    window.addEventListener("resize", clampPopoverHeight);
+    desktopQuery.addEventListener("change", clampPopoverHeight);
+
+    return () => {
+      window.removeEventListener("resize", clampPopoverHeight);
+      desktopQuery.removeEventListener("change", clampPopoverHeight);
+      popover.style.maxHeight = "";
+    };
+  }, [isMenuOpen, menuView]);
 
   useEffect(() => {
     if (!isMenuOpen) return;
@@ -1026,6 +1295,7 @@ export function ChatInput({
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
+        if (menuView === "models" && modelPickerEscapeRef.current?.()) return;
         closeMenu(true);
         return;
       }
@@ -1096,7 +1366,7 @@ export function ChatInput({
 
     document.addEventListener("keydown", handleMenuKeyDown, true);
     return () => document.removeEventListener("keydown", handleMenuKeyDown, true);
-  }, [closeMenu, getMenuFocusableElements, isMenuOpen]);
+  }, [closeMenu, getMenuFocusableElements, isMenuOpen, menuView]);
 
   const toggleFavoriteModel = (modelId: string) => {
     setFavoriteModelIds((current) => {
@@ -1112,8 +1382,13 @@ export function ChatInput({
     const textarea = textareaRef.current;
     if (!textarea) return;
 
+    // 10rem rather than a fixed 160px: at 200% text scaling the auto-grow cap
+    // has to grow with the text, or the box stops one line short of what the
+    // reader can actually see.
+    const rootFontSize =
+      Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
     textarea.style.height = "auto";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 160)}px`;
+    textarea.style.height = `${Math.min(textarea.scrollHeight, rootFontSize * 10)}px`;
   }, [value]);
 
   useEffect(() => {
@@ -1138,9 +1413,18 @@ export function ChatInput({
   }, [focusToken]);
 
   useEffect(() => {
-    const currentIds = new Set(attachments.map((attachment) => attachment.id));
+    // Only a removal *within one conversation* frees a preview. When the list
+    // changes because another conversation was opened, the previous entries
+    // are still that conversation's draft: revoking them here is what used to
+    // make an attachment unrecoverable the moment the user looked away.
+    // Drafts that are genuinely spent (sent, or their conversation deleted)
+    // are released by the draft store that owns them.
+    const previous = previousAttachmentsRef.current;
+    previousAttachmentsRef.current = { scopeId: draftScopeId, items: attachments };
+    if (previous.scopeId !== draftScopeId) return;
 
-    previousAttachmentsRef.current.forEach((attachment) => {
+    const currentIds = new Set(attachments.map((attachment) => attachment.id));
+    previous.items.forEach((attachment) => {
       if (
         !currentIds.has(attachment.id) &&
         attachment.data?.startsWith("blob:")
@@ -1148,46 +1432,145 @@ export function ChatInput({
         URL.revokeObjectURL(attachment.data);
       }
     });
-
-    previousAttachmentsRef.current = attachments;
-  }, [attachments]);
+  }, [attachments, draftScopeId]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      if (!isDisabled) {
-        dismissGuestQuickStart();
-        onSubmit();
-      }
+    const action = getChatEnterKeyAction(
+      e,
+      isComposingKeydown(e),
+      isMobileShell
+    );
+    if (action !== "submit") return;
+
+    e.preventDefault();
+    if (!isDisabled) {
+      dismissGuestQuickStart();
+      onSubmit();
     }
   };
 
-  const handleFilesSelected = async (files: FileList | File[] | null) => {
-    if (!files?.length) return;
+  /**
+   * UI-STATE-002. Uploading one file is three sequential network steps --
+   * prepare (PUT), transfer to object storage (PUT), then server-side
+   * finalize/extract (PATCH) -- but the composer used to represent all of it
+   * with one boolean and a spinner on the attach button. Nothing named the
+   * file, nothing said which step was running, and a failure only ever
+   * surfaced as a toast that took the file down with it. That is why the
+   * "uploading" and "processing" goldens were byte-identical: they really
+   * were the same picture.
+   *
+   * Each file now carries its own stage while it is in flight, and a failure
+   * keeps the File itself so "retry" can re-run that one file's pipeline
+   * rather than asking the user to find it in the picker again.
+   */
+  const uploadOneFile = useCallback(
+    async (file: File, trackingId: string, scopeId: string) => {
+      const mediaType = getFileMediaType(file);
+      const fail = (reason: string) => {
+        setPendingAttachments((current) =>
+          current.filter((item) => item.id !== trackingId)
+        );
+        setFailedAttachments((current) => [
+          ...current.filter((item) => item.id !== trackingId),
+          { id: trackingId, name: file.name, reason, file, scopeId },
+        ]);
+      };
 
-    const availableSlots = MAX_ATTACHMENTS - attachments.length;
-    if (availableSlots <= 0) {
-      dispatchAppToast(t("chat.attachmentCountError"), "error");
-      return;
-    }
+      const isTypeAccepted = isEphemeralAttachment
+        ? (GUEST_ACCEPTED_MEDIA_TYPES as readonly string[]).includes(mediaType)
+        : ACCEPTED_FILE_TYPES.split(",").includes(mediaType) ||
+          OFFICE_FILE_TYPES.has(mediaType);
+      if (!isTypeAccepted) {
+        fail(t("chat.attachmentTypeError"));
+        return;
+      }
+      if (file.size > maxAttachmentBytes) {
+        fail(
+          isEphemeralAttachment
+            ? interpolateCopy(t("chat.guestAttachmentSizeError"), {
+                megabytes: Math.floor(maxAttachmentBytes / (1024 * 1024)),
+              })
+            : t("chat.attachmentSizeError")
+        );
+        return;
+      }
 
-    const selectedFiles = Array.from(files).slice(0, availableSlots);
-    const nextAttachments: ChatAttachment[] = [];
-    setIsUploading(true);
+      setFailedAttachments((current) =>
+        current.filter((item) => item.id !== trackingId)
+      );
+      setPendingAttachments((current) => [
+        ...current.filter((item) => item.id !== trackingId),
+        { id: trackingId, name: file.name, stage: "uploading", scopeId },
+      ]);
 
-    try {
-      for (const file of selectedFiles) {
-        const mediaType = getFileMediaType(file);
-        if (
-          !ACCEPTED_FILE_TYPES.split(",").includes(mediaType) &&
-          !OFFICE_FILE_TYPES.has(mediaType)
-        ) {
-          dispatchAppToast(t("chat.attachmentTypeError"), "error");
-          continue;
-        }
-        if (file.size > MAX_ATTACHMENT_SIZE) {
-          dispatchAppToast(t("chat.attachmentSizeError"), "error");
-          continue;
+      try {
+        if (isEphemeralAttachment) {
+          // Guests take a different route on purpose, not a relaxed version of
+          // the same one: a single request that carries the bytes, validated
+          // and parsed server-side before anything is stored, writing to a key
+          // scoped to their own signed guest session. There is no presigned
+          // direct-to-storage step, because there is no account to scope one
+          // to -- see app/api/chat/guest-attachment/route.ts.
+          const uploadGuestFile = (turnstileToken?: string) => {
+            const query = new URLSearchParams({
+              name: file.name,
+              mediaType,
+            });
+            if (turnstileToken) query.set("turnstileToken", turnstileToken);
+            return fetch(`/api/chat/guest-attachment?${query.toString()}`, {
+              method: "POST",
+              headers: { "Content-Type": mediaType },
+              body: file,
+            });
+          };
+
+          let response = await uploadGuestFile();
+          if (!response.ok) {
+            const payload = (await response.json().catch(() => null)) as
+              | { code?: string }
+              | null;
+            if (payload?.code === "TURNSTILE_REQUIRED") {
+              // User-initiated, so the shared verification sheet may be shown.
+              const token = await requestGuestVerificationToken(
+                "guest_attachment"
+              );
+              response = await uploadGuestFile(token);
+            }
+            if (!response.ok) {
+              const finalPayload =
+                payload?.code === "TURNSTILE_REQUIRED"
+                  ? ((await response.json().catch(() => null)) as
+                      | { code?: string }
+                      | null)
+                  : payload;
+              fail(guestAttachmentErrorMessage(finalPayload?.code));
+              return;
+            }
+          }
+
+          const uploaded = (await response.json()) as {
+            objectKey: string;
+            name: string;
+            mediaType: string;
+            size: number;
+            kind: "text" | "file";
+          };
+          const guestAttachment: ChatAttachment = {
+            id: crypto.randomUUID(),
+            name: uploaded.name,
+            mediaType: uploaded.mediaType,
+            size: uploaded.size,
+            objectKey: uploaded.objectKey,
+            data: uploaded.mediaType.startsWith("image/")
+              ? await fileToDataUrl(file)
+              : undefined,
+            kind: uploaded.kind,
+          };
+          setPendingAttachments((current) =>
+            current.filter((item) => item.id !== trackingId)
+          );
+          onAttachmentsChange((current) => [...current, guestAttachment], scopeId);
+          return;
         }
 
         const prepareResponse = await fetch("/api/chat", {
@@ -1215,6 +1598,16 @@ export function ChatInput({
         if (!uploadResponse.ok) {
           throw new Error(`R2 upload failed: ${uploadResponse.status}`);
         }
+
+        // The bytes have left the browser; what remains is the server
+        // validating and extracting them. That is a different wait with a
+        // different explanation, so it is a different stage on screen.
+        setPendingAttachments((current) =>
+          current.map((item) =>
+            item.id === trackingId ? { ...item, stage: "processing" } : item
+          )
+        );
+
         const finalizeResponse = await fetch("/api/chat", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -1229,7 +1622,7 @@ export function ChatInput({
         }
         const finalized = await finalizeResponse.json();
 
-        nextAttachments.push({
+        const attachment: ChatAttachment = {
           id: crypto.randomUUID(),
           name: file.name,
           mediaType,
@@ -1239,18 +1632,88 @@ export function ChatInput({
             ? await fileToDataUrl(file)
             : undefined,
           kind: TEXT_FILE_TYPES.has(mediaType) ? "text" : "file",
-        });
+        };
+        setPendingAttachments((current) =>
+          current.filter((item) => item.id !== trackingId)
+        );
+        // Appended through a reducer rather than by rebuilding the list this
+        // closure captured: several files can finish while it still holds the
+        // list as it looked when the batch started, and appending to a stale
+        // copy silently drops whichever one landed first. `scopeId` sends it
+        // to the conversation the file was picked in, which may no longer be
+        // the one on screen.
+        onAttachmentsChange((current) => [...current, attachment], scopeId);
+      } catch (error) {
+        console.error("Attachment upload failed:", error);
+        fail(t("chat.attachmentUploadError"));
       }
+    },
+    [
+      guestAttachmentErrorMessage,
+      isEphemeralAttachment,
+      maxAttachmentBytes,
+      onAttachmentsChange,
+      requestGuestVerificationToken,
+      t,
+    ]
+  );
 
-      onAttachmentsChange([...attachments, ...nextAttachments]);
-    } catch (error) {
-      console.error("Attachment upload failed:", error);
-      dispatchAppToast(t("chat.attachmentUploadError"), "error");
-    } finally {
-      setIsUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+  const runUploadBatch = useCallback(
+    async (
+      entries: Array<{ file: File; trackingId: string }>,
+      // Read once, when the batch starts, so every file in it is attributed to
+      // the conversation the user actually picked it in.
+      scopeId: string = draftScopeIdRef.current
+    ) => {
+      setIsUploading(true);
+      try {
+        for (const entry of entries) {
+          await uploadOneFile(entry.file, entry.trackingId, scopeId);
+        }
+      } finally {
+        setIsUploading(false);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      }
+    },
+    [uploadOneFile]
+  );
+
+  const handleFilesSelected = async (files: FileList | File[] | null) => {
+    if (!files?.length) return;
+
+    const availableSlots =
+      maxAttachments - attachments.length - scopedPendingAttachments.length;
+    if (availableSlots <= 0) {
+      dispatchAppToast(
+        isEphemeralAttachment
+          ? t("chat.guestAttachmentCountError")
+          : t("chat.attachmentCountError"),
+        "error"
+      );
+      return;
     }
+
+    const entries = Array.from(files)
+      .slice(0, availableSlots)
+      .map((file) => ({ file, trackingId: crypto.randomUUID() }));
+    await runUploadBatch(entries);
   };
+
+  const handleRetryFailedAttachment = useCallback(
+    (failed: FailedAttachment) => {
+      // Retried into the conversation it originally failed in, which is the
+      // only one its card is ever shown in.
+      void runUploadBatch(
+        [{ file: failed.file, trackingId: failed.id }],
+        failed.scopeId
+      );
+    },
+    [runUploadBatch]
+  );
+
+  const handleDismissFailedAttachment = useCallback((id: string) => {
+    setFailedAttachments((current) => current.filter((item) => item.id !== id));
+  }, []);
 
   useEffect(() => {
     const preventFileNavigation = (event: DragEvent) => {
@@ -1306,7 +1769,13 @@ export function ChatInput({
     ) => {
         const pastedFiles = Array.from(event.clipboardData.files);
 
-        if (pastedFiles.length === 0) return;
+        if (pastedFiles.length === 0) {
+            const pastedText = event.clipboardData.getData("text/plain");
+            if (looksLikeStructuredText(pastedText)) {
+                setPreserveFormatting(true);
+            }
+            return;
+        }
 
         event.preventDefault();
 
@@ -1319,9 +1788,9 @@ export function ChatInput({
     };
 
   const handleGoogleDriveSelect = async () => {
-    if (!canAttach || isUploading) return;
+    if (!canConnectGoogleDrive || isUploading) return;
 
-    const availableSlots = MAX_ATTACHMENTS - attachments.length;
+    const availableSlots = maxAttachments - attachments.length;
     if (availableSlots <= 0) {
       dispatchAppToast(t("chat.attachmentCountError"), "error");
       return;
@@ -1459,11 +1928,18 @@ export function ChatInput({
     if (!attachment.objectKey) return;
 
     try {
-      const response = await fetch("/api/chat", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: attachment.objectKey }),
-      });
+      // A guest object lives on its own endpoint, scoped to the guest session
+      // that uploaded it. Deleting it here is what keeps the common case --
+      // pick a file, change your mind -- from leaving an orphan for the TTL
+      // sweep to find an hour later.
+      const response = await fetch(
+        isEphemeralAttachment ? "/api/chat/guest-attachment" : "/api/chat",
+        {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key: attachment.objectKey }),
+        }
+      );
       if (!response.ok) {
         throw new Error(`R2 deletion failed: ${response.status}`);
       }
@@ -1472,8 +1948,142 @@ export function ChatInput({
     }
   };
 
+  // Both composer tool chips. They always sit in a row of their own above the
+  // textarea -- see docs/ui-contracts/mobile-chat-composer.md -- and only the
+  // label length differs between the shells, so the two never drift apart.
+  const hasToolStatusChips = webSearchState.isVisible || isDeepResearchPending;
+  const toolStatusChips = hasToolStatusChips ? (
+    <>
+    {webSearchState.isVisible && (
+      <div
+        data-testid="web-search-mode-chip"
+        data-tone={webSearchState.tone}
+        data-supported-count={webSearchState.supportedCount}
+        data-unsupported-count={webSearchState.unsupportedCount}
+        // 32px tall on mobile so the row the chip got back costs the answer
+        // canvas as little as possible; the controls inside keep their 44px
+        // touch area through ::before insets rather than through box height.
+        className={`flex min-w-0 max-w-full items-center gap-1.5 rounded-full border pl-3 pr-1.5 text-xs font-bold ${isMobileShell ? "h-8" : "h-9"} ${
+          webSearchState.tone === "blocked"
+            ? "border-red-200 bg-red-50 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
+            : webSearchState.tone === "warning"
+              ? "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100"
+              : "border-accent-web-search-200 bg-accent-web-search-50 text-accent-web-search-800 dark:border-accent-web-search-900/60 dark:bg-accent-web-search-950/30 dark:text-accent-web-search-200"
+        }`}
+      >
+        <Globe2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        {/*
+          When nothing can search there is no "which ones" worth
+          expanding -- the blocking notice below already names the
+          two ways out, so the chip stays a plain label.
+        */}
+        {webSearchState.hasException && !webSearchState.allUnsupported ? (
+          <button
+            type="button"
+            data-testid="web-search-exception-toggle"
+            aria-expanded={isWebSearchExceptionOpen}
+            aria-controls="web-search-exception-detail"
+            aria-describedby="web-search-state-description"
+            onClick={() => setIsWebSearchExceptionOpen((open) => !open)}
+            // The chip itself is 36px tall, so the toggle borrows
+            // vertical hit area from a pseudo-element rather than
+            // growing the chip. Horizontal inset stays small so it
+            // never overlaps the adjacent remove control.
+            className={`relative truncate rounded-full text-left underline decoration-dotted underline-offset-2 before:absolute before:content-[''] before:-inset-x-1 ${
+              isMobileShell ? "before:-inset-y-3.5" : "before:-inset-y-1"
+            }`}
+          >
+            {isMobileShell ? webSearchChipCompactLabel : webSearchChipLabel}
+          </button>
+        ) : (
+          <span
+            className="truncate"
+            aria-describedby="web-search-state-description"
+          >
+            {isMobileShell ? webSearchChipCompactLabel : webSearchChipLabel}
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={() => onWebSearchModeChange?.("off")}
+          aria-label={t("chat.removeWebSearchMode")}
+          title={t("chat.removeWebSearchMode")}
+          className={`relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full before:absolute before:content-[''] hover:bg-black/5 dark:hover:bg-white/10 ${isMobileShell ? "before:-inset-2.5" : "before:-inset-1"}`}
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    )}
+    {isDeepResearchPending && (
+      <div
+        data-testid="deep-research-chip"
+        className={`flex min-w-0 max-w-full items-center gap-1.5 rounded-full border border-accent-deep-research-200 bg-accent-deep-research-50 pl-3 pr-1.5 text-xs font-bold text-accent-deep-research-800 dark:border-accent-deep-research-900/60 dark:bg-accent-deep-research-950/30 dark:text-accent-deep-research-200 ${isMobileShell ? "h-8" : "h-9"}`}
+        title={t("chat.deepResearchChipTooltip")}
+      >
+        <Microscope className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        <span className="truncate">{t("chat.deepResearchChipLabel")}</span>
+        <button
+          type="button"
+          onClick={() => onDismissDeepResearchChip?.()}
+          aria-label={t("chat.removeDeepResearchChip")}
+          title={t("chat.removeDeepResearchChip")}
+          className={`relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-accent-deep-research-500 before:absolute before:content-[''] hover:bg-accent-deep-research-100 dark:hover:bg-accent-deep-research-900/40 ${isMobileShell ? "before:-inset-2.5" : "before:-inset-1"}`}
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    )}
+    </>
+  ) : null;
+  const webSearchExceptionDetail =
+    webSearchState.hasException &&
+    !webSearchState.allUnsupported &&
+    isWebSearchExceptionOpen ? (
+      <p
+        id="web-search-exception-detail"
+        data-testid="web-search-exception-detail"
+        className="mb-2 px-1 text-[11px] leading-4 text-zinc-600 dark:text-zinc-300"
+      >
+        {interpolateCopy(t("chat.webSearchUnsupportedModels"), {
+          models: webSearchUnsupportedModelNames,
+        })}{" "}
+        {t("chat.webSearchUnsupportedBehavior")}
+      </p>
+    ) : null;
+
+  // Drives which model-picker layout renders below: the original compact,
+  // single-scroll mobile sheet (filters scroll away together with the
+  // list, matching this same breakpoint's MobileModelMenuPortal decision
+  // above) vs. the wider two-pane modal on desktop.
+  const isMobileModelMenu = useSyncExternalStore(
+    subscribeToMobileModelMenu,
+    getMobileModelMenuSnapshot,
+    getServerMobileModelMenuSnapshot
+  );
+
+  // UI-001. The sheet below is `position: fixed`, and a fixed element is laid
+  // out against the *layout* viewport -- which iOS Safari (and Android Chrome
+  // in its default mode) leaves at full height when the keyboard opens. So
+  // `bottom: 0.5rem` resolves to half a rem above the bottom of a viewport the
+  // user can no longer see, and the footer that carries "Done" plus the last
+  // candidate rows go under the keyboard. `dvh` does not help: it tracks the
+  // dynamic viewport (URL bar), not the keyboard.
+  //
+  // Adding the occluded height back as a bottom inset is the whole fix. The
+  // sheet's own `flex` contract does the rest: header, search, selected summary
+  // and footer are all `shrink-0`, the candidate list is the only `flex-1`
+  // region, so a shorter sheet takes the height out of the list -- which
+  // scrolls -- and never out of the controls that end the task.
+  const keyboardInset = useKeyboardInset();
+  const compactSheetKeyboardInset = isMobileModelMenu ? keyboardInset : 0;
+
   return (
-      <div className="w-full max-w-full shrink-0 overflow-hidden border-t border-zinc-200 bg-zinc-50/95 px-2 py-1 pb-[calc(0.3rem+env(safe-area-inset-bottom))] transition-colors dark:border-zinc-800 dark:bg-zinc-950 md:overflow-visible md:px-6 md:py-3 md:pb-3">
+      <div className={variant === "floating"
+        ? "w-full max-w-full shrink-0 overflow-hidden px-0 py-0 md:overflow-visible"
+        : `w-full max-w-full shrink-0 overflow-hidden bg-zinc-50/95 px-2 py-1 pb-[calc(0.3rem+env(safe-area-inset-bottom))] transition-colors dark:bg-zinc-950 md:overflow-visible md:px-6 md:py-3 md:pb-3 ${
+            hideTopBorder ? "" : "border-t border-zinc-200 dark:border-zinc-800"
+          }`
+      }>
           <div
             data-testid="chat-input"
             onDragEnter={handleDropZoneDragEnter}
@@ -1504,134 +2114,58 @@ export function ChatInput({
             </div>
           )}
           {addOnCreditsForRequest > 0 && (
-            <div className="mb-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold leading-5 text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-100">
+            <div className="mb-2 rounded-xl border border-status-success-200 bg-status-success-50 px-3 py-2 text-xs font-semibold leading-5 text-status-success-900 dark:border-status-success-900/60 dark:bg-status-success-950/30 dark:text-status-success-100">
               {interpolateCopy(t("chat.addOnCreditsWillBeUsed"), {
                 credits: addOnCreditsForRequest,
               })}
             </div>
           )}
           {isUsageLimitReached && (
-            <div className="mb-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <span className="font-black">
-                  {isGuestMode ? t("chat.guestLimitReachedTitle") : t("chat.accountLimitReachedTitle")}
-                </span>
-                <span className="flex flex-wrap items-center gap-2">
-                  {isGuestMode ? (
-                    <a
-                      href={`/auth/signin?callbackUrl=${encodeURIComponent(signInCallbackUrl)}`}
-                      className="font-black text-amber-900 underline underline-offset-2 dark:text-amber-100"
-                    >
-                      {t("auth.login")}
-                    </a>
-                  ) : (
-                    <>
-                      <CreditPackPurchaseButton
-                        trigger="limit_hit"
-                        className="rounded-lg bg-amber-900 px-3 py-1.5 font-black text-white transition hover:bg-amber-800 dark:bg-amber-200 dark:text-amber-950 dark:hover:bg-amber-100"
-                      >
-                        {t("chat.continueWithAdditionalCredits")}
-                      </CreditPackPurchaseButton>
-                      {accountUsage?.plan !== "Max" && (
-                        <UpgradeCtaLink
-                          targetPlan={accountUsage?.plan === "Pro" ? "Max" : "Pro"}
-                          currentPlan={accountUsage?.plan || "Free"}
-                          trigger="limit_hit"
-                          ctaLocation="credit_limit_banner"
-                          planCreditsRemaining={planCreditsRemaining}
-                          addonCreditsRemaining={purchasedCreditsRemaining}
-                          className="rounded-lg border border-amber-300 px-3 py-1.5 font-black text-amber-950 transition hover:bg-amber-100 dark:border-amber-700 dark:text-amber-100 dark:hover:bg-amber-900/50"
-                        >
-                          {accountUsage?.plan === "Pro"
-                            ? t("chat.viewMaxPlan")
-                            : t("chat.viewProPlan")}
-                        </UpgradeCtaLink>
-                      )}
-                    </>
-                  )}
-                </span>
-              </div>
-              <p className="mt-1 leading-5 opacity-90">
-                {isGuestMode
-                  ? t("chat.guestLimitReachedBody")
-                  : isAccountMonthlyLimitReached
-                    ? t("chat.monthlyLimitReachedBody")
-                    : interpolateCopy(t("chat.dailyPlanLimitReachedBody"), {
-                        limit: dailyCreditLimit,
-                        monthly: planCreditsRemaining,
-                        reset: dailyResetLabel,
-                      })}
-              </p>
-              {!isGuestMode && isAccountMonthlyLimitReached && (
-                <p className="mt-1 font-semibold leading-5">
-                  {lang === "ko"
-                    ? `예상 차감 ${estimatedRequestCredits} · 현재 잔액 ${totalAvailableCredits} · ${creditShortfall} 크레딧 부족`
-                    : `Estimated ${estimatedRequestCredits} · Balance ${totalAvailableCredits} · ${creditShortfall} credits short`}
-                </p>
-              )}
+            <div className="mb-2 flex items-center justify-between gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+              <span className="font-bold">
+                {isGuestMode ? t("chat.guestLimitReachedTitle") : t("chat.accountLimitReachedTitle")}
+              </span>
+              <button
+                type="button"
+                data-testid="usage-limit-view-options"
+                onClick={() => setIsUsageLimitModalOpen(true)}
+                className="shrink-0 font-bold text-amber-900 underline underline-offset-2 dark:text-amber-100"
+              >
+                {t("chat.viewOptions")}
+              </button>
             </div>
           )}
           {isGuestMode && showGuestQuickStart && (
             <div
               data-testid="guest-quick-start"
-              className="mb-2 flex flex-col gap-1 rounded-2xl border border-blue-200 bg-blue-50/90 px-3 py-2 text-zinc-900 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-zinc-100"
+              className="mb-2 flex items-center gap-1.5 px-1"
             >
-              <div className="flex items-center gap-2">
-                <p className="min-w-0 flex-1 truncate text-[11px] font-semibold text-blue-700 dark:text-blue-300">
-                  <span className="font-black">{t("onboarding.compareTitle")}</span>
-                  {" — "}
-                  {t("onboarding.compareBody")}
-                </p>
-              <button
-                type="button"
-                onClick={() => dismissGuestQuickStart("skipped")}
-                className="shrink-0 rounded-full bg-white px-2.5 py-1 text-[11px] font-black text-blue-700 shadow-sm transition hover:bg-blue-100 dark:bg-zinc-900 dark:text-blue-300 dark:hover:bg-zinc-800"
-              >
-                {t("modelFinder.dismissTips")}
-              </button>
-              </div>
-              <p className="truncate text-[10px] leading-4 text-blue-600/80 dark:text-blue-300/70">
-                {t("onboarding.filesBody")}
-              </p>
-              <p className="truncate text-[10px] leading-4 text-blue-600/80 dark:text-blue-300/70">
-                {t("onboarding.privateBody")}{" "}
-                <a
-                  href={`/auth/signin?callbackUrl=${encodeURIComponent(signInCallbackUrl)}`}
-                  onClick={() => dismissGuestQuickStart("completed")}
-                  className="font-black underline underline-offset-2"
-                >
-                  {t("auth.login")}
-                </a>
-              </p>
+              <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
+                {t("chat.guestQuickLine")}
+              </span>
+              <FeatureHelpPopover
+                title={t("chat.guestQuickLineHelp")}
+                description={t("chat.guestQuickLineHelpBody")}
+                buttonLabel={t("chat.guestQuickLineHelp")}
+                learnMoreLabel={helpCopy.learnMore}
+                topic="guest_trial"
+                align="right"
+                testId="guest-quick-start-help"
+              />
             </div>
           )}
-          {isNewConversation && !value.trim() && attachments.length === 0 && (
+          {isNewConversation && !value.trim() && attachments.length === 0 && personalizedPrompt && (
             <div className="mb-2 flex max-w-full gap-2 overflow-x-auto overscroll-x-contain pb-1 md:flex-wrap md:overflow-visible md:pb-0">
-              {personalizedPrompt && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    dismissGuestQuickStart();
-                    onChange(personalizedPrompt);
-                  }}
-                  className="shrink-0 touch-manipulation rounded-full border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700 transition-colors hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-200 dark:hover:bg-blue-950/60"
-                >
-                  {personalizedPrompt}
-                </button>
-              )}
-              {PROMPT_SUGGESTIONS.slice(0, guestPreviewMode ? 3 : undefined).map((suggestion) => (
-                <button
-                  key={suggestion}
-                  type="button"
-                  onClick={() => {
-                    dismissGuestQuickStart();
-                    onChange(t(suggestion));
-                  }}
-                  className="shrink-0 touch-manipulation rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs font-semibold text-zinc-600 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                >
-                  {t(suggestion)}
-                </button>
-              ))}
+              <button
+                type="button"
+                onClick={() => {
+                  dismissGuestQuickStart();
+                  onChange(personalizedPrompt);
+                }}
+                className="shrink-0 touch-manipulation rounded-full border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700 transition-colors hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-200 dark:hover:bg-blue-950/60"
+              >
+                {personalizedPrompt}
+              </button>
             </div>
           )}
           {showContextualSuggestion &&
@@ -1641,7 +2175,7 @@ export function ChatInput({
               <div className="mb-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3 dark:border-amber-900/60 dark:bg-amber-950/20">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                   <div className="min-w-0 flex-1">
-                    <p className="text-xs font-black text-zinc-900 dark:text-white">
+                    <p className="text-xs font-bold text-zinc-900 dark:text-white">
                       {t(
                         contextualSuggestion.reason === "research"
                           ? "modelFinder.contextualTitleResearch"
@@ -1675,7 +2209,7 @@ export function ChatInput({
                           }
                         );
                       }}
-                      className="rounded-xl bg-amber-600 px-3 py-2 text-[11px] font-black text-white hover:bg-amber-500"
+                      className="rounded-xl bg-amber-600 px-3 py-2 text-[11px] font-bold text-white hover:bg-amber-500"
                     >
                       {t("modelFinder.contextualUse").replace(
                         "{model}",
@@ -1695,12 +2229,228 @@ export function ChatInput({
                 </div>
               </div>
             )}
-          {attachments.length > 0 && (
-            <div className="mb-2 rounded-2xl bg-zinc-50 p-1.5 dark:bg-zinc-950/70 md:mb-3 md:bg-transparent md:p-0">
+          {showWebSearchSuggestion && (
+            <div
+              data-testid="web-search-auto-suggestion"
+              className="mb-2 rounded-2xl border border-accent-web-search-200 bg-accent-web-search-50 px-3 py-3 dark:border-accent-web-search-900/60 dark:bg-accent-web-search-950/20"
+            >
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-bold text-zinc-900 dark:text-white">
+                    {t("chat.webSearchSuggestionTitle")}
+                  </p>
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <button
+                    type="button"
+                    data-testid="web-search-suggestion-accept"
+                    onClick={() => {
+                      onWebSearchModeChange?.("always");
+                      trackProductEvent(
+                        "web_search_suggestion_accepted",
+                        selectedModels.length,
+                        {}
+                      );
+                      if (webSearchSuggestionKey) {
+                        setDismissedWebSearchSuggestionKey(webSearchSuggestionKey);
+                      }
+                    }}
+                    className="rounded-xl bg-accent-web-search-600 px-3 py-2 text-[11px] font-bold text-white hover:bg-accent-web-search-500"
+                  >
+                    {t("chat.webSearchSuggestionAccept")}
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="web-search-suggestion-decline"
+                    onClick={() => {
+                      trackProductEvent(
+                        "web_search_suggestion_declined",
+                        selectedModels.length,
+                        {}
+                      );
+                      if (webSearchSuggestionKey) {
+                        setDismissedWebSearchSuggestionKey(webSearchSuggestionKey);
+                      }
+                    }}
+                    className="rounded-xl border border-accent-web-search-300 bg-white px-3 py-2 text-[11px] font-bold text-accent-web-search-900 hover:bg-accent-web-search-100 dark:border-accent-web-search-800 dark:bg-zinc-950 dark:text-accent-web-search-200"
+                  >
+                    {t("chat.webSearchSuggestionDecline")}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+          {/*
+            The chips own a row of their own in *both* shells. They used to ride
+            the mobile textarea's first line, which left the input whatever
+            horizontal space the chips did not want; the composer contract in
+            docs/ui-contracts/mobile-chat-composer.md forbids that. Chips wrap
+            onto a second line rather than scrolling sideways or squeezing the
+            row below them. Only the label length is shell-specific, which
+            `data-label-variant` states so tests read it from the DOM.
+          */}
+          {hasToolStatusChips && (
+            <div
+              data-testid="tool-status-chip-row"
+              data-placement="row"
+              data-label-variant={isMobileShell ? "compact" : "full"}
+              className="mb-1.5 flex max-w-full flex-wrap gap-1.5 md:mb-3"
+            >
+              {toolStatusChips}
+            </div>
+          )}
+          {/*
+            The full request state -- mode, how many models can honour it, how
+            many cannot, the credit ceiling and what the unsupported models
+            actually do -- always exists for assistive tech, but only costs a
+            visible row when there is a real exception to resolve. "Unsupported
+            0" is the normal case and no longer earns a line of its own.
+          */}
+          {webSearchState.isVisible && (
+            <p id="web-search-state-description" className="sr-only">
+              {webSearchStateDescription}
+            </p>
+          )}
+          {/* The detail belongs directly under the chip row it expands from,
+              in both shells. */}
+          {webSearchExceptionDetail}
+          {webSearchState.allUnsupported && (
+            <div
+              role="status"
+              data-testid="web-search-unavailable-notice"
+              className="mb-2 flex flex-col gap-2 rounded-xl border border-red-300 bg-red-50 px-3 py-2 text-[11px] leading-4 text-red-900 dark:border-red-800 dark:bg-red-950/30 dark:text-red-100 sm:flex-row sm:items-center"
+            >
+              <p className="min-w-0 flex-1">{t("chat.webSearchUnavailableAction")}</p>
+              <button
+                type="button"
+                data-testid="web-search-unavailable-turn-off"
+                onClick={() => onWebSearchModeChange?.("off")}
+                className={`shrink-0 rounded-lg border border-red-400 bg-white px-2.5 font-bold text-red-900 transition hover:bg-red-100 dark:border-red-700 dark:bg-zinc-950 dark:text-red-100 dark:hover:bg-red-950/60 ${isMobileShell ? "min-h-11" : "py-1.5"}`}
+              >
+                {t("chat.webSearchTurnOff")}
+              </button>
+            </div>
+          )}
+          {(attachments.length > 0 ||
+            scopedPendingAttachments.length > 0 ||
+            scopedFailedAttachments.length > 0) && (
+            <div
+              data-testid="attachment-tray"
+              className="mb-2 rounded-2xl bg-zinc-50 p-1.5 dark:bg-zinc-950/70 md:mb-3 md:bg-transparent md:p-0"
+            >
             <div className="flex max-w-full gap-2 overflow-x-auto overscroll-x-contain pb-1 md:flex-wrap md:overflow-visible md:pb-0">
+              {/* UI-STATE-002. In-flight files are cards of their own, in the
+                  same tray as finished ones, so the user can see which file
+                  is where. Each names the file and the step actually running;
+                  neither offers a cancel button, because the upload pipeline
+                  has no abort path today and a control that does nothing is
+                  worse than the honest "please wait" this gives instead. */}
+              {scopedPendingAttachments.map((pending) => {
+                const stageLabel =
+                  pending.stage === "uploading"
+                    ? t("chat.attachmentUploadingLabel")
+                    : t("chat.attachmentProcessingLabel");
+                const stageHint =
+                  pending.stage === "uploading"
+                    ? t("chat.attachmentUploadingHint")
+                    : t("chat.attachmentProcessingHint");
+                return (
+                  <div
+                    key={pending.id}
+                    role="status"
+                    aria-live="polite"
+                    data-testid="attachment-pending"
+                    data-stage={pending.stage}
+                    aria-describedby={`attachment-stage-${pending.id}`}
+                    className="relative flex h-14 min-w-44 max-w-56 shrink-0 items-center gap-2.5 rounded-xl border border-zinc-200 bg-white py-2 pl-2 pr-2 text-zinc-700 shadow-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 md:h-16 md:min-w-52 md:max-w-64"
+                  >
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white text-zinc-500 ring-1 ring-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:ring-zinc-700">
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                    </span>
+                    <span className="flex min-w-0 flex-col">
+                      <span
+                        data-testid="attachment-pending-name"
+                        className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100"
+                      >
+                        {pending.name}
+                      </span>
+                      <span
+                        data-testid="attachment-pending-stage"
+                        className="truncate text-[11px] font-semibold text-zinc-600 dark:text-zinc-300"
+                      >
+                        {stageLabel}
+                      </span>
+                    </span>
+                    {/* The wait explanation is the accessible description
+                        rather than a third visible line: the tray is beside a
+                        composer that must keep its own full-width row. */}
+                    <span id={`attachment-stage-${pending.id}`} className="sr-only">
+                      {`${pending.name}: ${stageLabel}. ${stageHint}`}
+                    </span>
+                  </div>
+                );
+              })}
+              {scopedFailedAttachments.map((failed) => (
+                <div
+                  key={failed.id}
+                  role="alert"
+                  data-testid="attachment-failed"
+                  // The failure card is allowed to be taller than the chips
+                  // beside it: the reason is the point of the card, so it
+                  // wraps rather than truncating to an ellipsis the user then
+                  // has no way to read.
+                  className="relative flex min-h-14 min-w-44 max-w-72 shrink-0 items-center gap-2.5 rounded-xl border border-red-300 bg-red-50 px-2 py-2 text-red-900 shadow-sm dark:border-red-800 dark:bg-red-950/40 dark:text-red-100 md:min-h-16 md:min-w-56"
+                >
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white text-red-600 ring-1 ring-red-200 dark:bg-zinc-900 dark:text-red-300 dark:ring-red-900">
+                    <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+                  </span>
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span
+                      data-testid="attachment-failed-name"
+                      className="truncate text-sm font-medium"
+                    >
+                      {failed.name}
+                    </span>
+                    <span
+                      data-testid="attachment-failed-reason"
+                      className="text-[11px] font-semibold leading-4"
+                    >
+                      {failed.reason}
+                    </span>
+                  </span>
+                  <span className="flex shrink-0 items-center gap-0.5">
+                    {/* Both actions really run: retry re-uploads the File this
+                        entry still holds, remove drops the entry. Each names
+                        the file so two failures are told apart by voice. */}
+                    <button
+                      type="button"
+                      data-testid="attachment-retry"
+                      onClick={() => handleRetryFailedAttachment(failed)}
+                      aria-label={`${t("chat.attachmentRetry")}: ${failed.name}`}
+                      className={`relative flex items-center justify-center rounded-full text-red-800 transition hover:bg-red-200 dark:text-red-100 dark:hover:bg-red-900/60 ${
+                        isMobileShell ? "h-11 w-11" : "h-7 w-7"
+                      }`}
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="attachment-failed-dismiss"
+                      onClick={() => handleDismissFailedAttachment(failed.id)}
+                      aria-label={`${t("chat.removeAttachment")}: ${failed.name}`}
+                      className={`relative flex items-center justify-center rounded-full text-red-800 transition hover:bg-red-200 dark:text-red-100 dark:hover:bg-red-900/60 ${
+                        isMobileShell ? "h-11 w-11" : "h-7 w-7"
+                      }`}
+                    >
+                      <X className="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
+                  </span>
+                </div>
+              ))}
               {attachments.map((attachment) => (
                 <div
                   key={attachment.id}
+                  data-testid="attachment-complete"
                   className={
                     attachment.data
                       ? "relative h-14 w-14 shrink-0 overflow-hidden rounded-xl border border-zinc-200 bg-zinc-100 shadow-sm dark:border-zinc-700 dark:bg-zinc-900 md:h-20 md:w-20"
@@ -1732,11 +2482,11 @@ export function ChatInput({
                   <button
                     type="button"
                     onClick={() => handleRemoveAttachment(attachment)}
-                    className={
+                    className={`relative before:absolute before:content-[''] ${isMobileShell ? "before:-inset-3" : "before:-inset-1"} ${
                       attachment.data
                         ? "absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-zinc-950/80 text-white hover:bg-zinc-950"
                         : "absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-200 hover:text-zinc-900 dark:hover:bg-zinc-700 dark:hover:text-white"
-                    }
+                    }`}
                     title={t("chat.removeAttachment")}
                     aria-label={t("chat.removeAttachment")}
                   >
@@ -1754,7 +2504,7 @@ export function ChatInput({
               className="mb-2 flex flex-col gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100 sm:flex-row sm:items-center"
             >
               <p className="min-w-0 flex-1 leading-5">
-                <span className="font-black">{t("chat.imageUnsupportedSelected")}</span>{" "}
+                <span className="font-bold">{t("chat.imageUnsupportedSelected")}</span>{" "}
                 {imageUnsupportedSelectedModels.map((model) => model.name).join(", ")}
               </p>
               <button
@@ -1770,8 +2520,59 @@ export function ChatInput({
               </button>
             </div>
           )}
-          <div className="flex max-w-full flex-wrap items-end gap-1.5">
-        <div className="relative flex shrink-0 items-center gap-1.5" ref={menuRef}>
+          <div className="flex flex-col gap-2">
+        {preserveFormatting && (
+          <div className="flex items-center justify-between gap-2 rounded-lg bg-zinc-100 px-2 py-1 text-[11px] font-semibold text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
+            <span>{t("chat.formatPreserved")}</span>
+            <button
+              type="button"
+              data-testid="convert-to-plain-text"
+              onClick={() => setPreserveFormatting(false)}
+              className="shrink-0 rounded-md px-1.5 py-0.5 text-blue-600 transition hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/40"
+            >
+              {t("chat.convertToPlainText")}
+            </button>
+          </div>
+        )}
+        {/*
+          The textarea's own row. Nothing else may enter it: no chip, no badge,
+          no absolutely positioned control. Whatever the tool state is, the
+          input keeps the composer's full inner width and at least one complete
+          visible line -- the invariant in
+          docs/ui-contracts/mobile-chat-composer.md.
+        */}
+        <div data-testid="composer-textarea-row" className="flex w-full min-w-0">
+        <textarea
+          data-testid="chat-textarea"
+          ref={textareaRef}
+          value={value}
+          wrap={preserveFormatting ? "off" : "soft"}
+          onFocus={() => dismissGuestQuickStart("completed")}
+          onChange={(e) => {
+            if (e.target.value) dismissGuestQuickStart();
+            onChange(e.target.value);
+          }}
+          onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
+          aria-label={placeholderText}
+          placeholder={placeholderText}
+          disabled={isDisabled}
+          enterKeyHint={isMobileShell ? "enter" : undefined}
+          rows={1}
+          // The min/max heights are in rem, not px, so a reader at 200% text
+          // scaling still gets a complete first line instead of a box frozen
+          // at one 16px-root line's worth of height.
+          className={`w-full min-w-0 max-h-[5.75rem] min-h-[2.25rem] flex-1 resize-none overflow-y-auto border-0 bg-transparent px-1 py-1.5 text-base leading-5 text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-500 md:max-h-[12.5rem] md:min-h-[3.25rem] md:py-2 md:text-sm md:leading-6 ${preserveFormatting ? "overflow-x-auto whitespace-pre font-mono" : ""}`}
+        />
+        </div>
+        {/*
+          The actions row. It wraps and its model button truncates rather than
+          pushing the send button past the composer's edge: at 200% zoom (a
+          195px layout viewport) a fixed-width rail used to overflow, and the
+          composer's own `overflow-hidden` then clipped Send out of sight.
+        */}
+        <div className="relative flex flex-wrap items-center justify-between gap-1.5" ref={menuRef}>
+        <div className="flex shrink-0 items-center gap-1.5">
           <button
             ref={actionMenuButtonRef}
             type="button"
@@ -1784,8 +2585,9 @@ export function ChatInput({
               }
               setMenuView("actions");
               setIsMenuOpen(true);
+              trackProductEvent("chat_tool_menu_opened", selectedModels.length, {});
             }}
-            className="flex h-10 w-10 shrink-0 touch-manipulation items-center justify-center rounded-full border border-zinc-300 bg-zinc-50 text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white"
+            className={`flex shrink-0 touch-manipulation items-center justify-center rounded-full border border-zinc-300 bg-zinc-50 text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white ${isMobileShell ? "h-11 w-11" : "h-10 w-10"}`}
             title={t("chat.moreActions")}
             aria-label={t("chat.moreActions")}
             aria-expanded={isMenuOpen && menuView === "actions"}
@@ -1798,7 +2600,9 @@ export function ChatInput({
               <Plus className="h-5 w-5" />
             )}
           </button>
+        </div>
 
+        <div className="flex min-w-0 flex-1 items-center justify-end gap-1.5">
           <button
             ref={modelMenuButtonRef}
             type="button"
@@ -1811,36 +2615,128 @@ export function ChatInput({
               }
               setMenuView("models");
               setIsMenuOpen(true);
+              trackProductEvent("model_picker_opened", selectedModels.length, {});
             }}
-            className="flex h-10 max-w-[112px] shrink-0 touch-manipulation items-center gap-1 rounded-full border border-zinc-300 bg-zinc-50 px-2.5 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            className={`flex min-w-0 max-w-[112px] touch-manipulation items-center gap-1 rounded-full border border-zinc-300 bg-zinc-50 px-2.5 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-800 ${isMobileShell ? "h-11" : "h-10"}`}
+            // Named so the outage banner can hand focus back to the model
+            // selector when a swap or a recovered provider unmounts the
+            // control the user was standing on (ProviderStatusBanner).
+            data-testid="composer-model-select"
             title={activeModelNames.join(", ")}
             aria-label={t("chat.modelSelect")}
             aria-expanded={isMenuOpen && menuView === "models"}
             aria-controls="chat-input-popover"
             aria-haspopup="dialog"
           >
-            {selectedModels.length === 1 ? (
+            {/* Counts what will actually be sent and billed -- the same basis
+                as the credit estimate beside it and as the mobile header's
+                "+N", so a paused panel cannot make the two disagree. */}
+            {activeSelectedModels.length === 1 ? (
               <ModelLogo
-                model={AVAILABLE_MODELS.find((item) => item.id === selectedModels[0])}
+                model={AVAILABLE_MODELS.find((item) => item.id === activeSelectedModels[0])}
                 size="xs"
               />
             ) : (
-              <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[9px] font-black text-white">
-                {selectedModels.length}
+              // The same number is the visible label beside it
+              // ("3 AIs") and part of the button's accessible name, so the
+              // badge is a decorative repeat and stays out of the
+              // accessibility tree.
+              <span
+                aria-hidden="true"
+                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[11px] font-bold text-white"
+              >
+                {activeSelectedModels.length}
               </span>
             )}
-            <span className="min-w-0 truncate whitespace-nowrap">
-              {modelsSelectedLabel(selectedModels.length)}
+            <span
+              data-testid="composer-active-model-count"
+              className="min-w-0 truncate whitespace-nowrap"
+            >
+              {modelsSelectedLabel(activeSelectedModels.length)}
             </span>
             <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
           </button>
+
+          {activeSelectedModels.length > 0 && (
+            <button
+              type="button"
+              data-testid="request-credit-estimate"
+              onClick={() => setIsCreditBreakdownOpen(true)}
+              className={`flex shrink-0 items-center gap-1 rounded-full border border-zinc-200 bg-zinc-50 px-2 text-[11px] font-bold text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800 ${isMobileShell ? "h-11" : "h-9"}`}
+              title={
+                lang === "ko"
+                  ? `예상 ${estimatedRequestCredits}크레딧${inputCreditMultiplier > 1 ? ` · ${inputCreditMultiplier}×` : ""}`
+                  : `Estimated ${estimatedRequestCredits} credits${inputCreditMultiplier > 1 ? ` · ${inputCreditMultiplier}×` : ""}`
+              }
+              aria-label={
+                lang === "ko"
+                  ? `예상 ${estimatedRequestCredits}크레딧, 상세 보기`
+                  : `Estimated ${estimatedRequestCredits} credits, view breakdown`
+              }
+            >
+              <CreditCostBadge
+                credits={estimatedRequestCredits}
+                size="xs"
+                tone="plain"
+                label={String(estimatedRequestCredits)}
+                title=""
+                className="px-0"
+              />
+              {inputCreditMultiplier > 1 && (
+                <span className="text-amber-600 dark:text-amber-400">{inputCreditMultiplier}×</span>
+              )}
+            </button>
+          )}
+          {isSending ? (
+            <button
+              type="button"
+              onClick={onCancel}
+              className={`flex shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-red-600 text-white hover:bg-red-500 ${isMobileShell ? "h-11 w-11" : "h-9 w-9"}`}
+              title={t("chat.stopAllResponses")}
+              aria-label={t("chat.stopAllResponses")}
+            >
+              <Square className="h-3.5 w-3.5 fill-current" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              data-testid="chat-send-button"
+              onClick={() => {
+                dismissGuestQuickStart();
+                onSubmit();
+              }}
+              disabled={
+                isDisabled ||
+                activeSelectedModels.length === 0 ||
+                (!value.trim() && attachments.length === 0)
+              }
+              className={`flex shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-blue-600 text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500 dark:disabled:bg-zinc-700 dark:disabled:text-zinc-400 ${isMobileShell ? "h-11 w-11" : "h-9 w-9"}`}
+              title={`${t("chat.send")} · ${estimatedRequestCredits} credits`}
+              aria-label={`${t("chat.send")} · ${estimatedRequestCredits} credits`}
+              aria-describedby={
+                sendDisabledReason ? "chat-send-disabled-reason" : undefined
+              }
+            >
+              <ArrowUp className="h-4 w-4" />
+            </button>
+          )}
+          {sendDisabledReason && (
+            <p
+              id="chat-send-disabled-reason"
+              data-testid="chat-send-disabled-reason"
+              className="sr-only"
+            >
+              {sendDisabledReason}
+            </p>
+          )}
+        </div>
 
           {isMenuOpen && (
             <MobileModelMenuPortal>
             <>
             <button
               type="button"
-              className="fixed inset-0 z-[90] bg-black/35 backdrop-blur-[1px] md:hidden"
+              className={`fixed inset-0 z-[90] bg-black/35 backdrop-blur-[1px] ${menuView === "models" ? "" : "md:hidden"}`}
               onClick={() => closeMenu(true)}
               aria-label={t("auth.cancel")}
             />
@@ -1849,40 +2745,74 @@ export function ChatInput({
               id="chat-input-popover"
               role="dialog"
               aria-modal="false"
-              aria-label={menuView === "models" ? t("chat.modelSelect") : t("chat.moreActions")}
-              tabIndex={-1}
-              className={`fixed inset-x-2 z-[100] flex max-w-[calc(100%_-_1rem)] flex-col overflow-hidden rounded-3xl border border-zinc-200 bg-white p-2 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900 md:absolute md:inset-x-auto md:bottom-12 md:left-0 md:top-auto md:max-h-[calc(100dvh-8rem)] md:w-80 md:max-w-[calc(100vw_-_2rem)] md:rounded-2xl ${
+              aria-label={
                 menuView === "models"
-                  ? "bottom-[calc(0.5rem+env(safe-area-inset-bottom))] top-[calc(0.5rem+env(safe-area-inset-top))] max-h-none"
-                  : "bottom-[calc(0.5rem+env(safe-area-inset-bottom))] max-h-[calc(100dvh-2rem)]"
+                  ? t("chat.modelSelect")
+                  : menuView === "webSearch"
+                    ? t("chat.toolsWebSearch")
+                    : t("chat.moreActions")
+              }
+              tabIndex={-1}
+              // Exposed for the responsive suite so a keyboard fixture can
+              // assert the sheet actually reacted, rather than inferring it
+              // from a rect that would also pass with no keyboard at all.
+              data-keyboard-inset={compactSheetKeyboardInset || undefined}
+              style={
+                compactSheetKeyboardInset > 0
+                  ? {
+                      bottom: `calc(${compactSheetKeyboardInset}px + 0.5rem + env(safe-area-inset-bottom))`,
+                      maxHeight: `calc(100dvh - ${compactSheetKeyboardInset}px - 1rem - env(safe-area-inset-top) - env(safe-area-inset-bottom))`,
+                    }
+                  : undefined
+              }
+              className={`fixed inset-x-2 z-[100] flex max-w-[calc(100%_-_1rem)] flex-col overflow-hidden rounded-3xl border border-zinc-200 bg-white p-2 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900 md:rounded-2xl ${
+                menuView === "models"
+                  ? "bottom-[calc(0.5rem+env(safe-area-inset-bottom))] top-[calc(0.5rem+env(safe-area-inset-top))] max-h-none md:inset-x-auto md:left-1/2 md:right-auto md:-translate-x-1/2 md:top-[5vh] md:bottom-[5vh] md:h-[90vh] md:max-h-[900px] md:w-[min(94vw,1000px)] md:max-w-[min(94vw,1000px)]"
+                  : "md:left-0 md:right-auto bottom-[calc(0.5rem+env(safe-area-inset-bottom))] max-h-[calc(100dvh-2rem)] md:absolute md:inset-x-auto md:bottom-12 md:top-auto md:max-h-[calc(100dvh-8rem)] md:w-80 md:max-w-[calc(100vw_-_2rem)]"
               }`}
             >
               <div className="mx-auto mb-2 mt-0.5 h-1 w-10 rounded-full bg-zinc-300 dark:bg-zinc-700 md:hidden" aria-hidden="true" />
-              <div className="mb-2 flex items-center justify-between border-b border-zinc-200 px-2 pb-2 pt-1 dark:border-zinc-800 md:hidden">
-                <div>
-                  <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
-                    {menuView === "models" ? t("chat.modelSelect") : t("chat.moreActions")}
-                  </p>
-                  <p className="text-xs text-zinc-500">
-                    {menuView === "models"
-                      ? `${selectedModels.length}/${maxSelectableModels} ${selectedModels.length === 1 ? t("chat.modelsSelectedOne") : t("chat.modelsSelectedOther")}`
-                      : t("chat.uploadFromComputer")}
-                  </p>
+              {/*
+                The models view supplies its own header -- a back control, the
+                screen title and the selection count -- so this row would be the
+                second title in a row: "Choose AI models" stacked directly on
+                "All models". Two headers cost 65px, and at 320x568 the model
+                list is only 129px tall, which is how a catalogue of 30+ models
+                ended up unable to show one complete row. The dialog keeps its
+                accessible name either way; it lives on the dialog element, not
+                on this text. The picker's own header carries the close control
+                on the compact sheet.
+              */}
+              {menuView !== "models" && (
+                <div className="mb-2 flex items-center justify-between border-b border-zinc-200 px-2 pb-2 pt-1 dark:border-zinc-800 md:hidden">
+                  <div>
+                    <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
+                      {menuView === "webSearch"
+                        ? t("chat.toolsWebSearch")
+                        : t("chat.moreActions")}
+                    </p>
+                    <p className="text-xs text-zinc-500">
+                      {menuView === "webSearch"
+                        ? t("chat.toolsWebSearchDescription")
+                        : t("chat.uploadFromComputer")}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => closeMenu(true)}
+                    className="flex h-11 w-11 items-center justify-center rounded-xl bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+                    aria-label={t("auth.cancel")}
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => closeMenu(true)}
-                  className="flex h-9 w-9 items-center justify-center rounded-xl bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
-                  aria-label={t("auth.cancel")}
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
+              )}
               {menuView === "actions" ? (
                 <div className="space-y-1">
                   <button
                     type="button"
-                    disabled={!canAttach || attachments.length >= MAX_ATTACHMENTS}
+                    data-testid="attach-local-file-row"
+                    disabled={!canAttach || attachments.length >= maxAttachments}
                     onClick={() => {
                       closeMenu(false);
                       fileInputRef.current?.click();
@@ -1894,24 +2824,140 @@ export function ChatInput({
                     </span>
                     <span className="flex min-w-0 flex-col">
                       <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t("chat.attachFile")}</span>
-                      <span className="text-xs text-zinc-500">{t("chat.uploadFromComputer")}</span>
+                      <span className="text-xs text-zinc-500">
+                        {isEphemeralAttachment
+                          ? t("chat.guestAttachmentOneFile")
+                          : t("chat.uploadFromComputer")}
+                      </span>
                     </span>
                   </button>
+                  {/*
+                    Google Drive needs an OAuth grant an anonymous session
+                    cannot hold, so for a guest this is not a disabled control
+                    with no explanation -- it names the reason and offers the
+                    one action that changes it.
+                  */}
                   <button
                     type="button"
-                    disabled={!canAttach || attachments.length >= MAX_ATTACHMENTS}
+                    data-testid="attach-google-drive-row"
+                    data-locked={canConnectGoogleDrive ? "false" : "true"}
+                    disabled={
+                      canConnectGoogleDrive &&
+                      attachments.length >= maxAttachments
+                    }
                     onClick={() => {
                       closeMenu(false);
+                      if (!canConnectGoogleDrive) {
+                        onGuestSignInPrompt?.();
+                        return;
+                      }
                       void handleGoogleDriveSelect();
                     }}
                     className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-zinc-800"
                   >
                     <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-500/10 text-blue-500">
-                      <HardDrive className="h-5 w-5" />
+                      {canConnectGoogleDrive ? (
+                        <HardDrive className="h-5 w-5" />
+                      ) : (
+                        <Lock className="h-5 w-5" />
+                      )}
                     </span>
                     <span className="flex min-w-0 flex-col">
                       <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t("chat.attachGoogleDrive")}</span>
-                      <span className="text-xs text-zinc-500">{t("chat.googleDriveDescription")}</span>
+                      <span
+                        className={`text-xs ${
+                          canConnectGoogleDrive
+                            ? "text-zinc-500"
+                            : "text-amber-600 dark:text-amber-400"
+                        }`}
+                      >
+                        {canConnectGoogleDrive
+                          ? t("chat.googleDriveDescription")
+                          : t("chat.guestGoogleDriveSignIn")}
+                      </span>
+                    </span>
+                  </button>
+                  <div className="my-1 border-t border-zinc-200 dark:border-zinc-700" />
+                  <button
+                    type="button"
+                    data-testid="tools-web-search-row"
+                    onClick={() => setMenuView("webSearch")}
+                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                  >
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-web-search-500/10 text-accent-web-search-500">
+                      <Globe2 className="h-5 w-5" />
+                    </span>
+                    <span className="flex min-w-0 flex-col">
+                      <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t("chat.toolsWebSearch")}</span>
+                      <span className="text-xs text-zinc-500">
+                        {webSearchMode === "always"
+                          ? t("chat.toolsWebSearchAlways")
+                          : webSearchMode === "auto"
+                            ? t("chat.toolsWebSearchAuto")
+                            : t("chat.toolsWebSearchOff")}
+                      </span>
+                    </span>
+                  </button>
+                  {(() => {
+                    const deepResearchModel = AVAILABLE_MODELS.find(
+                      (model) => model.id === "perplexity/sonar-deep-research"
+                    );
+                    const deepResearchLocked =
+                      !deepResearchModel || !canUseModelWithPlan(currentPlan, deepResearchModel);
+                    const deepResearchReason = !deepResearchModel
+                      ? null
+                      : isGuestMode
+                        ? t("modelStatusReasons.loginRequired")
+                        : deepResearchLocked
+                          ? t("modelStatusReasons.upgradeRequired")
+                          : null;
+                    return (
+                      <button
+                        type="button"
+                        data-testid="tools-deep-research-row"
+                        disabled={!deepResearchModel}
+                        onClick={() => {
+                          closeMenu(false);
+                          if (deepResearchLocked) {
+                            // Reuses the same guest-sign-in/upgrade-plan gating
+                            // toggling a locked model in the picker already
+                            // triggers, instead of inventing a second prompt.
+                            onToggleModel("perplexity/sonar-deep-research");
+                            return;
+                          }
+                          trackProductEvent(
+                            "deep_research_setup_opened",
+                            selectedModels.length,
+                            {}
+                          );
+                          onOpenDeepResearchSetup?.();
+                        }}
+                        className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-zinc-800"
+                      >
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-deep-research-500/10 text-accent-deep-research-500">
+                          <Microscope className="h-5 w-5" />
+                        </span>
+                        <span className="flex min-w-0 flex-col">
+                          <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t("chat.toolsDeepResearch")}</span>
+                          <span className={`text-xs ${deepResearchReason ? "text-amber-600 dark:text-amber-400" : "text-zinc-500"}`}>
+                            {deepResearchReason || t("chat.toolsDeepResearchDescription")}
+                          </span>
+                        </span>
+                      </button>
+                    );
+                  })()}
+                  <button
+                    type="button"
+                    data-testid="tools-read-webpage-row"
+                    disabled
+                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left opacity-40"
+                  >
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+                      <Link2 className="h-5 w-5" />
+                    </span>
+                    <span className="flex min-w-0 flex-col">
+                      <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t("chat.toolsReadWebpage")}</span>
+                      <span className="text-xs text-zinc-500">{t("chat.toolsComingSoon")}</span>
                     </span>
                   </button>
                   <div className="mx-1 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950/70 dark:text-zinc-400">
@@ -1921,14 +2967,31 @@ export function ChatInput({
                     <p className="mt-0.5">
                       {t("chat.attachmentGuideBody")}
                     </p>
+                    {/*
+                      A guest's files are held for a short time and are never
+                      added to a saved chat, a project, a share link or an
+                      export. That is a promise the product has to make where
+                      the file is picked, not in a policy page.
+                    */}
+                    {isEphemeralAttachment && (
+                      <p
+                        data-testid="guest-attachment-temporary-note"
+                        className="mt-1 font-semibold text-zinc-700 dark:text-zinc-200"
+                      >
+                        {t("chat.guestAttachmentTemporary")}
+                      </p>
+                    )}
                   </div>
                   <div className="my-1 border-t border-zinc-200 dark:border-zinc-700" />
                   <button
                     type="button"
-                    onClick={() => setMenuView("models")}
+                    onClick={() => {
+                      setMenuView("models");
+                      trackProductEvent("model_picker_opened", selectedModels.length, {});
+                    }}
                     className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
                   >
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-purple-500/10 text-purple-500">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-model-catalogue-500/10 text-accent-model-catalogue-500">
                       <Boxes className="h-5 w-5" />
                     </span>
                     <span className="flex min-w-0 flex-col">
@@ -1939,392 +3002,239 @@ export function ChatInput({
                     </span>
                   </button>
                 </div>
+              ) : menuView === "webSearch" ? (
+                <div className="space-y-1">
+                  <button
+                    type="button"
+                    onClick={() => setMenuView("actions")}
+                    className={`mb-1 flex items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-white ${isMobileShell ? "h-11 w-11" : "h-8 w-8"}`}
+                    aria-label={t("auth.cancel")}
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                  </button>
+                  {WEB_SEARCH_MODES.map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      data-testid={`web-search-mode-option-${mode}`}
+                      aria-pressed={webSearchMode === mode}
+                      onClick={() => {
+                        onWebSearchModeChange?.(mode);
+                        trackProductEvent(
+                          "web_search_mode_selected",
+                          selectedModels.length,
+                          { web_search_mode: mode }
+                        );
+                        closeMenu(false);
+                      }}
+                      className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
+                        webSearchMode === mode ? "bg-accent-web-search-500/10" : ""
+                      }`}
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-web-search-500/10 text-accent-web-search-500">
+                        <Globe2 className="h-5 w-5" />
+                      </span>
+                      <span className="flex min-w-0 flex-1 flex-col">
+                        <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                          {mode === "always"
+                            ? t("chat.toolsWebSearchAlways")
+                            : mode === "auto"
+                              ? t("chat.toolsWebSearchAuto")
+                              : t("chat.toolsWebSearchOff")}
+                        </span>
+                        <span className="text-xs text-zinc-500">
+                          {mode === "always"
+                            ? t("chat.toolsWebSearchAlwaysDescription")
+                            : mode === "auto"
+                              ? t("chat.toolsWebSearchAutoDescription")
+                              : t("chat.toolsWebSearchOffDescription")}
+                        </span>
+                      </span>
+                      {webSearchMode === mode && (
+                        <Check className="h-4 w-4 shrink-0 text-accent-web-search-500" aria-hidden="true" />
+                      )}
+                    </button>
+                  ))}
+                </div>
               ) : (
                 <>
-                  <div className="mb-2 hidden items-center gap-2 px-1 py-1 md:flex">
-                    <button
-                      type="button"
-                      onClick={() => setMenuView("actions")}
-                      className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-white"
-                      aria-label={t("auth.cancel")}
-                    >
-                      <ArrowLeft className="h-4 w-4" />
-                    </button>
-                    <div className="min-w-0 flex-1">
-                      <span className="block text-sm font-semibold text-zinc-900 dark:text-zinc-100">{t("chat.modelSelect")}</span>
-                      <span className="block text-xs text-zinc-500">
-                        {selectedModels.length}/{maxSelectableModels} {selectedModels.length === 1 ? t("chat.modelsSelectedOne") : t("chat.modelsSelectedOther")}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="mb-2 shrink-0 px-1">
-                    <div className="relative">
-                      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                      <input
-                        ref={modelSearchInputRef}
-                        data-testid="model-search-input"
-                        value={modelSearchQuery}
-                        onChange={(event) => setModelSearchQuery(event.target.value)}
-                        placeholder={pickerCopy.searchPlaceholder}
-                        className="h-9 w-full rounded-lg border border-zinc-200 bg-zinc-50 pl-9 pr-3 text-xs text-zinc-800 outline-none transition placeholder:text-zinc-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:focus:border-blue-500"
-                      />
-                    </div>
-                  </div>
-                  <div
-                    data-testid="model-picker-scroll-region"
-                    className="h-0 min-h-0 flex-1 touch-pan-y space-y-2 overflow-x-hidden overflow-y-scroll overscroll-y-contain px-1 pb-4 pr-2 [scrollbar-gutter:stable] [-webkit-overflow-scrolling:touch]"
-                  >
-
-                    {!modelSearchQuery.trim() && (
-                      <section
-                        data-testid="model-recommendations"
-                        aria-label={
-                          favoriteRecommendationModels.length
-                            ? t("chat.favoriteModels")
-                            : personalizedRecommendationIds.length
-                              ? pickerCopy.personalizedRecommendations
-                              : pickerCopy.tomverseRecommendations
-                        }
-                        className="space-y-1 rounded-xl border border-blue-200 bg-blue-50/60 p-2 dark:border-blue-900/60 dark:bg-blue-950/20"
-                      >
-                        <p className="px-1 text-[11px] font-black text-zinc-900 dark:text-white">
-                          {favoriteRecommendationModels.length
-                            ? t("chat.favoriteModels")
-                            : personalizedRecommendationIds.length
-                              ? pickerCopy.personalizedRecommendations
-                              : pickerCopy.tomverseRecommendations}
-                        </p>
-                        {recommendationModels.map((model, recommendationIndex) => {
-                          const isSelected = selectedModels.includes(model.id);
-                          const liveStatus = liveModelStatuses[model.id];
-                          const modelStatus =
-                            liveStatus?.status || getModelExperienceStatus(model);
-                          const imageIncompatible =
-                            hasImageAttachments && !modelSupportsImageInput(model);
-                          const selectionDisabled =
-                            !model.enabled ||
-                            modelStatus === "unavailable" ||
-                            imageIncompatible;
-                          const usageProfile = getModelUsageProfile(model);
-                          const isPlanLocked = !canUseModelWithPlan(currentPlan, model);
-
-                          return (
-                            <button
-                              key={model.id}
-                              type="button"
-                              data-testid="recommended-model-option"
-                              data-model-id={model.id}
-                              data-model-plan-locked={isPlanLocked}
-                              disabled={selectionDisabled && !isSelected}
-                              aria-pressed={isSelected}
-                              onClick={() => {
-                                rememberRecentModel(model.id);
-                                if (!isSelected) {
-                                  trackProductEvent(
-                                    "recommended_model_accepted",
-                                    Math.min(maxSelectableModels, selectedModels.length + 1),
-                                    {
-                                      model_id: model.id,
-                                      recommendation_rank: recommendationIndex + 1,
-                                    }
-                                  );
-                                }
-                                onToggleModel(model.id);
-                              }}
-                              className="flex min-h-12 w-full items-center gap-2 rounded-lg bg-white px-2 py-1.5 text-left shadow-sm transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-45 dark:bg-zinc-900 dark:hover:bg-zinc-800"
-                            >
-                              <ModelLogo model={model} size="sm" />
-                              <span className="min-w-0 flex-1">
-                                <span className="block truncate text-xs font-bold text-zinc-900 dark:text-zinc-100">
-                                  {model.name}
-                                </span>
-                                <span className="block truncate text-[10px] text-zinc-500 dark:text-zinc-400">
-                                  {getModelPickerDescription(model, lang)}
-                                </span>
-                              </span>
-                              <CreditCostBadge
-                                credits={usageProfile.credits}
-                                size="xs"
-                                label={lang === "ko" ? `기본 ${usageProfile.credits}크레딧 차감` : `Base cost ${usageProfile.credits} credits`}
-                              />
-                              <span
-                                className={`shrink-0 rounded-full px-2 py-1 text-[9px] font-black ${
-                                  isSelected
-                                    ? "bg-blue-600 text-white"
-                                    : "border border-zinc-200 text-zinc-600 dark:border-zinc-700 dark:text-zinc-300"
-                                }`}
-                              >
-                                {isSelected ? pickerCopy.selected : pickerCopy.select}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </section>
-                    )}
-
-                    <div className="flex items-center justify-between gap-2 px-1 pt-0.5">
-                      <p className="text-[11px] font-black text-zinc-900 dark:text-white">
-                        {pickerCopy.allModels}
-                      </p>
-                      <button
-                        type="button"
-                        data-testid="advanced-model-filters"
-                        aria-expanded={showAdvancedModelFilters}
-                        onClick={() => setShowAdvancedModelFilters((current) => !current)}
-                        className="inline-flex items-center gap-1 rounded-full border border-zinc-200 px-2 py-1 text-[9px] font-black text-zinc-500 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                      >
-                        <SlidersHorizontal className="h-3 w-3" aria-hidden="true" />
-                        {pickerCopy.filters}
-                        {(imageInputOnly || availableOnPlanOnly) && (
-                          <span className="rounded-full bg-blue-600 px-1.5 text-white">
-                            {Number(imageInputOnly) + Number(availableOnPlanOnly)}
-                          </span>
-                        )}
-                      </button>
-                    </div>
-                    <div className="flex touch-pan-x gap-1 overflow-x-auto pb-0.5 [-webkit-overflow-scrolling:touch]">
-                      {([
-                        ["recommended", pickerCopy.recommended],
-                        ["fast", pickerCopy.fast],
-                        ["reasoning", pickerCopy.deepReasoning],
-                        ["search", pickerCopy.webSearch],
-                      ] as const).map(([filterValue, label]) => (
+                  {(() => {
+                    // The AI-combination nudge stays owned by ChatInput because
+                    // it depends on the draft text and the model-finder entry
+                    // point; the picker just renders it under the
+                    // recommendations.
+                    const comboFinderSlot = !isGuestMode ? (
+                      activeSelectedModels.length >= maxSelectableModels ? (
                         <button
-                          key={filterValue}
                           type="button"
-                          aria-pressed={capabilityFilter === filterValue}
-                          onClick={() =>
-                            setCapabilityFilter((current) =>
-                              current === filterValue ? "all" : filterValue
-                            )
-                          }
-                          className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black transition ${capabilityFilter === filterValue ? "border-blue-500 bg-blue-500 text-white" : "border-zinc-200 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"}`}
+                          data-testid="model-combo-finder-cta-compact"
+                          onClick={() => {
+                            closeMenu(false);
+                            openModelFinder();
+                          }}
+                          className={`inline-flex items-center self-start rounded-lg px-2 text-[11px] font-bold text-blue-600 underline decoration-dotted underline-offset-2 hover:text-blue-500 dark:text-blue-300 ${isMobileShell ? "min-h-11" : "py-1"}`}
                         >
-                          {label}
+                          {t("modelFinder.pickerCtaCompact")}
                         </button>
-                      ))}
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <select
-                        value={providerFilter}
-                        onChange={(event) => setProviderFilter(event.target.value)}
-                        aria-label={pickerCopy.providerAll}
-                        className="h-9 min-w-0 rounded-lg border border-zinc-200 bg-zinc-50 px-2 text-xs font-medium text-zinc-700 outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
-                      >
-                        <option value="all">{pickerCopy.providerAll}</option>
-                        {modelProviders.map((provider) => (
-                          <option key={provider} value={provider}>{provider}</option>
-                        ))}
-                      </select>
-                      <select
-                        value={usageBandFilter}
-                        onChange={(event) => setUsageBandFilter(event.target.value as ModelPickerUsageBand)}
-                        aria-label={pickerCopy.usageAll}
-                        className="h-9 min-w-0 rounded-lg border border-zinc-200 bg-zinc-50 px-2 text-xs font-medium text-zinc-700 outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
-                      >
-                        <option value="all">{pickerCopy.usageAll}</option>
-                        <option value="light">{pickerCopy.light}</option>
-                        <option value="medium">{pickerCopy.medium}</option>
-                        <option value="heavy">{pickerCopy.heavy}</option>
-                        <option value="intensive">{pickerCopy.intensive}</option>
-                      </select>
-                    </div>
-                    {showAdvancedModelFilters && (
-                      <div className="flex flex-wrap gap-1 rounded-lg bg-zinc-100 p-1.5 dark:bg-zinc-950">
-                        {([
-                          [imageInputOnly, setImageInputOnly, pickerCopy.imageInputOnly],
-                          [availableOnPlanOnly, setAvailableOnPlanOnly, pickerCopy.availableOnPlan],
-                        ] as const).map(([pressed, setPressed, label]) => (
-                          <button
-                            key={label}
-                            type="button"
-                            aria-pressed={pressed}
-                            onClick={() => setPressed(!pressed)}
-                            className={`rounded-full px-2 py-1 text-[9px] font-black transition ${pressed ? "bg-blue-600 text-white" : "bg-white text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"}`}
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  <div className="space-y-3">
-                    {groupedModels.map((group) => (
-                      <div key={group.provider} className="space-y-1">
-                        <div className="px-2 text-[10px] font-bold uppercase tracking-wide text-zinc-400">
-                          {group.provider.toUpperCase()}
-                        </div>
-                        {group.models.map((model) => {
-                          const isSelected = selectedModels.includes(model.id);
-                          const isFavorite = favoriteModelIds.includes(model.id);
-                          const liveStatus = liveModelStatuses[model.id];
-                          const modelStatus = liveStatus?.status || getModelExperienceStatus(model);
-                          const fallbackModels = (liveStatus?.fallbackModelIds || [])
-                            .map((id) => PUBLIC_MODELS.find((item) => item.id === id))
-                            .filter((item): item is (typeof PUBLIC_MODELS)[number] => Boolean(item))
-                            .filter((item) => item.enabled && item.id !== model.id)
-                            .slice(0, 2);
-                          const isPlanLocked = !canUseModelWithPlan(currentPlan, model);
-                          const imageIncompatible =
-                            hasImageAttachments && !modelSupportsImageInput(model);
-                          const selectionDisabled =
-                            !model.enabled ||
-                            modelStatus === "unavailable" ||
-                            imageIncompatible;
-                          const usageProfile = getModelUsageProfile(model);
-                          const statusReason = isPlanLocked
-                            ? isGuestMode
-                              ? t("modelStatusReasons.loginRequired")
-                              : t("modelStatusReasons.upgradeRequired")
-                            : imageIncompatible
-                              ? t("modelStatusReasons.imageUnsupported")
-                            : !model.enabled || modelStatus === "unavailable"
-                              ? t("modelStatusReasons.unavailable")
-                              : model.status !== "enabled" || modelStatus === "limited"
-                                ? t("modelStatusReasons.limited")
-                                : null;
-                          const modelDescription = getModelPickerDescription(model, lang);
-                          const modelFeatures = getModelPickerFeatures(model);
-                          return (
-                            <div
-                              key={model.id}
-                              className="flex w-full items-start gap-2 rounded-xl px-2 py-1.5 transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                      ) : showComplementarySuggestion &&
+                          complementarySuggestion &&
+                          complementaryModel &&
+                          complementaryProfile ? (
+                        <div
+                          data-testid="model-combo-complementary-suggestion"
+                          className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 dark:border-amber-900/60 dark:bg-amber-950/20"
+                        >
+                          <p className="text-[11px] font-bold text-zinc-900 dark:text-white">
+                            {t("modelFinder.complementaryTitle")}
+                          </p>
+                          <p className="mt-0.5 text-[11px] leading-4 text-zinc-600 dark:text-zinc-300">
+                            {t(
+                              complementarySuggestion.reason === "reasoning"
+                                ? "modelFinder.complementaryReasoning"
+                                : complementarySuggestion.reason === "research"
+                                  ? "modelFinder.complementaryResearch"
+                                  : "modelFinder.complementaryDifferentProvider"
+                            )}
+                          </p>
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            <button
+                              type="button"
+                              data-testid="model-combo-complementary-add"
+                              onClick={() => {
+                                const added = onToggleModel(complementaryModel.id);
+                                if (!added) return;
+                                trackProductEvent(
+                                  "advanced_model_selected",
+                                  selectedModels.length + 1,
+                                  { model_id: complementaryModel.id }
+                                );
+                              }}
+                              className={`inline-flex items-center justify-center rounded-lg bg-amber-600 px-2.5 text-xs font-bold text-white hover:bg-amber-500 ${isMobileShell ? "min-h-11" : "py-1.5"}`}
                             >
-                              <button
-                                type="button"
-                                onClick={() => toggleFavoriteModel(model.id)}
-                                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition ${isFavorite ? "text-amber-400" : "text-zinc-400 hover:text-amber-400"}`}
-                                aria-pressed={isFavorite}
-                                aria-label={t("chat.favoriteModels")}
-                              >
-                                <Star className={`h-4 w-4 ${isFavorite ? "fill-current" : ""}`} />
-                              </button>
-                              <button
-                                type="button"
-                                data-testid="model-option"
-                                data-model-id={model.id}
-                                data-model-usage-class={usageProfile.category}
-                                data-model-minimum-plan={model.minimumPlan}
-                                data-model-image-input={modelSupportsImageInput(model)}
-                                data-model-plan-locked={isPlanLocked}
-                                disabled={selectionDisabled && !isSelected}
-                                onClick={() => {
-                                  rememberRecentModel(model.id);
-                                  onToggleModel(model.id);
-                                }}
-                                aria-pressed={isSelected}
-                                className="flex min-w-0 flex-1 items-start gap-2 rounded-lg py-0.5 text-sm disabled:cursor-not-allowed disabled:opacity-45"
-                              >
-                                <ModelLogo model={model} size="md" />
-                                <span className="min-w-0 flex-1 text-left">
-                                  <span className="flex min-w-0 items-start gap-1.5">
-                                    <span
-                                      data-testid="model-option-name"
-                                      className="min-w-0 whitespace-normal break-words font-semibold leading-5 text-zinc-800 dark:text-zinc-100"
-                                    >
-                                      {model.name}
-                                    </span>
-                                    <span
-                                      className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${
-                                        modelStatus === "available"
-                                          ? "bg-emerald-500"
-                                          : modelStatus === "limited"
-                                            ? "bg-amber-500"
-                                            : "bg-zinc-400"
-                                      }`}
-                                      title={modelStatus === "available" ? undefined : statusReason || modelStatus}
-                                      aria-label={statusReason || modelStatus}
-                                    />
-                                  </span>
-                                  <span className="mt-0.5 block text-[10px] leading-4 text-zinc-500 dark:text-zinc-400">
-                                    {modelDescription}
-                                  </span>
-                                  {statusReason && (
-                                    <span className={`mt-0.5 flex items-center gap-1 text-[10px] font-bold ${modelStatus === "unavailable" || !model.enabled ? "text-red-500" : modelStatus === "limited" ? "text-amber-500" : "text-blue-500"}`}>
-                                      {isPlanLocked && <LockKeyhole className="h-3 w-3" aria-hidden="true" />}
-                                      {statusReason}
-                                    </span>
-                                  )}
-                                  {modelFeatures.length > 0 && (
-                                    <span className="mt-1 flex max-w-full flex-wrap gap-x-2 gap-y-1">
-                                      {modelFeatures.map((feature) => {
-                                        const Icon =
-                                          feature === "image"
-                                            ? ImageIcon
-                                            : feature === "reasoning"
-                                              ? Brain
-                                              : feature === "search"
-                                                ? Globe2
-                                                : Code2;
-                                        const label = pickerFeatureLabels[feature];
-                                        return (
-                                          <span
-                                            key={feature}
-                                            className="inline-flex items-center gap-1 text-[9px] font-bold text-zinc-500 dark:text-zinc-300"
-                                          >
-                                            <Icon className="h-3 w-3" aria-hidden="true" />
-                                            {label}
-                                          </span>
-                                        );
-                                      })}
-                                    </span>
-                                  )}
-                                  {(modelStatus === "limited" || modelStatus === "unavailable") && fallbackModels.length > 0 && (
-                                    <span className="mt-1 flex flex-wrap items-center gap-1 text-[10px] text-zinc-500">
-                                      <span>{t("chat.trySimilarModel")}</span>
-                                      {fallbackModels.map((fallback) => (
-                                        <span
-                                          key={fallback.id}
-                                          className="rounded-full bg-blue-500/10 px-1.5 py-0.5 font-bold text-blue-500"
-                                        >
-                                          {fallback.name}
-                                        </span>
-                                      ))}
-                                    </span>
-                                  )}
-                                </span>
-                                <span className="flex shrink-0 flex-col items-end gap-2">
-                                  <CreditCostBadge
-                                    credits={usageProfile.credits}
-                                    testId="model-credit-badge"
-                                    label={lang === "ko" ? `기본 ${usageProfile.credits}크레딧 차감` : `Base cost ${usageProfile.credits} credits`}
-                                  />
-                                  <span className={`h-4 w-8 rounded-full p-0.5 transition-colors ${isSelected ? "bg-blue-500" : "bg-zinc-300 dark:bg-zinc-700"}`}>
-                                    <span className={`block h-3 w-3 rounded-full bg-white transition-transform ${isSelected ? "translate-x-4" : ""}`} />
-                                  </span>
-                                </span>
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ))}
-                    {filteredModels.length === 0 && (
-                      <div className="rounded-xl border border-dashed border-zinc-200 px-4 py-8 text-center text-xs text-zinc-400 dark:border-zinc-700">
-                        {t("chat.noModelsFound")}
-                      </div>
-                    )}
-                  </div>
-                  </div>
-                  <div data-testid="model-selection-summary" className="mt-2 flex shrink-0 items-center gap-2 border-t border-zinc-200 px-1 pt-2 dark:border-zinc-700">
-                    <p className="min-w-0 flex-1 text-[11px] font-bold text-zinc-600 dark:text-zinc-300">
-                      {modelsSelectedLabel(selectedModels.length)} · {pickerCopy.baseEstimate}{" "}
-                      <CreditCostBadge
-                        credits={selectedBaseCredits}
-                        size="xs"
-                        label={lang === "ko" ? `기본 예상 ${selectedBaseCredits}크레딧` : `Base estimate ${selectedBaseCredits} credits`}
+                              {t("modelFinder.complementaryAdd").replace(
+                                "{model}",
+                                complementaryModel.name
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setDismissedComplementaryModelId(
+                                  complementarySuggestion.modelId
+                                )
+                              }
+                              className={`inline-flex items-center justify-center rounded-lg border border-amber-300 bg-white px-2.5 text-xs font-semibold text-amber-900 hover:bg-amber-100 dark:border-amber-800 dark:bg-zinc-950 dark:text-amber-200 ${isMobileShell ? "min-h-11" : "py-1.5"}`}
+                            >
+                              {t("modelFinder.complementaryDismiss")}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          data-testid="model-combo-finder-cta"
+                          onClick={() => {
+                            closeMenu(false);
+                            openModelFinder();
+                          }}
+                          className={`inline-flex items-center justify-center gap-1.5 self-start rounded-full border border-blue-200 bg-blue-50 px-3 text-[11px] font-bold text-blue-700 transition hover:bg-blue-100 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200 dark:hover:bg-blue-950 ${isMobileShell ? "min-h-11" : "py-1.5"}`}
+                        >
+                          <Sparkles className="h-3 w-3" aria-hidden="true" />
+                          {t("modelFinder.pickerCta")}
+                        </button>
+                      )
+                    ) : null;
+
+                    return (
+                      <ModelPickerPanel
+                        models={PUBLIC_MODELS}
+                        selectedModelIds={selectedModels}
+                        activeSelectedCount={activeSelectedModels.length}
+                        maxSelectableModels={maxSelectableModels}
+                        currentPlan={currentPlan}
+                        isGuestMode={isGuestMode}
+                        isMobileShell={isMobileShell}
+                        isCompactLayout={isMobileModelMenu}
+                        isKeyboardCompact={compactSheetKeyboardInset > 0}
+                        modelStatuses={liveModelStatuses}
+                        hasImageAttachments={hasImageAttachments}
+                        favoriteModelIds={favoriteModelIds}
+                        recentModelIds={recentModelIds}
+                        personalizedModelIds={personalizedRecommendationIds}
+                        selectedBaseCredits={selectedBaseCredits}
+                        searchInputRef={modelSearchInputRef}
+                        escapeHandlerRef={modelPickerEscapeRef}
+                        onToggleModel={onToggleModel}
+                        onRequestSwap={setReplaceModelCandidate}
+                        onToggleFavorite={toggleFavoriteModel}
+                        onRememberRecentModel={rememberRecentModel}
+                        onBackToActions={() => setMenuView("actions")}
+                        onDone={() => closeMenu(true, "done")}
+                        onTrackEvent={trackModelPickerEvent}
+                        comboFinderSlot={comboFinderSlot}
                       />
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => closeMenu(true)}
-                      className="shrink-0 rounded-xl bg-blue-600 px-3 py-2 text-xs font-black text-white transition hover:bg-blue-500"
-                    >
-                      {pickerCopy.done}
-                    </button>
-                  </div>
+                    );
+                  })()}
                 </>
               )}
             </div>
+            {replaceModelCandidate && (() => {
+              const candidate = replaceModelCandidate;
+              return (
+                <div
+                  className="fixed inset-0 z-[110] flex items-end justify-center bg-black/50 md:items-center"
+                  onClick={() => setReplaceModelCandidate(null)}
+                >
+                  <div
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label={t("chat.swapModelTitle").replace("{model}", candidate.name)}
+                    className="w-full max-w-sm rounded-t-3xl bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] dark:bg-zinc-900 md:rounded-3xl"
+                    onClick={(event) => event.stopPropagation()}
+                    onMouseDown={(event) => event.stopPropagation()}
+                  >
+                    <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-zinc-200 dark:bg-zinc-700 md:hidden" />
+                    <p className="text-base font-bold text-zinc-900 dark:text-zinc-100">
+                      {t("chat.swapModelTitle").replace("{model}", candidate.name)}
+                    </p>
+                    <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+                      {t("chat.swapModelBody")}
+                    </p>
+                    <div className="mt-3 space-y-1.5">
+                      {selectedModels.map((modelId) => {
+                        const currentModel = PUBLIC_MODELS.find((item) => item.id === modelId);
+                        return (
+                          <button
+                            key={modelId}
+                            type="button"
+                            onClick={() => {
+                              const swapped = onSwapModel(modelId, candidate.id);
+                              if (swapped) {
+                                rememberRecentModel(candidate.id);
+                              } else {
+                                dispatchAppToast(t("chat.swapModelFailed"), "error");
+                              }
+                              setReplaceModelCandidate(null);
+                            }}
+                            className="flex w-full items-center gap-2 rounded-xl border border-zinc-200 px-3 py-2.5 text-left text-sm font-semibold text-zinc-800 transition hover:border-blue-400 hover:bg-blue-50 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-blue-950/30"
+                          >
+                            <ModelLogo model={currentModel} size="sm" />
+                            <span className="min-w-0 flex-1 truncate">{currentModel?.name || modelId}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setReplaceModelCandidate(null)}
+                      className="mt-3 w-full rounded-xl border border-zinc-200 py-2.5 text-sm font-bold text-zinc-700 dark:border-zinc-700 dark:text-zinc-200"
+                    >
+                      {t("auth.cancel")}
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
             </>
             </MobileModelMenuPortal>
           )}
@@ -2334,95 +3244,25 @@ export function ChatInput({
           ref={fileInputRef}
           type="file"
           multiple
-          accept={ACCEPTED_FILE_TYPES}
+          accept={acceptedFileTypes}
           onChange={(event) => handleFilesSelected(event.target.files)}
           className="hidden"
         />
 
-        <textarea
-          data-testid="chat-textarea"
-          ref={textareaRef}
-          value={value}
-          onFocus={() => dismissGuestQuickStart("completed")}
-          onChange={(e) => {
-            if (e.target.value) dismissGuestQuickStart();
-            onChange(e.target.value);
-          }}
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
-          aria-label={placeholderText}
-          placeholder={placeholderText}
-          disabled={isDisabled}
-          rows={1}
-                  className="order-first w-full max-h-[92px] min-h-[36px] resize-none overflow-y-auto border-0 bg-transparent px-1 py-1.5 text-base leading-5 text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-500 md:order-none md:w-auto md:min-w-[80px] md:max-h-[160px] md:min-h-[40px] md:flex-1 md:py-2 md:text-sm md:leading-6"
-              />
-
-        {activeSelectedModels.length > 0 && (
-          <button
-            type="button"
-            data-testid="request-credit-estimate"
-            onClick={() => setIsCreditBreakdownOpen(true)}
-            className="flex h-9 shrink-0 items-center gap-1 rounded-full border border-zinc-200 bg-zinc-50 px-2 text-[11px] font-bold text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800"
-            title={
-              lang === "ko"
-                ? `예상 ${estimatedRequestCredits}크레딧${inputCreditMultiplier > 1 ? ` · ${inputCreditMultiplier}×` : ""}`
-                : `Estimated ${estimatedRequestCredits} credits${inputCreditMultiplier > 1 ? ` · ${inputCreditMultiplier}×` : ""}`
-            }
-            aria-label={
-              lang === "ko"
-                ? `예상 ${estimatedRequestCredits}크레딧, 상세 보기`
-                : `Estimated ${estimatedRequestCredits} credits, view breakdown`
-            }
-          >
-            <CreditCostBadge
-              credits={estimatedRequestCredits}
-              size="xs"
-              tone="plain"
-              label={String(estimatedRequestCredits)}
-              className="px-0"
-            />
-            {inputCreditMultiplier > 1 && (
-              <span className="text-amber-600 dark:text-amber-400">{inputCreditMultiplier}×</span>
-            )}
-          </button>
-        )}
-        {isSending ? (
-          <button
-            type="button"
-            onClick={onCancel}
-            className="flex h-9 w-9 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-red-600 text-white hover:bg-red-500"
-            title={t("chat.cancel")}
-            aria-label={t("chat.cancel")}
-          >
-            <Square className="h-3.5 w-3.5 fill-current" />
-          </button>
-        ) : (
-          <button
-            type="button"
-            data-testid="chat-send-button"
-            onClick={() => {
-              dismissGuestQuickStart();
-              onSubmit();
-            }}
-            disabled={
-              isDisabled ||
-              activeSelectedModels.length === 0 ||
-              (!value.trim() && attachments.length === 0)
-            }
-            className="flex h-9 w-9 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-blue-600 text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500 dark:disabled:bg-zinc-700 dark:disabled:text-zinc-400"
-            title={`${t("chat.send")} · ${estimatedRequestCredits} credits`}
-            aria-label={`${t("chat.send")} · ${estimatedRequestCredits} credits`}
-          >
-            <ArrowUp className="h-4 w-4" />
-          </button>
-        )}
       </div>
-      <p
-        data-testid="chat-ai-disclaimer"
-        className="mt-1.5 px-2 text-center text-[10px] leading-4 text-zinc-400 dark:text-zinc-500 md:text-[11px]"
-      >
-        {t("chat.aiDisclaimer")}
-      </p>
+      {!hideDisclaimer && (
+        <p
+          data-testid="chat-ai-disclaimer"
+          // UI-CONTRAST-001. Aligned with AiDisclaimerNotice's mobile copy of
+          // the same supporting-text role, which already measures above AA.
+          // The previous zinc-400/zinc-500 pair composited to 2.62:1 on the
+          // light composer surface and 3.67:1 on the dark one -- both below
+          // the 4.5:1 this 11-12px, 400-weight body text requires.
+          className="mt-1.5 px-2 text-center text-[11px] leading-4 text-zinc-600 dark:text-zinc-300 md:text-xs"
+        >
+          {t("chat.aiDisclaimer")}
+        </p>
+      )}
       </div>
       <CreditBreakdownSheet
         open={isCreditBreakdownOpen}
@@ -2430,6 +3270,23 @@ export function ChatInput({
         items={creditBreakdown}
         total={estimatedRequestCredits}
         multiplier={inputCreditMultiplier}
+        webSearchReservationCredits={webSearchReservationCredits}
+      />
+      <UsageLimitModal
+        open={isUsageLimitModalOpen && isUsageLimitReached}
+        onClose={() => setIsUsageLimitModalOpen(false)}
+        isGuestMode={isGuestMode}
+        isAccountMonthlyLimitReached={isAccountMonthlyLimitReached}
+        accountPlan={accountUsage?.plan}
+        dailyCreditLimit={dailyCreditLimit}
+        planCreditsRemaining={planCreditsRemaining}
+        purchasedCreditsRemaining={purchasedCreditsRemaining}
+        dailyResetLabel={dailyResetLabel}
+        estimatedRequestCredits={estimatedRequestCredits}
+        totalAvailableCredits={totalAvailableCredits}
+        creditShortfall={creditShortfall}
+        signInCallbackUrl={signInCallbackUrl}
+        currentChatId={currentChatId}
       />
     </div>
   );

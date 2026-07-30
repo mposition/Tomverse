@@ -5,7 +5,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { APP_DEFAULTS } from "@/lib/appDefaults";
+import { APP_DEFAULTS, WEB_SEARCH_MODES, isWebSearchMode } from "@/lib/appDefaults";
 import {
   clampRuntimeSelectedModels,
   isEnabledRuntimeModelId,
@@ -51,6 +51,7 @@ const updateConversationSchema = z
       .max(APP_DEFAULTS.maxSelectedModels)
       .optional(),
     projectId: z.union([z.string().trim().min(1).max(100), z.null()]).optional(),
+    webSearchMode: z.enum(WEB_SEARCH_MODES).optional(),
   })
   .strict()
   .refine(
@@ -59,7 +60,8 @@ const updateConversationSchema = z
       body.password !== undefined ||
       body.selectedModels !== undefined ||
       body.disabledPanels !== undefined ||
-      body.projectId !== undefined,
+      body.projectId !== undefined ||
+      body.webSearchMode !== undefined,
     { message: "At least one update is required." }
   );
 const MESSAGE_PAGE_SIZE = 50;
@@ -156,6 +158,7 @@ export async function GET(
         title: true,
         selectedModels: true,
         disabledPanels: true,
+        webSearchMode: true,
         projectId: true,
         shareEnabled: true,
         shareExpiresAt: true,
@@ -197,6 +200,9 @@ export async function GET(
         content: true,
         status: true,
         modelId: true,
+        pendingJobId: true,
+        searchMetadata: true,
+        createdAt: true,
       },
     });
     const hasMoreMessages = messagePage.length > MESSAGE_PAGE_SIZE;
@@ -219,6 +225,9 @@ export async function GET(
         disabledPanels: safeParse(conversation.disabledPanels, []).filter(
           (modelId: string) => selectedModels.includes(modelId)
         ),
+        webSearchMode: isWebSearchMode(conversation.webSearchMode)
+          ? conversation.webSearchMode
+          : APP_DEFAULTS.defaultWebSearchMode,
         isLocked: !!conversation.password,
         shareEnabled:
           conversation.shareEnabled &&
@@ -424,7 +433,11 @@ export async function PATCH(
         )
       );
       updateData.disabledPanels = JSON.stringify(disabledPanels);
-    }	
+    }
+
+    if (body.webSearchMode !== undefined) {
+      updateData.webSearchMode = body.webSearchMode;
+    }
 
     if (body.projectId !== undefined) {
       if (body.projectId === null) {
@@ -471,6 +484,9 @@ export async function PATCH(
       disabledPanels: safeParse(updatedConversation.disabledPanels, []).filter(
         (modelId: string) => responseSelectedModels.includes(modelId)
       ),
+        webSearchMode: isWebSearchMode(updatedConversation.webSearchMode)
+          ? updatedConversation.webSearchMode
+          : APP_DEFAULTS.defaultWebSearchMode,
         isLocked: !!updatedConversation.password,
         shareEnabled:
           updatedConversation.shareEnabled &&

@@ -8,20 +8,20 @@ import { authOptions } from "@/lib/auth";
 import { getActiveAiModel } from "@/lib/activeAiModel";
 import { getUserBillingPlan } from "@/lib/billingEntitlements";
 import {
+  accessibleQuickReviewers,
   buildQuickComparisonSummaryPrompt,
   createQuickComparisonSummaryHash,
   estimateComparisonReviewTokens,
-  getQuickComparisonReviewerCandidates,
   QUICK_COMPARISON_PROMPT_VERSION,
   quickComparisonSummaryResultSchema,
   validateComparisonReviewInputSize,
-  type QuickComparisonSummaryResult,
+  verifyQuickComparisonSummaryResult,
+  verifiedQuickComparisonSummaryResultSchema,
   type ReviewSourceResponse,
 } from "@/lib/comparisonReview";
 import { latestComparableConversationTurn } from "@/lib/comparisonReviewTurn";
 import {
   acquireChatAccess,
-  assertModelAccess,
   chatErrorResponse,
   ChatAccessError,
   createChatBudget,
@@ -35,7 +35,6 @@ import {
   conversationLockedResponse,
   hasConversationUnlockGrant,
 } from "@/lib/conversationLock";
-import { assertModelRuntimeAvailable } from "@/lib/modelAvailability";
 import type { AiModel } from "@/lib/models";
 import {
   consumePerplexityUsage,
@@ -67,26 +66,6 @@ const jsonError = (
     { error, code, ...(traceId ? { traceId } : {}) },
     { status, headers: { "Cache-Control": "no-store" } }
   );
-
-const accessibleQuickReviewers = async (
-  access: ReturnType<typeof identifyChatCaller>,
-  responses: ReviewSourceResponse[]
-) => {
-  const candidates = getQuickComparisonReviewerCandidates(
-    new Set(responses.map((response) => response.provider))
-  );
-  const available: AiModel[] = [];
-  for (const candidate of candidates) {
-    try {
-      assertModelAccess(access, candidate);
-      const override = await assertModelRuntimeAvailable(candidate.id);
-      if (override.allowed) available.push(candidate);
-    } catch {
-      // Try the next configured Standard reviewer.
-    }
-  }
-  return available;
-};
 
 const responseMapForCachedSummary = (
   storedIds: unknown,
@@ -183,7 +162,7 @@ export async function GET(
     const hasValidCache = Boolean(
       cached &&
         !cached.isStale &&
-        quickComparisonSummaryResultSchema.safeParse(cached.result).success &&
+        verifiedQuickComparisonSummaryResultSchema.safeParse(cached.result).success &&
         responseMapForCachedSummary(
           cached.assistantMessageIds,
           turn.responses
@@ -312,7 +291,7 @@ export async function POST(
       },
     });
     if (cached && !cached.isStale) {
-      const result = quickComparisonSummaryResultSchema.safeParse(cached.result);
+      const result = verifiedQuickComparisonSummaryResultSchema.safeParse(cached.result);
       const responseMap = responseMapForCachedSummary(
         cached.assistantMessageIds,
         turn.responses
@@ -435,8 +414,11 @@ export async function POST(
           })
         );
 
-        const result: QuickComparisonSummaryResult =
-          quickComparisonSummaryResultSchema.parse(generated.output);
+        const rawResult = quickComparisonSummaryResultSchema.parse(generated.output);
+        const result = verifyQuickComparisonSummaryResult(
+          rawResult,
+          summaryPrompt.contentByResponseId
+        );
         const stored = await prisma.comparisonReview.upsert({
           where: {
             userId_inputHash: { userId: session.user.id, inputHash },

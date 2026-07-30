@@ -1,4 +1,8 @@
 @import "tailwindcss";
+/* rehype-highlight adds hljs-* classes to code blocks; without a theme they are
+   inert and every response renders monochrome. Bundled from node_modules, so
+   `style-src 'self'` is satisfied. */
+@import "highlight.js/styles/github-dark.css";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
@@ -6,25 +10,295 @@
   color-scheme: light;
   --background: #ffffff;
   --foreground: #171717;
+
+  /*
+   * One UI family per locale. Every font-family in the app resolves through
+   * --font-ui, and the :lang() rules below re-point it, so a mixed
+   * "AI Review 결과" string is drawn by a single family instead of splitting
+   * Latin and Hangul across two. See docs/ui-contracts/typography.md.
+   */
+  --font-ui: var(--font-geist-sans), system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-code: var(--font-geist-mono), ui-monospace, SFMono-Regular, "SF Mono",
+    Menlo, Consolas, "Liberation Mono", monospace;
+
+  /*
+   * Tomverse brand accent -- reserved for AI Review and the "Tomverse
+   * generated this" selected state. Mirrors the cyan/blue/purple logo
+   * gradient (see the chat shell skeleton's brand mark), anchored on the
+   * app's existing primary blue-600 as the middle stop so it reads as an
+   * extension of the primary palette, not a competing one. Never use these
+   * for primary CTAs, provider branding, or success/warning/error state --
+   * see AGENTS.md color-scope rules for AI Review / selected highlights.
+   */
+  --tomverse-accent-start: #0e7490; /* cyan-700 */
+  --tomverse-accent-mid: #2563eb; /* blue-600, same as primary CTA blue */
+  --tomverse-accent-end: #9333ea; /* purple-600 */
+
+  /* Review container identity: flat indigo (blue+purple blend), deliberately
+     not plain blue (primary) and not violet (already owned by Deep Research). */
+  --tomverse-review-surface: #eef2ff; /* indigo-50 */
+  --tomverse-review-border: #6366f1; /* indigo-500 */
+  --tomverse-review-selected: #e0e7ff; /* indigo-100 */
+  --tomverse-review-selected-border: #4f46e5; /* indigo-600 */
+  --tomverse-review-selected-text: #3730a3; /* indigo-800 */
+}
+
+/*
+ * R-05-KO. A metric-matched stand-in for Noto Sans KR that can actually draw
+ * Hangul.
+ *
+ * `next/font` already emits a metric-override face for each family, but it is
+ * built on `src: local(Arial)` -- and Arial has no Hangul. So Korean text never
+ * reaches those adjusted metrics: it falls through to the next entry in the
+ * stack below, which carries no overrides at all, and every Hangul line jumps
+ * when Noto Sans KR finally arrives. The override works for the Latin run in a
+ * mixed string and for nothing else, which is why the typography contract's
+ * claim that "the swap does not move layout" held in English and failed in
+ * Korean. Measured on the landing hero: median CLS 0.1082 at 320px and 0.1061 at
+ * 360px, entirely from `h1`/`p` reflow.
+ *
+ * The numbers are derived from Noto Sans KR's own metrics, not chosen:
+ *   size-adjust      = Noto's Hangul advance / the fallback's = 92/100
+ *   ascent-override  = Noto's ascent  / size-adjust           = 116/92
+ *   descent-override = Noto's descent / size-adjust           =  29/92
+ * `line-gap-override` matches the face `next/font` generates. Noto Sans KR's
+ * Hangul is 8% narrower than a full-width Korean system face, which is the
+ * horizontal half of the mismatch; the ascent/descent pair is the vertical half.
+ *
+ * `src` is a list of locals so each platform resolves to whatever Korean face it
+ * actually has. That relies on those faces sharing the full-width (1em) Hangul
+ * advance that is standard for Korean and CJK text faces. If a platform is ever
+ * found not to, it needs its own family here with its own `size-adjust` rather
+ * than a different value in this one -- see docs/ui-contracts/typography.md.
+ */
+@font-face {
+  font-family: "Noto Sans KR Korean Fallback";
+  src:
+    local("Apple SD Gothic Neo"), local("Malgun Gothic"),
+    local("Noto Sans CJK KR"), local("NanumGothic"),
+    local("WenQuanYi Zen Hei");
+  ascent-override: 126.09%;
+  descent-override: 31.52%;
+  line-gap-override: 0%;
+  size-adjust: 92%;
+}
+
+/*
+ * `lang` is set on <html> by LanguageProvider, so these re-point the whole
+ * subtree rather than patching individual glyphs through a fallback.
+ */
+:lang(ko) {
+  --font-ui: var(--font-noto-sans-kr), "Noto Sans KR Korean Fallback",
+    "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --font-code: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo,
+    Consolas, var(--font-noto-sans-kr), "Noto Sans KR Korean Fallback",
+    "Apple SD Gothic Neo", monospace;
+}
+
+:lang(zh) {
+  --font-ui: var(--font-noto-sans-sc), "PingFang SC", "Microsoft YaHei",
+    system-ui, sans-serif;
+  --font-code: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo,
+    Consolas, var(--font-noto-sans-sc), "PingFang SC", monospace;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* `inline` keeps these as var() references in the emitted utilities, so
+     `font-sans` follows the :lang() cascade instead of freezing one family. */
+  --font-sans: var(--font-ui);
+  --font-mono: var(--font-code);
+
+  --color-tomverse-accent-start: var(--tomverse-accent-start);
+  --color-tomverse-accent-mid: var(--tomverse-accent-mid);
+  --color-tomverse-accent-end: var(--tomverse-accent-end);
+  --color-tomverse-review-surface: var(--tomverse-review-surface);
+  --color-tomverse-review-border: var(--tomverse-review-border);
+  --color-tomverse-review-selected: var(--tomverse-review-selected);
+  --color-tomverse-review-selected-border: var(--tomverse-review-selected-border);
+  --color-tomverse-review-selected-text: var(--tomverse-review-selected-text);
+
+  /*
+   * UI-012 (option B): one namespace per semantic role.
+   *
+   * Every entry resolves to the Tailwind palette step the role already
+   * rendered, so this names the existing colours rather than changing them.
+   * Roles stay separate even when two of them resolve to the same value --
+   * accent-promotion and status-success are both emerald today, and a change
+   * to one must not silently move the other.
+   *
+   * See AGENTS.md "Accent colour roles" for the usage rule and
+   * scripts/check-accent-tokens.mjs for what enforces it.
+   */
+  /* accent-account: Account identity (avatar). */
+  --color-accent-account-400: var(--color-teal-400);
+  --color-accent-account-700: var(--color-teal-700);
+
+  /* accent-ai-review: AI Review only. The cyan -> blue -> purple sequence is reserved for it; no other role may use the full gradient. */
+  --color-accent-ai-review-end-50: var(--color-violet-50);
+  --color-accent-ai-review-mid-50: var(--color-blue-50);
+  --color-accent-ai-review-start-50: var(--color-cyan-50);
+  --color-accent-ai-review-end-300: var(--color-purple-300);
+  --color-accent-ai-review-start-300: var(--color-cyan-300);
+  --color-accent-ai-review-end-400: var(--color-purple-400);
+  --color-accent-ai-review-mid-400: var(--color-blue-400);
+  --color-accent-ai-review-start-400: var(--color-cyan-400);
+  --color-accent-ai-review-end-600: var(--color-purple-600);
+  --color-accent-ai-review-mid-600: var(--color-blue-600);
+  --color-accent-ai-review-start-600: var(--color-cyan-600);
+  --color-accent-ai-review-start-700: var(--color-cyan-700);
+  --color-accent-ai-review-end-950: var(--color-violet-950);
+  --color-accent-ai-review-mid-950: var(--color-blue-950);
+  --color-accent-ai-review-start-950: var(--color-cyan-950);
+
+  /* accent-deep-research: Deep Research tool. */
+  --color-accent-deep-research-50: var(--color-violet-50);
+  --color-accent-deep-research-100: var(--color-violet-100);
+  --color-accent-deep-research-200: var(--color-violet-200);
+  --color-accent-deep-research-400: var(--color-violet-400);
+  --color-accent-deep-research-500: var(--color-violet-500);
+  --color-accent-deep-research-600: var(--color-violet-600);
+  --color-accent-deep-research-700: var(--color-violet-700);
+  --color-accent-deep-research-800: var(--color-violet-800);
+  --color-accent-deep-research-900: var(--color-violet-900);
+  --color-accent-deep-research-950: var(--color-violet-950);
+
+  /* accent-model-catalogue: The model catalogue entry point. */
+  --color-accent-model-catalogue-500: var(--color-purple-500);
+
+  /* accent-plan-max: Max plan identity. */
+  --color-accent-plan-max-50: var(--color-purple-50);
+  --color-accent-plan-max-100: var(--color-purple-100);
+  --color-accent-plan-max-200: var(--color-purple-200);
+  --color-accent-plan-max-300: var(--color-purple-300);
+  --color-accent-plan-max-500: var(--color-purple-500);
+  --color-accent-plan-max-600: var(--color-purple-600);
+  --color-accent-plan-max-700: var(--color-purple-700);
+  --color-accent-plan-max-900: var(--color-purple-900);
+  --color-accent-plan-max-950: var(--color-purple-950);
+
+  /* accent-promotion: Pricing promotions. Separate from status-success on purpose: same value today, different meaning. */
+  --color-accent-promotion-200: var(--color-emerald-200);
+  --color-accent-promotion-300: var(--color-emerald-300);
+  --color-accent-promotion-400: var(--color-emerald-400);
+  --color-accent-promotion-500: var(--color-emerald-500);
+  --color-accent-promotion-600: var(--color-emerald-600);
+  --color-accent-promotion-700: var(--color-emerald-700);
+  --color-accent-promotion-950: var(--color-emerald-950);
+
+  /* accent-web-search: Web search tool. */
+  --color-accent-web-search-50: var(--color-sky-50);
+  --color-accent-web-search-100: var(--color-sky-100);
+  --color-accent-web-search-200: var(--color-sky-200);
+  --color-accent-web-search-300: var(--color-sky-300);
+  --color-accent-web-search-500: var(--color-sky-500);
+  --color-accent-web-search-600: var(--color-sky-600);
+  --color-accent-web-search-800: var(--color-sky-800);
+  --color-accent-web-search-900: var(--color-sky-900);
+  --color-accent-web-search-950: var(--color-sky-950);
+
+  /* status-success: Success / verified state. Separate from accent-promotion on purpose. */
+  --color-status-success-50: var(--color-emerald-50);
+  --color-status-success-100: var(--color-emerald-100);
+  --color-status-success-200: var(--color-emerald-200);
+  --color-status-success-300: var(--color-emerald-300);
+  --color-status-success-500: var(--color-emerald-500);
+  --color-status-success-600: var(--color-emerald-600);
+  --color-status-success-700: var(--color-emerald-700);
+  --color-status-success-900: var(--color-emerald-900);
+  --color-status-success-950: var(--color-emerald-950);
 }
 
 :root.dark {
   color-scheme: dark;
   --background: #0a0a0a;
   --foreground: #ededed;
+
+  --tomverse-accent-start: #22d3ee; /* cyan-400 */
+  --tomverse-accent-mid: #60a5fa; /* blue-400 */
+  --tomverse-accent-end: #c084fc; /* purple-400 */
+
+  --tomverse-review-surface: #14152a;
+  --tomverse-review-border: #4f46e5; /* indigo-600 */
+  --tomverse-review-selected: #1e1b4b; /* indigo-950 */
+  --tomverse-review-selected-border: #818cf8; /* indigo-400 */
+  --tomverse-review-selected-text: #c7d2fe; /* indigo-200 */
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-ui);
+}
+
+/*
+ * Semantic typography roles. Documented in docs/ui-contracts/typography.md;
+ * every role inherits the locale family through --font-ui / --font-code.
+ */
+@utility type-display {
+  font-family: var(--font-ui);
+  font-size: clamp(2.25rem, 6vw, 3.5rem);
+  line-height: 1.05;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+@utility type-page-title {
+  font-family: var(--font-ui);
+  font-size: clamp(1.75rem, 4vw, 2.25rem);
+  line-height: 1.15;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+
+@utility type-section-title {
+  font-family: var(--font-ui);
+  font-size: 1.25rem;
+  line-height: 1.3;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+@utility type-body {
+  font-family: var(--font-ui);
+  font-size: 1rem;
+  line-height: 1.65;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+@utility type-body-compact {
+  font-family: var(--font-ui);
+  font-size: 0.875rem;
+  line-height: 1.55;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+@utility type-control-label {
+  font-family: var(--font-ui);
+  font-size: 0.875rem;
+  line-height: 1.25;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+@utility type-caption {
+  font-family: var(--font-ui);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  font-weight: 500;
+  letter-spacing: 0.005em;
+}
+
+@utility type-code {
+  font-family: var(--font-code);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  font-weight: 400;
+  letter-spacing: 0;
 }
 
 button:not(:disabled),
@@ -42,4 +316,84 @@ input[type="submit"]:disabled,
 input[type="reset"]:disabled,
 [aria-disabled="true"] {
   cursor: not-allowed;
+}
+
+/*
+ * R-05-A. The consent slot's reserved height while the decision is unresolved.
+ * `components/analytics/MarketingConsentReservation.tsx` sets
+ * `data-consent-pending` before the first paint; `AnalyticsProvider` removes it
+ * as soon as the decision resolves, so the band collapses and an
+ * accepted/declined visitor still costs no layout box.
+ *
+ * `display: block` is needed because the slot is `empty:hidden` -- it has no
+ * children until the notice mounts. These rules are deliberately unlayered so
+ * they win over that utility.
+ *
+ * The values are the measured maxima of the rendered notice, taken across
+ * en/ko and both consent policy modes (`opt_in` shows a prompt,
+ * `notice_opt_out` shows a longer notice), because the script cannot know which
+ * mode a visitor's region resolves to. `min-height` is a floor, so a value at
+ * or above the real height produces no shift at all, and a value below it still
+ * shrinks the shift rather than adding one -- an under-reservation degrades, it
+ * does not regress.
+ *
+ * The breakpoints look like Tailwind's but are not: the notice sizes itself
+ * with container queries (`@container/notice`), so its height steps when the
+ * slot's content box crosses them. Measured step: 500px of viewport width, not
+ * 640px. Values above are the 100%-text-scale maxima; at a 200% root font the
+ * notice grows roughly 2.4x, which no static value tracks, so those visitors
+ * get a partial reduction rather than zero.
+ */
+html[data-consent-pending] [data-testid="marketing-consent-slot"] {
+  display: block;
+  min-height: 94px;
+}
+
+@media (min-width: 500px) {
+  html[data-consent-pending] [data-testid="marketing-consent-slot"] {
+    min-height: 184px;
+  }
+}
+
+@media (min-width: 640px) {
+  html[data-consent-pending] [data-testid="marketing-consent-slot"] {
+    min-height: 148px;
+  }
+}
+
+@media (min-width: 768px) {
+  html[data-consent-pending] [data-testid="marketing-consent-slot"] {
+    min-height: 132px;
+  }
+}
+
+@media (min-width: 1280px) {
+  html[data-consent-pending] [data-testid="marketing-consent-slot"] {
+    min-height: 116px;
+  }
+}
+
+/* Baseline visible focus indicator (WCAG 2.4.7).
+   Several controls - including the main chat composer - set `outline-none`
+   without supplying a replacement ring, which left keyboard users with no
+   indication of focus. `:where()` keeps specificity at 0 so any component that
+   does define its own `focus:`/`focus-visible:` ring still wins, and targeting
+   `:focus-visible` avoids drawing rings on mouse clicks. */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-blue-500);
+  outline-offset: 2px;
+}
+
+/* Respect the OS reduced-motion preference. The typing indicator and status
+   dots animate indefinitely while a response streams, which is exactly the
+   sustained motion this setting exists to suppress. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

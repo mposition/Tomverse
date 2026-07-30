@@ -5,6 +5,8 @@ import { getPublicRuntimeModels } from "@/lib/modelRegistry";
 import { resolveModelRuntimeAvailability } from "@/lib/modelAvailability";
 import { getProviderHealthDashboard } from "@/lib/providerMonitoring";
 import { getAnonymousClientKey } from "@/lib/clientIp";
+import { selectFallbackCandidates } from "@/lib/providerFallbackCandidates";
+import { isE2EDatabaseDisabled } from "@/lib/e2eTestMode";
 import {
   apiSecurityResponse,
   consumeApiRateLimit,
@@ -25,15 +27,25 @@ const isTransientStatusDbError = (error: unknown) => {
   );
 };
 
+// Without a health dashboard there is no evidence about the provider either
+// way, so every model reports `providerStatus: "unknown"` rather than an
+// unearned "operational". The model's own registry lifecycle is still
+// authoritative for its availability.
 const fallbackModelStatus = (publicModels: Awaited<ReturnType<typeof getPublicRuntimeModels>>) => ({
   generatedAt: new Date().toISOString(),
   models: publicModels.map((model) => ({
     id: model.id,
     provider: model.provider,
     status: resolveModelRuntimeAvailability(model),
+    providerStatus: "unknown" as const,
+    providerStatusReason: "Provider health data is unavailable.",
     fallbackModelIds: model.replacementModelId
       ? [model.replacementModelId]
       : [],
+    // RECON-OPS-001: with no dashboard there is no evidence about the
+    // replacement either, so it is offered as unverified rather than as a
+    // safe swap.
+    fallbackHealth: "unknown" as const,
     recentFailureCount5m: 0,
     recentErrorCode: null,
   })),
@@ -42,7 +54,7 @@ const fallbackModelStatus = (publicModels: Awaited<ReturnType<typeof getPublicRu
 export async function GET(req: Request) {
   try {
     const publicModels = await getPublicRuntimeModels();
-    if (process.env.E2E_DISABLE_DATABASE === "true") {
+    if (isE2EDatabaseDisabled()) {
       return NextResponse.json(fallbackModelStatus(publicModels), {
         headers: cacheHeaders,
       });
@@ -81,33 +93,63 @@ export async function GET(req: Request) {
     );
 
     const publicModelIds = new Set(publicModels.map((model) => model.id));
-    const models = publicModels.map((model) => {
-      const replacementModelId = model.replacementModelId;
+
+    const resolveStatus = (model: (typeof publicModels)[number]) => {
       const provider = providerStatus.get(model.provider);
       const incident = modelIncidents.get(model.id);
       let status: "available" | "limited" | "unavailable" =
         resolveModelRuntimeAvailability(model);
       if (status !== "unavailable" && incident && incident.failureCount5m >= 3) {
         status = "unavailable";
-      } else if (status !== "unavailable" && provider?.status === "outage") {
-        status = "unavailable";
+      } else if (status !== "unavailable") {
+        // Derived from the same public projection /status renders, rather
+        // than from the internal health enum. Reading `provider.status`
+        // here was why a provider shown as "Incident" on /status could still
+        // report every one of its models "available" in the same second:
+        // the two surfaces were answering from different evidence models.
+        //
+        //   incident -> unavailable (blocked, offer a replacement)
+        //   degraded -> limited     (usable, but warned)
+        //   unknown  -> unchanged   (neutral; absence of evidence is not
+        //                            evidence of failure, and the caller is
+        //                            told so via providerStatus)
+        if (provider?.publicStatus === "incident") {
+          status = "unavailable";
+        } else if (provider?.publicStatus === "degraded") {
+          status = "limited";
+        }
       }
+      return status;
+    };
+
+    // RECON-OPS-001: every model's status is resolved once up front so the
+    // replacement candidates below can be judged against the same snapshot
+    // this response reports, instead of against the static registry alone.
+    const modelStatuses = new Map(
+      publicModels.map((model) => [model.id, resolveStatus(model)] as const)
+    );
+
+    const models = publicModels.map((model) => {
+      const provider = providerStatus.get(model.provider);
+      const status = modelStatuses.get(model.id) ?? "available";
+      const { fallbackModelIds, fallbackHealth } =
+        status === "unavailable"
+          ? selectFallbackCandidates({
+              replacementModelId: model.replacementModelId,
+              recommendedModelIds: provider?.fallback.recommendedModelIds,
+              isPublicModel: (modelId) => publicModelIds.has(modelId),
+              statusOf: (modelId) => modelStatuses.get(modelId),
+            })
+          : { fallbackModelIds: [] as string[], fallbackHealth: "none" as const };
 
       return {
         id: model.id,
         provider: model.provider,
         status,
-        fallbackModelIds:
-          status === "unavailable"
-            ? Array.from(
-                new Set([
-                  ...(replacementModelId
-                    ? [replacementModelId]
-                    : []),
-                  ...(provider?.fallback.recommendedModelIds || []),
-                ])
-              ).filter((modelId) => publicModelIds.has(modelId))
-            : [],
+        providerStatus: provider?.publicStatus ?? "unknown",
+        providerStatusReason: provider?.publicStatusReasonText ?? null,
+        fallbackModelIds,
+        fallbackHealth,
       };
     });
 

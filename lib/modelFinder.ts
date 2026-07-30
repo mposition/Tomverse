@@ -220,6 +220,132 @@ export const getOptionalModelSuggestion = (
   return null;
 };
 
+export type ModelFinderComboRole = "primary" | "specialist" | "advanced";
+
+export type ModelFinderComboPick = {
+  modelId: string;
+  role: ModelFinderComboRole;
+  reasonKey: string;
+};
+
+// "AI 조합 추천": unlike getModelFinderRecommendations (a ranked list the
+// caller picks ONE winner from), this always returns a small combination of
+// 2-3 complementary models meant to be selected together, reusing the same
+// scoring tables so there's no second taxonomy to maintain.
+export const getModelFinderCombination = (
+  answers: { tasks: ModelFinderTask[]; priority: ModelFinderPriority }
+): ModelFinderComboPick[] => {
+  const fullAnswers: ModelFinderAnswers = { ...answers, fileUsage: "rarely" };
+  const ranked = getModelFinderRecommendations(fullAnswers);
+  if (!ranked.length) return [];
+
+  const picks: ModelFinderComboPick[] = [
+    {
+      modelId: ranked[0].modelId,
+      role: "primary",
+      reasonKey: ranked[0].reasonKey,
+    },
+  ];
+  const usedIds = new Set(picks.map((pick) => pick.modelId));
+
+  for (const task of answers.tasks) {
+    if (usedIds.size >= 2) break;
+    const taskScores = Object.entries(TASK_SCORES[task] || {})
+      .filter(([modelId]) => !usedIds.has(modelId) && isModelFinderDefaultId(modelId))
+      .sort(([, left], [, right]) => (right || 0) - (left || 0));
+    const bestModelId = taskScores[0]?.[0];
+    if (bestModelId) {
+      picks.push({
+        modelId: bestModelId,
+        role: "specialist",
+        reasonKey: REASON_BY_MODEL[bestModelId] || "modelFinder.reasons.general",
+      });
+      usedIds.add(bestModelId);
+    }
+  }
+
+  if (usedIds.size < 2) {
+    const backfill = ranked.find((entry) => !usedIds.has(entry.modelId));
+    if (backfill) {
+      picks.push({
+        modelId: backfill.modelId,
+        role: "specialist",
+        reasonKey: backfill.reasonKey,
+      });
+      usedIds.add(backfill.modelId);
+    }
+  }
+
+  const optional = getOptionalModelSuggestion(fullAnswers);
+  if (optional && !usedIds.has(optional.modelId) && picks.length < 3) {
+    picks.push({
+      modelId: optional.modelId,
+      role: "advanced",
+      reasonKey:
+        optional.reason === "research"
+          ? "modelFinder.optionalResearch"
+          : "modelFinder.optionalDeep",
+    });
+  }
+
+  return picks;
+};
+
+export type ModelFinderComplementaryReason =
+  | "reasoning"
+  | "research"
+  | "different_provider";
+
+export type ModelFinderComplementarySuggestion = {
+  modelId: string;
+  reason: ModelFinderComplementaryReason;
+};
+
+// For the model picker's "add one complementary model" nudge, shown when the
+// user already has 2 models selected -- a lighter alternative to the full
+// tasks/priority questionnaire in getModelFinderCombination. Looks at what
+// kind of thinking is missing from the current selection (deep reasoning,
+// sourced research) before falling back to "a different provider" for
+// perspective diversity.
+export const getComplementaryModelSuggestion = (
+  selectedModelIds: string[]
+): ModelFinderComplementarySuggestion | null => {
+  const selectedModels = selectedModelIds
+    .map((id) => getModel(id))
+    .filter((model): model is AiModel => Boolean(model));
+  const selectedClasses = new Set(selectedModels.map((model) => model.usageClass));
+  const selectedProviders = new Set(selectedModels.map((model) => model.provider));
+
+  const hasReasoning =
+    selectedClasses.has("reasoning") || selectedClasses.has("premium-reasoning");
+  if (!hasReasoning) {
+    const candidate = getModel("deepseek-r1");
+    if (candidate?.enabled && !selectedModelIds.includes(candidate.id)) {
+      return { modelId: candidate.id, reason: "reasoning" };
+    }
+  }
+
+  const hasResearch =
+    selectedClasses.has("research") || selectedClasses.has("deep-research");
+  if (!hasResearch) {
+    const candidate = getModel("perplexity/sonar");
+    if (candidate?.enabled && !selectedModelIds.includes(candidate.id)) {
+      return { modelId: candidate.id, reason: "research" };
+    }
+  }
+
+  const differentProvider = STANDARD_CANDIDATE_ORDER.map((id) => getModel(id)).find(
+    (model): model is AiModel =>
+      model != null &&
+      model.enabled &&
+      !selectedProviders.has(model.provider) &&
+      !selectedModelIds.includes(model.id)
+  );
+  return differentProvider
+    ? { modelId: differentProvider.id, reason: "different_provider" }
+    : null;
+};
+
 export const getModelFinderPromptKey = (answers: ModelFinderAnswers) => {
   if (answers.tasks.includes("documents")) return "modelFinder.prompts.documents";
   if (answers.tasks.includes("writing")) return "modelFinder.prompts.writing";
@@ -235,7 +361,11 @@ export type ContextualModelSuggestion = OptionalModelSuggestion & {
 
 const DOCUMENT_PATTERN =
   /\b(long document|contract|agreement|risk clause|due diligence|detailed document analysis)\b|계약서|긴\s*문서|위험\s*조항|정밀\s*분석|실사\s*검토/i;
-const RESEARCH_PATTERN =
+// Exported for lib/webSearchSuggestion.ts's "web search: auto" inline
+// suggestion, which shares this signal (source/citation/research intent
+// correlates strongly with needing current information) rather than
+// duplicating a second Korean/English keyword regex.
+export const RESEARCH_PATTERN =
   /\b(source|sources|citation|citations|research|web search|latest evidence)\b|출처|근거|웹\s*검색|자료\s*조사|최신\s*정보/i;
 
 export const getContextualModelSuggestion = ({

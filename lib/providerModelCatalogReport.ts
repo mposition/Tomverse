@@ -1,8 +1,10 @@
 import "server-only";
 
 import { sendTransactionalEmail } from "@/lib/email";
+import { EMAIL_FONT_STACK } from "@/lib/emailTypography";
 import { sendManagedSlackMessage } from "@/lib/managedSlack";
 import type { ProviderModelCatalogResult } from "@/lib/providerModelCatalogMonitor";
+import type { CatalogReconciliationResult } from "@/lib/providerModelCatalogReconciliation";
 import { prisma } from "@/lib/prisma";
 
 const providerName = (provider: string) =>
@@ -29,7 +31,30 @@ const cappedRows = (rows: string[], empty: string, maximum = 20) => {
   return visible.join("\n");
 };
 
-const reportParts = (results: ProviderModelCatalogResult[]) => {
+const reconciliationRows = (
+  reconciliation: CatalogReconciliationResult | undefined
+) => {
+  if (!reconciliation?.ran) return [];
+  return [
+    ...reconciliation.disabled.map(
+      (item) =>
+        `• ${providerName(item.provider)} ${code(item.apiModel)}: *disabled in registry* after ×${item.consecutiveMissing} missing scans`
+    ),
+    ...reconciliation.restored.map(
+      (item) =>
+        `• ${providerName(item.provider)} ${code(item.apiModel)}: re-enabled after reappearing in the catalog`
+    ),
+    ...reconciliation.held.map(
+      (item) =>
+        `• ${providerName(item.provider)}: *held back* — disabling all ${item.modelIds.length} enabled models looks like a catalog fault, not a retirement`
+    ),
+  ];
+};
+
+const reportParts = (
+  results: ProviderModelCatalogResult[],
+  reconciliation?: CatalogReconciliationResult
+) => {
   const checked = results.filter((result) => result.status === "checked");
   const failed = results.filter((result) => result.status === "failed");
   const skipped = results.filter((result) => result.status === "skipped");
@@ -54,6 +79,16 @@ const reportParts = (results: ProviderModelCatalogResult[]) => {
     (result) =>
       `• ${providerName(result.provider)}: ${result.status} (${result.errorCode || "unknown"})`
   );
+  const registryUpdates = reconciliationRows(reconciliation);
+  // Folded into the existing summary line rather than added as a new template
+  // variable: the Slack side renders a stored template keyed on
+  // provider_model_catalog_daily, which would silently drop a key it does not
+  // reference. The email body below gets its own section.
+  const registrySummary = reconciliation?.ran
+    ? ` · registry auto-updates ${reconciliation.disabled.length + reconciliation.restored.length}${
+        reconciliation.held.length ? ` · HELD ${reconciliation.held.length}` : ""
+      }`
+    : "";
   return {
     checked,
     failed,
@@ -62,8 +97,9 @@ const reportParts = (results: ProviderModelCatalogResult[]) => {
     missing,
     candidates,
     failures,
+    registryUpdates,
     variables: {
-      summary: `*Summary* · checked ${checked.length}/${results.length} · lifecycle warnings ${lifecycle.length} · catalog missing ${missing.length} · new candidates ${candidates.length}`,
+      summary: `*Summary* · checked ${checked.length}/${results.length} · lifecycle warnings ${lifecycle.length} · catalog missing ${missing.length} · new candidates ${candidates.length}${registrySummary}`,
       lifecycleRows: `*Lifecycle warning*\n${cappedRows(lifecycle, "None")}`,
       missingRows: `*Missing from successful provider catalogs*\n${cappedRows(missing, "None")}`,
       candidateRows: `*New model candidates found today*\n${cappedRows(candidates, "None")}`,
@@ -115,11 +151,12 @@ const recordEmail = async (input: {
 
 export async function sendProviderModelCatalogReport(input: {
   results: ProviderModelCatalogResult[];
+  reconciliation?: CatalogReconciliationResult;
   generatedAt?: Date;
   test?: boolean;
 }) {
   const generatedAt = input.generatedAt || new Date();
-  const parts = reportParts(input.results);
+  const parts = reportParts(input.results, input.reconciliation);
   const localDate = new Intl.DateTimeFormat("en-AU", {
     dateStyle: "medium",
     timeZone: "Australia/Brisbane",
@@ -153,6 +190,7 @@ export async function sendProviderModelCatalogReport(input: {
     `Missing from successful provider catalogs\n${plain(cappedRows(parts.missing, "None", 100))}`,
     `New model candidates found today\n${plain(cappedRows(parts.candidates, "None", 100))}`,
     `Provider checks not completed\n${plain(cappedRows(parts.failures, "None", 100))}`,
+    `Registry auto-updates\n${plain(cappedRows(parts.registryUpdates, input.reconciliation?.ran === false ? "Disabled by configuration" : "None", 100))}`,
     "",
     "A model missing from a successful list response is not declared deprecated after one scan. Tomverse reports consecutive misses separately because access permissions and provider catalog behavior can also cause absence.",
     `Generated ${generatedLabel}`,
@@ -175,7 +213,7 @@ export async function sendProviderModelCatalogReport(input: {
           to: recipient,
           subject,
           text: detail,
-          html: `<div style="font-family:Arial,sans-serif;white-space:pre-wrap;line-height:1.55">${htmlEscape(detail)}</div>`,
+          html: `<div style="font-family:${EMAIL_FONT_STACK};white-space:pre-wrap;line-height:1.55">${htmlEscape(detail)}</div>`,
         });
         const status = sent.sent ? "sent" : "skipped";
         await recordEmail({ title: subject, detail, recipient, status });

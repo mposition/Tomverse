@@ -96,7 +96,7 @@ export function AdminNotesBox({ targetType, targetId }: Props) {
     <section className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500">
+          <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">
             Internal notes
           </p>
           <p className="mt-1 text-xs text-zinc-500">
@@ -118,7 +118,7 @@ export function AdminNotesBox({ targetType, targetId }: Props) {
           type="button"
           onClick={saveNote}
           disabled={isSaving || body.trim().length === 0}
-          className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-xs font-black text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MessageSquarePlus className="h-3.5 w-3.5" />}
           Save note

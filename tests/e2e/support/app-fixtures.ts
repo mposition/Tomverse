@@ -1,6 +1,90 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Page, type TestInfo } from "@playwright/test";
 
 export type QaLanguage = "en" | "ko" | "zh";
+
+/** How the mocked Cloudflare widget behaves when it is executed. */
+export type QaTurnstileScript =
+  /** Passes without any interaction -- the user must never see verification UI. */
+  | "silent"
+  /** Fires before-interactive-callback and then waits for the test to act. */
+  | "interactive"
+  | "error"
+  | "timeout"
+  | "expired"
+  | "unsupported"
+  /** Never calls back at all: the coordinator's own timeout has to end it. */
+  | "hang";
+
+export type QaTurnstileSnapshot = {
+  script: QaTurnstileScript;
+  renders: number;
+  executes: number;
+  issuedTokens: string[];
+  widgets: { id: string; action: string; size: string; interactive: boolean }[];
+};
+
+type QaTurnstileControl = {
+  script: QaTurnstileScript;
+  renders: number;
+  executes: number;
+  issuedTokens: string[];
+  usedTokens: string[];
+  snapshot: () => QaTurnstileSnapshot;
+  widgetCount: () => number;
+  interactiveCount: () => number;
+  completeInteractive: () => boolean;
+  failInteractive: (
+    kind?: "error" | "timeout" | "expired" | "unsupported"
+  ) => boolean;
+};
+
+declare global {
+  interface Window {
+    __qaTurnstile?: QaTurnstileControl;
+  }
+}
+
+/**
+ * Picks the widget script for the next document load. Registered after
+ * prepareGuestPage's own init script, so it runs once the mock exists.
+ */
+export async function installTurnstileScript(
+  page: Page,
+  script: QaTurnstileScript
+) {
+  await page.addInitScript((value) => {
+    if (window.__qaTurnstile) window.__qaTurnstile.script = value;
+  }, script);
+}
+
+/** Switches the script for the document that is already open. */
+export async function setTurnstileScript(page: Page, script: QaTurnstileScript) {
+  await page.evaluate((value) => {
+    if (window.__qaTurnstile) window.__qaTurnstile.script = value;
+  }, script);
+}
+
+/** Solves the challenge that is currently on screen. */
+export async function completeTurnstileChallenge(page: Page) {
+  return page.evaluate(
+    () => window.__qaTurnstile?.completeInteractive() ?? false
+  );
+}
+
+/** Ends the challenge that is currently on screen with a Cloudflare failure. */
+export async function failTurnstileChallenge(
+  page: Page,
+  kind: "error" | "timeout" | "expired" | "unsupported" = "error"
+) {
+  return page.evaluate(
+    (value) => window.__qaTurnstile?.failInteractive(value) ?? false,
+    kind
+  );
+}
+
+export async function readTurnstileState(page: Page) {
+  return page.evaluate(() => window.__qaTurnstile?.snapshot() ?? null);
+}
 
 type JsonValue =
   | null
@@ -118,24 +202,180 @@ export async function prepareGuestPage(page: Page, language: QaLanguage = "ko") 
   );
 
   await page.addInitScript((lang) => {
-    const callbacks = new Map<string, (token: string) => void>();
-    window.turnstile = {
-      render: (_container, options) => {
-        const widgetId = "qa-turnstile-widget";
-        const callback = options.callback;
-        if (typeof callback === "function") {
-          callbacks.set(widgetId, callback as (token: string) => void);
+    // A scriptable stand-in for Cloudflare's widget. The default -- "silent" --
+    // is what every pre-existing spec relies on: verification passes without
+    // any interaction, so no verification UI is ever supposed to appear. The
+    // other scripts drive the exact callbacks Turnstile can fire, so the
+    // coordinator's state machine can be tested without the network.
+    type Callbacks = Record<string, unknown>;
+    const widgets = new Map<
+      string,
+      {
+        id: string;
+        action: string;
+        size: string;
+        callbacks: Callbacks;
+        box: HTMLElement;
+        interactive: boolean;
+      }
+    >();
+    let widgetSeq = 0;
+    let tokenSeq = 0;
+
+    const control = {
+      script: "silent" as
+        | "silent"
+        | "interactive"
+        | "error"
+        | "timeout"
+        | "expired"
+        | "unsupported"
+        | "hang",
+      renders: 0,
+      executes: 0,
+      issuedTokens: [] as string[],
+      usedTokens: [] as string[],
+      snapshot: () => ({
+        script: control.script,
+        renders: control.renders,
+        executes: control.executes,
+        issuedTokens: [...control.issuedTokens],
+        widgets: Array.from(widgets.values()).map((widget) => ({
+          id: widget.id,
+          action: widget.action,
+          size: widget.size,
+          interactive: widget.interactive,
+        })),
+      }),
+      /** Every widget currently rendered, however it was placed. */
+      widgetCount: () => widgets.size,
+      interactiveCount: () =>
+        Array.from(widgets.values()).filter((widget) => widget.interactive)
+          .length,
+      /** The user solves the visible challenge. */
+      completeInteractive: () => {
+        for (const widget of widgets.values()) {
+          if (!widget.interactive) continue;
+          const callback = widget.callbacks.callback;
+          const after = widget.callbacks["after-interactive-callback"];
+          if (typeof after === "function") (after as () => void)();
+          if (typeof callback === "function") {
+            const token = `qa-turnstile-token-${++tokenSeq}`;
+            control.issuedTokens.push(token);
+            (callback as (value: string) => void)(token);
+          }
+          return true;
         }
+        return false;
+      },
+      /** The visible challenge ends badly. */
+      failInteractive: (
+        kind: "error" | "timeout" | "expired" | "unsupported" = "error"
+      ) => {
+        for (const widget of widgets.values()) {
+          if (!widget.interactive) continue;
+          const callback = widget.callbacks[`${kind}-callback`];
+          if (typeof callback === "function") (callback as () => void)();
+          return true;
+        }
+        return false;
+      },
+    };
+    window.__qaTurnstile = control;
+
+    /**
+     * Stands in for Cloudflare's iframe, including its `interaction-only`
+     * behaviour: zero size until an interaction is actually required, then the
+     * real widget's documented dimensions so geometry assertions mean
+     * something.
+     */
+    const sizeWidget = (widget: { box: HTMLElement; size: string }) => {
+      const box = widget.box;
+      if (widget.size === "compact") {
+        box.style.width = "150px";
+        box.style.height = "140px";
+      } else if (widget.size === "flexible") {
+        box.style.width = "100%";
+        box.style.maxWidth = "100%";
+        box.style.height = "65px";
+      } else {
+        box.style.width = "300px";
+        box.style.height = "65px";
+      }
+      box.style.maxWidth = "100%";
+      box.style.background = "#e6edf7";
+      box.style.border = "1px solid #b9c8de";
+      box.style.borderRadius = "4px";
+      box.style.boxSizing = "border-box";
+    };
+
+    window.turnstile = {
+      render: (container, options) => {
+        const widgetId = `qa-turnstile-widget-${++widgetSeq}`;
+        const box = document.createElement("div");
+        box.setAttribute("data-testid", "qa-turnstile-widget");
+        box.setAttribute("data-widget-id", widgetId);
+        box.setAttribute("data-action", String(options.action ?? ""));
+        box.setAttribute("data-size", String(options.size ?? "normal"));
+        box.style.width = "0px";
+        box.style.height = "0px";
+        box.style.overflow = "hidden";
+        container.appendChild(box);
+        widgets.set(widgetId, {
+          id: widgetId,
+          action: String(options.action ?? ""),
+          size: String(options.size ?? "normal"),
+          callbacks: options as Callbacks,
+          box,
+          interactive: false,
+        });
+        control.renders += 1;
         return widgetId;
       },
       execute: (widgetId) => {
+        const widget = widgets.get(widgetId);
+        if (!widget) return;
+        control.executes += 1;
         queueMicrotask(() => {
-          callbacks.get(widgetId)?.("qa-turnstile-token");
+          if (!widgets.has(widgetId)) return;
+          const callbacks = widget.callbacks;
+          const call = (name: string) => {
+            const handler = callbacks[name];
+            if (typeof handler === "function") (handler as () => void)();
+          };
+
+          if (control.script === "silent") {
+            const callback = callbacks.callback;
+            if (typeof callback === "function") {
+              const token = `qa-turnstile-token-${++tokenSeq}`;
+              control.issuedTokens.push(token);
+              (callback as (value: string) => void)(token);
+            }
+            return;
+          }
+          if (control.script === "hang") return;
+          if (control.script === "interactive") {
+            widget.interactive = true;
+            widget.box.setAttribute("data-interactive", "true");
+            sizeWidget(widget);
+            call("before-interactive-callback");
+            return;
+          }
+          call(`${control.script}-callback`);
         });
       },
-      reset: () => {},
+      reset: (widgetId) => {
+        const widget = widgets.get(widgetId);
+        if (!widget) return;
+        widget.interactive = false;
+        widget.box.removeAttribute("data-interactive");
+        widget.box.style.width = "0px";
+        widget.box.style.height = "0px";
+      },
       remove: (widgetId) => {
-        callbacks.delete(widgetId);
+        const widget = widgets.get(widgetId);
+        widget?.box.remove();
+        widgets.delete(widgetId);
       },
     };
 
@@ -181,9 +421,39 @@ export type AuthenticatedQaState = {
   userSettingsReads: number;
 };
 
+/**
+ * A message as GET /api/conversations/:id returns it. `modelId` is what each
+ * panel filters on (components/chat/ChatApp.tsx): a user turn with no modelId
+ * belongs to every panel, an assistant turn only to its own model's panel.
+ */
+export type QaConversationMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  modelId?: string;
+  status?: string;
+};
+
 export async function mockAuthenticatedApi(
   page: Page,
-  options: { selectedModels?: string[]; showSidebarTour?: boolean } = {}
+  options: {
+    selectedModels?: string[];
+    showSidebarTour?: boolean;
+    /**
+     * Seeds the conversation with history. Panels report themselves empty
+     * without it, and an empty conversation is exactly the state the mobile
+     * shell hides its model tabs in -- so any test that needs the multi-model
+     * tab strip has to seed this as well as `selectedModels`.
+     */
+    messages?: QaConversationMessage[];
+    /**
+     * Seeds the conversation's saved web-search mode, the same field
+     * ChatPageClient restores from. "always" with a mix of search-capable and
+     * search-incapable models is what puts the composer's tool-status chip
+     * into its partial-support state.
+     */
+    webSearchMode?: "off" | "auto" | "always";
+  } = {}
 ): Promise<AuthenticatedQaState> {
   await page.addInitScript((showSidebarTour) => {
     if (showSidebarTour) {
@@ -219,6 +489,7 @@ export async function mockAuthenticatedApi(
     title: state.title,
     selectedModels: options.selectedModels || ["gpt-5-4-mini"],
     disabledPanels: [],
+    webSearchMode: options.webSearchMode || "off",
     isLocked: state.locked,
     shareEnabled: state.shared,
     shareExpiresAt: state.shared ? "2099-01-01T00:00:00.000Z" : null,
@@ -294,15 +565,11 @@ export async function mockAuthenticatedApi(
   await page.route("**/api/user/model-finder", (route) =>
     route.fulfill(
       json({
-        variant: "control",
-        shouldShow: false,
         settings: {
           preferredTasks: [],
           preferredPriority: null,
-          usesFilesFrequently: null,
           defaultModelId: "gpt-5-4-mini",
           modelFinderCompletedAt: null,
-          modelFinderDismissedAt: null,
         },
       })
     )
@@ -402,12 +669,43 @@ export async function mockAuthenticatedApi(
     state.deleted = false;
     state.locked = false;
     state.shared = false;
-    state.title = "New QA conversation";
+    const body = route.request().postDataJSON() as { title?: unknown };
+    state.title =
+      typeof body.title === "string" && body.title.trim()
+        ? body.title
+        : "New QA conversation";
     await route.fulfill(json(conversation(), 201));
   });
 
+  // The transcript this conversation reports, which grows as the app saves to
+  // it -- exactly like the real endpoint pair.
+  //
+  // It used to be a static echo of `options.messages`: POST /messages returned
+  // `{}` and threw the body away, and GET /:id always replayed the seed. The
+  // app pre-saves the user turn before streaming and re-reads the conversation
+  // afterwards, so whenever that read landed after the optimistic append it
+  // replaced a real transcript with the empty seed and the shell fell back to
+  // its welcome screen -- a send that had already created the conversation,
+  // saved the message, streamed /api/chat and generated a title showed nothing
+  // at all. That was the ~30% flake in the mobile keyboard suite, and it was
+  // the mock disagreeing with itself rather than anything the product does.
+  const savedMessages: QaConversationMessage[] = [...(options.messages || [])];
+
   await page.route("**/api/conversations/qa-conversation/messages**", async (route) => {
-    await route.fulfill(json({}, route.request().method() === "POST" ? 201 : 200));
+    if (route.request().method() === "POST") {
+      const body = route.request().postDataJSON() as {
+        messages?: QaConversationMessage[];
+      };
+      for (const message of body?.messages ?? []) {
+        if (!message?.id || savedMessages.some((saved) => saved.id === message.id)) {
+          continue;
+        }
+        savedMessages.push(message);
+      }
+      await route.fulfill(json({}, 201));
+      return;
+    }
+    await route.fulfill(json({}));
   });
 
   await page.route("**/api/conversations/qa-conversation/verify", async (route) => {
@@ -465,7 +763,13 @@ export async function mockAuthenticatedApi(
       return;
     }
 
-    await route.fulfill(json({ ...conversation(), messages: [], nextCursor: null }));
+    await route.fulfill(
+      json({
+        ...conversation(),
+        messages: savedMessages as unknown as JsonValue,
+        nextCursor: null,
+      })
+    );
   });
 
   return state;
@@ -557,6 +861,94 @@ export function createQaPdfBuffer() {
   } /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
 
   return Buffer.from(pdf, "ascii");
+}
+
+// Chat message submission is shell-dependent: PC shells send on plain
+// Enter, but mobile shells only send via the on-screen send button (or an
+// external-keyboard Ctrl/Cmd+Enter). Tests that merely need a message sent
+// -- not ones specifically covering keyboard policy -- should use this
+// helper so they behave correctly under every Playwright project.
+export async function sendChatMessage(
+  page: Page,
+  testInfo: TestInfo,
+  text: string,
+  textareaTestId = "chat-textarea"
+) {
+  const textarea = page.getByTestId(textareaTestId);
+  await textarea.fill(text);
+  if (testInfo.project.name.startsWith("mobile")) {
+    await page.getByTestId("chat-send-button").click();
+  } else {
+    await textarea.press("Enter");
+  }
+}
+
+/** The model-selector trigger, second of the two chat-input popover buttons. */
+export function modelMenuTrigger(page: Page) {
+  return page.locator('button[aria-controls="chat-input-popover"]').nth(1);
+}
+
+/**
+ * STG-F008: opening the picker lands on the recommended screen, so the 30+
+ * model catalogue and its filters only exist after stepping into "All models".
+ * Specs that assert on `model-option` rows go through here.
+ */
+export async function openModelCatalogue(page: Page) {
+  const dialog = page.locator("#chat-input-popover");
+  if (!(await dialog.isVisible())) {
+    await modelMenuTrigger(page).click();
+    await expect(dialog).toBeVisible();
+  }
+  await dialog.getByTestId("model-picker-open-all").click();
+  await expect(dialog.getByTestId("model-picker-scroll-region")).toBeVisible();
+  await expect.poll(() => dialog.getByTestId("model-option").count()).toBeGreaterThan(0);
+  return dialog;
+}
+
+/** Opens the picker and steps straight into the full catalogue. */
+export async function openModelPickerCatalogue(page: Page) {
+  await modelMenuTrigger(page).click();
+  await expect(page.locator("#chat-input-popover")).toBeVisible();
+  return openModelCatalogue(page);
+}
+
+/**
+ * Opens a seeded conversation from the new-chat screen, whichever shell is
+ * rendering.
+ *
+ * The desktop welcome screen still lists recent conversations as title cards.
+ * The mobile welcome screen deliberately does not -- printing chat titles on
+ * the first screen of a phone leaks them to anyone holding it -- so there the
+ * path is the compact "View N recent chats" row, which opens the same drawer
+ * the hamburger does. Specs go through here instead of clicking
+ * `recent-conversation-card` directly so they stay shell-agnostic.
+ */
+export async function openRecentConversation(
+  page: Page,
+  options: { title?: string } = {}
+) {
+  const disclosure = page.getByTestId("recent-conversations-disclosure");
+  const cards = page.getByTestId("recent-conversation-card");
+  // Which affordance exists depends on the shell, so wait for whichever one
+  // this viewport renders before branching -- a bare count() would race the
+  // welcome screen's first paint.
+  await expect(disclosure.or(cards.first())).toBeVisible();
+
+  if (await disclosure.count()) {
+    await disclosure.click();
+    const drawer = page.getByRole("dialog");
+    const items = drawer.getByTestId("sidebar-conversation-item");
+    const item = options.title
+      ? items.filter({ hasText: options.title })
+      : items.first();
+    await item.click();
+    return;
+  }
+
+  const card = options.title
+    ? cards.filter({ hasText: options.title })
+    : cards.first();
+  await card.click();
 }
 
 export async function expectNoHorizontalOverflow(page: Page) {

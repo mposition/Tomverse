@@ -36,7 +36,7 @@ export function AdminReauthenticationCard({
           <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-blue-400/20 bg-blue-500/15 text-blue-300">
             <KeyRound className="h-7 w-7" aria-hidden="true" />
           </div>
-          <p className="mt-6 text-xs font-black uppercase tracking-[0.2em] text-blue-300">
+          <p className="mt-6 text-xs font-bold uppercase tracking-[0.2em] text-blue-300">
             Tomverse Admin Console
           </p>
           <h1 className="mt-3 text-3xl font-black tracking-tight">

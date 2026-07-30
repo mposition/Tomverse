@@ -137,15 +137,42 @@ export async function consumeApiRateLimit(
   });
 }
 
+// Gives back one unit of a per-user rate-limit bucket consumed earlier by
+// consumeApiRateLimit, floored at zero. Intended for cases where the action
+// that consumed the quota turned out to be legitimate (e.g. a login code
+// request that was actually used to sign in), so repeated genuine use isn't
+// penalized the same as abandoned/abusive requests. Only releases the
+// per-user bucket, not the coarser per-IP one.
+export async function releaseApiRateLimit(
+  userId: string,
+  scope: string,
+  period: ApiPeriod
+) {
+  const start = periodStart(period, new Date());
+  const key = `api:${hashKey(scope, "user", userId)}`;
+  await prisma.$executeRaw`
+    UPDATE "ChatUsageBucket"
+    SET "count" = GREATEST("count" - 1, 0), "updatedAt" = NOW()
+    WHERE "key" = ${key} AND "period" = ${`api-${scope}-${period}`} AND "periodStart" = ${start}
+  `;
+}
+
 export async function reserveDailyUploadBytes(
   userId: string,
-  bytes: number
+  bytes: number,
+  // Guests upload against a far smaller daily budget than an account does,
+  // and pass their own subject key as the bucket owner. The default stays
+  // exactly what it was for every existing caller.
+  limitOverride?: number
 ) {
   const now = new Date();
-  const limit = positiveInteger(
-    process.env.API_UPLOAD_BYTES_PER_USER_PER_DAY,
-    250 * 1024 * 1024
-  );
+  const limit =
+    limitOverride && Number.isSafeInteger(limitOverride) && limitOverride > 0
+      ? limitOverride
+      : positiveInteger(
+          process.env.API_UPLOAD_BYTES_PER_USER_PER_DAY,
+          250 * 1024 * 1024
+        );
   const allowed = await prisma.$transaction((tx) =>
     incrementBucket(
       tx,

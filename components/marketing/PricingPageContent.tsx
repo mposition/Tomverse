@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { displayHeadingClass } from "@/lib/displayHeading";
 import { useEffect, useRef } from "react";
 import {
   Calculator,
@@ -27,6 +28,11 @@ import {
   formatBillingMinor,
   type BillingCurrency,
 } from "@/lib/billingMarkets";
+import {
+  formatBillingPeriodLabel,
+  formatCountedUnit,
+  formatPriceWithPeriod,
+} from "@/lib/pricingFormat";
 
 const annualLabelByLanguage: Partial<Record<Language, { annual: string; save: string; checkout: string }>> = {
   en: { annual: "Annual", save: "Save 20%", checkout: "The fixed local price shown is charged at checkout." },
@@ -37,6 +43,14 @@ const annualLabelByLanguage: Partial<Record<Language, { annual: string; save: st
   es: { annual: "Anual", save: "20 % de descuento", checkout: "Se cobra el precio local fijo mostrado." },
   pt: { annual: "Anual", save: "20% de desconto", checkout: "O preço local fixo exibido é cobrado no checkout." },
 };
+
+// The public catalogue always offers exactly these three packs, so the
+// loading state can reserve their space without waiting to learn the count.
+const CREDIT_PACK_PLACEHOLDER_KEYS = [
+  "starter_500",
+  "project_1500",
+  "power_4000",
+] as const;
 
 const saleLabelByLanguage: Partial<Record<Language, { badge: string; intro: string; regular: string; duration: string }>> = {
   en: { badge: "Launch special", intro: "50% off now", regular: "Regular", duration: "for the first month" },
@@ -75,7 +89,10 @@ type CreditValueCopy = {
   title: string;
   description: string;
   typicalLabel: string;
+  /** Plural ("other") form of the credit unit. */
   creditUnit: string;
+  /** Singular ("one") form -- "Standard · 1 credit", never "1 credits". */
+  creditUnitOne: string;
   monthlyUnit: string;
   approx: string;
   standardOnly: string;
@@ -99,6 +116,7 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     description: "Compare the allowance with the base cost of common model combinations before choosing a plan.",
     typicalLabel: "Typical short-request examples",
     creditUnit: "credits",
+    creditUnitOne: "credit",
     monthlyUnit: "credits / month",
     approx: "About",
     standardOnly: "Standard only",
@@ -120,6 +138,7 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     description: "플랜을 선택하기 전에 월 제공량을 자주 사용하는 모델 조합의 기본 차감량과 비교해 보세요.",
     typicalLabel: "일반적인 짧은 요청 기준 예시",
     creditUnit: "크레딧",
+    creditUnitOne: "크레딧",
     monthlyUnit: "크레딧 / 월",
     approx: "약",
     standardOnly: "Standard 단독",
@@ -141,6 +160,7 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     description: "选择方案前，可将每月额度与常用模型组合的基础消耗进行比较。",
     typicalLabel: "典型短请求示例",
     creditUnit: "积分",
+    creditUnitOne: "积分",
     monthlyUnit: "积分 / 月",
     approx: "约",
     standardOnly: "仅 Standard",
@@ -162,6 +182,7 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     description: "Comparez l'enveloppe au coût de base des combinaisons de modèles courantes avant de choisir un plan.",
     typicalLabel: "Exemples de requêtes courtes typiques",
     creditUnit: "crédits",
+    creditUnitOne: "crédit",
     monthlyUnit: "crédits / mois",
     approx: "Environ",
     standardOnly: "Standard uniquement",
@@ -183,6 +204,7 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     description: "Vergleichen Sie das Kontingent vor der Tarifwahl mit den Basiskosten gängiger Modellkombinationen.",
     typicalLabel: "Beispiele für typische kurze Anfragen",
     creditUnit: "Credits",
+    creditUnitOne: "Credit",
     monthlyUnit: "Credits / Monat",
     approx: "Etwa",
     standardOnly: "Nur Standard",
@@ -204,6 +226,7 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     description: "Compara la asignación con el coste base de combinaciones habituales antes de elegir un plan.",
     typicalLabel: "Ejemplos de solicitudes cortas habituales",
     creditUnit: "créditos",
+    creditUnitOne: "crédito",
     monthlyUnit: "créditos / mes",
     approx: "Aprox.",
     standardOnly: "Solo Standard",
@@ -225,6 +248,7 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     description: "Compare a franquia com o custo-base das combinações mais comuns antes de escolher um plano.",
     typicalLabel: "Exemplos de pedidos curtos típicos",
     creditUnit: "créditos",
+    creditUnitOne: "crédito",
     monthlyUnit: "créditos / mês",
     approx: "Cerca de",
     standardOnly: "Somente Standard",
@@ -460,6 +484,8 @@ type PricingCopy = {
   creditNotice: string;
   compareTitle: string;
   compareDescription: string;
+  /** Accessible name for the horizontally scrollable comparison table. */
+  compareScrollLabel: string;
   table: {
     feature: string;
     free: string;
@@ -483,6 +509,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     creditNotice:
       "Credit usage varies by each model's processing cost and reasoning method. You can review the estimated usage before sending a request.",
     compareTitle: "Compare what each plan unlocks",
+    compareScrollLabel: "Plan comparison table, scrolls horizontally",
     compareDescription:
       "Tomverse plans are designed around model access, usage allowance, file workflows, and sharing controls.",
     table: {
@@ -524,7 +551,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
         period: "per month",
         description: "300 monthly AI credits for light everyday use and trying advanced models.",
         cta: "Start free",
-        href: "/chat",
+        href: "/auth/signin?callbackUrl=%2Fchat",
         usage: "300 monthly AI credits",
         features: [
           "Access to the selected model catalogue",
@@ -580,6 +607,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     billingNote: "출시 특가: Pro 또는 Max 첫 달 50% 할인. 언제든 취소할 수 있습니다.",
     creditNotice: "모델별 처리 비용과 추론 방식에 따라 크레딧 사용량이 다릅니다. 요청을 보내기 전에 예상 사용량을 확인할 수 있습니다.",
     compareTitle: "플랜별 제공 기능 비교",
+    compareScrollLabel: "플랜 비교표, 가로로 스크롤됩니다",
     compareDescription: "Tomverse 플랜은 모델 접근, 사용량, 파일 워크플로, 공유 제어를 기준으로 설계되었습니다.",
     table: {
       feature: "기능",
@@ -602,7 +630,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     ],
     note: "가격은 선택된 현지통화의 세금 전 고정 금액입니다. Max는 Standard 모델 일일 제한 없음, Premium 사용량은 월 크레딧 및 공정사용 정책이 적용됩니다.",
     plans: [
-      { name: "Free", eyebrow: "처음 시작하는 사용자", price: "$0", period: "월", description: "가벼운 일상 사용과 고급 모델 체험을 위한 월 300 AI 크레딧", cta: "무료로 시작", href: "/chat", usage: "월 300 AI 크레딧", features: ["선별된 모델 카탈로그 접근", "고급 모델 월 30응답까지", "최대 3개 모델 비교", "로그인 후 파일 첨부, 공유, 다운로드", "가벼운 개인 사용에 적합"] },
+      { name: "Free", eyebrow: "처음 시작하는 사용자", price: "$0", period: "월", description: "가벼운 일상 사용과 고급 모델 체험을 위한 월 300 AI 크레딧", cta: "무료로 시작", href: "/auth/signin?callbackUrl=%2Fchat", usage: "월 300 AI 크레딧", features: ["선별된 모델 카탈로그 접근", "고급 모델 월 30응답까지", "최대 3개 모델 비교", "로그인 후 파일 첨부, 공유, 다운로드", "가벼운 개인 사용에 적합"] },
       { name: "Pro", eyebrow: "일상 생산성", price: "$15", period: "월", description: "일상적인 멀티모델 비교를 위한 월 3,000 AI 크레딧", cta: "Pro로 업그레이드", href: "/chat", highlighted: true, badge: "추천", usage: "월 3,000 AI 크레딧", features: ["모든 사용 가능 모델 접근", "모델별 가중치에 따라 월 크레딧 사용", "최대 3개 모델 나란히 비교", "파일 첨부 및 Google Drive 파일", "공유 및 다운로드"] },
       { name: "Max", eyebrow: "고강도 AI 워크플로", price: "$25", period: "월", description: "집중적인 고급 모델·긴 문서 작업을 위한 월 10,000 AI 크레딧", cta: "Max로 업그레이드", href: "/chat", usage: "월 10,000 AI 크레딧", features: ["모든 사용 가능 모델 접근", "Standard 모델 일일 제한 없음", "Premium 사용량은 월 크레딧 및 공정사용 정책 적용", "더 높은 첨부파일 및 맥락 한도", "고급 모델·긴 문서 작업에 적합"] },
     ],
@@ -614,6 +642,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     billingNote: "发布特价：Pro 或 Max 首月享 50% 折扣。可随时取消。",
     creditNotice: "积分用量会因模型处理成本和推理方式而异。发送请求前可查看预计用量。",
     compareTitle: "比较每个方案解锁的功能",
+    compareScrollLabel: "方案比较表，可横向滚动",
     compareDescription: "Tomverse 方案围绕模型访问、使用额度、文件工作流和分享控制而设计。",
     table: {
       feature: "功能",
@@ -636,7 +665,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     ],
     note: "价格为所选结算货币的税前固定金额。Max 的 Standard 模型无每日限制；Premium 用量受月度积分和公平使用政策约束。",
     plans: [
-      { name: "Free", eyebrow: "适合开始使用", price: "$0", period: "每月", description: "每月 300 AI 积分，适合轻量日常使用和体验高级模型。", cta: "免费开始", href: "/chat", usage: "每月 300 AI 积分", features: ["访问精选模型目录", "最多比较 3 个模型", "基础聊天记录", "登录后可使用文件附件、分享和下载", "适合轻量个人使用"] },
+      { name: "Free", eyebrow: "适合开始使用", price: "$0", period: "每月", description: "每月 300 AI 积分，适合轻量日常使用和体验高级模型。", cta: "免费开始", href: "/auth/signin?callbackUrl=%2Fchat", usage: "每月 300 AI 积分", features: ["访问精选模型目录", "最多比较 3 个模型", "基础聊天记录", "登录后可使用文件附件、分享和下载", "适合轻量个人使用"] },
       { name: "Pro", eyebrow: "日常生产力", price: "$15", period: "每月", description: "每月 3,000 AI 积分，适合日常多模型比较。", cta: "升级到 Pro", href: "/chat", highlighted: true, badge: "推荐", usage: "每月 3,000 AI 积分", features: ["访问所有可用模型", "最多并排比较 3 个模型", "文件附件和 Google Drive 文件", "分享和下载对话", "按模型加权使用月度积分"] },
       { name: "Max", eyebrow: "高强度 AI 工作流", price: "$25", period: "每月", description: "每月 10,000 AI 积分，适合高强度高级模型和长文档工作。", cta: "升级到 Max", href: "/chat", usage: "每月 10,000 AI 积分", features: ["访问所有可用模型", "Standard 模型无每日限制", "Premium 用量适用月度积分和公平使用政策", "更高的附件和上下文限制", "适合高级模型和长文档工作"] },
     ],
@@ -648,6 +677,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     billingNote: "Offre de lancement : -50 % sur Pro ou Max le premier mois. Annulation possible a tout moment.",
     creditNotice: "La consommation de crédits varie selon le coût de traitement et le mode de raisonnement du modèle. Vous pouvez consulter l'estimation avant d'envoyer une demande.",
     compareTitle: "Comparez ce que chaque plan débloque",
+    compareScrollLabel: "Tableau comparatif des plans, défilement horizontal",
     compareDescription: "Les plans Tomverse sont conçus autour de l'accès aux modèles, des quotas d'utilisation, des workflows avec fichiers et des options de partage.",
     table: {
       feature: "Fonctionnalité",
@@ -670,7 +700,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     ],
     note: "Les prix sont des montants fixes hors taxes dans la devise de facturation sélectionnée. Avec Max, les modèles Standard n'ont pas de limite quotidienne ; l'usage Premium reste soumis aux crédits mensuels et à la politique d'utilisation équitable.",
     plans: [
-      { name: "Free", eyebrow: "Pour commencer", price: "$0", period: "par mois", description: "300 crédits IA mensuels pour un usage quotidien léger et l'essai de modèles avancés.", cta: "Commencer gratuitement", href: "/chat", usage: "300 crédits IA par mois", features: ["Accès au catalogue de modèles sélectionnés", "Comparer jusqu'à 3 modèles", "Historique de conversation de base", "Pièces jointes, partage et téléchargements après connexion", "Adapté à un usage personnel léger"] },
+      { name: "Free", eyebrow: "Pour commencer", price: "$0", period: "par mois", description: "300 crédits IA mensuels pour un usage quotidien léger et l'essai de modèles avancés.", cta: "Commencer gratuitement", href: "/auth/signin?callbackUrl=%2Fchat", usage: "300 crédits IA par mois", features: ["Accès au catalogue de modèles sélectionnés", "Comparer jusqu'à 3 modèles", "Historique de conversation de base", "Pièces jointes, partage et téléchargements après connexion", "Adapté à un usage personnel léger"] },
       { name: "Pro", eyebrow: "Productivité quotidienne", price: "$15", period: "par mois", description: "3 000 crédits IA mensuels pour les comparaisons multi-modèles quotidiennes.", cta: "Passer à Pro", href: "/chat", highlighted: true, badge: "Recommandé", usage: "3 000 crédits IA par mois", features: ["Accès à tous les modèles disponibles", "Comparer jusqu'à 3 modèles côte à côte", "Pièces jointes et fichiers Google Drive", "Partager et télécharger les conversations", "Crédits mensuels pondérés selon le modèle"] },
       { name: "Max", eyebrow: "Workflows IA intensifs", price: "$25", period: "par mois", description: "10 000 crédits IA mensuels pour les modèles avancés et les longs documents.", cta: "Passer à Max", href: "/chat", usage: "10 000 crédits IA par mois", features: ["Accès aux niveaux Free, Pro et Max", "Aucune limite quotidienne sur les modèles Standard", "L'usage Premium suit les crédits mensuels et le fair-use", "Limites de pièces jointes et de contexte plus élevées", "Adapté aux modèles avancés et aux longs documents"] },
     ],
@@ -682,6 +712,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     billingNote: "Launch-Angebot: 50 % Rabatt auf Pro oder Max im ersten Monat. Jederzeit kündbar.",
     creditNotice: "Der Credit-Verbrauch variiert je nach Verarbeitungskosten und Schlussfolgerungsmethode des Modells. Die geschätzte Nutzung ist vor dem Absenden sichtbar.",
     compareTitle: "Vergleichen Sie, was jeder Plan freischaltet",
+    compareScrollLabel: "Plan-Vergleichstabelle, horizontal scrollbar",
     compareDescription: "Tomverse-Pläne sind rund um Modellzugriff, Nutzungskontingente, Datei-Workflows und Freigabefunktionen aufgebaut.",
     table: {
       feature: "Funktion",
@@ -704,7 +735,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     ],
     note: "Preise sind feste Beträge vor Steuern in der ausgewählten Abrechnungswährung. Bei Max haben Standard-Modelle kein Tageslimit; Premium-Nutzung unterliegt den monatlichen Credits und der Fair-Use-Richtlinie.",
     plans: [
-      { name: "Free", eyebrow: "Für den Einstieg", price: "$0", period: "pro Monat", description: "300 monatliche KI-Credits für leichte Alltagsnutzung und zum Testen fortgeschrittener Modelle.", cta: "Kostenlos starten", href: "/chat", usage: "300 KI-Credits pro Monat", features: ["Zugriff auf den ausgewählten Modellkatalog", "Bis zu 3 Modelle vergleichen", "Grundlegender Chatverlauf", "Dateianhänge, Teilen und Downloads nach Anmeldung", "Gut für leichte persönliche Nutzung"] },
+      { name: "Free", eyebrow: "Für den Einstieg", price: "$0", period: "pro Monat", description: "300 monatliche KI-Credits für leichte Alltagsnutzung und zum Testen fortgeschrittener Modelle.", cta: "Kostenlos starten", href: "/auth/signin?callbackUrl=%2Fchat", usage: "300 KI-Credits pro Monat", features: ["Zugriff auf den ausgewählten Modellkatalog", "Bis zu 3 Modelle vergleichen", "Grundlegender Chatverlauf", "Dateianhänge, Teilen und Downloads nach Anmeldung", "Gut für leichte persönliche Nutzung"] },
       { name: "Pro", eyebrow: "Tägliche Produktivität", price: "$15", period: "pro Monat", description: "3.000 monatliche KI-Credits für alltägliche Multi-Modell-Vergleiche.", cta: "Auf Pro upgraden", href: "/chat", highlighted: true, badge: "Empfohlen", usage: "3.000 KI-Credits pro Monat", features: ["Zugriff auf alle verfügbaren Modelle", "Bis zu 3 Modelle nebeneinander vergleichen", "Dateianhänge und Google-Drive-Dateien", "Unterhaltungen teilen und herunterladen", "Nach Modell gewichtete Monats-Credits"] },
       { name: "Max", eyebrow: "Intensive KI-Workflows", price: "$25", period: "pro Monat", description: "10.000 monatliche KI-Credits für intensive Arbeit mit fortgeschrittenen Modellen und langen Dokumenten.", cta: "Auf Max upgraden", href: "/chat", usage: "10.000 KI-Credits pro Monat", features: ["Zugriff auf alle verfügbaren Modelle", "Kein Tageslimit für Standard-Modelle", "Premium-Nutzung folgt Monats-Credits und Fair-Use", "Höhere Anhang- und Kontextlimits", "Für fortgeschrittene Modelle und lange Dokumente"] },
     ],
@@ -716,6 +747,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     billingNote: "Oferta de lanzamiento: 50 % de descuento en Pro o Max durante el primer mes. Cancela cuando quieras.",
     creditNotice: "El consumo de créditos varía según el coste de procesamiento y el método de razonamiento del modelo. Puedes revisar el uso estimado antes de enviar una solicitud.",
     compareTitle: "Compara lo que desbloquea cada plan",
+    compareScrollLabel: "Tabla comparativa de planes, con desplazamiento horizontal",
     compareDescription: "Los planes de Tomverse se diseñan alrededor del acceso a modelos, límites de uso, archivos y controles para compartir.",
     table: {
       feature: "Función",
@@ -738,7 +770,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     ],
     note: "Los precios son importes fijos antes de impuestos en la moneda de facturación seleccionada. En Max, los modelos Standard no tienen límite diario; el uso Premium está sujeto a los créditos mensuales y a la política de uso justo.",
     plans: [
-      { name: "Free", eyebrow: "Para empezar", price: "$0", period: "al mes", description: "300 créditos de IA al mes para uso diario ligero y probar modelos avanzados.", cta: "Empezar gratis", href: "/chat", usage: "300 créditos de IA al mes", features: ["Acceso al catálogo de modelos seleccionados", "Comparar hasta 3 modelos", "Historial básico de chat", "Archivos, compartir y descargas tras iniciar sesión", "Adecuado para uso personal ligero"] },
+      { name: "Free", eyebrow: "Para empezar", price: "$0", period: "al mes", description: "300 créditos de IA al mes para uso diario ligero y probar modelos avanzados.", cta: "Empezar gratis", href: "/auth/signin?callbackUrl=%2Fchat", usage: "300 créditos de IA al mes", features: ["Acceso al catálogo de modelos seleccionados", "Comparar hasta 3 modelos", "Historial básico de chat", "Archivos, compartir y descargas tras iniciar sesión", "Adecuado para uso personal ligero"] },
       { name: "Pro", eyebrow: "Productividad diaria", price: "$15", period: "al mes", description: "3.000 créditos de IA al mes para comparaciones multimodelo cotidianas.", cta: "Actualizar a Pro", href: "/chat", highlighted: true, badge: "Recomendado", usage: "3.000 créditos de IA al mes", features: ["Acceso a todos los modelos disponibles", "Comparar hasta 3 modelos lado a lado", "Archivos adjuntos y Google Drive", "Compartir y descargar conversaciones", "Créditos mensuales ponderados por modelo"] },
       { name: "Max", eyebrow: "Flujos intensivos de IA", price: "$25", period: "al mes", description: "10.000 créditos de IA al mes para trabajo intensivo con modelos avanzados y documentos largos.", cta: "Actualizar a Max", href: "/chat", usage: "10.000 créditos de IA al mes", features: ["Acceso a niveles Free, Pro y Max", "Sin límite diario en modelos Standard", "El uso Premium sigue los créditos mensuales y el uso justo", "Límites superiores de adjuntos y contexto", "Para modelos avanzados y documentos largos"] },
     ],
@@ -750,6 +782,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     billingNote: "Oferta de lançamento: 50% de desconto no Pro ou Max no primeiro mês. Cancele quando quiser.",
     creditNotice: "O uso de créditos varia conforme o custo de processamento e o método de raciocínio do modelo. Você pode conferir o uso estimado antes de enviar uma solicitação.",
     compareTitle: "Compare o que cada plano libera",
+    compareScrollLabel: "Tabela comparativa de planos, com rolagem horizontal",
     compareDescription: "Os planos Tomverse são pensados em torno de acesso a modelos, limites de uso, arquivos e compartilhamento.",
     table: {
       feature: "Recurso",
@@ -772,7 +805,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     ],
     note: "Os preços são valores fixos antes de impostos na moeda de cobrança selecionada. No Max, modelos Standard não têm limite diário; o uso Premium está sujeito aos créditos mensais e à política de uso justo.",
     plans: [
-      { name: "Free", eyebrow: "Para começar", price: "$0", period: "por mês", description: "300 créditos de IA por mês para uso diário leve e para testar modelos avançados.", cta: "Começar grátis", href: "/chat", usage: "300 créditos de IA por mês", features: ["Acesso ao catálogo de modelos selecionados", "Comparar até 3 modelos", "Histórico básico de chat", "Anexos, compartilhamento e downloads após login", "Bom para uso pessoal leve"] },
+      { name: "Free", eyebrow: "Para começar", price: "$0", period: "por mês", description: "300 créditos de IA por mês para uso diário leve e para testar modelos avançados.", cta: "Começar grátis", href: "/auth/signin?callbackUrl=%2Fchat", usage: "300 créditos de IA por mês", features: ["Acesso ao catálogo de modelos selecionados", "Comparar até 3 modelos", "Histórico básico de chat", "Anexos, compartilhamento e downloads após login", "Bom para uso pessoal leve"] },
       { name: "Pro", eyebrow: "Produtividade diária", price: "$15", period: "por mês", description: "3.000 créditos de IA por mês para comparações multimodelo cotidianas.", cta: "Atualizar para Pro", href: "/chat", highlighted: true, badge: "Recomendado", usage: "3.000 créditos de IA por mês", features: ["Acesso a todos os modelos disponíveis", "Comparar até 3 modelos lado a lado", "Anexos e arquivos do Google Drive", "Compartilhar e baixar conversas", "Créditos mensais ponderados por modelo"] },
       { name: "Max", eyebrow: "Fluxos intensivos de IA", price: "$25", period: "por mês", description: "10.000 créditos de IA por mês para trabalho intensivo com modelos avançados e documentos longos.", cta: "Atualizar para Max", href: "/chat", usage: "10.000 créditos de IA por mês", features: ["Acesso aos níveis Free, Pro e Max", "Sem limite diário em modelos Standard", "O uso Premium segue os créditos mensais e o uso justo", "Limites maiores de anexos e contexto", "Para modelos avançados e documentos longos"] },
     ],
@@ -792,18 +825,26 @@ export function PricingPageContent() {
   const creditPackGuide = creditPackCopy[lang];
   const publicCreditPacks = billing.config?.creditPacks ?? [];
   const numberFormatter = new Intl.NumberFormat(promotionDateLocale[lang]);
+  // FINAL-F006: one place that decides "1 credit" vs "2 credits", and one
+  // place that glues a billing period onto a price, so the plain, sale, and
+  // struck-through regular prices can never drift apart again.
+  const creditUnit = {
+    one: creditGuide.creditUnitOne,
+    other: creditGuide.creditUnit,
+  };
+  const formatCredits = (count: number) =>
+    formatCountedUnit(count, creditUnit, lang, (value) =>
+      numberFormatter.format(value)
+    );
+  // The allowance comes from the live billing config, and its fallback is the
+  // same built-in plan table the API itself falls back to -- not a second copy
+  // of the numbers written into this component.
   const creditPlans = ([
-    { id: "free", name: "Free", fallbackCredits: 300 },
-    { id: "pro", name: "Pro", fallbackCredits: 3_000 },
-    { id: "max", name: "Max", fallbackCredits: 10_000 },
+    { id: "free", name: "Free" },
+    { id: "pro", name: "Pro" },
+    { id: "max", name: "Max" },
   ] as const).map((plan) => {
-    const configuredCredits = billing.config?.plans.find(
-      (configuredPlan) => configuredPlan.id === plan.id
-    )?.monthlyMessageLimit;
-    const monthlyCredits =
-      typeof configuredCredits === "number" && configuredCredits > 0
-        ? Math.floor(configuredCredits)
-        : plan.fallbackCredits;
+    const monthlyCredits = billing.planLimits(plan.id).monthlyCredits;
     return {
       ...plan,
       monthlyCredits,
@@ -865,27 +906,27 @@ export function PricingPageContent() {
 
       <section className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8 lg:py-20">
         <div className="mx-auto max-w-4xl text-center">
-          <p className="text-sm font-black uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">{content.eyebrow}</p>
-          <h1 className="mt-4 text-4xl font-black leading-tight sm:text-6xl">{content.title}</h1>
+          <p className="text-sm font-bold uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">{content.eyebrow}</p>
+          <h1 className={`mt-4 text-4xl font-bold leading-tight sm:text-6xl ${displayHeadingClass(lang)}`}>{content.title}</h1>
           <p className="mx-auto mt-5 max-w-2xl text-lg leading-8 text-zinc-600 dark:text-zinc-300">{content.description}</p>
           {featuredPromotion ? (
-          <div className="mx-auto mt-6 max-w-3xl overflow-hidden rounded-3xl border border-emerald-400/40 bg-gradient-to-br from-emerald-400/15 via-blue-500/10 to-transparent p-1 text-left shadow-2xl shadow-emerald-950/10">
+          <div className="mx-auto mt-6 max-w-3xl overflow-hidden rounded-3xl border border-accent-promotion-400/40 bg-gradient-to-br from-accent-promotion-400/15 via-blue-500/10 to-transparent p-1 text-left shadow-2xl shadow-accent-promotion-950/10">
             <div className="rounded-[1.35rem] bg-white/80 px-5 py-4 backdrop-blur dark:bg-zinc-950/75">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <span className="inline-flex w-fit rounded-full bg-emerald-500 px-3 py-1 text-xs font-black uppercase tracking-[0.16em] text-white">
+                  <span className="inline-flex w-fit rounded-full bg-accent-promotion-700 px-3 py-1 text-xs font-bold uppercase tracking-[0.16em] text-white">
                     {saleCopy.badge}
                   </span>
-                  <p className="mt-3 text-4xl font-black tracking-tight text-emerald-700 dark:text-emerald-200">
+                  <p className="mt-3 text-4xl font-black tracking-tight text-accent-promotion-700 dark:text-accent-promotion-200">
                     {featuredPromotion.discountPercent}% OFF
                   </p>
                 </div>
-                <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm font-black text-emerald-700 dark:text-emerald-200">
+                <div className="rounded-2xl border border-accent-promotion-500/20 bg-accent-promotion-500/10 px-4 py-3 text-sm font-bold text-accent-promotion-700 dark:text-accent-promotion-200">
                   {saleCopy.duration}
                 </div>
               </div>
               <p className="mt-3 text-sm font-bold text-zinc-700 dark:text-zinc-200">{content.billingNote}</p>
-              <div className="mt-3 flex flex-wrap gap-2 text-xs font-black text-zinc-700 dark:text-zinc-200">
+              <div className="mt-3 flex flex-wrap gap-2 text-xs font-bold text-zinc-700 dark:text-zinc-200">
                 <span className="rounded-full bg-zinc-950 px-3 py-1.5 text-white dark:bg-white dark:text-zinc-950">
                   {promotionDetail.code}: {featuredPromotion.code}
                 </span>
@@ -904,9 +945,12 @@ export function PricingPageContent() {
         <div className="mt-14 grid gap-5 lg:grid-cols-3">
           {content.plans.map((plan) => {
             const planId = plan.name === "Max" ? "max" : plan.name === "Pro" ? "pro" : "free";
-            const displayPrice = billing.formatPlanPrice(planId) || plan.price;
+            const displayPrice =
+              billing.formatPlanPrice(planId) || plan.price;
             const annualFallback = planId === "max" ? "$240" : planId === "pro" ? "$144" : "$0";
-            const annualPrice = billing.formatPlanPrice(planId, "annual") || annualFallback;
+            const annualPrice =
+              billing.formatPlanPrice(planId, "annual") ||
+              annualFallback;
             const promotionEligible = Boolean(
               featuredPromotion &&
               featuredPromotion.appliesToPlanIds.includes(planId) &&
@@ -922,66 +966,179 @@ export function PricingPageContent() {
             return (
             <article
               key={plan.name}
-              className={`relative flex min-h-full flex-col rounded-[1.75rem] border p-6 shadow-sm ${
-                plan.highlighted ? "border-blue-500 bg-blue-600 text-white shadow-2xl shadow-blue-950/20"
+              // UI-005. `min-width: auto` is a grid item's default, so this
+              // card refused to shrink below its own min-content width and
+              // overflowed its track -- 287px inside a 224px column at 320px
+              // with 125% zoom, which is what pushed the whole page sideways.
+              // `min-w-0` lets the track win; the content inside wraps instead.
+              className={`relative flex min-h-full min-w-0 flex-col rounded-[1.75rem] border p-6 shadow-sm ${
+                plan.highlighted ? "border-blue-600 bg-blue-700 text-white shadow-2xl shadow-blue-950/20"
                   : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/40"
               }`}
             >
               {promotionEligible && featuredPromotion ? (
-                <div className={`absolute -top-4 right-6 rounded-full px-4 py-2 text-xs font-black shadow-xl ${
+                <div className={`absolute -top-4 right-6 rounded-full px-4 py-2 text-xs font-bold shadow-xl ${
                   plan.highlighted
                     ? "bg-white text-blue-700 shadow-blue-950/20"
-                    : "bg-emerald-500 text-white shadow-emerald-950/20"
+                    : "bg-accent-promotion-700 text-white shadow-accent-promotion-950/20"
                 }`}>
                   {featuredPromotion.discountPercent}% OFF
                 </div>
               ) : null}
-              <div className="flex min-h-8 items-start justify-between gap-3">
-                <p className={`text-xs font-black uppercase tracking-[0.18em] ${plan.highlighted ? "text-blue-100" : "text-blue-600 dark:text-blue-400"}`}>
+              {/*
+                UI-005. The eyebrow wraps but the badge is `shrink-0`, so on a
+                narrow column the pair demanded more width than the card had and
+                took the page with it. Wrapping lets the badge drop to its own
+                line instead of widening the card, and the badge keeps its full
+                label rather than being squeezed.
+              */}
+              <div className="flex min-h-8 flex-wrap items-start justify-between gap-x-3 gap-y-2">
+                {/*
+                  VAL-002. Wrapping the row was not enough on its own: a flex
+                  item still refuses to shrink below its own min-content, and
+                  this label's min-content is its longest *word* -- inflated by
+                  0.18em of tracking on every character, so an English eyebrow
+                  like "For everyday productivity" measured 123px against the
+                  80px the card has at 320px with 200% zoom, and took the whole
+                  document sideways by 4px. It is what the reflow guard still
+                  named as the deepest offender after the currency notation was
+                  pinned, because the two were never the same defect.
+                */}
+                <p className={`min-w-0 [overflow-wrap:anywhere] text-xs font-bold uppercase tracking-[0.18em] ${plan.highlighted ? "text-blue-100" : "text-blue-600 dark:text-blue-400"}`}>
                   {plan.eyebrow}
                 </p>
                 {plan.badge && (
-                  <span className="shrink-0 rounded-full bg-white/15 px-3 py-1 text-xs font-black text-white ring-1 ring-white/20">
+                  <span className="min-w-0 [overflow-wrap:anywhere] rounded-full bg-white/15 px-3 py-1 text-xs font-bold text-white ring-1 ring-white/20">
                     {plan.badge}
                   </span>
                 )}
               </div>
-              <h2 className="mt-4 text-3xl font-black">{plan.name}</h2>
+              <h2 className={`mt-4 text-3xl font-black ${displayHeadingClass(lang)}`}>{plan.name}</h2>
               <p className={`mt-3 min-h-14 text-sm leading-6 ${plan.highlighted ? "text-blue-50" : "text-zinc-600 dark:text-zinc-300"}`}>
                 {plan.description}
               </p>
               {planId === "free" || !promotionEligible ? (
                 <div className="mt-8">
-                  <span className="text-4xl font-black">{displayPrice}</span>
-                  <span className={`ml-2 text-sm font-bold ${plan.highlighted ? "text-blue-100" : "text-zinc-500 dark:text-zinc-400"}`}>
-                    {plan.period}
+                  {/* The price and the period render as separate spans so they
+                      can carry different type sizes, which leaves no text node
+                      between them -- assistive tech read the pair as
+                      "$15per month". The spoken form is supplied once here and
+                      the visual pair is hidden from the accessibility tree, so
+                      the phrase is announced exactly once. */}
+                  <span className="sr-only">
+                    {formatPriceWithPeriod(displayPrice, plan.period, lang)}
+                  </span>
+                  {/* UI-005. A 36px price and its period label sat on one
+                      inline line; at 320px with 200% zoom the pair was wider
+                      than the card's content box and pushed the page sideways
+                      by the last few pixels. A wrapping baseline row lets the
+                      period drop under the price instead.
+
+                      The price itself also has to be able to shrink. It is one
+                      unbreakable token, so at a fixed 36px it *is* the card's
+                      min-content, and a grid item cannot go below that -- it
+                      pushes the page instead. The clamp only engages below
+                      ~360px of CSS width, which in practice means a zoomed
+                      phone; every real phone width still renders it at 36px.
+
+                      RECON-UX-001 lowered the clamp floor from 24px to 18px
+                      and made the token breakable. Once the display locale is
+                      pinned, the widest notation it can produce is "USD 19.00"
+                      -- whose space is a non-breaking space -- or "US$19.00",
+                      which has no space at all. Either one set a min-content
+                      of ~148px inside a 128px grid track at 320px/200% zoom
+                      and pushed the document sideways. 18px is the smallest
+                      size the typography contract lets font-black reach, and
+                      `overflow-wrap: anywhere` lowers the min-content to a
+                      single glyph so the grid item can fit, while still
+                      keeping the price on one line whenever it has the room.
+                      The price is never clipped or hidden. */}
+                  <span aria-hidden="true" className="flex flex-wrap items-baseline gap-x-2">
+                    <span data-testid="pricing-plan-price" className="text-[clamp(1.125rem,10vw,2.25rem)] font-black [overflow-wrap:anywhere]">{displayPrice}</span>
+                    <span className={`text-sm font-bold ${plan.highlighted ? "text-blue-100" : "text-zinc-500 dark:text-zinc-400"}`}>
+                      {formatBillingPeriodLabel(plan.period, lang)}
+                    </span>
                   </span>
                 </div>
               ) : (
-                <div className={`mt-8 rounded-2xl border p-4 ${
+                <div
+                  data-testid="pricing-sale-block"
+                  className={`mt-8 rounded-2xl border p-4 ${
                   plan.highlighted
                     ? "border-white/25 bg-white/15"
-                    : "border-emerald-500/30 bg-emerald-500/10"
+                    : "border-accent-promotion-500/30 bg-accent-promotion-500/10"
                 }`}>
-                  <div className="flex items-center justify-between gap-3">
-                    <span className={`rounded-full px-3 py-1 text-xs font-black ${plan.highlighted ? "bg-white text-blue-700" : "bg-emerald-500 text-white"}`}>
+                  {/* UI-REFLOW-001. Two non-shrinking pills on one
+                      `justify-between` row: at a 160px layout viewport (320px
+                      at 200% zoom) "Launch special" and "50% OFF" together are
+                      3px wider than the card, and neither could give way --
+                      flex items default to `min-width: auto`, so a shrink
+                      factor alone never takes them below their content. The
+                      row now wraps, and each pill may break a word it cannot
+                      otherwise fit, which is the same treatment the price span
+                      above already uses. Both labels stay whole; only their
+                      arrangement changes. */}
+                  <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                    <span className={`min-w-0 rounded-full px-3 py-1 text-xs font-bold [overflow-wrap:anywhere] ${plan.highlighted ? "bg-white text-blue-700" : "bg-accent-promotion-700 text-white"}`}>
                       {saleCopy.badge}
                     </span>
-                    <span className={`text-xs font-black ${plan.highlighted ? "text-blue-50" : "text-emerald-600 dark:text-emerald-400"}`}>
+                    <span
+                      data-testid="pricing-discount-badge"
+                      // UI-CONTRAST-001. On the non-highlighted card the sale
+                      // block's surface is `bg-accent-promotion-500/10` over
+                      // white, and the 600 step measured below AA against it.
+                      // One step darker in light only; dark already passed.
+                      className={`min-w-0 text-xs font-bold [overflow-wrap:anywhere] ${plan.highlighted ? "text-blue-50" : "text-accent-promotion-700 dark:text-accent-promotion-400"}`}
+                    >
                       {featuredPromotion?.discountPercent}% OFF
                     </span>
                   </div>
-                  <div className="mt-3 flex flex-wrap items-end gap-x-3 gap-y-1">
-                    <span className="text-5xl font-black">{salePrice}</span>
-                    <span className={`pb-1 text-sm font-black ${plan.highlighted ? "text-blue-50" : "text-zinc-700 dark:text-zinc-200"}`}>
-                      / {plan.period}
+                  {/* Same split-span problem as the plain price above, plus a
+                      struck-through regular price that reads as a bare number
+                      out of context. Both are replaced by one spoken sale
+                      phrase, with the visual row hidden from the
+                      accessibility tree. */}
+                  <span className="sr-only">
+                    {`${formatPriceWithPeriod(
+                      salePrice ?? displayPrice,
+                      plan.period,
+                      lang
+                    )}. ${saleCopy.regular}: ${formatPriceWithPeriod(
+                      displayPrice,
+                      plan.period,
+                      lang
+                    )}.`}
+                  </span>
+                  <div
+                    aria-hidden="true"
+                    className="mt-3 flex flex-wrap items-end gap-x-3 gap-y-1"
+                  >
+                    <span className="text-[clamp(1.5rem,13vw,3rem)] font-black [overflow-wrap:anywhere]">{salePrice}</span>
+                    <span className={`pb-1 text-sm font-bold ${plan.highlighted ? "text-blue-50" : "text-zinc-700 dark:text-zinc-200"}`}>
+                      {formatBillingPeriodLabel(plan.period, lang)}
                     </span>
-                    <span className={`pb-1 text-sm font-bold line-through ${plan.highlighted ? "text-blue-100/80" : "text-zinc-500 dark:text-zinc-400"}`}>
+                    {/* UI-CONTRAST-001. `text-blue-100/80` composited to
+                        3.26:1 against the highlighted plan's blue card, and
+                        full-strength blue-100 only reached 4.19:1 -- both
+                        below AA for this 14px/700 text. It now uses the same
+                        blue-50 as the period label beside it, which already
+                        measures above AA on this surface. The strike-through
+                        is what marks this as the superseded price; the colour
+                        was never carrying that meaning. Invisible until the
+                        promotion fixture started rendering the sale block. */}
+                    <span className={`pb-1 text-sm font-bold line-through ${plan.highlighted ? "text-blue-50" : "text-zinc-600 dark:text-zinc-400"}`}>
                       {displayPrice}
                     </span>
                   </div>
-                  <p className={`mt-2 text-xs font-bold ${plan.highlighted ? "text-blue-100" : "text-zinc-600 dark:text-zinc-300"}`}>
-                    {saleCopy.duration}. {saleCopy.regular}: {displayPrice} / {plan.period}.
+                  {/* UI-CONTRAST-001. Same surface as the struck price above:
+                      the sale block lays `bg-white/15` over the blue card, so
+                      the composited background is lighter than the plain card
+                      and blue-100 falls to 4.19:1 here even though it clears
+                      AA elsewhere on the same plan. blue-50 is what this
+                      surface needs. */}
+                  <p className={`mt-2 text-xs font-bold ${plan.highlighted ? "text-blue-50" : "text-zinc-600 dark:text-zinc-300"}`}>
+                    {saleCopy.duration}. {saleCopy.regular}: {displayPrice}{" "}
+                    {formatBillingPeriodLabel(plan.period, lang)}.
                   </p>
                 </div>
               )}
@@ -991,19 +1148,19 @@ export function PricingPageContent() {
                     ? "border-white/20 bg-white/10 text-blue-50"
                     : "border-zinc-200 bg-zinc-50 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950/60 dark:text-zinc-300"
                 }`}>
-                  <div className="flex items-center justify-between gap-3">
-                    <span>{annualCopy.annual}</span>
-                    <span className={`rounded-full px-2.5 py-1 ${plan.highlighted ? "bg-white text-blue-700" : "bg-emerald-500/10 text-emerald-500"}`}>
+                  <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                    <span className="min-w-0 [overflow-wrap:anywhere]">{annualCopy.annual}</span>
+                    <span className={`rounded-full px-2.5 py-1 ${plan.highlighted ? "bg-white text-blue-700" : "bg-accent-promotion-500/10 text-accent-promotion-700 dark:text-accent-promotion-300"}`}>
                       {annualCopy.save}
                     </span>
                   </div>
-                  <div className="mt-1 text-lg font-black">{annualPrice}</div>
+                  <div className="mt-1 text-[clamp(0.875rem,4.5vw,1.125rem)] font-bold [overflow-wrap:anywhere]">{annualPrice}</div>
                   <p className={plan.highlighted ? "text-blue-100" : "text-zinc-500 dark:text-zinc-400"}>
                     {annualCopy.checkout}
                   </p>
                 </div>
               ) : null}
-              <p className={`mt-3 text-sm font-black ${plan.highlighted ? "text-blue-50" : "text-zinc-700 dark:text-zinc-200"}`}>
+              <p className={`mt-3 text-sm font-bold ${plan.highlighted ? "text-blue-50" : "text-zinc-700 dark:text-zinc-200"}`}>
                 {plan.usage}
               </p>
               {planId === "free" ? (
@@ -1015,7 +1172,7 @@ export function PricingPageContent() {
                       cta_location: "pricing_plan_card",
                     })
                   }
-                  className={`mt-8 inline-flex h-12 w-full items-center justify-center rounded-xl text-sm font-black transition ${
+                  className={`mt-8 inline-flex h-12 w-full items-center justify-center rounded-xl text-sm font-bold transition ${
                     plan.highlighted ? "bg-white text-blue-700 hover:bg-blue-50"
                       : "border border-zinc-300 text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-zinc-800"
                   }`}
@@ -1025,7 +1182,7 @@ export function PricingPageContent() {
               ) : (
                 <UpgradeInterestButton
                   plan={plan.name === "Max" ? "Max" : "Pro"}
-                  className={`mt-8 inline-flex h-12 w-full items-center justify-center rounded-xl text-sm font-black transition ${
+                  className={`mt-8 inline-flex h-12 w-full items-center justify-center rounded-xl text-sm font-bold transition ${
                     plan.highlighted ? "bg-white text-blue-700 hover:bg-blue-50"
                       : "border border-zinc-300 text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-zinc-800"
                   }`}
@@ -1035,9 +1192,16 @@ export function PricingPageContent() {
               )}
               <ul className="mt-8 space-y-3">
                 {plan.features.map((feature) => (
+                  // UI-005. The bullet's icon is `shrink-0` and the label was a
+                  // bare text node, so the row's minimum width was the icon plus
+                  // the longest word -- more than the card's content box has at
+                  // 320px with 200% zoom. Wrapping the label in a `min-w-0`
+                  // block lets the row shrink, and `break-words` breaks a word
+                  // that could not have fitted a line anyway rather than
+                  // widening the page.
                   <li key={feature} className={`flex gap-3 text-sm font-semibold leading-6 ${plan.highlighted ? "text-white" : "text-zinc-700 dark:text-zinc-300"}`}>
                     <CheckCircle2 className={`mt-0.5 h-4 w-4 shrink-0 ${plan.highlighted ? "text-white" : "text-blue-600 dark:text-blue-400"}`} />
-                    {feature}
+                    <span className="min-w-0 break-words">{feature}</span>
                   </li>
                 ))}
               </ul>
@@ -1048,15 +1212,15 @@ export function PricingPageContent() {
 
         <section
           data-testid="pricing-credit-packs"
-          className="mt-16 overflow-hidden rounded-[2rem] border border-emerald-500/25 bg-gradient-to-br from-emerald-500/10 via-white to-blue-500/5 dark:via-zinc-950 dark:to-blue-950/20"
+          className="mt-16 overflow-hidden rounded-[2rem] border border-accent-promotion-500/25 bg-gradient-to-br from-accent-promotion-500/10 via-white to-blue-500/5 dark:via-zinc-950 dark:to-blue-950/20"
         >
           <div className="grid gap-6 p-5 sm:p-7 lg:grid-cols-[1fr_auto] lg:items-end">
             <div className="max-w-3xl">
-              <p className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.18em] text-emerald-700 dark:text-emerald-300">
+              <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-accent-promotion-700 dark:text-accent-promotion-300">
                 <Coins className="h-4 w-4" />
                 {creditPackGuide.eyebrow}
               </p>
-              <h2 className="mt-3 text-3xl font-black sm:text-4xl">{creditPackGuide.title}</h2>
+              <h2 className={`mt-3 text-3xl font-black sm:text-4xl ${displayHeadingClass(lang)}`}>{creditPackGuide.title}</h2>
               <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">
                 {creditPackGuide.description}
               </p>
@@ -1068,17 +1232,52 @@ export function PricingPageContent() {
                   cta_location: "pricing_credit_pack_section",
                 })
               }
-              className="inline-flex h-11 items-center justify-center rounded-xl bg-emerald-600 px-5 text-sm font-black text-white transition hover:bg-emerald-500"
+              className="inline-flex h-11 items-center justify-center rounded-xl bg-accent-promotion-700 px-5 text-sm font-bold text-white transition hover:bg-accent-promotion-600"
             >
               {creditPackGuide.purchaseCta}
             </Link>
           </div>
 
-          <div className="grid gap-4 border-t border-emerald-500/20 p-5 sm:p-7 lg:grid-cols-3">
+          <div className="grid gap-4 border-t border-accent-promotion-500/20 p-5 sm:p-7 lg:grid-cols-3">
             {publicCreditPacks.length === 0 ? (
-              <p className="text-sm font-semibold text-zinc-500 dark:text-zinc-400 lg:col-span-3">
-                {creditPackGuide.loading}
-              </p>
+              // Placeholders reserve the geometry the real packs will occupy.
+              // A single line of loading text here meant the section grew by
+              // ~1000px on a 390px viewport the moment usePublicBilling()
+              // resolved -- one repeatable shift that was essentially the
+              // page's entire CLS. The skeleton mirrors a real card's block
+              // structure (header, credits, price, description, validity) so
+              // the reserved height matches what replaces it.
+              <>
+                <p className="sr-only" role="status">
+                  {creditPackGuide.loading}
+                </p>
+                {CREDIT_PACK_PLACEHOLDER_KEYS.map((key) => (
+                  <article
+                    key={key}
+                    aria-hidden="true"
+                    data-testid="credit-pack-placeholder"
+                    className="flex min-h-full animate-pulse flex-col rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950/80"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="w-full">
+                        <div className="h-6 w-2/5 rounded bg-zinc-200 dark:bg-zinc-800" />
+                        <div className="mt-2 h-4 w-3/5 rounded bg-zinc-100 dark:bg-zinc-900" />
+                      </div>
+                      <div className="h-6 w-16 shrink-0 rounded-full bg-zinc-100 dark:bg-zinc-900" />
+                    </div>
+                    <div className="mt-5 h-9 w-1/2 rounded bg-zinc-200 dark:bg-zinc-800" />
+                    <div className="mt-1 h-7 w-1/3 rounded bg-zinc-100 dark:bg-zinc-900" />
+                    <div className="mt-4 flex-1 space-y-2">
+                      <div className="h-4 w-full rounded bg-zinc-100 dark:bg-zinc-900" />
+                      <div className="h-4 w-11/12 rounded bg-zinc-100 dark:bg-zinc-900" />
+                      <div className="h-4 w-4/5 rounded bg-zinc-100 dark:bg-zinc-900" />
+                    </div>
+                    <div className="mt-4 border-t border-zinc-200 pt-3 dark:border-zinc-800">
+                      <div className="h-4 w-2/5 rounded bg-zinc-100 dark:bg-zinc-900" />
+                    </div>
+                  </article>
+                ))}
+              </>
             ) : (
               publicCreditPacks.map((pack) => (
                 <article
@@ -1089,11 +1288,11 @@ export function PricingPageContent() {
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <h3 className="text-lg font-black">{creditPackGuide.packNames[pack.id]}</h3>
-                      <p className="mt-2 text-xs font-black uppercase tracking-[0.12em] text-emerald-700 dark:text-emerald-300">
+                      <p className="mt-2 text-xs font-bold uppercase tracking-[0.12em] text-accent-promotion-700 dark:text-accent-promotion-300">
                         {creditPackGuide.availableFor}: {pack.allowedPlans.join(" / ")}
                       </p>
                     </div>
-                    <span className="shrink-0 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[10px] font-black text-emerald-700 dark:text-emerald-300">
+                    <span className="shrink-0 rounded-full bg-accent-promotion-500/10 px-2.5 py-1 text-[11px] font-bold text-accent-promotion-700 dark:text-accent-promotion-300">
                       {creditPackGuide.oneTime}
                     </span>
                   </div>
@@ -1101,7 +1300,7 @@ export function PricingPageContent() {
                     {numberFormatter.format(pack.credits)}{" "}
                     <span className="text-sm text-zinc-500 dark:text-zinc-400">{creditPackGuide.credits}</span>
                   </p>
-                  <p className="mt-1 text-xl font-black text-emerald-700 dark:text-emerald-300">
+                  <p className="mt-1 text-xl font-black text-accent-promotion-700 dark:text-accent-promotion-300">
                     {formatBillingMinor(
                       pack.priceMinor,
                       pack.currency as BillingCurrency,
@@ -1119,9 +1318,9 @@ export function PricingPageContent() {
             )}
           </div>
 
-          <div className="grid gap-5 border-t border-emerald-500/20 bg-white/60 p-5 dark:bg-zinc-950/40 sm:p-7 lg:grid-cols-[0.75fr_1.25fr]">
+          <div className="grid gap-5 border-t border-accent-promotion-500/20 bg-white/60 p-5 dark:bg-zinc-950/40 sm:p-7 lg:grid-cols-[0.75fr_1.25fr]">
             <div>
-              <h3 className="font-black">{creditPackGuide.policyTitle}</h3>
+              <h3 className="font-bold">{creditPackGuide.policyTitle}</h3>
               <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">
                 {creditPackGuide.guidance}
               </p>
@@ -1129,7 +1328,7 @@ export function PricingPageContent() {
             <ul className="grid gap-3">
               {creditPackGuide.policies.map((policy) => (
                 <li key={policy} className="flex gap-3 text-sm font-semibold leading-6 text-zinc-700 dark:text-zinc-200">
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-300" />
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-accent-promotion-600 dark:text-accent-promotion-300" />
                   {policy}
                 </li>
               ))}
@@ -1144,31 +1343,31 @@ export function PricingPageContent() {
           <div className="border-b border-zinc-200 p-5 dark:border-zinc-800 sm:p-7">
             <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
               <div className="max-w-3xl">
-                <p className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.18em] text-blue-600 dark:text-blue-400">
+                <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-blue-600 dark:text-blue-400">
                   <Calculator className="h-4 w-4" />
                   {creditGuide.eyebrow}
                 </p>
-                <h2 className="mt-3 text-3xl font-black sm:text-4xl">
+                <h2 className={`mt-3 text-3xl font-black sm:text-4xl ${displayHeadingClass(lang)}`}>
                   {creditGuide.title}
                 </h2>
                 <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">
                   {creditGuide.description}
                 </p>
               </div>
-              <span className="w-fit rounded-full border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-xs font-black text-emerald-700 dark:text-emerald-300">
+              <span className="w-fit rounded-full border border-accent-promotion-500/30 bg-accent-promotion-500/10 px-4 py-2 text-xs font-bold text-accent-promotion-700 dark:text-accent-promotion-300">
                 {creditGuide.typicalLabel}
               </span>
             </div>
 
             <div className="mt-5 flex flex-wrap gap-2 text-xs font-bold text-zinc-600 dark:text-zinc-300">
               <span className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 dark:border-zinc-700 dark:bg-zinc-950">
-                Standard · {MODEL_USAGE_CREDIT_WEIGHTS.standard} {creditGuide.creditUnit}
+                Standard · {formatCredits(MODEL_USAGE_CREDIT_WEIGHTS.standard)}
               </span>
               <span className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 dark:border-zinc-700 dark:bg-zinc-950">
-                Advanced · {MODEL_USAGE_CREDIT_WEIGHTS.advanced} {creditGuide.creditUnit}
+                Advanced · {formatCredits(MODEL_USAGE_CREDIT_WEIGHTS.advanced)}
               </span>
               <span className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 dark:border-zinc-700 dark:bg-zinc-950">
-                Premium · {MODEL_USAGE_CREDIT_WEIGHTS.premium} {creditGuide.creditUnit}
+                Premium · {formatCredits(MODEL_USAGE_CREDIT_WEIGHTS.premium)}
               </span>
             </div>
           </div>
@@ -1201,13 +1400,13 @@ export function PricingPageContent() {
                   key={plan.id}
                   className={`rounded-2xl border p-5 ${
                     plan.id === "pro"
-                      ? "border-blue-500 bg-blue-600 text-white shadow-xl shadow-blue-950/15"
+                      ? "border-blue-600 bg-blue-700 text-white shadow-xl shadow-blue-950/15"
                       : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
                   }`}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <h3 className="text-2xl font-black">{plan.name}</h3>
+                      <h3 className={`text-2xl font-black ${displayHeadingClass(lang)}`}>{plan.name}</h3>
                       <p
                         className={`mt-1 text-xs font-bold ${
                           plan.id === "pro"
@@ -1227,13 +1426,13 @@ export function PricingPageContent() {
                         <div className="flex items-start justify-between gap-3">
                           <p className="text-xs font-bold leading-5">{example.label}</p>
                           <span
-                            className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black ${
+                            className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold ${
                               plan.id === "pro"
                                 ? "bg-white/15 text-white"
-                                : "bg-zinc-100 text-zinc-500 dark:bg-zinc-900 dark:text-zinc-300"
+                                : "bg-zinc-100 text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300"
                             }`}
                           >
-                            {example.cost} {creditGuide.creditUnit}
+                            {formatCredits(example.cost)}
                           </span>
                         </div>
                         <p className="mt-2 text-xl font-black">
@@ -1249,9 +1448,9 @@ export function PricingPageContent() {
 
           <div className="grid gap-4 border-t border-zinc-200 p-4 dark:border-zinc-800 sm:p-6 lg:grid-cols-2">
             <article className="rounded-2xl border border-amber-500/25 bg-amber-500/10 p-5">
-              <div className="flex items-center gap-2 text-amber-700 dark:text-amber-300">
+              <div className="flex items-center gap-2 text-amber-800 dark:text-amber-300">
                 <FileText className="h-5 w-5" />
-                <h3 className="font-black">{creditGuide.longContextTitle}</h3>
+                <h3 className="font-bold">{creditGuide.longContextTitle}</h3>
               </div>
               <p className="mt-3 text-xs leading-6 text-zinc-600 dark:text-zinc-300">
                 {creditGuide.longContextBody}
@@ -1260,7 +1459,7 @@ export function PricingPageContent() {
                 {inputMultiplierBands.map((band) => (
                   <span
                     key={band.label}
-                    className="rounded-full border border-amber-500/20 bg-white/70 px-3 py-1.5 text-[11px] font-black text-amber-900 dark:bg-zinc-950/60 dark:text-amber-200"
+                    className="rounded-full border border-amber-500/20 bg-white/70 px-3 py-1.5 text-[11px] font-bold text-amber-900 dark:bg-zinc-950/60 dark:text-amber-200"
                   >
                     {band.label} {creditGuide.tokenUnit} · {band.multiplier}×
                   </span>
@@ -1271,14 +1470,14 @@ export function PricingPageContent() {
             <article className="rounded-2xl border border-blue-500/25 bg-blue-500/10 p-5">
               <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
                 <Info className="h-5 w-5" />
-                <h3 className="font-black">{creditGuide.preflightTitle}</h3>
+                <h3 className="font-bold">{creditGuide.preflightTitle}</h3>
               </div>
               <p className="mt-3 text-xs leading-6 text-zinc-600 dark:text-zinc-300">
                 {creditGuide.preflightBody}
               </p>
               <Link
                 href="/chat"
-                className="mt-4 inline-flex h-10 items-center justify-center rounded-xl bg-blue-600 px-4 text-xs font-black text-white transition hover:bg-blue-500"
+                className="mt-4 inline-flex h-10 items-center justify-center rounded-xl bg-blue-600 px-4 text-xs font-bold text-white transition hover:bg-blue-500"
               >
                 {creditGuide.preflightCta}
               </Link>
@@ -1296,15 +1495,28 @@ export function PricingPageContent() {
 
         <section className="mt-16 rounded-[2rem] border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40 sm:p-6">
           <div className="max-w-3xl">
-            <h2 className="text-3xl font-black">{content.compareTitle}</h2>
+            <h2 className={`text-3xl font-black ${displayHeadingClass(lang)}`}>{content.compareTitle}</h2>
             <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">{content.compareDescription}</p>
           </div>
-          <div className="mt-8 overflow-x-auto">
+          {/*
+            RECON-A11Y-002 (WCAG 2.1.1). At 390px this region hides 436px of
+            the Pro and Max columns behind a horizontal scrollbar, and it had
+            no focusable element inside it and no tabindex of its own -- a
+            keyboard-only visitor could not reach the Max column at all. A
+            scrollable region needs to be focusable and named; the table's own
+            semantics are untouched.
+          */}
+          <div
+            className="mt-8 overflow-x-auto rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 dark:focus-visible:outline-blue-400"
+            role="region"
+            aria-label={content.compareScrollLabel}
+            tabIndex={0}
+          >
             <table className="w-full min-w-[760px] border-separate border-spacing-0 text-left text-sm">
               <thead>
                 <tr>
                   {[content.table.feature, content.table.free, content.table.pro, content.table.max].map((heading) => (
-                    <th key={heading} className="border-b border-zinc-200 px-4 py-3 font-black text-zinc-900 dark:border-zinc-800 dark:text-white">
+                    <th key={heading} className="border-b border-zinc-200 px-4 py-3 font-bold text-zinc-900 dark:border-zinc-800 dark:text-white">
                       {heading}
                     </th>
                   ))}
@@ -1313,7 +1525,7 @@ export function PricingPageContent() {
               <tbody>
                 {content.table.rows.map((row) => (
                   <tr key={row.label}>
-                    <td className="border-b border-zinc-200 px-4 py-4 font-black dark:border-zinc-800">{row.label}</td>
+                    <td className="border-b border-zinc-200 px-4 py-4 font-bold dark:border-zinc-800">{row.label}</td>
                     {[row.free, row.pro, row.max].map((value, index) => (
                       <td key={`${row.label}-${index}`} className="border-b border-zinc-200 px-4 py-4 font-semibold text-zinc-600 dark:border-zinc-800 dark:text-zinc-300">
                         {value === "-" ? <Minus className="h-4 w-4 text-zinc-400" /> : value}
@@ -1327,13 +1539,21 @@ export function PricingPageContent() {
         </section>
 
         <section className="mt-16 grid gap-5 lg:grid-cols-[0.7fr_1.3fr]">
-          <h2 className="text-3xl font-black">{content.faqTitle}</h2>
+          {/*
+            UI-005. `break-words` lets a long word wrap, but by spec it does
+            not lower the element's min-content width -- so as a grid item this
+            heading still demanded the width of "questions" set at 30px, which
+            at 320px/200% is wider than the column and pushed the page. Letting
+            the size fall below ~375px of CSS width fixes the cause; every real
+            phone width still renders it at 30px.
+          */}
+          <h2 className={`text-[clamp(1.5rem,8vw,1.875rem)] font-black ${displayHeadingClass(lang)}`}>{content.faqTitle}</h2>
           <div className="grid gap-4">
             {content.faqs
               .filter((faq) => !faq.promotionOnly || featuredPromotion)
               .map((faq) => (
               <article key={faq.question} className="rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900/40">
-                <h3 className="font-black">{faq.question}</h3>
+                <h3 className="font-bold">{faq.question}</h3>
                 <p className="mt-2 text-sm leading-7 text-zinc-600 dark:text-zinc-300">{faq.answer}</p>
               </article>
               ))}

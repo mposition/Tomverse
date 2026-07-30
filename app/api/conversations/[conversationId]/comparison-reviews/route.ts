@@ -1,65 +1,45 @@
 export const dynamic = "force-dynamic";
 
 import { randomUUID } from "node:crypto";
-import { generateText, Output } from "ai";
 import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
-import { getActiveAiModel } from "@/lib/activeAiModel";
-import {
-  consumePerplexityUsage,
-  discardPerplexityUsage,
-  perplexityUsageHeaders,
-} from "@/lib/perplexityUsageCapture";
-import type { PerplexityUsageCostSnapshot } from "@/lib/perplexityUsageCore";
 import { getUserBillingPlan } from "@/lib/billingEntitlements";
 import {
-  buildComparisonReviewPrompt,
   COMPARISON_REVIEW_PROMPT_VERSION,
   comparisonReviewModeSchema,
-  comparisonReviewResultSchema,
   createComparisonReviewHash,
-  estimateComparisonReviewTokens,
-  getComparisonReviewerCandidates,
+  dualComparisonReviewResultSchema,
   validateComparisonReviewInputSize,
-  type ComparisonReviewResult,
   type ReviewSourceResponse,
 } from "@/lib/comparisonReview";
+import {
+  estimateComparisonReview,
+  runComparisonReview,
+  ComparisonReviewerUnavailableError,
+  ComparisonReviewFailedError,
+  type ComparisonReviewSubject,
+} from "@/lib/comparisonReviewService";
 import {
   latestComparableConversationTurn,
   requestedComparableConversationTurn,
 } from "@/lib/comparisonReviewTurn";
 import {
-  releaseFreeComparisonReview,
+  releaseComparisonReviewQuota,
   reserveFreeComparisonReview,
   getFreeComparisonReviewLimit,
   type ComparisonReviewQuotaReservation,
 } from "@/lib/comparisonReviewQuota";
 import {
-  acquireChatAccess,
-  assertModelAccess,
   chatErrorResponse,
   ChatAccessError,
-  createChatBudget,
   identifyChatCaller,
-  linkChatReservationProviderRequest,
-  releaseChatAccess,
-  settleChatUsage,
-  type ChatUsageReservation,
 } from "@/lib/chatSecurity";
 import {
   conversationLockedResponse,
   hasConversationUnlockGrant,
 } from "@/lib/conversationLock";
-import { assertModelRuntimeAvailable } from "@/lib/modelAvailability";
-import { getModelUsageProfile, type AiModel } from "@/lib/models";
 import { prisma } from "@/lib/prisma";
-import {
-  recordModelFailure,
-  recordModelSuccess,
-  recordProviderFailure,
-  recordProviderSuccess,
-} from "@/lib/providerMonitoring";
 import {
   apiSecurityResponse,
   consumeApiRateLimit,
@@ -118,26 +98,6 @@ const authorizeConversation = async (
     return { response: conversationLockedResponse() };
   }
   return { conversation };
-};
-
-const accessibleCandidates = async (
-  access: ReturnType<typeof identifyChatCaller>,
-  responses: ReviewSourceResponse[]
-) => {
-  const candidates = getComparisonReviewerCandidates(
-    new Set(responses.map((response) => response.provider))
-  );
-  const available: AiModel[] = [];
-  for (const candidate of candidates) {
-    try {
-      assertModelAccess(access, candidate);
-      const override = await assertModelRuntimeAvailable(candidate.id);
-      if (override.allowed) available.push(candidate);
-    } catch {
-      // A configured fallback can be outside this plan's model tier.
-    }
-  }
-  return available;
 };
 
 const responseMapForStoredReview = (
@@ -202,19 +162,24 @@ export async function GET(
       dailyMessageLimit: billingPlan.dailyMessageLimit,
       monthlyMessageLimit: billingPlan.monthlyMessageLimit,
     });
-    const candidates = await accessibleCandidates(access, turn.responses);
-    if (!candidates.length) {
-      return jsonError(
-        "No comparison reviewer is currently configured for your plan.",
-        "COMPARISON_REVIEWER_UNAVAILABLE",
-        503
+    // The same estimate the guest preview uses, from the same service: two
+    // callers, one definition of what a cross-review costs.
+    let estimate;
+    try {
+      estimate = await estimateComparisonReview(
+        { access, reviewerPlan: billingPlan.tier },
+        { question: turn.prompt.content, responses: turn.responses }
       );
+    } catch (error) {
+      if (error instanceof ComparisonReviewerUnavailableError) {
+        return jsonError(
+          "No comparison reviewer is currently configured for your plan.",
+          "COMPARISON_REVIEWER_UNAVAILABLE",
+          503
+        );
+      }
+      throw error;
     }
-    const inputTokens = estimateComparisonReviewTokens(
-      turn.prompt.content,
-      turn.responses
-    );
-    const budget = createChatBudget("user", candidates[0], inputTokens);
 
     return Response.json(
       {
@@ -227,8 +192,9 @@ export async function GET(
           modelId: response.modelId,
           modelName: response.modelName,
         })),
-        estimatedCredits: budget.usageCredits,
-        reviewerClass: getModelUsageProfile(candidates[0]).category,
+        estimatedCredits: estimate.estimatedCredits,
+        dualReview: estimate.dualReview,
+        reviewerClass: estimate.reviewerClass,
         reviewModes: ["balanced", "evidence", "action"],
         freeMonthlyReviews:
           billingPlan.tier === "Free"
@@ -320,7 +286,7 @@ export async function POST(
       },
     });
     if (cached && !cached.isStale) {
-      const result = comparisonReviewResultSchema.safeParse(cached.result);
+      const result = dualComparisonReviewResultSchema.safeParse(cached.result);
       const responseMap = responseMapForStoredReview(
         cached.assistantMessageIds,
         turn.responses
@@ -352,223 +318,96 @@ export async function POST(
     if (billingPlan.tier === "Free") {
       freeQuota = await reserveFreeComparisonReview(access.subjectKey);
     }
-    const candidates = await accessibleCandidates(access, turn.responses);
-    if (!candidates.length) {
-      throw new ChatAccessError(
-        503,
-        "COMPARISON_REVIEWER_UNAVAILABLE",
-        "No comparison reviewer is currently configured for your plan."
-      );
-    }
 
     const userSettings = await prisma.userSettings.findUnique({
       where: { userId: session.user.id },
       select: { language: true },
     });
-    const reviewPrompt = buildComparisonReviewPrompt({
-      question: turn.prompt.content,
-      responses: turn.responses,
-      reviewMode: payload.reviewMode,
-      includeSynthesis: payload.includeSynthesis,
-      language: userSettings?.language || "en",
-    });
-    const inputTokens = estimateComparisonReviewTokens(
-      turn.prompt.content,
-      turn.responses
-    );
-    let lastError: unknown = new Error("No reviewer attempted.");
+    const subject: ComparisonReviewSubject = {
+      access,
+      reviewerPlan: billingPlan.tier,
+    };
 
-    for (const candidate of candidates) {
-      let leaseId: string | null = null;
-      let reservation: ChatUsageReservation | null = null;
-      let providerUsageTraceId: string | null = null;
-      let providerUsageSnapshot: PerplexityUsageCostSnapshot | null = null;
-      try {
-        const budget = createChatBudget("user", candidate, inputTokens);
-        const grant = await acquireChatAccess(access, budget, {
-          traceId,
-          source: "comparison_review",
-        });
-        leaseId = grant.leaseId;
-        reservation = grant.usageReservation;
-        providerUsageTraceId = reservation.reservationId;
-
-        let generated:
-          | {
-              output: unknown;
-              usage: {
-                inputTokens?: number;
-                inputTokenDetails: { cacheReadTokens?: number };
-                outputTokens?: number;
-              };
-              response: {
-                id: string;
-                headers?: Record<string, string>;
-              };
-            }
-          | undefined;
-        let generationError: unknown;
-        for (let attempt = 0; attempt < 2; attempt += 1) {
-          try {
-            generated = await generateText({
-              model: getActiveAiModel(candidate),
-              system: reviewPrompt.system,
-              prompt: reviewPrompt.prompt,
-              output: Output.object({ schema: comparisonReviewResultSchema }),
-              temperature: 0.1,
-              maxOutputTokens: budget.maxOutputTokens,
-              maxRetries: 1,
-              abortSignal: AbortSignal.timeout(45_000),
-              headers:
-                candidate.provider === "perplexity"
-                  ? perplexityUsageHeaders(providerUsageTraceId)
-                  : undefined,
-            });
-            break;
-          } catch (error) {
-            generationError = error;
-          }
-        }
-        if (!generated) throw generationError || new Error("No review output.");
-        if (candidate.provider === "perplexity") {
-          providerUsageSnapshot = await consumePerplexityUsage(
-            providerUsageTraceId
-          );
-        }
-        await linkChatReservationProviderRequest(reservation.reservationId, {
-          providerRequestId:
-            generated.response.headers?.["x-request-id"] ||
-            generated.response.headers?.["request-id"] ||
-            null,
-          providerResponseId: generated.response.id,
-        }).catch((linkError) =>
-          console.error("Comparison review provider request link failed:", {
-            traceId,
-            candidate: candidate.id,
-            linkError,
-          })
+    // The pipeline itself -- reviewer selection, credit reservation, the two
+    // independent reviews, grounding verification and settlement -- is shared
+    // with the guest route. What stays here is what is genuinely this route's:
+    // the conversation the answers came from, the Free-plan quota, the cache
+    // and the persisted ComparisonReview row.
+    let run;
+    try {
+      run = await runComparisonReview(
+        subject,
+        {
+          question: turn.prompt.content,
+          responses: turn.responses,
+          reviewMode: payload.reviewMode,
+          includeSynthesis: payload.includeSynthesis,
+          language: userSettings?.language || "en",
+        },
+        { traceId }
+      );
+    } catch (error) {
+      if (error instanceof ComparisonReviewerUnavailableError) {
+        throw new ChatAccessError(
+          503,
+          "COMPARISON_REVIEWER_UNAVAILABLE",
+          "No comparison reviewer is currently configured for your plan."
         );
-        const result: ComparisonReviewResult = comparisonReviewResultSchema.parse(
-          generated.output
-        );
-        const stored = await prisma.comparisonReview.upsert({
-          where: {
-            userId_inputHash: { userId: session.user.id, inputHash },
-          },
-          create: {
-            userId: session.user.id,
-            conversationId,
-            promptMessageId: turn.prompt.id,
-            assistantMessageIds: reviewPrompt.responseMap.map(
-              (response) => response.messageId
-            ),
-            reviewerModelId: candidate.id,
-            reviewMode: payload.reviewMode,
-            promptVersion: COMPARISON_REVIEW_PROMPT_VERSION,
-            result,
-            usageCredits: budget.usageCredits,
-            inputHash,
-          },
-          update: {
-            assistantMessageIds: reviewPrompt.responseMap.map(
-              (response) => response.messageId
-            ),
-            reviewerModelId: candidate.id,
-            result,
-            usageCredits: budget.usageCredits,
-            isStale: false,
-          },
-        });
-        const successfulReservation = reservation;
-        reservation = null;
-        await settleChatUsage(successfulReservation, {
-          inputTokens: generated.usage.inputTokens,
-          cachedInputTokens: generated.usage.inputTokenDetails.cacheReadTokens,
-          outputTokens: generated.usage.outputTokens,
-          outcome: "completed",
-        }, {
-          providerUsageSnapshot,
-        }).catch((settlementError) =>
-          console.error("Comparison review settlement failed:", {
-            traceId,
-            candidate: candidate.id,
-            settlementError,
-          })
-        );
-        await Promise.all([
-          recordProviderSuccess(candidate.provider),
-          recordModelSuccess(candidate.id),
-        ]);
-        completed = true;
-        return Response.json(
-          {
-            id: stored.id,
-            result,
-            responseMap: reviewPrompt.responseMap,
-            reviewerModelId: candidate.id,
-            usageCredits: budget.usageCredits,
-            cached: false,
-            createdAt: stored.createdAt.toISOString(),
-            disclaimer:
-              "This AI review compares supplied answers and is not external fact verification.",
-          },
-          { headers: { "Cache-Control": "no-store" } }
-        );
-      } catch (error) {
-        lastError = error;
-        if (reservation) {
-          if (candidate.provider === "perplexity" && providerUsageTraceId) {
-            providerUsageSnapshot = await consumePerplexityUsage(
-              providerUsageTraceId
-            );
-          }
-          await settleChatUsage(reservation, {
-            inputTokens: 0,
-            outputTokens: 0,
-            outcome: "failed",
-          }, {
-            providerUsageSnapshot,
-          }).catch((settlementError) =>
-            console.error("Comparison review refund failed:", {
-              traceId,
-              candidate: candidate.id,
-              settlementError,
-            })
-          );
-        }
-        await Promise.allSettled([
-          recordProviderFailure(candidate.provider, "COMPARISON_REVIEW_FAILED", {
-            modelId: candidate.id,
-            phase: "request",
-            traceId,
-            errorName: error instanceof Error ? error.name : undefined,
-            message: error instanceof Error ? error.message : String(error),
-          }),
-          recordModelFailure(
-            candidate.id,
-            candidate.provider,
-            "COMPARISON_REVIEW_FAILED"
-          ),
-        ]);
-        console.error("Comparison reviewer attempt failed:", {
-          traceId,
-          reviewerModelId: candidate.id,
-          error,
-        });
-      } finally {
-        if (providerUsageTraceId) {
-          discardPerplexityUsage(providerUsageTraceId);
-        }
-        if (leaseId) await releaseChatAccess(leaseId);
       }
+      if (error instanceof ComparisonReviewFailedError) {
+        console.error("All comparison reviewers failed:", { traceId });
+        return jsonError(
+          "The AI comparison review could not be completed. Reserved credits were refunded.",
+          "COMPARISON_REVIEW_FAILED",
+          502,
+          traceId
+        );
+      }
+      throw error;
     }
 
-    console.error("All comparison reviewers failed:", { traceId, lastError });
-    return jsonError(
-      "The AI comparison review could not be completed. Reserved credits were refunded.",
-      "COMPARISON_REVIEW_FAILED",
-      502,
-      traceId
+    const stored = await prisma.comparisonReview.upsert({
+      where: {
+        userId_inputHash: { userId: session.user.id, inputHash },
+      },
+      create: {
+        userId: session.user.id,
+        conversationId,
+        promptMessageId: turn.prompt.id,
+        assistantMessageIds: run.responseMap.map(
+          (response) => response.messageId
+        ),
+        reviewerModelId: run.reviewerModelId,
+        reviewMode: payload.reviewMode,
+        promptVersion: COMPARISON_REVIEW_PROMPT_VERSION,
+        result: run.result,
+        usageCredits: run.usageCredits,
+        inputHash,
+      },
+      update: {
+        assistantMessageIds: run.responseMap.map(
+          (response) => response.messageId
+        ),
+        reviewerModelId: run.reviewerModelId,
+        result: run.result,
+        usageCredits: run.usageCredits,
+        isStale: false,
+      },
+    });
+    completed = true;
+    return Response.json(
+      {
+        id: stored.id,
+        result: run.result,
+        responseMap: run.responseMap,
+        reviewerModelId: run.reviewerModelId,
+        usageCredits: run.usageCredits,
+        cached: false,
+        createdAt: stored.createdAt.toISOString(),
+        disclaimer:
+          "This AI review compares supplied answers and is not external fact verification.",
+      },
+      { headers: { "Cache-Control": "no-store" } }
     );
   } catch (error) {
     if (
@@ -603,7 +442,7 @@ export async function POST(
     );
   } finally {
     if (freeQuota && !completed) {
-      await releaseFreeComparisonReview(freeQuota).catch((error) =>
+      await releaseComparisonReviewQuota(freeQuota).catch((error) =>
         console.error("Comparison review quota refund failed:", {
           traceId,
           error,

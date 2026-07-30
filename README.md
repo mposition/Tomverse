@@ -16,6 +16,31 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+## UI contracts
+
+Some parts of the UI carry non-negotiable product invariants. Read the contract
+before changing the code it covers — a violation is a release blocker, not a
+review comment:
+
+- [Mobile chat composer](docs/ui-contracts/mobile-chat-composer.md) —
+  `components/chat/ChatInput.tsx`, `components/chat/MobileChatShell.tsx`, the
+  composer's tool chips and the mobile bottom dock. The textarea always owns a
+  dedicated full-width row with at least one complete visible line; no chip,
+  badge or control may take, cover or scroll across it. Changes need
+  bounding-box, overlap, horizontal-overflow, Korean IME, 320px and 200%
+  text-scaling coverage — see `tests/e2e/mobile-composer-contract.spec.ts`.
+- [Comparison action rail](docs/ui-contracts/comparison-action-rail.md) —
+  `components/chat/ComparisonActionRail.tsx`, `lib/comparisonReadiness.ts` and
+  the bottom workflow dock in both shells. Desktop and mobile share one
+  state-driven disclosure policy: the "Comparing N completed answers" sentence
+  is visually hidden (but kept in the accessibility tree) in the normal
+  all-complete state, and on screen for every generating, excluded,
+  needs-more, running or credit-blocked state. Changes need the desktop and
+  mobile state matrix — `tests/comparisonReadiness.test.mjs` and
+  `tests/e2e/comparison-action-rail.spec.ts`.
+
+`AGENTS.md` carries the short version of the same rules for coding agents.
+
 ## AI Usage Limits
 
 Chat access is enforced on the server. Guests can use `Free` models only by
@@ -921,6 +946,70 @@ API failures. Admin Scheduled Jobs records the latest run, result counts,
 delay, and failure state. Admin Alerts also exposes the managed Slack template
 and a safe test payload.
 
+Create a fifth Railway Cron service for the synthetic provider health probe
+(AUD-R001) and set its Config File Path to `/railway.provider-probe.json`. It
+runs every 10 minutes:
+
+```text
+npm run maintenance:provider-probe
+```
+
+Set `PROVIDER_PROBE_SECRET` on both the web and Cron services (or let it fall
+back to the shared `MAINTENANCE_SECRET`), and `PROVIDER_PROBE_URL` on the Cron
+service (or let it fall back to `PUBLIC_APP_URL`/`NEXTAUTH_URL`). Each run
+sends one minimal, non-billed request to one representative model per
+configured provider (a fixed prompt, `maxOutputTokens: 8`, zero temperature,
+no tools/search/image/file/deep-research, a 10-second timeout, and no
+client-side retry -- the next cron tick is the retry) so idle providers with
+no real user traffic stop showing as permanently **Unknown** on the public
+`/status` page. The public status page never treats this as a substitute for
+real evidence: a single failed probe never alone declares an incident
+(repeated consecutive failures are required, default 3, configurable with
+`PROVIDER_PROBE_INCIDENT_THRESHOLD`), and probe evidence is always stored
+completely separately from real-request evidence (`ProviderHealthState`'s
+`lastProbeSuccessAt`/`lastProbeFailureAt`/`consecutiveProbeFailures` columns,
+distinct from the real-traffic `lastSuccessAt`/`lastFailureAt`/
+`consecutiveFailures` columns) so the two streams can never silently overwrite
+each other.
+
+The probe model for a provider is resolved from the model registry (the
+cheapest enabled `standard`-tier model, or -- for the two providers with no
+standard-tier option, Moonshot and Perplexity -- the cheapest enabled model
+of any tier) and can be overridden per provider without a deploy via a JSON
+map:
+
+```text
+PROVIDER_PROBE_MODEL_OVERRIDES={"openai":"gpt-5-4-mini"}
+```
+
+A daily cost ceiling guards the whole cycle, checked before every run against
+that day's total `ProviderDailyUsage` rows recorded with `source: "probe"`
+(a value distinct from `"internal"` and `"provider_api"`, so probe spend is
+always queryable in isolation):
+
+```text
+PROVIDER_PROBE_DAILY_COST_CAP_USD=1
+```
+
+If the cap is already reached, the run records a skip and calls no provider
+for the rest of that day. Today's spend against this same cap is shown at
+the top of Admin Provider Health (`components/admin/AdminProviderHealthPanel.tsx`)
+so operators don't need a direct DB query to see it, and highlights once the
+cap is reached. A soft overlap guard (a `ScheduledJobRun` lookup
+within half the 10-minute cadence, the same pattern
+`lib/infrastructureThresholdMonitor.ts` uses) skips a cycle entirely if
+another one started moments earlier, so two near-simultaneous cron ticks
+never double-charge or double-count. `development` and `test` never call a
+real provider by default -- set `PROVIDER_PROBE_FORCE_LIVE=true` on a
+developer machine for manual staging-style verification; unit tests always
+inject a fake generator regardless of this flag. Each attempt is also logged
+to `ProviderProbeResult` (provider, model, timing, success/timeout, and a
+small fixed-vocabulary public-safe error classification -- never a raw
+provider message, API key, or user content) for auditing. Admin Scheduled
+Jobs records this job as `provider_probe`, including delay/failure state
+separately from any individual provider's health, so a delayed scheduler is
+never confused with a provider outage on the public page.
+
 All Tomverse Slack deliveries, including Admin test messages and DB-independent
 operational alerts, automatically include `<!channel>` so the destination channel
 receives an explicit notification.
@@ -985,6 +1074,19 @@ npm run test:e2e:chromium # existing build, all Chromium projects
 npm run test:e2e:run      # existing build, every configured browser project
 npm run test:e2e          # local convenience: build, then full E2E
 ```
+
+UI-contract suites worth running directly when touching the chat composer (see
+[docs/ui-contracts/mobile-chat-composer.md](docs/ui-contracts/mobile-chat-composer.md)):
+
+```text
+npx playwright test --project=desktop-chromium tests/e2e/mobile-composer-contract.spec.ts
+npx playwright test --project=desktop-chromium tests/e2e/mobile-message-visibility.spec.ts
+npx playwright test --project=desktop-chromium tests/e2e/comparison-action-rail.spec.ts
+```
+
+The comparison rail's state matrix also runs as fast unit tests
+(`npm run test:unit`, `tests/comparisonReadiness.test.mjs`) — see
+[docs/ui-contracts/comparison-action-rail.md](docs/ui-contracts/comparison-action-rail.md).
 
 Configure these GitHub repository **Actions secrets** (Railway variables are not
 automatically available to GitHub Actions):

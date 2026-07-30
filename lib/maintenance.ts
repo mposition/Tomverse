@@ -17,12 +17,18 @@ import {
   FOUNDING_TESTER_PASS_STATUS,
 } from "@/lib/foundingTesterPassCore";
 import { deleteTomverseAccount } from "@/lib/accountDeletion";
+import { deleteR2Object, listExpiredR2Objects } from "@/lib/r2";
+import {
+  GUEST_ATTACHMENT_PREFIX,
+  getGuestAttachmentTtlMinutes,
+} from "@/lib/guestAttachments";
 
 const OAUTH_ACCOUNT_BATCH_SIZE = 200;
+const GUEST_ATTACHMENT_SWEEP_BATCH = 500;
 const TESTER_PASS_BATCH_SIZE = 100;
 const TESTER_PASS_REMINDER_WINDOW_MS = 7 * 86_400_000;
 
-const deleteScheduledAccounts = async (now: Date) => {
+export const deleteScheduledAccounts = async (now: Date) => {
   const users = await prisma.user.findMany({
     where: {
       accountStatus: "pending_deletion",
@@ -34,6 +40,20 @@ const deleteScheduledAccounts = async (now: Date) => {
   });
   let deleted = 0;
   for (const user of users) {
+    // Re-verify and claim atomically right before deleting: an admin
+    // restore that lands between the findMany above and here already
+    // flipped accountStatus away from pending_deletion, so this affects 0
+    // rows and the account survives instead of being deleted out from
+    // under the restore.
+    const claimed = await prisma.user.updateMany({
+      where: {
+        id: user.id,
+        accountStatus: "pending_deletion",
+        accountDeletionScheduledFor: { lte: now },
+      },
+      data: { accountStatus: "deletion_processing" },
+    });
+    if (claimed.count !== 1) continue;
     const result = await deleteTomverseAccount(user.id, {
       cancelSubscription: false,
     });
@@ -263,6 +283,48 @@ const encryptExistingOAuthTokens = async () => {
   return encryptedCount;
 };
 
+/**
+ * Reclaims ephemeral guest uploads past their TTL.
+ *
+ * A guest file is deleted as soon as the composer drops it or the turn that
+ * used it finishes, but neither of those is guaranteed to run: a closed tab
+ * between "picked a file" and "pressed send" leaves an orphan nothing else
+ * references. This is the backstop that makes the retention promise true, and
+ * the only place a guest object outlives its session.
+ *
+ * Failures are reported, never thrown: a storage outage must not take the rest
+ * of the maintenance run down with it. Nothing about the file's *contents* is
+ * logged -- only counts and, on failure, the opaque key.
+ */
+const sweepExpiredGuestAttachments = async (now: Date) => {
+  const cutoff = new Date(now.getTime() - getGuestAttachmentTtlMinutes() * 60_000);
+  let deleted = 0;
+  let failed = 0;
+  try {
+    const keys = await listExpiredR2Objects(
+      GUEST_ATTACHMENT_PREFIX,
+      cutoff,
+      GUEST_ATTACHMENT_SWEEP_BATCH
+    );
+    for (const key of keys) {
+      try {
+        await deleteR2Object(key);
+        deleted += 1;
+      } catch (error) {
+        failed += 1;
+        console.error("Guest attachment cleanup failed for one object:", {
+          key,
+          error,
+        });
+      }
+    }
+  } catch (error) {
+    console.error("Guest attachment cleanup could not list objects:", error);
+    return { deleted, failed, listed: false };
+  }
+  return { deleted, failed, listed: true };
+};
+
 export async function cleanupExpiredData() {
   assertOAuthTokenEncryptionConfigured();
   const now = new Date();
@@ -361,8 +423,10 @@ export async function cleanupExpiredData() {
   `;
   const oauthTokensEncrypted = await encryptExistingOAuthTokens();
   const creditLotsExpired = await expireCreditLots();
+  const guestAttachments = await sweepExpiredGuestAttachments(now);
 
   return {
+    guestAttachments,
     sessions: sessions.count,
     usageBuckets: Number(usageBuckets),
     requestLeases: Number(requestLeases),

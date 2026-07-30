@@ -1,63 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
+import {
+  isLocalTurnstileBypassHost,
+  loadTurnstile,
+} from "@/components/chat/turnstileScript";
 
-type TurnstileApi = {
-  render: (container: HTMLElement, options: Record<string, unknown>) => string;
-  execute: (widgetId: string) => void;
-  reset: (widgetId: string) => void;
-  remove: (widgetId: string) => void;
-};
-
-declare global {
-  interface Window {
-    turnstile?: TurnstileApi;
-  }
-}
-
-const SCRIPT_ID = "cloudflare-turnstile-script";
-const SCRIPT_URL =
-  "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
-
-const isLocalDevelopmentHost = () => {
-  if (process.env.NODE_ENV === "production") return false;
-  if (typeof window === "undefined") return false;
-  return ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
-};
-
-const loadTurnstile = () =>
-  new Promise<void>((resolve, reject) => {
-    if (window.turnstile) {
-      resolve();
-      return;
-    }
-    const existing = document.getElementById(
-      SCRIPT_ID
-    ) as HTMLScriptElement | null;
-    if (existing) {
-      existing.addEventListener("load", () => resolve(), { once: true });
-      existing.addEventListener(
-        "error",
-        () => reject(new Error("Turnstile failed to load.")),
-        { once: true }
-      );
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.id = SCRIPT_ID;
-    script.src = SCRIPT_URL;
-    script.async = true;
-    script.defer = true;
-    script.addEventListener("load", () => resolve(), { once: true });
-    script.addEventListener(
-      "error",
-      () => reject(new Error("Turnstile failed to load.")),
-      { once: true }
-    );
-    document.head.appendChild(script);
-  });
-
+/**
+ * The standalone-form Turnstile hook: one widget, owned by one form, rendered
+ * wherever that form puts its container (sign-in, support request).
+ *
+ * The chat page does NOT use this. A chat shell has several model panels and
+ * several guest-only endpoints sharing one verification surface, so it goes
+ * through GuestVerificationProvider instead -- see
+ * components/chat/GuestVerificationProvider.tsx.
+ */
 export function useTurnstile(enabled: boolean, action = "guest_chat") {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const widgetIdRef = useRef<string | null>(null);
@@ -68,7 +25,7 @@ export function useTurnstile(enabled: boolean, action = "guest_chat") {
 
   useEffect(() => {
     const sitekey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
-    if (!enabled || !sitekey || isLocalDevelopmentHost()) return;
+    if (!enabled || !sitekey || isLocalTurnstileBypassHost()) return;
     let cancelled = false;
 
     void loadTurnstile()
@@ -126,7 +83,7 @@ export function useTurnstile(enabled: boolean, action = "guest_chat") {
 
   const getToken = useCallback(async () => {
     if (!enabled) return undefined;
-    if (isLocalDevelopmentHost()) return undefined;
+    if (isLocalTurnstileBypassHost()) return undefined;
     if (!process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY) {
       if (process.env.NODE_ENV !== "production") return undefined;
       throw new Error("Guest verification is not configured.");

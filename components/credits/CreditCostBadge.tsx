@@ -1,4 +1,5 @@
 import type { HTMLAttributes } from "react";
+import { englishCreditUnit, formatCountedUnit } from "@/lib/pricingFormat";
 
 type CreditCoinIconProps = {
   className?: string;
@@ -41,11 +42,20 @@ type CreditCostBadgeProps = Omit<HTMLAttributes<HTMLSpanElement>, "children"> & 
   size?: "xs" | "sm" | "md";
   tone?: "default" | "onColor" | "plain";
   testId?: string;
+  /**
+   * Marks the number as an estimate rather than a settled price. Used where
+   * the real cost scales with the request (e.g. a difference summary over
+   * long answers), so a bare "1" would read as a guaranteed charge.
+   */
+  approximate?: boolean;
 };
 
 const sizeClasses = {
-  xs: "gap-0.5 px-1.5 py-0.5 text-[9px] [&_svg]:h-3 [&_svg]:w-3",
-  sm: "gap-1 px-2 py-1 text-[10px] [&_svg]:h-3.5 [&_svg]:w-3.5",
+  // `xs` rides inside the comparison rail's two mobile actions at 320px, where
+  // the label has no width to spare. Raising the text to the 11px floor is paid
+  // for out of the badge's own padding, not out of the label beside it.
+  xs: "gap-0.5 px-0.5 py-0.5 text-[11px] [&_svg]:h-3 [&_svg]:w-3",
+  sm: "gap-1 px-2 py-1 text-[11px] [&_svg]:h-3.5 [&_svg]:w-3.5",
   md: "gap-1.5 px-2.5 py-1.5 text-xs [&_svg]:h-4 [&_svg]:w-4",
 } as const;
 
@@ -70,20 +80,47 @@ export function CreditCostBadge({
   tone = "default",
   testId = "credit-cost-badge",
   className = "",
+  title,
+  approximate = false,
   ...props
 }: CreditCostBadgeProps) {
-  const accessibleLabel = label || `${formatCredits(credits)} credits`;
+  // FINAL-F006: 12 of the 34 catalogue models weigh 1 credit -- including all
+  // three guest defaults -- so the hard-coded plural was reachable copy, not a
+  // theoretical edge. Goes through the same CLDR helper /pricing uses.
+  const countedCredits = formatCountedUnit(
+    credits,
+    englishCreditUnit,
+    "en",
+    formatCredits
+  );
+  const accessibleLabel =
+    label || (approximate ? `about ${countedCredits}` : countedCredits);
 
   return (
+    // RECON-A11Y-001: a bare <span> may not carry aria-label (axe
+    // `aria-prohibited-attr`). The badge is a coin glyph plus a numeral that
+    // together mean "N credits", which is exactly what role="img" describes,
+    // and it leaves the rendered box untouched.
     <span
       {...props}
+      role="img"
       data-testid={testId}
+      data-approximate={approximate ? "true" : undefined}
       aria-label={accessibleLabel}
-      title={props.title || accessibleLabel}
-      className={`inline-flex shrink-0 items-center justify-center rounded-full border font-black tabular-nums leading-none ${sizeClasses[size]} ${toneClasses[tone]} ${className}`}
+      title={title === undefined ? accessibleLabel : title}
+      className={`inline-flex shrink-0 items-center justify-center rounded-full border font-bold tabular-nums leading-none ${sizeClasses[size]} ${toneClasses[tone]} ${className}`}
     >
       <CreditCoinIcon />
-      <span aria-hidden="true">{formatCredits(credits)}</span>
+      {/*
+        The numeral sits inside a coin-sized pill and is aria-hidden: the whole
+        badge already carries "N credits" as its accessible name and its title.
+        It is a deliberate exception to the 11px consumer-text floor (UI-007),
+        marked so the audit can see it rather than infer it.
+      */}
+      <span aria-hidden="true" data-allow-small-text>
+        {approximate ? "~" : ""}
+        {formatCredits(credits)}
+      </span>
     </span>
   );
 }

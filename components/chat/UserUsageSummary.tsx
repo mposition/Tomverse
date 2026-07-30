@@ -66,7 +66,7 @@ export function UserUsageSummary({
         data-testid={compact ? "sidebar-upgrade-card" : undefined}
         className={`${compact ? "rounded-3xl" : "mx-3 mb-3 rounded-2xl"} border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-100`}
       >
-        <div className="flex items-center gap-2 font-black">
+        <div className="flex items-center gap-2 font-bold">
           <BarChart3 className="h-4 w-4" />
           {t("usage.guestUsage")}
         </div>
@@ -106,13 +106,13 @@ export function UserUsageSummary({
         className="rounded-3xl border border-zinc-200 bg-white p-3 text-xs text-zinc-700 shadow-sm dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200"
       >
         <div className="flex items-center justify-between gap-2">
-          <span className="flex items-center gap-1.5 font-black text-zinc-900 dark:text-zinc-100">
+          <span className="flex items-center gap-1.5 font-bold text-zinc-900 dark:text-zinc-100">
             <BarChart3 className="h-4 w-4 text-blue-500" />
             {t("sidebar.currentUsage")}
           </span>
           <span className="flex items-center gap-1">
             {headerAction}
-            <span className="rounded-full bg-zinc-100 px-2 py-1 text-[10px] font-black text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
+            <span className="rounded-full bg-zinc-100 px-2 py-1 text-xs font-bold text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
               {planLabel}
             </span>
           </span>
@@ -142,13 +142,13 @@ export function UserUsageSummary({
               planCreditsRemaining={usage.balances.planRemainingCredits}
               addonCreditsRemaining={usage.balances.purchasedRemainingCredits}
               testId="sidebar-upgrade-cta"
-              className="flex min-h-10 w-full items-center justify-center rounded-xl bg-blue-600 px-3 py-2 text-center text-xs font-black text-white shadow-sm shadow-blue-950/20 transition hover:bg-blue-500"
+              className="flex min-h-10 w-full items-center justify-center rounded-xl bg-blue-600 px-3 py-2 text-center text-xs font-bold text-white shadow-sm shadow-blue-950/20 transition hover:bg-blue-500"
             >
               {upgradeTarget === "Pro"
                 ? t("upgrade.upgradeToPro")
                 : t("upgrade.upgradeToMax")}
             </UpgradeCtaLink>
-            <p className="mt-1.5 text-center text-[10px] font-medium leading-4 text-zinc-500 dark:text-zinc-400">
+            <p className="mt-1.5 text-center text-[11px] font-medium leading-4 text-zinc-500 dark:text-zinc-400">
               {upgradeTarget === "Pro"
                 ? t("upgrade.proBenefit")
                 : t("upgrade.maxBenefit")}
@@ -160,7 +160,7 @@ export function UserUsageSummary({
           <div className="mt-3 border-t border-zinc-200 pt-3 dark:border-zinc-800">
             <CreditPackPurchaseButton
               trigger="usage_widget"
-              className="flex min-h-10 w-full items-center justify-center rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white hover:bg-emerald-500"
+              className="flex min-h-10 w-full items-center justify-center rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-500"
             >
               {t("upgrade.buyAdditionalCredits")}
             </CreditPackPurchaseButton>
@@ -174,7 +174,7 @@ export function UserUsageSummary({
     <section className="mx-3 mb-3 rounded-2xl border border-zinc-200 bg-white p-3 text-xs text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-200">
       {usage.creditDebt.riskStatus === "disputed_hold" && (
         <div className="mb-3 rounded-xl border border-red-300 bg-red-50 p-2.5 text-red-900 dark:border-red-900/70 dark:bg-red-950/30 dark:text-red-100">
-          <p className="font-black">
+          <p className="font-bold">
             {lang === "ko"
               ? "결제 분쟁 검토 중에는 AI 요청이 일시 중지됩니다."
               : "AI requests are paused while a payment dispute is reviewed."}
@@ -188,7 +188,7 @@ export function UserUsageSummary({
       )}
       {usage.creditDebt.credits > 0 && (
         <div className="mb-3 rounded-xl border border-amber-300 bg-amber-50 p-2.5 text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-100">
-          <p className="font-black">
+          <p className="font-bold">
             {lang === "ko"
               ? `미회수 크레딧 ${usage.creditDebt.credits.toLocaleString(lang)}개`
               : `${usage.creditDebt.credits.toLocaleString(lang)} unrecovered credits`}
@@ -201,7 +201,7 @@ export function UserUsageSummary({
         </div>
       )}
       <div className="flex items-center justify-between gap-2">
-        <span className="flex items-center gap-2 font-black">
+        <span className="flex items-center gap-2 font-bold">
           <BarChart3 className="h-4 w-4 text-blue-500" />
           {t("usage.plan")}: {planLabel}
         </span>
@@ -233,27 +233,27 @@ export function UserUsageSummary({
       </div>
       <div className="mt-2 grid grid-cols-2 gap-2">
         <div className="rounded-xl bg-zinc-100 p-2 dark:bg-zinc-950/70">
-          <span className="block text-[10px] font-bold uppercase text-zinc-400">
+          <span className="block text-[11px] font-bold uppercase text-zinc-400">
             {lang === "ko" ? "플랜 크레딧" : "Plan credits"}
           </span>
           <strong>{usage.balances.planRemainingCredits.toLocaleString(lang)}</strong>
-          <span className="mt-0.5 block text-[10px] text-zinc-400">
+          <span className="mt-0.5 block text-[11px] text-zinc-400">
             {lang === "ko" ? "다음 달 초기화" : "Resets next month"}
           </span>
         </div>
         <div className="rounded-xl bg-emerald-50 p-2 dark:bg-emerald-950/20">
-          <span className="flex items-center gap-1 text-[10px] font-bold uppercase text-emerald-600 dark:text-emerald-300">
+          <span className="flex items-center gap-1 text-[11px] font-bold uppercase text-emerald-600 dark:text-emerald-300">
             <Coins className="h-3 w-3" /> {lang === "ko" ? "구매 크레딧" : "Purchased"}
           </span>
           <strong>{usage.balances.purchasedRemainingCredits.toLocaleString(lang)}</strong>
-          <span className="mt-0.5 block text-[10px] text-zinc-400">
+          <span className="mt-0.5 block text-[11px] text-zinc-400">
             {expiryLabel ? `${lang === "ko" ? "만료" : "Expires"} ${expiryLabel}` : (lang === "ko" ? "구매 내역 없음" : "No purchases")}
           </span>
         </div>
       </div>
       {warningLevel > 0 && (
         <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 p-2.5 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
-          <p className="font-black">
+          <p className="font-bold">
             {lang === "ko"
               ? warningLevel >= 100 ? "이번 달 플랜 크레딧을 모두 사용했습니다." : `이번 달 플랜 크레딧의 ${warningLevel}% 이상을 사용했습니다.`
               : warningLevel >= 100 ? "You have used all plan credits for this month." : `You have used at least ${warningLevel}% of this month's plan credits.`}
@@ -268,15 +268,15 @@ export function UserUsageSummary({
                   ctaLocation="usage_summary_warning"
                   planCreditsRemaining={usage.balances.planRemainingCredits}
                   addonCreditsRemaining={usage.balances.purchasedRemainingCredits}
-                  className="rounded-lg bg-blue-600 px-2.5 py-1.5 font-black text-white"
+                  className="rounded-lg bg-blue-600 px-2.5 py-1.5 font-bold text-white"
                 >
                   {upgradeLabel}
                 </UpgradeCtaLink>
-                <CreditPackPurchaseButton trigger="usage_widget" className="rounded-lg border border-amber-400 px-2.5 py-1.5 font-black">{addCreditLabel}</CreditPackPurchaseButton>
+                <CreditPackPurchaseButton trigger="usage_widget" className="rounded-lg border border-amber-400 px-2.5 py-1.5 font-bold">{addCreditLabel}</CreditPackPurchaseButton>
               </>
             ) : (
               <>
-                <CreditPackPurchaseButton trigger="usage_widget" className="rounded-lg bg-emerald-600 px-2.5 py-1.5 font-black text-white">{addCreditLabel}</CreditPackPurchaseButton>
+                <CreditPackPurchaseButton trigger="usage_widget" className="rounded-lg bg-emerald-600 px-2.5 py-1.5 font-bold text-white">{addCreditLabel}</CreditPackPurchaseButton>
                 {usage.plan === "Pro" && (
                   <UpgradeCtaLink
                     targetPlan="Max"
@@ -285,12 +285,12 @@ export function UserUsageSummary({
                     ctaLocation="usage_summary_secondary"
                     planCreditsRemaining={usage.balances.planRemainingCredits}
                     addonCreditsRemaining={usage.balances.purchasedRemainingCredits}
-                    className="rounded-lg border border-amber-400 px-2.5 py-1.5 font-black"
+                    className="rounded-lg border border-amber-400 px-2.5 py-1.5 font-bold"
                   >
                     {t("upgrade.compareMax")}
                   </UpgradeCtaLink>
                 )}
-                {usage.recommendation.secondary === "business" && <Link href="/support" className="rounded-lg border border-amber-400 px-2.5 py-1.5 font-black">Business</Link>}
+                {usage.recommendation.secondary === "business" && <Link href="/support" className="rounded-lg border border-amber-400 px-2.5 py-1.5 font-bold">Business</Link>}
               </>
             )}
           </div>

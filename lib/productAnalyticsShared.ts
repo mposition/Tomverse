@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { BILLING_CURRENCIES, type BillingCurrency } from "@/lib/billingMarkets";
+import { SUPPORTED_LANGUAGES } from "@/lib/language";
 
 export const PRODUCT_ANALYTICS_EVENT_NAMES = [
   "landing_view",
@@ -46,6 +47,41 @@ export const PRODUCT_ANALYTICS_EVENT_NAMES = [
   "sidebar_tour_started",
   "sidebar_tour_completed",
   "sidebar_tour_skipped",
+  "chat_tool_menu_opened",
+  "model_picker_opened",
+  "model_picker_all_opened",
+  "model_picker_search_used",
+  "model_picker_filter_opened",
+  "model_picker_filter_applied",
+  "model_picker_selection_confirmed",
+  "model_picker_max_reached",
+  "model_picker_abandoned",
+  "web_search_mode_selected",
+  "web_search_suggestion_shown",
+  "web_search_suggestion_accepted",
+  "web_search_suggestion_declined",
+  "deep_research_setup_opened",
+  "deep_research_started",
+  "deep_research_cancelled",
+  "deep_research_completed",
+  "deep_research_failed",
+  "answer_sources_opened",
+  "web_search_native_executed",
+  "web_search_native_unsupported",
+  "web_search_native_failed",
+  // Requested on a native-capable model, but the provider chose not to
+  // search this turn -- distinct from unsupported/failed. Always paired
+  // with a full surcharge refund (see getSettledUsageCredits).
+  "web_search_native_not_executed",
+  // RECON-I18N-001. The localized marketing routes have their own root layout,
+  // so switching language from an English page is a document navigation rather
+  // than a client one -- about 2x slower, and 2.6s slower on a mid-tier phone
+  // over 4G. Keeping that cost was decided on the structural argument that the
+  // path is rare (Korean traffic lands on /ko from search, and /chat resolves
+  // Accept-Language), with nothing measuring whether that is true. This event
+  // is the missing input: `navigation` says whether a given switch actually
+  // crossed a root boundary and paid for it.
+  "marketing_language_switched",
 ] as const;
 
 export type ProductAnalyticsEventName =
@@ -134,9 +170,19 @@ export const analyticsPropertiesSchema = z
     market_tier: z.enum(["primary", "limited", "preview"]).optional(),
     paid_marketing_eligible: z.boolean().optional(),
     experiment_variant: z.enum(["control", "finder"]).optional(),
-    recommendation_rank: z.number().int().min(1).max(3).optional(),
+    // The picker's recommended screen shows up to 8 cards (STG-F008); the
+    // onboarding Model Finder still only ever emits ranks 1-3.
+    recommendation_rank: z.number().int().min(1).max(8).optional(),
     suggestion_reason: z.enum(["document", "deep_analysis", "research"]).optional(),
     review_mode: z.enum(["balanced", "evidence", "action"]).optional(),
+    // Bucketed exact-quote-match rate for a comparison review (the value the
+    // UI shows as "Source grounding"). It is stored under the legacy
+    // `confidence` field name, so the analytics property is named for what it
+    // measures to keep it from being reported as model confidence.
+    // "not_available" means the review contained no quotes to match at all.
+    source_grounding_level: z
+      .enum(["low", "medium", "high", "not_available"])
+      .optional(),
     cached: z.boolean().optional(),
     usage_credits: z.number().int().min(0).max(100).optional(),
     help_source: z
@@ -153,9 +199,23 @@ export const analyticsPropertiesSchema = z
         "private",
         "ai_review",
         "credits",
+        "guest_trial",
       ])
       .optional(),
     help_article_id: z.enum(["chat_workspace"]).optional(),
+    web_search_mode: z.enum(["off", "auto", "always"]).optional(),
+    deep_research_depth: z.enum(["quick", "standard", "deep"]).optional(),
+    search_provider: z
+      .enum(["openai", "anthropic", "google", "perplexity"])
+      .optional(),
+    // Language the visitor switched away from / to. `language` already exists
+    // as an attribution field, but it records the language at send time, which
+    // for a switch is only half the story.
+    language_from: z.enum(SUPPORTED_LANGUAGES).optional(),
+    language_to: z.enum(SUPPORTED_LANGUAGES).optional(),
+    // "document" when the switch crossed the (site)/[locale] root boundary and
+    // reloaded, "client" when it stayed in the same document.
+    navigation: z.enum(["document", "client"]).optional(),
   })
   .strict()
   .superRefine((properties, context) => {
@@ -322,3 +382,11 @@ export const normalizeAnalyticsPlan = (value: unknown) =>
     : value === "Guest"
       ? "Guest"
       : "Free";
+
+// The stored consent decision's key. It lives here rather than in
+// `productAnalyticsClient` because that module is `"use client"`, and the
+// pre-paint reservation script (see MarketingConsentReservation) is rendered by
+// a Server Component that has to embed this exact string. One source of truth
+// keeps the script and the reader from drifting apart -- a mismatch would
+// silently reserve space for visitors who have already decided.
+export const ANALYTICS_CONSENT_STORAGE_KEY = "tomverse_analytics_consent_v1";

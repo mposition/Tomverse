@@ -1,4 +1,6 @@
-﻿export type ChatAttachment = {
+﻿import type { WebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
+
+export type ChatAttachment = {
   id: string;
   name: string;
   mediaType: string;
@@ -12,9 +14,14 @@ export type Message = {
   id: string;
   role: "user" | "assistant";
   content: string;
-  status?: "normal" | "error" | "cancelled";
+  status?: "normal" | "error" | "cancelled" | "pending";
   attachments?: ChatAttachment[];
   modelId?: string;
+  errorCode?: string;
+  errorHadAttachments?: boolean;
+  createdAt?: string;
+  pendingJobId?: string | null;
+  searchMetadata?: WebSearchExecution | null;
 };
 
 export type Conversation = {
@@ -23,10 +30,12 @@ export type Conversation = {
     projectId?: string | null;
     selectedModels?: string[];
     disabledPanels?: string[];
+    webSearchMode?: "off" | "auto" | "always";
     isLocked?: boolean;
     shareEnabled?: boolean;
     shareExpiresAt?: string | null;
     messageCount?: number;
+    createdAt?: string;
 };
 
 export const MAX_SELECTED_MODELS = 3;

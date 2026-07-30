@@ -15,6 +15,8 @@
 /playwright-report/
 /test-results/
 /blob-report/
+# Sandbox-only Playwright browser-executable override; never a real fix.
+playwright.local-sandbox.config.ts
 
 # next.js
 /.next/
@@ -44,6 +46,14 @@ yarn-error.log*
 next-env.d.ts
 
 /app/generated/prisma
+/lib/generated
 .vs
 .local-backups/aihub-clone.dump
-docs
+# Local scratch docs stay out of the repo, but the UI contracts under
+# docs/ui-contracts/ are product invariants and must be versioned, and
+# docs/qa/ holds approved QA policy (the canonical visual baseline) that CI
+# and the Playwright config both point at.
+docs/*
+!docs/ui-contracts/
+!docs/qa/
+.playwright-mcp

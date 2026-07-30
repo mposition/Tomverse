@@ -438,17 +438,17 @@ export function SupportPageContent() {
 
       <section className="mx-auto max-w-6xl px-4 py-14 sm:px-6 lg:py-20">
         <div className="max-w-3xl">
-          <p className="text-sm font-black uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">
+          <p className="text-sm font-bold uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">
             {page.eyebrow}
           </p>
           <h1 className="mt-4 text-4xl font-black leading-tight sm:text-6xl">{page.title}</h1>
           <p className="mt-5 text-lg leading-8 text-zinc-600 dark:text-zinc-300">{page.description}</p>
           <div className="mt-8 flex flex-wrap gap-3">
-            <Link href="/support/help-centre" className="inline-flex h-12 items-center gap-2 rounded-xl bg-blue-600 px-5 text-sm font-black text-white transition hover:bg-blue-500">
+            <Link href="/support/help-centre" className="inline-flex h-12 items-center gap-2 rounded-xl bg-blue-600 px-5 text-sm font-bold text-white transition hover:bg-blue-500">
               {page.helpCta}
               <ArrowRight className="h-4 w-4" />
             </Link>
-            <Link href="/chat" className="inline-flex h-12 items-center gap-2 rounded-xl border border-zinc-300 px-5 text-sm font-black transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900">
+            <Link href="/chat" className="inline-flex h-12 items-center gap-2 rounded-xl border border-zinc-300 px-5 text-sm font-bold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900">
               {page.appCta}
             </Link>
           </div>
@@ -464,8 +464,8 @@ export function SupportPageContent() {
             return (
               <div key={label as string} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40">
                 <IconComponent className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-                <p className="mt-3 text-xs font-black uppercase tracking-[0.16em] text-zinc-500">{label as string}</p>
-                <p className="mt-1 text-sm font-black">{value as string}</p>
+                <p className="mt-3 text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">{label as string}</p>
+                <p className="mt-1 text-sm font-bold">{value as string}</p>
               </div>
             );
           })}
@@ -497,7 +497,7 @@ export function SupportPageContent() {
           </div>
 
           <form onSubmit={submit} className="rounded-3xl border border-zinc-200 bg-zinc-50 p-5 shadow-2xl shadow-zinc-950/5 dark:border-zinc-800 dark:bg-zinc-900/50">
-            <label className="mt-6 block text-sm font-black">
+            <label className="mt-6 block text-sm font-bold">
               {page.typeLabel}
               <select
                 value={type}
@@ -511,7 +511,7 @@ export function SupportPageContent() {
                 ))}
               </select>
             </label>
-            <label className="mt-4 block text-sm font-black">
+            <label className="mt-4 block text-sm font-bold">
               {page.emailInput}
               <input
                 type="email"
@@ -521,7 +521,7 @@ export function SupportPageContent() {
                 className="mt-2 h-12 w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm outline-none transition focus:border-blue-500 dark:border-zinc-800 dark:bg-zinc-950"
               />
             </label>
-            <label className="mt-4 block text-sm font-black">
+            <label className="mt-4 block text-sm font-bold">
               {page.traceInput}
               <input
                 value={traceId}
@@ -529,7 +529,7 @@ export function SupportPageContent() {
                 className="mt-2 h-12 w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm outline-none transition focus:border-blue-500 dark:border-zinc-800 dark:bg-zinc-950"
               />
             </label>
-            <label className="mt-4 block text-sm font-black">
+            <label className="mt-4 block text-sm font-bold">
               {page.messageInput}
               <textarea
                 required
@@ -545,7 +545,7 @@ export function SupportPageContent() {
             <button
               type="submit"
               disabled={busy || message.trim().length < 5 || !email.trim()}
-              className="mt-5 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 text-sm font-black text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+              className="mt-5 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 text-sm font-bold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Send className="h-4 w-4" />
               {busy ? page.sending : page.submit}

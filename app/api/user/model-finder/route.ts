@@ -11,20 +11,11 @@ import {
 } from "@/lib/apiSecurity";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import {
-  MODEL_FINDER_FILE_USAGE,
   MODEL_FINDER_PRIORITIES,
   MODEL_FINDER_TASKS,
-  getModelFinderRecommendations,
+  getModelFinderCombination,
   isModelFinderDefaultId,
 } from "@/lib/modelFinder";
-import {
-  getModelFinderVariant,
-  isModelFinderNewUser,
-} from "@/lib/modelFinderExperiment";
-import {
-  getModelFinderReappearsAt,
-  shouldAutoShowModelFinder,
-} from "@/lib/modelFinderSnooze";
 import { prisma } from "@/lib/prisma";
 
 const answersSchema = z
@@ -34,7 +25,6 @@ const answersSchema = z
       .min(1)
       .max(MODEL_FINDER_TASKS.length),
     priority: z.enum(MODEL_FINDER_PRIORITIES),
-    fileUsage: z.enum(MODEL_FINDER_FILE_USAGE),
   })
   .strict();
 
@@ -43,14 +33,10 @@ const actionSchema = z.discriminatedUnion("action", [
     .object({
       action: z.literal("complete"),
       answers: answersSchema,
-      defaultModelId: z.string().trim().min(1).max(100),
+      modelIds: z.array(z.string().trim().min(1).max(100)).min(1).max(3),
     })
     .strict(),
   z.object({ action: z.literal("accept_default") }).strict(),
-  z.object({ action: z.literal("dismiss") }).strict(),
-  // Kept temporarily so an already-loaded client chunk cannot turn a
-  // "later" choice into a permanent completion during a rolling deploy.
-  z.object({ action: z.literal("skip") }).strict(),
 ]);
 
 const noStoreHeaders = {
@@ -87,15 +73,12 @@ export async function GET(req: Request) {
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: {
-        createdAt: true,
         settings: {
           select: {
             preferredTasks: true,
             preferredPriority: true,
-            usesFilesFrequently: true,
             defaultModel: true,
             modelFinderCompletedAt: true,
-            modelFinderDismissedAt: true,
           },
         },
       },
@@ -108,35 +91,15 @@ export async function GET(req: Request) {
       );
     }
 
-    const variant = getModelFinderVariant(userId);
-    const isNewUser = isModelFinderNewUser(user.createdAt);
-    const reappearsAt = getModelFinderReappearsAt(
-      user.settings?.modelFinderDismissedAt
-    );
-    const shouldShow =
-      variant === "finder" &&
-      isNewUser &&
-      shouldAutoShowModelFinder({
-        completedAt: user.settings?.modelFinderCompletedAt,
-        dismissedAt: user.settings?.modelFinderDismissedAt,
-      });
-
     return NextResponse.json(
       {
-        variant,
-        shouldShow,
         settings: {
           preferredTasks: toStoredTasks(user.settings?.preferredTasks),
           preferredPriority: user.settings?.preferredPriority || null,
-          usesFilesFrequently:
-            user.settings?.usesFilesFrequently || null,
           defaultModelId:
             user.settings?.defaultModel || APP_DEFAULTS.defaultModelId,
           modelFinderCompletedAt:
             user.settings?.modelFinderCompletedAt?.toISOString() || null,
-          modelFinderDismissedAt:
-            user.settings?.modelFinderDismissedAt?.toISOString() || null,
-          modelFinderReappearsAt: reappearsAt?.toISOString() || null,
         },
       },
       { headers: noStoreHeaders }
@@ -170,35 +133,6 @@ export async function POST(req: Request) {
     const body = await readLimitedJson(req, 8 * 1024, actionSchema);
     const actionAt = new Date();
 
-    if (body.action === "dismiss" || body.action === "skip") {
-      const settings = await prisma.userSettings.upsert({
-        where: { userId },
-        update: {
-          modelFinderDismissedAt: actionAt,
-          modelFinderCompletedAt: null,
-        },
-        create: {
-          userId,
-          defaultModel: APP_DEFAULTS.defaultModelId,
-          modelFinderDismissedAt: actionAt,
-        },
-      });
-      const reappearsAt = getModelFinderReappearsAt(
-        settings.modelFinderDismissedAt
-      );
-      return NextResponse.json(
-        {
-          success: true,
-          defaultModelId: settings.defaultModel,
-          modelFinderCompletedAt: null,
-          modelFinderDismissedAt:
-            settings.modelFinderDismissedAt?.toISOString() || null,
-          modelFinderReappearsAt: reappearsAt?.toISOString() || null,
-        },
-        { headers: noStoreHeaders }
-      );
-    }
-
     if (body.action === "accept_default") {
       const defaultModelId = isModelFinderDefaultId(APP_DEFAULTS.defaultModelId)
         ? APP_DEFAULTS.defaultModelId
@@ -208,7 +142,6 @@ export async function POST(req: Request) {
         update: {
           defaultModel: defaultModelId,
           modelFinderCompletedAt: actionAt,
-          modelFinderDismissedAt: null,
         },
         create: {
           userId,
@@ -220,21 +153,21 @@ export async function POST(req: Request) {
         {
           success: true,
           defaultModelId: settings.defaultModel,
+          modelIds: [settings.defaultModel],
           modelFinderCompletedAt: settings.modelFinderCompletedAt?.toISOString(),
         },
         { headers: noStoreHeaders }
       );
     }
 
-    const recommendations = getModelFinderRecommendations(body.answers);
+    const combo = getModelFinderCombination(body.answers);
+    const comboModelIds = new Set(combo.map((pick) => pick.modelId));
     if (
-      !isModelFinderDefaultId(body.defaultModelId) ||
-      !recommendations.some(
-        (recommendation) => recommendation.modelId === body.defaultModelId
-      )
+      !body.modelIds.length ||
+      !body.modelIds.every((modelId) => comboModelIds.has(modelId))
     ) {
       return NextResponse.json(
-        { error: "The selected default model is not a survey recommendation." },
+        { error: "One or more selected models are not part of the recommended combination." },
         { status: 400, headers: noStoreHeaders }
       );
     }
@@ -244,17 +177,16 @@ export async function POST(req: Request) {
       update: {
         preferredTasks: body.answers.tasks,
         preferredPriority: body.answers.priority,
-        usesFilesFrequently: body.answers.fileUsage,
-        defaultModel: body.defaultModelId,
+        usesFilesFrequently: "rarely",
+        defaultModel: body.modelIds[0],
         modelFinderCompletedAt: actionAt,
-        modelFinderDismissedAt: null,
       },
       create: {
         userId,
         preferredTasks: body.answers.tasks,
         preferredPriority: body.answers.priority,
-        usesFilesFrequently: body.answers.fileUsage,
-        defaultModel: body.defaultModelId,
+        usesFilesFrequently: "rarely",
+        defaultModel: body.modelIds[0],
         modelFinderCompletedAt: actionAt,
       },
     });
@@ -263,6 +195,7 @@ export async function POST(req: Request) {
       {
         success: true,
         defaultModelId: settings.defaultModel,
+        modelIds: body.modelIds,
         modelFinderCompletedAt: settings.modelFinderCompletedAt?.toISOString(),
       },
       { headers: noStoreHeaders }

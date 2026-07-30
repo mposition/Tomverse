@@ -1,115 +1,207 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import {
   expectNoHorizontalOverflow,
   mockAuthenticatedApi,
+  modelMenuTrigger,
+  openModelCatalogue,
   prepareGuestPage,
 } from "./support/app-fixtures";
-
-const modelMenuTrigger = (page: Page) =>
-  page.locator('button[aria-controls="chat-input-popover"]').nth(1);
 
 test.beforeEach(async ({ page }) => {
   await prepareGuestPage(page, "en");
   await page.goto("/chat");
 });
 
-test("recommended picker and credit summary fit the active viewport", async ({ page }) => {
+test("opening the picker shows recommendations only, not the full catalogue", async ({ page }) => {
   await modelMenuTrigger(page).click();
   const dialog = page.locator("#chat-input-popover");
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByTestId("recommended-model-option")).toHaveCount(3);
-  await expect.poll(() => dialog.getByTestId("model-option").count()).toBeGreaterThan(3);
-  await expect(dialog.getByTestId("model-selection-summary")).toBeVisible();
 
-  const dialogBox = await dialog.boundingBox();
-  const viewport = page.viewportSize();
-  expect(dialogBox).not.toBeNull();
-  expect(viewport).not.toBeNull();
-  expect(dialogBox!.x).toBeGreaterThanOrEqual(0);
-  expect(dialogBox!.y).toBeGreaterThanOrEqual(0);
-  expect(dialogBox!.x + dialogBox!.width).toBeLessThanOrEqual(viewport!.width);
-  expect(dialogBox!.y + dialogBox!.height).toBeLessThanOrEqual(viewport!.height);
+  const recommendations = dialog.getByTestId("recommended-model-option");
+  const count = await recommendations.count();
+  expect(count).toBeGreaterThanOrEqual(6);
+  expect(count).toBeLessThanOrEqual(8);
+
+  // STG-F008: the 30+ model list and the advanced filters are one step away,
+  // so a beginner is not asked to understand provider/usage filters first.
+  await expect(dialog.getByTestId("model-option")).toHaveCount(0);
+  await expect(dialog.getByTestId("model-filter-sheet-trigger")).toHaveCount(0);
+  await expect(dialog.getByTestId("model-task-filter")).toHaveCount(0);
+
+  // The search entry point and the completion control stay on this screen --
+  // the 2026-07-17 collapsed picker was reverted precisely because search was
+  // hidden behind the expand.
+  await expect(dialog.getByTestId("model-search-input")).toBeVisible();
+  await expect(dialog.getByTestId("model-picker-open-all")).toBeVisible();
+  await expect(dialog.getByTestId("model-selection-summary")).toBeVisible();
   await expectNoHorizontalOverflow(page);
 });
 
-test("mobile model picker scrolls from recommendations through the full model list", async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
+test("every recommendation explains itself in task language with an exact cost", async ({ page }) => {
   await modelMenuTrigger(page).click();
-
   const dialog = page.locator("#chat-input-popover");
-  const scrollRegion = dialog.getByTestId("model-picker-scroll-region");
-  const summary = dialog.getByTestId("model-selection-summary");
-  await expect(scrollRegion).toBeVisible();
-  await expect(summary).toBeVisible();
+  const cards = dialog.getByTestId("recommended-model-option");
 
-  const mobileLayout = await dialog.evaluate((element) => {
-    const scrollRegionElement = element.querySelector(
-      '[data-testid="model-picker-scroll-region"]'
-    );
-    const styles = scrollRegionElement
-      ? getComputedStyle(scrollRegionElement)
-      : null;
-    return {
-      portalAtDocumentRoot: element.parentElement === document.body,
-      overflowY: styles?.overflowY || "",
-      touchAction: styles?.touchAction || "",
-    };
-  });
-  expect(mobileLayout.portalAtDocumentRoot).toBe(true);
-  expect(mobileLayout.overflowY).toBe("scroll");
-  expect(mobileLayout.touchAction).toBe("pan-y");
-
-  const dimensions = await scrollRegion.evaluate((element) => ({
-    clientHeight: element.clientHeight,
-    scrollHeight: element.scrollHeight,
-  }));
-  expect(dimensions.scrollHeight).toBeGreaterThan(dimensions.clientHeight);
-
-  const lastModel = dialog.getByTestId("model-option").last();
-  await lastModel.scrollIntoViewIfNeeded();
-  await expect.poll(() => scrollRegion.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-  await expect(lastModel).toBeVisible();
-  await expect(summary).toBeVisible();
+  for (let index = 0; index < (await cards.count()); index += 1) {
+    const card = cards.nth(index);
+    await expect(card).toHaveAttribute("aria-pressed", /true|false/);
+    await expect(card).toHaveAttribute("data-recommendation-source", /.+/);
+    await expect(card.getByTestId("recommended-model-credit-badge")).toBeVisible();
+    // Provider names may appear in the model name, never as the reason.
+    const reason = await card.getAttribute("data-recommendation-source");
+    expect(reason).not.toBe("");
+  }
 });
 
-test("search hides recommendations and shows matching full-list models", async ({ page }) => {
+test("All models reveals the full catalogue and its filters", async ({ page }) => {
+  const dialog = await openModelCatalogue(page);
+
+  await expect.poll(() => dialog.getByTestId("model-option").count()).toBeGreaterThan(20);
+  await expect(dialog.getByTestId("model-task-filter")).toBeVisible();
+  await expect(dialog.getByTestId("model-filter-sheet-trigger")).toBeVisible();
+  await expect(dialog.getByTestId("model-catalogue-result-count")).toBeVisible();
+  await expect(dialog.getByTestId("recommended-model-option")).toHaveCount(0);
+  await expectNoHorizontalOverflow(page);
+});
+
+test("going back from All models keeps the selection intact", async ({ page }) => {
+  await mockAuthenticatedApi(page, { selectedModels: ["gpt-5-4-mini"] });
+  await page.reload();
+  const dialog = await openModelCatalogue(page);
+
+  const target = dialog.locator(
+    '[data-testid="model-option"][data-model-id="claude-haiku-4-5"]'
+  );
+  await target.click();
+  await expect(target).toHaveAttribute("aria-pressed", "true");
+  await expect(dialog.getByTestId("selected-model-chip")).toHaveCount(2);
+
+  await dialog.getByTestId("model-picker-back").first().click();
+  await expect(dialog.getByTestId("recommended-model-option").first()).toBeVisible();
+  await expect(dialog.getByTestId("selected-model-chip")).toHaveCount(2);
+
+  // The same model reads as selected on the recommended screen too.
+  const recommended = dialog.locator(
+    '[data-testid="recommended-model-option"][data-model-id="claude-haiku-4-5"]'
+  );
+  await expect(recommended).toHaveAttribute("aria-pressed", "true");
+});
+
+test("selection state stays synchronized between both screens", async ({ page }) => {
+  await mockAuthenticatedApi(page, { selectedModels: ["gpt-5-4-mini"] });
+  await page.reload();
   await modelMenuTrigger(page).click();
   const dialog = page.locator("#chat-input-popover");
-  await expect(dialog.getByTestId("model-recommendations")).toBeVisible();
+
+  const modelId = await dialog
+    .locator('[data-testid="recommended-model-option"][aria-pressed="false"][data-model-plan-locked="false"]')
+    .first()
+    .getAttribute("data-model-id");
+  expect(modelId).toBeTruthy();
+  // Pinned by id, not by position: selecting a card changes which one is
+  // "first unselected", so a positional locator would drift to another card.
+  const recommended = dialog.locator(
+    `[data-testid="recommended-model-option"][data-model-id="${modelId}"]`
+  );
+  await recommended.click();
+  await expect(recommended).toHaveAttribute("aria-pressed", "true");
+
+  await openModelCatalogue(page);
+  await expect(
+    dialog.locator(`[data-testid="model-option"][data-model-id="${modelId}"]`)
+  ).toHaveAttribute("aria-pressed", "true");
+});
+
+test("search jumps into the catalogue and cancelling restores the recommendations", async ({ page }) => {
+  await modelMenuTrigger(page).click();
+  const dialog = page.locator("#chat-input-popover");
+  await expect(dialog.getByTestId("recommended-model-option").first()).toBeVisible();
 
   await dialog.getByTestId("model-search-input").fill("Perplexity Sonar Deep Research");
-
-  await expect(dialog.getByTestId("model-recommendations")).toHaveCount(0);
+  await expect(dialog.getByTestId("recommended-model-option")).toHaveCount(0);
   await expect(
     dialog.locator(
       '[data-testid="model-option"][data-model-id="perplexity/sonar-deep-research"]'
     )
   ).toBeVisible();
   await expect(dialog.getByTestId("model-option")).toHaveCount(1);
+
+  await dialog.getByTestId("model-search-clear").click();
+  await expect(dialog.getByTestId("model-option")).toHaveCount(0);
+  const restored = await dialog.getByTestId("recommended-model-option").count();
+  expect(restored).toBeGreaterThanOrEqual(6);
 });
 
-test("recommended shortcuts stay synchronized with the full model list", async ({ page }) => {
-  await mockAuthenticatedApi(page);
-  await page.reload();
+test("the filter sheet reports its active count, result count, and resets", async ({ page }) => {
+  const dialog = await openModelCatalogue(page);
+  const resultCount = dialog.getByTestId("model-catalogue-result-count");
+  const unfiltered = await resultCount.innerText();
+
+  await dialog.getByTestId("model-filter-sheet-trigger").click();
+  const sheet = dialog.getByTestId("model-filter-sheet");
+  await expect(sheet).toBeVisible();
+  await sheet.getByTestId("capability-filter-search").click();
+  await sheet.getByTestId("model-filter-apply").click();
+
+  // Closing the sheet keeps the filter applied and shows how many are active.
+  await expect(sheet).toHaveCount(0);
+  await expect(dialog.getByTestId("model-filter-sheet-trigger")).toContainText("1");
+  await expect(resultCount).not.toHaveText(unfiltered);
+  await expect.poll(() => dialog.getByTestId("model-option").count()).toBeGreaterThan(0);
+  // "Web search" is a capability, not a provider: since 911ded5 the native
+  // web-search models (GPT-5.5, Claude, Gemini Pro/Flash) qualify alongside the
+  // Perplexity search models, so the filter is checked against a model that
+  // does support it and one that does not.
+  await expect(
+    dialog.locator('[data-testid="model-option"][data-model-id="perplexity/sonar"]')
+  ).toHaveCount(1);
+  await expect(
+    dialog.locator('[data-testid="model-option"][data-model-id="llama-3-1"]')
+  ).toHaveCount(0);
+  await expect(
+    dialog.locator('[data-testid="model-option"][data-model-id="gpt-5-4-mini"]')
+  ).toHaveCount(0);
+
+  await dialog.getByTestId("model-filter-reset-all").click();
+  await expect(resultCount).toHaveText(unfiltered);
+  await expect(dialog.getByTestId("model-filter-sheet-trigger")).not.toContainText("1");
+});
+
+test("Escape closes the filter sheet, then the catalogue, then the picker", async ({ page }) => {
+  const dialog = await openModelCatalogue(page);
+
+  await dialog.getByTestId("model-filter-sheet-trigger").click();
+  await expect(dialog.getByTestId("model-filter-sheet")).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(dialog.getByTestId("model-filter-sheet")).toHaveCount(0);
+  await expect(dialog).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(dialog.getByTestId("recommended-model-option").first()).toBeVisible();
+  await expect(dialog).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+});
+
+test("guests are told what a gated recommendation needs before they pick it", async ({ page }) => {
   await modelMenuTrigger(page).click();
   const dialog = page.locator("#chat-input-popover");
-  const recommended = dialog.getByTestId("recommended-model-option").nth(1);
-  const modelId = await recommended.getAttribute("data-model-id");
-  expect(modelId).toBeTruthy();
-  const fullListOption = dialog.locator(
-    `[data-testid="model-option"][data-model-id="${modelId}"]`
+  const locked = dialog.locator(
+    '[data-testid="recommended-model-option"][data-model-plan-locked="true"]'
   );
 
-  await recommended.click();
-  await expect(recommended).toHaveAttribute("aria-pressed", "true");
-  await expect(fullListOption).toHaveAttribute("aria-pressed", "true");
-
-  await fullListOption.click();
-  await expect(recommended).toHaveAttribute("aria-pressed", "false");
-  await expect(fullListOption).toHaveAttribute("aria-pressed", "false");
+  // Gated models are allowed a couple of slots, and each one states the
+  // required action rather than failing silently on click.
+  const lockedCount = await locked.count();
+  expect(lockedCount).toBeLessThanOrEqual(2);
+  if (lockedCount > 0) {
+    await expect(locked.first()).toContainText(/Sign in|로그인/);
+  }
 });
 
-test("completed model finder answers personalize the recommendation shortcuts", async ({ page }) => {
+test("completed model finder answers personalize the recommendations", async ({ page }) => {
   await mockAuthenticatedApi(page);
   await page.unroute("**/api/user/model-finder");
   await page.route("**/api/user/model-finder", (route) =>
@@ -134,26 +226,19 @@ test("completed model finder answers personalize the recommendation shortcuts", 
 
   await modelMenuTrigger(page).click();
   const dialog = page.locator("#chat-input-popover");
-  const recommendations = dialog.getByTestId("model-recommendations");
-  await expect(recommendations).toHaveAttribute(
-    "aria-label",
-    /Recommended for you|나에게 추천/
+  const personalized = dialog.locator(
+    '[data-testid="recommended-model-option"][data-recommendation-source="personalized"]'
   );
+  await expect(personalized.first()).toBeVisible();
   await expect(
-    recommendations.locator(
+    dialog.locator(
       '[data-testid="recommended-model-option"][data-model-id="deepseek-v4-flash"]'
     )
   ).toBeVisible();
 });
 
-test("favorited models replace Tomverse recommendations", async ({ page }) => {
-  await modelMenuTrigger(page).click();
-  const dialog = page.locator("#chat-input-popover");
-  await expect(dialog.getByTestId("model-recommendations")).toHaveAttribute(
-    "aria-label",
-    /Tomverse recommends|Tomverse 추천/
-  );
-
+test("favorited models lead the recommendations", async ({ page }) => {
+  await mockAuthenticatedApi(page, { selectedModels: ["gpt-5-4-mini"] });
   await page.evaluate(() => {
     localStorage.setItem(
       "favorite_model_ids",
@@ -162,30 +247,21 @@ test("favorited models replace Tomverse recommendations", async ({ page }) => {
   });
   await page.reload();
   await modelMenuTrigger(page).click();
+  const dialog = page.locator("#chat-input-popover");
 
-  const recommendations = dialog.getByTestId("model-recommendations");
-  await expect(recommendations).toHaveAttribute(
-    "aria-label",
-    /Favorites|즐겨찾기/
-  );
-  await expect(dialog.getByTestId("recommended-model-option")).toHaveCount(2);
-  await expect(
-    recommendations.locator(
-      '[data-testid="recommended-model-option"][data-model-id="claude-sonnet-5"]'
-    )
-  ).toBeVisible();
-  await expect(
-    recommendations.locator(
-      '[data-testid="recommended-model-option"][data-model-id="deepseek-r1"]'
-    )
-  ).toBeVisible();
+  const cards = dialog.getByTestId("recommended-model-option");
+  await expect(cards.nth(0)).toHaveAttribute("data-model-id", "claude-sonnet-5");
+  await expect(cards.nth(0)).toHaveAttribute("data-recommendation-source", "favorite");
+  await expect(cards.nth(1)).toHaveAttribute("data-model-id", "deepseek-r1");
 });
 
 test("long input explains its multiplier beside the send controls", async ({ page }) => {
   await page.getByTestId("chat-textarea").fill("x".repeat(64_004));
   const estimate = page.getByTestId("request-credit-estimate");
   await expect(estimate).toContainText("1.5×");
-  await expect(estimate).toContainText("2");
+  // Guests default to the 3-model brand trio, so the base estimate is the
+  // combined cost of all three selected models (6), not a single model's.
+  await expect(estimate).toContainText("6");
 
   const estimateBox = await estimate.boundingBox();
   const inputBox = await page.getByTestId("chat-input").boundingBox();

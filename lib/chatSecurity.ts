@@ -15,6 +15,7 @@ import {
     type ModelTier,
     type ModelUsageClass,
 } from "@/lib/models";
+import { isWebSearchMode, type WebSearchMode } from "@/lib/appDefaults";
 import { getAnonymousClientKey } from "@/lib/clientIp";
 import { recordInternalProviderUsage } from "@/lib/providerUsageAccounting";
 import {
@@ -168,7 +169,7 @@ const serializeReservation = (
     };
 };
 
-const deserializeReservation = (payload: Prisma.JsonValue) => {
+export const deserializeReservation = (payload: Prisma.JsonValue) => {
     const parsed = durableReservationPayloadSchema.parse(payload);
     return {
         ...parsed,
@@ -271,7 +272,8 @@ export const getChatBudgetReservedCostMicroUsd = (budget: ChatBudget) =>
 export const createChatBudget = (
     kind: AccessKind,
     model: AiModel,
-    estimatedInputTokens: number
+    estimatedInputTokens: number,
+    options?: { webSearchSurchargeCredits?: number }
 ): ChatBudget => {
     const profile = getModelBillingProfile(model);
     const maxInputTokens =
@@ -295,7 +297,9 @@ export const createChatBudget = (
         modelId: model.id,
         minimumPlan: model.minimumPlan,
         modelUsageClass: model.usageClass,
-        usageCredits: getWeightedUsageCredits(model, estimatedInputTokens),
+        usageCredits:
+            getWeightedUsageCredits(model, estimatedInputTokens) +
+            (options?.webSearchSurchargeCredits || 0),
         inputTokens: estimatedInputTokens,
         maxOutputTokens: profile.maxOutputTokens,
         reservedOutputTokens: profile.reservationOutputTokens,
@@ -443,6 +447,67 @@ export const identifyChatCaller = (
     };
 };
 
+// Server-authoritative guest usage snapshot: reads the exact same
+// ChatUsageBucket day-period row that acquireChatAccess enforces, keyed by
+// the same signed guest cookie, instead of a client-only counter that can
+// drift arbitrarily from what the server actually allows.
+export const getGuestUsageSnapshot = async (request: Request) => {
+    const access = identifyChatCaller(request, null);
+    const now = new Date();
+    const dayStart = periodStart("day", now);
+    const monthStart = periodStart("month", now);
+    const rules = limitsFor(access);
+    const dayLimit = rules.find((rule) => rule.period === "day")?.limit ?? 0;
+    const monthLimit = rules.find((rule) => rule.period === "month")?.limit ?? 0;
+    const [dayBucket, monthBucket] = await Promise.all([
+        prisma.chatUsageBucket.findUnique({
+            where: {
+                key_period_periodStart: {
+                    key: access.subjectKey,
+                    period: "day",
+                    periodStart: dayStart,
+                },
+            },
+            select: { count: true },
+        }),
+        prisma.chatUsageBucket.findUnique({
+            where: {
+                key_period_periodStart: {
+                    key: access.subjectKey,
+                    period: "month",
+                    periodStart: monthStart,
+                },
+            },
+            select: { count: true },
+        }),
+    ]);
+    const used = dayBucket?.count || 0;
+    const monthUsed = monthBucket?.count || 0;
+    const dayRemaining = Math.max(0, dayLimit - used);
+    const monthRemaining = Math.max(0, monthLimit - monthUsed);
+    return {
+        // Server-side only: the caller's hashed usage subject, so a route can
+        // read this guest's other feature buckets without re-deriving the
+        // identity. Never included in an API response.
+        subjectKey: access.subjectKey,
+        used,
+        limit: dayLimit,
+        remaining: dayRemaining,
+        monthUsed,
+        monthLimit,
+        monthRemaining,
+        // These buckets are incremented by a request's *credit* weight, not by
+        // one per message, so the smaller of the two remainders is exactly
+        // what a guest can still afford to spend right now. Surfacing it lets
+        // the comparison rail tell "you have run out of credits" apart from
+        // "you have used your monthly AI Review trial" -- two different
+        // blocks with two different ways out.
+        creditsAvailable: Math.min(dayRemaining, monthRemaining),
+        resetsAt: new Date(dayStart.getTime() + 86_400_000).toISOString(),
+        setCookie: access.setCookie,
+    };
+};
+
 const periodStart = (period: Period, now: Date) => {
     if (period === "minute") {
         return new Date(
@@ -501,6 +566,35 @@ const incrementUsage = async (
     `;
     return rows.length > 0;
 };
+
+// A separate, feature-scoped guest cap (independent of the general
+// day/month chat-message quota from limitsFor/acquireChatAccess): guests
+// get exactly one Quick Difference Summary per day. Uses its own "period"
+// string on the same ChatUsageBucket table/subjectKey so it can't collide
+// with or be confused for the chat-message "day" bucket.
+export async function assertGuestQuickSummaryDailyLimit(
+    access: Pick<ChatAccess, "kind" | "subjectKey">
+) {
+    if (access.kind !== "guest") return;
+    const allowed = await prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"guest-quick-summary:" + access.subjectKey}))`;
+        return incrementUsage(
+            tx,
+            access.subjectKey,
+            "guest-quick-summary-day",
+            periodStart("day", new Date()),
+            positiveInteger(process.env.CHAT_GUEST_QUICK_SUMMARY_PER_DAY, 1),
+            1
+        );
+    });
+    if (!allowed) {
+        throw new ChatAccessError(
+            429,
+            "GUEST_QUICK_SUMMARY_LIMIT_REACHED",
+            "Guests can use quick difference summary once per day."
+        );
+    }
+}
 
 const readUsageCount = async (
     tx: Prisma.TransactionClient,
@@ -1246,15 +1340,27 @@ export const acquireChatAccess = async (
                 amount
             );
             if (!allowed) {
+                const retryAfterSeconds = retryAfterFor(
+                    rule.period,
+                    now,
+                    rule.period === "day" ? accessDayWindow.end : undefined
+                );
+                // A brief per-minute rate limit and a genuine day/month quota
+                // exhaustion need different client responses (wait-and-retry
+                // vs. a login/upgrade prompt for guests), so they get distinct
+                // codes here -- matching the CHAT_RATE_LIMITED naming already
+                // used for the same distinction in preflightChatComparisonAccess
+                // above -- instead of collapsing everything into
+                // CHAT_QUOTA_EXCEEDED regardless of which period tripped.
+                const isRateLimit = rule.period === "minute";
                 throw new ChatAccessError(
                     429,
-                    "CHAT_QUOTA_EXCEEDED",
-                    "AI response credit limit exceeded.",
-                    retryAfterFor(
-                        rule.period,
-                        now,
-                        rule.period === "day" ? accessDayWindow.end : undefined
-                    )
+                    isRateLimit ? "CHAT_RATE_LIMITED" : "CHAT_QUOTA_EXCEEDED",
+                    isRateLimit
+                        ? "Chat request rate limit exceeded."
+                        : "AI response credit limit exceeded.",
+                    retryAfterSeconds,
+                    { period: rule.period, retryAfterSeconds }
                 );
             }
             if (rule.period !== "minute") {
@@ -1838,6 +1944,13 @@ export const settleChatUsage = async (
         cachedInputTokens?: number;
         outputTokens?: number;
         outcome: "completed" | "cancelled" | "failed" | "empty";
+        /** Extra credits reserved on top of the base weight for a native web search attempt. */
+        searchSurchargeCredits?: number;
+        /** Whether the provider actually executed a search this turn -- refund the surcharge if not. */
+        searchExecuted?: boolean;
+        /** Native web search's own per-call provider cost (OpenAI/Anthropic/Google), from webSearchExecutionNormalizer's costMetadata. Never set for Perplexity -- its own reported response cost already covers search. */
+        searchCostMicroUsd?: number;
+        searchQueryCount?: number;
     },
     options?: {
         reconciled?: boolean;
@@ -1896,6 +2009,8 @@ export const settleChatUsage = async (
             actualInputTokens: actualInput,
             actualOutputTokens: actualOutput,
             outcome: usage.outcome,
+            searchSurchargeCredits: usage.searchSurchargeCredits,
+            searchExecuted: usage.searchExecuted,
         });
         const tokenCostBreakdown = calculateProviderUsageCost({
             inputTokens: actualInput,
@@ -1912,7 +2027,7 @@ export const settleChatUsage = async (
                 "perplexity_response_usage"
                 ? options.providerUsageSnapshot
                 : null;
-        const costBreakdown = providerUsageSnapshot
+        const baseCostBreakdown = providerUsageSnapshot
             ? {
                   ...tokenCostBreakdown,
                   costSource: "provider_response" as const,
@@ -1928,7 +2043,34 @@ export const settleChatUsage = async (
                       providerUsageSnapshot.outputTokensCostMicroUsd ??
                       tokenCostBreakdown.outputCostMicroUsd,
               }
-            : tokenCostBreakdown;
+            : { ...tokenCostBreakdown, costSource: "token_estimate" as const };
+        // Native web search's own per-call provider cost (never sent by the
+        // client -- derived server-side from the AI SDK's provider response,
+        // see lib/webSearchExecutionNormalizer.ts). Perplexity always takes
+        // the providerUsageSnapshot branch above instead, so this stays 0
+        // there and can never double-count its already-reported cost.
+        const searchCostMicroUsd = Math.max(
+            0,
+            Number.isFinite(usage.searchCostMicroUsd)
+                ? Math.round(usage.searchCostMicroUsd!)
+                : 0
+        );
+        const costBreakdown =
+            searchCostMicroUsd > 0
+                ? {
+                      ...baseCostBreakdown,
+                      tokenCostMicroUsd: baseCostBreakdown.totalCostMicroUsd,
+                      searchCostMicroUsd,
+                      searchQueryCount: Math.max(
+                          0,
+                          Number.isSafeInteger(usage.searchQueryCount)
+                              ? usage.searchQueryCount!
+                              : 0
+                      ),
+                      totalCostMicroUsd:
+                          baseCostBreakdown.totalCostMicroUsd + searchCostMicroUsd,
+                  }
+                : baseCostBreakdown;
         const actualCost = costBreakdown.totalCostMicroUsd;
         const planActualCredits = Math.min(
             actualCredits,
@@ -2056,6 +2198,30 @@ export const settleChatUsage = async (
         }
     }
     return { applied: settlement.applied, status: settlement.status };
+};
+
+// Heartbeat for a reservation backing a long-running async job (Perplexity
+// deep research can run well past the 30-minute ceiling acquireChatAccess
+// clamps CHAT_RESERVATION_TTL_SECONDS to). Called on every poll that finds
+// the job still running, so reconcileExpiredChatCreditReservations' 15-minute
+// sweep doesn't forcibly refund/close a reservation whose job is still
+// legitimately in progress. No-ops if the reservation already settled.
+export const extendChatReservationExpiry = async (
+    reservationId: string,
+    additionalSeconds: number
+) => {
+    await prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`chat-credit-reservation:${reservationId}`}))`;
+        const durable = await tx.chatCreditReservation.findUnique({
+            where: { id: reservationId },
+            select: { status: true },
+        });
+        if (!durable || durable.status !== "reserved") return;
+        await tx.chatCreditReservation.update({
+            where: { id: reservationId },
+            data: { expiresAt: new Date(Date.now() + additionalSeconds * 1000) },
+        });
+    });
 };
 
 const boundedProviderIdentifier = (value: string | null | undefined) => {
@@ -2215,6 +2381,8 @@ export const validateChatPayload = (body: unknown) => {
         conversationId?: unknown;
         assistantMessageId?: unknown;
         turnstileToken?: unknown;
+        deepResearchDepth?: unknown;
+        webSearchMode?: unknown;
     };
     if (
         !Array.isArray(payload.messages) ||
@@ -2280,6 +2448,28 @@ export const validateChatPayload = (body: unknown) => {
             "Invalid guest verification token."
         );
     }
+    if (
+        payload.deepResearchDepth !== undefined &&
+        payload.deepResearchDepth !== "quick" &&
+        payload.deepResearchDepth !== "standard" &&
+        payload.deepResearchDepth !== "deep"
+    ) {
+        throw new ChatAccessError(
+            400,
+            "INVALID_DEEP_RESEARCH_DEPTH",
+            "Invalid deep research depth."
+        );
+    }
+    if (
+        payload.webSearchMode !== undefined &&
+        !isWebSearchMode(payload.webSearchMode)
+    ) {
+        throw new ChatAccessError(
+            400,
+            "INVALID_WEB_SEARCH_MODE",
+            "Invalid web search mode."
+        );
+    }
 
     let totalCharacters = 0;
     for (const message of payload.messages) {
@@ -2337,6 +2527,8 @@ export const validateChatPayload = (body: unknown) => {
         conversationId?: string;
         assistantMessageId?: string;
         turnstileToken?: string;
+        deepResearchDepth?: "quick" | "standard" | "deep";
+        webSearchMode?: WebSearchMode;
     };
 };
 

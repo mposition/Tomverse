@@ -6,6 +6,7 @@ import {
   canUseModelWithPlan,
   getModelUsageProfile,
 } from "@/lib/models";
+import { GUEST_BRAND_TRIO_MODEL_IDS } from "@/lib/appDefaults";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import type { PublicAppSettings } from "@/lib/appSettings";
 import { dispatchAppToast } from "@/lib/appToast";
@@ -26,6 +27,7 @@ export function PlatformSettingsPanel({ settings }: Props) {
     () =>
       models.filter(
         (model) =>
+          GUEST_BRAND_TRIO_MODEL_IDS.includes(model.id) &&
           model.enabled &&
           canUseModelWithPlan("Guest", model) &&
           getModelUsageProfile(model).category === "Standard"
@@ -138,7 +140,7 @@ export function PlatformSettingsPanel({ settings }: Props) {
               type="button"
               onClick={save}
               disabled={isLoading || isSaving}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-black text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isSaving ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -158,7 +160,7 @@ export function PlatformSettingsPanel({ settings }: Props) {
               <ShieldAlert className="h-5 w-5" />
             </span>
             <div className="min-w-0 flex-1">
-              <p className="text-xs font-black uppercase tracking-[0.18em] text-red-300">Emergency kill switches</p>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-red-300">Emergency kill switches</p>
               <h3 className="mt-2 text-xl font-black text-white">Operational feature controls</h3>
               <p className="mt-2 text-sm leading-6 text-zinc-400">
                 Disabled features are blocked by the server immediately. Attachment deletion and share revocation remain available for safe cleanup.
@@ -169,7 +171,7 @@ export function PlatformSettingsPanel({ settings }: Props) {
                   ["Attachments", attachmentsEnabled, setAttachmentsEnabled],
                   ["Public sharing", publicSharingEnabled, setPublicSharingEnabled],
                 ] as const).map(([label, enabled, setEnabled]) => (
-                  <label key={label} className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm font-black text-white">
+                  <label key={label} className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm font-bold text-white">
                     <span>{label}</span>
                     <input
                       type="checkbox"
@@ -189,20 +191,21 @@ export function PlatformSettingsPanel({ settings }: Props) {
               <Bot className="h-5 w-5" />
             </span>
             <div className="min-w-0 flex-1">
-              <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-300">
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
                 Guest default model
               </p>
               <h3 className="mt-2 text-xl font-black text-white">
                 게스트 모드 기본 대화 엔진
               </h3>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-400">
-                로그인하지 않은 사용자가 새 대화를 시작할 때 자동으로 선택되는
-                Free 모델입니다. 게스트 비용과 첫 사용 경험에 직접 영향을 줍니다.
+                로그인하지 않은 게스트에게는 항상 GPT · Claude · Gemini 3개 모델이
+                함께 제공됩니다. 여기서 고르는 모델은 그중 어느 모델을 맨 앞(리딩
+                슬롯)에 둘지만 결정하며, 게스트 첫 사용 경험에 영향을 줍니다.
               </p>
 
               <label className="mt-5 block">
                 <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
-                  Default engine
+                  Leading engine
                 </span>
                 <select
                   value={guestDefaultModelId}
@@ -221,7 +224,7 @@ export function PlatformSettingsPanel({ settings }: Props) {
         </div>
 
         <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5">
-          <p className="text-xs font-black uppercase tracking-[0.18em] text-zinc-500">
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-zinc-500">
             Current selection
           </p>
           {selectedModel ? (

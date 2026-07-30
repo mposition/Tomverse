@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
 
-test("desktop exposes stable QA contracts", async ({ page }) => {
+test("desktop exposes stable QA contracts", { tag: "@smoke" }, async ({ page }) => {
   await prepareGuestPage(page, "en");
   await page.setViewportSize({ width: 1366, height: 768 });
   await page.goto("/chat");
@@ -9,13 +9,13 @@ test("desktop exposes stable QA contracts", async ({ page }) => {
   await expect(page.getByTestId("desktop-chat-shell")).toBeVisible();
   await expect(page.getByTestId("chat-input")).toBeVisible();
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
-  await expect(page.getByTestId("chat-message-list")).toBeVisible();
+  await expect(page.getByTestId("chat-empty-state")).toBeVisible();
 
   const guestGuide = page.getByTestId("guest-quick-start");
-  await expect(guestGuide).toContainText("up to 3 free models");
-  await expect(guestGuide).toContainText("Guest usage limits apply");
-  await expect(guestGuide.getByRole("link", { name: "Login / Sign Up" })).toBeVisible();
+  await expect(guestGuide).toContainText("Try 3 free AIs side by side, no login needed.");
   await expect(guestGuide).not.toContainText("auth.signIn");
+  await guestGuide.getByTestId("guest-quick-start-help").click();
+  await expect(page.getByText("Guest chats are stored in this browser only.")).toBeVisible();
 
   await page.getByTestId("sidebar-help-button").click();
   const helpLink = page.getByTestId("sidebar-help-link");
@@ -94,7 +94,7 @@ test("chat workspace guide honors the language passed from the app", async ({ pa
   await expect(localizedHelpLinks.last()).toBeVisible();
 });
 
-test("mobile exposes stable QA contracts", async ({ page }) => {
+test("mobile exposes stable QA contracts", { tag: "@smoke" }, async ({ page }) => {
   await prepareGuestPage(page, "en");
   await page.setViewportSize({ width: 412, height: 915 });
   await page.goto("/chat");
@@ -126,6 +126,12 @@ test("authenticated users can complete and replay the sidebar tour", async ({ pa
   await page.goto("/chat");
 
   const tour = page.getByTestId("sidebar-tour");
+  await expect(tour).toHaveCount(0);
+
+  // The tour no longer auto-pops on load -- it only starts when requested
+  // from the help menu.
+  await page.getByTestId("sidebar-help-button").click();
+  await page.getByTestId("sidebar-tour-replay").click();
   await expect(tour).toBeVisible();
   await page.getByTestId("sidebar-tour-next").click();
   await page.getByTestId("sidebar-tour-next").click();

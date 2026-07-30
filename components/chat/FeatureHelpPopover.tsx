@@ -20,7 +20,8 @@ export type UiHelpTopic =
   | "shared"
   | "private"
   | "ai_review"
-  | "credits";
+  | "credits"
+  | "guest_trial";
 
 type FeatureHelpPopoverProps = {
   title: string;
@@ -211,14 +212,14 @@ export function FeatureHelpPopover({
   const content = (
     <>
       <div className="flex items-start justify-between gap-3">
-        <h3 className="text-sm font-black text-zinc-950 dark:text-white">
+        <h3 className="text-sm font-bold text-zinc-950 dark:text-white">
           {title}
         </h3>
         {renderAsSheet ? (
           <button
             type="button"
             onClick={closePopover}
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
             aria-label={buttonLabel}
           >
             <X className="h-4 w-4" aria-hidden="true" />
@@ -233,7 +234,7 @@ export function FeatureHelpPopover({
           href={href}
           target="_blank"
           rel="noopener noreferrer"
-          className="mt-3 inline-flex items-center gap-1.5 text-xs font-black text-blue-600 hover:text-blue-500 dark:text-blue-300"
+          className="mt-3 inline-flex items-center gap-1.5 text-xs font-bold text-blue-600 hover:text-blue-500 dark:text-blue-300"
         >
           {learnMoreLabel}
           <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
@@ -326,7 +327,7 @@ export function FeatureHelpPopover({
           if (renderAsSheet && open) closePopover();
           else openPopover();
         }}
-        className="inline-flex h-8 w-8 items-center justify-center rounded-full text-zinc-400 transition hover:bg-blue-50 hover:text-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:hover:bg-blue-950/50 dark:hover:text-blue-300"
+        className={`inline-flex items-center justify-center rounded-full text-zinc-400 transition hover:bg-blue-50 hover:text-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:hover:bg-blue-950/50 dark:hover:text-blue-300 ${renderAsSheet ? "h-11 w-11" : "h-8 w-8"}`}
       >
         <Info className="h-4 w-4" aria-hidden="true" />
       </button>

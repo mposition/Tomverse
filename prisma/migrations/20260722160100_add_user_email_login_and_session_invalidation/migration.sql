@@ -1,0 +1,2 @@
+ALTER TABLE "User" ADD COLUMN "emailLoginEnabled" BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE "User" ADD COLUMN "sessionsInvalidatedAt" TIMESTAMP(3);

@@ -179,7 +179,7 @@ export function AdminProviderUsageSyncPanel() {
     <section className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-300">
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
             Usage reconciliation
           </p>
           <h3 className="mt-2 text-xl font-black text-white">
@@ -202,7 +202,7 @@ export function AdminProviderUsageSyncPanel() {
             type="button"
             onClick={runSync}
             disabled={loading}
-            className="inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-black text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-bold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
             {loading ? "Syncing" : "Sync now"}
@@ -245,7 +245,7 @@ export function AdminProviderUsageSyncPanel() {
                 >
                 <div className="flex items-center justify-between gap-3">
                   <span className="font-black text-white">{result.displayName}</span>
-                  <span className={`rounded-full border px-2 py-0.5 text-[11px] font-black ${statusClass[result.status]}`}>
+                  <span className={`rounded-full border px-2 py-0.5 text-[11px] font-bold ${statusClass[result.status]}`}>
                     {result.status}
                   </span>
                 </div>

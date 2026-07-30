@@ -48,6 +48,14 @@ export const MODEL_USAGE_CREDIT_WEIGHTS = {
     premiumReasoning: 16,
     search: 20,
     deepResearch: 30,
+    // Flat surcharge reserved when webSearchMode === "always" enables a
+    // provider-native search tool (OpenAI/Anthropic/Google). Refunded at
+    // settlement if the provider didn't actually execute a search that
+    // turn -- see getSettledUsageCredits' searchExecuted parameter. Read
+    // this via lib/webSearchCredits.ts rather than referencing the raw
+    // number so every caller (UI estimate, preflight, reservation) shares
+    // one definition.
+    webSearchSurcharge: 8,
 } as const;
 
 export const INPUT_CREDIT_MULTIPLIERS = [
@@ -123,6 +131,31 @@ const FULL_BINARY_INPUT = {
 
 export const DEFAULT_MODEL_ID = "gpt-5-4-mini";
 
+// Every model carries three separate identifiers. They are not
+// interchangeable, and support/incident work needs all three to line up:
+//
+//   id       -- the Tomverse model ID. Appears in chat request bodies, stored
+//               conversations, the credit ledger and the admin registry. It is
+//               a stable primary key, so it is NOT renamed when the underlying
+//               model is upgraded.
+//   name     -- the display name shown in the picker and comparison panels.
+//               Tracks whatever the provider currently calls the model.
+//   apiModel -- the provider's own model ID, sent upstream. Tracks provider
+//               naming and changes whenever the mapped upstream model changes.
+//
+// Because `id` is pinned and the other two follow the provider, an entry can
+// legitimately look mismatched. As of this writing two do, and both are
+// intentional -- the upstream model behind a stable ID was replaced in place:
+//
+//   id "gemini-2-5-flash"  -> "Gemini 3.1 Flash-Lite" (apiModel gemini-3.1-flash-lite)
+//   id "deepseek-r1"       -> "DeepSeek R1 Reasoning" (apiModel deepseek-reasoner)
+//
+// So when a log line, trace or ledger row says `gemini-2-5-flash`, the user
+// saw "Gemini 3.1 Flash-Lite" and Google was asked for
+// `gemini-3.1-flash-lite`. Do not "fix" such a row by renaming the ID:
+// migrating IDs would break stored conversations and billing history. Retiring
+// a model instead uses `replacementModelId` plus the disabled lifecycle
+// fields, which `lib/modelRegistry.ts` replays onto the runtime registry.
 export const AVAILABLE_MODELS = [
     { id: "gpt-5-5", name: "GPT-5.5", apiModel: "gpt-5.5", provider: "openai", icon: "🤖", bestFor: "Complex analysis and important decisions", minimumPlan: "Pro", usageClass: "premium", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
     { id: "gpt-5-5-thinking", name: "GPT-5.5 Thinking", apiModel: "gpt-5.5", provider: "openai", icon: "🤖", bestFor: "Difficult problems that benefit from step-by-step reasoning", minimumPlan: "Pro", usageClass: "premium-reasoning", enabled: true, status: "enabled", reasoning: "high", inputCapabilities: FULL_BINARY_INPUT },
@@ -139,7 +172,13 @@ export const AVAILABLE_MODELS = [
     { id: "gemini-2-5-flash", name: "Gemini 3.1 Flash-Lite", apiModel: "gemini-3.1-flash-lite", provider: "google", icon: "✨", bestFor: "Low-cost everyday tasks and quick file questions", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
 
     { id: "llama-3-1", name: "Llama 3.1", apiModel: "llama-3.1-8b-instant", provider: "groq", icon: "∞", bestFor: "Very fast, lightweight text questions", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled" },
-    { id: "llama-4-scout", name: "Llama 4 Scout", apiModel: "meta-llama/llama-4-scout-17b-16e-instruct", provider: "groq", icon: "∞", bestFor: "Fast visual questions and long-context exploration", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", contextWindowTokens: 131_072, inputCapabilities: { image: true, nativePdf: false, maxImages: 5, maxBase64ImagePayloadBytes: 4 * 1024 * 1024 } },
+    // Groq stopped serving this model: the catalog monitor first recorded it
+    // missing on 2026-07-21 and escalated it to likely_deprecated after seven
+    // consecutive absences, while live calls returned HTTP 404. Disabled
+    // rather than repointed because Groq currently exposes no vision-capable
+    // replacement -- llama-3-3 is the closest enabled sibling, so it takes
+    // over as the replacement target even though it is text-only.
+    { id: "llama-4-scout", name: "Llama 4 Scout", apiModel: "meta-llama/llama-4-scout-17b-16e-instruct", provider: "groq", icon: "∞", bestFor: "Legacy fast visual questions and long-context exploration", minimumPlan: "Guest", usageClass: "standard", replacementModelId: "llama-3-3", publiclyListed: false, enabled: false, status: "disabled", contextWindowTokens: 131_072, inputCapabilities: { image: true, nativePdf: false, maxImages: 5, maxBase64ImagePayloadBytes: 4 * 1024 * 1024 } },
     { id: "llama-3-3", name: "Llama 3.3", apiModel: "llama-3.3-70b-versatile", provider: "groq", icon: "∞", bestFor: "Broad open-model text analysis and instruction following", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled" },
 
     { id: "grok-4", name: "Grok 4", apiModel: "grok-4", provider: "xai", icon: "𝕏", bestFor: "Current-events discussion and broad advanced analysis", minimumPlan: "Pro", usageClass: "premium", enabled: true, status: "enabled" },
@@ -189,6 +228,17 @@ export const ENABLED_MODELS = AVAILABLE_MODELS.filter(
 
 export const PUBLIC_MODELS: readonly AiModel[] = AVAILABLE_MODELS.filter(
     (model) => (model as AiModel).publiclyListed !== false
+);
+
+// Distinct providers a visitor can actually reach today. Derived rather than
+// counted by hand so marketing copy cannot drift from the catalogue the way
+// the landing FAQ's fixed provider list did.
+export const PUBLIC_MODEL_PROVIDERS: readonly AiProvider[] = Array.from(
+    new Set(
+        PUBLIC_MODELS.filter((model) => model.enabled).map(
+            (model) => model.provider
+        )
+    )
 );
 
 export const getModel = (modelId: string) => modelMap.get(modelId);
@@ -279,6 +329,8 @@ export const getSettledUsageCredits = ({
     actualInputTokens,
     actualOutputTokens,
     outcome,
+    searchSurchargeCredits = 0,
+    searchExecuted = true,
 }: {
     reservedCredits: number;
     reservedInputTokens: number;
@@ -286,18 +338,33 @@ export const getSettledUsageCredits = ({
     actualInputTokens: number;
     actualOutputTokens: number;
     outcome: UsageCreditOutcome;
+    /** Extra credits reserved on top of the base weight for a native web search attempt. */
+    searchSurchargeCredits?: number;
+    /** Whether the provider actually executed a search this turn -- refund the surcharge if not. */
+    searchExecuted?: boolean;
 }) => {
-    if (outcome === "completed") return reservedCredits;
+    // A search that never executed never earns its surcharge, in either
+    // outcome -- fold it out of the reserved amount once, up front, so
+    // neither branch below can accidentally charge for a search that didn't
+    // happen.
+    const surchargeAdjustedReservedCredits = searchExecuted
+        ? reservedCredits
+        : Math.max(0, reservedCredits - searchSurchargeCredits);
+
+    if (outcome === "completed") {
+        return surchargeAdjustedReservedCredits;
+    }
     if (outcome !== "cancelled" || actualOutputTokens <= 16) return 0;
 
     const reservedTokens = reservedInputTokens + reservedOutputTokens;
     const actualTokens = actualInputTokens + actualOutputTokens;
     return Math.min(
-        reservedCredits,
+        surchargeAdjustedReservedCredits,
         Math.max(
             1,
             Math.ceil(
-                reservedCredits * (actualTokens / Math.max(1, reservedTokens))
+                surchargeAdjustedReservedCredits *
+                    (actualTokens / Math.max(1, reservedTokens))
             )
         )
     );
@@ -441,6 +508,47 @@ export const getModelBillingProfile = (
 
 export const isEnabledModelId = (modelId: string) =>
     getEnabledModel(modelId) !== undefined;
+
+// ---------------------------------------------------------------------------
+// Model lifecycle
+//
+// One definition of "retired" and one definition of "offer this to users",
+// shared by the runtime registry (lib/modelRegistry.ts) and the client catalog
+// (components/ModelCatalogProvider.tsx). They used to be spelled out
+// separately at each site and had drifted: the picker's public filter checked
+// only `publiclyListed`/`catalogDeleted` and never `enabled`/`status`, so a
+// model the registry had disabled stayed selectable.
+// ---------------------------------------------------------------------------
+
+/**
+ * A model this catalog has retired: delisted, disabled and (normally) pointed
+ * at a replacement, because the provider stopped serving it. Distinct from
+ * `catalogDeleted`, which stays a human-controlled admin action.
+ */
+export const isRetiredModel = (
+    model: Pick<AiModel, "enabled" | "publiclyListed" | "status">
+) =>
+    model.enabled === false &&
+    model.publiclyListed === false &&
+    model.status === "disabled";
+
+/**
+ * Whether a model may be offered to users -- listed in the picker and
+ * selectable. Requires every lifecycle signal to agree that it can actually be
+ * called, so a delisted, disabled, retired or catalog-deleted model can never
+ * be presented as a choice.
+ */
+export const isPubliclySelectableModel = (
+    model: Pick<
+        AiModel,
+        "enabled" | "publiclyListed" | "status" | "catalogDeleted"
+    >
+) =>
+    model.publiclyListed !== false &&
+    !model.catalogDeleted &&
+    model.enabled &&
+    model.status !== "disabled" &&
+    model.status !== "coming-soon";
 
 if (!isEnabledModelId(DEFAULT_MODEL_ID)) {
     throw new Error(`Default model "${DEFAULT_MODEL_ID}" must be enabled.`);

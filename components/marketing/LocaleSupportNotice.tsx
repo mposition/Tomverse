@@ -36,7 +36,7 @@ export function LocaleSupportNotice({
       >
         <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
         <div className="min-w-0">
-          <span className="font-black">{policy.badge}</span>
+          <span className="font-bold">{policy.badge}</span>
           <span className="ml-2 font-medium">{message}</span>
         </div>
       </div>

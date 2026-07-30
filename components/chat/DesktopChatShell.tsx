@@ -1,15 +1,27 @@
 "use client";
 
-import React from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { Check, X } from "lucide-react";
+import { useChatConsentSlotRef } from "@/components/analytics/AnalyticsProvider";
+import { useSidebarCollapsePreference } from "@/components/chat/useSidebarCollapse";
 import { ChatApp } from "@/components/chat/ChatApp";
 import { ChatInput } from "@/components/chat/ChatInput";
+import type { AttachmentsChangeHandler } from "@/components/chat/useConversationDrafts";
+import { useComposerPortalHost } from "@/components/chat/useComposerPortalHost";
+import { ChatWelcomeScreen } from "@/components/chat/ChatWelcomeScreen";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { ProviderStatusBanner } from "@/components/chat/ProviderStatusBanner";
-import { FeatureHelpPopover } from "@/components/chat/FeatureHelpPopover";
+import {
+  ComparisonActionRail,
+  type AiReviewAccess,
+} from "@/components/chat/ComparisonActionRail";
+import type { ChatAttachmentCapabilities } from "@/lib/guestAttachmentPolicy";
+import { GuestVerificationDesktopSlot } from "@/components/chat/GuestVerificationDesktopSlot";
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
-import { chatHelpCopy } from "@/components/chat/chatHelpCopy";
-import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
+import { deriveComparisonReadiness } from "@/lib/comparisonReadiness";
+import { englishCreditUnit, formatCountedUnit } from "@/lib/pricingFormat";
 import {
   getModelUsageProfile,
   type ChatAttachment,
@@ -17,6 +29,13 @@ import {
 } from "@/components/chat/types";
 import { useLanguage } from "@/components/LanguageProvider";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
+import type { WebSearchMode } from "@/lib/appDefaults";
+
+const interpolate = (template: string, values: Record<string, string | number>) =>
+  Object.entries(values).reduce(
+    (copy, [key, value]) => copy.replaceAll(`{${key}}`, String(value)),
+    template
+  );
 
 type PromptPayload = {
   id: string;
@@ -24,6 +43,7 @@ type PromptPayload = {
   chatId: string;
   userMessageId: string;
   attachments: ChatAttachment[];
+  deepResearchDepth?: "quick" | "standard" | "deep";
 };
 
 type DesktopChatShellProps = {
@@ -36,14 +56,17 @@ type DesktopChatShellProps = {
   setInputValue: (value: string) => void;
   personalizedPrompt?: string | null;
   attachments: ChatAttachment[];
-  setAttachments: (attachments: ChatAttachment[]) => void;
+  setAttachments: AttachmentsChangeHandler;
   isSending: boolean;
   focusToken: number;
   isGuestMode: boolean;
+  /** What this caller may do with the AI cross-review. */
+  aiReviewAccess: AiReviewAccess;
+  /** What this caller may do with file attachments. */
+  attachmentCapabilities: ChatAttachmentCapabilities;
   guestPreviewMode?: boolean;
   guestMessageCount: number;
   maxGuestMessages: number;
-  isPrivateMode: boolean;
   isModelSelectionReady: boolean;
   onNewChat: () => void;
   onSelectConversation: (id: string) => void;
@@ -54,15 +77,24 @@ type DesktopChatShellProps = {
   onShare: (id: string, title: string) => void;
   onRevokeShare: (id: string) => void;
   onDownload: (id: string, title: string) => void;
-  onTogglePrivateMode: () => void;
   onToggleModel: (modelId: string) => boolean;
+  onSwapModel: (removeModelId: string, addModelId: string) => boolean;
+  webSearchMode: WebSearchMode;
+  onWebSearchModeChange: (mode: WebSearchMode) => void;
+  onOpenDeepResearchSetup: () => void;
+  isDeepResearchPending: boolean;
+  onDismissDeepResearchChip: () => void;
   onSubmit: () => void;
   onBeforeModelSend: (chatId: string) => Promise<boolean>;
   onChangePanelModel: (oldModelId: string, newModelId: string) => void;
   onTogglePanelDisable: (modelId: string) => void;
   onRemoveModel: (modelId: string) => void;
   onCompareSummary: () => void;
+  isCompareSummaryLoading: boolean;
+  isQuickSummaryCached?: boolean;
+  availableCredits?: number | null;
   onComparisonReview: () => void;
+  onGuestSignInPrompt: () => void;
   onResponseComplete: (promptId: string | null, modelId: string, responseText: string) => void;
   onFollowupSent: (modelId: string) => void;
 };
@@ -81,10 +113,11 @@ export function DesktopChatShell({
   isSending,
   focusToken,
   isGuestMode,
+  aiReviewAccess,
+  attachmentCapabilities,
   guestPreviewMode = false,
   guestMessageCount,
   maxGuestMessages,
-  isPrivateMode,
   isModelSelectionReady,
   onNewChat,
   onSelectConversation,
@@ -95,15 +128,24 @@ export function DesktopChatShell({
   onShare,
   onRevokeShare,
   onDownload,
-  onTogglePrivateMode,
   onToggleModel,
+  onSwapModel,
+  webSearchMode,
+  onWebSearchModeChange,
+  onOpenDeepResearchSetup,
+  isDeepResearchPending,
+  onDismissDeepResearchChip,
   onSubmit,
   onBeforeModelSend,
   onChangePanelModel,
   onTogglePanelDisable,
   onRemoveModel,
   onCompareSummary,
+  isCompareSummaryLoading,
+  isQuickSummaryCached = false,
+  availableCredits = null,
   onComparisonReview,
+  onGuestSignInPrompt,
   onResponseComplete,
   onFollowupSent,
 }: DesktopChatShellProps) {
@@ -112,7 +154,222 @@ export function DesktopChatShell({
     enabledModels: ENABLED_MODELS,
   } = useModelCatalog();
   const { t, lang } = useLanguage();
-  const helpCopy = chatHelpCopy[lang];
+  const recentConversations = useMemo(
+    () =>
+      conversations
+        // The chat you are already in is not a chat to return to -- a brand
+        // new guest conversation exists from the first render, and offering it
+        // back to the user was both meaningless and (on mobile) the only thing
+        // keeping the recent-chats row on screen for someone with no history.
+        .filter(
+          (conversation) =>
+            !conversation.isLocked && conversation.id !== currentChatId
+        )
+        .slice(0, 3)
+        .map((conversation) => ({ id: conversation.id, title: conversation.title })),
+    [conversations, currentChatId]
+  );
+  const [modelEmptyStates, setModelEmptyStates] = useState<Record<string, boolean>>({});
+  const conversationStateKey = currentChatId || "new";
+  const emptyStateKey = useCallback(
+    (modelId: string) => `${conversationStateKey}:${modelId}`,
+    [conversationStateKey]
+  );
+  const handleEmptyStateChange = useCallback(
+    (modelId: string, isEmpty: boolean) => {
+      const key = emptyStateKey(modelId);
+      setModelEmptyStates((current) =>
+        current[key] === isEmpty ? current : { ...current, [key]: isEmpty }
+      );
+    },
+    [emptyStateKey]
+  );
+  // An existing *authenticated* conversation (currentChatId set) hasn't
+  // been proven empty until at least one panel reports back -- defaulting
+  // it to "empty" would flash the welcome screen over a still-loading
+  // panel, indistinguishable from a genuinely empty new chat. Only a
+  // brand-new conversation (no id yet) defaults to empty, since it always
+  // legitimately starts that way. Guests are excluded: unlike an
+  // authenticated chat's server-assigned id, a guest's currentChatId is a
+  // client-generated placeholder assigned immediately even for a
+  // guaranteed-empty new chat, so "has an id" isn't a signal there.
+  const isConversationEmpty =
+    selectedModels.length > 0 &&
+    selectedModels.every(
+      (modelId) => modelEmptyStates[emptyStateKey(modelId)] ?? (isGuestMode || !currentChatId)
+    );
+  const [modelStatuses, setModelStatuses] = useState<
+    Record<string, "idle" | "loading" | "responding" | "error" | "cancelled" | "paused">
+  >({});
+  const handleModelStatusChange = useCallback(
+    (
+      modelId: string,
+      nextStatus: "idle" | "loading" | "responding" | "error" | "cancelled" | "paused"
+    ) => {
+      setModelStatuses((current) =>
+        current[modelId] === nextStatus
+          ? current
+          : { ...current, [modelId]: nextStatus }
+      );
+    },
+    []
+  );
+  // Bumped to abort every currently-responding panel at once ("stop all").
+  // A counter, not a boolean, so a second click still re-triggers each
+  // ChatApp panel's abort effect even though the value it flips from/to
+  // would otherwise look unchanged.
+  const [stopSignal, setStopSignal] = useState(0);
+  const isAnyModelResponding = Object.values(modelStatuses).some(
+    (status) => status === "responding"
+  );
+  // A quick-comparison summary needs at least two models that have actually
+  // finished responding (not still streaming, not paused/off) -- the
+  // request only ever counted selectedModels.length > 1 and an otherwise
+  // non-empty conversation, so the button was clickable the instant a
+  // message was sent, well before any model had a real answer to compare.
+  // Both shells now read that from the same derivation, which also supplies
+  // the sentence explaining the state.
+  const comparisonReadiness = deriveComparisonReadiness({
+    selectedModelIds: selectedModels,
+    disabledModelIds: disabledPanels,
+    modelStatuses,
+    hasComparableConversation: !isConversationEmpty && Boolean(currentChatId),
+    isBusy: isCompareSummaryLoading,
+  });
+  const [welcomeInputSlot, setWelcomeInputSlot] = useState<HTMLDivElement | null>(null);
+  const [bottomInputSlot, setBottomInputSlot] = useState<HTMLDivElement | null>(null);
+  const inputPortalTarget = isConversationEmpty
+    ? welcomeInputSlot ?? bottomInputSlot
+    : bottomInputSlot ?? welcomeInputSlot;
+  // STG-F003: portal into a host we move between the two slots, never into
+  // the slots themselves -- switching containers would rebuild the composer
+  // and drop whatever the user had just typed into it.
+  const composerPortalHost = useComposerPortalHost(inputPortalTarget);
+  // Mirrors inputPortalTarget above: the composer (and so the consent
+  // notice slot right next to it) lives in one of two DOM positions
+  // depending on whether the welcome screen is showing.
+  const [welcomeConsentSlot, setWelcomeConsentSlot] = useState<HTMLDivElement | null>(null);
+  const [bottomConsentSlot, setBottomConsentSlot] = useState<HTMLDivElement | null>(null);
+  const consentSlotTarget = isConversationEmpty
+    ? welcomeConsentSlot ?? bottomConsentSlot
+    : bottomConsentSlot ?? welcomeConsentSlot;
+  const registerChatConsentSlot = useChatConsentSlotRef();
+  useEffect(() => {
+    registerChatConsentSlot(consentSlotTarget);
+    return () => registerChatConsentSlot(null);
+  }, [consentSlotTarget, registerChatConsentSlot]);
+
+  // STG-F002: at tablet/split-screen widths, an always-expanded 320px
+  // sidebar plus N side-by-side panels can leave each panel with nowhere
+  // near enough room for its model name/controls. Both layout decisions
+  // below are driven by content width (viewport width, minus the sidebar's
+  // own known fixed widths, minus chrome padding/gaps, divided by the
+  // selected model count) rather than a single breakpoint -- so the same
+  // math that decides collapsing the sidebar also decides falling back to
+  // tabs, and both react correctly to browser zoom (window.innerWidth
+  // shrinks in CSS px as zoom increases) as well as to the model count
+  // changing. Auto-collapsing the sidebar is tried first (recovering
+  // SIDEBAR_EXPANDED_WIDTH - SIDEBAR_COLLAPSED_WIDTH of extra room); tabs
+  // only kick in if that alone still isn't enough, matching the requested
+  // priority order.
+  const SIDEBAR_EXPANDED_WIDTH = 320;
+  const SIDEBAR_COLLAPSED_WIDTH = 64;
+  const CONTENT_PADDING = 32; // px-4 on both the sidebar's sibling section and the panel row
+  const PANEL_GAP = 16; // gap-4 between panels
+  const MIN_PANEL_WIDTH = 310; // keeps the model name/select area >= 120px usable
+
+  const [viewportWidth, setViewportWidth] = useState<number>(
+    () => window.innerWidth
+  );
+  useEffect(() => {
+    const updateViewportWidth = () => setViewportWidth(window.innerWidth);
+    window.addEventListener("resize", updateViewportWidth);
+    return () => window.removeEventListener("resize", updateViewportWidth);
+  }, []);
+
+  const [sidebarCollapsePreference] = useSidebarCollapsePreference();
+  const perModelWidth = useCallback(
+    (sidebarWidth: number) => {
+      if (selectedModels.length === 0) return Infinity;
+      const contentWidth = viewportWidth - sidebarWidth - CONTENT_PADDING;
+      return (
+        (contentWidth - PANEL_GAP * (selectedModels.length - 1)) /
+        selectedModels.length
+      );
+    },
+    [viewportWidth, selectedModels.length]
+  );
+  const autoCollapseSuggested =
+    selectedModels.length > 1 &&
+    perModelWidth(SIDEBAR_EXPANDED_WIDTH) < MIN_PANEL_WIDTH;
+  const isSidebarCollapsed =
+    sidebarCollapsePreference === "collapsed" ||
+    (sidebarCollapsePreference === "auto" && autoCollapseSuggested);
+  const useTabsLayout =
+    selectedModels.length > 1 &&
+    perModelWidth(isSidebarCollapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_EXPANDED_WIDTH) <
+      MIN_PANEL_WIDTH;
+
+  const [activeModelId, setActiveModelId] = useState<string | null>(
+    selectedModels[0] || null
+  );
+  // The active tab is scoped to the current conversation: switching to a
+  // different conversation (even one that happens to share a model with
+  // whatever tab was active before) must re-anchor to that conversation's
+  // first model rather than silently keeping the previous tab selected just
+  // because that model id still happens to be a member of the new list.
+  const [activeModelChatKey, setActiveModelChatKey] = useState(conversationStateKey);
+  if (activeModelChatKey !== conversationStateKey) {
+    setActiveModelChatKey(conversationStateKey);
+    setActiveModelId(selectedModels[0] || null);
+  }
+  const resolvedActiveModelId =
+    activeModelId && selectedModels.includes(activeModelId)
+      ? activeModelId
+      : selectedModels[0] || null;
+  const activeModelIndex = resolvedActiveModelId
+    ? selectedModels.indexOf(resolvedActiveModelId)
+    : -1;
+  // Roving tabindex per the WAI-ARIA tabs pattern: only the active tab is
+  // in the Tab order, and arrow keys move both selection and focus. Focus
+  // is moved imperatively inside these handlers (not via an effect keyed
+  // on the active id) so it only happens in response to an actual
+  // keyboard/click interaction, never on mount or on an ambient re-render
+  // (e.g. resizing into tabs layout for the first time).
+  const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const activateModel = useCallback((modelId: string, focus: boolean) => {
+    setActiveModelId(modelId);
+    if (focus) tabRefs.current[modelId]?.focus();
+  }, []);
+  const switchModelByOffset = useCallback(
+    (offset: number) => {
+      if (selectedModels.length < 2 || activeModelIndex < 0) return;
+      const nextIndex =
+        (activeModelIndex + offset + selectedModels.length) %
+        selectedModels.length;
+      activateModel(selectedModels[nextIndex], true);
+    },
+    [activateModel, activeModelIndex, selectedModels]
+  );
+  const handleTabKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLButtonElement>) => {
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        switchModelByOffset(1);
+      } else if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        switchModelByOffset(-1);
+      } else if (event.key === "Home") {
+        event.preventDefault();
+        if (selectedModels[0]) activateModel(selectedModels[0], true);
+      } else if (event.key === "End") {
+        event.preventDefault();
+        const last = selectedModels[selectedModels.length - 1];
+        if (last) activateModel(last, true);
+      }
+    },
+    [activateModel, selectedModels, switchModelByOffset]
+  );
 
   return (
     <main
@@ -134,15 +391,127 @@ export function DesktopChatShell({
         onShare={onShare}
         onRevokeShare={onRevokeShare}
         onDownload={onDownload}
-        isPrivateMode={isPrivateMode}
-        onTogglePrivateMode={onTogglePrivateMode}
         currentModelId={selectedModels[0]}
         attachmentCount={attachments.length}
+        autoCollapseSuggested={autoCollapseSuggested}
       />
 
       <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        <ProviderStatusBanner selectedModels={selectedModels} compact onToggleModel={onToggleModel} />
-        <div className="flex min-h-0 flex-1 gap-4 overflow-hidden bg-zinc-100/80 px-4 pb-4 pt-3 dark:bg-zinc-950">
+        <ProviderStatusBanner
+          selectedModels={selectedModels}
+          compact
+          onSwapModel={onSwapModel}
+        />
+        {/*
+          UI-P1-05. The tab bar used to be suppressed while the conversation
+          was empty, on the reasoning that the welcome screen covers the panels
+          anyway so there is nothing to switch between. But panel visibility is
+          decided by `useTabsLayout` alone: at 768-1024px two of the three
+          panels are already `display:none` and `aria-hidden` before a single
+          message exists. With the tab bar hidden as well, nothing on screen
+          named them -- the composer said "3 models" while two of the three
+          were neither identifiable nor reachable, by pointer or by keyboard.
+          At >=1058px all three panels render side by side, so the same empty
+          state never had the problem there, which is why it went unnoticed.
+
+          The tab bar is the thing that already names every selected model,
+          carries the WAI-ARIA roving tabindex, and offers per-model removal.
+          Showing it whenever the tabs layout is in force -- empty or not --
+          is the smallest change that makes the selection legible, and it
+          costs nothing at the widths that render all three panels.
+        */}
+        {useTabsLayout && (
+          <div
+            role="tablist"
+            aria-label={t("chat.compareTabsLabel")}
+            data-testid="model-compare-tablist"
+            className="flex shrink-0 snap-x snap-mandatory gap-1.5 overflow-x-auto border-b border-zinc-200 bg-white px-4 py-2 dark:border-zinc-800 dark:bg-zinc-950"
+          >
+            {selectedModels.map((modelId) => {
+              const model = AVAILABLE_MODELS.find((item) => item.id === modelId);
+              const isActive = modelId === resolvedActiveModelId;
+              const isPanelDisabled = disabledPanels.includes(modelId);
+              const status = isPanelDisabled
+                ? "paused"
+                : modelStatuses[modelId] || "idle";
+              return (
+                <div
+                  key={modelId}
+                  className={`flex min-w-[228px] shrink-0 snap-start items-center rounded-xl border transition ${
+                    isActive
+                      ? "border-blue-400 bg-blue-50 dark:border-blue-700 dark:bg-blue-950/30"
+                      : "border-zinc-200 bg-white hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900"
+                  } ${isPanelDisabled ? "opacity-50" : ""}`}
+                >
+                  <button
+                    ref={(node) => {
+                      tabRefs.current[modelId] = node;
+                    }}
+                    type="button"
+                    role="tab"
+                    id={`model-tab-${modelId}`}
+                    aria-selected={isActive}
+                    aria-controls={`model-tabpanel-${modelId}`}
+                    tabIndex={isActive ? 0 : -1}
+                    data-testid="model-compare-tab"
+                    data-model-id={modelId}
+                    onClick={() => activateModel(modelId, false)}
+                    onKeyDown={handleTabKeyDown}
+                    className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left"
+                  >
+                    <ModelLogo model={model} size="sm" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-xs font-bold text-zinc-800 dark:text-zinc-100">
+                        {model?.name || modelId}
+                      </span>
+                      <span className="block truncate text-[11px] text-zinc-500 dark:text-zinc-400">
+                        {model?.provider}
+                      </span>
+                    </span>
+                    {status === "responding" || status === "loading" ? (
+                      <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-blue-500" aria-hidden="true" />
+                    ) : status === "error" ? (
+                      <span className="h-2 w-2 shrink-0 rounded-full bg-red-500" aria-hidden="true" />
+                    ) : status === "paused" ? (
+                      <span className="shrink-0 text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">OFF</span>
+                    ) : status === "idle" ? (
+                      <Check className="h-3 w-3 shrink-0 text-emerald-500" aria-hidden="true" />
+                    ) : null}
+                  </button>
+                  {selectedModels.length > 1 && (
+                    <button
+                      type="button"
+                      data-testid="model-compare-tab-remove"
+                      aria-label={t("chat.removeModelFromComparison")}
+                      onClick={() => onRemoveModel(modelId)}
+                      className="mr-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800"
+                    >
+                      <X className="h-3 w-3" aria-hidden="true" />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <div className="relative flex min-h-0 flex-1 gap-4 overflow-hidden bg-zinc-100/80 px-4 pb-4 pt-3 dark:bg-zinc-950">
+          {isConversationEmpty && (
+            // UI-EMPTY-001. The light overlay has always been translucent, so
+            // the three comparison panels stay legible behind the welcome
+            // screen and the first screen still reads as a comparison
+            // product. Dark was opaque, which erased that structure entirely.
+            // Matching the light alpha is the smallest change that restores
+            // it; the welcome text sits on its own surfaces inside
+            // ChatWelcomeScreen, so its contrast is unaffected either way.
+            <div className="absolute inset-0 z-10 bg-zinc-100/80 dark:bg-zinc-950/80">
+              <ChatWelcomeScreen
+                recentConversations={recentConversations}
+                onSelectConversation={onSelectConversation}
+                inputSlotRef={setWelcomeInputSlot}
+                consentSlotRef={setWelcomeConsentSlot}
+              />
+            </div>
+          )}
           {selectedModels.length === 0 && (
             <div className="flex flex-1 select-none flex-col items-center justify-center text-zinc-500">
               <div className="mb-4 text-4xl opacity-50">AI</div>
@@ -157,14 +526,35 @@ export function DesktopChatShell({
               ? getModelUsageProfile(modelInfo)
               : null;
             const isPanelDisabled = disabledPanels.includes(modelId);
+            const isPanelVisible = !useTabsLayout || modelId === resolvedActiveModelId;
 
             return (
               <div
                 key={`${currentChatId || "new"}:panel:${panelIndex}`}
                 data-testid="desktop-model-panel"
                 data-model-id={modelId}
-                className={`relative flex flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm shadow-zinc-200/60 transition-all duration-300 ease-in-out dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/20 ${
-                  isPanelDisabled ? "w-44 shrink-0" : "min-w-0 flex-1"
+                {...(useTabsLayout
+                  ? {
+                      role: "tabpanel",
+                      id: `model-tabpanel-${modelId}`,
+                      "aria-labelledby": `model-tab-${modelId}`,
+                    }
+                  : {})}
+                aria-hidden={!isPanelVisible}
+                // UI-EMPTY-001 note: while the welcome overlay is up these
+                // panels keep their own controls in the tab order and in the
+                // accessibility tree. Marking them `inert` was tried and
+                // reverted -- the per-panel model select and follow-up input
+                // are genuinely operated in that state (see
+                // upgrade-discovery.spec.ts "panel-only send waits for a
+                // changed model selection to persist"), so inerting them
+                // breaks a real path. The exposure predates the overlay's
+                // alpha change and is unchanged by it; closing it means
+                // deciding what the empty state should let a keyboard user
+                // reach, which is a product decision, not a colour one.
+                style={isPanelVisible ? undefined : { contentVisibility: "hidden" }}
+                className={`relative flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm shadow-zinc-200/60 transition-all duration-300 ease-in-out dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/20 ${
+                  !isPanelVisible ? "hidden" : isPanelDisabled ? "flex w-44 shrink-0" : "flex min-w-0 flex-1"
                 }`}
               >
                 <div className="flex min-h-12 shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-400">
@@ -174,24 +564,37 @@ export function DesktopChatShell({
                     {isPanelDisabled ? (
                       <span className="flex min-w-0 select-none flex-col truncate">
                         <span className="truncate text-sm font-semibold text-zinc-600 dark:text-zinc-300">{modelInfo?.name}</span>
-                        <span className="flex items-center gap-1.5 text-[10px] font-medium text-zinc-400">
+                        <span className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
                           <span className="truncate">{modelInfo?.provider}</span>
                           {usageProfile && (
                             <CreditCostBadge
                               credits={usageProfile.credits}
                               size="xs"
-                              label={lang === "ko" ? `기본 ${usageProfile.credits}크레딧 차감` : `Base cost ${usageProfile.credits} credits`}
+                              label={lang === "ko" ? `기본 ${usageProfile.credits}크레딧 차감` : `Base cost ${formatCountedUnit(usageProfile.credits, englishCreditUnit, "en")}`}
                             />
                           )}
                         </span>
                       </span>
                     ) : (
                       <span className="flex min-w-0 flex-col">
+                        {/*
+                          RECON-A11Y-001: the selected model name is this
+                          control's only visible text, so a screen reader
+                          announced three identical "combo box"es and gave no
+                          way to tell which panel was about to change models
+                          -- and changing the wrong panel spends credits.
+                          Named by panel position rather than by model, so the
+                          name stays stable across a selection change and the
+                          three names stay unique.
+                        */}
                         <select
                           value={modelId}
                           onChange={(event) => onChangePanelModel(modelId, event.target.value)}
                           disabled={isPanelDisabled || !isModelSelectionReady}
                           aria-busy={!isModelSelectionReady}
+                          aria-label={interpolate(t("chat.panelModelSelectLabel"), {
+                            position: panelIndex + 1,
+                          })}
                           className="min-w-0 cursor-pointer truncate bg-transparent text-sm font-semibold text-zinc-800 outline-none hover:text-zinc-950 dark:text-zinc-100 dark:hover:text-white"
                         >
                           {ENABLED_MODELS.map((model) => {
@@ -208,13 +611,13 @@ export function DesktopChatShell({
                             );
                           })}
                         </select>
-                        <span className="flex items-center gap-1.5 text-[10px] font-medium text-zinc-400">
+                        <span className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
                           <span className="truncate">{modelInfo?.provider}</span>
                           {usageProfile && (
                             <CreditCostBadge
                               credits={usageProfile.credits}
                               size="xs"
-                              label={lang === "ko" ? `기본 ${usageProfile.credits}크레딧 차감` : `Base cost ${usageProfile.credits} credits`}
+                              label={lang === "ko" ? `기본 ${usageProfile.credits}크레딧 차감` : `Base cost ${formatCountedUnit(usageProfile.credits, englishCreditUnit, "en")}`}
                             />
                           )}
                         </span>
@@ -232,7 +635,7 @@ export function DesktopChatShell({
                           title={isPanelDisabled ? t("chat.resumePanel") : t("chat.pausePanel")}
                           aria-pressed={!isPanelDisabled}
                         >
-                          <span className="text-[10px] font-bold text-zinc-500">
+                          <span className="text-[11px] font-bold text-zinc-500 dark:text-zinc-400">
                             {isPanelDisabled ? "OFF" : "ON"}
                           </span>
                           <div className={`h-4 w-8 rounded-full p-0.5 transition-colors ${!isPanelDisabled ? "bg-blue-500" : "bg-zinc-700"}`}>
@@ -264,82 +667,91 @@ export function DesktopChatShell({
                   promptPayload={promptPayload}
                   isPanelDisabled={isPanelDisabled}
                   isGuestMode={isGuestMode}
+                  webSearchMode={webSearchMode}
                   onBeforeSend={onBeforeModelSend}
                   onResponseComplete={onResponseComplete}
                   onFollowupSent={onFollowupSent}
                   hideModelOnlyInput={selectedModels.length <= 1}
+                  useCenteredWelcome
+                  onEmptyStateChange={handleEmptyStateChange}
+                  onStatusChange={handleModelStatusChange}
+                  onRequestCloseModel={() => onToggleModel(modelId)}
+                  hasMultipleActiveModels={selectedModels.length > 1}
+                  stopSignal={stopSignal}
                 />
               </div>
             );
           })}
         </div>
 
-        {selectedModels.length > 1 && currentChatId && (
-          <div className="flex gap-2 border-t border-zinc-200 bg-white px-4 py-2 dark:border-zinc-800 dark:bg-zinc-950">
-            <button
-              type="button"
-              data-testid="quick-comparison-button"
-              onClick={onCompareSummary}
-              className="flex items-center justify-between gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-xs font-black text-blue-700 hover:bg-blue-100 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200 dark:hover:bg-blue-950"
-            >
-              <span>{t("chat.quickDifferenceSummary")}</span>
-              <CreditCostBadge
-                credits={1}
-                size="xs"
-                label={t("chat.quickDifferenceSummaryCreditCost")}
-                testId="quick-comparison-credit-cost"
-              />
-            </button>
-            {!isGuestMode && currentChatId !== "private-chat" && (
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={onComparisonReview}
-                  className="flex items-center justify-between gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-black text-white hover:bg-blue-500"
-                >
-                  <span>{t("chat.aiReviewButton")}</span>
-                  <CreditCostBadge
-                    credits={4}
-                    size="xs"
-                    tone="onColor"
-                    label={`4 ${t("chat.aiReviewCredits")}`}
-                    testId="ai-review-entry-credit-cost"
-                    className="border-0 bg-white/20"
-                  />
-                </button>
-                <FeatureHelpPopover
-                  title={helpCopy.aiReviewTitle}
-                  description={helpCopy.aiReviewDescription}
-                  buttonLabel={helpCopy.helpAboutAiReview}
-                  learnMoreLabel={helpCopy.learnMore}
-                  topic="ai_review"
-                  href={chatWorkspaceGuideHref(lang, "ai-review")}
-                  align="right"
-                  testId="ai-review-help"
-                />
-              </div>
-            )}
-          </div>
+        {/*
+          The bottom workflow dock. The comparison rail and the composer are
+          separate sections semantically -- one acts on finished answers, the
+          other configures the next request -- but they share one alignment
+          axis (`max-w-4xl mx-auto`, same horizontal padding) and one boundary
+          against the answer canvas, so a wide screen no longer strands the
+          actions on the far left of a centred composer.
+        */}
+        <ComparisonActionRail
+          layout="desktop"
+          readiness={comparisonReadiness}
+          aiReviewAccess={aiReviewAccess}
+          isCompareSummaryLoading={isCompareSummaryLoading}
+          isQuickSummaryCached={isQuickSummaryCached}
+          availableCredits={availableCredits}
+          verificationSlot={<GuestVerificationDesktopSlot variant="rail" />}
+          onCompareSummary={onCompareSummary}
+          onComparisonReview={onComparisonReview}
+          onGuestSignInPrompt={onGuestSignInPrompt}
+        />
+
+        {/*
+          The shared fallback: with a single model there is no comparison rail
+          to host the widget, but the verification surface still has to exist
+          somewhere predictable -- a full-width row of its own directly above
+          the composer, never inside a model panel.
+        */}
+        {!comparisonReadiness.isVisible && (
+          <GuestVerificationDesktopSlot variant="fallback" />
         )}
 
-        <ChatInput
-          value={inputValue}
-          onChange={setInputValue}
-          personalizedPrompt={personalizedPrompt}
-          onSubmit={onSubmit}
-          onCancel={() => {}}
-          isSending={isSending}
-          focusToken={focusToken}
-          selectedModels={selectedModels}
-          disabledModelIds={disabledPanels}
-          onToggleModel={onToggleModel}
-          attachments={attachments}
-          onAttachmentsChange={setAttachments}
-          canAttach={!isGuestMode}
-          isGuestMode={isGuestMode}
-          guestPreviewMode={guestPreviewMode}
-          isGuestLimitReached={isGuestMode && guestMessageCount >= maxGuestMessages}
-        />
+        <div className="w-full shrink-0 px-4 md:px-6">
+          <div ref={setBottomConsentSlot} className="mx-auto w-full max-w-4xl" />
+        </div>
+        <div ref={setBottomInputSlot} />
+        {composerPortalHost &&
+          createPortal(
+            <ChatInput
+              value={inputValue}
+              onChange={setInputValue}
+              personalizedPrompt={personalizedPrompt}
+              onSubmit={onSubmit}
+              onCancel={() => setStopSignal((current) => current + 1)}
+              isSending={isSending || isAnyModelResponding}
+              focusToken={focusToken}
+              currentChatId={currentChatId}
+              selectedModels={selectedModels}
+              disabledModelIds={disabledPanels}
+              onToggleModel={onToggleModel}
+              onSwapModel={onSwapModel}
+              webSearchMode={webSearchMode}
+              onWebSearchModeChange={onWebSearchModeChange}
+              onOpenDeepResearchSetup={onOpenDeepResearchSetup}
+              isDeepResearchPending={isDeepResearchPending}
+              onDismissDeepResearchChip={onDismissDeepResearchChip}
+              attachments={attachments}
+              onAttachmentsChange={setAttachments}
+              attachmentCapabilities={attachmentCapabilities}
+              onGuestSignInPrompt={onGuestSignInPrompt}
+              isGuestMode={isGuestMode}
+              guestPreviewMode={guestPreviewMode}
+              guestMessageCount={guestMessageCount}
+              maxGuestMessages={maxGuestMessages}
+              variant={isConversationEmpty ? "floating" : "bar"}
+              hideTopBorder={comparisonReadiness.isVisible}
+            />,
+            composerPortalHost
+          )}
       </section>
     </main>
   );

@@ -22,6 +22,39 @@ const allowedRequestHosts = [
   "localhost:3100",
 ].filter((host, index, hosts) => hosts.indexOf(host) === index);
 
+// EXT-REAUDIT-F001. Some runners cannot reach cdn.playwright.dev, so
+// `npx playwright install` fails and the Chromium projects cannot launch at
+// all. Those images ship a pre-provisioned Chromium instead; pointing
+// PLAYWRIGHT_CHROMIUM_EXECUTABLE at it lets the canonical projects run there.
+//
+// This is a capability fallback, never the default: unset -- which is the
+// case in CI and on developer machines -- Playwright uses its own pinned
+// build and nothing about the canonical projects changes. A run that sets it
+// is NOT canonical, so its screenshots must not be treated as golden
+// evidence (see docs/qa/canonical-visual-baseline.md).
+const chromiumExecutablePath =
+  process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined;
+const chromiumLaunchOptions = chromiumExecutablePath
+  ? { launchOptions: { executablePath: chromiumExecutablePath } }
+  : {};
+
+// The canonical visual baseline, pinned so a golden compares like with like.
+// Locale and time zone both change what gets rasterised -- a locale picks a
+// different font stack for the same text (`:lang()` selects Noto Sans KR/SC
+// per docs/ui-contracts/typography.md), and a time zone moves every rendered
+// date -- so neither may be inherited from whatever machine happens to be
+// running.
+//
+// Device pixel ratio is deliberately NOT set here: it belongs to the device
+// preset each project already declares, and forcing Pixel 5's 2.625 down to 1
+// would silently re-rasterise every mobile golden. Full policy, including the
+// runner image and which platforms may judge a golden at all, is in
+// docs/qa/canonical-visual-baseline.md.
+const canonicalRendering = {
+  locale: "en-US",
+  timezoneId: "UTC",
+} as const;
+
 export default defineConfig({
   testDir: "./tests/e2e",
   fullyParallel: false,
@@ -60,21 +93,39 @@ export default defineConfig({
   projects: [
     {
       name: "desktop-chromium",
-      use: { ...devices["Desktop Chrome"], viewport: { width: 1920, height: 1080 } },
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 1920, height: 1080 },
+        deviceScaleFactor: 1,
+        ...canonicalRendering,
+        ...chromiumLaunchOptions,
+      },
     },
     {
       name: "desktop-compact",
-      use: { ...devices["Desktop Chrome"], viewport: { width: 1366, height: 768 } },
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 1366, height: 768 },
+        deviceScaleFactor: 1,
+        ...canonicalRendering,
+        ...chromiumLaunchOptions,
+      },
     },
     {
       name: "mobile-safari",
-      use: { ...devices["iPhone 13"], viewport: { width: 390, height: 844 } },
+      use: {
+        ...devices["iPhone 13"],
+        viewport: { width: 390, height: 844 },
+        ...canonicalRendering,
+      },
     },
     {
       name: "mobile-chromium",
       use: {
         ...devices["Pixel 5"],
         viewport: { width: 412, height: 915 },
+        ...canonicalRendering,
+        ...chromiumLaunchOptions,
       },
     },
   ],

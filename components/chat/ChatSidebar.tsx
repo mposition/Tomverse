@@ -3,19 +3,23 @@
 import { Conversation } from "./types";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { AuthButton } from "@/components/auth/AuthButton";
+import { SidebarAccountRailButton } from "@/components/chat/SidebarAccountRailButton";
 import { useCallback, useState, useEffect, useId, useRef, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { useLanguage } from "@/components/LanguageProvider";
 import Link from "next/link";
-import { AlertTriangle, Check, ChevronDown, CircleHelp, CloudUpload, Crown, Database, Download, Folder, FolderPlus, Link2Off, Lock, MessageSquare, MoreVertical, Pencil, Pin, Search, Send, Share2, ShieldCheck, SlidersHorizontal, Sparkles, Star, Tag, Trash2, Unlock, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, CircleHelp, Crown, Download, Folder, FolderPlus, Link2Off, Lock, MessageSquare, MoreVertical, PanelLeftClose, PanelLeftOpen, Pencil, Pin, Plus, Search, Share2, SlidersHorizontal, Sparkles, Star, Tag, Trash2, Unlock, X } from "lucide-react";
 import { FeedbackButton } from "@/components/chat/FeedbackButton";
 import { UserUsageSummary } from "@/components/chat/UserUsageSummary";
 import { FeatureHelpPopover } from "@/components/chat/FeatureHelpPopover";
 import { chatHelpCopy } from "@/components/chat/chatHelpCopy";
 import { useUserUsage, type UserPlan } from "@/components/chat/useUserUsage";
 import { dispatchAppToast } from "@/lib/appToast";
-import { trackProductEvent, trackProductEventOnce } from "@/lib/productAnalyticsClient";
+import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
+import { useSidebarCollapsePreference } from "@/components/chat/useSidebarCollapse";
+import { useShortViewport } from "@/components/chat/useVisualViewport";
+import { BuildInfoMenuItem, BuildStagingBadge } from "@/components/chat/BuildInfoMenu";
 
 type ChatSidebarProps = {
     conversations: Conversation[];
@@ -31,12 +35,14 @@ type ChatSidebarProps = {
     onUnlock?: (id: string) => void;
     onShare: (id: string, title: string) => void;
     onRevokeShare: (id: string) => void;
-    onDownload: (id: string, title: string) => void;    
-    isPrivateMode?: boolean;
-    onTogglePrivateMode: () => void;
+    onDownload: (id: string, title: string) => void;
     currentModelId?: string | null;
     attachmentCount?: number;
     isMobileDrawer?: boolean;
+    // Set by DesktopChatShell once it measures that expanding the sidebar
+    // would leave too little room for the current model comparison. Only
+    // takes effect while the user's own preference is "auto".
+    autoCollapseSuggested?: boolean;
 };
 
 type ConversationFilter = "all" | "locked" | "shared" | "work" | "research" | "personal" | `project:${string}`;
@@ -91,17 +97,15 @@ export function ChatSidebar({
     onUnlock,
     onShare,
     onRevokeShare,
-    onDownload,    
-    isPrivateMode = false,
-    onTogglePrivateMode,
+    onDownload,
     currentModelId,
     attachmentCount = 0,
     isMobileDrawer = false,
+    autoCollapseSuggested = false,
 }: ChatSidebarProps) {
     const { getModel } = useModelCatalog();
     const [openMenuId, setOpenMenuId] = useState<string | null>(null);
     const [conversationMenuPosition, setConversationMenuPosition] = useState<ConversationMenuPosition | null>(null);
-    const [showPrivateNotice, setShowPrivateNotice] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
     const [conversationFilter, setConversationFilter] = useState<ConversationFilter>("all");
     const [showProjectForm, setShowProjectForm] = useState(false);
@@ -158,8 +162,6 @@ export function ChatSidebar({
     const [lockTarget, setLockTarget] = useState<Conversation | null>(null);
     const [lockPassword, setLockPassword] = useState("");
     const [lockError, setLockError] = useState("");
-    const privateModeButtonRef = useRef<HTMLButtonElement | null>(null);
-    const privateNoticeDialogRef = useRef<HTMLDivElement | null>(null);
     const conversationMenuAnchorRef = useRef<HTMLButtonElement | null>(null);
     const conversationMenuPanelRef = useRef<HTMLDivElement | null>(null);
     const helpMenuRef = useRef<HTMLSpanElement | null>(null);
@@ -170,6 +172,23 @@ export function ChatSidebar({
         getOrganizerPreference,
         getServerOrganizerPreference
     );
+    const [sidebarCollapsePreference, setSidebarCollapsePreference] =
+        useSidebarCollapsePreference();
+    // SHORT-VIEWPORT-001: whether the drawer still has the height to keep its
+    // header and footer pinned around a scrolling list. Read from the visible
+    // viewport, so a raised keyboard or a rotation counts as "short" the moment
+    // it happens -- a CSS `max-height` query cannot see either.
+    const isShortViewport = useShortViewport();
+    const isSingleScrollDrawer = isMobileDrawer && isShortViewport;
+    const isSidebarCollapsed =
+        sidebarCollapsePreference === "collapsed" ||
+        (sidebarCollapsePreference === "auto" && autoCollapseSuggested);
+    // Always a sticky, explicit override of whatever "auto" currently
+    // resolves to -- so reopening a sidebar the width-based logic collapsed
+    // sticks even if the viewport hasn't changed.
+    const toggleSidebarCollapsed = () => {
+        setSidebarCollapsePreference(isSidebarCollapsed ? "expanded" : "collapsed");
+    };
     const { t, lang } = useLanguage();
     const helpCopy = chatHelpCopy[lang];
     const tooltipIdPrefix = useId();
@@ -275,23 +294,6 @@ export function ChatSidebar({
             document.removeEventListener("keydown", closeOnEscape);
         };
     }, [showHelpMenu]);
-
-    useEffect(() => {
-        if (isGuestMode || !conversations.some((conversation) => conversation.id !== "private-chat")) {
-            return;
-        }
-        const desktopViewport = window.matchMedia("(min-width: 768px)").matches;
-        const visibleSidebar = isMobileDrawer ? !desktopViewport : desktopViewport;
-        if (!visibleSidebar || localStorage.getItem(SIDEBAR_TOUR_STORAGE_KEY)) return;
-        const timer = window.setTimeout(() => {
-            setSidebarTourStep((current) => current ?? 0);
-            trackProductEventOnce(
-                "sidebar_tour_started:auto:v1",
-                "sidebar_tour_started"
-            );
-        }, 500);
-        return () => window.clearTimeout(timer);
-    }, [conversations, isGuestMode, isMobileDrawer]);
 
     useEffect(() => {
         if (!showProjectForm && !editingProjectId && !deleteProjectArmedId) return;
@@ -572,13 +574,6 @@ export function ChatSidebar({
         return `${models[0]} +${models.length - 1}`;
     };
 
-    const closePrivateNotice = useCallback((restoreFocus = true) => {
-        setShowPrivateNotice(false);
-        if (restoreFocus) {
-            requestAnimationFrame(() => privateModeButtonRef.current?.focus());
-        }
-    }, []);
-
     const closeConversationMenu = useCallback(() => {
         setOpenMenuId(null);
         setConversationMenuPosition(null);
@@ -652,24 +647,6 @@ export function ChatSidebar({
         trackProductEvent("sidebar_tour_completed");
     };
 
-    const getPrivateNoticeFocusableElements = useCallback(() => {
-        const dialog = privateNoticeDialogRef.current;
-        if (!dialog) return [];
-
-        return Array.from(
-            dialog.querySelectorAll<HTMLElement>(
-                [
-                    "button:not([disabled])",
-                    "input:not([disabled])",
-                    "select:not([disabled])",
-                    "textarea:not([disabled])",
-                    "a[href]",
-                    '[tabindex]:not([tabindex="-1"])',
-                ].join(",")
-            )
-        ).filter((element) => element.offsetParent !== null);
-    }, []);
-
     useEffect(() => {
         function handleClickOutside(event: MouseEvent) {
             const target = event.target as HTMLElement;
@@ -708,67 +685,100 @@ export function ChatSidebar({
         };
     }, [closeConversationMenu, openMenuId]);
 
-    useEffect(() => {
-        if (!showPrivateNotice) return;
-        const animationFrame = requestAnimationFrame(() => {
-            getPrivateNoticeFocusableElements()[0]?.focus();
-        });
-        return () => cancelAnimationFrame(animationFrame);
-    }, [getPrivateNoticeFocusableElements, showPrivateNotice]);
-
-    useEffect(() => {
-        if (!showPrivateNotice) return;
-        const handleKeyDown = (event: KeyboardEvent) => {
-            if (event.key === "Escape") {
-                event.preventDefault();
-                closePrivateNotice(true);
-                return;
-            }
-
-            if (event.key !== "Tab") return;
-
-            const focusableElements = getPrivateNoticeFocusableElements();
-            if (focusableElements.length === 0) {
-                event.preventDefault();
-                return;
-            }
-
-            const firstElement = focusableElements[0];
-            const lastElement = focusableElements[focusableElements.length - 1];
-            const activeElement = document.activeElement;
-
-            if (event.shiftKey && activeElement === firstElement) {
-                event.preventDefault();
-                lastElement.focus();
-                return;
-            }
-
-            if (!event.shiftKey && activeElement === lastElement) {
-                event.preventDefault();
-                firstElement.focus();
-            }
-        };
-        document.addEventListener("keydown", handleKeyDown, true);
-        return () => document.removeEventListener("keydown", handleKeyDown, true);
-    }, [closePrivateNotice, getPrivateNoticeFocusableElements, showPrivateNotice]);
+    if (isSidebarCollapsed && !isMobileDrawer) {
+        return (
+            <aside
+                data-testid="chat-sidebar-rail"
+                className="relative hidden h-full w-16 shrink-0 select-none flex-col items-center border-r border-zinc-200 bg-zinc-50 py-3 dark:border-zinc-800 dark:bg-zinc-950 md:flex"
+            >
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white ring-1 ring-zinc-200 shadow-sm dark:ring-zinc-800">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                        src="/tomverse-logo.png"
+                        alt="Tomverse Insight"
+                        className="h-full w-full object-cover"
+                    />
+                </span>
+                <button
+                    type="button"
+                    data-testid="sidebar-expand-button"
+                    onClick={toggleSidebarCollapsed}
+                    title={t("sidebar.expand")}
+                    aria-label={t("sidebar.expand")}
+                    className="mt-4 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-zinc-500 transition hover:bg-zinc-200/70 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-white"
+                >
+                    <PanelLeftOpen className="h-5 w-5" aria-hidden="true" />
+                </button>
+                <button
+                    type="button"
+                    onClick={onNewChat}
+                    title={t("sidebar.newChat")}
+                    aria-label={t("sidebar.newChat")}
+                    className="mt-2 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-zinc-900 text-white transition hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200"
+                >
+                    <Plus className="h-4 w-4" aria-hidden="true" />
+                </button>
+                <button
+                    type="button"
+                    onClick={toggleSidebarCollapsed}
+                    title={t("sidebar.title")}
+                    aria-label={t("sidebar.title")}
+                    className="mt-2 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-zinc-500 transition hover:bg-zinc-200/70 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-white"
+                >
+                    <Search className="h-4 w-4" aria-hidden="true" />
+                </button>
+                <div className="mt-auto w-8 border-t border-zinc-200 pt-3 dark:border-zinc-800">
+                    <SidebarAccountRailButton accountUsage={accountUsage} />
+                </div>
+            </aside>
+        );
+    }
 
     return (
         <>
-        <aside className={`relative flex h-full w-full shrink-0 select-none flex-col border-r border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 ${isMobileDrawer ? "" : "md:w-80"}`}>
+        <aside
+            data-testid="chat-sidebar"
+            // SHORT-VIEWPORT-001: in the drawer the sidebar is also the scroll
+            // owner of last resort. Its fixed chrome plus the conversation
+            // list's floor plus the account footer need ~658px, so on anything
+            // shorter the footer used to overflow the panel with no scroll path
+            // to it at all -- the list was the only scroller and does not
+            // contain the footer. Desktop keeps its own overflow untouched.
+            className={`relative flex h-full w-full shrink-0 select-none flex-col border-r border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 ${isMobileDrawer ? "overflow-y-auto overscroll-contain" : "md:w-80"}`}
+        >
 
-            <div className={`${isMobileDrawer ? "p-3" : "p-4"} border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-2.5`}>
+            {/*
+              Sticky in the drawer so the panel-anchored close button (which
+              floats over this row and is why it reserves pr-16) never comes to
+              rest on top of a scrolled conversation row or the search field.
+            */}
+            <div className={`${isMobileDrawer ? "sticky top-0 z-10 bg-zinc-50 p-3 pr-16 dark:bg-zinc-950" : "p-4"} border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-2.5`}>
                 <span className={`flex items-center justify-center overflow-hidden rounded-xl bg-white ring-1 ring-zinc-200 shadow-sm dark:ring-zinc-800 ${isMobileDrawer ? "h-8 w-8" : "h-9 w-9"}`}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                         src="/tomverse-logo.png"
-                        alt="Tomverse AI"
+                        alt="Tomverse Insight"
                         className="h-full w-full object-cover"
                     />
                 </span>
                 <h1 className={`${isMobileDrawer ? "text-sm" : "text-base"} font-bold tracking-tight text-zinc-800 dark:text-zinc-100`}>
-                    Tomverse AI
+                    Tomverse Insight
                 </h1>
-                <span ref={helpMenuRef} className="group/help relative ml-auto inline-flex">
+                <BuildStagingBadge />
+                <div className="ml-auto flex items-center gap-1">
+                {!isMobileDrawer && (
+                    <button
+                        type="button"
+                        data-testid="sidebar-collapse-button"
+                        onClick={toggleSidebarCollapsed}
+                        title={t("sidebar.collapse")}
+                        aria-label={t("sidebar.collapse")}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-full text-zinc-500 transition hover:bg-blue-50 hover:text-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-zinc-400 dark:hover:bg-blue-950/50 dark:hover:text-blue-300"
+                    >
+                        <PanelLeftClose className="h-5 w-5" aria-hidden="true" />
+                    </button>
+                )}
+                <span ref={helpMenuRef} className="group/help relative inline-flex">
                     <button
                         type="button"
                         aria-label={t("sidebar.helpAndGuides")}
@@ -783,7 +793,7 @@ export function ChatSidebar({
                                 help_topic: "workspace",
                             });
                         }}
-                        className={`inline-flex items-center justify-center rounded-full text-zinc-500 transition hover:bg-blue-50 hover:text-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-zinc-400 dark:hover:bg-blue-950/50 dark:hover:text-blue-300 ${isMobileDrawer ? "h-10 w-10" : "h-8 w-8"}`}
+                        className={`inline-flex items-center justify-center rounded-full text-zinc-500 transition hover:bg-blue-50 hover:text-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-zinc-400 dark:hover:bg-blue-950/50 dark:hover:text-blue-300 ${isMobileDrawer ? "h-11 w-11" : "h-8 w-8"}`}
                     >
                         <CircleHelp className="h-5 w-5" aria-hidden="true" />
                     </button>
@@ -801,7 +811,7 @@ export function ChatSidebar({
                             role="menu"
                             className="absolute right-0 top-full z-[75] mt-2 block w-64 rounded-2xl border border-zinc-200 bg-white p-2 text-left shadow-2xl dark:border-zinc-700 dark:bg-zinc-900"
                         >
-                            <span className="block px-3 py-2 text-xs font-black uppercase tracking-wide text-zinc-500">
+                            <span className="block px-3 py-2 text-xs font-bold uppercase tracking-wide text-zinc-500">
                                 {helpCopy.quickHelp}
                             </span>
                             <button
@@ -827,53 +837,25 @@ export function ChatSidebar({
                                 <CircleHelp className="h-4 w-4 text-blue-500" aria-hidden="true" />
                                 {helpCopy.openFullGuide}
                             </Link>
+                            <BuildInfoMenuItem
+                                menuItemClassName="flex min-h-11 w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-bold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                                iconClassName="h-4 w-4 text-blue-500"
+                            />
                         </span>
                     ) : null}
                 </span>
+                </div>
             </div>
 
             <div className={`${isMobileDrawer ? "p-2.5" : "p-3"} border-b border-zinc-200/60 dark:border-zinc-800/40`}>
                 <button
+                    type="button"
+                    data-testid="sidebar-new-chat"
                     onClick={onNewChat}
-                    className={`w-full cursor-pointer flex items-center justify-center gap-2 rounded-lg bg-zinc-900 px-4 text-xs font-semibold text-white transition-all hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200 ${isMobileDrawer ? "py-2" : "py-2.5"}`}
+                    className={`w-full cursor-pointer flex items-center justify-center gap-2 rounded-lg bg-zinc-900 px-4 text-xs font-semibold text-white transition-all hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200 ${isMobileDrawer ? "min-h-11 py-2" : "py-2.5"}`}
                 >
                     <span className="text-sm">+</span> {t("sidebar.newChat")}
                 </button>
-
-                <div className="mt-2 flex items-center gap-1">
-                    <button
-                        ref={privateModeButtonRef}
-                        onClick={() => {
-                            if (isPrivateMode) {
-                                onTogglePrivateMode();
-                            } else {
-                                setShowPrivateNotice(true);
-                            }
-                        }}
-                        disabled={isGuestMode}
-                        className={`flex min-w-0 flex-1 items-center justify-center gap-2 rounded-lg border px-4 text-xs font-semibold transition-all ${isMobileDrawer ? "py-2" : "py-2.5"} ${isGuestMode
-                                ? "cursor-not-allowed opacity-50 border-zinc-200 bg-white text-zinc-400 dark:border-zinc-700/50 dark:bg-zinc-800/50 dark:text-zinc-500"
-                                : isPrivateMode
-                                    ? "cursor-pointer border-purple-700/70 bg-purple-950/40 text-purple-200 hover:bg-purple-900/50"
-                                    : "cursor-pointer border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700/50 dark:bg-zinc-800/50 dark:text-zinc-300 dark:hover:bg-zinc-700/60 dark:hover:text-white"
-                            }`}
-                        title={isGuestMode ? t("sidebar.loginRequired") : ""}
-                    >
-                        {isPrivateMode ? t("sidebar.privateModeStop") : t("sidebar.privateModeStart")}
-                        {isGuestMode && <Crown className="h-3.5 w-3.5" aria-hidden="true" />}
-                    </button>
-                    <FeatureHelpPopover
-                        title={helpCopy.privateTitle}
-                        description={helpCopy.privateDescription}
-                        buttonLabel={helpCopy.helpAboutPrivate}
-                        learnMoreLabel={helpCopy.learnMore}
-                        topic="private"
-                        href={chatWorkspaceGuideHref(lang, "files-and-drive")}
-                        mobile={isMobileDrawer}
-                        align="right"
-                        testId="private-mode-help"
-                    />
-                </div>
             </div>
 
             <div className={`shrink-0 border-b border-zinc-200/60 px-3 dark:border-zinc-800/40 ${isMobileDrawer ? "py-2" : "py-3"}`}>
@@ -897,16 +879,16 @@ export function ChatSidebar({
                     >
                         <SlidersHorizontal className="h-3.5 w-3.5 shrink-0 text-blue-500" aria-hidden="true" />
                         <span className="min-w-0 flex-1">
-                            <span className="block text-[11px] font-black text-zinc-700 dark:text-zinc-200">
+                            <span className="block text-[11px] font-bold text-zinc-700 dark:text-zinc-200">
                                 {t("sidebar.organizerTools")}
                             </span>
                             {!organizerExpanded ? (
-                                <span className="block truncate text-[10px] font-medium text-zinc-400">
+                                <span className="block truncate text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
                                     {activeOrganizerSummary}
                                 </span>
                             ) : null}
                         </span>
-                        <span className="inline-flex shrink-0 items-center gap-1 text-[10px] font-bold text-zinc-500 dark:text-zinc-400">
+                        <span className="inline-flex shrink-0 items-center gap-1 text-[11px] font-bold text-zinc-500 dark:text-zinc-400">
                             {organizerExpanded
                                 ? t("sidebar.organizerCollapse")
                                 : t("sidebar.organizerExpand")}
@@ -920,7 +902,15 @@ export function ChatSidebar({
                         <div
                             id="sidebar-organizer-content"
                             data-testid="sidebar-organizer-content"
-                            className="max-h-80 touch-pan-y overflow-y-auto overscroll-contain pr-0.5 [scrollbar-gutter:stable] [@media(max-height:860px)]:max-h-40"
+                            // SHORT-VIEWPORT-001: when the drawer itself is the
+                            // single scroll owner this panel stops being a
+                            // competing nested scroller and simply takes the
+                            // height of its own content.
+                            className={`touch-pan-y pr-0.5 [scrollbar-gutter:stable] ${
+                                isSingleScrollDrawer
+                                    ? "overflow-visible"
+                                    : "max-h-80 overflow-y-auto overscroll-contain [@media(max-height:860px)]:max-h-40"
+                            }`}
                         >
                 <div
                     data-testid="sidebar-status-filters"
@@ -929,7 +919,7 @@ export function ChatSidebar({
                     }`}
                 >
                     <div className="flex items-center gap-1">
-                        <span className="text-[10px] font-black uppercase tracking-wide text-zinc-500">
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">
                             {helpCopy.statusTitle}
                         </span>
                         <FeatureHelpPopover
@@ -975,7 +965,7 @@ export function ChatSidebar({
                     }`}
                 >
                     <div className="flex items-center gap-1">
-                        <span className="text-[10px] font-black uppercase tracking-wide text-zinc-500">
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">
                             {helpCopy.labelsTitle}
                         </span>
                         <FeatureHelpPopover
@@ -1022,7 +1012,7 @@ export function ChatSidebar({
                     }`}
                 >
                     <div className="flex items-center justify-between gap-2">
-                        <span className="inline-flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wide text-zinc-500">
+                        <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-zinc-500">
                             <Folder className="h-3.5 w-3.5" />
                             {t("sidebar.projects")}
                             <FeatureHelpPopover
@@ -1068,7 +1058,7 @@ export function ChatSidebar({
                                 type="button"
                                 onClick={() => void createProject()}
                                 disabled={!projectName.trim() || isCreatingProject}
-                                className="h-8 rounded-lg bg-blue-600 px-2 text-[11px] font-black text-white disabled:cursor-not-allowed disabled:opacity-50"
+                                className="h-8 rounded-lg bg-blue-600 px-2 text-[11px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
                             >
                                 {t("auth.ok")}
                             </button>
@@ -1078,7 +1068,7 @@ export function ChatSidebar({
                                     setShowProjectForm(false);
                                     setProjectName("");
                                 }}
-                                className="h-8 rounded-lg border border-zinc-200 px-2 text-[11px] font-black text-zinc-500 hover:bg-zinc-100 dark:border-zinc-800 dark:hover:bg-zinc-900"
+                                className="h-8 rounded-lg border border-zinc-200 px-2 text-[11px] font-bold text-zinc-500 hover:bg-zinc-100 dark:border-zinc-800 dark:hover:bg-zinc-900"
                             >
                                 {t("auth.cancel")}
                             </button>
@@ -1093,7 +1083,7 @@ export function ChatSidebar({
                                         setShowProjectForm(true);
                                         setProjectName("");
                                     }}
-                                    className="inline-flex items-center gap-1 text-[11px] font-black text-blue-600 hover:text-blue-500 dark:text-blue-300"
+                                    className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-600 hover:text-blue-500 dark:text-blue-300"
                                 >
                                     <FolderPlus className="h-3.5 w-3.5" aria-hidden="true" />
                                     {helpCopy.createProject}
@@ -1139,7 +1129,7 @@ export function ChatSidebar({
                                                     type="button"
                                                     onClick={() => void renameProject(project.id)}
                                                     disabled={!editingProjectName.trim() || renamingProjectId === project.id}
-                                                    className="h-7 rounded-md bg-blue-500 px-2 text-[10px] font-black text-white"
+                                                    className="h-7 rounded-md bg-blue-500 px-2 text-xs font-bold text-white"
                                                 >
                                                     {t("auth.ok")}
                                                 </button>
@@ -1149,7 +1139,7 @@ export function ChatSidebar({
                                                         setEditingProjectId(null);
                                                         setEditingProjectName("");
                                                     }}
-                                                    className="h-7 rounded-md px-2 text-[10px] font-black text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-800"
+                                                    className="h-7 rounded-md px-2 text-xs font-bold text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-800"
                                                 >
                                                     {t("auth.cancel")}
                                                 </button>
@@ -1168,8 +1158,8 @@ export function ChatSidebar({
                                                     className="flex min-w-0 flex-1 items-center justify-between gap-2 rounded-md px-1.5 py-1 text-left"
                                                     aria-pressed={isProjectActive}
                                                 >
-                                                    <span className="truncate text-[11px] font-black">{project.name}</span>
-                                                    <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-black ${
+                                                    <span className="truncate text-[11px] font-bold">{project.name}</span>
+                                                    <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[11px] font-bold ${
                                                         isProjectActive
                                                             ? "bg-white/15 text-white"
                                                             : "bg-white text-zinc-500 dark:bg-zinc-800 dark:text-zinc-300"
@@ -1218,11 +1208,38 @@ export function ChatSidebar({
 
             <div
                 data-testid="sidebar-conversation-list"
-                className="min-h-[10rem] flex-1 touch-pan-y space-y-1 overflow-y-auto overscroll-contain p-2 [scrollbar-gutter:stable]"
+                // SHORT-VIEWPORT-001. Two heights, one scroll owner each:
+                //
+                // - Tall enough for the whole drawer: unchanged. The list is the
+                //   scroller, header and footer stay pinned, and the drawer
+                //   itself never overflows.
+                // - Shorter than that: the pinned layout cannot fit -- the
+                //   chrome plus this list's 10rem floor plus the footer need
+                //   ~658px -- so the list stops being a scroller, takes its
+                //   natural height, and the drawer scrolls as one region that
+                //   includes the header and the account footer.
+                //
+                // `flex-none` rather than a smaller `min-height`: an item that
+                // can still shrink would end up with a box shorter than the rows
+                // it is painting, and with `overflow: visible` those rows would
+                // be drawn straight over the footer.
+                //
+                // `overscroll-auto` in the drawer covers the residual case where
+                // the drawer overflows while it is still tall enough to keep the
+                // list a scroller: a drag that runs out of list chains into the
+                // drawer instead of dead-ending, and the drawer's own
+                // `overscroll-contain` still stops it before the page behind.
+                className={`min-h-[10rem] touch-pan-y space-y-1 p-2 [scrollbar-gutter:stable] ${
+                    isSingleScrollDrawer
+                        ? "flex-none overflow-visible"
+                        : `flex-1 overflow-y-auto ${
+                              isMobileDrawer ? "overscroll-auto" : "overscroll-contain"
+                          }`
+                }`}
             >
                 {messageSearchResults.length > 0 && (
                     <div className="mb-2 rounded-xl border border-blue-200 bg-blue-50 p-2 text-xs dark:border-blue-900/50 dark:bg-blue-950/20">
-                        <p className="px-1 pb-1 font-black text-blue-700 dark:text-blue-300">
+                        <p className="px-1 pb-1 font-bold text-blue-700 dark:text-blue-300">
                             {t("sidebar.messageMatches")}
                         </p>
                         {messageSearchResults.slice(0, 4).map((result) => (
@@ -1251,7 +1268,7 @@ export function ChatSidebar({
                                     href={chatWorkspaceGuideHref(lang, "labels")}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="mt-2 font-black text-blue-600 hover:text-blue-500 dark:text-blue-300"
+                                    className="mt-2 font-bold text-blue-600 hover:text-blue-500 dark:text-blue-300"
                                 >
                                     {helpCopy.labelGuide}
                                 </Link>
@@ -1263,26 +1280,40 @@ export function ChatSidebar({
                 )}
                 {filteredConversations.map((conv) => {
                     const isActive = currentChatId === conv.id;
-                    const isPrivate = conv.id === "private-chat";
                     const isMenuOpen = openMenuId === conv.id;
 
                     return (
                         <div
                             key={conv.id}
+                            data-testid="sidebar-conversation-item"
+                            data-conversation-id={conv.id}
+                            // Opening a conversation is the sidebar's primary
+                            // action and was mouse-only: no role, no tab stop and
+                            // no key handler, so keyboard and screen-reader users
+                            // had no way to reach any prior conversation. The row
+                            // contains its own actions button, so it stays a div
+                            // with an explicit button role rather than a <button>
+                            // (nested interactive elements are invalid).
+                            role="button"
+                            tabIndex={0}
+                            aria-current={isActive ? "true" : undefined}
+                            onKeyDown={(event) => {
+                                if (event.target !== event.currentTarget) return;
+                                if (event.key === "Enter" || event.key === " ") {
+                                    event.preventDefault();
+                                    onSelectConversation(conv.id);
+                                }
+                            }}
                             onClick={() => onSelectConversation(conv.id)}
-                            className={`relative group flex items-center justify-between rounded-xl px-3 py-2.5 text-xs cursor-pointer transition-all border ${isMenuOpen ? "z-20" : "z-10"} ${isPrivate
-                                    ? isActive
-                                    ? "bg-purple-100 border-purple-300 text-purple-700 font-semibold dark:bg-purple-900/30 dark:border-purple-700/60 dark:text-purple-200"
-                                    : "bg-purple-50/50 border-purple-100 text-purple-500 hover:bg-purple-100 dark:bg-purple-950/15 dark:border-purple-900/20 dark:text-purple-400/80 dark:hover:bg-purple-900/20 dark:hover:text-purple-300"
-                                : isActive
+                            className={`relative group flex items-center justify-between rounded-xl px-3 py-2.5 text-xs cursor-pointer transition-all border ${isMenuOpen ? "z-20" : "z-10"} ${isActive
                                     ? "bg-zinc-200 border-zinc-300 text-zinc-900 font-semibold dark:bg-zinc-800 dark:border-zinc-700/80 dark:text-zinc-100"
                                     : "bg-transparent border-transparent text-zinc-600 hover:bg-zinc-200/50 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800/40 dark:hover:text-zinc-200"
                                 }`}
                             title={isGuestMode ? t("sidebar.loginRequired") : ""}
                         >
-                            <div className="cursor-pointer flex min-w-0 flex-1 items-center gap-2.5 pr-6">
-                                <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${isPrivate ? "bg-purple-500/10 text-purple-500" : conv.isLocked ? "bg-amber-500/10 text-amber-500" : "bg-blue-500/10 text-blue-500"}`}>
-                                    {isPrivate || conv.isLocked ? (
+                            <div className={`cursor-pointer flex min-w-0 flex-1 items-center gap-2.5 ${isMobileDrawer ? "pr-11" : "pr-6"}`}>
+                                <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${conv.isLocked ? "bg-amber-500/10 text-amber-500" : "bg-blue-500/10 text-blue-500"}`}>
+                                    {conv.isLocked ? (
                                         <Lock className="h-3.5 w-3.5" />
                                     ) : (
                                         <MessageSquare className="h-3.5 w-3.5" />
@@ -1291,29 +1322,29 @@ export function ChatSidebar({
                                 <span className="min-w-0 flex flex-col gap-1">
                                     <span className="truncate text-[13px] leading-4">{conv.title}</span>
                                     {conversationLabels[conv.id] && (
-                                        <span className="inline-flex w-fit items-center gap-1 rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-bold text-blue-500">
+                                        <span className="inline-flex w-fit items-center gap-1 rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[11px] font-bold text-blue-500">
                                             <Tag className="h-2.5 w-2.5" />
                                             {labelText(conversationLabels[conv.id])}
                                         </span>
                                     )}
                                     {getConversationProjectId(conv) && (
-                                        <span className="inline-flex w-fit max-w-full items-center gap-1 rounded-full bg-purple-500/10 px-1.5 py-0.5 text-[10px] font-bold text-purple-500">
+                                        <span className="inline-flex w-fit max-w-full items-center gap-1 rounded-full bg-purple-500/10 px-1.5 py-0.5 text-[11px] font-bold text-purple-500">
                                             <Folder className="h-2.5 w-2.5 shrink-0" />
                                             <span className="truncate">{projectText(getConversationProjectId(conv) || "")}</span>
                                         </span>
                                     )}
-                                    <span className="flex items-center gap-1.5 truncate text-[10px] font-medium text-zinc-400 dark:text-zinc-500">
+                                    <span className="flex items-center gap-1.5 truncate text-[11px] font-medium text-zinc-600 dark:text-zinc-400">
                                         {pinnedConversationIds.includes(conv.id) && <Pin className="h-3 w-3 shrink-0 text-blue-500" />}
                                         {favoriteConversationIds.includes(conv.id) && <Star className="h-3 w-3 shrink-0 fill-amber-400 text-amber-400" />}
                                         <Sparkles className="h-3 w-3 shrink-0" />
                                         <span className="truncate">{getConversationModelSummary(conv)}</span>
                                         {conv.shareEnabled && (
-                                            <span className="shrink-0 rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[9px] font-bold text-blue-500">
+                                            <span className="shrink-0 rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[11px] font-semibold text-blue-500">
                                                 {helpCopy.sharedBadge}
                                             </span>
                                         )}
                                         {conv.isLocked && (
-                                            <span className="shrink-0 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-bold text-amber-500">
+                                            <span className="shrink-0 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-semibold text-amber-500">
                                                 {helpCopy.lockedBadge}
                                             </span>
                                         )}
@@ -1330,7 +1361,7 @@ export function ChatSidebar({
                                          e.stopPropagation();
                                          toggleConversationMenu(conv.id, e.currentTarget);
                                      }}
-                                     className="cursor-pointer p-1 text-zinc-500 hover:text-zinc-200 transition-colors"
+                                     className={`flex shrink-0 cursor-pointer items-center justify-center text-zinc-500 transition-colors hover:text-zinc-200 ${isMobileDrawer ? "h-11 w-11" : "p-1"}`}
                                      title={t("chat.moreActions")}
                                      aria-label={`${t("chat.moreActions")}: ${conv.title}`}
                                      aria-expanded={isMenuOpen}
@@ -1402,7 +1433,7 @@ export function ChatSidebar({
                                         </button>
 
                                         <div className="my-1 border-t border-zinc-800" />
-                                        <div className="px-3 py-1 text-[10px] font-black uppercase tracking-wide text-zinc-500">
+                                        <div className="px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-zinc-500">
                                             {helpCopy.labelAssignment}
                                         </div>
                                         {(["work", "research", "personal"] as const).map((label) => (
@@ -1430,7 +1461,7 @@ export function ChatSidebar({
                                             </button>
                                         ))}
                                         <div className="my-1 border-t border-zinc-800" />
-                                        <div className="px-3 py-1 text-[10px] font-black uppercase tracking-wide text-zinc-500">
+                                        <div className="px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-zinc-500">
                                             {t("sidebar.moveToProject")}
                                         </div>
                                         {projects.length === 0 ? (
@@ -1616,7 +1647,15 @@ export function ChatSidebar({
                 })}
             </div>
 
-            <div className={`${isMobileDrawer ? "shrink-0 border-t border-zinc-200 bg-zinc-100/40 p-2 dark:border-zinc-800 dark:bg-zinc-900/50" : "shrink-0 border-t border-zinc-200 bg-zinc-100/40 p-3 dark:border-zinc-800 dark:bg-zinc-900/50"} flex min-h-0 flex-col gap-2 overflow-visible`}>
+            {/*
+              `mt-auto` in the drawer: once the conversation list stops being
+              the flexible spacer (short viewports, see above) something still
+              has to absorb the free space on a drawer whose content happens to
+              be shorter than the panel, or the footer would float mid-panel.
+              Auto margins resolve to 0 when the content overflows instead, so
+              this can never push the footer out of the scroll region.
+            */}
+            <div className={`${isMobileDrawer ? "mt-auto shrink-0 border-t border-zinc-200 bg-zinc-100/40 p-2 dark:border-zinc-800 dark:bg-zinc-900/50" : "shrink-0 border-t border-zinc-200 bg-zinc-100/40 p-3 dark:border-zinc-800 dark:bg-zinc-900/50"} flex min-h-0 flex-col gap-2 overflow-visible`}>
                 {isGuestMode ? (
                     <div className="shrink-0">
                         <UserUsageSummary
@@ -1640,13 +1679,14 @@ export function ChatSidebar({
                     </div>
                 ) : null}
                 <div className="shrink-0" data-testid="sidebar-account-controls">
-                    <AuthButton />
+                    <AuthButton showAnalyticsCookieButton={isMobileDrawer} />
                 </div>
                 <div className="shrink-0">
                     <FeedbackButton
                         currentModelId={currentModelId}
                         currentPlan={displayedPlan}
                         attachmentCount={attachmentCount}
+                        triggerTestId="sidebar-feedback-button"
                     />
                 </div>
             </div>
@@ -1659,7 +1699,7 @@ export function ChatSidebar({
                     aria-live="polite"
                 >
                     <div className="flex items-center justify-between gap-3">
-                        <span className="text-[10px] font-black uppercase tracking-[0.16em] text-blue-600 dark:text-blue-300">
+                        <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-blue-600 dark:text-blue-300">
                             {sidebarTourStep + 1} / {helpCopy.tourSteps.length}
                         </span>
                         <button
@@ -1671,7 +1711,7 @@ export function ChatSidebar({
                             {helpCopy.tourSkip}
                         </button>
                     </div>
-                    <h2 className="mt-2 text-sm font-black text-zinc-950 dark:text-white">
+                    <h2 className="mt-2 text-sm font-bold text-zinc-950 dark:text-white">
                         {helpCopy.tourSteps[sidebarTourStep].title}
                     </h2>
                     <p className="mt-1 text-xs font-medium leading-5 text-zinc-600 dark:text-zinc-300">
@@ -1681,7 +1721,7 @@ export function ChatSidebar({
                         type="button"
                         data-testid="sidebar-tour-next"
                         onClick={advanceSidebarTour}
-                        className="mt-3 flex h-9 w-full items-center justify-center rounded-xl bg-blue-600 px-4 text-xs font-black text-white hover:bg-blue-500"
+                        className="mt-3 flex h-9 w-full items-center justify-center rounded-xl bg-blue-600 px-4 text-xs font-bold text-white hover:bg-blue-500"
                     >
                         {sidebarTourStep === helpCopy.tourSteps.length - 1
                             ? helpCopy.tourDone
@@ -1690,95 +1730,6 @@ export function ChatSidebar({
                 </div>
             ) : null}
         </aside>
-        {showPrivateNotice && (
-            <div
-                className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-                role="presentation"
-                onMouseDown={(event) => {
-                    if (event.target === event.currentTarget) {
-                        closePrivateNotice(true);
-                    }
-                }}
-            >
-                <div
-                    ref={privateNoticeDialogRef}
-                    role="dialog"
-                    aria-modal="true"
-                    aria-labelledby="private-mode-notice-title"
-                    className="w-full max-w-lg rounded-lg border border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900"
-                >
-                    <div className="flex items-start justify-between gap-4 border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
-                        <div className="flex min-w-0 items-center gap-3">
-                            <ShieldCheck className="h-5 w-5 shrink-0 text-purple-500" />
-                            <div>
-                                <h2
-                                    id="private-mode-notice-title"
-                                    className="text-base font-semibold text-zinc-900 dark:text-zinc-100"
-                                >
-                                    {t("sidebar.privateNoticeTitle")}
-                                </h2>
-                                <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-                                    {t("sidebar.privateNoticeIntro")}
-                                </p>
-                            </div>
-                        </div>
-                        <button
-                            type="button"
-                            onClick={() => closePrivateNotice(true)}
-                            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
-                            aria-label={t("auth.cancel")}
-                        >
-                            <X className="h-4 w-4" />
-                        </button>
-                    </div>
-
-                    <div className="space-y-4 px-5 py-4 text-sm text-zinc-700 dark:text-zinc-300">
-                        <div className="flex gap-3">
-                            <Database className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
-                            <p className="leading-6">{t("sidebar.privateNoticeNoSave")}</p>
-                        </div>
-                        <div className="flex gap-3">
-                            <Send className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
-                            <p className="leading-6">{t("sidebar.privateNoticeProvider")}</p>
-                        </div>
-                        <div className="flex gap-3">
-                            <CloudUpload className="mt-0.5 h-4 w-4 shrink-0 text-cyan-500" />
-                            <p className="leading-6">{t("sidebar.privateNoticeAttachment")}</p>
-                        </div>
-                        <div className="flex gap-3 rounded-md bg-amber-50 px-3 py-2.5 text-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
-                            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                            <p className="text-xs leading-5">{t("sidebar.privateNoticeCaution")}</p>
-                        </div>
-                        <Link
-                            href="/privacy"
-                            className="inline-flex text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
-                        >
-                            {t("sidebar.privateNoticePolicy")}
-                        </Link>
-                    </div>
-
-                    <div className="flex justify-end gap-2 border-t border-zinc-200 px-5 py-4 dark:border-zinc-800">
-                        <button
-                            type="button"
-                            onClick={() => closePrivateNotice(true)}
-                            className="rounded-md px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                        >
-                            {t("auth.cancel")}
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => {
-                                closePrivateNotice(false);
-                                onTogglePrivateMode();
-                            }}
-                            className="rounded-md bg-purple-600 px-4 py-2 text-sm font-semibold text-white hover:bg-purple-500"
-                        >
-                            {t("sidebar.privateNoticeContinue")}
-                        </button>
-                    </div>
-                </div>
-            </div>
-        )}
         {renameTarget && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
                 <form
@@ -1842,7 +1793,7 @@ export function ChatSidebar({
                             <Share2 className="h-5 w-5" aria-hidden="true" />
                         </span>
                         <div>
-                            <h2 id="conversation-share-title" className="text-base font-black text-zinc-950 dark:text-white">
+                            <h2 id="conversation-share-title" className="text-base font-bold text-zinc-950 dark:text-white">
                                 {helpCopy.shareDialogTitle}
                             </h2>
                             <p className="mt-1 text-xs font-semibold text-zinc-500">{shareTarget.title}</p>
@@ -1873,7 +1824,7 @@ export function ChatSidebar({
                                 onShare(shareTarget.id, shareTarget.title);
                                 setShareTarget(null);
                             }}
-                            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-black text-white hover:bg-blue-500"
+                            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-500"
                         >
                             {shareTarget.shareEnabled
                                 ? t("sidebar.refreshShare")

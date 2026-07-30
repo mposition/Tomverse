@@ -24,6 +24,7 @@ import type {
   ProviderPricingModel,
   ProviderSettlementModel,
 } from "@/lib/providerBillingTypes";
+import type { PublicProviderStatus } from "@/lib/providerPublicStatusCore";
 
 const REFRESH_INTERVAL_MS = 120_000;
 
@@ -76,6 +77,22 @@ const statusPanelClass: Record<ProviderHealthStatus, string> = {
   available: "border-emerald-500/20 bg-emerald-500/5",
   limited: "border-amber-500/25 bg-amber-500/5",
   outage: "border-red-500/25 bg-red-500/5",
+};
+// What tomverse.app/status shows for this provider right now -- rendered
+// here too so admins can see the public claim can't have drifted from this
+// panel's own diagnostics (both read provider.publicStatus off the same
+// dashboard row; see lib/providerPublicStatusCore.ts).
+const publicStatusCopy: Record<PublicProviderStatus, string> = {
+  operational: "Public: Operational",
+  degraded: "Public: Degraded",
+  incident: "Public: Incident",
+  unknown: "Public: Unknown",
+};
+const publicStatusClass: Record<PublicProviderStatus, string> = {
+  operational: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
+  degraded: "border-amber-500/30 bg-amber-500/10 text-amber-300",
+  incident: "border-red-500/30 bg-red-500/10 text-red-300",
+  unknown: "border-zinc-600/40 bg-zinc-700/20 text-zinc-300",
 };
 const balanceSourceCopy: Record<ProviderHealthRow["balanceSource"], string> = {
   api: "provider API",
@@ -314,7 +331,7 @@ function ProviderRow({
               </h2>
               <Link
                 href={`/admin/providers/${provider.provider}`}
-                className="rounded-full border border-zinc-700 bg-zinc-900 px-2.5 py-1 text-xs font-black text-zinc-300 transition hover:border-blue-500/40 hover:text-blue-200"
+                className="rounded-full border border-zinc-700 bg-zinc-900 px-2.5 py-1 text-xs font-bold text-zinc-300 transition hover:border-blue-500/40 hover:text-blue-200"
               >
                 Workspace
               </Link>
@@ -331,6 +348,12 @@ function ProviderRow({
                   className={`h-3 w-3 transition-transform ${statusOpen ? "rotate-180" : ""}`}
                 />
               </button>
+              <span
+                title={provider.publicStatusReasonText}
+                className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${publicStatusClass[provider.publicStatus]}`}
+              >
+                {publicStatusCopy[provider.publicStatus]}
+              </span>
               <span
                 className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${apiKeyClass(provider.apiKeyConfigured)}`}
               >
@@ -800,7 +823,7 @@ function ProviderRow({
                   <div className="flex items-start gap-2">
                     <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-blue-300" />
                     <div className="min-w-0">
-                      <p className="text-xs font-black text-blue-100">
+                      <p className="text-xs font-bold text-blue-100">
                         {selectedError.code}
                       </p>
                       <p className="mt-1 text-xs leading-5 text-zinc-400">
@@ -1099,6 +1122,17 @@ export function AdminProviderHealthPanel({
           <p className="mt-1 text-xs text-zinc-500">
             Admin API refreshes every 30 seconds · Updated{" "}
             {dateLabel(dashboard.generatedAt)}
+          </p>
+          <p
+            className={`mt-1 text-xs ${
+              dashboard.probeCostCapMicroUsd > 0 &&
+              dashboard.probeCostTodayMicroUsd >= dashboard.probeCostCapMicroUsd
+                ? "font-bold text-amber-300"
+                : "text-zinc-500"
+            }`}
+          >
+            Synthetic probe spend today: {money(dashboard.probeCostTodayMicroUsd)} of{" "}
+            {money(dashboard.probeCostCapMicroUsd)} daily cap
           </p>
         </div>
         <button

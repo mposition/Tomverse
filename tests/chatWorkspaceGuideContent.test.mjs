@@ -10,7 +10,7 @@ test("chat workspace guide is complete in every supported language", () => {
   for (const language of languages) {
     const copy = chatWorkspaceGuideContent[language];
     assert.ok(copy.title.length > 10, `${language} title is missing`);
-    assert.equal(copy.tourItems.length, 7, `${language} tour must explain seven controls`);
+    assert.equal(copy.tourItems.length, 6, `${language} tour must explain six controls`);
     assert.equal(copy.sections.length, 9, `${language} guide must contain ten sections including the tour`);
     assert.deepEqual(
       copy.sections.map((section) => section.id),
