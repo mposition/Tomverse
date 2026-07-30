@@ -1234,6 +1234,10 @@ export async function POST(req: Request) {
                 );
             }
 
+            // Set once Perplexity has accepted the job. If persisting the
+            // local rows then fails, this is the id an operator needs to
+            // reconcile a provider job that has no Message or job row here.
+            let submittedPerplexityJobId: string | null = null;
             try {
                 const depthParams =
                     DEEP_RESEARCH_DEPTH_PARAMS[deepResearchDepth || "standard"];
@@ -1244,6 +1248,7 @@ export async function POST(req: Request) {
                         depthParams.reasoningEffort ||
                         (modelConfig.reasoning === "high" ? "high" : undefined),
                 });
+                submittedPerplexityJobId = perplexityJobId;
 
                 await linkChatReservationProviderRequest(
                     usageReservation.reservationId,
@@ -1331,9 +1336,15 @@ export async function POST(req: Request) {
                     traceId,
                     error,
                     requestedModelId,
-                    // Shape of the conversation this request carried, so a
-                    // recurrence is diagnosable without logging its content.
-                    { messageShape: describeDeepResearchMessages(formattedMessages) }
+                    {
+                        // Shape of the conversation this request carried, so a
+                        // recurrence is diagnosable without logging its content.
+                        messageShape:
+                            describeDeepResearchMessages(formattedMessages),
+                        ...(submittedPerplexityJobId
+                            ? { submittedPerplexityJobId }
+                            : {}),
+                    }
                 );
                 return isMessageContractError
                     ? tracedJsonError(
