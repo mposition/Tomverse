@@ -30,6 +30,10 @@ const blockedOriginResponse = () =>
     },
   });
 
+const isRouterPrefetch = (request: NextRequest) =>
+  request.headers.has("next-router-prefetch") ||
+  request.headers.get("purpose") === "prefetch";
+
 const TRACE_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -97,6 +101,18 @@ export function proxy(request: NextRequest) {
     !hasValidMutationOrigin(request)
   ) {
     return blockedMutationOriginResponse(request);
+  }
+
+  // Router prefetches fetch an RSC payload rather than a document, so they need
+  // no nonce and no CSP header. They must still clear the host, origin-secret
+  // and mutation-origin checks above: gating those on request headers would let
+  // any caller opt out of the entire edge security layer.
+  //
+  // This sits ahead of the localized redirect below so that a prefetch keeps
+  // behaving exactly as it did while the matcher excluded it -- the fix adds
+  // the security checks to prefetches without also starting to redirect them.
+  if (isRouterPrefetch(request)) {
+    return NextResponse.next();
   }
 
   // R-05-LANG. Send a non-English visitor to their own localized page before
@@ -218,14 +234,12 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
+  // Deliberately unconditional. A `missing:` clause here would let any caller
+  // skip the proxy - and therefore the host allowlist, the Cloudflare
+  // origin-secret check, the mutation-origin (CSRF) check and CSP delivery - by
+  // sending a single request header. Prefetch requests are cheap-pathed inside
+  // proxy() instead, after those checks have run.
   matcher: [
-    {
-      source:
-        "/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml).*)",
-      missing: [
-        { type: "header", key: "next-router-prefetch" },
-        { type: "header", key: "purpose", value: "prefetch" },
-      ],
-    },
+    "/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml).*)",
   ],
 };

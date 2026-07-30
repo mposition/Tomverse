@@ -900,14 +900,26 @@ export function MobileChatShell({
                 onSelectConversation(id);
               }}
               onRename={onRename}
-              onDelete={onDelete}
+              // These open a page-level confirmation dialog that renders outside
+              // the drawer. The drawer must close first or the dialog is painted
+              // underneath its overlay and the action looks like it did nothing.
+              onDelete={(id) => {
+                setIsDrawerOpen(false);
+                onDelete(id);
+              }}
               isGuestMode={isGuestMode}
               guestMessageCount={guestMessageCount}
               maxGuestMessages={maxGuestMessages}
               onLock={onLock}
-              onUnlock={onUnlock}
+              onUnlock={(id) => {
+                setIsDrawerOpen(false);
+                onUnlock(id);
+              }}
               onShare={onShare}
-              onRevokeShare={onRevokeShare}
+              onRevokeShare={(id) => {
+                setIsDrawerOpen(false);
+                onRevokeShare(id);
+              }}
               onDownload={onDownload}
               currentModelId={resolvedActiveModelId}
               attachmentCount={attachments.length}

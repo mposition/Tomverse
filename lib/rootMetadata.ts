@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { SITE_NAME, SITE_ORIGIN } from "@/lib/seo";
 
 /**
@@ -71,4 +71,28 @@ export const rootMetadata: Metadata = {
         }
       : {}),
   },
+};
+
+/**
+ * The viewport every root layout shares, for the same reason `rootMetadata`
+ * is shared: there is more than one root and they must not drift apart.
+ */
+export const rootViewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  // Required for `env(safe-area-inset-*)` to resolve to anything but 0px. The
+  // chat header, composer and every bottom sheet already reserve space with
+  // those insets; without `viewport-fit=cover` all of that padding is inert and
+  // controls sit under the notch / Dynamic Island / home indicator.
+  viewportFit: "cover",
+  // Resize the layout viewport when the software keyboard opens, so the
+  // `100dvh` app shell keeps the composer above the keyboard instead of behind
+  // it. Without this, `dvh` tracks browser chrome but not the keyboard.
+  interactiveWidget: "resizes-content",
+  // Tint the mobile browser chrome to match the app surfaces defined in
+  // app/globals.css; keep these in step with `--background`.
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#0a0a0a" },
+  ],
 };

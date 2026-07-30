@@ -1,6 +1,7 @@
 import "server-only";
 
 import { prisma } from "@/lib/prisma";
+import { invalidateSessionSecuritySnapshot } from "@/lib/sessionSecurity";
 
 export type LoginMethodProvider = "google" | "azure-ad" | "email";
 export type RemoveLoginMethodOutcome = "removed" | "already-removed" | "blocked";
@@ -19,7 +20,7 @@ export async function removeLoginMethod(
   userId: string,
   method: LoginMethodProvider
 ): Promise<RemoveLoginMethodOutcome> {
-  return prisma.$transaction(async (tx) => {
+  const outcome = await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"login-methods:" + userId}))`;
 
     const [accounts, user] = await Promise.all([
@@ -56,11 +57,20 @@ export async function removeLoginMethod(
       });
     }
     await tx.session.deleteMany({ where: { userId } });
+    // `sessionsRevokedAt` is the epoch lib/sessionRevocationCore.ts actually
+    // checks on every session resolution. `sessionsInvalidatedAt` predates it
+    // and is stamped alongside so a rollback to the previous checker still
+    // revokes; writing only the older column would make this unlink a no-op.
     await tx.user.update({
       where: { id: userId },
-      data: { sessionsInvalidatedAt: new Date() },
+      data: { sessionsInvalidatedAt: new Date(), sessionsRevokedAt: new Date() },
     });
 
     return "removed" as const;
   });
+
+  // The snapshot cache is keyed per user and holds for SNAPSHOT_TTL_MS; without
+  // this the unlinked user keeps a working session until it lapses.
+  if (outcome === "removed") invalidateSessionSecuritySnapshot(userId);
+  return outcome;
 }

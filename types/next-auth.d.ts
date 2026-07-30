@@ -18,5 +18,10 @@ declare module "next-auth/jwt" {
         plan?: "Free" | "Pro" | "Max";
         createdAt?: string;
         authenticatedAt?: string;
+        /**
+         * Epoch milliseconds at which this token was issued. Compared against
+         * `User.sessionsRevokedAt` so revocation works without a session table.
+         */
+        sessionIssuedAt?: number;
     }
 }

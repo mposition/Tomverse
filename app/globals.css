@@ -1,4 +1,8 @@
 @import "tailwindcss";
+/* rehype-highlight adds hljs-* classes to code blocks; without a theme they are
+   inert and every response renders monochrome. Bundled from node_modules, so
+   `style-src 'self'` is satisfied. */
+@import "highlight.js/styles/github-dark.css";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
@@ -367,4 +371,37 @@ html[data-consent-pending] [data-testid="marketing-consent-slot"] {
   html[data-consent-pending] [data-testid="marketing-consent-slot"] {
     min-height: 116px;
   }
+}
+
+/* Baseline visible focus indicator (WCAG 2.4.7).
+   Several controls - including the main chat composer - set `outline-none`
+   without supplying a replacement ring, which left keyboard users with no
+   indication of focus. `:where()` keeps specificity at 0 so any component that
+   does define its own `focus:`/`focus-visible:` ring still wins, and targeting
+   `:focus-visible` avoids drawing rings on mouse clicks. */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-blue-500);
+  outline-offset: 2px;
+}
+
+/* Respect the OS reduced-motion preference. The typing indicator and status
+   dots animate indefinitely while a response streams, which is exactly the
+   sustained motion this setting exists to suppress. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Korean and Chinese break between arbitrary syllables by default, splitting
+   words mid-word. `keep-all` keeps words intact; `anywhere` retains the long
+   URL / unbroken-token protection that `break-words` provides today. */
+:where(:lang(ko), :lang(zh)) {
+  word-break: keep-all;
+  overflow-wrap: anywhere;
 }

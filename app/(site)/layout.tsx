@@ -5,9 +5,10 @@ import {
   DOCUMENT_LANGUAGE_HEADER,
   isSupportedDocumentLanguage,
 } from "@/lib/documentLanguage";
-import { rootMetadata } from "@/lib/rootMetadata";
+import { rootMetadata, rootViewport } from "@/lib/rootMetadata";
 
 export const metadata = rootMetadata;
+export const viewport = rootViewport;
 
 /**
  * Root layout for the English marketing pages and the application.

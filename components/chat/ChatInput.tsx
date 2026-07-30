@@ -496,6 +496,7 @@ export function ChatInput({
   );
   const isMobileShell = useIsMobileShell();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  /** True while an IME composition is in progress, so Enter must not submit. */
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   // The draft this composer is currently editing. Everything scoped below is
   // scoped to this, not to the component instance: the composer is shared by
