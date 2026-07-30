@@ -1269,7 +1269,24 @@ export function ChatSidebar({
                     return (
                         <div
                             key={conv.id}
+                            // Opening a conversation is the sidebar's primary
+                            // action and was mouse-only: no role, no tab stop and
+                            // no key handler, so keyboard and screen-reader users
+                            // had no way to reach any prior conversation. The row
+                            // contains its own actions button, so it stays a div
+                            // with an explicit button role rather than a <button>
+                            // (nested interactive elements are invalid).
+                            role="button"
+                            tabIndex={0}
+                            aria-current={isActive ? "true" : undefined}
                             onClick={() => onSelectConversation(conv.id)}
+                            onKeyDown={(event) => {
+                                if (event.target !== event.currentTarget) return;
+                                if (event.key === "Enter" || event.key === " ") {
+                                    event.preventDefault();
+                                    onSelectConversation(conv.id);
+                                }
+                            }}
                             className={`relative group flex items-center justify-between rounded-xl px-3 py-2.5 text-xs cursor-pointer transition-all border ${isMenuOpen ? "z-20" : "z-10"} ${isPrivate
                                     ? isActive
                                     ? "bg-purple-100 border-purple-300 text-purple-700 font-semibold dark:bg-purple-900/30 dark:border-purple-700/60 dark:text-purple-200"

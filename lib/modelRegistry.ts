@@ -2,6 +2,7 @@ import "server-only";
 
 import type { ModelRegistryEntry, Prisma } from "@prisma/client";
 import { isMissingDatabaseSchemaError } from "@/lib/databaseError";
+import { isE2EDatabaseDisabled } from "@/lib/e2eTestMode";
 import { prisma } from "@/lib/prisma";
 import {
   AVAILABLE_MODELS,
@@ -20,7 +21,9 @@ import {
   isAiProvider,
 } from "@/lib/modelRegistryShared";
 
-const E2E_DATABASE_DISABLED = process.env.E2E_DISABLE_DATABASE === "true";
+// Evaluated per call rather than captured at module load, so the guard sees the
+// real environment regardless of import order.
+const E2E_DATABASE_DISABLED = isE2EDatabaseDisabled;
 
 const staticModelWithRuntimeDefaults = (
   model: AiModel,
@@ -136,7 +139,7 @@ let bootstrapPromise: Promise<void> | null = null;
 let didWarnAboutRegistrySchema = false;
 
 export async function ensureModelRegistrySeeded() {
-  if (E2E_DATABASE_DISABLED) return;
+  if (E2E_DATABASE_DISABLED()) return;
   if (!bootstrapPromise) {
     bootstrapPromise = prisma.modelRegistryEntry
       .createMany({ data: staticSeedRows(), skipDuplicates: true })
@@ -152,7 +155,7 @@ export async function ensureModelRegistrySeeded() {
 export async function getRuntimeModels(options?: {
   includeCatalogDeleted?: boolean;
 }): Promise<AiModel[]> {
-  if (E2E_DATABASE_DISABLED) {
+  if (E2E_DATABASE_DISABLED()) {
     return STATIC_RUNTIME_MODELS.filter(
       (model) => options?.includeCatalogDeleted || !model.catalogDeleted
     );
@@ -289,7 +292,7 @@ export type ModelRegistrySecurityFinding = {
 export async function getModelRegistrySecurityFindings(): Promise<
   ModelRegistrySecurityFinding[]
 > {
-  if (E2E_DATABASE_DISABLED) return [];
+  if (E2E_DATABASE_DISABLED()) return [];
   const rows = await prisma.modelRegistryEntry.findMany({
     select: {
       id: true,

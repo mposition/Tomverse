@@ -11,6 +11,7 @@ import {
   formatChatCostSafetyDetails,
   isChatCostSafetyCode,
 } from "@/lib/chatCostSafetyCore";
+import { guestMessagesStorageKey } from "@/lib/guestConversationStorage";
 
 const processedPromptKeys = new Set<string>();
 const CHAT_STREAM_IDLE_TIMEOUT_MS = 90_000;
@@ -100,6 +101,8 @@ function ChatAppComponent({
     };
   
   const isSendingRef = useRef(false);
+  /** True while an IME composition is in progress in the model-only composer. */
+  const isModelInputComposingRef = useRef(false);
   const streamingChatIdRef = useRef<string | null>(null);
   const lastFetchedConversationKeyRef = useRef<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -174,7 +177,7 @@ function ChatAppComponent({
         if (initialConversationId) {
             loadedChatIdRef.current = initialConversationId;
 
-        const storageKey = `guest_messages_${initialConversationId}_${modelId}`;
+        const storageKey = guestMessagesStorageKey(initialConversationId, modelId);
         const savedMessages = localStorage.getItem(storageKey);
         if (savedMessages) {
           try {
@@ -300,7 +303,7 @@ function ChatAppComponent({
   useEffect(() => {
       if (isGuestMode && initialConversationId && isMessagesLoaded && messages.length > 0) {
           if (loadedChatIdRef.current === initialConversationId) {
-              const storageKey = `guest_messages_${initialConversationId}_${modelId}`;
+              const storageKey = guestMessagesStorageKey(initialConversationId, modelId);
               localStorage.setItem(storageKey, JSON.stringify(messages));
           }
     }
@@ -707,10 +710,27 @@ function ChatAppComponent({
                               value={modelInput}
                               onChange={(event) => setModelInput(event.target.value)}
                               onKeyDown={(event) => {
+                                  // Never submit mid-IME-composition: Enter is
+                                  // committing a Korean/Japanese/Chinese syllable.
+                                  if (
+                                      isModelInputComposingRef.current ||
+                                      event.nativeEvent.isComposing ||
+                                      event.keyCode === 229
+                                  ) {
+                                      return;
+                                  }
                                   if (event.key === "Enter" && !event.shiftKey) {
                                       event.preventDefault();
                                       handleModelOnlySubmit();
                                   }
+                              }}
+                              onCompositionStart={() => {
+                                  isModelInputComposingRef.current = true;
+                              }}
+                              onCompositionEnd={() => {
+                                  requestAnimationFrame(() => {
+                                      isModelInputComposingRef.current = false;
+                                  });
                               }}
                               disabled={isSending || !initialConversationId}
                               rows={1}

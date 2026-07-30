@@ -8,6 +8,7 @@ import {
   type BillingCurrency,
   type BillingMarket,
 } from "@/lib/billingMarkets";
+import { isE2EFixtureMode } from "@/lib/e2eTestMode";
 import {
   DEFAULT_BILLING_PRICE_CATALOG,
   getBillingPriceCatalog,
@@ -36,6 +37,9 @@ type PublicBillingConfig<TConfig> = Omit<TConfig, "plans" | "creditPacks"> & {
   pricingMode: "fixed";
   exchangeRateUpdatedAt: null;
 };
+
+/** Market used when the edge did not supply a verifiable country. */
+export const DEFAULT_BILLING_COUNTRY = "US";
 
 // Only edge-injected headers belong here: Cloudflare and Vercel overwrite these
 // on the way in, so a client cannot forge them. Do not add client-settable
@@ -79,7 +83,12 @@ export function validateBillingMarketRequest({
 }): BillingMarket {
   const trustedCountry = trustedCountryFromHeaders(req.headers);
   const requestedCountry = normalizeBillingCountry(country);
-  const selectedCountry = trustedCountry || requestedCountry || "US";
+  // Fail closed. The client's `country` is never authoritative for pricing: if
+  // the edge did not tell us where the request came from, fall back to the
+  // default market instead of letting the caller choose a cheaper one. Honouring
+  // `requestedCountry` here also defeated the webhook amount check downstream,
+  // because the "expected" amount was derived from the same forged input.
+  const selectedCountry = trustedCountry || DEFAULT_BILLING_COUNTRY;
   if (trustedCountry && requestedCountry && trustedCountry !== requestedCountry) {
     throw new BillingMarketValidationError(
       "The selected billing country does not match the checkout region. Reload pricing and try again."
@@ -107,8 +116,7 @@ export async function withDisplayCurrency<
 ): Promise<PublicBillingConfig<TConfig>> {
   const market = inferBillingMarketFromRequest(req);
   const catalog =
-    process.env.E2E_AUTH_BYPASS === "true" &&
-    process.env.E2E_DISABLE_DATABASE === "true"
+    isE2EFixtureMode()
       ? DEFAULT_BILLING_PRICE_CATALOG
       : await getBillingPriceCatalog();
   return {

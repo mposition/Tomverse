@@ -8,7 +8,10 @@ type AuthAuditEvent =
     | "auth.sign_in"
     | "auth.sign_in_denied_suspended"
     | "auth.sign_out"
-    | "auth.link_account";
+    | "auth.link_account"
+    // A presented token was rejected during session resolution because the
+    // account was revoked (sessionsRevokedAt) or is no longer active.
+    | "auth.session_rejected";
 export type SecurityAuditEvent =
     | AuthAuditEvent
     | "conversation.share.create"
@@ -80,5 +83,7 @@ export const logAuthAuditEvent = (
         userId?: string | null;
         provider?: string | null;
         isNewUser?: boolean;
+        /** Short machine-readable cause, e.g. why a session was rejected. */
+        reason?: string | null;
     } = {}
 ) => logSecurityAuditEvent(event, details);

@@ -41,6 +41,10 @@ model User {
   aiUsageRestrictedById         String?
   aiUsageRestrictedByEmail      String?
   securityIncidentNote          String?
+  // Session-invalidation epoch. Sessions use the JWT strategy, so there is no
+  // server-side session row to delete; any token issued at or before this
+  // instant is rejected. Bumped by revokeAllUserSessions().
+  sessionsRevokedAt             DateTime?
   accountDeletionRequestedAt    DateTime?
   accountDeletionScheduledFor   DateTime?
   lastLoginAt                   DateTime?

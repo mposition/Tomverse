@@ -5,6 +5,7 @@ import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import { chatErrorResponse } from "@/lib/chatSecurity";
+import { getAnonymousClientKey } from "@/lib/clientIp";
 import { sendTransactionalEmail } from "@/lib/email";
 import { prisma } from "@/lib/prisma";
 import {
@@ -52,7 +53,9 @@ const supportNotificationEmail = () =>
 export async function POST(req: Request) {
   try {
     const session = await getServerSession(authOptions);
-    const subject = session?.user?.id || "guest";
+    // Per-caller, not a single shared "guest" bucket: one anonymous client must
+    // not be able to exhaust the daily allowance for every other visitor.
+    const subject = session?.user?.id || `guest:${getAnonymousClientKey(req)}`;
     await consumeApiRateLimit(req, subject, "feedback-submit", {
       minute: 5,
       day: 30,

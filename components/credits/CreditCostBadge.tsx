@@ -83,6 +83,12 @@ export function CreditCostBadge({
       className={`inline-flex shrink-0 items-center justify-center rounded-full border font-black tabular-nums leading-none ${sizeClasses[size]} ${toneClasses[tone]} ${className}`}
     >
       <CreditCoinIcon />
+      {/* The wrapper is a plain <span> (implicit role "generic"), where
+          `aria-label` is ignored, and the icon is aria-hidden. Without this
+          visually-hidden text the cost of an action is absent from the
+          accessibility tree entirely. `aria-hidden` on the visible number keeps
+          the announcement from being duplicated. */}
+      <span className="sr-only">{accessibleLabel}</span>
       <span aria-hidden="true">{formatCredits(credits)}</span>
     </span>
   );

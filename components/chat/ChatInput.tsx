@@ -404,6 +404,8 @@ export function ChatInput({
     [PUBLIC_MODELS]
   );
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  /** True while an IME composition is in progress, so Enter must not submit. */
+  const isComposingRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const previousAttachmentsRef = useRef<ChatAttachment[]>([]);
   const hasHandledFocusTokenRef = useRef(false);
@@ -1153,6 +1155,13 @@ export function ChatInput({
   }, [attachments]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // While an IME is composing (Korean, Japanese, Chinese...), Enter commits the
+    // in-progress syllable and must not submit. Swallowing it here would both
+    // break the commit and send a truncated prompt. `keyCode === 229` covers
+    // browsers that fire keydown without setting `isComposing`.
+    if (isComposingRef.current || e.nativeEvent.isComposing || e.keyCode === 229) {
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       if (!isDisabled) {
@@ -1160,6 +1169,17 @@ export function ChatInput({
         onSubmit();
       }
     }
+  };
+
+  // `compositionend` fires before the final `keydown` in some IME/browser
+  // combinations, so treat the composition as live for one frame afterwards.
+  const handleCompositionStart = () => {
+    isComposingRef.current = true;
+  };
+  const handleCompositionEnd = () => {
+    requestAnimationFrame(() => {
+      isComposingRef.current = false;
+    });
   };
 
   const handleFilesSelected = async (files: FileList | File[] | null) => {
@@ -2349,6 +2369,8 @@ export function ChatInput({
             onChange(e.target.value);
           }}
           onKeyDown={handleKeyDown}
+          onCompositionStart={handleCompositionStart}
+          onCompositionEnd={handleCompositionEnd}
           onPaste={handlePaste}
           aria-label={placeholderText}
           placeholder={placeholderText}

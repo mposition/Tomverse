@@ -32,6 +32,10 @@ import {
   type AppToastTone,
 } from "@/lib/appToast";
 import {
+  removeAllGuestConversationMessages,
+  removeGuestConversationMessages,
+} from "@/lib/guestConversationStorage";
+import {
   notifyUserUsageChanged,
   useUserUsage,
 } from "@/components/chat/useUserUsage";
@@ -194,7 +198,7 @@ function ConfirmDialog({
   onConfirm: () => void | Promise<void>;
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4">
       <div
         role="dialog"
         aria-modal="true"
@@ -1211,13 +1215,16 @@ export default function Home() {
     if (isGuestMode) {
       const updated = conversations.filter((c) => c.id !== id);
       setConversations(updated);
-      localStorage.removeItem(`guest_messages_${id}`);
-      
+      removeGuestConversationMessages(id);
+
       if (currentChatId === id) {
         setCurrentChatId(updated.length > 0 ? updated[0].id : null);
       }
       if (updated.length === 0) {
         localStorage.removeItem("guest_conversations");
+        // Nothing is left to reference the remaining transcripts, so drop them
+        // rather than leaving deleted prompts recoverable on a shared browser.
+        removeAllGuestConversationMessages();
       }
     } else {    
       try {
@@ -1578,6 +1585,7 @@ export default function Home() {
       );
     }
   };
+
 
   const handleAttachmentsChange = useCallback(
     (nextAttachments: ChatAttachment[]) => {
@@ -2424,7 +2432,7 @@ export default function Home() {
       </div>
     )}
     {compareSummary && (
-      <div className="fixed inset-x-0 top-0 z-50 flex h-[100dvh] items-center justify-center overflow-hidden bg-black/60 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-[max(0.75rem,env(safe-area-inset-top))] sm:p-4">
+      <div className="fixed inset-x-0 top-0 z-[130] flex h-[100dvh] items-center justify-center overflow-hidden bg-black/60 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-[max(0.75rem,env(safe-area-inset-top))] sm:p-4">
         <section
           role="dialog"
           data-testid="quick-comparison-dialog"
@@ -2586,7 +2594,7 @@ export default function Home() {
       />
     )}
     {unlockDialog && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4">
         <form
           onSubmit={(event) => {
             event.preventDefault();
@@ -2631,7 +2639,7 @@ export default function Home() {
       </div>
     )}
     {lockedSelectDialog && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4">
         <form
           onSubmit={async (event) => {
             event.preventDefault();

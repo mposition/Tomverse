@@ -8,6 +8,8 @@ import { prisma } from "@/lib/prisma";
 import { encryptOAuthAccountTokens } from "@/lib/oauthTokenCrypto";
 import { logAuthAuditEvent } from "@/lib/securityAudit";
 import { effectivePlanForAccess } from "@/lib/foundingTesterPassCore";
+import { sessionRevocationReason } from "@/lib/sessionRevocationCore";
+import { readSessionSecuritySnapshot } from "@/lib/sessionSecurity";
 
 const SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
 const SESSION_UPDATE_AGE_SECONDS = 24 * 60 * 60;
@@ -118,16 +120,41 @@ export const authOptions: NextAuthOptions = {
                         ? analyticsUser.createdAt.toISOString()
                         : undefined;
                 token.authenticatedAt = new Date().toISOString();
+                token.sessionIssuedAt = Date.now();
             }
             return token;
         },
         async session({ session, token }) {
-            if (session.user && token.id) {
-                session.user.id = token.id;
-                session.user.plan = token.plan;
-                session.user.createdAt = token.createdAt;
-                session.user.authenticatedAt = token.authenticatedAt;
+            if (!session.user || !token.id) return session;
+
+            // Sessions are JWTs, so there is no session row to delete. Check the
+            // server-side revocation epoch and account status on every
+            // resolution; otherwise a suspended or signed-out user keeps full
+            // API access until their token expires.
+            const snapshot = await readSessionSecuritySnapshot(token.id);
+            const revocation = sessionRevocationReason({
+                issuedAt: token.sessionIssuedAt ?? token.authenticatedAt,
+                snapshot,
+            });
+            if (revocation) {
+                logAuthAuditEvent("auth.session_rejected", {
+                    userId: token.id,
+                    reason: revocation,
+                });
+                // Strip the whole user object. Every authenticated route gates on
+                // `session.user.id`, and admin routes additionally match on
+                // email, so removing both makes the request unauthenticated
+                // everywhere rather than only on the id check.
+                return {
+                    expires: session.expires,
+                    user: {},
+                } as typeof session;
             }
+
+            session.user.id = token.id;
+            session.user.plan = token.plan;
+            session.user.createdAt = token.createdAt;
+            session.user.authenticatedAt = token.authenticatedAt;
             return session;
         },
     },
