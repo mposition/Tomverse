@@ -669,10 +669,38 @@ cascade 순서로 이겼기 때문이다. `</head>` 직전으로 옮기고 `--fo
 2. 한 platform이라도 전각이 아니면, 이 값을 바꾸는 것이 아니라 **그 platform용
    family를 따로 선언해 자기 `size-adjust`를 주어야 한다.** 하나의 값이 서로 다른
    advance를 동시에 만족시킬 수 없다. contract에 이 제약을 명시했다.
-3. `:lang(zh)`에는 **같은 구조적 결함이 그대로 남아 있다.** Han glyph도
-   `local(Arial)` fallback을 통과하지 못한다. 같은 방식의 측정과 처리가 필요하며,
-   그때까지 중국어 page가 swap shift로부터 자유롭다고 말할 수 없다. contract에
-   적었다.
+3. `:lang(zh)`는 **R-05-ZH로 분리해 별개 항목으로 관리한다**(아래).
+
+#### R-05-ZH — 중국어의 동일 구조 (`Known limitation / Not verified`)
+
+사용자 지시에 따라 **별개 항목으로 분리**한다. R-05-KO의 변경은 한국어에 한정된
+locale-specific remediation이며, 중국어까지 해결됐다고 **일반화하지 않는다.**
+
+`next/font`가 생성하는 `Noto Sans SC Fallback`도 `Noto Sans KR Fallback`과 같은
+모양으로 **`local(Arial)` 기반**이고, Arial에는 Hangul도 **Han glyph도 없다.**
+따라서 생성된 `size-adjust`·`ascent-override`·`descent-override`는 중국어 glyph의
+fallback 렌더링에 적용되지 않는다. cold load에서 `:lang(zh)`는 `PingFang SC` 또는
+`Microsoft YaHei` 등으로 먼저 그려진 뒤 `Noto Sans SC`로 교체되며, 그 face들에는
+어떤 override도 없다. 즉 **"metric-adjusted fallback이 있으므로 CJK swap이 layout을
+이동시키지 않는다"는 기존 보장은 중국어에도 성립하지 않는다.**
+
+| 축 | 상태 |
+|---|---|
+| `/zh` cold-load raw CLS (320/360px × accepted/declined) | 계측 진행 중 |
+| font 지연(1500ms)·차단 상태 | 계측 진행 중 |
+| 실제 rasterized font (`CSS.getPlatformFontsForNode`) | 계측 진행 중 |
+| 주요 platform(`PingFang SC`, `Microsoft YaHei`) 실기기 검증 | **미실행** |
+| remediation | **미실행** |
+
+**판정: `Known limitation / Not verified`.** 위 축이 모두 닫히기 전에는 중국어를
+`Pass`나 "영향 없음"으로 표기하지 않는다. locale별 font 다운로드량(중국어 15
+chunk / 807.2 KB vs 한국어 21 chunk / 494.6 KB), system fallback, wrapping이 모두
+다르므로 영어나 한국어 측정값으로 대체할 수 없다. `display: "optional"`을 한국어에만
+적용하는 것도, 측정 없이 CJK 전체에 일괄 적용하는 것도 근거가 되지 않는다.
+
+한국어 변경 시 **중국어 regression test는 반드시 실행**한다
+(`tests/e2e/font-system.spec.ts`, `tests/e2e/korean-typography.spec.ts` ——
+후자가 중국어 wrapping도 덮는다). contract의 change checklist에 이 요구를 넣었다.
 
 *2순위(`display: "optional"`)는 실행하지 않았다*
 
@@ -688,6 +716,7 @@ preload 무증가, composer·200% 통과)은 사용자가 제시한 그대로 �
 |---|---|---|---|
 | **R-05-A (c)** | `/api/analytics/consent-policy` 비동기 해석 후 consent slot 삽입 | `section.relative.border-b…`(hero section이 아래로 밀림) | 전 locale·전 viewport |
 | **R-05-KO** | `Noto Sans KR` 21+개 non-preload subset의 늦은 swap | hero의 `h1`·`p`·brand note·CTA 블록 | 한국어 전용, 320px에서 최대 |
+| **R-05-ZH** (신규 분리) | `Noto Sans SC`의 동일 구조 —— `Noto Sans SC Fallback`도 `local(Arial)` 기반이고 Arial에는 Han glyph가 없다 | **미계측** | 중국어. `Known limitation / Not verified` |
 
 **추가로 드러난 제약 —— (c)만으로는 320px에서도 부족하다.**
 
