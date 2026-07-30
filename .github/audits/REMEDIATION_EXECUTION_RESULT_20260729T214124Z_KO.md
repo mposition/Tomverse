@@ -6,24 +6,33 @@
 
 합의된 8개 finding 중 5개(R-02, R-04, R-06, R-07, R-08)를 증거와 함께 종결했고,
 R-03은 작업 중 upstream에 merge된 PR #145가 이미 해결한 것을 확인해 그 구현을
-채택했다. R-05는 재현·근본 원인 특정·59% 개선까지 완료했으나 완료 조건(median
-CLS ≤0.1)에는 `/`에서 0.0095 미달이며, 잔여분은 별도 설계 결정을 필요로 한다.
-R-01과 `QA-GATE-001`은 이 실행 환경에서 **검증 불가**로 남는다.
+채택했다.
 
-production `Go`를 선언하지 않는다. R-01 actual proof와 `QA-GATE-001`이 닫히지
-않았고, R-05가 완료 조건에 미달한다.
+R-05는 `/`를 0.2667 → 0.1095로 59% 개선했으나 완료 조건(median CLS ≤0.1)에 미달
+하고, 사용자가 제시한 **조건부 수용의 배제 기준에도 걸린다** —— 320px·한국어·200%
+에서 최대 0.2385까지 커지고, 한국어에서는 consent slot 외에 hero 본문이라는 추가
+shift source가 나타난다(§4 R-05).
+
+`QA-GATE-001`은 canonical CI에서 **실행했고 실패했다**(1509 passed / 10 failed /
+908 skipped). 다만 `develop` 대조 실행이 **동일한 10건과 동일한 카운트를 재현**했으므로
+이 실패는 전부 trunk의 기존 상태이고, **이번 remediation이 canonical 환경에 추가한
+regression은 0건**이다. gate 종결은 합의 범위 밖의 신규 항목이 됐다(§6.4). R-01은 계정·승인·로그인·baseline까지 확보했으나 실행 단계에서
+막혔고, 사람이 UI에서 수행하는 방식으로 진행하기로 결정됐다. **실제 Provider 호출
+0회, credit 소비 0.**
+
+production `Go`를 선언하지 않는다. R-01, R-05, `QA-GATE-001` 셋이 모두 열려 있다.
 
 | ID | 최종 심각도 | 판정 | 근거 |
 |---|---|---|---|
-| `R-01` | P1 release blocker | **Not verified** | 사용자 승인은 받았으나 staging 인증 계정 자격증명이 제공되지 않아 실행 불가 |
+| `R-01` | P1 release blocker | **부분 검증 — 3/3 run 완료, 2축 미검증** | 사람이 staging UI에서 comparison 3회 + Review 3회 실행. expected/charged가 6/6 단계에서 정책과 정확히 일치(3, 8), 9개 provider 호출 전부 200 OK·panel 완료, 중복 차감·debt 없음, 누적 33 credit(상한 40 이내). **미검증**: 환불·partial failure(실패가 발생하지 않아 경로가 실행되지 않음), provider-start 내부 counter(사용자 노출 없음) |
 | `R-02` | P1 release gate | **성공** (staging 미배포) | source 수정 + 38개 unit test, stale failure → `unknown` |
 | `R-03` | P1 release gate | **성공 (upstream PR #145)** | 3개 control 모두 실제 44×44, upstream이 해결·검증 |
 | `R-04` | P2 release blocker (`B4`) | **성공** (staging 미배포) | 320/390px × 4 route × en/ko = 24/24 조합 overflow 0px |
-| `R-05` | P2 | **부분 성공 — 완료 조건 미달** | `/` 0.2667 → 0.1095 (임계 0.1), `/pricing`·`/chat` 0 |
+| `R-05` | P2 | **R-05-A 종결 / R-05-KO 조건부 / R-05-ZH 판정 철회 / R-05-LANG 신규 실패 — 전체는 완료 조건 미달** | 두 원인으로 분해했다. **R-05-A**(consent slot 삽입)는 pre-paint 예약으로 종결 —— 영어 4상태 × 두 정책 mode × 320·360px **20 cell 전부 0**. **R-05-KO**(한국어 webfont swap)는 기존 accepted·declined 방문자에서 0.1061–0.1082로 **0.1 초과**. 한국어 최댓값은 0.2295 → 0.1082로 내려갔다. 근본 원인은 typography contract의 잘못된 전제(생성된 metric-override face가 `local(Arial)`이고 Arial에 Hangul glyph가 없음). **R-05-KO**는 유도한 metric fallback으로 9 cell 전부 median·max ≤0.1이 됐으나 실기기 검증이 남아 Pass로 닫지 않았다. **R-05-ZH**는 같은 결함의 중국어 축이지만, 그 FAIL 수치가 `/?lang=zh`에서 나온 것이어서 **판정을 철회**했다 —— 실제 route `/zh`는 0.0076 PASS다. 대신 세 번째 원인 **R-05-LANG**을 분리했다: 정적 영어 root의 client-side locale 재렌더로, query 없이 `/`에 온 zh-CN 브라우저가 **0.1959**(재방문 0.1713)이고 copy 교체 단독 기여가 0.1637이다. 남은 실패는 webfont가 아니라 이쪽이다 |
 | `R-06` | P2 | **성공** | 3개 lifecycle 전이 coverage 추가, 11/11 통과 |
 | `R-07` | P2 verification | **성공** | live `/api/build-info` ↔ UI field 일치 검증 추가 |
 | `R-08` | P3 | **성공** (staging 미배포) | stall 25초 내 안내, security semantics 무변경 |
-| `QA-GATE-001` | release gate | **Not verified** | 저장소가 고정한 Chromium을 이 환경에서 설치 불가 |
+| `QA-GATE-001` | release gate | **Not verified — 설명되지 않은 실패 0건** | 이번 변경의 canonical regression은 **0건**. 기능 2건은 UI-EMPTY-001 계약과 충돌하는 낡은 test였음을 계측으로 확정하고 **수정 완료(28/28)**. visual 8건은 canonical diff로 #145의 의도적 대비 변경(`UI-CONTRAST-001`: overlay 반투명화)이 원인이고 제품 동작 정상임을 확인 —— **golden 재촬영 승인만 남았다.** §6.5 |
 
 ---
 
@@ -111,14 +120,166 @@ rebase는 `git stash push -u` → `git checkout -B <branch> origin/develop` →
 - **판정**: `Not verified`
 - **근본 원인**: 제품 결함이 아니라 검증 수단의 부재. Guest 계정은 AI Review가
   잠겨 있고, 실제 3-model comparison에는 인증 계정이 필요하다.
-- **수행**: 사용자에게 실행 승인을 요청해 "진행 — 계정과 credit 한도를 제공"을
-  받았다. 그러나 **실제 staging 인증 계정 자격증명이 제공되지 않아** 실행
-  단계에 진입하지 못했다.
-- **환경 확인(read-only)**: `challenges.cloudflare.com/turnstile/v0/api.js` → 302
-  (도달 가능). 즉 Turnstile 자체는 이 환경에서 차단되지 않는다. 남은 차단 요인은
-  계정 자격증명 하나다.
 - **변경한 제품 코드**: 없음.
-- **다음 승인**: staging 인증 계정 + 모델·실행 횟수·최대 credit을 명시한 재승인.
+- **실제 Provider 호출 0회, credit 소비 0.**
+
+**후속 실행 시도 (2026-07-29T22:00–23:15Z)**
+
+사용자가 QA 계정 `qaverify@tomverse.app`을 제시하고, 실행 범위를
+**3-model×3 + AI Review×1, 상한 40 credit, web search off**로 승인한 뒤
+로그인 코드까지 전달했다. 인증과 baseline 확보까지 성공했고, 실제 호출
+직전에 정지했다.
+
+*예상 credit 산출 (`lib/models.ts`)*
+
+공식 `ceil(usage class 가중치 × 입력 토큰 배수)`. 가중치 standard 1 /
+advanced 4 / premium 8 / reasoning 12 / premium-reasoning 16 / research 20.
+입력 배수 ≤16k 1× / >16k 1.5× / >50k 2× / >100k 3×. web search `always`는
+모델당 +8(미실행 시 환불).
+
+| 항목 | 구성 | credit |
+|---|---|---:|
+| 3-model comparison ×3 | `gpt-5-4-mini` + `claude-haiku-4-5` + `gemini-2-5-flash` (전부 standard, provider 3사) | 3/회 × 3 = 9 |
+| AI Review ×1 | 기본 reviewer `mistral-medium-3-1` + `claude-sonnet-5` + `llama-3-3` (전부 advanced) | 12 |
+| **예상 합계** | | **9–21** |
+| 최악 (프롬프트 >16k 토큰) | | 36 |
+| 승인된 hard cap | | **40** |
+
+*확보한 것*
+
+- **로그인 성공**: `POST /api/auth/callback/email-code` → 세션 확립.
+  계정 plan **Pro**, 세션 만료 2026-08-05.
+- **credit baseline** (`GET /api/user/usage`, 2026-07-29T23:10:21Z):
+  `creditsMonth=23`, `planRemainingCredits=2977`(월 한도 3000),
+  `purchasedRemainingCredits=0`, `creditDebt=0`, `maxModels=3`.
+- **실행 경로 확정**: `POST /api/conversations` → `POST /api/chat/preflight`
+  (expected credit) → `POST /api/chat` ×3 병렬(panel별 HTTP status·latency·
+  trace·완료 여부) → `GET /api/user/usage`(charged) →
+  `POST /api/conversations/{id}/comparison-reviews`. run별 before/after 기록.
+
+*차단 요인 2 — 이 환경의 브라우저가 staging에 도달하지 못한다*
+
+R-01은 본래 UI flow다. 그러나 Chromium이 `https://staging.tomverse.app`에
+도달하지 못한다. 5개 구성 전부 `net::ERR_CONNECTION_RESET`: Playwright `proxy`
+옵션, raw `--proxy-server`, 프록시 미사용, `--disable-http2`,
+`--ignore-certificate-errors`.
+
+- 같은 호스트에 **curl은 정상 도달**한다(`/api/build-info` 200).
+- agent proxy `__agentproxy/status`는 이 호스트에 대한 **정책 거부를 기록하지
+  않았다**(기록된 `connect_rejected`는 Chromium 자체 telemetry인
+  `www.google.com`·`android.clients.google.com`뿐). egress 정책 문제가 아니다.
+- `/root/.ccr/README.md`가 "report, do not work around"라고 명시하므로 로컬
+  reverse-proxy 등으로 브라우저 트래픽을 우회시키는 workaround는 **시도하지
+  않았다**. 그런 경로로 얻은 증거는 신뢰할 수 없다.
+
+이 때문에 UI 관찰(사용자가 보는 3개 panel 완료)은 이 환경에서 불가능하고,
+browserless API 경로만 남았다.
+
+*확인한 사실 — Turnstile은 guest 전용이다*
+
+- 로그인 코드 요청은 Turnstile 없이 성공한다
+  (`POST /api/auth/email-login/request` → `{"ok":true}` 200). 코드 TTL 최대 10분
+  (`EMAIL_LOGIN_CODE_TTL_MINUTES`).
+- Turnstile은 guest flow에만 걸린다(`guest_turnstile_grant` cookie,
+  `expectedAction = "guest_chat"`). **인증된 chat은 Turnstile을 요구하지 않는다.**
+  감사 기준선의 `403 TURNSTILE_REQUIRED` 3건이 모두 guest 시도였던 이유가 이것이며,
+  이는 Provider 장애의 증거가 아니었다는 기존 판단을 뒷받침한다.
+
+*차단 요인 3 — 실행 단계가 권한 classifier에 거부됨*
+
+실제 호출(`POST /api/conversations`, `/api/chat/preflight`, `/api/chat` ×3)이
+Claude Code auto-mode 권한 classifier에 의해 차단되었다. credit을 소비하고 외부
+Provider를 호출하는 되돌릴 수 없는 동작이므로 **정당한 게이트**이며, 지침에 따라
+우회하지 않고 정지했다.
+
+결과적으로 이 세션은 이 계정의 credit을 **한 번도 쓰지 않았다**
+(`creditsMonth`는 baseline과 동일한 23).
+
+- **다음 승인**: 아래 중 하나.
+  1. staging에 대한 authenticated POST를 허용하는 Bash 권한 규칙 추가 —— 세션이
+     2026-08-05까지 유효하므로 새 로그인 코드 없이 즉시 재개 가능하다.
+  2. 사람이 staging UI에서 직접 수행하고 metadata를 공유 —— 브라우저 도달 문제까지
+     함께 해소되므로 UI 충실도가 가장 높다.
+- **별도 보고 대상**: 브라우저의 staging 도달 불가는 세션 환경/프록시 제약이므로
+  관리자 또는 Anthropic 지원에 보고할 사안이다(README 지침).
+- **위생**: 세션 cookie는 저장소가 아니라 세션 scratchpad에만 있고 컨테이너와 함께
+  사라진다. 로그인 코드·cookie·token은 보고서와 artifact에 기록하지 않았다.
+
+**실제 실행 결과 (사람이 staging UI에서 수행, 2026-07-30)**
+
+(b) 경로로 사람이 staging UI에서 직접 실행하고 metadata를 공유했다. **이번
+remediation 전체에서 유일한 actual Provider 트래픽이다.**
+
+**3 run 전체 (comparison ×3, AI Review ×3)**
+
+| 단계 | creditsMonth | planRemaining | purchased | debt | charged | 정책값 |
+|---|---:|---:|---:|---:|---:|---:|
+| baseline | 23 | 2977 | 0 | 0 | — | — |
+| run 1 comparison | 26 | 2974 | 0 | 0 | **3** | 3 ✅ |
+| run 1 review | 34 | 2966 | 0 | 0 | **8** | 8 ✅ |
+| run 2 comparison | 37 | 2963 | 0 | 0 | **3** | 3 ✅ |
+| run 2 review | 45 | 2955 | 0 | 0 | **8** | 8 ✅ |
+| run 3 comparison | 48 | 2952 | 0 | 0 | **3** | 3 ✅ |
+| run 3 review | 56 | 2944 | 0 | 0 | **8** | 8 ✅ |
+| **누적** | 23→56 = **33** | 2977→2944 = **33** | 0 | 0 | **33** | 상한 40 이내 ✅ |
+
+두 개의 독립 counter(`creditsMonth` 증가분, `planRemaining` 감소분)가 **6개 단계
+전부에서 서로 일치**한다 —— 어느 단계에서도 중복 차감이 없었다.
+
+승인 범위는 `comparison×3 + Review×1`이었고 실제로는 Review가 3회 실행됐다
+(24 credit). 승인의 실질 제약이었던 **hard cap 40은 지켜졌다**(33).
+
+*comparison 3 run — 4축 대조*
+
+| run | comparisonId | expected (칩 / preflight) | charged | panel 완료 | provider latency (전부 200 OK) |
+|---|---|---|---:|---|---|
+| 1 | `1785373195068` | 3 / 3 | 3 ✅ | 3/3 | Gemini 1.32s, Claude 1.42s, GPT 2.56s |
+| 2 | `1785374537658` | 3 / 3 | 3 ✅ | 3/3 | Gemini 1.33s, Claude 1.50s, GPT 1.84s |
+| 3 | `1785374762240` | 3 / 3 | 3 ✅ | 3/3 | Gemini 1.43s, Claude 1.75s, GPT 1.50s |
+
+| 축 | 판정 |
+|---|---|
+| expected | ✅ 3 run 모두 UI 추정 칩과 `preflight` 응답 `requiredCredits`가 **서로 일치하고 정책값 3과도 일치**(standard×3 = 1+1+1, 입력 배수 1×) |
+| charged | ✅ 3 run 모두 정확히 3. 두 counter 일치 |
+| provider-start | ✅ **9개 provider 호출 전부 200 OK, 9개 panel 전부 답변 완료.** latency 1.32–2.56s로 이상치 없음. 단 아래 한계 참고 |
+| refunded | ⚠️ **환불 이벤트가 발생하지 않았다** —— 아래 한계 참고 |
+
+*AI Review — 예측 정정*
+
+charged **8**이다. 이 보고서의 앞선 예측은 12였고 **그것이 틀렸다**.
+`reviewerIds()`가 반환하는 3개가 모두 실행된다고 읽었으나, 실제 코드는
+`candidates[0]`과 그와 다른 **두 번째 후보 하나**만 실행하고 나머지는 fallback
+후보다(`app/api/conversations/[conversationId]/comparison-reviews/route.ts:199–207`,
+주석도 "roughly doubled"라고 명시). 두 reviewer 모두 `advanced`(가중치 4)이므로
+정책값은 4+4 = **8**이고, **관측값과 정확히 일치한다.**
+
+따라서 §4 R-01의 예상 credit 표에서 Review 항목 12는 8로, 합계 9–21은
+**9–17**로 읽어야 한다.
+
+*충족된 완료 조건*
+
+- **3회의 comparison 모두 3개 panel 완료** ✅
+- **AI Review 완료** ✅ (1회 요구, 3회 실행)
+- **expected/charged가 정책과 정확히 일치** ✅ (6/6 단계)
+- 감사 기준선의 "성공한 실제 3-model comparison **0회**"가 **3회**가 됐다.
+- 세 provider(OpenAI·Anthropic·Google)가 9회 모두 실제로 응답했다 —— Provider
+  자체 장애를 시사하는 신호는 없다.
+- `purchased`와 `debt`가 전 구간 0 —— 구매 credit 소진이나 debt 누적 없이 plan
+  credit만 정상 사용됐다.
+
+*여전히 닫히지 않은 두 축*
+
+1. **환불·partial failure 경로는 actual 트래픽으로 검증되지 않았다.** 완료 조건에
+   "partial failure recovery와 미소비 요청 환불 확인"이 명시돼 있으나, 9개 panel
+   호출이 **전부 성공**했으므로 환불이 발생할 상황이 한 번도 없었다. 이 축은
+   unit/server-contract 수준에서만 검증된 상태로 남는다. actual 검증에는 실패를
+   의도적으로 유도해야 하므로 별도 판단이 필요하다.
+2. **provider-start의 내부 counter는 관측하지 못했다.** 위 ✅는 "9개 호출이 200을
+   반환하고 9개 panel이 답변을 완료했다"는 **대체 관찰**이며, 사용자에게 노출되는
+   경로에는 내부 counter가 없다. 서버 로그 또는 admin 경로에서 별도 확인이 필요하다.
+
+*따라서 R-01의 판정은 `부분 검증`이다.* comparison·review·expected·charged 축은
+actual 트래픽으로 닫혔고, refund·provider-start 축은 닫히지 않았다.
 
 ### R-02 — Stale probe failure freshness ✅
 
@@ -268,6 +429,870 @@ rebase는 `git stash push -u` → `git checkout -B <branch> origin/develop` →
 
 - **가격·consent·composer 회귀**: 0. LCP는 악화되지 않았다(392–896ms).
 
+**조건부 수용 심사 (2026-07-30T00:00–00:30Z)**
+
+사용자가 R-05에 대해 **조건부 수용**을 제시했다: 원인이 consent slot 삽입으로
+한정되고, median이 0.1095 수준에서 안정적이며, 심각한 최대값이나 추가 shift
+source가 없으면 —— Pass가 아니라 **문서화된 잔여 위험 수용**으로 기록하고
+Go-Live 예외를 승인한다. 단 다음 중 하나라도 해당하면 수용해서는 안 된다:
+`CLS ≤0.1`이 예외 없는 계약인 경우 / 반복 측정에서 0.1095보다 높은 값이
+반복되는 경우 / **320px·한국어·200%에서 더 큰 shift가 발생하는 경우** /
+실제 RUM p75도 0.1을 초과하는 경우.
+
+측정 조건은 §4 R-05와 동일(cold context, 40ms/10Mbps, `PerformanceObserver`),
+cell당 5–10회. 모든 shift source를 기록해 "추가 source"가 top-N 절단에 숨지
+않게 했다.
+
+| cell (route `/`, 첫 방문) | median | max | 판정 |
+|---|---:|---:|---|
+| 360×640 en 100% (10회) | 0.1095 | 0.1095 | 안정 |
+| 360×640 en 200% | 0.1095 | 0.1095 | 동일 |
+| **320×568 en 100%** | **0.1466** | 0.1466 | **더 큼** |
+| **320×568 en 200%** | **0.1466** | 0.1466 | **더 큼** |
+| **320×568 ko 100%** | **0.1498** | **0.2385** | **더 큼** |
+| **320×568 ko 200%** | **0.2282** | 0.2282 | **더 큼** |
+| **360×640 ko 100%** | **0.116** | **0.2141** | **더 큼** |
+| **360×640 ko 200%** | **0.116** | 0.2089 | **더 큼** |
+
+| consent 상태 (360×640 en 100%) | median | 비고 |
+|---|---:|---|
+| 최초 방문 (unset) | 0.1095 | consent slot 삽입 |
+| 동의 완료 직후 (just-accepted) | 0.1095 | 클릭 이후 추가 shift 없음(사용자 조작분은 `hadRecentInput`으로 제외) |
+| **기존 동의 (accepted)** | **0** | 5/5 회 |
+| **거부 (declined)** | **0** | 5/5 회 |
+
+*세 기여분을 분리해 기록 (사용자 요청)*
+
+사용자가 "동의 직후"의 의미를 분명히 하라고 지적했다 —— 클릭 후 500ms 이내의
+shift는 표준 CLS에서 `hadRecentInput`으로 제외될 수 있으므로 위 표의
+"just-accepted" 행만으로는 slot 제거 기여분이 보이지 않는다. 그래서 세 갈래로
+따로 측정했다(`cls-split.mjs`, 360×640 en, 5회 median).
+
+| 기여분 | 값 | 측정 방법 |
+|---|---:|---|
+| ① page load 중 prompt 삽입 | **0.1095** | 클릭 이전 entry만, `hadRecentInput=false` |
+| ② accept 클릭 후 slot 제거 | **0.1095** | 클릭 시각 이후 raw entry 전체, **`hadRecentInput` filter를 의도적으로 끄고** 집계 |
+| ③ 기존 accepted 방문자 reload | **0** | `localStorage` seed 후 cold load |
+| ③ 기존 declined 방문자 reload | **0** | 동일 |
+
+②는 표준 CLS에 **집계되지 않는다**(사용자 조작 직후이므로). 여기 적은 값은
+"필터를 껐을 때 실제로 존재하는 shift"이며, 필드 지표가 아니라 설계 판단용
+근거다. ①과 ③이 Go-Live 판정 대상이다.
+
+*C1 rollback 확인 (사용자 권고 1단계)*
+
+`AnalyticsProvider.tsx`가 수정 없는 상태임을 `git status`로 확인하고 재측정한
+결과가 C1 이전 baseline과 **정확히 일치**했다: 360 en 0.1095 / 320 en 0.1466 /
+360 ko 0.116(max 0.2141) / 320 ko 0.1486(max 0.2295). 되돌림이 완결됐다.
+
+**판정: 조건부 수용 조건을 충족하지 못한다. (a)를 적용하지 않는다.**
+
+배제 기준 두 개가 걸린다.
+
+1. **320px·한국어·200%에서 더 큰 shift가 발생한다.** 최대 0.2385(320 ko)로,
+   360 en의 0.1095의 두 배가 넘는다.
+2. **0.1095보다 높은 값이 반복된다** —— 320/ko 계열 6개 cell 전부.
+
+또한 전제 자체가 깨진다: **"원인이 consent slot 삽입으로 한정"이 한국어에서
+성립하지 않는다.** 한국어 cell에서는 consent slot(`section.relative.border-b…`)
+외에 다음 source들이 추가로 나타난다.
+
+- `p[landing-hero-signup-note]`, `h1[landing-hero-title]`,
+  `p[landing-brand-note]`, `p.mt-6.max-w-2xl`(hero 본문),
+  `div.mt-8.flex.flex-col`(CTA 블록)
+- header의 `div.flex.min-w-0.items-center`, `svg`,
+  `a.font-bold.text-blue-700.underline`
+
+즉 hero 본문 자체가 재배치된다. `Noto Sans KR`이 `preload: false`인 typography
+contract와 맞물린 늦은 font swap이 유력한 설명이지만 **아직 확증하지 않았다**
+(cold/warm 대조 미실시). 확증 전까지 추정으로만 기록한다.
+
+*부수적으로 확인된 것*
+
+- **`CLS ≤0.1`은 예외 없는 계약이 아니다.** `docs/ui-contracts/`의 3개 문서
+  (mobile-chat-composer, comparison-action-rail, typography) 중 CLS를 release
+  gate로 규정한 것은 없고, 감사 문서들은 "Core Web Vitals good 기준"으로 다룬다.
+- **RUM p75는 이 환경에서 접근할 수 없어 미확인**이다.
+- **기존 동의·거부 사용자는 이미 shift가 0이다.** 따라서 (c) 고정 높이 예약은
+  반드시 pending 상태에만 적용해야 하며, 무조건 예약하면 현재 0인 사용자에게
+  새 shift를 만든다.
+- **(c)만으로는 부족하다.** 한국어·320px의 지배적 원인은 consent slot이 아니라
+  hero 본문 재배치이므로, slot 높이 예약은 그 부분을 해결하지 못한다.
+
+**두 원인의 확증 (2026-07-30, font 차단 대조 실험)**
+
+사용자가 R-05 closure 요건으로 "두 원인의 raw layout-shift entry와 shifted node
+확인"을 요구했다. webfont 요청을 `route.abort()`로 차단한 대조 실험으로 둘을
+분리해 확증했다(cell당 5회, 그 외 조건 동일).
+
+| cell | fonts 로드 | fonts 차단 | 차단 시 남는 shift source |
+|---|---:|---:|---|
+| 360 ko | median 0.1160 / max **0.2174** | median **0.1095** / max 0.1095 | `section`(consent slot)만 |
+| 320 ko | median 0.1486 / max **0.2282** | median **0.1216** / max 0.1216 | `section`만 |
+| 360 en | 0.1095 | 0.1095 | `section`만 |
+| 320 en | 0.1466 | 0–0.1466 (timing 의존) | `section`만 |
+
+차단 시 한국어에서만 나타났던 source —— `h1[landing-hero-title]`,
+`p[landing-hero-signup-note]`, `p[landing-brand-note]`, hero 본문 `p`,
+`div.mt-8`(CTA 블록) —— 이 **전부 소멸한다.**
+
+**font 요청 수가 결정적 증거다**: `/?lang=en`은 webfont **1개**를 요청하고,
+`/?lang=ko`는 **21–22개**를 요청한다. `Noto Sans KR`이 subset으로 쪼개져 있고
+typography contract가 이를 `preload: false`로 규정하므로, 이 파일들이 늦게
+도착해 swap이 일어나며 한국어 hero 전체가 재배치된다.
+
+#### R-05-KO의 근본 원인 —— typography contract의 전제가 사실과 다르다
+
+`docs/ui-contracts/typography.md`는 같은 주장을 두 번 한다.
+
+> "It has metric-override fallback data in `next/font`, so the swap does not
+> move layout." (§Why Noto Sans KR over Pretendard)
+>
+> "`display: swap` plus a metric-override fallback means text paints immediately
+> and the webfont swaps in **without moving layout**." (§preload/bytes)
+
+**이 전제는 Hangul에 대해 성립하지 않는다.** build 산출물을 직접 확인했다.
+
+```
+@font-face{font-family:Noto Sans KR Fallback;src:local(Arial);
+  ascent-override:110.73%;descent-override:27.49%;line-gap-override:0.0%;
+  size-adjust:104.76%}
+--font-noto-sans-kr:"Noto Sans KR", "Noto Sans KR Fallback"
+```
+
+`next/font`가 생성한 metric-override face의 실체는 **`local(Arial)`** 이다.
+Arial에는 **Hangul glyph가 없다.** 따라서 한국어 본문은 이 보정된 face를 한 번도
+쓰지 못하고 `:lang(ko)` stack의 다음 항목
+(`Apple SD Gothic Neo → Malgun Gothic → system-ui → sans-serif`,
+`app/globals.css:47-52`)으로 떨어지는데, **그쪽에는 어떤 override도 없다.**
+그래서 `Noto Sans KR`이 도착하는 순간 Hangul 줄의 metric이 그대로 바뀌고
+hero가 재배치된다 —— 320px 한국어에서 `h1`의 높이가 160→154→117→128px로 움직인
+관측이 이 경로 그대로다. metric override는 **Latin 구간에서만** 작동한다.
+
+즉 R-05-KO는 구현 실수가 아니라 **contract의 근거 자체가 틀렸기 때문에 생긴
+결함**이다. 이 문서는 `lib/fonts.ts` 변경 시 필독으로 지정돼 있으므로, 위 두
+문장은 정정 대상이다.
+
+#### R-05-KO 처리 —— 1순위(한국어 metric-adjusted fallback)를 검증하고 적용했다
+
+사용자 지시: `display: "optional"`을 즉시 최종안으로 확정하지 말고, **먼저 한국어
+glyph를 지원하는 system fallback의 metric 조정으로 swap을 안정화할 수 있는지
+검증**하라. 실패하면 `optional` + `adjustFontFallback: false` 비교 실험과 contract
+변경안을 함께 보고하라. 승인 전에는 `optional`을 최종 정책으로 확정하거나
+R-05-KO를 Pass로 닫지 말라.
+
+*이 선택지는 렌더링되는 최종 글꼴을 바꾸지 않는다*
+
+중요한 구분이다. 1순위 안은 최종 face를 `Noto Sans KR`로 그대로 두고 **도착
+이전의 fallback metric만** Noto와 일치시킨다. 따라서 `optional`과 달리 typography
+**정책 변경이 아니라 결함 수정**이며, "한국어 UI가 cold-load에서 OS 글꼴로
+렌더링될 수 있다"는 정책 전환을 수반하지 않는다.
+
+*값은 측정에서 유도했다 —— 고르지 않았다*
+
+`canvas.measureText`로 100px에서 잰 값이다.
+
+| family | Hangul 1자 advance | ascent | descent | 비고 |
+|---|---:|---:|---:|---|
+| `Noto Sans KR` | **92** | 116 | 29 | 최종 face |
+| `Noto Sans KR Fallback` (next/font, `local(Arial)`) | 100 | 89 | 22 | **Hangul glyph 없음** |
+| `WenQuanYi Zen Hei` (이 컨테이너의 실제 fallback) | 100 | 96 | 30 | |
+
+`Noto Sans KR`의 한글이 전각 한국어 face보다 **8% 좁다** —— 이것이 수평 불일치이고
+ascent/descent 쌍이 수직 불일치다. 따라서
+
+- `size-adjust` = Noto의 Hangul advance ÷ fallback의 = 92/100 = **92%**
+- `ascent-override` = Noto의 ascent ÷ `size-adjust` = 116/92 = **126.09%**
+- `descent-override` = Noto의 descent ÷ `size-adjust` = 29/92 = **31.52%**
+- `line-gap-override` = next/font가 생성한 face와 동일 = **0%**
+
+*측정에서 정정할 점 —— 없는 face를 측정한 행이 있었다*
+
+첫 측정에서 `Apple SD Gothic Neo`·`Malgun Gothic`·`Noto Sans CJK KR` 세 행이
+`Noto Sans KR Fallback`과 **완전히 동일한 값**(1825/100/89/22)을 냈다. 이
+컨테이너에 그 face들이 없어서 canvas가 기본 fallback을 잰 것이고,
+`document.fonts.check()`도 system font를 가정해 `true`를 반환한다. **그 세 행은
+해당 face의 측정값이 아니다.** 표에서 제외했다.
+
+*격리 실험 결과 (`kr-fallback.mjs`, cell당 5회, `</head>` 직전 주입)*
+
+| cell | BASE median / max | FIX median / max |
+|---|---:|---:|
+| 320 ko accepted | 0.1082 / 0.1082 | **0.0717 / 0.0717** |
+| 320 ko declined | 0.1082 / 0.1082 | **0.0717 / 0.0717** |
+| 320 ko unset | 0.0827 / 0.0827 | **0.0617 / 0.0617** |
+| 360 ko accepted | 0.0401 / **0.1061** | **0.0797 / 0.0797** |
+| 360 ko declined | 0.1048 / 0.1050 | **0.0797 / 0.0797** |
+| 360 ko unset | 0.0855 / 0.0855 | **0.0581 / 0.0581** |
+| 390 ko accepted | 0.052 / **0.104** | **0.0239 / 0.0239** |
+| 390 ko declined | 0.104 / 0.104 | **0.0239 / 0.0239** |
+| 390 ko unset | 0.0876 / 0.0876 | **0.0196 / 0.0196** |
+
+**9개 cell 전부 median·max 모두 0.1 이하다.** 그리고 사용자가 median과 max를
+섞지 말라고 한 요구가 여기서 특히 의미를 갖는다 —— FIX에서 **max == median**이다.
+분산이 사라진 것이 metric이 안정됐다는 직접 증거이며, 중앙값만 보는 것보다 강한
+신호다.
+
+정직하게 적는 한 지점: **360 accepted는 BASE median(0.0401)이 FIX median(0.0797)
+보다 낮다.** BASE가 bimodal(max 0.1061)이라 그렇고, 실제 개선은 max와 분산이
+내려간 것이다. median만 비교하면 이 cell은 악화로 보인다.
+
+*첫 실험은 무효였다 (정정)*
+
+처음 실행은 FIX와 BASE가 소수점까지 같았다. 주입한 `<style>`을 `<head>`
+**앞쪽**에 넣어서, 뒤에 오는 `globals.css`의 동일 specificity `:lang(ko)` 규칙이
+cascade 순서로 이겼기 때문이다. `</head>` 직전으로 옮기고 `--font-ui` 실측값을
+함께 출력해 적용을 확인한 뒤의 결과가 위 표다.
+
+*적용 범위*
+
+| 파일 | 변경 |
+|---|---|
+| `app/globals.css` | `@font-face "Noto Sans KR Korean Fallback"` 추가(`local()` 목록 + 유도한 override), `:lang(ko)`의 `--font-ui`·`--font-code` stack에 `var(--font-noto-sans-kr)` 바로 뒤로 삽입 |
+| `docs/ui-contracts/typography.md` | 틀린 문장 2개 정정, "The metric override does not reach Hangul on its own" 절 신설, stack 표 갱신, change checklist에 "swap-driven shift는 가정하지 말고 locale별로 측정" 항목 추가 |
+
+`local()` src이므로 **다운로드도 preload도 늘지 않는다** ——
+`node scripts/report-font-preload.mjs` 결과 66 route 전부 이전과 동일
+(route당 0 또는 1 file, 28.6 KB Latin face만). `tests/typographyPolicy.test.mjs`
+6/6 통과(hard-coded Arial 금지, `:lang(ko)`가 `var(--font-noto-sans-kr)`로 시작
+등 단정 유지).
+
+*R-05-KO를 Pass로 닫지 않는다 —— 남은 검증 조건*
+
+지시대로 닫지 않는다. 근거는 지시 때문만이 아니라 증거의 범위 때문이다.
+
+1. **이 컨테이너의 유일한 한국어 face는 `WenQuanYi Zen Hei`다.** `Apple SD Gothic
+   Neo`·`Malgun Gothic`·Android의 한국어 face는 **존재하지 않아 측정할 수 없었다.**
+   따라서 위 결과는 **메커니즘의 증명**이고, `size-adjust: 92%`가 세 실제 face에도
+   맞는다는 것은 "한국어·CJK text face는 Hangul을 전각(1em)으로 그린다"는 통상
+   전제에 의존한다. **실기기 확인이 필요하다.**
+2. 한 platform이라도 전각이 아니면, 이 값을 바꾸는 것이 아니라 **그 platform용
+   family를 따로 선언해 자기 `size-adjust`를 주어야 한다.** 하나의 값이 서로 다른
+   advance를 동시에 만족시킬 수 없다. contract에 이 제약을 명시했다.
+3. `:lang(zh)`는 **R-05-ZH로 분리해 별개 항목으로 관리한다**(아래).
+
+#### ⚠️ 측정 경로 정정 —— R-05-KO·R-05-ZH 수치는 `/?lang=xx`에서 나왔다
+
+`blocked` 상태에서도 중국어 CLS가 0.1637로 남는 것이 단서였다. webfont를 전부
+차단하면 swap이 없으므로, 그 값은 **font 결함이 아니다.** 경로를 나눠 다시 쟀다
+(320px, `consent=declined`, cell당 3회, `route-compare.mjs`).
+
+| route | fonts 정상 | fonts 차단 | 지배 source |
+|---|---:|---:|---|
+| `/?lang=zh` | 0.1959 | **0.1637** | `section.relative.border-b` `y65 h503 → y170 h398` |
+| **`/zh`** | **0.0076** | **0** | —— |
+| `/?lang=ko` | 0.0717 | **0.0970** | `h1`·`p`·brand note·signup note 동시 이동 |
+| **`/kr`** | **0.0012** | **0** | —— |
+| `/` (en) | 0 | 0 | —— |
+
+**locale별로 prerender되는 실제 route(`/zh`, `/kr`)는 사실상 0이다.** 큰 값은
+전부 `/?lang=xx` —— 영어 static root에 query를 붙인 경로 —— 에만 나타난다.
+
+원인은 `components/LanguageProvider.tsx:85-109`다. mount 후 `setTimeout(…, 0)`에서
+`?lang=` → `localStorage` → `navigator.languages` 순으로 언어를 해석하고
+`setLangState`를 호출한다. 그 시점에 **영어로 그려진 정적 page 전체가 해당 locale
+copy로 재렌더**되며, 문장 길이가 달라 hero section이 통째로 움직인다. font
+차단에도 남고, `consent=declined`라 slot도 아니다.
+
+**따라서 R-05-KO와 R-05-ZH로 보고한 수치는 두 결함을 뒤섞은 값이다** —— locale
+copy 교체(다수)와 webfont swap(소수). 아래 R-05-ZH 절의 "전 cell FAIL"은 실제
+중국어 방문자가 착지하는 `/zh` 기준으로는 과한 판정이었다. 정정한다.
+
+이 세 번째 원인을 **R-05-LANG**으로 분리한다.
+
+#### R-05-LANG —— `?lang=` 전용이 아니다. query 없는 `/`에서도 발생한다
+
+`detectBrowserLanguage()` 분기가 있으므로 query 없는 경로를 따로 쟀다
+(`accept-language.mjs`, 320px, `consent=declined`, cold cache, cell당 5회).
+
+| cell | median | max | `<html lang>` | 판정 |
+|---|---:|---:|---|---|
+| `/` `Accept-Language: en-US` | 0 | 0 | en→en | PASS |
+| `/` `Accept-Language: ko-KR` | 0.0012 | 0.0717 | en→**ko** | PASS |
+| `/` `Accept-Language: zh-CN` | **0.1959** | **0.1959** | en→**zh** | **FAIL** |
+| `/` en-US 브라우저 + 저장된 `ko` | 0.0717 | 0.0717 | en→**ko** | PASS |
+| `/` ko-KR + 저장된 `ko` (재방문) | 0.0717 | 0.0717 | en→**ko** | PASS |
+| `/` zh-CN + 저장된 `zh` (재방문) | **0.1713** | **0.1959** | en→**zh** | **FAIL** |
+
+**query가 전혀 없어도 발생한다.** 한국어·중국어를 선호하는 브라우저가 `/`에
+착지하면 `navigator.languages`가 걸려 정적 영어 page 전체가 재렌더된다. **저장된
+언어가 있는 재방문자도 동일하게 실패한다** —— 즉 첫 방문에 한정된 문제가 아니다.
+
+중국어의 지배 source는 `section` `y65 h503 → y170 h398`(+105px, t≈1366ms)이다.
+중국어 hero 문구가 영어보다 **짧아서** section이 통째로 줄어드는 것이고, 한국어
+문구는 영어와 길이가 비슷해 영향이 작다. 이것이 두 locale의 차이를 설명한다.
+
+`MarketingLanguageSwitcher`는 `/kr`·`/zh`로 **navigate**하므로 사용자가 직접
+바꾸는 경로는 이 결함을 통과하지 않는다. 문제는 **load 시점의 자동 감지**다.
+
+*대조군과 격리*
+
+| cell | median | max | `<html lang>` | 판정 |
+|---|---:|---:|---|---|
+| `/kr` (ko-KR 브라우저) | 0.0012 | 0.0012 | **ko→ko** | PASS |
+| `/zh` (zh-CN 브라우저) | 0.0076 | 0.0076 | **zh→zh** | PASS |
+| `/` ko-KR, **webfont 전면 차단** | **0.097** | 0.097 | en→ko | PASS(경계) |
+| `/` zh-CN, **webfont 전면 차단** | **0.1637** | 0.1637 | en→zh | **FAIL** |
+| `/kr` ko-KR, webfont 전면 차단 | **0** | 0 | ko→ko | PASS |
+| `/zh` zh-CN, webfont 전면 차단 | **0** | 0 | zh→zh | PASS |
+
+prerender된 localized route는 `<html lang>`이 서버에서 이미 목표 locale이므로
+재렌더가 없다. 반대로 webfont를 전부 차단해도 `/`의 값이 그대로 남는다 ——
+**copy 교체 단독 기여분이 한국어 0.097, 중국어 0.1637**이다. 한국어는 gate를
+겨우 밑돌 뿐이고, 중국어는 단독으로 초과한다.
+
+#### R-05 최종 판정 (정정)
+
+| 하위 항목 | 원인 | 판정 |
+|---|---|---|
+| **R-05-A** | consent slot 삽입 | ✅ **종결** —— 아래 상태 행렬 |
+| **R-05-KO** | `Noto Sans KR` swap의 metric 불일치 | ✅ **기술적으로 해결, 실기기 검증 대기** —— `/kr` 0.0012. 단 override 값의 platform 검증이 남아 Pass로 닫지 않는다 |
+| **R-05-ZH** | `Noto Sans SC` swap의 동일 구조 | ⚠️ **판정 정정** —— 이전의 "전 cell FAIL"은 `/?lang=zh`에서 측정한 값이었다. 실제 route `/zh`는 **0.0076 PASS**. 구조적 결함(Arial 기반 fallback)은 그대로 남아 있으므로 `Known Risk`은 유지하되 **Fail 표기는 철회한다** |
+| **R-05-LANG** (신규) | 정적 영어 root의 client-side locale 재렌더 | ❌ **Fail** —— `/`에서 zh-CN 브라우저 0.1959(재방문 0.1713), copy 교체 단독 0.1637. 한국어는 0.097로 경계 |
+
+*R-05-A 종결 근거 —— 상태 행렬 (요구에 따라 명시)*
+
+"영어 전 cell 0"만으로는 모호하므로 상태별로 적는다. 전부 `/`, cold context,
+40ms/10Mbps, **cell당 5회**, median과 max를 함께 기록한다.
+
+| 상태 | 320×568 | 360×640 | 반복 | median / max |
+|---|---:|---:|---:|---|
+| ① 정책 fetch 대기(2.5초 지연) | 0 | 0 | 5 | 0 / 0 |
+| ② 최초 방문, prompt 표시 | 0 | 0 | 5 | 0 / 0 |
+| ③ 기존 accepted 첫 paint | 0 | 0 | 5 | 0 / 0 |
+| ④ 거부(declined) 첫 paint | 0 | 0 | 5 | 0 / 0 |
+
+각 상태는 `opt_in`과 `notice_opt_out` **두 정책 mode에서 각각** 측정했고 값이
+동일했다(총 20 cell). 추가로 `/`(en)에서 320/360/390px × 미해결·accepted·declined
+9 cell을 cold·warm 양쪽으로 재측정해 **전부 0**이었다.
+
+- **동의 직후(post-click) slot 제거**: 320px 0.1466, 360px 0.132. 표준 CLS는
+  `hadRecentInput`으로 이를 제외하지만, filter를 끄고 측정해 기록한다. 예약
+  band(94px)가 notice(78px)보다 크므로 C2 이전(0.1095)보다 커졌다.
+- **reverse shift 없음**: ①~④의 raw entry 수가 0이다(shift 자체가 발생하지
+  않는다). 예약 → notice 삽입 경로에서 band가 줄어드는 방향의 이동은 관측되지
+  않았다 —— `min-height`가 floor이므로 구조적으로 발생할 수 없다.
+- **canonical locale route 회귀 없음**: `/kr` 0.0012, `/zh` 0.0076이며 webfont를
+  전면 차단하면 둘 다 **0**이다. consent 관련 shift source는 나타나지 않는다.
+- **계약 test**: `marketing-consent-hero.spec.ts`의 "해결된 consent는 layout 비용
+  0" 단정을 포함해 21/21 통과.
+
+#### R-05-LANG 처리 —— proxy 단계의 localized canonical route redirect
+
+*앞선 서술 정정*
+
+이 보고서는 한때 "`proxy.ts`가 요청 언어를 `<html lang>`으로 해석한다"고 적었다.
+정확하지 않다. `proxy.ts`는 언어를 판별해 **내부 request header**에 넣을 뿐이고
+(`DOCUMENT_LANGUAGE_HEADER`), `/`는 `app/(site)/(marketing)/layout.tsx`에서
+`force-static`이므로 **그 신호로 요청마다 localized copy가 생성되지 않는다.**
+`app/(site)/layout.tsx`의 주석도 정적 marketing HTML이 영어로 빌드된다고 명시한다.
+
+*채택한 방식*
+
+요청마다 copy를 렌더하지 않고, **canonical localized route로 307 redirect**한다.
+localized route의 `force-static`과 hash 기반 CSP 구조가 그대로 유지된다.
+
+| 파일 | 변경 |
+|---|---|
+| `lib/marketingRoutes.ts` | `localizedMarketingRedirect()` —— 대상 경로·언어·판별 출처로 목적지를 계산 |
+| `proxy.ts` | GET/HEAD에 한해 307 발행, `lang` 제거, 나머지 query 보존, `Cache-Control: private, no-store` + `Vary: Accept-Language, Cookie` |
+| `components/LanguageProvider.tsx` | 선택한 언어를 `tomverse_lang` cookie에도 기록(`persistLanguage`) |
+| `tests/marketingRoutes.test.mjs` | 신규 9건 |
+
+*우선순위*: 명시적 `?lang=` → `tomverse_lang` cookie → `Accept-Language`.
+cookie가 필요한 이유는 `LanguageProvider`의 선호가 `localStorage`에 있어 proxy가
+볼 수 없기 때문이다. 없으면 **한국어 브라우저에서 영어를 직접 고른 방문자가 매
+방문 `/ko`로 끌려간다** —— client는 그 선택을 존중하는데 redirect가 뒤집는 셈이다.
+
+*동작 확인 (실제 build, `curl`)*
+
+| 요청 | 결과 |
+|---|---|
+| `Accept-Language: ko-KR` → `/` | **307 → `/ko`**, `private, no-store`, `Vary: Accept-Language, Cookie` |
+| `Accept-Language: zh-CN` → `/` | **307 → `/zh`** |
+| `Accept-Language: en-US` → `/` | **200** (기존 `s-maxage=3600` 유지) |
+| `/?lang=ko&utm_source=x&ref=y` | **307 → `/ko?utm_source=x&ref=y`** —— `lang`만 제거, 나머지 보존 |
+| cookie `tomverse_lang=en` + ko 브라우저 | **200**, redirect 없음 |
+| ko 브라우저 → `/ko` | **200**, loop 없음 |
+| ko 브라우저 → `/pricing` | **200** —— localized 대응이 없어 대상 아님 |
+| ko 브라우저 → `/chat` | **200** —— application route 제외 |
+
+`307`을 쓴 이유는 선호 기반 이동이기 때문이다. 영구 redirect는 사용자가 나중에
+언어를 바꿔도 브라우저·중간 캐시가 계속 이전 목적지로 보낼 수 있다.
+**shared cache 오염 방지가 특히 중요하다** —— static marketing 응답은
+`public, s-maxage=3600`으로 공유 캐시에 들어가므로, 언어 의존 redirect가 거기
+저장되면 첫 한국어 방문자의 hop이 모두에게 재생된다. 그래서 redirect 응답만
+`private, no-store` + `Vary`로 분리했다.
+
+*효과*
+
+| cell | 이전 median / max | 이후 median / max | `<html lang>` |
+|---|---:|---:|---|
+| `/` `Accept-Language: zh-CN` | **0.1959** / 0.1959 | **0.0076** / 0.0076 | en→zh ⇒ **zh→zh** |
+| `/` zh-CN + 저장된 `zh` (재방문) | **0.1713** / 0.1959 | **0.0076** / 0.0076 | en→zh ⇒ **zh→zh** |
+| `/` `Accept-Language: ko-KR` | 0.0012 / **0.0717** | 0.0012 / **0.0012** | en→ko ⇒ **ko→ko** |
+| `/` ko-KR + 저장된 `ko` (재방문) | 0.0717 / 0.0717 | **0.0012** / 0.0012 | en→ko ⇒ **ko→ko** |
+| `/` `Accept-Language: en-US` | 0 / 0 | 0 / 0 | en→en (변화 없음) |
+| **`/` ko-KR, webfont 전면 차단** | **0.097** / 0.097 | **0** / 0 | en→ko ⇒ **ko→ko** |
+| **`/` zh-CN, webfont 전면 차단** | **0.1637** / 0.1637 | **0** / 0 | en→zh ⇒ **zh→zh** |
+| `/kr`·`/zh` (대조군) | 0.0012 / 0.0076 | 변화 없음 | 이미 서버 렌더 |
+
+`<html lang>`이 서버에서 이미 목표 locale이 되어 client 재렌더가 사라진다.
+**webfont를 전면 차단한 격리 측정이 0이 된 것이 결정적이다** —— copy 교체 기여분
+자체가 소멸했다는 뜻이며, 이전에 남아 있던 한국어 0.097·중국어 0.1637이 정확히
+그 값이었다.
+
+*전체 언어에서 `lang`·copy·URL 일치 재측정 (권고 2단계)*
+
+지원 7개 언어 전부에 대해 `/`로 진입해 세 가지가 서로 맞는지 확인했다 ——
+도달 URL, **서버가 보낸 HTML의 `<html lang>`**, hydration 후 client `lang`. 셋 중
+하나라도 어긋나면 그것이 곧 R-05-LANG 결함이다(`all-locales.mjs`, 320px,
+`consent=declined`, cold cache, cell당 3회).
+
+| 브라우저 | 도달 URL | 서버 `<html lang>` | client `lang` | median | max | 일치 | 첫 paint hero |
+|---|---|---|---|---:|---:|---|---|
+| en-US | `/` | en | en | 0 | 0 | ✅ | `Ask once. Compare multiple A…` |
+| ko-KR | `/ko` | ko | ko | 0.0012 | 0.0012 | ✅ | `한 번 질문하고, 여러 AI 답변을…` |
+| zh-CN | `/zh` | zh | zh | 0 | 0.0076 | ✅ | `问一次， 比较多个 AI 的回答。` |
+| de-DE | `/de` | de | de | 0 | 0 | ✅ | `Einmal fragen. Antworten meh…` |
+| es-ES | `/es` | es | es | 0 | 0 | ✅ | `Pregunta una vez. Compara re…` |
+| fr-FR | `/fr` | fr | fr | 0 | 0 | ✅ | `Posez une question. Comparez…` |
+| pt-BR | `/pt` | pt | pt | 0 | 0 | ✅ | `Pergunte uma vez. Compare re…` |
+
+**7개 전부 일치하며, hero copy가 첫 paint부터 해당 언어다.** de·es·fr·pt는 이번
+작업에서 한 번도 측정한 적이 없던 축인데 모두 0이다 —— 이 네 locale은 copy 길이가
+영어와 가까워 재렌더 shift가 작았을 뿐 구조적으로는 같은 결함을 안고 있었고,
+redirect가 원인 자체를 제거했다.
+
+*회귀 검증 —— proxy 변경은 모든 요청 경로를 지난다*
+
+redirect는 `proxy.ts`에 있으므로 route 하나가 아니라 **전 요청**에 영향을 준다.
+`?lang=`에 의존하는 spec이 20개가 넘어 해당 축을 우선 돌렸다.
+
+| suite | 결과 |
+|---|---|
+| `language-detection` + `marketing-consent-hero` + `marketing-language-analytics` + `marketing-language-focus` | ✅ **13/13 passed** —— locale route override, 언어 전환 analytics(document/client 구분 포함), FINAL-F001·F004 |
+| `touch-targets` + `font-system` + `korean-typography` | ✅ **38 passed / 17 skipped / 0 failed** —— contract가 요구하는 **중국어 regression**(`font-system`의 locale별 rasterized font, `korean-typography`의 중국어 wrapping) 포함 |
+| `ui-contracts` + `accessibility-core-tasks` + `build-info` | ✅ 23 passed / 1 skipped / 0 failed |
+| `npm run test:unit` | ✅ **571/571** (신규 `marketingRoutes.test.mjs` 9건 포함) |
+| `npm run security:regression` | ✅ 113 checks passed |
+| `npx eslint --max-warnings=0` + `next build` | ✅ exit 0 |
+
+`touch-targets.spec.ts:418`이 `/?lang=${lang}`을 locale별로 순회하므로 이제 각
+locale route로 redirect되지만, 검증 대상이 페이지 내용이라 그대로 통과한다.
+
+*닫히지 않는 범위 —— 명시한다*
+
+1. **localized 대응이 있는 route만 처리된다.** locale별로 생성되는 것은 `/`와
+   search-intent 4개뿐이다. `/pricing`·`/faq`·`/privacy` 등은 `/ko/pricing`이
+   존재하지 않으므로 redirect 대상이 아니며 **client-side copy 교체가 남는다.**
+   존재하지 않는 곳으로 보내는 것은 수정이 아니라 404이므로 의도적으로 제외했다.
+2. **cookie는 그것을 기록한 방문부터 유효하다.** 기존 방문자의 저장된 선호가
+   브라우저 언어와 다르면, 이 변경 직후 **첫 요청 한 번은** 여전히 client 교체를
+   겪는다. 그 방문에서 cookie가 기록되므로 다음 요청부터 redirect가 처리한다.
+   추정이 아니라 측정했다(`cookie-second-visit.mjs`, 320px, 5회).
+
+   | 상황 | median / max | 도달 URL | `<html lang>` |
+   |---|---:|---|---|
+   | en-US 브라우저 + 저장된 `ko`, **cookie 없음**(변경 직후 첫 요청) | 0.0717 / 0.0717 | `/` | en→ko |
+   | 같은 방문자, **cookie 기록 후** | **0.0012 / 0.0012** | **`/ko`** | **ko→ko** |
+   | ko-KR 브라우저 + 저장된 `en`, cookie 기록 후 | **0 / 0** | **`/`** | **en→en** |
+
+   세 번째 행이 cookie를 넣은 이유 그 자체다 —— 한국어 브라우저에서 영어를
+   **직접 고른** 방문자가 `/`에 그대로 머물고 shift도 0이다. cookie가 없었다면
+   매 방문 `/ko`로 끌려갔을 것이다.
+
+**R-05 전체 판정**: R-05-A 종결, R-05-KO 실기기 검증 대기, R-05-ZH
+`Known Risk`, R-05-LANG은 **측정된 실패 cell이 해소**됐으나 위 두 잔여 범위가
+남는다.
+
+#### R-05-ZH — 중국어의 동일 구조 (`Known Risk / platform coverage limitation`)
+
+사용자 지시에 따라 **별개 항목으로 분리**한다. R-05-KO의 변경은 한국어에 한정된
+locale-specific remediation이며, 중국어까지 해결됐다고 **일반화하지 않는다.**
+
+`next/font`가 생성하는 `Noto Sans SC Fallback`도 `Noto Sans KR Fallback`과 같은
+모양으로 **`local(Arial)` 기반**이고, Arial에는 Hangul도 **Han glyph도 없다.**
+따라서 생성된 `size-adjust`·`ascent-override`·`descent-override`는 중국어 glyph의
+fallback 렌더링에 적용되지 않는다. cold load에서 `:lang(zh)`는 `PingFang SC` 또는
+`Microsoft YaHei` 등으로 먼저 그려진 뒤 `Noto Sans SC`로 교체되며, 그 face들에는
+어떤 override도 없다. 즉 **"metric-adjusted fallback이 있으므로 CJK swap이 layout을
+이동시키지 않는다"는 기존 보장은 중국어에도 성립하지 않는다.**
+
+*계측 결과 —— 추정이 아니라 실측이다. 그리고 한국어보다 나쁘다.*
+
+제품 build에서 `/?lang=zh`를 cold cache로 측정했다(`final-cls.mjs`, cell당 5회,
+40ms/10Mbps). 이 축은 이번에 **처음** 측정한 것이다.
+
+| cell | median | max | 판정 |
+|---|---:|---:|---|
+| 320 zh unset | 0.1573 | 0.1573 | **FAIL** |
+| 320 zh accepted | **0.1959** | 0.1959 | **FAIL** |
+| 320 zh declined | **0.1959** | 0.1959 | **FAIL** |
+| 360 zh unset | 0.1376 | 0.1376 | **FAIL** |
+| 360 zh accepted | 0.1658 | 0.1658 | **FAIL** |
+| 360 zh declined | 0.1658 | 0.1658 | **FAIL** |
+| 390 zh unset | 0.1357 | 0.1357 | **FAIL** |
+| 390 zh accepted | 0.1569 | 0.1569 | **FAIL** |
+| 390 zh declined | 0.1569 | 0.1569 | **FAIL** |
+
+warm cache에서도 같다(360 unset 0.1376, accepted 0.1658). 같은 run의 대조군:
+**영어는 cold·warm 모두 전 cell 0**, **한국어는 0.0196–0.0797로 전 cell 통과**.
+즉 이 값은 환경 잡음이 아니라 locale 고유의 결함이다.
+
+`R-05-ZH`의 최악값 0.1959는 **R-05-KO의 수정 전 최악값(0.1082)보다 크고**,
+R-05-A 수정 전의 `/` 영어값(0.1466)보다도 크다. 중국어가 15 chunk / 807.2 KB를
+받고 한국어가 21 chunk / 494.6 KB를 받는 차이 —— chunk 수는 적지만 총량은 1.6배 ——
+가 여기에 그대로 나타난다.
+
+| 축 | 상태 |
+|---|---|
+| `/zh` cold-load raw CLS (320/360/390px × unset/accepted/declined) | ✅ **측정 완료 —— 전 cell FAIL** (위 표) |
+| warm cache | ✅ 측정 완료 —— cold와 동일 |
+| font 지연(1500ms)·차단 상태 | 계측 진행 중 |
+| 실제 rasterized font (`CSS.getPlatformFontsForNode`) | 계측 진행 중 |
+| 주요 platform(`PingFang SC`, `Microsoft YaHei`) 실기기 검증 | **미실행** |
+| remediation | **미실행** |
+
+**판정: `Fail` (측정된 축) + `Not verified` (platform 축).** 더 이상 "잠재
+결함"이 아니다 —— cold·warm 양쪽에서 9 cell 전부 gate를 넘는다. 남은 축이 닫히기
+전에는 중국어를 `Pass`나 "영향 없음"으로 표기하지 않는다. locale별 font
+다운로드량, system fallback, wrapping이 모두 다르므로 영어나 한국어 측정값으로
+대체할 수 없다 —— 이번 측정이 그 이유를 그대로 보여준다. `display: "optional"`을
+한국어에만 적용하는 것도, 측정 없이 CJK 전체에 일괄 적용하는 것도 근거가 되지
+않는다.
+
+**Go-Live 함의**: `/zh`는 marketing route이고 중국어는 지원 locale이다. R-05를
+"median CLS ≤0.1"로 판정하는 기준을 locale에 무관하게 적용한다면, R-05-ZH는
+R-05-KO와 동급의 미충족 항목이다.
+
+한국어 변경 시 **중국어 regression test는 반드시 실행**한다
+(`tests/e2e/font-system.spec.ts`, `tests/e2e/korean-typography.spec.ts` ——
+후자가 중국어 wrapping도 덮는다). contract의 change checklist에 이 요구를 넣었다.
+
+*2순위(`display: "optional"`)는 실행하지 않았다*
+
+1순위가 목표를 달성했으므로 정책 변경을 수반하는 선택지로 넘어갈 이유가 없다.
+필요해질 경우의 실험 조건(cold/warm 분리, font 지연·차단, 320/360/390px,
+accepted/declined, median과 max 분리 보고, 실제 rasterized font 기록, hero
+wrapping·CTA 위치 비교, platform smoke, LCP·FOIT·CLS 동시 측정, en/zh 무회귀,
+preload 무증가, composer·200% 통과)은 사용자가 제시한 그대로 유효하다.
+
+*따라서 R-05의 원인은 확정적으로 둘이다.*
+
+| 하위 항목 | 원인 | shifted node | 영향 범위 |
+|---|---|---|---|
+| **R-05-A (c)** | `/api/analytics/consent-policy` 비동기 해석 후 consent slot 삽입 | `section.relative.border-b…`(hero section이 아래로 밀림) | 전 locale·전 viewport |
+| **R-05-KO** | `Noto Sans KR` 21+개 non-preload subset의 늦은 swap | hero의 `h1`·`p`·brand note·CTA 블록 | 한국어 전용, 320px에서 최대 |
+| **R-05-ZH** (신규 분리) | `Noto Sans SC`의 동일 구조 —— `Noto Sans SC Fallback`도 `local(Arial)` 기반이고 Arial에는 Han glyph가 없다 | hero (한국어와 같은 계열) | 중국어. **측정 완료: 0.1357–0.1959로 전 cell FAIL**, platform 축은 `Not verified` |
+
+**추가로 드러난 제약 —— (c)만으로는 320px에서도 부족하다.**
+
+font를 차단해 R-05-KO를 제거해도 **320px의 consent slot 단독 기여가 0.1216(ko)·
+0.1466(en)** 으로 이미 0.1을 넘는다. 즉 (c)는 slot shift를 "줄이는" 수준이 아니라
+**제거**해야 한다.
+
+**(c)의 설계 제약 —— 기존 계약과 정면으로 충돌한다**
+
+`tests/e2e/marketing-consent-hero.spec.ts`의 FINAL-F001 test는 동의 해결 후
+`marketing-consent-slot`의 높이가 **정확히 0**이어야 한다고 요구한다. 주석은
+그 이유를 "otherwise the fix would trade an overlap for a permanent gap under
+the header"로 명시한다. 따라서 **영구 `min-height`는 이 계약을 위반한다.**
+
+측정에서 나온 해결의 단서는 예약 게이트를 무엇으로 잡느냐다.
+
+- `analyticsConsent()`는 localStorage를 **microtask에서** 읽는다. 반면
+  `resolvedPolicy`는 network fetch(~900ms)를 기다린다.
+- 따라서 게이트를 **"policy 대기 중"이 아니라 `consent === "unset"`** 으로 잡으면,
+  기존 accepted·declined 방문자는 microtask 시점에 이미 해결되어 **예약 자체가
+  발생하지 않는다** —— 측정된 0 CLS(5/5회)와 일치하고 FINAL-F001도 유지된다.
+- 최초 방문자가 accept/decline하는 순간의 붕괴는 **사용자 조작**이므로
+  `hadRecentInput`으로 CLS에서 제외된다.
+
+남는 위험은 예약 높이가 실제 notice 높이와 다를 때의 잔여 shift다. 측정된 notice
+높이는 폭·locale에 따라 **74–94px**로 변동한다.
+
+**(c) 검증에 반드시 포함할 상태 (사용자 요구)**
+
+1. 정책 fetch 대기 상태
+2. 최초 방문자의 prompt 표시 상태
+3. 기존 accepted 방문자의 첫 paint
+4. 기존 declined 방문자의 첫 paint
+5. accept/decline **직후** slot 제거
+6. `opt_in` vs `notice_opt_out` 정책 차이
+
+"prompt가 표시된다"만 확인하는 것으로는 불충분하다.
+
+**R-05 closure 정책 (사용자 결정)**
+
+- (c)와 R-05-KO는 **구현 티켓을 분리해도 되지만 둘 다 R-05의 하위 항목으로
+  유지하고, 동일 Go-Live milestone에서 검증한다.**
+- 한국어는 지원 locale이고 320px는 저장소의 명시적 모바일 계약 범위이므로,
+  **한국어/320px를 R-05 closure와 Go-Live 판정에서 제외하지 않는다.**
+- consent slot만 고치고 R-05를 Pass로 닫을 수 없다.
+
+**(c) 구현 시도와 측정에 의한 반증 (2026-07-30)**
+
+사용자 승인에 따라 (c) consent slot 높이 예약을 구현하고 요구된 상태 전체를
+측정했다. 결과는 **(c)가 조건을 충족할 수 없음을 보여준다.**
+
+*구현 내용*
+
+- `MarketingConsentReservationContext`를 추가해 `AnalyticsProvider`가
+  "notice가 아직 도착 예정인가"를 slot에 전달.
+- 게이트는 `consent`(localStorage, microtask 해석) 기준: `loading` 또는 `unset`
+  일 때만 예약. `accepted`·`declined`는 예약하지 않아 FINAL-F001의
+  "resolved consent costs no layout box" 계약을 유지.
+- 예약 높이는 실측한 band별 **최대값**: `<640px` 94px, `640–767px` 132px,
+  `768–1279px` 116px, `≥1280px` 100px. 과소 예약은 notice 도착 시 slot을 다시
+  키워 shift를 재유입시키므로 band 최대값을 택했다.
+
+*측정 결과 (360×640, en, cold, 5회)*
+
+| consent 상태 | (c) 적용 전 | (c) 적용 후 | 판정 |
+|---|---:|---:|---|
+| 최초 방문 (unset) | 0.1095 | **0.132** | **악화** |
+| 동의 완료 직후 (just-accepted) | 0.1095 | **0.132** | **악화** |
+| 기존 동의 (accepted) | 0 | 0 | 유지 |
+| 거부 (declined) | 0 | 0 | 유지 |
+
+320px·한국어·200% 축도 함께 악화됐다(예: 320 ko 100% median 0.1498 → 0.2286).
+
+*왜 악화되는가 — 구조적 이유*
+
+예약이 **첫 paint 프레임에 존재하지 않기** 때문이다. marketing route는
+`force-static`이므로 prerender된 HTML이 먼저 그려지고, 예약은 hydration 이후
+client에서 붙는다. 그 결과 shift가 "notice 78px 삽입"에서 "예약 94px 삽입"으로
+**커졌다**(0.1095 × 94/78 ≈ 0.132, 관측값과 일치).
+
+예약을 첫 프레임에 넣으려면 prerender된 HTML에 들어가야 한다.
+
+> **정정 (아래 "C2 pre-paint spike" 참조).** 이 문단은 원래 "그러면 방문자의
+> 저장된 consent를 build 시점에 알 수 없으므로 **모든** 방문자에게 예약이 그려지고,
+> 기존 동의·거부 방문자에서 붕괴 shift가 새로 생긴다"고 단정했다. **이 단정은
+> 틀렸다.** prerender된 HTML 안의 pre-paint inline script가 `localStorage`를
+> **동기적으로** 읽어 `<html>`에 attribute를 세우면, 예약은 첫 paint 프레임에
+> 존재하면서도 **미해결 방문자에게만** 적용된다. 즉 서버가 consent를 알 필요가
+> 없고 (b) 동적 전환도 필요 없다. 이 경로를 C2로 명명하고 실제로 측정했다.
+
+*결론*
+
+사용자가 (c)에 붙인 조건은 "최초 방문·동의 완료·기존 동의·거부 네 상태 모두에서
+삽입·제거 CLS가 발생하지 않는 것이 증명된 경우"였다. **측정은 그 반대를
+증명했다** —— 정적 marketing route에서 client-side 높이 예약은 두 집단을 동시에
+만족시킬 수 없다. 따라서 **구현을 되돌렸다**(제품 코드에 회귀를 남기지 않음).
+
+R-05-A를 해결하려면 셋 중 하나가 필요하다.
+
+1. consent를 요청 시점에 읽어 첫 프레임에 반영 —— (b) 동적 전환. 사용자가 제외.
+2. consent 정책 결정을 network 왕복 없이 client bundle에서 알 수 있게 만드는 구조
+   변경(국가별 정책이므로 자명하지 않다).
+3. `0.1095`를 문서화된 잔여 위험으로 수용 —— 단 이는 320px·한국어 축이 함께
+   해결된 뒤에야 논의 가능하다(사용자 배제 기준).
+
+*사용자 결정으로 제외된 선택지*
+
+- **(b) marketing route 동적 전환은 적용하지 않는다** —— 성능·캐시 영향에 비해
+  변경 범위가 과도하다는 사용자 판단.
+- **(c) 고정 높이 예약**은 최초 방문·동의 완료·기존 동의·거부 네 상태 모두에서
+  삽입·제거 CLS가 발생하지 않음이 증명된 경우에만 후속 개선으로 적용한다.
+
+#### C2 pre-paint spike — 첫 시도는 **측정 자체가 무효**였다
+
+사용자 권고 순서 3단계로 격리 spike를 수행했다. 첫 실행은 "C2는 개선이 없다"는
+결과를 냈고 나는 그것을 폐기 근거로 삼으려 했다. **그 측정은 무효였다.**
+
+진단 script(`c2-diag.mjs`)가 첫 프레임부터 `requestAnimationFrame`으로
+표본을 떠 보니 `data-consent-pending` attribute도, 주입한 `<style>` 태그도
+**아예 존재하지 않았다**(`attr=null`, `styleIn=null`). 원인은 harness다.
+Playwright `page.addInitScript`는 문서 파싱 이전의 placeholder document에서
+실행되므로, `document.documentElement`에 세운 attribute와 거기 붙인 `<style>`은
+실제 응답 HTML이 파싱될 때 **함께 폐기된다**. 같은 spike의 `PerformanceObserver`
+주입은 `window`에만 등록하므로 살아남았고, 그래서 실패가 조용히 통과했다.
+중앙값이 baseline과 소수점까지 동일했던 것(0.1095 / 0.1466 / 0.1498)이 단서였다.
+
+재측정은 제품 변경과 동일한 메커니즘으로 했다 —— 응답 HTML의 `<head>`에 inline
+script를 삽입하고, 그 script/style의 sha256 hash를 CSP header에 더했다
+(`c2-spike2.mjs`). script가 실제로 실행됐음을 `attr=1`, `slotH=94`,
+`minH=94px`로 확인했다.
+
+| cell | BASE median | C2 median | C2 max |
+|---|---|---|---|
+| 360×640 en 미해결 | 0.1095 | **0** | 0 |
+| 320×568 en 미해결 | 0.1466 | **0** | 0 |
+| 360×640 ko 미해결 | 0.1172 | **0.0074** | 0.0843 |
+| 320×568 ko 미해결 | 0.2048 | **0.0226** | 0.0641 |
+| 360×640 en 기존 accepted | 0 | **0** | 0 |
+| 360×640 en 기존 declined | 0 | **0** | 0 |
+
+**C2는 R-05-A를 제거한다.** 그리고 한국어 잔여값이 0.107 → 0.0074로 함께 내려간
+것은 R-05-KO가 사라졌기 때문이 아니라, 예약된 band가 hero를 아래로 밀어 font
+swap이 움직이는 영역의 viewport 점유율(impact fraction)이 줄었기 때문이다.
+원인은 남아 있다.
+
+**CSP 복잡성은 작다.** static marketing은 hash 기반이고
+`getStaticMarketingCspHashes`(`lib/staticMarketingCsp.ts:20-39`)가 prerender된
+`.next/server/app/<route>.html`에서 `src` 없는 inline `<script>`와 `<style>`의
+hash를 자동 수집한다. CSP header는 `CSP_MODE`에 따라 enforce/report-only 중
+**하나만** 발행된다(`proxy.ts:125-128`). 따라서 수동 allowlist도 nonce도 필요
+없다. 관측된 `[Report Only]` 위반 4건은 제품 결함이 아니라 harness가
+`Content-Security-Policy-Report-Only` header 이름을 갱신하지 않은 결과다.
+삽입 지점도 하나로 끝난다: `MarketingShell`은 두 marketing layout
+(`app/(site)/(marketing)/layout.tsx`, `app/[locale]/layout.tsx`) **에서만**
+쓰이고 둘 다 `force-static`이므로, dynamic route(nonce + `strict-dynamic`)에는
+전혀 노출되지 않는다. CSS는 `app/globals.css`에 두면 hash 대상에서 아예 빠진다.
+
+#### 그런데 예약 높이 표가 곡면을 따라가지 못한다 —— C2의 실제 약점
+
+`min-height`는 floor로만 작동하므로 **예약값 ≥ 실제값인 cell에서는 shift가 정확히
+0**이다(360 en에서 실제 78 < 예약 94인데도 0이 나온 이유). 반대로 예약값이
+실제보다 작으면 그만큼 성장 shift가 남는다. 그래서 예약값은 모든 cell의 실제
+높이를 **상한으로 덮어야** 한다. 21개 width × en/ko × `opt_in`/`notice_opt_out`
+× 100%/200% 확대로 slot 높이를 훑었다(`slot-sweep.mjs`, 총 168 load).
+
+| band | 100% 최대 | 200% 최대 |
+|---|---|---|
+| `<640` (320–480px) | 94px | 222px |
+| `<640` (540–639px) | **152px** | 146px |
+| `640–767` | 148px | 170px |
+| `768–1279` | 132px | **262px** (1100px) |
+| `≥1280` | 116px | 230px |
+
+세 가지가 드러났다.
+
+1. **`<640` band이 균일하지 않다.** 320–480px는 최대 94px인데 540–639px는 152px다.
+   실제 높이 breakpoint가 Tailwind `sm:`(640px)와 어긋나 있고, 경계는 480–540px
+   사이 어딘가로 미측정이다. `<640`에 152px를 예약하면 320px 전화기에서 실제
+   94px 대신 152px —— header 아래 **58px의 죽은 공간**이 최초 방문자에게 생긴다.
+2. **200% 확대에서 표의 값뿐 아니라 모양이 바뀐다.** px 예약은 200%에서 대량
+   부족하고(94 예약 vs 222 필요), rem 예약은 100%에서 대량 초과한다. notice는
+   확대 시 약 2.4배가 되는데 `rem`은 2배만 따라가므로 어느 단위도 두 배율을
+   동시에 만족하지 못한다. `min-height: max(94px, 6.94rem)` 같은 조합으로 band별
+   튜닝은 가능하지만(100%에서 17–37px 초과, 200%에서 근사 일치), 그것은 magic
+   constant를 band마다 두 개씩 두는 것이다.
+3. **나는 en/ko만 측정했고 locale은 7개다.** zh·de·es·fr·pt 각각이 이 곡면 전체를
+   다시 만든다. 예약 표를 지켜 줄 자동 guard는 없고, consent copy가 한 줄
+   길어지는 순간 조용히 부족해진다.
+
+band 경계도 추측이 아니라 측정으로 확정했다. notice는 viewport breakpoint가 아니라
+**container query**(`@container/notice`, `AnalyticsProvider.tsx:611-627`)로 크기를
+정하므로, 높이는 slot의 content box가 threshold를 넘을 때 계단식으로 바뀐다.
+실제 전환점은 Tailwind `sm:`(640px)가 아니라 **viewport 500px**이고, 그 지점에서
+`notice_opt_out`이 184px까지 올라간다(`boundary.mjs`).
+
+| viewport band | 100% 최대 높이 | 예약값 | 최대 죽은 공간 |
+|---|---:|---:|---:|
+| `<500` | 94px (320 en `opt_in`) | 94px | 20px (390px에서) |
+| `500–639` | 184px (500 en `notice_opt_out`) | 184px | 32px |
+| `640–767` | 148px | 148px | 32px |
+| `768–1279` | 132px | 132px | 16px |
+| `≥1280` | 116px | 116px | 16px |
+
+*판정 —— 사용자 권고 5단계 규칙의 적용*
+
+규칙은 "C2가 한 상태라도 불안정하거나 CSP 복잡성이 크면 폐기하고 (b)"다.
+
+- **CSP 복잡성: 작다.** 위 근거에 더해, 실제로 build한 뒤 확인했다. prerender된
+  `.next/server/app/index.html`에서 script를 찾아 sha384를 계산하고 live 응답의
+  CSP header와 대조하니 **hash가 이미 들어 있었다**. 수동 작업은 0이다.
+- **네 consent 상태: 아래 4단계 검증 표.**
+- **높이 표의 취약성은 "불안정"이 아니라 "부분 개선"으로 끝난다.** `min-height`는
+  floor이므로 예약값이 실제보다 **작으면 shift가 줄어들 뿐 늘지 않는다.** 200%
+  확대(notice가 약 2.4배)와 미측정 5개 locale에서 예약이 부족할 수 있지만, 그
+  cell의 결과는 baseline보다 나쁘지 않다. 회귀 위험이 없으므로 폐기 사유에
+  해당하지 않는다.
+
+따라서 **C2를 구현하고 4단계 검증으로 판정한다.** (b)는 보류한다.
+
+*구현 (최소 변경)*
+
+| 파일 | 변경 |
+|---|---|
+| `components/analytics/MarketingConsentReservation.tsx` | 신규. pre-paint inline script. `localStorage`를 동기 판독해 미해결 방문자에게만 `<html data-consent-pending>` |
+| `components/marketing/MarketingShell.tsx` | 위 component를 subtree 최선두에 렌더 |
+| `app/globals.css` | `html[data-consent-pending]` 키의 band별 `min-height` (표 위) |
+| `components/analytics/AnalyticsProvider.tsx` | 결정 확정 시 attribute 제거 (`showPreferences`면 복원) |
+| `lib/productAnalyticsShared.ts` | `ANALYTICS_CONSENT_STORAGE_KEY` 노출 —— script와 판독자가 어긋나지 않게 단일 출처화 |
+| `lib/productAnalyticsClient.ts` | 위 상수를 사용 |
+
+설계상 주의한 두 지점.
+
+1. **`consent === "loading"` 동안 attribute를 건드리지 않는다.** 여기서
+   attribute를 *추가*하면 기존 accepted 방문자(현재 CLS 0)에게 예약이 생겼다가
+   microtask 뒤 사라져 **없던 shift가 새로 생긴다.** pre-paint script가 이미 같은
+   저장값을 읽었으므로 `loading` 동안은 그 판단이 곧 정답이다.
+2. **결정 후에는 attribute를 반드시 제거한다.** `marketing-consent-hero.spec.ts:176`
+   이 "해결된 consent는 예약 공간을 남기지 않는다"며 slot 높이가 **정확히 0**임을
+   단정한다. 제거하지 않으면 shift 하나를 header 아래 영구 공백으로 바꾸는 셈이다.
+
+`MarketingShell`은 `force-static` marketing layout 2곳에서만 쓰이므로
+(`app/(site)/(marketing)/layout.tsx`, `app/[locale]/layout.tsx`) nonce +
+`strict-dynamic`을 쓰는 dynamic route에는 이 script가 도달하지 않는다.
+Next.js 공식 지침(`node_modules/next/dist/docs/01-app/02-guides/preventing-flash-before-hydration.md`)의
+inline-script 패턴을 그대로 따랐고, dev의 `<script>` 렌더 경고와 soft navigation
+재실행 문제는 문서가 제시한 `type` 전환 + `suppressHydrationWarning`으로 처리했다.
+
+#### 4단계 검증 —— 4상태 × 두 정책 mode × 320·360px × en/ko
+
+사용자가 요구한 검증 표면 전체를 돌렸다(`step4.mjs`, cell당 5회, 총 200 load,
+cold context, 40ms/10Mbps). `1.policy-pending`은 `/api/analytics/consent-policy`
+응답을 2.5초 붙잡아 두고 그 **대기 중에** slot 상태를 표본했다.
+
+| state | 320 en | 360 en | 320 ko | 360 ko |
+|---|---:|---:|---:|---:|
+| 1. 정책 fetch 대기 | **0** | **0** | 0.0827 | 0.0855 |
+| 2. 최초 방문 prompt 표시 | **0** | **0** | 0.0815 | 0.0855 |
+| 3. 기존 accepted 첫 paint | **0** | **0** | **0.1082** | **0.1061** |
+| 4. 기존 declined 첫 paint | **0** | **0** | **0.1082** | **0.1061** |
+
+`opt_in`과 `notice_opt_out` 두 mode의 값이 **동일하다**(표는 두 mode 공통).
+예약값이 두 mode의 최댓값을 덮으므로 mode 차이가 shift로 나타나지 않는다 ——
+이것이 mode를 모른 채 예약해도 되는 이유다.
+
+부수 관측:
+
+- **정책 fetch 대기 중 `noticeMounted=false`, `slotH=94`, `attr=true`.** 예약이
+  첫 프레임부터 존재하고 notice가 그 안으로 들어온다. 대기 상태의 en CLS가
+  0이라는 것은 대기 자체가 shift를 만들지 않는다는 직접 증거다.
+- **accept 클릭 직후 slot 제거 기여분**: 320px 0.1466, 360px 0.132
+  (`hadRecentInput` filter를 끈 값). 예약 band(94px)가 notice(360px에서 78px)보다
+  크므로 C2 이전(0.1095)보다 **커졌다.** 표준 CLS에는 집계되지 않지만 숨기지
+  않고 기록한다.
+
+*판정*
+
+| 하위 항목 | 판정 | 근거 |
+|---|---|---|
+| **R-05-A** (consent slot 삽입) | ✅ **종결** | 영어 20 cell 전부 0. 한국어에서도 더 이상 shift source로 등장하지 않는다(`section` 소멸) |
+| **R-05-KO** (한국어 webfont swap) | ❌ **미종결** | 기존 accepted·declined 한국어 방문자 0.1061–0.1082로 **0.1 초과** |
+
+**R-05 전체는 여전히 Pass가 아니다.** 사용자 정책("한국어/320px를 R-05 closure와
+Go-Live 판정에서 제외하지 않는다")에 따라 R-05는 열린 상태로 유지한다.
+
+*C2가 기존 방문자 cell을 악화시킨 것이 아니다*
+
+3·4 상태에서 `attr=false`, `slotH=0`이다 —— pre-paint script가 저장된 결정을
+읽고 attribute를 세우지 않았으므로 **C2는 이 cell들에서 구조적으로 no-op**이다.
+0.1061은 예약이 없어 hero가 높은 위치에 있는 상태에서 font swap이 온전한
+impact fraction으로 작동한 값이며, C2 유무와 무관하다. 반대로 미해결 cell에서
+한국어가 0.0855까지 내려간 것은 예약 band가 hero를 아래로 밀어 swap이 움직이는
+영역의 viewport 점유율을 줄인 부수 효과다.
+
+전체적으로 **한국어 최댓값은 0.2295 → 0.1082로 내려갔다.** 실질 개선이지만
+gate는 넘지 못한다. 남은 초과분의 원인은 하나뿐이다 —— R-05-KO.
+
+*계약 test 확인*
+
+| suite | 결과 |
+|---|---|
+| `marketing-consent-hero.spec.ts` + `root-font-resize-text.spec.ts` (desktop) | ✅ **21/21 passed** —— FINAL-F001의 "해결된 consent는 layout 비용 0" 단정 포함 |
+| `mobile-composer-contract` + `web-search-composer-state` | 40 passed, 9 failed —— **전부 이 변경과 무관**. `mobile-safari` 7건은 이 컨테이너에 WebKit이 없어서 launch 실패(`webkit-2336` 부재), composer golden 2건은 **정확히 906 pixels**의 기존 noise pair(non-canonical browser) |
+| `test:unit` | ✅ 562/562 |
+| `npm run check` (eslint `--max-warnings=0` + `next build`) | ✅ exit 0 |
+
+- **남은 작업**: R-05-KO 처리 방향 결정(위 세 선택지), 200% 확대·미측정 5개
+  locale의 부분 개선 범위 문서화, staging 배포본에서의 재확인.
+
 ### R-06 — Authenticated web-search state transitions ✅
 
 - **판정**: 성공 — **production source 결함은 재현되지 않았고, coverage만 보강**했다.
@@ -385,7 +1410,7 @@ color scheme 기본, cold cache(측정마다 새 context), 대상 SHA `ea56a6ba`
 | E2E: R-02/03/04 관련 6 spec × desktop+mobile | ✅ **223 passed**, 0 failed | |
 | E2E: R-06/07/08 관련 5 spec × desktop | ✅ **72 passed**, 0 failed | |
 | E2E: 전체 suite × desktop+mobile (비-canonical) | ⚠️ 256/1618까지 실행 후 중단, 18 failed | §6.3 |
-| `npm run test:e2e:run` (canonical 전체) | ⛔ **Not verified** | canonical runner 부재 |
+| **QA-GATE-001 canonical (CI, `ubuntu-24.04`, 고정 Chromium)** | ⚠️ **1509 passed / 10 failed / 908 skipped** (36.1분) | §6.4 |
 
 ### 6.1 최초 실패와 분류
 
@@ -419,6 +1444,254 @@ color scheme 기본, cold cache(측정마다 새 context), 대상 SHA `ea56a6ba`
   reason to re-record."
 - 이번 변경은 composer를 건드리지 않았다.
 - → **snapshot을 갱신하지 않았다.** `Not verified`로 보고한다.
+
+### 6.4 QA-GATE-001 — canonical 실행 결과 (2026-07-29T23:19–23:57Z)
+
+사용자 요청으로 canonical 환경에서 gate를 실행했다. 이 컨테이너에서는 고정
+Chromium 설치가 프록시 403으로 막히지만, CI에서는 정상 완료된다.
+
+| 항목 | 값 |
+|---|---|
+| workflow | `.github/workflows/e2e.yml` "Main Chromium Regression" (`workflow_dispatch`) |
+| run | `30499132860`, run #44 |
+| ref / head SHA | `claude/tomverse-insight-remediation-yvubkq` / `199baa65` |
+| runner | `ubuntu-24.04` (canonical) |
+| browser | `npx playwright install chromium` = 저장소 고정 build **설치 성공** |
+| 명령 | `npm run test:e2e:chromium` (desktop-chromium + desktop-compact + mobile-chromium) |
+| 결과 | **1509 passed / 10 failed / 908 skipped**, 36.1분 |
+| artifact | `main-chromium-test-results-30499132860` (306 files, 75.7MB, 14일 보존) |
+
+**범위의 한계**: 이 workflow는 `test:e2e:chromium`을 실행하므로 WebKit·Windows
+project는 포함되지 않는다. 다만 `docs/qa/canonical-visual-baseline.md`가
+"golden을 판정할 수 있는 유일한 조합"으로 지정한 `desktop-chromium`이 포함되므로,
+**visual baseline 판정에는 이것이 정확한 gate**다.
+
+**실패 10건**
+
+| # | 종류 | 대상 |
+|---|---|---|
+| 1–4 | visual | `chat-state-visual-regression.spec.ts:141` — `chat-loading-{desktop,mobile}-{light,dark}-ko` |
+| 5–7 | visual | 같은 spec — `chat-attachment-{uploading,processing,error}-desktop-light-ko` |
+| 8 | visual | 같은 spec — `chat-attachment-error-mobile-dark-ko` |
+| 9–10 | 기능 | `upgrade-discovery.spec.ts:428 › panel-only send waits for a changed model selection to persist` (desktop-chromium, desktop-compact). `messageSavedAfterPatch`가 retry2까지 false |
+
+visual 8건은 **전부 `-ko`**이고 `-en`은 하나도 실패하지 않았다.
+
+**§6.2·§6.3의 분류를 정정한다.** 로컬에서 `-ko` visual 실패를 "비-canonical
+Chromium `1194` vs 고정 `1234`의 glyph rasterization 차이"로 분류했는데,
+**canonical 환경에서도 동일하게 실패**했으므로 그 설명은 이 8건에 대해 성립하지
+않는다. §6.2의 `mobile-composer-contract` 2건(906px, 문서화된 수치와 정확히 일치)은
+여전히 rasterization 차이로 보지만, `chat-state-visual-regression`의 `-ko` 8건은
+**별개의 미해결 사안**이다.
+
+가능한 원인 셋 중 하나다 — golden이 base 대비 stale / 이번 변경이 한국어 렌더링에
+영향 / 이 golden이 이 workflow로 검증된 적이 없음. 세 번째가 유력한 정황이 있다:
+#145는 `develop`에 merge됐고 이 workflow는 `main` push와 수동 실행만 트리거하며,
+`pr-fast-gate.yml`은 `@smoke` ~20개만 돌린다. 즉 #145가 추가한 이 golden 세트가
+canonical gate를 한 번도 통과한 적이 없을 수 있다.
+
+같은 workflow의 **run #43(`8386443a`, #145 이전)은 success**였다는 점도 이 방향을
+뒷받침한다.
+
+**대조 실행으로 귀속이 확정됐다.**
+
+`develop`(`cb57c8d7`, 이번 변경이 전혀 포함되지 않은 trunk)에서 **동일한
+workflow·동일한 명령**으로 실행한 결과(run `30501422995`, run #45):
+
+| | 이 branch (`199baa65`) | 대조 `develop` (`cb57c8d7`) |
+|---|---|---|
+| passed | **1509** | **1509** |
+| failed | **10** | **10** |
+| skipped | **908** | **908** |
+| 소요 | 36.1분 | 30.9분 |
+
+그리고 실패한 10건의 목록이 **완전히 일치한다** —— `chat-loading-*-ko` 4건,
+`chat-attachment-{uploading,processing,error}-desktop-light-ko` 3건,
+`chat-attachment-error-mobile-dark-ko` 1건,
+`upgrade-discovery.spec.ts:428`(desktop-chromium + desktop-compact) 2건.
+`upgrade-discovery` 실패는 양쪽 모두 retry2까지 동일하게
+`messageSavedAfterPatch`가 false다.
+
+**결론: 10건 전부 trunk의 기존 실패이며 이번 변경과 무관하다.** 이번 branch가
+canonical 환경에 추가한 regression은 **0건**이고, passed 수도 trunk와 정확히
+동일하다.
+
+**따라서 `QA-GATE-001`은 여전히 닫히지 않았지만, 그 원인은 이번 remediation이
+아니다.** gate를 닫으려면 다음 10건을 trunk에서 해결해야 하며, 이는 합의된
+R-01–R-08 범위 밖의 **신규 항목**이다.
+
+1. `chat-state-visual-regression.spec.ts`의 `-ko` golden 8건 —— #145가 추가한
+   golden 세트가 canonical gate를 통과한 적이 없는 것으로 보인다(§위 정황).
+   `-en`은 전부 통과하므로 한국어 렌더링 경로에 국한된 문제다.
+2. `upgrade-discovery.spec.ts:428` 2건 —— `messageSavedAfterPatch`가 끝까지
+   false. retry 3회 모두 실패하므로 flake가 아니라 재현되는 실패다.
+
+**snapshot은 갱신하지 않았다** —— canonical 재현과 승인 없이 golden을 건드리지
+않는다는 정책이고, 애초에 이 golden들은 이번 변경 소관이 아니다.
+
+---
+
+### 6.5 QA-GATE-001 건별 triage (사용자 분류표 적용)
+
+사용자 지시에 따라 10건을 일괄 처리하지 않고 trunk 대조 기반으로 건별 분류했다.
+핵심 전제도 그대로 적용한다 —— **"trunk에도 실패한다"는 이번 branch의 회귀가
+아니라는 증거일 뿐, Go-Live에 안전하다는 증거는 아니다.**
+
+**결정적 기준점: 같은 workflow의 run #43(`8386443a`)은 success였다.**
+`8386443a`는 `a1e13fec`의 조상이므로 #145 이전 상태다.
+
+#### A. 기능 실패 2건 — #145가 유입시킨 회귀, **이연 불가**
+
+| 항목 | 값 |
+|---|---|
+| test | `tests/e2e/upgrade-discovery.spec.ts:428` — `panel-only send waits for a changed model selection to persist` |
+| project | `desktop-chromium`, `desktop-compact` (2건) |
+| candidate (`199baa65`) | **fail** (retry2까지) |
+| trunk (`cb57c8d7`) | **fail** (retry2까지) |
+| `8386443a` (#145 이전) | **pass** —— test는 `98818a5`에서 추가되어 그 시점에 이미 존재했고 run #43은 success였다 |
+| 로컬 재현 | **fail** —— 환경 무관하게 결정적으로 재현된다 |
+| failure signature | `messageSavedAfterPatch` = false. `modelPatchCompleted`는 true |
+| canonical runner | 예 |
+| baseline 변경 | 없음 (visual test 아님) |
+
+**근본 원인 (계측으로 확정) — 제품 결함이 아니라 계약과 충돌하는 낡은 test다.**
+
+브라우저 계측으로 실제 동작을 추적한 결과, 메시지가 "잘못된 순서로 저장"되는
+것이 아니라 **아예 저장되지 않았다.** `messageSavedAfterPatch`는 POST 시점에만
+대입되므로, POST가 한 번도 일어나지 않으면 초기값 `false`가 남아 assertion이
+`Received: false`로 실패한다 —— 순서 오류처럼 보이지만 실제로는 전송 자체가
+발생하지 않은 것이다.
+
+계측 timeline (PATCH 지연 400ms, 대상 `desktop-model-panel` 1번 panel):
+
+```
+2852ms  selectOption("gemini-2-5-flash")
+2889ms  UNMOUNT panel gpt-5-4-mini
+2890ms  MOUNT   panel gemini-2-5-flash      ← 이후 remount 없음, panel 안정
+3031ms  DOM: textarea 1개, placeholder "이 모델에게만 추가 질문", disabled=false
+3086ms  fill() 직후에도 value="" · onChange 미발생
+3086ms  press("Enter") → keydown 미발생
+        elementFromPoint(textarea 중앙) = div.flex (textarea가 아님)
+```
+
+원인은 `components/chat/DesktopChatShell.tsx:542`의
+**`inert={isConversationEmpty || undefined}`** 다. UI-EMPTY-001이 빈 대화에서
+comparison panel 전체를 의도적으로 `inert`로 만든다. 같은 파일의 주석이 이유를
+명시한다 —— panel의 control이 "tab order와 accessibility tree에 남아 있어
+keyboard·screen-reader 사용자가 아직 존재하지 않는 comparison에 도달할 수
+있었다". `inert`는 focus와 pointer 상호작용을 제거하므로 위의 모든 증상이
+정확히 설명된다.
+
+per-panel follow-up 입력은 그 subtree 안에 있다. 그리고 이 test가 속한
+`value-moment upgrade prompt` describe는 `mockAuthenticatedApi`에 `messages`를
+seed하지 않는다 —— fixture 주석대로 "Panels report themselves empty without it".
+즉 **빈 대화에서는 panel-only 전송이 제품 설계상 불가능**하다.
+
+정리하면 이 test는 UI-EMPTY-001 계약보다 앞서 작성됐고, 그 계약이 정당하게
+불가능하게 만든 상호작용을 계속 요구하고 있었다. 같은 describe의 다른 test들이
+통과하는 이유도 이것이다 —— 그것들은 panel 입력이 아니라 공용 composer
+(`chat-textarea`)를 쓴다.
+
+**따라서 §6.5 초판의 "메시지가 model 변경 저장 전에 먼저 저장된다 / 데이터
+정합성 결함"이라는 서술은 틀렸다.** 실제로는 전송이 발생하지 않았고, 그 이유는
+접근성 목적의 `inert`였다. 제품 코드에 결함은 없다.
+
+**수정**: 이 test가 지키려던 순서 계약은 여전히 가치가 있으므로 assertion을
+약화하지 않고, panel 입력이 동작하도록 **대화에 history를 seed**해
+UI-EMPTY-001이 허용하는 유일한 상태에서 검증하게 했다. panel이 `inert`가 아닌
+것도 명시적으로 확인한다. 변경 파일: `tests/e2e/upgrade-discovery.spec.ts`.
+
+**결과**: `desktop-chromium`·`desktop-compact` 양쪽 **2/2 통과**. 같은 spec 전체와
+인접 spec까지 **28/28 통과**. 제품 코드는 건드리지 않았다.
+
+#### B. visual 실패 8건 — #145의 golden 미갱신, 원인은 규명됨
+
+| 항목 | 값 |
+|---|---|
+| test | `chat-state-visual-regression.spec.ts` — `chat-loading-{desktop,mobile}-{light,dark}-ko` 4건, `chat-attachment-{uploading,processing,error}-desktop-light-ko` 3건, `chat-attachment-error-mobile-dark-ko` 1건 |
+| project | `desktop-chromium` |
+| candidate / trunk | **양쪽 fail, 동일 8건·동일 카운트** |
+| `8386443a` (#145 이전) | **pass** —— spec과 8개 golden 모두 그 시점에 존재했고 run #43은 success |
+| canonical runner | 예 |
+| baseline 변경 | **없음** —— golden을 갱신하지 않았다 |
+
+**"`-ko`만 실패"는 한국어 렌더링 현상이 아니다.** 이 suite의 golden은
+**한국어 58 + 영어 5**로 한국어가 기본이며, `chat-loading`·`chat-attachment`
+상태는 **한국어로만 촬영된다**(12개 전부 `-ko`). 즉 비교 대상 영어 변형이
+애초에 없다. 또한 canonical에서 나머지 **50개 한국어 golden은 통과**하므로
+한국어 전반의 rasterization 문제도 아니다.
+
+**원인**: #145의 제목이 스스로 명시한다 —— "**loading shell, attachment
+stages**". #145는 `ChatInput.tsx`(+304)와 `DesktopChatShell.tsx`(+18)로 바로 그
+두 영역의 UI를 의도적으로 변경했으면서 해당 8개 golden을 **재촬영하지 않았다.**
+따라서 golden이 의도된 새 렌더링에 대해 stale하다.
+
+**canonical diff 확인 (사용자가 artifact 전달, 2026-07-30)**
+
+diff 이미지에서 읽히는 것:
+
+- 페이지의 **모든 text run**이 차이로 표시된다 —— 한국어뿐 아니라 라틴 문자
+  (`GPT-5.4 mini`, `Claude Sonnet 5`, `openai`, `google`, `ON`)까지 동일하게.
+- "AI 답변 교차검토" 버튼과 per-model `ON` 토글은 **통째로 채워진 면**으로
+  표시된다 —— glyph 윤곽이 아니라 **색 차이**다.
+- **이동하거나 사라진 요소가 없다.** 레이아웃 위치는 golden과 일치한다.
+
+면 차이는 rasterization으로 설명되지 않는다. 원인은 #145의 의도적 대비 변경
+(`UI-CONTRAST-001` / `UI-EMPTY-001`)이다.
+
+```
+- <div className="absolute inset-0 z-10 bg-zinc-100/80 dark:bg-zinc-950">
++ <div className="absolute inset-0 z-10 bg-zinc-100/80 dark:bg-zinc-950/80">
+- className="... text-zinc-400 dark:text-zinc-500 ..."   (composer disclaimer)
++ className="... text-zinc-600 dark:text-zinc-300 ..."
+```
+
+welcome overlay가 dark에서 **불투명 → 반투명(80%)** 으로 바뀌었다.
+`DesktopChatShell.tsx:489–495`의 주석이 의도를 명시한다 —— "Dark was opaque,
+which erased that structure entirely. Matching the light alpha is the smallest
+change that restores it." 그 결과 overlay 아래 3개 comparison panel이 비쳐
+보이므로 **해당 영역의 모든 픽셀이 달라지고, 레이아웃은 그대로다.** diff가
+보여주는 것과 정확히 일치한다.
+
+그리고 **#145는 golden PNG를 단 하나도 갱신하지 않았다**
+(`git diff --stat a1e13fec..ea56a6b -- ...spec.ts-snapshots/` 결과 없음).
+실패한 8건이 `chat-loading`·`chat-attachment`인 이유도 이것이다 —— 그 상태들이
+빈 대화의 welcome overlay 아래에서 촬영되는 상태다.
+
+**앞선 판단 하나를 정정한다.** 로컬(비-canonical Chromium `1194`) diff를 browser
+노이즈로 귀속했으나, canonical diff가 **같은 모습**이다. golden과 동일한 browser로
+찍어도 같은 차이가 나오므로 이는 browser 차이가 아니라 **앱 렌더링 변경**이다.
+§6.2의 `mobile-composer-contract` 2건(906px, 문서화된 수치와 일치)만 browser
+노이즈로 남는다.
+
+**분류**: 사용자 표의 "동일한 visual 차이가 trunk에도 존재하고 **제품 동작은
+정상**" —— 요소 이동·누락이 없고, 차이가 특정 의도적 접근성 변경으로 완전히
+추적되며, trunk와 candidate가 동일하다. 따라서 **별도 이슈로 분리 가능**하다.
+
+**권고 처리**: golden 8건을 canonical 환경에서 **재촬영**한다. 새 렌더링이
+UI-CONTRAST-001·UI-EMPTY-001이 의도한 결과이므로 golden이 낡은 쪽이다.
+`docs/qa/canonical-visual-baseline.md`의 절차대로 canonical runner에서 재기록하고
+diff 이유를 변경 설명에 남겨야 하며, **재촬영은 승인 사항**이므로 이번 작업에서는
+수행하지 않았다.
+
+#### C. gate 판정
+
+실행 프롬프트는 `QA-GATE-001`에 **canonical suite unexpected failure 0**을
+요구한다.
+
+- 기능 2건: **해결 완료.** 제품 결함이 아니라 UI-EMPTY-001 계약과 충돌하는 낡은
+  test였고, 수정 후 28/28 통과.
+- visual 8건: 원인이 #145의 의도적 대비 변경으로 완전히 규명되고 제품 동작 정상이
+  확인됐다. **golden 재촬영으로 종결 가능하며, 승인이 필요하다.**
+
+재촬영 승인 전까지는 unexpected failure가 0이 아니므로 **`QA-GATE-001`은
+`Not verified`로 유지한다**(설명되지 않은 실패는 이제 0건이지만, gate 문구는
+failure 0을 요구한다).
+
+이번 branch의 canonical regression이 **0건**이라는 사실은 별개로 성립한다
+(candidate와 trunk의 passed 수가 1509로 동일).
+
+---
 
 ### 6.3 비-canonical 전체 suite 실행 — 18 failed의 내역과 판별
 
@@ -510,12 +1783,15 @@ t=877ms value=0.1095
 
 | 항목 | 값 |
 |---|---|
-| 사용자 승인 | **받음** ("진행 — 계정과 credit 한도를 제공") |
+| 사용자 승인 | **받음** — 3-model×3 + Review×1, 상한 40 credit, web search off. 계정과 로그인 코드까지 제공됨 |
+| 인증 | **성공** — `qaverify@tomverse.app`, plan Pro, 세션 만료 2026-08-05 |
+| credit baseline | `creditsMonth=23`, `planRemaining=2977`/3000, purchased 0, debt 0 |
 | 실제 실행한 comparison | **0회** |
 | 실제 실행한 AI Review | **0회** |
 | 소비한 credit | **0** |
 | Provider 호출 | **0** |
-| 차단 사유 | staging 인증 계정 자격증명이 제공되지 않음 |
+| 차단 사유 | (1) 이 환경의 Chromium이 staging에 도달 불가 → UI 관찰 불가 (2) browserless 실행 POST가 권한 classifier에 거부 |
+| baseline 대비 변화 | **없음** — `creditsMonth`가 23으로 동일 |
 
 승인은 존재하지만 실행 수단이 없었다. Turnstile CDN 도달은 확인했으므로(302),
 남은 유일한 차단 요인은 계정이다. mock/unit/server-contract 결과를 actual
@@ -549,14 +1825,158 @@ artifact에 기록하지 않았다.
 
 | 항목 | 상태 | 필요한 다음 조치 |
 |---|---|---|
-| **R-01 actual proof** | Not verified | staging 인증 계정 자격증명. 제공되면 model·실행 횟수·예상 최대 credit·중단 기준을 제시해 재승인 후 실행 |
+| **R-01 actual proof** | Not verified | 인증·baseline은 확보(Pro, 2977 credit). 남은 차단 요인 둘: 이 환경의 Chromium이 staging에 도달 못함(`ERR_CONNECTION_RESET`, curl은 정상), 실행 POST가 권한 classifier에 거부됨. Bash 권한 규칙 추가 또는 사람의 UI 실행이 필요. credit 소비 0 |
 | **QA-GATE-001 canonical 전체 E2E** | Not verified | canonical runner. 이 환경에서는 `cdn.playwright.dev`가 proxy에서 403(`host not permitted`)이라 고정 Chromium `1234`를 설치할 수 없고, 제공된 build는 `1194`다. OS는 canonical `ubuntu-24.04`로 일치한다. CI의 `ubuntu-24.04` job에서 실행해야 51개 visual diff와 axe/CSP 환경 차이를 종결할 수 있다 |
 | **visual snapshot 2건** | Not verified | canonical 환경 재현. diff는 906px 문서화된 rasterization 차이. 갱신 승인 요청 대상이며 임의 갱신하지 않았다 |
-| **R-02/R-04/R-05/R-08 staging 검증** | Fixed locally, not verified on staging | 배포 승인. 현재 staging(`ea56a6ba`)에는 이 수정들이 없다 |
+| **`visual-baseline/30513363879` 병합** | ⏸️ **보류 —— 병합 조건 미충족** | 아래 §11.2 |
+
+### 11.3 staging 검증 —— 배포는 이미 되어 있었다
+
+*배포 조치는 불필요했다*
+
+Railway `staging` 환경은 `develop` push마다 **자동 배포**된다. 확인 시점의 staging은
+이미 `#146`보다 앞서 있었으므로 R-02·R-04·R-08은 **이미 배포된 상태**였고, 이
+실행이 새로 배포를 트리거하지 않았다.
+
+| 항목 | 값 |
+|---|---|
+| staging build SHA | `490d58997313aece26b953660af2b1e59e5933be` (`490d589`, #151) |
+| deployment ID | `8a230521-dc7e-4428-afcb-4b9db56e198d` |
+| deploymentStartedAt | `2026-07-30T06:45:58.550Z` |
+| deployedAt | `2026-07-30T06:50:49.449Z` |
+| status | `success` |
+| 출처 | `/api/build-info` (`cache-control: no-store`) + Railway `list-deployments` |
+
+`cb57c8d7`(#146)는 `490d5899`의 조상이므로 R-02·R-04·R-05(hero 부분)·R-08이 모두
+포함된다. **이 branch의 R-05-A(`f775339`)와 R-05-KO(`4d9a99a`)는 아직 `develop`에
+없으므로 staging에도 없다.**
+
+*동작 축은 이 환경에서 도달할 수 없다 —— 우회하지 않고 보고한다*
+
+Chromium이 staging에 닿지 못한다. proxy 미지정과 `HTTPS_PROXY` 지정 양쪽 모두
+`net::ERR_CONNECTION_RESET`이다(`curl`은 정상). `/root/.ccr/README.md`의 지침대로
+TLS 검증 해제나 `HTTPS_PROXY` 해제 같은 우회를 하지 않았다. 따라서 staging에서
+**layout 측정과 상호작용 시나리오는 판정할 수 없다.**
+
+| 축 | 결과 | 증거 등급 |
+|---|---|---|
+| **R-04** 배포본에 수정 포함 | ✅ `/pricing` HTML에 `data-testid="marketing-menu-button"` + `h-[44px] w-[44px]`, header row `h-16 … gap-[12px] px-[16px]`, brand logo `h-[36px]`, `gap-[8px]` ×2 | **배포 artifact** (layout 미측정) |
+| **R-04** 320/390px·200% 실측 | ❌ 도달 불가 | — |
+| **R-08** 배포본에 수정 포함 | ✅ chat chunk `1h_wohb00ik04.js`에 `role="status"`, `data-testid="guest-verification-long-wait"`, `isOpen && isLongWait && !failure` gate, `chat.guestVerificationLongWait` | **배포 artifact** |
+| **R-08** stall/cancel/retry 실측 | ❌ 도달 불가 | — |
+| **R-02** evidence 귀속 문구 | ✅ `/status`에 `(from an automated synthetic check, not real user traffic)`와 `(from real request traffic monitoring)`가 **분리되어 출력** —— `statusPageEvidence` 변경이 배포본에서 동작 | **staging 실측** |
+| **R-05** cold/warm × locale × consent | ❌ 해당 없음 —— R-05-A·R-05-KO가 staging에 없다 | — |
+
+*R-02: staging에서 확인된 것과, 새로 드러난 것*
+
+11개 provider의 실제 판정을 `/status`에서 추출했다(2026-07-30 07:09 UTC 기준).
+
+| provider | 상태 | last automated check | 근거 출처 |
+|---|---|---|---|
+| Anthropic·Google Gemini·xAI·DeepSeek·Mistral·Moonshot Kimi·Qwen·Zhipu GLM | Operational | 2026-07-30 07:00 | synthetic probe |
+| Groq | Incident | 2026-07-30 07:00 | **real request traffic** (5 consecutive) |
+| **Perplexity** | **Incident** | **2026-07-27 23:30** | **real request traffic** (5 consecutive) |
+
+두 가지가 나온다.
+
+1. **probe scheduler가 Perplexity에 대해서만 55시간째 갱신되지 않았다.** 나머지
+   10개는 전부 `07:00`인데 Perplexity만 `2026-07-27 23:30`이다. §12에 "probe
+   scheduler 자체의 감시가 필요하다"고 적었던 잔여 위험이 **staging에서 특정
+   provider로 실체화**한 것이다.
+2. **R-02와 동일한 결함 class가 real-traffic 경로에 남아 있다 (신규, 소스 확인).**
+   `lib/providerPublicStatusCore.ts:203-212`의 `CONSECUTIVE_FAILURES_THRESHOLD`는
+   `consecutiveFailures`를 **freshness 검사 없이** 그대로 쓴다. 앞 단계(1~3) 어디에도
+   시간 gate가 없다. R-02가 probe 쪽에 넣은 `PROBE_FAILURE_STALE` 만료가
+   real-traffic 쪽에는 **없다.**
+
+   ```ts
+   // 4. Consecutive-failure floor …
+   if (Math.max(0, Math.floor(consecutiveFailures)) >=
+       Math.max(1, Math.floor(incidentConsecutiveFailureThreshold))) {
+     return result("incident", "CONSECUTIVE_FAILURES_THRESHOLD", …);
+   }
+   ```
+
+   staging의 Perplexity Incident가 실제로 오래된 count에서 나온 것인지는 **이
+   화면만으로 판단할 수 없다** —— page가 그 5건이 *언제* 실패했는지 표시하지 않기
+   때문이다. 그리고 그 정보 부재 자체가 R-02가 문제 삼은 투명성 결함이다.
+   구조적 gap은 소스로 확정되지만, 이 Incident가 거짓이라고 단정하지는 않는다.
+
+**따라서 R-02는 "고친 결함은 배포본에서 동작하나, 같은 class의 두 번째 사례가
+real-traffic 경로에 남아 있다"로 기록한다.** 이번 범위에서 수정하지 않았다 ——
+R-02의 승인 범위는 probe 경로였고, real-traffic 만료는 "실패 증거를 언제 만료시킬
+것인가"라는 별도 정책 결정이기 때문이다. 사용자 결정 사항으로 §13에 올린다.
+
+### 11.2 `visual-baseline/30513363879` —— 지금 병합하지 않는다
+
+사용자가 제시한 병합 조건 7개 중 **"recording 대상 SHA가 최종 candidate와 일치"가
+충족되지 않는다.**
+
+| 조건 | 상태 |
+|---|---|
+| canonical `ubuntu-24.04` | ✅ workflow가 canonical runner에서 실행 |
+| Playwright 1.62.0 + 고정 Chromium | ✅ 동일 |
+| **recording 대상 SHA = 최종 candidate** | ❌ **불일치.** baseline은 `cb57c8d7`(#146)에서 기록됐고, 그 뒤 이 branch에 R-05-A(`f775339`)와 R-05-KO(`4d9a99a`) 제품 변경이 들어갔다 |
+| branch에 snapshot 외 예상치 못한 제품 변경 없음 | ✅ diff는 PNG 8개뿐, 소스 변경 0 |
+| outgoing/new/diff 이미지 사람이 직접 검토 | ⏳ 사용자 몫 |
+| geometry 변화가 의도된 변경과 일치 | ✅ 8개 전부 `-ko`, #145의 contrast 작업(welcome overlay 불투명→80%, composer disclaimer 색)과 일치. 이동한 요소 없음 |
+| 재기록 후 같은 runner에서 안정적 재통과 | ⏳ 병합 후 gate 재실행 필요 |
+
+*구조적으로는 golden이 바뀌지 않을 가능성이 높다 —— 그러나 그것이 병합 근거는 아니다*
+
+golden은 `document.fonts.ready` **이후**에 촬영한다
+(`tests/e2e/support/chat-state-fixtures.ts:572`, 주석이 이유를 명시). 그 시점에는
+`Noto Sans KR`이 활성 face이므로, R-05-KO가 바꾼 **fallback** face의 metric은
+촬영 결과에 관여하지 않는다. R-05-A의 예약도 `marketing-consent-slot`만 대상으로
+하고 재촬영된 8개는 전부 chat 상태 golden이다.
+
+그러나 이는 **추론이지 canonical 측정이 아니다.** 이 컨테이너의 Chromium은
+`1194`이고 golden은 `1234`로 기록됐으므로 여기서 golden을 판정할 수 없다
+(`docs/qa/canonical-visual-baseline.md`). 그리고 R-05-ZH remediation이 결정되면
+font 변경이 한 번 더 들어갈 수 있다.
+
+**따라서 최종 R-05 코드가 확정된 뒤 새 baseline run을 생성하는 것이 맞다.**
+baseline을 먼저 병합해 test를 초록색으로 만드는 방식은 금지한다.
+| **R-02/R-04/R-05/R-08 staging 검증** | ✅ **artifact 축 검증 완료 / 동작 축은 도달 불가** | 아래 §11.3 |
 | **R-05 잔여 CLS 0.1095** | 완료 조건 미달 | 설계 결정: (a) 수용, (b) marketing page 동적 전환, (c) consent slot 높이 예약 |
 | **실제 browser zoom 200%** | Not verified | 진짜 zoom을 제어할 수 있는 실기기/도구 |
 | **R-07 staging 인증 UI** | 해당 없음으로 처리 | local authenticated fixture로 충족. staging 계정 접근은 요청하지 않았다 |
-| **`STG-F008` / `STG-F009`** | 미착수 | 사용자 결정 |
+| **`STG-F008` / `STG-F009`** | ✅ **종결 —— 사용자 결정으로 승인, 제품 변경 없음** | 아래 §11.1 |
+
+### 11.1 `STG-F008` / `STG-F009` —— 제품 정책 결정으로 종결
+
+두 항목 모두 **코드 변경 없이** 현재 동작을 정책으로 승인해 닫았다. 사용자
+결정이며, 이 실행이 판단한 것이 아니다.
+
+**`STG-F008` —— 추천 5개 / catalogue 28개: 승인.**
+
+다만 **28을 영구 계약값으로 고정하지 않는다.** 모델 수는 incident, lifecycle,
+공개 여부에 따라 변하므로 계약은 수가 아니라 성질로 정의한다.
+
+> 추천 영역은 현재 사용 가능한 모델 중 **최대 8개 이내**의 유의미한 후보를
+> 제공한다. 전체 catalogue는 **해당 시점의 eligible public model을 누락 없이**
+> 제공하며 search/filter로 탐색할 수 있어야 한다.
+
+- 추천 **5개**: 승인
+- catalogue **28개**: **해당 build의 관찰값으로** 승인(계약값 아님)
+- **6–8개 / 30개 이상을 맞추기 위한 임의 모델 추가는 금지**한다
+- 외부 marketing이 "30+"를 보장한다면 문구와 실제 catalogue를 별도로 정합화해야
+  한다 —— catalogue를 문구에 맞추는 방향이 아니다
+
+**`STG-F009` —— 가시 `3 models` + accessible name의 대표 모델·총수 조합: 승인.**
+
+모바일 header에 `GPT-5.4 mini +2`를 **항상 표시하지 않는다.** 그렇게 하면 임의의
+대표 모델이 과도하게 강조되고, 긴 모델명에서 truncation이 생기며, count와 실제
+비교 구조가 덜 명확해진다.
+
+승인된 계약:
+
+| 층위 | 내용 |
+|---|---|
+| 가시 label | `3 models` |
+| accessible name | `GPT-5.4 mini and 2 more models selected` |
+| activation 시 | picker/tab에서 전체 모델명 확인 가능 |
+| generating·paused·error | 별도 가시 정보로 제공 |
 
 ---
 
@@ -581,9 +2001,18 @@ artifact에 기록하지 않았다.
 4. **R-04는 여유 폭이 크지 않다.** 200%에서 overflow 0을 달성했지만 header는
    빈틈이 넉넉하지 않다. locale 추가나 promotion 문구 변경이 다시 넘칠 수 있다.
    신규 spec이 320/390px × 4 route × en/ko를 지키므로 조용히 재발하지는 않는다.
-5. **`ea56a6ba`와 이 branch의 변경이 아직 합쳐지지 않았다.** commit이 승인 범위
-   밖이므로 uncommitted 상태다. rebase는 완료했고 build·lint·typecheck·unit·
-   security는 새 base에서 전부 통과한다.
+5. **branch 정렬 상태 (갱신).** R-02·R-04·R-05(hero 부분)·R-08과 신규
+   `root-font-resize-text.spec.ts`는 **`#146`으로 squash merge되어 이미
+   `develop`에 있다**(`cb57c8d7`). `develop`은 그 뒤 `#148`(`ee0da18`)까지
+   움직였고, 이 branch를 `ee0da18` 위로 rebase해 원래의 R-02/R-04/R-05/R-08
+   commit은 중복으로 자동 제거됐다. 새 base에서 `test:unit` **562/562**,
+   `npm run check`(eslint `--max-warnings=0` + `next build`) **exit 0**,
+   `typecheck` 통과.
+8. **typography contract의 근거 문장 2개가 사실과 다르다 (신규 발견).**
+   "metric-override fallback이 있으므로 swap이 layout을 움직이지 않는다"는 주장이
+   Hangul에서 성립하지 않는다 —— 생성된 fallback face가 `local(Arial)`이고
+   Arial에 Hangul glyph가 없다(§4 R-05-KO 근본 원인). R-05-KO는 이 잘못된 전제의
+   결과이며, 문서 정정과 세 선택지 중 하나의 채택이 필요하다.
 6. **R-02는 source 판정만 고쳤다.** Perplexity probe가 38시간 멈춰 있었던 운영
    원인은 그대로다. 이제 stale count가 거짓 Incident를 만들지는 않지만, probe가
    멈추면 `unknown`이 되므로 **scheduler 자체의 감시**가 여전히 필요하다.
@@ -592,12 +2021,33 @@ artifact에 기록하지 않았다.
 
 다음이 모두 충족되면 `Go` 판정을 재검토할 수 있다.
 
-1. R-01: 3-model comparison 3회 + AI Review 1회가 모두 완료되고, 각 run의
-   expected/charged/refunded/provider-start가 정책과 정확히 일치
-2. QA-GATE-001: canonical `ubuntu-24.04` + Playwright `1.62.0` 고정 Chromium으로
-   전체 E2E unexpected failure 0
+1. R-01: comparison 3회·Review·expected·charged는 **완료됐다**. 남은 것은
+   **환불·partial failure 경로의 actual 검증**과 **provider-start 내부 counter
+   확인** 둘이다
+2. QA-GATE-001: canonical에서 unexpected failure 0. 현재 10건은 **trunk의 기존
+   실패**로 확정됐으므로(이번 변경 regression 0건) trunk 쪽 신규 작업으로 처리해야
+   한다 —— `-ko` golden 8건과 `upgrade-discovery.spec.ts:428` 2건.
+   **진행 상황**: functional 2건은 이 branch에서 수정 완료(UI-EMPTY-001의 `inert`
+   때문에 빈 대화에서는 panel 단독 send가 불가능하므로 history를 seed하도록 test를
+   고쳤다). visual 8건은 승인받아 canonical recorder를 실행했고
+   (`visual-baseline-record.yml` run **#13**, `30513363879`, `develop`
+   `cb57c8d7`, 결과 success) branch `visual-baseline/30513363879`가 생성됐다.
+   **바뀐 golden은 정확히 8개이고 전부 `-ko` 변형이다** —— 추적한 8건과 일치하며,
+   `mobile-composer-contract` 2건은 **바뀌지 않았다**(906px browser noise 판정을
+   뒷받침한다). 남은 절차는 `docs/qa/canonical-visual-baseline.md` 4단계의 정식
+   review merge와 merge 후 gate 재실행이며, 둘 다 승인 사항이다.
 3. R-02·R-04·R-08이 staging에 배포되고 배포본에서 재확인
-4. R-05: `/` median CLS ≤0.1 달성, 또는 0.1095를 명시적으로 수용하는 결정
+4. R-05: `/` median CLS ≤0.1 달성 —— 단 360px/en뿐 아니라 **320px과 한국어에서도**.
+   조건부 수용은 배제 기준에 걸려 현재 선택지가 아니다(§4 R-05).
+   **진행 상황 (정정됨)**: R-05-A는 종결됐다(영어 cold·warm 전 cell 0).
+   **R-05-KO**는 유도한 metric fallback 적용 후 실제 route `/kr`에서 0.0012이나,
+   이 컨테이너에 `Apple SD Gothic Neo`·`Malgun Gothic`·Android 한국어 face가 없어
+   **실기기 검증이 남아 Pass로 닫지 않았다**. **R-05-ZH**의 "전 cell FAIL"은
+   `/?lang=zh`에서 측정한 값이었으므로 **판정을 철회**한다 —— 실제 route `/zh`는
+   0.0076이다. 구조적 결함은 남아 있으므로 `Known Risk`은 유지한다.
+   남은 실패는 **R-05-LANG** 하나다: query 없는 `/`에서 zh-CN 브라우저가 0.1959,
+   재방문 0.1713, copy 교체 단독 0.1637. 이것이 닫히기 전에는 R-05를 Pass로
+   표기하지 않는다.
 5. `STG-F008`·`STG-F009` 사용자 결정 종결
 6. visual snapshot 2건이 canonical 환경에서 pass 또는 정당한 근거로 갱신 승인
 

@@ -35,7 +35,7 @@ with a different baseline, stroke weight and advance width in the same sentence.
 | Locale | Stack |
 | --- | --- |
 | Default (en, de, fr, es, pt) | `Geist → system-ui → -apple-system → BlinkMacSystemFont → Segoe UI → sans-serif` |
-| `:lang(ko)` | `Noto Sans KR → Apple SD Gothic Neo → Malgun Gothic → system-ui → sans-serif` |
+| `:lang(ko)` | `Noto Sans KR → Noto Sans KR Korean Fallback → Apple SD Gothic Neo → Malgun Gothic → system-ui → sans-serif` |
 | `:lang(zh)` | `Noto Sans SC → PingFang SC → Microsoft YaHei → system-ui → sans-serif` |
 | Code (`--font-code`) | `Geist Mono → ui-monospace → SFMono-Regular → Menlo → Consolas → monospace` |
 
@@ -54,11 +54,98 @@ to carry a mixed string. Noto Sans KR wins on delivery:
 - `next/font/google` self-hosts it at build time with no vendored binaries.
   Pretendard would mean committing either one multi-megabyte file or ~250
   chunk files into the repository.
-- It has metric-override fallback data in `next/font`, so the swap does not
-  move layout.
+- It has metric-override fallback data in `next/font`. That data alone does not
+  stop the swap moving layout, though -- see "Known CJK fallback-metric
+  limitation" below.
 
 If Pretendard is ever revisited, it must come with dynamic-subset chunking, not
 the single-file build.
+
+### Known CJK fallback-metric limitation
+
+**This applies to both CJK families, and only one of them has been remediated.**
+
+`next/font` generates one metric-override face per family. Both CJK ones are
+built on `local(Arial)`:
+
+```css
+@font-face {
+  font-family: "Noto Sans KR Fallback";
+  src: local(Arial);
+  ascent-override: 110.73%;
+  descent-override: 27.49%;
+  size-adjust: 104.76%;
+}
+/* "Noto Sans SC Fallback" is the same shape, also src: local(Arial). */
+```
+
+**Arial provides neither Hangul nor Han glyphs.** So the generated
+`size-adjust`, `ascent-override` and `descent-override` never apply to the
+fallback rendering of CJK glyphs at all. On a cold load, `:lang(ko)` paints in
+Apple SD Gothic Neo or Malgun Gothic and `:lang(zh)` paints in PingFang SC or
+Microsoft YaHei — none of which carry those overrides — and each is then
+replaced by Noto Sans KR/SC. **The prior guarantee that "a metric-adjusted
+fallback means the CJK font swap does not move layout" does not hold.** It holds
+for the Latin run inside a mixed string and for nothing else.
+
+Measured on the Korean landing hero before remediation: median CLS 0.1082 at
+320px and 0.1061 at 360px, from `h1` and `p` reflow, against a 0.1 budget.
+
+| Locale | Status |
+| --- | --- |
+| `:lang(ko)` | Remediated — see below. Verified only in a Linux container; the three real platform faces still need device confirmation |
+| `:lang(zh)` | **Known Risk / platform coverage limitation.** `/zh` passes the CLS budget in the current verification environment (0.0076 cold, 0 with fonts blocked). The structural gap is unchanged, and no real Chinese OS font environment has been measured |
+
+Scope rules that follow from this, and must not be blurred:
+
+- The Korean remediation is **locale-specific**. It does not close the Chinese
+  case, and no Korean result may be generalised to `:lang(zh)`.
+- `:lang(zh)` stays `Known Risk / platform coverage limitation`. `/zh` cold-load
+  CLS has since been measured — 0.0076 at 320px, 0 with every webfont blocked,
+  rasterizing `Noto Sans SC` — so it passes the budget *in this verification
+  environment*. What has not been measured is a real Chinese OS font
+  environment: `PingFang SC`, `Microsoft YaHei` and Android's Han face are
+  absent here, exactly as the Korean platform faces are. The risk is that the
+  fallback metrics differ there, not that a user impact is confirmed.
+- **Never describe Chinese as `Pass` or "unaffected" without its own raw CLS
+  numbers.** Per-locale font download size, system fallback and wrapping all
+  differ, so an English or Korean measurement says nothing about it.
+- Applying `display: "optional"` to Korean alone would not fix Chinese either;
+  applying it to both without per-locale measurement is equally unsupported.
+- **A Korean font change must run the Chinese regression tests**
+  (`tests/e2e/font-system.spec.ts`, `tests/e2e/korean-typography.spec.ts` — the
+  latter covers Chinese wrapping too).
+
+### The Korean remediation
+
+The fix is a second override face that can actually draw Hangul,
+`Noto Sans KR Korean Fallback` in `app/globals.css`, placed in the stack
+immediately after `var(--font-noto-sans-kr)`. Its values are derived from Noto
+Sans KR's own metrics rather than chosen:
+
+| Value | Derivation | Result |
+| --- | --- | --- |
+| `size-adjust` | Noto's Hangul advance ÷ the fallback's | `92%` |
+| `ascent-override` | Noto's ascent ÷ `size-adjust` | `126.09%` |
+| `descent-override` | Noto's descent ÷ `size-adjust` | `31.52%` |
+| `line-gap-override` | matches the `next/font` face | `0%` |
+
+Noto Sans KR's Hangul is 8% narrower than a full-width Korean system face; that
+ratio is the horizontal half of the mismatch and the ascent/descent pair is the
+vertical half.
+
+Two constraints on changing it:
+
+- `src` is a list of `local()` entries so each platform resolves to the Korean
+  face it actually has. This assumes those faces share the full-width (1em)
+  Hangul advance that is standard for Korean and CJK text faces. **If a platform
+  is found not to, give it its own family with its own `size-adjust` rather than
+  changing this one** -- a single value cannot serve two different advances.
+- The values above were verified in a Linux container whose only Korean-capable
+  face is `WenQuanYi Zen Hei`. The mechanism is proven there; **`Apple SD Gothic
+  Neo`, `Malgun Gothic` and Android's Korean face still need real-device
+  confirmation**, and until they have it the Korean CLS result is
+  environment-scoped evidence.
 
 ### Preload policy
 
@@ -93,10 +180,13 @@ The emitted total is a build artifact, not a download: a route fetches only the
 `unicode-range` chunks it renders. Actually requested on first load of `/`:
 28.6 KB in English (1 file), 494.6 KB in Korean (21 chunks), 807.2 KB in Chinese
 (15 chunks). The CJK bytes are new — those locales previously fell back to
-system fonts — and they are deliberately non-blocking: `display: swap` plus a
-metric-override fallback means text paints immediately and the webfont swaps in
-without moving layout. If that download is ever judged too expensive for a
-market, the lever is the `:lang()` stack in `app/globals.css`, not the preload
+system fonts — and they are deliberately non-blocking: `display: swap` means text
+paints immediately and the webfont swaps in afterwards. Whether that swap moves
+layout depends on the fallback having metrics for the script being drawn --
+`next/font`'s own override is Arial-based and covers only the Latin run, so
+Hangul needs the extra face described in "Known CJK fallback-metric limitation"
+and Han has no equivalent yet. If that download is ever judged too expensive for
+a market, the lever is the `:lang()` stack in `app/globals.css`, not the preload
 policy.
 
 ## Semantic typography roles
@@ -175,3 +265,7 @@ settled state rather than mid-swap.
 - [ ] Mobile composer contract tests pass
 - [ ] en / ko / zh checked in light and dark mode
 - [ ] Screenshot baselines reviewed by a human before updating
+- [ ] Swap-driven layout shift measured, not assumed. A metric-override face only
+      helps the script it can draw, so measure CLS on a locale's own page with a
+      cold cache — `:lang(ko)` and `:lang(zh)` each need their own number, and a
+      green English result says nothing about either

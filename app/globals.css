@@ -41,14 +41,55 @@
 }
 
 /*
+ * R-05-KO. A metric-matched stand-in for Noto Sans KR that can actually draw
+ * Hangul.
+ *
+ * `next/font` already emits a metric-override face for each family, but it is
+ * built on `src: local(Arial)` -- and Arial has no Hangul. So Korean text never
+ * reaches those adjusted metrics: it falls through to the next entry in the
+ * stack below, which carries no overrides at all, and every Hangul line jumps
+ * when Noto Sans KR finally arrives. The override works for the Latin run in a
+ * mixed string and for nothing else, which is why the typography contract's
+ * claim that "the swap does not move layout" held in English and failed in
+ * Korean. Measured on the landing hero: median CLS 0.1082 at 320px and 0.1061 at
+ * 360px, entirely from `h1`/`p` reflow.
+ *
+ * The numbers are derived from Noto Sans KR's own metrics, not chosen:
+ *   size-adjust      = Noto's Hangul advance / the fallback's = 92/100
+ *   ascent-override  = Noto's ascent  / size-adjust           = 116/92
+ *   descent-override = Noto's descent / size-adjust           =  29/92
+ * `line-gap-override` matches the face `next/font` generates. Noto Sans KR's
+ * Hangul is 8% narrower than a full-width Korean system face, which is the
+ * horizontal half of the mismatch; the ascent/descent pair is the vertical half.
+ *
+ * `src` is a list of locals so each platform resolves to whatever Korean face it
+ * actually has. That relies on those faces sharing the full-width (1em) Hangul
+ * advance that is standard for Korean and CJK text faces. If a platform is ever
+ * found not to, it needs its own family here with its own `size-adjust` rather
+ * than a different value in this one -- see docs/ui-contracts/typography.md.
+ */
+@font-face {
+  font-family: "Noto Sans KR Korean Fallback";
+  src:
+    local("Apple SD Gothic Neo"), local("Malgun Gothic"),
+    local("Noto Sans CJK KR"), local("NanumGothic"),
+    local("WenQuanYi Zen Hei");
+  ascent-override: 126.09%;
+  descent-override: 31.52%;
+  line-gap-override: 0%;
+  size-adjust: 92%;
+}
+
+/*
  * `lang` is set on <html> by LanguageProvider, so these re-point the whole
  * subtree rather than patching individual glyphs through a fallback.
  */
 :lang(ko) {
-  --font-ui: var(--font-noto-sans-kr), "Apple SD Gothic Neo", "Malgun Gothic",
-    system-ui, sans-serif;
+  --font-ui: var(--font-noto-sans-kr), "Noto Sans KR Korean Fallback",
+    "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
   --font-code: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo,
-    Consolas, var(--font-noto-sans-kr), "Apple SD Gothic Neo", monospace;
+    Consolas, var(--font-noto-sans-kr), "Noto Sans KR Korean Fallback",
+    "Apple SD Gothic Neo", monospace;
 }
 
 :lang(zh) {
@@ -271,4 +312,59 @@ input[type="submit"]:disabled,
 input[type="reset"]:disabled,
 [aria-disabled="true"] {
   cursor: not-allowed;
+}
+
+/*
+ * R-05-A. The consent slot's reserved height while the decision is unresolved.
+ * `components/analytics/MarketingConsentReservation.tsx` sets
+ * `data-consent-pending` before the first paint; `AnalyticsProvider` removes it
+ * as soon as the decision resolves, so the band collapses and an
+ * accepted/declined visitor still costs no layout box.
+ *
+ * `display: block` is needed because the slot is `empty:hidden` -- it has no
+ * children until the notice mounts. These rules are deliberately unlayered so
+ * they win over that utility.
+ *
+ * The values are the measured maxima of the rendered notice, taken across
+ * en/ko and both consent policy modes (`opt_in` shows a prompt,
+ * `notice_opt_out` shows a longer notice), because the script cannot know which
+ * mode a visitor's region resolves to. `min-height` is a floor, so a value at
+ * or above the real height produces no shift at all, and a value below it still
+ * shrinks the shift rather than adding one -- an under-reservation degrades, it
+ * does not regress.
+ *
+ * The breakpoints look like Tailwind's but are not: the notice sizes itself
+ * with container queries (`@container/notice`), so its height steps when the
+ * slot's content box crosses them. Measured step: 500px of viewport width, not
+ * 640px. Values above are the 100%-text-scale maxima; at a 200% root font the
+ * notice grows roughly 2.4x, which no static value tracks, so those visitors
+ * get a partial reduction rather than zero.
+ */
+html[data-consent-pending] [data-testid="marketing-consent-slot"] {
+  display: block;
+  min-height: 94px;
+}
+
+@media (min-width: 500px) {
+  html[data-consent-pending] [data-testid="marketing-consent-slot"] {
+    min-height: 184px;
+  }
+}
+
+@media (min-width: 640px) {
+  html[data-consent-pending] [data-testid="marketing-consent-slot"] {
+    min-height: 148px;
+  }
+}
+
+@media (min-width: 768px) {
+  html[data-consent-pending] [data-testid="marketing-consent-slot"] {
+    min-height: 132px;
+  }
+}
+
+@media (min-width: 1280px) {
+  html[data-consent-pending] [data-testid="marketing-consent-slot"] {
+    min-height: 116px;
+  }
 }

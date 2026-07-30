@@ -428,6 +428,40 @@ test.describe("value-moment upgrade prompt", () => {
   test("panel-only send waits for a changed model selection to persist", async ({
     page,
   }) => {
+    // UI-EMPTY-001 makes the whole comparison panel `inert` while the
+    // conversation has no messages yet, so that a keyboard or screen-reader
+    // user cannot reach a comparison the conversation does not have. The
+    // per-panel follow-up input is inside that subtree, which means an empty
+    // conversation cannot produce a panel-only send at all -- the input takes
+    // no focus, no keystroke and no submit.
+    //
+    // This test predates that contract and was seeding no messages, so it was
+    // asserting on an interaction the product deliberately refuses: the send
+    // never happened, `messageSavedAfterPatch` kept its initial false, and the
+    // failure read like a persistence-ordering bug. Seeding history puts the
+    // panel in the only state where its follow-up input is meant to work, so
+    // the ordering this test exists to protect is actually exercised.
+    await mockAuthenticatedApi(page, {
+      selectedModels: ["gpt-5-4-mini", "claude-haiku-4-5"],
+      messages: [
+        { id: "seed-user", role: "user", content: "seeded question" },
+        {
+          id: "seed-assistant",
+          role: "assistant",
+          content: "seeded answer",
+          modelId: "gpt-5-4-mini",
+        },
+      ],
+    });
+    await page.reload();
+    await expect(page.getByTestId("chat-input")).toBeVisible();
+    // The panel is only interactive once the conversation is known to be
+    // non-empty; without this the send below would be silently refused again.
+    await expect(page.getByTestId("desktop-model-panel").first()).not.toHaveAttribute(
+      "inert",
+      ""
+    );
+
     let modelPatchCompleted = false;
     let messageSavedAfterPatch = false;
     await page.route(
