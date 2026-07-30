@@ -11,6 +11,7 @@ import { UpgradeCtaLink } from "@/components/billing/UpgradeCtaLink";
 import { ModelFinder } from "@/components/onboarding/ModelFinder";
 import { DeepResearchSetupSheet } from "@/components/chat/DeepResearchSetupSheet";
 import { Conversation, type ChatAttachment } from "@/components/chat/types";
+import { useConversationDrafts } from "@/components/chat/useConversationDrafts";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { useSession } from "next-auth/react";
 import {
@@ -376,7 +377,21 @@ export function ChatPageClient({
     isGuestMode ||
     (isUserSettingsLoaded && isConversationsLoaded && isInitialConversationResolved);
 
-  const [inputValue, setInputValue] = useState("");
+  // The composer's in-progress question belongs to the conversation it was
+  // typed in, not to the tab: a single shared `inputValue` used to follow the
+  // user into whatever conversation they opened next. Both shells read this
+  // one store, so switching between desktop and mobile is not a draft
+  // boundary either. In-memory for this tab only -- see the hook's docstring.
+  const {
+    draftText: inputValue,
+    draftAttachments: attachments,
+    setDraftText: setInputValue,
+    setDraftAttachments,
+    readDraft,
+    hasDraft,
+    discardDraft,
+    migrateDraft,
+  } = useConversationDrafts(currentChatId);
   const [personalizedPrompt, setPersonalizedPrompt] = useState<string | null>(null);
   const [isGuestPreviewEntry] = useState(
     () =>
@@ -385,7 +400,6 @@ export function ChatPageClient({
         "guest-preview"
   );
   const [showGuestSignInPrompt, setShowGuestSignInPrompt] = useState(false);
-  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [promptPayload, setPromptPayload] = useState<{
     id: string;
     text: string;
@@ -1493,6 +1507,11 @@ export function ChatPageClient({
     const handleNewChat = () => {
         localComparisonResponsesRef.current.clear();
         latestLocalComparisonPromptRef.current = null;
+    // Asking for a new chat is an explicit request for a blank composer, so
+    // the conversation this lands on gives its draft up. Every *other*
+    // conversation keeps its own -- coming back to one still restores what
+    // was being written there.
+    let blankedDraftScope: string | null = currentChatIdRef.current;
     if (isGuestMode) {
       const existingCurrent = conversations.find((c) => c.id === currentChatIdRef.current);
       if (
@@ -1524,17 +1543,19 @@ export function ChatPageClient({
           setConversations((prev) => [newGuestChat, ...prev]);
         setCurrentChatId(newGuestChat.id);
         currentChatIdRef.current = newGuestChat.id;
+        blankedDraftScope = newGuestChat.id;
       }
     } else {
         currentChatIdRef.current = null;
         setCurrentChatId(null);
         setSelectedModels([userDefaultEngine]);
+        blankedDraftScope = null;
     }
 
     setDisabledPanels([]);
     setWebSearchMode(APP_DEFAULTS.defaultWebSearchMode);
     setIsDeepResearchPending(false);
-    setInputValue("");
+    discardDraft(blankedDraftScope);
       setPromptPayload(null);
       setIsInitialConversationResolved(true);
 
@@ -1560,7 +1581,14 @@ export function ChatPageClient({
           const previousId = currentChatIdRef.current;
           if (previousId && previousId !== id) {
             const previousConv = conversations.find((c) => c.id === previousId);
-            if (previousConv && isGuestConversationEmpty(previousConv)) {
+            // A conversation with an unsent draft is not abandoned, even
+            // though it has no messages yet: sweeping it here would delete
+            // the sidebar entry the draft is meant to be restored from.
+            if (
+              previousConv &&
+              isGuestConversationEmpty(previousConv) &&
+              !hasDraft(previousId)
+            ) {
               setConversations((prev) => prev.filter((c) => c.id !== previousId));
               removeGuestConversationStorage(previousId);
             }
@@ -1849,13 +1877,20 @@ export function ChatPageClient({
   };
 
   const executeDelete = async (id: string) => {
+    // A deleted conversation can never be returned to, so its draft has
+    // nowhere left to be restored into: drop it (and release its previews)
+    // rather than leak an entry nothing can reach. Other conversations'
+    // drafts are untouched.
+    discardDraft(id);
     if (isGuestMode) {
       const updated = conversations.filter((c) => c.id !== id);
       setConversations(updated);
       removeGuestConversationStorage(id);
 
       if (currentChatId === id) {
-        setCurrentChatId(updated.length > 0 ? updated[0].id : null);
+        const nextId = updated.length > 0 ? updated[0].id : null;
+        setCurrentChatId(nextId);
+        currentChatIdRef.current = nextId;
       }
       if (updated.length === 0) {
         localStorage.removeItem(GUEST_CONVERSATIONS_STORAGE_KEY);
@@ -2105,6 +2140,7 @@ export function ChatPageClient({
     clampGuestSelectedModels,
     clampSelectedModels,
     isGuestMode,
+    setInputValue,
     isUserSettingsLoaded,
     maxSelectableModels,
     isEnabledModelId,
@@ -2140,6 +2176,10 @@ export function ChatPageClient({
       showToast(t("chat.chooseModel"), "error");
       return;
     }
+    // Captured before the first await: everything below may run while the
+    // user is looking somewhere else, and this draft must only ever be
+    // cleared once this send has actually been accepted.
+    const originScopeId = currentChatId;
     const promptAttachments = await cloneAttachmentPreviews(attachments);
 	
     if (isGuestMode) {
@@ -2181,6 +2221,12 @@ export function ChatPageClient({
           localStorage.setItem(GUEST_CONVERSATIONS_STORAGE_KEY, JSON.stringify([initialChat]));
         }
         setCurrentChatId(activeChatId);
+        currentChatIdRef.current = activeChatId;
+        // The composer was writing into the not-yet-created-conversation
+        // draft; hand it to the real id so an abort further down (preflight,
+        // credits, network) leaves the text under the conversation that is
+        // now on screen instead of stranding it behind a key nothing reads.
+        migrateDraft(originScopeId, activeChatId);
       } else {
       try {
         const newConversationTitle = (
@@ -2209,6 +2255,11 @@ export function ChatPageClient({
             ),
           };
           setCurrentChatId(activeChatId);
+          currentChatIdRef.current = activeChatId;
+          // Same hand-off as the guest branch above: the draft follows the id
+          // the server just issued, so a later abort keeps the question
+          // visible in the conversation it now belongs to.
+          migrateDraft(originScopeId, activeChatId);
           fetchConversations();
         }
       } catch (error) {
@@ -2288,8 +2339,12 @@ export function ChatPageClient({
           ? { deepResearchDepth: options.deepResearchDepth }
           : {}),
       });
-      setInputValue("");
-      setAttachments([]);
+      // The single point where a draft is cleared by sending: the prompt is
+      // now on its way, so this conversation's draft is spent. Every earlier
+      // return above -- no model, guest limit, conversation create, model
+      // settings, preflight -- leaves it exactly as the user typed it, and no
+      // other conversation's draft is touched either way.
+      discardDraft(activeChatId, promptAttachments);
       setConversations((current) =>
         current.map((item) =>
           item.id === activeChatId
@@ -2300,17 +2355,30 @@ export function ChatPageClient({
     }
   };
 
+  // `scopeId` is what keeps an upload that finished after the user moved on
+  // out of the conversation now on screen: ChatInput reports the conversation
+  // the file was picked in, and the draft store applies the change there.
   const handleAttachmentsChange = useCallback(
-    (nextAttachments: ChatAttachment[]) => {
-      const addedCount = Math.max(0, nextAttachments.length - attachments.length);
+    (
+      update: ChatAttachment[] | ((current: ChatAttachment[]) => ChatAttachment[]),
+      scopeId?: string | null
+    ) => {
+      // Analytics is measured against the latest snapshot, while the write
+      // itself hands the reducer to the store so React resolves it against
+      // committed state -- two files finishing back to back must not drop
+      // whichever landed first.
+      const current = readDraft(scopeId).attachments;
+      const nextAttachments =
+        typeof update === "function" ? update(current) : update;
+      const addedCount = Math.max(0, nextAttachments.length - current.length);
       if (addedCount > 0) {
         trackProductEvent("file_attached", activeModelCount, {
           attachment_count: addedCount,
         });
       }
-      setAttachments(nextAttachments);
+      setDraftAttachments(update, scopeId);
     },
-    [activeModelCount, attachments.length]
+    [activeModelCount, readDraft, setDraftAttachments]
   );
 
   const maybeShowValueUpgradePrompt = useCallback(
@@ -2691,7 +2759,9 @@ export function ChatPageClient({
       setSelectedModels(applied);
       setDisabledPanels([]);
       setPersonalizedPrompt(promptExample || null);
-      setInputValue("");
+      // Lands on a blank new chat, so only the pending-conversation draft is
+      // cleared -- an existing conversation's draft is still waiting there.
+      discardDraft(null);
       setPromptPayload(null);
       setFocusToken((current) => current + 1);
     };
