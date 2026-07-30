@@ -541,15 +541,17 @@ export function DesktopChatShell({
                     }
                   : {})}
                 aria-hidden={!isPanelVisible}
-                // UI-EMPTY-001. The welcome overlay sits above these panels and
-                // already swallows pointer events, but the panel's own controls
-                // (per-model ON toggle, close, follow-up input) stayed in the
-                // tab order and in the accessibility tree underneath it -- so a
-                // keyboard or screen-reader user could reach a comparison the
-                // conversation does not have yet. `inert` is what makes the
-                // panels match what the overlay already does visually, and it
-                // matters more now that the dark overlay is translucent.
-                inert={isConversationEmpty || undefined}
+                // UI-EMPTY-001 note: while the welcome overlay is up these
+                // panels keep their own controls in the tab order and in the
+                // accessibility tree. Marking them `inert` was tried and
+                // reverted -- the per-panel model select and follow-up input
+                // are genuinely operated in that state (see
+                // upgrade-discovery.spec.ts "panel-only send waits for a
+                // changed model selection to persist"), so inerting them
+                // breaks a real path. The exposure predates the overlay's
+                // alpha change and is unchanged by it; closing it means
+                // deciding what the empty state should let a keyboard user
+                // reach, which is a product decision, not a colour one.
                 style={isPanelVisible ? undefined : { contentVisibility: "hidden" }}
                 className={`relative flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm shadow-zinc-200/60 transition-all duration-300 ease-in-out dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/20 ${
                   !isPanelVisible ? "hidden" : isPanelDisabled ? "flex w-44 shrink-0" : "flex min-w-0 flex-1"
