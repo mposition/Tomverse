@@ -24,9 +24,17 @@ import { expect, test, type Page } from "@playwright/test";
  * 2. hydration does not change it -- the client agrees with the server rather
  *    than overwriting it.
  *
- * Statically prerendered *English* marketing routes are asserted as `en` on
- * purpose: they are built once, they serve English copy to every visitor, and
- * their language only changes on the client.
+ * R-05-LANG. "Built once in English, corrected on the client" used to be true
+ * of `/` as well, and it was a defect rather than a design: a zh-CN browser
+ * measured 0.1959 CLS at 320px on that correction alone, against a 0.1 budget,
+ * with every webfont blocked. The proxy now sends a non-English visitor to the
+ * localized page that already carries their language, so property 1 above holds
+ * for `/` too rather than being excused there.
+ *
+ * A marketing route with no localized counterpart -- `/pricing` and most of the
+ * rest -- still serves English to everyone and still declares `en`, because
+ * there is nowhere else to send that visitor. Those cases stay asserted as `en`
+ * on purpose, and they are what is left of the old compromise.
  *
  * RECON-I18N-001. The localized marketing routes used to be the exception --
  * prerendered Korean, Chinese, French copy under a root that still said
@@ -93,18 +101,27 @@ const SERVED_LANGUAGE_CASES: Case[] = [
     expected: "ko",
     why: "with no ?lang the application layout renders the browser's language",
   },
-  // Statically prerendered marketing routes: English copy for everyone.
+  // Statically prerendered marketing routes.
   {
     path: "/",
     acceptLanguage: KOREAN_BROWSER,
+    expected: "ko",
+    // `request.get` follows the redirect, which is the point: what a Korean
+    // browser ends up holding is Korean copy declaring Korean. The hop itself
+    // is asserted separately below.
+    why: "R-05-LANG: a Korean browser is served the localized page, not English corrected later",
+  },
+  {
+    path: "/",
+    acceptLanguage: ENGLISH_BROWSER,
     expected: "en",
-    why: "prerendered once with English copy; the declared language matches it",
+    why: "English is served the English root unchanged; no redirect, no correction",
   },
   {
     path: "/pricing",
     acceptLanguage: KOREAN_BROWSER,
     expected: "en",
-    why: "prerendered once with English copy; the declared language matches it",
+    why: "no localized counterpart exists, so English copy and an `en` declaration still agree",
   },
 ];
 
@@ -154,6 +171,102 @@ for (const { path, expected } of LOCALIZED_ROUTES) {
     // before this route had a root of its own, and removing it would make the
     // fix depend on a single attribute with nothing behind it.
     expect(html).toContain(`lang="${expected}"`);
+  });
+}
+
+/**
+ * R-05-LANG. The hop itself, asserted where following it cannot hide it.
+ *
+ * Each of these was a way to get it wrong: caching a language-dependent
+ * redirect in the shared cache that serves static marketing for an hour would
+ * replay one visitor's language to everyone; redirecting a request that already
+ * carries a locale would loop; dropping the query string would lose campaign
+ * attribution; and honouring `Accept-Language` over a stored choice would drag
+ * a visitor who picked English back to their browser's language every visit.
+ */
+const LANGUAGE_REDIRECTS: Array<{
+  path: string;
+  headers?: Record<string, string>;
+  to: string | null;
+  why: string;
+}> = [
+  {
+    path: "/",
+    headers: { "accept-language": KOREAN_BROWSER },
+    to: "/ko",
+    why: "a Korean browser is sent to the Korean page",
+  },
+  {
+    path: "/",
+    headers: { "accept-language": "zh-CN,zh;q=0.9" },
+    to: "/zh",
+    why: "a Chinese browser is sent to the Chinese page",
+  },
+  {
+    path: "/",
+    headers: { "accept-language": ENGLISH_BROWSER },
+    to: null,
+    why: "English is left where it is",
+  },
+  {
+    path: "/?lang=ko&utm_source=x&ref=y",
+    to: "/ko?utm_source=x&ref=y",
+    why: "the handled parameter is consumed and the rest of the query survives",
+  },
+  {
+    path: "/",
+    headers: { "accept-language": KOREAN_BROWSER, cookie: "tomverse_lang=en" },
+    to: null,
+    why: "a stored choice of English outranks the browser's preference",
+  },
+  {
+    path: "/ko",
+    headers: { "accept-language": KOREAN_BROWSER },
+    to: null,
+    why: "an already-localized path is not redirected again, so there is no loop",
+  },
+  {
+    path: "/pricing",
+    headers: { "accept-language": KOREAN_BROWSER },
+    to: null,
+    why: "no /ko/pricing exists; redirecting there would be a 404 dressed as a fix",
+  },
+  {
+    path: "/chat",
+    headers: { "accept-language": KOREAN_BROWSER },
+    to: null,
+    why: "application routes resolve their own language and are never redirected",
+  },
+];
+
+for (const redirectCase of LANGUAGE_REDIRECTS) {
+  test(`language redirect: ${redirectCase.path} -> ${
+    redirectCase.to ?? "(no redirect)"
+  } -- ${redirectCase.why}`, {
+    tag: "@ui-risk",
+  }, async ({ request }, testInfo) => {
+    test.skip(
+      testInfo.project.name !== "desktop-chromium",
+      "Redirect behaviour does not depend on the viewport; covered once."
+    );
+    const response = await request.get(redirectCase.path, {
+      maxRedirects: 0,
+      headers: redirectCase.headers,
+    });
+    if (redirectCase.to === null) {
+      expect(response.status(), redirectCase.why).toBe(200);
+      return;
+    }
+    expect(response.status(), redirectCase.why).toBe(307);
+    expect(response.headers()["location"], redirectCase.why).toBe(redirectCase.to);
+    // A shared cache holds static marketing for an hour. This response must
+    // never be one of the things it holds.
+    expect(
+      response.headers()["cache-control"],
+      "a language-dependent redirect must not be publicly cacheable"
+    ).toContain("no-store");
+    expect(response.headers()["vary"]).toContain("Accept-Language");
+    expect(response.headers()["vary"]).toContain("Cookie");
   });
 }
 
