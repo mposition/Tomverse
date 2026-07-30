@@ -573,21 +573,114 @@ hero가 재배치된다 —— 320px 한국어에서 `h1`의 높이가 160→154
 결함**이다. 이 문서는 `lib/fonts.ts` 변경 시 필독으로 지정돼 있으므로, 위 두
 문장은 정정 대상이다.
 
-*가능한 처리 —— 전부 typography 설계 결정이 필요하다*
+#### R-05-KO 처리 —— 1순위(한국어 metric-adjusted fallback)를 검증하고 적용했다
 
-1. **CJK face를 `display: "optional"`로.** swap을 아예 없애 shift를 제거한다.
-   대가: cold cache의 한국어 방문자는 그 load에서 system Korean face를 본다.
-   contract가 CJK를 `preload: false`로 둔 의도("첫 paint에 그 비용을 지불하지
-   않는다")와 방향이 같다.
-2. **Hangul용 metric-matched fallback face를 직접 선언.** `local(Arial)` 대신
-   한국어 system face를 기준으로 `size-adjust`·`ascent-override`를 재보정한다.
-   platform별 face가 달라 값이 하나로 수렴하지 않는다.
-3. **`:lang(ko)` stack 교체.** contract가 "market별 비용 조정의 lever는 preload
-   정책이 아니라 `:lang()` stack"이라고 명시한 경로다.
+사용자 지시: `display: "optional"`을 즉시 최종안으로 확정하지 말고, **먼저 한국어
+glyph를 지원하는 system fallback의 metric 조정으로 swap을 안정화할 수 있는지
+검증**하라. 실패하면 `optional` + `adjustFontFallback: false` 비교 실험과 contract
+변경안을 함께 보고하라. 승인 전에는 `optional`을 최종 정책으로 확정하거나
+R-05-KO를 Pass로 닫지 말라.
 
-세 안 모두 **한국어 사용자에게 렌더링되는 글꼴을 바꾼다.** `AGENTS.md`가 contract
-위반을 release blocker로 규정하고 있으므로, 근거를 문서에 남기기 전에 일방적으로
-적용하지 않았다. **선택은 사용자 결정 사항으로 남긴다**(§13).
+*이 선택지는 렌더링되는 최종 글꼴을 바꾸지 않는다*
+
+중요한 구분이다. 1순위 안은 최종 face를 `Noto Sans KR`로 그대로 두고 **도착
+이전의 fallback metric만** Noto와 일치시킨다. 따라서 `optional`과 달리 typography
+**정책 변경이 아니라 결함 수정**이며, "한국어 UI가 cold-load에서 OS 글꼴로
+렌더링될 수 있다"는 정책 전환을 수반하지 않는다.
+
+*값은 측정에서 유도했다 —— 고르지 않았다*
+
+`canvas.measureText`로 100px에서 잰 값이다.
+
+| family | Hangul 1자 advance | ascent | descent | 비고 |
+|---|---:|---:|---:|---|
+| `Noto Sans KR` | **92** | 116 | 29 | 최종 face |
+| `Noto Sans KR Fallback` (next/font, `local(Arial)`) | 100 | 89 | 22 | **Hangul glyph 없음** |
+| `WenQuanYi Zen Hei` (이 컨테이너의 실제 fallback) | 100 | 96 | 30 | |
+
+`Noto Sans KR`의 한글이 전각 한국어 face보다 **8% 좁다** —— 이것이 수평 불일치이고
+ascent/descent 쌍이 수직 불일치다. 따라서
+
+- `size-adjust` = Noto의 Hangul advance ÷ fallback의 = 92/100 = **92%**
+- `ascent-override` = Noto의 ascent ÷ `size-adjust` = 116/92 = **126.09%**
+- `descent-override` = Noto의 descent ÷ `size-adjust` = 29/92 = **31.52%**
+- `line-gap-override` = next/font가 생성한 face와 동일 = **0%**
+
+*측정에서 정정할 점 —— 없는 face를 측정한 행이 있었다*
+
+첫 측정에서 `Apple SD Gothic Neo`·`Malgun Gothic`·`Noto Sans CJK KR` 세 행이
+`Noto Sans KR Fallback`과 **완전히 동일한 값**(1825/100/89/22)을 냈다. 이
+컨테이너에 그 face들이 없어서 canvas가 기본 fallback을 잰 것이고,
+`document.fonts.check()`도 system font를 가정해 `true`를 반환한다. **그 세 행은
+해당 face의 측정값이 아니다.** 표에서 제외했다.
+
+*격리 실험 결과 (`kr-fallback.mjs`, cell당 5회, `</head>` 직전 주입)*
+
+| cell | BASE median / max | FIX median / max |
+|---|---:|---:|
+| 320 ko accepted | 0.1082 / 0.1082 | **0.0717 / 0.0717** |
+| 320 ko declined | 0.1082 / 0.1082 | **0.0717 / 0.0717** |
+| 320 ko unset | 0.0827 / 0.0827 | **0.0617 / 0.0617** |
+| 360 ko accepted | 0.0401 / **0.1061** | **0.0797 / 0.0797** |
+| 360 ko declined | 0.1048 / 0.1050 | **0.0797 / 0.0797** |
+| 360 ko unset | 0.0855 / 0.0855 | **0.0581 / 0.0581** |
+| 390 ko accepted | 0.052 / **0.104** | **0.0239 / 0.0239** |
+| 390 ko declined | 0.104 / 0.104 | **0.0239 / 0.0239** |
+| 390 ko unset | 0.0876 / 0.0876 | **0.0196 / 0.0196** |
+
+**9개 cell 전부 median·max 모두 0.1 이하다.** 그리고 사용자가 median과 max를
+섞지 말라고 한 요구가 여기서 특히 의미를 갖는다 —— FIX에서 **max == median**이다.
+분산이 사라진 것이 metric이 안정됐다는 직접 증거이며, 중앙값만 보는 것보다 강한
+신호다.
+
+정직하게 적는 한 지점: **360 accepted는 BASE median(0.0401)이 FIX median(0.0797)
+보다 낮다.** BASE가 bimodal(max 0.1061)이라 그렇고, 실제 개선은 max와 분산이
+내려간 것이다. median만 비교하면 이 cell은 악화로 보인다.
+
+*첫 실험은 무효였다 (정정)*
+
+처음 실행은 FIX와 BASE가 소수점까지 같았다. 주입한 `<style>`을 `<head>`
+**앞쪽**에 넣어서, 뒤에 오는 `globals.css`의 동일 specificity `:lang(ko)` 규칙이
+cascade 순서로 이겼기 때문이다. `</head>` 직전으로 옮기고 `--font-ui` 실측값을
+함께 출력해 적용을 확인한 뒤의 결과가 위 표다.
+
+*적용 범위*
+
+| 파일 | 변경 |
+|---|---|
+| `app/globals.css` | `@font-face "Noto Sans KR Korean Fallback"` 추가(`local()` 목록 + 유도한 override), `:lang(ko)`의 `--font-ui`·`--font-code` stack에 `var(--font-noto-sans-kr)` 바로 뒤로 삽입 |
+| `docs/ui-contracts/typography.md` | 틀린 문장 2개 정정, "The metric override does not reach Hangul on its own" 절 신설, stack 표 갱신, change checklist에 "swap-driven shift는 가정하지 말고 locale별로 측정" 항목 추가 |
+
+`local()` src이므로 **다운로드도 preload도 늘지 않는다** ——
+`node scripts/report-font-preload.mjs` 결과 66 route 전부 이전과 동일
+(route당 0 또는 1 file, 28.6 KB Latin face만). `tests/typographyPolicy.test.mjs`
+6/6 통과(hard-coded Arial 금지, `:lang(ko)`가 `var(--font-noto-sans-kr)`로 시작
+등 단정 유지).
+
+*R-05-KO를 Pass로 닫지 않는다 —— 남은 검증 조건*
+
+지시대로 닫지 않는다. 근거는 지시 때문만이 아니라 증거의 범위 때문이다.
+
+1. **이 컨테이너의 유일한 한국어 face는 `WenQuanYi Zen Hei`다.** `Apple SD Gothic
+   Neo`·`Malgun Gothic`·Android의 한국어 face는 **존재하지 않아 측정할 수 없었다.**
+   따라서 위 결과는 **메커니즘의 증명**이고, `size-adjust: 92%`가 세 실제 face에도
+   맞는다는 것은 "한국어·CJK text face는 Hangul을 전각(1em)으로 그린다"는 통상
+   전제에 의존한다. **실기기 확인이 필요하다.**
+2. 한 platform이라도 전각이 아니면, 이 값을 바꾸는 것이 아니라 **그 platform용
+   family를 따로 선언해 자기 `size-adjust`를 주어야 한다.** 하나의 값이 서로 다른
+   advance를 동시에 만족시킬 수 없다. contract에 이 제약을 명시했다.
+3. `:lang(zh)`에는 **같은 구조적 결함이 그대로 남아 있다.** Han glyph도
+   `local(Arial)` fallback을 통과하지 못한다. 같은 방식의 측정과 처리가 필요하며,
+   그때까지 중국어 page가 swap shift로부터 자유롭다고 말할 수 없다. contract에
+   적었다.
+
+*2순위(`display: "optional"`)는 실행하지 않았다*
+
+1순위가 목표를 달성했으므로 정책 변경을 수반하는 선택지로 넘어갈 이유가 없다.
+필요해질 경우의 실험 조건(cold/warm 분리, font 지연·차단, 320/360/390px,
+accepted/declined, median과 max 분리 보고, 실제 rasterized font 기록, hero
+wrapping·CTA 위치 비교, platform smoke, LCP·FOIT·CLS 동시 측정, en/zh 무회귀,
+preload 무증가, composer·200% 통과)은 사용자가 제시한 그대로 유효하다.
 
 *따라서 R-05의 원인은 확정적으로 둘이다.*
 
