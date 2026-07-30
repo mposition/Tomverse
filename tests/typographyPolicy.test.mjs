@@ -103,7 +103,7 @@ test("font-black is reserved for headline-sized customer text", () => {
   // Short brand expressions are the one body-size exception the weight policy
   // allows; everything else at <=16px uses 500-700.
   const BRAND_EXPRESSION_ALLOWLIST = new Set([
-    "app/(site)/(application)/chat/ChatPageClient.tsx:322",
+    "app/(site)/(application)/chat/ChatPageClient.tsx:333",
     "components/marketing/ChatWorkspaceGuide.tsx:186",
   ]);
 

@@ -41,7 +41,15 @@ import {
  * verification passed. See lib/turnstile.ts.
  */
 
-export type GuestVerificationAction = "guest_chat" | "guest_quick_summary";
+export type GuestVerificationAction =
+  | "guest_chat"
+  | "guest_quick_summary"
+  // The two guest surfaces opened up alongside the chat itself. Both are
+  // user-initiated and both cost real work server-side -- an 8-credit review
+  // and a worker-isolated file parse -- so both go through the same challenge
+  // the chat already uses rather than inventing an unverified entry point.
+  | "guest_ai_review"
+  | "guest_attachment";
 
 export type GuestVerificationPhase =
   /** Nothing to verify. No verification UI exists anywhere. */

@@ -2,6 +2,7 @@ import {
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
@@ -192,4 +193,42 @@ export async function writeR2Object(
 export async function deleteR2Object(key: string) {
   const { client, bucket } = getR2Client();
   await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+}
+
+/**
+ * Objects under a prefix that were written before `olderThan`, oldest first.
+ *
+ * Used by the maintenance sweep to reclaim ephemeral guest uploads that were
+ * never sent -- a file picked in the composer and then abandoned leaves an
+ * orphan that nothing else will ever reference. `maxKeys` bounds one sweep so
+ * a large backlog is drained across runs rather than in one long request.
+ */
+export async function listExpiredR2Objects(
+  prefix: string,
+  olderThan: Date,
+  maxKeys = 1_000
+) {
+  const { client, bucket } = getR2Client();
+  const expired: string[] = [];
+  let continuationToken: string | undefined;
+
+  do {
+    const page = await client.send(
+      new ListObjectsV2Command({
+        Bucket: bucket,
+        Prefix: prefix,
+        MaxKeys: Math.min(1_000, maxKeys - expired.length),
+        ContinuationToken: continuationToken,
+      })
+    );
+    for (const object of page.Contents || []) {
+      if (!object.Key || !object.LastModified) continue;
+      if (object.LastModified.getTime() > olderThan.getTime()) continue;
+      expired.push(object.Key);
+      if (expired.length >= maxKeys) return expired;
+    }
+    continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
+  } while (continuationToken);
+
+  return expired;
 }

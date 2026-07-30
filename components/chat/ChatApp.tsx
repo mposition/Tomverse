@@ -517,7 +517,20 @@ function ChatAppComponent({
       if (isGuestMode && initialConversationId && isMessagesLoaded && messages.length > 0) {
           if (loadedChatIdRef.current === initialConversationId) {
               const storageKey = `guest_messages_${initialConversationId}_${modelId}`;
-              localStorage.setItem(storageKey, JSON.stringify(messages));
+              try {
+                  // The same `data` strip the request already does. A guest
+                  // image attachment carries a multi-megabyte data URL for its
+                  // preview, and writing that into localStorage would blow the
+                  // origin's quota -- taking the whole guest transcript with
+                  // it. The bytes live in ephemeral object storage, keyed by
+                  // objectKey; the preview is worth less than the history.
+                  localStorage.setItem(
+                      storageKey,
+                      JSON.stringify(messages.map(toChatRequestMessage))
+                  );
+              } catch (error) {
+                  console.error("Failed to persist guest messages:", error);
+              }
           }
     }
   }, [messages, isGuestMode, initialConversationId, modelId, isMessagesLoaded]);

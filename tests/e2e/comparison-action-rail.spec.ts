@@ -9,6 +9,7 @@ import {
 import {
   freezeAnimations,
   installChatModelStub,
+  mockGuestUsage,
   mockUserUsage,
   restoreActiveConversation,
   submitComposer,
@@ -154,7 +155,7 @@ test.describe("desktop workflow dock alignment", () => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await openSeeded(page);
 
-    for (const testId of ["quick-comparison-button", "ai-review-guest-locked"]) {
+    for (const testId of ["quick-comparison-button", "ai-review-button"]) {
       const box = await page.getByTestId(testId).boundingBox();
       expect(box, testId).not.toBeNull();
       expect(box!.height, testId).toBeGreaterThanOrEqual(44);
@@ -244,7 +245,7 @@ test.describe("mobile comparison rail", () => {
     // Still reachable: expanding brings both actions back on the same screen.
     await disclosure.click();
     await expect(quickButton(page)).toBeVisible();
-    await expect(page.getByTestId("ai-review-guest-locked")).toBeVisible();
+    await expect(page.getByTestId("ai-review-button")).toBeVisible();
     await expectNoHorizontalOverflow(page);
   });
 
@@ -281,6 +282,11 @@ test.describe("mobile comparison rail", () => {
 test.describe("comparison readiness states", () => {
   test.beforeEach(async ({ page }) => {
     await prepareGuestPage(page, "en");
+    // The rail asks the server what this guest may run, so these readiness
+    // cases need that answer to be the ordinary one -- otherwise every
+    // assertion below reads the fail-closed "still checking" state instead of
+    // the readiness state it is about.
+    await mockGuestUsage(page, 0, 20);
   });
 
   test("a conversation with no answers at all offers no rail", async ({ page }) => {
@@ -458,6 +464,38 @@ async function enterAuthenticatedComparison(
 }
 
 const status = (page: Page) => page.getByTestId("comparison-action-rail-status");
+
+/**
+ * A guest looking at three completed answers, with the server's own view of
+ * what they may run.
+ *
+ * The rail decides the cross-review's availability from `/api/user/guest-usage`
+ * -- never from `isGuestMode` -- so a spec that wants a trial available, a
+ * trial used up or a credit shortfall states it here, exactly as the server
+ * would report it.
+ */
+async function openGuestComparison(
+  page: Page,
+  options: {
+    viewport: { width: number; height: number };
+    creditsAvailable?: number;
+    aiReviewTrial?: { limit: number; used: number; remaining: number };
+    lang?: string;
+  }
+) {
+  await prepareGuestPage(page, "en");
+  await mockGuestUsage(page, 0, 20, {
+    creditsAvailable: options.creditsAvailable,
+    aiReviewTrial: options.aiReviewTrial,
+  });
+  await seedGuestComparison(page);
+  await page.setViewportSize(options.viewport);
+  await page.goto(`/chat?lang=${options.lang ?? "en"}`);
+  await openRecentConversation(page, { title: TITLE });
+  await expect(page.getByTestId("chat-empty-state")).toHaveCount(0);
+  await expect(rail(page)).toBeVisible();
+  await freezeAnimations(page);
+}
 
 const QUICK_SUMMARY_SETUP = {
   available: true,
@@ -734,20 +772,118 @@ for (const shell of SHELLS) {
       await expect(status(page)).toContainText("Comparing 3 completed answers");
     });
 
-    test("a guest keeps the locked cross-review under the same policy", async ({
+    test("a guest with a trial left runs the review under the same policy", async ({
       page,
     }) => {
-      await prepareGuestPage(page, "en");
-      await seedGuestComparison(page);
-      await page.setViewportSize(shell.viewport);
-      await openSeeded(page);
+      await openGuestComparison(page, { viewport: shell.viewport });
 
-      // The gate is visible, not hidden behind a menu, and the steady-state
-      // sentence is hidden for a guest exactly as it is for an account.
-      await expect(page.getByTestId("ai-review-guest-locked")).toBeVisible();
+      // A real action, not a lock: the homepage promises a guest can run the
+      // AI Review, and this is where that promise is either kept or broken.
+      const review = page.getByTestId("ai-review-button");
+      await expect(review).toBeVisible();
+      await expect(review).toHaveAttribute("data-access", "guestTrial");
+      await expect(review).toHaveAttribute("aria-disabled", "false");
       await expect(quickButton(page)).toBeVisible();
+      // Its own price, on the button itself.
+      await expect(page.getByTestId("ai-review-entry-credit-cost")).toContainText("8");
+
+      // ...and the disclosure policy does not change for a guest: with a run
+      // available this is the steady state in both shells, so the sentence is
+      // hidden visually and reachable in the accessibility tree.
       await expect(rail(page)).toHaveAttribute("data-status-hidden", "true");
+      await expect(rail(page)).toHaveAttribute("data-steady", "true");
       await expect(status(page)).toContainText("Comparing 3 completed answers");
+
+      // The trial condition is carried by the action's own description, in
+      // both shells, whether or not there is room for the desktop badge.
+      await expect(page.getByTestId("ai-review-description")).toContainText(
+        "Monthly guest trial available"
+      );
+      // ...and only on that action. The quick summary is a guest's every-day
+      // action and must not inherit the review's trial language.
+      await expect(page.getByTestId("quick-comparison-description")).not.toContainText(
+        "Monthly guest trial"
+      );
+    });
+
+    test("a guest whose trial is used up is told exactly that, on screen", async ({
+      page,
+    }) => {
+      await openGuestComparison(page, {
+        viewport: shell.viewport,
+        aiReviewTrial: { limit: 1, used: 1, remaining: 0 },
+      });
+
+      const review = page.getByTestId("ai-review-button");
+      await expect(review).toHaveAttribute("data-access", "guestTrialExhausted");
+      await expect(review).toHaveAttribute("aria-disabled", "true");
+      // A blocked action is an exception state, so the sentence comes back on
+      // screen -- in both shells, by the same policy.
+      await expect(rail(page)).toHaveAttribute("data-status-hidden", "false");
+      await expectStatusOnScreen(page);
+      await expect(status(page)).toContainText("trial");
+      // Named against its own action only; the quick summary is still runnable.
+      await expect(status(page)).toContainText("AI review");
+      await expect(quickButton(page)).toHaveAttribute("aria-disabled", "false");
+      await expect(page.getByTestId("ai-review-description")).toContainText("trial");
+      await expect(page.getByTestId("quick-comparison-description")).not.toContainText(
+        "trial"
+      );
+    });
+
+    test("a guest short of credits is told that, not that the trial is gone", async ({
+      page,
+    }) => {
+      // Two different blocks with two different ways out: waiting for the
+      // daily budget to reset, versus signing in. Collapsing them would leave
+      // the user acting on the wrong one.
+      await openGuestComparison(page, {
+        viewport: shell.viewport,
+        creditsAvailable: 2,
+      });
+
+      await expect(rail(page)).toHaveAttribute("data-status-hidden", "false");
+      await expectStatusOnScreen(page);
+      await expect(status(page)).toContainText("8 credits needed");
+      await expect(status(page)).toContainText("2 available");
+      // The 1-credit quick summary is still affordable at a balance of 2, and
+      // must not be described as unaffordable alongside the 8-credit review.
+      await expect(quickButton(page)).toHaveAttribute("aria-disabled", "false");
+      await expect(page.getByTestId("quick-comparison-description")).not.toContainText(
+        "8 credits needed"
+      );
+      await expect(page.getByTestId("ai-review-button")).toHaveAttribute(
+        "aria-disabled",
+        "true"
+      );
+    });
+
+    test("a guest keeps the accessibility contract the actions already had", async ({
+      page,
+    }) => {
+      await openGuestComparison(page, { viewport: shell.viewport });
+
+      const quickDescribedBy = await quickButton(page).getAttribute(
+        "aria-describedby"
+      );
+      const reviewDescribedBy = await page
+        .getByTestId("ai-review-button")
+        .getAttribute("aria-describedby");
+      expect(quickDescribedBy).toBeTruthy();
+      expect(reviewDescribedBy).toBeTruthy();
+      expect(quickDescribedBy).not.toBe(reviewDescribedBy);
+
+      // Each description still carries the comparison target count itself.
+      for (const testId of ["quick-comparison-description", "ai-review-description"]) {
+        await expect(page.getByTestId(testId)).toContainText(
+          "Comparing 3 completed answers"
+        );
+      }
+      // The accessible name stays the action alone.
+      await expect(page.getByTestId("ai-review-button")).toHaveAttribute(
+        "aria-label",
+        "AI answer cross-review"
+      );
     });
 
     test("the live region stays silent once everything has settled", async ({

@@ -192,6 +192,27 @@ test("a running analysis or an unaffordable action leaves the steady state", () 
   );
 });
 
+test("a used-up guest trial leaves the steady state on its own", () => {
+  // Distinct from a credit shortfall on purpose: the balance is fine, the
+  // monthly allowance is not, and the two lead to different sentences and
+  // different ways out. What they share is that the user now has something to
+  // act on, so the rail's sentence comes back.
+  const state = readiness({ a: "idle", b: "idle", c: "idle" });
+  assert.equal(isComparisonRailSteadyState({ readiness: state }), true);
+  assert.equal(
+    isComparisonRailSteadyState({ readiness: state, isAnyActionRestricted: true }),
+    false
+  );
+  assert.equal(
+    isComparisonRailSteadyState({
+      readiness: state,
+      isAnyActionUnaffordable: false,
+      isAnyActionRestricted: true,
+    }),
+    false
+  );
+});
+
 // ---------------------------------------------------------------------------
 // shouldShowVisualStatus: the one policy both shells ask. The state matrix
 // lives here rather than in a browser, so a regression is a unit-test failure
@@ -221,6 +242,35 @@ test("the status row is hidden only in the steady state, whatever the shell", ()
   assert.equal(
     shouldShowVisualStatus({ readiness: steady, isAnyActionUnaffordable: true }),
     true
+  );
+  assert.equal(
+    shouldShowVisualStatus({ readiness: steady, isAnyActionRestricted: true }),
+    true
+  );
+});
+
+test("a guest with a trial left is indistinguishable from an account, by policy", () => {
+  // The point of the guest AI Review is that nothing about the rail's
+  // disclosure changes for it: with a run available, three completed answers
+  // are the steady state for a guest exactly as they are for an account, in
+  // both shells. Only "trial used up" moves the sentence back on screen.
+  const steady = readiness({ a: "idle", b: "idle", c: "idle" });
+  assert.equal(
+    shouldShowVisualStatus({ readiness: steady, isAnyActionRestricted: false }),
+    false
+  );
+  assert.equal(
+    shouldShowVisualStatus({ readiness: steady, isAnyActionRestricted: true }),
+    true
+  );
+  // ...and a collapsed rail still carries it on the disclosure instead.
+  assert.equal(
+    shouldShowVisualStatus({
+      readiness: steady,
+      isAnyActionRestricted: true,
+      isCollapsed: true,
+    }),
+    false
   );
 });
 

@@ -596,6 +596,243 @@ test.describe("Mobile composer: keyboard, zoom and text scaling", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Guest attachments.
+//
+// Guests can now attach one local file, which puts a new chip, a new error
+// surface and a new set of copy into the composer -- everything the contract
+// exists to keep off the textarea's row. These cases drive the guest shell
+// specifically, because the signed-in cases above cannot: the guest composer
+// resolves a different upload endpoint, a different file cap and a different
+// set of sentences.
+// ---------------------------------------------------------------------------
+
+/** The guest upload endpoint, answering as the real one does. */
+async function mockGuestAttachmentUpload(
+  page: Page,
+  options: { failWith?: { status: number; code: string } } = {}
+) {
+  const uploads: string[] = [];
+  await page.route("**/api/chat/guest-attachment**", async (route) => {
+    if (route.request().method() === "DELETE") {
+      await route.fulfill({ status: 204, body: "" });
+      return;
+    }
+    const url = new URL(route.request().url());
+    const name = url.searchParams.get("name") || "file";
+    const mediaType = url.searchParams.get("mediaType") || "text/plain";
+    uploads.push(name);
+    if (options.failWith) {
+      await route.fulfill({
+        status: options.failWith.status,
+        contentType: "application/json",
+        body: JSON.stringify({
+          code: options.failWith.code,
+          error: "QA fixture rejection.",
+        }),
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        objectKey: `guest-attachments/${"a".repeat(32)}/${"b".repeat(40)}`,
+        name,
+        mediaType,
+        size: 2_048,
+        kind: mediaType.startsWith("text/") || mediaType === "application/json" ? "text" : "file",
+        ephemeral: true,
+        expiresInMinutes: 60,
+      }),
+    });
+  });
+  return { uploads };
+}
+
+type GuestComposerOptions = {
+  lang?: "en" | "ko";
+  viewport: { width: number; height: number };
+  uploadFailure?: { status: number; code: string };
+};
+
+async function enterGuestMobileComposer(
+  page: Page,
+  options: GuestComposerOptions
+) {
+  const { lang = "ko", viewport } = options;
+  await prepareGuestPage(page, "en");
+  await mockGuestUsage(page, 0, 20);
+  const upload = await mockGuestAttachmentUpload(page, {
+    failWith: options.uploadFailure,
+  });
+  await setDeterministicTheme(page, "light");
+  await suppressTransientUi(page);
+
+  await page.setViewportSize(viewport);
+  await page.goto(`/chat?lang=${lang}`);
+  await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
+  await expect(page.getByTestId("chat-textarea")).toBeVisible();
+  await freezeAnimations(page);
+  return upload;
+}
+
+/** Pastes a file rather than picking one, so no chooser is involved. */
+async function pasteGuestFile(
+  page: Page,
+  file: { name: string; type: string; bytes: number[] }
+) {
+  await page.getByTestId("chat-textarea").focus();
+  await page.getByTestId("chat-textarea").evaluate((textarea, picked) => {
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(
+      new File([new Uint8Array(picked.bytes)], picked.name, { type: picked.type })
+    );
+    textarea.dispatchEvent(
+      new ClipboardEvent("paste", {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: dataTransfer,
+      })
+    );
+  }, file);
+}
+
+const guestTextFile = (name = "guest-notes.txt") => ({
+  name,
+  type: "text/plain",
+  bytes: Array.from(Buffer.from("Compare these two approaches.", "utf8")),
+});
+
+test.describe("Mobile composer: guest attachments", () => {
+  const openActions = async (page: Page) => {
+    await page.locator('button[aria-controls="chat-input-popover"]').nth(0).click();
+  };
+
+  test("a guest can attach a local file, and Drive stays behind sign-in", async ({
+    page,
+  }) => {
+    await enterGuestMobileComposer(page, { viewport: { width: 390, height: 780 } });
+    await openActions(page);
+
+    // The capability the homepage promises, actually offered.
+    const local = page.getByTestId("attach-local-file-row");
+    await expect(local).toBeVisible();
+    await expect(local).toBeEnabled();
+
+    // ...and the one that genuinely needs an account, named rather than dead.
+    const drive = page.getByTestId("attach-google-drive-row");
+    await expect(drive).toBeVisible();
+    await expect(drive).toHaveAttribute("data-locked", "true");
+    await expect(drive).toContainText(/로그인|Sign in/);
+
+    // The temporary-file promise is made where the file is picked.
+    await expect(page.getByTestId("guest-attachment-temporary-note")).toBeVisible();
+  });
+
+  for (const width of MOBILE_WIDTHS) {
+    test(`${width}px keeps the textarea's row while a guest file is attached`, async ({
+      page,
+    }) => {
+      await enterGuestMobileComposer(page, { viewport: { width, height: 780 } });
+      await pasteGuestFile(page, guestTextFile());
+      await expect(page.getByText("guest-notes.txt").first()).toBeVisible();
+
+      // The whole point of the contract: a new chip in the composer must not
+      // be paid for out of the input's row.
+      await expectComposerContract(page, `guest attachment @${width}px`);
+    });
+  }
+
+  test("a very long filename wraps or truncates rather than widening the row", async ({
+    page,
+  }) => {
+    await enterGuestMobileComposer(page, { viewport: { width: 320, height: 780 } });
+    await pasteGuestFile(
+      page,
+      guestTextFile(`${"분기별-실적-보고서-최종본-검토용".repeat(6)}.txt`)
+    );
+    await expect(page.getByTestId("chat-textarea")).toBeVisible();
+    await expectComposerContract(page, "guest attachment with a long filename @320px");
+  });
+
+  test("an upload error states its own reason without taking the input's row", async ({
+    page,
+  }) => {
+    await enterGuestMobileComposer(page, {
+      viewport: { width: 320, height: 780 },
+      uploadFailure: { status: 413, code: "GUEST_ATTACHMENT_TEXT_TOO_LARGE" },
+    });
+    await pasteGuestFile(page, guestTextFile());
+
+    // The specific reason, not a generic failure -- and specifically not the
+    // "unsupported file" one, which would send the user to change format.
+    await expect(page.getByText(/게스트 입력 한도|guest input limit/)).toBeVisible();
+    await expectComposerContract(page, "guest attachment error @320px");
+  });
+
+  test("attaching mid-composition does not disturb Korean input", async ({
+    page,
+  }) => {
+    await enterGuestMobileComposer(page, { viewport: { width: 390, height: 780 } });
+    const textarea = page.getByTestId("chat-textarea");
+
+    // Committed text, then a composition left in flight, then the attachment
+    // state changes underneath it. insertText goes through the same input
+    // events a real IME does, so React state sees the composition rather than
+    // reverting it on the next render.
+    await textarea.click();
+    await page.keyboard.insertText("한국어 입력 ");
+    await textarea.evaluate((element) => {
+      element.dispatchEvent(
+        new CompositionEvent("compositionstart", { bubbles: true })
+      );
+      element.dispatchEvent(
+        new CompositionEvent("compositionupdate", { bubbles: true, data: "테" })
+      );
+    });
+    await page.keyboard.insertText("테");
+
+    await pasteGuestFile(page, guestTextFile());
+    await expect(page.getByText("guest-notes.txt").first()).toBeVisible();
+
+    // The composition survives, and stays visible inside the box.
+    await expect(textarea).toHaveValue("한국어 입력 테");
+    const geometry = await expectComposerContract(
+      page,
+      "guest attachment during IME composition"
+    );
+    expect(geometry.clippedValueHeight).toBeLessThanOrEqual(1);
+  });
+
+  test("200% text scaling keeps the contract with a guest file attached", async ({
+    page,
+  }) => {
+    await enterGuestMobileComposer(page, { viewport: { width: 390, height: 780 } });
+    await pasteGuestFile(page, guestTextFile());
+    await expect(page.getByText("guest-notes.txt").first()).toBeVisible();
+
+    await page.addStyleTag({ content: "html { font-size: 32px !important; }" });
+    await expectComposerContract(page, "guest attachment at 200% text scaling");
+  });
+
+  test("a taller message list never shortens the textarea's row", async ({
+    page,
+  }) => {
+    await enterGuestMobileComposer(page, { viewport: { width: 390, height: 780 } });
+    const before = await readComposerGeometry(page);
+    await pasteGuestFile(page, guestTextFile());
+    await expect(page.getByText("guest-notes.txt").first()).toBeVisible();
+
+    // ChatMessageList takes whatever is left; the input's own line is not part
+    // of what it may take.
+    const after = await readComposerGeometry(page);
+    expect(after.textareaHeight).toBeGreaterThanOrEqual(after.lineBox - 0.5);
+    expect(after.widthRatio).toBeGreaterThanOrEqual(MIN_WIDTH_RATIO);
+    expect(after.textareaHeight).toBeGreaterThanOrEqual(before.lineBox - 0.5);
+  });
+});
+
 test.describe("Mobile composer: visual record", () => {
   // The before/after screenshots the change checklist asks reviewers to
   // compare, pinned as goldens so the next change has to update them

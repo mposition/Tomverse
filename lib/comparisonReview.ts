@@ -506,19 +506,43 @@ export type ReviewSourceResponse = {
   content: string;
 };
 
+/**
+ * Guests review under a tighter ceiling than accounts do.
+ *
+ * Not a product decision so much as an arithmetic one: a guest's chat budget
+ * caps input at `CHAT_GUEST_MAX_INPUT_TOKENS` (16k by default), and the
+ * account-sized 140k-character payload estimates to roughly twice that. Left
+ * unbounded, an oversized guest review would be accepted by the schema, reach
+ * `createChatBudget`, and fail there with a generic token-limit error after
+ * the quota slot had already been claimed. These limits refuse it up front,
+ * with a message that says what to do about it.
+ */
+export const GUEST_COMPARISON_REVIEW_LIMITS = {
+  maxQuestionCharacters: 8_000,
+  maxAnswerCharacters: 20_000,
+  maxTotalCharacters: 45_000,
+  maxResponses: COMPARISON_REVIEW_LIMITS.maxResponses,
+} as const;
+
+export type ComparisonReviewSizeLimits = {
+  maxQuestionCharacters: number;
+  maxAnswerCharacters: number;
+  maxTotalCharacters: number;
+};
+
 export const validateComparisonReviewInputSize = (
   question: string,
-  responses: ReviewSourceResponse[]
+  responses: ReviewSourceResponse[],
+  limits: ComparisonReviewSizeLimits = COMPARISON_REVIEW_LIMITS
 ) => {
   if (
-    question.length > COMPARISON_REVIEW_LIMITS.maxQuestionCharacters ||
+    question.length > limits.maxQuestionCharacters ||
     responses.some(
-      (response) =>
-        response.content.length > COMPARISON_REVIEW_LIMITS.maxAnswerCharacters
+      (response) => response.content.length > limits.maxAnswerCharacters
     ) ||
     question.length +
       responses.reduce((sum, response) => sum + response.content.length, 0) >
-      COMPARISON_REVIEW_LIMITS.maxTotalCharacters
+      limits.maxTotalCharacters
   ) {
     throw new Error("COMPARISON_REVIEW_INPUT_TOO_LARGE");
   }

@@ -25,6 +25,7 @@ import {
   Globe2,
   Link2,
   Loader2,
+  Lock,
   Microscope,
   Paperclip,
   Plus,
@@ -95,6 +96,11 @@ import {
   draftKeyFor,
   type AttachmentsChangeHandler,
 } from "@/components/chat/useConversationDrafts";
+import {
+  GUEST_ACCEPTED_MEDIA_TYPES,
+  type ChatAttachmentCapabilities,
+} from "@/lib/guestAttachmentPolicy";
+import { useGuestVerification } from "@/components/chat/GuestVerificationProvider";
 
 type PublicModelStatus = "available" | "limited" | "unavailable";
 type PublicModelStatusRecord = {
@@ -182,6 +188,27 @@ const ACCEPTED_FILE_TYPES = [
   ...OFFICE_FILE_TYPES,
   ...Object.keys(OFFICE_EXTENSION_TYPES).map((extension) => `.${extension}`),
 ].join(",");
+
+// A guest's picker offers the same formats minus nothing the server would
+// refuse anyway; the extension aliases stay so a `.docx` whose browser-reported
+// type is empty is still selectable.
+const GUEST_ACCEPT_ATTRIBUTE = [
+  ...GUEST_ACCEPTED_MEDIA_TYPES,
+  ...Object.keys(OFFICE_EXTENSION_TYPES).map((extension) => `.${extension}`),
+].join(",");
+
+/**
+ * A signed-in account with an attachment-capable plan. The composer is used in
+ * places that never pass capabilities explicitly, so the permissive
+ * signed-in shape stays the default and guests are the narrowing.
+ */
+const DEFAULT_ATTACHMENT_CAPABILITIES: ChatAttachmentCapabilities = {
+  canAttachLocalFiles: true,
+  canConnectGoogleDrive: true,
+  maxAttachmentsPerMessage: MAX_ATTACHMENTS,
+  maxAttachmentBytes: MAX_ATTACHMENT_SIZE,
+  attachmentPersistence: "account",
+};
 
 const getFileMediaType = (file: File) => {
   if (TEXT_FILE_TYPES.has(file.type) || OFFICE_FILE_TYPES.has(file.type)) {
@@ -323,7 +350,16 @@ type ChatInputProps = {
   onSwapModel: (removeModelId: string, addModelId: string) => boolean;
   attachments: ChatAttachment[];
   onAttachmentsChange: AttachmentsChangeHandler;
-  canAttach?: boolean;
+  /**
+   * What this caller may actually do with files, as four independent facts
+   * rather than one boolean. `canAttach={!isGuestMode}` used to answer "may I
+   * attach at all", "how many", "from where" and "what happens afterwards"
+   * with a single "no" for guests, which is why the product promised a file
+   * upload the composer refused to offer.
+   */
+  attachmentCapabilities?: ChatAttachmentCapabilities;
+  /** Opens the shell's sign-in prompt from a capability the guest lacks. */
+  onGuestSignInPrompt?: () => void;
   isGuestMode?: boolean;
   guestPreviewMode?: boolean;
   variant?: "bar" | "floating";
@@ -437,7 +473,8 @@ export function ChatInput({
   onSwapModel,
   attachments,
   onAttachmentsChange,
-  canAttach: canAttachProp = true,
+  attachmentCapabilities = DEFAULT_ATTACHMENT_CAPABILITIES,
+  onGuestSignInPrompt,
   isGuestMode = false,
   guestPreviewMode = false,
   variant = "bar",
@@ -522,10 +559,56 @@ export function ChatInput({
       `${count} ${count === 1 ? t("chat.modelsSelectedOne") : t("chat.modelsSelectedOther")}`;
     const signInCallbackUrl = withChatLanguage("/chat", lang);
     const accountUsage = useUserUsage(!isGuestMode);
+    // Local files and Google Drive are two separate permissions: a guest gets
+    // the first (one ephemeral file, validated and parsed server-side) and not
+    // the second, because Drive needs an OAuth grant an anonymous session
+    // cannot hold. The plan check only ever *removes* a capability.
     const canAttach =
-      canAttachProp &&
-      !isGuestMode &&
+      attachmentCapabilities.canAttachLocalFiles &&
       accountUsage?.limits.allowAttachments !== false;
+    const canConnectGoogleDrive =
+      attachmentCapabilities.canConnectGoogleDrive &&
+      accountUsage?.limits.allowAttachments !== false;
+    const maxAttachments = Math.max(
+      1,
+      attachmentCapabilities.maxAttachmentsPerMessage
+    );
+    const maxAttachmentBytes = attachmentCapabilities.maxAttachmentBytes;
+    const isEphemeralAttachment =
+      attachmentCapabilities.attachmentPersistence === "ephemeral";
+    const acceptedFileTypes = isEphemeralAttachment
+      ? GUEST_ACCEPT_ATTRIBUTE
+      : ACCEPTED_FILE_TYPES;
+    const { requestToken: requestGuestVerificationToken } = useGuestVerification();
+    // Every guest upload rejection the server can produce, mapped to the one
+    // sentence that tells the user what to do about it. An unrecognised code
+    // falls back to the generic "could not be processed" rather than surfacing
+    // a server string.
+    const guestAttachmentErrorMessage = useCallback(
+      (code?: string) => {
+        switch (code) {
+          case "GUEST_ATTACHMENT_UNSUPPORTED_TYPE":
+          case "GUEST_ATTACHMENT_TYPE_MISMATCH":
+            return t("chat.guestAttachmentUnsupported");
+          case "GUEST_ATTACHMENT_TOO_LARGE":
+            return interpolateCopy(t("chat.guestAttachmentSizeError"), {
+              megabytes: Math.floor(maxAttachmentBytes / (1024 * 1024)),
+            });
+          case "GUEST_ATTACHMENT_TEXT_TOO_LARGE":
+            return t("chat.guestAttachmentTextTooLarge");
+          case "GUEST_ATTACHMENT_NO_TEXT":
+          case "GUEST_ATTACHMENT_UNREADABLE":
+            return t("chat.guestAttachmentUnreadable");
+          case "API_RATE_LIMITED":
+            return t("chat.compareRateLimited");
+          case "ATTACHMENTS_DISABLED_BY_ADMIN":
+            return t("chat.guestAttachmentUnavailable");
+          default:
+            return t("chat.guestAttachmentFailed");
+        }
+      },
+      [maxAttachmentBytes, t]
+    );
   const maxSelectableModels = isGuestMode
       ? APP_DEFAULTS.maxGuestSelectedModels
       : accountUsage?.limits.maxModels || MAX_SELECTED_MODELS;
@@ -1392,15 +1475,22 @@ export function ChatInput({
         ]);
       };
 
-      if (
-        !ACCEPTED_FILE_TYPES.split(",").includes(mediaType) &&
-        !OFFICE_FILE_TYPES.has(mediaType)
-      ) {
+      const isTypeAccepted = isEphemeralAttachment
+        ? (GUEST_ACCEPTED_MEDIA_TYPES as readonly string[]).includes(mediaType)
+        : ACCEPTED_FILE_TYPES.split(",").includes(mediaType) ||
+          OFFICE_FILE_TYPES.has(mediaType);
+      if (!isTypeAccepted) {
         fail(t("chat.attachmentTypeError"));
         return;
       }
-      if (file.size > MAX_ATTACHMENT_SIZE) {
-        fail(t("chat.attachmentSizeError"));
+      if (file.size > maxAttachmentBytes) {
+        fail(
+          isEphemeralAttachment
+            ? interpolateCopy(t("chat.guestAttachmentSizeError"), {
+                megabytes: Math.floor(maxAttachmentBytes / (1024 * 1024)),
+              })
+            : t("chat.attachmentSizeError")
+        );
         return;
       }
 
@@ -1413,6 +1503,75 @@ export function ChatInput({
       ]);
 
       try {
+        if (isEphemeralAttachment) {
+          // Guests take a different route on purpose, not a relaxed version of
+          // the same one: a single request that carries the bytes, validated
+          // and parsed server-side before anything is stored, writing to a key
+          // scoped to their own signed guest session. There is no presigned
+          // direct-to-storage step, because there is no account to scope one
+          // to -- see app/api/chat/guest-attachment/route.ts.
+          const uploadGuestFile = (turnstileToken?: string) => {
+            const query = new URLSearchParams({
+              name: file.name,
+              mediaType,
+            });
+            if (turnstileToken) query.set("turnstileToken", turnstileToken);
+            return fetch(`/api/chat/guest-attachment?${query.toString()}`, {
+              method: "POST",
+              headers: { "Content-Type": mediaType },
+              body: file,
+            });
+          };
+
+          let response = await uploadGuestFile();
+          if (!response.ok) {
+            const payload = (await response.json().catch(() => null)) as
+              | { code?: string }
+              | null;
+            if (payload?.code === "TURNSTILE_REQUIRED") {
+              // User-initiated, so the shared verification sheet may be shown.
+              const token = await requestGuestVerificationToken(
+                "guest_attachment"
+              );
+              response = await uploadGuestFile(token);
+            }
+            if (!response.ok) {
+              const finalPayload =
+                payload?.code === "TURNSTILE_REQUIRED"
+                  ? ((await response.json().catch(() => null)) as
+                      | { code?: string }
+                      | null)
+                  : payload;
+              fail(guestAttachmentErrorMessage(finalPayload?.code));
+              return;
+            }
+          }
+
+          const uploaded = (await response.json()) as {
+            objectKey: string;
+            name: string;
+            mediaType: string;
+            size: number;
+            kind: "text" | "file";
+          };
+          const guestAttachment: ChatAttachment = {
+            id: crypto.randomUUID(),
+            name: uploaded.name,
+            mediaType: uploaded.mediaType,
+            size: uploaded.size,
+            objectKey: uploaded.objectKey,
+            data: uploaded.mediaType.startsWith("image/")
+              ? await fileToDataUrl(file)
+              : undefined,
+            kind: uploaded.kind,
+          };
+          setPendingAttachments((current) =>
+            current.filter((item) => item.id !== trackingId)
+          );
+          onAttachmentsChange((current) => [...current, guestAttachment], scopeId);
+          return;
+        }
+
         const prepareResponse = await fetch("/api/chat", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -1488,7 +1647,14 @@ export function ChatInput({
         fail(t("chat.attachmentUploadError"));
       }
     },
-    [onAttachmentsChange, t]
+    [
+      guestAttachmentErrorMessage,
+      isEphemeralAttachment,
+      maxAttachmentBytes,
+      onAttachmentsChange,
+      requestGuestVerificationToken,
+      t,
+    ]
   );
 
   const runUploadBatch = useCallback(
@@ -1515,9 +1681,14 @@ export function ChatInput({
     if (!files?.length) return;
 
     const availableSlots =
-      MAX_ATTACHMENTS - attachments.length - scopedPendingAttachments.length;
+      maxAttachments - attachments.length - scopedPendingAttachments.length;
     if (availableSlots <= 0) {
-      dispatchAppToast(t("chat.attachmentCountError"), "error");
+      dispatchAppToast(
+        isEphemeralAttachment
+          ? t("chat.guestAttachmentCountError")
+          : t("chat.attachmentCountError"),
+        "error"
+      );
       return;
     }
 
@@ -1616,9 +1787,9 @@ export function ChatInput({
     };
 
   const handleGoogleDriveSelect = async () => {
-    if (!canAttach || isUploading) return;
+    if (!canConnectGoogleDrive || isUploading) return;
 
-    const availableSlots = MAX_ATTACHMENTS - attachments.length;
+    const availableSlots = maxAttachments - attachments.length;
     if (availableSlots <= 0) {
       dispatchAppToast(t("chat.attachmentCountError"), "error");
       return;
@@ -1756,11 +1927,18 @@ export function ChatInput({
     if (!attachment.objectKey) return;
 
     try {
-      const response = await fetch("/api/chat", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: attachment.objectKey }),
-      });
+      // A guest object lives on its own endpoint, scoped to the guest session
+      // that uploaded it. Deleting it here is what keeps the common case --
+      // pick a file, change your mind -- from leaving an orphan for the TTL
+      // sweep to find an hour later.
+      const response = await fetch(
+        isEphemeralAttachment ? "/api/chat/guest-attachment" : "/api/chat",
+        {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key: attachment.objectKey }),
+        }
+      );
       if (!response.ok) {
         throw new Error(`R2 deletion failed: ${response.status}`);
       }
@@ -2632,7 +2810,8 @@ export function ChatInput({
                 <div className="space-y-1">
                   <button
                     type="button"
-                    disabled={!canAttach || attachments.length >= MAX_ATTACHMENTS}
+                    data-testid="attach-local-file-row"
+                    disabled={!canAttach || attachments.length >= maxAttachments}
                     onClick={() => {
                       closeMenu(false);
                       fileInputRef.current?.click();
@@ -2644,24 +2823,57 @@ export function ChatInput({
                     </span>
                     <span className="flex min-w-0 flex-col">
                       <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t("chat.attachFile")}</span>
-                      <span className="text-xs text-zinc-500">{t("chat.uploadFromComputer")}</span>
+                      <span className="text-xs text-zinc-500">
+                        {isEphemeralAttachment
+                          ? t("chat.guestAttachmentOneFile")
+                          : t("chat.uploadFromComputer")}
+                      </span>
                     </span>
                   </button>
+                  {/*
+                    Google Drive needs an OAuth grant an anonymous session
+                    cannot hold, so for a guest this is not a disabled control
+                    with no explanation -- it names the reason and offers the
+                    one action that changes it.
+                  */}
                   <button
                     type="button"
-                    disabled={!canAttach || attachments.length >= MAX_ATTACHMENTS}
+                    data-testid="attach-google-drive-row"
+                    data-locked={canConnectGoogleDrive ? "false" : "true"}
+                    disabled={
+                      canConnectGoogleDrive &&
+                      attachments.length >= maxAttachments
+                    }
                     onClick={() => {
                       closeMenu(false);
+                      if (!canConnectGoogleDrive) {
+                        onGuestSignInPrompt?.();
+                        return;
+                      }
                       void handleGoogleDriveSelect();
                     }}
                     className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-zinc-800"
                   >
                     <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-500/10 text-blue-500">
-                      <HardDrive className="h-5 w-5" />
+                      {canConnectGoogleDrive ? (
+                        <HardDrive className="h-5 w-5" />
+                      ) : (
+                        <Lock className="h-5 w-5" />
+                      )}
                     </span>
                     <span className="flex min-w-0 flex-col">
                       <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t("chat.attachGoogleDrive")}</span>
-                      <span className="text-xs text-zinc-500">{t("chat.googleDriveDescription")}</span>
+                      <span
+                        className={`text-xs ${
+                          canConnectGoogleDrive
+                            ? "text-zinc-500"
+                            : "text-amber-600 dark:text-amber-400"
+                        }`}
+                      >
+                        {canConnectGoogleDrive
+                          ? t("chat.googleDriveDescription")
+                          : t("chat.guestGoogleDriveSignIn")}
+                      </span>
                     </span>
                   </button>
                   <div className="my-1 border-t border-zinc-200 dark:border-zinc-700" />
@@ -2754,6 +2966,20 @@ export function ChatInput({
                     <p className="mt-0.5">
                       {t("chat.attachmentGuideBody")}
                     </p>
+                    {/*
+                      A guest's files are held for a short time and are never
+                      added to a saved chat, a project, a share link or an
+                      export. That is a promise the product has to make where
+                      the file is picked, not in a policy page.
+                    */}
+                    {isEphemeralAttachment && (
+                      <p
+                        data-testid="guest-attachment-temporary-note"
+                        className="mt-1 font-semibold text-zinc-700 dark:text-zinc-200"
+                      >
+                        {t("chat.guestAttachmentTemporary")}
+                      </p>
+                    )}
                   </div>
                   <div className="my-1 border-t border-zinc-200 dark:border-zinc-700" />
                   <button
@@ -3017,7 +3243,7 @@ export function ChatInput({
           ref={fileInputRef}
           type="file"
           multiple
-          accept={ACCEPTED_FILE_TYPES}
+          accept={acceptedFileTypes}
           onChange={(event) => handleFilesSelected(event.target.files)}
           className="hidden"
         />

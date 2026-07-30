@@ -159,13 +159,20 @@ export async function releaseApiRateLimit(
 
 export async function reserveDailyUploadBytes(
   userId: string,
-  bytes: number
+  bytes: number,
+  // Guests upload against a far smaller daily budget than an account does,
+  // and pass their own subject key as the bucket owner. The default stays
+  // exactly what it was for every existing caller.
+  limitOverride?: number
 ) {
   const now = new Date();
-  const limit = positiveInteger(
-    process.env.API_UPLOAD_BYTES_PER_USER_PER_DAY,
-    250 * 1024 * 1024
-  );
+  const limit =
+    limitOverride && Number.isSafeInteger(limitOverride) && limitOverride > 0
+      ? limitOverride
+      : positiveInteger(
+          process.env.API_UPLOAD_BYTES_PER_USER_PER_DAY,
+          250 * 1024 * 1024
+        );
   const allowed = await prisma.$transaction((tx) =>
     incrementBucket(
       tx,

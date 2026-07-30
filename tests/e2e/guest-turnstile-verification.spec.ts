@@ -224,14 +224,14 @@ test.describe("Guest verification: desktop shell", () => {
 
     // Right of the cross-review action group, and after it in DOM order.
     const reviewBox = (await page
-      .getByTestId("ai-review-guest-locked")
+      .getByTestId("ai-review-button")
       .boundingBox())!;
     const widgetBox = (await mockWidget(page).boundingBox())!;
     expect(widgetBox.x).toBeGreaterThanOrEqual(reviewBox.x + reviewBox.width);
     expect(intersectionArea(widgetBox, reviewBox)).toBe(0);
 
     const followsInDom = await page.evaluate(() => {
-      const review = document.querySelector('[data-testid="ai-review-guest-locked"]');
+      const review = document.querySelector('[data-testid="ai-review-button"]');
       const slotNode = document.querySelector('[data-testid="desktop-guest-verification"]');
       if (!review || !slotNode) return false;
       return Boolean(
@@ -306,7 +306,7 @@ test.describe("Guest verification: desktop shell", () => {
       .getByTestId("quick-comparison-button")
       .boundingBox())!;
     const reviewBox = (await page
-      .getByTestId("ai-review-guest-locked")
+      .getByTestId("ai-review-button")
       .boundingBox())!;
     const composerBox = (await page.getByTestId("chat-input").boundingBox())!;
 
