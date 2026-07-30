@@ -23,7 +23,10 @@ import { ComparisonActionRail } from "@/components/chat/ComparisonActionRail";
 import { GuestVerificationSheet } from "@/components/chat/GuestVerificationSheet";
 import { useGuestVerification } from "@/components/chat/GuestVerificationProvider";
 import { ModeInfoSheet } from "@/components/chat/ModeInfoSheet";
-import { useCompactBottomDock } from "@/components/chat/useVisualViewport";
+import {
+  useCompactBottomDock,
+  useKeyboardInset,
+} from "@/components/chat/useVisualViewport";
 import { chatModelSummaryCopy } from "@/components/chat/chatModelSummaryCopy";
 import { deriveComparisonReadiness } from "@/lib/comparisonReadiness";
 import { buildChatModelSummary } from "@/lib/chatModelSummary";
@@ -444,6 +447,13 @@ export function MobileChatShell({
     isBusy: isCompareSummaryLoading,
   });
   const isCompactBottomDock = useCompactBottomDock();
+  // SHORT-VIEWPORT-001: on iOS Safari and Android Chrome's default mode the
+  // layout viewport keeps its full height while the keyboard is up, so a
+  // `position: fixed` drawer anchored to `inset-y-0` runs underneath the
+  // keyboard and takes its own footer with it. This is how many CSS px of the
+  // drawer's bottom the user cannot see; 0 whenever there is nothing to
+  // compensate for.
+  const drawerKeyboardInset = useKeyboardInset();
   const isAnyWorkingOrError = selectedModels.some((modelId) => {
     const status = modelStatuses[modelId];
     return status === "responding" || status === "loading" || status === "error";
@@ -854,7 +864,15 @@ export function MobileChatShell({
           />
           <div
             ref={drawerPanelRef}
-            className="absolute inset-y-0 left-0 z-10 flex w-[min(24rem,92vw)] max-w-full bg-zinc-50 pt-[env(safe-area-inset-top)] shadow-2xl dark:bg-zinc-950"
+            data-testid="mobile-sidebar-drawer"
+            // SHORT-VIEWPORT-001: the bottom inset is padding on the panel, not
+            // on the footer inside it, so the sidebar's own scroll region ends
+            // above the home indicator instead of scrolling its last control
+            // underneath it.
+            className="absolute inset-y-0 left-0 z-10 flex w-[min(24rem,92vw)] max-w-full bg-zinc-50 pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] shadow-2xl dark:bg-zinc-950"
+            style={
+              drawerKeyboardInset ? { bottom: drawerKeyboardInset } : undefined
+            }
           >
             <div className="absolute right-[-0.45rem] top-1/2 h-12 w-1.5 -translate-y-1/2 rounded-full bg-white/70 shadow dark:bg-zinc-700/80" aria-hidden="true" />
             <ChatSidebar
@@ -888,7 +906,9 @@ export function MobileChatShell({
               ref={drawerCloseButtonRef}
               type="button"
               onClick={closeDrawer}
-              className="absolute right-3 top-3 flex h-11 w-11 items-center justify-center rounded-xl bg-zinc-900/80 text-white"
+              // Above the sidebar's own sticky header (z-10), which the button
+              // deliberately floats over -- the header reserves pr-16 for it.
+              className="absolute right-3 top-3 z-20 flex h-11 w-11 items-center justify-center rounded-xl bg-zinc-900/80 text-white"
               aria-label={t("auth.cancel")}
             >
               <X className="h-5 w-5" />

@@ -80,6 +80,35 @@ Non-negotiable requirements:
 - A change that violates this contract is a release blocker.
 <!-- END:mobile-chat-composer-invariant -->
 
+<!-- BEGIN:mobile-sidebar-drawer-invariant -->
+## Mobile sidebar drawer invariant
+
+Before changing the drawer in `MobileChatShell.tsx`, `ChatSidebar.tsx`'s
+`isMobileDrawer` layout, `useVisualViewport.ts`, or the account footer inside the
+drawer, read:
+
+- `docs/ui-contracts/mobile-sidebar-drawer.md`
+
+Non-negotiable requirements:
+
+- Every drawer control must be visible or reachable by one vertical scroll on any
+  supported viewport, including one shortened by browser chrome, rotation or the
+  on-screen keyboard.
+- Reachable is measured from the control's centre point with
+  `elementFromPoint`, not with `toBeAttached()` or a programmatic `.click()`.
+- Exactly one scroll owner at a time: when the drawer scrolls, the conversation
+  list must not also be a scroller, and the owner must contain every control.
+- The short/tall switch reads the visible viewport (`useShortViewport()`), never
+  `window.innerHeight`, a CSS `max-height` query, a device name or a UA string.
+- No control may be hidden, demoted behind a "more" affordance, or have its touch
+  target, text size, accessible name or focus ring reduced to make room.
+- Safe-area insets, modal semantics, focus trapping and focus return are
+  preserved, and the page behind the drawer never scrolls in its place.
+- Any related change must keep `tests/e2e/mobile-short-viewport-drawer.spec.ts`
+  passing across its full viewport/state matrix.
+- A change that violates this contract is a release blocker.
+<!-- END:mobile-sidebar-drawer-invariant -->
+
 <!-- BEGIN:comparison-action-rail-invariant -->
 ## Comparison action rail invariant
 

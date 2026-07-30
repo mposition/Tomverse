@@ -18,6 +18,7 @@ import { dispatchAppToast } from "@/lib/appToast";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
 import { useSidebarCollapsePreference } from "@/components/chat/useSidebarCollapse";
+import { useShortViewport } from "@/components/chat/useVisualViewport";
 import { BuildInfoMenuItem, BuildStagingBadge } from "@/components/chat/BuildInfoMenu";
 
 type ChatSidebarProps = {
@@ -173,6 +174,12 @@ export function ChatSidebar({
     );
     const [sidebarCollapsePreference, setSidebarCollapsePreference] =
         useSidebarCollapsePreference();
+    // SHORT-VIEWPORT-001: whether the drawer still has the height to keep its
+    // header and footer pinned around a scrolling list. Read from the visible
+    // viewport, so a raised keyboard or a rotation counts as "short" the moment
+    // it happens -- a CSS `max-height` query cannot see either.
+    const isShortViewport = useShortViewport();
+    const isSingleScrollDrawer = isMobileDrawer && isShortViewport;
     const isSidebarCollapsed =
         sidebarCollapsePreference === "collapsed" ||
         (sidebarCollapsePreference === "auto" && autoCollapseSuggested);
@@ -731,10 +738,21 @@ export function ChatSidebar({
         <>
         <aside
             data-testid="chat-sidebar"
-            className={`relative flex h-full w-full shrink-0 select-none flex-col border-r border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 ${isMobileDrawer ? "" : "md:w-80"}`}
+            // SHORT-VIEWPORT-001: in the drawer the sidebar is also the scroll
+            // owner of last resort. Its fixed chrome plus the conversation
+            // list's floor plus the account footer need ~658px, so on anything
+            // shorter the footer used to overflow the panel with no scroll path
+            // to it at all -- the list was the only scroller and does not
+            // contain the footer. Desktop keeps its own overflow untouched.
+            className={`relative flex h-full w-full shrink-0 select-none flex-col border-r border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 ${isMobileDrawer ? "overflow-y-auto overscroll-contain" : "md:w-80"}`}
         >
 
-            <div className={`${isMobileDrawer ? "p-3 pr-16" : "p-4"} border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-2.5`}>
+            {/*
+              Sticky in the drawer so the panel-anchored close button (which
+              floats over this row and is why it reserves pr-16) never comes to
+              rest on top of a scrolled conversation row or the search field.
+            */}
+            <div className={`${isMobileDrawer ? "sticky top-0 z-10 bg-zinc-50 p-3 pr-16 dark:bg-zinc-950" : "p-4"} border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-2.5`}>
                 <span className={`flex items-center justify-center overflow-hidden rounded-xl bg-white ring-1 ring-zinc-200 shadow-sm dark:ring-zinc-800 ${isMobileDrawer ? "h-8 w-8" : "h-9 w-9"}`}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
@@ -884,7 +902,15 @@ export function ChatSidebar({
                         <div
                             id="sidebar-organizer-content"
                             data-testid="sidebar-organizer-content"
-                            className="max-h-80 touch-pan-y overflow-y-auto overscroll-contain pr-0.5 [scrollbar-gutter:stable] [@media(max-height:860px)]:max-h-40"
+                            // SHORT-VIEWPORT-001: when the drawer itself is the
+                            // single scroll owner this panel stops being a
+                            // competing nested scroller and simply takes the
+                            // height of its own content.
+                            className={`touch-pan-y pr-0.5 [scrollbar-gutter:stable] ${
+                                isSingleScrollDrawer
+                                    ? "overflow-visible"
+                                    : "max-h-80 overflow-y-auto overscroll-contain [@media(max-height:860px)]:max-h-40"
+                            }`}
                         >
                 <div
                     data-testid="sidebar-status-filters"
@@ -1182,7 +1208,34 @@ export function ChatSidebar({
 
             <div
                 data-testid="sidebar-conversation-list"
-                className="min-h-[10rem] flex-1 touch-pan-y space-y-1 overflow-y-auto overscroll-contain p-2 [scrollbar-gutter:stable]"
+                // SHORT-VIEWPORT-001. Two heights, one scroll owner each:
+                //
+                // - Tall enough for the whole drawer: unchanged. The list is the
+                //   scroller, header and footer stay pinned, and the drawer
+                //   itself never overflows.
+                // - Shorter than that: the pinned layout cannot fit -- the
+                //   chrome plus this list's 10rem floor plus the footer need
+                //   ~658px -- so the list stops being a scroller, takes its
+                //   natural height, and the drawer scrolls as one region that
+                //   includes the header and the account footer.
+                //
+                // `flex-none` rather than a smaller `min-height`: an item that
+                // can still shrink would end up with a box shorter than the rows
+                // it is painting, and with `overflow: visible` those rows would
+                // be drawn straight over the footer.
+                //
+                // `overscroll-auto` in the drawer covers the residual case where
+                // the drawer overflows while it is still tall enough to keep the
+                // list a scroller: a drag that runs out of list chains into the
+                // drawer instead of dead-ending, and the drawer's own
+                // `overscroll-contain` still stops it before the page behind.
+                className={`min-h-[10rem] touch-pan-y space-y-1 p-2 [scrollbar-gutter:stable] ${
+                    isSingleScrollDrawer
+                        ? "flex-none overflow-visible"
+                        : `flex-1 overflow-y-auto ${
+                              isMobileDrawer ? "overscroll-auto" : "overscroll-contain"
+                          }`
+                }`}
             >
                 {messageSearchResults.length > 0 && (
                     <div className="mb-2 rounded-xl border border-blue-200 bg-blue-50 p-2 text-xs dark:border-blue-900/50 dark:bg-blue-950/20">
@@ -1577,7 +1630,15 @@ export function ChatSidebar({
                 })}
             </div>
 
-            <div className={`${isMobileDrawer ? "shrink-0 border-t border-zinc-200 bg-zinc-100/40 p-2 dark:border-zinc-800 dark:bg-zinc-900/50" : "shrink-0 border-t border-zinc-200 bg-zinc-100/40 p-3 dark:border-zinc-800 dark:bg-zinc-900/50"} flex min-h-0 flex-col gap-2 overflow-visible`}>
+            {/*
+              `mt-auto` in the drawer: once the conversation list stops being
+              the flexible spacer (short viewports, see above) something still
+              has to absorb the free space on a drawer whose content happens to
+              be shorter than the panel, or the footer would float mid-panel.
+              Auto margins resolve to 0 when the content overflows instead, so
+              this can never push the footer out of the scroll region.
+            */}
+            <div className={`${isMobileDrawer ? "mt-auto shrink-0 border-t border-zinc-200 bg-zinc-100/40 p-2 dark:border-zinc-800 dark:bg-zinc-900/50" : "shrink-0 border-t border-zinc-200 bg-zinc-100/40 p-3 dark:border-zinc-800 dark:bg-zinc-900/50"} flex min-h-0 flex-col gap-2 overflow-visible`}>
                 {isGuestMode ? (
                     <div className="shrink-0">
                         <UserUsageSummary
@@ -1608,6 +1669,7 @@ export function ChatSidebar({
                         currentModelId={currentModelId}
                         currentPlan={displayedPlan}
                         attachmentCount={attachmentCount}
+                        triggerTestId="sidebar-feedback-button"
                     />
                 </div>
             </div>
