@@ -429,7 +429,6 @@ export const pt = {
     providerStatus: {
         allAvailable: "Os provedores selecionados estão disponíveis",
         allAvailableBody: "Os provedores de modelos estão respondendo normalmente.",
-        limited: "limitado",
         selectedUnavailableOne: "{model} está temporariamente indisponível",
         selectedUnavailableMany: "{count} modelos selecionados estão temporariamente indisponíveis",
         switchFromTo: "Trocar {from} por {to}",

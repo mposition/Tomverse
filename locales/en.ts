@@ -578,7 +578,6 @@ export const en = {
     providerStatus: {
         allAvailable: "All selected providers are available",
         allAvailableBody: "Model providers are responding normally.",
-        limited: "limited",
         selectedUnavailableOne: "{model} is temporarily unavailable",
         selectedUnavailableMany: "{count} selected models are temporarily unavailable",
         switchFromTo: "Switch {from} for {to}",

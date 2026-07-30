@@ -361,11 +361,18 @@ export function ProviderStatusBanner({
             {/* Not truncated: the model name is the whole point of the
                 sentence, and at 320px or 200% text scaling a single-line clamp
                 is exactly where it would be cut off. */}
-            <p id={headingId} className="min-w-0 break-words font-bold">
+            <p
+              id={headingId}
+              data-testid="provider-status-title"
+              className="min-w-0 break-words font-bold"
+            >
               {title}
             </p>
             {detail ? (
-              <p className="mt-0.5 break-words text-[11px] font-medium opacity-80">
+              <p
+                data-testid="provider-status-guidance"
+                className="mt-0.5 break-words text-[11px] font-medium opacity-80"
+              >
                 {detail}
               </p>
             ) : null}
@@ -402,11 +409,20 @@ export function ProviderStatusBanner({
       <div className="flex items-start gap-2">
         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
         <div className="min-w-0 flex-1">
-          <p id={headingId} className="min-w-0 break-words font-bold">
+          <p
+            id={headingId}
+            data-testid="provider-status-title"
+            className="min-w-0 break-words font-bold"
+          >
             {title}
           </p>
           {detail ? (
-            <p className="mt-1 break-words leading-5 opacity-90">{detail}</p>
+            <p
+              data-testid="provider-status-guidance"
+              className="mt-1 break-words leading-5 opacity-90"
+            >
+              {detail}
+            </p>
           ) : null}
           {renderActions(
             "mt-2 flex flex-wrap gap-1.5",

@@ -578,7 +578,6 @@ export const ko = {
     providerStatus: {
         allAvailable: "선택한 모든 공급자가 사용 가능합니다",
         allAvailableBody: "모델 공급자가 정상적으로 응답하고 있습니다.",
-        limited: "제한됨",
         selectedUnavailableOne: "{model}을(를) 일시적으로 사용할 수 없습니다",
         selectedUnavailableMany: "선택한 모델 {count}개를 일시적으로 사용할 수 없습니다",
         switchFromTo: "{from}을(를) {to}(으)로 교체",

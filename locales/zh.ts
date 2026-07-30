@@ -460,7 +460,6 @@ export const zh = {
     providerStatus: {
         allAvailable: "所选提供商均可用",
         allAvailableBody: "模型提供商响应正常。",
-        limited: "受限",
         selectedUnavailableOne: "{model}暂时无法使用",
         selectedUnavailableMany: "所选的 {count} 个模型暂时无法使用",
         switchFromTo: "将{from}替换为{to}",

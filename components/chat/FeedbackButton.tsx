@@ -12,6 +12,7 @@ export function FeedbackButton({
   rawErrorDetails,
   triggerLabel,
   triggerClassName,
+  triggerTestId,
 }: {
   currentModelId?: string | null;
   currentPlan?: string | null;
@@ -24,6 +25,7 @@ export function FeedbackButton({
   rawErrorDetails?: string;
   triggerLabel?: string;
   triggerClassName?: string;
+  triggerTestId?: string;
 }) {
   const { t } = useLanguage();
   const isErrorReport = Boolean(rawErrorDetails);
@@ -87,6 +89,7 @@ export function FeedbackButton({
     <>
       <button
         type="button"
+        data-testid={triggerTestId}
         onClick={() => {
           if (!traceId && typeof window !== "undefined") {
             setTraceId(window.localStorage.getItem("tomverse_last_error_trace_id") || "");

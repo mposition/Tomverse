@@ -865,3 +865,282 @@ test.describe("outage banner touch targets (UI-TOUCH-001)", () => {
     ).toBe(true);
   });
 });
+
+// RECON-OPS-002, re-pointed by UI-STATUS-002.
+//
+// #152 added this block against the banner's *global* variant: six models the
+// user had not selected, reported with three add-a-fallback chips. That variant
+// no longer exists -- a non-selected outage does not raise the workspace banner
+// at all -- so the fixture is now three *selected* models down with three
+// distinct replacements, which is the widest shape this banner can still reach
+// (the selection cap is three).
+//
+// Every assertion #152 established is kept, because each one is about copy and
+// geometry rather than about which models were down: the headline says
+// "unavailable" and never "limited", the count is one whole translated sentence
+// rather than a number glued to a word, a replacement name appears in exactly
+// one place in the banner, each action's accessible name states the action, the
+// headline is not clipped, the document never scrolls sideways, and every chip
+// keeps its own hit area and stays reachable by keyboard and touch.
+test.describe("widespread selected outage copy and layout (RECON-OPS-002)", () => {
+  const OUTAGE = [
+    { model: SELECTED.gpt, replacementId: "mistral-small-4", replacement: "Mistral Small 4" },
+    { model: SELECTED.claude, replacementId: "deepseek-v4-flash", replacement: "DeepSeek-V4 Flash" },
+    { model: SELECTED.gemini, replacementId: "llama-3-1", replacement: "Llama 3.1" },
+  ];
+  const REPLACEMENT_NAMES = OUTAGE.map((entry) => entry.replacement);
+
+  // The healthy replacements are reported too, and so are six unrelated
+  // outages: a count that says "3" has to be counting the user's own failed
+  // models rather than the payload, the chips, or the catalogue.
+  async function mockWidespreadSelectedOutage(page: Page) {
+    await mockProviderStatus(page, [
+      ...OUTAGE.map((entry) => ({
+        id: entry.model.id,
+        provider: entry.model.provider,
+        status: "unavailable" as const,
+        fallbackModelIds: [entry.replacementId],
+        fallbackHealth: "operational" as const,
+      })),
+      ...OUTAGE.map((entry) => ({
+        id: entry.replacementId,
+        provider: "qa-healthy",
+        status: "available" as const,
+        fallbackModelIds: [],
+        fallbackHealth: "none" as const,
+      })),
+      ...unselectedOutage(6),
+    ]);
+  }
+
+  test("the headline states unavailability as one localized sentence, and replacement names appear only on the buttons", async ({
+    page,
+  }) => {
+    await prepareGuestPage(page, "en");
+    await mockWidespreadSelectedOutage(page);
+    await page.goto("/chat");
+
+    await expect(banner(page)).toBeVisible();
+
+    // One whole sentence carrying the count, not a headline plus a bare tally.
+    await expect(banner(page).getByTestId("provider-status-title")).toHaveText(
+      "3 selected models are temporarily unavailable"
+    );
+    // The old headline described an outage as a throttle.
+    await expect(banner(page)).not.toContainText("limited");
+    // And the count is not a number glued to a translated word beside an
+    // unrelated number of buttons.
+    await expect(banner(page)).not.toContainText("3 unavailable");
+    // 9 models are down in the snapshot; only the user's 3 may be counted.
+    await expect(banner(page)).not.toContainText("9");
+
+    // A healthy replacement needs no caveat, so there is no guidance line to
+    // repeat a name into -- the names live in the buttons and nowhere else.
+    await expect(banner(page).getByTestId("provider-status-guidance")).toHaveCount(0);
+
+    const swaps = banner(page).getByTestId("provider-status-swap");
+    await expect(swaps).toHaveCount(OUTAGE.length);
+    const bannerText = await banner(page).innerText();
+    for (const [index, entry] of OUTAGE.entries()) {
+      // Naming the action, not just the model: the shuffle glyph is decorative
+      // and cannot carry "switch" on its own.
+      await expect(swaps.nth(index)).toHaveAccessibleName(
+        `Switch ${entry.model.name} for ${entry.replacement}`
+      );
+      expect(
+        bannerText.split(entry.replacement).length - 1,
+        `${entry.replacement} must appear exactly once in the banner`
+      ).toBe(1);
+      expect(
+        bannerText.split(entry.model.name).length - 1,
+        `${entry.model.name} must appear exactly once in the banner`
+      ).toBe(1);
+    }
+    for (const model of UNSELECTED_SIX) {
+      expect(
+        bannerText,
+        `the banner must not name the unrelated outage ${model.name}`
+      ).not.toContain(model.name);
+    }
+
+    await expect(banner(page).getByTestId("provider-status-refresh")).toBeVisible();
+  });
+
+  test("Korean renders the same copy as whole sentences rather than assembled words", async ({
+    page,
+  }) => {
+    await prepareGuestPage(page, "ko");
+    await mockWidespreadSelectedOutage(page);
+    await page.goto("/chat?lang=ko");
+
+    await expect(banner(page)).toBeVisible();
+    // Korean puts the counter after the noun -- a number glued in front of a
+    // translated "unavailable" could not produce this.
+    await expect(banner(page).getByTestId("provider-status-title")).toHaveText(
+      "선택한 모델 3개를 일시적으로 사용할 수 없습니다"
+    );
+
+    const swaps = banner(page).getByTestId("provider-status-swap");
+    await expect(swaps).toHaveCount(OUTAGE.length);
+    for (const [index, entry] of OUTAGE.entries()) {
+      await expect(swaps.nth(index)).toHaveAccessibleName(
+        `${entry.model.name}을(를) ${entry.replacement}(으)로 교체`
+      );
+    }
+
+    const bannerText = await banner(page).innerText();
+    for (const name of REPLACEMENT_NAMES) {
+      expect(
+        bannerText.split(name).length - 1,
+        `${name} must appear exactly once in the banner`
+      ).toBe(1);
+    }
+  });
+
+  // The bug report arrived as a screenshot whose right edge was cut off, which
+  // looks like a missing refresh button or a page overflowing sideways. Neither
+  // reproduces: measured here the document never scrolls horizontally and both
+  // the banner and its refresh control sit inside the viewport at every width.
+  // What does reproduce is the headline being clipped by `truncate`, which is
+  // why it wraps -- so these are the measurements that have to keep holding,
+  // rather than a shell or useIsMobileShell change made on a hunch.
+  test("banner geometry holds at phone widths and on a narrow desktop pointer", async ({
+    page,
+  }, testInfo) => {
+    await prepareGuestPage(page, "en");
+    await mockWidespreadSelectedOutage(page);
+
+    const viewports = testInfo.project.name.startsWith("mobile")
+      ? [
+          { width: 320, height: 568 },
+          { width: 390, height: 844 },
+          { width: 430, height: 932 },
+        ]
+      : [
+          // Narrow enough to share the mobile shell's width breakpoint while
+          // keeping a fine pointer -- the case useIsMobileShell exists to tell
+          // apart, and where the compact desktop sizing must survive.
+          { width: 720, height: 800 },
+          { width: 1280, height: 800 },
+        ];
+
+    for (const viewport of viewports) {
+      await page.setViewportSize(viewport);
+      await page.goto("/chat");
+      const label = `[${testInfo.project.name} ${viewport.width}x${viewport.height}]`;
+
+      await expect(banner(page)).toBeVisible();
+      const refresh = banner(page).getByTestId("provider-status-refresh");
+      await expect(refresh).toBeVisible();
+
+      // The suggestion strip is allowed to scroll sideways; the document is
+      // not. Measured, not assumed -- this is the claim the screenshot made.
+      expect(
+        await horizontalOverflow(page),
+        `${label} document horizontal overflow`
+      ).toBeLessThanOrEqual(1);
+
+      // The defect the screenshot actually contained. `truncate` hid 98px of
+      // the headline at 320px and 28px at 390px, so the one sentence saying
+      // what was wrong was the first thing cut. It wraps now, and a future
+      // `truncate` would fail here rather than pass every copy assertion while
+      // showing "3 selected models are temporarily unavai...".
+      const headline = await banner(page)
+        .getByTestId("provider-status-title")
+        .evaluate((element) => ({
+          clientWidth: element.clientWidth,
+          scrollWidth: element.scrollWidth,
+        }));
+      expect(
+        headline.clientWidth,
+        `${label} headline must be a measurable box`
+      ).toBeGreaterThan(0);
+      expect(
+        headline.scrollWidth - headline.clientWidth,
+        `${label} headline must not be clipped`
+      ).toBeLessThanOrEqual(1);
+
+      for (const [name, locator] of [
+        ["banner", banner(page)],
+        ["refresh", refresh],
+      ] as const) {
+        const box = (await locator.boundingBox())!;
+        expect(box.x, `${label} ${name} left edge`).toBeGreaterThanOrEqual(0);
+        expect(
+          box.x + box.width,
+          `${label} ${name} right edge inside the viewport`
+        ).toBeLessThanOrEqual(viewport.width);
+      }
+
+      // Every action measured in a single pass, because scrolling the strip
+      // between measurements would report the same screen coordinates for
+      // different chips and turn a clean row into a phantom overlap.
+      const boxes = await banner(page)
+        .locator(
+          '[data-testid="provider-status-refresh"], [data-testid="provider-status-choose-model"], [data-testid="provider-status-swap"]'
+        )
+        .evaluateAll((elements) =>
+          elements.map((element) => {
+            const box = element.getBoundingClientRect();
+            return { x: box.x, y: box.y, width: box.width, height: box.height };
+          })
+        );
+      expect(boxes.length, `${label} refresh plus one chip per impacted model`).toBe(
+        1 + OUTAGE.length
+      );
+
+      // UI-TOUCH-001 still holds at the widths added here, in both directions:
+      // a phone gets real 44px targets, and the narrow desktop window keeps its
+      // mouse-sized ones instead of inheriting the touch floor by width alone.
+      for (const [index, box] of boxes.entries()) {
+        if (testInfo.project.name.startsWith("mobile")) {
+          expect(box.width, `${label} action ${index} width`).toBeGreaterThanOrEqual(
+            43.5
+          );
+          expect(box.height, `${label} action ${index} height`).toBeGreaterThanOrEqual(
+            43.5
+          );
+        } else {
+          expect(box.height, `${label} action ${index} height`).toBeLessThan(43.5);
+        }
+      }
+
+      for (let a = 0; a < boxes.length; a++) {
+        for (let b = a + 1; b < boxes.length; b++) {
+          const overlaps =
+            boxes[a].x < boxes[b].x + boxes[b].width &&
+            boxes[a].x + boxes[a].width > boxes[b].x &&
+            boxes[a].y < boxes[b].y + boxes[b].height &&
+            boxes[a].y + boxes[a].height > boxes[b].y;
+          expect(overlaps, `${label} banner actions must not overlap`).toBe(false);
+        }
+      }
+
+      // Keyboard and touch both have to reach every recovery, including the
+      // ones the strip has scrolled past at 320px.
+      const swaps = banner(page).getByTestId("provider-status-swap");
+      await expect(swaps).toHaveCount(OUTAGE.length);
+      for (let index = 0; index < OUTAGE.length; index++) {
+        const action = swaps.nth(index);
+        await action.focus();
+        await expect(
+          action,
+          `${label} recovery ${index} must take keyboard focus`
+        ).toBeFocused();
+        await action.scrollIntoViewIfNeeded();
+        const reachable = await action.evaluate((element) => {
+          const box = element.getBoundingClientRect();
+          const hit = document.elementFromPoint(
+            box.x + box.width / 2,
+            box.y + box.height / 2
+          );
+          return hit === element || Boolean(hit && element.contains(hit));
+        });
+        expect(
+          reachable,
+          `${label} recovery ${index} must be reachable by touch`
+        ).toBe(true);
+      }
+    }
+  });
+});
