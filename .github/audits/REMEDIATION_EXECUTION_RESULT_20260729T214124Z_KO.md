@@ -32,7 +32,7 @@ production `Go`를 선언하지 않는다. R-01, R-05, `QA-GATE-001` 셋이 모�
 | `R-06` | P2 | **성공** | 3개 lifecycle 전이 coverage 추가, 11/11 통과 |
 | `R-07` | P2 verification | **성공** | live `/api/build-info` ↔ UI field 일치 검증 추가 |
 | `R-08` | P3 | **성공** (staging 미배포) | stall 25초 내 안내, security semantics 무변경 |
-| `QA-GATE-001` | release gate | **실행됨 — 실패, 단 원인은 trunk** | canonical CI 실행 완료: 1509 passed / 10 failed. `develop` 대조 실행이 **동일한 10건·동일한 카운트**를 재현 → 전부 기존 실패이며 이번 변경의 regression은 **0건**. gate 종결은 trunk의 신규 항목 |
+| `QA-GATE-001` | release gate | **Fail (1509/10/908)** | 이번 변경의 canonical regression은 **0건**(trunk와 passed 수 동일). 그러나 10건 전부 **#145가 유입**시킨 것으로 확인 —— 기능 2건(panel send 순서·데이터 정합성, **이연 불가**)과 golden 미갱신 8건. #145 이전 run #43은 success였다. §6.5 |
 
 ---
 
@@ -814,6 +814,91 @@ R-01–R-08 범위 밖의 **신규 항목**이다.
 
 **snapshot은 갱신하지 않았다** —— canonical 재현과 승인 없이 golden을 건드리지
 않는다는 정책이고, 애초에 이 golden들은 이번 변경 소관이 아니다.
+
+---
+
+### 6.5 QA-GATE-001 건별 triage (사용자 분류표 적용)
+
+사용자 지시에 따라 10건을 일괄 처리하지 않고 trunk 대조 기반으로 건별 분류했다.
+핵심 전제도 그대로 적용한다 —— **"trunk에도 실패한다"는 이번 branch의 회귀가
+아니라는 증거일 뿐, Go-Live에 안전하다는 증거는 아니다.**
+
+**결정적 기준점: 같은 workflow의 run #43(`8386443a`)은 success였다.**
+`8386443a`는 `a1e13fec`의 조상이므로 #145 이전 상태다.
+
+#### A. 기능 실패 2건 — #145가 유입시킨 회귀, **이연 불가**
+
+| 항목 | 값 |
+|---|---|
+| test | `tests/e2e/upgrade-discovery.spec.ts:428` — `panel-only send waits for a changed model selection to persist` |
+| project | `desktop-chromium`, `desktop-compact` (2건) |
+| candidate (`199baa65`) | **fail** (retry2까지) |
+| trunk (`cb57c8d7`) | **fail** (retry2까지) |
+| `8386443a` (#145 이전) | **pass** —— test는 `98818a5`에서 추가되어 그 시점에 이미 존재했고 run #43은 success였다 |
+| 로컬 재현 | **fail** —— 환경 무관하게 결정적으로 재현된다 |
+| failure signature | `messageSavedAfterPatch` = false. `modelPatchCompleted`는 true |
+| canonical runner | 예 |
+| baseline 변경 | 없음 (visual test 아님) |
+
+**제품 영향**: test는 panel의 model을 바꾼 뒤 그 panel에서 전송할 때, 메시지
+POST가 conversation PATCH(model 선택 영속화) **완료 후에** 일어나야 한다고
+요구하며 PATCH를 400ms 지연시켜 순서를 강제한다. 현재는 **메시지가 model 변경
+저장 전에 먼저 저장된다.** 즉 메시지가 이전 model 선택 상태에 귀속될 수 있는
+**순서·데이터 정합성 결함**이다.
+
+**귀속**: #145는 이 spec을 건드리지 않았지만 send 경로인
+`ChatPageClient.tsx`(+25, `UI-STATE-001`로 conversation 목록의
+`selectedModels`를 낙관적으로 적용)와 `ChatInput.tsx`(+304)를 변경했다.
+#145 이전 green → #145 이후 fail이므로 **#145가 회귀 지점**이다.
+
+**분류**: 사용자 표의 "기능·접근성·보안·credit·데이터 정합성 실패" →
+**trunk 기존 결함이어도 Go-Live 전 처리 또는 명시적 No-Go.** 별도 이슈로
+이연할 수 없다. 그리고 이 결함은 **현재 staging에 배포된 상태다.**
+
+#### B. visual 실패 8건 — #145의 golden 미갱신, 원인은 규명됨
+
+| 항목 | 값 |
+|---|---|
+| test | `chat-state-visual-regression.spec.ts` — `chat-loading-{desktop,mobile}-{light,dark}-ko` 4건, `chat-attachment-{uploading,processing,error}-desktop-light-ko` 3건, `chat-attachment-error-mobile-dark-ko` 1건 |
+| project | `desktop-chromium` |
+| candidate / trunk | **양쪽 fail, 동일 8건·동일 카운트** |
+| `8386443a` (#145 이전) | **pass** —— spec과 8개 golden 모두 그 시점에 존재했고 run #43은 success |
+| canonical runner | 예 |
+| baseline 변경 | **없음** —— golden을 갱신하지 않았다 |
+
+**"`-ko`만 실패"는 한국어 렌더링 현상이 아니다.** 이 suite의 golden은
+**한국어 58 + 영어 5**로 한국어가 기본이며, `chat-loading`·`chat-attachment`
+상태는 **한국어로만 촬영된다**(12개 전부 `-ko`). 즉 비교 대상 영어 변형이
+애초에 없다. 또한 canonical에서 나머지 **50개 한국어 golden은 통과**하므로
+한국어 전반의 rasterization 문제도 아니다.
+
+**원인**: #145의 제목이 스스로 명시한다 —— "**loading shell, attachment
+stages**". #145는 `ChatInput.tsx`(+304)와 `DesktopChatShell.tsx`(+18)로 바로 그
+두 영역의 UI를 의도적으로 변경했으면서 해당 8개 golden을 **재촬영하지 않았다.**
+따라서 golden이 의도된 새 렌더링에 대해 stale하다.
+
+**미확보 증거**: canonical의 actual/expected/diff 이미지를 확인하지 못했다
+(CI artifact 75MB, 이 환경에 인증 다운로드 경로가 없다). 따라서 "새 렌더링이
+올바르고 golden만 낡았다"는 것은 **원인 규명 수준이며 제품 동작 정상 확인은
+아니다.**
+
+참고로 로컬에서 이 8건을 재현했을 때 diff는 13,083–18,987 pixels였으나,
+**그 수치는 판정에 쓸 수 없다** —— 로컬은 비-canonical Chromium `1194`이고 diff
+이미지에서 라틴 문자(`Claude Sonnet 5`, `google`, `ON`)까지 전부 차이로 표시되어
+문서화된 glyph-edge 노이즈가 full-page에서 확대된 것임이 드러난다.
+
+**분류**: 원인은 규명됐으나 제품 동작 정상 확인이 없으므로, 사용자 표의
+"별도 이슈 가능"에 아직 도달하지 못한다. 종결에는 canonical diff 확인 후
+**golden 재촬영 승인**이 필요하다.
+
+#### C. gate 판정
+
+실행 프롬프트는 `QA-GATE-001`에 **canonical suite unexpected failure 0**을
+요구한다. 현재 10건이 남아 있고 그중 2건은 이연 불가 기능 결함이므로,
+**`QA-GATE-001`은 `Fail`로 유지한다.**
+
+이번 branch의 canonical regression이 **0건**이라는 사실은 별개로 성립한다
+(candidate와 trunk의 passed 수가 1509로 동일).
 
 ---
 
