@@ -864,6 +864,23 @@ cookie가 필요한 이유는 `LanguageProvider`의 선호가 `localStorage`에 
 영어와 가까워 재렌더 shift가 작았을 뿐 구조적으로는 같은 결함을 안고 있었고,
 redirect가 원인 자체를 제거했다.
 
+*회귀 검증 —— proxy 변경은 모든 요청 경로를 지난다*
+
+redirect는 `proxy.ts`에 있으므로 route 하나가 아니라 **전 요청**에 영향을 준다.
+`?lang=`에 의존하는 spec이 20개가 넘어 해당 축을 우선 돌렸다.
+
+| suite | 결과 |
+|---|---|
+| `language-detection` + `marketing-consent-hero` + `marketing-language-analytics` + `marketing-language-focus` | ✅ **13/13 passed** —— locale route override, 언어 전환 analytics(document/client 구분 포함), FINAL-F001·F004 |
+| `touch-targets` + `font-system` + `korean-typography` | ✅ **38 passed / 17 skipped / 0 failed** —— contract가 요구하는 **중국어 regression**(`font-system`의 locale별 rasterized font, `korean-typography`의 중국어 wrapping) 포함 |
+| `ui-contracts` + `accessibility-core-tasks` + `build-info` | ✅ 23 passed / 1 skipped / 0 failed |
+| `npm run test:unit` | ✅ **571/571** (신규 `marketingRoutes.test.mjs` 9건 포함) |
+| `npm run security:regression` | ✅ 113 checks passed |
+| `npx eslint --max-warnings=0` + `next build` | ✅ exit 0 |
+
+`touch-targets.spec.ts:418`이 `/?lang=${lang}`을 locale별로 순회하므로 이제 각
+locale route로 redirect되지만, 검증 대상이 페이지 내용이라 그대로 통과한다.
+
 *닫히지 않는 범위 —— 명시한다*
 
 1. **localized 대응이 있는 route만 처리된다.** locale별로 생성되는 것은 `/`와
