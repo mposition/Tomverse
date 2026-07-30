@@ -152,10 +152,21 @@ export function ProviderStatusBanner({
     // repairs. `claimed` stops two impacted models from pointing at the same
     // replacement: accepting both offers would then remove two selections and
     // add one, quietly shrinking the comparison.
+    //
+    // A candidate this same snapshot reports as unavailable is never offered.
+    // The route already drops those (see lib/providerFallbackCandidates), but
+    // the banner is holding the same evidence and must not print a replacement
+    // its own data says is down -- a stale or hand-rolled payload would
+    // otherwise turn into a swap straight onto another outage. `limited`
+    // candidates are still offered, with the caveat fallbackHealth carries.
+    const statusById = new Map(models.map((model) => [model.id, model.status]));
     const claimed = new Set<string>();
     const recoveries = impacted.map((model) => {
       const addModelId = model.fallbackModelIds.find(
-        (id) => !selectedSet.has(id) && !claimed.has(id)
+        (id) =>
+          !selectedSet.has(id) &&
+          !claimed.has(id) &&
+          statusById.get(id) !== "unavailable"
       );
       if (addModelId) claimed.add(addModelId);
       return {

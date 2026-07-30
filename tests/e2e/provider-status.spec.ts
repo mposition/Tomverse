@@ -486,6 +486,78 @@ test.describe("contextual outage disclosure (UI-STATUS-002)", () => {
     }
   });
 
+  test("a candidate the same snapshot reports down is never offered", async ({
+    page,
+  }) => {
+    await prepareGuestPage(page, "en");
+    // The route filters these out before they ship (selectFallbackCandidates),
+    // so this is a stale-or-malformed-payload fixture: the banner is holding
+    // the evidence that the nominated replacement is itself out, and must not
+    // offer a swap straight onto a second outage.
+    await mockProviderStatus(page, [
+      {
+        id: SELECTED.gemini.id,
+        provider: SELECTED.gemini.provider,
+        status: "unavailable",
+        fallbackModelIds: ["llama-3-1", "mistral-small-4"],
+        fallbackHealth: "operational",
+      },
+      {
+        id: "llama-3-1",
+        provider: "groq",
+        status: "unavailable",
+        fallbackModelIds: [],
+        fallbackHealth: "none",
+      },
+    ]);
+
+    await page.goto("/chat");
+    await expect(banner(page)).toBeVisible();
+    // It skips the downed candidate and takes the next eligible one rather
+    // than giving up on recovery altogether.
+    await expect(
+      banner(page).getByRole("button", {
+        name: `Switch ${SELECTED.gemini.name} for Mistral Small 4`,
+      })
+    ).toBeVisible();
+    await expect(banner(page)).not.toContainText("Llama 3.1");
+  });
+
+  test("with every candidate down the banner falls back to the picker", async ({
+    page,
+  }) => {
+    await prepareGuestPage(page, "en");
+    await mockProviderStatus(page, [
+      {
+        id: SELECTED.gemini.id,
+        provider: SELECTED.gemini.provider,
+        status: "unavailable",
+        fallbackModelIds: ["llama-3-1"],
+        fallbackHealth: "operational",
+      },
+      {
+        id: "llama-3-1",
+        provider: "groq",
+        status: "unavailable",
+        fallbackModelIds: [],
+        fallbackHealth: "none",
+      },
+    ]);
+
+    await page.goto("/chat");
+    await expect(banner(page)).toBeVisible();
+    await expect(banner(page).getByTestId("provider-status-swap")).toHaveCount(0);
+    // fallbackHealth said "operational", but the snapshot says otherwise and
+    // the snapshot wins -- so the banner reports no replacement rather than
+    // repeating the payload's claim.
+    await expect(banner(page)).toContainText(
+      "No eligible replacement model is available right now."
+    );
+    await expect(
+      banner(page).getByRole("button", { name: "Choose another model" })
+    ).toBeVisible();
+  });
+
   test("one healthy replacement does not vouch for a degraded one", async ({ page }) => {
     await prepareGuestPage(page, "en");
     await mockProviderStatus(page, [
@@ -886,9 +958,26 @@ test.describe("widespread selected outage copy and layout (RECON-OPS-002)", () =
   const OUTAGE = [
     { model: SELECTED.gpt, replacementId: "mistral-small-4", replacement: "Mistral Small 4" },
     { model: SELECTED.claude, replacementId: "deepseek-v4-flash", replacement: "DeepSeek-V4 Flash" },
-    { model: SELECTED.gemini, replacementId: "llama-3-1", replacement: "Llama 3.1" },
+    { model: SELECTED.gemini, replacementId: "grok-3-mini", replacement: "Grok 3 Mini" },
   ];
   const REPLACEMENT_NAMES = OUTAGE.map((entry) => entry.replacement);
+  // Six unrelated outages. None may be one of the replacements above, and no
+  // name may nest inside a name the banner legitimately prints -- "Grok 3" is
+  // a substring of "Grok 3 Mini", so a naive absence check on it would fail on
+  // correct output. The precondition below makes that trap loud instead of
+  // letting a future model rename re-introduce it silently.
+  const UNRELATED = [
+    { id: "gemini-3-5-flash", provider: "google", name: "Gemini 3.5 Flash" },
+    { id: "llama-3-1", provider: "groq", name: "Llama 3.1" },
+    { id: "llama-3-3", provider: "groq", name: "Llama 3.3" },
+    { id: "mistral-large-3", provider: "mistral", name: "Mistral Large 3" },
+    { id: "grok-4", provider: "xai", name: "Grok 4" },
+    { id: "deepseek-v4-pro", provider: "deepseek", name: "DeepSeek-V4 Pro" },
+  ];
+  const NAMES_THE_BANNER_PRINTS = [
+    ...REPLACEMENT_NAMES,
+    ...OUTAGE.map((entry) => entry.model.name),
+  ];
 
   // The healthy replacements are reported too, and so are six unrelated
   // outages: a count that says "3" has to be counting the user's own failed
@@ -909,7 +998,13 @@ test.describe("widespread selected outage copy and layout (RECON-OPS-002)", () =
         fallbackModelIds: [],
         fallbackHealth: "none" as const,
       })),
-      ...unselectedOutage(6),
+      ...UNRELATED.map((model) => ({
+        id: model.id,
+        provider: model.provider,
+        status: "unavailable" as const,
+        fallbackModelIds: ["mistral-medium-3-1"],
+        fallbackHealth: "operational" as const,
+      })),
     ]);
   }
 
@@ -956,7 +1051,16 @@ test.describe("widespread selected outage copy and layout (RECON-OPS-002)", () =
         `${entry.model.name} must appear exactly once in the banner`
       ).toBe(1);
     }
-    for (const model of UNSELECTED_SIX) {
+    for (const model of UNRELATED) {
+      // Precondition, not the assertion: an unrelated name that nests inside a
+      // name the banner is supposed to print would make the check below fail
+      // on correct output.
+      for (const printed of NAMES_THE_BANNER_PRINTS) {
+        expect(
+          printed.includes(model.name),
+          `fixture error: unrelated "${model.name}" nests inside printed "${printed}"`
+        ).toBe(false);
+      }
       expect(
         bannerText,
         `the banner must not name the unrelated outage ${model.name}`
