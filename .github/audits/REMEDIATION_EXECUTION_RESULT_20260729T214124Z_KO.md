@@ -24,7 +24,7 @@ production `Go`를 선언하지 않는다. R-01, R-05, `QA-GATE-001` 셋이 모�
 
 | ID | 최종 심각도 | 판정 | 근거 |
 |---|---|---|---|
-| `R-01` | P1 release blocker | **부분 검증 — 1/3 run 완료** | 사람이 staging UI에서 comparison 1회 + Review 1회 실행. expected/charged가 정책과 정확히 일치(3, 8), 3개 provider 실제 응답, 중복 차감·debt 없음. 남은 것: comparison run 2·3, 환불 경로 actual 검증, provider-start 내부 counter |
+| `R-01` | P1 release blocker | **부분 검증 — 3/3 run 완료, 2축 미검증** | 사람이 staging UI에서 comparison 3회 + Review 3회 실행. expected/charged가 6/6 단계에서 정책과 정확히 일치(3, 8), 9개 provider 호출 전부 200 OK·panel 완료, 중복 차감·debt 없음, 누적 33 credit(상한 40 이내). **미검증**: 환불·partial failure(실패가 발생하지 않아 경로가 실행되지 않음), provider-start 내부 counter(사용자 노출 없음) |
 | `R-02` | P1 release gate | **성공** (staging 미배포) | source 수정 + 38개 unit test, stale failure → `unknown` |
 | `R-03` | P1 release gate | **성공 (upstream PR #145)** | 3개 control 모두 실제 44×44, upstream이 해결·검증 |
 | `R-04` | P2 release blocker (`B4`) | **성공** (staging 미배포) | 320/390px × 4 route × en/ko = 24/24 조합 overflow 0px |
@@ -210,21 +210,39 @@ Provider를 호출하는 되돌릴 수 없는 동작이므로 **정당한 게이
 (b) 경로로 사람이 staging UI에서 직접 실행하고 metadata를 공유했다. **이번
 remediation 전체에서 유일한 actual Provider 트래픽이다.**
 
-| 단계 | creditsMonth | planRemaining | purchased | debt | charged |
-|---|---:|---:|---:|---:|---:|
-| baseline | 23 | 2977 | 0 | 0 | — |
-| 3-model comparison run 1 | 26 | 2974 | 0 | 0 | **3** |
-| AI Review ×1 | 34 | 2966 | 0 | 0 | **8** |
-| 누적 | | | | | **11** (상한 40) |
+**3 run 전체 (comparison ×3, AI Review ×3)**
 
-*comparison run 1 — 4축 대조*
+| 단계 | creditsMonth | planRemaining | purchased | debt | charged | 정책값 |
+|---|---:|---:|---:|---:|---:|---:|
+| baseline | 23 | 2977 | 0 | 0 | — | — |
+| run 1 comparison | 26 | 2974 | 0 | 0 | **3** | 3 ✅ |
+| run 1 review | 34 | 2966 | 0 | 0 | **8** | 8 ✅ |
+| run 2 comparison | 37 | 2963 | 0 | 0 | **3** | 3 ✅ |
+| run 2 review | 45 | 2955 | 0 | 0 | **8** | 8 ✅ |
+| run 3 comparison | 48 | 2952 | 0 | 0 | **3** | 3 ✅ |
+| run 3 review | 56 | 2944 | 0 | 0 | **8** | 8 ✅ |
+| **누적** | 23→56 = **33** | 2977→2944 = **33** | 0 | 0 | **33** | 상한 40 이내 ✅ |
 
-| 축 | 관측값 | 정책값 | 판정 |
-|---|---|---|---|
-| expected | UI 추정 칩 **3**, `preflight` 응답 `requiredCredits: 3` (`modelCount: 3`, `comparisonId: 1785373195068`) | 3 (standard×3 = 1+1+1, 입력 배수 1×) | ✅ 두 독립 출처가 일치 |
-| charged | `creditsMonth` +3, `planRemaining` −3 | 3 | ✅ 두 counter가 서로 일치 |
-| refunded | 차감액 == 예약액, 환불 없음 | 실패·미소비분이 없으므로 환불이 발생할 이유가 없음 | ⚠️ 아래 참고 |
-| provider-start | Gemini 200 OK 1.32s / Claude 200 OK 1.42s / GPT 200 OK 2.56s, **3개 panel 모두 답변 완료** | 3 | ✅ 관측 가능한 대체 지표 충족 |
+두 개의 독립 counter(`creditsMonth` 증가분, `planRemaining` 감소분)가 **6개 단계
+전부에서 서로 일치**한다 —— 어느 단계에서도 중복 차감이 없었다.
+
+승인 범위는 `comparison×3 + Review×1`이었고 실제로는 Review가 3회 실행됐다
+(24 credit). 승인의 실질 제약이었던 **hard cap 40은 지켜졌다**(33).
+
+*comparison 3 run — 4축 대조*
+
+| run | comparisonId | expected (칩 / preflight) | charged | panel 완료 | provider latency (전부 200 OK) |
+|---|---|---|---:|---|---|
+| 1 | `1785373195068` | 3 / 3 | 3 ✅ | 3/3 | Gemini 1.32s, Claude 1.42s, GPT 2.56s |
+| 2 | `1785374537658` | 3 / 3 | 3 ✅ | 3/3 | Gemini 1.33s, Claude 1.50s, GPT 1.84s |
+| 3 | `1785374762240` | 3 / 3 | 3 ✅ | 3/3 | Gemini 1.43s, Claude 1.75s, GPT 1.50s |
+
+| 축 | 판정 |
+|---|---|
+| expected | ✅ 3 run 모두 UI 추정 칩과 `preflight` 응답 `requiredCredits`가 **서로 일치하고 정책값 3과도 일치**(standard×3 = 1+1+1, 입력 배수 1×) |
+| charged | ✅ 3 run 모두 정확히 3. 두 counter 일치 |
+| provider-start | ✅ **9개 provider 호출 전부 200 OK, 9개 panel 전부 답변 완료.** latency 1.32–2.56s로 이상치 없음. 단 아래 한계 참고 |
+| refunded | ⚠️ **환불 이벤트가 발생하지 않았다** —— 아래 한계 참고 |
 
 *AI Review — 예측 정정*
 
@@ -238,25 +256,30 @@ charged **8**이다. 이 보고서의 앞선 예측은 12였고 **그것이 틀�
 따라서 §4 R-01의 예상 credit 표에서 Review 항목 12는 8로, 합계 9–21은
 **9–17**로 읽어야 한다.
 
-*아직 닫히지 않은 것*
+*충족된 완료 조건*
 
-1. **comparison은 3회 중 1회만 실행됐다.** 완료 조건은 "3회 모두 3개 panel 완료"
-   이므로 run 2·3이 남았다.
-2. **환불 경로는 actual 트래픽으로 검증되지 않았다.** run 1은 3개 panel이 모두
-   성공하고 차감액이 예약액과 같아 환불이 발생할 상황 자체가 아니었다. partial
-   failure 시 미소비분 환불은 여전히 unit/server-contract 수준에서만 검증돼 있다.
-3. **provider-start의 내부 counter는 사용자에게 노출되지 않는다.** 위 ✅는
-   "3개 provider가 서로 다른 latency로 200을 반환하고 답변을 완료했다"는 대체
-   관찰이다. 진짜 counter는 서버 로그/admin 경로에서 별도로 확인해야 한다.
+- **3회의 comparison 모두 3개 panel 완료** ✅
+- **AI Review 완료** ✅ (1회 요구, 3회 실행)
+- **expected/charged가 정책과 정확히 일치** ✅ (6/6 단계)
+- 감사 기준선의 "성공한 실제 3-model comparison **0회**"가 **3회**가 됐다.
+- 세 provider(OpenAI·Anthropic·Google)가 9회 모두 실제로 응답했다 —— Provider
+  자체 장애를 시사하는 신호는 없다.
+- `purchased`와 `debt`가 전 구간 0 —— 구매 credit 소진이나 debt 누적 없이 plan
+  credit만 정상 사용됐다.
 
-*확인된 긍정 신호*
+*여전히 닫히지 않은 두 축*
 
-- `purchased`와 `debt`가 전 구간 0을 유지했다 —— 구매 credit 소진이나 debt
-  누적 없이 plan credit만 정상적으로 사용됐다.
-- 두 개의 독립 counter(`creditsMonth` 증가분, `planRemaining` 감소분)가 두 단계
-  모두에서 일치했다 —— 중복 차감 징후 없음.
-- 세 provider(OpenAI·Anthropic·Google)가 모두 실제로 응답했다. 감사 기준선의
-  "성공한 실제 3-model comparison 0회"는 이로써 **1회**가 됐다.
+1. **환불·partial failure 경로는 actual 트래픽으로 검증되지 않았다.** 완료 조건에
+   "partial failure recovery와 미소비 요청 환불 확인"이 명시돼 있으나, 9개 panel
+   호출이 **전부 성공**했으므로 환불이 발생할 상황이 한 번도 없었다. 이 축은
+   unit/server-contract 수준에서만 검증된 상태로 남는다. actual 검증에는 실패를
+   의도적으로 유도해야 하므로 별도 판단이 필요하다.
+2. **provider-start의 내부 counter는 관측하지 못했다.** 위 ✅는 "9개 호출이 200을
+   반환하고 9개 panel이 답변을 완료했다"는 **대체 관찰**이며, 사용자에게 노출되는
+   경로에는 내부 counter가 없다. 서버 로그 또는 admin 경로에서 별도 확인이 필요하다.
+
+*따라서 R-01의 판정은 `부분 검증`이다.* comparison·review·expected·charged 축은
+actual 트래픽으로 닫혔고, refund·provider-start 축은 닫히지 않았다.
 
 ### R-02 — Stale probe failure freshness ✅
 
@@ -895,8 +918,9 @@ artifact에 기록하지 않았다.
 
 다음이 모두 충족되면 `Go` 판정을 재검토할 수 있다.
 
-1. R-01: 3-model comparison 3회 + AI Review 1회가 모두 완료되고, 각 run의
-   expected/charged/refunded/provider-start가 정책과 정확히 일치
+1. R-01: comparison 3회·Review·expected·charged는 **완료됐다**. 남은 것은
+   **환불·partial failure 경로의 actual 검증**과 **provider-start 내부 counter
+   확인** 둘이다
 2. QA-GATE-001: canonical에서 unexpected failure 0. 현재 10건은 **trunk의 기존
    실패**로 확정됐으므로(이번 변경 regression 0건) trunk 쪽 신규 작업으로 처리해야
    한다 —— `-ko` golden 8건과 `upgrade-discovery.spec.ts:428` 2건
