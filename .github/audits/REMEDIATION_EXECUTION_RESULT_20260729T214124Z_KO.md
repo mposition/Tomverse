@@ -13,14 +13,18 @@ R-05는 `/`를 0.2667 → 0.1095로 59% 개선했으나 완료 조건(median CLS
 에서 최대 0.2385까지 커지고, 한국어에서는 consent slot 외에 hero 본문이라는 추가
 shift source가 나타난다(§4 R-05).
 
-`QA-GATE-001`은 canonical CI에서 **실행했고 실패했다**(1509 passed / 10 failed /
-908 skipped). 다만 `develop` 대조 실행이 **동일한 10건과 동일한 카운트를 재현**했으므로
-이 실패는 전부 trunk의 기존 상태이고, **이번 remediation이 canonical 환경에 추가한
-regression은 0건**이다. gate 종결은 합의 범위 밖의 신규 항목이 됐다(§6.4). R-01은 계정·승인·로그인·baseline까지 확보했으나 실행 단계에서
+`QA-GATE-001`은 **통과했다** —— 최종 후보 `dbb0770`에서 **1652 passed / 0 failed /
+991 skipped**(run `30530783640`). 처음 실행은 1509/10/908이었고, `develop` 대조가
+동일한 10건과 동일한 카운트를 재현했으므로 그 실패는 전부 trunk의 기존 상태였다
+(이번 remediation이 추가한 regression 0건). 그 10건을 이후 정리했다 —— visual 8건은
+승인을 받아 canonical 환경에서 재촬영해 채택(#156), functional 2건은 코드 수정
+(§6.4·§6.5·§6.6). R-01은 계정·승인·로그인·baseline까지 확보했으나 실행 단계에서
 막혔고, 사람이 UI에서 수행하는 방식으로 진행하기로 결정됐다. **실제 Provider 호출
 0회, credit 소비 0.**
 
-production `Go`를 선언하지 않는다. R-01, R-05, `QA-GATE-001` 셋이 모두 열려 있다.
+production `Go`를 선언하지 않는다. `QA-GATE-001`은 닫혔지만 **R-01과 R-05가
+열려 있다** —— R-01은 환불·provider-start 2축의 수치 증거가 없고, R-05는 R-05-KO의
+실기기 검증과 R-05-ZH의 platform coverage가 남아 있다.
 
 | ID | 최종 심각도 | 판정 | 근거 |
 |---|---|---|---|
@@ -32,7 +36,7 @@ production `Go`를 선언하지 않는다. R-01, R-05, `QA-GATE-001` 셋이 모�
 | `R-06` | P2 | **성공** | 3개 lifecycle 전이 coverage 추가, 11/11 통과 |
 | `R-07` | P2 verification | **성공** | live `/api/build-info` ↔ UI field 일치 검증 추가 |
 | `R-08` | P3 | **성공** (staging 미배포) | stall 25초 내 안내, security semantics 무변경 |
-| `QA-GATE-001` | release gate | **Not verified — 설명되지 않은 실패 0건** | 이번 변경의 canonical regression은 **0건**. 기능 2건은 UI-EMPTY-001 계약과 충돌하는 낡은 test였음을 계측으로 확정하고 **수정 완료(28/28)**. visual 8건은 canonical diff로 #145의 의도적 대비 변경(`UI-CONTRAST-001`: overlay 반투명화)이 원인이고 제품 동작 정상임을 확인 —— **golden 재촬영 승인만 남았다.** §6.5 |
+| `QA-GATE-001` | release gate | ✅ **통과 —— unexpected failure 0** | 최종 후보에서 재실행해 **1652 passed / 0 failed / 991 skipped**(run `30530783640`, `dbb0770`, 31.9분). 이전 10건이 모두 정리됐다 —— functional 2건은 UI-EMPTY-001 계약과 충돌하는 낡은 test였음을 계측으로 확정해 수정, visual 8건은 canonical 재촬영 후 채택(#156). §6.4·§6.5·§6.6 |
 
 ---
 
@@ -1384,7 +1388,7 @@ gate는 넘지 못한다. 남은 초과분의 원인은 하나뿐이다 —— R
 | R-06 | 변경 없음 (결함 미재현) | ✅ 신규 4건, 11/11 ×3회 | ✅ request body 대조 | 해당 없음 | actual credit은 R-01 |
 | R-07 | 변경 없음 (결함 미재현) | ✅ 신규 1건, 72/72 | ✅ live API↔UI 일치 | 해당 없음 | 해당 없음 |
 | R-08 | ✅ 안내 타이머 추가 | ✅ 신규 4건, 32/32 | ✅ 320px·ko·200% | 현재 배포는 **수정 전** 동작 | 차단 network 실측은 후속 |
-| QA-GATE-001 | 해당 없음 | 비-canonical 실행만 | 해당 없음 | 해당 없음 | **Not verified** |
+| QA-GATE-001 | 해당 없음 | canonical CI 2회(대조 포함) | 해당 없음 | 해당 없음 | ✅ **통과 (1652/0/991)** |
 
 **browser evidence 공통 metadata**: Chromium `/opt/pw-browsers/chromium-1194`
 (비-canonical), viewport 320×568 / 360×640 / 390×844 / 430×932, DPR 2,
@@ -1410,7 +1414,7 @@ color scheme 기본, cold cache(측정마다 새 context), 대상 SHA `ea56a6ba`
 | E2E: R-02/03/04 관련 6 spec × desktop+mobile | ✅ **223 passed**, 0 failed | |
 | E2E: R-06/07/08 관련 5 spec × desktop | ✅ **72 passed**, 0 failed | |
 | E2E: 전체 suite × desktop+mobile (비-canonical) | ⚠️ 256/1618까지 실행 후 중단, 18 failed | §6.3 |
-| **QA-GATE-001 canonical (CI, `ubuntu-24.04`, 고정 Chromium)** | ⚠️ **1509 passed / 10 failed / 908 skipped** (36.1분) | §6.4 |
+| **QA-GATE-001 canonical (CI, `ubuntu-24.04`, 고정 Chromium)** | ✅ **1652 passed / 0 failed / 991 skipped** (31.9분, run `30530783640`). 이전 실행은 1509/10/908 | §6.4·§6.6 |
 
 ### 6.1 최초 실패와 분류
 
@@ -1528,6 +1532,11 @@ R-01–R-08 범위 밖의 **신규 항목**이다.
 
 **snapshot은 갱신하지 않았다** —— canonical 재현과 승인 없이 golden을 건드리지
 않는다는 정책이고, 애초에 이 golden들은 이번 변경 소관이 아니다.
+
+> **후속 (§6.6).** 위 10건은 이후 전부 정리됐다 —— visual 8건은 승인을 받아
+> canonical 환경에서 재촬영해 채택(#156), functional 2건은 코드 수정. 최종
+> 후보에서 재실행한 결과가 **1652 passed / 0 failed**다. 이 절은 그 시점의
+> 기록으로 남긴다.
 
 ---
 
@@ -1735,6 +1744,66 @@ reached @smoke"**
 전체 suite 순서로는 훨씬 더 길다. 따라서 이 2건은 "clean upstream에서도 재현되는
 환경성 불안정"으로 판별했을 뿐, **개별 test의 flake로 종결(closed)하지 않았다.**
 근본 원인 제거(worker 수 축소, 또는 CI canonical runner에서의 확인)는 후속이다.
+
+> **후속.** 이 2건은 최종 canonical 실행에서 **재현되지 않았다**(0 failed).
+> 20회 반복을 수행하지 않았다는 한계는 그대로 남으므로 "환경성 불안정"이라는
+> 판별을 취소하지는 않지만, 최종 후보의 canonical gate에서는 관측되지 않았다.
+
+---
+
+### 6.6 QA-GATE-001 최종 실행 —— 통과 (2026-07-30T09:27–10:01Z)
+
+golden 재촬영 승인을 받아 §11.2의 병합 조건을 모두 충족시킨 뒤 재실행했다.
+
+*수행한 순서*
+
+1. branch를 `develop`(`6ce66d3`) 위로 rebase하고 새 base에서 재검증
+   (`test:unit` 589/589, `npm run check` exit 0, `security:regression` 113 checks).
+2. **PR #147 merge → 최종 후보 SHA `7087fd92d1b1057146ea6dac94e77ab04a28b359`.**
+   CI 6/6 통과. 첫 실행에서 `ssr-root-language.spec.ts` 1건이 실패했는데, 그
+   spec이 encode하고 있던 것은 R-05-LANG이 고친 옛 타협("`/`는 모두에게 영어를
+   준다")이었다. 단정을 약화하지 않고, spec 스스로 명시한 property("served root
+   `lang`이 요청 언어와 일치")가 `/`에서도 성립하도록 다시 썼고 redirect hop을
+   별도로 8 case 검증했다(28/28).
+3. **최종 SHA에서 baseline 재촬영** —— `visual-baseline-record.yml` run
+   `30529216081`, branch `visual-baseline/30529216081`. 이제 "recording SHA =
+   최종 candidate" 조건이 충족된다.
+4. **PR #156으로 채택 병합** → `develop` `dbb0770d6fb8860aaa4f951ff6cae36ab2deef3d`.
+   diff는 golden PNG **8개뿐이고 소스 변경 0**이다.
+5. **canonical gate 재실행** —— `e2e.yml`(Main Chromium Regression) run
+   `30530783640`, `ubuntu-24.04` 고정 image, 고정 Chromium,
+   `desktop-chromium`·`desktop-compact`·`mobile-chromium` 무필터.
+
+*결과*
+
+| run | SHA | passed | failed | skipped | 시간 |
+|---|---|---:|---:|---:|---:|
+| `30445545230` | `8386443a` (#145 이전) | —— | 0 | —— | success |
+| `30501422995` | `cb57c8d7` | 1509 | **10** | 908 | 36.1분 |
+| **`30530783640`** | **`dbb0770`** | **1652** | **0** | **991** | **31.9분** |
+
+**판정: `QA-GATE-001` 통과 —— unexpected failure 0.** 이전 10건이 전부
+정리됐다(visual 8 재촬영 채택, functional 2 코드 수정). log의
+`Can't reach database server at 127.0.0.1:1`은 `E2E_DISABLE_DATABASE` 설정상
+의도된 것이며 실패가 아니다.
+
+*이번 변경이 golden을 바꾸지 않았음이 실측으로 확인됐다*
+
+새 baseline과 이전 baseline(`30513363879`, `cb57c8d7` 기준)을 직접 대조하니
+**8개 중 7개가 byte 단위로 동일**하고, 나머지 1개
+(`chat-attachment-processing-desktop-light-ko`)만 **86,915 → 86,917 bytes**
+차이다. PNG 압축 수준이며 layout 변화가 아니다. 즉 R-05-A·R-05-KO·R-05-LANG은
+golden에 영향을 주지 않았다 —— 앞서 코드 근거로 예측한 그대로이며, 이제
+canonical 환경의 측정이다. `mobile-composer-contract`의 2개는 906 pixel
+browser noise이므로 **의도적으로 재촬영하지 않았고** canonical에서 통과한다.
+
+*범위 한정*
+
+이 gate 결과는 **`dbb0770` 기준**이다. 이후 `develop`은 #155·#154 merge로
+`08abb7e`까지 움직였다. 그 두 PR은 각자의 PR Fast Gate를 통과했으나
+**canonical full gate로 판정되지는 않았다** —— Fast Gate는 `@smoke` 계약만
+돌리므로 golden을 판정하지 않는다. 최종 릴리스 후보를 확정할 때 그 시점의 SHA에서
+gate를 한 번 더 돌려야 한다.
 
 ---
 
@@ -2024,9 +2093,8 @@ baseline을 먼저 병합해 test를 초록색으로 만드는 방식은 금지�
 1. R-01: comparison 3회·Review·expected·charged는 **완료됐다**. 남은 것은
    **환불·partial failure 경로의 actual 검증**과 **provider-start 내부 counter
    확인** 둘이다
-2. QA-GATE-001: canonical에서 unexpected failure 0. 현재 10건은 **trunk의 기존
-   실패**로 확정됐으므로(이번 변경 regression 0건) trunk 쪽 신규 작업으로 처리해야
-   한다 —— `-ko` golden 8건과 `upgrade-discovery.spec.ts:428` 2건.
+2. QA-GATE-001: canonical에서 unexpected failure 0. ✅ **충족** —— 최종 후보
+   `dbb0770`에서 **1652 passed / 0 failed / 991 skipped**(run `30530783640`).
    **진행 상황**: functional 2건은 이 branch에서 수정 완료(UI-EMPTY-001의 `inert`
    때문에 빈 대화에서는 panel 단독 send가 불가능하므로 history를 seed하도록 test를
    고쳤다). visual 8건은 승인받아 canonical recorder를 실행했고
@@ -2049,9 +2117,15 @@ baseline을 먼저 병합해 test를 초록색으로 만드는 방식은 금지�
    재방문 0.1713, copy 교체 단독 0.1637. 이것이 닫히기 전에는 R-05를 Pass로
    표기하지 않는다.
 5. `STG-F008`·`STG-F009` 사용자 결정 종결
-6. visual snapshot 2건이 canonical 환경에서 pass 또는 정당한 근거로 갱신 승인
+6. visual snapshot 2건이 canonical 환경에서 pass 또는 정당한 근거로 갱신 승인 ——
+   ✅ **충족**. `mobile-composer-contract`의 2개는 canonical에서 통과하며(906 pixel
+   차이는 non-canonical browser noise) 재촬영하지 않았다. `chat-state`의 `-ko`
+   8개는 승인을 받아 최종 후보에서 재촬영해 채택했다(#156)
 
-이 중 1·2가 닫히기 전에는 production `Go`를 선언하지 않는다.
+**남은 것은 1·4다.** `QA-GATE-001`(2)은 닫혔고, 3은 artifact 축까지 검증했으며
+(동작 축은 Chromium이 staging에 도달하지 못해 미검증), 5·6은 충족됐다.
+1(R-01의 환불·provider-start 수치)과 4(R-05의 R-05-KO 실기기 검증)가 닫히기 전에는
+production `Go`를 선언하지 않는다.
 
 ---
 
