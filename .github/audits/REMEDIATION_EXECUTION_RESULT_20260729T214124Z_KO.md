@@ -671,6 +671,60 @@ cascade 순서로 이겼기 때문이다. `</head>` 직전으로 옮기고 `--fo
    advance를 동시에 만족시킬 수 없다. contract에 이 제약을 명시했다.
 3. `:lang(zh)`는 **R-05-ZH로 분리해 별개 항목으로 관리한다**(아래).
 
+#### ⚠️ 측정 경로 정정 —— R-05-KO·R-05-ZH 수치는 `/?lang=xx`에서 나왔다
+
+`blocked` 상태에서도 중국어 CLS가 0.1637로 남는 것이 단서였다. webfont를 전부
+차단하면 swap이 없으므로, 그 값은 **font 결함이 아니다.** 경로를 나눠 다시 쟀다
+(320px, `consent=declined`, cell당 3회, `route-compare.mjs`).
+
+| route | fonts 정상 | fonts 차단 | 지배 source |
+|---|---:|---:|---|
+| `/?lang=zh` | 0.1959 | **0.1637** | `section.relative.border-b` `y65 h503 → y170 h398` |
+| **`/zh`** | **0.0076** | **0** | —— |
+| `/?lang=ko` | 0.0717 | **0.0970** | `h1`·`p`·brand note·signup note 동시 이동 |
+| **`/kr`** | **0.0012** | **0** | —— |
+| `/` (en) | 0 | 0 | —— |
+
+**locale별로 prerender되는 실제 route(`/zh`, `/kr`)는 사실상 0이다.** 큰 값은
+전부 `/?lang=xx` —— 영어 static root에 query를 붙인 경로 —— 에만 나타난다.
+
+원인은 `components/LanguageProvider.tsx:85-109`다. mount 후 `setTimeout(…, 0)`에서
+`?lang=` → `localStorage` → `navigator.languages` 순으로 언어를 해석하고
+`setLangState`를 호출한다. 그 시점에 **영어로 그려진 정적 page 전체가 해당 locale
+copy로 재렌더**되며, 문장 길이가 달라 hero section이 통째로 움직인다. font
+차단에도 남고, `consent=declined`라 slot도 아니다.
+
+**따라서 R-05-KO와 R-05-ZH로 보고한 수치는 두 결함을 뒤섞은 값이다** —— locale
+copy 교체(다수)와 webfont swap(소수). 아래 R-05-ZH 절의 "전 cell FAIL"은 실제
+중국어 방문자가 착지하는 `/zh` 기준으로는 과한 판정이었다. 정정한다.
+
+이 세 번째 원인을 **R-05-LANG**으로 분리한다.
+
+#### R-05-LANG —— `?lang=` 전용이 아니다. query 없는 `/`에서도 발생한다
+
+`detectBrowserLanguage()` 분기가 있으므로 query 없는 경로를 따로 쟀다
+(`accept-language.mjs`, 320px, `consent=declined`, cold cache, cell당 5회).
+
+| cell | median | max | `<html lang>` | 판정 |
+|---|---:|---:|---|---|
+| `/` `Accept-Language: en-US` | 0 | 0 | en→en | PASS |
+| `/` `Accept-Language: ko-KR` | 0.0012 | 0.0717 | en→**ko** | PASS |
+| `/` `Accept-Language: zh-CN` | **0.1959** | **0.1959** | en→**zh** | **FAIL** |
+| `/` en-US 브라우저 + 저장된 `ko` | 0.0717 | 0.0717 | en→**ko** | PASS |
+| `/` ko-KR + 저장된 `ko` (재방문) | 0.0717 | 0.0717 | en→**ko** | PASS |
+| `/` zh-CN + 저장된 `zh` (재방문) | **0.1713** | **0.1959** | en→**zh** | **FAIL** |
+
+**query가 전혀 없어도 발생한다.** 한국어·중국어를 선호하는 브라우저가 `/`에
+착지하면 `navigator.languages`가 걸려 정적 영어 page 전체가 재렌더된다. **저장된
+언어가 있는 재방문자도 동일하게 실패한다** —— 즉 첫 방문에 한정된 문제가 아니다.
+
+중국어의 지배 source는 `section` `y65 h503 → y170 h398`(+105px, t≈1366ms)이다.
+중국어 hero 문구가 영어보다 **짧아서** section이 통째로 줄어드는 것이고, 한국어
+문구는 영어와 길이가 비슷해 영향이 작다. 이것이 두 locale의 차이를 설명한다.
+
+`MarketingLanguageSwitcher`는 `/kr`·`/zh`로 **navigate**하므로 사용자가 직접
+바꾸는 경로는 이 결함을 통과하지 않는다. 문제는 **load 시점의 자동 감지**다.
+
 #### R-05-ZH — 중국어의 동일 구조 (`Known limitation / Not verified`)
 
 사용자 지시에 따라 **별개 항목으로 분리**한다. R-05-KO의 변경은 한국어에 한정된
