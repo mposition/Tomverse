@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createStaticMarketingCsp, createStrictCsp } from "@/lib/csp";
-import { isStaticMarketingPathname } from "@/lib/marketingRoutes";
+import {
+  isStaticMarketingPathname,
+  localizedMarketingRedirect,
+} from "@/lib/marketingRoutes";
 import { getStaticMarketingCspHashes } from "@/lib/staticMarketingCsp";
 import {
   getPublicReportOrigin,
@@ -14,6 +17,7 @@ import {
 import {
   DOCUMENT_LANGUAGE_HEADER,
   DOCUMENT_LANGUAGE_SOURCE_HEADER,
+  isSupportedDocumentLanguage,
   resolveDocumentLanguage,
 } from "@/lib/documentLanguage";
 
@@ -93,6 +97,48 @@ export function proxy(request: NextRequest) {
     !hasValidMutationOrigin(request)
   ) {
     return blockedMutationOriginResponse(request);
+  }
+
+  // R-05-LANG. Send a non-English visitor to their own localized page before
+  // anything renders, rather than serving English HTML that the client rewrites
+  // after first paint. See `localizedMarketingRedirect` for the measurements.
+  //
+  // Precedence is explicit request, then stored choice, then browser hint. The
+  // cookie exists because `LanguageProvider` keeps the preference in
+  // `localStorage`, which this cannot see: without it, a visitor who chose
+  // English on a Korean browser would be dragged back to `/ko` every visit.
+  const requestedLanguage = request.nextUrl.searchParams.get("lang");
+  const storedLanguage = request.cookies.get("tomverse_lang")?.value;
+  const preference = isSupportedDocumentLanguage(requestedLanguage)
+    ? { language: requestedLanguage, source: "search" as const }
+    : isSupportedDocumentLanguage(storedLanguage)
+      ? { language: storedLanguage, source: "search" as const }
+      : resolveDocumentLanguage({
+          pathname: request.nextUrl.pathname,
+          searchLanguage: null,
+          acceptLanguage: request.headers.get("accept-language"),
+        });
+  const localizedTarget =
+    request.method === "GET" || request.method === "HEAD"
+      ? localizedMarketingRedirect({
+          pathname: request.nextUrl.pathname,
+          language: preference.language,
+          source: preference.source,
+        })
+      : null;
+  if (localizedTarget) {
+    const target = request.nextUrl.clone();
+    target.pathname = localizedTarget;
+    // The handled parameter is consumed; everything else -- campaign tags, a
+    // referral code -- survives the hop.
+    target.searchParams.delete("lang");
+    const redirect = NextResponse.redirect(target, 307);
+    // Static marketing responses are cached by a shared cache for an hour. A
+    // language-dependent redirect must never land in it, or the first Korean
+    // visitor's hop would be replayed to everyone.
+    redirect.headers.set("Cache-Control", "private, no-store");
+    redirect.headers.set("Vary", "Accept-Language, Cookie");
+    return redirect;
   }
 
   const isStaticMarketingRequest = isStaticMarketingPathname(

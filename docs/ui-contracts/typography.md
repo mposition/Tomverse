@@ -94,16 +94,19 @@ Measured on the Korean landing hero before remediation: median CLS 0.1082 at
 | Locale | Status |
 | --- | --- |
 | `:lang(ko)` | Remediated — see below. Verified only in a Linux container; the three real platform faces still need device confirmation |
-| `:lang(zh)` | **Known limitation / Not verified.** Same structure, no measurement, no remediation |
+| `:lang(zh)` | **Known Risk / platform coverage limitation.** `/zh` passes the CLS budget in the current verification environment (0.0076 cold, 0 with fonts blocked). The structural gap is unchanged, and no real Chinese OS font environment has been measured |
 
 Scope rules that follow from this, and must not be blurred:
 
 - The Korean remediation is **locale-specific**. It does not close the Chinese
   case, and no Korean result may be generalised to `:lang(zh)`.
-- `:lang(zh)` stays `Known limitation / Not verified` until `/zh` cold-load CLS
-  is measured — 320/360px, accepted/declined, with font requests delayed and
-  blocked — together with the actually-rasterized font per state. Any axis not
-  run stays recorded as not verified.
+- `:lang(zh)` stays `Known Risk / platform coverage limitation`. `/zh` cold-load
+  CLS has since been measured — 0.0076 at 320px, 0 with every webfont blocked,
+  rasterizing `Noto Sans SC` — so it passes the budget *in this verification
+  environment*. What has not been measured is a real Chinese OS font
+  environment: `PingFang SC`, `Microsoft YaHei` and Android's Han face are
+  absent here, exactly as the Korean platform faces are. The risk is that the
+  fallback metrics differ there, not that a user impact is confirmed.
 - **Never describe Chinese as `Pass` or "unaffected" without its own raw CLS
   numbers.** Per-locale font download size, system fallback and wrapping all
   differ, so an English or Korean measurement says nothing about it.

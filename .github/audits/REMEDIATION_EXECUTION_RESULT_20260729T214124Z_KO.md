@@ -745,19 +745,110 @@ prerender된 localized route는 `<html lang>`이 서버에서 이미 목표 loca
 
 | 하위 항목 | 원인 | 판정 |
 |---|---|---|
-| **R-05-A** | consent slot 삽입 | ✅ **종결** —— 영어 cold·warm 전 cell 0, 4상태 × 두 정책 mode × 320/360px 20 cell 0 |
+| **R-05-A** | consent slot 삽입 | ✅ **종결** —— 아래 상태 행렬 |
 | **R-05-KO** | `Noto Sans KR` swap의 metric 불일치 | ✅ **기술적으로 해결, 실기기 검증 대기** —— `/kr` 0.0012. 단 override 값의 platform 검증이 남아 Pass로 닫지 않는다 |
-| **R-05-ZH** | `Noto Sans SC` swap의 동일 구조 | ⚠️ **판정 정정** —— 이전의 "전 cell FAIL"은 `/?lang=zh`에서 측정한 값이었다. 실제 route `/zh`는 **0.0076 PASS**. 구조적 결함(Arial 기반 fallback)은 그대로 남아 있으므로 `Known limitation`은 유지하되 **Fail 표기는 철회한다** |
+| **R-05-ZH** | `Noto Sans SC` swap의 동일 구조 | ⚠️ **판정 정정** —— 이전의 "전 cell FAIL"은 `/?lang=zh`에서 측정한 값이었다. 실제 route `/zh`는 **0.0076 PASS**. 구조적 결함(Arial 기반 fallback)은 그대로 남아 있으므로 `Known Risk`은 유지하되 **Fail 표기는 철회한다** |
 | **R-05-LANG** (신규) | 정적 영어 root의 client-side locale 재렌더 | ❌ **Fail** —— `/`에서 zh-CN 브라우저 0.1959(재방문 0.1713), copy 교체 단독 0.1637. 한국어는 0.097로 경계 |
 
-**R-05 전체는 여전히 Pass가 아니다.** 다만 남은 실패의 정체가 바뀌었다 ——
-webfont가 아니라 **`/`의 locale 재렌더**다. 그리고 이 결함은 R-05-KO·R-05-ZH와
-달리 **font 정책 결정을 필요로 하지 않는다.** 서버가 이미 `Accept-Language`를
-읽어 `<html lang>`을 정하고 있으므로(`resolveDocumentLanguage`, `proxy.ts:135-141`),
-같은 신호로 localized route에 보내거나 해당 locale copy를 렌더하면 원인이 사라진다.
-다만 이는 marketing route의 정적/동적 성격을 건드리므로 **범위 결정이 필요하다.**
+*R-05-A 종결 근거 —— 상태 행렬 (요구에 따라 명시)*
 
-#### R-05-ZH — 중국어의 동일 구조 (`Known limitation / Not verified`)
+"영어 전 cell 0"만으로는 모호하므로 상태별로 적는다. 전부 `/`, cold context,
+40ms/10Mbps, **cell당 5회**, median과 max를 함께 기록한다.
+
+| 상태 | 320×568 | 360×640 | 반복 | median / max |
+|---|---:|---:|---:|---|
+| ① 정책 fetch 대기(2.5초 지연) | 0 | 0 | 5 | 0 / 0 |
+| ② 최초 방문, prompt 표시 | 0 | 0 | 5 | 0 / 0 |
+| ③ 기존 accepted 첫 paint | 0 | 0 | 5 | 0 / 0 |
+| ④ 거부(declined) 첫 paint | 0 | 0 | 5 | 0 / 0 |
+
+각 상태는 `opt_in`과 `notice_opt_out` **두 정책 mode에서 각각** 측정했고 값이
+동일했다(총 20 cell). 추가로 `/`(en)에서 320/360/390px × 미해결·accepted·declined
+9 cell을 cold·warm 양쪽으로 재측정해 **전부 0**이었다.
+
+- **동의 직후(post-click) slot 제거**: 320px 0.1466, 360px 0.132. 표준 CLS는
+  `hadRecentInput`으로 이를 제외하지만, filter를 끄고 측정해 기록한다. 예약
+  band(94px)가 notice(78px)보다 크므로 C2 이전(0.1095)보다 커졌다.
+- **reverse shift 없음**: ①~④의 raw entry 수가 0이다(shift 자체가 발생하지
+  않는다). 예약 → notice 삽입 경로에서 band가 줄어드는 방향의 이동은 관측되지
+  않았다 —— `min-height`가 floor이므로 구조적으로 발생할 수 없다.
+- **canonical locale route 회귀 없음**: `/kr` 0.0012, `/zh` 0.0076이며 webfont를
+  전면 차단하면 둘 다 **0**이다. consent 관련 shift source는 나타나지 않는다.
+- **계약 test**: `marketing-consent-hero.spec.ts`의 "해결된 consent는 layout 비용
+  0" 단정을 포함해 21/21 통과.
+
+#### R-05-LANG 처리 —— proxy 단계의 localized canonical route redirect
+
+*앞선 서술 정정*
+
+이 보고서는 한때 "`proxy.ts`가 요청 언어를 `<html lang>`으로 해석한다"고 적었다.
+정확하지 않다. `proxy.ts`는 언어를 판별해 **내부 request header**에 넣을 뿐이고
+(`DOCUMENT_LANGUAGE_HEADER`), `/`는 `app/(site)/(marketing)/layout.tsx`에서
+`force-static`이므로 **그 신호로 요청마다 localized copy가 생성되지 않는다.**
+`app/(site)/layout.tsx`의 주석도 정적 marketing HTML이 영어로 빌드된다고 명시한다.
+
+*채택한 방식*
+
+요청마다 copy를 렌더하지 않고, **canonical localized route로 307 redirect**한다.
+localized route의 `force-static`과 hash 기반 CSP 구조가 그대로 유지된다.
+
+| 파일 | 변경 |
+|---|---|
+| `lib/marketingRoutes.ts` | `localizedMarketingRedirect()` —— 대상 경로·언어·판별 출처로 목적지를 계산 |
+| `proxy.ts` | GET/HEAD에 한해 307 발행, `lang` 제거, 나머지 query 보존, `Cache-Control: private, no-store` + `Vary: Accept-Language, Cookie` |
+| `components/LanguageProvider.tsx` | 선택한 언어를 `tomverse_lang` cookie에도 기록(`persistLanguage`) |
+| `tests/marketingRoutes.test.mjs` | 신규 9건 |
+
+*우선순위*: 명시적 `?lang=` → `tomverse_lang` cookie → `Accept-Language`.
+cookie가 필요한 이유는 `LanguageProvider`의 선호가 `localStorage`에 있어 proxy가
+볼 수 없기 때문이다. 없으면 **한국어 브라우저에서 영어를 직접 고른 방문자가 매
+방문 `/ko`로 끌려간다** —— client는 그 선택을 존중하는데 redirect가 뒤집는 셈이다.
+
+*동작 확인 (실제 build, `curl`)*
+
+| 요청 | 결과 |
+|---|---|
+| `Accept-Language: ko-KR` → `/` | **307 → `/ko`**, `private, no-store`, `Vary: Accept-Language, Cookie` |
+| `Accept-Language: zh-CN` → `/` | **307 → `/zh`** |
+| `Accept-Language: en-US` → `/` | **200** (기존 `s-maxage=3600` 유지) |
+| `/?lang=ko&utm_source=x&ref=y` | **307 → `/ko?utm_source=x&ref=y`** —— `lang`만 제거, 나머지 보존 |
+| cookie `tomverse_lang=en` + ko 브라우저 | **200**, redirect 없음 |
+| ko 브라우저 → `/ko` | **200**, loop 없음 |
+| ko 브라우저 → `/pricing` | **200** —— localized 대응이 없어 대상 아님 |
+| ko 브라우저 → `/chat` | **200** —— application route 제외 |
+
+`307`을 쓴 이유는 선호 기반 이동이기 때문이다. 영구 redirect는 사용자가 나중에
+언어를 바꿔도 브라우저·중간 캐시가 계속 이전 목적지로 보낼 수 있다.
+**shared cache 오염 방지가 특히 중요하다** —— static marketing 응답은
+`public, s-maxage=3600`으로 공유 캐시에 들어가므로, 언어 의존 redirect가 거기
+저장되면 첫 한국어 방문자의 hop이 모두에게 재생된다. 그래서 redirect 응답만
+`private, no-store` + `Vary`로 분리했다.
+
+*효과*
+
+| cell | 이전 | 이후 | `<html lang>` |
+|---|---:|---:|---|
+| `/` `Accept-Language: zh-CN` | **0.1959** | **0.0076** | en→zh ⇒ **zh→zh** |
+| `/` `Accept-Language: ko-KR` | 0.0012 / max 0.0717 | **0.0012 / max 0.0012** | en→ko ⇒ **ko→ko** |
+| `/` `Accept-Language: en-US` | 0 | 0 | en→en (변화 없음) |
+
+`<html lang>`이 서버에서 이미 목표 locale이 되어 client 재렌더가 사라진다.
+
+*닫히지 않는 범위 —— 명시한다*
+
+1. **localized 대응이 있는 route만 처리된다.** locale별로 생성되는 것은 `/`와
+   search-intent 4개뿐이다. `/pricing`·`/faq`·`/privacy` 등은 `/ko/pricing`이
+   존재하지 않으므로 redirect 대상이 아니며 **client-side copy 교체가 남는다.**
+   존재하지 않는 곳으로 보내는 것은 수정이 아니라 404이므로 의도적으로 제외했다.
+2. **cookie는 그것을 기록한 방문부터 유효하다.** 기존 방문자의 저장된 선호가
+   브라우저 언어와 다르면, 이 변경 직후 **첫 요청 한 번은** 여전히 client 교체를
+   겪는다. 그 방문에서 cookie가 기록되므로 다음 요청부터 redirect가 처리한다.
+
+**R-05 전체 판정**: R-05-A 종결, R-05-KO 실기기 검증 대기, R-05-ZH
+`Known Risk`, R-05-LANG은 **측정된 실패 cell이 해소**됐으나 위 두 잔여 범위가
+남는다.
+
+#### R-05-ZH — 중국어의 동일 구조 (`Known Risk / platform coverage limitation`)
 
 사용자 지시에 따라 **별개 항목으로 분리**한다. R-05-KO의 변경은 한국어에 한정된
 locale-specific remediation이며, 중국어까지 해결됐다고 **일반화하지 않는다.**
@@ -1895,7 +1986,7 @@ baseline을 먼저 병합해 test를 초록색으로 만드는 방식은 금지�
    이 컨테이너에 `Apple SD Gothic Neo`·`Malgun Gothic`·Android 한국어 face가 없어
    **실기기 검증이 남아 Pass로 닫지 않았다**. **R-05-ZH**의 "전 cell FAIL"은
    `/?lang=zh`에서 측정한 값이었으므로 **판정을 철회**한다 —— 실제 route `/zh`는
-   0.0076이다. 구조적 결함은 남아 있으므로 `Known limitation`은 유지한다.
+   0.0076이다. 구조적 결함은 남아 있으므로 `Known Risk`은 유지한다.
    남은 실패는 **R-05-LANG** 하나다: query 없는 `/`에서 zh-CN 브라우저가 0.1959,
    재방문 0.1713, copy 교체 단독 0.1637. 이것이 닫히기 전에는 R-05를 Pass로
    표기하지 않는다.

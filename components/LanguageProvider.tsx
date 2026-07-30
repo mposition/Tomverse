@@ -24,6 +24,30 @@ const LanguageContext = createContext<LanguageContextType | undefined>(undefined
 const dictionaries = { ko, en, zh, fr, de, es, pt };
 const LANGUAGE_STORAGE_KEY = "tomverse_language";
 
+/**
+ * R-05-LANG. The same preference as `LANGUAGE_STORAGE_KEY`, mirrored where the
+ * proxy can see it.
+ *
+ * The proxy redirects a non-English visitor from `/` to their localized page so
+ * the first byte already carries the right language. `localStorage` is
+ * invisible to it, so without this a visitor who deliberately chose English on
+ * a Korean browser would be sent back to `/ko` on every visit -- the client
+ * respects that choice today and the redirect must not undo it.
+ *
+ * Functional only: it stores a language code the visitor picked, is not read by
+ * analytics, and is deliberately not `HttpOnly` because the same code that
+ * writes `localStorage` writes it.
+ */
+const LANGUAGE_COOKIE = "tomverse_lang";
+const LANGUAGE_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
+
+const persistLanguage = (nextLang: Language) => {
+    window.localStorage.setItem(LANGUAGE_STORAGE_KEY, nextLang);
+    document.cookie =
+        `${LANGUAGE_COOKIE}=${nextLang}; path=/; max-age=${LANGUAGE_COOKIE_MAX_AGE}; samesite=lax` +
+        (window.location.protocol === "https:" ? "; secure" : "");
+};
+
 const lookup = (dictionary: unknown, keys: string[]) => {
     let value = dictionary;
     for (const k of keys) {
@@ -66,7 +90,7 @@ export function LanguageProvider({
     const setLang = useCallback((nextLang: Language) => {
         setLangState(nextLang);
         if (typeof window !== "undefined") {
-            window.localStorage.setItem(LANGUAGE_STORAGE_KEY, nextLang);
+            persistLanguage(nextLang);
             document.documentElement.lang = nextLang;
         }
     }, []);
@@ -77,7 +101,7 @@ export function LanguageProvider({
 
     useEffect(() => {
         if (forceInitialLang) {
-            window.localStorage.setItem(LANGUAGE_STORAGE_KEY, initialLang);
+            persistLanguage(initialLang);
             document.documentElement.lang = initialLang;
             return;
         }
@@ -86,7 +110,7 @@ export function LanguageProvider({
             const urlLanguage = new URLSearchParams(window.location.search).get("lang");
             if (isLanguage(urlLanguage)) {
                 setLangState(urlLanguage);
-                window.localStorage.setItem(LANGUAGE_STORAGE_KEY, urlLanguage);
+                persistLanguage(urlLanguage);
                 document.documentElement.lang = urlLanguage;
                 return;
             }
@@ -94,6 +118,10 @@ export function LanguageProvider({
             const savedLanguage = window.localStorage.getItem(LANGUAGE_STORAGE_KEY);
             if (isLanguage(savedLanguage)) {
                 setLangState(savedLanguage);
+                // Re-persisted, not just read: this is what carries an existing
+                // visitor's stored choice into the cookie the proxy reads, so
+                // preferences made before R-05-LANG keep being honoured.
+                persistLanguage(savedLanguage);
                 document.documentElement.lang = savedLanguage;
                 return;
             }
@@ -104,7 +132,7 @@ export function LanguageProvider({
             const browserLanguage = detectBrowserLanguage();
             if (browserLanguage) {
                 setLangState(browserLanguage);
-                window.localStorage.setItem(LANGUAGE_STORAGE_KEY, browserLanguage);
+                persistLanguage(browserLanguage);
                 document.documentElement.lang = browserLanguage;
             }
         }, 0);
