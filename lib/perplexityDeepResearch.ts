@@ -87,6 +87,7 @@ export type DeepResearchMessageMetadata = {
   hasLeadingAssistant: boolean;
   droppedLeadingAssistantCount: number;
   droppedTrailingAssistantCount: number;
+  misplacedSystemCount: number;
 };
 
 const ROLE_CODES: Record<string, string> = {
@@ -134,11 +135,23 @@ export const normalizeDeepResearchMessages = (
     }))
     .filter((message) => message.content.trim().length > 0);
 
-  // System messages are only legal ahead of the conversation, so one that
-  // arrived later is hoisted into the leading block instead of being sent
-  // mid-conversation (a 400) or dropped (its instruction lost).
-  const systemMessages = plain.filter((message) => message.role === "system");
-  const conversation = plain.filter((message) => message.role !== "system");
+  // System messages are only legal ahead of the conversation, and only the
+  // contiguous block at the very start is accepted. A system message that
+  // appears once the conversation has begun is NOT quietly moved to the
+  // front: hoisting would silently change instruction order and authority
+  // the day this app starts sending a real system prompt. It is counted
+  // here and rejected locally by toPlainDeepResearchMessages below.
+  const firstConversationIndex = plain.findIndex(
+    (message) => message.role !== "system"
+  );
+  const leadingSystemMessages =
+    firstConversationIndex === -1 ? plain : plain.slice(0, firstConversationIndex);
+  const rest =
+    firstConversationIndex === -1 ? [] : plain.slice(firstConversationIndex);
+  const misplacedSystemCount = rest.filter(
+    (message) => message.role === "system"
+  ).length;
+  const conversation = rest.filter((message) => message.role !== "system");
 
   const firstUserIndex = conversation.findIndex(
     (message) => message.role === "user"
@@ -161,7 +174,7 @@ export const normalizeDeepResearchMessages = (
   }
 
   const normalized = [
-    ...collapseConsecutiveSameRole(systemMessages),
+    ...collapseConsecutiveSameRole(leadingSystemMessages),
     ...alternating,
   ];
 
@@ -179,6 +192,7 @@ export const normalizeDeepResearchMessages = (
       hasLeadingAssistant,
       droppedLeadingAssistantCount,
       droppedTrailingAssistantCount,
+      misplacedSystemCount,
     },
   };
 };
@@ -193,9 +207,16 @@ export const toPlainDeepResearchMessages = (
 ): PlainChatMessage[] => {
   const { messages: normalized, metadata } = normalizeDeepResearchMessages(messages);
 
-  // Without a user turn there is no question to research. Failing here keeps
-  // the request off the wire entirely, so a malformed submit costs one local
-  // error instead of a provider 400 counted against Perplexity.
+  // Both rejections below keep the request off the wire entirely, so a
+  // malformed submit costs one local error instead of a provider 400 counted
+  // against Perplexity.
+  if (metadata.misplacedSystemCount > 0) {
+    throw new PerplexityDeepResearchMessageError(
+      `Deep research accepts system messages only before the conversation starts (roles: ${metadata.inputRoleSequence}).`
+    );
+  }
+
+  // Without a user turn there is no question to research.
   if (!normalized.some((message) => message.role === "user")) {
     throw new PerplexityDeepResearchMessageError(
       `Deep research requires at least one user message (roles: ${metadata.inputRoleSequence || "none"}).`

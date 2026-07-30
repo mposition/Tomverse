@@ -13,6 +13,11 @@ on:
       - "app/api/billing/**"
       - "app/api/admin/**/refund/**"
       - "app/api/admin/refund*/**"
+      # Deep research reserves credits in one request and settles them in a
+      # later one, so its routes are covered by these scenarios too.
+      - "app/api/chat/route.ts"
+      - "app/api/chat/deep-research/**"
+      - "lib/perplexityDeepResearch.ts"
       - "tests/integration/**"
       - "scripts/run-db-integration-tests.mjs"
       - "package.json"
