@@ -134,7 +134,10 @@ test("the response lifecycle is announced to assistive technology", async ({
   // Send first: on the mobile shell the transcript (and therefore the live
   // region) mounts with the active model panel rather than on first paint.
   await page.getByTestId("chat-textarea").fill("Hello there");
-  await page.getByTestId("chat-textarea").press("Enter");
+  // Click send rather than pressing Enter: on the mobile shell Enter inserts a
+  // newline by design (lib/chatKeyboardPolicy.ts), so an Enter-only send makes
+  // this spec pass on desktop and silently never send on mobile-chromium.
+  await page.getByTestId("chat-send-button").click();
 
   const status = page.getByTestId("chat-response-status").first();
   await expect(status).toBeAttached({ timeout: 15_000 });
@@ -187,7 +190,9 @@ test("assistant markdown renders headings and tables as distinct blocks", async 
   await page.goto("/chat");
 
   await page.getByTestId("chat-textarea").fill("Compare A and B in a table");
-  await page.getByTestId("chat-textarea").press("Enter");
+  // Send by click for the same reason as above -- Enter does not submit on the
+  // mobile shell.
+  await page.getByTestId("chat-send-button").click();
 
   const heading = page.locator("h2", { hasText: "Comparison heading" }).first();
   await expect(heading).toBeVisible({ timeout: 15_000 });

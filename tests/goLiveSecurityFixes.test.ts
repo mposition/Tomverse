@@ -569,7 +569,16 @@ test("a baseline focus indicator and reduced-motion policy exist globally", () =
   assert.match(source, /:focus-visible/, "outline-none controls need a fallback ring");
   assert.match(source, /prefers-reduced-motion: reduce/);
   assert.match(source, /highlight\.js\/styles/, "rehype-highlight needs a theme to do anything");
-  assert.match(source, /word-break: keep-all/, "Korean must not break mid-word");
+  // The `:where(:lang(ko), :lang(zh)) { word-break: keep-all; overflow-wrap:
+  // anywhere }` rule this test also asserted is deliberately not in this
+  // release. `overflow-wrap: anywhere` licenses a break inside a Korean word
+  // exactly when the line would overflow, which is the 200% zoom case
+  // tests/e2e/korean-typography.spec.ts pins: the landing hero's 비교하세요 split
+  // across lines on all three Chromium projects, and eight Korean chat goldens
+  // moved with it. Removing the rule turns all 21 Korean typography specs green
+  // again, so it is a real regression rather than a stale baseline -- and the
+  // release checklist forbids re-recording goldens as part of a release.
+  // Korean line-breaking wants its own change with its own reviewed re-record.
 });
 
 test("assistant markdown restores block-level typography reset by preflight", () => {
