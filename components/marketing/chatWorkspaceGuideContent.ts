@@ -24,7 +24,6 @@ export type ChatWorkspaceGuideCopy = {
   tourItems: WorkspaceGuideItem[];
   sections: WorkspaceGuideSection[];
   reviewVideoTitle: string;
-  reviewVideoCaption: string;
   openChat: string;
   allHelp: string;
 };
@@ -181,7 +180,6 @@ export const chatWorkspaceGuideContent: Record<
       },
     ],
     reviewVideoTitle: "AI Review workflow example",
-    reviewVideoCaption: "Controlled demonstration data; no private user conversation is shown.",
     openChat: "Open Tomverse chat",
     allHelp: "View all Help Centre guides",
   },
@@ -270,7 +268,6 @@ export const chatWorkspaceGuideContent: Record<
       ] },
     ],
     reviewVideoTitle: "AI Review 동작 예시",
-    reviewVideoCaption: "통제된 데모 데이터이며 실제 사용자의 비공개 대화는 표시하지 않습니다.",
     openChat: "Tomverse Chat 열기",
     allHelp: "전체 도움말 보기",
   },
@@ -308,7 +305,7 @@ export const chatWorkspaceGuideContent: Record<
         { term: "没有回答", detail: "查看状态页、重试一次并尝试推荐替代模型。" }, { term: "单个模型失败", detail: "继续使用成功面板并查看失败提供商原因。" }, { term: "上传失败", detail: "检查格式、大小、密码和网络，再用一个文件重试。" }, { term: "积分异常", detail: "结算后刷新用量；仍不一致时联系支持。" }, { term: "Trace ID", detail: "提交 Trace ID、时间、模型、浏览器和附件情况。" }, { term: "提供商状态", detail: "在 tomverse.app/status 查看可用性和事故。" },
       ] },
     ],
-    reviewVideoTitle: "AI Review 流程示例", reviewVideoCaption: "使用受控演示数据，不显示私人用户对话。", openChat: "打开 Tomverse Chat", allHelp: "查看全部帮助指南",
+    reviewVideoTitle: "AI Review 流程示例", openChat: "打开 Tomverse Chat", allHelp: "查看全部帮助指南",
   },
   fr: {
     eyebrow: "Centre d’aide · Espace Chat", title: "Guide de l’espace Chat Tomverse", description: "Maîtrisez conversations, projets, libellés personnels, verrouillage, partage, panneaux de modèles, AI Review, fichiers et crédits.", updated: "Mis à jour le 16 juillet 2026", contents: "Dans cette page", tourTitle: "1. Découvrir l’écran Chat", tourDescription: "Sélectionnez un numéro dans la carte pour rejoindre son explication, sans afficher de conversation privée.",
@@ -344,7 +341,7 @@ export const chatWorkspaceGuideContent: Record<
         { term: "Aucune réponse", detail: "Vérifiez le statut, réessayez et utilisez un secours recommandé." }, { term: "Un modèle échoue", detail: "Continuez avec les panneaux réussis et consultez la raison." }, { term: "Échec d’envoi", detail: "Vérifiez format, taille, mot de passe et réseau puis un seul fichier." }, { term: "Crédits", detail: "Actualisez après règlement et contactez le support si l’écart persiste." }, { term: "Trace ID", detail: "Joignez identifiant, heure, modèle, navigateur et état des pièces jointes." }, { term: "Statut", detail: "Consultez tomverse.app/status." },
       ] },
     ],
-    reviewVideoTitle: "Exemple du flux AI Review", reviewVideoCaption: "Données de démonstration contrôlées; aucune conversation privée réelle.", openChat: "Ouvrir Tomverse Chat", allHelp: "Voir tout le Centre d’aide",
+    reviewVideoTitle: "Exemple du flux AI Review", openChat: "Ouvrir Tomverse Chat", allHelp: "Voir tout le Centre d’aide",
   },
   de: {
     eyebrow: "Hilfe · Chat-Workspace", title: "Leitfaden für den Tomverse Chat-Workspace", description: "Erklärungen zu Chats, Projekten, persönlichen Labels, Sperren, Freigaben, Modell-Panels, AI Review, Dateien und Credits.", updated: "Aktualisiert am 16. Juli 2026", contents: "Auf dieser Seite", tourTitle: "1. Chat-Oberfläche kennenlernen", tourDescription: "Wählen Sie eine Nummer in der Workspace-Karte, ohne private Chatinhalte anzuzeigen.",
@@ -380,7 +377,7 @@ export const chatWorkspaceGuideContent: Record<
         { term: "Keine Antwort", detail: "Status prüfen, einmal neu versuchen, Ersatzmodell nutzen." }, { term: "Ein Modell", detail: "Erfolgreiche Panels weiterverwenden und Grund prüfen." }, { term: "Upload", detail: "Format, Größe, Passwort, Netzwerk prüfen und eine Datei testen." }, { term: "Credits", detail: "Nach Abrechnung aktualisieren und bei Abweichung Support kontaktieren." }, { term: "Trace ID", detail: "ID, Zeit, Modell, Browser und Anhänge mitsenden." }, { term: "Status", detail: "tomverse.app/status öffnen." },
       ] },
     ],
-    reviewVideoTitle: "Beispiel für AI Review", reviewVideoCaption: "Kontrollierte Demodaten; keine privaten Nutzerdialoge.", openChat: "Tomverse Chat öffnen", allHelp: "Alle Hilfeartikel ansehen",
+    reviewVideoTitle: "Beispiel für AI Review", openChat: "Tomverse Chat öffnen", allHelp: "Alle Hilfeartikel ansehen",
   },
   es: {
     eyebrow: "Centro de ayuda · Espacio Chat", title: "Guía del espacio Chat de Tomverse", description: "Aprende conversaciones, proyectos, etiquetas personales, bloqueo, compartir, paneles, AI Review, archivos y créditos.", updated: "Actualizado el 16 de julio de 2026", contents: "En esta página", tourTitle: "1. Recorrido por Chat", tourDescription: "Selecciona un número del mapa para ir a su explicación sin mostrar conversaciones privadas.",
@@ -416,7 +413,7 @@ export const chatWorkspaceGuideContent: Record<
         { term: "Sin respuesta", detail: "Consulta estado, reintenta y usa un modelo alternativo." }, { term: "Un modelo", detail: "Continúa con paneles correctos y revisa el motivo." }, { term: "Carga", detail: "Comprueba formato, tamaño, contraseña y red con un archivo." }, { term: "Créditos", detail: "Actualiza tras liquidación y contacta soporte si persiste." }, { term: "Trace ID", detail: "Incluye ID, hora, modelo, navegador y adjuntos." }, { term: "Estado", detail: "Abre tomverse.app/status." },
       ] },
     ],
-    reviewVideoTitle: "Ejemplo del flujo AI Review", reviewVideoCaption: "Datos de demostración controlados; no muestra chats privados reales.", openChat: "Abrir Tomverse Chat", allHelp: "Ver todo el Centro de ayuda",
+    reviewVideoTitle: "Ejemplo del flujo AI Review", openChat: "Abrir Tomverse Chat", allHelp: "Ver todo el Centro de ayuda",
   },
   pt: {
     eyebrow: "Centro de ajuda · Workspace Chat", title: "Guia do workspace Chat do Tomverse", description: "Aprenda conversas, projetos, etiquetas pessoais, bloqueio, partilha, painéis, AI Review, ficheiros e créditos.", updated: "Atualizado em 16 de julho de 2026", contents: "Nesta página", tourTitle: "1. Conhecer o ecrã Chat", tourDescription: "Selecione um número no mapa para ir à explicação, sem mostrar conversas privadas.",
@@ -452,6 +449,6 @@ export const chatWorkspaceGuideContent: Record<
         { term: "Sem resposta", detail: "Veja o estado, tente novamente e use um modelo alternativo." }, { term: "Um modelo", detail: "Continue com painéis bem-sucedidos e veja o motivo." }, { term: "Upload", detail: "Verifique formato, tamanho, palavra-passe e rede com um ficheiro." }, { term: "Créditos", detail: "Atualize após liquidação e contacte suporte se persistir." }, { term: "Trace ID", detail: "Inclua ID, hora, modelo, navegador e anexos." }, { term: "Estado", detail: "Abra tomverse.app/status." },
       ] },
     ],
-    reviewVideoTitle: "Exemplo do fluxo AI Review", reviewVideoCaption: "Dados de demonstração controlados; não mostra chats privados reais.", openChat: "Abrir Tomverse Chat", allHelp: "Ver todo o Centro de ajuda",
+    reviewVideoTitle: "Exemplo do fluxo AI Review", openChat: "Abrir Tomverse Chat", allHelp: "Ver todo o Centro de ajuda",
   },
 };

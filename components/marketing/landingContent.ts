@@ -264,6 +264,7 @@ const en: LandingCopy = {
       {
         title: "Files and real context",
         description: "Add images, PDFs, Office documents, text files, or supported Google Drive files when the source material matters.",
+        condition: "Connecting Google Drive needs an account.",
       },
       {
         title: "Targeted follow-up",
@@ -502,6 +503,7 @@ const ko: LandingCopy = {
       {
         title: "파일과 실제 맥락",
         description: "원본 자료가 중요할 때 이미지, PDF, Office 문서, 텍스트 또는 지원되는 Google Drive 파일을 추가하세요.",
+        condition: "Google Drive 연결에는 계정이 필요합니다.",
       },
       {
         title: "특정 모델 후속 질문",
@@ -732,6 +734,7 @@ const zh: LandingCopy = {
       {
         title: "文件与真实上下文",
         description: "需要原始材料时，可添加图片、PDF、Office 文档、文本或受支持的 Google Drive 文件。",
+        condition: "连接 Google Drive 需要账户。",
       },
       {
         title: "定向追问",
@@ -966,6 +969,7 @@ const fr: LandingCopy = {
       {
         title: "Fichiers et contexte réel",
         description: "Ajoutez images, PDF, documents Office, texte ou fichiers Google Drive pris en charge.",
+        condition: "Connecter Google Drive requiert un compte.",
       },
       {
         title: "Relance ciblée",
@@ -1200,6 +1204,7 @@ const de: LandingCopy = {
       {
         title: "Dateien und echter Kontext",
         description: "Bilder, PDFs, Office-Dokumente, Text oder unterstützte Google-Drive-Dateien hinzufügen.",
+        condition: "Google Drive zu verbinden erfordert ein Konto.",
       },
       {
         title: "Gezielte Nachfrage",
@@ -1434,6 +1439,7 @@ const es: LandingCopy = {
       {
         title: "Archivos y contexto real",
         description: "Añade imágenes, PDF, documentos Office, texto o archivos compatibles de Google Drive.",
+        condition: "Conectar Google Drive requiere cuenta.",
       },
       {
         title: "Seguimiento dirigido",
@@ -1668,6 +1674,7 @@ const pt: LandingCopy = {
       {
         title: "Arquivos e contexto real",
         description: "Adicione imagens, PDFs, documentos Office, texto ou arquivos compatíveis do Google Drive.",
+        condition: "Conectar o Google Drive requer conta.",
       },
       {
         title: "Acompanhamento direcionado",

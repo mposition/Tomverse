@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 
 const read = (path) => readFileSync(path, "utf8");
 
@@ -1474,20 +1474,29 @@ const checks = [
     },
   },
   {
-    name: "Help-centre walkthrough asset is present and served locally",
+    name: "No customer surface embeds the superseded walkthrough capture",
     file: "components/marketing/ChatWorkspaceGuide.tsx",
-    test: (source) =>
-      // The landing page no longer embeds this capture (it showed a
-      // superseded credit figure), but the help-centre guide still does, and
-      // it must keep pointing at a real local file rather than a 0-byte stub
-      // or a third-party host.
-      source.includes('src="/marketing-proof/tomverse-review-workflow.webm"') &&
-      source.includes('poster="/marketing-proof/tomverse-review-workflow-poster.png"') &&
-      !source.includes("http://") &&
-      statSync("public/marketing-proof/tomverse-review-workflow.webm").size >
-        100_000 &&
-      statSync("public/marketing-proof/tomverse-review-workflow-poster.png").size >
-        20_000,
+    test: (source) => {
+      const landing = read("components/marketing/ProductProofSection.tsx");
+      // The 2026-07-27 recording showed "4 credits used" (a cost corrected two
+      // days later, because two independent reviewers run) and "Review
+      // confidence" (renamed to source grounding). Both are server-side, so no
+      // recording of them can stay true -- the guard is that nothing embeds it,
+      // not that it keeps existing.
+      const embedsCapture = (file) =>
+        file.includes('src="/marketing-proof/') ||
+        file.includes('poster="/marketing-proof/') ||
+        file.includes("<video");
+      return (
+        !embedsCapture(source) &&
+        !embedsCapture(landing) &&
+        // Both surfaces explain the same flow from the same shared stage copy.
+        source.includes('data-testid="guide-review-workflow"') &&
+        source.includes("workflowStages.map") &&
+        source.includes("workflowDisclosure") &&
+        landing.includes('data-testid="landing-workflow-diagram"')
+      );
+    },
   },
   {
     name: "Pricing explains credit value using the production model weights",
@@ -1497,7 +1506,14 @@ const checks = [
       return (
         source.includes('data-testid="pricing-credit-guide"') &&
         source.includes("getTypicalShortRequestCapacities(monthlyCredits)") &&
-        source.includes("configuredPlan.id === plan.id") &&
+        // The allowance must come from the live billing config, whose
+        // fallback is the shared built-in plan table -- not a second copy of
+        // the numbers pasted into this component.
+        source.includes("billing.planLimits(plan.id).monthlyCredits") &&
+        !source.includes("fallbackCredits") &&
+        read("components/marketing/usePublicBilling.ts").includes(
+          "getDefaultBillingPlan"
+        ) &&
         source.includes("일반적인 짧은 요청 기준 예시") &&
         source.includes("Standard + Advanced + Premium") &&
         source.includes("INPUT_CREDIT_MULTIPLIERS.map") &&

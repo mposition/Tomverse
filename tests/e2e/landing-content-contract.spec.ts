@@ -170,8 +170,9 @@ for (const path of ["/", "/ko"] as const) {
     const support = await page.getByTestId("landing-support-section").innerText();
     expect(support).toMatch(accountPattern);
 
-    // Attachments must not be described as account-only: guest attachment
-    // support is a separate, in-flight platform change.
+    // Attachments must not be described as account-only: guests can attach
+    // files (one per message, ephemeral) since the guest attachment work
+    // landed.
     const lower = support.toLowerCase();
     expect(lower).not.toContain("log in to attach");
     expect(lower).not.toContain("첨부는 로그인");
@@ -248,8 +249,8 @@ for (const path of ["/", "/ko"] as const) {
 
 test("the hero keeps its guest-start and AI Review messages", async ({ page }) => {
   // Guarded from the opposite direction to everything else here: a future
-  // edit must not "fix" the hero by qualifying it, because guest access to
-  // AI Review is being widened rather than documented as a limit.
+  // edit must not "fix" the hero by qualifying it. Guests can run AI Review,
+  // so an "account required" note would be a false limit, not a disclosure.
   await openLanding(page, "/");
 
   await expect(page.getByTestId("landing-hero-signup-note")).toHaveText(
@@ -402,16 +403,18 @@ for (const width of [320, 390]) {
 }
 
 for (const path of ["/", "/ko", "/fr"] as const) {
-  test(`${path} sections stay inside the viewport at 200% text scale on 320px`, async ({
+  test(`${path} stays inside the viewport at 200% text scale on 320px`, async ({
     page,
   }) => {
     // `main` is `overflow-x-hidden`, so a section that outgrows the viewport
     // is silently cropped rather than showing a scrollbar -- a document-level
     // overflow assertion cannot see it. This measures each section instead.
     //
-    // The hero is deliberately excluded: its markup and copy are owned by the
-    // in-flight guest-access change, and it already overflowed here before
-    // these sections existed.
+    // The hero is included. Keeping its wording untouched (the guest promises
+    // are the product's, not this page's to qualify) is a copy constraint and
+    // says nothing about layout, so excluding it from a reflow check was
+    // wrong: the fix is gutters and padding frozen in px, `min-w-0` on the
+    // grid items and overflow-wrap on the text, none of which touch a word.
     await page.setViewportSize({ width: 320, height: 640 });
     await prepareGuestPage(page, path === "/ko" ? "ko" : "en");
     await page.addInitScript(() => {
@@ -427,13 +430,13 @@ for (const path of ["/", "/ko", "/fr"] as const) {
     const clipped = await page.evaluate(() => {
       const viewport = document.documentElement.clientWidth;
       const out: Record<string, number> = {};
-      for (const section of Array.from(document.querySelectorAll("main section[id]"))) {
+      for (const section of Array.from(document.querySelectorAll("main section"))) {
         let count = 0;
         for (const child of Array.from(section.querySelectorAll("*"))) {
           const rect = child.getBoundingClientRect();
           if (rect.width > 0 && rect.right > viewport + 1) count += 1;
         }
-        if (count > 0) out[section.id] = count;
+        if (count > 0) out[section.id || "hero"] = count;
       }
       return out;
     });

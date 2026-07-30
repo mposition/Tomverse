@@ -32,6 +32,17 @@ const hreflangByLocale: Record<Language, string> = {
   pt: "pt",
 };
 
+// `en` maps to en_AU deliberately: Australia is the English-language market
+// this surface is written for. lib/billingMarkets.ts carries the corroborating
+// wiring -- AUD is one of the five billing currencies, `AU` resolves to it, an
+// `Australia/*` time zone resolves to `AU`, and AUD is the one currency whose
+// display locale is pinned to `en-AU`. (The *default* currency is USD; AUD is
+// a market, not the fallback.)
+//
+// Recorded here because the 2026-07-30 landing audit flagged the value as
+// unexplained rather than wrong, and the original decision is not written down
+// anywhere else. Do not "correct" it to en_US as a tidy-up: it is the region
+// signal every OG consumer reads, so changing it is a market decision.
 const openGraphLocaleByLanguage: Record<Language, string> = {
   en: "en_AU",
   ko: "ko_KR",

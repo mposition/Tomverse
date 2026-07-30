@@ -148,8 +148,8 @@ test("no locale reintroduces superseded product figures or unguaranteed outcomes
 });
 
 test("the hero keeps the guest-start note and the AI Review promise unqualified", () => {
-  // Guest access to AI Review and to attachments is being widened by a
-  // separate platform change. Until it lands, the landing page must neither
+  // Guests can run AI Review and attach files (the guest attachment and guest
+  // AI Review work landed on develop), so the landing page must neither
   // advertise those as account-only nor drop them.
   for (const language of languages) {
     const copy = landingCopy[language];
