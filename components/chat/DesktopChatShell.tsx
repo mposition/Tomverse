@@ -13,7 +13,11 @@ import { ChatWelcomeScreen } from "@/components/chat/ChatWelcomeScreen";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { ProviderStatusBanner } from "@/components/chat/ProviderStatusBanner";
-import { ComparisonActionRail } from "@/components/chat/ComparisonActionRail";
+import {
+  ComparisonActionRail,
+  type AiReviewAccess,
+} from "@/components/chat/ComparisonActionRail";
+import type { ChatAttachmentCapabilities } from "@/lib/guestAttachmentPolicy";
 import { GuestVerificationDesktopSlot } from "@/components/chat/GuestVerificationDesktopSlot";
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import { deriveComparisonReadiness } from "@/lib/comparisonReadiness";
@@ -56,6 +60,10 @@ type DesktopChatShellProps = {
   isSending: boolean;
   focusToken: number;
   isGuestMode: boolean;
+  /** What this caller may do with the AI cross-review. */
+  aiReviewAccess: AiReviewAccess;
+  /** What this caller may do with file attachments. */
+  attachmentCapabilities: ChatAttachmentCapabilities;
   guestPreviewMode?: boolean;
   guestMessageCount: number;
   maxGuestMessages: number;
@@ -105,6 +113,8 @@ export function DesktopChatShell({
   isSending,
   focusToken,
   isGuestMode,
+  aiReviewAccess,
+  attachmentCapabilities,
   guestPreviewMode = false,
   guestMessageCount,
   maxGuestMessages,
@@ -684,7 +694,7 @@ export function DesktopChatShell({
         <ComparisonActionRail
           layout="desktop"
           readiness={comparisonReadiness}
-          isGuestMode={isGuestMode}
+          aiReviewAccess={aiReviewAccess}
           isCompareSummaryLoading={isCompareSummaryLoading}
           isQuickSummaryCached={isQuickSummaryCached}
           availableCredits={availableCredits}
@@ -730,7 +740,8 @@ export function DesktopChatShell({
               onDismissDeepResearchChip={onDismissDeepResearchChip}
               attachments={attachments}
               onAttachmentsChange={setAttachments}
-              canAttach={!isGuestMode}
+              attachmentCapabilities={attachmentCapabilities}
+              onGuestSignInPrompt={onGuestSignInPrompt}
               isGuestMode={isGuestMode}
               guestPreviewMode={guestPreviewMode}
               guestMessageCount={guestMessageCount}

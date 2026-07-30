@@ -20,7 +20,11 @@ import { ChatWelcomeScreen } from "@/components/chat/ChatWelcomeScreen";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { ProviderStatusBanner } from "@/components/chat/ProviderStatusBanner";
-import { ComparisonActionRail } from "@/components/chat/ComparisonActionRail";
+import {
+  ComparisonActionRail,
+  type AiReviewAccess,
+} from "@/components/chat/ComparisonActionRail";
+import type { ChatAttachmentCapabilities } from "@/lib/guestAttachmentPolicy";
 import { GuestVerificationSheet } from "@/components/chat/GuestVerificationSheet";
 import { useGuestVerification } from "@/components/chat/GuestVerificationProvider";
 import { ModeInfoSheet } from "@/components/chat/ModeInfoSheet";
@@ -76,6 +80,10 @@ type MobileChatShellProps = {
   isSending: boolean;
   focusToken: number;
   isGuestMode: boolean;
+  /** What this caller may do with the AI cross-review. */
+  aiReviewAccess: AiReviewAccess;
+  /** What this caller may do with file attachments. */
+  attachmentCapabilities: ChatAttachmentCapabilities;
   guestPreviewMode?: boolean;
   guestMessageCount: number;
   maxGuestMessages: number;
@@ -123,6 +131,8 @@ export function MobileChatShell({
   isSending,
   focusToken,
   isGuestMode,
+  aiReviewAccess,
+  attachmentCapabilities,
   guestPreviewMode = false,
   guestMessageCount,
   maxGuestMessages,
@@ -801,7 +811,7 @@ export function MobileChatShell({
       <ComparisonActionRail
         layout="mobile"
         readiness={comparisonReadiness}
-        isGuestMode={isGuestMode}
+        aiReviewAccess={aiReviewAccess}
         isCompactViewport={isCompactBottomDock}
         isCompareSummaryLoading={isCompareSummaryLoading}
         isQuickSummaryCached={isQuickSummaryCached}
@@ -836,7 +846,8 @@ export function MobileChatShell({
             onDismissDeepResearchChip={onDismissDeepResearchChip}
             attachments={attachments}
             onAttachmentsChange={setAttachments}
-            canAttach={!isGuestMode}
+            attachmentCapabilities={attachmentCapabilities}
+            onGuestSignInPrompt={onGuestSignInPrompt}
             isGuestMode={isGuestMode}
             guestPreviewMode={guestPreviewMode}
             guestMessageCount={guestMessageCount}

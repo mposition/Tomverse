@@ -356,3 +356,194 @@ test("an allowed request reserves credits before it can reach the provider", asy
     "streamText ran even though the credit reservation failed"
   );
 });
+
+// ---------------------------------------------------------------------------
+// Guest attachments.
+//
+// A guest may now send one ephemeral file per message. The object it refers to
+// was validated and parsed at upload time, so what the chat route has to
+// guarantee is narrower but sharper: the key belongs to *this* guest, there is
+// only one of them, and the type is one a guest is allowed to send. Each of
+// these is asserted by what it costs: a rejected request must reach neither a
+// provider nor a credit reservation.
+// ---------------------------------------------------------------------------
+
+/**
+ * The narrower guarantee for requests rejected *inside* the message loop.
+ *
+ * `getActiveAiModel` runs before the loop, so a provider *client* has already
+ * been constructed by then -- which issues no request and costs nothing. What
+ * must not happen is the two things that do cost: a provider call and a credit
+ * reservation.
+ */
+const assertNothingCharged = (spies: Spies, context: string) => {
+  assert.equal(spies.streamTextCalls, 0, `${context}: streamText was called`);
+  assert.equal(
+    spies.creditReservations,
+    0,
+    `${context}: credits were reserved`
+  );
+};
+
+const guestAttachmentKey = (subjectKeySeed: string) => {
+  const { guestAttachmentPrefix, createGuestAttachmentKey, createGuestAttachmentObjectId } =
+    require(resolve(ROOT, "lib/guestAttachments.ts")) as {
+      guestAttachmentPrefix: (subjectKey: string, secret: string) => string;
+      createGuestAttachmentKey: (
+        subjectKey: string,
+        secret: string,
+        objectId: string
+      ) => string;
+      createGuestAttachmentObjectId: (uuid: string) => string;
+    };
+  void guestAttachmentPrefix;
+  return createGuestAttachmentKey(
+    subjectKeySeed,
+    process.env.NEXTAUTH_SECRET as string,
+    createGuestAttachmentObjectId("11111111-1111-4111-8111-111111111111")
+  );
+};
+
+test("a guest cannot send another guest's file", async () => {
+  const { POST, spies } = await loadRouteWithSpies();
+
+  // A key that is validly *shaped* but belongs to a different guest identity.
+  // The route derives the caller's own prefix rather than trusting the key, so
+  // there is nothing here to guess right.
+  const response = await POST(
+    chatRequest({
+      messages: [
+        {
+          role: "user",
+          content: "Read this.",
+          attachments: [
+            {
+              name: "someone-elses.txt",
+              mediaType: "text/plain",
+              kind: "text",
+              objectKey: guestAttachmentKey("guest:someone-else"),
+            },
+          ],
+        },
+      ],
+      modelId: "claude-haiku-4-5",
+    })
+  );
+
+  assert.equal(response.ok, false);
+  assertNothingCharged(spies, "another guest's attachment");
+});
+
+test("a guest cannot send more than one file in a message", async () => {
+  const { POST, spies } = await loadRouteWithSpies();
+  const attachment = (index: number) => ({
+    name: `file-${index}.txt`,
+    mediaType: "text/plain",
+    kind: "text",
+    objectKey: `${guestAttachmentKey("guest:whoever")}-${index}`,
+  });
+
+  const response = await POST(
+    chatRequest({
+      messages: [
+        {
+          role: "user",
+          content: "Read both.",
+          attachments: [attachment(1), attachment(2)],
+        },
+      ],
+      modelId: "claude-haiku-4-5",
+    })
+  );
+
+  assert.equal(response.status, 413);
+  const body = (await response.json()) as { code?: string };
+  assert.equal(body.code, "GUEST_TOO_MANY_ATTACHMENTS");
+  assertNothingSpent(spies, "a second guest attachment");
+});
+
+test("a guest cannot send an attachment type guests are not allowed", async () => {
+  const { POST, spies } = await loadRouteWithSpies();
+
+  const response = await POST(
+    chatRequest({
+      messages: [
+        {
+          role: "user",
+          content: "Read this.",
+          attachments: [
+            {
+              name: "clip.mp4",
+              mediaType: "video/mp4",
+              kind: "file",
+              objectKey: guestAttachmentKey("guest:whoever"),
+            },
+          ],
+        },
+      ],
+      modelId: "claude-haiku-4-5",
+    })
+  );
+
+  assert.equal(response.ok, false);
+  assertNothingCharged(spies, "an unsupported guest attachment type");
+});
+
+test("a guest cannot smuggle inline attachment data past the upload path", async () => {
+  // Bypassing the upload endpoint would mean bypassing every validation and
+  // parse it performs, so inline data is refused for everyone -- guests very
+  // much included.
+  const { POST, spies } = await loadRouteWithSpies();
+
+  const response = await POST(
+    chatRequest({
+      messages: [
+        {
+          role: "user",
+          content: "Read this.",
+          attachments: [
+            {
+              name: "notes.txt",
+              mediaType: "text/plain",
+              kind: "text",
+              data: Buffer.from("inline").toString("base64"),
+            },
+          ],
+        },
+      ],
+      modelId: "claude-haiku-4-5",
+    })
+  );
+
+  assert.equal(response.status, 400);
+  const body = (await response.json()) as { code?: string };
+  assert.equal(body.code, "INLINE_ATTACHMENT_FORBIDDEN");
+  assertNothingSpent(spies, "an inline guest attachment");
+});
+
+test("a guest cannot read from the signed-in attachment area", async () => {
+  const { POST, spies } = await loadRouteWithSpies();
+
+  const response = await POST(
+    chatRequest({
+      messages: [
+        {
+          role: "user",
+          content: "Read this.",
+          attachments: [
+            {
+              name: "someone.txt",
+              mediaType: "text/plain",
+              kind: "text",
+              objectKey: "attachments/abcdef0123456789abcd/2026-07-30/uuid-someone.txt",
+            },
+          ],
+        },
+      ],
+      modelId: "claude-haiku-4-5",
+    })
+  );
+
+  assert.equal(response.ok, false);
+  assertNothingCharged(spies, "a signed-in object key sent by a guest");
+});

@@ -17,6 +17,7 @@ The message canvas may be optimized for additional vertical space, but the prima
 | Area | File |
 | --- | --- |
 | Composer markup, tool chips, actions row | `components/chat/ChatInput.tsx` |
+| Attachment capabilities (who may attach what, from where, and for how long) | `lib/guestAttachmentPolicy.ts` |
 | Mobile shell, bottom dock, portal placement | `components/chat/MobileChatShell.tsx` |
 | Comparison action rail above the composer | `components/chat/ComparisonActionRail.tsx` |
 | Mobile AI/security disclosure below the composer | `components/chat/AiDisclaimerNotice.tsx` |
@@ -59,6 +60,8 @@ As implemented, that is:
 - The contract must remain valid at 200% text scaling.
 - Mobile keyboard and safe-area changes must not collapse the textarea.
 - ChatMessageList optimization is subordinate to composer usability.
+- An attachment chip, its filename, and any attachment error occupy their own
+  rows; none of them may narrow, cover or shorten the textarea's row.
 
 ## Allowed patterns
 
@@ -108,6 +111,32 @@ ChatMessageList height may never be bought with any of these:
 - A partial-support exception expands under the chip that opened it, never over the input.
 - A fully blocked state keeps its full-width notice and its way out (`web-search-unavailable-notice`).
 - Several chips wrap onto another chip row; they never scroll sideways and never enter the input row.
+
+## Attachment capabilities
+
+Who may attach what is four independent facts, passed in as
+`attachmentCapabilities` (`lib/guestAttachmentPolicy.ts`) and never derived
+from `isGuestMode` at the point of render:
+
+| Capability | Guest | Signed-in |
+| --- | --- | --- |
+| `canAttachLocalFiles` | yes — one file per message | yes — up to 5 |
+| `canConnectGoogleDrive` | no; the row states the reason and offers sign-in | yes |
+| `maxAttachmentBytes` | 5 MB | 10 MB |
+| `attachmentPersistence` | `ephemeral` | `account` |
+
+Requirements:
+
+- A capability the caller lacks is *named*, never a dead disabled control:
+  Google Drive says why and offers the one action that changes it.
+- Every guest limit here is re-enforced server-side; the client's copy of it
+  exists to pre-empt a rejection, never to define one.
+- `ephemeral` persistence is stated where the file is picked: guest files are
+  held briefly for that chat only, and never saved, shared or exported.
+- Attachment errors are distinguishable — unsupported type, too large, could
+  not be processed, and over the guest input limit are four different
+  sentences, because they have four different fixes.
+- Changing attachment state must not disturb an in-flight IME composition.
 
 ## Accessibility requirements
 
@@ -170,6 +199,7 @@ Primary tests:
 - `tests/e2e/web-search-composer-state.spec.ts`
 - `tests/e2e/comparison-action-rail.spec.ts`
 - `tests/e2e/guest-turnstile-verification.spec.ts` (the verification sheet vs. the composer)
+- `tests/e2e/guest-attachment-ai-review-flow.spec.ts` (the guest journey, 320/390/desktop)
 - `tests/e2e/mobile-header-spacing.spec.ts`
 - relevant mobile visual-regression coverage (`tests/e2e/chat-state-visual-regression.spec.ts`)
 
@@ -194,7 +224,8 @@ Before approving a mobile composer change:
 - [ ] At least one complete input line is visible
 - [ ] No chip or control intersects the textarea
 - [ ] No composer horizontal scrollbar exists
-- [ ] Korean IME was tested
+- [ ] Korean IME was tested, including while attachment state changes
+- [ ] Guest attachment states were tested (attached, long filename, upload error)
 - [ ] 320px viewport was tested
 - [ ] 200% text scaling was tested
 - [ ] Keyboard-open state was tested

@@ -4,7 +4,18 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { AlertCircle, ArrowRight, CheckCircle2, Info, Loader2, Sparkles, X } from "lucide-react";
 import { DesktopChatShell } from "@/components/chat/DesktopChatShell";
 import { MobileChatShell } from "@/components/chat/MobileChatShell";
-import { ComparisonReviewDialog, QuoteBadge, VerifyItemButton } from "@/components/chat/ComparisonReviewDialog";
+import {
+  ComparisonReviewDialog,
+  QuoteBadge,
+  VerifyItemButton,
+  type GuestReviewSource,
+} from "@/components/chat/ComparisonReviewDialog";
+import type { AiReviewAccess } from "@/components/chat/ComparisonActionRail";
+import {
+  GUEST_MAX_ATTACHMENTS_PER_MESSAGE,
+  GUEST_MAX_ATTACHMENT_BYTES,
+  type ChatAttachmentCapabilities,
+} from "@/lib/guestAttachmentPolicy";
 import { SourceGroundingBadge } from "@/components/chat/SourceGroundingBadge";
 import { toSourceGrounding } from "@/lib/sourceGrounding";
 import { UpgradeCtaLink } from "@/components/billing/UpgradeCtaLink";
@@ -467,6 +478,11 @@ export function ChatPageClient({
     return () => window.clearTimeout(timer);
   }, [isCompareSummaryLoading]);
   const [showComparisonReview, setShowComparisonReview] = useState(false);
+  // Captured when a guest opens the review, never read during render: a
+  // guest has no saved conversation, so the answers themselves are what the
+  // dialog reviews.
+  const [guestReviewSource, setGuestReviewSource] =
+    useState<GuestReviewSource | null>(null);
   const [upgradeModelPrompt, setUpgradeModelPrompt] = useState<AiModel | null>(null);
   const [valueUpgradeSource, setValueUpgradeSource] = useState<
     "comparison" | "ai_review" | null
@@ -627,7 +643,16 @@ export function ChatPageClient({
   // enforces, refreshed after every completed response (see
   // refreshGuestUsage below) instead of a client-only counter that could
   // show "plenty left" while the server's real bucket was already spent.
-  const [guestUsage, setGuestUsage] = useState<{ used: number; limit: number } | null>(null);
+  const [guestUsage, setGuestUsage] = useState<{
+    used: number;
+    limit: number;
+    // Spendable guest credits and the monthly AI Review trial, both read from
+    // the same server buckets that will actually be enforced -- so the rail
+    // can distinguish "out of credits" from "trial already used" instead of
+    // guessing, and can never offer a run the server would refuse.
+    creditsAvailable: number | null;
+    aiReviewTrial: { limit: number; used: number; remaining: number } | null;
+  } | null>(null);
   const guestMessageCount = guestUsage?.used ?? 0;
   const MAX_GUEST_MESSAGES = guestUsage?.limit ?? 20;
   const refreshGuestUsage = useCallback(() => {
@@ -636,7 +661,20 @@ export function ChatPageClient({
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data && typeof data.used === "number" && typeof data.limit === "number") {
-          setGuestUsage({ used: data.used, limit: data.limit });
+          setGuestUsage({
+            used: data.used,
+            limit: data.limit,
+            creditsAvailable:
+              typeof data.creditsAvailable === "number"
+                ? data.creditsAvailable
+                : null,
+            aiReviewTrial:
+              data.aiReviewTrial &&
+              typeof data.aiReviewTrial.limit === "number" &&
+              typeof data.aiReviewTrial.remaining === "number"
+                ? data.aiReviewTrial
+                : null,
+          });
         }
       })
       .catch(() => {
@@ -2965,7 +3003,13 @@ export function ChatPageClient({
               ? t("chat.compareGenerationFailed")
               : t("chat.compareUnavailable");
 
-    const executeGuestCompareSummary = async () => {
+    /**
+     * The latest completed guest turn, read from the same local refs the
+     * panels write as answers finish. Called only from event handlers -- never
+     * during render -- and shared by both guest comparison actions so the
+     * quick summary and the AI Review can never describe different answers.
+     */
+    const readGuestComparisonTurn = (): GuestReviewSource | null => {
       const promptId = latestLocalComparisonPromptRef.current;
       const question = promptId
         ? localComparisonQuestionsRef.current.get(promptId)
@@ -2974,18 +3018,30 @@ export function ChatPageClient({
         ? localComparisonResponsesRef.current.get(promptId)
         : undefined;
       if (!promptId || !question || !responseMap || responseMap.size < 2) {
-        showToast(t("chat.aiReviewResponsesRequired"), "info");
-        return;
+        return null;
       }
-      setIsCompareSummaryLoading(true);
-      try {
-        const responses = Array.from(responseMap.entries()).map(
+      return {
+        question,
+        language: lang,
+        responses: Array.from(responseMap.entries()).map(
           ([modelId, content]) => ({
             messageId: `${promptId}:${modelId}`,
             modelId,
             content,
           })
-        );
+        ),
+      };
+    };
+
+    const executeGuestCompareSummary = async () => {
+      const turn = readGuestComparisonTurn();
+      if (!turn) {
+        showToast(t("chat.aiReviewResponsesRequired"), "info");
+        return;
+      }
+      const { question, responses } = turn;
+      setIsCompareSummaryLoading(true);
+      try {
         const sendRequest = (turnstileToken?: string) =>
           fetch("/api/chat/compare-summary", {
             method: "POST",
@@ -3040,6 +3096,22 @@ export function ChatPageClient({
       await executeCompareSummary(currentChatId);
     };
 
+    // The guest review's answers are captured at click time, from the same
+    // turn the quick summary would use, and handed to the dialog as its
+    // source. An account's dialog looks its own turn up by conversation id and
+    // needs nothing here.
+    const handleComparisonReview = () => {
+      if (isGuestMode) {
+        const turn = readGuestComparisonTurn();
+        if (!turn) {
+          showToast(t("chat.aiReviewResponsesRequired"), "info");
+          return;
+        }
+        setGuestReviewSource(turn);
+      }
+      setShowComparisonReview(true);
+    };
+
   const pendingRemoveModel = pendingRemoveModelId
     ? AVAILABLE_MODELS.find((model) => model.id === pendingRemoveModelId)
     : null;
@@ -3084,7 +3156,48 @@ export function ChatPageClient({
         purchasedCreditsRemaining:
           accountUsage.balances.purchasedRemainingCredits,
       }).totalCreditsAvailableNow
-    : null;
+    : // Guests have a real balance too -- the day/month buckets
+      // acquireChatAccess charges -- so the rail can state a shortfall for
+      // them the same way it does for an account, instead of treating "guest"
+      // as "unknown" and offering a run that would be refused.
+      guestUsage?.creditsAvailable ?? null;
+
+  // What this caller may do with the cross-review, decided from server facts
+  // rather than from `isGuestMode` at the point of render.
+  const aiReviewAccess: AiReviewAccess = !isGuestMode
+    ? { kind: "account" }
+    : guestUsage?.aiReviewTrial
+      ? guestUsage.aiReviewTrial.remaining > 0
+        ? {
+            kind: "guestTrial",
+            trialLimit: guestUsage.aiReviewTrial.limit,
+            trialRemaining: guestUsage.aiReviewTrial.remaining,
+          }
+        : { kind: "guestTrialExhausted", trialLimit: guestUsage.aiReviewTrial.limit }
+      : // The snapshot has not arrived yet. Fail closed -- but say so
+        // accurately: "log in to unlock" would be a lie to a guest who is
+        // about to be told they have a free run.
+        { kind: "guestTrialPending" };
+
+  // Local files yes, Google Drive no: Drive needs an OAuth grant an anonymous
+  // session cannot hold, and one ephemeral file per message is the guest
+  // allowance the server independently enforces.
+  const attachmentCapabilities: ChatAttachmentCapabilities = isGuestMode
+    ? {
+        canAttachLocalFiles: true,
+        canConnectGoogleDrive: false,
+        maxAttachmentsPerMessage: GUEST_MAX_ATTACHMENTS_PER_MESSAGE,
+        maxAttachmentBytes: GUEST_MAX_ATTACHMENT_BYTES,
+        attachmentPersistence: "ephemeral",
+      }
+    : {
+        canAttachLocalFiles: true,
+        canConnectGoogleDrive: true,
+        maxAttachmentsPerMessage: 5,
+        maxAttachmentBytes: 10 * 1024 * 1024,
+        attachmentPersistence: "account",
+      };
+
   const isQuickSummaryCached = Boolean(
     currentChatId && cachedCompareSummaryChatId === currentChatId
   );
@@ -3171,7 +3284,9 @@ export function ChatPageClient({
           isCompareSummaryLoading={isCompareSummaryLoading}
           isQuickSummaryCached={isQuickSummaryCached}
           availableCredits={comparisonAvailableCredits}
-          onComparisonReview={() => setShowComparisonReview(true)}
+          aiReviewAccess={aiReviewAccess}
+          attachmentCapabilities={attachmentCapabilities}
+          onComparisonReview={handleComparisonReview}
           onGuestSignInPrompt={() => setShowGuestSignInPrompt(true)}
           onResponseComplete={handleResponseComplete}
           onFollowupSent={handleModelFollowupSent}
@@ -3220,7 +3335,9 @@ export function ChatPageClient({
           isCompareSummaryLoading={isCompareSummaryLoading}
           isQuickSummaryCached={isQuickSummaryCached}
           availableCredits={comparisonAvailableCredits}
-          onComparisonReview={() => setShowComparisonReview(true)}
+          aiReviewAccess={aiReviewAccess}
+          attachmentCapabilities={attachmentCapabilities}
+          onComparisonReview={handleComparisonReview}
           onGuestSignInPrompt={() => setShowGuestSignInPrompt(true)}
           onResponseComplete={handleResponseComplete}
           onFollowupSent={handleModelFollowupSent}
@@ -3806,10 +3923,24 @@ export function ChatPageClient({
     )}
     {showComparisonReview && (
       <ComparisonReviewDialog
-        conversationId={currentChatId ?? null}
+        conversationId={isGuestMode ? null : currentChatId ?? null}
+        guestSource={guestReviewSource}
         open
         onClose={() => setShowComparisonReview(false)}
-        onCompleted={() => maybeShowValueUpgradePrompt("ai_review")}
+        onCompleted={() => {
+          if (isGuestMode) {
+            // The trial slot is spent, so re-read the server's own count
+            // rather than decrementing a local copy of it.
+            refreshGuestUsage();
+            maybeShowGuestSaveReviewCard();
+            return;
+          }
+          maybeShowValueUpgradePrompt("ai_review");
+        }}
+        onSignIn={() => {
+          setShowComparisonReview(false);
+          setShowGuestSignInPrompt(true);
+        }}
       />
     )}
     {pendingRemoveModelId && (

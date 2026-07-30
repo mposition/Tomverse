@@ -25,20 +25,42 @@ import {
  * unavailable.
  */
 
-export const QUICK_SUMMARY_CREDITS = 1;
-// Two independent reviewers run for every cross-review -- the route starts a
-// second one from a different provider once the first succeeds, which doubles
-// the cost on purpose (see the comparison-reviews route). This constant used
-// to carry a single reviewer's weight, so the rail advertised 4 while 8 was
-// charged, and `creditsShortFor` let the action look affordable at a balance
-// of 4-7 that could not actually pay for it.
-//
-// It stays an estimate: reviewer models come from COMPARISON_REVIEW_MODEL_IDS
-// and are filtered by plan and runtime availability, so the exact figure is
-// only knowable server-side. The dialog fetches it before anything is spent
-// and is authoritative; this is the shelf price, marked approximate the same
-// way the quick summary's is.
-export const AI_REVIEW_CREDITS = 8;
+// Both prices come from the shared domain module so the rail, the dialog and
+// the server routes cannot quote three different numbers. Re-exported here
+// because this component has always been where callers imported them from.
+import {
+  AI_REVIEW_CREDITS,
+  QUICK_SUMMARY_CREDITS,
+} from "@/lib/comparisonReviewCost";
+
+export { AI_REVIEW_CREDITS, QUICK_SUMMARY_CREDITS };
+
+/**
+ * What this caller may do with the cross-review, decided by the shell from
+ * server-supplied facts -- never by a `isGuestMode ? lock : action` branch in
+ * here.
+ *
+ * The rail used to show guests a single dead "Sign in to unlock" button, which
+ * meant the homepage promised an AI Review a guest could not reach. Modelling
+ * the capability instead of the identity gives every state (trial available,
+ * trial used up, signed-in, feature locked) one place to be decided and one
+ * place to be rendered.
+ */
+export type AiReviewAccess =
+  /** A signed-in account: the plan's own quota applies, not a trial. */
+  | { kind: "account" }
+  /** A guest with trial runs left this month. */
+  | { kind: "guestTrial"; trialLimit: number; trialRemaining: number }
+  /** A guest who has used the month's trial. Sign-in is the way forward. */
+  | { kind: "guestTrialExhausted"; trialLimit: number }
+  /**
+   * The server has not said yet what this guest may run. Fail-closed, but not
+   * mislabelled: telling a guest to log in when the answer might well be "you
+   * have a free run" would be worse than saying nothing useful for a moment.
+   */
+  | { kind: "guestTrialPending" }
+  /** The cross-review is unavailable to this caller for any other reason. */
+  | { kind: "locked" };
 
 const interpolate = (template: string, values: Record<string, string | number>) =>
   Object.entries(values).reduce(
@@ -113,7 +135,7 @@ function ReviewActionGroup({
 type ComparisonActionRailProps = {
   layout: "desktop" | "mobile";
   readiness: ComparisonReadiness;
-  isGuestMode: boolean;
+  aiReviewAccess: AiReviewAccess;
   /**
    * The visible viewport is too short for a full-height dock -- an on-screen
    * keyboard is covering it, or the phone is in landscape. The rail collapses
@@ -141,7 +163,7 @@ type ComparisonActionRailProps = {
 export function ComparisonActionRail({
   layout,
   readiness,
-  isGuestMode,
+  aiReviewAccess,
   isCompactViewport = false,
   isCompareSummaryLoading = false,
   isQuickSummaryCached = false,
@@ -192,17 +214,48 @@ export function ComparisonActionRail({
       available: Math.max(0, availableCredits ?? 0),
     });
 
+  // The cross-review can be blocked by something the quick summary never is:
+  // a guest's monthly trial being used up. It is its own reason, with its own
+  // sentence and its own way out (sign in), so it is never described as a
+  // credit problem and never leaks onto the other action.
+  const reviewRestrictionText =
+    aiReviewAccess.kind === "guestTrialExhausted"
+      ? interpolate(t("chat.guestAiReviewTrialUsed"), {
+          limit: aiReviewAccess.trialLimit,
+        })
+      : aiReviewAccess.kind === "guestTrialPending"
+        ? t("chat.guestAiReviewCheckingAvailability")
+        : aiReviewAccess.kind === "locked"
+          ? t("chat.aiReviewLoginToUnlock")
+          : null;
+  const isReviewRestricted = reviewRestrictionText !== null;
+
   const quickBlocked = !readiness.canRun || creditsShortFor(quickCredits);
-  const reviewBlocked = !readiness.canRun || creditsShortFor(AI_REVIEW_CREDITS);
+  const reviewBlocked =
+    !readiness.canRun ||
+    isReviewRestricted ||
+    creditsShortFor(AI_REVIEW_CREDITS);
   const quickReason = !readiness.canRun
     ? statusText
     : creditsShortFor(quickCredits)
       ? insufficientText(quickCredits)
       : null;
-  const reviewReason = !readiness.canRun
-    ? statusText
-    : creditsShortFor(AI_REVIEW_CREDITS)
-      ? insufficientText(AI_REVIEW_CREDITS)
+  const reviewReason = isReviewRestricted
+    ? reviewRestrictionText
+    : !readiness.canRun
+      ? statusText
+      : creditsShortFor(AI_REVIEW_CREDITS)
+        ? insufficientText(AI_REVIEW_CREDITS)
+        : null;
+  // What a guest's one free run is, said once, in the description that already
+  // carries this action's price and scope -- so it reaches both shells without
+  // competing with the 320px label budget for a row of its own.
+  const reviewTrialNote =
+    aiReviewAccess.kind === "guestTrial"
+      ? interpolate(t("chat.guestAiReviewTrialAvailable"), {
+          remaining: aiReviewAccess.trialRemaining,
+          limit: aiReviewAccess.trialLimit,
+        })
       : null;
 
   const quickCostLabel = isQuickSummaryCached
@@ -216,15 +269,21 @@ export function ComparisonActionRail({
   // the button's name, once as its description).
   const quickAccessibleName = t("chat.quickDifferenceSummary");
   const reviewAccessibleName = t("chat.aiReviewButton");
-  const describeAction = (costLabel: string, reason: string | null) => {
+  const describeAction = (
+    costLabel: string,
+    reason: string | null,
+    note: string | null = null
+  ) => {
     const parts = [statusText, costLabel];
+    if (note) parts.push(note);
     if (reason && reason !== statusText) parts.push(reason);
     return parts.join(" · ");
   };
   const quickDescription = describeAction(quickCostLabel, quickReason);
   const reviewDescription = describeAction(
     `${AI_REVIEW_CREDITS} ${t("chat.aiReviewCredits")}`,
-    reviewReason
+    reviewReason,
+    reviewTrialNote
   );
 
   const isAnyActionUnaffordable =
@@ -233,6 +292,7 @@ export function ComparisonActionRail({
     readiness,
     isBusy: isCompareSummaryLoading,
     isAnyActionUnaffordable,
+    isAnyActionRestricted: isReviewRestricted,
   });
   // A short, per-action sentence for the one blocked reason the shared status
   // text cannot express: two prices, one balance. "AI cross-review · 4 credits
@@ -254,9 +314,18 @@ export function ComparisonActionRail({
         })
       : null,
   ].filter((note): note is string => note !== null);
+  // A used-up guest trial is stated on screen exactly the way a credit
+  // shortfall is: it names the action it belongs to, and it never appears on
+  // the quick summary, which a guest can still run.
+  const blockedActionNotes = [
+    ...creditShortfallNotes,
+    isReviewRestricted
+      ? `${t("chat.aiReviewButtonShort")} · ${reviewRestrictionText}`
+      : null,
+  ].filter((note): note is string => note !== null);
   const visibleStatusText =
-    readiness.canRun && creditShortfallNotes.length > 0
-      ? creditShortfallNotes.join(" · ")
+    readiness.canRun && blockedActionNotes.length > 0
+      ? blockedActionNotes.join(" · ")
       : statusText;
   // Only genuinely *changing* progress is announced. The steady description is
   // a persistent property of each button, reachable on focus, and announcing it
@@ -276,6 +345,7 @@ export function ComparisonActionRail({
     readiness,
     isBusy: isCompareSummaryLoading,
     isAnyActionUnaffordable,
+    isAnyActionRestricted: isReviewRestricted,
     isCollapsed,
   });
 
@@ -383,28 +453,27 @@ export function ComparisonActionRail({
               />
             </button>
 
-            {isGuestMode ? (
-              <button
-                type="button"
-                data-testid="ai-review-guest-locked"
-                onClick={onGuestSignInPrompt}
-                className={`flex min-h-11 items-center justify-center gap-1 rounded-xl border border-zinc-200 bg-zinc-50 text-[11px] font-bold text-zinc-600 transition-colors hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 ${
-                  isMobile ? "min-w-0 flex-1 px-2" : "w-full px-3 text-xs md:w-auto"
-                }`}
-              >
-                <Lock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                <span className="min-w-0 truncate">
-                  {t("chat.aiReviewLoginToUnlock")}
-                </span>
-              </button>
-            ) : (
+            {
               // Mobile lays the action and its help control out as two
               // siblings of the row; desktop keeps the tight pair it had.
               <ReviewActionGroup isMobile={isMobile}>
                 <button
                   type="button"
                   data-testid="ai-review-button"
+                  data-access={aiReviewAccess.kind}
                   onClick={() => {
+                    // A blocked action still does something useful: when the
+                    // block is "your trial is used up", the only way forward is
+                    // signing in, so the button opens that rather than being a
+                    // dead target the user taps twice and gives up on.
+                    if (isReviewRestricted) {
+                      // Nothing to sign in *for* while the answer is still on
+                      // its way; the tap simply does nothing rather than
+                      // interrupting with a prompt the user did not ask for.
+                      if (aiReviewAccess.kind === "guestTrialPending") return;
+                      onGuestSignInPrompt();
+                      return;
+                    }
                     if (reviewBlocked) return;
                     onComparisonReview();
                   }}
@@ -421,17 +490,33 @@ export function ComparisonActionRail({
                     {/* Decoration only, and the first thing to give way: at
                         320px it costs the label the 12px it needs to stay
                         whole. */}
-                    {!isMobile && (
-                      <span
-                        aria-hidden="true"
-                        className="h-1.5 w-1.5 shrink-0 rounded-full bg-gradient-to-br from-accent-ai-review-start-300 via-white to-accent-ai-review-end-300"
-                      />
-                    )}
+                    {!isMobile &&
+                      (isReviewRestricted ? (
+                        <Lock className="h-3 w-3 shrink-0" aria-hidden="true" />
+                      ) : (
+                        <span
+                          aria-hidden="true"
+                          className="h-1.5 w-1.5 shrink-0 rounded-full bg-gradient-to-br from-accent-ai-review-start-300 via-white to-accent-ai-review-end-300"
+                        />
+                      ))}
                     <span className="min-w-0 truncate">
                       {isMobile
                         ? t("chat.aiReviewButtonShort")
                         : t("chat.aiReviewButton")}
                     </span>
+                    {/* Desktop has the horizontal budget to say "this is your
+                        free monthly run" on the control itself. Mobile does
+                        not -- at 320px this row is already exact -- so there
+                        the same fact rides the action's own description, which
+                        both shells carry either way. */}
+                    {!isMobile && reviewTrialNote && (
+                      <span
+                        data-testid="ai-review-guest-trial-badge"
+                        className="shrink-0 rounded-full bg-white/20 px-1.5 py-0.5 text-[11px] font-bold"
+                      >
+                        {t("chat.guestAiReviewTrialBadge")}
+                      </span>
+                    )}
                   </span>
                   <CreditCostBadge
                     credits={AI_REVIEW_CREDITS}
@@ -455,7 +540,7 @@ export function ComparisonActionRail({
                   testId={isMobile ? "ai-review-help-mobile" : "ai-review-help"}
                 />
               </ReviewActionGroup>
-            )}
+            }
             {verificationSlot}
           </div>
         )}

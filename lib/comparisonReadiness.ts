@@ -135,6 +135,18 @@ export type ComparisonRailStatusInput = {
   readiness: ComparisonReadiness;
   isBusy?: boolean;
   isAnyActionUnaffordable?: boolean;
+  /**
+   * An action cannot run for a reason that is *not* the balance -- today, a
+   * guest whose monthly AI Review trial is used up.
+   *
+   * It is deliberately its own input rather than being folded into
+   * `isAnyActionUnaffordable`: the two produce different sentences and
+   * different ways out ("top up" vs. "sign in"), and collapsing them would put
+   * the wrong one in front of the user. What they share is that the rail is no
+   * longer in a state where the sentence has nothing to say, so both take it
+   * out of the steady state.
+   */
+  isAnyActionRestricted?: boolean;
 };
 
 /**
@@ -153,12 +165,14 @@ export function isComparisonRailSteadyState({
   readiness,
   isBusy = false,
   isAnyActionUnaffordable = false,
+  isAnyActionRestricted = false,
 }: ComparisonRailStatusInput) {
   return (
     readiness.state === "ready" &&
     readiness.canRun &&
     !isBusy &&
     !isAnyActionUnaffordable &&
+    !isAnyActionRestricted &&
     readiness.generatingCount === 0 &&
     readiness.excludedCount === 0 &&
     readiness.pausedCount === 0 &&
@@ -185,6 +199,7 @@ export function shouldShowVisualStatus({
   readiness,
   isBusy = false,
   isAnyActionUnaffordable = false,
+  isAnyActionRestricted = false,
   isCollapsed = false,
 }: ComparisonRailStatusInput & { isCollapsed?: boolean }) {
   if (isCollapsed) return false;
@@ -192,5 +207,6 @@ export function shouldShowVisualStatus({
     readiness,
     isBusy,
     isAnyActionUnaffordable,
+    isAnyActionRestricted,
   });
 }

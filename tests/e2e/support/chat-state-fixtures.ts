@@ -208,12 +208,41 @@ export async function mockDeepResearchStatus(page: Page, response: DeepResearchS
   });
 }
 
-export async function mockGuestUsage(page: Page, used: number, limit: number) {
+export type GuestUsagePatch = {
+  /** Spendable guest credits, as the server would report them. */
+  creditsAvailable?: number;
+  /** The monthly guest AI Review trial. */
+  aiReviewTrial?: { limit: number; used: number; remaining: number };
+};
+
+/**
+ * The guest counterpart to `mockUserUsage`. Every field here is
+ * server-authoritative in production -- the comparison rail decides what a
+ * guest may run from this response, never from `isGuestMode` -- so a spec that
+ * wants a guest with a trial available, or one who has used it, says so here.
+ *
+ * The defaults describe the ordinary first-visit guest: full credits, one
+ * unused AI Review trial.
+ */
+export async function mockGuestUsage(
+  page: Page,
+  used: number,
+  limit: number,
+  patch: GuestUsagePatch = {}
+) {
   await page.route("**/api/user/guest-usage**", (route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ used, limit }),
+      body: JSON.stringify({
+        used,
+        limit,
+        remaining: Math.max(0, limit - used),
+        creditsAvailable: patch.creditsAvailable ?? Math.max(0, limit - used),
+        aiReviewTrial:
+          patch.aiReviewTrial ?? { limit: 1, used: 0, remaining: 1 },
+        resetsAt: "2099-01-01T00:00:00.000Z",
+      }),
     })
   );
 }

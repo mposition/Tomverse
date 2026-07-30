@@ -36,8 +36,20 @@ pure function:
 
 ```ts
 // lib/comparisonReadiness.ts
-shouldShowVisualStatus({ readiness, isBusy, isAnyActionUnaffordable, isCollapsed })
+shouldShowVisualStatus({
+  readiness,
+  isBusy,
+  isAnyActionUnaffordable,
+  isAnyActionRestricted,
+  isCollapsed,
+})
 ```
+
+`isAnyActionRestricted` covers a block that is *not* the balance — today, a
+guest whose monthly AI Review trial is used up. It is a separate input from
+`isAnyActionUnaffordable` on purpose: the two produce different sentences and
+different ways out ("top up" vs. "sign in"), so collapsing them would put the
+wrong one in front of the user. Both take the rail out of the steady state.
 
 `isCollapsed` is a *viewport* fact (the rail is behind its disclosure button
 because an on-screen keyboard or landscape left no room), not a desktop/mobile
@@ -54,6 +66,7 @@ All of the following hold:
 - `readyCount === comparableCount === selectedCount`
 - no comparison analysis is in flight (`isBusy === false`)
 - neither action is blocked by credits
+- neither action is otherwise restricted (a guest's monthly trial is still available)
 
 Then, in **both** shells:
 
@@ -76,7 +89,8 @@ Any one of these puts the sentence back on screen, in both shells:
 - selected model count ≠ actual comparison target count (a paused panel)
 - a comparison analysis running — `Running the AI analysis...`
 - the quick summary blocked by credits — `Differences · 1 credits needed · 0 available`
-- the cross-review blocked by credits — `AI review · 4 credits needed · 2 available`
+- the cross-review blocked by credits — `AI review · 8 credits needed · 2 available`
+- a guest's monthly AI Review trial used up — `AI review · Guest AI Review trial used`
 - any other reason an action cannot run
 
 In these states the status element must have a genuinely readable bounding box
@@ -91,6 +105,30 @@ landscape, or any viewport too short for the full rail):
 - the disclosure button must carry the exact state through its own
   `aria-describedby`;
 - expanding must put the sentence back on screen when the state is an exception.
+
+## Guest access
+
+The cross-review is a real, runnable action for a guest, not a lock. What a
+caller may do with it is decided from server-supplied facts and passed in as
+`aiReviewAccess`; it is never derived from `isGuestMode` at the point of
+render:
+
+| `aiReviewAccess.kind` | The action |
+| --- | --- |
+| `account` | runnable, plan quota applies |
+| `guestTrial` | runnable; the trial condition rides the action's own description, and desktop also shows a compact badge |
+| `guestTrialExhausted` | blocked, focusable, and opens the sign-in prompt |
+| `guestTrialPending` | blocked while the server's answer is in flight, labelled as *checking* rather than as *log in* |
+| `locked` | blocked, with the sign-in reason |
+
+Requirements:
+
+- The two blocked guest states never share a sentence with a credit shortfall.
+- A guest's trial state is never asserted by the client: it comes from
+  `/api/user/guest-usage`, and the server re-checks it on every run.
+- The quick difference summary keeps its own separate allowance and is never
+  described by the review's trial language.
+- A blocked review stays focusable and keeps its description on focus.
 
 ## Accessibility requirements
 
@@ -159,7 +197,9 @@ Verified for **both** desktop (1440×900) and mobile (390×680):
 | 7 | only the cross-review short of credits | visible, names the review action only |
 | 8 | both actions short of credits | visible, names both prices |
 | 9 | replayed (cached) quick summary, 0 credits | hidden (still steady) |
-| 10 | guest cross-review locked | hidden in the steady state; the lock stays visible |
+| 10 | guest cross-review, trial available | hidden (steady); the action is *runnable*, at 8 credits |
+| 10a | guest cross-review, trial used up | visible, naming the review action only |
+| 10b | guest short of credits, trial available | visible, naming the price and the balance |
 | 11 | rail collapsed by the mobile keyboard | hidden, carried by the disclosure |
 | 12 | expanded again after collapse | visible when the state is an exception |
 
@@ -179,6 +219,7 @@ Primary tests:
 
 - `tests/comparisonReadiness.test.mjs` — the policy matrix as unit tests
 - `tests/e2e/comparison-action-rail.spec.ts` — both shells, states 1–12
+- `tests/e2e/guest-attachment-ai-review-flow.spec.ts` — the guest journey end to end
 - `tests/e2e/mobile-message-visibility.spec.ts` — the rail's share of the mobile shell
 - `tests/e2e/chat-state-visual-regression.spec.ts` — desktop/mobile goldens
 
@@ -196,6 +237,7 @@ npx playwright test --project=desktop-chromium tests/e2e/comparison-action-rail.
 - [ ] No empty row or bottom gap remains when hidden
 - [ ] Every exception state is visible with a readable box
 - [ ] Each action's credit-shortfall reason names only its own action
+- [ ] A guest's trial state and a credit shortfall are two different sentences
 - [ ] Collapsed rail carries the state on its disclosure button
 - [ ] Unit + e2e state matrix passes for both shells
 - [ ] Visual goldens reviewed
@@ -212,5 +254,7 @@ npx playwright test --project=desktop-chromium tests/e2e/comparison-action-rail.
 - an exception state (generating, needsMore, excluded, busy, insufficient
   credits) is not visible;
 - one action's credit shortfall is described on the other action;
+- a guest's used-up trial is described as a credit problem, or vice versa;
+- the cross-review is locked for a guest who has a trial run available;
 - a blocked reason is reachable only through `title`;
 - the comparison actions or their prices become less discoverable.

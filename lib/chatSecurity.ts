@@ -455,22 +455,54 @@ export const getGuestUsageSnapshot = async (request: Request) => {
     const access = identifyChatCaller(request, null);
     const now = new Date();
     const dayStart = periodStart("day", now);
-    const dayLimit = limitsFor(access).find((rule) => rule.period === "day")?.limit ?? 0;
-    const bucket = await prisma.chatUsageBucket.findUnique({
-        where: {
-            key_period_periodStart: {
-                key: access.subjectKey,
-                period: "day",
-                periodStart: dayStart,
+    const monthStart = periodStart("month", now);
+    const rules = limitsFor(access);
+    const dayLimit = rules.find((rule) => rule.period === "day")?.limit ?? 0;
+    const monthLimit = rules.find((rule) => rule.period === "month")?.limit ?? 0;
+    const [dayBucket, monthBucket] = await Promise.all([
+        prisma.chatUsageBucket.findUnique({
+            where: {
+                key_period_periodStart: {
+                    key: access.subjectKey,
+                    period: "day",
+                    periodStart: dayStart,
+                },
             },
-        },
-        select: { count: true },
-    });
-    const used = bucket?.count || 0;
+            select: { count: true },
+        }),
+        prisma.chatUsageBucket.findUnique({
+            where: {
+                key_period_periodStart: {
+                    key: access.subjectKey,
+                    period: "month",
+                    periodStart: monthStart,
+                },
+            },
+            select: { count: true },
+        }),
+    ]);
+    const used = dayBucket?.count || 0;
+    const monthUsed = monthBucket?.count || 0;
+    const dayRemaining = Math.max(0, dayLimit - used);
+    const monthRemaining = Math.max(0, monthLimit - monthUsed);
     return {
+        // Server-side only: the caller's hashed usage subject, so a route can
+        // read this guest's other feature buckets without re-deriving the
+        // identity. Never included in an API response.
+        subjectKey: access.subjectKey,
         used,
         limit: dayLimit,
-        remaining: Math.max(0, dayLimit - used),
+        remaining: dayRemaining,
+        monthUsed,
+        monthLimit,
+        monthRemaining,
+        // These buckets are incremented by a request's *credit* weight, not by
+        // one per message, so the smaller of the two remainders is exactly
+        // what a guest can still afford to spend right now. Surfacing it lets
+        // the comparison rail tell "you have run out of credits" apart from
+        // "you have used your monthly AI Review trial" -- two different
+        // blocks with two different ways out.
+        creditsAvailable: Math.min(dayRemaining, monthRemaining),
         resetsAt: new Date(dayStart.getTime() + 86_400_000).toISOString(),
         setCookie: access.setCookie,
     };

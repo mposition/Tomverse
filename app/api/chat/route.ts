@@ -87,6 +87,14 @@ import {
 } from "@/lib/billingEntitlements";
 import { getOperationalFeatureFlags } from "@/lib/appSettings";
 import { estimateNativeAttachmentTokens } from "@/lib/chatAttachmentTokens";
+import {
+    getGuestAttachmentSecret,
+    guestAttachmentPrefix,
+    isOwnGuestAttachmentKey,
+    GUEST_ATTACHMENT_TYPES,
+    GUEST_MAX_ATTACHMENT_BYTES,
+    GUEST_MAX_ATTACHMENTS_PER_MESSAGE,
+} from "@/lib/guestAttachments";
 import { isChatCostSafetyCode } from "@/lib/chatCostSafetyCore";
 import {
     providerDiagnosticCode,
@@ -100,6 +108,11 @@ const MAX_ATTACHMENTS = 5;
 // this is a generous safety ceiling on total reprocessing cost, not a
 // per-message limit — see MAX_ATTACHMENTS for the per-send cap.
 const MAX_CONVERSATION_ATTACHMENTS = 30;
+// Guests resend their whole local history on every turn too, so this bounds
+// how much ephemeral storage one guest chat can force the server to re-read.
+// Far below the account ceiling on purpose: a guest chat is a trial, not an
+// archive.
+const GUEST_MAX_CONVERSATION_ATTACHMENTS = 5;
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
 const MAX_TOTAL_ATTACHMENT_SIZE = 25 * 1024 * 1024;
 const MAX_EXTRACTED_ATTACHMENT_CHARACTERS = 300_000;
@@ -726,27 +739,6 @@ export async function POST(req: Request) {
             ? await getUserBillingPlan(session.user.id)
             : null;
         const userPlan = billingPlan?.tier;
-        if (requestAttachments.length > 0) {
-            if (!(await getOperationalFeatureFlags()).attachmentsEnabled) {
-                return tracedJsonError(
-                    "Attachments are temporarily disabled for operational maintenance.",
-                    "ATTACHMENTS_DISABLED_BY_ADMIN",
-                    503,
-                    traceId
-                );
-            }
-            if (!session?.user?.id) {
-                return tracedJsonError(
-                    "Authentication is required for attachments.",
-                    "ATTACHMENT_AUTHENTICATION_REQUIRED",
-                    401,
-                    traceId
-                );
-            }
-            if (!billingPlan?.allowAttachments) {
-                return featureNotIncludedResponse("attachments");
-            }
-        }
         const access = identifyChatCaller(
             req,
             session?.user?.id,
@@ -758,6 +750,44 @@ export async function POST(req: Request) {
                   }
                 : undefined
         );
+        // Attachments are gated per access kind rather than by "is there a
+        // session". A guest may send one ephemeral file per message, uploaded
+        // through /api/chat/guest-attachment and already validated and parsed
+        // there; an account keeps the durable, plan-gated flow unchanged.
+        if (requestAttachments.length > 0) {
+            if (!(await getOperationalFeatureFlags()).attachmentsEnabled) {
+                return tracedJsonError(
+                    "Attachments are temporarily disabled for operational maintenance.",
+                    "ATTACHMENTS_DISABLED_BY_ADMIN",
+                    503,
+                    traceId
+                );
+            }
+            if (access.kind === "guest") {
+                if (
+                    latestMessageAttachmentCount >
+                    GUEST_MAX_ATTACHMENTS_PER_MESSAGE
+                ) {
+                    throw new ChatAccessError(
+                        413,
+                        "GUEST_TOO_MANY_ATTACHMENTS",
+                        "Guests can attach one file per message. Sign in to send more."
+                    );
+                }
+                if (
+                    requestAttachments.length >
+                    GUEST_MAX_CONVERSATION_ATTACHMENTS
+                ) {
+                    throw new ChatAccessError(
+                        413,
+                        "GUEST_TOO_MANY_CONVERSATION_ATTACHMENTS",
+                        "This guest chat has reached its file limit. Sign in to keep attaching files."
+                    );
+                }
+            } else if (!billingPlan?.allowAttachments) {
+                return featureNotIncludedResponse("attachments");
+            }
+        }
         assertModelAccess(access, modelConfig);
         if (access.kind === "guest") {
             turnstileGrantCookie = await ensureGuestVerified(req, turnstileToken);
@@ -840,6 +870,17 @@ export async function POST(req: Request) {
                 .digest("hex")
                 .slice(0, 20)}/`
             : null;
+        // One guest's storage scope, derived from their own signed identity.
+        // Computed here rather than compared against a value from the request,
+        // so a crafted objectKey can only ever resolve inside the caller's own
+        // prefix -- there is nothing to guess and nothing to enumerate.
+        const guestObjectPrefix =
+            access.kind === "guest"
+                ? guestAttachmentPrefix(
+                      access.subjectKey,
+                      getGuestAttachmentSecret()
+                  )
+                : null;
 
         const activeModel = getActiveAiModel(modelConfig);
         let estimatedInputTokens = 0;
@@ -893,21 +934,61 @@ export async function POST(req: Request) {
                 let extractedPdfText: string | undefined;
                 let pdfFilePartBuffer: Buffer | undefined;
 
+                const isGuestObject =
+                    typeof attachment.objectKey === "string" &&
+                    Boolean(guestObjectPrefix) &&
+                    isOwnGuestAttachmentKey(
+                        attachment.objectKey,
+                        access.subjectKey,
+                        getGuestAttachmentSecret()
+                    );
+                if (isGuestObject && !GUEST_ATTACHMENT_TYPES[attachment.mediaType]) {
+                    throw new ChatAccessError(
+                        400,
+                        "GUEST_ATTACHMENT_UNSUPPORTED_TYPE",
+                        "This file type cannot be attached as a guest."
+                    );
+                }
+                const attachmentSizeLimit = isGuestObject
+                    ? GUEST_MAX_ATTACHMENT_BYTES
+                    : MAX_ATTACHMENT_SIZE;
+
                 if (typeof attachment.objectKey === "string") {
-                    if (
-                        !userObjectPrefix ||
-                        !attachment.objectKey.startsWith(userObjectPrefix)
-                    ) {
+                    const isOwnUserObject =
+                        Boolean(userObjectPrefix) &&
+                        attachment.objectKey.startsWith(userObjectPrefix!);
+                    if (!isOwnUserObject && !isGuestObject) {
                         throw new Error("Attachment access denied.");
                     }
 
-                    attachmentBuffer = await readR2Object(
-                        attachment.objectKey,
-                        {
-                            maxBytes: MAX_ATTACHMENT_SIZE,
-                            expectedContentType: attachment.mediaType,
+                    try {
+                        attachmentBuffer = await readR2Object(
+                            attachment.objectKey,
+                            {
+                                maxBytes: attachmentSizeLimit,
+                                expectedContentType: attachment.mediaType,
+                            }
+                        );
+                    } catch (error) {
+                        // A guest object is ephemeral by design, so "gone" is
+                        // an ordinary outcome (the TTL sweep took it), not a
+                        // server fault. Say so instead of returning a 500 the
+                        // user cannot act on.
+                        if (isGuestObject) {
+                            logRequestError(
+                                "guest_attachment_unavailable",
+                                traceId,
+                                error,
+                                requestedModelId
+                            );
+                            throw new ChatAccessError(
+                                410,
+                                "GUEST_ATTACHMENT_EXPIRED",
+                                "The attached file is no longer available. Attach it again, or sign in to keep files with your chat."
+                            );
                         }
-                    );
+                        throw error;
+                    }
                     attachmentBytes = attachmentBuffer.byteLength;
                     attachmentData =
                         attachment.kind === "text"
@@ -917,7 +998,7 @@ export async function POST(req: Request) {
                     throw new Error("Attachment data is missing.");
                 }
 
-                if (attachmentBytes > MAX_ATTACHMENT_SIZE) {
+                if (attachmentBytes > attachmentSizeLimit) {
                     throw new ChatAccessError(
                         413,
                         "ATTACHMENT_TOO_LARGE",

@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
   Check,
   LoaderCircle,
+  Lock,
   RefreshCw,
   Search,
   ShieldAlert,
@@ -14,6 +15,7 @@ import {
 } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
+import { useGuestVerification } from "@/components/chat/GuestVerificationProvider";
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import { SourceGroundingBadge } from "@/components/chat/SourceGroundingBadge";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
@@ -39,6 +41,27 @@ type ReviewSetup = {
   reviewerClass?: string;
   freeMonthlyReviews?: number | null;
   disclaimer?: string;
+  /** Guest-only fields, all server-computed. Never sent back on the run. */
+  guest?: boolean;
+  guestTrial?: { limit: number; used: number; remaining: number };
+  creditsAvailable?: number;
+  webVerificationAvailable?: boolean;
+  persisted?: boolean;
+};
+
+/**
+ * The locally-held turn a guest reviews.
+ *
+ * A guest has no server-side conversation, so the answers travel with the
+ * request exactly as the guest quick summary's already do. This is the shape
+ * the shell hands over -- the same `localComparison*` refs the quick summary
+ * reads -- and it is the only thing about this dialog that differs between an
+ * account and a guest.
+ */
+export type GuestReviewSource = {
+  question: string;
+  responses: Array<{ messageId: string; modelId: string; content: string }>;
+  language: string;
 };
 
 type Citation = { responseId: "A" | "B" | "C"; quote: string; verified: boolean };
@@ -94,6 +117,9 @@ type ComparisonReview = {
   originalUsageCredits?: number;
   cached: boolean;
   disclaimer: string;
+  guest?: boolean;
+  persisted?: boolean;
+  webVerificationAvailable?: boolean;
 };
 
 const modeKeys: Array<{
@@ -352,16 +378,33 @@ export function VerifyItemButton({
 
 export function ComparisonReviewDialog({
   conversationId,
+  guestSource = null,
   open,
   onClose,
   onCompleted,
+  onSignIn,
 }: {
   conversationId: string | null;
+  /**
+   * Present only for guests. When set, setup and run go to the guest
+   * endpoints and the answers travel with the request instead of being looked
+   * up by conversation id -- everything else on this screen, including the
+   * dual-reviewer tabs and the source-grounding badge, is the same component
+   * rendering the same DTO.
+   */
+  guestSource?: GuestReviewSource | null;
   open: boolean;
   onClose: () => void;
   onCompleted?: () => void;
+  onSignIn?: () => void;
 }) {
   const { t } = useLanguage();
+  const { requestToken: requestGuestVerificationToken } = useGuestVerification();
+  // One key per opened dialog, regenerated after a failure so a genuine retry
+  // is a new run while a double-submitted click is not. The server refuses the
+  // second request carrying a key it has already claimed, before any credit is
+  // reserved.
+  const idempotencyKeyRef = useRef<string>("");
   const { models: catalogModels } = useModelCatalog();
   const [setup, setSetup] = useState<ReviewSetup | null>(null);
   const [review, setReview] = useState<ComparisonReview | null>(null);
@@ -372,13 +415,34 @@ export function ComparisonReviewDialog({
   const [error, setError] = useState("");
   const [activeReviewer, setActiveReviewer] = useState<"primary" | "secondary">("primary");
 
+  const isGuestReview = Boolean(guestSource);
+
   useEffect(() => {
-    if (!open || !conversationId) return;
+    if (!open) return;
+    if (!conversationId && !guestSource) return;
     const controller = new AbortController();
-    void fetch(
-      `/api/conversations/${conversationId}/comparison-reviews`,
-      { cache: "no-store", signal: controller.signal }
-    )
+    // The guest preview is a POST because the thing being previewed is the
+    // payload: there is no saved conversation to name in a URL. It spends
+    // nothing and reserves nothing -- it exists so the price, the reviewer
+    // class and the remaining trial on this screen all come from the server.
+    const request = guestSource
+      ? fetch("/api/chat/comparison-review/preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+          signal: controller.signal,
+          body: JSON.stringify({
+            question: guestSource.question,
+            responses: guestSource.responses,
+            language: guestSource.language,
+          }),
+        })
+      : fetch(`/api/conversations/${conversationId}/comparison-reviews`, {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+
+    void request
       .then(async (response) => {
         const data = (await response.json().catch(() => ({}))) as ReviewSetup & {
           error?: string;
@@ -402,7 +466,13 @@ export function ComparisonReviewDialog({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [conversationId, open, t]);
+  }, [conversationId, guestSource, open, t]);
+
+  useEffect(() => {
+    if (open && !idempotencyKeyRef.current) {
+      idempotencyKeyRef.current = crypto.randomUUID();
+    }
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -450,13 +520,13 @@ export function ComparisonReviewDialog({
       `chat.aiReviewSourceGroundingLevel${level.charAt(0).toUpperCase()}${level.slice(1)}`
     );
 
-  if (!open || !conversationId) return null;
+  if (!open || (!conversationId && !guestSource)) return null;
 
   const runReview = async () => {
+    if (!setup?.available) return;
     if (
-      !setup?.available ||
-      !setup.promptMessageId ||
-      !setup.assistantMessageIds
+      !guestSource &&
+      (!setup.promptMessageId || !setup.assistantMessageIds)
     ) {
       return;
     }
@@ -468,23 +538,65 @@ export function ComparisonReviewDialog({
       { review_mode: mode }
     );
     try {
-      const response = await fetch(
-        `/api/conversations/${conversationId}/comparison-reviews`,
-        {
+      const sendGuestRun = (turnstileToken?: string) =>
+        fetch("/api/chat/comparison-review", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          cache: "no-store",
           body: JSON.stringify({
-            promptMessageId: setup.promptMessageId,
-            assistantMessageIds: setup.assistantMessageIds,
+            question: guestSource!.question,
+            responses: guestSource!.responses,
+            language: guestSource!.language,
             reviewMode: mode,
             includeSynthesis,
+            idempotencyKey: idempotencyKeyRef.current,
+            ...(turnstileToken ? { turnstileToken } : {}),
           }),
+        });
+
+      let response = guestSource
+        ? await sendGuestRun()
+        : await fetch(
+            `/api/conversations/${conversationId}/comparison-reviews`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                promptMessageId: setup.promptMessageId,
+                assistantMessageIds: setup.assistantMessageIds,
+                reviewMode: mode,
+                includeSynthesis,
+              }),
+            }
+          );
+      if (guestSource && !response.ok) {
+        const preflight = (await response.clone().json().catch(() => null)) as
+          | { code?: string }
+          | null;
+        if (preflight?.code === "TURNSTILE_REQUIRED") {
+          // User-initiated, so the shared verification sheet may be shown.
+          const token = await requestGuestVerificationToken("guest_ai_review");
+          response = await sendGuestRun(token);
         }
-      );
+      }
       const data = (await response.json().catch(() => ({}))) as
         | ComparisonReview
-        | { error?: string; traceId?: string };
+        | { error?: string; traceId?: string; code?: string };
       if (!response.ok || !("result" in data)) {
+        const code = "code" in data ? data.code : undefined;
+        // The two guest-specific refusals have their own sentences: one is
+        // "come back next month or sign in", the other is "you have run out
+        // of credits". Collapsing them into the generic failure would leave
+        // the user guessing which.
+        if (code === "GUEST_COMPARISON_REVIEW_MONTHLY_LIMIT") {
+          throw new Error(t("chat.guestAiReviewTrialUsedLong"));
+        }
+        if (code === "CHAT_QUOTA_EXCEEDED") {
+          throw new Error(t("chat.guestAiReviewNotEnoughCredits"));
+        }
+        if (code === "DUPLICATE_REQUEST") {
+          throw new Error(t("chat.aiReviewDuplicateRequest"));
+        }
         const trace = "traceId" in data && data.traceId ? ` (${data.traceId})` : "";
         throw new Error(
           `${"error" in data && data.error ? data.error : t("chat.aiReviewFailed")}${trace}`
@@ -516,6 +628,10 @@ export function ComparisonReviewDialog({
       setError(
         runError instanceof Error ? runError.message : t("chat.aiReviewFailed")
       );
+      // The failed run released its idempotency claim server-side, so a real
+      // retry needs a real new key rather than re-presenting one the server
+      // may still be holding.
+      idempotencyKeyRef.current = crypto.randomUUID();
     } finally {
       setRunning(false);
     }
@@ -666,6 +782,18 @@ export function ComparisonReviewDialog({
                     <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-bold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
                       {t("chat.aiReviewedBy")}: {modelName(activeEntry.reviewerModelId)}
                     </span>
+                    {/* A guest result is not stored anywhere, so it must not
+                        be presented as if it were: it is gone on refresh, and
+                        saying so here is the difference between an honest
+                        trial and a broken feature. */}
+                    {review.persisted === false && (
+                      <span
+                        data-testid="ai-review-guest-not-saved"
+                        className="rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+                      >
+                        {t("chat.guestAiReviewNotSaved")}
+                      </span>
+                    )}
                     {/* What the analysis actually covered, kept with the run
                         rather than only on the screen that started it. */}
                     {comparedAnswerCount > 0 && (
@@ -764,20 +892,51 @@ export function ComparisonReviewDialog({
                       items={activeResult.verificationNeeded}
                       emptyLabel={t("chat.aiReviewNoneFound")}
                       tone="warning"
-                      renderExtra={(item) => (
-                        <VerifyItemButton
-                          conversationId={conversationId as string}
-                          item={item}
-                          checkLabel={t("chat.aiReviewVerifyWithWeb")}
-                          checkingLabel={t("chat.aiReviewVerifying")}
-                          failedLabel={t("chat.aiReviewVerifyFailed")}
-                          statusLabels={{
-                            supported: t("chat.aiReviewVerifySupported"),
-                            unsupported: t("chat.aiReviewVerifyUnsupported"),
-                            inconclusive: t("chat.aiReviewVerifyInconclusive"),
-                          }}
-                        />
-                      )}
+                      renderExtra={(item, index) =>
+                        // Per-item web verification runs a paid external
+                        // search against a saved conversation, which a guest
+                        // does not have. Rather than showing a control that
+                        // would 401, the reason and the way to get it are
+                        // stated once, under the first item.
+                        isGuestReview ? (
+                          index === 0 ? (
+                            <p
+                              data-testid="ai-review-verify-guest-locked"
+                              className="mt-1.5 flex items-start gap-1.5 rounded-lg border border-zinc-200 px-2 py-1.5 text-[11px] leading-5 text-zinc-600 dark:border-zinc-800 dark:text-zinc-300"
+                            >
+                              <Lock
+                                className="mt-0.5 h-3 w-3 shrink-0"
+                                aria-hidden="true"
+                              />
+                              <span className="min-w-0">
+                                {t("chat.guestAiReviewVerifySignIn")}
+                                {onSignIn && (
+                                  <button
+                                    type="button"
+                                    onClick={onSignIn}
+                                    className="ml-1 font-bold underline underline-offset-2"
+                                  >
+                                    {t("chat.guestAiReviewSignInCta")}
+                                  </button>
+                                )}
+                              </span>
+                            </p>
+                          ) : null
+                        ) : (
+                          <VerifyItemButton
+                            conversationId={conversationId as string}
+                            item={item}
+                            checkLabel={t("chat.aiReviewVerifyWithWeb")}
+                            checkingLabel={t("chat.aiReviewVerifying")}
+                            failedLabel={t("chat.aiReviewVerifyFailed")}
+                            statusLabels={{
+                              supported: t("chat.aiReviewVerifySupported"),
+                              unsupported: t("chat.aiReviewVerifyUnsupported"),
+                              inconclusive: t("chat.aiReviewVerifyInconclusive"),
+                            }}
+                          />
+                        )
+                      }
                     />
                   </div>
 
@@ -948,6 +1107,19 @@ export function ComparisonReviewDialog({
                         {setup.freeMonthlyReviews ? (
                           <p>
                             Free: {setup.freeMonthlyReviews} {t("chat.aiReviewPerMonth")}
+                          </p>
+                        ) : null}
+                        {setup.guestTrial ? (
+                          <p data-testid="ai-review-guest-trial-scope">
+                            {t("chat.guestAiReviewTrialAvailable")
+                              .replaceAll(
+                                "{remaining}",
+                                String(setup.guestTrial.remaining)
+                              )
+                              .replaceAll(
+                                "{limit}",
+                                String(setup.guestTrial.limit)
+                              )}
                           </p>
                         ) : null}
                       </div>
