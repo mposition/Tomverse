@@ -9,6 +9,7 @@ import {
   consumeApiRateLimit,
   readLimitedJson,
 } from "@/lib/apiSecurity";
+import { getAnonymousClientKey } from "@/lib/clientIp";
 
 const waitlistSchema = z
   .object({
@@ -21,7 +22,8 @@ const waitlistSchema = z
 export async function POST(req: Request) {
   try {
     const session = await getServerSession(authOptions);
-    const subject = session?.user?.id || "guest";
+    // Per-caller, not a single shared "guest" bucket.
+    const subject = session?.user?.id || `guest:${getAnonymousClientKey(req)}`;
     await consumeApiRateLimit(req, subject, "waitlist-submit", {
       minute: 5,
       day: 20,

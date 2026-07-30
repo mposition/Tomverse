@@ -62,6 +62,9 @@ import {
   type AppToastTone,
 } from "@/lib/appToast";
 import {
+  removeAllGuestConversationMessages,
+} from "@/lib/guestConversationStorage";
+import {
   notifyUserUsageChanged,
   useUserUsage,
 } from "@/components/chat/useUserUsage";
@@ -266,7 +269,7 @@ function ConfirmDialog({
   onConfirm: () => void | Promise<void>;
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4">
       <div
         role="dialog"
         aria-modal="true"
@@ -1932,6 +1935,9 @@ export function ChatPageClient({
       }
       if (updated.length === 0) {
         localStorage.removeItem(GUEST_CONVERSATIONS_STORAGE_KEY);
+        // Nothing is left to reference the remaining transcripts, so drop them
+        // rather than leaving deleted prompts recoverable on a shared browser.
+        removeAllGuestConversationMessages();
       }
     } else {    
       try {
@@ -3696,7 +3702,7 @@ export function ChatPageClient({
       </div>
     )}
     {compareSummary && (
-      <div className="fixed inset-x-0 top-0 z-50 flex h-[100dvh] items-center justify-center overflow-hidden bg-black/60 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-[max(0.75rem,env(safe-area-inset-top))] sm:p-4">
+      <div className="fixed inset-x-0 top-0 z-[130] flex h-[100dvh] items-center justify-center overflow-hidden bg-black/60 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-[max(0.75rem,env(safe-area-inset-top))] sm:p-4">
         <section
           role="dialog"
           data-testid="quick-comparison-dialog"
@@ -3975,7 +3981,7 @@ export function ChatPageClient({
       />
     )}
     {unlockDialog && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4">
         <form
           onSubmit={(event) => {
             event.preventDefault();
@@ -4020,7 +4026,7 @@ export function ChatPageClient({
       </div>
     )}
     {lockedSelectDialog && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4">
         <form
           onSubmit={async (event) => {
             event.preventDefault();

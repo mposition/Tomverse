@@ -31,6 +31,8 @@ const toRequestLike = (headers: Record<string, unknown> | undefined): Request =>
         return new Request("http://internal.invalid/auth/email-code");
     }
 };
+import { sessionRevocationReason } from "@/lib/sessionRevocationCore";
+import { readSessionSecuritySnapshot } from "@/lib/sessionSecurity";
 
 const SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
 const SESSION_UPDATE_AGE_SECONDS = 24 * 60 * 60;
@@ -184,29 +186,41 @@ export const authOptions: NextAuthOptions = {
                         ? analyticsUser.createdAt.toISOString()
                         : undefined;
                 token.authenticatedAt = new Date().toISOString();
+                token.sessionIssuedAt = Date.now();
             }
             return token;
         },
         async session({ session, token }) {
-            if (session.user && token.id) {
-                const security = await prisma.user.findUnique({
-                    where: { id: token.id },
-                    select: { sessionsInvalidatedAt: true },
+            if (!session.user || !token.id) return session;
+
+            // Sessions are JWTs, so there is no session row to delete. Check the
+            // server-side revocation epoch and account status on every
+            // resolution; otherwise a suspended or signed-out user keeps full
+            // API access until their token expires.
+            const snapshot = await readSessionSecuritySnapshot(token.id);
+            const revocation = sessionRevocationReason({
+                issuedAt: token.sessionIssuedAt ?? token.authenticatedAt,
+                snapshot,
+            });
+            if (revocation) {
+                logAuthAuditEvent("auth.session_rejected", {
+                    userId: token.id,
+                    reason: revocation,
                 });
-                const authenticatedAtMs = token.authenticatedAt
-                    ? new Date(token.authenticatedAt).getTime()
-                    : 0;
-                if (
-                    security?.sessionsInvalidatedAt &&
-                    authenticatedAtMs < security.sessionsInvalidatedAt.getTime()
-                ) {
-                    return { ...session, user: undefined as unknown as typeof session.user };
-                }
-                session.user.id = token.id;
-                session.user.plan = token.plan;
-                session.user.createdAt = token.createdAt;
-                session.user.authenticatedAt = token.authenticatedAt;
+                // Strip the whole user object. Every authenticated route gates on
+                // `session.user.id`, and admin routes additionally match on
+                // email, so removing both makes the request unauthenticated
+                // everywhere rather than only on the id check.
+                return {
+                    expires: session.expires,
+                    user: {},
+                } as typeof session;
             }
+
+            session.user.id = token.id;
+            session.user.plan = token.plan;
+            session.user.createdAt = token.createdAt;
+            session.user.authenticatedAt = token.authenticatedAt;
             return session;
         },
     },

@@ -1,6 +1,7 @@
 import "server-only";
 
 import { APP_DEFAULTS } from "@/lib/appDefaults";
+import { isE2EDatabaseDisabled } from "@/lib/e2eTestMode";
 import {
   canUseModelWithPlan,
   getModelUsageProfile,
@@ -28,7 +29,7 @@ export type OperationalFeatureFlags = Pick<
 >;
 
 const enabledFromValue = (value: string | null | undefined) => value !== "false";
-const e2eDatabaseDisabled = () => process.env.E2E_DISABLE_DATABASE === "true";
+const e2eDatabaseDisabled = isE2EDatabaseDisabled;
 
 export const isValidGuestDefaultModel = async (modelId: string) => {
   const model = await getEnabledRuntimeModel(modelId);

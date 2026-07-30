@@ -131,12 +131,18 @@ const isFileParsingError = (content: string) => {
   );
 };
 
-function TypingIndicator() {
+function TypingIndicator({ label }: { label?: string }) {
   return (
+    // The three bouncing dots are purely visual: without a text alternative,
+    // assistive technology has no way to tell that a model is generating a
+    // response. The announcement itself comes from the dedicated live region in
+    // ChatMessageList, so no role is needed (and adding one would make existing
+    // getByRole("status") toast assertions ambiguous).
     <div className="flex items-center gap-1 py-1">
-          <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 motion-reduce:animate-none dark:bg-zinc-500 [animation-delay:-0.2s]" />
-          <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 motion-reduce:animate-none dark:bg-zinc-500 [animation-delay:-0.1s]" />
-          <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 motion-reduce:animate-none dark:bg-zinc-500" />
+      {label ? <span className="sr-only">{label}</span> : null}
+      <span aria-hidden="true" className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 motion-reduce:animate-none dark:bg-zinc-500 [animation-delay:-0.2s]" />
+      <span aria-hidden="true" className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 motion-reduce:animate-none dark:bg-zinc-500 [animation-delay:-0.1s]" />
+      <span aria-hidden="true" className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 motion-reduce:animate-none dark:bg-zinc-500" />
     </div>
   );
 }
@@ -172,6 +178,21 @@ export function ChatMessageList({
     const { t } = useLanguage();
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const copiedResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Coarse announcement of the response lifecycle. Deliberately NOT an
+  // aria-live region around the transcript itself: streaming token-by-token
+  // into a live region floods a screen reader with partial words. Only the
+  // start/finish/fail transitions are announced; the answer stays readable by
+  // navigating the transcript as normal.
+  const lastMessage = messages[messages.length - 1];
+  const liveStatusMessage = (() => {
+    if (!lastMessage || lastMessage.role !== "assistant") return "";
+    if (lastMessage.id === "welcome") return "";
+    if (!lastMessage.content) return t("chat.responseGenerating");
+    if (lastMessage.status === "error") return t("chat.responseFailed");
+    if (lastMessage.status === "cancelled") return t("chat.responseCancelled");
+    return t("chat.responseComplete");
+  })();
 
   const copyMessageContent = async (messageId: string, content: string) => {
     try {
@@ -311,6 +332,17 @@ export function ChatMessageList({
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
+      {/* aria-live + aria-atomic without role="status": the two are equivalent
+          for announcement purposes, and an extra `status` role in the tree would
+          make every existing getByRole("status") toast assertion ambiguous. */}
+      <p
+        data-testid="chat-response-status"
+        className="sr-only"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        {liveStatusMessage}
+      </p>
       <div
         data-testid="chat-message-list"
         ref={containerRef}
@@ -556,7 +588,7 @@ export function ChatMessageList({
                         </span>
                       </div>
                     ) : (
-                      <TypingIndicator />
+                      <TypingIndicator label={t("chat.responseGenerating")} />
                     )
                   ) : msg.role === "assistant" ? (
                     <>
@@ -568,6 +600,38 @@ export function ChatMessageList({
                         ul: ({ children }) => <ul className="mb-3 list-disc pl-5 last:mb-0">{children}</ul>,
                         ol: ({ children }) => <ol className="mb-3 list-decimal pl-5 last:mb-0">{children}</ol>,
                         li: ({ children }) => <li className="mb-1">{children}</li>,
+                        // Tailwind's preflight resets headings to `font-size:
+                        // inherit; font-weight: inherit` and zeroes every border,
+                        // so without these overrides a model's "## Heading"
+                        // rendered pixel-identical to a paragraph and GFM tables
+                        // came out borderless and unpadded.
+                        h1: ({ children }) => <h1 className="mb-2 mt-4 text-[1.35em] font-bold leading-snug first:mt-0">{children}</h1>,
+                        h2: ({ children }) => <h2 className="mb-2 mt-4 text-[1.2em] font-bold leading-snug first:mt-0">{children}</h2>,
+                        h3: ({ children }) => <h3 className="mb-2 mt-3 text-[1.08em] font-bold leading-snug first:mt-0">{children}</h3>,
+                        h4: ({ children }) => <h4 className="mb-1.5 mt-3 text-[1em] font-bold leading-snug first:mt-0">{children}</h4>,
+                        h5: ({ children }) => <h5 className="mb-1.5 mt-3 text-[0.95em] font-bold uppercase tracking-wide first:mt-0">{children}</h5>,
+                        h6: ({ children }) => <h6 className="mb-1.5 mt-3 text-[0.9em] font-bold uppercase tracking-wide first:mt-0">{children}</h6>,
+                        blockquote: ({ children }) => (
+                            <blockquote className="mb-3 border-l-2 border-zinc-300 pl-3 italic text-zinc-600 last:mb-0 dark:border-zinc-600 dark:text-zinc-300">
+                                {children}
+                            </blockquote>
+                        ),
+                        hr: () => <hr className="my-4 border-t border-zinc-200 dark:border-zinc-700" />,
+                        // The wrapper scrolls the table itself; without it a wide
+                        // table forces the whole message list to scroll sideways.
+                        table: ({ children }) => (
+                            <div className="mb-3 max-w-full overflow-x-auto last:mb-0">
+                                <table className="w-full border-collapse text-left text-[0.95em]">{children}</table>
+                            </div>
+                        ),
+                        th: ({ children }) => (
+                            <th className="border border-zinc-300 bg-zinc-100 px-2 py-1 font-bold dark:border-zinc-600 dark:bg-zinc-800">
+                                {children}
+                            </th>
+                        ),
+                        td: ({ children }) => (
+                            <td className="border border-zinc-300 px-2 py-1 align-top dark:border-zinc-600">{children}</td>
+                        ),
                         pre: ({ children }) => (
                           <pre className="mb-3 overflow-x-auto rounded-lg bg-zinc-950 p-3 text-zinc-100 last:mb-0 [&>code]:block [&>code]:rounded-none [&>code]:bg-transparent [&>code]:p-0 [&>code]:text-zinc-100">
                             {children}

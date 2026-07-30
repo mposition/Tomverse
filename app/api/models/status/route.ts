@@ -6,6 +6,7 @@ import { resolveModelRuntimeAvailability } from "@/lib/modelAvailability";
 import { getProviderHealthDashboard } from "@/lib/providerMonitoring";
 import { getAnonymousClientKey } from "@/lib/clientIp";
 import { selectFallbackCandidates } from "@/lib/providerFallbackCandidates";
+import { isE2EDatabaseDisabled } from "@/lib/e2eTestMode";
 import {
   apiSecurityResponse,
   consumeApiRateLimit,
@@ -53,7 +54,7 @@ const fallbackModelStatus = (publicModels: Awaited<ReturnType<typeof getPublicRu
 export async function GET(req: Request) {
   try {
     const publicModels = await getPublicRuntimeModels();
-    if (process.env.E2E_DISABLE_DATABASE === "true") {
+    if (isE2EDatabaseDisabled()) {
       return NextResponse.json(fallbackModelStatus(publicModels), {
         headers: cacheHeaders,
       });

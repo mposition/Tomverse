@@ -19,6 +19,7 @@ import {
 import type { WebSearchMode } from "@/lib/appDefaults";
 import { splitSearchMetadataTrailer } from "@/lib/webSearchStreamTrailer";
 import type { WebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
+import { guestMessagesStorageKey } from "@/lib/guestConversationStorage";
 
 const processedPromptKeys = new Set<string>();
 const CHAT_STREAM_IDLE_TIMEOUT_MS = 90_000;
@@ -135,6 +136,8 @@ function ChatAppComponent({
     };
   
   const isSendingRef = useRef(false);
+  /** True while an IME composition is in progress in the model-only composer. */
+  const isModelInputComposingRef = useRef(false);
   const streamingChatIdRef = useRef<string | null>(null);
   // Guards for the message-view loader below. `requestedViewKeyRef` dedupes
   // repeat loads of the same view; `loadRequestIdRef` identifies the newest
@@ -373,7 +376,7 @@ function ChatAppComponent({
         if (initialConversationId) {
           loadedChatIdRef.current = initialConversationId;
 
-          const storageKey = `guest_messages_${initialConversationId}_${modelId}`;
+          const storageKey = guestMessagesStorageKey(initialConversationId, modelId);
           const savedMessages = localStorage.getItem(storageKey);
           if (savedMessages) {
             try {
@@ -516,7 +519,7 @@ function ChatAppComponent({
   useEffect(() => {
       if (isGuestMode && initialConversationId && isMessagesLoaded && messages.length > 0) {
           if (loadedChatIdRef.current === initialConversationId) {
-              const storageKey = `guest_messages_${initialConversationId}_${modelId}`;
+              const storageKey = guestMessagesStorageKey(initialConversationId, modelId);
               try {
                   // The same `data` strip the request already does. A guest
                   // image attachment carries a multi-megabyte data URL for its
@@ -1018,6 +1021,14 @@ function ChatAppComponent({
 
                                   event.preventDefault();
                                   handleModelOnlySubmit();
+                              }}
+                              onCompositionStart={() => {
+                                  isModelInputComposingRef.current = true;
+                              }}
+                              onCompositionEnd={() => {
+                                  requestAnimationFrame(() => {
+                                      isModelInputComposingRef.current = false;
+                                  });
                               }}
                               disabled={isSending || !initialConversationId}
                               enterKeyHint={isMobileShell ? "enter" : undefined}

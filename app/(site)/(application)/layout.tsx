@@ -16,6 +16,7 @@ import {
   resolveAnalyticsConsentPolicy,
 } from "@/lib/analyticsConsentPolicy";
 import { authOptions } from "@/lib/auth";
+import { isE2EAuthBypassEnabled } from "@/lib/e2eTestMode";
 import { ModelCatalogProvider } from "@/components/ModelCatalogProvider";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { AVAILABLE_MODELS } from "@/lib/models";
@@ -66,12 +67,12 @@ export default async function ApplicationLayout({
 
   try {
     const e2eCookies =
-      process.env.E2E_AUTH_BYPASS === "true" ? await cookies() : null;
+      isE2EAuthBypassEnabled() ? await cookies() : null;
     const e2eAuthCookie = e2eCookies?.get("__tomverse_e2e_auth")?.value;
     e2eAnalyticsEnabled =
       e2eCookies?.get("__tomverse_e2e_analytics")?.value === "1";
 
-    if (process.env.E2E_AUTH_BYPASS === "true" && e2eAuthCookie === "1") {
+    if (isE2EAuthBypassEnabled() && e2eAuthCookie === "1") {
       session = {
         user: {
           id: "qa-user",
@@ -111,7 +112,7 @@ export default async function ApplicationLayout({
           userCreatedAt={session?.user?.createdAt || null}
           initialConsentMode={analyticsConsentPolicy.mode}
           disabled={
-            process.env.E2E_AUTH_BYPASS === "true" && !e2eAnalyticsEnabled
+            isE2EAuthBypassEnabled() && !e2eAnalyticsEnabled
           }
         >
           <ModelCatalogProvider initialModels={initialModels}>

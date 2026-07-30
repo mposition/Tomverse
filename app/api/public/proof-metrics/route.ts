@@ -2,12 +2,11 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { isE2EFixtureMode } from "@/lib/e2eTestMode";
 
 const PUBLIC_COUNT_THRESHOLD = 20;
 
-const isDatabaseDisabledForE2e = () =>
-  process.env.E2E_AUTH_BYPASS === "true" &&
-  process.env.E2E_DISABLE_DATABASE === "true";
+const isDatabaseDisabledForE2e = isE2EFixtureMode;
 
 const publicCount = (count: number) =>
   count >= PUBLIC_COUNT_THRESHOLD ? Math.floor(count / 10) * 10 : null;

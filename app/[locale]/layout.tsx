@@ -3,9 +3,10 @@ import "../globals.css";
 import { DocumentShell } from "@/components/DocumentShell";
 import { MarketingShell } from "@/components/marketing/MarketingShell";
 import { marketingLocaleFor } from "@/lib/marketingLocale";
-import { rootMetadata } from "@/lib/rootMetadata";
+import { rootMetadata, rootViewport } from "@/lib/rootMetadata";
 
 export const metadata = rootMetadata;
+export const viewport = rootViewport;
 
 export const dynamic = "force-static";
 export const revalidate = false;
