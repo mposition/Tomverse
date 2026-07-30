@@ -3,31 +3,26 @@ import "server-only";
 import type { BillingPromotion as PrismaBillingPromotion } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import type { ModelTier } from "@/lib/models";
+import {
+  getDefaultBillingPlan,
+  getDefaultBillingPlans,
+  type BillingPlanConfig,
+  type BillingPlanId,
+} from "@/lib/billingPlanDefaults";
 import { promotionEligibilityFailure } from "@/lib/billingPromotionCore";
 import { getPublicCreditPackCatalog } from "@/lib/creditPacks";
 
-export type BillingPlanId = "free" | "pro" | "max";
-
-export type BillingPlanConfig = {
-  id: BillingPlanId;
-  name: string;
-  tier: ModelTier;
-  monthlyPriceCents: number;
-  annualPriceCents: number;
-  currency: string;
-  stripeProductId: string | null;
-  stripePriceId: string | null;
-  stripeAnnualPriceId: string | null;
-  dailyMessageLimit: number;
-  monthlyMessageLimit: number;
-  maxModels: number;
-  allowAttachments: boolean;
-  allowSharing: boolean;
-  allowDownloads: boolean;
-  isActive: boolean;
-  sortOrder: number;
-  updatedAt?: string | null;
-};
+// The plan shape and its built-in values live in lib/billingPlanDefaults.ts so
+// the marketing surface can reach them without importing this `server-only`
+// module. Re-exported here so every existing server import keeps working.
+export {
+  getDefaultBillingPlans,
+  getDefaultBillingPlan,
+} from "@/lib/billingPlanDefaults";
+export type {
+  BillingPlanConfig,
+  BillingPlanId,
+} from "@/lib/billingPlanDefaults";
 
 export type BillingPromotionConfig = {
   id: string;
@@ -48,72 +43,6 @@ export type BillingPromotionConfig = {
   isActive: boolean;
   updatedAt?: string | null;
 };
-
-const DEFAULT_PLANS: Record<BillingPlanId, BillingPlanConfig> = {
-  free: {
-    id: "free",
-    name: "Free",
-    tier: "Free",
-    monthlyPriceCents: 0,
-    annualPriceCents: 0,
-    currency: "USD",
-    stripeProductId: null,
-    stripePriceId: null,
-    stripeAnnualPriceId: null,
-    dailyMessageLimit: 30,
-    monthlyMessageLimit: 300,
-    maxModels: 3,
-    allowAttachments: true,
-    allowSharing: true,
-    allowDownloads: true,
-    isActive: true,
-    sortOrder: 10,
-    updatedAt: null,
-  },
-  pro: {
-    id: "pro",
-    name: "Pro",
-    tier: "Pro",
-    monthlyPriceCents: 1_500,
-    annualPriceCents: 14_400,
-    currency: "USD",
-    stripeProductId: null,
-    stripePriceId: null,
-    stripeAnnualPriceId: null,
-    dailyMessageLimit: 300,
-    monthlyMessageLimit: 3_000,
-    maxModels: 3,
-    allowAttachments: true,
-    allowSharing: true,
-    allowDownloads: true,
-    isActive: true,
-    sortOrder: 20,
-    updatedAt: null,
-  },
-  max: {
-    id: "max",
-    name: "Max",
-    tier: "Max",
-    monthlyPriceCents: 2_500,
-    annualPriceCents: 24_000,
-    currency: "USD",
-    stripeProductId: null,
-    stripePriceId: null,
-    stripeAnnualPriceId: null,
-    dailyMessageLimit: 0,
-    monthlyMessageLimit: 10_000,
-    maxModels: 3,
-    allowAttachments: true,
-    allowSharing: true,
-    allowDownloads: true,
-    isActive: true,
-    sortOrder: 30,
-    updatedAt: null,
-  },
-};
-
-export const getDefaultBillingPlans = (): BillingPlanConfig[] =>
-  Object.values(DEFAULT_PLANS).map((plan) => ({ ...plan }));
 
 const normalizePlanId = (value: string): BillingPlanId | null =>
   value === "free" || value === "pro" || value === "max" ? value : null;
@@ -179,7 +108,7 @@ export async function syncBillingDefaultsToDatabase() {
   });
   const existingPlanIds = new Set(existingPlans.map((plan) => plan.id));
 
-  for (const plan of Object.values(DEFAULT_PLANS)) {
+  for (const plan of getDefaultBillingPlans()) {
     if (existingPlanIds.has(plan.id)) continue;
     await prisma.billingPlan.create({
       data: {
@@ -208,7 +137,10 @@ export async function syncBillingDefaultsToDatabase() {
 
 export async function getBillingPlanByTier(tier: ModelTier) {
   const plans = await getBillingPlans();
-  return plans.find((plan) => plan.id === planIdForTier(tier)) || DEFAULT_PLANS.free;
+  return (
+    plans.find((plan) => plan.id === planIdForTier(tier)) ||
+    getDefaultBillingPlan("free")
+  );
 }
 
 export async function getBillingPromotions(): Promise<BillingPromotionConfig[]> {

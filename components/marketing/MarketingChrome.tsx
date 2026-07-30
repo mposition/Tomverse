@@ -7,9 +7,26 @@ import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { MarketingConsentSlot } from "@/components/analytics/AnalyticsProvider";
 import { MarketingLanguageSwitcher } from "./MarketingLanguageSwitcher";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
-import { localizedPath } from "@/lib/seo";
+import { LOCALIZED_SEO_PATHS, localizedPath } from "@/lib/seo";
 import { statusLinkLabel, statusNewTabCopy } from "./statusLinkCopy";
 import { LocaleSupportNotice } from "./LocaleSupportNotice";
+
+// Only these paths actually have a `/[locale]` route (app/[locale]), so only
+// these may be prefixed. `/models`, `/pricing`, `/faq`, `/terms` and the rest
+// are single-route pages that pick their language up from LanguageProvider --
+// prefixing them would 404.
+//
+// Without this the brand link and the "Features" anchor sent a visitor on
+// /ko to `/`, which is the English canonical URL: the copy stayed Korean
+// (localStorage), but the URL, the canonical tag and og:locale all switched
+// to English mid-visit.
+const localizedHref = (lang: Language, href: string) => {
+  if (lang === "en") return href;
+  const [path, hash] = href.split("#");
+  const basePath = path || "/";
+  if (!(LOCALIZED_SEO_PATHS as readonly string[]).includes(basePath)) return href;
+  return `${localizedPath(lang, basePath)}${hash ? `#${hash}` : ""}`;
+};
 
 const resourceLinks: Record<Language, Array<{ label: string; path: string }>> = {
   en: [
@@ -260,8 +277,9 @@ export function MarketingHeader({
           accessible name is exactly the visible brand text.
         */}
         <Link
-          href="/"
+          href={localizedHref(lang, "/")}
           className="flex shrink-0 items-center gap-[8px] sm:gap-3"
+          data-testid="marketing-brand-link"
           onClick={() => setIsMenuOpen(false)}
         >
           <span className="flex h-[36px] w-[36px] shrink-0 overflow-hidden rounded-xl bg-white ring-1 ring-zinc-200 dark:ring-zinc-800">
@@ -290,7 +308,7 @@ export function MarketingHeader({
           {labels.topMenu.map((item) => (
             <Link
               key={item.href}
-              href={item.href}
+              href={localizedHref(lang, item.href)}
               target={item.href === "/status" ? "_blank" : undefined}
               rel={item.href === "/status" ? "noopener noreferrer" : undefined}
               prefetch={item.href === "/status" ? false : undefined}
@@ -302,7 +320,13 @@ export function MarketingHeader({
               title={
                 item.href === "/status" ? statusNewTabCopy[lang] : undefined
               }
-              data-testid={item.href === "/status" ? "header-status-link" : undefined}
+              data-testid={
+                item.href === "/status"
+                  ? "header-status-link"
+                  : item.href.startsWith("/#")
+                    ? "header-features-link"
+                    : undefined
+              }
               className="inline-flex items-center gap-1 hover:text-zinc-950 dark:hover:text-white"
             >
               {item.label}
@@ -358,7 +382,7 @@ export function MarketingHeader({
             {labels.topMenu.map((item) => (
               <Link
                 key={item.href}
-                href={item.href}
+                href={localizedHref(lang, item.href)}
                 target={item.href === "/status" ? "_blank" : undefined}
                 rel={item.href === "/status" ? "noopener noreferrer" : undefined}
                 prefetch={item.href === "/status" ? false : undefined}
@@ -370,7 +394,13 @@ export function MarketingHeader({
                 title={
                   item.href === "/status" ? statusNewTabCopy[lang] : undefined
                 }
-                data-testid={item.href === "/status" ? "mobile-status-link" : undefined}
+                data-testid={
+                  item.href === "/status"
+                    ? "mobile-status-link"
+                    : item.href.startsWith("/#")
+                      ? "mobile-features-link"
+                      : undefined
+                }
                 onClick={() => setIsMenuOpen(false)}
                 className="flex items-center gap-2 rounded-xl px-3 py-3 text-base font-bold text-zinc-800 transition hover:bg-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-900"
               >

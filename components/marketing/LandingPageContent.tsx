@@ -5,458 +5,42 @@ import { displayHeadingClass } from "@/lib/displayHeading";
 import { ArrowRight, Bot, Sparkles } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { useEffect, useRef } from "react";
-import { useLanguage, type Language } from "@/components/LanguageProvider";
-import { usePublicBilling } from "@/components/marketing/usePublicBilling";
+import { useLanguage } from "@/components/LanguageProvider";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
+import { ComparisonBasicsSection } from "./ComparisonBasicsSection";
+import { EvidenceSection } from "./EvidenceSection";
+import { getLandingCopy } from "./landingContent";
+import { LandingPricingSection } from "./LandingPricingSection";
+import { ModelCatalogueSection } from "./ModelCatalogueSection";
 import { ProductProofSection } from "./ProductProofSection";
+import { TrustSection } from "./TrustSection";
+import { WorkflowContinuitySection } from "./WorkflowContinuitySection";
 
-type CardCopy = { title: string; description: string };
-type PlanCopy = CardCopy & { id: "free" | "pro" | "max"; fallbackPrice: string };
-
-type LandingCopy = {
-  app: string;
-  badge: string;
-  brandNote: string;
-  title: string;
-  description: string;
-  primaryCta: string;
-  signedInCta: string;
-  heroSignupNote: string;
-  guestNote: string;
-  pricingCta: string;
-  modelFinderLead: string;
-  modelFinderCta: string;
-  steps: string[];
-  previewTitle: string;
-  previewCount: string;
-  previewAnswers: string[];
-  reviewTitle: string;
-  reviewItems: string[];
-  modelStripLabel: string;
-  modelCatalogue: string;
-  status: string;
-  supportTitle: string;
-  supportDescription: string;
-  supportItems: CardCopy[];
-  trustTitle: string;
-  trustDescription: string;
-  trustItems: CardCopy[];
-  safetyCta: string;
-  pricingTitle: string;
-  pricingDescription: string;
-  plans: PlanCopy[];
-  monthly: string;
-  pricingDetails: string;
-  faqTitle: string;
-  faqs: Array<{ question: string; answer: string }>;
-  ctaTitle: string;
-  ctaDescription: string;
-};
-
-const englishCopy: LandingCopy = {
-  app: "Chat",
-  badge: "Tomverse Insight · Multi-AI Comparison & Review",
-  brandNote: "Tomverse Insight is the multi-AI comparison and review experience from Tomverse.",
-  title: "Ask once.\nCompare multiple AI answers.",
-  description:
-    "Compare GPT, Claude, and Gemini side by side,\nthen use AI Review to find differences and missing points.",
-  primaryCta: "Start chatting free",
-  signedInCta: "Continue chatting",
-  heroSignupNote: "No sign-up required—start with three models.",
-  guestNote: "No sign-up required—compare GPT, Claude, and Gemini side by side.",
-  pricingCta: "See pricing",
-  modelFinderLead: "Not sure which AI fits your work?",
-  modelFinderCta: "Get a one-minute recommendation after sign-up.",
-  steps: ["Choose up to three models", "Ask once or attach a file", "Compare, review, follow up, or share"],
-  previewTitle: "One question, multiple perspectives",
-  previewCount: "3 models",
-  previewAnswers: ["Clear next steps", "Risks and trade-offs", "Concise operating plan"],
-  reviewTitle: "Tomverse AI Review",
-  reviewItems: ["Common ground", "Contradiction", "Missing point", "Verify next"],
-  modelStripLabel: "Compare models across leading providers",
-  modelCatalogue: "Explore all models",
-  status: "Live service status",
-  supportTitle: "Keep the work moving after the comparison.",
-  supportDescription:
-    "Tomverse keeps the useful context around each answer, so a comparison can become a document, a follow-up, or a result your team can revisit.",
-  supportItems: [
-    { title: "Files and real context", description: "Add images, PDFs, Office documents, text files, or supported Google Drive files when the source material matters." },
-    { title: "Targeted follow-up", description: "Ask one model a follow-up without losing the other answers or the original comparison." },
-    { title: "Projects and records", description: "Organize conversations into projects and keep a reusable record instead of rebuilding context across tabs." },
-    { title: "Share the outcome", description: "Create a read-only share page or download a clean text record when the result is ready." },
-  ],
-  trustTitle: "Clear controls for private and shared work.",
-  trustDescription:
-    "Tomverse makes storage, locks, and sharing behavior visible. AI providers still receive the prompts needed to generate a response.",
-  trustItems: [
-    { title: "Locked conversations", description: "Protect sensitive saved chats and require unlock verification before protected actions." },
-    { title: "Read-only sharing", description: "Share a snapshot designed not to expose later conversation updates." },
-  ],
-  safetyCta: "Read the safety and security overview",
-  pricingTitle: "Start free. Upgrade when the work grows.",
-  pricingDescription:
-    "The homepage shows only the essentials. Model weights, credit examples, annual billing, add-on credits, and Fair Use details are explained on the pricing page.",
-  plans: [
-    { id: "free", title: "Free", fallbackPrice: "$0", description: "300 monthly AI credits for light everyday use and trying advanced models." },
-    { id: "pro", title: "Pro", fallbackPrice: "$15", description: "3,000 monthly AI credits for regular multi-model comparison." },
-    { id: "max", title: "Max", fallbackPrice: "$25", description: "10,000 monthly AI credits for advanced models and long documents." },
-  ],
-  monthly: "/ month",
-  pricingDetails: "Compare plans and credit usage",
-  faqTitle: "Three quick questions",
-  faqs: [
-    { question: "Can I use Tomverse for free?", answer: "Yes. Without signing in, you can already compare 3 AI models side by side on the same question. A Free account unlocks a broader model catalogue, higher usage limits, saved conversations, and other signed-in workflows within the plan limits." },
-    { question: "Which models can I compare?", answer: "The available catalogue spans providers such as OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Mistral, Moonshot, Alibaba, and Perplexity. Availability can change, so the live status page is the source of current service state." },
-    { question: "How is my data handled?", answer: "Tomverse applies attachment limits, locked-chat controls, and read-only share snapshots. Selected AI providers still receive the request content needed to answer; review the Safety page for the complete boundaries." },
-  ],
-  ctaTitle: "One clearer view starts with one question.",
-  ctaDescription: "Compare several AI answers, then use AI Review to decide what deserves a closer look.",
-};
-
-const copy: { en: LandingCopy } & Partial<Record<Language, LandingCopy>> = {
-  en: englishCopy,
-  ko: {
-    ...englishCopy,
-    app: "채팅하기",
-    badge: "Tomverse Insight · 멀티 AI 비교 및 검토",
-    brandNote: "Tomverse Insight는 Tomverse에서 제공하는 멀티 AI 비교 및 검토 경험입니다.",
-    title: "한 번 질문하고,\n여러 AI 답변을 비교하세요.",
-    description: "GPT, Claude, Gemini의 답변을 한 화면에서 비교하고,\nAI Review로 차이와 놓친 부분을 확인하세요.",
-    primaryCta: "무료로 채팅 시작하기",
-    signedInCta: "채팅 계속하기",
-    heroSignupNote: "회원가입 없이 3개 모델로 바로 시작할 수 있습니다.",
-    guestNote: "회원가입 없이 GPT, Claude, Gemini의 답변을 바로 비교해 보세요.",
-    pricingCta: "요금 보기",
-    modelFinderLead: "어떤 AI가 내 작업에 맞는지 모르시겠나요?",
-    modelFinderCta: "가입 후 1분 추천을 받아보세요.",
-    steps: ["최대 3개 모델 선택", "한 번 질문하거나 파일 첨부", "비교·교차검토·후속 질문·공유"],
-    previewTitle: "하나의 질문, 여러 관점",
-    previewCount: "3개 모델",
-    previewAnswers: ["명확한 다음 단계", "위험과 장단점", "간결한 실행 계획"],
-    reviewTitle: "Tomverse AI Review",
-    reviewItems: ["공통점", "모순", "누락", "추가 검증"],
-    modelStripLabel: "주요 공급자의 모델을 한곳에서 비교",
-    modelCatalogue: "전체 모델 보기",
-    status: "실시간 서비스 상태",
-    supportTitle: "비교한 뒤의 작업도 한 흐름으로 이어가세요.",
-    supportDescription: "각 답변의 유용한 맥락을 유지해 비교 결과를 문서, 후속 질문 또는 팀이 다시 확인할 수 있는 기록으로 만듭니다.",
-    supportItems: [
-      { title: "파일과 실제 맥락", description: "원본 자료가 중요할 때 이미지, PDF, Office 문서, 텍스트 또는 지원되는 Google Drive 파일을 추가하세요." },
-      { title: "특정 모델 후속 질문", description: "원래 비교와 다른 답변을 유지하면서 필요한 모델 하나에만 후속 질문을 보낼 수 있습니다." },
-      { title: "프로젝트와 기록", description: "대화를 프로젝트로 정리하고 여러 탭에서 맥락을 다시 만들지 않아도 되는 기록을 유지하세요." },
-      { title: "결과 공유", description: "결과가 준비되면 읽기 전용 공유 페이지를 만들거나 깔끔한 텍스트 기록으로 다운로드하세요." },
-    ],
-    trustTitle: "비공개 작업과 공유를 위한 명확한 제어.",
-    trustDescription: "저장, 잠금, 공유 동작을 분명히 보여드립니다. 답변 생성에 필요한 요청은 선택한 AI 공급자에게 전송됩니다.",
-    trustItems: [
-      { title: "잠긴 대화", description: "민감한 저장 대화를 보호하고 중요한 작업 전에 잠금 해제 확인을 요구합니다." },
-      { title: "읽기 전용 공유", description: "이후 대화 업데이트가 노출되지 않도록 설계된 스냅샷을 공유합니다." },
-    ],
-    safetyCta: "안전 및 보안 개요 보기",
-    pricingTitle: "무료로 시작하고 작업이 커질 때 업그레이드하세요.",
-    pricingDescription: "홈페이지에는 핵심만 표시합니다. 모델별 차감량, 크레딧 예시, 연간 결제, 추가 크레딧과 공정사용 정책은 요금 페이지에서 확인하세요.",
-    plans: [
-      { id: "free", title: "Free", fallbackPrice: "$0", description: "가벼운 일상 사용과 고급 모델 체험을 위한 월 300 AI 크레딧." },
-      { id: "pro", title: "Pro", fallbackPrice: "$15", description: "일상적인 멀티모델 비교를 위한 월 3,000 AI 크레딧." },
-      { id: "max", title: "Max", fallbackPrice: "$25", description: "고급 모델·긴 문서 작업을 위한 월 10,000 AI 크레딧." },
-    ],
-    monthly: "/ 월",
-    pricingDetails: "플랜과 크레딧 사용량 비교",
-    faqTitle: "빠르게 확인하는 세 가지",
-    faqs: [
-      { question: "Tomverse를 무료로 사용할 수 있나요?", answer: "네. 로그인 없이도 3개의 AI 모델로 같은 질문에 대한 답변을 바로 비교해볼 수 있습니다. Free 계정을 만들면 더 넓은 모델 카탈로그, 높은 사용량 한도, 대화 저장 및 로그인 전용 기능을 사용할 수 있습니다." },
-      { question: "어떤 모델을 비교할 수 있나요?", answer: "OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Mistral, Moonshot, Alibaba, Perplexity 등의 모델을 지원합니다. 제공 상태는 바뀔 수 있으므로 실시간 상태 페이지에서 현재 상태를 확인할 수 있습니다." },
-      { question: "데이터는 어떻게 처리되나요?", answer: "첨부파일 제한, 대화 잠금, 읽기 전용 공유 스냅샷을 적용합니다. 선택한 AI 공급자는 답변에 필요한 요청 내용을 처리하므로 전체 범위는 안전 페이지에서 확인하세요." },
-    ],
-    ctaTitle: "더 명확한 시야는 하나의 질문에서 시작됩니다.",
-    ctaDescription: "여러 AI 답변을 비교한 뒤 AI Review로 더 살펴볼 부분을 빠르게 찾으세요.",
-  },
-  zh: {
-    ...englishCopy,
-    app: "开始聊天",
-    badge: "Tomverse Insight · 多 AI 比较与审查",
-    brandNote: "Tomverse Insight 是 Tomverse 提供的多 AI 比较与审查体验。",
-    title: "问一次，\n比较多个 AI 的回答。",
-    description: "在一个页面比较 GPT、Claude 和 Gemini，再用 AI Review 找出差异与遗漏。",
-    primaryCta: "免费开始聊天",
-    signedInCta: "继续聊天",
-    heroSignupNote: "无需注册，即可用 3 个模型直接开始。",
-    guestNote: "无需注册，即可直接比较 GPT、Claude 和 Gemini 的回答。",
-    pricingCta: "查看价格",
-    modelFinderLead: "不确定哪种 AI 适合你的工作？",
-    modelFinderCta: "注册后获取一分钟推荐。",
-    steps: ["最多选择三个模型", "提问一次或附加文件", "比较、审查、追问或分享"],
-    previewTitle: "一个问题，多种视角",
-    previewCount: "3 个模型",
-    previewAnswers: ["清晰的下一步", "风险与取舍", "简洁的执行计划"],
-    reviewItems: ["共识", "矛盾", "遗漏", "下一步核实"],
-    modelStripLabel: "比较多个主流供应商的模型",
-    modelCatalogue: "浏览全部模型",
-    status: "实时服务状态",
-    supportTitle: "比较之后，继续完成工作。",
-    supportDescription: "Tomverse 保留每个回答的上下文，让比较结果变成文档、追问或可复用的团队记录。",
-    supportItems: [
-      { title: "文件与真实上下文", description: "需要原始材料时，可添加图片、PDF、Office 文档、文本或受支持的 Google Drive 文件。" },
-      { title: "定向追问", description: "保留原始比较，同时只向一个模型继续提问。" },
-      { title: "项目与记录", description: "按项目整理对话，避免在多个标签页重复建立上下文。" },
-      { title: "分享结果", description: "创建只读分享页，或下载整洁的文本记录。" },
-    ],
-    trustTitle: "为私密与共享工作提供清晰控制。",
-    trustDescription: "存储、锁定和共享行为清晰可见。所选 AI 供应商仍会处理生成回答所需的请求。",
-    trustItems: [
-      { title: "锁定对话", description: "保护敏感对话，并在受保护操作前要求解锁验证。" },
-      { title: "只读分享", description: "分享不会暴露后续对话更新的快照。" },
-    ],
-    safetyCta: "查看安全与保障说明",
-    pricingTitle: "免费开始，按需升级。",
-    pricingDescription: "首页只展示核心信息。模型权重、积分示例、年付、附加积分和公平使用政策请查看价格页。",
-    plans: [
-      { id: "free", title: "Free", fallbackPrice: "$0", description: "每月 300 AI 积分，适合轻量日常使用。" },
-      { id: "pro", title: "Pro", fallbackPrice: "$15", description: "每月 3,000 AI 积分，适合常规多模型比较。" },
-      { id: "max", title: "Max", fallbackPrice: "$25", description: "每月 10,000 AI 积分，适合高级模型和长文档。" },
-    ],
-    monthly: "/ 月",
-    pricingDetails: "比较套餐与积分用量",
-    faqTitle: "三个常见问题",
-    faqs: [
-      { question: "可以免费使用 Tomverse 吗？", answer: "可以。无需登录即可同时比较 3 个 AI 模型对同一问题的回答；Free 账户可解锁更广泛的模型库、更高的使用额度、对话保存以及其他登录专属功能。" },
-      { question: "可以比较哪些模型？", answer: "模型目录覆盖 OpenAI、Anthropic、Google、Groq、DeepSeek、xAI、Mistral、Moonshot、Alibaba 和 Perplexity 等供应商；当前状态请查看实时状态页。" },
-      { question: "数据如何处理？", answer: "Tomverse 提供附件限制、对话锁和只读分享快照。所选 AI 供应商仍会处理生成回答所需的内容；完整边界请查看安全页。" },
-    ],
-    ctaTitle: "一个问题，获得更清晰的全貌。",
-    ctaDescription: "比较多个 AI 回答，再用 AI Review 找出值得深入核实的部分。",
-  },
-  fr: {
-    ...englishCopy,
-    app: "Discuter",
-    badge: "Tomverse Insight · Comparaison et revue multi-IA",
-    brandNote: "Tomverse Insight est l’expérience de comparaison et de revue multi-IA proposée par Tomverse.",
-    title: "Posez une question.\nComparez plusieurs réponses IA.",
-    description: "Comparez GPT, Claude et Gemini au même endroit, puis repérez les différences et les oublis avec AI Review.",
-    primaryCta: "Commencer à discuter gratuitement",
-    signedInCta: "Continuer la discussion",
-    heroSignupNote: "Aucune inscription requise : commencez avec trois modèles.",
-    guestNote: "Aucune inscription requise : comparez GPT, Claude et Gemini côte à côte.",
-    pricingCta: "Voir les tarifs",
-    modelFinderLead: "Vous ne savez pas quelle IA choisir ?",
-    modelFinderCta: "Obtenez une recommandation en une minute après inscription.",
-    steps: ["Choisissez jusqu’à trois modèles", "Posez une question ou joignez un fichier", "Comparez, révisez, relancez ou partagez"],
-    previewTitle: "Une question, plusieurs points de vue",
-    previewCount: "3 modèles",
-    previewAnswers: ["Prochaines étapes", "Risques et compromis", "Plan d’action concis"],
-    reviewItems: ["Points communs", "Contradiction", "Omission", "À vérifier"],
-    modelStripLabel: "Comparez les modèles des principaux fournisseurs",
-    modelCatalogue: "Explorer tous les modèles",
-    status: "État du service",
-    supportTitle: "Poursuivez le travail après la comparaison.",
-    supportDescription: "Tomverse conserve le contexte utile pour transformer une comparaison en document, relance ou résultat réutilisable.",
-    supportItems: [
-      { title: "Fichiers et contexte réel", description: "Ajoutez images, PDF, documents Office, texte ou fichiers Google Drive pris en charge." },
-      { title: "Relance ciblée", description: "Interrogez un seul modèle sans perdre les autres réponses ni la comparaison." },
-      { title: "Projets et archives", description: "Organisez les conversations en projets et conservez un contexte réutilisable." },
-      { title: "Partager le résultat", description: "Créez une page en lecture seule ou téléchargez une trace texte propre." },
-    ],
-    trustTitle: "Des contrôles clairs pour le travail privé et partagé.",
-    trustDescription: "Le stockage, le verrouillage et le partage sont visibles. Les fournisseurs sélectionnés traitent la demande nécessaire à la réponse.",
-    trustItems: [
-      { title: "Conversations verrouillées", description: "Protégez les conversations sensibles avant les actions à risque." },
-      { title: "Partage en lecture seule", description: "Partagez un instantané qui n’expose pas les mises à jour ultérieures." },
-    ],
-    safetyCta: "Lire l’aperçu sécurité",
-    pricingTitle: "Commencez gratuitement, évoluez selon vos besoins.",
-    pricingDescription: "Les poids des modèles, exemples de crédits, paiements annuels, crédits additionnels et Fair Use sont détaillés sur la page Tarifs.",
-    plans: [
-      { id: "free", title: "Free", fallbackPrice: "$0", description: "300 crédits IA mensuels pour un usage léger." },
-      { id: "pro", title: "Pro", fallbackPrice: "$15", description: "3 000 crédits IA mensuels pour comparer régulièrement." },
-      { id: "max", title: "Max", fallbackPrice: "$25", description: "10 000 crédits IA mensuels pour modèles avancés et longs documents." },
-    ],
-    monthly: "/ mois",
-    pricingDetails: "Comparer les plans et crédits",
-    faqTitle: "Trois questions rapides",
-    faqs: [
-      { question: "Puis-je utiliser Tomverse gratuitement ?", answer: "Oui. Sans connexion, vous pouvez déjà comparer 3 modèles d'IA côte à côte sur la même question. Un compte Free débloque un catalogue de modèles plus large, des limites d'utilisation plus élevées, la sauvegarde des conversations et d'autres fonctionnalités réservées aux comptes connectés." },
-      { question: "Quels modèles puis-je comparer ?", answer: "Le catalogue couvre notamment OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Mistral, Moonshot, Alibaba et Perplexity. Consultez la page d’état pour la disponibilité actuelle." },
-      { question: "Comment mes données sont-elles traitées ?", answer: "Tomverse applique limites de pièces jointes, verrouillage et instantanés en lecture seule. Les fournisseurs sélectionnés traitent toujours le contenu nécessaire à la réponse." },
-    ],
-    ctaTitle: "Une vision plus claire commence par une question.",
-    ctaDescription: "Comparez plusieurs réponses puis utilisez AI Review pour cibler ce qui mérite un examen approfondi.",
-  },
-  de: {
-    ...englishCopy,
-    app: "Chatten",
-    badge: "Tomverse Insight · Multi-KI-Vergleich und -Prüfung",
-    brandNote: "Tomverse Insight ist das Multi-KI-Vergleichs- und Prüferlebnis von Tomverse.",
-    title: "Einmal fragen.\nAntworten mehrerer KIs vergleichen.",
-    description: "Vergleichen Sie GPT, Claude und Gemini an einem Ort und erkennen Sie mit AI Review Unterschiede und Lücken.",
-    primaryCta: "Kostenlos chatten",
-    signedInCta: "Chat fortsetzen",
-    heroSignupNote: "Keine Anmeldung nötig – starten Sie direkt mit drei Modellen.",
-    guestNote: "Keine Anmeldung nötig – vergleichen Sie GPT, Claude und Gemini direkt nebeneinander.",
-    pricingCta: "Preise ansehen",
-    modelFinderLead: "Unsicher, welche KI passt?",
-    modelFinderCta: "Nach der Anmeldung in einer Minute empfehlen lassen.",
-    steps: ["Bis zu drei Modelle wählen", "Einmal fragen oder Datei anhängen", "Vergleichen, prüfen, nachfragen oder teilen"],
-    previewTitle: "Eine Frage, mehrere Perspektiven",
-    previewCount: "3 Modelle",
-    previewAnswers: ["Klare nächste Schritte", "Risiken und Abwägungen", "Kompakter Betriebsplan"],
-    reviewItems: ["Gemeinsamkeit", "Widerspruch", "Lücke", "Zu prüfen"],
-    modelStripLabel: "Modelle führender Anbieter vergleichen",
-    modelCatalogue: "Alle Modelle ansehen",
-    status: "Live-Servicestatus",
-    supportTitle: "Nach dem Vergleich direkt weiterarbeiten.",
-    supportDescription: "Tomverse hält den nützlichen Kontext zusammen, damit aus dem Vergleich ein Dokument, eine Nachfrage oder ein wiederverwendbares Ergebnis wird.",
-    supportItems: [
-      { title: "Dateien und echter Kontext", description: "Bilder, PDFs, Office-Dokumente, Text oder unterstützte Google-Drive-Dateien hinzufügen." },
-      { title: "Gezielte Nachfrage", description: "Ein Modell weiterfragen, ohne die anderen Antworten oder den Vergleich zu verlieren." },
-      { title: "Projekte und Verlauf", description: "Unterhaltungen in Projekten organisieren und Kontext wiederverwenden." },
-      { title: "Ergebnis teilen", description: "Schreibgeschützte Freigabe erstellen oder einen sauberen Textverlauf laden." },
-    ],
-    trustTitle: "Klare Kontrollen für private und geteilte Arbeit.",
-    trustDescription: "Speicherung, Sperren und Freigaben sind sichtbar. Ausgewählte KI-Anbieter verarbeiten die für die Antwort nötige Anfrage.",
-    trustItems: [
-      { title: "Gesperrte Unterhaltungen", description: "Sensible Chats schützen und vor geschützten Aktionen entsperren." },
-      { title: "Schreibgeschütztes Teilen", description: "Einen Snapshot teilen, der spätere Aktualisierungen nicht offenlegt." },
-    ],
-    safetyCta: "Sicherheitsübersicht lesen",
-    pricingTitle: "Kostenlos starten, bei Bedarf erweitern.",
-    pricingDescription: "Modellgewichte, Kreditbeispiele, Jahreszahlung, Zusatzkredite und Fair Use stehen auf der Preisseite.",
-    plans: [
-      { id: "free", title: "Free", fallbackPrice: "$0", description: "300 monatliche KI-Kredite für leichte Nutzung." },
-      { id: "pro", title: "Pro", fallbackPrice: "$15", description: "3.000 monatliche KI-Kredite für regelmäßige Vergleiche." },
-      { id: "max", title: "Max", fallbackPrice: "$25", description: "10.000 monatliche KI-Kredite für fortgeschrittene Modelle und lange Dokumente." },
-    ],
-    monthly: "/ Monat",
-    pricingDetails: "Pläne und Kreditverbrauch vergleichen",
-    faqTitle: "Drei kurze Fragen",
-    faqs: [
-      { question: "Kann ich Tomverse kostenlos nutzen?", answer: "Ja. Ohne Anmeldung können Sie bereits 3 KI-Modelle direkt bei derselben Frage vergleichen. Ein Free-Konto schaltet einen breiteren Modellkatalog, höhere Nutzungslimits, gespeicherte Unterhaltungen und weitere Funktionen für angemeldete Nutzer frei." },
-      { question: "Welche Modelle kann ich vergleichen?", answer: "Der Katalog umfasst unter anderem OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Mistral, Moonshot, Alibaba und Perplexity. Aktuelle Verfügbarkeit zeigt die Statusseite." },
-      { question: "Wie werden meine Daten verarbeitet?", answer: "Tomverse nutzt Anhangslimits, Chatsperren und schreibgeschützte Snapshots. Ausgewählte KI-Anbieter verarbeiten weiterhin die für Antworten nötigen Inhalte." },
-    ],
-    ctaTitle: "Ein klarerer Blick beginnt mit einer Frage.",
-    ctaDescription: "Mehrere Antworten vergleichen und mit AI Review gezielt tiefer prüfen.",
-  },
-  es: {
-    ...englishCopy,
-    app: "Chatear",
-    badge: "Tomverse Insight · Comparación y revisión multi-IA",
-    brandNote: "Tomverse Insight es la experiencia de comparación y revisión multi-IA de Tomverse.",
-    title: "Pregunta una vez.\nCompara respuestas de varias IA.",
-    description: "Compara GPT, Claude y Gemini en un solo lugar y usa AI Review para detectar diferencias y omisiones.",
-    primaryCta: "Empezar a chatear gratis",
-    signedInCta: "Continuar el chat",
-    heroSignupNote: "No se requiere registro: empieza con tres modelos.",
-    guestNote: "No se requiere registro: compara GPT, Claude y Gemini en paralelo.",
-    pricingCta: "Ver precios",
-    modelFinderLead: "¿No sabes qué IA encaja contigo?",
-    modelFinderCta: "Recibe una recomendación de un minuto tras registrarte.",
-    steps: ["Elige hasta tres modelos", "Pregunta o adjunta un archivo", "Compara, revisa, continúa o comparte"],
-    previewTitle: "Una pregunta, varias perspectivas",
-    previewCount: "3 modelos",
-    previewAnswers: ["Próximos pasos claros", "Riesgos y alternativas", "Plan operativo conciso"],
-    reviewItems: ["Coincidencias", "Contradicción", "Omisión", "Por verificar"],
-    modelStripLabel: "Compara modelos de los principales proveedores",
-    modelCatalogue: "Explorar todos los modelos",
-    status: "Estado del servicio",
-    supportTitle: "Continúa el trabajo después de comparar.",
-    supportDescription: "Tomverse conserva el contexto útil para convertir una comparación en documento, seguimiento o resultado reutilizable.",
-    supportItems: [
-      { title: "Archivos y contexto real", description: "Añade imágenes, PDF, documentos Office, texto o archivos compatibles de Google Drive." },
-      { title: "Seguimiento dirigido", description: "Pregunta a un modelo concreto sin perder las demás respuestas." },
-      { title: "Proyectos y registros", description: "Organiza conversaciones en proyectos y conserva un contexto reutilizable." },
-      { title: "Comparte el resultado", description: "Crea una página de solo lectura o descarga un registro de texto limpio." },
-    ],
-    trustTitle: "Controles claros para trabajo privado y compartido.",
-    trustDescription: "El almacenamiento, bloqueo y uso compartido son visibles. Los proveedores elegidos procesan la solicitud necesaria para responder.",
-    trustItems: [
-      { title: "Conversaciones bloqueadas", description: "Protege chats sensibles antes de acciones protegidas." },
-      { title: "Compartir en solo lectura", description: "Comparte una instantánea que no expone cambios posteriores." },
-    ],
-    safetyCta: "Leer seguridad y protección",
-    pricingTitle: "Empieza gratis y mejora cuando crezca el trabajo.",
-    pricingDescription: "Los pesos por modelo, ejemplos de créditos, pago anual, créditos extra y Fair Use están en la página de precios.",
-    plans: [
-      { id: "free", title: "Free", fallbackPrice: "$0", description: "300 créditos IA al mes para uso ligero." },
-      { id: "pro", title: "Pro", fallbackPrice: "$15", description: "3.000 créditos IA al mes para comparaciones habituales." },
-      { id: "max", title: "Max", fallbackPrice: "$25", description: "10.000 créditos IA al mes para modelos avanzados y documentos largos." },
-    ],
-    monthly: "/ mes",
-    pricingDetails: "Comparar planes y créditos",
-    faqTitle: "Tres preguntas rápidas",
-    faqs: [
-      { question: "¿Puedo usar Tomverse gratis?", answer: "Sí. Sin iniciar sesión ya puedes comparar 3 modelos de IA lado a lado en la misma pregunta. Una cuenta Free desbloquea un catálogo de modelos más amplio, límites de uso más altos, conversaciones guardadas y otras funciones exclusivas para usuarios con sesión iniciada." },
-      { question: "¿Qué modelos puedo comparar?", answer: "El catálogo incluye proveedores como OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Mistral, Moonshot, Alibaba y Perplexity. Consulta el estado en vivo para la disponibilidad actual." },
-      { question: "¿Cómo se tratan mis datos?", answer: "Tomverse aplica límites de archivos, bloqueo de chats e instantáneas de solo lectura. Los proveedores elegidos siguen procesando el contenido necesario para responder." },
-    ],
-    ctaTitle: "Una visión más clara empieza con una pregunta.",
-    ctaDescription: "Compara varias respuestas y usa AI Review para decidir qué revisar con más detalle.",
-  },
-  pt: {
-    ...englishCopy,
-    app: "Conversar",
-    badge: "Tomverse Insight · Comparação e revisão multi-IA",
-    brandNote: "Tomverse Insight é a experiência de comparação e revisão multi-IA da Tomverse.",
-    title: "Pergunte uma vez.\nCompare respostas de várias IAs.",
-    description: "Compare GPT, Claude e Gemini em um só lugar e use o AI Review para encontrar diferenças e omissões.",
-    primaryCta: "Começar a conversar grátis",
-    signedInCta: "Continuar a conversa",
-    heroSignupNote: "Não é necessário cadastro — comece com três modelos.",
-    guestNote: "Não é necessário cadastro — compare GPT, Claude e Gemini lado a lado.",
-    pricingCta: "Ver preços",
-    modelFinderLead: "Não sabe qual IA combina com seu trabalho?",
-    modelFinderCta: "Receba uma recomendação de um minuto após criar a conta.",
-    steps: ["Escolha até três modelos", "Pergunte ou anexe um arquivo", "Compare, revise, continue ou compartilhe"],
-    previewTitle: "Uma pergunta, várias perspectivas",
-    previewCount: "3 modelos",
-    previewAnswers: ["Próximos passos claros", "Riscos e escolhas", "Plano operacional conciso"],
-    reviewItems: ["Consenso", "Contradição", "Omissão", "A verificar"],
-    modelStripLabel: "Compare modelos dos principais provedores",
-    modelCatalogue: "Explorar todos os modelos",
-    status: "Status do serviço",
-    supportTitle: "Continue o trabalho depois da comparação.",
-    supportDescription: "O Tomverse mantém o contexto útil para transformar uma comparação em documento, acompanhamento ou resultado reutilizável.",
-    supportItems: [
-      { title: "Arquivos e contexto real", description: "Adicione imagens, PDFs, documentos Office, texto ou arquivos compatíveis do Google Drive." },
-      { title: "Acompanhamento direcionado", description: "Pergunte a um modelo específico sem perder as outras respostas." },
-      { title: "Projetos e registros", description: "Organize conversas por projeto e mantenha contexto reutilizável." },
-      { title: "Compartilhe o resultado", description: "Crie uma página somente leitura ou baixe um registro de texto limpo." },
-    ],
-    trustTitle: "Controles claros para trabalho privado e compartilhado.",
-    trustDescription: "Armazenamento, bloqueio e compartilhamento ficam visíveis. Os provedores escolhidos processam a solicitação necessária para responder.",
-    trustItems: [
-      { title: "Conversas bloqueadas", description: "Proteja chats sensíveis antes de ações protegidas." },
-      { title: "Compartilhamento somente leitura", description: "Compartilhe um snapshot que não expõe atualizações posteriores." },
-    ],
-    safetyCta: "Ler visão geral de segurança",
-    pricingTitle: "Comece grátis e evolua quando o trabalho crescer.",
-    pricingDescription: "Pesos por modelo, exemplos de créditos, cobrança anual, créditos extras e Fair Use estão na página de preços.",
-    plans: [
-      { id: "free", title: "Free", fallbackPrice: "$0", description: "300 créditos de IA por mês para uso leve." },
-      { id: "pro", title: "Pro", fallbackPrice: "$15", description: "3.000 créditos de IA por mês para comparações regulares." },
-      { id: "max", title: "Max", fallbackPrice: "$25", description: "10.000 créditos de IA por mês para modelos avançados e documentos longos." },
-    ],
-    monthly: "/ mês",
-    pricingDetails: "Comparar planos e créditos",
-    faqTitle: "Três perguntas rápidas",
-    faqs: [
-      { question: "Posso usar o Tomverse gratuitamente?", answer: "Sim. Sem entrar, você já pode comparar 3 modelos de IA lado a lado na mesma pergunta. Uma conta Free desbloqueia um catálogo de modelos mais amplo, limites de uso mais altos, conversas salvas e outros recursos exclusivos para quem está conectado." },
-      { question: "Quais modelos posso comparar?", answer: "O catálogo inclui provedores como OpenAI, Anthropic, Google, Groq, DeepSeek, xAI, Mistral, Moonshot, Alibaba e Perplexity. Veja a página de status para a disponibilidade atual." },
-      { question: "Como meus dados são tratados?", answer: "O Tomverse aplica limites de anexos, bloqueio e snapshots somente leitura. Os provedores escolhidos continuam processando o conteúdo necessário para responder." },
-    ],
-    ctaTitle: "Uma visão mais clara começa com uma pergunta.",
-    ctaDescription: "Compare várias respostas e use o AI Review para decidir o que merece análise mais profunda.",
-  },
-};
-
+/**
+ * The landing page shell: the hero, and the order the sections run in.
+ *
+ * Section order is the deliberate part. "Why this rather than one AI chat"
+ * (the comparison loop, then evidence and currency) now comes before the
+ * walkthrough, because a visitor who has not been told what is different has
+ * no reason to watch how it works.
+ *
+ * The hero's wording is unchanged: guests really can start with three
+ * models and run AI Review, so qualifying either promise would state a limit
+ * that does not exist. Its layout is not exempt from that -- the gutters,
+ * padding and mock-up chrome below are frozen in px and the text columns carry
+ * `min-w-0` so the hero reflows at a 200% root font size on a 320px viewport
+ * instead of being cropped by this element's `overflow-x-hidden`.
+ */
 export function LandingPageContent() {
   const { lang } = useLanguage();
   const { status } = useSession();
-  const content = copy[lang] ?? englishCopy;
-  const billing = usePublicBilling();
+  const content = getLandingCopy(lang);
   const chatHref = `/chat?lang=${encodeURIComponent(lang)}`;
   const guestChatHref = `${chatHref}&entry=guest-preview`;
   const primaryChatHref = status === "authenticated" ? chatHref : guestChatHref;
+  const primaryCtaLabel =
+    status === "authenticated" ? content.signedInCta : content.primaryCta;
   const landingTrackedRef = useRef(false);
 
   useEffect(() => {
@@ -469,23 +53,51 @@ export function LandingPageContent() {
     <main className="min-h-screen overflow-x-hidden bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">
       <MarketingHeader />
 
-      <section className="relative border-b border-zinc-200 dark:border-zinc-800">
-        <div className="mx-auto grid max-w-7xl gap-10 px-4 pb-12 pt-10 sm:px-6 sm:pb-14 sm:pt-12 lg:grid-cols-[1.03fr_0.97fr] lg:items-center lg:px-8 lg:py-16">
+      <section
+        aria-labelledby="landing-hero-title"
+        className="relative border-b border-zinc-200 dark:border-zinc-800"
+      >
+        <div className="mx-auto grid max-w-7xl gap-10 px-[16px] pb-12 pt-10 sm:px-6 sm:pb-14 sm:pt-12 lg:grid-cols-[1.03fr_0.97fr] lg:items-center lg:px-8 lg:py-16">
+          {/*
+            No `min-w-0` here, deliberately. Shrinking this grid item below its
+            min-content does make the hero fit a 320px viewport at 200% zoom --
+            but its min-content is set by the display heading, and for Korean
+            that minimum is one intact 어절. Removing it split "비교하세요" across
+            two lines, which is the defect UI-006 exists to prevent and which
+            tests/e2e/korean-typography.spec.ts treats as a release blocker.
+            So the heading keeps its intact-어절 minimum (overflowing into this
+            element's `overflow-x-hidden`, as it did before), and everything
+            else in the hero -- badge, notes, CTA, mock-up -- is made to fit on
+            its own. Closing the remainder means either a smaller Korean hero
+            heading at the narrowest widths or a relaxed 200%-zoom assertion,
+            and that is a design decision, not a layout fix.
+          */}
           <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/40 dark:text-blue-300">
+            <div className="inline-flex max-w-full flex-wrap items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-[12px] py-[4px] text-xs font-bold text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/40 dark:text-blue-300">
               <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
               {content.badge}
             </div>
-            <p data-testid="landing-brand-note" className="mt-2 max-w-xl text-sm font-medium text-zinc-500 dark:text-zinc-400">
+            <p data-testid="landing-brand-note" className="mt-2 max-w-xl break-words text-sm font-medium text-zinc-500 dark:text-zinc-400">
               {content.brandNote}
             </p>
             <h1
+              id="landing-hero-title"
               data-testid="landing-hero-title"
-              className={`mt-6 max-w-4xl whitespace-pre-line text-4xl font-black leading-[1.05] tracking-tight sm:text-6xl lg:text-7xl ${displayHeadingClass(lang)}`}
+              // Viewport-relative rather than root-relative below `sm`, which is what
+              // lets the hero fit without breaking a 어절. The heading sets this
+              // column's min-content width, and at a fixed 2.25rem that minimum is
+              // one intact Korean 어절 rendered at a 200% root font -- wider than a
+              // 320px viewport, so the column overflowed. A `clamp()` in `vw` does
+              // not grow with the root font (text scaling) and does shrink with the
+              // layout viewport (browser zoom), so the minimum fits in both cases.
+              // The cap is the previous size and 9vw reaches it by ~400px, so
+              // anything from a 390px phone upward renders as before; only 320-360px
+              // trims, which is exactly where the conflict was.
+              className={`mt-6 max-w-4xl whitespace-pre-line break-words text-[clamp(1.75rem,9vw,2.25rem)] font-black leading-[1.05] tracking-tight sm:text-6xl lg:text-7xl ${displayHeadingClass(lang)}`}
             >
               {content.title}
             </h1>
-            <p className="mt-6 max-w-2xl whitespace-pre-line text-lg leading-8 text-zinc-600 dark:text-zinc-300">{content.description}</p>
+            <p className="mt-6 max-w-2xl whitespace-pre-line break-words text-lg leading-8 text-zinc-600 dark:text-zinc-300">{content.description}</p>
             {/*
               EXT-REAUDIT-F001: gated on "not authenticated" rather than on
               "unauthenticated" so it renders during `loading` too. `status`
@@ -500,7 +112,7 @@ export function LandingPageContent() {
               stable one; the copy itself is unchanged.
             */}
             {status !== "authenticated" && (
-              <p data-testid="landing-hero-signup-note" className="mt-3 max-w-2xl text-base font-semibold text-zinc-700 dark:text-zinc-200">
+              <p data-testid="landing-hero-signup-note" className="mt-3 max-w-2xl break-words text-base font-semibold text-zinc-700 dark:text-zinc-200">
                 {content.heroSignupNote}
               </p>
             )}
@@ -511,40 +123,50 @@ export function LandingPageContent() {
                 href={primaryChatHref}
                 data-testid="landing-primary-cta"
                 onClick={() => trackProductEvent("cta_start_click", 0, { cta_location: "landing_hero_chat" })}
-                className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-blue-600 px-6 text-sm font-bold text-white shadow-lg shadow-blue-950/20 transition hover:bg-blue-500"
+                className="inline-flex min-h-12 max-w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-[24px] text-center text-sm font-bold text-white shadow-lg shadow-blue-950/20 transition hover:bg-blue-500"
               >
-                {status === "authenticated" ? content.signedInCta : content.primaryCta}
+                {primaryCtaLabel}
                 <ArrowRight className="h-4 w-4" aria-hidden="true" />
               </Link>
               {status !== "authenticated" && (
-                <p data-testid="landing-guest-note" className="text-sm font-medium text-zinc-500 dark:text-zinc-400">
+                <p data-testid="landing-guest-note" className="break-words text-sm font-medium text-zinc-500 dark:text-zinc-400">
                   {content.guestNote}
                 </p>
               )}
             </div>
           </div>
 
-          <div className="overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-950 p-2 shadow-2xl shadow-zinc-300/60 dark:shadow-black/50 md:p-3">
+          {/*
+            The mock-up is decorative -- its bars and chips carry no text a
+            screen reader can make sense of -- so the group is labelled once
+            with a sentence describing what it depicts, and the shapes inside
+            stay hidden rather than being read out as stray fragments.
+          */}
+          <div
+            role="img"
+            aria-label={content.preview.srDescription}
+            className="min-w-0 overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-950 p-[8px] shadow-2xl shadow-zinc-300/60 dark:shadow-black/50 md:p-[12px]"
+          >
             <div className="rounded-[1.25rem] border border-zinc-800 bg-zinc-950 text-white">
-              <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
-                <span className="flex items-center gap-2 text-xs font-bold text-zinc-300"><Bot className="h-4 w-4 text-blue-400" />{content.previewTitle}</span>
-                <span className="rounded-full bg-emerald-500/10 px-2 py-1 text-[11px] font-bold text-emerald-300">{content.previewCount}</span>
+              <div className="flex items-center justify-between gap-2 border-b border-zinc-800 px-[16px] py-[12px]">
+                <span className="flex min-w-0 items-center gap-2 break-words text-xs font-bold text-zinc-300"><Bot className="h-4 w-4 text-blue-400" aria-hidden="true" />{content.preview.title}</span>
+                <span className="shrink-0 rounded-full bg-status-success-500/10 px-[8px] py-[4px] text-[11px] font-bold text-status-success-300">{content.preview.count}</span>
               </div>
-              <div className="grid gap-2 p-3 sm:grid-cols-3">
+              <div className="grid gap-2 p-[12px] sm:grid-cols-3">
                 {["GPT", "Claude", "Gemini"].map((model, index) => (
-                  <article key={model} className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-3">
-                    <div className="flex items-center justify-between"><span className="text-sm font-bold">{model}</span><span className="h-2 w-2 rounded-full bg-zinc-500" /></div>
-                    <div className="mt-4 space-y-2"><div className="h-2 w-4/5 rounded-full bg-zinc-700" /><div className="h-2 w-full rounded-full bg-zinc-800" /></div>
-                    <p className="mt-4 rounded-xl border border-zinc-700 bg-zinc-800 p-2.5 text-xs font-bold leading-5 text-zinc-200">{content.previewAnswers[index]}</p>
+                  <article key={model} className="min-w-0 rounded-2xl border border-zinc-800 bg-zinc-900/80 p-[12px]">
+                    <div className="flex items-center justify-between"><span className="text-sm font-bold">{model}</span><span aria-hidden="true" className="h-2 w-2 rounded-full bg-zinc-500" /></div>
+                    <div aria-hidden="true" className="mt-4 space-y-2"><div className="h-2 w-4/5 rounded-full bg-zinc-700" /><div className="h-2 w-full rounded-full bg-zinc-800" /></div>
+                    <p className="mt-4 break-words rounded-xl border border-zinc-700 bg-zinc-800 p-[10px] text-xs font-bold leading-5 text-zinc-200">{content.preview.answers[index]}</p>
                   </article>
                 ))}
               </div>
-              <div className="mx-3 mb-3 rounded-2xl border border-blue-500/30 bg-blue-500/10 p-3">
-                <div className="flex items-center gap-2 text-xs font-bold text-blue-200"><Sparkles className="h-3.5 w-3.5" />{content.reviewTitle}</div>
+              <div className="mx-[12px] mb-[12px] rounded-2xl border border-blue-500/30 bg-blue-500/10 p-[12px]">
+                <div className="flex min-w-0 items-center gap-2 break-words text-xs font-bold text-blue-200"><Sparkles className="h-3.5 w-3.5" aria-hidden="true" />{content.preview.reviewTitle}</div>
                 <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  {content.reviewItems.map((item, index) => (
-                    <span key={item} className="flex items-center gap-1.5 rounded-lg bg-black/20 px-2 py-2 text-[11px] font-bold text-zinc-200">
-                      <span className={`h-1.5 w-1.5 rounded-full ${index === 1 || index === 3 ? "bg-amber-400" : "bg-emerald-400"}`} />{item}
+                  {content.preview.reviewItems.map((item, index) => (
+                    <span key={item} className="flex min-w-0 items-center gap-1.5 break-words rounded-lg bg-black/20 px-[8px] py-[8px] text-[11px] font-bold text-zinc-200">
+                      <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${index === 1 || index === 3 ? "bg-amber-400" : "bg-status-success-300"}`} />{item}
                     </span>
                   ))}
                 </div>
@@ -552,31 +174,21 @@ export function LandingPageContent() {
             </div>
           </div>
         </div>
-
       </section>
 
+      <ComparisonBasicsSection />
+      <EvidenceSection />
       <ProductProofSection />
-
-      <section id="pricing" className="border-y border-zinc-200 bg-zinc-50 py-16 dark:border-zinc-800 dark:bg-zinc-900/30 sm:py-20">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="max-w-3xl"><h2 className={`text-3xl font-black sm:text-4xl ${displayHeadingClass(lang)}`}>{content.pricingTitle}</h2><p className="mt-4 text-base leading-7 text-zinc-600 dark:text-zinc-300">{content.pricingDescription}</p></div>
-          <div className="mt-9 grid gap-4 md:grid-cols-3">
-            {content.plans.map((plan) => {
-              const formatted = billing.formatPlanPrice(plan.id) || plan.fallbackPrice;
-              return <article key={plan.id} className={`rounded-2xl border p-5 ${plan.id === "pro" ? "border-blue-500 bg-blue-50/70 dark:bg-blue-950/20" : "border-zinc-200 dark:border-zinc-800"}`}><h3 className="text-lg font-black">{plan.title}</h3><p className="mt-4 text-3xl font-black">{formatted}<span className="ml-1 text-sm font-semibold text-zinc-600 dark:text-zinc-400">{plan.id === "free" ? "" : content.monthly}</span></p><p className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-400">{plan.description}</p></article>;
-            })}
-          </div>
-          <Link href="/pricing" className="mt-7 inline-flex items-center gap-2 rounded-xl bg-zinc-950 px-5 py-3 text-sm font-bold text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200">{content.pricingDetails}<ArrowRight className="h-4 w-4" /></Link>
-          <h2 className={`mt-16 text-3xl font-bold sm:text-4xl ${displayHeadingClass(lang)}`}>{content.faqTitle}</h2>
-          <div className="mt-8 grid gap-4 lg:grid-cols-3">
-            {content.faqs.map((item) => <details key={item.question} className="group rounded-2xl border border-zinc-200 p-5 dark:border-zinc-800"><summary className="cursor-pointer list-none font-bold">{item.question}</summary><p className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-400">{item.answer}</p></details>)}
-          </div>
-          <div className="mt-12 flex flex-col items-start justify-between gap-6 rounded-3xl bg-zinc-950 p-7 text-white sm:p-9 lg:flex-row lg:items-center dark:border dark:border-zinc-800">
-            <div className="max-w-2xl"><h2 className={`text-3xl font-bold ${displayHeadingClass(lang)}`}>{content.ctaTitle}</h2><p className="mt-3 leading-7 text-zinc-300">{content.ctaDescription}</p></div>
-            <Link href={primaryChatHref} onClick={() => trackProductEvent("cta_start_click", 0, { cta_location: "landing_final_chat" })} className="inline-flex min-h-12 shrink-0 items-center justify-center gap-2 rounded-xl bg-white px-6 text-sm font-bold text-zinc-950 hover:bg-zinc-200">{status === "authenticated" ? content.signedInCta : content.primaryCta}<ArrowRight className="h-4 w-4" /></Link>
-          </div>
-        </div>
-      </section>
+      <WorkflowContinuitySection />
+      <ModelCatalogueSection />
+      <TrustSection />
+      <LandingPricingSection
+        primaryChatHref={primaryChatHref}
+        primaryCtaLabel={primaryCtaLabel}
+        onPrimaryCtaClick={() =>
+          trackProductEvent("cta_start_click", 0, { cta_location: "landing_final_chat" })
+        }
+      />
 
       <MarketingFooter />
     </main>

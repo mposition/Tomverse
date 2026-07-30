@@ -24,6 +24,7 @@ import {
   trackProductEvent,
   trackProductEventOnce,
 } from "@/lib/productAnalyticsClient";
+import { getLandingCopy } from "./landingContent";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
 import {
   chatWorkspaceGuideContent,
@@ -97,6 +98,9 @@ function GuideSection({ section }: { section: WorkspaceGuideSection }) {
 export function ChatWorkspaceGuide() {
   const { lang } = useLanguage();
   const copy = chatWorkspaceGuideContent[lang];
+  // Shared with the landing walkthrough so the stage wording and its
+  // "illustration, not a recording" disclosure exist once.
+  const { stages: workflowStages, workflowDisclosure } = getLandingCopy(lang).proof;
 
   useEffect(() => {
     trackProductEventOnce(
@@ -240,22 +244,44 @@ export function ChatWorkspaceGuide() {
           {copy.sections.map((section) => (
             <div key={section.id}>
               {section.id === "ai-review" ? (
-                <div className="mb-6 overflow-hidden rounded-3xl border border-blue-200 bg-blue-50 p-5 sm:p-7 dark:border-blue-900/70 dark:bg-blue-950/20">
+                <div className="mb-6 overflow-hidden rounded-3xl border border-blue-200 bg-blue-50 p-[20px] sm:p-[28px] dark:border-blue-900/70 dark:bg-blue-950/20">
                   <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
                     <Sparkles className="h-5 w-5" aria-hidden="true" />
-                    <h3 className="font-bold">{copy.reviewVideoTitle}</h3>
+                    <h3 className="font-bold break-words">{copy.reviewVideoTitle}</h3>
                   </div>
-                  <video
-                    className="mt-5 aspect-video w-full rounded-2xl border border-zinc-200 bg-zinc-950 object-cover shadow-lg dark:border-zinc-800"
-                    controls
-                    preload="metadata"
-                    poster="/marketing-proof/tomverse-review-workflow-poster.png"
+                  {/*
+                    This used to embed the 2026-07-27 walkthrough recording,
+                    which still showed "4 credits used" -- superseded two days
+                    later, since two independent reviewers run -- and "Review
+                    confidence", the pre-rename source-grounding label. Both
+                    are server-side values, so a recording cannot stay correct.
+                    The stage copy is shared with the landing page rather than
+                    translated twice.
+                  */}
+                  <ol
+                    data-testid="guide-review-workflow"
+                    className="mt-5 grid gap-3 sm:grid-cols-2"
                   >
-                    <source src="/marketing-proof/tomverse-review-workflow.webm" type="video/webm" />
-                  </video>
+                    {workflowStages.map((stage, index) => (
+                      <li
+                        key={stage.title}
+                        className="min-w-0 rounded-2xl border border-blue-200 bg-white p-[16px] dark:border-blue-900/70 dark:bg-zinc-950/40"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="flex h-[24px] w-[24px] shrink-0 items-center justify-center rounded-lg bg-blue-600 text-[11px] font-bold text-white">
+                            {index + 1}
+                          </span>
+                          <span className="text-sm font-bold break-words">{stage.title}</span>
+                        </div>
+                        <p className="mt-2 text-xs leading-5 text-zinc-600 break-words dark:text-zinc-300">
+                          {stage.caption}
+                        </p>
+                      </li>
+                    ))}
+                  </ol>
                   <p className="mt-3 flex items-start gap-2 text-xs font-semibold leading-5 text-blue-900 dark:text-blue-100">
                     <FileText className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                    {copy.reviewVideoCaption}
+                    {workflowDisclosure}
                   </p>
                 </div>
               ) : null}

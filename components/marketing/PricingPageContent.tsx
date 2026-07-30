@@ -836,18 +836,15 @@ export function PricingPageContent() {
     formatCountedUnit(count, creditUnit, lang, (value) =>
       numberFormatter.format(value)
     );
+  // The allowance comes from the live billing config, and its fallback is the
+  // same built-in plan table the API itself falls back to -- not a second copy
+  // of the numbers written into this component.
   const creditPlans = ([
-    { id: "free", name: "Free", fallbackCredits: 300 },
-    { id: "pro", name: "Pro", fallbackCredits: 3_000 },
-    { id: "max", name: "Max", fallbackCredits: 10_000 },
+    { id: "free", name: "Free" },
+    { id: "pro", name: "Pro" },
+    { id: "max", name: "Max" },
   ] as const).map((plan) => {
-    const configuredCredits = billing.config?.plans.find(
-      (configuredPlan) => configuredPlan.id === plan.id
-    )?.monthlyMessageLimit;
-    const monthlyCredits =
-      typeof configuredCredits === "number" && configuredCredits > 0
-        ? Math.floor(configuredCredits)
-        : plan.fallbackCredits;
+    const monthlyCredits = billing.planLimits(plan.id).monthlyCredits;
     return {
       ...plan,
       monthlyCredits,

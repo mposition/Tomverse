@@ -104,7 +104,9 @@ test("font-black is reserved for headline-sized customer text", () => {
   // allows; everything else at <=16px uses 500-700.
   const BRAND_EXPRESSION_ALLOWLIST = new Set([
     "app/(site)/(application)/chat/ChatPageClient.tsx:333",
-    "components/marketing/ChatWorkspaceGuide.tsx:186",
+    // Same "Tomverse Insight" brand span; it moved down four lines when the
+    // superseded walkthrough embed above it was replaced by a stage diagram.
+    "components/marketing/ChatWorkspaceGuide.tsx:190",
   ]);
 
   const violations = [];
