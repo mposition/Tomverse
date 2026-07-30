@@ -6,24 +6,33 @@
 
 합의된 8개 finding 중 5개(R-02, R-04, R-06, R-07, R-08)를 증거와 함께 종결했고,
 R-03은 작업 중 upstream에 merge된 PR #145가 이미 해결한 것을 확인해 그 구현을
-채택했다. R-05는 재현·근본 원인 특정·59% 개선까지 완료했으나 완료 조건(median
-CLS ≤0.1)에는 `/`에서 0.0095 미달이며, 잔여분은 별도 설계 결정을 필요로 한다.
-R-01과 `QA-GATE-001`은 이 실행 환경에서 **검증 불가**로 남는다.
+채택했다.
 
-production `Go`를 선언하지 않는다. R-01 actual proof와 `QA-GATE-001`이 닫히지
-않았고, R-05가 완료 조건에 미달한다.
+R-05는 `/`를 0.2667 → 0.1095로 59% 개선했으나 완료 조건(median CLS ≤0.1)에 미달
+하고, 사용자가 제시한 **조건부 수용의 배제 기준에도 걸린다** —— 320px·한국어·200%
+에서 최대 0.2385까지 커지고, 한국어에서는 consent slot 외에 hero 본문이라는 추가
+shift source가 나타난다(§4 R-05).
+
+`QA-GATE-001`은 canonical CI에서 **실행했고 실패했다**(1509 passed / 10 failed /
+908 skipped). 다만 `develop` 대조 실행이 **동일한 10건과 동일한 카운트를 재현**했으므로
+이 실패는 전부 trunk의 기존 상태이고, **이번 remediation이 canonical 환경에 추가한
+regression은 0건**이다. gate 종결은 합의 범위 밖의 신규 항목이 됐다(§6.4). R-01은 계정·승인·로그인·baseline까지 확보했으나 실행 단계에서
+막혔고, 사람이 UI에서 수행하는 방식으로 진행하기로 결정됐다. **실제 Provider 호출
+0회, credit 소비 0.**
+
+production `Go`를 선언하지 않는다. R-01, R-05, `QA-GATE-001` 셋이 모두 열려 있다.
 
 | ID | 최종 심각도 | 판정 | 근거 |
 |---|---|---|---|
-| `R-01` | P1 release blocker | **Not verified** | 사용자 승인은 받았으나 staging 인증 계정 자격증명이 제공되지 않아 실행 불가 |
+| `R-01` | P1 release blocker | **Not verified** | 계정·승인·로그인까지 확보(Pro, baseline 기록)했으나 브라우저가 staging에 도달 못하고 실행 POST가 권한 classifier에 거부됨. 사람이 UI에서 수행하는 방식으로 진행 결정. credit 소비 0 |
 | `R-02` | P1 release gate | **성공** (staging 미배포) | source 수정 + 38개 unit test, stale failure → `unknown` |
 | `R-03` | P1 release gate | **성공 (upstream PR #145)** | 3개 control 모두 실제 44×44, upstream이 해결·검증 |
 | `R-04` | P2 release blocker (`B4`) | **성공** (staging 미배포) | 320/390px × 4 route × en/ko = 24/24 조합 overflow 0px |
-| `R-05` | P2 | **부분 성공 — 완료 조건 미달** | `/` 0.2667 → 0.1095 (임계 0.1), `/pricing`·`/chat` 0 |
+| `R-05` | P2 | **부분 성공 — 완료 조건 미달, 조건부 수용도 불가** | `/` 0.2667 → 0.1095, `/pricing`·`/chat` 0. 그러나 320px·한국어·200%에서 최대 0.2385까지 커지고 한국어에서는 hero 본문이라는 추가 shift source가 나타나 배제 기준에 걸림 |
 | `R-06` | P2 | **성공** | 3개 lifecycle 전이 coverage 추가, 11/11 통과 |
 | `R-07` | P2 verification | **성공** | live `/api/build-info` ↔ UI field 일치 검증 추가 |
 | `R-08` | P3 | **성공** (staging 미배포) | stall 25초 내 안내, security semantics 무변경 |
-| `QA-GATE-001` | release gate | **Not verified** | 저장소가 고정한 Chromium을 이 환경에서 설치 불가 |
+| `QA-GATE-001` | release gate | **실행됨 — 실패, 단 원인은 trunk** | canonical CI 실행 완료: 1509 passed / 10 failed. `develop` 대조 실행이 **동일한 10건·동일한 카운트**를 재현 → 전부 기존 실패이며 이번 변경의 regression은 **0건**. gate 종결은 trunk의 신규 항목 |
 
 ---
 
@@ -344,6 +353,82 @@ Provider를 호출하는 되돌릴 수 없는 동작이므로 **정당한 게이
 
 - **가격·consent·composer 회귀**: 0. LCP는 악화되지 않았다(392–896ms).
 
+**조건부 수용 심사 (2026-07-30T00:00–00:30Z)**
+
+사용자가 R-05에 대해 **조건부 수용**을 제시했다: 원인이 consent slot 삽입으로
+한정되고, median이 0.1095 수준에서 안정적이며, 심각한 최대값이나 추가 shift
+source가 없으면 —— Pass가 아니라 **문서화된 잔여 위험 수용**으로 기록하고
+Go-Live 예외를 승인한다. 단 다음 중 하나라도 해당하면 수용해서는 안 된다:
+`CLS ≤0.1`이 예외 없는 계약인 경우 / 반복 측정에서 0.1095보다 높은 값이
+반복되는 경우 / **320px·한국어·200%에서 더 큰 shift가 발생하는 경우** /
+실제 RUM p75도 0.1을 초과하는 경우.
+
+측정 조건은 §4 R-05와 동일(cold context, 40ms/10Mbps, `PerformanceObserver`),
+cell당 5–10회. 모든 shift source를 기록해 "추가 source"가 top-N 절단에 숨지
+않게 했다.
+
+| cell (route `/`, 첫 방문) | median | max | 판정 |
+|---|---:|---:|---|
+| 360×640 en 100% (10회) | 0.1095 | 0.1095 | 안정 |
+| 360×640 en 200% | 0.1095 | 0.1095 | 동일 |
+| **320×568 en 100%** | **0.1466** | 0.1466 | **더 큼** |
+| **320×568 en 200%** | **0.1466** | 0.1466 | **더 큼** |
+| **320×568 ko 100%** | **0.1498** | **0.2385** | **더 큼** |
+| **320×568 ko 200%** | **0.2282** | 0.2282 | **더 큼** |
+| **360×640 ko 100%** | **0.116** | **0.2141** | **더 큼** |
+| **360×640 ko 200%** | **0.116** | 0.2089 | **더 큼** |
+
+| consent 상태 (360×640 en 100%) | median | 비고 |
+|---|---:|---|
+| 최초 방문 (unset) | 0.1095 | consent slot 삽입 |
+| 동의 완료 직후 (just-accepted) | 0.1095 | 클릭 이후 추가 shift 없음(사용자 조작분은 `hadRecentInput`으로 제외) |
+| **기존 동의 (accepted)** | **0** | 5/5 회 |
+| **거부 (declined)** | **0** | 5/5 회 |
+
+**판정: 조건부 수용 조건을 충족하지 못한다. (a)를 적용하지 않는다.**
+
+배제 기준 두 개가 걸린다.
+
+1. **320px·한국어·200%에서 더 큰 shift가 발생한다.** 최대 0.2385(320 ko)로,
+   360 en의 0.1095의 두 배가 넘는다.
+2. **0.1095보다 높은 값이 반복된다** —— 320/ko 계열 6개 cell 전부.
+
+또한 전제 자체가 깨진다: **"원인이 consent slot 삽입으로 한정"이 한국어에서
+성립하지 않는다.** 한국어 cell에서는 consent slot(`section.relative.border-b…`)
+외에 다음 source들이 추가로 나타난다.
+
+- `p[landing-hero-signup-note]`, `h1[landing-hero-title]`,
+  `p[landing-brand-note]`, `p.mt-6.max-w-2xl`(hero 본문),
+  `div.mt-8.flex.flex-col`(CTA 블록)
+- header의 `div.flex.min-w-0.items-center`, `svg`,
+  `a.font-bold.text-blue-700.underline`
+
+즉 hero 본문 자체가 재배치된다. `Noto Sans KR`이 `preload: false`인 typography
+contract와 맞물린 늦은 font swap이 유력한 설명이지만 **아직 확증하지 않았다**
+(cold/warm 대조 미실시). 확증 전까지 추정으로만 기록한다.
+
+*부수적으로 확인된 것*
+
+- **`CLS ≤0.1`은 예외 없는 계약이 아니다.** `docs/ui-contracts/`의 3개 문서
+  (mobile-chat-composer, comparison-action-rail, typography) 중 CLS를 release
+  gate로 규정한 것은 없고, 감사 문서들은 "Core Web Vitals good 기준"으로 다룬다.
+- **RUM p75는 이 환경에서 접근할 수 없어 미확인**이다.
+- **기존 동의·거부 사용자는 이미 shift가 0이다.** 따라서 (c) 고정 높이 예약은
+  반드시 pending 상태에만 적용해야 하며, 무조건 예약하면 현재 0인 사용자에게
+  새 shift를 만든다.
+- **(c)만으로는 부족하다.** 한국어·320px의 지배적 원인은 consent slot이 아니라
+  hero 본문 재배치이므로, slot 높이 예약은 그 부분을 해결하지 못한다.
+
+*사용자 결정으로 제외된 선택지*
+
+- **(b) marketing route 동적 전환은 적용하지 않는다** —— 성능·캐시 영향에 비해
+  변경 범위가 과도하다는 사용자 판단.
+- **(c) 고정 높이 예약**은 최초 방문·동의 완료·기존 동의·거부 네 상태 모두에서
+  삽입·제거 CLS가 발생하지 않음이 증명된 경우에만 후속 개선으로 적용한다.
+
+- **남은 작업**: 한국어 hero shift의 근본 원인 확증, (c) 설계·4상태 검증,
+  그리고 한국어·320px 축은 별도 작업으로 분리할지에 대한 결정.
+
 ### R-06 — Authenticated web-search state transitions ✅
 
 - **판정**: 성공 — **production source 결함은 재현되지 않았고, coverage만 보강**했다.
@@ -461,7 +546,7 @@ color scheme 기본, cold cache(측정마다 새 context), 대상 SHA `ea56a6ba`
 | E2E: R-02/03/04 관련 6 spec × desktop+mobile | ✅ **223 passed**, 0 failed | |
 | E2E: R-06/07/08 관련 5 spec × desktop | ✅ **72 passed**, 0 failed | |
 | E2E: 전체 suite × desktop+mobile (비-canonical) | ⚠️ 256/1618까지 실행 후 중단, 18 failed | §6.3 |
-| `npm run test:e2e:run` (canonical 전체) | ⛔ **Not verified** | canonical runner 부재 |
+| **QA-GATE-001 canonical (CI, `ubuntu-24.04`, 고정 Chromium)** | ⚠️ **1509 passed / 10 failed / 908 skipped** (36.1분) | §6.4 |
 
 ### 6.1 최초 실패와 분류
 
@@ -495,6 +580,92 @@ color scheme 기본, cold cache(측정마다 새 context), 대상 SHA `ea56a6ba`
   reason to re-record."
 - 이번 변경은 composer를 건드리지 않았다.
 - → **snapshot을 갱신하지 않았다.** `Not verified`로 보고한다.
+
+### 6.4 QA-GATE-001 — canonical 실행 결과 (2026-07-29T23:19–23:57Z)
+
+사용자 요청으로 canonical 환경에서 gate를 실행했다. 이 컨테이너에서는 고정
+Chromium 설치가 프록시 403으로 막히지만, CI에서는 정상 완료된다.
+
+| 항목 | 값 |
+|---|---|
+| workflow | `.github/workflows/e2e.yml` "Main Chromium Regression" (`workflow_dispatch`) |
+| run | `30499132860`, run #44 |
+| ref / head SHA | `claude/tomverse-insight-remediation-yvubkq` / `199baa65` |
+| runner | `ubuntu-24.04` (canonical) |
+| browser | `npx playwright install chromium` = 저장소 고정 build **설치 성공** |
+| 명령 | `npm run test:e2e:chromium` (desktop-chromium + desktop-compact + mobile-chromium) |
+| 결과 | **1509 passed / 10 failed / 908 skipped**, 36.1분 |
+| artifact | `main-chromium-test-results-30499132860` (306 files, 75.7MB, 14일 보존) |
+
+**범위의 한계**: 이 workflow는 `test:e2e:chromium`을 실행하므로 WebKit·Windows
+project는 포함되지 않는다. 다만 `docs/qa/canonical-visual-baseline.md`가
+"golden을 판정할 수 있는 유일한 조합"으로 지정한 `desktop-chromium`이 포함되므로,
+**visual baseline 판정에는 이것이 정확한 gate**다.
+
+**실패 10건**
+
+| # | 종류 | 대상 |
+|---|---|---|
+| 1–4 | visual | `chat-state-visual-regression.spec.ts:141` — `chat-loading-{desktop,mobile}-{light,dark}-ko` |
+| 5–7 | visual | 같은 spec — `chat-attachment-{uploading,processing,error}-desktop-light-ko` |
+| 8 | visual | 같은 spec — `chat-attachment-error-mobile-dark-ko` |
+| 9–10 | 기능 | `upgrade-discovery.spec.ts:428 › panel-only send waits for a changed model selection to persist` (desktop-chromium, desktop-compact). `messageSavedAfterPatch`가 retry2까지 false |
+
+visual 8건은 **전부 `-ko`**이고 `-en`은 하나도 실패하지 않았다.
+
+**§6.2·§6.3의 분류를 정정한다.** 로컬에서 `-ko` visual 실패를 "비-canonical
+Chromium `1194` vs 고정 `1234`의 glyph rasterization 차이"로 분류했는데,
+**canonical 환경에서도 동일하게 실패**했으므로 그 설명은 이 8건에 대해 성립하지
+않는다. §6.2의 `mobile-composer-contract` 2건(906px, 문서화된 수치와 정확히 일치)은
+여전히 rasterization 차이로 보지만, `chat-state-visual-regression`의 `-ko` 8건은
+**별개의 미해결 사안**이다.
+
+가능한 원인 셋 중 하나다 — golden이 base 대비 stale / 이번 변경이 한국어 렌더링에
+영향 / 이 golden이 이 workflow로 검증된 적이 없음. 세 번째가 유력한 정황이 있다:
+#145는 `develop`에 merge됐고 이 workflow는 `main` push와 수동 실행만 트리거하며,
+`pr-fast-gate.yml`은 `@smoke` ~20개만 돌린다. 즉 #145가 추가한 이 golden 세트가
+canonical gate를 한 번도 통과한 적이 없을 수 있다.
+
+같은 workflow의 **run #43(`8386443a`, #145 이전)은 success**였다는 점도 이 방향을
+뒷받침한다.
+
+**대조 실행으로 귀속이 확정됐다.**
+
+`develop`(`cb57c8d7`, 이번 변경이 전혀 포함되지 않은 trunk)에서 **동일한
+workflow·동일한 명령**으로 실행한 결과(run `30501422995`, run #45):
+
+| | 이 branch (`199baa65`) | 대조 `develop` (`cb57c8d7`) |
+|---|---|---|
+| passed | **1509** | **1509** |
+| failed | **10** | **10** |
+| skipped | **908** | **908** |
+| 소요 | 36.1분 | 30.9분 |
+
+그리고 실패한 10건의 목록이 **완전히 일치한다** —— `chat-loading-*-ko` 4건,
+`chat-attachment-{uploading,processing,error}-desktop-light-ko` 3건,
+`chat-attachment-error-mobile-dark-ko` 1건,
+`upgrade-discovery.spec.ts:428`(desktop-chromium + desktop-compact) 2건.
+`upgrade-discovery` 실패는 양쪽 모두 retry2까지 동일하게
+`messageSavedAfterPatch`가 false다.
+
+**결론: 10건 전부 trunk의 기존 실패이며 이번 변경과 무관하다.** 이번 branch가
+canonical 환경에 추가한 regression은 **0건**이고, passed 수도 trunk와 정확히
+동일하다.
+
+**따라서 `QA-GATE-001`은 여전히 닫히지 않았지만, 그 원인은 이번 remediation이
+아니다.** gate를 닫으려면 다음 10건을 trunk에서 해결해야 하며, 이는 합의된
+R-01–R-08 범위 밖의 **신규 항목**이다.
+
+1. `chat-state-visual-regression.spec.ts`의 `-ko` golden 8건 —— #145가 추가한
+   golden 세트가 canonical gate를 통과한 적이 없는 것으로 보인다(§위 정황).
+   `-en`은 전부 통과하므로 한국어 렌더링 경로에 국한된 문제다.
+2. `upgrade-discovery.spec.ts:428` 2건 —— `messageSavedAfterPatch`가 끝까지
+   false. retry 3회 모두 실패하므로 flake가 아니라 재현되는 실패다.
+
+**snapshot은 갱신하지 않았다** —— canonical 재현과 승인 없이 golden을 건드리지
+않는다는 정책이고, 애초에 이 golden들은 이번 변경 소관이 아니다.
+
+---
 
 ### 6.3 비-canonical 전체 suite 실행 — 18 failed의 내역과 판별
 
@@ -673,10 +844,12 @@ artifact에 기록하지 않았다.
 
 1. R-01: 3-model comparison 3회 + AI Review 1회가 모두 완료되고, 각 run의
    expected/charged/refunded/provider-start가 정책과 정확히 일치
-2. QA-GATE-001: canonical `ubuntu-24.04` + Playwright `1.62.0` 고정 Chromium으로
-   전체 E2E unexpected failure 0
+2. QA-GATE-001: canonical에서 unexpected failure 0. 현재 10건은 **trunk의 기존
+   실패**로 확정됐으므로(이번 변경 regression 0건) trunk 쪽 신규 작업으로 처리해야
+   한다 —— `-ko` golden 8건과 `upgrade-discovery.spec.ts:428` 2건
 3. R-02·R-04·R-08이 staging에 배포되고 배포본에서 재확인
-4. R-05: `/` median CLS ≤0.1 달성, 또는 0.1095를 명시적으로 수용하는 결정
+4. R-05: `/` median CLS ≤0.1 달성 —— 단 360px/en뿐 아니라 **320px과 한국어에서도**.
+   조건부 수용은 배제 기준에 걸려 현재 선택지가 아니다(§4 R-05)
 5. `STG-F008`·`STG-F009` 사용자 결정 종결
 6. visual snapshot 2건이 canonical 환경에서 pass 또는 정당한 근거로 갱신 승인
 
