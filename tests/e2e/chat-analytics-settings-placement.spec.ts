@@ -120,7 +120,9 @@ async function analyticsIntersections(page: Page) {
 }
 
 test.describe("desktop chat analytics settings placement", () => {
-  test.beforeEach(async (_, testInfo) => {
+  // Playwright requires the first argument to be an object destructuring
+  // pattern, even when the hook only needs `testInfo`.
+  test.beforeEach(async ({}, testInfo) => {
     test.skip(
       !testInfo.project.name.startsWith("desktop"),
       "The floating pill and the model panel footers are a desktop-shell layout."

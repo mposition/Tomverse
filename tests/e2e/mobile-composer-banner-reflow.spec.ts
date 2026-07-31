@@ -325,7 +325,9 @@ function assertCell(report: CellReport, label: string) {
 test.describe("mobile composer stays operable with a provider banner at every text size", () => {
   test.use({ hasTouch: true });
 
-  test.beforeEach(async (_, testInfo) => {
+  // Playwright requires the first argument to be an object destructuring
+  // pattern, even when the hook only needs `testInfo`.
+  test.beforeEach(async ({}, testInfo) => {
     test.skip(
       testInfo.project.name.includes("safari"),
       "The matrix pins explicit viewports and runs on one engine."
