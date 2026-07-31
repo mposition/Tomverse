@@ -37,6 +37,7 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AppToastViewport } from "@/components/AppToastViewport";
 import type { AdminRole } from "@/lib/adminAuthCore";
 
 type NavItem = {
@@ -346,6 +347,14 @@ export function AdminConsoleShell({
 
   return (
     <div className="min-h-dvh bg-zinc-950 text-zinc-100">
+      {/*
+        Every admin panel reports through dispatchAppToast(). The console had
+        no listener, so validation failures, API errors and confirmations were
+        dispatched into nothing. Mounted here rather than in the shared
+        `(application)` layout: /chat renders its own listener and would show
+        every toast twice.
+      */}
+      <AppToastViewport />
       <aside className="fixed inset-y-0 left-0 z-50 hidden w-64 border-r border-zinc-800 lg:block">{sidebar}</aside>
       {mobileNavOpen ? (
         <div className="fixed inset-0 z-[70] lg:hidden">
