@@ -44,9 +44,14 @@ jobs:
     # canonical environment no matter which shard happens to own it.
     runs-on: ubuntu-24.04
     # One shard's share of the suite, plus its own build. The single-job
-    # version needed 75 minutes and was still growing into it; three shards
-    # bring a shard's own work back to roughly a third of that, and this
-    # leaves room for the build and for the suite to keep growing.
+    # version needed 75 minutes and was still growing into it.
+    #
+    # First sharded run, for whoever tunes this next: 18m05s, 12m50s, 10m15s,
+    # against 33m36s unsharded. Wall clock is the slowest shard, so this is a
+    # bit under half, not the third the test split alone would suggest --
+    # every shard pays for its own build, and `--shard` divides by file, which
+    # does not divide evenly by duration. Raising the shard count trades more
+    # duplicated build for a flatter tail; three is where it sits today.
     timeout-minutes: 40
     strategy:
       # A failing shard must not cancel its siblings. Their results are the
