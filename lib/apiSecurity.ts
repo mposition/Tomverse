@@ -193,11 +193,10 @@ export async function reserveDailyUploadBytes(
   }
 }
 
-export async function readLimitedJson<T>(
+export async function readLimitedText(
   request: Request,
-  maxBytes: number,
-  schema: z.ZodType<T>
-): Promise<T> {
+  maxBytes: number
+): Promise<string> {
   const declared = Number(request.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > maxBytes) {
     throw new ApiSecurityError(
@@ -234,6 +233,15 @@ export async function readLimitedJson<T>(
     reader.releaseLock();
   }
 
+  return text;
+}
+
+export async function readLimitedJson<T>(
+  request: Request,
+  maxBytes: number,
+  schema: z.ZodType<T>
+): Promise<T> {
+  const text = await readLimitedText(request, maxBytes);
   let value: unknown;
   try {
     value = JSON.parse(text);

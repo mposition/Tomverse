@@ -40,7 +40,7 @@ export const rootMetadata: Metadata = {
     locale: "en_AU",
     images: [
       {
-        url: "/opengraph-image",
+        url: `${SITE_ORIGIN}/opengraph-image`,
         width: 1200,
         height: 630,
         alt: "Tomverse Insight by Tomverse — compare GPT, Claude, and Gemini side by side",
@@ -54,7 +54,7 @@ export const rootMetadata: Metadata = {
       "Compare GPT, Claude, and Gemini side by side, then use AI Review to identify differences, omissions, and points that need verification.",
     images: [
       {
-        url: "/twitter-image",
+        url: `${SITE_ORIGIN}/twitter-image`,
         alt: "Tomverse Insight by Tomverse — compare GPT, Claude, and Gemini side by side",
       },
     ],

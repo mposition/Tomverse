@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   classifyProbeError,
   providerDiagnosticCode,
+  safeErrorMetadata,
 } from "../lib/providerErrorClassification.ts";
 
 // The diagnostic codes below are the exact strings observed on staging while
@@ -59,4 +60,24 @@ test("providerDiagnosticCode still produces the shape the classifier matches", (
   const code = providerDiagnosticCode("PROVIDER_PROBE_FAILED", error);
   assert.equal(code, "PROVIDER_PROBE_FAILED.AI_APICallError.HTTP_404");
   assert.equal(classifyProbeError(code), "MODEL_NOT_FOUND");
+});
+
+test("safeErrorMetadata excludes provider request and response payloads", () => {
+  const error = Object.assign(new Error("message includes SECRET_PROMPT"), {
+    name: "AI_APICallError",
+    code: "PROVIDER_FAILURE",
+    statusCode: 502,
+    isRetryable: true,
+    requestBodyValues: { prompt: "SECRET_PROMPT" },
+    responseBody: "SECRET_RESPONSE",
+  });
+
+  const serialized = JSON.stringify(safeErrorMetadata(error));
+  assert.deepEqual(safeErrorMetadata(error), {
+    name: "AI_APICallError",
+    code: "PROVIDER_FAILURE",
+    statusCode: 502,
+    isRetryable: true,
+  });
+  assert.doesNotMatch(serialized, /SECRET_PROMPT|SECRET_RESPONSE/);
 });

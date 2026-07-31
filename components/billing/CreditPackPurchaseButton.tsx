@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Coins, X } from "lucide-react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
@@ -37,15 +37,24 @@ type PurchaseAnalyticsContext = {
   addonCreditsRemaining: number;
 };
 
-const copy: Record<Language, { title: string; body: string; notice: string; buy: string; close: string; loading: string; expiry: string; error: string }> = {
-  en: { title: "Buy additional credits", body: "One-time credits for extra work this month.", notice: "Purchased credits remain usable after the plan’s daily credit guardrail is reached. They do not change model access, plan features, rate or concurrency limits, provider budgets, or fair-use safeguards.", buy: "Buy", close: "Close", loading: "Loading…", expiry: "Valid for 12 months", error: "Credit packs could not be loaded." },
-  ko: { title: "추가 크레딧 구매", body: "이번 달에만 작업량이 많을 때 사용하는 일회성 크레딧입니다.", notice: "구매 크레딧은 플랜의 일일 크레딧 가드레일을 넘어 사용할 수 있습니다. 모델 접근 권한, 플랜 기능, 분당·동시 요청 제한, 공급자 예산 및 공정사용 안전장치는 변경되지 않습니다.", buy: "구매", close: "닫기", loading: "불러오는 중…", expiry: "12개월 유효", error: "크레딧 팩을 불러오지 못했습니다." },
-  zh: { title: "购买额外积分", body: "用于本月额外工作的单次积分。", notice: "达到套餐每日积分保护额度后，已购买积分仍可使用。模型权限、套餐功能、请求频率与并发限制、供应商预算及公平使用保护不会改变。", buy: "购买", close: "关闭", loading: "加载中…", expiry: "有效期 12 个月", error: "无法加载积分包。" },
-  fr: { title: "Acheter des crédits supplémentaires", body: "Crédits ponctuels pour un besoin supplémentaire ce mois-ci.", notice: "Les crédits achetés restent utilisables après la limite quotidienne du forfait. Ils ne modifient ni l’accès aux modèles, ni les fonctions, ni les limites de fréquence et de concurrence, ni les budgets fournisseur ou les protections d’usage équitable.", buy: "Acheter", close: "Fermer", loading: "Chargement…", expiry: "Valable 12 mois", error: "Impossible de charger les packs." },
-  de: { title: "Zusätzliche Credits kaufen", body: "Einmalige Credits für zusätzlichen Bedarf in diesem Monat.", notice: "Gekaufte Credits bleiben nach Erreichen des täglichen Planlimits nutzbar. Modellzugriff, Planfunktionen, Raten- und Parallelitätslimits, Anbieterbudgets und Fair-Use-Schutz bleiben unverändert.", buy: "Kaufen", close: "Schließen", loading: "Laden…", expiry: "12 Monate gültig", error: "Credit-Pakete konnten nicht geladen werden." },
-  es: { title: "Comprar créditos adicionales", body: "Créditos de un solo pago para trabajo adicional este mes.", notice: "Los créditos comprados siguen disponibles después del límite diario del plan. No cambian el acceso a modelos, las funciones, los límites de frecuencia o concurrencia, los presupuestos de proveedores ni las protecciones de uso justo.", buy: "Comprar", close: "Cerrar", loading: "Cargando…", expiry: "Válido 12 meses", error: "No se pudieron cargar los paquetes." },
-  pt: { title: "Comprar créditos adicionais", body: "Créditos avulsos para trabalho extra neste mês.", notice: "Créditos comprados continuam disponíveis após o limite diário do plano. Eles não alteram acesso a modelos, recursos, limites de taxa ou simultaneidade, orçamentos de provedores nem proteções de uso justo.", buy: "Comprar", close: "Fechar", loading: "Carregando…", expiry: "Válido por 12 meses", error: "Não foi possível carregar os pacotes." },
+const copy: Record<Language, { title: string; body: string; notice: string; buy: string; close: string; loading: string; expiry: string; error: string; retry: string }> = {
+  en: { title: "Buy additional credits", body: "One-time credits for extra work this month.", notice: "Purchased credits remain usable after the plan’s daily credit guardrail is reached. They do not change model access, plan features, rate or concurrency limits, provider budgets, or fair-use safeguards.", buy: "Buy", close: "Close", loading: "Loading…", expiry: "Valid for 12 months", error: "Credit packs could not be loaded.", retry: "Try again" },
+  ko: { title: "추가 크레딧 구매", body: "이번 달에만 작업량이 많을 때 사용하는 일회성 크레딧입니다.", notice: "구매 크레딧은 플랜의 일일 크레딧 가드레일을 넘어 사용할 수 있습니다. 모델 접근 권한, 플랜 기능, 분당·동시 요청 제한, 공급자 예산 및 공정사용 안전장치는 변경되지 않습니다.", buy: "구매", close: "닫기", loading: "불러오는 중…", expiry: "12개월 유효", error: "크레딧 팩을 불러오지 못했습니다.", retry: "다시 시도" },
+  zh: { title: "购买额外积分", body: "用于本月额外工作的单次积分。", notice: "达到套餐每日积分保护额度后，已购买积分仍可使用。模型权限、套餐功能、请求频率与并发限制、供应商预算及公平使用保护不会改变。", buy: "购买", close: "关闭", loading: "加载中…", expiry: "有效期 12 个月", error: "无法加载积分包。", retry: "重试" },
+  fr: { title: "Acheter des crédits supplémentaires", body: "Crédits ponctuels pour un besoin supplémentaire ce mois-ci.", notice: "Les crédits achetés restent utilisables après la limite quotidienne du forfait. Ils ne modifient ni l’accès aux modèles, ni les fonctions, ni les limites de fréquence et de concurrence, ni les budgets fournisseur ou les protections d’usage équitable.", buy: "Acheter", close: "Fermer", loading: "Chargement…", expiry: "Valable 12 mois", error: "Impossible de charger les packs.", retry: "Réessayer" },
+  de: { title: "Zusätzliche Credits kaufen", body: "Einmalige Credits für zusätzlichen Bedarf in diesem Monat.", notice: "Gekaufte Credits bleiben nach Erreichen des täglichen Planlimits nutzbar. Modellzugriff, Planfunktionen, Raten- und Parallelitätslimits, Anbieterbudgets und Fair-Use-Schutz bleiben unverändert.", buy: "Kaufen", close: "Schließen", loading: "Laden…", expiry: "12 Monate gültig", error: "Credit-Pakete konnten nicht geladen werden.", retry: "Erneut versuchen" },
+  es: { title: "Comprar créditos adicionales", body: "Créditos de un solo pago para trabajo adicional este mes.", notice: "Los créditos comprados siguen disponibles después del límite diario del plan. No cambian el acceso a modelos, las funciones, los límites de frecuencia o concurrencia, los presupuestos de proveedores ni las protecciones de uso justo.", buy: "Comprar", close: "Cerrar", loading: "Cargando…", expiry: "Válido 12 meses", error: "No se pudieron cargar los paquetes.", retry: "Reintentar" },
+  pt: { title: "Comprar créditos adicionais", body: "Créditos avulsos para trabalho extra neste mês.", notice: "Créditos comprados continuam disponíveis após o limite diário do plano. Eles não alteram acesso a modelos, recursos, limites de taxa ou simultaneidade, orçamentos de provedores nem proteções de uso justo.", buy: "Comprar", close: "Fechar", loading: "Carregando…", expiry: "Válido por 12 meses", error: "Não foi possível carregar os pacotes.", retry: "Tentar novamente" },
 };
+
+const FOCUSABLE_SELECTOR = [
+  "button:not([disabled])",
+  "a[href]",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  '[tabindex]:not([tabindex="-1"])',
+].join(",");
 
 export function CreditPackPurchaseButton({
   children,
@@ -58,6 +67,11 @@ export function CreditPackPurchaseButton({
 }) {
   const { lang } = useLanguage();
   const text = copy[lang];
+  const titleId = useId();
+  const dialogId = `${titleId}-dialog`;
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const dialogRef = useRef<HTMLElement | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const [open, setOpen] = useState(false);
   const [packs, setPacks] = useState<Pack[] | null>(null);
   const [plan, setPlan] = useState<"Free" | "Pro" | "Max">("Free");
@@ -67,6 +81,64 @@ export function CreditPackPurchaseButton({
     useState<PurchaseAnalyticsContext | null>(null);
   const [error, setError] = useState("");
   const [buying, setBuying] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+
+  const close = useCallback(() => setOpen(false), []);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const returnTarget =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : triggerRef.current;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const focusFrame = requestAnimationFrame(() => closeButtonRef.current?.focus());
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      const modalDialogs = Array.from(
+        document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]')
+      );
+      if (modalDialogs.at(-1) !== dialog) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        close();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(
+        dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)
+      ).filter((element) => element.offsetParent !== null);
+      if (focusable.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (!dialog.contains(active)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      } else if (event.shiftKey && active === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown, true);
+    return () => {
+      cancelAnimationFrame(focusFrame);
+      document.removeEventListener("keydown", handleKeyDown, true);
+      document.body.style.overflow = previousOverflow;
+      requestAnimationFrame(() => {
+        if (returnTarget?.isConnected) returnTarget.focus({ preventScroll: true });
+      });
+    };
+  }, [close, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -102,7 +174,7 @@ export function CreditPackPurchaseButton({
         if ((requestError as Error).name !== "AbortError") setError(text.error);
       });
     return () => controller.abort();
-  }, [open, text.error]);
+  }, [loadAttempt, open, text.error]);
 
   const buy = async (packId: string) => {
     const pack = packs?.find((item) => item.id === packId);
@@ -160,27 +232,33 @@ export function CreditPackPurchaseButton({
   return (
     <>
       <button
+        ref={triggerRef}
+        data-testid="credit-pack-purchase-trigger"
         type="button"
         onClick={() => {
           setPacks(null);
           setPurchaseAnalyticsContext(null);
           setBillingMarket(null);
           setError("");
+          setBuying(null);
           setOpen(true);
         }}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-controls={open ? dialogId : undefined}
         className={className || "font-bold text-amber-900 underline underline-offset-2 dark:text-amber-100"}
       >
         {children || text.title}
       </button>
       {open && typeof document !== "undefined" && createPortal(
-        <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/65 p-3 backdrop-blur-sm sm:items-center" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setOpen(false)}>
-          <section role="dialog" aria-modal="true" aria-labelledby="credit-pack-title" className="max-h-[90dvh] w-full max-w-xl overflow-y-auto rounded-3xl border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-800 dark:bg-zinc-950">
+        <div className="fixed inset-0 z-[120] flex items-end justify-center bg-black/65 p-3 backdrop-blur-sm sm:items-center" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && close()}>
+          <section id={dialogId} ref={dialogRef} data-testid="credit-pack-purchase-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId} className="max-h-[90dvh] w-full max-w-xl overflow-y-auto rounded-3xl border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-800 dark:bg-zinc-950">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 id="credit-pack-title" className="flex items-center gap-2 text-xl font-black text-zinc-950 dark:text-white"><Coins className="h-5 w-5 text-emerald-500" />{text.title}</h2>
+                <h2 id={titleId} className="flex items-center gap-2 text-xl font-black text-zinc-950 dark:text-white"><Coins className="h-5 w-5 text-emerald-500" />{text.title}</h2>
                 <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{text.body}</p>
               </div>
-              <button type="button" onClick={() => setOpen(false)} aria-label={text.close} className="rounded-xl p-2 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-900"><X className="h-5 w-5" /></button>
+              <button ref={closeButtonRef} type="button" onClick={close} aria-label={text.close} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-900"><X className="h-5 w-5" /></button>
             </div>
             <div className="mt-5 grid gap-3 sm:grid-cols-2">
               {packs === null && !error && <p className="text-sm text-zinc-500">{text.loading}</p>}
@@ -197,7 +275,23 @@ export function CreditPackPurchaseButton({
                 </article>
               ))}
             </div>
-            {error && <p className="mt-3 text-sm font-semibold text-red-600 dark:text-red-300">{error}</p>}
+            {error && (
+              <div className="mt-3 flex flex-wrap items-center gap-3" role="alert">
+                <p className="text-sm font-semibold text-red-600 dark:text-red-300">{error}</p>
+                {packs === null && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setError("");
+                      setLoadAttempt((attempt) => attempt + 1);
+                    }}
+                    className="min-h-11 rounded-xl border border-red-300 px-3 py-2 text-sm font-bold text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-200 dark:hover:bg-red-950/40"
+                  >
+                    {text.retry}
+                  </button>
+                )}
+              </div>
+            )}
             {debtCredits > 0 && (
               <p className="mt-3 rounded-2xl border border-red-200 bg-red-50 p-3 text-xs leading-5 text-red-900 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-100">
                 {lang === "ko"

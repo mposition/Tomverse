@@ -113,7 +113,7 @@ export const createPageMetadata = ({
     ),
     images: [
       {
-        url: "/opengraph-image",
+        url: `${SITE_ORIGIN}/opengraph-image`,
         width: 1200,
         height: 630,
         alt: "Tomverse Insight by Tomverse — compare GPT, Claude, and Gemini side by side",
@@ -126,7 +126,7 @@ export const createPageMetadata = ({
     description: ogDescription ?? description,
     images: [
       {
-        url: "/twitter-image",
+        url: `${SITE_ORIGIN}/twitter-image`,
         alt: "Tomverse Insight by Tomverse — compare GPT, Claude, and Gemini side by side",
       },
     ],

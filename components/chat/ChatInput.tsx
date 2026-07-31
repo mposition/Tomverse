@@ -2155,14 +2155,14 @@ export function ChatInput({
             </div>
           )}
           {isNewConversation && !value.trim() && attachments.length === 0 && personalizedPrompt && (
-            <div className="mb-2 flex max-w-full gap-2 overflow-x-auto overscroll-x-contain pb-1 md:flex-wrap md:overflow-visible md:pb-0">
+            <div className="mb-2 flex max-w-full flex-wrap gap-2">
               <button
                 type="button"
                 onClick={() => {
                   dismissGuestQuickStart();
                   onChange(personalizedPrompt);
                 }}
-                className="shrink-0 touch-manipulation rounded-full border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700 transition-colors hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-200 dark:hover:bg-blue-950/60"
+                className="min-w-0 max-w-full touch-manipulation whitespace-normal break-words rounded-full border border-blue-300 bg-blue-50 px-3 py-1.5 text-left text-xs font-bold text-blue-700 transition-colors hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-200 dark:hover:bg-blue-950/60"
               >
                 {personalizedPrompt}
               </button>
@@ -2338,7 +2338,7 @@ export function ChatInput({
               data-testid="attachment-tray"
               className="mb-2 rounded-2xl bg-zinc-50 p-1.5 dark:bg-zinc-950/70 md:mb-3 md:bg-transparent md:p-0"
             >
-            <div className="flex max-w-full gap-2 overflow-x-auto overscroll-x-contain pb-1 md:flex-wrap md:overflow-visible md:pb-0">
+            <div className="flex max-h-[35dvh] max-w-full flex-wrap gap-2 overflow-x-hidden overflow-y-auto overscroll-contain md:max-h-none md:overflow-visible">
               {/* UI-STATE-002. In-flight files are cards of their own, in the
                   same tray as finished ones, so the user can see which file
                   is where. Each names the file and the step actually running;
@@ -2362,9 +2362,9 @@ export function ChatInput({
                     data-testid="attachment-pending"
                     data-stage={pending.stage}
                     aria-describedby={`attachment-stage-${pending.id}`}
-                    className="relative flex h-14 min-w-44 max-w-56 shrink-0 items-center gap-2.5 rounded-xl border border-zinc-200 bg-white py-2 pl-2 pr-2 text-zinc-700 shadow-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 md:h-16 md:min-w-52 md:max-w-64"
+                    className="relative flex min-h-14 w-full min-w-0 max-w-full items-center gap-[10px] rounded-xl border border-zinc-200 bg-white py-2 pl-[8px] pr-[8px] text-zinc-700 shadow-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 md:min-h-16 md:w-auto md:min-w-52 md:max-w-64 md:shrink-0"
                   >
-                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white text-zinc-500 ring-1 ring-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:ring-zinc-700">
+                    <span className="flex h-[40px] w-[40px] shrink-0 items-center justify-center rounded-lg bg-white text-zinc-500 ring-1 ring-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:ring-zinc-700">
                       <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                     </span>
                     <span className="flex min-w-0 flex-col">
@@ -2399,9 +2399,9 @@ export function ChatInput({
                   // beside it: the reason is the point of the card, so it
                   // wraps rather than truncating to an ellipsis the user then
                   // has no way to read.
-                  className="relative flex min-h-14 min-w-44 max-w-72 shrink-0 items-center gap-2.5 rounded-xl border border-red-300 bg-red-50 px-2 py-2 text-red-900 shadow-sm dark:border-red-800 dark:bg-red-950/40 dark:text-red-100 md:min-h-16 md:min-w-56"
+                  className="relative flex min-h-14 w-full min-w-0 max-w-full items-center gap-[10px] rounded-xl border border-red-300 bg-red-50 px-[8px] py-2 text-red-900 shadow-sm dark:border-red-800 dark:bg-red-950/40 dark:text-red-100 md:min-h-16 md:w-auto md:min-w-56 md:max-w-72 md:shrink-0"
                 >
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white text-red-600 ring-1 ring-red-200 dark:bg-zinc-900 dark:text-red-300 dark:ring-red-900">
+                  <span className="flex h-[40px] w-[40px] shrink-0 items-center justify-center rounded-lg bg-white text-red-600 ring-1 ring-red-200 dark:bg-zinc-900 dark:text-red-300 dark:ring-red-900">
                     <AlertTriangle className="h-4 w-4" aria-hidden="true" />
                   </span>
                   <span className="flex min-w-0 flex-1 flex-col">
@@ -2454,7 +2454,7 @@ export function ChatInput({
                   className={
                     attachment.data
                       ? "relative h-14 w-14 shrink-0 overflow-hidden rounded-xl border border-zinc-200 bg-zinc-100 shadow-sm dark:border-zinc-700 dark:bg-zinc-900 md:h-20 md:w-20"
-                      : "relative flex h-14 min-w-44 max-w-56 shrink-0 items-center gap-2.5 rounded-xl border border-zinc-200 bg-white py-2 pl-2 pr-8 text-zinc-700 shadow-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 md:h-16 md:min-w-52 md:max-w-64"
+                      : "relative flex min-h-14 w-full min-w-0 max-w-full items-center gap-[10px] rounded-xl border border-zinc-200 bg-white py-2 pl-[8px] pr-[32px] text-zinc-700 shadow-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 md:min-h-16 md:w-auto md:min-w-52 md:max-w-64 md:shrink-0"
                   }
                 >
                   {attachment.data ? (
@@ -2466,7 +2466,7 @@ export function ChatInput({
                     />
                   ) : (
                     <>
-                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white text-zinc-500 ring-1 ring-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:ring-zinc-700">
+                      <span className="flex h-[40px] w-[40px] shrink-0 items-center justify-center rounded-lg bg-white text-zinc-500 ring-1 ring-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:ring-zinc-700">
                         {getAttachmentIcon(attachment)}
                       </span>
                       <span className="flex min-w-0 flex-col">
@@ -2485,10 +2485,10 @@ export function ChatInput({
                     className={`relative before:absolute before:content-[''] ${isMobileShell ? "before:-inset-3" : "before:-inset-1"} ${
                       attachment.data
                         ? "absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-zinc-950/80 text-white hover:bg-zinc-950"
-                        : "absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-200 hover:text-zinc-900 dark:hover:bg-zinc-700 dark:hover:text-white"
+                        : "absolute right-[8px] top-[8px] flex h-[20px] w-[20px] items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-200 hover:text-zinc-900 dark:hover:bg-zinc-700 dark:hover:text-white"
                     }`}
                     title={t("chat.removeAttachment")}
-                    aria-label={t("chat.removeAttachment")}
+                    aria-label={`${t("chat.removeAttachment")}: ${attachment.name}`}
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>

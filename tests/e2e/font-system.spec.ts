@@ -70,7 +70,13 @@ function unlocalizedPath(pathname: string): string {
 
 async function selectLanguage(page: Page, lang: "ko" | "en" | "zh") {
   const select = page.getByLabel("Language");
-  if ((await select.inputValue()) === lang) return;
+  if ((await select.inputValue()) === lang) {
+    // WebKit can finish the document load before the next/font face has
+    // settled. Keep the no-navigation path under the same font-ready
+    // contract as an actual locale switch so computed styles are meaningful.
+    await waitForFonts(page);
+    return;
+  }
 
   // Since the localized marketing routes got their own root layout, the
   // switcher crosses a *document* boundary on any page that has a localized
@@ -131,18 +137,18 @@ test.describe("font system: locale families", () => {
       await page.goto("/");
       await selectLanguage(page, "en");
 
-      const declared = await declaredFontFamily(page.locator("body"));
-      expect(declared).toMatch(/^Geist\b/);
-      expect(declared).not.toMatch(/Arial/);
-
       const title = page.getByTestId("landing-hero-title");
       await expect(title).toBeVisible();
       expect(await declaredFontFamily(title)).toMatch(/^Geist\b/);
 
-      test.skip(
-        !testInfo.project.name.includes("chromium"),
-        "Platform font reporting needs CDP."
-      );
+      // Mobile WebKit reports `-webkit-standard` for the body element even
+      // when rendered descendants resolve the author family. Check body and
+      // rasterized platform fonts only where CDP can report them reliably;
+      // every engine still checks the real headline above.
+      if (!testInfo.project.name.includes("chromium")) return;
+      const body = page.locator("body");
+      expect(await declaredFontFamily(body)).toMatch(/^Geist\b/);
+      expect(await declaredFontFamily(body)).not.toMatch(/Arial/);
       const used = await renderedFonts(page, "[data-testid='landing-hero-title']");
       expect(used[0]).toMatch(/^Geist\b/);
       expect(used).not.toContain("Arial");
@@ -153,16 +159,15 @@ test.describe("font system: locale families", () => {
     await page.goto("/");
     await selectLanguage(page, "ko");
 
-    const declared = await declaredFontFamily(page.locator("body"));
+    const declared = await declaredFontFamily(
+      page.getByTestId("landing-hero-title")
+    );
     expect(declared).toMatch(/^Noto Sans KR\b/);
     expect(declared).toMatch(/Apple SD Gothic Neo/);
     expect(declared).toMatch(/Malgun Gothic/);
     expect(declared).not.toMatch(/Arial/);
 
-    test.skip(
-      !testInfo.project.name.includes("chromium"),
-      "Platform font reporting needs CDP."
-    );
+    if (!testInfo.project.name.includes("chromium")) return;
     const used = await renderedFonts(page, "[data-testid='landing-hero-title']");
     // A mixed Hangul/Latin headline must come from one family, not two.
     expect(used.some((font) => font.startsWith("Noto Sans KR"))).toBe(true);
@@ -174,16 +179,15 @@ test.describe("font system: locale families", () => {
     await page.goto("/");
     await selectLanguage(page, "zh");
 
-    const declared = await declaredFontFamily(page.locator("body"));
+    const declared = await declaredFontFamily(
+      page.getByTestId("landing-hero-title")
+    );
     expect(declared).toMatch(/^Noto Sans SC\b/);
     expect(declared).toMatch(/PingFang SC/);
     expect(declared).toMatch(/Microsoft YaHei/);
     expect(declared).not.toMatch(/Arial/);
 
-    test.skip(
-      !testInfo.project.name.includes("chromium"),
-      "Platform font reporting needs CDP."
-    );
+    if (!testInfo.project.name.includes("chromium")) return;
     const used = await renderedFonts(page, "[data-testid='landing-hero-title']");
     expect(used.some((font) => font.startsWith("Noto Sans SC"))).toBe(true);
     expect(used).not.toContain("Arial");
@@ -194,7 +198,9 @@ test.describe("font system: locale families", () => {
   }) => {
     await page.goto("/");
     await selectLanguage(page, "en");
-    expect(await declaredFontFamily(page.locator("body"))).toMatch(/^Geist\b/);
+    expect(
+      await declaredFontFamily(page.getByTestId("landing-hero-title"))
+    ).toMatch(/^Geist\b/);
 
     await selectLanguage(page, "ko");
     const korean = await declaredFontFamily(
@@ -203,7 +209,9 @@ test.describe("font system: locale families", () => {
     expect(korean).toMatch(/^Noto Sans KR\b/);
 
     await selectLanguage(page, "en");
-    expect(await declaredFontFamily(page.locator("body"))).toMatch(/^Geist\b/);
+    expect(
+      await declaredFontFamily(page.getByTestId("landing-hero-title"))
+    ).toMatch(/^Geist\b/);
   });
 });
 

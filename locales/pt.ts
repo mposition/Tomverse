@@ -508,6 +508,7 @@ export const pt = {
         microsoft: "Continuar com Microsoft",
         orDivider: "ou",
         emailLoginPlaceholder: "voce@exemplo.com",
+        emailLoginEmailInputLabel: "Endereço de e-mail",
         emailLoginInvalidFormat: "Informe um endereço de e-mail válido.",
         emailLoginButton: "Receber código de login",
         emailLoginCodeSentTitle: "Verifique seu e-mail",

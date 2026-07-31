@@ -350,6 +350,19 @@ export async function freezeAnimations(page: Page) {
   await page.addStyleTag({ url: "/qa/freeze-animations.css" });
 }
 
+export async function setRootFontSize(
+  page: Page,
+  size: 16 | 20 | 24 | 32
+) {
+  await page.addStyleTag({ url: `/qa/root-font-${size}.css` });
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      )
+  );
+}
+
 /**
  * Sets the theme preference deterministically, before the page's first
  * script runs, so ThemeController's mount-time

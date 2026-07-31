@@ -925,8 +925,8 @@ const checks = [
     test: (source) =>
       source.includes("metadataBase: new URL(SITE_ORIGIN)") &&
       source.includes('card: "summary_large_image"') &&
-      source.includes('url: "/opengraph-image"') &&
-      source.includes('url: "/twitter-image"') &&
+      source.includes('url: `${SITE_ORIGIN}/opengraph-image`') &&
+      source.includes('url: `${SITE_ORIGIN}/twitter-image`') &&
       source.includes("GOOGLE_SITE_VERIFICATION") &&
       source.includes("BING_SITE_VERIFICATION") &&
       [read("app/(site)/layout.tsx"), read("app/[locale]/layout.tsx")].every(

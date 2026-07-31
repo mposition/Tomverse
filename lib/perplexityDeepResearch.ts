@@ -285,9 +285,8 @@ export const submitDeepResearchJob = async ({
   });
 
   if (!response.ok) {
-    const errorBody = await response.text().catch(() => "");
     throw new PerplexityDeepResearchError(
-      `Perplexity async submit failed: ${response.status} ${errorBody.slice(0, 500)}`
+      `Perplexity async submit failed with HTTP ${response.status}.`
     );
   }
 
@@ -337,9 +336,8 @@ export const pollDeepResearchJob = async (
   );
 
   if (!response.ok) {
-    const errorBody = await response.text().catch(() => "");
     throw new PerplexityDeepResearchError(
-      `Perplexity async poll failed: ${response.status} ${errorBody.slice(0, 500)}`
+      `Perplexity async poll failed with HTTP ${response.status}.`
     );
   }
 
@@ -360,10 +358,7 @@ export const pollDeepResearchJob = async (
   if (status === "FAILED") {
     return {
       status,
-      errorMessage:
-        data && typeof data.error_message === "string"
-          ? data.error_message
-          : "The Perplexity deep research job failed.",
+      errorMessage: "The Perplexity deep research job failed.",
     };
   }
 
