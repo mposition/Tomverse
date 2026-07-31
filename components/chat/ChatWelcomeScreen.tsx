@@ -51,7 +51,13 @@ export function ChatWelcomeScreen({
   return (
     <div
       data-testid="chat-empty-state"
-      className="flex h-full flex-col items-center justify-center px-6 text-center"
+      // `min-h-full`, not `h-full`: with a fixed height a centred column whose
+      // content outgrows it overflows in both directions, so the composer
+      // portalled into this screen painted below the section and under the AI
+      // disclaimer (REAUDIT-P1-04, 1166px^2 at 320x568/200% text). A minimum
+      // keeps the centred look whenever there is room and lets the column grow
+      // downwards -- into its scroll container -- when there is not.
+      className="flex min-h-full flex-col items-center justify-center px-6 text-center"
     >
       <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-3xl bg-blue-500/10 text-blue-500">
         <Bot className="h-6 w-6" />
