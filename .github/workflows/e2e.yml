@@ -10,6 +10,16 @@ name: Main Chromium Regression
 # `test:e2e:chromium` must therefore stay unfiltered. Adding a tag filter to
 # it would drop those tests from CI entirely, and the security-regression
 # check asserts that it has none.
+#
+# The suite is split across shards rather than projects. `--shard` divides the
+# same unfiltered run by test count, so every shard still carries all three
+# Chromium projects and the union of the shards is exactly what one job used
+# to execute. Sharding by `--project` would have been the obvious cut and is
+# the wrong one twice over: the projects are lopsided (desktop-chromium alone
+# is over half the suite, so the slowest shard would barely improve), and it
+# would mean dropping `npm run test:e2e:chromium` in favour of per-project
+# `playwright test` calls -- which is the command the security-regression
+# check pins precisely so nobody can quietly narrow this run.
 
 on:
   push:
@@ -26,23 +36,26 @@ concurrency:
 
 jobs:
   playwright:
-    name: Chromium desktop and mobile regression
+    name: Chromium regression (shard ${{ matrix.shard }}/${{ matrix.shards }})
     # Canonical visual baseline: pinned image, not ubuntu-latest, so a
     # runner-image bump cannot silently re-rasterise every golden.
-    # See docs/qa/canonical-visual-baseline.md.
+    # See docs/qa/canonical-visual-baseline.md. Sharding does not weaken this:
+    # every shard runs the same pinned image, so a golden is compared on the
+    # canonical environment no matter which shard happens to own it.
     runs-on: ubuntu-24.04
-    # The unfiltered suite has been growing into this budget for several
-    # releases -- 33m, then 41m43s, then 42m23s -- and the go-live regression
-    # specs took it past 45m, where the run is killed and reported as
-    # "cancelled" rather than as a timeout, which reads like someone stopped it.
-    # Raised for headroom, not because anything here got slower: no single spec
-    # regressed, the suite simply has more of them.
-    #
-    # This buys time rather than fixing the shape. `test:e2e:chromium` runs
-    # desktop-chromium, desktop-compact and mobile-chromium in one job; a matrix
-    # over the three projects would cut wall-clock roughly threefold and is the
-    # real fix. That is a change to make on its own, not during a release.
-    timeout-minutes: 75
+    # One shard's share of the suite, plus its own build. The single-job
+    # version needed 75 minutes and was still growing into it; three shards
+    # bring a shard's own work back to roughly a third of that, and this
+    # leaves room for the build and for the suite to keep growing.
+    timeout-minutes: 40
+    strategy:
+      # A failing shard must not cancel its siblings. Their results are the
+      # evidence for what else broke, and cancelling them turns one red spec
+      # into an unreadable run.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+        shards: [3]
     # Keep the production client bundle on the same deterministic Turnstile
     # configuration used by the isolated Playwright server.
     env:
@@ -72,6 +85,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Each shard builds for itself. The shards share a cache key, so the
+      # first to arrive populates .next/cache and the others restore it; the
+      # duplicated work is bounded and buys the wall-clock the split exists for.
       - name: Build once for the Chromium test server
         run: npm run build
 
@@ -88,15 +104,48 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Run Chromium desktop and mobile E2E tests
-        run: npm run test:e2e:chromium
+        run: npm run test:e2e:chromium -- --shard=${{ matrix.shard }}/${{ matrix.shards }}
 
       - name: Upload failed test evidence
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: main-chromium-test-results-${{ github.run_id }}
+          # Shard-scoped, or the shards race to write one artifact name and
+          # only the first upload survives.
+          name: main-chromium-test-results-${{ github.run_id }}-shard-${{ matrix.shard }}
           path: |
             test-results
             playwright-report
           if-no-files-found: ignore
           retention-days: 14
+
+  regression:
+    name: Chromium desktop and mobile regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [playwright]
+    # Keeps one check with the name this workflow reported before it was
+    # sharded, so anything watching for that result still finds it.
+    #
+    # `always()` so this reports a red check instead of going pending when a
+    # shard fails, is cancelled, or is skipped. The step below decides the
+    # verdict; reaching it is not itself a pass.
+    if: always()
+    steps:
+      # `needs.playwright.result` collapses the whole matrix: it is `success`
+      # only when every shard succeeded. `skipped` and `cancelled` are
+      # failures here on purpose -- a shard that never ran has verified
+      # nothing, and treating either as a pass is how an aggregating gate goes
+      # green without gating.
+      - name: Enforce shard results
+        env:
+          SHARDS: ${{ needs.playwright.result }}
+        run: |
+          set -uo pipefail
+          echo "shards: $SHARDS"
+          if [ "$SHARDS" != "success" ]; then
+            echo "::error::Chromium regression shards concluded '$SHARDS', not 'success'."
+            echo "See the shard jobs above for which specs failed."
+            exit 1
+          fi
+          echo "All Chromium regression shards passed."
