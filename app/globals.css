@@ -398,9 +398,18 @@ html[data-consent-pending] [data-testid="marketing-consent-slot"] {
   }
 }
 
-/* Korean and Chinese break between arbitrary syllables by default, splitting
-   words mid-word. `keep-all` restricts breaks to spaces, so a word stays
-   whole.
+/* Korean breaks between arbitrary syllables by default, splitting words
+   mid-word. `keep-all` restricts breaks to spaces, so a word stays whole.
+
+   Korean only, deliberately. `keep-all` is safe for a script that puts spaces
+   between its words and catastrophic for one that does not: Chinese has no
+   word delimiter, so the rule made every *sentence* one unbreakable run.
+   Measured on /pricing at 320px in zh, the FAQ's 15-character question
+   resolved its grid track to 350px inside a 320px viewport and pushed the
+   document 46px sideways -- which is what `korean-typography.spec.ts`'s
+   "English and Chinese headings keep their existing wrapping" was already
+   failing on. Breaking between Han characters is ordinary Chinese
+   typography, and `word-break: normal` is what does it.
 
    Deliberately without `overflow-wrap: anywhere`, which an earlier attempt
    paired with this and which is what made that attempt a regression rather
@@ -414,6 +423,6 @@ html[data-consent-pending] [data-testid="marketing-consent-slot"] {
    Nothing is lost by omitting it: the long-URL protection it was added for
    already comes from the `break-words` utility on the message body, which is
    `overflow-wrap: break-word` and does not affect min-content sizing. */
-:where(:lang(ko), :lang(zh)) {
+:where(:lang(ko)) {
   word-break: keep-all;
 }
