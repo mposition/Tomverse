@@ -671,17 +671,17 @@ test.describe("contextual outage disclosure (UI-STATUS-002)", () => {
     await page.goto("/chat?lang=ko");
     await expect(banner(page)).toBeVisible();
     await expect(banner(page)).toContainText(
-      `${SELECTED.gemini.name}을(를) 일시적으로 사용할 수 없습니다`
+      `일시적으로 사용할 수 없는 모델: ${SELECTED.gemini.name}`
     );
     await expect(
       banner(page).getByRole("button", {
-        name: `${SELECTED.gemini.name}을(를) DeepSeek-V4 Flash(으)로 교체`,
+        name: `${SELECTED.gemini.name} 대신 DeepSeek-V4 Flash 사용`,
       })
     ).toBeVisible();
     // role="status" carries the sentence as its accessible name, so the
     // announcement is about the user's own model rather than the catalogue.
     await expect(banner(page)).toHaveAccessibleName(
-      `${SELECTED.gemini.name}을(를) 일시적으로 사용할 수 없습니다`
+      `일시적으로 사용할 수 없는 모델: ${SELECTED.gemini.name}`
     );
   });
 
@@ -1088,7 +1088,7 @@ test.describe("widespread selected outage copy and layout (RECON-OPS-002)", () =
     await expect(swaps).toHaveCount(OUTAGE.length);
     for (const [index, entry] of OUTAGE.entries()) {
       await expect(swaps.nth(index)).toHaveAccessibleName(
-        `${entry.model.name}을(를) ${entry.replacement}(으)로 교체`
+        `${entry.model.name} 대신 ${entry.replacement} 사용`
       );
     }
 
@@ -1246,5 +1246,138 @@ test.describe("widespread selected outage copy and layout (RECON-OPS-002)", () =
         ).toBe(true);
       }
     }
+  });
+});
+
+/**
+ * REAUDIT-P2-02. At 200% text scaling the banner's heading was 102px wide --
+ * narrower than a single five-syllable Korean word -- because the refresh
+ * button shared the title's row and its `h-11 w-11` box grows with the root
+ * font. `overflow-wrap: break-word` then split whatever did not fit, and what
+ * did not fit included the model name: measured on the build before the fix,
+ * the Korean title came apart as
+ *
+ *   root 24px: `Gemini 3.1 Flash-` / `Lite을(를)`
+ *   root 32px: `Gemini` / `3.1` / `Flash-` / `Lite을` / `(를)` / `일시적으` / `로 사용할`
+ *
+ * `Gemin / i` and `Flash- / Lite` are the two failure shapes: a mid-letter
+ * break from `break-word`, and a hyphen break that `word-break: keep-all` does
+ * not suppress for Latin text. Line boxes are reconstructed per character with
+ * Range rects, because that is the only way to see where the break landed.
+ */
+test.describe("provider banner keeps model names readable at every text size", () => {
+  test.use({ hasTouch: true });
+
+  const readTitleLines = (page: Page) =>
+    page.evaluate(() => {
+      const title = document.querySelector<HTMLElement>(
+        '[data-testid="provider-status-title"]'
+      );
+      if (!title) return null;
+      const walker = document.createTreeWalker(title, NodeFilter.SHOW_TEXT);
+      const byLine = new Map<number, string>();
+      let node: Node | null;
+      while ((node = walker.nextNode())) {
+        const text = node.textContent || "";
+        for (let index = 0; index < text.length; index += 1) {
+          const range = document.createRange();
+          range.setStart(node, index);
+          range.setEnd(node, index + 1);
+          const top = Math.round(range.getBoundingClientRect().top);
+          byLine.set(top, (byLine.get(top) || "") + text[index]);
+        }
+      }
+      return {
+        text: title.textContent || "",
+        lines: Array.from(byLine.entries())
+          .sort((a, b) => a[0] - b[0])
+          .map(([, value]) => value.trim()),
+      };
+    });
+
+  for (const lang of ["ko", "en"] as const) {
+    for (const rootFont of [16, 24, 32] as const) {
+      test(`[${lang}] the model name survives a ${rootFont}px root font at 320px`, {
+        tag: "@ui-risk",
+      }, async ({ page }) => {
+        test.setTimeout(90_000);
+        await prepareGuestPage(page, lang);
+        await mockProviderStatus(page, [
+          {
+            id: SELECTED.gemini.id,
+            provider: SELECTED.gemini.provider,
+            status: "unavailable",
+            fallbackModelIds: ["mistral-medium-3-1"],
+            fallbackHealth: "operational",
+          },
+        ]);
+        await page.setViewportSize({ width: 320, height: 640 });
+        await page.goto(`/chat?lang=${lang}`);
+        await expect(banner(page)).toBeVisible();
+        await page.evaluate((size) => {
+          document.documentElement.style.fontSize = `${size}px`;
+        }, rootFont);
+        await page.evaluate(
+          () =>
+            new Promise<void>((resolve) =>
+              requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+            )
+        );
+
+        const measured = await readTitleLines(page);
+        expect(measured, "banner title").not.toBeNull();
+
+        // The whole name is still there, unchanged.
+        expect(measured!.text).toContain(SELECTED.gemini.name);
+
+        // No line boundary falls inside one of the name's own tokens. Each
+        // token is either wholly on a line or not on it at all.
+        for (const token of SELECTED.gemini.name.split(/\s+/)) {
+          const carriers = measured!.lines.filter((line) => line.includes(token));
+          expect(
+            carriers.length,
+            `[${lang}@${rootFont}px] "${token}" was split across lines: ${JSON.stringify(
+              measured!.lines
+            )}`
+          ).toBe(1);
+        }
+
+        const overflow = await page.evaluate(
+          () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+        );
+        expect(overflow, `[${lang}@${rootFont}px] document horizontal overflow`).toBeLessThanOrEqual(1);
+
+        // The status and its way out both survive the reflow.
+        await expect(banner(page)).toHaveAttribute("role", "status");
+        await expect(
+          banner(page).getByTestId("provider-status-refresh")
+        ).toBeVisible();
+        await expect(banner(page).getByTestId("provider-status-swap")).toBeVisible();
+      });
+    }
+  }
+
+  test("[ko] the banner sentence no longer spells both particles", {
+    tag: "@ui-risk",
+  }, async ({ page }) => {
+    // REAUDIT-P3-01: `{model}을(를)` and `{to}(으)로` made the user read the
+    // grammar table. The sentence is restructured so no particle has to agree
+    // with a model name whose final consonant is unknowable.
+    await prepareGuestPage(page, "ko");
+    await mockProviderStatus(page, [
+      {
+        id: SELECTED.gemini.id,
+        provider: SELECTED.gemini.provider,
+        status: "unavailable",
+        fallbackModelIds: ["mistral-medium-3-1"],
+        fallbackHealth: "operational",
+      },
+    ]);
+    await page.goto("/chat?lang=ko");
+    await expect(banner(page)).toBeVisible();
+
+    const text = await banner(page).innerText();
+    expect(text).not.toMatch(/을\(를\)|를\(을\)|\(으\)로|이\(가\)|은\(는\)/);
+    expect(text).toContain("일시적으로 사용할 수 없는 모델");
   });
 });

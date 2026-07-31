@@ -1005,6 +1005,8 @@ function ChatAppComponent({
                           event.preventDefault();
                           handleModelOnlySubmit();
                       }}
+                      data-testid="model-only-form"
+                      data-model-id={modelId}
                       className="flex shrink-0 items-end gap-2 border-t border-zinc-200 bg-zinc-50/80 p-3 dark:border-zinc-800 dark:bg-zinc-950/95"
                   >
                       <div className="flex min-w-0 flex-1 items-end gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-2 shadow-sm focus-within:border-blue-500 dark:border-zinc-800 dark:bg-zinc-900">
@@ -1033,12 +1035,16 @@ function ChatAppComponent({
                               disabled={isSending || !initialConversationId}
                               enterKeyHint={isMobileShell ? "enter" : undefined}
                               rows={1}
+                              data-testid="model-only-input"
+                              data-model-id={modelId}
                               placeholder={t("chat.modelOnlyPlaceholder")}
                               className="max-h-28 min-h-7 flex-1 resize-none border-0 bg-transparent py-1 text-sm leading-5 text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-500"
                           />
                       </div>
                       <button
                           type="submit"
+                          data-testid="model-only-send"
+                          data-model-id={modelId}
                           disabled={!modelInput.trim() || isSending || !initialConversationId}
                           className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500 dark:disabled:bg-zinc-800 dark:disabled:text-zinc-500"
                           title={t("chat.modelOnlySendTitle")}

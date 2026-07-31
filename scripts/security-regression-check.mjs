@@ -1238,9 +1238,17 @@ const checks = [
       // literal -- check the shared class itself carries the 44px WCAG 2.2
       // target size and pill shape, in place of the old
       // `className="min-h-11 rounded-lg` literal-string check. UI-P2-01 then
-      // moved both buttons behind one `consentAction` builder that applies
-      // that class, so the "both buttons use it" half is now asserted as
-      // "the single builder applies it and is called exactly twice".
+      // moved both buttons behind one builder that applies that class, so the
+      // "both buttons use it" half is asserted as "the single builder applies
+      // it and is used exactly twice, once per decision".
+      //
+      // REAUDIT-P1-01 turned that builder from a render-time helper call into
+      // a module-scope `ConsentAction` component, because the handlers now
+      // close over the control that opened the preferences notice and
+      // `react-hooks/refs` refuses a ref-reading function passed into a
+      // function call during render. The property being guarded is unchanged
+      // -- one shared 44px class, applied to exactly the two consent
+      // decisions -- so only the shape it is matched in moves here.
       const buttonClassMatch = source.match(
         /const consentButtonClass =\s*\n?\s*"([^"]+)"/
       );
@@ -1248,8 +1256,8 @@ const checks = [
       const buttonClassUsages = (
         source.match(/className=\{consentButtonClass\}/g) || []
       ).length;
-      const consentActionCalls = (
-        source.match(/\{?\s*consentAction\(\s*\n?\s*"(decline|accept)"/g) || []
+      const consentDecisions = (
+        source.match(/<ConsentAction\s*\n?\s*kind="(decline|accept)"/g) || []
       ).length;
 
       return (
@@ -1279,7 +1287,11 @@ const checks = [
         buttonClass.includes("min-h-11") &&
         buttonClass.includes("rounded-lg") &&
         buttonClassUsages === 1 &&
-        consentActionCalls === 2 &&
+        consentDecisions === 2 &&
+        // The component has to stay at module scope: defined inside the
+        // provider it would be a new type on every render, remounting both
+        // buttons (and dropping focus) whenever the notice re-renders.
+        /^function ConsentAction\(/m.test(source) &&
         source.includes("env(safe-area-inset-bottom)")
       );
     },

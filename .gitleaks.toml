@@ -12,7 +12,18 @@ regexes = [
   # e.g. lib/models.ts, components/chat/*.tsx: apiModel: "claude-haiku-4-5-20251001"
   # A public provider model identifier, not a secret.
   '''apiModel:\s*"[A-Za-z0-9._/-]+"''',
+  # SEC-009. The two shapes that actually appear in this repo for a `*_KEY`
+  # constant, and nothing wider. The previous rule was
+  # `[A-Z_]*_KEY = "[A-Za-z0-9._-]+"`, whose value class also describes a
+  # credential: a single line reading `STRIPE_SECRET_KEY = "sk_live_51Hx..."`
+  # matched it and would have been suppressed. Neither pattern below can:
+  # the first is all-lowercase and must carry a `.`/`_`/`-` separator, the
+  # second is a short camelCase identifier with no separator at all.
+  # tests/gitleaksAllowlist.test.mjs pins both directions with canaries.
+  #
   # e.g. lib/billingPriceCatalog.ts: BILLING_PRICE_CATALOG_KEY = "billing.fixed-prices.v1"
-  # A cache/version namespace string, not a secret.
-  '''[A-Z_]*_KEY\s*=\s*"[A-Za-z0-9._-]+"''',
+  # e.g. lib/theme.ts: THEME_STORAGE_KEY = "tomverse_theme_preference"
+  '''[A-Za-z_]*_KEY\s*=\s*"[a-z][a-z0-9]*(?:[._-][a-z0-9]+)+"''',
+  # e.g. lib/appSettings.ts: GUEST_DEFAULT_MODEL_KEY = "guestDefaultModelId"
+  '''[A-Za-z_]*_KEY\s*=\s*"[a-z]+(?:[A-Z][a-z0-9]*)+"''',
 ]

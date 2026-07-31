@@ -465,6 +465,8 @@ export function MobileChatShell({
   // drawer's bottom the user cannot see; 0 whenever there is nothing to
   // compensate for.
   const drawerKeyboardInset = useKeyboardInset();
+  // Same number, used for the shell's own scroll region (see <main> below).
+  const composerKeyboardInset = drawerKeyboardInset;
   const isAnyWorkingOrError = selectedModels.some((modelId) => {
     const status = modelStatuses[modelId];
     return status === "responding" || status === "loading" || status === "error";
@@ -499,10 +501,43 @@ export function MobileChatShell({
   const headerBottomPadding = hasHeaderStatus ? "pb-1.5" : "pb-2";
 
   return (
+    // REAUDIT-P1-04. `overflow-hidden` on a `100dvh` box meant anything the
+    // header, the provider outage banner, the model tabs, the composer and the
+    // disclaimer needed beyond the viewport was simply cut off, with no way to
+    // reach it.
+    // Measured at 320x568 with an outage banner: at root 24px the composer's
+    // textarea started at y=593 and its send at y=659 against a 568px viewport
+    // (`elementFromPoint` returned null for both), and at root 32px the shell
+    // wanted 1280px of content. The document could not scroll either -- the
+    // shell's own `overflow: hidden` swallowed the overflow before it ever
+    // reached `documentElement`.
+    //
+    // The height stays exactly `100dvh` -- that is what makes the flex box
+    // distribute (and shrink) the rows the way it does today, so no
+    // default-text-size layout moves by a pixel. What changes is that the
+    // leftover is now *scrollable* instead of discarded: the shell itself
+    // becomes the single vertical scroll owner, so a composer that no longer
+    // fits is reached by one scroll rather than being unreachable. Horizontal
+    // overflow keeps the old `hidden` behaviour, and the specs measure
+    // per-element rects rather than the document's `scrollWidth`, so this
+    // cannot quietly absorb a real sideways overflow.
     <main
       data-testid="mobile-chat-shell"
       inert={isGuestVerificationOpen || undefined}
-      className="flex h-[100dvh] w-full max-w-full flex-col overflow-hidden bg-white text-[13px] text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100"
+      // `100dvh` tracks the browser's own chrome, never the on-screen
+      // keyboard, so the bottom of this box sits underneath a raised keyboard
+      // and the composer with it. Reserving the occluded height as padding
+      // inside the shell's own scroll region means the composer can be
+      // scrolled clear of the keyboard instead of being pinned under it -- the
+      // same compensation the model sheet already makes (see ChatInput's
+      // `keyboardInset`). Zero when there is no keyboard, so the plain layout
+      // is untouched.
+      style={
+        composerKeyboardInset
+          ? { paddingBottom: composerKeyboardInset }
+          : undefined
+      }
+      className="flex h-[100dvh] w-full max-w-full flex-col overflow-y-auto overflow-x-hidden overscroll-contain bg-white text-[13px] text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100"
     >
       <header
         data-testid="mobile-chat-header"
@@ -713,6 +748,13 @@ export function MobileChatShell({
       )}
 
       <section
+        // Deliberately still `min-h-0`. A rem-based floor here looked like an
+        // improvement -- it stops the answer canvas being squeezed -- but it
+        // moved the composer 51px down at 320x568 and default text, where the
+        // section is the row that absorbs the shell's last few pixels today.
+        // The composer's reachability is bought by the shell's scroll owner
+        // above, not by reserving space here, so the distribution is left
+        // exactly as the recorded baseline has it.
         className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-zinc-50 dark:bg-zinc-950"
         onTouchStart={(event) => {
           const touch = event.touches[0];
@@ -734,7 +776,15 @@ export function MobileChatShell({
         }}
       >
         {isConversationEmpty && selectedModels.length > 0 && (
-          <div className="absolute inset-0 z-10 bg-zinc-50 dark:bg-zinc-950">
+          // REAUDIT-P1-04. The welcome overlay is absolutely positioned, so
+          // its content -- including the composer, which portals into its
+          // centred slot -- was free to paint past the section's bottom edge.
+          // Measured at 320x568 with a draft and an outage banner, the empty
+          // state's composer ran to y=547 while the AI disclaimer starts at
+          // y=528: 1166px^2 of the composer sat under the notice. Scrolling the
+          // overlay keeps the welcome screen inside its own box at any text
+          // size, which is also the one scroll the user needs there.
+          <div className="absolute inset-0 z-10 overflow-y-auto overscroll-contain bg-zinc-50 dark:bg-zinc-950">
             <ChatWelcomeScreen
               recentConversations={recentConversations}
               onSelectConversation={onSelectConversation}
