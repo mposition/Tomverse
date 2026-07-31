@@ -397,3 +397,23 @@ html[data-consent-pending] [data-testid="marketing-consent-slot"] {
     scroll-behavior: auto !important;
   }
 }
+
+/* Korean and Chinese break between arbitrary syllables by default, splitting
+   words mid-word. `keep-all` restricts breaks to spaces, so a word stays
+   whole.
+
+   Deliberately without `overflow-wrap: anywhere`, which an earlier attempt
+   paired with this and which is what made that attempt a regression rather
+   than a fix. `anywhere` is allowed to break inside a word when the line
+   would otherwise overflow -- and, unlike `break-word`, it also applies while
+   the browser computes min-content width, so a narrow or zoomed container
+   splits the word instead of growing. The landing hero's 비교하세요 came apart
+   at 200% zoom on all three Chromium projects, and eight chat goldens moved
+   with it.
+
+   Nothing is lost by omitting it: the long-URL protection it was added for
+   already comes from the `break-words` utility on the message body, which is
+   `overflow-wrap: break-word` and does not affect min-content sizing. */
+:where(:lang(ko), :lang(zh)) {
+  word-break: keep-all;
+}
