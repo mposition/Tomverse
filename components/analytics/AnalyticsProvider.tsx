@@ -3,7 +3,7 @@
 import Script from "next/script";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import {
@@ -22,6 +22,50 @@ import {
 import { ANALYTICS_PREFERENCES_OPEN_EVENT } from "@/lib/analyticsPreferencesEvents";
 
 type ConsentState = "loading" | "unset" | "accepted" | "declined";
+
+// Secondary, non-alarming styling: a light card on light theme and a
+// muted dark card on dark theme (instead of the old always-black
+// high-contrast bar), so the notice reads as an ordinary compact toast
+// rather than a warning that outweighs the surrounding page (UI-P1-02).
+//
+// 11px is the floor for the label, not 10px: this is required text inside a
+// 44x44 control, and the audit flagged the old 10px/9px auxiliary sizes
+// across the product as too small to read comfortably at a phone's viewing
+// distance.
+const consentButtonClass =
+  "inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-zinc-300 bg-white px-2 text-[11px] font-bold text-zinc-700 transition-colors hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700 dark:focus-visible:ring-offset-zinc-900 @md/notice:px-3 @md/notice:text-xs";
+
+// A component, not a render-time helper call. The handlers close over the
+// remembered opener (see closePreferences), and `react-hooks/refs` treats
+// passing such a function *into a function call* during render as a ref read
+// -- passing it as a JSX prop, which is what actually happens here, is fine.
+function ConsentAction({
+  kind,
+  onClick,
+  label,
+  shortLabel,
+}: {
+  kind: "decline" | "accept";
+  onClick: () => void;
+  label: string;
+  shortLabel: string;
+}) {
+  return (
+    <button
+      type="button"
+      data-testid={`analytics-consent-${kind}`}
+      onClick={onClick}
+      // The accessible name is always the full label; only the visible text
+      // shortens in a narrow container, and it is a substring of that name.
+      aria-label={label}
+      className={consentButtonClass}
+    >
+      <span className="@md/notice:hidden">{shortLabel}</span>
+      <span className="hidden @md/notice:inline">{label}</span>
+    </button>
+  );
+}
+
 
 const GUEST_QUICK_START_ACTIVE_KEY = "tomverse_guest_quick_start_active_v2";
 const GUEST_QUICK_START_EVENT = "tomverse:guest-quick-start";
@@ -480,9 +524,36 @@ export function AnalyticsProvider({
     };
   }, [pathname]);
 
+  // REAUDIT-P1-01. Whichever control opened the preferences notice is the
+  // control the notice replaces on screen, and closing it unmounts the notice
+  // -- which drops focus on <body> and strands keyboard and screen-reader
+  // users at the top of the document. Remembering the opener means the choice
+  // can be reviewed and closed without losing your place, from the sidebar
+  // account card, the collapsed rail's account menu, the account menu, or the
+  // floating pill on the routes that still have one.
+  const preferencesReturnFocusRef = useRef<HTMLElement | null>(null);
+
+  const openPreferencesFrom = useCallback((trigger: HTMLElement | null) => {
+    preferencesReturnFocusRef.current =
+      trigger ?? (document.activeElement as HTMLElement | null);
+    setShowPreferences(true);
+  }, []);
+
+  const closePreferences = useCallback(() => {
+    setShowPreferences(false);
+    // The whole ref round trip happens on the next frame, after the notice has
+    // actually gone: focus must not land on a node that is about to be
+    // removed, and nothing here may read the ref while React is rendering.
+    requestAnimationFrame(() => {
+      const target = preferencesReturnFocusRef.current;
+      preferencesReturnFocusRef.current = null;
+      if (target?.isConnected) target.focus({ preventScroll: true });
+    });
+  }, []);
+
   useEffect(() => {
     if (disabled) return;
-    const openPreferences = () => setShowPreferences(true);
+    const openPreferences = () => openPreferencesFrom(null);
     window.addEventListener(
       ANALYTICS_PREFERENCES_OPEN_EVENT,
       openPreferences
@@ -493,7 +564,7 @@ export function AnalyticsProvider({
         openPreferences
       );
     };
-  }, [disabled]);
+  }, [disabled, openPreferencesFrom]);
 
   const analyticsEnabled = Boolean(
     resolvedPolicy &&
@@ -545,18 +616,21 @@ export function AnalyticsProvider({
     };
   }, [analyticsEnabled, disabled, initialPlan, lang, measurementId, resolvedPolicy, userCreatedAt]);
 
-  const accept = () => {
+  // `useCallback` rather than plain closures: both read the remembered opener
+  // through `closePreferences`, and a ref read from a function created during
+  // render is exactly what `react-hooks/refs` (correctly) refuses.
+  const accept = useCallback(() => {
     setAnalyticsConsent("accepted");
     setConsent("accepted");
-    setShowPreferences(false);
-  };
+    closePreferences();
+  }, [closePreferences]);
 
-  const decline = () => {
+  const decline = useCallback(() => {
     setAnalyticsConsent("declined");
     disableAnalyticsClient();
     setConsent("declined");
-    setShowPreferences(false);
-  };
+    closePreferences();
+  }, [closePreferences]);
 
   const consentPromptReady = pathname !== "/chat" || chatConsentReady;
   const defaultEnabledNotice =
@@ -601,7 +675,6 @@ export function AnalyticsProvider({
     consentPromptReady &&
     !showPreferences &&
     !isMobileChatTextEntryActive &&
-    !(pathname === "/chat" && initialPlan !== "Guest") &&
     (consent === "accepted" || consent === "declined");
 
   // UI-P1-04. The settings pill is a viewport-fixed overlay, which is fine on
@@ -623,17 +696,24 @@ export function AnalyticsProvider({
   const settingsUsesInlineSlot = pathname === "/auth/signin";
   const settingsInlineSlot = settingsUsesInlineSlot ? authConsentSlot : null;
 
-  // Secondary, non-alarming styling: a light card on light theme and a
-  // muted dark card on dark theme (instead of the old always-black
-  // high-contrast bar), so the notice reads as an ordinary compact toast
-  // rather than a warning that outweighs the surrounding page (UI-P1-02).
+  // REAUDIT-P1-01. /chat is the one route where the bottom-right corner is
+  // never free: the last model panel's follow-up form ends there, and below it
+  // the shared composer runs to the same edge. Measured on a 1440x900 desktop
+  // guest preview the pill covered 1012px^2 of the third panel's send button,
+  // 522px^2 of that panel's input and 771px^2 of the shared composer -- and,
+  // being the topmost layer, it took every click that landed on it. The same
+  // numbers came back at 1366x768 and 1920x1080, because the pill and the
+  // panel footer are both anchored to that corner, so no `bottom` offset or
+  // per-viewport nudge can separate them.
   //
-  // 11px is the floor for the label, not 10px: this is required text inside a
-  // 44x44 control, and the audit flagged the old 10px/9px auxiliary sizes
-  // across the product as too small to read comfortably at a phone's viewing
-  // distance.
-  const consentButtonClass =
-    "inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-zinc-300 bg-white px-2 text-[11px] font-bold text-zinc-700 transition-colors hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700 dark:focus-visible:ring-offset-zinc-900 @md/notice:px-3 @md/notice:text-xs";
+  // The workspace already carries this entry point in normal document flow --
+  // the account card in the sidebar footer for guests (AuthButton's
+  // `showAnalyticsCookieButton`) and the account menu for signed-in users --
+  // and the collapsed rail's account menu offers it too. So on /chat the pill
+  // is redundant rather than load-bearing, and dropping it is what makes the
+  // intersection structurally zero instead of coincidentally small.
+  const settingsUsesFloatingPill = pathname !== "/chat" && !settingsUsesInlineSlot;
+
 
   // Why container queries (@container/notice on the card below) instead of the
   // viewport-keyed `sm:` variants this used to carry: the notice is portalled
@@ -650,25 +730,6 @@ export function AnalyticsProvider({
   // Nothing forces `flex-nowrap` any more either: the row wraps as a last
   // resort, so even a locale whose labels outgrow every budget below degrades
   // to a two-row notice instead of overflowing its container.
-  const consentAction = (
-    kind: "decline" | "accept",
-    onClick: () => void,
-    label: string,
-    shortLabel: string
-  ) => (
-    <button
-      type="button"
-      data-testid={`analytics-consent-${kind}`}
-      onClick={onClick}
-      // The accessible name is always the full label; only the visible text
-      // shortens in a narrow container, and it is a substring of that name.
-      aria-label={label}
-      className={consentButtonClass}
-    >
-      <span className="@md/notice:hidden">{shortLabel}</span>
-      <span className="hidden @md/notice:inline">{label}</span>
-    </button>
-  );
 
   const noticeInner = (
     // The query container is this wrapper rather than the card itself: a
@@ -706,13 +767,18 @@ export function AnalyticsProvider({
           </div>
         </div>
         <div className="flex shrink-0 gap-2">
-          {consentAction(
-            "decline",
-            decline,
-            promptCopy.decline,
-            promptCopy.declineShort
-          )}
-          {consentAction("accept", accept, promptCopy.accept, promptCopy.acceptShort)}
+          <ConsentAction
+            kind="decline"
+            onClick={decline}
+            label={promptCopy.decline}
+            shortLabel={promptCopy.declineShort}
+          />
+          <ConsentAction
+            kind="accept"
+            onClick={accept}
+            label={promptCopy.accept}
+            shortLabel={promptCopy.acceptShort}
+          />
         </div>
       </div>
     </div>
@@ -766,7 +832,7 @@ export function AnalyticsProvider({
                 <button
                   type="button"
                   data-testid="analytics-settings-button"
-                  onClick={() => setShowPreferences(true)}
+                  onClick={(event) => openPreferencesFrom(event.currentTarget)}
                   // Same 44x44 floor and focus treatment as the fixed variant
                   // below; only the positioning differs.
                   className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full border border-zinc-300 bg-white/95 px-3 text-[11px] font-bold text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50 hover:text-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:border-zinc-600 dark:bg-zinc-900/95 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:focus-visible:ring-offset-zinc-900"
@@ -777,27 +843,18 @@ export function AnalyticsProvider({
               settingsInlineSlot
             )
           : null}
-        {showSettingsButton && !settingsUsesInlineSlot ? (
+        {showSettingsButton && settingsUsesFloatingPill ? (
           <button
             type="button"
             data-testid="analytics-settings-button"
-            onClick={() => setShowPreferences(true)}
+            onClick={(event) => openPreferencesFrom(event.currentTarget)}
             // UI-002. This is the only way back into the analytics choice on
             // marketing, pricing and sign-in, and it used to be a 25px-tall
             // pill: a real target, not a decorative one. It now carries the
             // same 44x44 floor and focus treatment as the consent actions
             // above, and it is inset by the safe area so a notched phone's
             // rounded corner cannot eat the corner of the box.
-            className={`fixed right-[max(0.5rem,env(safe-area-inset-right))] z-[60] min-h-11 min-w-11 items-center justify-center rounded-full border border-zinc-300 bg-white/95 px-3 text-[11px] font-bold text-zinc-700 shadow-lg backdrop-blur transition-colors hover:bg-zinc-50 hover:text-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:border-zinc-600 dark:bg-zinc-900/95 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:focus-visible:ring-offset-zinc-900 ${
-              pathname === "/chat"
-                ? // The chat sidebar/drawer offers its own path back to this
-                  // (the account menu for signed-in users, an inline button
-                  // next to "Login" for guests), so this floating overlay
-                  // only needs to cover desktop, where it doesn't compete
-                  // with the composer for space.
-                  "bottom-[max(0.5rem,env(safe-area-inset-bottom))] hidden md:inline-flex"
-                : "bottom-[max(0.5rem,env(safe-area-inset-bottom))] inline-flex"
-            }`}
+            className="fixed bottom-[max(0.5rem,env(safe-area-inset-bottom))] right-[max(0.5rem,env(safe-area-inset-right))] z-[60] inline-flex min-h-11 min-w-11 items-center justify-center rounded-full border border-zinc-300 bg-white/95 px-3 text-[11px] font-bold text-zinc-700 shadow-lg backdrop-blur transition-colors hover:bg-zinc-50 hover:text-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:border-zinc-600 dark:bg-zinc-900/95 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:focus-visible:ring-offset-zinc-900"
           >
             {copy.settings}
           </button>

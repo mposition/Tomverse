@@ -88,11 +88,11 @@ test("mobile guest chat never shows the floating analytics settings shortcut", a
   await page.goto("/chat");
 
   const settings = page.getByTestId("analytics-settings-button");
-  // The button stays in the DOM (the same markup shows it on desktop via
-  // md:inline-flex) but is CSS-hidden below the md breakpoint, so this
-  // asserts "present but not visible" rather than "absent" -- see the
-  // authenticated-user test below for the case that's genuinely absent.
-  await expect(settings).toBeHidden();
+  // REAUDIT-P1-01: the floating pill is not rendered on /chat at all any
+  // more, on either shell -- the sidebar account card and the collapsed
+  // rail's account menu carry the control in normal document flow instead.
+  // So this is "absent", not "present but CSS-hidden".
+  await expect(settings).toHaveCount(0);
 
   const textarea = page.getByTestId("chat-textarea");
   await textarea.click();
@@ -182,12 +182,13 @@ test("mobile guest chat opens analytics preferences from the sidebar drawer", as
 
   // Real clickable hit area, not the inner icon/text glyph -- the button is
   // a plain labeled text control (no icon), so color/icon dependence isn't
-  // a concern here. Its current height (~40px) sits a few px under the
-  // ~44px mobile touch-target guideline; see the report for that gap.
+  // a concern here. REAUDIT-P1-02: this used to accept the ~40px box the
+  // control actually had; the product now meets the 44px floor, so the
+  // assertion is the floor rather than a record of the gap.
   const box = await analyticsButton.boundingBox();
   expect(box, "guest analytics settings button bounding box").not.toBeNull();
   if (box) {
-    expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(40);
+    expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(44 - 0.5);
   }
 
   await analyticsButton.focus();
@@ -260,9 +261,8 @@ test("authenticated chat moves analytics settings into the account menu", async 
   });
   await page.goto("/chat?lang=en");
 
-  // Unlike the guest mobile case (present but CSS-hidden), the floating
-  // shortcut's JSX is skipped entirely for a signed-in user on /chat, so
-  // it's genuinely absent -- toHaveCount(0), not toBeHidden().
+  // The floating shortcut's JSX is skipped entirely on /chat, for guests and
+  // signed-in users alike (REAUDIT-P1-01).
   await expect(page.getByTestId("analytics-settings-button")).toHaveCount(0);
   await page.getByTestId("account-menu-trigger").click();
   const accountMenu = page.getByTestId("account-menu");

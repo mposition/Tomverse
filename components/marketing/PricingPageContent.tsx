@@ -1214,14 +1214,24 @@ export function PricingPageContent() {
           data-testid="pricing-credit-packs"
           className="mt-16 overflow-hidden rounded-[2rem] border border-accent-promotion-500/25 bg-gradient-to-br from-accent-promotion-500/10 via-white to-blue-500/5 dark:via-zinc-950 dark:to-blue-950/20"
         >
+          {/*
+            UI-005 again, on the text-scale axis (REAUDIT-P2-01). A grid item's
+            default `min-width: auto` is its min-content width, and
+            `overflow-wrap: break-word` deliberately does not lower that. At
+            320px with a 200% root font the Korean heading's min-content width
+            resolved the track to 436px inside a 320px section, and the
+            section's own `overflow-hidden` clipped the remainder -- so the
+            copy and the CTA were cut off while the document reported zero
+            overflow. `min-w-0` lets the track win; the text wraps instead.
+          */}
           <div className="grid gap-6 p-5 sm:p-7 lg:grid-cols-[1fr_auto] lg:items-end">
-            <div className="max-w-3xl">
-              <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-accent-promotion-700 dark:text-accent-promotion-300">
-                <Coins className="h-4 w-4" />
-                {creditPackGuide.eyebrow}
+            <div className="min-w-0 max-w-3xl">
+              <p className="flex min-w-0 items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-accent-promotion-700 dark:text-accent-promotion-300">
+                <Coins className="h-4 w-4 shrink-0" />
+                <span className="min-w-0 break-words">{creditPackGuide.eyebrow}</span>
               </p>
-              <h2 className={`mt-3 text-3xl font-black sm:text-4xl ${displayHeadingClass(lang)}`}>{creditPackGuide.title}</h2>
-              <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">
+              <h2 className={`mt-3 min-w-0 text-3xl font-black sm:text-4xl ${displayHeadingClass(lang)}`}>{creditPackGuide.title}</h2>
+              <p className="mt-3 min-w-0 break-words text-sm leading-7 text-zinc-600 dark:text-zinc-300">
                 {creditPackGuide.description}
               </p>
             </div>
@@ -1232,7 +1242,9 @@ export function PricingPageContent() {
                   cta_location: "pricing_credit_pack_section",
                 })
               }
-              className="inline-flex h-11 items-center justify-center rounded-xl bg-accent-promotion-700 px-5 text-sm font-bold text-white transition hover:bg-accent-promotion-600"
+              // `min-h-11` rather than `h-11`: a label that has to take two
+              // lines at 200% text must grow the button, not spill out of it.
+              className="inline-flex min-h-11 min-w-0 items-center justify-center rounded-xl bg-accent-promotion-700 px-5 py-2 text-center text-sm font-bold text-white transition hover:bg-accent-promotion-600"
             >
               {creditPackGuide.purchaseCta}
             </Link>
@@ -1283,12 +1295,12 @@ export function PricingPageContent() {
                 <article
                   key={pack.id}
                   data-pack-id={pack.id}
-                  className="flex min-h-full flex-col rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950/80"
+                  className="flex min-h-full min-w-0 flex-col rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950/80"
                 >
                   <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h3 className="text-lg font-black">{creditPackGuide.packNames[pack.id]}</h3>
-                      <p className="mt-2 text-xs font-bold uppercase tracking-[0.12em] text-accent-promotion-700 dark:text-accent-promotion-300">
+                    <div className="min-w-0">
+                      <h3 className="min-w-0 break-words text-lg font-black">{creditPackGuide.packNames[pack.id]}</h3>
+                      <p className="mt-2 min-w-0 break-words text-xs font-bold uppercase tracking-[0.12em] text-accent-promotion-700 dark:text-accent-promotion-300">
                         {creditPackGuide.availableFor}: {pack.allowedPlans.join(" / ")}
                       </p>
                     </div>
@@ -1296,7 +1308,7 @@ export function PricingPageContent() {
                       {creditPackGuide.oneTime}
                     </span>
                   </div>
-                  <p className="mt-5 text-3xl font-black">
+                  <p className="mt-5 min-w-0 break-words text-3xl font-black">
                     {numberFormatter.format(pack.credits)}{" "}
                     <span className="text-sm text-zinc-500 dark:text-zinc-400">{creditPackGuide.credits}</span>
                   </p>
@@ -1307,10 +1319,10 @@ export function PricingPageContent() {
                       promotionDateLocale[lang]
                     )}
                   </p>
-                  <p className="mt-4 flex-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+                  <p className="mt-4 min-w-0 flex-1 break-words text-sm leading-6 text-zinc-600 dark:text-zinc-300">
                     {creditPackGuide.packDescriptions[pack.id]}
                   </p>
-                  <p className="mt-4 border-t border-zinc-200 pt-3 text-xs font-bold text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+                  <p className="mt-4 min-w-0 break-words border-t border-zinc-200 pt-3 text-xs font-bold text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
                     {creditPackGuide.validity}
                   </p>
                 </article>
@@ -1319,17 +1331,17 @@ export function PricingPageContent() {
           </div>
 
           <div className="grid gap-5 border-t border-accent-promotion-500/20 bg-white/60 p-5 dark:bg-zinc-950/40 sm:p-7 lg:grid-cols-[0.75fr_1.25fr]">
-            <div>
-              <h3 className="font-bold">{creditPackGuide.policyTitle}</h3>
-              <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">
+            <div className="min-w-0">
+              <h3 className="min-w-0 break-words font-bold">{creditPackGuide.policyTitle}</h3>
+              <p className="mt-3 min-w-0 break-words text-sm leading-7 text-zinc-600 dark:text-zinc-300">
                 {creditPackGuide.guidance}
               </p>
             </div>
-            <ul className="grid gap-3">
+            <ul className="grid min-w-0 gap-3">
               {creditPackGuide.policies.map((policy) => (
-                <li key={policy} className="flex gap-3 text-sm font-semibold leading-6 text-zinc-700 dark:text-zinc-200">
+                <li key={policy} className="flex min-w-0 gap-3 text-sm font-semibold leading-6 text-zinc-700 dark:text-zinc-200">
                   <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-accent-promotion-600 dark:text-accent-promotion-300" />
-                  {policy}
+                  <span className="min-w-0 break-words">{policy}</span>
                 </li>
               ))}
             </ul>
@@ -1342,19 +1354,19 @@ export function PricingPageContent() {
         >
           <div className="border-b border-zinc-200 p-5 dark:border-zinc-800 sm:p-7">
             <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-              <div className="max-w-3xl">
-                <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-blue-600 dark:text-blue-400">
-                  <Calculator className="h-4 w-4" />
-                  {creditGuide.eyebrow}
+              <div className="min-w-0 max-w-3xl">
+                <p className="flex min-w-0 items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-blue-600 dark:text-blue-400">
+                  <Calculator className="h-4 w-4 shrink-0" />
+                  <span className="min-w-0 break-words">{creditGuide.eyebrow}</span>
                 </p>
-                <h2 className={`mt-3 text-3xl font-black sm:text-4xl ${displayHeadingClass(lang)}`}>
+                <h2 className={`mt-3 min-w-0 text-3xl font-black sm:text-4xl ${displayHeadingClass(lang)}`}>
                   {creditGuide.title}
                 </h2>
-                <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">
+                <p className="mt-3 min-w-0 break-words text-sm leading-7 text-zinc-600 dark:text-zinc-300">
                   {creditGuide.description}
                 </p>
               </div>
-              <span className="w-fit rounded-full border border-accent-promotion-500/30 bg-accent-promotion-500/10 px-4 py-2 text-xs font-bold text-accent-promotion-700 dark:text-accent-promotion-300">
+              <span className="w-fit min-w-0 break-words rounded-full border border-accent-promotion-500/30 bg-accent-promotion-500/10 px-4 py-2 text-xs font-bold text-accent-promotion-700 dark:text-accent-promotion-300">
                 {creditGuide.typicalLabel}
               </span>
             </div>
@@ -1398,17 +1410,17 @@ export function PricingPageContent() {
               return (
                 <article
                   key={plan.id}
-                  className={`rounded-2xl border p-5 ${
+                  className={`min-w-0 rounded-2xl border p-5 ${
                     plan.id === "pro"
                       ? "border-blue-600 bg-blue-700 text-white shadow-xl shadow-blue-950/15"
                       : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
                   }`}
                 >
                   <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h3 className={`text-2xl font-black ${displayHeadingClass(lang)}`}>{plan.name}</h3>
+                    <div className="min-w-0">
+                      <h3 className={`min-w-0 text-2xl font-black ${displayHeadingClass(lang)}`}>{plan.name}</h3>
                       <p
-                        className={`mt-1 text-xs font-bold ${
+                        className={`mt-1 min-w-0 break-words text-xs font-bold ${
                           plan.id === "pro"
                             ? "text-blue-100"
                             : "text-zinc-500 dark:text-zinc-400"
@@ -1417,14 +1429,14 @@ export function PricingPageContent() {
                         {numberFormatter.format(plan.monthlyCredits)} {creditGuide.monthlyUnit}
                       </p>
                     </div>
-                    <MessageSquare className={`h-6 w-6 ${plan.id === "pro" ? "text-white" : "text-blue-600 dark:text-blue-400"}`} />
+                    <MessageSquare className={`h-6 w-6 shrink-0 ${plan.id === "pro" ? "text-white" : "text-blue-600 dark:text-blue-400"}`} />
                   </div>
 
                   <div className="mt-5 divide-y divide-zinc-200/80 dark:divide-zinc-800">
                     {examples.map((example) => (
                       <div key={example.label} className="py-3 first:pt-0 last:pb-0">
                         <div className="flex items-start justify-between gap-3">
-                          <p className="text-xs font-bold leading-5">{example.label}</p>
+                          <p className="min-w-0 break-words text-xs font-bold leading-5">{example.label}</p>
                           <span
                             className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold ${
                               plan.id === "pro"
@@ -1435,7 +1447,7 @@ export function PricingPageContent() {
                             {formatCredits(example.cost)}
                           </span>
                         </div>
-                        <p className="mt-2 text-xl font-black">
+                        <p className="mt-2 min-w-0 break-words text-xl font-black">
                           {creditGuide.approx} {numberFormatter.format(example.value)} {example.unit}
                         </p>
                       </div>
@@ -1447,19 +1459,19 @@ export function PricingPageContent() {
           </div>
 
           <div className="grid gap-4 border-t border-zinc-200 p-4 dark:border-zinc-800 sm:p-6 lg:grid-cols-2">
-            <article className="rounded-2xl border border-amber-500/25 bg-amber-500/10 p-5">
-              <div className="flex items-center gap-2 text-amber-800 dark:text-amber-300">
-                <FileText className="h-5 w-5" />
-                <h3 className="font-bold">{creditGuide.longContextTitle}</h3>
+            <article className="min-w-0 rounded-2xl border border-amber-500/25 bg-amber-500/10 p-5">
+              <div className="flex min-w-0 items-center gap-2 text-amber-800 dark:text-amber-300">
+                <FileText className="h-5 w-5 shrink-0" />
+                <h3 className="min-w-0 break-words font-bold">{creditGuide.longContextTitle}</h3>
               </div>
-              <p className="mt-3 text-xs leading-6 text-zinc-600 dark:text-zinc-300">
+              <p className="mt-3 min-w-0 break-words text-xs leading-6 text-zinc-600 dark:text-zinc-300">
                 {creditGuide.longContextBody}
               </p>
               <div className="mt-4 flex flex-wrap gap-2">
                 {inputMultiplierBands.map((band) => (
                   <span
                     key={band.label}
-                    className="rounded-full border border-amber-500/20 bg-white/70 px-3 py-1.5 text-[11px] font-bold text-amber-900 dark:bg-zinc-950/60 dark:text-amber-200"
+                    className="min-w-0 break-words rounded-full border border-amber-500/20 bg-white/70 px-3 py-1.5 text-[11px] font-bold text-amber-900 dark:bg-zinc-950/60 dark:text-amber-200"
                   >
                     {band.label} {creditGuide.tokenUnit} · {band.multiplier}×
                   </span>
@@ -1467,17 +1479,17 @@ export function PricingPageContent() {
               </div>
             </article>
 
-            <article className="rounded-2xl border border-blue-500/25 bg-blue-500/10 p-5">
-              <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
-                <Info className="h-5 w-5" />
-                <h3 className="font-bold">{creditGuide.preflightTitle}</h3>
+            <article className="min-w-0 rounded-2xl border border-blue-500/25 bg-blue-500/10 p-5">
+              <div className="flex min-w-0 items-center gap-2 text-blue-700 dark:text-blue-300">
+                <Info className="h-5 w-5 shrink-0" />
+                <h3 className="min-w-0 break-words font-bold">{creditGuide.preflightTitle}</h3>
               </div>
-              <p className="mt-3 text-xs leading-6 text-zinc-600 dark:text-zinc-300">
+              <p className="mt-3 min-w-0 break-words text-xs leading-6 text-zinc-600 dark:text-zinc-300">
                 {creditGuide.preflightBody}
               </p>
               <Link
                 href="/chat"
-                className="mt-4 inline-flex h-10 items-center justify-center rounded-xl bg-blue-600 px-4 text-xs font-bold text-white transition hover:bg-blue-500"
+                className="mt-4 inline-flex min-h-11 min-w-0 items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-center text-xs font-bold text-white transition hover:bg-blue-500"
               >
                 {creditGuide.preflightCta}
               </Link>

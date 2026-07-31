@@ -1678,8 +1678,16 @@ export function ChatSidebar({
                         />
                     </div>
                 ) : null}
+                {/*
+                  REAUDIT-P1-01: not `isMobileDrawer` any more. The desktop
+                  sidebar used to leave this to the floating "Analytics
+                  settings" pill, which lands in the same bottom-right corner
+                  as the last model panel's send button. The guest account card
+                  now carries the control in normal document flow on both
+                  shells, which is what lets the overlay go away entirely.
+                */}
                 <div className="shrink-0" data-testid="sidebar-account-controls">
-                    <AuthButton showAnalyticsCookieButton={isMobileDrawer} />
+                    <AuthButton showAnalyticsCookieButton />
                 </div>
                 <div className="shrink-0">
                     <FeedbackButton

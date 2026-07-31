@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { signIn, signOut, useSession } from "next-auth/react";
 import {
+    BarChart3,
     CreditCard,
     Crown,
     LogOut,
@@ -15,6 +16,7 @@ import {
 import { useLanguage } from "@/components/LanguageProvider";
 import type { UserUsageResponse } from "@/components/chat/useUserUsage";
 import { openAccountSettings } from "@/lib/accountSettingsEvents";
+import { openAnalyticsPreferences } from "@/lib/analyticsPreferencesEvents";
 import { helpCentreHref } from "@/lib/localizedHelpHref";
 import { withChatLanguage } from "@/lib/localizedCallbackUrl";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
@@ -62,6 +64,27 @@ export function SidebarAccountRailButton({
     const user = session?.user;
     const plan = accountUsage?.plan || null;
     const upgradeTargetPlan = plan === "Free" ? "Pro" : plan === "Pro" ? "Max" : null;
+
+    // REAUDIT-P1-01. With the floating "Analytics settings" pill gone from
+    // /chat, a collapsed sidebar would otherwise have no path back to the
+    // analytics choice at all -- the expanded sidebar's account card is what
+    // carries it, and the collapsed rail does not render that card. This is
+    // the same action, in the rail's own menu, for both account states.
+    const analyticsSettingsItem = (
+        <button
+            type="button"
+            role="menuitem"
+            data-testid="sidebar-rail-analytics-settings"
+            onClick={() => {
+                setIsOpen(false);
+                openAnalyticsPreferences();
+            }}
+            className="flex min-h-11 w-full items-center gap-2 rounded-xl px-3 text-left text-sm font-bold text-zinc-700 transition hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+        >
+            <BarChart3 className="h-4 w-4 shrink-0 text-blue-500" aria-hidden="true" />
+            <span className="min-w-0">{t("auth.analyticsSettings")}</span>
+        </button>
+    );
 
     return (
         <div ref={containerRef} className="group/account relative inline-flex">
@@ -178,6 +201,7 @@ export function SidebarAccountRailButton({
                                     <Palette className="h-4 w-4 text-zinc-500" aria-hidden="true" />
                                     {t("sidebar.languageAndDisplay")}
                                 </button>
+                                {analyticsSettingsItem}
                                 <Link
                                     href={helpCentreHref(lang)}
                                     target="_blank"
@@ -235,6 +259,7 @@ export function SidebarAccountRailButton({
                                     <CreditCard className="h-4 w-4 text-blue-500" aria-hidden="true" />
                                     {t("sidebar.guestMenuViewPlans")}
                                 </Link>
+                                {analyticsSettingsItem}
                                 <Link
                                     href={helpCentreHref(lang)}
                                     target="_blank"

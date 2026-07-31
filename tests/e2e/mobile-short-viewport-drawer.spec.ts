@@ -150,15 +150,16 @@ const drawerControls = (page: Page, mode: "guest" | "authenticated"): DrawerCont
         locator: drawer.locator("select").first(),
         minHeight: 16,
       },
+      // REAUDIT-P1-02: both were 40px and carried an explicit exemption here.
+      // They now hold the same 44px floor as the rest of the drawer, so no
+      // `minHeight` override remains to hide a regression.
       {
         label: "login",
         locator: drawer.getByTestId("sidebar-account-controls").getByRole("button").first(),
-        minHeight: 40,
       },
       {
         label: "analytics cookie settings",
         locator: drawer.getByTestId("guest-analytics-cookie-settings"),
-        minHeight: 40,
       },
     ];
   }

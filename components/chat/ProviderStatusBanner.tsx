@@ -31,6 +31,56 @@ type ProviderStatusBannerProps = {
 };
 
 /**
+ * REAUDIT-P2-02. A model name is an identifier, not prose: "Gemini 3.1
+ * Flash-Lite" broken as `Gemin / i` or `Flash- / Lite` stops naming anything a
+ * user can match against the picker. Two different rules were doing it. The
+ * surrounding `break-words` (`overflow-wrap: break-word`) splits between
+ * letters once a token is wider than the line, and the hyphen in `Flash-Lite`
+ * is an ordinary line-break opportunity that `word-break: keep-all` does not
+ * suppress for Latin text.
+ *
+ * Each whitespace-separated token is therefore rendered as its own
+ * `whitespace-nowrap` span: the name still wraps, but only at the spaces the
+ * vendor itself put in it, and a long name is allowed to take two lines rather
+ * than being cut mid-token. `textContent` is unchanged, so the accessible name
+ * the banner's `aria-labelledby` resolves to is exactly the same string.
+ */
+function ModelName({ name }: { name: string }) {
+  return (
+    <span data-testid="provider-status-model-name">
+      {name.split(/(\s+)/).map((chunk, index) =>
+        /^\s+$/.test(chunk) ? (
+          chunk
+        ) : (
+          <span key={index} className="whitespace-nowrap">
+            {chunk}
+          </span>
+        )
+      )}
+    </span>
+  );
+}
+
+/**
+ * Renders a `{model}`-style template with the substitution kept unbreakable.
+ * Split rather than `String.replace`, because the replacement has to become
+ * markup instead of more text.
+ */
+function templateWithModelNames(
+  template: string,
+  values: Record<string, string>
+) {
+  const parts = template.split(/(\{[a-zA-Z]+\})/);
+  return parts.map((part, index) => {
+    const key = /^\{([a-zA-Z]+)\}$/.exec(part)?.[1];
+    if (key && key in values) {
+      return <ModelName key={index} name={values[key]} />;
+    }
+    return part;
+  });
+}
+
+/**
  * Contextual outage disclosure.
  *
  * This banner used to have two modes: a selected-model one, and a global one
@@ -253,10 +303,9 @@ export function ProviderStatusBanner({
 
   const title =
     bannerState.impacted.length === 1
-      ? t("providerStatus.selectedUnavailableOne").replace(
-          "{model}",
-          modelName(bannerState.impacted[0].id)
-        )
+      ? templateWithModelNames(t("providerStatus.selectedUnavailableOne"), {
+          model: modelName(bannerState.impacted[0].id),
+        })
       : t("providerStatus.selectedUnavailableMany").replace(
           "{count}",
           String(bannerState.impacted.length)
@@ -283,9 +332,10 @@ export function ProviderStatusBanner({
       return {
         key: recovery.modelId,
         kind: "swap" as const,
-        label: t("providerStatus.switchFromTo")
-          .replace("{from}", modelName(recovery.modelId))
-          .replace("{to}", modelName(addModelId)),
+        label: templateWithModelNames(t("providerStatus.switchFromTo"), {
+          from: modelName(recovery.modelId),
+          to: modelName(addModelId),
+        }),
         run: () => {
           rememberFocusTarget(addModelId);
           onSwapModel(recovery.modelId, addModelId);
@@ -298,10 +348,9 @@ export function ProviderStatusBanner({
       label:
         bannerState.impacted.length === 1
           ? t("providerStatus.chooseAnother")
-          : t("providerStatus.chooseAnotherFor").replace(
-              "{model}",
-              modelName(recovery.modelId)
-            ),
+          : templateWithModelNames(t("providerStatus.chooseAnotherFor"), {
+              model: modelName(recovery.modelId),
+            }),
       run: (element: HTMLElement) => {
         // The picker owns focus while it is open and returns it here on close;
         // it is also what will change the selection, so the effect above takes
@@ -359,15 +408,40 @@ export function ProviderStatusBanner({
   if (compact) {
     return (
       <div
-        className="mx-3 mt-2 rounded-2xl border border-red-200 bg-red-50 px-2.5 py-2 text-xs text-red-800 shadow-sm dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
+        // REAUDIT-P1-04. An outage banner is a notice, not the workspace. At
+        // 200% text on a 568px phone this card grew to 266px -- nearly half the
+        // screen -- and every pixel of it came out of the answers and the
+        // composer below. Capping it at 45% of the viewport and scrolling the
+        // rest keeps the whole sentence and every recovery action reachable
+        // (they are in the scroll region, not hidden behind a "more") while the
+        // composer keeps a workable share of the screen. At default text sizes
+        // the card is 88-102px tall, so the cap never engages.
+        className="mx-3 mt-2 max-h-[45dvh] overflow-y-auto overscroll-contain rounded-2xl border border-red-200 bg-red-50 px-2.5 py-2 text-xs text-red-800 shadow-sm dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
         role="status"
         aria-live="polite"
         aria-labelledby={headingId}
         aria-describedby={actionsId}
         data-testid="provider-outage-banner"
       >
+        {/*
+          REAUDIT-P2-02. The heading had 102px to work with at 320px with a 200%
+          root font -- narrower than a single five-syllable Korean word -- so
+          `overflow-wrap: break-word` split `일시적으로` into `일시적으 / 로`,
+          and the model name with it (`Gemin / i`, `Flash- / Lite`).
+          Everything eating that width was *chrome*, not text: the warning
+          icon (`h-4 w-4` -> 32px), the refresh box (`h-11 w-11` -> 88px) and
+          the chips all grew with the root font even though a touch target is
+          specified in CSS pixels and does not need to. Pinning those boxes --
+          the same thing the marketing menu button already does for exactly
+          this reason -- returns the sentence to ~156px without moving it, and
+          without putting refresh inside the scrolling chip strip where three
+          impacted models would push it off the right edge.
+        */}
         <div className="flex items-start gap-2">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          <AlertTriangle
+            className="mt-0.5 h-[16px] w-[16px] shrink-0"
+            aria-hidden="true"
+          />
           <div className="min-w-0 flex-1">
             {/* Not truncated: the model name is the whole point of the
                 sentence, and at 320px or 200% text scaling a single-line clamp
@@ -389,9 +463,9 @@ export function ProviderStatusBanner({
             ) : null}
           </div>
           {refreshButton(
-            // The icon itself stays 16px: only the box around it grows.
+            // The icon itself stays 16px; so does the box now.
             `flex shrink-0 items-center justify-center rounded-xl bg-black/5 transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15 ${
-              isMobileShell ? "h-11 w-11" : "h-8 w-8"
+              isMobileShell ? "h-[44px] w-[44px]" : "h-[32px] w-[32px]"
             }`
           )}
         </div>
@@ -401,7 +475,7 @@ export function ProviderStatusBanner({
           // apart in a scrolling row, so an inset large enough to reach 44px
           // would overlap the next chip's tap area and steal its taps.
           `inline-flex shrink-0 items-center gap-1 rounded-full bg-black/5 text-[11px] font-bold transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15 ${
-            isMobileShell ? "h-11 min-w-11 px-3" : "h-7 px-2"
+            isMobileShell ? "h-[44px] min-w-[44px] px-3" : "h-[28px] px-2"
           }`
         )}
       </div>

@@ -1701,6 +1701,13 @@ export function AuthButton({
         as a `shrink-0` item on a nowrap row it pushed 168px of itself outside
         the panel. It now takes a second row instead, and can shrink from there.
       */}
+      {/*
+        REAUDIT-P1-02. Both controls on this row were 40px tall (measured
+        170.42x40 and 98.97x40 at 320x568), a few pixels under the 44px touch
+        floor the rest of the drawer already holds. `min-h-11` raises the hit
+        area itself -- the label keeps its size and the row keeps its density,
+        so nothing is hidden or demoted to buy the height.
+      */}
       <div className="flex flex-wrap gap-2">
         <button
           onClick={() => {
@@ -1709,7 +1716,7 @@ export function AuthButton({
             });
             void signIn(undefined, { callbackUrl: chatCallbackUrl });
           }}
-          className="cursor-pointer flex-1 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-blue-950/20 transition-all hover:bg-blue-500"
+          className="flex min-h-11 flex-1 cursor-pointer items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-blue-950/20 transition-all hover:bg-blue-500"
         >
           {t("auth.login")}
         </button>
@@ -1718,7 +1725,7 @@ export function AuthButton({
             type="button"
             data-testid="guest-analytics-cookie-settings"
             onClick={() => openAnalyticsPreferences()}
-            className="min-w-0 rounded-xl border border-zinc-200 bg-zinc-100 px-3 py-2.5 text-xs font-bold text-zinc-600 transition-colors hover:bg-zinc-200 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            className="flex min-h-11 min-w-0 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 px-3 py-2.5 text-xs font-bold text-zinc-600 transition-colors hover:bg-zinc-200 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
           >
             {t("auth.analyticsCookieSettings")}
           </button>
