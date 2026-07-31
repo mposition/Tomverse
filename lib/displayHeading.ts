@@ -13,6 +13,24 @@
  * Deliberately scoped to display headings. Body copy, legal copy, user content
  * and model answers keep the default wrapping: `keep-all` over a paragraph
  * trades a rare bad break for consistently ragged lines.
+ *
+ * A global `:where(:lang(ko), :lang(zh)) { word-break: keep-all }` rule has now
+ * been tried twice and reverted twice, so the reasons are worth keeping here
+ * rather than in the pull requests:
+ *
+ *   * Chinese does not put spaces between words. `keep-all` only permits breaks
+ *     at spaces, so a Chinese sentence becomes one unbreakable token and
+ *     overflows -- the `/pricing` heading measured 367px in a 320px viewport.
+ *     The first attempt hid this behind `overflow-wrap: anywhere`, which then
+ *     split Korean words at 200% zoom, because `anywhere` (unlike
+ *     `break-word`) also applies while min-content width is computed. Each half
+ *     of that pair covers for the other's damage.
+ *   * Applying it to body copy contradicts the scoping decision above. It is
+ *     not an oversight that the chat disclaimer may break 입력 / 은: paragraphs
+ *     were weighed and left on the default.
+ *
+ * If a specific surface needs the 어절 kept whole, give that element this
+ * class. Do not reintroduce the global rule.
  */
 export function displayHeadingClass(lang: string): string {
   // `break-word` is not Korean-specific: it is the overflow escape hatch for
