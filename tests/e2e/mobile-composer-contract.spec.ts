@@ -15,6 +15,7 @@ import {
   mockUserUsage,
   restoreActiveConversation,
   setDeterministicTheme,
+  setRootFontSize,
   suppressTransientUi,
 } from "./support/chat-state-fixtures";
 
@@ -144,13 +145,19 @@ async function startDeepResearch(page: Page) {
 /** An image attachment, pasted rather than picked, so no file chooser is
  *  involved -- the composer geometry is what is under test, not the picker. */
 async function attachPastedImage(page: Page) {
+  await attachPastedImages(page, ["qa-image.png"]);
+}
+
+async function attachPastedImages(page: Page, names: string[]) {
   const bytes = Array.from(createQaPngBuffer());
   await page.getByTestId("chat-textarea").focus();
-  await page.getByTestId("chat-textarea").evaluate((textarea, fileBytes) => {
+  await page.getByTestId("chat-textarea").evaluate((textarea, input) => {
     const dataTransfer = new DataTransfer();
-    dataTransfer.items.add(
-      new File([new Uint8Array(fileBytes)], "qa-image.png", { type: "image/png" })
-    );
+    for (const name of input.names) {
+      dataTransfer.items.add(
+        new File([new Uint8Array(input.bytes)], name, { type: "image/png" })
+      );
+    }
     textarea.dispatchEvent(
       new ClipboardEvent("paste", {
         bubbles: true,
@@ -158,7 +165,7 @@ async function attachPastedImage(page: Page) {
         clipboardData: dataTransfer,
       })
     );
-  }, bytes);
+  }, { bytes, names });
 }
 
 type ComposerGeometry = {
@@ -380,6 +387,22 @@ test.describe("Mobile composer: the textarea owns its row", () => {
 
     const geometry = await expectComposerContract(page, "390x680 attachment");
     expect(geometry.overlaps).toEqual([]);
+  });
+
+  test("five account attachments wrap without a horizontal tray at 320px", async ({ page }) => {
+    await enterMobileComposer(page, { viewport: { width: 320, height: 780 } });
+    await mockAttachmentUpload(page);
+    const names = Array.from({ length: 5 }, (_, index) => `qa-image-${index + 1}.png`);
+    await attachPastedImages(page, names);
+    for (const name of names) await expect(page.getByAltText(name)).toBeVisible();
+
+    const trayOverflow = await page.getByTestId("attachment-tray").evaluate((tray) => ({
+      horizontal: tray.scrollWidth - tray.clientWidth,
+      overflowX: getComputedStyle(tray.firstElementChild as Element).overflowX,
+    }));
+    expect(trayOverflow.horizontal).toBeLessThanOrEqual(1);
+    expect(trayOverflow.overflowX).not.toBe("auto");
+    await expectComposerContract(page, "five account attachments @320px");
   });
 
   test("the chip's own controls keep a 44px touch target at 320px", async ({
@@ -812,7 +835,7 @@ test.describe("Mobile composer: guest attachments", () => {
     await pasteGuestFile(page, guestTextFile());
     await expect(page.getByText("guest-notes.txt").first()).toBeVisible();
 
-    await page.addStyleTag({ content: "html { font-size: 32px !important; }" });
+    await setRootFontSize(page, 32);
     await expectComposerContract(page, "guest attachment at 200% text scaling");
   });
 

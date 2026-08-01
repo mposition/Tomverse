@@ -337,17 +337,19 @@ test("a Free account can start a fresh subscription on either paid plan", () => 
   assert.equal(forFree("Max"), "upgrade");
 });
 
-test("Pro sees plan management on Max, never a checkout that would 409", () => {
+test("Pro is offered the change flow on Max, never a checkout that would 409", () => {
   const forPro = (cardPlan) =>
     resolvePlanCtaState({
       sessionStatus: "authenticated",
       currentPlan: "Pro",
       cardPlan,
       hasActiveSubscription: true,
+      currentBillingInterval: "monthly",
     });
 
   assert.equal(forPro("Pro"), "current_plan");
-  assert.equal(forPro("Max"), "manage_plan");
+  assert.equal(forPro("Max"), "change_plan");
+  // Free is not a plan change -- it is a cancellation, which lives elsewhere.
   assert.equal(forPro("Free"), "manage_plan");
 });
 
@@ -358,11 +360,63 @@ test("Max is never told that Pro is an upgrade", () => {
       currentPlan: "Max",
       cardPlan,
       hasActiveSubscription: true,
+      currentBillingInterval: "annual",
     });
 
   assert.equal(forMax("Max"), "current_plan");
-  assert.equal(forMax("Pro"), "manage_plan");
+  // The same state as the upgrade: one flow, and the server decides the
+  // direction again when it is confirmed.
+  assert.equal(forMax("Pro"), "change_plan");
   assert.equal(forMax("Free"), "manage_plan");
+});
+
+test("an unknown billing interval sends the subscriber to support, not to a refusal", () => {
+  // A change only ever happens on the interval already being billed, so
+  // without one there is nothing this flow can offer. The value is null for a
+  // subscription synced before the field existed.
+  const withoutInterval = resolvePlanCtaState({
+    sessionStatus: "authenticated",
+    currentPlan: "Pro",
+    cardPlan: "Max",
+    hasActiveSubscription: true,
+  });
+  assert.equal(withoutInterval, "manage_plan");
+
+  assert.equal(
+    resolvePlanCtaState({
+      sessionStatus: "authenticated",
+      currentPlan: "Pro",
+      cardPlan: "Max",
+      hasActiveSubscription: true,
+      currentBillingInterval: null,
+    }),
+    "manage_plan"
+  );
+});
+
+test("a lapsed subscriber buys again rather than changing a subscription that is gone", () => {
+  // No live subscription means there is nothing to change: the interval is
+  // irrelevant and a fresh checkout is the correct CTA.
+  assert.equal(
+    resolvePlanCtaState({
+      sessionStatus: "authenticated",
+      currentPlan: "Pro",
+      cardPlan: "Max",
+      hasActiveSubscription: false,
+      currentBillingInterval: "monthly",
+    }),
+    "upgrade"
+  );
+  assert.equal(
+    resolvePlanCtaState({
+      sessionStatus: "authenticated",
+      currentPlan: "Max",
+      cardPlan: "Pro",
+      hasActiveSubscription: false,
+      currentBillingInterval: "monthly",
+    }),
+    "manage_plan"
+  );
 });
 
 test("a Free account whose subscription lapsed can check out again", () => {
@@ -377,15 +431,17 @@ test("a Free account whose subscription lapsed can check out again", () => {
     }),
     "upgrade"
   );
-  // Still inside the paid period, plan still Pro: management, not checkout.
+  // Still inside the paid period, plan still Pro: the change flow, not a
+  // checkout that would create a second subscription.
   assert.equal(
     resolvePlanCtaState({
       sessionStatus: "authenticated",
       currentPlan: "Pro",
       cardPlan: "Max",
       hasActiveSubscription: true,
+      currentBillingInterval: "monthly",
     }),
-    "manage_plan"
+    "change_plan"
   );
 });
 

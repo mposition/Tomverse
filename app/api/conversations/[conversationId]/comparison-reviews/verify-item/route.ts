@@ -30,6 +30,7 @@ import {
 } from "@/lib/conversationLock";
 import { getEnabledModel } from "@/lib/models";
 import { prisma } from "@/lib/prisma";
+import { safeErrorMetadata } from "@/lib/providerErrorClassification";
 import {
   recordModelFailure,
   recordModelSuccess,
@@ -248,8 +249,10 @@ export async function POST(
           modelId: model.id,
           phase: "request",
           traceId,
-          errorName: error instanceof Error ? error.name : undefined,
-          message: error instanceof Error ? error.message : String(error),
+          errorName: safeErrorMetadata(error).name,
+          errorCode: safeErrorMetadata(error).code,
+          httpStatus: safeErrorMetadata(error).statusCode,
+          retryable: safeErrorMetadata(error).isRetryable,
         }),
         recordModelFailure(model.id, model.provider, "VERIFICATION_ITEM_FAILED"),
       ]);
@@ -268,7 +271,10 @@ export async function POST(
     if (chatResponse) return chatResponse;
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
-    console.error("Comparison review item verification failed:", { traceId, error });
+    console.error("Comparison review item verification failed:", {
+      traceId,
+      ...safeErrorMetadata(error),
+    });
     return jsonError(
       "Failed to verify this item. Reserved credits were refunded.",
       "VERIFICATION_ITEM_FAILED",

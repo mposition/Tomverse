@@ -7,6 +7,7 @@ import {
 import {
   freezeAnimations,
   mockGuestUsage,
+  setRootFontSize,
   suppressTransientUi,
 } from "./support/chat-state-fixtures";
 
@@ -289,9 +290,11 @@ async function startGuestJourney(page: Page, options: JourneyOptions) {
   await page.goto(`/chat?lang=${lang}`);
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
   if (options.textScalePercent) {
-    await page.addStyleTag({
-      content: `html { font-size: ${(16 * options.textScalePercent) / 100}px !important; }`,
-    });
+    const size = (16 * options.textScalePercent) / 100;
+    if (size !== 16 && size !== 20 && size !== 24 && size !== 32) {
+      throw new Error(`Unsupported QA root font size: ${size}px`);
+    }
+    await setRootFontSize(page, size);
   }
   await freezeAnimations(page);
   return { uploads, review, watch };
