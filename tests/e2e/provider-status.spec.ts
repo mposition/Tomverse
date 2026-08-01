@@ -37,7 +37,11 @@ const SELECTED = {
 const UNSELECTED_SIX: Array<{ id: string; provider: string; name: string }> = [
   { id: "qwen3.6-flash", provider: "qwen", name: "Qwen 3.6" },
   { id: "glm-5.2", provider: "zhipu", name: "GLM 5.2" },
-  { id: "gemini-3-5-flash", provider: "google", name: "Gemini 3.5 Flash" },
+  // Not `gemini-3-5-flash`: the catalogue renamed `gemini-2-5-flash` to
+  // "Gemini 3.5 Flash-Lite", which made "Gemini 3.5 Flash" a prefix of a name
+  // the banner legitimately prints, so the absence check below failed on
+  // correct output. Same provider and plan tier, no nesting.
+  { id: "gemini-3-6-flash", provider: "google", name: "Gemini 3.6 Flash" },
   { id: "kimi-k2.7-code", provider: "moonshot", name: "Kimi K2.7" },
   { id: "mistral-large-3", provider: "mistral", name: "Mistral Large 3" },
   { id: "deepseek-v4-pro", provider: "deepseek", name: "DeepSeek-V4 Pro" },
@@ -323,6 +327,17 @@ test.describe("contextual outage disclosure (UI-STATUS-002)", () => {
     const text = (await banner(page).innerText()).toLowerCase();
     // Neither the unrelated models nor the catalogue-wide tally may leak in.
     for (const model of UNSELECTED_SIX) {
+      // Precondition, not the assertion -- the same guard the widespread-outage
+      // suite carries. An unrelated name that nests inside one the banner is
+      // supposed to print makes the absence check below fail on correct output,
+      // and without this the failure reads as a product defect. A catalogue
+      // rename did exactly that here once already.
+      for (const printed of [SELECTED.gemini.name, "DeepSeek-V4 Flash"]) {
+        expect(
+          printed.toLowerCase().includes(model.name.toLowerCase()),
+          `fixture error: unrelated "${model.name}" nests inside printed "${printed}"`
+        ).toBe(false);
+      }
       expect(text, `banner must not name ${model.name}`).not.toContain(
         model.name.toLowerCase()
       );
@@ -1081,7 +1096,10 @@ test.describe("widespread selected outage copy and layout (RECON-OPS-002)", () =
   // absence check fails on correct output. The precondition below makes that
   // trap loud instead of letting a future model rename re-introduce it.
   const UNRELATED = [
-    { id: "gemini-3-5-flash", provider: "google", name: "Gemini 3.5 Flash" },
+    // See UNSELECTED_SIX: "Gemini 3.5 Flash" nests inside the renamed
+    // "Gemini 3.5 Flash-Lite", which is exactly the trap the precondition
+    // below catches.
+    { id: "gemini-3-6-flash", provider: "google", name: "Gemini 3.6 Flash" },
     { id: "glm-5.2", provider: "zhipu", name: "GLM 5.2" },
     { id: "codestral", provider: "mistral", name: "Codestral" },
     { id: "mistral-large-3", provider: "mistral", name: "Mistral Large 3" },

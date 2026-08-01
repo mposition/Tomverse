@@ -14,6 +14,15 @@ test.describe("landing hero product demonstration", () => {
     await openLanding(page);
 
     const demo = page.getByTestId("landing-hero-product-demo");
+    // The reveal is gated on an IntersectionObserver at 28%, and until it fires
+    // the component holds the complete state -- the same thing it renders
+    // without JavaScript. On a 412x915 viewport the hero puts the demo at 17%
+    // visible on load, so it correctly never played and the test read that
+    // resting state as a defect. Scrolling to it is the path the playback is
+    // for; on a wide viewport it is already in view and this changes nothing.
+    await demo.evaluate((element) =>
+      element.scrollIntoView({ block: "center", inline: "nearest" })
+    );
     await expect(demo).toHaveAttribute("data-active-stage", "0", {
       timeout: 1_500,
     });

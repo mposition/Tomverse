@@ -254,6 +254,12 @@ test.describe("theme is correct on the first paint", () => {
     const before = await page.evaluate(
       () => getComputedStyle(document.body).backgroundColor
     );
+    // Below `lg` the marketing header collapses its nav behind a menu button
+    // (`MarketingChrome`'s `hidden … lg:flex`), so on a narrow project the link
+    // has to be revealed before it can be clicked. Same page, same soft
+    // navigation -- only the affordance that reaches it differs.
+    const menu = page.getByRole("button", { name: /^(Menu|메뉴|菜单)$/ });
+    if (await menu.isVisible()) await menu.click();
     await page.getByRole("link", { name: /pricing/i }).first().click();
     await page.waitForLoadState("networkidle");
     const after = await page.evaluate(
