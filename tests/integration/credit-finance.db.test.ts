@@ -1133,3 +1133,58 @@ test("purchased credits are not blocked a second time by the plan cost guardrail
   assert.ok(settledLot.remainingCredits < 20);
   await releaseChatAccess(acquired.leaseId);
 });
+
+// The int4 fix has two halves. The limit half -- binding a guardrail above
+// 2,147,483,647 µUSD into the guard query -- is covered by
+// tests/chatCostGuardrails.test.mjs and by the Max reservation scenarios above.
+// This covers the other half: the running total itself.
+//
+// `count = count + amount` overflowed on int4 just as the bound limit did, so
+// a bucket that had been quietly filling up would start failing once it
+// approached the ceiling -- later, and further from the cause, than the
+// original report. Widening the column fixed both, and this pins the second
+// one so a future narrowing (or an int cast in the guard query) cannot pass
+// the limit-side tests while breaking accumulation.
+test("a cost bucket accumulates past the old int4 ceiling", async () => {
+  const user = await createUser("Max");
+  const access = chatAccess(user, 10_000);
+  const now = new Date();
+  const monthStart = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)
+  );
+
+  // The operational total-cost bucket: its limit (totalMonth, 2,500,000,000
+  // µUSD for this plan) is the one that sits above the ceiling, so it is the
+  // only bucket whose running total can legitimately reach it. Seeded close
+  // enough that one reservation's cost carries the total across.
+  await prisma.chatUsageBucket.create({
+    data: {
+      key: access.subjectKey,
+      period: "op-cost-month",
+      periodStart: monthStart,
+      count: BigInt(2_147_450_000),
+    },
+  });
+
+  const acquired = await acquireChatAccess(
+    access,
+    chatBudget({
+      credits: 8,
+      inputTokens: 1_000,
+      outputTokens: 4_096,
+      inputRate: 5,
+      outputRate: 25,
+    })
+  );
+  assert.ok(acquired.usageReservation);
+
+  const bucket = await prisma.chatUsageBucket.findFirstOrThrow({
+    where: { key: access.subjectKey, period: "op-cost-month" },
+  });
+  assert.ok(
+    usageBucketCount(bucket.count) > 2_147_483_647,
+    `expected the running total to pass int4's ceiling, got ${bucket.count}`
+  );
+
+  await releaseChatAccess(acquired.leaseId);
+});
