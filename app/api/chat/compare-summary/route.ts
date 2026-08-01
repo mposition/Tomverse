@@ -33,6 +33,7 @@ import {
   perplexityUsageHeaders,
 } from "@/lib/perplexityUsageCapture";
 import type { PerplexityUsageCostSnapshot } from "@/lib/perplexityUsageCore";
+import { safeErrorMetadata } from "@/lib/providerErrorClassification";
 import {
   recordModelFailure,
   recordModelSuccess,
@@ -317,15 +318,17 @@ export async function POST(request: Request) {
             modelId: candidate.id,
             phase: "request",
             traceId,
-            errorName: error instanceof Error ? error.name : undefined,
-            message: error instanceof Error ? error.message : String(error),
+            errorName: safeErrorMetadata(error).name,
+            errorCode: safeErrorMetadata(error).code,
+            httpStatus: safeErrorMetadata(error).statusCode,
+            retryable: safeErrorMetadata(error).isRetryable,
           }),
           recordModelFailure(candidate.id, candidate.provider, "QUICK_COMPARISON_FAILED"),
         ]);
         console.error("Guest quick comparison reviewer attempt failed:", {
           traceId,
           reviewerModelId: candidate.id,
-          error,
+          ...safeErrorMetadata(error),
         });
       } finally {
         if (providerUsageTraceId) {
@@ -335,7 +338,10 @@ export async function POST(request: Request) {
       }
     }
 
-    console.error("All guest quick comparison reviewers failed:", { traceId, lastError });
+    console.error("All guest quick comparison reviewers failed:", {
+      traceId,
+      ...safeErrorMetadata(lastError),
+    });
     return jsonError(
       "The quick comparison could not be completed. Reserved credits were refunded.",
       "QUICK_COMPARISON_FAILED",

@@ -2,7 +2,7 @@ import { isAllowedRequestHost } from "@/lib/originProtection";
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const EXEMPT_MUTATION_PATHS = [
-  "/api/auth/",
+  "/api/auth/callback/",
   "/api/billing/webhook",
   "/api/internal/",
   "/api/security/csp-report",

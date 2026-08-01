@@ -76,5 +76,13 @@ test("machine-auth and webhook routes are exempt while user mutations are checke
   assert.equal(requiresMutationOriginCheck("DELETE", "/api/user/account"), true);
   assert.equal(requiresMutationOriginCheck("POST", "/api/internal/maintenance/cleanup"), false);
   assert.equal(requiresMutationOriginCheck("POST", "/api/billing/webhook"), false);
+  assert.equal(
+    requiresMutationOriginCheck("POST", "/api/auth/email-login/request"),
+    true
+  );
+  assert.equal(
+    requiresMutationOriginCheck("POST", "/api/auth/callback/google"),
+    false
+  );
   assert.equal(requiresMutationOriginCheck("GET", "/api/user/settings"), false);
 });

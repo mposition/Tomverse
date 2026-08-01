@@ -275,25 +275,37 @@ export function CreditPackPurchaseButton({
   // out of the dialog into the pricing page behind it and lost the purchase.
   useEffect(() => {
     if (!open) return;
-    returnFocusRef.current =
-      (document.activeElement as HTMLElement | null) || triggerRef.current;
+    if (!returnFocusRef.current?.isConnected) {
+      returnFocusRef.current =
+        (document.activeElement as HTMLElement | null) || triggerRef.current;
+    }
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     const focusFrame = requestAnimationFrame(() => {
       closeButtonRef.current?.focus();
     });
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      const modalDialogs = Array.from(
+        document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]')
+      );
+      if (modalDialogs.at(-1) !== dialog) return;
       if (event.key === "Escape") {
+        event.preventDefault();
         event.stopPropagation();
         setOpen(false);
         return;
       }
       if (event.key !== "Tab") return;
-      const dialog = dialogRef.current;
-      if (!dialog) return;
       const focusable = Array.from(
         dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)
       ).filter((node) => node.offsetParent !== null || node === document.activeElement);
-      if (focusable.length === 0) return;
+      if (focusable.length === 0) {
+        event.preventDefault();
+        return;
+      }
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
       const active = document.activeElement as HTMLElement | null;
@@ -310,8 +322,12 @@ export function CreditPackPurchaseButton({
     return () => {
       cancelAnimationFrame(focusFrame);
       document.removeEventListener("keydown", handleKeyDown, true);
+      document.body.style.overflow = previousOverflow;
       const returnTarget = returnFocusRef.current;
-      if (returnTarget?.isConnected) returnTarget.focus();
+      returnFocusRef.current = null;
+      requestAnimationFrame(() => {
+        if (returnTarget?.isConnected) returnTarget.focus({ preventScroll: true });
+      });
     };
   }, [open, setOpen]);
 
@@ -468,8 +484,12 @@ export function CreditPackPurchaseButton({
         <button
           ref={triggerRef}
           type="button"
-          data-testid={testId}
-          onClick={() => {
+          data-testid={testId || "credit-pack-purchase-trigger"}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          aria-controls={open ? "credit-pack-modal" : undefined}
+          onClick={(event) => {
+            returnFocusRef.current = event.currentTarget;
             resetPurchaseState();
             trackProductEvent("credit_pack_cta_click", 0, {
               cta_location: ctaLocation,
@@ -488,8 +508,9 @@ export function CreditPackPurchaseButton({
         </button>
       )}
       {open && typeof document !== "undefined" && createPortal(
-        <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/65 p-3 backdrop-blur-sm sm:items-center" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setOpen(false)}>
+        <div className="fixed inset-0 z-[120] flex items-end justify-center bg-black/65 p-3 backdrop-blur-sm sm:items-center" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setOpen(false)}>
           <section
+            id="credit-pack-modal"
             ref={dialogRef}
             role="dialog"
             aria-modal="true"

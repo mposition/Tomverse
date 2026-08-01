@@ -51,21 +51,74 @@ export function UsageLimitModal({
   currentChatId,
 }: UsageLimitModalProps) {
   const { t, lang } = useLanguage();
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
 
+    const returnTarget =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     const focusFrame = requestAnimationFrame(() => {
       closeButtonRef.current?.focus();
     });
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const dialog = dialogRef.current;
+      const panel = panelRef.current;
+      if (!dialog || !panel) return;
+      const eventOwner =
+        event.target instanceof Element
+          ? event.target.closest<HTMLElement>('[role="dialog"][aria-modal="true"]')
+          : null;
+      // A nested portal can be earlier or later than this dialog in the body
+      // depending on the caller's render order. The event target is the stable
+      // ownership boundary: Escape and Tab from the purchase dialog must never
+      // close or cycle focus in the usage-limit dialog underneath it.
+      if (eventOwner && eventOwner !== dialog) return;
+      const modalDialogs = Array.from(
+        document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]')
+      );
+      if (modalDialogs.at(-1) !== dialog) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(
+        panel.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter((element) => element.offsetParent !== null);
+      if (focusable.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (!panel.contains(active)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      } else if (event.shiftKey && active === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
-    document.addEventListener("keydown", handleEscape);
+    document.addEventListener("keydown", handleKeyDown, true);
     return () => {
       cancelAnimationFrame(focusFrame);
-      document.removeEventListener("keydown", handleEscape);
+      document.removeEventListener("keydown", handleKeyDown, true);
+      document.body.style.overflow = previousOverflow;
+      requestAnimationFrame(() => {
+        if (returnTarget?.isConnected) returnTarget.focus({ preventScroll: true });
+      });
     };
   }, [open, onClose]);
 
@@ -73,6 +126,7 @@ export function UsageLimitModal({
 
   return (
     <div
+      ref={dialogRef}
       data-testid="usage-limit-modal"
       className="fixed inset-0 z-[110] flex items-end justify-center bg-black/50 p-0 backdrop-blur-sm sm:items-center sm:p-5"
       role="dialog"
@@ -85,7 +139,7 @@ export function UsageLimitModal({
         onClick={onClose}
         aria-label={t("auth.cancel")}
       />
-      <div className="relative z-10 w-full max-w-sm rounded-t-3xl border border-zinc-200 bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-2xl dark:border-zinc-800 dark:bg-zinc-950 sm:rounded-3xl sm:pb-5">
+      <div ref={panelRef} className="relative z-10 w-full max-w-sm rounded-t-3xl border border-zinc-200 bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-2xl dark:border-zinc-800 dark:bg-zinc-950 sm:rounded-3xl sm:pb-5">
         <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-zinc-300 dark:bg-zinc-700 sm:hidden" />
         <div className="flex items-start justify-between gap-3">
           <h2
@@ -99,7 +153,7 @@ export function UsageLimitModal({
             type="button"
             onClick={onClose}
             data-testid="usage-limit-modal-close"
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-zinc-500 transition hover:bg-zinc-100 dark:hover:bg-zinc-900"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-zinc-500 transition hover:bg-zinc-100 dark:hover:bg-zinc-900"
             aria-label={t("auth.cancel")}
           >
             <X className="h-4 w-4" />
