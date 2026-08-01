@@ -165,7 +165,9 @@ test.describe("platform operations", () => {
     );
     await page.getByRole("button", { name: "Save platform settings" }).click();
 
-    await expect(page.getByText("Platform settings saved to DB.")).toBeVisible();
+    await expect(
+      page.getByText("Platform settings saved and are live.")
+    ).toBeVisible();
     const stored = await adminFixtureDatabase().appSetting.findUniqueOrThrow({
       where: { key: "guestDefaultModelId" },
     });

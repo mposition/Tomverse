@@ -74,7 +74,11 @@ test.describe("support journeys", () => {
     await expect(saveNote).toBeEnabled();
     await saveNote.click();
 
-    await expect(page.getByText("Admin note saved.")).toBeVisible();
+    // The panel names the target type it wrote against, so the confirmation is
+    // specific to this customer rather than a generic "saved".
+    await expect(
+      page.getByText("Admin note saved on this user.")
+    ).toBeVisible();
     await expect(
       notes.getByText(
         "Customer confirmed the duplicate charge by email; refund queued."

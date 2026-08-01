@@ -211,7 +211,11 @@ test.describe("billing journeys", () => {
     await promotion.getByLabel("Discount percent").fill("45");
     await savePromotions(page);
 
-    await expect(page.getByText("Billing settings saved to DB.")).toBeVisible();
+    await expect(
+      page.getByText(
+        "Billing settings saved. Plans, promotions and the price catalogue are live."
+      )
+    ).toBeVisible();
     expect(
       (
         await adminFixtureDatabase().billingPromotion.findUniqueOrThrow({
@@ -244,7 +248,9 @@ test.describe("billing journeys", () => {
     await savePromotions(page);
 
     await expect(
-      page.getByText("Failed to save billing settings.")
+      page.getByText(
+        "Billing settings were not saved. Nothing changed -- retry, or reload to discard the edit."
+      )
     ).toBeVisible();
     // The stored promotion is untouched, so a rejected save cannot half-apply.
     expect(
