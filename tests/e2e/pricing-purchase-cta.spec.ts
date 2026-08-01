@@ -26,6 +26,12 @@ type PricingScenario = {
   /** null renders the signed-out page. */
   plan: "Free" | "Pro" | "Max" | null;
   hasActiveSubscription?: boolean;
+  /**
+   * The interval the subscription bills on. Explicitly settable to null: a
+   * subscription synced before the field existed has none, and the plan-change
+   * CTA has to fall back to support rather than open a flow the server refuses.
+   */
+  billingInterval?: "monthly" | "annual" | null;
   /** Delays the session response so the loading state can be observed. */
   sessionDelayMs?: number;
   /** Status for GET /api/billing/credit-packs. */
@@ -138,7 +144,11 @@ async function preparePricingPage(
         plan: scenario.plan,
         subscription: {
           status: scenario.hasActiveSubscription ? "active" : null,
-          billingInterval: scenario.hasActiveSubscription ? "monthly" : null,
+          billingInterval: scenario.hasActiveSubscription
+            ? scenario.billingInterval === undefined
+              ? "monthly"
+              : scenario.billingInterval
+            : null,
           currentPeriodEnd: null,
           cancelAtPeriodEnd: false,
         },
@@ -305,7 +315,7 @@ test.describe("pricing plan CTAs by authentication state and plan", () => {
     await expect(creditCta).not.toContainText("Sign in");
   });
 
-  test("a Pro subscriber is never offered Pro again, and Max is plan management", async ({
+  test("a Pro subscriber is never offered Pro again, and Max opens the change flow", async ({
     page,
   }) => {
     await preparePricingPage(page, {
@@ -320,25 +330,12 @@ test.describe("pricing plan CTAs by authentication state and plan", () => {
     );
     await expect(ctaState(page, "pro")).toContainText("Current plan");
 
-    // The 409 dead end: an "Upgrade to Max" button here reaches a checkout the
-    // server refuses, because there is no subscription-change flow.
+    // Not a checkout: /api/billing/checkout refuses a plan change with 409 and
+    // always will, so this CTA opens the dedicated change screen instead.
     const maxCta = ctaState(page, "max");
-    await expect(maxCta).toHaveAttribute("data-cta-state", "manage_plan");
-    await expect(maxCta).not.toContainText("Upgrade to Max");
-    // The CTA has to say that online plan change is unavailable -- not merely
-    // point somewhere else -- and it has to point at a place that can actually
-    // perform the change today. /chat cannot: account settings can cancel a
-    // subscription, not change one.
-    await expect(maxCta).toContainText("not supported yet");
-    const supportLink = maxCta.getByRole("link", {
-      name: "Ask support to change plan",
-    });
-    const supportHref = new URL(
-      (await supportLink.getAttribute("href"))!,
-      "http://127.0.0.1:3100"
-    );
-    expect(supportHref.pathname).toBe("/support");
-    expect(supportHref.searchParams.get("topic")).toBe("billing");
+    await expect(maxCta).toHaveAttribute("data-cta-state", "change_plan");
+    await expect(maxCta).not.toContainText("not supported yet");
+    await expect(page.getByTestId("pricing-change-plan-max")).toBeVisible();
 
     // A paying account is not shown a sign-up button for Free.
     await expect(ctaState(page, "free")).toHaveAttribute(
@@ -348,18 +345,23 @@ test.describe("pricing plan CTAs by authentication state and plan", () => {
     await expect(ctaState(page, "free")).toBeEmpty();
   });
 
-  test("the plan-change handoff arrives on a support form already set to Billing", async ({
+  test("a subscription with no known interval is handed to support, not to a refusal", async ({
     page,
   }) => {
+    // A change only ever happens on the interval already being billed. Without
+    // one, opening the flow would show a price and then refuse the confirm.
     await preparePricingPage(page, {
       plan: "Pro",
       hasActiveSubscription: true,
+      billingInterval: null,
     });
     await gotoPricing(page);
 
-    await ctaState(page, "max")
-      .getByRole("link", { name: "Ask support to change plan" })
-      .click();
+    const maxCta = ctaState(page, "max");
+    await expect(maxCta).toHaveAttribute("data-cta-state", "manage_plan");
+    await expect(maxCta).toContainText("not supported yet");
+
+    await maxCta.getByRole("link", { name: "Ask support to change plan" }).click();
 
     await page.waitForURL(/\/support/);
     // Landing on a generic contact page would make this a redirect, not a
@@ -381,8 +383,11 @@ test.describe("pricing plan CTAs by authentication state and plan", () => {
       "current_plan"
     );
     const proCta = ctaState(page, "pro");
-    await expect(proCta).toHaveAttribute("data-cta-state", "manage_plan");
+    await expect(proCta).toHaveAttribute("data-cta-state", "change_plan");
+    // "Upgrade to Pro" is what a Max subscriber used to be shown: it reads as
+    // a promotion and describes a demotion.
     await expect(proCta).not.toContainText("Upgrade");
+    await expect(proCta).toContainText("Change to Pro");
     await expect(page.getByTestId("credit-pack-section-cta")).toContainText(
       "Buy additional credits"
     );

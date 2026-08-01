@@ -62,34 +62,42 @@ export function ProductProofSection() {
           headingId="landing-proof-heading"
         />
 
-        <div className="mt-9 grid gap-6 lg:grid-cols-[1.3fr_0.7fr]">
+        <div className="mt-10 grid gap-8 lg:grid-cols-[0.92fr_1.08fr] lg:items-start">
           <article
             data-testid="landing-workflow-diagram"
-            className="overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-950 text-white shadow-2xl shadow-blue-950/20"
+            className="overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-950 text-white lg:sticky lg:top-24"
           >
-            <div className="flex items-center gap-2 border-b border-zinc-800 px-4 py-3 text-xs font-bold uppercase tracking-wider text-blue-300">
+            <div className="flex items-center gap-2 border-b border-zinc-800 px-[20px] py-[16px] text-xs font-bold uppercase tracking-wider text-blue-300">
               <Sparkles className="h-4 w-4" aria-hidden="true" />
               {copy.workflowLabel}
             </div>
-            <ol className="grid gap-3 p-[16px] sm:grid-cols-2">
+            <ol className="divide-y divide-zinc-800">
               {copy.stages.map((stage, index) => (
                 <li
                   key={stage.title}
-                  className="min-w-0 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-[16px]"
+                  className="grid min-w-0 grid-cols-[40px_1fr] gap-3 px-[20px] py-[16px]"
                 >
-                  <div className="flex items-center gap-2">
-                    <span className="flex h-[24px] w-[24px] shrink-0 items-center justify-center rounded-lg bg-blue-600 text-[11px] font-bold text-white">
-                      {index + 1}
+                  <span className="text-xs font-semibold text-blue-300">
+                    0{index + 1}
+                  </span>
+                  <div className="min-w-0">
+                    <span className="break-words text-sm font-bold">
+                      {stage.title}
                     </span>
-                    <span className="text-sm font-bold">{stage.title}</span>
+                    <p className="mt-1 break-words text-xs leading-5 text-zinc-400">
+                      {stage.caption}
+                    </p>
                   </div>
-                  <p className="mt-2 text-xs leading-5 text-zinc-300 break-words">{stage.caption}</p>
                 </li>
               ))}
             </ol>
-            <div className="border-t border-zinc-800 p-[20px]">
-              <h3 className="text-xl font-black break-words">{copy.workflowTitle}</h3>
-              <p className="mt-3 text-sm leading-6 text-zinc-300">{copy.workflowBody}</p>
+            <div className="bg-zinc-900/70 p-[20px] sm:p-[24px]">
+              <h3 className="break-words text-xl font-black">
+                {copy.workflowTitle}
+              </h3>
+              <p className="mt-3 break-words text-sm leading-6 text-zinc-300">
+                {copy.workflowBody}
+              </p>
               <p
                 data-testid="landing-workflow-disclosure"
                 className="mt-3 text-xs font-medium leading-5 text-zinc-400"
@@ -99,22 +107,22 @@ export function ProductProofSection() {
             </div>
           </article>
 
-          <div className="space-y-3">
+          <div className="border-t border-zinc-300 dark:border-zinc-700">
             {copy.steps.map((step, index) => (
               <article
                 key={step.title}
-                className="min-w-0 rounded-2xl border border-zinc-200 bg-zinc-50 p-[16px] dark:border-zinc-800 dark:bg-zinc-900/40"
+                className="grid min-w-0 grid-cols-[48px_1fr] gap-4 border-b border-zinc-300 py-[24px] dark:border-zinc-700 sm:grid-cols-[64px_1fr] sm:py-[28px]"
               >
-                <div className="flex items-start gap-3">
-                  <span className="flex h-[32px] w-[32px] shrink-0 items-center justify-center rounded-lg bg-blue-600 text-xs font-bold text-white">
-                    {index + 1}
-                  </span>
-                  <div>
-                    <h3 className="font-bold break-words">{step.title}</h3>
-                    <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400 break-words">
-                      {step.description}
-                    </p>
-                  </div>
+                <span className="text-xs font-semibold text-blue-600 dark:text-blue-400">
+                  0{index + 1}
+                </span>
+                <div className="min-w-0">
+                  <h3 className="break-words text-lg font-black">
+                    {step.title}
+                  </h3>
+                  <p className="mt-2 break-words text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+                    {step.description}
+                  </p>
                 </div>
               </article>
             ))}
@@ -124,10 +132,14 @@ export function ProductProofSection() {
         <div className="mt-6 grid gap-4 lg:grid-cols-2">
           <article
             data-testid="landing-review-modes"
-            className="min-w-0 rounded-2xl border border-zinc-200 bg-zinc-50 p-[20px] dark:border-zinc-800 dark:bg-zinc-900/30"
+            className="relative min-w-0 overflow-hidden rounded-3xl border border-tomverse-review-border bg-tomverse-review-surface p-[20px] sm:p-[28px]"
           >
-            <h3 className="flex items-center gap-2 text-sm font-bold">
-              <MessagesSquare className="h-4 w-4 text-blue-600 dark:text-blue-400" aria-hidden="true" />
+            <span
+              aria-hidden="true"
+              className="absolute inset-x-0 top-0 h-1 bg-blue-600"
+            />
+            <h3 className="flex items-center gap-2 text-sm font-bold text-tomverse-review-selected-text dark:text-blue-200">
+              <MessagesSquare className="h-4 w-4" aria-hidden="true" />
               {copy.reviewModesLabel}
             </h3>
             <ul className="mt-3 space-y-2">
@@ -145,18 +157,18 @@ export function ProductProofSection() {
 
           <article
             data-testid="landing-dual-reviewer"
-            className="min-w-0 rounded-2xl border border-zinc-200 bg-zinc-50 p-[20px] dark:border-zinc-800 dark:bg-zinc-900/30"
+            className="min-w-0 rounded-3xl border border-zinc-800 bg-zinc-950 p-[20px] text-white sm:p-[28px]"
           >
             <h3 className="flex items-center gap-2 text-sm font-bold">
-              <Users className="h-4 w-4 text-blue-600 dark:text-blue-400" aria-hidden="true" />
+              <Users className="h-4 w-4 text-blue-400" aria-hidden="true" />
               {copy.dualReviewerLabel}
             </h3>
-            <p className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-300 break-words">
+            <p className="mt-3 break-words text-sm leading-6 text-zinc-300">
               {copy.dualReviewer}
             </p>
             <p
               data-testid="landing-review-terminology"
-              className="mt-4 text-xs leading-5 text-zinc-500 dark:text-zinc-400"
+              className="mt-4 text-xs leading-5 text-zinc-300"
             >
               {copy.terminologyNote}
             </p>
@@ -169,13 +181,13 @@ export function ProductProofSection() {
             {copy.casesDescription}
           </p>
         </div>
-        <div className="mt-8 grid gap-4 lg:grid-cols-3">
+        <div className="mt-8 grid divide-y divide-zinc-300 border-y border-zinc-300 dark:divide-zinc-700 dark:border-zinc-700 lg:grid-cols-3 lg:divide-x lg:divide-y-0">
           {copy.cases.map((item, index) => {
             const Icon = caseIcons[index];
             return (
               <article
                 key={item.title}
-                className="min-w-0 flex flex-col rounded-2xl border border-zinc-200 bg-zinc-50 p-[20px] dark:border-zinc-800 dark:bg-zinc-900/30"
+                className="flex min-w-0 flex-col px-[4px] py-[24px] sm:px-[20px] lg:px-[28px] lg:first:pl-0 lg:last:pr-0"
               >
                 <Icon className="h-6 w-6 text-blue-600 dark:text-blue-400" aria-hidden="true" />
                 <h3 className="mt-4 text-lg font-black break-words">{item.title}</h3>

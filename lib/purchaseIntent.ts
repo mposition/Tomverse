@@ -454,7 +454,10 @@ export type PricingPlanCtaState =
   | "signed_out"
   | "current_plan"
   | "upgrade"
+  | "change_plan"
   | "manage_plan";
+
+export type PricingBillingInterval = "monthly" | "annual";
 
 const PLAN_RANK: Record<AccountPlanTier, number> = { Free: 0, Pro: 1, Max: 2 };
 
@@ -466,21 +469,35 @@ const PLAN_RANK: Record<AccountPlanTier, number> = { Free: 0, Pro: 1, Max: 2 };
  * spread across a card renderer, and the downgrade case cannot silently fall
  * through to "Upgrade" the way it used to.
  *
- * `Max` looking at `Pro` resolves to `manage_plan`, never `upgrade`: this
- * product has no in-app subscription-change flow (only cancel-at-period-end),
- * so a checkout started there would be rejected with a 409 after the visitor
- * had already committed.
+ * A subscriber looking at the other paid plan resolves to `change_plan`, which
+ * opens the plan-change flow rather than a checkout: `/api/billing/checkout`
+ * refuses a change with 409, deliberately and permanently, so that a second
+ * subscription can never be created by that route.
+ *
+ * It needs `currentBillingInterval` because a change only ever happens on the
+ * interval the subscription already bills on -- monthly <-> annual is not
+ * supported -- so an account whose interval is unknown gets `manage_plan`
+ * rather than a flow the server would refuse. That is not a hypothetical: the
+ * value is null for a subscription synced before the field existed.
+ *
+ * Both directions share one state. The dialog behind it knows whether the
+ * change is an immediate upgrade or an end-of-period downgrade -- and only the
+ * server's own decision, taken again at confirm time, is authoritative about
+ * that.
  */
 export function resolvePlanCtaState({
   sessionStatus,
   currentPlan,
   cardPlan,
   hasActiveSubscription,
+  currentBillingInterval = null,
 }: {
   sessionStatus: "loading" | "authenticated" | "unauthenticated";
   currentPlan: AccountPlanTier | null;
   cardPlan: AccountPlanTier;
   hasActiveSubscription: boolean;
+  /** The interval the live subscription bills on, when it is known. */
+  currentBillingInterval?: PricingBillingInterval | null;
 }): PricingPlanCtaState {
   if (sessionStatus === "loading") return "loading";
   if (sessionStatus === "unauthenticated") return "signed_out";
@@ -488,9 +505,18 @@ export function resolvePlanCtaState({
   // here is what produced a dead "Upgrade to Pro" button for Pro subscribers.
   if (!currentPlan) return "loading";
   if (currentPlan === cardPlan) return "current_plan";
+
+  const betweenPaidPlans = currentPlan !== "Free" && cardPlan !== "Free";
+  if (hasActiveSubscription && betweenPaidPlans) {
+    // An unknown interval falls through to support rather than opening a flow
+    // the server would refuse: the same-interval rule is the one thing the
+    // change endpoints will not bend on.
+    return currentBillingInterval ? "change_plan" : "manage_plan";
+  }
+
   if (PLAN_RANK[cardPlan] > PLAN_RANK[currentPlan]) {
-    // Free -> Pro/Max is a fresh subscription. Pro -> Max is a change to an
-    // existing Stripe subscription, which /api/billing/checkout refuses.
+    // Free -> Pro/Max is a fresh subscription, and so is Pro -> Max for an
+    // account whose subscription has already lapsed.
     return hasActiveSubscription ? "manage_plan" : "upgrade";
   }
   return "manage_plan";

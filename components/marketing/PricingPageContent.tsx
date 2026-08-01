@@ -23,6 +23,7 @@ import { UpgradeInterestButton } from "@/components/marketing/UpgradeInterestBut
 import { usePublicBilling } from "@/components/marketing/usePublicBilling";
 import { usePricingAccount } from "@/components/marketing/usePricingAccount";
 import { CreditPackPurchaseButton } from "@/components/billing/CreditPackPurchaseButton";
+import { PlanChangeDialog } from "@/components/billing/PlanChangeDialog";
 import { purchaseCtaCopy } from "@/components/billing/purchaseCopy";
 import {
   PRICING_CREDIT_PACKS_ANCHOR,
@@ -862,6 +863,12 @@ export function PricingPageContent() {
     packId: PurchaseCreditPackId | null;
     ctaLocation: string;
   }>({ open: false, packId: null, ctaLocation: "pricing_credit_pack_section" });
+  // The plan the visitor asked to move to, or null when the change screen is
+  // closed. One at a time: two cards can offer a change, but a subscriber has
+  // exactly one subscription to change.
+  const [planChangeTarget, setPlanChangeTarget] = useState<"Pro" | "Max" | null>(
+    null
+  );
   const purchaseResumedRef = useRef(false);
   const creditPackCtaRef = useRef<HTMLDivElement | null>(null);
   const annualCopy = annualLabelByLanguage[lang] ?? annualLabelByLanguage.en!;
@@ -1230,6 +1237,11 @@ export function PricingPageContent() {
     );
   };
 
+  // Whether the card is above or below the account's own plan. Only the label
+  // depends on it: the server decides the direction again at confirm time, and
+  // it is the only decision that counts.
+  const PLAN_ORDER: Record<AccountPlanTier, number> = { Free: 0, Pro: 1, Max: 2 };
+
   // The two CTA surfaces a plan card can have. Extracted because every CTA
   // state now needs it, and five inline copies of the same ternary is how the
   // highlighted card ends up looking different in one state and not another.
@@ -1316,6 +1328,11 @@ export function PricingPageContent() {
               currentPlan: account.plan,
               cardPlan,
               hasActiveSubscription: account.hasActiveSubscription,
+              // A change always happens on the interval the subscription
+              // already bills on -- the card shows both prices, but the
+              // customer is on one of them and monthly <-> annual is not a
+              // supported change.
+              currentBillingInterval: account.billingInterval,
             });
             // The card the visitor asked for when they clicked "Upgrade"
             // elsewhere. Marked with a ring *and* a named region, so the
@@ -1592,6 +1609,37 @@ export function PricingPageContent() {
                   >
                     {ctaText.currentPlan}
                   </button>
+                ) : ctaState === "change_plan" ? (
+                  // The dedicated change screen, which is what makes this CTA
+                  // work at all: /api/billing/checkout refuses a plan change
+                  // with 409 and always will, so a checkout button here would
+                  // be the dead end this branch was built to remove.
+                  <button
+                    type="button"
+                    data-testid={`pricing-change-plan-${planId}`}
+                    onClick={() => {
+                      trackProductEvent("plan_selected", 0, {
+                        plan_id: planId,
+                        target_plan: planId,
+                        cta_location: `pricing_plan_card_change_${planId}`,
+                        authentication_state: "authenticated",
+                        ...(account.plan
+                          ? {
+                              current_plan: account.plan.toLowerCase() as
+                                | "free"
+                                | "pro"
+                                | "max",
+                            }
+                          : {}),
+                      });
+                      setPlanChangeTarget(cardPlan === "Max" ? "Max" : "Pro");
+                    }}
+                    className={`inline-flex min-h-12 w-full items-center justify-center rounded-xl px-4 py-3 text-center text-sm font-bold transition ${planCtaSurface(plan.highlighted)}`}
+                  >
+                    {account.plan && PLAN_ORDER[cardPlan] > PLAN_ORDER[account.plan]
+                      ? ctaText.upgradeTo(plan.name)
+                      : ctaText.changePlanTo(plan.name)}
+                  </button>
                 ) : ctaState === "manage_plan" ? (
                   // Support, not `/chat`. Account settings can cancel a
                   // subscription; it cannot change one, so pointing there was
@@ -1700,6 +1748,22 @@ export function PricingPageContent() {
             );
           })}
         </div>
+
+        {/*
+          One change screen for the page, opened by whichever card offers a
+          change. Two cards can offer one, but a subscriber has exactly one
+          subscription to change, and two dialogs would mean two focus traps
+          and two quotes for the same account.
+        */}
+        {planChangeTarget && account.billingInterval ? (
+          <PlanChangeDialog
+            open
+            onOpenChange={(open) => setPlanChangeTarget(open ? planChangeTarget : null)}
+            targetTier={planChangeTarget}
+            billingInterval={account.billingInterval}
+            lang={lang}
+          />
+        ) : null}
 
         <section
           id={PRICING_CREDIT_PACKS_ANCHOR}

@@ -1,0 +1,158 @@
+name: Admin Console E2E
+#
+# The admin suite (`npm run test:e2e:admin`) runs the real Admin Console
+# against a real NextAuth session and a real PostgreSQL database. It is the
+# only tier that exercises admin authorization, the role matrix and the
+# mutation journeys end to end, so until this workflow existed nothing in CI
+# ran it: the 111 specs only ran when somebody remembered to run them locally.
+#
+# That gap was not theoretical. #193 rewrote four admin toast strings and every
+# required check stayed green while four specs were broken; the breakage was
+# found by hand afterwards. This job is what turns that into a red check.
+#
+# The harness's own production-inertness assertions
+# (`tests/adminE2eHarness.test.ts`) are not repeated here -- they are plain
+# unit tests and already run in the required `Security, lint, encoding, and
+# unit tests` job on every PR.
+#
+# It is deliberately NOT part of the `fast-gate` aggregation in
+# pr-fast-gate.yml. That workflow's header explains why its check name is
+# load-bearing: branch protection references "Security, unit, build, and
+# Chromium smoke tests" by name, and the jobs it aggregates are deliberately
+# not required checks. Adding a fourth job there would change what a green
+# fast-gate means without touching branch protection, which is a repository
+# setting this file cannot edit.
+#
+# So this is a visible check, not a required one. Making it required is a
+# branch protection change: add "Admin Console E2E (PostgreSQL)" to the
+# required checks for develop and main. Because the job now reports on every
+# pull request (see the trigger note below), it can be made required without
+# leaving unrelated pull requests waiting on a check that never runs.
+
+# Runs on every pull request, with no `paths` filter, for two reasons.
+#
+# A path filter would be a guess about which files can break the admin
+# console, and the guess is what failed last time: #193 broke four specs by
+# rewriting toast strings, and a filter is only as good as whoever remembers
+# to extend it when a new shared module starts feeding an admin surface.
+#
+# It also blocks this check from ever becoming a required one. A workflow
+# skipped by a `paths` filter creates no check run at all, so GitHub leaves a
+# required check pending forever and the pull request can never merge. Moving
+# the decision into a job-level `if` would avoid that, but it would keep the
+# guess -- so the filter is gone instead.
+#
+# The cost is nil in wall-clock terms: measured at 5m17s in run #210, against
+# ~11m for `Production build and Chromium smoke tests` in the same pull
+# request. This job finishes well inside the existing critical path.
+on:
+  pull_request:
+  push:
+    branches:
+      - develop
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: admin-console-e2e-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  admin-console-e2e:
+    name: Admin Console E2E (PostgreSQL)
+    runs-on: ubuntu-latest
+    # Measured ~3 minutes of Playwright plus a production build. 25 minutes
+    # leaves room for a cold npm and browser cache while still stopping a hung
+    # web server rather than letting it burn the runner's full allowance.
+    timeout-minutes: 25
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tomverse_admin_e2e_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d tomverse_admin_e2e_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # The harness truncates every table before each test, so this must never
+      # be a database anything else uses. `resolveAdminE2EDatabaseUrl()` is
+      # fail-closed about it: the name has to carry a test marker, and it
+      # refuses a value equal to DATABASE_URL. The service database above is
+      # created fresh for this job and dies with it.
+      ADMIN_E2E_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/tomverse_admin_e2e_test
+      # NEXT_PUBLIC values are embedded by `next build`, and the access-control
+      # specs render the real sign-in page, whose client requires a configured
+      # Turnstile key. Same placeholder the PR Fast Gate build uses.
+      NEXT_PUBLIC_TURNSTILE_SITE_KEY: tomverse-playwright-turnstile-site-key
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Restore Next.js build cache
+        continue-on-error: true
+        uses: actions/cache@v5
+        with:
+          path: .next/cache
+          key: ${{ runner.os }}-next-admin-e2e-${{ hashFiles('package-lock.json') }}-${{ hashFiles('app/**/*.ts', 'app/**/*.tsx', 'components/**/*.ts', 'components/**/*.tsx', 'lib/**/*.ts', 'lib/**/*.tsx', 'next.config.ts', 'tsconfig.json') }}
+          restore-keys: |
+            ${{ runner.os }}-next-admin-e2e-${{ hashFiles('package-lock.json') }}-
+            ${{ runner.os }}-next-
+
+      - name: Install dependencies
+        timeout-minutes: 10
+        run: npm ci --no-audit --no-fund
+
+      - name: Production build
+        timeout-minutes: 15
+        run: npm run build
+
+      - name: Restore Playwright Chromium cache
+        continue-on-error: true
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}-chromium
+          restore-keys: |
+            ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}-
+
+      - name: Install Chromium
+        timeout-minutes: 10
+        run: npx playwright install --with-deps chromium
+
+      # `scripts/run-admin-e2e.mjs` validates the database URL and pushes the
+      # Prisma schema before Playwright boots the server. The build above is
+      # why this uses the `:run` script rather than `test:e2e:admin`, which
+      # would build a second time.
+      - name: Run the Admin Console E2E suite
+        timeout-minutes: 15
+        run: npm run test:e2e:admin:run
+
+      - name: Upload failed test evidence
+        if: failure()
+        timeout-minutes: 5
+        uses: actions/upload-artifact@v7
+        with:
+          name: admin-console-e2e-${{ github.run_id }}
+          path: |
+            test-results-admin
+            playwright-report-admin
+          if-no-files-found: ignore
+          retention-days: 14
