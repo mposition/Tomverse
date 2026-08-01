@@ -999,22 +999,42 @@ const checks = [
         read("app/[locale]/layout.tsx"),
       ];
       const requestReadsIn = (layout) =>
-        [...layout.matchAll(/\(await headers\(\)\)\.get\(([^)]*)\)/g)].map(
-          (match) => match[1].trim()
-        );
+        [
+          ...layout.matchAll(
+            /(?:\(await headers\(\)\)|requestHeaders)\.get\(([^)]*)\)/g
+          ),
+        ].map((match) => match[1].trim());
       const siteReads = requestReadsIn(rootLayouts[0]);
       const localeReads = requestReadsIn(rootLayouts[1]);
+      const proxySource = read("proxy.ts");
+      // VAL-004 narrowed this rule rather than relaxing it, and UI-001 narrows
+      // it again on the same terms. A root layout may read values the *proxy*
+      // resolved for this request and nothing else: reading a session, a
+      // cookie or the database there would put per-user state above every
+      // route under that root, which is what the assertions further down still
+      // forbid outright.
+      //
+      // UI-001 adds the theme. It is per-visitor, so the property that keeps it
+      // safe is not in this layout but in the proxy: THEME_HEADER is set only
+      // when the request is *not* a static marketing request, so the
+      // prerendered, publicly cached HTML is never rendered with one visitor's
+      // theme. That guard is asserted here rather than assumed, because
+      // deleting it is what would turn this into a cache-poisoning bug.
+      const allowedSiteReads = new Set([
+        "DOCUMENT_LANGUAGE_HEADER",
+        "THEME_HEADER",
+        '"x-nonce"',
+      ]);
       return (
         source.includes('export const dynamic = "force-static"') &&
         source.includes("export const revalidate = false") &&
         applicationLayout.includes('export const dynamic = "force-dynamic"') &&
         applicationLayout.includes("getServerSession(authOptions)") &&
-        // VAL-004 narrowed this rule rather than relaxing it. A root layout may
-        // read the document language the proxy resolved and nothing else --
-        // reading a session, a cookie or the database there would put per-user
-        // state above every route under that root.
-        siteReads.length === 1 &&
-        siteReads[0] === "DOCUMENT_LANGUAGE_HEADER" &&
+        siteReads.length > 0 &&
+        siteReads.every((entry) => allowedSiteReads.has(entry)) &&
+        siteReads.includes("DOCUMENT_LANGUAGE_HEADER") &&
+        proxySource.includes("if (!isStaticMarketingRequest) {") &&
+        proxySource.includes("requestHeaders.set(THEME_HEADER, theme)") &&
         rootLayouts[0].includes('import { headers } from "next/headers"') &&
         // The localized root takes its language from `params`, so it needs no
         // request-time read at all and must stay prerenderable: an accidental
