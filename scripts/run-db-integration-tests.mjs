@@ -81,6 +81,23 @@ run(
   ["node_modules/prisma/build/index.js", "db", "push"],
   "Synchronizing the current Prisma schema"
 );
+// `db push` materialises schema.prisma and nothing else, so every object
+// Prisma's schema language cannot express -- partial unique indexes, today --
+// exists only in raw migration SQL and never reaches the test database. A
+// test that asserts the *database* enforces a rule then fails for a reason
+// that has nothing to do with the code under test. Replaying the migrations
+// instead is not currently possible: they do not apply to an empty database
+// (20260709120000_align_model_defaults fails on a missing "UserSettings").
+run(
+  [
+    "node_modules/prisma/build/index.js",
+    "db",
+    "execute",
+    "--file",
+    "prisma/test-database-extras.sql",
+  ],
+  "Applying database objects prisma db push cannot create"
+);
 run(
   [
     "--conditions=react-server",
