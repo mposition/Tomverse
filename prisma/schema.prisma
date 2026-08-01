@@ -734,6 +734,38 @@ model Feedback {
   @@index([userId, createdAt])
 }
 
+/// An operator notification that still owes a delivery.
+///
+/// Written in the same transaction as the record it describes, so a submission
+/// that reached the database can never lose its notification to a crash, a
+/// provider outage or a missing API key. The body is deliberately NOT stored
+/// here: `kind` + `referenceId` point at the source row and the mail is
+/// re-rendered at send time, so the reporter's words live in exactly one table
+/// and one retention policy.
+model NotificationDelivery {
+  id            String    @id @default(cuid())
+  /// Which notification this is; selects the renderer. e.g. "support_feedback".
+  kind          String
+  /// The source row this notification describes. e.g. Feedback.id
+  referenceId   String
+  /// pending | delivered | abandoned
+  status        String    @default("pending")
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime  @default(now())
+  lastAttemptAt DateTime?
+  /// A short classification such as "http_502" -- never a provider response body.
+  lastErrorKind String?
+  deliveredAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  /// One queue row per source record: re-submitting the same feedback cannot
+  /// enqueue a second notification.
+  @@unique([kind, referenceId])
+  @@index([status, nextAttemptAt])
+  @@index([status, createdAt])
+}
+
 model RefundRequest {
   id                           String                       @id @default(cuid())
   userId                       String?

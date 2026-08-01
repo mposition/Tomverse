@@ -29,6 +29,14 @@ export const SCHEDULED_JOB_DEFINITIONS = [
     maximumSilenceMs: 26 * 60 * 60 * 1_000,
   },
   {
+    key: "notification_delivery_retry",
+    name: "Operator notification delivery retry",
+    // Drained from the credit reconciliation cron as well as its own endpoint,
+    // so the queue keeps moving without a second schedule having to exist.
+    schedule: "Every 5 minutes via credit reconciliation cron",
+    maximumSilenceMs: 35 * 60 * 1_000,
+  },
+  {
     key: "infrastructure_threshold_monitor",
     name: "Infrastructure threshold monitor",
     schedule: "Every 15 minutes via credit reconciliation cron",

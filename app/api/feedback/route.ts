@@ -6,8 +6,6 @@ import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import { chatErrorResponse } from "@/lib/chatSecurity";
 import { getAnonymousClientKey } from "@/lib/clientIp";
-import { sendTransactionalEmail } from "@/lib/email";
-import { EMAIL_FONT_STACK } from "@/lib/emailTypography";
 import { prisma } from "@/lib/prisma";
 import {
   apiSecurityResponse,
@@ -16,6 +14,13 @@ import {
 } from "@/lib/apiSecurity";
 import { ensureGuestVerified } from "@/lib/turnstile";
 import { feedbackReferenceFromId } from "@/lib/feedbackPolicy";
+import {
+  NOTIFICATION_KIND,
+  attemptNotificationDelivery,
+  enqueueNotificationDelivery,
+  recordNotificationAttempt,
+} from "@/lib/notificationDeliveries";
+import { NOTIFICATION_DELIVERY_STATUS } from "@/lib/notificationRetryCore";
 
 const feedbackSchema = z
   .object({
@@ -32,25 +37,6 @@ const feedbackSchema = z
     turnstileToken: z.string().trim().min(1).max(2_048).optional(),
   })
   .strict();
-
-const escapeHtml = (value: unknown) =>
-  String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-
-const firstCsvValue = (value: string | undefined) =>
-  (value || "")
-    .split(",")
-    .map((item) => item.trim())
-    .find(Boolean);
-
-const supportNotificationEmail = () =>
-  process.env.SUPPORT_NOTIFICATION_EMAIL ||
-  process.env.ADMIN_ALERT_EMAIL ||
-  firstCsvValue(process.env.ADMIN_EMAILS);
 
 /**
  * How the guest check was satisfied, for the operational log. Never the token
@@ -89,78 +75,73 @@ export async function POST(req: Request) {
       turnstileOutcome = turnstileGrantCookie ? "verified" : "existing_grant";
     }
     const email = session?.user?.email || body.email || null;
-    const feedback = await prisma.feedback.create({
-      data: {
-        userId: session?.user?.id || null,
-        email,
-        type: body.type,
-        message: body.message,
-        traceId: body.traceId || null,
-        modelId: body.modelId || null,
-        plan: body.plan || null,
-        hasAttachments: Boolean(body.hasAttachments),
-        attachmentCount: body.attachmentCount || 0,
-        path: body.path || null,
-        userAgent: body.userAgent || null,
-      },
+    // The report and the promise to notify about it commit together. Enqueuing
+    // after the write would leave a window where a crash loses the
+    // notification with no record that one was ever owed.
+    const { feedback, delivery } = await prisma.$transaction(async (tx) => {
+      const feedback = await tx.feedback.create({
+        data: {
+          userId: session?.user?.id || null,
+          email,
+          type: body.type,
+          message: body.message,
+          traceId: body.traceId || null,
+          modelId: body.modelId || null,
+          plan: body.plan || null,
+          hasAttachments: Boolean(body.hasAttachments),
+          attachmentCount: body.attachmentCount || 0,
+          path: body.path || null,
+          userAgent: body.userAgent || null,
+        },
+      });
+      const delivery = await enqueueNotificationDelivery(tx, {
+        kind: NOTIFICATION_KIND.supportFeedback,
+        referenceId: feedback.id,
+      });
+      return { feedback, delivery };
     });
 
     // From here on the submission is stored. Nothing below may turn this into
     // a failure for the user: a notification that cannot be delivered is an
-    // operations problem, not a rejected report.
+    // operations problem, not a rejected report. The first attempt happens
+    // inline so the common case still notifies immediately; anything else is
+    // left to the retry queue, which drains on the maintenance cron.
     let notificationDelivered = false;
-    const supportEmail = supportNotificationEmail();
-    if (supportEmail) {
-      try {
-        await sendTransactionalEmail({
-          to: supportEmail,
-          subject: `Tomverse support request: ${body.type}`,
-          text: [
-            `Feedback ID: ${feedback.id}`,
-            `Type: ${body.type}`,
-            `Email: ${email || "guest"}`,
-            `Trace ID: ${body.traceId || "-"}`,
-            `Model: ${body.modelId || "-"}`,
-            `Plan: ${body.plan || "-"}`,
-            `Attachments: ${body.attachmentCount || 0}`,
-            `Path: ${body.path || "-"}`,
-            "",
-            body.message,
-          ].join("\n"),
-          html: `
-            <div style="font-family:${EMAIL_FONT_STACK};color:#111827;line-height:1.6">
-              <h2>New Tomverse support request</h2>
-              <p><strong>Feedback ID:</strong> ${escapeHtml(feedback.id)}</p>
-              <p><strong>Type:</strong> ${escapeHtml(body.type)}</p>
-              <p><strong>Email:</strong> ${escapeHtml(email || "guest")}</p>
-              <p><strong>Trace ID:</strong> ${escapeHtml(body.traceId || "-")}</p>
-              <p><strong>Model:</strong> ${escapeHtml(body.modelId || "-")}</p>
-              <p><strong>Plan:</strong> ${escapeHtml(body.plan || "-")}</p>
-              <p><strong>Attachments:</strong> ${escapeHtml(body.attachmentCount || 0)}</p>
-              <p><strong>Path:</strong> ${escapeHtml(body.path || "-")}</p>
-              <hr />
-              <p style="white-space:pre-wrap">${escapeHtml(body.message)}</p>
-            </div>
-          `,
-        });
-        notificationDelivered = true;
-      } catch (error) {
+    try {
+      const outcome = await attemptNotificationDelivery({
+        kind: NOTIFICATION_KIND.supportFeedback,
+        referenceId: feedback.id,
+        attempt: 1,
+      });
+      const transition = await recordNotificationAttempt({
+        id: delivery.id,
+        attemptsBefore: 0,
+        outcome,
+      });
+      notificationDelivered =
+        transition.status === NOTIFICATION_DELIVERY_STATUS.delivered;
+      if (!notificationDelivered) {
         console.warn(
           JSON.stringify({
             event: "support_notification_failed",
             feedbackId: feedback.id,
-            // The delivery error's *class*, not its text: a provider message
-            // can quote the request it was given.
-            reason: error instanceof Error ? error.name : "unknown",
+            deliveryId: delivery.id,
+            // The delivery outcome's *class*, not a provider message: that
+            // body echoes the request, which here is the reporter's words.
+            reason: transition.lastErrorKind,
+            queued: transition.status === NOTIFICATION_DELIVERY_STATUS.pending,
           })
         );
       }
-    } else {
+    } catch (error) {
+      // The row is already queued, so a failure to even record the attempt
+      // still leaves the notification recoverable on the next drain.
       console.warn(
         JSON.stringify({
-          event: "support_notification_skipped",
+          event: "support_notification_attempt_unrecorded",
           feedbackId: feedback.id,
-          reason: "recipient not configured",
+          deliveryId: delivery.id,
+          reason: error instanceof Error ? error.name : "unknown",
         })
       );
     }
@@ -178,6 +159,7 @@ export async function POST(req: Request) {
         status: 200,
         turnstile: turnstileOutcome,
         notificationDelivered,
+        notificationDeliveryId: delivery.id,
         hasTraceId: Boolean(body.traceId),
         hasModelId: Boolean(body.modelId),
         hasAttachments: Boolean(body.hasAttachments),

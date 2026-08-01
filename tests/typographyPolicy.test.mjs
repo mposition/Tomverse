@@ -200,7 +200,10 @@ test("every email template shares one web-safe font policy", () => {
     "lib/emailLoginEmails.ts",
     "lib/providerModelCatalogReport.ts",
     "app/api/admin/test-email/route.ts",
-    "app/api/feedback/route.ts",
+    // The support notification moved out of app/api/feedback/route.ts when it
+    // gained a retry queue: the same mail is now rendered by the submission
+    // path and by the retry, so it has to live in one place.
+    "lib/supportNotificationEmail.ts",
   ];
 
   for (const template of templates) {
