@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { displayHeadingClass } from "@/lib/displayHeading";
-import { ArrowRight, Bot, Sparkles } from "lucide-react";
+import { ArrowRight, Sparkles } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { useEffect, useRef } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
@@ -12,6 +12,7 @@ import { ComparisonBasicsSection } from "./ComparisonBasicsSection";
 import { EvidenceSection } from "./EvidenceSection";
 import { getLandingCopy } from "./landingContent";
 import { LandingPricingSection } from "./LandingPricingSection";
+import { LandingHeroAiReviewDemo } from "./LandingHeroAiReviewDemo";
 import { ModelCatalogueSection } from "./ModelCatalogueSection";
 import { ProductProofSection } from "./ProductProofSection";
 import { TrustSection } from "./TrustSection";
@@ -55,9 +56,13 @@ export function LandingPageContent() {
 
       <section
         aria-labelledby="landing-hero-title"
-        className="relative border-b border-zinc-200 dark:border-zinc-800"
+        className="relative isolate overflow-hidden border-b border-zinc-200 dark:border-zinc-800"
       >
-        <div className="mx-auto grid max-w-7xl gap-10 px-[16px] pb-12 pt-10 sm:px-6 sm:pb-14 sm:pt-12 lg:grid-cols-[1.03fr_0.97fr] lg:items-center lg:px-8 lg:py-16">
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute right-0 top-[64px] -z-10 h-[384px] w-full max-w-[384px] rounded-full bg-blue-500/10 blur-3xl dark:bg-blue-500/15"
+        />
+        <div className="mx-auto grid max-w-7xl gap-10 px-[16px] pb-12 pt-10 sm:px-6 sm:pb-14 sm:pt-12 lg:grid-cols-[1.03fr_0.97fr] lg:items-center lg:px-8 lg:py-20">
           {/*
             No `min-w-0` here, deliberately. Shrinking this grid item below its
             min-content does make the hero fit a 320px viewport at 200% zoom --
@@ -136,43 +141,10 @@ export function LandingPageContent() {
             </div>
           </div>
 
-          {/*
-            The mock-up is decorative -- its bars and chips carry no text a
-            screen reader can make sense of -- so the group is labelled once
-            with a sentence describing what it depicts, and the shapes inside
-            stay hidden rather than being read out as stray fragments.
-          */}
-          <div
-            role="img"
-            aria-label={content.preview.srDescription}
-            className="min-w-0 overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-950 p-[8px] shadow-2xl shadow-zinc-300/60 dark:shadow-black/50 md:p-[12px]"
-          >
-            <div className="rounded-[1.25rem] border border-zinc-800 bg-zinc-950 text-white">
-              <div className="flex items-center justify-between gap-2 border-b border-zinc-800 px-[16px] py-[12px]">
-                <span className="flex min-w-0 items-center gap-2 break-words text-xs font-bold text-zinc-300"><Bot className="h-4 w-4 text-blue-400" aria-hidden="true" />{content.preview.title}</span>
-                <span className="shrink-0 rounded-full bg-status-success-500/10 px-[8px] py-[4px] text-[11px] font-bold text-status-success-300">{content.preview.count}</span>
-              </div>
-              <div className="grid gap-2 p-[12px] sm:grid-cols-3">
-                {["GPT", "Claude", "Gemini"].map((model, index) => (
-                  <article key={model} className="min-w-0 rounded-2xl border border-zinc-800 bg-zinc-900/80 p-[12px]">
-                    <div className="flex items-center justify-between"><span className="text-sm font-bold">{model}</span><span aria-hidden="true" className="h-2 w-2 rounded-full bg-zinc-500" /></div>
-                    <div aria-hidden="true" className="mt-4 space-y-2"><div className="h-2 w-4/5 rounded-full bg-zinc-700" /><div className="h-2 w-full rounded-full bg-zinc-800" /></div>
-                    <p className="mt-4 break-words rounded-xl border border-zinc-700 bg-zinc-800 p-[10px] text-xs font-bold leading-5 text-zinc-200">{content.preview.answers[index]}</p>
-                  </article>
-                ))}
-              </div>
-              <div className="mx-[12px] mb-[12px] rounded-2xl border border-blue-500/30 bg-blue-500/10 p-[12px]">
-                <div className="flex min-w-0 items-center gap-2 break-words text-xs font-bold text-blue-200"><Sparkles className="h-3.5 w-3.5" aria-hidden="true" />{content.preview.reviewTitle}</div>
-                <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  {content.preview.reviewItems.map((item, index) => (
-                    <span key={item} className="flex min-w-0 items-center gap-1.5 break-words rounded-lg bg-black/20 px-[8px] py-[8px] text-[11px] font-bold text-zinc-200">
-                      <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${index === 1 || index === 3 ? "bg-amber-400" : "bg-status-success-300"}`} />{item}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
+          <LandingHeroAiReviewDemo
+            preview={content.preview}
+            stages={content.proof.stages}
+          />
         </div>
       </section>
 
