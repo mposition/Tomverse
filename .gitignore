@@ -56,9 +56,11 @@ next-env.d.ts
 # docs/qa/ holds approved QA policy (the canonical visual baseline) that CI
 # and the Playwright config both point at, and docs/policy/ holds approved
 # product policy that code and CI enforce (credit entitlement vs operational
-# cost guardrail).
+# cost guardrail). docs/ops/ holds runbooks the deployment path itself depends
+# on -- the migration baseline procedure is not reconstructable from the code.
 docs/*
 !docs/ui-contracts/
 !docs/qa/
 !docs/policy/
+!docs/ops/
 .playwright-mcp
