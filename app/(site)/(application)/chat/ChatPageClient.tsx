@@ -1054,14 +1054,21 @@ export function ChatPageClient({
           return true;
         }
         const localizedMessage =
-          code === "CREDIT_BALANCE_INSUFFICIENT" ||
+          code === "PLAN_ENTITLEMENT_EXHAUSTED"
+            ? t("chat.planEntitlementExhausted")
+          : code === "CONCURRENT_RESERVATION_CONFLICT"
+            ? t("chat.concurrentReservationConflict")
+          : code === "CREDIT_BALANCE_INSUFFICIENT" ||
           code === "CREDIT_COST_ALLOWANCE_INSUFFICIENT"
             ? t("chat.comparisonCreditsInsufficient")
-            : code === "INTERNAL_DAILY_COST_SAFETY_LIMIT"
+            : code === "OPERATIONAL_COST_GUARDRAIL_TRIGGERED"
+              ? t("chat.operationalCostGuardrail")
+              : code === "INTERNAL_DAILY_COST_SAFETY_LIMIT"
               ? t("chat.internalDailyCostSafetyLimit")
               : code === "INTERNAL_MONTHLY_COST_SAFETY_LIMIT"
                 ? t("chat.internalMonthlyCostSafetyLimit")
-                : code === "PROVIDER_DAILY_SPEND_LIMIT_REACHED" ||
+                : code === "PROVIDER_BUDGET_EXHAUSTED" ||
+                    code === "PROVIDER_DAILY_SPEND_LIMIT_REACHED" ||
                     code === "PROVIDER_SPEND_LIMIT_REACHED"
                   ? t("chat.providerCostSafetyLimit")
                   : code === "PLAN_DAILY_CREDIT_LIMIT_REACHED"
@@ -3435,6 +3442,8 @@ export function ChatPageClient({
     {toast && (
       <div
         key={toast.id}
+        data-testid="app-toast"
+        data-tone={toast.tone}
         role={toast.tone === "error" ? "alert" : "status"}
         aria-live={toast.tone === "error" ? "assertive" : "polite"}
         className="fixed bottom-5 left-1/2 z-[70] flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-3 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-900 shadow-2xl shadow-zinc-900/15 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"

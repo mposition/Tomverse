@@ -34,6 +34,7 @@ export default async function AdminProviderDetailPage({
       <AdminProviderHealthPanel
         initialDashboard={{ ...dashboard, providers: [selected] }}
         canManageCredits={role === "owner" || role === "billing"}
+        canRunVerification={role === "owner" || role === "ops"}
         providerFilter={providerId}
       />
     </section>

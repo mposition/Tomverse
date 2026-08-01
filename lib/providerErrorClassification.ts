@@ -50,6 +50,33 @@ export const safeErrorMetadata = (error: unknown): SafeErrorMetadata => {
     };
 };
 
+/**
+ * Strips credentials out of provider-originated text before it is persisted or
+ * shown to an operator. Provider errors routinely echo the request back, which
+ * is how an Authorization header ends up in an error message.
+ *
+ * Returns null for anything that reduces to empty, so callers can store NULL
+ * rather than an empty string.
+ */
+export const redactProviderText = (
+    value: string | null | undefined,
+    maxLength: number
+): string | null => {
+    if (!value) return null;
+    return (
+        value
+            .replace(/Bearer\s+\S+/gi, "Bearer [REDACTED]")
+            .replace(/\b(?:sk|rk|pk)-[A-Za-z0-9_-]{12,}\b/g, "[REDACTED_KEY]")
+            .replace(
+                /\b(api[_-]?key|token|secret|authorization)\s*[:=]\s*[^\s,;]+/gi,
+                "$1=[REDACTED]"
+            )
+            .replace(/\s+/g, " ")
+            .trim()
+            .slice(0, maxLength) || null
+    );
+};
+
 export const safeErrorMessage = (error: unknown): string | undefined => {
     if (!error || typeof error !== "object" || !("message" in error)) {
         return undefined;
@@ -72,6 +99,262 @@ export const providerDiagnosticCode = (fallback: string, error: unknown): string
     ]
         .filter((value): value is string => Boolean(value))
         .join(".");
+};
+
+/**
+ * Diagnostic-code roots that are only ever produced *after* an actual HTTP
+ * request left this process for a provider. Anything else recorded through
+ * recordProviderFailure -- a ChatAccessError code, a quota rejection, an
+ * attachment validation failure -- describes a request Tomverse refused to
+ * send, and must never be counted against the provider.
+ *
+ * This allowlist, not the HTTP status, is what decides "did we actually talk
+ * to the provider": ChatAccessError carries its own `status` (429 for a quota
+ * rejection, 402 for insufficient credit), and safeErrorMetadata surfaces it,
+ * so status-first classification would file our own rate limiting as the
+ * provider's. Roots are matched on the segment before the first ".", which is
+ * the `fallback` argument providerDiagnosticCode() is called with.
+ *
+ * Adding a new provider-call code means adding it here too; tests/
+ * providerErrorClassification.test.mjs statically scans the route handlers
+ * and fails if a recordProviderFailure code is missing from this list.
+ */
+export const PROVIDER_CALL_DIAGNOSTIC_ROOTS = [
+    "AI_REQUEST_FAILED",
+    "AI_STREAM_FAILED",
+    "AI_EMPTY_RESPONSE",
+    "PROVIDER_PROBE_FAILED",
+    "PROVIDER_VERIFICATION_FAILED",
+    "QUICK_COMPARISON_FAILED",
+    "VERIFICATION_ITEM_FAILED",
+    "DEEP_RESEARCH_SUBMIT_FAILED",
+    "DEEP_RESEARCH_JOB_FAILED",
+] as const;
+
+const providerCallRoots = new Set<string>(PROVIDER_CALL_DIAGNOSTIC_ROOTS);
+
+/** Which health counters a single failure is legitimate evidence for. */
+export type ProviderFailureScope = "provider" | "model" | "none";
+
+export type ProviderFailureCategory =
+    /** Tomverse rejected the request locally; it never reached the provider. */
+    | "LOCAL_REJECTION"
+    /** The provider rejected the request we sent (bad role order, bad params). */
+    | "REQUEST_CONTRACT"
+    /** The provider does not know this model id. */
+    | "MODEL_NOT_FOUND"
+    /** The call reached the model but produced nothing usable. */
+    | "MODEL_TRANSIENT"
+    | "AUTHENTICATION"
+    | "PAYMENT_REQUIRED"
+    | "RATE_LIMIT"
+    | "SERVER_ERROR"
+    | "NETWORK"
+    | "UNKNOWN";
+
+export type ProviderFailureClassification = {
+    category: ProviderFailureCategory;
+    scope: ProviderFailureScope;
+    /** The HTTP status the verdict was reached with, when one was available. */
+    httpStatus: number | null;
+    /** Short, operator-facing justification. Never contains provider text. */
+    reason: string;
+};
+
+const PROVIDER_SCOPED: ProviderFailureCategory[] = [
+    "AUTHENTICATION",
+    "PAYMENT_REQUIRED",
+    "RATE_LIMIT",
+    "SERVER_ERROR",
+    "NETWORK",
+    "UNKNOWN",
+];
+
+export const isProviderScopedFailureCategory = (
+    category: ProviderFailureCategory
+) => PROVIDER_SCOPED.includes(category);
+
+const diagnosticRoot = (code: string | null | undefined) =>
+    (code || "").split(".")[0] || "";
+
+const parseHttpStatus = (
+    httpStatus: number | null | undefined,
+    diagnosticCode: string | null | undefined
+): number | null => {
+    if (
+        typeof httpStatus === "number" &&
+        Number.isSafeInteger(httpStatus) &&
+        httpStatus >= 100 &&
+        httpStatus <= 599
+    ) {
+        return httpStatus;
+    }
+    const match = /HTTP_(\d{3})/.exec(diagnosticCode || "");
+    if (!match) return null;
+    const parsed = Number(match[1]);
+    return parsed >= 100 && parsed <= 599 ? parsed : null;
+};
+
+/**
+ * Decides what one recorded failure is evidence *of*.
+ *
+ * The rule this exists to enforce: a provider answering "400 invalid_message"
+ * is telling us our request was malformed, not that it is down. Five of those
+ * used to read identically to five 503s, which pinned an entire provider --
+ * and every model under it -- to Incident until a real success arrived, with
+ * no such success possible while the whole provider was blocked.
+ *
+ * Pure and dependency-free so the chat route, the dashboard and the tests all
+ * reach the same verdict from the same inputs.
+ */
+export const classifyProviderFailure = ({
+    diagnosticCode,
+    httpStatus,
+    timedOut = false,
+}: {
+    diagnosticCode: string | null | undefined;
+    httpStatus?: number | null;
+    timedOut?: boolean;
+}): ProviderFailureClassification => {
+    const status = parseHttpStatus(httpStatus, diagnosticCode);
+    const code = diagnosticCode || "";
+    const root = diagnosticRoot(code);
+
+    if (!providerCallRoots.has(root)) {
+        return {
+            category: "LOCAL_REJECTION",
+            scope: "none",
+            httpStatus: status,
+            reason:
+                "Tomverse rejected this request before it reached the provider, so it is not provider health evidence.",
+        };
+    }
+
+    // Roots that describe a *completed* provider round trip whose outcome was
+    // specific to one model: the call itself worked, the model's answer did
+    // not. Escalating these to the whole provider was an explicit decision to
+    // reverse -- an async deep-research job failing says nothing about whether
+    // sonar can answer a question, and a genuine provider outage surfaces
+    // separately as a 5xx on the submit or poll call.
+    if (root === "AI_EMPTY_RESPONSE" || root === "DEEP_RESEARCH_JOB_FAILED") {
+        return {
+            category: "MODEL_TRANSIENT",
+            scope: "model",
+            httpStatus: status,
+            reason:
+                "The provider answered but the model returned no usable result, which is a model-scoped outcome.",
+        };
+    }
+
+    if (timedOut) {
+        return {
+            category: "NETWORK",
+            scope: "provider",
+            httpStatus: status,
+            reason: "The request to the provider timed out before a response arrived.",
+        };
+    }
+
+    if (status !== null) {
+        if (status === 401 || status === 403) {
+            return {
+                category: "AUTHENTICATION",
+                scope: "provider",
+                httpStatus: status,
+                reason: `The provider rejected our credentials (HTTP ${status}), which blocks every model under it.`,
+            };
+        }
+        if (status === 402) {
+            return {
+                category: "PAYMENT_REQUIRED",
+                scope: "provider",
+                httpStatus: status,
+                reason:
+                    "The provider account cannot fund requests (HTTP 402), which blocks every model under it.",
+            };
+        }
+        if (status === 429) {
+            return {
+                category: "RATE_LIMIT",
+                scope: "provider",
+                httpStatus: status,
+                reason:
+                    "The provider is rate limiting this account (HTTP 429), which constrains every model under it.",
+            };
+        }
+        if (status === 404) {
+            return {
+                category: "MODEL_NOT_FOUND",
+                scope: "model",
+                httpStatus: status,
+                reason:
+                    "The provider does not recognise this model id (HTTP 404), which is a registry problem for one model.",
+            };
+        }
+        if (status === 408) {
+            return {
+                category: "NETWORK",
+                scope: "provider",
+                httpStatus: status,
+                reason: "The provider timed the request out (HTTP 408).",
+            };
+        }
+        if (status >= 400 && status < 500) {
+            return {
+                category: "REQUEST_CONTRACT",
+                scope: "model",
+                httpStatus: status,
+                reason: `The provider rejected the request we sent (HTTP ${status}). This is a request-contract error, not a provider outage.`,
+            };
+        }
+        if (status >= 500) {
+            return {
+                category: "SERVER_ERROR",
+                scope: "provider",
+                httpStatus: status,
+                reason: `The provider returned a server error (HTTP ${status}).`,
+            };
+        }
+    }
+
+    if (/RATE.?LIMIT/i.test(code)) {
+        return {
+            category: "RATE_LIMIT",
+            scope: "provider",
+            httpStatus: status,
+            reason: "The provider reported rate limiting without an HTTP status.",
+        };
+    }
+    if (/UNAUTHORIZED|FORBIDDEN|API.?KEY|\bAUTH\b|AUTHENTICATION/i.test(code)) {
+        return {
+            category: "AUTHENTICATION",
+            scope: "provider",
+            httpStatus: status,
+            reason:
+                "The provider reported an authentication or authorization problem without an HTTP status.",
+        };
+    }
+    if (
+        /TIMEOUT|ETIMEDOUT|ECONN|EPIPE|ENOTFOUND|EAI_AGAIN|NETWORK|SOCKET|FETCH_FAILED|ABORTERROR/i.test(
+            code
+        )
+    ) {
+        return {
+            category: "NETWORK",
+            scope: "provider",
+            httpStatus: status,
+            reason:
+                "The request never completed a round trip to the provider (network, DNS, or connection failure).",
+        };
+    }
+
+    return {
+        category: "UNKNOWN",
+        scope: "provider",
+        httpStatus: status,
+        reason:
+            "The failure came from a provider call but could not be classified, so it is counted against the provider.",
+    };
 };
 
 export type ProbeErrorClassification =

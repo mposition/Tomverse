@@ -508,3 +508,167 @@ test("stale success plus stale probe failure still reports the stale failure hon
   assert.equal(result.status, "unknown");
   assert.equal(result.reasonCode, "PROBE_FAILURE_STALE");
 });
+
+// STG-R002: real-traffic failure evidence expires, administrator verification
+// is its own evidence stream, and neither may impersonate the other.
+//
+// The staging incident these pin: Perplexity's deep-research model was
+// rejected five times with HTTP 400, consecutiveFailures reached 5, and
+// lastSuccessAt stayed null. consecutiveFailures only resets on a recorded
+// success, and no success could be recorded while every Perplexity model was
+// reported unavailable -- so the provider stayed at Incident indefinitely on
+// evidence that was, by then, a day and a half old.
+
+const hoursAgo = (hours: number) => new Date(NOW.getTime() - hours * 3_600_000);
+
+test("five real request failures from 38 hours ago are not a current incident", () => {
+  const result = evaluatePublicProviderStatus({
+    ...baseInput,
+    lastSuccessAt: null,
+    lastFailureAt: hoursAgo(38),
+    consecutiveFailures: 5,
+    freshnessMinutes: 30,
+  });
+  assert.notEqual(result.status, "incident");
+  assert.equal(result.status, "unknown");
+  assert.equal(result.reasonCode, "REAL_FAILURE_STALE");
+});
+
+test("three consecutive failures inside the freshness window are an incident", () => {
+  const result = evaluatePublicProviderStatus({
+    ...baseInput,
+    lastSuccessAt: null,
+    lastFailureAt: minutesAgo(2),
+    consecutiveFailures: 3,
+    freshnessMinutes: 30,
+  });
+  assert.equal(result.status, "incident");
+  assert.equal(result.reasonCode, "CONSECUTIVE_FAILURES_THRESHOLD");
+});
+
+test("a stale failure count with no timestamp cannot back a current verdict", () => {
+  const result = evaluatePublicProviderStatus({
+    ...baseInput,
+    lastSuccessAt: null,
+    lastFailureAt: null,
+    consecutiveFailures: 9,
+  });
+  assert.equal(result.status, "unknown");
+  assert.equal(result.reasonCode, "REAL_FAILURE_STALE");
+});
+
+test("an old failure with no count no longer holds a provider at degraded forever", () => {
+  const result = evaluatePublicProviderStatus({
+    ...baseInput,
+    lastSuccessAt: hoursAgo(40),
+    lastFailureAt: hoursAgo(38),
+    consecutiveFailures: 1,
+  });
+  assert.notEqual(result.status, "degraded");
+  assert.equal(result.status, "unknown");
+  assert.equal(result.reasonCode, "REAL_FAILURE_STALE");
+});
+
+test("a successful admin verification after an old failure restores a usable status", () => {
+  const result = evaluatePublicProviderStatus({
+    ...baseInput,
+    lastSuccessAt: null,
+    lastFailureAt: hoursAgo(38),
+    // Recovery zeroes the counter in the same transaction that consumes the
+    // verification, so this is the state the provider is left in.
+    consecutiveFailures: 0,
+    lastVerificationSuccessAt: minutesAgo(1),
+  });
+  assert.equal(result.status, "operational");
+  assert.equal(result.reasonCode, "ADMIN_VERIFICATION_SUCCESS");
+});
+
+test("a successful verification is never reported as real-traffic success", () => {
+  const result = evaluatePublicProviderStatus({
+    ...baseInput,
+    lastSuccessAt: null,
+    lastVerificationSuccessAt: minutesAgo(1),
+  });
+  assert.equal(result.reasonCode, "ADMIN_VERIFICATION_SUCCESS");
+  assert.notEqual(result.reasonCode, "RECENT_SUCCESS_CONFIRMED");
+  // isFresh reports real-traffic (or probe) freshness only. A verification
+  // proves the API answers; it does not prove users are being served.
+  assert.equal(result.isFresh, false);
+});
+
+test("verification alone does not clear a fresh consecutive-failure block", () => {
+  // Recovery is a separate, audited action for exactly this reason: while real
+  // traffic is still failing right now, an operator's successful check does
+  // not make the provider healthy.
+  const result = evaluatePublicProviderStatus({
+    ...baseInput,
+    lastSuccessAt: null,
+    lastFailureAt: minutesAgo(1),
+    consecutiveFailures: 5,
+    lastVerificationSuccessAt: minutesAgo(0.5),
+  });
+  assert.equal(result.status, "incident");
+  assert.equal(result.reasonCode, "CONSECUTIVE_FAILURES_THRESHOLD");
+});
+
+test("a failed admin verification leaves the provider non-operational", () => {
+  const result = evaluatePublicProviderStatus({
+    ...baseInput,
+    lastSuccessAt: null,
+    lastFailureAt: hoursAgo(38),
+    consecutiveFailures: 0,
+    lastVerificationFailureAt: minutesAgo(1),
+  });
+  assert.equal(result.status, "degraded");
+  assert.equal(result.reasonCode, "RECOVERY_VERIFICATION_FAILED");
+});
+
+test("a newer failed verification supersedes an older successful one", () => {
+  const result = evaluatePublicProviderStatus({
+    ...baseInput,
+    lastSuccessAt: null,
+    lastVerificationSuccessAt: minutesAgo(10),
+    lastVerificationFailureAt: minutesAgo(1),
+  });
+  assert.equal(result.reasonCode, "RECOVERY_VERIFICATION_FAILED");
+});
+
+test("verification evidence expires on the same window as every other signal", () => {
+  const result = evaluatePublicProviderStatus({
+    ...baseInput,
+    lastSuccessAt: null,
+    lastVerificationSuccessAt: hoursAgo(4),
+    freshnessMinutes: 30,
+  });
+  assert.notEqual(result.status, "operational");
+  assert.equal(result.status, "unknown");
+});
+
+test("a future-dated verification timestamp is never treated as evidence", () => {
+  const result = evaluatePublicProviderStatus({
+    ...baseInput,
+    lastSuccessAt: null,
+    lastVerificationSuccessAt: minutesFromNow(30),
+  });
+  assert.equal(result.status, "unknown");
+  assert.equal(result.reasonCode, "NO_SUCCESS_RECORDED");
+});
+
+test("real traffic still outranks verification evidence when both are fresh", () => {
+  const result = evaluatePublicProviderStatus({
+    ...baseInput,
+    lastSuccessAt: minutesAgo(2),
+    lastVerificationSuccessAt: minutesAgo(1),
+  });
+  assert.equal(result.reasonCode, "RECENT_SUCCESS_CONFIRMED");
+});
+
+test("a stale failure that predates a stale success is still reported as stale success", () => {
+  const result = evaluatePublicProviderStatus({
+    ...baseInput,
+    lastSuccessAt: minutesAgo(45),
+    lastFailureAt: minutesAgo(60),
+    consecutiveFailures: 0,
+  });
+  assert.equal(result.reasonCode, "SUCCESS_STALE");
+});

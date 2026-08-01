@@ -56,7 +56,25 @@ export function UserUsageSummary({
   const { t, lang } = useLanguage();
   const fetchedUsage = useUserUsage(!isGuestMode && usageOverride === undefined);
   const usage = usageOverride === undefined ? fetchedUsage : usageOverride;
-  const isDailyUnlimited = Boolean(usage && usage.limits.creditsDay <= 0);
+  // "No daily limit" only ever meant "no daily *credit* limit". Said plainly,
+  // because the previous "Unlimited" label read as "nothing can stop this
+  // request" while a separate allowance could, and did, block it.
+  const hasDailyCreditLimit = Boolean(usage && usage.limits.creditsDay > 0);
+  const isDailyUnlimited = Boolean(usage) && !hasDailyCreditLimit;
+  const formatResetTime = (value: string | undefined, timeZone: string) => {
+    if (!value) return null;
+    const resetAt = new Date(value);
+    if (Number.isNaN(resetAt.getTime())) return null;
+    try {
+      return new Intl.DateTimeFormat(lang, {
+        dateStyle: "short",
+        timeStyle: "short",
+        timeZone,
+      }).format(resetAt);
+    } catch {
+      return resetAt.toISOString();
+    }
+  };
 
   if (isGuestMode) {
     const used = guestMessageCount || 0;
@@ -91,6 +109,11 @@ export function UserUsageSummary({
   const expiryLabel = usage.balances.purchasedEarliestExpiry
     ? new Date(usage.balances.purchasedEarliestExpiry).toLocaleDateString(lang)
     : null;
+  const resetTimeZone = usage.entitlement?.timeZone || usage.timeZone || "UTC";
+  const dailyResetLabel = formatResetTime(
+    usage.entitlement?.dailyResetsAt || usage.balances.dailyResetsAt,
+    resetTimeZone
+  );
 
   if (compact) {
     const dailyRemaining = Math.max(
@@ -117,11 +140,11 @@ export function UserUsageSummary({
             </span>
           </span>
         </div>
-        <div className="mt-2 flex items-center justify-between font-semibold text-zinc-500 dark:text-zinc-400">
+        <div className="mt-2 flex items-center justify-between gap-2 font-semibold text-zinc-500 dark:text-zinc-400">
           <span>{t("sidebar.todayUsage")}</span>
-          <span>
+          <span className="text-right">
             {isDailyUnlimited
-              ? t("usage.unlimited")
+              ? t("usage.noDailyCreditLimit")
               : `${dailyRemaining} ${t("sidebar.remaining")}`}
           </span>
         </div>
@@ -131,6 +154,17 @@ export function UserUsageSummary({
             limit={usage.limits.creditsDay}
           />
         )}
+        {/* The allowance that actually binds, always shown -- an account with
+            no daily limit is still bounded by its monthly plan credits. */}
+        <p
+          data-testid="usage-plan-credits-remaining"
+          className="mt-1 text-[11px] font-medium leading-4 text-zinc-500 dark:text-zinc-400"
+        >
+          {t("usage.planCreditsRemaining").replace(
+            "{credits}",
+            usage.balances.planRemainingCredits.toLocaleString(lang)
+          )}
+        </p>
 
         {upgradeTarget && (
           <div className="mt-3 border-t border-zinc-200 pt-3 dark:border-zinc-800">
@@ -207,22 +241,34 @@ export function UserUsageSummary({
           <BarChart3 className="h-4 w-4 text-blue-500" />
           {t("usage.plan")}: {planLabel}
         </span>
-        <span className="text-zinc-400">
+        <span className="text-right text-zinc-400">
           {isDailyUnlimited
-            ? t("usage.unlimited")
+            ? t("usage.noDailyCreditLimit")
             : `${Math.max(0, usage.limits.creditsDay - usage.usage.creditsDay)} ${t("usage.left")}`}
         </span>
       </div>
       <div className="mt-2">
-        <div className="flex justify-between font-semibold">
-          <span>{t("usage.todayCredits")}</span>
-          <span>
+        <div className="flex justify-between gap-2 font-semibold">
+          <span>{isDailyUnlimited ? t("usage.dailyAllowance") : t("usage.todayCredits")}</span>
+          <span className="text-right">
             {isDailyUnlimited
-              ? t("usage.unlimited")
+              ? usage.usage.creditsDay.toLocaleString(lang)
               : `${usage.usage.creditsDay}/${usage.limits.creditsDay}`}
           </span>
         </div>
         {!isDailyUnlimited && <UsageBar used={usage.usage.creditsDay} limit={usage.limits.creditsDay} />}
+        {/* Every blocking allowance states its own reset instant and zone, so
+            a blocked user is never told to wait for an unnamed "reset". */}
+        {dailyResetLabel && (
+          <p
+            data-testid="usage-daily-reset"
+            className="mt-1 text-[11px] font-medium leading-4 text-zinc-400"
+          >
+            {t("usage.dailyResetAt")
+              .replace("{time}", dailyResetLabel)
+              .replace("{timeZone}", resetTimeZone)}
+          </p>
+        )}
       </div>
       <div className="mt-2">
         <div className="flex justify-between font-semibold">

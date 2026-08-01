@@ -50,10 +50,13 @@ next-env.d.ts
 .vs
 .local-backups/aihub-clone.dump
 # Local scratch docs stay out of the repo, but the UI contracts under
-# docs/ui-contracts/ are product invariants and must be versioned, and
+# docs/ui-contracts/ are product invariants and must be versioned,
 # docs/qa/ holds approved QA policy (the canonical visual baseline) that CI
-# and the Playwright config both point at.
+# and the Playwright config both point at, and docs/policy/ holds approved
+# product policy that code and CI enforce (credit entitlement vs operational
+# cost guardrail).
 docs/*
 !docs/ui-contracts/
 !docs/qa/
+!docs/policy/
 .playwright-mcp
