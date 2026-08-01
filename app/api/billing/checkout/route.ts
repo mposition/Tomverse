@@ -60,6 +60,7 @@ import { checkoutBillingMetadata } from "@/lib/billingTransactions";
 import {
   FOUNDING_TESTER_PASS_STATUS,
   addUtcDays,
+  effectivePlanForAccess,
   isInternalPassPromotion,
 } from "@/lib/foundingTesterPassCore";
 
@@ -77,6 +78,16 @@ const checkoutSchema = z
   .strict();
 
 const activeSubscriptionStatuses = new Set(["active", "trialing", "past_due"]);
+
+/**
+ * Plan ordering, so "is this a new subscription, a change, or a downgrade" is
+ * one comparison rather than a chain of plan-name conditionals.
+ */
+const PLAN_RANK: Record<"Free" | "Pro" | "Max", number> = {
+  Free: 0,
+  Pro: 1,
+  Max: 2,
+};
 
 type CheckoutPromotion = BillingPromotionConfig;
 type CheckoutPlan = Awaited<ReturnType<typeof getBillingPlans>>[number];
@@ -306,7 +317,7 @@ export async function POST(req: Request) {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) {
       return NextResponse.json(
-        { error: "Authentication required." },
+        { code: "AUTHENTICATION_REQUIRED", error: "Authentication required." },
         { status: 401 }
       );
     }
@@ -330,7 +341,10 @@ export async function POST(req: Request) {
     const plan = plans.find((item) => item.id === planId && item.isActive);
     if (!plan) {
       return NextResponse.json(
-        { error: "This plan is not ready for checkout yet." },
+        {
+          code: "CHECKOUT_CONFIGURATION_ERROR",
+          error: "This plan is not ready for checkout yet.",
+        },
         { status: 503 }
       );
     }
@@ -353,6 +367,7 @@ export async function POST(req: Request) {
         stripeCustomerId: true,
         stripeSubscriptionId: true,
         subscriptionStatus: true,
+        subscriptionCurrentPeriodEnd: true,
         plan: true,
         creditDebtCredits: true,
         settings: {
@@ -363,13 +378,58 @@ export async function POST(req: Request) {
     if (!user) {
       return NextResponse.json({ error: "User not found." }, { status: 404 });
     }
+    // The plan the account can actually use right now, not the raw column: a
+    // Founding Tester Pass that has run out still leaves `plan` at "Pro", and
+    // blocking that account from subscribing would be wrong.
+    const effectivePlan = effectivePlanForAccess({
+      plan: user.plan,
+      subscriptionStatus: user.subscriptionStatus,
+      subscriptionCurrentPeriodEnd: user.subscriptionCurrentPeriodEnd,
+    });
+    const targetTier = tierForPlanId(planId as BillingPlanId);
+
+    // Same plan. Previously this only failed if a Stripe subscription happened
+    // to be attached, so an account holding a plan by any other route could
+    // buy the plan it already had.
+    if (effectivePlan === targetTier) {
+      return NextResponse.json(
+        {
+          code: "PLAN_CHANGE_NOT_SUPPORTED",
+          error: "This account is already on this plan.",
+        },
+        { status: 409 }
+      );
+    }
+
+    // A downgrade. There is no in-product subscription-change flow -- only
+    // cancel-at-period-end -- so creating a second, cheaper subscription here
+    // would leave the account paying for two plans at once.
+    if (PLAN_RANK[effectivePlan] > PLAN_RANK[targetTier]) {
+      return NextResponse.json(
+        {
+          code: "PLAN_CHANGE_NOT_SUPPORTED",
+          error:
+            "Moving to a lower plan is handled from account settings at the end of the paid period.",
+        },
+        { status: 409 }
+      );
+    }
+
+    // An upgrade while a Stripe subscription is live is a *change* to that
+    // subscription, which this product does not implement. The UI must not
+    // offer a checkout CTA here (see resolvePlanCtaState in
+    // lib/purchaseIntent.ts, which resolves this state to "manage_plan"); the
+    // code lets the client say so precisely if it ever gets here anyway.
     if (
       user.stripeSubscriptionId &&
       user.subscriptionStatus &&
       activeSubscriptionStatuses.has(user.subscriptionStatus)
     ) {
       return NextResponse.json(
-        { error: "An active subscription already exists." },
+        {
+          code: "ACTIVE_SUBSCRIPTION_EXISTS",
+          error: "An active subscription already exists.",
+        },
         { status: 409 }
       );
     }
@@ -611,7 +671,11 @@ export async function POST(req: Request) {
           billingInterval,
           language
         ),
-        cancel_url: `${origin}/pricing?billing=cancelled`,
+        // Cancelling used to drop the visitor on a bare /pricing with no
+        // acknowledgement and no way back to the plan they were considering.
+        cancel_url: `${origin}/pricing?billing=cancelled&plan=${encodeURIComponent(
+          planId
+        )}${language ? `&lang=${encodeURIComponent(language)}` : ""}#plans`,
         expires_at: appliedPromotion
           ? Math.floor(Date.now() / 1000) + PROMOTION_CHECKOUT_TTL_SECONDS
           : undefined,
@@ -662,13 +726,16 @@ export async function POST(req: Request) {
       error.message === "PROMOTION_REDEMPTION_LIMIT_REACHED"
     ) {
       return NextResponse.json(
-        { error: "This promotion code has reached its redemption limit." },
+        {
+          code: "PROMOTION_REDEMPTION_LIMIT_REACHED",
+          error: "This promotion code has reached its redemption limit.",
+        },
         { status: 409 }
       );
     }
     console.error("Stripe checkout failed:", error);
     return NextResponse.json(
-      { error: "Failed to start checkout." },
+      { code: "CHECKOUT_CONFIGURATION_ERROR", error: "Failed to start checkout." },
       { status: 500 }
     );
   }

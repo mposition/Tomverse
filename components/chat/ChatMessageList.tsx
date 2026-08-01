@@ -782,6 +782,7 @@ export function ChatMessageList({
                             rawErrorDetails={msg.content}
                             triggerLabel={t("chat.reportError")}
                             triggerClassName={secondaryButtonClass}
+                            triggerTestId="report-error-button"
                           />
                           {(errorCategory === "generic" || errorCategory === "attachment") && (
                             <span className="flex items-center text-xs font-semibold text-red-700 dark:text-red-200">

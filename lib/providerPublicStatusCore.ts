@@ -20,6 +20,15 @@ export type PublicStatusReasonCode =
   | "PROBE_SUCCESS_CONFIRMED"
   | "PROBE_REPEATED_FAILURE"
   | "PROBE_FAILURE_STALE"
+  /** STG-R002: real-traffic failure evidence exists but has expired, so it can
+   *  no longer describe the provider's current state. */
+  | "REAL_FAILURE_STALE"
+  /** STG-R002: an administrator ran a live verification call against the
+   *  provider and it succeeded. Synthetic evidence, deliberately distinct from
+   *  RECENT_SUCCESS_CONFIRMED, which only real user traffic can produce. */
+  | "ADMIN_VERIFICATION_SUCCESS"
+  /** STG-R002: the most recent administrator verification call failed. */
+  | "RECOVERY_VERIFICATION_FAILED"
   | "NO_SUCCESS_RECORDED"
   | "SUCCESS_STALE"
   | "HEALTH_DATA_UNAVAILABLE";
@@ -73,6 +82,13 @@ export type PublicProviderStatusInput = {
    *  higher bar than a single failed probe (principle #4: one probe failure
    *  never alone means an outage). */
   probeIncidentConsecutiveFailureThreshold?: number;
+  /** STG-R002: evidence from administrator-triggered live verification calls,
+   *  kept in a third pair of fields for the same reason the probe stream is
+   *  separate -- a synthetic check must never be written into, or read as,
+   *  real-traffic success. Set by the admin verification flow only; every
+   *  existing caller/test that omits them keeps behaving exactly as before. */
+  lastVerificationSuccessAt?: Date | null;
+  lastVerificationFailureAt?: Date | null;
 };
 
 export const DEFAULT_PUBLIC_STATUS_FRESHNESS_MINUTES = 30;
@@ -113,6 +129,8 @@ export const evaluatePublicProviderStatus = ({
   lastProbeFailureAt = null,
   consecutiveProbeFailures = 0,
   probeIncidentConsecutiveFailureThreshold = DEFAULT_PROBE_INCIDENT_CONSECUTIVE_FAILURE_THRESHOLD,
+  lastVerificationSuccessAt = null,
+  lastVerificationFailureAt = null,
 }: PublicProviderStatusInput): PublicProviderStatusResult => {
   const safeFreshnessMinutes =
     Number.isFinite(freshnessMinutes) && freshnessMinutes > 0
@@ -126,6 +144,18 @@ export const evaluatePublicProviderStatus = ({
     : null;
   const validProbeFailureAt = isValidPast(lastProbeFailureAt ?? null, now)
     ? lastProbeFailureAt
+    : null;
+  const validVerificationSuccessAt = isValidPast(
+    lastVerificationSuccessAt ?? null,
+    now
+  )
+    ? lastVerificationSuccessAt
+    : null;
+  const validVerificationFailureAt = isValidPast(
+    lastVerificationFailureAt ?? null,
+    now
+  )
+    ? lastVerificationFailureAt
     : null;
 
   const isFresh =
@@ -143,6 +173,30 @@ export const evaluatePublicProviderStatus = ({
     validProbeFailureAt !== null &&
     minutesBetween(now, validProbeFailureAt) <= safeFreshnessMinutes;
 
+  // STG-R002: real-traffic *failure* evidence expires on the same window as
+  // every other signal here. Probe failures already had this (STG-F004); real
+  // failures did not, and that asymmetry is what let five 38-hour-old request
+  // rejections hold a provider at Incident indefinitely. consecutiveFailures
+  // only resets on a success, and no success can be recorded while every
+  // model under the provider is reported unavailable -- a self-locking state.
+  // An expired failure is not proof the provider is healthy, so it resolves to
+  // "unknown" (non-blocking), never to "operational".
+  const isRealFailureFresh =
+    validFailureAt !== null &&
+    minutesBetween(now, validFailureAt) <= safeFreshnessMinutes;
+
+  const isVerificationSuccessFresh =
+    validVerificationSuccessAt !== null &&
+    minutesBetween(now, validVerificationSuccessAt) <= safeFreshnessMinutes;
+  const isVerificationFailureFresh =
+    validVerificationFailureAt !== null &&
+    minutesBetween(now, validVerificationFailureAt) <= safeFreshnessMinutes;
+  const latestVerificationIsFailure =
+    validVerificationFailureAt !== null &&
+    (validVerificationSuccessAt === null ||
+      validVerificationFailureAt.getTime() >
+        validVerificationSuccessAt.getTime());
+
   // Either stream is legitimate "the provider is alive" evidence for the
   // purpose of clearing "unknown" -- this is the actual AUD-R001 fix (idle
   // providers that only ever get probed, never used, no longer stay
@@ -150,10 +204,15 @@ export const evaluatePublicProviderStatus = ({
   const isFreshFromEitherStream = isFresh || isFreshFromProbe;
 
   // The most recent *kind* of event we have evidence for -- lets a stale-but-old
-  // success never mask a more recent failure (and vice versa).
+  // success never mask a more recent failure (and vice versa). A successful
+  // administrator verification counts here too: it is a real call to the
+  // provider, so a failure older than it is no longer the last thing we saw.
   const latestEventIsFailure =
     validFailureAt !== null &&
-    (validSuccessAt === null || validFailureAt.getTime() > validSuccessAt.getTime());
+    (validSuccessAt === null ||
+      validFailureAt.getTime() > validSuccessAt.getTime()) &&
+    (validVerificationSuccessAt === null ||
+      validFailureAt.getTime() > validVerificationSuccessAt.getTime());
 
   const result = (
     status: PublicProviderStatus,
@@ -200,9 +259,18 @@ export const evaluatePublicProviderStatus = ({
   // 4. Consecutive-failure floor: catches a low-traffic provider whose only
   //    recent request(s) failed, before the window even has enough samples
   //    for the failure-rate policy to trip on its own.
+  //
+  //    STG-R002: gated on the failure timestamp being inside the freshness
+  //    window. The count alone is a running total with no expiry, so without
+  //    this gate it describes "the last thing that happened", not "what is
+  //    happening now" -- see isRealFailureFresh above. Deliberately *not*
+  //    superseded by a successful administrator verification: clearing this
+  //    block is the recovery action's job (which resets the counter under an
+  //    audited, verified transaction), not a side effect of running a check.
   if (
+    isRealFailureFresh &&
     Math.max(0, Math.floor(consecutiveFailures)) >=
-    Math.max(1, Math.floor(incidentConsecutiveFailureThreshold))
+      Math.max(1, Math.floor(incidentConsecutiveFailureThreshold))
   ) {
     return result(
       "incident",
@@ -223,7 +291,10 @@ export const evaluatePublicProviderStatus = ({
   // 6. A more recent failure than success exists, but doesn't meet the
   //    consecutive-failure or window thresholds above -- don't call this
   //    operational, but a single/soft blip shouldn't read as a full incident.
-  if (latestEventIsFailure) {
+  //    STG-R002: also gated on freshness, so "the last thing we ever saw was a
+  //    failure, two days ago" can no longer hold a provider at Degraded
+  //    forever purely because no traffic has arrived since.
+  if (latestEventIsFailure && isRealFailureFresh) {
     return result(
       "degraded",
       "RECENT_FAILURE_EVIDENCE",
@@ -276,6 +347,23 @@ export const evaluatePublicProviderStatus = ({
     }
   }
 
+  // 9b. STG-R002: the most recent administrator verification call failed and
+  //     is still fresh, with no real-traffic success contradicting it. An
+  //     operator personally checked and the provider did not answer, so this
+  //     must not fall through to "unknown" -- but one manual check is no more
+  //     proof of a full outage than one probe is, so it lands on degraded.
+  if (
+    !isFresh &&
+    latestVerificationIsFailure &&
+    isVerificationFailureFresh
+  ) {
+    return result(
+      "degraded",
+      "RECOVERY_VERIFICATION_FAILED",
+      "The most recent administrator verification call to this provider failed."
+    );
+  }
+
   // 10. Fresh success evidence from either real traffic or a synthetic
   //     probe, with nothing above overriding it.
   if (isFresh) {
@@ -293,6 +381,18 @@ export const evaluatePublicProviderStatus = ({
     );
   }
 
+  // 10b. STG-R002: an administrator ran a live call against this provider and
+  //      it succeeded. Reported under its own reason code, never merged into
+  //      RECENT_SUCCESS_CONFIRMED -- readers must be able to tell "real users
+  //      are being served" apart from "an operator proved the API answers".
+  if (isVerificationSuccessFresh) {
+    return result(
+      "operational",
+      "ADMIN_VERIFICATION_SUCCESS",
+      `An administrator verification call to this provider succeeded within the last ${safeFreshnessMinutes} minutes.`
+    );
+  }
+
   // 11. STG-F004: probe failures exist but their timestamp has expired (or was
   //     never usable), and nothing fresh contradicts or confirms them. Report
   //     the honest verdict -- we do not currently know -- and say why, rather
@@ -305,6 +405,27 @@ export const evaluatePublicProviderStatus = ({
       validProbeFailureAt === null
         ? `${safeConsecutiveProbeFailures} automated probe failures are recorded, but without a usable timestamp they cannot confirm the provider's current state.`
         : `The last automated probe failure is older than the ${safeFreshnessMinutes}-minute freshness window, so it no longer describes the provider's current state.`
+    );
+  }
+
+  // 11b. STG-R002: real-traffic failure evidence exists but has expired. Say
+  //      so explicitly instead of either presenting an expired count as a live
+  //      incident (the self-locking bug) or silently dropping the fact that
+  //      the last thing we saw was a failure.
+  //      Scoped to failure evidence that is actually the *last* thing real
+  //      traffic recorded: a failure that predates a (merely stale) success is
+  //      already described by SUCCESS_STALE below and needs no separate verdict.
+  if (
+    !isRealFailureFresh &&
+    (Math.max(0, Math.floor(consecutiveFailures)) >= 1 || latestEventIsFailure)
+  ) {
+    const staleFailureCount = Math.max(0, Math.floor(consecutiveFailures));
+    return result(
+      "unknown",
+      "REAL_FAILURE_STALE",
+      validFailureAt === null
+        ? `${staleFailureCount} consecutive request failures are recorded, but without a usable timestamp they cannot confirm the provider's current state.`
+        : `The last recorded request failure is older than the ${safeFreshnessMinutes}-minute freshness window, so it no longer describes the provider's current state.`
     );
   }
 

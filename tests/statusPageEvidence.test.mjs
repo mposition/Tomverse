@@ -59,3 +59,27 @@ test("describeProbeSchedulerDelay distinguishes a delayed-with-history scheduler
     "delayed_never_run"
   );
 });
+
+// STG-R002: an administrator's manual verification is a fourth evidence
+// source. It is the one that can release a blocked provider, so labelling it
+// as real traffic would be the most consequential version of exactly the
+// conflation this module exists to prevent.
+test("an administrator verification is never labelled as real user traffic", () => {
+  for (const reasonCode of [
+    "ADMIN_VERIFICATION_SUCCESS",
+    "RECOVERY_VERIFICATION_FAILED",
+  ]) {
+    const label = evidenceSourceLabel(reasonCode);
+    assert.match(label, /manual check/);
+    assert.match(label, /not real user traffic/);
+    assert.doesNotMatch(label, /real request traffic monitoring/);
+    assert.doesNotMatch(label, /synthetic check/);
+  }
+});
+
+test("stale real-traffic failure evidence is still labelled as real traffic", () => {
+  assert.equal(
+    evidenceSourceLabel("REAL_FAILURE_STALE"),
+    "(from real request traffic monitoring)"
+  );
+});
