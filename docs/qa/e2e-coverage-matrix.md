@@ -13,6 +13,14 @@ Two suites, two configurations, because they need opposite environments:
 Run them with `npm run test:e2e:pr` / `npm run test:e2e:chromium` and
 `npm run test:e2e:admin`.
 
+In CI the user suite's `@smoke` and `@ui-risk` tiers run inside PR Fast Gate,
+and the admin suite runs as its own workflow, `Admin Console E2E`
+(`.github/workflows/admin-console-e2e.yml`), against a PostgreSQL service
+container. That workflow is not part of the `fast-gate` aggregation, so it is
+a visible check but not yet a *required* one — making it required is a branch
+protection change, not a file in this repository. Until it is required, a red
+Admin Console E2E does not by itself block a merge.
+
 ---
 
 ## 1. The Admin Console harness

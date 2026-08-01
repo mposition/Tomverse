@@ -95,19 +95,30 @@ UI-012에서 승인된 정책(B안)입니다. accent 색은 **hue가 아니라 �
 
 - `docs/policy/plan-change.md`
 
-**온라인 플랜 변경은 아직 지원하지 않습니다.** 제품에는 구독 *변경* 흐름이 없고
-신규 Checkout과 기간 말 해지만 있습니다. 그래서:
+**Pro↔Max 온라인 변경은 전용 엔드포인트로만 합니다.** `/api/billing/checkout`은
+변경을 수행하지 않으며 앞으로도 하지 않습니다.
 
 - 서버는 동일 플랜 재구매와 다운그레이드를 `PLAN_CHANGE_NOT_SUPPORTED`로,
   활성 구독 상태의 상위 플랜 요청을 `ACTIVE_SUBSCRIPTION_EXISTS`로 각각 409
-  차단합니다. **이 차단을 UI보다 먼저 풀지 않습니다.** 풀면 한 계정이 두 플랜을
-  동시에 결제합니다.
-- UI는 변경을 결제로 안내하지 않습니다. `resolvePlanCtaState()`가 이 상태를
-  `manage_plan`으로 판정하고, CTA는 고객지원 문의로 연결하며, 온라인 변경이
-  아직 지원되지 않는다는 사실을 문구로 명시합니다.
-- `resolvePlanCtaState()`의 `manage_plan` 분기 교체는 구현의 **마지막** 단계입니다.
-  크레딧 경제성 결정 → 서버 상태기계 → Stripe 결제·예약 → 웹훅 재동기화가 모두
-  끝난 뒤에 바꿉니다. 먼저 바꾸면 동작하지 않는 CTA가 다시 생깁니다.
+  차단합니다. **이 세 분기는 그대로 둡니다.** 풀면 신규 구독 Checkout으로 변경을
+  우회할 수 있게 되고, 한 계정이 두 플랜을 동시에 결제합니다.
+- 변경은 `app/api/billing/plan-change/**`(preview · confirm · 조회 · 예약 취소)가
+  수행하고, 판정은 `lib/planChangeStateMachine.ts`(순수), Stripe 실행은
+  `lib/planChangeService.ts`가 맡습니다. 이 분담을 섞지 않습니다.
+- **결제 전에 권한을 올리지 않습니다.** 업그레이드는
+  `proration_behavior=always_invoice` + `payment_behavior=pending_if_incomplete`로
+  보내고, 계정의 plan은 오직 `syncSubscription()`이 Stripe에서 다시 읽은 구독으로
+  옮깁니다.
+- **다운그레이드는 Subscription Schedule을 직접 관리합니다.** Customer Portal은
+  같은 interval의 Price 여러 개를 한 Product에 두지 못하므로 이 변경을 담지
+  못합니다. Portal을 실행 경로로 되돌리지 않습니다.
+- **`cancel_at_period_end`를 자동으로 해제하지 않습니다.** 별도 opt-in(별도 label을
+  가진 별도 control)에서 온 `resumeRenewal`이 있을 때만 해제합니다.
+- **같은 interval끼리만 허용합니다.** 월간↔연간 변경은 아직 없습니다. 구독
+  interval을 모르는 계정은 CTA가 `manage_plan`(고객지원)으로 남습니다.
+- 크레딧 산식은 `lib/planChangeCredits.ts`에 있습니다. 플랜 변경은 월 사용량을
+  초기화하지도, 추가 지급하지도, 이미 쓴 크레딧을 회수하지도 않습니다.
+  업그레이드와 다운그레이드가 같은 함수를 씁니다.
 
 <!-- BEGIN:mobile-chat-composer-invariant -->
 ## Mobile chat composer invariant
