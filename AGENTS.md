@@ -105,9 +105,14 @@ UI-012에서 승인된 정책(B안)입니다. accent 색은 **hue가 아니라 �
 - UI는 변경을 결제로 안내하지 않습니다. `resolvePlanCtaState()`가 이 상태를
   `manage_plan`으로 판정하고, CTA는 고객지원 문의로 연결하며, 온라인 변경이
   아직 지원되지 않는다는 사실을 문구로 명시합니다.
+- 플랜 변경이 구현된 뒤에도 이 409들은 그대로 둡니다. 변경은 **전용 preview ·
+  confirm 엔드포인트**로 하고, 신규 구독 Checkout을 통한 우회는 계속 막습니다.
+- 크레딧 산식은 확정됐고 `lib/planChangeCredits.ts`에 있습니다. 플랜 변경은
+  월 사용량을 초기화하지도, 추가 지급하지도, 이미 쓴 크레딧을 회수하지도
+  않습니다. 업그레이드와 다운그레이드가 같은 함수를 씁니다.
 - `resolvePlanCtaState()`의 `manage_plan` 분기 교체는 구현의 **마지막** 단계입니다.
-  크레딧 경제성 결정 → 서버 상태기계 → Stripe 결제·예약 → 웹훅 재동기화가 모두
-  끝난 뒤에 바꿉니다. 먼저 바꾸면 동작하지 않는 CTA가 다시 생깁니다.
+  서버 상태기계 → Stripe 결제·예약 → 웹훅 재동기화가 모두 끝난 뒤에 바꿉니다.
+  먼저 바꾸면 동작하지 않는 CTA가 다시 생깁니다.
 
 <!-- BEGIN:mobile-chat-composer-invariant -->
 ## Mobile chat composer invariant

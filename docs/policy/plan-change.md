@@ -1,11 +1,11 @@
 # 플랜 변경 정책
 
-Pro ↔ Max 플랜 변경에 관한 승인된 정책입니다. **아직 구현되지 않았습니다.**
-이 문서는 구현 전에 합의된 계약과, 구현을 시작하기 전에 반드시 확정해야 하는
-미결 항목을 기록합니다.
+Pro ↔ Max 플랜 변경에 관한 승인된 정책입니다. **정책은 확정됐고, 아직 구현되지
+않았습니다.** 이 문서가 구현의 계약입니다.
 
 관련 파일을 바꾸기 전에 읽어 주세요.
 
+- `lib/planChangeCredits.ts`의 `planCreditsAfterPlanChange()`
 - `lib/purchaseIntent.ts`의 `resolvePlanCtaState()`
 - `app/api/billing/checkout/route.ts`의 플랜 변경 차단 분기
 - `app/api/billing/cancel-subscription/route.ts`
@@ -27,8 +27,8 @@ Pro ↔ Max 플랜 변경에 관한 승인된 정책입니다. **아직 구현�
 | 활성 Stripe 구독 상태에서 상위 플랜 | 409 | `ACTIVE_SUBSCRIPTION_EXISTS` |
 
 차단이 없으면 두 번째 구독이 생성되어 한 계정이 두 플랜을 동시에 결제하게
-됩니다. 아래 5절의 미결 항목이 전부 확정되기 전까지 이 세 분기는 그대로
-둡니다.
+됩니다. 이 세 분기는 플랜 변경이 구현된 뒤에도 그대로 둡니다 — 변경은 전용
+엔드포인트로 하고, Checkout을 통한 우회는 계속 막습니다(5절).
 
 ## 1. Pro → Max (업그레이드)
 
@@ -46,7 +46,49 @@ Pro ↔ Max 플랜 변경에 관한 승인된 정책입니다. **아직 구현�
   해제합니다. 업그레이드 확인 하나로 두 가지(플랜 변경 + 갱신 재개)에 동의한
   것으로 취급하지 않습니다.
 
-참고: [Stripe 구독 변경](https://docs.stripe.com/billing/subscriptions/change)
+### Stripe 호출 파라미터 (필수)
+
+확정 요청은 반드시 다음을 사용합니다.
+
+```
+proration_behavior = always_invoice
+payment_behavior   = pending_if_incomplete
+```
+
+`pending_if_incomplete`가 없으면 결제 실패나 SCA 대기 중에 구독이 먼저 Max로
+바뀝니다. 즉 **돈을 받기 전에 권한이 올라갑니다.** 이 두 파라미터가 "결제 성공
+후에만 Max 적용"을 실제로 강제하는 장치이며, 애플리케이션 코드의 순서 제어가
+아닙니다.
+
+참고: [Stripe Pending Updates](https://docs.stripe.com/billing/subscriptions/pending-updates)
+· [Stripe 구독 변경](https://docs.stripe.com/billing/subscriptions/change)
+
+### 크레딧 (확정)
+
+결제 성공 시:
+
+- 플랜과 모델 · 기능 권한을 **즉시 Max**로 변경합니다.
+- 현재 UTC 월의 플랜 한도를 3,000 → 10,000으로 바꿉니다.
+- **이미 사용한 플랜 크레딧을 초기화하지 않습니다.**
+- **10,000크레딧을 따로 추가 지급하지 않습니다.**
+- 남은 크레딧은 `lib/planChangeCredits.ts`의 `planCreditsAfterPlanChange()`가
+  계산합니다.
+
+```
+남은 플랜 크레딧 = max(0, Max 월 한도 10,000 - 이번 UTC 월 플랜 크레딧 사용량 - 크레딧 debt)
+
+예) Pro에서 2,500 사용 후 Max 업그레이드 → 7,500
+```
+
+- 다음 UTC 월초에는 Max 기준 10,000으로 정상 초기화됩니다.
+- **구매한 추가 크레딧은 변동 없습니다.** 별도 잔액이며 만료일도 그대로입니다.
+- 결제 실패 또는 SCA 진행 중에는 **계속 Pro**입니다. SCA 완료와 `invoice.paid`
+  확인 후에 Max를 적용합니다.
+
+**의도적으로 수용하는 점:** Stripe 일할 결제액과 무관하게 현재 월 한도가 Max
+전체 한도로 올라갑니다. 월 중간에 업그레이드해도 남은 기간에 비례한 몫이 아니라
+10,000 기준으로 계산됩니다. 설명하기 쉽고 검증하기 쉬우며 사용자에게 유리한
+방향이므로, 결함이 아니라 선택입니다.
 
 ## 2. Max → Pro (다운그레이드)
 
@@ -59,9 +101,30 @@ Pro ↔ Max 플랜 변경에 관한 승인된 정책입니다. **아직 구현�
   동작하는 예약이 서버에 남아 있어야 하며, 클라이언트 타이머나 웹훅 도착에만
   의존해서는 안 됩니다.
 
+### 크레딧 (확정)
+
+- 적용 예정일까지 **Max 플랜과 Max 크레딧 정책을 유지**합니다.
+- 예약 기간 중 UTC 월초가 오면 **Max 10,000을 정상 제공**합니다. 다운그레이드가
+  예약돼 있다는 이유로 미리 줄이지 않습니다.
+- 결제기간 종료 시 Pro로 변경합니다.
+- **이미 사용한 Max 크레딧을 회수하거나 debt로 만들지 않습니다.**
+- 적용 시점이 UTC 월 중간이면 남은 Pro 크레딧은 같은 함수로 계산합니다.
+
+```
+남은 플랜 크레딧 = max(0, Pro 월 한도 3,000 - 이번 UTC 월 플랜 크레딧 사용량)
+
+예) 이번 달 Max로 6,000 사용 후 Pro 적용 → 0 (음수가 되지 않고, 상계도 없음)
+```
+
+- 다음 UTC 월초부터 Pro 3,000을 정상 제공합니다.
+- 추가 구매 크레딧은 유지됩니다.
+
+업그레이드와 다운그레이드가 **같은 함수 하나**를 쓴다는 점이 중요합니다. 방향별로
+식을 따로 두면 경계 동작이 서로 어긋납니다.
+
 Stripe Customer Portal도 기간 말 다운그레이드를 지원하지만, 대상 가격들이 **같은
 Stripe Product에 속해야 한다**는 제한이 있습니다. Portal을 쓸지 결정하기 전에
-현재 Pro · Max의 Product 구성을 확인해야 합니다(5절 참조).
+현재 Pro · Max의 Product 구성을 확인해야 합니다(6절 참조).
 
 참고: [Stripe Customer Portal 설정](https://docs.stripe.com/customer-management/configure-portal)
 
@@ -108,27 +171,45 @@ Stripe는 웹훅 전달 순서를 보장하지 않으므로, 오래된 이벤트
 이 보강 없이 플랜 변경을 열면, 결제는 성공했는데 권한이 되돌아가거나 그 반대인
 상태를 사람이 손으로 고쳐야 합니다.
 
-## 5. 구현 전에 확정해야 하는 것
+## 5. 엔드포인트 구조 — 기존 409를 제거하지 않습니다
 
-1. **Pro → Max 크레딧 제공 정책.** 업그레이드 시점에 Max 월 크레딧을 어떻게
-   줄지 정해지지 않았습니다. 결정해야 할 것: 남은 기간에 대한 차액만 줄지, 전량을
-   줄지, 다음 갱신일부터 적용할지. proration으로 돈은 일할 계산되는데 크레딧은
-   그렇지 않으면 사용자가 실제로 받는 것과 지불한 것이 어긋납니다. **이 결정이
-   나오기 전에는 서버 차단을 풀 수 없습니다.**
-2. **Stripe Product 구성 확인.** Pro와 Max 가격이 같은 Product에 속하는지 확인해야
-   Customer Portal 사용 가능 여부가 정해집니다.
-3. **다운그레이드 예약 중의 크레딧.** Max→Pro 예약이 걸린 기간 동안 월 갱신이
-   오면 Max 크레딧을 주는지 Pro 크레딧을 주는지.
+플랜 변경은 **전용 엔드포인트 두 개**로 만듭니다. `/api/billing/checkout`의 차단
+분기는 **그대로 둡니다.**
 
-## 6. 구현 순서
+| 엔드포인트 | 역할 |
+|---|---|
+| 플랜 변경 preview | Stripe proration invoice preview를 조회해 추가 결제액 · 세금 · 적용 시점을 반환. 아무것도 변경하지 않음 |
+| 플랜 변경 confirm | preview에서 사용자가 확인한 내용을 실제로 실행 |
+| `/api/billing/checkout` | **변경 불가.** 동일 플랜 · 다운그레이드 · 활성 구독 상태 상위 플랜을 계속 409로 거부 |
+
+기존 409를 살려두는 것이 핵심입니다. 신규 구독 Checkout으로 플랜 변경을
+우회하면 두 번째 구독이 생겨 한 계정이 두 플랜을 동시에 결제합니다. 변경 경로가
+따로 생겨도 그 우회로는 계속 막혀 있어야 합니다.
+
+`resolvePlanCtaState()`는 서버 · 웹훅 구현이 **전부 끝난 뒤에** 전용 변경 화면으로
+연결합니다.
+
+## 6. 아직 확인이 필요한 것
+
+크레딧 정책은 확정됐습니다(1 · 2절). 남은 것은 하나입니다.
+
+- **Stripe Product 구성 확인.** Pro와 Max 가격이 같은 Product에 속하는지 확인해야
+  Customer Portal을 다운그레이드에 쓸 수 있는지 정해집니다. 별개 Product라면
+  Subscription Schedule을 직접 다뤄야 합니다.
+
+## 7. 구현 순서
 
 앞 단계가 끝나기 전에 뒤 단계를 시작하지 않습니다.
 
-1. **크레딧 경제성 결정** (5절 1·3번)
-2. **서버 변경 상태기계** — 허용/거부 판정, 예약 상태, 실패 시 원복
-3. **Stripe 결제 · 예약** — proration preview, `always_invoice`, Subscription Schedule
+1. ~~**크레딧 경제성 결정**~~ — 확정. `lib/planChangeCredits.ts`에
+   `planCreditsAfterPlanChange()`로 인코딩했고 `tests/planChangeCredits.test.mjs`가
+   양방향 경계를 고정합니다.
+2. **서버 변경 상태기계** — 허용/거부 판정(같은 interval인지, 방향이 무엇인지),
+   예약 상태, 실패 시 원복. preview · confirm 엔드포인트.
+3. **Stripe 결제 · 예약** — proration preview, `always_invoice` +
+   `pending_if_incomplete`, Subscription Schedule
 4. **웹훅 · 재동기화** (4절)
-5. **CTA 변경** — `resolvePlanCtaState()`의 `manage_plan` 분기를 실제 변경 흐름으로
+5. **CTA 변경** — `resolvePlanCtaState()`의 `manage_plan` 분기를 전용 변경 화면으로
    교체
 
 `resolvePlanCtaState()` 수정은 **마지막 UI 단계**입니다. 이 함수를 먼저 바꾸면
