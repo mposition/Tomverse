@@ -13,6 +13,23 @@ Two suites, two configurations, because they need opposite environments:
 Run them with `npm run test:e2e:pr` / `npm run test:e2e:chromium` and
 `npm run test:e2e:admin`.
 
+In CI the user suite's `@smoke` and `@ui-risk` tiers run inside PR Fast Gate,
+and the admin suite runs as its own workflow, `Admin Console E2E`
+(`.github/workflows/admin-console-e2e.yml`), against a PostgreSQL service
+container. It runs on **every** pull request: a path filter would be a guess
+about which files can break the admin console, and that guess is exactly what
+failed when #193's toast rewrite broke four specs with every check green. The
+job is measured at ~5 minutes against ~11 for the Chromium build job it runs
+beside, so it costs no wall-clock time.
+
+That workflow is not part of the `fast-gate` aggregation, so it is a visible
+check and not yet a *required* one — a red Admin Console E2E does not by
+itself block a merge today. Making it required is a branch protection change,
+not a file in this repository: add the check named
+`Admin Console E2E (PostgreSQL)` to the required checks for `develop` and
+`main`. Because the job reports on every pull request, it can be required
+without stranding unrelated pull requests on a check that never runs.
+
 ---
 
 ## 1. The Admin Console harness
