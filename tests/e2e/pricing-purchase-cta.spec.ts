@@ -324,9 +324,21 @@ test.describe("pricing plan CTAs by authentication state and plan", () => {
     // server refuses, because there is no subscription-change flow.
     const maxCta = ctaState(page, "max");
     await expect(maxCta).toHaveAttribute("data-cta-state", "manage_plan");
-    await expect(maxCta).toContainText("Manage plan");
     await expect(maxCta).not.toContainText("Upgrade to Max");
-    await expect(maxCta).toContainText("account settings");
+    // The CTA has to say that online plan change is unavailable -- not merely
+    // point somewhere else -- and it has to point at a place that can actually
+    // perform the change today. /chat cannot: account settings can cancel a
+    // subscription, not change one.
+    await expect(maxCta).toContainText("not supported yet");
+    const supportLink = maxCta.getByRole("link", {
+      name: "Ask support to change plan",
+    });
+    const supportHref = new URL(
+      (await supportLink.getAttribute("href"))!,
+      "http://127.0.0.1:3100"
+    );
+    expect(supportHref.pathname).toBe("/support");
+    expect(supportHref.searchParams.get("topic")).toBe("billing");
 
     // A paying account is not shown a sign-up button for Free.
     await expect(ctaState(page, "free")).toHaveAttribute(
@@ -334,6 +346,25 @@ test.describe("pricing plan CTAs by authentication state and plan", () => {
       "hidden"
     );
     await expect(ctaState(page, "free")).toBeEmpty();
+  });
+
+  test("the plan-change handoff arrives on a support form already set to Billing", async ({
+    page,
+  }) => {
+    await preparePricingPage(page, {
+      plan: "Pro",
+      hasActiveSubscription: true,
+    });
+    await gotoPricing(page);
+
+    await ctaState(page, "max")
+      .getByRole("link", { name: "Ask support to change plan" })
+      .click();
+
+    await page.waitForURL(/\/support/);
+    // Landing on a generic contact page would make this a redirect, not a
+    // handoff: the visitor would have to re-explain what they were doing.
+    await expect(page.getByLabel("Request type")).toHaveValue("billing");
   });
 
   test("a Max subscriber is never told that Pro is an upgrade", async ({
