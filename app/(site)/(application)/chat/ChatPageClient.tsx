@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { AlertCircle, ArrowRight, CheckCircle2, Info, Loader2, Sparkles, X } from "lucide-react";
+import { useModalDialog } from "@/components/useModalDialog";
 import { DesktopChatShell } from "@/components/chat/DesktopChatShell";
 import { MobileChatShell } from "@/components/chat/MobileChatShell";
 import {
@@ -270,9 +271,26 @@ function ConfirmDialog({
   onCancel: () => void;
   onConfirm: () => void | Promise<void>;
 }) {
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
+  // UX-010. This is the confirmation for every destructive action in the
+  // workspace -- delete conversation, close panel, revoke share. It rendered
+  // with aria-modal and no focus management at all, so Escape did nothing,
+  // focus stayed on the row behind the overlay, and Tab walked the page under
+  // it. Cancel takes initial focus: the safe option should be the default for a
+  // keyboard user who is about to confirm a deletion.
+  useModalDialog({
+    open: true,
+    onClose: onCancel,
+    dialogRef,
+    panelRef: dialogRef,
+    initialFocusRef: cancelButtonRef,
+  });
+
   return (
     <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4">
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -289,6 +307,7 @@ function ConfirmDialog({
         </p>
         <div className="mt-5 flex justify-end gap-2">
           <button
+            ref={cancelButtonRef}
             type="button"
             onClick={onCancel}
             className="rounded-lg px-4 py-2 text-sm font-semibold text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"

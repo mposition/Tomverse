@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
+import { useModalDialog } from "@/components/useModalDialog";
 import {
   buildGuestImportPayload,
   importGuestConversation,
@@ -39,6 +40,21 @@ export function GuestImportModal({
   const { t } = useLanguage();
   const [isImporting, setIsImporting] = useState(false);
   const [summary, setSummary] = useState<ImportSummary | null>(null);
+
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  // UX-010. Offered right after sign-in, over the chat workspace, and had no
+  // focus handling at all: focus stayed behind the overlay and Escape did
+  // nothing. Skipping is the safe default, so Escape maps to onSkip.
+  const dismiss = useCallback(() => {
+    if (!isImporting) onSkip();
+  }, [isImporting, onSkip]);
+  useModalDialog({
+    open: open && conversations.length > 0,
+    onClose: dismiss,
+    dialogRef,
+    panelRef,
+  });
 
   if (!open || conversations.length === 0) return null;
 
@@ -94,6 +110,7 @@ export function GuestImportModal({
 
   return (
     <div
+      ref={dialogRef}
       className="fixed inset-0 z-[110] flex items-end justify-center bg-black/50 p-0 backdrop-blur-sm sm:items-center sm:p-5"
       role="dialog"
       aria-modal="true"
@@ -105,7 +122,7 @@ export function GuestImportModal({
         onClick={() => !isImporting && onSkip()}
         aria-label={t("auth.cancel")}
       />
-      <div className="relative z-10 w-full max-w-sm rounded-t-3xl border border-zinc-200 bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-2xl dark:border-zinc-800 dark:bg-zinc-950 sm:rounded-3xl sm:pb-5">
+      <div ref={panelRef} className="relative z-10 w-full max-w-sm rounded-t-3xl border border-zinc-200 bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-2xl dark:border-zinc-800 dark:bg-zinc-950 sm:rounded-3xl sm:pb-5">
         <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-zinc-300 dark:bg-zinc-700 sm:hidden" />
         <div className="flex items-start justify-between gap-3">
           <h2
