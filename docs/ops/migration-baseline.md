@@ -100,9 +100,24 @@ diff <(sort prod-schema.sql) <(sort baseline-schema.sql)
 `DB_INTEGRATION_SCHEMA_SOURCE=push`를 쓸 수 있지만, 그 실행은 migration 이력을
 검증하지 않습니다.
 
-CHECK 제약을 추가한다면 새 migration에 직접 씁니다. `schema.prisma`에는 표현할
-수 없고, `migrate diff`도 그 drift를 보지 못합니다. `tests/migrationBaseline.test.mjs`가
-baseline의 10건이 사라지지 않았는지 지킵니다.
+## `schema.prisma`가 표현하지 못하는 것
+
+두 종류가 있고 **둘 다 `migrate diff`가 drift로 보지 못합니다.** 새로 추가할 때는
+migration에 직접 씁니다.
+
+1. **CHECK 제약** — 현재 10건이 baseline에 있습니다.
+2. **partial·expression index** — 예: `PlanChangeRequest_userId_active_key`
+   (`UNIQUE (userId) WHERE status = 'pending'`). 동시에 들어온 두 플랜 변경
+   확정이 둘 다 예약되는 것을 막는 유일한 장치입니다.
+
+두 번째는 실제로 사고가 났습니다. `test:db:integration`이 `db push`로 스키마를
+만들던 시절, 이 인덱스는 생성되지 않았고 **그것을 검증하는 테스트가 develop에서
+실패**했습니다. `db push`는 `schema.prisma`만 읽기 때문입니다. 지금은 migration으로
+만들므로 통과합니다.
+
+`tests/migrationBaseline.test.mjs`가 baseline의 CHECK 10건이 사라지지 않았는지,
+그리고 통합 테스트가 계속 migration으로 스키마를 만드는지 지킵니다. 후자를
+`push`로 되돌리면 partial index와 CHECK 제약이 조용히 전부 사라집니다.
 
 ## 남은 작업
 

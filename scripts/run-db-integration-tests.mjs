@@ -107,6 +107,14 @@ if (schemaSource === "push") {
     "Synchronizing the current Prisma schema"
   );
 } else {
+  // `db push` regenerates the client as part of its work; `migrate deploy`
+  // does not. Without this, a schema change that has been migrated but not
+  // reinstalled fails as `Cannot read properties of undefined` on a model the
+  // client has never heard of -- which says nothing about what is wrong.
+  run(
+    ["node_modules/prisma/build/index.js", "generate"],
+    "Generating the Prisma client for the current schema"
+  );
   run(
     ["node_modules/prisma/build/index.js", "migrate", "deploy"],
     "Building the schema from the migration history"

@@ -86,6 +86,31 @@ test("the replaced history is kept, and kept out of Prisma's way", () => {
   );
 });
 
+test("the integration database is built from migrations by default", () => {
+  // CHECK constraints are not the only thing schema.prisma cannot express.
+  // `PlanChangeRequest_userId_active_key` is a partial unique index -- the only
+  // thing stopping two racing confirms from both reserving a plan change --
+  // and it exists solely in a migration. A `db push` database does not have
+  // it, which is how its own regression test came to fail on develop.
+  //
+  // So the default matters: flipping this back to `push` would quietly drop
+  // every partial index and CHECK constraint in the schema, and the suite
+  // would keep reporting green for the ones nothing tests.
+  const runner = readFileSync(
+    join(ROOT, "scripts", "run-db-integration-tests.mjs"),
+    "utf8"
+  );
+  assert.ok(
+    /DB_INTEGRATION_SCHEMA_SOURCE\s*\|\|\s*"migrations"/.test(runner),
+    "the DB integration runner must default to building from migrations"
+  );
+  assert.ok(
+    runner.includes('"migrate", "deploy"') &&
+      runner.includes('"--exit-code"'),
+    "the migrations path must run migrate deploy and then assert no drift"
+  );
+});
+
 test("deployments baseline a pre-existing database before applying migrations", () => {
   const scripts = JSON.parse(
     readFileSync(join(ROOT, "package.json"), "utf8")
