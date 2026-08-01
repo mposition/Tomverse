@@ -36,7 +36,14 @@ import {
   Webhook,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { AppToastViewport } from "@/components/AppToastViewport";
 import type { AdminRole } from "@/lib/adminAuthCore";
 
@@ -163,6 +170,17 @@ const statusTone = (status: Props["apiStatus"]) =>
       ? "text-amber-300"
       : "text-zinc-500";
 
+
+/**
+ * The moment this bundle first ran in the browser. Module scope, so the
+ * reference is stable across renders -- `useSyncExternalStore` re-renders in a
+ * loop if `getSnapshot` returns a fresh object each call.
+ */
+const CLIENT_MOUNT_TIME = typeof window === "undefined" ? null : new Date();
+const subscribeToNothing = () => () => {};
+const getClientMountSnapshot = () => CLIENT_MOUNT_TIME;
+const getServerMountSnapshot = (): Date | null => null;
+
 export function AdminConsoleShell({
   children,
   role,
@@ -185,7 +203,23 @@ export function AdminConsoleShell({
   const [loadingAlerts, setLoadingAlerts] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState(() => new Date());
+  // UI-020. A `useState(() => new Date())` initialiser is evaluated once while
+  // the server renders and again while the client hydrates, so the two runs
+  // produced different clock strings and React reported a hydration mismatch on
+  // every admin page -- console noise during exactly the incident response the
+  // console exists for.
+  //
+  // `useSyncExternalStore` is the hydration-safe shape for a value that only
+  // exists on the client: the server snapshot is null, so the server and the
+  // first client render agree, and the real time appears immediately after.
+  // `refresh()` below still replaces it on every manual and automatic refresh.
+  const mountedAt = useSyncExternalStore(
+    subscribeToNothing,
+    getClientMountSnapshot,
+    getServerMountSnapshot
+  );
+  const [refreshedAt, setRefreshedAt] = useState<Date | null>(null);
+  const lastUpdated = refreshedAt ?? mountedAt;
   const [recentPaths, setRecentPaths] = useState<string[]>([]);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const page = titleFromPath(pathname);
@@ -199,7 +233,7 @@ export function AdminConsoleShell({
       setRefreshing(true);
       router.refresh();
       window.dispatchEvent(new CustomEvent("admin:refresh", { detail: { source } }));
-      setLastUpdated(new Date());
+      setRefreshedAt(new Date());
       window.setTimeout(() => setRefreshing(false), 650);
     },
     [router]
@@ -442,7 +476,7 @@ export function AdminConsoleShell({
                 <button type="button" onClick={() => refresh("manual")} className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs font-bold text-white hover:bg-zinc-800">
                   <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} /> Refresh
                 </button>
-                <span className="text-[11px] text-zinc-600">Updated {lastUpdated.toISOString().slice(11, 19)} UTC</span>
+                <span className="text-[11px] text-zinc-600">Updated {lastUpdated ? `${lastUpdated.toISOString().slice(11, 19)} UTC` : "\u2014"}</span>
               </div>
             </div>
             {children}

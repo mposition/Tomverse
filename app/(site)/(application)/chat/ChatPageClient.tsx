@@ -337,7 +337,7 @@ function ChatShellSkeleton({ label }: { label: string }) {
       aria-label={label}
       className="flex h-screen overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100"
     >
-      <aside className="hidden w-[clamp(19rem,32vw,30rem)] shrink-0 flex-col border-r border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-950 md:flex">
+      <aside className="hidden w-80 shrink-0 flex-col border-r border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-950 md:flex">
         <div className="flex items-center gap-3">
           <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-cyan-400 via-blue-500 to-purple-500" />
           <div>

@@ -595,7 +595,14 @@ export function DesktopChatShell({
                           aria-label={interpolate(t("chat.panelModelSelectLabel"), {
                             position: panelIndex + 1,
                           })}
-                          className="min-w-0 cursor-pointer truncate bg-transparent text-sm font-semibold text-zinc-800 outline-none hover:text-zinc-950 dark:text-zinc-100 dark:hover:text-white"
+                          // UI-014. This was borderless, background-less text with no focus ring, so
+                          // the primary way to change a panel's model read as a static
+                          // label. It keeps the native select (and its own arrow, and
+                          // its unique aria-label) and only gains the field affordance:
+                          // a border, a hover and focus-visible state, and a disabled
+                          // treatment. Padding stays tight so three panels at 200% text
+                          // still truncate rather than overflow.
+                          className="min-w-0 cursor-pointer truncate rounded-md border border-zinc-300 bg-white px-1.5 py-0.5 text-sm font-semibold text-zinc-800 outline-none transition-colors hover:border-zinc-400 hover:text-zinc-950 focus-visible:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500/30 disabled:cursor-not-allowed disabled:opacity-60 aria-busy:opacity-70 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:border-zinc-500 dark:hover:text-white"
                         >
                           {ENABLED_MODELS.map((model) => {
                             const isAlreadyUsed = selectedModels.includes(model.id) && model.id !== modelId;
@@ -633,9 +640,26 @@ export function DesktopChatShell({
                           onClick={() => onTogglePanelDisable(modelId)}
                           className="flex cursor-pointer items-center gap-2 rounded-full px-2 py-1 transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800"
                           title={isPanelDisabled ? t("chat.resumePanel") : t("chat.pausePanel")}
+                          // UX-013. Text content wins over `title` when a name is
+                          // computed, so all three of these buttons were announced as
+                          // "ON" -- identical, and silent about which model they
+                          // control. The visible ON/OFF is decorative once the name
+                          // carries the state.
+                          aria-label={interpolate(
+                            isPanelDisabled
+                              ? t("chat.panelResumeLabel")
+                              : t("chat.panelPauseLabel"),
+                            {
+                              position: panelIndex + 1,
+                              model: modelInfo?.name || modelId,
+                            }
+                          )}
                           aria-pressed={!isPanelDisabled}
                         >
-                          <span className="text-[11px] font-bold text-zinc-500 dark:text-zinc-400">
+                          <span
+                            aria-hidden="true"
+                            className="text-[11px] font-bold text-zinc-500 dark:text-zinc-400"
+                          >
                             {isPanelDisabled ? "OFF" : "ON"}
                           </span>
                           <div className={`h-4 w-8 rounded-full p-0.5 transition-colors ${!isPanelDisabled ? "bg-blue-500" : "bg-zinc-700"}`}>
@@ -650,8 +674,14 @@ export function DesktopChatShell({
                           onClick={() => onRemoveModel(modelId)}
                           className="flex cursor-pointer items-center justify-center rounded-full p-1.5 text-zinc-500 transition-colors hover:bg-red-500/10 hover:text-red-500"
                           title={t("chat.closeModelPanel")}
+                          // Destructive and repeated once per panel: the name has to
+                          // say which comparison column it discards.
+                          aria-label={interpolate(t("chat.panelCloseLabel"), {
+                            position: panelIndex + 1,
+                            model: modelInfo?.name || modelId,
+                          })}
                         >
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                             <line x1="18" y1="6" x2="6" y2="18" />
                             <line x1="6" y1="6" x2="18" y2="18" />
                           </svg>
