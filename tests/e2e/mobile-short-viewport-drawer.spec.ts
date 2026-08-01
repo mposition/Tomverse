@@ -2,6 +2,7 @@ import { expect, test, type Locator, type Page, type TestInfo } from "@playwrigh
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
+import { setRootFontSize } from "./support/chat-state-fixtures";
 import {
   closeOnScreenKeyboard,
   openOnScreenKeyboard,
@@ -536,7 +537,7 @@ test.describe("SHORT-VIEWPORT-001: mobile drawer on a short viewport", () => {
     await seedGuestConversations(page, 2);
     await page.setViewportSize({ width: 382, height: 560 });
     await page.goto("/chat?lang=en");
-    await page.addStyleTag({ content: "html { font-size: 32px !important; }" });
+    await setRootFontSize(page, 32);
     await openDrawer(page);
 
     await expectSingleScrollOwner(page, "200% text");

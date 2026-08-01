@@ -7,6 +7,7 @@ import {
   classifyProviderFailure,
   isProviderScopedFailureCategory,
   providerDiagnosticCode,
+  safeErrorMetadata,
   redactProviderText,
 } from "../lib/providerErrorClassification.ts";
 
@@ -66,7 +67,27 @@ test("providerDiagnosticCode still produces the shape the classifier matches", (
   assert.equal(classifyProbeError(code), "MODEL_NOT_FOUND");
 });
 
-// STG-R002: failure *scope* -- what a recorded failure is evidence of. The
+test("safeErrorMetadata excludes provider request and response payloads", () => {
+  const error = Object.assign(new Error("message includes SECRET_PROMPT"), {
+    name: "AI_APICallError",
+    code: "PROVIDER_FAILURE",
+    statusCode: 502,
+    isRetryable: true,
+    requestBodyValues: { prompt: "SECRET_PROMPT" },
+    responseBody: "SECRET_RESPONSE",
+  });
+
+  const serialized = JSON.stringify(safeErrorMetadata(error));
+  assert.deepEqual(safeErrorMetadata(error), {
+    name: "AI_APICallError",
+    code: "PROVIDER_FAILURE",
+    statusCode: 502,
+    isRetryable: true,
+  });
+  assert.doesNotMatch(serialized, /SECRET_PROMPT|SECRET_RESPONSE/);
+});
+
+ // STG-R002: failure *scope* -- what a recorded failure is evidence of. The
 // cases below are the ones that produced the Perplexity self-lock: a provider
 // answering "400 invalid_message" was counted identically to a 503, so five
 // rejections of one deep-research request pinned the whole provider (and every

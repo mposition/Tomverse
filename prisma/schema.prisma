@@ -23,6 +23,10 @@ model User {
   subscriptionCurrentPeriodEnd  DateTime?
   subscriptionBillingInterval   String?
   subscriptionCancelAtPeriodEnd Boolean       @default(false)
+  /// When the stored subscription state was read from Stripe. Webhooks arrive
+  /// out of order, so a snapshot read before this is refused rather than
+  /// reverting the account to an older plan. See lib/stripeWebhookSyncCore.ts.
+  subscriptionSyncedAt          DateTime?
   creditDebtCredits             Int           @default(0)
   creditDebtCostMicroUsd        BigInt        @default(0)
   billingRiskStatus             String        @default("normal")
@@ -71,6 +75,7 @@ model User {
   comparisonReviews      ComparisonReview[]
   productAnalyticsEvents ProductAnalyticsEvent[]
   privacyRequests        PrivacyRequest[]
+  planChangeRequests     PlanChangeRequest[]
 
   @@index([plan, id])
   @@index([createdAt])
@@ -1170,6 +1175,54 @@ model InfrastructureCreditConfig {
   updatedByEmail String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+}
+
+/// A Pro <-> Max plan change: the quote we showed, and the reservation it
+/// became. lib/planChangeStateMachine.ts owns every transition; this table only
+/// remembers them.
+///
+/// The row exists from the moment a quote is produced, because a confirm must
+/// prove it is executing the quote the customer saw -- `fingerprint` is every
+/// subscription fact the amount depended on, and a confirm against a moved
+/// subscription is refused rather than charged.
+model PlanChangeRequest {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  direction       String // "upgrade" | "downgrade"
+  execution       String // "immediate_upgrade" | "scheduled_downgrade"
+  fromTier        String
+  toTier          String
+  billingInterval String // "monthly" | "annual"
+  currency        String
+
+  stripeSubscriptionId     String
+  stripeSubscriptionItemId String
+  targetStripePriceId      String
+
+  fingerprint     String
+  /// "unaffected" | "cancellation_preserved" | "cancellation_cleared_by_explicit_consent"
+  renewalDecision String
+
+  /// What the customer was quoted, in the subscription's currency. Kept so
+  /// support can answer "how much was I told this would cost".
+  quotedAmountMinor Int?
+
+  /// "previewed" | "pending" | "applied" | "cancelled" | "expired" | "failed"
+  status           String    @default("previewed")
+  appliesAt        DateTime?
+  stripeScheduleId String?
+  confirmedAt      DateTime?
+  settledAt        DateTime?
+  failureCode      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, status])
+  @@index([stripeSubscriptionId, status])
+  @@index([status, createdAt])
 }
 
 model StripeWebhookEventLog {

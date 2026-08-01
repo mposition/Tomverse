@@ -25,6 +25,11 @@ export type PurchaseCtaCopy = {
   buyThisPack: string;
   currentPlan: string;
   upgradeTo: (plan: string) => string;
+  /**
+   * A move to a *lower* paid plan. "Upgrade to Pro" was what a Max subscriber
+   * used to be shown, which reads as a promotion and describes a demotion.
+   */
+  changePlanTo: (plan: string) => string;
   signInAndStart: (plan: string) => string;
   /** Label for a plan change this product cannot yet perform online. */
   managePlan: string;
@@ -50,6 +55,7 @@ export const purchaseCtaCopy: Record<Language, PurchaseCtaCopy> = {
     buyThisPack: "Buy this pack",
     currentPlan: "Current plan",
     upgradeTo: (plan) => `Upgrade to ${plan}`,
+    changePlanTo: (plan) => `Change to ${plan}`,
     signInAndStart: (plan) => `Sign in to start ${plan}`,
     managePlan: "Ask support to change plan",
     managePlanHint:
@@ -74,6 +80,7 @@ export const purchaseCtaCopy: Record<Language, PurchaseCtaCopy> = {
     buyThisPack: "이 팩 구매",
     currentPlan: "현재 플랜",
     upgradeTo: (plan) => `${plan}로 업그레이드`,
+    changePlanTo: (plan) => `${plan}(으)로 변경`,
     signInAndStart: (plan) => `로그인하고 ${plan} 시작`,
     managePlan: "고객지원에 플랜 변경 문의",
     managePlanHint:
@@ -98,6 +105,7 @@ export const purchaseCtaCopy: Record<Language, PurchaseCtaCopy> = {
     buyThisPack: "购买此积分包",
     currentPlan: "当前方案",
     upgradeTo: (plan) => `升级到 ${plan}`,
+    changePlanTo: (plan) => `切换到 ${plan}`,
     signInAndStart: (plan) => `登录后开通 ${plan}`,
     managePlan: "联系支持变更方案",
     managePlanHint: "目前尚不支持在线变更方案，支持团队可以为你完成变更。",
@@ -121,6 +129,7 @@ export const purchaseCtaCopy: Record<Language, PurchaseCtaCopy> = {
     buyThisPack: "Acheter ce pack",
     currentPlan: "Formule actuelle",
     upgradeTo: (plan) => `Passer à ${plan}`,
+    changePlanTo: (plan) => `Passer à ${plan}`,
     signInAndStart: (plan) => `Se connecter pour démarrer ${plan}`,
     managePlan: "Demander un changement au support",
     managePlanHint:
@@ -146,6 +155,7 @@ export const purchaseCtaCopy: Record<Language, PurchaseCtaCopy> = {
     buyThisPack: "Dieses Paket kaufen",
     currentPlan: "Aktueller Tarif",
     upgradeTo: (plan) => `Auf ${plan} upgraden`,
+    changePlanTo: (plan) => `Zu ${plan} wechseln`,
     signInAndStart: (plan) => `Anmelden und ${plan} starten`,
     managePlan: "Tarifwechsel beim Support anfragen",
     managePlanHint:
@@ -171,6 +181,7 @@ export const purchaseCtaCopy: Record<Language, PurchaseCtaCopy> = {
     buyThisPack: "Comprar este paquete",
     currentPlan: "Plan actual",
     upgradeTo: (plan) => `Actualizar a ${plan}`,
+    changePlanTo: (plan) => `Cambiar a ${plan}`,
     signInAndStart: (plan) => `Inicia sesión para empezar con ${plan}`,
     managePlan: "Pedir el cambio a soporte",
     managePlanHint:
@@ -196,6 +207,7 @@ export const purchaseCtaCopy: Record<Language, PurchaseCtaCopy> = {
     buyThisPack: "Comprar este pacote",
     currentPlan: "Plano atual",
     upgradeTo: (plan) => `Fazer upgrade para ${plan}`,
+    changePlanTo: (plan) => `Mudar para ${plan}`,
     signInAndStart: (plan) => `Entrar para começar no ${plan}`,
     managePlan: "Pedir a mudança ao suporte",
     managePlanHint:

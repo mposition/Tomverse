@@ -126,9 +126,27 @@ test("an active account with nothing revoked keeps its session", () => {
   );
 });
 
-test("a failed snapshot lookup does not sign the user out", () => {
-  // Fail-open only for infrastructure errors: signing every user out on a
-  // transient database blip would be its own outage.
+test("a failed snapshot lookup rejects the session", () => {
+  assert.equal(
+    sessionRevocationReason({
+      issuedAt: Date.now(),
+      snapshot: { lookupStatus: "lookup-error" },
+    }),
+    "lookup-error"
+  );
+});
+
+test("a token whose user no longer exists is rejected", () => {
+  assert.equal(
+    sessionRevocationReason({
+      issuedAt: Date.now(),
+      snapshot: { lookupStatus: "user-not-found" },
+    }),
+    "user-not-found"
+  );
+});
+
+test("the isolated E2E database bypass remains explicit", () => {
   assert.equal(
     sessionRevocationReason({ issuedAt: Date.now(), snapshot: null }),
     null

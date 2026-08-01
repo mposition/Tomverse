@@ -1,0 +1,12 @@
+-- Stripe does not guarantee webhook delivery order, and the handler wrote the
+-- event's own payload straight into the account. An event generated before a
+-- plan change but delivered after it therefore reverted the account to the
+-- older plan, with nothing to detect it.
+--
+-- Every handled event now re-reads the subscription from Stripe and stamps the
+-- read with when it was taken. This column holds that stamp so a snapshot read
+-- earlier than the stored one can be refused instead of applied.
+--
+-- Nullable with no backfill: an account that has never been re-synced has no
+-- observation to compare against, and the first sync is always accepted.
+ALTER TABLE "User" ADD COLUMN "subscriptionSyncedAt" TIMESTAMP(3);
