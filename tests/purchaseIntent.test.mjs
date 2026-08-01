@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildCreditPackReturnUrls,
+  buildPlanChangeSupportHref,
   buildPricingIntentHref,
   buildPurchaseSignInHref,
   classifyBillingError,
@@ -217,6 +218,20 @@ test("the sign-in callback is sanitised with the same rules as a Stripe return",
     buildPurchaseSignInHref("//evil.com"),
     `/auth/signin?callbackUrl=${encodeURIComponent("/pricing")}`
   );
+});
+
+test("a plan change nobody can do online lands on the support form, categorised", () => {
+  // The CTA used to point at /chat "handled in account settings". Account
+  // settings can cancel a subscription, not change one, so that was a dead end
+  // dressed as a destination. Support genuinely does handle plan changes today
+  // (see docs/policy/plan-change.md), and arriving with the category already
+  // set is what makes it a handoff rather than a generic contact page.
+  assert.equal(
+    buildPlanChangeSupportHref("ko"),
+    "/support?topic=billing&lang=ko"
+  );
+  // An unknown language is dropped rather than echoed into the URL.
+  assert.equal(buildPlanChangeSupportHref("xx"), "/support?topic=billing");
 });
 
 test("a 401 is only a session expiry when there was a session to expire", () => {

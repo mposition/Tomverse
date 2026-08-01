@@ -421,6 +421,33 @@ export const requiresSupport = (code: BillingErrorCode) =>
   !requiresReauthentication(code) &&
   !isSelfResolvableBillingError(code);
 
+/**
+ * Support-form topic the plan-change CTA opens on.
+ *
+ * Mirrors the `billing` key in SupportPageContent's `types` map. Plan changes
+ * are handled as a written support request until the flow in
+ * docs/policy/plan-change.md is built, so this is the CTA's real destination --
+ * not a placeholder for one.
+ */
+export const PLAN_CHANGE_SUPPORT_TOPIC = "billing";
+
+/**
+ * Where a visitor goes when they want a plan change this product cannot yet
+ * perform online.
+ *
+ * The CTA used to point at `/chat` with "handled in account settings", which
+ * was not true: account settings can cancel a subscription, not change one.
+ * Sending someone to a screen that cannot do the thing is the same dead end as
+ * a checkout that answers 409, just slower to discover.
+ */
+export function buildPlanChangeSupportHref(lang: string): string {
+  const params = new URLSearchParams();
+  params.set("topic", PLAN_CHANGE_SUPPORT_TOPIC);
+  const language = normalizePurchaseLanguage(lang);
+  if (language) params.set("lang", language);
+  return `/support?${params.toString()}`;
+}
+
 export type AccountPlanTier = "Free" | "Pro" | "Max";
 export type PricingPlanCtaState =
   | "loading"
