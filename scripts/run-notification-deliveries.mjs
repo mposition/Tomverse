@@ -1,6 +1,6 @@
 // Forces a pass over the operator-notification retry queue.
 //
-// The queue also drains from the five-minute credit reconciliation cron, so
+// The queue also drains from the fifteen-minute credit reconciliation cron, so
 // this script is for running it on demand -- typically right after fixing a
 // mail configuration, instead of waiting for the next tick.
 const baseUrl =

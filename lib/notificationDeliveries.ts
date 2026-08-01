@@ -57,11 +57,11 @@ const DEFAULT_BATCH_SIZE = 25;
 /**
  * Batches one drain will run before stopping. A pass keeps going while there
  * is due work, so a backlog clears in one cron tick rather than 25 rows per
- * five minutes -- but not without end: the cap and the time budget below keep
+ * tick -- but not without end: the cap and the time budget below keep
  * a pathological queue from monopolising the runner.
  */
 const DEFAULT_MAX_BATCHES = 40;
-/** Wall-clock budget for one drain, well inside the five-minute cadence. */
+/** Wall-clock budget for one drain, well inside the fifteen-minute cadence. */
 const DEFAULT_TIME_BUDGET_MS = 120_000;
 /**
  * Queue depth that stops being ordinary. Reported so a backlog is visible

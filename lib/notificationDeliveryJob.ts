@@ -17,7 +17,7 @@ import {
  * console reads.
  *
  * Two callers share it: the dedicated maintenance endpoint, and the credit
- * reconciliation cron that already runs every five minutes. Having both means
+ * reconciliation cron that already runs every fifteen minutes. Having both means
  * the queue keeps draining on an existing schedule -- no new cron entry has to
  * be provisioned before this starts working -- while still offering an
  * explicit endpoint to run or re-run it on demand.
