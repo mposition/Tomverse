@@ -68,9 +68,9 @@ export function PlatformSettingsPanel({ settings }: Props) {
         throw new Error(data?.error || "Settings reload failed");
       }
       applySettings(data.settings);
-      dispatchAppToast("Platform settings loaded from DB.", "success");
+      dispatchAppToast("Platform settings reloaded. The form now matches what is stored.", "success");
     } catch {
-      dispatchAppToast("Failed to load platform settings.", "error");
+      dispatchAppToast("Platform settings could not be reloaded, so the form still shows the values it had. Retry before editing.", "error");
     } finally {
       setIsLoading(false);
     }
@@ -97,9 +97,9 @@ export function PlatformSettingsPanel({ settings }: Props) {
         throw new Error(data?.error || "Settings save failed");
       }
       applySettings(data.settings);
-      dispatchAppToast("Platform settings saved to DB.", "success");
+      dispatchAppToast("Platform settings saved and are live.", "success");
     } catch {
-      dispatchAppToast("Failed to save platform settings.", "error");
+      dispatchAppToast("Platform settings were not saved. Nothing changed -- retry, or reload to discard the edit.", "error");
     } finally {
       setIsSaving(false);
     }

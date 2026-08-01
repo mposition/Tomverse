@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Loader2, MessageSquarePlus } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
+import { describeAdminApiFailure } from "@/lib/adminApiOutcome";
 
 type AdminNote = {
   id: string;
@@ -40,16 +41,25 @@ export function AdminNotesBox({ targetType, targetId }: Props) {
           cache: "no-store",
         });
         const data = (await response.json().catch(() => null)) as
-          | { notes?: AdminNote[]; error?: string }
+          | { notes?: AdminNote[]; error?: string; code?: string }
           | null;
         if (!response.ok || !data?.notes) {
-          throw new Error(data?.error || "Failed to load notes.");
+          if (!cancelled) {
+            const failure = describeAdminApiFailure({
+              status: response.status,
+              error: data?.error,
+              code: data?.code,
+              fallback: `Existing notes on this ${targetType.toLowerCase()} could not be loaded, so the list below is incomplete.`,
+            });
+            dispatchAppToast(failure.message, failure.tone);
+          }
+          return;
         }
         if (!cancelled) setNotes(data.notes);
-      } catch (error) {
+      } catch {
         if (!cancelled) {
           dispatchAppToast(
-            error instanceof Error ? error.message : "Failed to load notes.",
+            `Existing notes on this ${targetType.toLowerCase()} could not be loaded, so the list below is incomplete.`,
             "error"
           );
         }
@@ -74,17 +84,28 @@ export function AdminNotesBox({ targetType, targetId }: Props) {
         body: JSON.stringify({ targetType, targetId, body: trimmed }),
       });
       const data = (await response.json().catch(() => null)) as
-        | { note?: AdminNote; error?: string }
+        | { note?: AdminNote; error?: string; code?: string; approvalId?: string }
         | null;
       if (!response.ok || !data?.note) {
-        throw new Error(data?.error || "Failed to save note.");
+        const failure = describeAdminApiFailure({
+          status: response.status,
+          error: data?.error,
+          code: data?.code,
+          approvalId: data?.approvalId,
+          // The draft is deliberately left in the box on failure, and the
+          // message says so -- an operator who has just written a long note
+          // needs to know it was not thrown away.
+          fallback: "The note was not saved. Your text is still in the box -- retry.",
+        });
+        dispatchAppToast(failure.message, failure.tone);
+        return;
       }
       setNotes((current) => [data.note!, ...current]);
       setBody("");
-      dispatchAppToast("Admin note saved.", "success");
-    } catch (error) {
+      dispatchAppToast(`Admin note saved on this ${targetType.toLowerCase()}.`, "success");
+    } catch {
       dispatchAppToast(
-        error instanceof Error ? error.message : "Failed to save note.",
+        "The note was not saved. Your text is still in the box -- retry.",
         "error"
       );
     } finally {
