@@ -5,6 +5,7 @@ Pro ↔ Max 플랜 변경에 관한 승인된 정책입니다. **정책은 확�
 
 관련 파일을 바꾸기 전에 읽어 주세요.
 
+- `lib/planChangeStateMachine.ts` — 허용 판정 · preview 유효성 · 예약 상태기계
 - `lib/planChangeCredits.ts`의 `planCreditsAfterPlanChange()`
 - `lib/purchaseIntent.ts`의 `resolvePlanCtaState()`
 - `app/api/billing/checkout/route.ts`의 플랜 변경 차단 분기
@@ -122,9 +123,19 @@ payment_behavior   = pending_if_incomplete
 업그레이드와 다운그레이드가 **같은 함수 하나**를 쓴다는 점이 중요합니다. 방향별로
 식을 따로 두면 경계 동작이 서로 어긋납니다.
 
-Stripe Customer Portal도 기간 말 다운그레이드를 지원하지만, 대상 가격들이 **같은
-Stripe Product에 속해야 한다**는 제한이 있습니다. Portal을 쓸지 결정하기 전에
-현재 Pro · Max의 Product 구성을 확인해야 합니다(6절 참조).
+### Customer Portal은 실행 주체가 아닙니다 (정정)
+
+이전 판에서는 "Pro와 Max가 같은 Product면 Portal로 기간 말 다운그레이드가
+가능하다"고 적었습니다. **절반만 맞습니다.** Portal은 하나의 Product에 **같은
+recurring interval을 가진 Price를 여러 개** 두지 못하게 제한합니다. 승인된
+다운그레이드는 정의상 동일 interval(월간→월간, 연간→연간)이므로, **Product를
+어떻게 나누든 Portal에는 담기지 않습니다.**
+
+따라서 Pro↔Max 변경은 **Tomverse 서버가 Stripe를 직접 호출**해 수행합니다.
+Portal은 결제수단 · 청구서 · 단순 구독 해지 용도로 계속 씁니다. 상태 모델이
+Portal을 전제해서는 안 되며, `lib/planChangeStateMachine.ts`의 실행 모드는
+Stripe 화면이 아니라 **Tomverse가 하는 일**로 이름 붙였습니다
+(`immediate_upgrade` · `scheduled_downgrade`).
 
 참고: [Stripe Customer Portal 설정](https://docs.stripe.com/customer-management/configure-portal)
 
@@ -216,13 +227,123 @@ Stripe는 웹훅 전달 순서를 보장하지 않으므로, 오래된 이벤트
 `resolvePlanCtaState()`는 서버 · 웹훅 구현이 **전부 끝난 뒤에** 전용 변경 화면으로
 연결합니다.
 
-## 6. 아직 확인이 필요한 것
+### 상태기계 구현 완료 (2026-08-01)
 
-크레딧 정책은 확정됐습니다(1 · 2절). 남은 것은 하나입니다.
+`lib/planChangeStateMachine.ts`. Stripe client도 Prisma도 시계도 갖지 않는 순수
+모듈이라, 운영에서만 드러나는 중복 · 역순 경우까지 전부 test로 고정됩니다
+(`tests/planChangeStateMachine.test.mjs`, 30개).
 
-- **Stripe Product 구성 확인.** Pro와 Max 가격이 같은 Product에 속하는지 확인해야
-  Customer Portal을 다운그레이드에 쓸 수 있는지 정해집니다. 별개 Product라면
-  Subscription Schedule을 직접 다뤄야 합니다.
+- **판정.** `resolvePlanChange()`가 방향(`upgrade`/`downgrade`)과 실행 모드
+  (`immediate_upgrade`/`scheduled_downgrade`)를 정합니다. preview와 confirm이
+  **같은 함수**를 쓰므로 preview가 제시하지 않은 변경을 confirm이 실행할 수
+  없습니다.
+- **거부 코드.** 전부 409입니다(요청이 아니라 계정 상태와의 충돌이므로).
+
+  | 코드 | 상황 |
+  |---|---|
+  | `NO_ACTIVE_SUBSCRIPTION` | 구독 없음 — 변경이 아니라 신규 구매 |
+  | `SUBSCRIPTION_NOT_CHANGEABLE` | 변경 불가 상태 · 통화/기간 불명 · 저장 플랜 불일치 |
+  | `PLAN_CHANGE_NOT_SUPPORTED` | 동일 플랜 |
+  | `BILLING_INTERVAL_CHANGE_NOT_SUPPORTED` | interval 불일치 또는 불명 |
+  | `SUBSCRIPTION_NOT_SINGLE_ITEM` | item이 1개가 아님 |
+  | `PLAN_CHANGE_ALREADY_PENDING` | 결제 · 인증 대기 중인 변경이 있음 |
+  | `PLAN_CHANGE_ALREADY_SCHEDULED` | 이미 예약된 변경이 있음 |
+  | `SUBSCRIPTION_SCHEDULE_CONFLICT` | 우리가 만들지 않은 schedule이 구독을 몰고 있음 |
+  | `PLAN_CHANGE_BLOCKED_BY_CANCELLATION` | 기간 말 해지 예약 상태에서의 다운그레이드 |
+
+- **`past_due`는 변경 불가.** `/api/billing/checkout`은 `past_due`를 "활성"으로
+  세지만(두 번째 구독을 막기 위해) 여기서는 아닙니다. 직전 청구가 실패한 계정에
+  업그레이드 invoice를 발행하면 실패 invoice가 하나 더 생기고 권한 상태를 아무도
+  설명할 수 없게 됩니다. 미납 해소가 먼저입니다.
+- **`cancel_at_period_end` 자동 해제 없음.** 상태기계에는 "업그레이드했으니
+  해제한다"는 값 자체가 없습니다. 업그레이드 확인은 플랜 변경에 대한 동의이지
+  갱신 재개에 대한 동의가 아닙니다. 해제는 별도 label을 가진 별도 control에서 온
+  `resumeRenewal`이 있을 때만
+  (`cancellation_cleared_by_explicit_consent`) 일어납니다.
+- **해지 예약 중 다운그레이드는 거부.** 구독이 기간 말에 끝나는데 그 다음 기간에
+  Pro를 예약하면 해지된 구독을 조용히 되살립니다. 요청한 것보다 큰 변경입니다.
+- **preview 만료 · stale.** `planChangeStateFingerprint()`가 견적이 의존하는
+  구독 사실을 전부 담고, `checkPlanChangePreview()`가 TTL(10분) · 소유자 · 대상 ·
+  fingerprint를 확인합니다. 나이가 음수면(앞선 시계가 쓴 record) 영원히 신선한
+  것으로 보지 않고 만료로 처리합니다.
+- **confirm 멱등성.** `planChangeIdempotencyKey(previewId)`. 더블클릭 · 재시도 ·
+  뒤로 가기 재전송이 같은 key를 들고 갑니다. **실패한** 결제의 재시도는 새 preview
+  부터 시작해 새 key를 받습니다 — 실패 원인이 견적을 바꿨을 수 있기 때문입니다.
+- **예약 상태기계.** `pending → applied | cancelled | expired | failed`, terminal
+  상태는 되돌아가지 않습니다. 중복 전달은 `already_in_state`로 따로 보고해서
+  경보 대상과 구분합니다.
+- **예약 취소.** `checkPlanChangeCancellation()`. 기준은 웹훅 도착이 아니라 적용
+  경계 시각입니다. `appliesAt` 이후에는 Stripe가 이미 옮겼을 수 있으므로 거부하고
+  웹훅이 정리하게 둡니다.
+- **감사 · Support.** `PLAN_CHANGE_AUDIT_ACTIONS`와
+  `describePlanChangeForSupport()`. 조회용 식별자만 담고 이메일 · 이름 · 금액은
+  담지 않습니다.
+
+## 6. Stripe 구성 확인 결과 (2026-08-01, 읽기 전용)
+
+Stripe MCP는 이 계정의 **live key**에 연결돼 있습니다(`acct_1Trz6uCqxdHJo2tM`,
+Tomverse). 조회 결과는 전부 `livemode: true`였습니다. **test mode는 이 연결로
+조회할 수 없어 미확인 상태입니다** — 별도 test key 연결이 필요합니다.
+
+### 구독 Product · Price (live)
+
+| 플랜 | Product | interval | Price (USD) | 그 외 통화 |
+|---|---|---|---|---|
+| Pro | `prod_UrluLVYli6IfRH` "Tomverse Pro" | month | `price_1Ts2MJCqxdHJo2tMB7ZxI6HY` $15.00 | aud · cny · eur · krw 각 1개 |
+| Pro | 〃 | year | `price_1Ts2MmCqxdHJo2tMdYo6So4t` $144.00 | aud · cny · eur · krw 각 1개 |
+| Max | `prod_UrlvgqTdnuv1H0` "Tomverse Max" | month | `price_1Ts2NxCqxdHJo2tMlydhPsIU` $25.00 | aud · cny · eur · krw 각 1개 |
+| Max | 〃 | year | `price_1Ts2OCCqxdHJo2tMtCoU8mbK` $240.00 | aud · cny · eur · krw 각 1개 |
+
+- **Pro와 Max는 별개 Product입니다.** 2절의 정정과 합치면 결론은 하나입니다 —
+  Portal은 쓸 수 없고, 서버가 직접 Price를 교체하고 Schedule을 관리합니다.
+- 모든 구독 Price가 `active: true`, `tax_behavior: "exclusive"`,
+  `recurring.interval_count: 1`, `billing_scheme: "per_unit"`,
+  `usage_type: "licensed"`로 **일관**합니다. 교체 시 tax behavior 불일치 문제는
+  없습니다.
+- 통화는 플랜당 interval마다 usd · aud · cny · eur · krw 5종입니다. 교체 대상
+  Price는 **현재 구독의 통화와 interval에 맞는 것 하나**로 정해집니다.
+  `resolvePlanChange()`가 통화 불명이면 거부하는 이유입니다.
+- 크레딧 팩은 별개 Product 3개(`prod_Ut3gUosDx9GkoH` ·
+  `prod_Ut3hoW5WcwGCJ4` · `prod_Ut3i15xlY1yc81`), 전부 `type: "one_time"`이라
+  구독 변경과 무관합니다.
+
+### 실제 구독 (live, 3건)
+
+- 전부 **item 1개**입니다(`total_count: 1`). `SUBSCRIPTION_NOT_SINGLE_ITEM`은
+  방어용이며 현재 위반 사례는 없습니다.
+- 전부 `schedule: null`, `pending_update: null`입니다. 기존 schedule과의 충돌은
+  현재 없습니다.
+- 3건 중 **2건이 `cancel_at_period_end: true`**입니다. 해지 예약 상태는 예외가
+  아니라 흔한 경우이므로, 자동 해제 금지와 해지 중 다운그레이드 거부가 실제로
+  자주 걸립니다.
+- 모두 `billing_mode.type: "flexible"`(`proration_discounts: "included"`)입니다.
+- 모두 promotion code discount가 붙어 있습니다. **proration preview에 할인이
+  반영되므로 금액을 자체 계산하지 말고 Stripe preview 값을 그대로 보여줘야
+  합니다.**
+- 구독 item의 Price는 위 표의 catalogue Price와 일치합니다
+  (`price_1Ts2MJCqxdHJo2tMB7ZxI6HY`).
+
+### Customer Portal configuration (live)
+
+- **설정된 configuration이 없습니다**(`/v1/billing_portal/configurations`가 빈
+  목록). 따라서 `subscription_update`나 `schedule_at_period_end` 설정도 없습니다.
+  Portal을 플랜 변경 경로로 쓰지 않기로 한 결정과 충돌하지 않습니다.
+
+### 확인 중 드러난 별건
+
+`app/api/billing/checkout/route.ts`의 `buildCheckoutLineItem()`은 catalogue
+Price ID가 아니라 `price_data`(+ `product: plan.stripeProductId`)로 구독을
+만듭니다. `BillingPlanConfig`에는 `stripePriceId` ·
+`stripeAnnualPriceId` 필드가 있지만 구독 Checkout이 쓰지 않습니다. 플랜 변경은
+**Price ID를 지정해 item을 교체**해야 하므로, 3단계에서 대상 Price를 어떻게
+고르는지(플랜 · interval · 통화 → Price ID) 명시적으로 정해야 합니다. 이번
+변경 범위 밖이라 손대지 않았습니다.
+
+### 남은 확인
+
+- **test mode 동일 항목 재확인.** 위 표와 같은 Product · Price 구성이 test
+  mode에도 있는지, Price ID가 무엇인지 확인해야 3단계를 test mode에서 검증할 수
+  있습니다.
 
 ## 7. 구현 순서
 
@@ -233,10 +354,12 @@ pending update부터 "결제는 됐는데 권한이 되돌아간" 상태가 나�
 1. ~~**크레딧 경제성 결정**~~ — 확정. `lib/planChangeCredits.ts`에
    `planCreditsAfterPlanChange()`로 인코딩했고 `tests/planChangeCredits.test.mjs`가
    양방향 경계를 고정합니다.
-2. **서버 변경 상태기계** — 허용/거부 판정(같은 interval인지, 방향이 무엇인지),
-   예약 상태, 실패 시 원복. preview · confirm 엔드포인트. **다음 단계.**
+2. **서버 변경 상태기계** — 판정 · preview 유효성 · 예약 상태기계는
+   `lib/planChangeStateMachine.ts`로 완료(5절). preview · confirm **엔드포인트는
+   아직**이며, 3단계의 Stripe 호출과 함께 붙입니다.
 3. **Stripe 결제 · 예약** — proration preview, `always_invoice` +
-   `pending_if_incomplete`, Subscription Schedule
+   `pending_if_incomplete`, Subscription Schedule, preview · confirm ·
+   예약 취소 엔드포인트. **다음 단계.**
 4. ~~**웹훅 · 재동기화**~~ (4절) — 완료
 5. **CTA 변경** — `resolvePlanCtaState()`의 `manage_plan` 분기를 전용 변경 화면으로
    교체
