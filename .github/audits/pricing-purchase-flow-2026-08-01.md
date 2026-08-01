@@ -56,7 +56,7 @@
 | `components/marketing/usePricingAccount.ts` | `useSession()` + 권위 있는 `/api/user/usage` 를 합쳐 인증 상태 · 실제 플랜 · 활성 구독 여부를 제공. |
 | `tests/purchaseIntent.test.mjs` | 위 모듈의 단위 테스트 24건. |
 | `tests/e2e/pricing-purchase-cta.spec.ts` | 요금 페이지 구매 funnel 전용 E2E 25건. |
-| `prisma/migrations/20260801120000_add_credit_pack_purchase_funnel_events/` | analytics event 이름 CHECK 제약 동기화. |
+| `prisma/migrations/20260801130000_add_credit_pack_purchase_funnel_events/` | analytics event 이름 CHECK 제약 동기화. |
 
 ### 수정
 
@@ -230,7 +230,7 @@ canonical 이 아니므로 시각 golden 판정에는 쓰지 않습니다. 이 s
   그대로이며, `success_url` / `cancel_url` 은 요청마다 API 가 생성하므로 Stripe
   측 설정 항목이 아닙니다.
 - **환경변수 변경 없음.**
-- **DB migration 1건 필요**: `20260801120000_add_credit_pack_purchase_funnel_events`.
+- **DB migration 1건 필요**: `20260801130000_add_credit_pack_purchase_funnel_events`.
   `ProductAnalyticsEvent_name_check` 제약을 새 event 6종을 포함하도록
   교체합니다. 데이터 이동이 없고 되돌릴 수 있습니다.
 - GA4: 신규 custom event 6종(`credit_pack_cta_view`, `credit_pack_cta_click`,
