@@ -182,15 +182,24 @@ test("groq has no publicly selectable model left", () => {
   );
 });
 
+// Standing decision, reaffirmed after Groq's deprecation notice named
+// openai/gpt-oss-* as the Llama successors -- see the note above
+// AVAILABLE_MODELS' Llama block for why it is declined. Asserted against the
+// whole catalogue rather than only the public list, because the tempting way
+// in is a hidden row existing purely to be a retirement's replacement target.
 test("GPT-OSS is absent from the catalogue entirely", () => {
-  const gptOss = CATALOG.filter((model) =>
-    /gpt-oss/i.test(`${model.id} ${model.name} ${model.apiModel}`)
-  );
-  assert.deepEqual(gptOss.map((model) => model.id), []);
+  const matchesGptOss = (model: AiModel) =>
+    /gpt-?oss/i.test(`${model.id} ${model.name} ${model.apiModel}`);
+
+  assert.deepEqual(CATALOG.filter(matchesGptOss).map((model) => model.id), []);
   assert.deepEqual(
-    PUBLIC_MODELS.filter((model) =>
-      /gpt-oss/i.test(`${model.id} ${model.name} ${model.apiModel}`)
-    ).map((model) => model.id),
+    PUBLIC_MODELS.filter(matchesGptOss).map((model) => model.id),
+    []
+  );
+  // Not reachable as a replacement either, hidden or otherwise.
+  assert.deepEqual(
+    CATALOG.filter((model) => /gpt-?oss/i.test(model.replacementModelId ?? ""))
+      .map((model) => model.id),
     []
   );
 });

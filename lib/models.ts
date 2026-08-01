@@ -183,15 +183,30 @@ export const AVAILABLE_MODELS = [
     { id: "gemini-2-5-pro", name: "Gemini 2.5 Pro", apiModel: "gemini-2.5-pro", provider: "google", icon: "✨", bestFor: "Legacy multimodal analysis", minimumPlan: "Free", usageClass: "advanced", replacementModelId: "gemini-3-1-pro", publiclyListed: false, enabled: false, status: "disabled", inputCapabilities: FULL_BINARY_INPUT },
     { id: "gemini-2-5-flash", name: "Gemini 3.1 Flash-Lite", apiModel: "gemini-3.1-flash-lite", provider: "google", icon: "✨", bestFor: "Low-cost everyday tasks and quick file questions", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
 
-    // Llama is retired from the public catalogue. Tomverse never self-hosted
-    // it -- every Llama answer was served through Groq -- and Groq is ending
-    // public hosting for the three models mapped here (see
-    // https://console.groq.com/docs/deprecations). Groq's suggested
-    // successors are the open-weight openai/gpt-oss-* models, which are
-    // deliberately NOT adopted: they are open-weight models, not OpenAI's
-    // hosted GPT line, and listing them would either misrepresent them or
-    // add an unreviewed product category purely to keep a provider's model
-    // count from reaching zero.
+    // STANDING DECISION -- openai/gpt-oss-* is not added to this catalogue.
+    //
+    // Groq's deprecation notice recommends the open-weight openai/gpt-oss-20b
+    // and openai/gpt-oss-120b as the successors to the Llama models below, so
+    // "just point Llama at GPT-OSS" is the obvious-looking fix and has been
+    // proposed twice. It is declined for two reasons that do not expire:
+    //
+    //   * GPT-OSS is an open-weight line, not OpenAI's hosted GPT models.
+    //     Listing it beside gpt-5-5 / gpt-5-4-mini implies a lineage it does
+    //     not have.
+    //   * Adding it to stop a provider's public model count reaching zero is
+    //     not a product reason. Groq having no listed model is an accurate
+    //     description of what Tomverse currently offers.
+    //
+    // If it is ever wanted, it needs its own product review and its own
+    // category ("Groq" or "Open Models") -- not a replacement pointer. Pinned
+    // by "GPT-OSS is absent from the catalogue entirely" in
+    // tests/model-lifecycle, which fails on any entry whose id, name or
+    // apiModel matches, so it cannot be smuggled in as a hidden row either.
+    //
+    // Llama itself is retired because Tomverse never self-hosted it -- every
+    // Llama answer was served through Groq -- and Groq is ending public
+    // hosting for the three models mapped here
+    // (https://console.groq.com/docs/deprecations).
     //
     // The three entries stay in the catalogue as historical rows so stored
     // conversations, the credit ledger and admin history keep resolving their
