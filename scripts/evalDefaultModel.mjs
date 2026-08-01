@@ -36,6 +36,7 @@
 //
 // Requires OPENAI_API_KEY.
 
+import { execFileSync } from "node:child_process";
 import { generateText, tool } from "ai";
 import { z } from "zod";
 import { getActiveAiModel } from "../lib/activeAiModel.ts";
@@ -300,6 +301,50 @@ const wilsonInterval = (successes, total, z = 1.96) => {
     };
 };
 
+/**
+ * Per-scenario samples needed before a per-scenario verdict means anything.
+ *
+ * The headline rules (error rate, empty rate) pool every scenario, so 300 runs
+ * per arm gives them ~0.33pp resolution. The per-scenario rule does not pool:
+ * at `--repeats=25` a scenario has 25 samples, so its success rate can only
+ * move in 4pp steps. A "no more than a 5pp drop" rule against a 4pp grid can
+ * only ever see 0pp (pass) or 8pp (fail) near its own threshold -- it cannot
+ * resolve the boundary it is written on. 100 samples puts the grid at 1pp.
+ */
+const PER_SCENARIO_MIN_RUNS_FOR_VERDICT = 100;
+
+const gitOutput = (args) => {
+  try {
+    return execFileSync("git", args, { encoding: "utf8" }).trim();
+  } catch {
+    return "";
+  }
+};
+
+const gitCommitSha = () => gitOutput(["rev-parse", "HEAD"]) || "unknown";
+
+/** A dirty tree means the commit SHA does not describe what actually ran. */
+const gitWorkingTreeDirty = () =>
+  gitOutput(["status", "--porcelain"]).length > 0;
+
+/**
+ * Provider errors are echoed into the saved artifact, and an SDK is free to
+ * put a request URL or a header dump in its message. Nothing that looks like a
+ * credential reaches the file.
+ */
+const redactSecrets = (message) => {
+  const key = process.env.OPENAI_API_KEY?.trim();
+  return (key ? message.split(key).join("[REDACTED_API_KEY]") : message)
+    .replace(/\b(sk|rk)-[A-Za-z0-9_-]{8,}/g, "[REDACTED_API_KEY]")
+    .replace(/(authorization|api[-_]?key)(\s*[:=]\s*)\S+/gi, "$1$2[REDACTED]");
+};
+
+/** Errors that say "try again later" rather than "this arm is unhealthy". */
+const isTransientProviderError = (message) =>
+  /\b429\b|rate.?limit|overloaded|timeout|timed out|ECONNRESET|503|502|temporarily/i.test(
+    message
+  );
+
 const percentile = (values, fraction) => {
   if (values.length === 0) return 0;
   const sorted = [...values].sort((left, right) => left - right);
@@ -355,6 +400,11 @@ const runOnce = async (arm, scenario) => {
   return {
     empty,
     passed: empty ? false : Boolean(scenario.check(text, result)),
+    // Kept so the blinded qualitative review has something to read. These are
+    // answers to this file's own fixed prompts -- there is no user content in
+    // them, and no credential is ever recorded alongside.
+    text,
+    toolCalls: (result.toolCalls ?? []).map((call) => call.toolName),
     latencyMs,
     inputTokens: usage.inputTokens ?? 0,
     outputTokens: usage.outputTokens ?? 0,
@@ -390,35 +440,65 @@ const main = async () => {
 
   const records = [];
   const summaries = [];
+  const startedAt = new Date().toISOString();
 
-  for (const arm of arms) {
-    const runs = [];
-    const errors = [];
-    console.log(`== arm ${arm.name} (${arm.modelId}, effort=${arm.reasoningEffort ?? "unset"})`);
-
-    for (const scenario of scenarios) {
-      let scenarioPasses = 0;
-      for (let repeat = 0; repeat < repeats; repeat += 1) {
+  // Arms are interleaved rather than run one after another.
+  //
+  // Running every baseline call, then every "none" call, and so on hands each
+  // arm a different slice of the provider's day: a rate-limit window, a
+  // capacity dip or a deploy on the provider side lands entirely on whichever
+  // arm was running at the time, and shows up as that arm being slower or
+  // more error-prone. Round-robin puts all four arms in the same conditions
+  // for each repeat, so a provider-side wobble hits them together instead of
+  // biasing one. It does not remove the need for an independent re-run, but it
+  // stops the ordering itself from being the explanation.
+  for (const scenario of scenarios) {
+    const perArmPasses = new Map(arms.map((arm) => [arm.name, 0]));
+    for (let repeat = 0; repeat < repeats; repeat += 1) {
+      for (const arm of arms) {
+        const attemptedAt = new Date().toISOString();
         try {
           const run = await runOnce(arm, scenario);
-          runs.push({ ...run, scenarioId: scenario.id });
-          records.push({ arm: arm.name, scenarioId: scenario.id, ...run });
-          if (run.passed) scenarioPasses += 1;
-        } catch (error) {
-          errors.push({ scenarioId: scenario.id, message: String(error) });
           records.push({
             arm: arm.name,
+            modelId: arm.modelId,
             scenarioId: scenario.id,
-            error: String(error),
+            workload: scenario.workload,
+            repeat,
+            attemptedAt,
+            ...run,
+          });
+          if (run.passed) {
+            perArmPasses.set(arm.name, perArmPasses.get(arm.name) + 1);
+          }
+        } catch (error) {
+          const message = redactSecrets(String(error));
+          records.push({
+            arm: arm.name,
+            modelId: arm.modelId,
+            scenarioId: scenario.id,
+            workload: scenario.workload,
+            repeat,
+            attemptedAt,
+            error: message,
+            transient: isTransientProviderError(message),
           });
         }
       }
-      console.log(
-        `   ${scenario.id.padEnd(24)} ${scenarioPasses}/${repeats} (${scenario.workload})`
-      );
     }
+    console.log(
+      `   ${scenario.id.padEnd(24)} ${arms
+        .map((arm) => `${arm.name}=${perArmPasses.get(arm.name)}/${repeats}`)
+        .join("  ")}`
+    );
+  }
 
-    const attempted = runs.length + errors.length;
+  for (const arm of arms) {
+    const armRecords = records.filter((record) => record.arm === arm.name);
+    const runs = armRecords.filter((record) => !record.error);
+    const errors = armRecords.filter((record) => record.error);
+
+    const attempted = armRecords.length;
     const latencies = runs.map((run) => run.latencyMs);
     const passedCount = runs.filter((run) => run.passed).length;
     const emptyCount = runs.filter((run) => run.empty).length;
@@ -436,6 +516,11 @@ const main = async () => {
       emptyResponseRateUpper95: wilsonInterval(emptyCount, attempted).upper,
       providerErrorRate: attempted === 0 ? 0 : errors.length / attempted,
       emptyResponseRate: attempted === 0 ? 0 : emptyCount / attempted,
+      // Separated so a run that hit a rate limit is not read as a run where
+      // the model failed. Transient errors still count against the error rate
+      // -- they were real failed requests -- but they are the first thing to
+      // check before blaming an arm.
+      transientErrorCount: errors.filter((entry) => entry.transient).length,
       meanLatencyMs: mean(latencies),
       p95LatencyMs: percentile(latencies, 0.95),
       meanInputTokens: mean(runs.map((run) => run.inputTokens)),
@@ -469,14 +554,148 @@ const main = async () => {
     }))
   );
 
+  // Per-scenario resolution. The headline rules pool every scenario; the
+  // "no more than a 5pp drop in any scenario" rule does not, and is therefore
+  // limited by per-scenario samples rather than per-arm samples.
+  const baselineArm = summaries.find((summary) => summary.arm === "baseline");
+  const scenarioStats = scenarios.flatMap((scenario) => {
+    const forScenario = (armName) =>
+      records.filter(
+        (record) => record.arm === armName && record.scenarioId === scenario.id
+      );
+    const baselineRuns = baselineArm ? forScenario("baseline") : [];
+    const baselinePassRate = baselineRuns.length
+      ? baselineRuns.filter((run) => run.passed).length / baselineRuns.length
+      : null;
+
+    return arms.map((arm) => {
+      const armRuns = forScenario(arm.name);
+      const passes = armRuns.filter((run) => run.passed).length;
+      const passRate = armRuns.length ? passes / armRuns.length : 0;
+      const resolutionPp = armRuns.length ? 100 / armRuns.length : 100;
+      return {
+        scenarioId: scenario.id,
+        workload: scenario.workload,
+        arm: arm.name,
+        runs: armRuns.length,
+        passes,
+        passRate,
+        // The smallest difference this many samples can express at all. A
+        // threshold finer than this cannot be judged from this run.
+        resolutionPp,
+        verdictGrade: armRuns.length >= PER_SCENARIO_MIN_RUNS_FOR_VERDICT,
+        baselinePassRate,
+        deltaVsBaselinePp:
+          baselinePassRate === null ? null : (passRate - baselinePassRate) * 100,
+      };
+    });
+  });
+
+  const underpoweredScenarios = scenarioStats.filter(
+    (entry) => !entry.verdictGrade
+  );
+  const scenarioRegressions = scenarioStats.filter(
+    (entry) =>
+      entry.arm !== "baseline" &&
+      entry.deltaVsBaselinePp !== null &&
+      entry.deltaVsBaselinePp < 0
+  );
+
+  if (scenarioRegressions.length > 0) {
+    console.log("\n== per-scenario drops vs baseline");
+    for (const entry of scenarioRegressions) {
+      console.log(
+        `   ${entry.arm.padEnd(9)} ${entry.scenarioId.padEnd(24)} ` +
+          `${entry.deltaVsBaselinePp.toFixed(1)}pp ` +
+          `(n=${entry.runs}, resolution ${entry.resolutionPp.toFixed(1)}pp` +
+          `${entry.verdictGrade ? "" : ", UNDERPOWERED"})`
+      );
+    }
+  }
+
+  const manifest = {
+    // Evidence for the run, so a result can be tied to a specific build and
+    // set of provider settings months later. No credential, no environment
+    // dump: the API key is never read into this object.
+    startedAt,
+    finishedAt: new Date().toISOString(),
+    commitSha: gitCommitSha(),
+    gitDirty: gitWorkingTreeDirty(),
+    nodeVersion: process.version,
+    repeats,
+    scenarioCount: scenarios.length,
+    armsRequested: arms.map((arm) => arm.name),
+    allArmsPresent: arms.length === ARMS.length,
+    arms: arms.map((arm) => {
+      const model = getModel(arm.modelId);
+      const pricing = resolveModelPricing(model);
+      return {
+        arm: arm.name,
+        tomverseModelId: arm.modelId,
+        providerModelSlug: model.apiModel,
+        provider: model.provider,
+        reasoningEffort: arm.reasoningEffort,
+        pricingVersion: pricing.pricingVersion,
+        costSource: pricing.costSource,
+        reservationOutputBasis: pricing.reservationOutputBasis,
+      };
+    }),
+    perScenarioMinRunsForVerdict: PER_SCENARIO_MIN_RUNS_FOR_VERDICT,
+    decisionMinRunsPerArm: DECISION_MIN_RUNS_PER_ARM,
+  };
+
   if (jsonPath) {
-    const { writeFile } = await import("node:fs/promises");
+    const { writeFile, mkdir } = await import("node:fs/promises");
+    const { dirname } = await import("node:path");
+    await mkdir(dirname(jsonPath), { recursive: true });
     await writeFile(
       jsonPath,
-      JSON.stringify({ summaries, records }, null, 2),
+      JSON.stringify({ manifest, summaries, scenarioStats, records }, null, 2),
       "utf8"
     );
-    console.log(`\nRaw records written to ${jsonPath}`);
+    console.log(`\nRaw records and manifest written to ${jsonPath}`);
+
+    // Blinded review set. Arm labels are replaced by opaque codes so a human
+    // can judge Korean phrasing, refusals and completeness without knowing
+    // which model produced which answer; the mapping goes in a separate file
+    // that stays sealed until the review is written down.
+    const armCodes = new Map(
+      arms.map((arm, index) => [arm.name, `ARM-${String.fromCharCode(65 + index)}`])
+    );
+    const reviewPath = jsonPath.replace(/\.json$/, "") + "-review.json";
+    const keyPath = jsonPath.replace(/\.json$/, "") + "-review-key.json";
+    await writeFile(
+      reviewPath,
+      JSON.stringify(
+        records
+          .filter((record) => !record.error)
+          .map((record) => ({
+            reviewId: `${record.scenarioId}:${record.repeat}:${armCodes.get(record.arm)}`,
+            armCode: armCodes.get(record.arm),
+            scenarioId: record.scenarioId,
+            workload: record.workload,
+            automatedVerdict: record.passed ? "pass" : "fail",
+            empty: record.empty,
+            toolCalls: record.toolCalls,
+            text: record.text,
+          })),
+        null,
+        2
+      ),
+      "utf8"
+    );
+    await writeFile(
+      keyPath,
+      JSON.stringify(Object.fromEntries(armCodes), null, 2),
+      "utf8"
+    );
+    console.log(`Blinded review set: ${reviewPath}`);
+    console.log(`Sealed arm mapping: ${keyPath} (open only after reviewing)`);
+  } else {
+    console.warn(
+      "\nNo --json path given, so nothing was preserved. A run without its raw " +
+        "records, manifest and blinded review set cannot be cited in a retirement decision."
+    );
   }
 
   const smokeArms = summaries.filter((summary) => !summary.decisionGrade);
@@ -496,10 +715,45 @@ const main = async () => {
     );
   }
 
+  if (!manifest.allArmsPresent) {
+    console.warn(
+      `\nPARTIAL RUN -- only ${arms.length}/${ARMS.length} arms ran. baseline, none, ` +
+        "low and medium must all run on the same commit and in the same session " +
+        "for their numbers to be comparable."
+    );
+  }
+  if (manifest.gitDirty) {
+    console.warn(
+      "\nWorking tree is dirty, so commitSha does not fully describe this build. " +
+        "Commit before a decision-grade run."
+    );
+  }
+  if (underpoweredScenarios.length > 0) {
+    console.warn(
+      `\nPer-scenario rule is UNDERPOWERED: ${repeats} repeats gives each scenario ` +
+        `${repeats} samples, i.e. ${(100 / Math.max(1, repeats)).toFixed(1)}pp resolution. ` +
+        `The 5pp per-scenario regression rule cannot be judged on a grid coarser ` +
+        `than itself -- one differing response is already ${(100 / Math.max(1, repeats)).toFixed(1)}pp. ` +
+        `Use --repeats=${PER_SCENARIO_MIN_RUNS_FOR_VERDICT} for a per-scenario verdict, ` +
+        "or re-run only the scenarios that dropped at higher repeats."
+    );
+  }
+  const transientTotal = summaries.reduce(
+    (total, summary) => total + summary.transientErrorCount,
+    0
+  );
+  if (transientTotal > 0) {
+    console.warn(
+      `\n${transientTotal} error(s) look transient (rate limit / overload / timeout). ` +
+        "Check whether they clustered on one arm before reading the error rates."
+    );
+  }
+
   console.log(
     "\nJudge each rule on its bound (pass>= / err<= / empty<=), not the point estimate.\n" +
       "Compare these against docs/policy/default-model-luna-migration.md before deciding anything.\n" +
-      "Numbers alone do not authorise a retirement -- the readiness review in 4.6 is separate."
+      "Numbers alone do not authorise a retirement -- the readiness review in 4.6, the\n" +
+      "blinded qualitative review, an independent re-run and the staging checks are separate."
   );
 };
 

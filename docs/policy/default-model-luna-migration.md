@@ -175,6 +175,29 @@ Luna의 어느 한 arm이 **아래를 모두** 만족해야 은퇴 논의를 시
 `SMOKE RUN -- NOT a retirement decision`을 출력합니다. 시나리오가 12개이므로
 decision-grade는 `--repeats=25` 이상(500회는 `--repeats=42`)입니다.
 
+**표본 등급은 규칙마다 다릅니다.** 위 표는 시나리오를 합산하는 규칙(오류율,
+빈 응답률)에 대한 것입니다. 1번의 **시나리오별 5%p 규칙은 합산되지 않으므로
+arm당 표본이 아니라 시나리오당 표본이 검정력을 정합니다.**
+
+`--repeats=25`(arm당 300회, 전체 1,200회)에서 시나리오당 표본은 25회이고,
+성공률의 최소 변화 단위는 **4%p**입니다. 5%p 기준을 4%p 격자 위에서 판정하면
+경계에서 무의미해집니다 — 1건 차이는 4%p라 통과하고 2건 차이는 8%p라 실패해,
+그 사이를 표현할 수 없습니다.
+
+| 규칙 | 검정력을 정하는 표본 | decision-grade 하한 |
+|---|---|---|
+| 오류율·빈 응답률 (2·3번) | arm당 전체 | 300 (권장 500) |
+| 시나리오별 성공률 (1·6번) | **시나리오당** | 100 (`--repeats=100`) |
+| 안전 거부·안전 오탐 (1번의 0%p 항목) | 시나리오당 | 하한 없음 — 1건이라도 회귀면 즉시 불합격 |
+
+안전 두 시나리오는 허용 오차가 0%p이므로 소표본에서도 **보수적인 방향으로만**
+틀립니다(회귀를 놓칠 수는 있어도 없는 회귀를 만들지는 않습니다). 따라서 표본
+하한을 두지 않되, **통과했다고 해서 안전하다고 선언하지는 않습니다.**
+
+현실적인 절충: `--repeats=25`를 먼저 돌려 합산 규칙을 판정하고, **하락이 관찰된
+시나리오만** `--repeats=100` 이상으로 다시 돌립니다. harness는 시나리오별 해상도와
+`UNDERPOWERED` 여부를 출력하고, baseline 대비 하락한 시나리오를 따로 나열합니다.
+
 **판정은 점추정이 아니라 신뢰구간 경계로 합니다.** harness가 각 비율의 Wilson
 95% 구간을 함께 출력합니다.
 
@@ -205,6 +228,74 @@ none/low/medium을 실제로 비교하기 전에는 바꾸지 않습니다.** �
 않습니다.** 실행할 수 없으면 각 workload의 성공률 차이, 오류율, p95 latency,
 평균·p95 비용, 구체적 회귀 사례, Terra/Sol 상향 routing이 필요한 workload를
 확인하지 못했다는 사실 자체를 보고합니다.
+
+### 4.5.1 실행 절차 — `--repeats=25`를 돌렸다는 사실만으로 decision-grade가 되지 않습니다
+
+표본 수는 필요조건 하나일 뿐입니다. 은퇴 판정 자료로 인용하려면 아래를 묶어야
+합니다.
+
+**1) 사전 점검 (`--repeats=2`)**
+
+```
+npm run eval:default-model -- --repeats=2 --json=artifacts/default-model-eval-preflight.json
+```
+
+확인할 것: 네 arm이 모두 **실제 모델로** 호출되는지, API 권한과 arm별 reasoning
+설정이 의도대로 전달되는지, usage 필드(input/output/reasoning/cached)가 채워지는지,
+JSON 산출물 3종이 생성되는지, 그리고 본 실행의 예상 호출량과 비용
+(`--repeats=25` = 1,200회)입니다.
+
+**2) 본 실행**
+
+```
+npm run eval:default-model -- --repeats=25 --json=artifacts/default-model-eval-<timestamp>.json
+```
+
+**`baseline, none, low, medium` 네 arm을 같은 commit·같은 환경·같은 실행에서**
+돌립니다. harness는 일부 arm만 돌면 `PARTIAL RUN`을, 작업 트리가 dirty면 경고를
+출력합니다. arm은 시나리오·repeat 단위로 **교대 실행(round-robin)**되므로 공급자
+상태 변화가 특정 arm에 몰리지 않습니다.
+
+**3) 실행 증거 보존**
+
+`--json`을 주면 다음이 저장됩니다. **`--json` 없이 돌린 실행은 인용할 수 없습니다.**
+
+- `<name>.json` — manifest + arm 요약 + 시나리오별 통계 + 원본 기록
+  (성공·오류·빈 응답 각각, 실행 시각 포함)
+- `<name>-review.json` — 블라인드 정성 검토용 (arm 코드만, 모델명 없음)
+- `<name>-review-key.json` — 봉인된 arm 매핑
+
+manifest에 담기는 것: commit SHA와 dirty 여부, 시작·종료 UTC 시각, Node 버전,
+arm별 **실제 provider model slug**·reasoning 설정·`pricingVersion`·`costSource`·
+`reservationOutputBasis`, repeats, 시나리오 수, 표본 하한값.
+
+`artifacts/`는 `.gitignore` 대상입니다. 실제 과금된 응답 원문이라 저장소에
+넣지 않고, **파일은 결정 기록과 함께 보관하고 manifest 요약과 판정 결과는
+`.github/audits/`에 한국어 보고서로 남깁니다**(이 저장소의 기존 감사 문서 관례).
+
+산출물에 **API 키나 자격증명은 들어가지 않습니다** — 오류 메시지는 저장 전에
+마스킹됩니다. 시나리오 프롬프트는 이 파일에 고정된 자체 문구이므로 사용자 데이터가
+포함되지 않습니다. region 등 manifest가 자동으로 알 수 없는 항목은 실행자가
+보고서에 함께 적습니다.
+
+**4) 정량 결과와 블라인드 정성 검토 병행**
+
+자동 판정은 keyword, JSON 형태, 거부 표현 같은 단순 검사입니다. 수치 통과와
+별개로 **모델명을 가린 상태에서** 실패 사례와 경계 응답을 사람이 읽습니다
+(`-review.json`을 먼저 검토하고, 결론을 적은 뒤에 `-review-key.json`을 엽니다).
+중점: 한국어 자연스러움, 안전 거부와 잘못된 거부, 장문 지시 유지, 응답 완결성,
+그리고 reasoning 토큰을 포함한 실제 비용이 제대로 산정됐는지.
+
+**5) 독립 재실행**
+
+다른 시간대에 같은 조건으로 한 번 더 돌립니다. **결과가 임계값에 가까우면
+재실행 없이 은퇴를 결정하지 않습니다.** transient 오류(rate limit·overload)가
+보고되면 특정 arm에 몰렸는지부터 확인합니다.
+
+**6) staging 수동 검증은 그대로 남습니다**
+
+공급자를 직접 호출하는 eval은 PDF·첨부, native web search, 스트림 중단,
+desktop/mobile hydration을 검증하지 못합니다. 4.2와 8절을 별도로 수행합니다.
 
 ### 4.6 은퇴 준비 점검 — 수치와 별개로 통과해야 합니다
 
