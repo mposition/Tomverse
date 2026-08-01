@@ -873,7 +873,7 @@ export const PENDING_VERIFIED_PRICE_REGISTER: readonly PendingVerifiedPriceEntry
     [
         {
             modelId: "claude-fable-5",
-            owner: null,
+            owner: "@mposition",
             verificationTicket: null,
             registeredAt: "2026-08-01",
             expiresAt: "2026-10-30",
@@ -886,7 +886,7 @@ export const PENDING_VERIFIED_PRICE_REGISTER: readonly PendingVerifiedPriceEntry
         // out by `enabled` and there is nothing left to exempt.
         {
             modelId: "mistral-large-3",
-            owner: null,
+            owner: "@mposition",
             verificationTicket: null,
             registeredAt: "2026-08-01",
             expiresAt: "2026-10-30",
@@ -895,7 +895,7 @@ export const PENDING_VERIFIED_PRICE_REGISTER: readonly PendingVerifiedPriceEntry
         },
         {
             modelId: "qwen3.7-max",
-            owner: null,
+            owner: "@mposition",
             verificationTicket: null,
             registeredAt: "2026-08-01",
             expiresAt: "2026-10-30",
@@ -904,7 +904,7 @@ export const PENDING_VERIFIED_PRICE_REGISTER: readonly PendingVerifiedPriceEntry
         },
         {
             modelId: "perplexity/sonar-deep-research",
-            owner: null,
+            owner: "@mposition",
             verificationTicket: null,
             registeredAt: "2026-08-01",
             expiresAt: "2026-10-30",
