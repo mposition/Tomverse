@@ -2,13 +2,12 @@
 --
 -- lib/modelRegistry.ts seeds a row from STATIC_RUNTIME_MODELS, which spreads
 -- getModelBillingProfile(model) -- the *resolved* profile, not the catalogue's
--- raw optional fields. A model with no explicit price in MODEL_BILLING_DEFAULTS
+-- raw optional fields. A model with no explicit price in the pricing registry
 -- therefore has its usage-class fallback written into the row as a concrete
 -- number, and from then on that column wins over the catalogue
 -- (`model.inputUsdPerMillionTokens ?? <fallback>`). createMany(skipDuplicates)
--- never updates an existing row, so adding the real price to
--- MODEL_BILLING_DEFAULTS does not reach any environment that has already
--- seeded.
+-- never updates an existing row, so adding the real price to lib/modelPricing
+-- does not reach any environment that has already seeded.
 --
 -- grok-4-5 was seeded while it had no explicit price, so its row holds the
 -- "premium" cost-class fallback of USD 15/60 per million against a model xAI
