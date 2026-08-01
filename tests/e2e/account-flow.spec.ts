@@ -115,8 +115,27 @@ test("a stale Private Mode sessionStorage flag from before the removal is ignore
   expect(flagAfterLoad).toBeNull();
 });
 
+/** app/globals.css paints these; asserted directly so "follows the OS" is
+ *  checked on what the visitor sees rather than on a class name. */
+const DARK_BACKGROUND = "rgb(10, 10, 10)";
+const LIGHT_BACKGROUND = "rgb(255, 255, 255)";
+
+const themeClasses = (page: Page) =>
+  page.locator("html").evaluate((element) => ({
+    dark: element.classList.contains("dark"),
+    light: element.classList.contains("light"),
+  }));
+
+const backgroundColor = (page: Page) =>
+  page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor);
+
 test("theme preference changes immediately and follows the system setting", async ({ page }) => {
-  await expect(page.locator("html")).toHaveClass(/dark/);
+  // UI-001 made the class set three-valued: "dark" and "light" are explicit
+  // choices, and "system" writes *neither*, because it is the absence of a
+  // class that lets the `prefers-color-scheme` rule in app/globals.css answer.
+  // Asserting `.dark` for the system case -- as this test used to -- asserts
+  // the one thing that would stop the OS from being followed.
+  await expect.poll(() => themeClasses(page)).toEqual({ dark: true, light: false });
   await openAccountMenu(page);
   await page
     .getByTestId("account-menu")
@@ -129,12 +148,14 @@ test("theme preference changes immediately and follows the system setting", asyn
   await settingsDialog.getByLabel(/테마|Theme/).selectOption("light");
   await settingsDialog.getByRole("button", { name: /확인|OK/, exact: true }).click();
 
-  await expect(page.locator("html")).not.toHaveClass(/dark/);
-  await expect
-    .poll(() => page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor))
-    .toBe("rgb(255, 255, 255)");
+  await expect.poll(() => themeClasses(page)).toEqual({ dark: false, light: true });
+  await expect.poll(() => backgroundColor(page)).toBe(LIGHT_BACKGROUND);
 
+  // An explicit light choice has to survive a dark OS -- that contradiction is
+  // the case CSS alone cannot serve, and the reason ThemeBootstrap exists.
   await page.emulateMedia({ colorScheme: "dark" });
+  await expect.poll(() => backgroundColor(page)).toBe(LIGHT_BACKGROUND);
+
   await openAccountMenu(page);
   await page
     .getByTestId("account-menu")
@@ -147,9 +168,12 @@ test("theme preference changes immediately and follows the system setting", asyn
   await settingsDialog.getByLabel(/테마|Theme/).selectOption("system");
   await settingsDialog.getByRole("button", { name: /확인|OK/, exact: true }).click();
 
-  await expect(page.locator("html")).toHaveClass(/dark/);
+  // Back on "system": neither class, and the paint tracks the OS in both
+  // directions without another visit to the dialog.
+  await expect.poll(() => themeClasses(page)).toEqual({ dark: false, light: false });
+  await expect.poll(() => backgroundColor(page)).toBe(DARK_BACKGROUND);
   await page.emulateMedia({ colorScheme: "light" });
-  await expect(page.locator("html")).not.toHaveClass(/dark/);
+  await expect.poll(() => backgroundColor(page)).toBe(LIGHT_BACKGROUND);
 });
 
 test("authenticated selector opens a swap dialog for a fourth model", async ({ page }) => {
