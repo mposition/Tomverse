@@ -35,6 +35,7 @@ test("picker exposes only decision-relevant special features", () => {
     "reasoning",
   ]);
   assert.deepEqual(getModelPickerFeatures(getModel("gemini-2-5-flash")), [
+    "search",
     "image",
   ]);
   assert.deepEqual(getModelPickerFeatures(getModel("perplexity/sonar")), [
@@ -59,9 +60,9 @@ test("recommended and capability filters use model behavior", () => {
   assert.deepEqual(RECOMMENDED_MODEL_IDS, [
     "gpt-5-4-mini",
     "claude-sonnet-5",
-    "deepseek-r1",
+    "gemini-3-6-flash",
   ]);
-  assert.equal(modelMatchesCapability(getModel("deepseek-r1"), "reasoning"), true);
+  assert.equal(modelMatchesCapability(getModel("groq-gpt-oss-120b"), "reasoning"), true);
   assert.equal(modelMatchesCapability(getModel("perplexity/sonar"), "search"), true);
   assert.equal(modelMatchesCapability(getModel("gpt-5-4-mini"), "fast"), true);
   assert.equal(modelPickerCopy.ko.personalizedRecommendations, "나에게 추천");

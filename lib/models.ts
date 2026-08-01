@@ -146,19 +146,21 @@ export const DEFAULT_MODEL_ID = "gpt-5-4-mini";
 //               naming and changes whenever the mapped upstream model changes.
 //
 // Because `id` is pinned and the other two follow the provider, an entry can
-// legitimately look mismatched. As of this writing two do, and both are
-// intentional -- the upstream model behind a stable ID was replaced in place:
+// legitimately look mismatched. The upstream model behind this stable ID was
+// replaced in place:
 //
-//   id "gemini-2-5-flash"  -> "Gemini 3.1 Flash-Lite" (apiModel gemini-3.1-flash-lite)
-//   id "deepseek-r1"       -> "DeepSeek R1 Reasoning" (apiModel deepseek-reasoner)
+//   id "gemini-2-5-flash"  -> "Gemini 3.5 Flash-Lite" (apiModel gemini-3.5-flash-lite)
 //
 // So when a log line, trace or ledger row says `gemini-2-5-flash`, the user
-// saw "Gemini 3.1 Flash-Lite" and Google was asked for
-// `gemini-3.1-flash-lite`. Do not "fix" such a row by renaming the ID:
+// saw "Gemini 3.5 Flash-Lite" and Google was asked for
+// `gemini-3.5-flash-lite`. Do not "fix" such a row by renaming the ID:
 // migrating IDs would break stored conversations and billing history. Retiring
 // a model instead uses `replacementModelId` plus the disabled lifecycle
 // fields, which `lib/modelRegistry.ts` replays onto the runtime registry.
 export const AVAILABLE_MODELS = [
+    { id: "gpt-5-6-sol", name: "GPT-5.6 Sol", apiModel: "gpt-5.6-sol", provider: "openai", icon: "🤖", bestFor: "Frontier reasoning, coding, and complex professional work", minimumPlan: "Pro", usageClass: "premium", enabled: true, status: "enabled", reasoning: "medium", contextWindowTokens: 1_050_000, inputCapabilities: FULL_BINARY_INPUT },
+    { id: "gpt-5-6-terra", name: "GPT-5.6 Terra", apiModel: "gpt-5.6-terra", provider: "openai", icon: "🤖", bestFor: "Strong analysis and coding with balanced cost", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled", reasoning: "medium", contextWindowTokens: 1_050_000, inputCapabilities: FULL_BINARY_INPUT },
+    { id: "gpt-5-6-luna", name: "GPT-5.6 Luna", apiModel: "gpt-5.6-luna", provider: "openai", icon: "🤖", bestFor: "Efficient high-volume questions and document work", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", reasoning: "medium", contextWindowTokens: 1_050_000, inputCapabilities: FULL_BINARY_INPUT },
     { id: "gpt-5-5", name: "GPT-5.5", apiModel: "gpt-5.5", provider: "openai", icon: "🤖", bestFor: "Complex analysis and important decisions", minimumPlan: "Pro", usageClass: "premium", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
     { id: "gpt-5-5-thinking", name: "GPT-5.5 Thinking", apiModel: "gpt-5.5", provider: "openai", icon: "🤖", bestFor: "Difficult problems that benefit from step-by-step reasoning", minimumPlan: "Pro", usageClass: "premium-reasoning", enabled: true, status: "enabled", reasoning: "high", inputCapabilities: FULL_BINARY_INPUT },
     { id: "gpt-5-4-mini", name: "GPT-5.4 mini", apiModel: "gpt-5.4-mini", provider: "openai", icon: "🤖", bestFor: "Fast everyday questions and concise document work", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
@@ -168,31 +170,32 @@ export const AVAILABLE_MODELS = [
     { id: "claude-sonnet-5", name: "Claude Sonnet 5", apiModel: "claude-sonnet-5", provider: "anthropic", icon: "🧠", bestFor: "Writing, structured analysis, and detailed documents", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
     { id: "claude-haiku-4-5", name: "Claude Haiku 4.5", apiModel: "claude-haiku-4-5-20251001", provider: "anthropic", icon: "🧠", bestFor: "Quick summaries, drafting, and lightweight analysis", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
 
+    { id: "gemini-3-6-flash", name: "Gemini 3.6 Flash", apiModel: "gemini-3.6-flash", provider: "google", icon: "✨", bestFor: "Fast agentic, coding, and multimodal analysis", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled", contextWindowTokens: 1_048_576, inputCapabilities: FULL_BINARY_INPUT },
     { id: "gemini-3-5-flash", name: "Gemini 3.5 Flash", apiModel: "gemini-3.5-flash", provider: "google", icon: "✨", bestFor: "Fast responses with image and file analysis", minimumPlan: "Free", usageClass: "standard", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
     { id: "gemini-3-1-pro", name: "Gemini 3.1 Pro", apiModel: "gemini-3.1-pro-preview", provider: "google", icon: "✨", bestFor: "Detailed multimodal analysis and complex documents", minimumPlan: "Pro", usageClass: "premium", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
     { id: "gemini-2-5-pro", name: "Gemini 2.5 Pro", apiModel: "gemini-2.5-pro", provider: "google", icon: "✨", bestFor: "Legacy multimodal analysis", minimumPlan: "Free", usageClass: "advanced", replacementModelId: "gemini-3-1-pro", publiclyListed: false, enabled: false, status: "disabled", inputCapabilities: FULL_BINARY_INPUT },
-    { id: "gemini-2-5-flash", name: "Gemini 3.1 Flash-Lite", apiModel: "gemini-3.1-flash-lite", provider: "google", icon: "✨", bestFor: "Low-cost everyday tasks and quick file questions", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
+    { id: "gemini-2-5-flash", name: "Gemini 3.5 Flash-Lite", apiModel: "gemini-3.5-flash-lite", provider: "google", icon: "✨", bestFor: "Low-latency document parsing and high-volume everyday tasks", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", contextWindowTokens: 1_048_576, inputCapabilities: FULL_BINARY_INPUT },
 
     { id: "llama-3-1", name: "Llama 3.1", apiModel: "llama-3.1-8b-instant", provider: "groq", icon: "∞", bestFor: "Very fast, lightweight text questions", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled" },
-    // Groq stopped serving this model: the catalog monitor first recorded it
-    // missing on 2026-07-21 and escalated it to likely_deprecated after seven
-    // consecutive absences, while live calls returned HTTP 404. Disabled
-    // rather than repointed because Groq currently exposes no vision-capable
-    // replacement -- llama-3-3 is the closest enabled sibling, so it takes
-    // over as the replacement target even though it is text-only.
-    { id: "llama-4-scout", name: "Llama 4 Scout", apiModel: "meta-llama/llama-4-scout-17b-16e-instruct", provider: "groq", icon: "∞", bestFor: "Legacy fast visual questions and long-context exploration", minimumPlan: "Guest", usageClass: "standard", replacementModelId: "llama-3-3", publiclyListed: false, enabled: false, status: "disabled", contextWindowTokens: 131_072, inputCapabilities: { image: true, nativePdf: false, maxImages: 5, maxBase64ImagePayloadBytes: 4 * 1024 * 1024 } },
+    // Groq shut this model down on 2026-07-17. Keep the Tomverse ID for
+    // historical rows and route future selection recovery to Groq's official
+    // open-weight replacement. The replacement is text-only, so no image
+    // capability is inherited during recovery.
+    { id: "llama-4-scout", name: "Llama 4 Scout", apiModel: "meta-llama/llama-4-scout-17b-16e-instruct", provider: "groq", icon: "∞", bestFor: "Legacy fast visual questions and long-context exploration", minimumPlan: "Guest", usageClass: "standard", replacementModelId: "groq-gpt-oss-120b", publiclyListed: false, enabled: false, status: "disabled", operationalReason: "Groq shut down Llama 4 Scout on 2026-07-17.", userVisibleNote: "This model was retired and replaced by GPT-OSS 120B on Groq.", contextWindowTokens: 131_072, inputCapabilities: { image: true, nativePdf: false, maxImages: 5, maxBase64ImagePayloadBytes: 4 * 1024 * 1024 } },
     { id: "llama-3-3", name: "Llama 3.3", apiModel: "llama-3.3-70b-versatile", provider: "groq", icon: "∞", bestFor: "Broad open-model text analysis and instruction following", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled" },
+    { id: "groq-gpt-oss-120b", name: "GPT-OSS 120B (Groq)", apiModel: "openai/gpt-oss-120b", provider: "groq", icon: "GR", bestFor: "Fast open-weight reasoning, coding, and technical analysis", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled", reasoning: "medium", contextWindowTokens: 131_072 },
 
     { id: "grok-4", name: "Grok 4", apiModel: "grok-4", provider: "xai", icon: "𝕏", bestFor: "Current-events discussion and broad advanced analysis", minimumPlan: "Pro", usageClass: "premium", enabled: true, status: "enabled" },
-    { id: "grok-4-5", name: "Grok 4.5", apiModel: "grok-4.5", provider: "xai", icon: "𝕏", bestFor: "Deep reasoning on complex technical and analytical tasks", minimumPlan: "Pro", usageClass: "premium-reasoning", enabled: true, status: "enabled", reasoning: "high" },
-    { id: "grok-3", name: "Grok 3", apiModel: "grok-3", provider: "xai", icon: "𝕏", bestFor: "General analysis with a direct conversational style", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled" },
+    { id: "grok-4-5", name: "Grok 4.5", apiModel: "grok-4.5", provider: "xai", icon: "𝕏", bestFor: "Deep reasoning on complex technical and analytical tasks", minimumPlan: "Pro", usageClass: "premium-reasoning", enabled: true, status: "enabled", reasoning: "high", contextWindowTokens: 500_000, inputCapabilities: { image: true, nativePdf: false } },
+    { id: "grok-4-3", name: "Grok 4.3", apiModel: "grok-4.3", provider: "xai", icon: "𝕏", bestFor: "Fast general analysis with strong instruction following", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled", reasoning: "none", contextWindowTokens: 1_000_000, inputCapabilities: { image: true, nativePdf: false } },
+    { id: "grok-3", name: "Grok 3", apiModel: "grok-3", provider: "xai", icon: "𝕏", bestFor: "Legacy general analysis with a direct conversational style", minimumPlan: "Free", usageClass: "advanced", replacementModelId: "grok-4-3", publiclyListed: false, enabled: false, status: "disabled", operationalReason: "xAI retired Grok 3 on 2026-05-15 and redirects the slug to Grok 4.3.", userVisibleNote: "This model was retired and replaced by Grok 4.3." },
     { id: "grok-3-mini", name: "Grok 3 Mini", apiModel: "grok-3-mini", provider: "xai", icon: "𝕏", bestFor: "Fast, concise everyday answers", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled" },
-    { id: "deepseek-v4-flash", name: "DeepSeek-V4 Flash", apiModel: "deepseek-v4-flash", provider: "deepseek", icon: "DS", bestFor: "Fast coding help and technical questions", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled" },
-    { id: "deepseek-v4-pro", name: "DeepSeek-V4 Pro", apiModel: "deepseek-v4-pro", provider: "deepseek", icon: "DS", bestFor: "Cost-efficient technical analysis and coding", minimumPlan: "Free", usageClass: "standard", enabled: true, status: "enabled" },
-    { id: "deepseek-r1", name: "DeepSeek R1 Reasoning", apiModel: "deepseek-reasoner", provider: "deepseek", icon: "DS", bestFor: "Math, code, and problems requiring explicit reasoning", minimumPlan: "Free", usageClass: "reasoning", enabled: true, status: "enabled", reasoning: "high" },
+    { id: "deepseek-v4-flash", name: "DeepSeek-V4 Flash", apiModel: "deepseek-v4-flash", provider: "deepseek", icon: "DS", bestFor: "Fast coding help and cost-efficient technical reasoning", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", reasoning: "medium", contextWindowTokens: 1_000_000 },
+    { id: "deepseek-v4-pro", name: "DeepSeek-V4 Pro", apiModel: "deepseek-v4-pro", provider: "deepseek", icon: "DS", bestFor: "Long-context technical analysis, agents, and coding", minimumPlan: "Free", usageClass: "standard", enabled: true, status: "enabled", reasoning: "high", contextWindowTokens: 1_000_000 },
+    { id: "deepseek-r1", name: "DeepSeek R1 Reasoning", apiModel: "deepseek-reasoner", provider: "deepseek", icon: "DS", bestFor: "Legacy math, code, and explicit reasoning", minimumPlan: "Free", usageClass: "reasoning", replacementModelId: "deepseek-v4-flash", publiclyListed: false, enabled: false, status: "disabled", operationalReason: "DeepSeek retired deepseek-reasoner on 2026-07-24.", userVisibleNote: "This model was retired and replaced by DeepSeek-V4 Flash.", reasoning: "high" },
     { id: "mistral-small-4", name: "Mistral Small 4", apiModel: "mistral-small-latest", provider: "mistral", icon: "M", bestFor: "Efficient multilingual writing and everyday tasks", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled" },
     { id: "mistral-large-3", name: "Mistral Large 3", apiModel: "mistral-large-latest", provider: "mistral", icon: "M", bestFor: "High-quality multilingual analysis and long-form work", minimumPlan: "Pro", usageClass: "premium", enabled: true, status: "enabled" },
-    { id: "mistral-medium-3-1", name: "Mistral Medium 3.1", apiModel: "mistral-medium-latest", provider: "mistral", icon: "M", bestFor: "Balanced multilingual drafting and analysis", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled" },
+    { id: "mistral-medium-3-1", name: "Mistral Medium 3.5", apiModel: "mistral-medium-3-5", provider: "mistral", icon: "M", bestFor: "Multimodal agentic work, coding, and multilingual analysis", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled", contextWindowTokens: 262_144, inputCapabilities: { image: true, nativePdf: false } },
     { id: "codestral", name: "Codestral", apiModel: "codestral-latest", provider: "mistral", icon: "M", bestFor: "Code generation, completion, and repository questions", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled" },
     { id: "kimi-k2.7-code", name: "Kimi K2.7", apiModel: "kimi-k2.7-code", provider: "moonshot", icon: "KM", bestFor: "Coding tasks and long technical context", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled" },
     { id: "qwen3.7-max", name: "Qwen 3.7 Max", apiModel: "qwen3.7-max", provider: "qwen", icon: "QW", bestFor: "Demanding multilingual reasoning and complex instructions", minimumPlan: "Pro", usageClass: "premium", enabled: true, status: "enabled" },
@@ -244,6 +247,35 @@ export const PUBLIC_MODEL_PROVIDERS: readonly AiProvider[] = Array.from(
 );
 
 export const getModel = (modelId: string) => modelMap.get(modelId);
+
+/**
+ * Resolves a stored model ID through a bounded replacement chain. Historical
+ * IDs remain intact in messages and ledgers; this is only for mutable
+ * selection state such as conversation settings, favourites and defaults.
+ */
+export const resolveSelectableModelId = (
+    modelId: string,
+    lookup: (candidateId: string) => AiModel | undefined = getModel
+) => {
+    let candidateId: string | undefined = modelId;
+    const visited = new Set<string>();
+    for (let hop = 0; candidateId && hop < 8; hop += 1) {
+        if (visited.has(candidateId)) return undefined;
+        visited.add(candidateId);
+        const model = lookup(candidateId);
+        if (!model) return undefined;
+        if (
+            model.enabled &&
+            model.status === "enabled" &&
+            model.publiclyListed !== false &&
+            !model.catalogDeleted
+        ) {
+            return model.id;
+        }
+        candidateId = model.replacementModelId;
+    }
+    return undefined;
+};
 
 export const modelSupportsImageInput = (
     model: Pick<AiModel, "id" | "inputCapabilities">

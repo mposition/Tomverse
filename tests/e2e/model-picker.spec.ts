@@ -64,6 +64,38 @@ test("All models reveals the full catalogue and its filters", async ({ page }) =
   await expectNoHorizontalOverflow(page);
 });
 
+test("new models are listed and historical retirements stay hidden on desktop and mobile", async ({
+  page,
+}) => {
+  const dialog = await openModelCatalogue(page);
+
+  for (const modelId of [
+    "gpt-5-6-sol",
+    "gpt-5-6-terra",
+    "gpt-5-6-luna",
+    "gemini-3-6-flash",
+    "groq-gpt-oss-120b",
+    "grok-4-3",
+  ]) {
+    await expect(
+      dialog.locator(`[data-testid="model-option"][data-model-id="${modelId}"]`)
+    ).toHaveCount(1);
+  }
+
+  for (const modelId of ["deepseek-r1", "grok-3", "llama-4-scout"]) {
+    await expect(
+      dialog.locator(`[data-testid="model-option"][data-model-id="${modelId}"]`)
+    ).toHaveCount(0);
+  }
+
+  await expect(
+    dialog.locator('[data-testid="model-option"][data-model-id="gemini-2-5-flash"]')
+  ).toContainText("Gemini 3.5 Flash-Lite");
+  await expect(
+    dialog.locator('[data-testid="model-option"][data-model-id="mistral-medium-3-1"]')
+  ).toContainText("Mistral Medium 3.5");
+});
+
 test("going back from All models keeps the selection intact", async ({ page }) => {
   await mockAuthenticatedApi(page, { selectedModels: ["gpt-5-4-mini"] });
   await page.reload();
@@ -252,7 +284,7 @@ test("favorited models lead the recommendations", async ({ page }) => {
   const cards = dialog.getByTestId("recommended-model-option");
   await expect(cards.nth(0)).toHaveAttribute("data-model-id", "claude-sonnet-5");
   await expect(cards.nth(0)).toHaveAttribute("data-recommendation-source", "favorite");
-  await expect(cards.nth(1)).toHaveAttribute("data-model-id", "deepseek-r1");
+  await expect(cards.nth(1)).toHaveAttribute("data-model-id", "deepseek-v4-flash");
 });
 
 test("long input explains its multiplier beside the send controls", async ({ page }) => {

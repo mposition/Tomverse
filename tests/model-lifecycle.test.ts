@@ -5,6 +5,7 @@ import {
   AVAILABLE_MODELS,
   isPubliclySelectableModel,
   isRetiredModel,
+  resolveSelectableModelId,
   type AiModel,
 } from "../lib/models";
 
@@ -118,10 +119,43 @@ test("no publicly selectable model is simultaneously retired", () => {
 });
 
 test("groq llama-4-scout stays retired and unselectable", () => {
-  // The specific model the audit found still on offer through the live API.
+  // Groq removed Scout and recommends GPT-OSS as an open-model successor.
   const scout = CATALOG.find((entry) => entry.id === "llama-4-scout");
   assert.ok(scout, "llama-4-scout should remain in the catalog for history");
   assert.equal(isRetiredModel(scout!), true);
   assert.equal(isPubliclySelectableModel(scout!), false);
-  assert.equal(scout!.replacementModelId, "llama-3-3");
+  assert.equal(scout!.replacementModelId, "groq-gpt-oss-120b");
+});
+
+test("provider retirements remain historical rows with exact replacements", () => {
+  const expected = new Map([
+    ["deepseek-r1", "deepseek-v4-flash"],
+    ["grok-3", "grok-4-3"],
+    ["llama-4-scout", "groq-gpt-oss-120b"],
+  ]);
+
+  for (const [id, replacementModelId] of expected) {
+    const entry = CATALOG.find((candidate) => candidate.id === id);
+    assert.ok(entry, `${id} must remain as a historical row`);
+    assert.equal(entry.enabled, false, id);
+    assert.equal(entry.status, "disabled", id);
+    assert.equal(entry.publiclyListed, false, id);
+    assert.equal(entry.replacementModelId, replacementModelId, id);
+    assert.equal(resolveSelectableModelId(id), replacementModelId, id);
+  }
+});
+
+test("replacement resolution follows bounded chains and rejects cycles", () => {
+  const entries = new Map([
+    ["old", model({ id: "old", enabled: false, status: "disabled", publiclyListed: false, replacementModelId: "middle" })],
+    ["middle", model({ id: "middle", enabled: false, status: "disabled", publiclyListed: false, replacementModelId: "live" })],
+    ["live", model({ id: "live" })],
+    ["cycle-a", model({ id: "cycle-a", enabled: false, status: "disabled", publiclyListed: false, replacementModelId: "cycle-b" })],
+    ["cycle-b", model({ id: "cycle-b", enabled: false, status: "disabled", publiclyListed: false, replacementModelId: "cycle-a" })],
+  ]);
+  const lookup = (id: string) => entries.get(id);
+
+  assert.equal(resolveSelectableModelId("old", lookup), "live");
+  assert.equal(resolveSelectableModelId("cycle-a", lookup), undefined);
+  assert.equal(resolveSelectableModelId("missing", lookup), undefined);
 });

@@ -51,8 +51,10 @@ import { dispatchAppToast } from "@/lib/appToast";
 import { APP_DEFAULTS, WEB_SEARCH_MODES, type WebSearchMode } from "@/lib/appDefaults";
 import {
   canUseModelWithPlan,
+  getModel as getStaticModel,
   getInputCreditMultiplier,
   modelSupportsImageInput,
+  resolveSelectableModelId,
   type AiModel,
 } from "@/lib/models";
 import { estimateRequestCredits } from "@/lib/webSearchCredits";
@@ -824,7 +826,10 @@ export function ChatInput({
       if (!saved) return [];
       const parsed: unknown = JSON.parse(saved);
       return Array.isArray(parsed)
-        ? parsed.filter((item): item is string => typeof item === "string")
+        ? parsed
+            .filter((item): item is string => typeof item === "string")
+            .map((modelId) => resolveSelectableModelId(modelId, getStaticModel))
+            .filter((modelId): modelId is string => Boolean(modelId))
         : [];
     } catch {
       return [];
@@ -838,7 +843,10 @@ export function ChatInput({
       if (!saved) return [];
       const parsed: unknown = JSON.parse(saved);
       return Array.isArray(parsed)
-        ? parsed.filter((item): item is string => typeof item === "string")
+        ? parsed
+            .filter((item): item is string => typeof item === "string")
+            .map((modelId) => resolveSelectableModelId(modelId, getStaticModel))
+            .filter((modelId): modelId is string => Boolean(modelId))
         : [];
     } catch {
       return [];

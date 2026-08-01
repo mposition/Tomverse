@@ -13,7 +13,10 @@
 // and google.tools.googleSearch respectively). Any catalog model whose
 // support could not be confirmed against those docs is deliberately left
 // as "unverified" rather than assumed -- see STG web-search-native task
-// notes for the exact sources checked.
+// notes for the exact sources checked. Groq and xAI expose separate
+// provider-side search products, but this app routes them through plain
+// Chat Completions without those server tools, so their models intentionally
+// remain unsupported here.
 
 export type WebSearchSupport = "native" | "search-model" | "unsupported" | "unverified";
 
@@ -80,6 +83,9 @@ const UNSUPPORTED: WebSearchCapability = {
 export const WEB_SEARCH_CAPABILITIES: Readonly<Record<string, WebSearchCapability>> = {
   // OpenAI -- confirmed supported models per platform.openai.com/docs/guides/tools-web-search:
   // gpt-5.6, gpt-5.5, gpt-4.1, gpt-4.1-mini. Catalog apiModel "gpt-5.5" matches.
+  "gpt-5-6-sol": NATIVE_OPENAI,
+  "gpt-5-6-terra": NATIVE_OPENAI,
+  "gpt-5-6-luna": NATIVE_OPENAI,
   "gpt-5-5": NATIVE_OPENAI,
   "gpt-5-5-thinking": NATIVE_OPENAI,
   // apiModel "gpt-5.4-mini" is not in the confirmed-supported list above.
@@ -93,15 +99,13 @@ export const WEB_SEARCH_CAPABILITIES: Readonly<Record<string, WebSearchCapabilit
   "claude-sonnet-5": NATIVE_ANTHROPIC,
   "claude-haiku-4-5": NATIVE_ANTHROPIC,
 
-  // Google -- confirmed supported models per ai.google.dev/gemini-api/docs/google-search
-  // include "Gemini 3.5 Flash" and "3.1 Pro Preview", matching apiModel
-  // gemini-3.5-flash / gemini-3.1-pro-preview.
+  // Google -- exact model pages confirm Search grounding for both July 2026
+  // stable releases as well as the existing 3.5 Flash / 3.1 Pro entries.
+  "gemini-3-6-flash": NATIVE_GOOGLE,
   "gemini-3-5-flash": NATIVE_GOOGLE,
   "gemini-3-1-pro": NATIVE_GOOGLE,
-  // apiModel is actually "gemini-3.1-flash-lite" (pre-existing id/apiModel
-  // naming mismatch, unrelated to this change) -- not confirmed in the
-  // fetched docs' model list ("3.5 Flash-Lite" is a different version line).
-  "gemini-2-5-flash": UNVERIFIED,
+  // Stable Tomverse ID; upstream apiModel is gemini-3.5-flash-lite.
+  "gemini-2-5-flash": NATIVE_GOOGLE,
   // Disabled in the catalog; left out entirely (falls through to unsupported
   // via the lookup fallback) since it can't be selected today anyway.
 

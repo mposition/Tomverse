@@ -6,6 +6,7 @@ import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import { getActiveAiModel } from "@/lib/activeAiModel";
+import { getModelGenerationSettings } from "@/lib/modelGenerationCompatibility";
 import { getUserBillingPlan } from "@/lib/billingEntitlements";
 import {
   accessibleQuickReviewers,
@@ -381,7 +382,7 @@ export async function POST(
               system: summaryPrompt.system,
               prompt: summaryPrompt.prompt,
               output: Output.object({ schema: quickComparisonSummaryResultSchema }),
-              temperature: 0.1,
+              ...getModelGenerationSettings(candidate, { temperature: 0.1 }),
               maxOutputTokens: budget.maxOutputTokens,
               maxRetries: 1,
               abortSignal: AbortSignal.timeout(35_000),

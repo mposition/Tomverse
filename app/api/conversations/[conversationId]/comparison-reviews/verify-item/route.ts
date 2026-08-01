@@ -6,6 +6,7 @@ import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import { getActiveAiModel } from "@/lib/activeAiModel";
+import { getModelGenerationSettings } from "@/lib/modelGenerationCompatibility";
 import { getUserBillingPlan } from "@/lib/billingEntitlements";
 import {
   consumePerplexityUsage,
@@ -176,7 +177,7 @@ export async function POST(
         system: verificationPrompt.system,
         prompt: verificationPrompt.prompt,
         output: Output.object({ schema: verificationCheckSchema }),
-        temperature: 0.1,
+        ...getModelGenerationSettings(model, { temperature: 0.1 }),
         maxOutputTokens: budget.maxOutputTokens,
         maxRetries: 1,
         abortSignal: AbortSignal.timeout(30_000),
