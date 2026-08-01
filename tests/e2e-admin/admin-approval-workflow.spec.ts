@@ -192,10 +192,16 @@ test.describe("two-person approval", () => {
     // 5. The change is on screen and in the audit log.
     await expect(page.getByText("Max", { exact: true }).first()).toBeVisible();
     await page.goto("/admin/audit");
+    // `getByRole` rather than `getByText`: a route transition can leave the
+    // previous tree in the DOM as hidden nodes, which text matching still
+    // picks up. The accessibility tree only carries the live row, which is
+    // what "the operator can see it" actually means.
     await expect(
-      page.getByText(
-        `Adjusted plan for ${FIXTURE_CUSTOMERS.activePro.email} to Max.`
-      )
+      page
+        .getByRole("cell", {
+          name: `Adjusted plan for ${FIXTURE_CUSTOMERS.activePro.email} to Max.`,
+        })
+        .first()
     ).toBeVisible();
     const audit = await database.adminAuditLog.findMany({
       where: { targetType: "User", targetId: FIXTURE_CUSTOMERS.activePro.id },

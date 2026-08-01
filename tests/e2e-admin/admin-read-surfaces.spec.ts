@@ -404,7 +404,9 @@ test.describe("admin read surfaces", () => {
     await expect(
       page.getByRole("heading", { name: "Admin activity log" })
     ).toBeVisible();
-    await expect(page.getByText(FIXTURE_AUDIT_LOG.summary)).toBeVisible();
+    await expect(
+      page.getByRole("cell", { name: FIXTURE_AUDIT_LOG.summary }).first()
+    ).toBeVisible();
     await expect(
       page.getByText(ADMIN_E2E_IDENTITIES.owner.email).first()
     ).toBeVisible();
