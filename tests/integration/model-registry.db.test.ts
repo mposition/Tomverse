@@ -178,6 +178,67 @@ test("an already-withdrawn row with a stale replacement is still corrected", asy
   assert.notEqual(replacement.publiclyListed, false);
 });
 
+// The one shape the withdrawal replay cannot cover, pinned so the next person
+// who deletes a catalogue entry finds it here rather than in production.
+//
+// Both replay paths iterate the static catalogue -- reconcileStaticWithdrawals
+// over STATIC_WITHDRAWN_MODELS, applyScopedStaticCatalogReconciliation over
+// filtered seed rows -- so an id removed outright leaves nothing to iterate,
+// while getRuntimeModels keeps answering from the row. Deleting an entry
+// therefore does NOT withdraw the model from an environment that already
+// seeded it. groq-gpt-oss-120b shipped in release #225 and was deleted in
+// #180; migration 20260801200000 is what actually withdraws it.
+test("deleting a catalogue entry does not withdraw its runtime row", async () => {
+  const orphanId = `integration/orphan-${randomUUID()}`;
+  await prisma.modelRegistryEntry.create({
+    data: {
+      id: orphanId,
+      name: "Orphaned Model",
+      apiModel: "orphaned-model",
+      provider: "groq",
+      apiBaseUrl: "https://api.groq.com/openai/v1",
+      apiKeyEnvName: "GROQ_API_KEY",
+      icon: "GR",
+      bestFor: "an id with no catalogue entry behind it",
+      minimumPlan: "Free",
+      usageClass: "advanced",
+      creditWeight: 4,
+      enabled: true,
+      publiclyListed: true,
+      status: "enabled",
+    },
+  });
+
+  try {
+    await reconcileStaticWithdrawals();
+
+    const row = await prisma.modelRegistryEntry.findUnique({
+      where: { id: orphanId },
+    });
+    assert.ok(row);
+    assert.equal(
+      row.enabled,
+      true,
+      "the replay cannot reach an id the catalogue no longer carries -- removing an entry needs a targeted migration, not a delete"
+    );
+
+    const runtime = await getEnabledRuntimeModel(orphanId);
+    assert.ok(
+      runtime,
+      "and the model keeps being served, because getRuntimeModels answers from the row"
+    );
+  } finally {
+    await prisma.modelRegistryEntry.deleteMany({ where: { id: orphanId } });
+  }
+});
+
+test("the shipped GPT-OSS row is withdrawn by migration, not left offerable", async () => {
+  // 20260801200000 runs against a database that has one; here it has none, so
+  // this asserts the end state either way: no environment serves it.
+  const runtime = await getEnabledRuntimeModel("groq-gpt-oss-120b");
+  assert.equal(runtime, undefined);
+});
+
 test("re-running the bootstrap leaves retired rows untouched", async () => {
   const before = await prisma.modelRegistryEntry.findMany({
     where: { id: { in: RETIRED_MODEL_EXPECTATIONS.map((entry) => entry.id) } },
