@@ -134,15 +134,29 @@ export function AuthButton({
             dailyCreditsLimit - (accountUsage?.usage.creditsDay || 0)
         )
         : null;
-    const dailyCreditsResetLabel = accountUsage?.balances.dailyResetsAt
-        ? new Intl.DateTimeFormat(globalLang, {
-            month: "short",
-            day: "numeric",
-            hour: "numeric",
-            minute: "2-digit",
-            timeZone: accountUsage?.timeZone || timeZone,
-        }).format(new Date(accountUsage.balances.dailyResetsAt))
-        : null;
+    const accountTimeZone =
+        accountUsage?.entitlement?.timeZone || accountUsage?.timeZone || timeZone;
+    const formatResetLabel = (value: string | null | undefined) =>
+        value
+            ? new Intl.DateTimeFormat(globalLang, {
+                month: "short",
+                day: "numeric",
+                hour: "numeric",
+                minute: "2-digit",
+                timeZone: accountTimeZone,
+            }).format(new Date(value))
+            : null;
+    const dailyCreditsResetLabel = formatResetLabel(
+        accountUsage?.entitlement?.dailyResetsAt ||
+            accountUsage?.balances.dailyResetsAt
+    );
+    // An account with no daily credit limit is still bounded by its monthly
+    // plan credits, so the reset it is told about has to be the one that
+    // actually applies rather than nothing at all.
+    const planCreditsResetLabel = formatResetLabel(
+        accountUsage?.entitlement?.planResetsAt ||
+            accountUsage?.balances.planResetsAt
+    );
     const planPeriodEnd = accountUsage?.subscription?.currentPeriodEnd;
     const planPeriodEndLabel = planPeriodEnd
         ? new Intl.DateTimeFormat(globalLang, {
@@ -845,10 +859,17 @@ export function AuthButton({
                       <span className="block text-[11px] font-bold text-blue-700 dark:text-blue-300">
                         {t("auth.dailyCreditsRemaining")}
                       </span>
-                      {hasDailyCreditGuardrail && dailyCreditsResetLabel ? (
-                        <span className="text-right text-[11px] leading-4 text-blue-500 dark:text-blue-400">
+                      {(hasDailyCreditGuardrail
+                        ? dailyCreditsResetLabel
+                        : planCreditsResetLabel) ? (
+                        <span
+                          data-testid="account-credits-reset"
+                          className="text-right text-[11px] leading-4 text-blue-500 dark:text-blue-400"
+                        >
                           {formatCopy("auth.dailyCreditsResetAt", {
-                            time: dailyCreditsResetLabel,
+                            time: (hasDailyCreditGuardrail
+                              ? dailyCreditsResetLabel
+                              : planCreditsResetLabel)!,
                           })}
                         </span>
                       ) : null}
@@ -859,7 +880,10 @@ export function AuthButton({
                         : t("auth.dailyCreditsUnlimitedStandard")}
                     </strong>
                   </div>
-                  <div className="rounded-xl bg-zinc-100 p-2.5 dark:bg-zinc-900">
+                  <div
+                    className="rounded-xl bg-zinc-100 p-2.5 dark:bg-zinc-900"
+                    data-testid="account-plan-credits"
+                  >
                     <span className="block text-[11px] font-bold text-zinc-500 dark:text-zinc-400">
                       {t("auth.planCreditsRemaining")}
                     </span>
