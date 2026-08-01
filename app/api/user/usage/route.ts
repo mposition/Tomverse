@@ -5,7 +5,7 @@ import { getServerSession } from "next-auth/next";
 import { prisma } from "@/lib/prisma";
 import { authOptions } from "@/lib/auth";
 import {
-  getPlanEstimatedCostLimits,
+  getChatCostGuardrails,
   getUserChatUsageKey,
 } from "@/lib/chatSecurity";
 import {
@@ -114,7 +114,10 @@ export async function GET(req: Request) {
       )
     );
     const billingPlan = await getBillingPlanByTier(plan);
-    const estimatedCostLimits = getPlanEstimatedCostLimits(plan);
+    const costGuardrails = getChatCostGuardrails(plan, {
+      dailyMessageLimit: billingPlan.dailyMessageLimit,
+      monthlyMessageLimit: billingPlan.monthlyMessageLimit,
+    });
     const limits = {
       creditsDay: billingPlan.dailyMessageLimit,
       creditsMonth: billingPlan.monthlyMessageLimit,
@@ -127,8 +130,10 @@ export async function GET(req: Request) {
           : 0,
       tokensDay: positiveInteger(process.env.CHAT_USER_TOKENS_PER_DAY, 1_000_000),
       tokensMonth: positiveInteger(process.env.CHAT_USER_TOKENS_PER_MONTH, 20_000_000),
-      costDay: estimatedCostLimits.day,
-      costMonth: estimatedCostLimits.month,
+      // Operational guardrails, not entitlement. Kept in `limits` for the admin
+      // console and diagnostics; the customer-facing allowance is credits.
+      costDay: costGuardrails.planDay,
+      costMonth: costGuardrails.planMonth,
       maxModels: effectivePlanModelLimit(billingPlan),
       allowAttachments: billingPlan.allowAttachments,
       allowSharing: billingPlan.allowSharing,
@@ -147,6 +152,37 @@ export async function GET(req: Request) {
     const nextMonthStart = new Date(
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)
     );
+
+    // What the account is actually allowed to spend, stated once and without
+    // any hidden second ceiling. "No daily limit" means no daily *credit*
+    // limit -- the monthly plan credits below are still the binding allowance,
+    // which is exactly the ambiguity the old "Unlimited" label created.
+    const planRemainingCredits = Math.max(
+      0,
+      limits.creditsMonth - count("month") - (user?.creditDebtCredits || 0)
+    );
+    const dailyRemainingCredits =
+      limits.creditsDay > 0
+        ? Math.max(0, limits.creditsDay - count("day"))
+        : null;
+    const entitlement = {
+      dailyCreditLimit: limits.creditsDay,
+      dailyCreditsUsed: count("day"),
+      dailyCreditsRemaining: dailyRemainingCredits,
+      hasDailyCreditLimit: limits.creditsDay > 0,
+      dailyResetsAt: dayWindow.end.toISOString(),
+      timeZone: dayWindow.timeZone,
+      planCreditsRemaining: planRemainingCredits,
+      planResetsAt: nextMonthStart.toISOString(),
+      purchasedCreditsRemaining: purchasedBalance.remainingCredits,
+      // Spendable right now: purchased credits stay usable after the daily
+      // plan-credit guardrail is reached.
+      creditsAvailableNow:
+        (dailyRemainingCredits === null
+          ? planRemainingCredits
+          : Math.min(planRemainingCredits, dailyRemainingCredits)) +
+        purchasedBalance.remainingCredits,
+    };
 
     return NextResponse.json({
       plan,
@@ -167,16 +203,11 @@ export async function GET(req: Request) {
         costDay: count("cost-day"),
         costMonth: count("cost-month"),
       },
+      entitlement,
       balances: {
-        dailyRemainingCredits:
-          limits.creditsDay > 0
-            ? Math.max(0, limits.creditsDay - count("day"))
-            : null,
+        dailyRemainingCredits,
         dailyResetsAt: dayWindow.end.toISOString(),
-        planRemainingCredits: Math.max(
-          0,
-          limits.creditsMonth - count("month") - (user?.creditDebtCredits || 0)
-        ),
+        planRemainingCredits,
         planResetsAt: nextMonthStart.toISOString(),
         purchasedRemainingCredits: purchasedBalance.remainingCredits,
         purchasedFundedCostMicroUsd: purchasedBalance.remainingFundedCostMicroUsd,

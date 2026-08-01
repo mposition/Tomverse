@@ -8,6 +8,7 @@ import {
 } from "@/lib/oauthTokenCrypto";
 import { expireCreditLots } from "@/lib/creditLedger";
 import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
+import { purgeExpiredChatLimitDecisions } from "@/lib/chatLimitDecisions";
 import {
   sendFoundingTesterPassEndedEmail,
   sendFoundingTesterPassReminderEmail,
@@ -384,6 +385,11 @@ export async function cleanupExpiredData() {
     },
   });
 
+  // Limit decisions are support diagnostics, not billing records: 90 days is
+  // long enough to answer "why was I blocked last quarter" and short enough
+  // that the table cannot grow without bound.
+  const limitDecisions = await purgeExpiredChatLimitDecisions(now);
+
   const promotionRiskIdentifiers =
     await prisma.billingPromotionRedemption.updateMany({
       where: {
@@ -432,6 +438,7 @@ export async function cleanupExpiredData() {
     requestLeases: Number(requestLeases),
     providerErrorEvents: providerErrorEvents.count,
     productAnalyticsEvents: productAnalyticsEvents.count,
+    limitDecisions: limitDecisions.deleted,
     promotionRiskIdentifiers: promotionRiskIdentifiers.count,
     shareSnapshots: Number(shareSnapshots),
     oauthTokensEncrypted,

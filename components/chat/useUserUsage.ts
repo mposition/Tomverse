@@ -30,6 +30,23 @@ export type UserUsageResponse = {
     costDay: number;
     costMonth: number;
   };
+  /**
+   * What the account is allowed to spend, stated once. Optional so a client
+   * rendered before the field shipped still type-checks against a cached
+   * response.
+   */
+  entitlement?: {
+    dailyCreditLimit: number;
+    dailyCreditsUsed: number;
+    dailyCreditsRemaining: number | null;
+    hasDailyCreditLimit: boolean;
+    dailyResetsAt: string;
+    timeZone: string;
+    planCreditsRemaining: number;
+    planResetsAt: string;
+    purchasedCreditsRemaining: number;
+    creditsAvailableNow: number;
+  };
   balances: {
     dailyRemainingCredits: number | null;
     dailyResetsAt: string;

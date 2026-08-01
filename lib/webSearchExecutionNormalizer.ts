@@ -1,5 +1,6 @@
 import { sanitizeWebSearchCitations, type WebSearchCitation } from "@/lib/webSearchCitations";
 import type { WebSearchCapability } from "@/lib/webSearchCapability";
+import { getNativeSearchCostMicroUsdPerQuery } from "@/lib/modelPricing";
 
 export type WebSearchExecution = {
   requested: boolean;
@@ -15,21 +16,9 @@ export type WebSearchExecution = {
 
 type UnknownContentPart = { type?: unknown; [key: string]: unknown };
 
-// Conservative internal per-query cost estimates for provider-native web
-// search, in micro-USD (1,000,000 = US$1), used only for internal cost
-// accounting (settledCostMicroUsd / provider spend buckets) -- never exposed
-// as extra user-facing credits beyond the flat surcharge already reserved.
-// OpenAI/Anthropic: documented flat $10 per 1,000 searches (i.e. $0.01 each).
-// Google: Gemini native search's public list price is $14 per 1,000 requests
-// past the free grounding quota; billed here at that rate regardless of
-// quota so the internal estimate never understates cost. Perplexity is
-// excluded -- its own reported response cost is used instead (see
-// lib/perplexityUsageCore.ts), never this flat per-query estimate.
-const NATIVE_SEARCH_COST_MICRO_USD_PER_QUERY: Partial<Record<string, number>> = {
-  openai: 10_000,
-  anthropic: 10_000,
-  google: 14_000,
-};
+// Per-query native-search prices live in the pricing registry alongside every
+// other price this application charges, so a search price change is versioned
+// and audited the same way a token price change is.
 
 const isToolPart = (
   part: unknown,
@@ -104,7 +93,7 @@ export function normalizeWebSearchExecution(args: {
   // policy requires for providers that don't report a distinct count.
   const queryCount = executed ? resultParts.length : undefined;
   const failureCode = errorParts.length > 0 ? "provider_tool_error" : undefined;
-  const costPerQuery = NATIVE_SEARCH_COST_MICRO_USD_PER_QUERY[provider];
+  const costPerQuery = getNativeSearchCostMicroUsdPerQuery(provider);
   const costMetadata =
     queryCount && costPerQuery
       ? { searchCostMicroUsd: queryCount * costPerQuery }

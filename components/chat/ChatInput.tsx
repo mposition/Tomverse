@@ -56,6 +56,7 @@ import {
   type AiModel,
 } from "@/lib/models";
 import { estimateRequestCredits } from "@/lib/webSearchCredits";
+import { useChatAvailability } from "@/components/chat/useChatAvailability";
 import {
   ModelPickerPanel,
   type ModelPickerAnalyticsEvent,
@@ -758,6 +759,17 @@ export function ChatInput({
     creditAllocation.balanceInsufficient;
   const isUsageLimitReached =
     isGuestLimitReached || isAccountDailyLimitReached || isAccountMonthlyLimitReached;
+  // Guardrail and provider-budget state lives in server-side buckets the
+  // composer cannot see, so it is probed whenever the selection or the
+  // web-search mode changes rather than only discovered after sending.
+  const serverAvailability = useChatAvailability({
+    enabled: !isGuestMode && activeSelectedModels.length > 0,
+    modelIds: activeSelectedModels,
+    webSearchMode,
+  });
+  const operationalHoldActive =
+    serverAvailability?.runnable === false &&
+    serverAvailability.blockLayer === "operational_guardrail";
   const creditShortfall = Math.max(0, estimatedRequestCredits - totalAvailableCredits);
   const addOnCreditsForRequest =
     !isGuestMode &&
@@ -2118,6 +2130,17 @@ export function ChatInput({
               {interpolateCopy(t("chat.addOnCreditsWillBeUsed"), {
                 credits: addOnCreditsForRequest,
               })}
+            </div>
+          )}
+          {operationalHoldActive && !isUsageLimitReached && (
+            <div
+              data-testid="operational-hold-notice"
+              role="status"
+              className="mb-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold leading-5 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100"
+            >
+              {serverAvailability?.blockCode === "PROVIDER_BUDGET_EXHAUSTED"
+                ? t("chat.providerCostSafetyLimit")
+                : t("chat.operationalCostGuardrail")}
             </div>
           )}
           {isUsageLimitReached && (

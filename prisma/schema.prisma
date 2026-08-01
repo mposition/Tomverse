@@ -388,6 +388,43 @@ model ChatRequestLease {
   @@index([subjectKey, expiresAt])
 }
 
+// Why one chat request was allowed or refused by a credit/cost limit, keyed by
+// the Trace ID the user is shown. Carries no prompt text and no message
+// content: the subject is the same hashed usage key the rate limiter uses, and
+// the rest is the pricing and allowance arithmetic behind the decision.
+model ChatLimitDecisionEvent {
+  id                        String    @id @default(cuid())
+  traceId                   String
+  subjectKey                String
+  userId                    String?
+  plan                      String
+  phase                     String
+  decision                  String
+  errorCode                 String?
+  limitLayer                String?
+  limitScope                String?
+  modelIds                  String[]
+  enabledTools              String[]
+  estimatedInputTokens      Int       @default(0)
+  estimatedOutputTokens     Int       @default(0)
+  estimatedCostMicroUsd     BigInt    @default(0)
+  pricingVersions           String[]
+  models                    Json
+  requiredCredits           Int?
+  availableCredits          Int?
+  usedAllowanceMicroUsd     BigInt?
+  requiredAllowanceMicroUsd BigInt?
+  limitMicroUsd             BigInt?
+  timeZone                  String    @default("UTC")
+  resetAt                   DateTime?
+  createdAt                 DateTime  @default(now())
+
+  @@index([traceId])
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@index([subjectKey, createdAt])
+}
+
 model BillingPlan {
   id                  String   @id
   name                String
