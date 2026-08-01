@@ -81,6 +81,14 @@ run(
   ["node_modules/prisma/build/index.js", "db", "push"],
   "Synchronizing the current Prisma schema"
 );
+// db push only reproduces what schema.prisma can express. Production also has
+// constraints that live in migration SQL -- partial unique indexes above all --
+// and without this step a test written to prove one exists would pass against a
+// database that never had it. See the script for the full reasoning.
+run(
+  ["scripts/apply-test-db-partial-indexes.mjs"],
+  "Applying the constraints db push cannot express"
+);
 run(
   [
     "--conditions=react-server",
