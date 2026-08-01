@@ -15,6 +15,7 @@ import {
   isFeedbackReference,
   isPlausibleTraceId,
   isRetryableFeedbackFailure,
+  looksLikeUnknownSecret,
   sanitizeFeedbackDiagnostics,
 } from "../lib/feedbackPolicy.ts";
 import { guestVerificationFailureKey } from "../components/chat/guestVerificationCopy.ts";
@@ -174,10 +175,24 @@ test("attached diagnostics never push the body past the server maximum", () => {
  * tests/gitleaksAllowlist.test.mjs), so the fix is to not commit the shape,
  * not to teach the scanner to ignore it.
  */
+const assemble = (...parts) => parts.join("");
+
 const fakeJwt = () =>
   ["eyJhbGciOiJIUzI1NiJ9", "eyJzdWIiOiIxMjM0NSJ9", "QWxsRG9uZUhlcmVOb3c"].join(".");
 const fakeOpenAiKey = () => `sk${"-"}livesecretvalue1234567890`;
 const fakeAwsKeyId = () => `AKIA${"IOSFODNN7EXAMPLE"}`;
+/** A Google-shaped key: `AIza` followed by 35 characters. */
+const fakeGoogleKey = () =>
+  assemble("AIza", "SyD1x9Qp", "LmNv2345", "abcdEFGH", "ijkLMNop", "QRs");
+/** A vendor prefix the denylist has never heard of. */
+const fakeVendorKey = () =>
+  assemble("nvapi-", "Xy7Kq2Lm", "9Pw4Rt8Zc", "1Vb6Nh3Jd", "5Fg0As");
+/** A bare 48-character hex digest. */
+const fakeHexDigest = () =>
+  assemble("a3f5c9e1", "b7d24089", "f9a1c3e5", "b7d9f012", "34567890", "abcdef12", "34");
+/** A base64 blob. */
+const fakeBase64Secret = () =>
+  assemble("dGhpcyBp", "c0FSYW5k", "b21CYXNl", "NjRTZWNy", "ZXQxMjM0", "NTY3ODk=");
 
 test("credentials in an auto-attached error never leave the browser", () => {
   const jwt = fakeJwt();
@@ -418,5 +433,180 @@ test("no feedback surface logs a Turnstile token", () => {
         `${path} logs submission content: ${call.slice(0, 120)}`
       );
     }
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Credential shapes nobody registered a pattern for
+//
+// A denylist is only ever as good as the formats it was told about. These pin
+// the second, shape-based pass: it must catch a generated credential whatever
+// issued it, and must not eat the trace ID the feature exists to carry.
+// ---------------------------------------------------------------------------
+
+test("a credential in an unregistered format is still removed", () => {
+  const unknownSecrets = [
+    fakeGoogleKey(),
+    fakeVendorKey(),
+    fakeHexDigest(),
+    fakeBase64Secret(),
+  ];
+  for (const secret of unknownSecrets) {
+    assert.equal(looksLikeUnknownSecret(secret), true, secret);
+    const sanitized = sanitizeFeedbackDiagnostics(`upstream rejected ${secret}`);
+    assert.ok(!sanitized.includes(secret), `${secret} survived sanitisation`);
+    assert.ok(sanitized.includes("[redacted]"));
+  }
+});
+
+test("the trace ID a user is asked to quote is never redacted", () => {
+  // The whole point of attaching diagnostics is to carry this back to support.
+  const traceId = "0d1f6b1e-9a2c-4d3f-8b7a-5c6d7e8f9012";
+  assert.equal(looksLikeUnknownSecret(traceId), false);
+  const sanitized = sanitizeFeedbackDiagnostics(`Trace ID: ${traceId}`);
+  assert.ok(sanitized.includes(traceId));
+});
+
+test("ordinary diagnostic tokens are not mistaken for secrets", () => {
+  const keep = [
+    "claude-haiku-4-5-20251001",
+    "gemini-2-5-flash",
+    "components/chat/FeedbackButton.tsx",
+    "app/api/internal/maintenance/notification-deliveries/route.ts",
+    "PLAN_DAILY_CREDIT_LIMIT_REACHED",
+    "OPERATIONAL_COST_GUARDRAIL_TRIGGERED",
+    "2026-08-01T12:00:00.000Z",
+    "https://api.example.com/v1/chat/completions",
+    "1754049600000",
+    "support@tomverse.app",
+  ];
+  for (const token of keep) {
+    assert.equal(looksLikeUnknownSecret(token), false, token);
+    assert.ok(
+      sanitizeFeedbackDiagnostics(`context ${token} end`).includes(token),
+      `${token} was redacted`
+    );
+  }
+});
+
+test("a realistic error report keeps its diagnostics and loses its key", () => {
+  const googleKey = fakeGoogleKey();
+  const sanitized = sanitizeFeedbackDiagnostics(
+    [
+      "Request failed for model claude-haiku-4-5-20251001.",
+      "Trace ID: 0d1f6b1e-9a2c-4d3f-8b7a-5c6d7e8f9012",
+      `Upstream said: invalid key ${googleKey}`,
+      "at components/chat/ChatApp.tsx:812",
+    ].join("\n")
+  );
+  assert.ok(sanitized.includes("claude-haiku-4-5-20251001"));
+  assert.ok(sanitized.includes("0d1f6b1e-9a2c-4d3f-8b7a-5c6d7e8f9012"));
+  assert.ok(sanitized.includes("components/chat/ChatApp.tsx:812"));
+  assert.ok(!sanitized.includes(googleKey));
+});
+
+test("punctuation around a secret does not shield it", () => {
+  const secret = fakeGoogleKey();
+  for (const wrapped of [`"${secret}"`, `(${secret})`, `${secret},`, `[${secret}]`]) {
+    const sanitized = sanitizeFeedbackDiagnostics(`key=${wrapped}`);
+    assert.ok(!sanitized.includes(secret), wrapped);
+  }
+});
+
+test("a short token is left alone however random it looks", () => {
+  // Redacting every short mixed token would gut the diagnostics.
+  assert.equal(looksLikeUnknownSecret("Ab3Xy9Zq"), false);
+  assert.equal(looksLikeUnknownSecret("Err500Retry2"), false);
+});
+
+test("the user is shown exactly what will be attached", () => {
+  const source = read("components/chat/FeedbackButton.tsx");
+  // The preview renders the sanitised text, not the raw details.
+  assert.match(source, /sanitizedDiagnostics = useMemo/);
+  assert.match(source, /data-testid="feedback-diagnostics-body"/);
+  assert.match(source, /\{sanitizedDiagnostics\}/);
+  // And the copy button hands over the same thing.
+  assert.match(source, /clipboard\.writeText\(sanitizedDiagnostics\)/);
+  assert.ok(
+    !/clipboard\.writeText\(rawErrorDetails\)/.test(source),
+    "the copy button still hands over unsanitised text"
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Closing mid-flight
+// ---------------------------------------------------------------------------
+
+test("closing is never blocked while a submission is in flight", () => {
+  const source = read("components/chat/FeedbackButton.tsx");
+  const closeDialog = source.slice(
+    source.indexOf("const closeDialog"),
+    source.indexOf("const openDialog")
+  );
+  // The old guard returned early while sending, locking the dialog shut for
+  // as long as the request took.
+  assert.ok(
+    !/if \(submittingRef\.current\) return;/.test(closeDialog),
+    "closeDialog still refuses to close during a send"
+  );
+  assert.match(closeDialog, /setOpen\(false\)/);
+  // The close control itself is live too.
+  const closeButton = source.slice(
+    source.indexOf('data-testid="feedback-close"'),
+    source.indexOf('data-testid="feedback-close"') + 400
+  );
+  assert.ok(
+    !/disabled=\{isSending\}/.test(closeButton),
+    "the close button is still disabled while sending"
+  );
+});
+
+test("an outcome that lands after the dialog closed still reaches the user", () => {
+  const source = read("components/chat/FeedbackButton.tsx");
+  assert.match(source, /const reportFailure = \(failure: SubmitError\) => \{/);
+  // Inline when visible, toast when not: the dialog is no longer the only
+  // channel a failure can use.
+  assert.match(source, /if \(openRef\.current\) return;/);
+  assert.match(source, /dispatchAppToast\(text, "error"\)/);
+});
+
+// ---------------------------------------------------------------------------
+// The fixtures police themselves
+//
+// Twice now a credential-shaped literal was committed in a test fixture and
+// the secret scanner caught it in CI rather than here. The detector this work
+// added is exactly the tool for the job, so it is pointed at this feature's
+// own source: a fake key is still a real key *shape* in the history, and
+// .gitleaks.toml's allowlist is deliberately narrow (tests/gitleaksAllowlist.
+// test.mjs), so the fix is always to assemble the fixture at runtime.
+// ---------------------------------------------------------------------------
+
+test("no file this feature owns commits a credential shape", () => {
+  const owned = [
+    "lib/feedbackPolicy.ts",
+    "lib/feedbackClient.ts",
+    "lib/notificationRetryCore.ts",
+    "lib/notificationDeliveries.ts",
+    "lib/notificationDeliveryJob.ts",
+    "lib/supportNotificationEmail.ts",
+    "components/chat/FeedbackButton.tsx",
+    "app/api/feedback/route.ts",
+    "tests/feedbackPolicy.test.mjs",
+    "tests/notificationRetryCore.test.mjs",
+    "tests/e2e/feedback-modal.spec.ts",
+    "tests/server-contract/feedback-route.test.ts",
+    "tests/server-contract/notification-delivery-queue.test.ts",
+  ];
+
+  for (const path of owned) {
+    const source = read(path);
+    const offenders = (source.match(/[A-Za-z0-9+/_-]{20,}={0,2}/g) || []).filter(
+      (candidate) => looksLikeUnknownSecret(candidate)
+    );
+    assert.deepEqual(
+      offenders,
+      [],
+      `${path} contains a credential-shaped literal; assemble it at runtime instead`
+    );
   }
 });
