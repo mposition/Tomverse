@@ -111,7 +111,7 @@ export async function POST(req: Request) {
       const outcome = await attemptNotificationDelivery({
         kind: NOTIFICATION_KIND.supportFeedback,
         referenceId: feedback.id,
-        attempt: 1,
+        deliveryId: delivery.id,
       });
       const transition = await recordNotificationAttempt({
         id: delivery.id,

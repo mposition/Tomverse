@@ -18,12 +18,38 @@ import {
   consumeApiRateLimit,
   readLimitedJson,
 } from "@/lib/apiSecurity";
-import {
-  sendRefundRequestApprovedEmail,
-  sendRefundRequestRejectedEmail,
-} from "@/lib/billingEmails";
 import { prisma } from "@/lib/prisma";
+import {
+  NOTIFICATION_KIND,
+  deliverNotificationNow,
+  enqueueNotificationDelivery,
+} from "@/lib/notificationDeliveries";
 import { getStripe, isStripeConfigured } from "@/lib/stripe";
+
+/**
+ * Queues the decision email and makes the first attempt inline.
+ *
+ * Both decisions used to `.catch(console.error)`, so a customer whose refund
+ * was approved or rejected could simply never be told. The row is written
+ * first, so a failed send is retried rather than lost.
+ */
+const notifyRefundDecision = async (
+  requestId: string,
+  kind: "refundRequestApproved" | "refundRequestRejected"
+) => {
+  const notificationKind = NOTIFICATION_KIND[kind];
+  const delivery = await prisma.$transaction((tx) =>
+    enqueueNotificationDelivery(tx, {
+      kind: notificationKind,
+      referenceId: requestId,
+    })
+  );
+  await deliverNotificationNow({
+    deliveryId: delivery.id,
+    kind: notificationKind,
+    referenceId: requestId,
+  });
+};
 
 const updateRefundRequestSchema = z
   .object({
@@ -195,13 +221,9 @@ export async function PATCH(req: Request, context: RouteContext) {
       );
     }
 
-    const userSettings = refundRequest.userId
-      ? await prisma.userSettings.findUnique({
-          where: { userId: refundRequest.userId },
-          select: { language: true },
-        })
-      : null;
-
+    // The recipient's language is no longer looked up here: the notification
+    // queue re-renders the decision email from the stored request at send
+    // time, and reads the language from the same place a retry would.
     const creditReview = refundRequest.userId
       ? await prisma.user.findUnique({
           where: { id: refundRequest.userId },
@@ -360,15 +382,7 @@ export async function PATCH(req: Request, context: RouteContext) {
         },
       });
 
-      await sendRefundRequestApprovedEmail({
-        to: updated.email,
-        plan: updated.plan,
-        requestId: updated.id,
-        adminNote: updated.adminNote,
-        language: userSettings?.language,
-      }).catch((error) => {
-        console.error("Refund approval email failed:", error);
-      });
+      await notifyRefundDecision(updated.id, "refundRequestApproved");
 
       return NextResponse.json({ success: true, refundRequest: updated });
     }
@@ -420,15 +434,7 @@ export async function PATCH(req: Request, context: RouteContext) {
       },
     });
 
-    await sendRefundRequestRejectedEmail({
-      to: updated.email,
-      plan: updated.plan,
-      requestId: updated.id,
-      adminNote: updated.adminNote,
-      language: userSettings?.language,
-    }).catch((error) => {
-      console.error("Refund rejection email failed:", error);
-    });
+    await notifyRefundDecision(updated.id, "refundRequestRejected");
 
     return NextResponse.json({ success: true, refundRequest: updated });
   } catch (error) {

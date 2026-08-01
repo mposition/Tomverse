@@ -36,7 +36,7 @@ export async function POST(request: Request) {
       1_000
     );
     const infrastructureMonitor = await monitorInfrastructureThresholdsIfDue();
-    // Rides along on the only five-minute schedule this deployment already
+    // Rides along on the only fifteen-minute schedule this deployment already
     // has, so the operator-notification queue drains without a second cron
     // entry having to be provisioned. It never throws, so it cannot turn a
     // successful reconciliation into a failed one.

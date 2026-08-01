@@ -189,8 +189,8 @@ export function AdminInfrastructurePanel({
               Railway, R2, and database operations
             </h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-              Read-only external metrics are refreshed every five minutes. Tokens stay on the
-              server and are never returned to the browser.
+              Read-only external metrics are refreshed every fifteen minutes. Tokens stay on
+              the server and are never returned to the browser.
             </p>
           </div>
           <button

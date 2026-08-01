@@ -180,7 +180,8 @@ export async function GET(req: Request) {
         {
           key: "creditReservations",
           label: "Expired credit reservations",
-          policy: "Refund expired reserved credits within the five-minute reconciliation cycle.",
+          policy:
+            "Refund expired reserved credits on the next fifteen-minute reconciliation sweep.",
           staleCount: expiredCreditReservations,
           oldestAt: oldestCreditReservation,
         },

@@ -8,9 +8,10 @@ import { EMAIL_FONT_STACK } from "@/lib/emailTypography";
  * queue when that send failed. Building it twice would let the retried mail
  * drift away from the original.
  *
- * Pure: it takes the stored fields and returns strings, so
- * tests/supportNotificationEmail.test.mjs can assert the escaping without a
- * database or a mail provider.
+ * Pure, and deterministic for a given record: every attempt must render byte
+ * for byte the same message, because the provider's idempotency key only
+ * suppresses a duplicate when the payload matches too. That is why nothing
+ * here varies by attempt number or by clock.
  */
 
 export const escapeHtml = (value: unknown) =>
@@ -31,8 +32,6 @@ export type SupportNotificationInput = {
   plan?: string | null;
   attachmentCount?: number | null;
   path?: string | null;
-  /** Set on a retried send so the operator knows why it arrived late. */
-  retryAttempt?: number;
 };
 
 export const buildSupportNotificationEmail = (
@@ -40,15 +39,10 @@ export const buildSupportNotificationEmail = (
 ) => {
   const dash = (value: unknown) => (value ? String(value) : "-");
   const attachments = input.attachmentCount || 0;
-  const isRetry = Boolean(input.retryAttempt && input.retryAttempt > 1);
-  const retryNote = isRetry
-    ? `Delivery retry ${input.retryAttempt} -- the report itself was stored when it was submitted.`
-    : null;
 
   const subject = `Tomverse support request: ${input.type}`;
 
   const text = [
-    ...(retryNote ? [retryNote, ""] : []),
     `Feedback ID: ${input.feedbackId}`,
     `Type: ${input.type}`,
     `Email: ${input.email || "guest"}`,
@@ -64,11 +58,6 @@ export const buildSupportNotificationEmail = (
   const html = `
             <div style="font-family:${EMAIL_FONT_STACK};color:#111827;line-height:1.6">
               <h2>New Tomverse support request</h2>
-              ${
-                retryNote
-                  ? `<p style="color:#92400e"><strong>${escapeHtml(retryNote)}</strong></p>`
-                  : ""
-              }
               <p><strong>Feedback ID:</strong> ${escapeHtml(input.feedbackId)}</p>
               <p><strong>Type:</strong> ${escapeHtml(input.type)}</p>
               <p><strong>Email:</strong> ${escapeHtml(input.email || "guest")}</p>

@@ -1,4 +1,10 @@
-import type { AiProvider } from "@/lib/models";
+import {
+  AVAILABLE_MODELS,
+  getModelBillingProfile,
+  getModelUsageProfile,
+  type AiModel,
+  type AiProvider,
+} from "@/lib/models";
 
 export const AI_PROVIDERS = [
   "openai",
@@ -128,3 +134,67 @@ export const isSafeProviderApiBaseUrl = (value: string) => {
     return false;
   }
 };
+
+/**
+ * The static bootstrap catalogue, expressed the way the runtime uses it.
+ *
+ * This lives in the shared (Prisma-free) module rather than next to
+ * `ensureModelRegistrySeeded()` because two callers need it and only one of
+ * them may import `server-only`: the runtime bootstrap, and the Admin Console
+ * E2E fixture seeder, which recreates the catalogue after truncating the test
+ * database. Keeping one definition is what makes the seeded fixture catalogue
+ * identical to the one a real deployment bootstraps.
+ */
+export const staticModelWithRuntimeDefaults = (
+  model: AiModel,
+  sortOrder: number
+): AiModel => {
+  const providerConfig = PROVIDER_API_CONFIGURATION[model.provider];
+  const billing = getModelBillingProfile(model);
+  return {
+    ...model,
+    apiBaseUrl: providerConfig.baseUrl,
+    apiKeyEnvName: providerConfig.apiKeyEnvName,
+    creditWeight: getModelUsageProfile(model).credits,
+    catalogDeleted: false,
+    sortOrder,
+    ...billing,
+  };
+};
+
+export const STATIC_RUNTIME_MODELS = AVAILABLE_MODELS.map(staticModelWithRuntimeDefaults);
+
+export const staticModelRegistrySeedRows = () =>
+  STATIC_RUNTIME_MODELS.map((model) => ({
+    id: model.id,
+    name: model.name,
+    apiModel: model.apiModel,
+    provider: model.provider,
+    apiBaseUrl: model.apiBaseUrl!,
+    apiKeyEnvName: model.apiKeyEnvName!,
+    icon: model.icon,
+    bestFor: model.bestFor,
+    minimumPlan: model.minimumPlan,
+    usageClass: model.usageClass,
+    creditWeight: model.creditWeight!,
+    publiclyListed: model.publiclyListed !== false,
+    enabled: model.enabled,
+    status: model.status,
+    operationalReason: model.operationalReason || null,
+    userVisibleNote: model.userVisibleNote || null,
+    replacementModelId: model.replacementModelId || null,
+    catalogDeleted: false,
+    reasoning: model.reasoning || null,
+    contextWindowTokens: model.contextWindowTokens || null,
+    supportsImage: model.inputCapabilities?.image === true,
+    supportsNativePdf: model.inputCapabilities?.nativePdf === true,
+    maxImages: model.inputCapabilities?.maxImages || null,
+    maxBase64ImagePayloadBytes:
+      model.inputCapabilities?.maxBase64ImagePayloadBytes || null,
+    maxOutputTokens: model.maxOutputTokens || null,
+    reservationOutputTokens: model.reservationOutputTokens || null,
+    inputUsdPerMillionTokens: model.inputUsdPerMillionTokens ?? null,
+    outputUsdPerMillionTokens: model.outputUsdPerMillionTokens ?? null,
+    cachedInputPriceMultiplier: model.cachedInputPriceMultiplier ?? null,
+    sortOrder: model.sortOrder || 0,
+  }));

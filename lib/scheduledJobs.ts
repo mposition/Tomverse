@@ -2,59 +2,24 @@ import "server-only";
 
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import {
+  SCHEDULED_JOB_DEFINITIONS,
+  evaluateScheduledJobTiming,
+  nextScheduledAt,
+  type ScheduledJobKey,
+} from "@/lib/scheduledJobsCore";
 
-export const SCHEDULED_JOB_DEFINITIONS = [
-  {
-    key: "credit_reservation_reconciliation",
-    name: "Credit reservation reconciliation",
-    schedule: "Every 5 minutes",
-    maximumSilenceMs: 12 * 60 * 1_000,
-  },
-  {
-    key: "retention_cleanup",
-    name: "Retention cleanup",
-    schedule: "Daily at 03:00 UTC",
-    maximumSilenceMs: 26 * 60 * 60 * 1_000,
-  },
-  {
-    key: "provider_model_catalog_monitor",
-    name: "Provider model lifecycle and discovery monitor",
-    schedule: "Daily at 00:00 UTC (10:00 Australia/Brisbane)",
-    maximumSilenceMs: 26 * 60 * 60 * 1_000,
-  },
-  {
-    key: "provider_usage_sync",
-    name: "Provider usage and infrastructure report",
-    schedule: "Daily at 00:30 UTC",
-    maximumSilenceMs: 26 * 60 * 60 * 1_000,
-  },
-  {
-    key: "notification_delivery_retry",
-    name: "Operator notification delivery retry",
-    // Drained from the credit reconciliation cron as well as its own endpoint,
-    // so the queue keeps moving without a second schedule having to exist.
-    schedule: "Every 5 minutes via credit reconciliation cron",
-    maximumSilenceMs: 35 * 60 * 1_000,
-  },
-  {
-    key: "infrastructure_threshold_monitor",
-    name: "Infrastructure threshold monitor",
-    schedule: "Every 15 minutes via credit reconciliation cron",
-    maximumSilenceMs: 35 * 60 * 1_000,
-  },
-  {
-    key: "provider_probe",
-    name: "Synthetic provider health probe (AUD-R001)",
-    schedule: "Every 10 minutes",
-    // Cadence is 10 minutes; the public status page's freshness window
-    // (see PROVIDER_PUBLIC_STATUS_FRESHNESS_MINUTES) is 30 minutes, so this
-    // must stay well under that or "monitoring delayed" and "provider
-    // stale" would trip at nearly the same time and be indistinguishable.
-    maximumSilenceMs: 25 * 60 * 1_000,
-  },
-] as const;
-
-export type ScheduledJobKey = (typeof SCHEDULED_JOB_DEFINITIONS)[number]["key"];
+// SCHED-DRIFT-001. The catalogue and every timing rule derived from it now live
+// in lib/scheduledJobsCore.ts, which has no Prisma and no "server-only" import
+// so a fixed-clock unit test can reach them. Re-exported here because every
+// existing caller imports them from this module.
+export {
+  SCHEDULED_JOB_DEFINITIONS,
+  CRON_CADENCE_MINUTES,
+  silenceBudgetMsFor,
+  nextScheduledAt,
+} from "@/lib/scheduledJobsCore";
+export type { ScheduledJobKey } from "@/lib/scheduledJobsCore";
 
 const serializeError = (error: unknown) =>
   error instanceof Error
@@ -170,44 +135,6 @@ export async function recordAutoFixResult(input: {
   });
 }
 
-const nextFiveMinuteBoundary = (now: Date) => {
-  const result = new Date(now);
-  result.setUTCSeconds(0, 0);
-  result.setUTCMinutes(Math.floor(result.getUTCMinutes() / 5) * 5 + 5);
-  return result;
-};
-
-const nextDailyUtc = (now: Date, hour: number, minute: number) => {
-  const result = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), hour, minute)
-  );
-  if (result <= now) result.setUTCDate(result.getUTCDate() + 1);
-  return result;
-};
-
-const nextScheduledAt = (key: ScheduledJobKey, now: Date) => {
-  if (key === "credit_reservation_reconciliation") {
-    return nextFiveMinuteBoundary(now);
-  }
-  if (key === "infrastructure_threshold_monitor") {
-    const result = new Date(now);
-    result.setUTCSeconds(0, 0);
-    result.setUTCMinutes(Math.floor(result.getUTCMinutes() / 15) * 15 + 15);
-    return result;
-  }
-  if (key === "provider_probe") {
-    const result = new Date(now);
-    result.setUTCSeconds(0, 0);
-    result.setUTCMinutes(Math.floor(result.getUTCMinutes() / 10) * 10 + 10);
-    return result;
-  }
-  return key === "retention_cleanup"
-    ? nextDailyUtc(now, 3, 0)
-    : key === "provider_model_catalog_monitor"
-      ? nextDailyUtc(now, 0, 0)
-      : nextDailyUtc(now, 0, 30);
-};
-
 export async function getScheduledJobsDashboard(now = new Date()) {
   const recentRuns = await prisma.scheduledJobRun.findMany({
     where: {
@@ -227,11 +154,12 @@ export async function getScheduledJobsDashboard(now = new Date()) {
       if (run.status === "failed") consecutiveFailures += 1;
       else if (run.status === "succeeded") break;
     }
-    const delayed =
-      !lastRun || now.getTime() - lastRun.startedAt.getTime() > definition.maximumSilenceMs;
-    const stuck =
-      lastRun?.status === "running" &&
-      now.getTime() - lastRun.startedAt.getTime() > definition.maximumSilenceMs;
+    const { delayed, stuck } = evaluateScheduledJobTiming({
+      now,
+      maximumSilenceMs: definition.maximumSilenceMs,
+      lastRunStartedAt: lastRun?.startedAt ?? null,
+      lastRunStatus: lastRun?.status ?? null,
+    });
     return {
       key: definition.key,
       name: definition.name,
