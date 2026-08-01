@@ -267,6 +267,39 @@ const scenarios = [
   },
 ];
 
+// Minimum completed runs per arm before a result may be used to decide a
+// retirement. Below this the run is a smoke test: at 60 runs a single provider
+// error is already 1.67%, so a "<= 2% absolute, <= baseline + 1pp" rule cannot
+// distinguish a healthy arm from an unhealthy one -- one unlucky request flips
+// the verdict. See docs/policy/default-model-luna-migration.md 4.3.
+const DECISION_MIN_RUNS_PER_ARM = 300;
+
+/**
+ * Wilson score interval for a binomial proportion.
+ *
+ * Reported alongside every rate so a verdict can be read off the bound that
+ * matters rather than off a point estimate: an error rate is judged by its
+ * UPPER bound ("we are confident it is no worse than this") and a success rate
+ * by its LOWER bound. Wilson rather than the normal approximation because
+ * these proportions sit near 0 and 1, where the normal interval misbehaves and
+ * can even run outside [0, 1].
+ */
+const wilsonInterval = (successes, total, z = 1.96) => {
+    if (total === 0) return { lower: 0, upper: 1 };
+    const proportion = successes / total;
+    const denominator = 1 + (z * z) / total;
+    const centre = proportion + (z * z) / (2 * total);
+    const spread =
+        z *
+        Math.sqrt(
+            proportion * (1 - proportion) / total + (z * z) / (4 * total * total)
+        );
+    return {
+        lower: Math.max(0, (centre - spread) / denominator),
+        upper: Math.min(1, (centre + spread) / denominator),
+    };
+};
+
 const percentile = (values, fraction) => {
   if (values.length === 0) return 0;
   const sorted = [...values].sort((left, right) => left - right);
@@ -387,14 +420,22 @@ const main = async () => {
 
     const attempted = runs.length + errors.length;
     const latencies = runs.map((run) => run.latencyMs);
+    const passedCount = runs.filter((run) => run.passed).length;
+    const emptyCount = runs.filter((run) => run.empty).length;
     const summary = {
       arm: arm.name,
       modelId: arm.modelId,
       reasoningEffort: arm.reasoningEffort,
       attempted,
-      successRate: attempted === 0 ? 0 : runs.filter((run) => run.passed).length / attempted,
+      decisionGrade: attempted >= DECISION_MIN_RUNS_PER_ARM,
+      successRate: attempted === 0 ? 0 : passedCount / attempted,
+      // The bound each rule is actually judged on, so a verdict never rests on
+      // a point estimate that a single request could have moved.
+      successRateLower95: wilsonInterval(passedCount, attempted).lower,
+      providerErrorRateUpper95: wilsonInterval(errors.length, attempted).upper,
+      emptyResponseRateUpper95: wilsonInterval(emptyCount, attempted).upper,
       providerErrorRate: attempted === 0 ? 0 : errors.length / attempted,
-      emptyResponseRate: attempted === 0 ? 0 : runs.filter((run) => run.empty).length / attempted,
+      emptyResponseRate: attempted === 0 ? 0 : emptyCount / attempted,
       meanLatencyMs: mean(latencies),
       p95LatencyMs: percentile(latencies, 0.95),
       meanInputTokens: mean(runs.map((run) => run.inputTokens)),
@@ -411,9 +452,13 @@ const main = async () => {
   console.table(
     summaries.map((summary) => ({
       arm: summary.arm,
+      runs: summary.attempted,
       pass: `${(summary.successRate * 100).toFixed(1)}%`,
+      "pass>=": `${(summary.successRateLower95 * 100).toFixed(1)}%`,
       err: `${(summary.providerErrorRate * 100).toFixed(1)}%`,
+      "err<=": `${(summary.providerErrorRateUpper95 * 100).toFixed(1)}%`,
       empty: `${(summary.emptyResponseRate * 100).toFixed(1)}%`,
+      "empty<=": `${(summary.emptyResponseRateUpper95 * 100).toFixed(1)}%`,
       meanMs: Math.round(summary.meanLatencyMs),
       p95Ms: Math.round(summary.p95LatencyMs),
       inTok: Math.round(summary.meanInputTokens),
@@ -434,8 +479,27 @@ const main = async () => {
     console.log(`\nRaw records written to ${jsonPath}`);
   }
 
+  const smokeArms = summaries.filter((summary) => !summary.decisionGrade);
+  if (smokeArms.length > 0) {
+    console.warn(
+      `\nSMOKE RUN -- NOT a retirement decision. ${smokeArms.length} arm(s) completed ` +
+        `fewer than ${DECISION_MIN_RUNS_PER_ARM} runs ` +
+        `(${smokeArms.map((s) => `${s.arm}=${s.attempted}`).join(", ")}).\n` +
+        `At this sample size the confidence intervals above are too wide to ` +
+        `separate a healthy arm from an unhealthy one. Raise --repeats to at ` +
+        `least ${Math.ceil(DECISION_MIN_RUNS_PER_ARM / scenarios.length)} for a ` +
+        `decision-grade run.`
+    );
+  } else {
+    console.log(
+      `\nDecision-grade: every arm completed at least ${DECISION_MIN_RUNS_PER_ARM} runs.`
+    );
+  }
+
   console.log(
-    "\nCompare these against docs/policy/default-model-luna-migration.md before deciding anything."
+    "\nJudge each rule on its bound (pass>= / err<= / empty<=), not the point estimate.\n" +
+      "Compare these against docs/policy/default-model-luna-migration.md before deciding anything.\n" +
+      "Numbers alone do not authorise a retirement -- the readiness review in 4.6 is separate."
   );
 };
 

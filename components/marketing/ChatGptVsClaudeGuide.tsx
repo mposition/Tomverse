@@ -13,6 +13,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
+import { CHATGPT_VS_CLAUDE_MODEL_IDS } from "@/lib/marketingModelReferences";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 
 type TaskRow = {
@@ -318,7 +319,11 @@ const guideCopy: Partial<Record<Language, GuideCopy>> = {
   ko: koreanGuide,
 };
 
-const comparisonModelIds = ["gpt-5-4-mini", "claude-haiku-4-5"];
+// Shared with tests/marketingModelReferences.test.mjs, which fails if either
+// id stops being publicly selectable. The prose, badges, result cards and
+// preview panels below name these same two models by hand -- changing this
+// list alone is not enough, see docs/policy/default-model-luna-migration.md.
+const comparisonModelIds = [...CHATGPT_VS_CLAUDE_MODEL_IDS];
 
 export function ChatGptVsClaudeGuide() {
   const { lang } = useLanguage();
