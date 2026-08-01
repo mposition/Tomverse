@@ -77,18 +77,62 @@ const run = (args, label) => {
 console.log(
   `[db-integration] Using dedicated database ${databaseName} on ${testDatabaseUrl.hostname}.`
 );
-run(
-  ["node_modules/prisma/build/index.js", "db", "push"],
-  "Synchronizing the current Prisma schema"
-);
-// db push only reproduces what schema.prisma can express. Production also has
-// constraints that live in migration SQL -- partial unique indexes above all --
-// and without this step a test written to prove one exists would pass against a
-// database that never had it. See the script for the full reasoning.
-run(
-  ["scripts/apply-test-db-partial-indexes.mjs"],
-  "Applying the constraints db push cannot express"
-);
+
+// How the test database gets its schema.
+//
+// `migrations` is the default because it is the only mode that proves anything
+// about deployment: `db push` reads schema.prisma directly and would keep
+// passing even if the migration history could not build the schema at all --
+// which is exactly the state this repository was in until the baseline
+// migration replaced it. Building from migrations and then asserting no drift
+// also catches a schema.prisma change that nobody wrote a migration for.
+//
+// `push` stays available for local iteration on a schema whose migration is
+// not written yet.
+const schemaSource = (
+  process.env.DB_INTEGRATION_SCHEMA_SOURCE || "migrations"
+).trim();
+if (!["migrations", "push"].includes(schemaSource)) {
+  fail(
+    `DB_INTEGRATION_SCHEMA_SOURCE must be "migrations" or "push"; received "${schemaSource}".`
+  );
+}
+
+if (schemaSource === "push") {
+  console.warn(
+    "[db-integration] DB_INTEGRATION_SCHEMA_SOURCE=push: the migration history is NOT exercised by this run."
+  );
+  run(
+    ["node_modules/prisma/build/index.js", "db", "push"],
+    "Synchronizing the current Prisma schema"
+  );
+} else {
+  // `db push` regenerates the client as part of its work; `migrate deploy`
+  // does not. Without this, a schema change that has been migrated but not
+  // reinstalled fails as `Cannot read properties of undefined` on a model the
+  // client has never heard of -- which says nothing about what is wrong.
+  run(
+    ["node_modules/prisma/build/index.js", "generate"],
+    "Generating the Prisma client for the current schema"
+  );
+  run(
+    ["node_modules/prisma/build/index.js", "migrate", "deploy"],
+    "Building the schema from the migration history"
+  );
+  run(
+    [
+      "node_modules/prisma/build/index.js",
+      "migrate",
+      "diff",
+      "--from-schema",
+      "prisma/schema.prisma",
+      "--to-config-datasource",
+      "prisma.config.ts",
+      "--exit-code",
+    ],
+    "Checking the migrated schema for drift against schema.prisma"
+  );
+}
 run(
   [
     "--conditions=react-server",
