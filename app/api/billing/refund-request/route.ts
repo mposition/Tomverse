@@ -9,7 +9,11 @@ import {
   consumeApiRateLimit,
   readLimitedJson,
 } from "@/lib/apiSecurity";
-import { sendRefundRequestReceivedEmail } from "@/lib/billingEmails";
+import {
+  NOTIFICATION_KIND,
+  deliverNotificationNow,
+  enqueueNotificationDelivery,
+} from "@/lib/notificationDeliveries";
 import { prisma } from "@/lib/prisma";
 
 const refundRequestSchema = z
@@ -118,27 +122,34 @@ export async function POST(req: Request) {
       );
     }
 
-    const refundRequest = await prisma.refundRequest.create({
-      data: {
-        userId: user.id,
-        email: user.email,
-        plan: user.plan,
-        stripeCustomerId: user.stripeCustomerId,
-        stripeSubscriptionId: user.stripeSubscriptionId,
-        subscriptionStatus: user.subscriptionStatus,
-        subscriptionCurrentPeriodEnd: user.subscriptionCurrentPeriodEnd,
-        subscriptionBillingInterval: user.subscriptionBillingInterval,
-        reason: body.reason || null,
-      },
+    // The request and the receipt we owe the user commit together: a failed
+    // send used to be a console line and nothing else, so the customer was
+    // left with no confirmation that their refund request had been recorded.
+    const { refundRequest, delivery } = await prisma.$transaction(async (tx) => {
+      const refundRequest = await tx.refundRequest.create({
+        data: {
+          userId: user.id,
+          email: user.email,
+          plan: user.plan,
+          stripeCustomerId: user.stripeCustomerId,
+          stripeSubscriptionId: user.stripeSubscriptionId,
+          subscriptionStatus: user.subscriptionStatus,
+          subscriptionCurrentPeriodEnd: user.subscriptionCurrentPeriodEnd,
+          subscriptionBillingInterval: user.subscriptionBillingInterval,
+          reason: body.reason || null,
+        },
+      });
+      const delivery = await enqueueNotificationDelivery(tx, {
+        kind: NOTIFICATION_KIND.refundRequestReceived,
+        referenceId: refundRequest.id,
+      });
+      return { refundRequest, delivery };
     });
 
-    await sendRefundRequestReceivedEmail({
-      to: user.email,
-      plan: user.plan,
-      requestId: refundRequest.id,
-      language: user.settings?.language,
-    }).catch((error) => {
-      console.error("Refund request received email failed:", error);
+    await deliverNotificationNow({
+      deliveryId: delivery.id,
+      kind: NOTIFICATION_KIND.refundRequestReceived,
+      referenceId: refundRequest.id,
     });
 
     return NextResponse.json({

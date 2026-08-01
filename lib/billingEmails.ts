@@ -913,58 +913,84 @@ export const sendFoundingTesterPassEndedEmail = (
   input: FoundingTesterPassEmailInput
 ) => passEmail(input, "ended");
 
-export async function sendRefundRequestReceivedEmail(input: RefundEmailInput) {
-  if (!input.to) return;
+export type RefundEmailStage = "received" | "approved" | "rejected";
+
+/**
+ * Renders a refund email without sending it.
+ *
+ * Split out from the senders below because these three are now delivered
+ * through the notification retry queue, which re-renders from the stored
+ * RefundRequest at send time. Building the message in one place is what keeps
+ * a retried mail identical to the original -- which the provider's idempotency
+ * key requires, and which is what stops a retry becoming a duplicate.
+ */
+export function buildRefundRequestEmail(
+  stage: RefundEmailStage,
+  input: RefundEmailInput
+) {
   const language = normalizeLanguage(input.language);
   const copy = getCopy(input.language);
-  const plan = escapeHtml(input.plan || "paid");
   const requestId = escapeHtml(input.requestId);
-  const subject = copy.refundReceived.subject;
-  const text = copy.refundReceived.text(plan, requestId).join("\n");
-  const html = shell(
-    copy.refundReceived.title,
-    copy.refundReceived.body(plan, requestId),
-    language
-  );
-  await sendTransactionalEmail({ to: input.to, subject, text, html });
+
+  if (stage === "received") {
+    const plan = escapeHtml(input.plan || "paid");
+    return {
+      subject: copy.refundReceived.subject,
+      text: copy.refundReceived.text(plan, requestId).join("\n"),
+      html: shell(
+        copy.refundReceived.title,
+        copy.refundReceived.body(plan, requestId),
+        language
+      ),
+    };
+  }
+
+  const adminNote = input.adminNote ? escapeHtml(input.adminNote) : "";
+  if (stage === "approved") {
+    return {
+      subject: copy.refundApproved.subject,
+      text: copy.refundApproved
+        .text(input.requestId, input.adminNote || "")
+        .filter(Boolean)
+        .join("\n"),
+      html: shell(
+        copy.refundApproved.title,
+        copy.refundApproved.body(requestId, adminNote),
+        language
+      ),
+    };
+  }
+
+  return {
+    subject: copy.refundRejected.subject,
+    text: copy.refundRejected
+      .text(input.requestId, input.adminNote || "")
+      .join("\n"),
+    html: shell(
+      copy.refundRejected.title,
+      copy.refundRejected.body(requestId, adminNote, copy.refundRejected.fallback),
+      language
+    ),
+  };
 }
 
-export async function sendRefundRequestApprovedEmail(input: RefundEmailInput) {
+const sendRefundEmail = async (
+  stage: RefundEmailStage,
+  input: RefundEmailInput
+) => {
   if (!input.to) return;
-  const language = normalizeLanguage(input.language);
-  const copy = getCopy(input.language);
-  const requestId = escapeHtml(input.requestId);
-  const adminNote = input.adminNote ? escapeHtml(input.adminNote) : "";
-  const subject = copy.refundApproved.subject;
-  const text = copy.refundApproved
-    .text(input.requestId, input.adminNote || "")
-    .filter(Boolean)
-    .join("\n");
-  const html = shell(
-    copy.refundApproved.title,
-    copy.refundApproved.body(requestId, adminNote),
-    language
-  );
-  await sendTransactionalEmail({ to: input.to, subject, text, html });
-}
+  const message = buildRefundRequestEmail(stage, input);
+  await sendTransactionalEmail({ to: input.to, ...message });
+};
 
-export async function sendRefundRequestRejectedEmail(input: RefundEmailInput) {
-  if (!input.to) return;
-  const language = normalizeLanguage(input.language);
-  const copy = getCopy(input.language);
-  const requestId = escapeHtml(input.requestId);
-  const adminNote = input.adminNote ? escapeHtml(input.adminNote) : "";
-  const subject = copy.refundRejected.subject;
-  const text = copy.refundRejected
-    .text(input.requestId, input.adminNote || "")
-    .join("\n");
-  const html = shell(
-    copy.refundRejected.title,
-    copy.refundRejected.body(requestId, adminNote, copy.refundRejected.fallback),
-    language
-  );
-  await sendTransactionalEmail({ to: input.to, subject, text, html });
-}
+export const sendRefundRequestReceivedEmail = (input: RefundEmailInput) =>
+  sendRefundEmail("received", input);
+
+export const sendRefundRequestApprovedEmail = (input: RefundEmailInput) =>
+  sendRefundEmail("approved", input);
+
+export const sendRefundRequestRejectedEmail = (input: RefundEmailInput) =>
+  sendRefundEmail("rejected", input);
 
 export async function sendAdminPlanChangedEmail(input: {
   to: string | null | undefined;

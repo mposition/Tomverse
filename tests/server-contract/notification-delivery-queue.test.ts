@@ -51,7 +51,12 @@ type DeliveryRow = {
   updatedAt: Date;
 };
 
-type SendAttempt = { to: string; subject: string; text: string };
+type SendAttempt = {
+  to: string;
+  subject: string;
+  text: string;
+  idempotencyKey?: string;
+};
 
 type World = {
   feedback: FeedbackRow[];
@@ -221,6 +226,7 @@ async function loadModules() {
             to: input.to,
             subject: input.subject,
             text: input.text,
+            idempotencyKey: input.idempotencyKey,
           });
           if (outcome === "ok") return { sent: true, skipped: false, id: "1" };
           if (outcome === "skip") return { sent: false, skipped: true };
@@ -345,10 +351,17 @@ test("a later drain delivers what the first attempt could not", async () => {
   assert.equal(result.pending, 0);
   assert.equal(world.deliveries[0].status, "delivered");
   assert.equal(world.deliveries[0].attempts, 2);
-  // The retried mail says it is a retry, and still carries the report.
+  // The retried mail carries the report, and is byte-identical to the first
+  // attempt: the provider's idempotency key only suppresses a duplicate when
+  // the payload matches, so a retry must not vary by attempt.
   assert.equal(world.sends.length, 2);
-  assert.match(world.sends[1].text, /Delivery retry 2/);
   assert.match(world.sends[1].text, /the report that must not be lost/);
+  assert.equal(world.sends[1].text, world.sends[0].text);
+  assert.equal(world.sends[1].subject, world.sends[0].subject);
+  // And both attempts present the same key, which is what makes them one
+  // delivery as far as the provider is concerned.
+  assert.equal(world.sends[1].idempotencyKey, world.sends[0].idempotencyKey);
+  assert.match(String(world.sends[0].idempotencyKey), /^notification-delivery:/);
 });
 
 test("a delivery not yet due is left alone", async () => {

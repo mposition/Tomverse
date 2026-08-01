@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -178,26 +179,22 @@ test("the operator email carries the report and escapes it", () => {
   assert.ok(!email.html.includes('onerror="alert(1)"'));
 });
 
-test("a retried notification says which attempt it is; a first one does not", () => {
-  const first = buildSupportNotificationEmail({
+/*
+ * This used to assert a "Delivery retry N" banner on a retried send. The
+ * banner had to go: the provider's idempotency key only suppresses a duplicate
+ * when the payload matches too, so a body that changes by attempt would defeat
+ * the very thing that makes delivery exactly-once. Determinism is asserted
+ * directly further down.
+ */
+test("the rendered notification carries no attempt-varying content", () => {
+  const email = buildSupportNotificationEmail({
     feedbackId: "id",
     type: "bug",
     email: null,
     message: "hello there",
-    retryAttempt: 1,
   });
-  assert.ok(!first.text.includes("Delivery retry"));
-
-  const retried = buildSupportNotificationEmail({
-    feedbackId: "id",
-    type: "bug",
-    email: null,
-    message: "hello there",
-    retryAttempt: 3,
-  });
-  assert.ok(retried.text.includes("Delivery retry 3"));
-  // And says the report itself was never at risk.
-  assert.ok(/stored when it was submitted/.test(retried.text));
+  assert.ok(!/retry/i.test(email.text));
+  assert.ok(!/retry/i.test(email.html));
 });
 
 test("a guest report is labelled rather than left blank", () => {
@@ -299,4 +296,155 @@ test("nothing in the delivery path logs the report or the recipient's mail body"
       );
     }
   }
+});
+
+// ---------------------------------------------------------------------------
+// Exactly-once delivery, and the payload determinism it depends on
+// ---------------------------------------------------------------------------
+
+test("every attempt at one notification presents the same idempotency key", () => {
+  const queue = read("lib/notificationDeliveries.ts");
+  // Derived from the queue row, not from the attempt: a retry must present
+  // the key the first attempt used, or the provider cannot suppress it.
+  assert.match(queue, /idempotencyKey: `notification-delivery:\$\{deliveryId\}`/);
+  assert.ok(
+    !/idempotencyKey:[^\n]*attempt/.test(queue),
+    "the idempotency key varies by attempt, which defeats it"
+  );
+});
+
+test("the mailer forwards the key as the provider's header, within its limit", () => {
+  const email = read("lib/email.ts");
+  assert.match(email, /"Idempotency-Key": input\.idempotencyKey\.slice\(0, 256\)/);
+});
+
+test("a notification renders identically however many times it is attempted", () => {
+  const input = {
+    feedbackId: "clzfeedback0001abcd",
+    type: "bug",
+    email: "member@tomverse.app",
+    message: "the same report every time",
+    traceId: "0d1f6b1e",
+    modelId: "gemini-2-5-flash",
+    plan: "Pro",
+    attachmentCount: 1,
+    path: "/chat",
+  };
+  const first = buildSupportNotificationEmail(input);
+  const later = buildSupportNotificationEmail(input);
+  assert.deepEqual(first, later);
+  // Nothing attempt-shaped may creep back into the body: the provider matches
+  // on the payload as well as the key.
+  for (const rendered of [first.text, first.html, first.subject]) {
+    assert.ok(!/retry/i.test(rendered), "the rendered mail mentions a retry");
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Which notifications the queue owns
+// ---------------------------------------------------------------------------
+
+test("the queue covers the emails that were being dropped silently", () => {
+  const queue = read("lib/notificationDeliveries.ts");
+  for (const kind of [
+    "support_feedback",
+    "refund_request_received",
+    "refund_request_approved",
+    "refund_request_rejected",
+  ]) {
+    assert.ok(queue.includes(`"${kind}"`), `${kind} is not a queued notification`);
+  }
+});
+
+test("the refund emails no longer swallow their own failures", () => {
+  for (const path of [
+    "app/api/billing/refund-request/route.ts",
+    "app/api/admin/refund-requests/[requestId]/route.ts",
+  ]) {
+    const source = read(path);
+    assert.ok(
+      !/console\.error\("Refund [^"]*email failed/.test(source),
+      `${path} still drops a refund email on the floor`
+    );
+    assert.match(source, /enqueueNotificationDelivery/, `${path} does not queue`);
+    assert.match(source, /deliverNotificationNow/, `${path} makes no inline attempt`);
+  }
+});
+
+test("a refund receipt and its queue row are written together", () => {
+  const source = read("app/api/billing/refund-request/route.ts");
+  assert.match(source, /prisma\.\$transaction\(async \(tx\) => \{/);
+  assert.match(source, /tx\.refundRequest\.create/);
+  assert.match(source, /enqueueNotificationDelivery\(tx/);
+});
+
+/**
+ * Every place that sends mail is accounted for. A sender is acceptable when it
+ * goes through the retry queue, retries by its own mechanism, or is
+ * deliberately fire-and-forget for a stated reason. What is not acceptable is
+ * a new one quietly joining the "logged and forgotten" category, which is how
+ * the refund emails went unnoticed.
+ */
+test("every transactional email sender has a reviewed failure policy", () => {
+  const CLASSIFIED = {
+    "lib/notificationDeliveries.ts": "is the retry queue itself",
+    "lib/supportNotificationEmail.ts": "renders for the queue, does not send",
+    // Claims its row before sending and resets the claim on failure, so the
+    // next maintenance pass retries it.
+    "lib/maintenance.ts": "retries via its own claim/reset",
+    "lib/billingEmails.ts": "renders and sends; callers own the policy",
+    "lib/accountEmails.ts": "renders and sends; callers own the policy",
+    // Time-sensitive by design: a login code delivered late is worse than
+    // one not delivered, and the user can simply request another.
+    "lib/emailLoginEmails.ts": "deliberately fire-and-forget (time-sensitive)",
+    // Records every send, skip and failure in its own report table, which the
+    // admin console surfaces.
+    "lib/providerModelCatalogReport.ts": "records outcomes in its report table",
+    "app/api/admin/test-email/route.ts": "an admin's own manual probe",
+    // Raises an operational incident on failure.
+    "app/api/user/account/route.ts": "alerts via reportOperationalIncident",
+    "app/api/billing/refund-request/route.ts": "queued",
+    "app/api/admin/refund-requests/[requestId]/route.ts": "queued",
+  };
+
+  const senders = execFileSync(
+    "git",
+    ["grep", "-l", "sendTransactionalEmail", "--", "lib", "app"],
+    { cwd: ROOT, encoding: "utf8" }
+  )
+    .split("\n")
+    .filter(Boolean)
+    .filter((path) => path !== "lib/email.ts");
+
+  const unclassified = senders.filter((path) => !(path in CLASSIFIED));
+  assert.deepEqual(
+    unclassified,
+    [],
+    `These files send email with no reviewed failure policy. Route them through\n` +
+      `lib/notificationDeliveries.ts, give them their own retry, or add them to\n` +
+      `CLASSIFIED here with the reason they may be fire-and-forget:\n` +
+      unclassified.join("\n")
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Backlog
+// ---------------------------------------------------------------------------
+
+test("a drain keeps going while there is due work, within a bounded budget", () => {
+  const queue = read("lib/notificationDeliveries.ts");
+  // The old shape stopped after one batch, capping throughput at 25 rows per
+  // cron tick however deep the queue was.
+  assert.match(queue, /while \(result\.batches < maxBatches\)/);
+  assert.match(queue, /if \(Date\.now\(\) >= deadline\) break;/);
+  assert.match(queue, /result\.exhausted = true;/);
+});
+
+test("a queue that is not keeping up says so before anything abandons", () => {
+  const job = read("lib/notificationDeliveryJob.ts");
+  assert.match(job, /NOTIFICATION_DELIVERY_BACKLOG/);
+  assert.match(
+    job,
+    /result\.pending >= NOTIFICATION_QUEUE_DEPTH_ALERT \|\| !result\.exhausted/
+  );
 });

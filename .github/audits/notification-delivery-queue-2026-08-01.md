@@ -134,3 +134,79 @@ Scheduled Jobs 패널에 마지막 실행·처리 건수·지연 여부가 그�
   `NOTIFICATION_KIND`와 `renderNotification()`에 추가하면 됩니다.
 - 배수는 한 번에 25건까지 처리합니다. 대량 적체 시 여러 tick에 걸쳐
   빠지며, 큐 깊이는 매 실행 결과의 `pending`으로 확인할 수 있습니다.
+
+---
+
+## 후속 (같은 날): 남는 위험 세 건 해소
+
+### 1. at-least-once 중복 도착
+
+"메일 본문이 몇 번째 시도인지 밝힌다"는 완화책이었지 해결책이 아니었습니다.
+중복을 **provider 층에서 없앴습니다**.
+
+- `lib/email.ts`의 `SendEmailInput`에 `idempotencyKey`를 추가하고 Resend의
+  `Idempotency-Key` header로 넘깁니다(256자 상한으로 자름).
+- `attemptNotificationDelivery()`가 `notification-delivery:${deliveryId}`를
+  키로 씁니다. 같은 큐 행의 재시도는 몇 번을 하든 같은 키입니다.
+- Resend는 키가 같아도 **payload가 다르면 새 발송**으로 봅니다. 그래서
+  `supportNotificationEmail.ts`에서 재시도 회차 배너(`retryAttempt`)를
+  제거해 payload를 결정적으로 만들었습니다. 회차 정보는 어차피 수신자에게
+  쓸모가 없고, 큐 행과 구조화 로그에 남아 있습니다.
+
+at-least-once 큐 + provider idempotency = 실질적 exactly-once입니다.
+Resend의 키 보존 기간은 24시간이고 재시도 상한(6회 / 최대 4시간 간격)이
+그 안에 들어옵니다.
+
+### 2. support feedback 알림에만 연결돼 있음
+
+환불 요청 메일 3종을 큐로 옮겼습니다.
+
+- `NOTIFICATION_KIND`에 `refundRequestReceived`·`refundRequestApproved`·
+  `refundRequestRejected`를 추가했습니다.
+- `lib/billingEmails.ts`에서 본문 생성을 `buildRefundRequestEmail(stage,
+  input)`로 뽑아내, 큐의 `renderNotification()`과 직접 발송 경로가 **같은
+  함수**를 씁니다. 두 경로가 갈라져 payload가 달라지면 idempotency가 깨지기
+  때문에 중요합니다.
+- `app/api/billing/refund-request/route.ts`는 요청 row 생성과 큐 등록을
+  하나의 `prisma.$transaction`으로 묶고(transactional outbox), 커밋 뒤
+  `deliverNotificationNow()`로 즉시 시도합니다. 실패해도 행이 남아 재처리
+  됩니다.
+- 관리자 승인·거절 경로(`app/api/admin/refund-requests/[requestId]/route.ts`)도
+  `notifyRefundDecision()`으로 같은 흐름을 탑니다.
+
+로그인 코드처럼 뒤늦은 재전송이 오히려 틀린 메일은 여전히 제외입니다 —
+이건 범위 문제가 아니라 의도입니다.
+
+### 3. 한 tick 25건 상한
+
+배수를 **다중 배치 루프**로 바꿨습니다.
+
+- 배치당 25건은 그대로 두고(`DEFAULT_BATCH_SIZE`), 한 실행에서 최대 40배치
+  (`DEFAULT_MAX_BATCHES`, 1000건) 또는 120초(`DEFAULT_TIME_BUDGET_MS`)까지
+  반복합니다. 크론 간격(5분) 안에서 끝나도록 잡은 상한입니다.
+- `NotificationDrainResult`에 `batches`와 `exhausted`가 생겼습니다.
+  `exhausted`는 "더 이상 처리할 due 행이 없었다"를 뜻합니다.
+- `lib/notificationDeliveryJob.ts`가 `pending >=
+  NOTIFICATION_QUEUE_DEPTH_ALERT`(100) 이거나 `exhausted`가 아니면
+  `NOTIFICATION_DELIVERY_BACKLOG` 운영 인시던트를 올립니다. 적체가 조용히
+  누적되지 않습니다.
+
+상한을 없애지는 않았습니다 — 무한 루프는 크론 tick을 잡아먹습니다. 대신
+상한에 **닿았다는 사실이 관측 가능**해졌습니다.
+
+### 검증
+
+- `tests/notificationRetryCore.test.mjs` 34건
+- `tests/server-contract/notification-delivery-queue.test.ts` 12건 — 재시도
+  간 idempotency key 동일, payload 동일, 다중 배치 배수, backlog 인시던트
+- `tests/server-contract/feedback-route.test.ts` 19건
+- `test:unit` 906 / `test:server-contract` 100 / `security:regression` 117
+- typecheck / eslint / build / encoding / accent / model-pricing /
+  fixture-route-gate 통과
+
+### 이 조치로도 남는 것
+
+Resend가 idempotency를 24시간만 보장하므로, 큐 행이 그보다 오래 살아남아
+재시도되면(운영자가 수동으로 `nextAttemptAt`을 되돌리는 등) 중복이 다시
+가능합니다. 자동 재시도 일정은 최대 누적 5시간 20분이라 정상 경로에서는
+발생하지 않습니다.
