@@ -54,6 +54,44 @@ test("uses Gemini base model IDs and only keeps generateContent models", () => {
   assert.equal(models[0].displayName, "Gemini 3.5 Flash");
 });
 
+test("preserves the exact 2026-08-01 provider API model strings", () => {
+  const openaiCompatible = [
+    ["openai", "gpt-5.6-sol"],
+    ["groq", "openai/gpt-oss-120b"],
+    ["xai", "grok-4.3"],
+    ["deepseek", "deepseek-v4-flash"],
+    ["mistral", "mistral-medium-3-5"],
+  ] as const;
+
+  for (const [provider, apiModel] of openaiCompatible) {
+    const response =
+      provider === "mistral"
+        ? [{ id: apiModel, capabilities: { completion_chat: true } }]
+        : { data: [{ id: apiModel }] };
+    const parsed = parseProviderCatalogResponse(provider, response);
+    assert.equal(parsed.some((entry) => entry.id === apiModel), true, provider);
+  }
+
+  const google = parseProviderCatalogResponse("google", {
+    models: [
+      {
+        name: "models/gemini-3.6-flash",
+        baseModelId: "gemini-3.6-flash",
+        supportedGenerationMethods: ["generateContent"],
+      },
+      {
+        name: "models/gemini-3.5-flash-lite",
+        baseModelId: "gemini-3.5-flash-lite",
+        supportedGenerationMethods: ["generateContent"],
+      },
+    ],
+  });
+  assert.deepEqual(
+    google.map((entry) => entry.id),
+    ["gemini-3.6-flash", "gemini-3.5-flash-lite"]
+  );
+});
+
 test("marks explicit legacy and archived lifecycle states unavailable", () => {
   const google = parseProviderCatalogResponse("google", {
     models: [

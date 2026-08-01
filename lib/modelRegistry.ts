@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import {
   getModelUsageProfile,
   isRetiredModel,
+  resolveSelectableModelId,
   type AiModel,
   type ModelInputCapabilities,
   type ModelMinimumPlan,
@@ -19,6 +20,7 @@ import {
   isApprovedProviderApiBaseUrl,
   isApprovedProviderApiKeyEnvName,
   isAiProvider,
+  staticModelRegistryReconciliationRows,
   staticModelRegistrySeedRows,
 } from "@/lib/modelRegistryShared";
 
@@ -109,6 +111,10 @@ async function applyStaticRetirements() {
           { enabled: true },
           { publiclyListed: true },
           { status: { not: "disabled" } },
+          { replacementModelId: null },
+          ...(model.replacementModelId
+            ? [{ replacementModelId: { not: model.replacementModelId } }]
+            : []),
         ],
       },
       data: {
@@ -139,12 +145,50 @@ async function applyStaticRetirements() {
   }
 }
 
+// Exact-ID reconciliation for the 2026-08-01 provider catalogue migration.
+// Unlike createMany(skipDuplicates), this updates the upstream ID, display
+// metadata, capability and pricing fields of existing rows. It deliberately
+// excludes catalogDeleted, sortOrder, provider connection settings, actor
+// metadata and active-model lifecycle fields so an operator's incident switch
+// is never turned back on by an application restart.
+async function applyScopedStaticCatalogReconciliation() {
+  const changes = staticModelRegistryReconciliationRows();
+  if (changes.length === 0) return;
+
+  const existingRows = await prisma.modelRegistryEntry.findMany({
+    where: { id: { in: changes.map((change) => change.id) } },
+  });
+  const existingById = new Map(existingRows.map((row) => [row.id, row]));
+
+  for (const change of changes) {
+    const current = existingById.get(change.id);
+    if (!current) continue;
+    const hasDrift = Object.entries(change.data).some(
+      ([field, value]) =>
+        current[field as keyof ModelRegistryEntry] !== value
+    );
+    if (!hasDrift) continue;
+
+    await prisma.modelRegistryEntry.update({
+      where: { id: change.id },
+      data: change.data as Prisma.ModelRegistryEntryUpdateInput,
+    });
+    console.warn(
+      "Model registry: reconciled provider-verified static metadata.",
+      { modelId: change.id }
+    );
+  }
+}
+
 export async function ensureModelRegistrySeeded() {
   if (E2E_DATABASE_DISABLED()) return;
   if (!bootstrapPromise) {
     bootstrapPromise = prisma.modelRegistryEntry
       .createMany({ data: staticModelRegistrySeedRows(), skipDuplicates: true })
-      .then(() => applyStaticRetirements())
+      .then(async () => {
+        await applyStaticRetirements();
+        await applyScopedStaticCatalogReconciliation();
+      })
       .catch((error) => {
         bootstrapPromise = null;
         throw error;
@@ -216,19 +260,27 @@ export async function getPublicRuntimeModels() {
   );
 }
 
+export function clampSelectedModelsAgainstRuntime(
+  modelIds: string[],
+  models: readonly AiModel[],
+  maximum = 3
+) {
+  const modelMap = new Map(models.map((model) => [model.id, model]));
+  return Array.from(new Set(modelIds))
+    .map((modelId) =>
+      resolveSelectableModelId(modelId, (candidateId) => modelMap.get(candidateId))
+    )
+    .filter((modelId): modelId is string => Boolean(modelId))
+    .filter((modelId, index, resolved) => resolved.indexOf(modelId) === index)
+    .slice(0, maximum);
+}
+
 export async function clampRuntimeSelectedModels(
   modelIds: string[],
   maximum = 3
 ) {
   const models = await getRuntimeModels();
-  const enabledIds = new Set(
-    models
-      .filter((model) => model.enabled && !model.catalogDeleted)
-      .map((model) => model.id)
-  );
-  return Array.from(new Set(modelIds))
-    .filter((modelId) => enabledIds.has(modelId))
-    .slice(0, maximum);
+  return clampSelectedModelsAgainstRuntime(modelIds, models, maximum);
 }
 
 export function modelRegistryCreateData(

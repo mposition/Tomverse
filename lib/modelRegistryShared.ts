@@ -198,3 +198,69 @@ export const staticModelRegistrySeedRows = () =>
     cachedInputPriceMultiplier: model.cachedInputPriceMultiplier ?? null,
     sortOrder: model.sortOrder || 0,
   }));
+
+// Only these human-reviewed lifecycle/API migrations are authoritative over
+// an already-existing runtime row. This is intentionally not a general seed
+// sync: operator-managed availability, catalogue deletion, ordering and
+// unrelated custom metadata remain untouched.
+export const STATIC_CATALOG_RECONCILIATION_MODEL_IDS = [
+  "gpt-5-6-sol",
+  "gpt-5-6-terra",
+  "gpt-5-6-luna",
+  "gemini-3-6-flash",
+  "gemini-2-5-flash",
+  "groq-gpt-oss-120b",
+  "grok-4-3",
+  "grok-4-5",
+  "grok-3",
+  "llama-3-1",
+  "llama-3-3",
+  "llama-4-scout",
+  "deepseek-v4-flash",
+  "deepseek-v4-pro",
+  "deepseek-r1",
+  "mistral-medium-3-1",
+] as const;
+
+const reconciliationModelIds = new Set<string>(
+  STATIC_CATALOG_RECONCILIATION_MODEL_IDS
+);
+
+export const staticModelRegistryReconciliationRows = () =>
+  staticModelRegistrySeedRows()
+    .filter((row) => reconciliationModelIds.has(row.id))
+    .map((row) => {
+      const lifecycle = row.enabled
+        ? {}
+        : {
+            publiclyListed: row.publiclyListed,
+            enabled: row.enabled,
+            status: row.status,
+            operationalReason: row.operationalReason,
+            userVisibleNote: row.userVisibleNote,
+            replacementModelId: row.replacementModelId,
+          };
+      return {
+        id: row.id,
+        data: {
+          name: row.name,
+          apiModel: row.apiModel,
+          bestFor: row.bestFor,
+          minimumPlan: row.minimumPlan,
+          usageClass: row.usageClass,
+          creditWeight: row.creditWeight,
+          reasoning: row.reasoning,
+          contextWindowTokens: row.contextWindowTokens,
+          supportsImage: row.supportsImage,
+          supportsNativePdf: row.supportsNativePdf,
+          maxImages: row.maxImages,
+          maxBase64ImagePayloadBytes: row.maxBase64ImagePayloadBytes,
+          maxOutputTokens: row.maxOutputTokens,
+          reservationOutputTokens: row.reservationOutputTokens,
+          inputUsdPerMillionTokens: row.inputUsdPerMillionTokens,
+          outputUsdPerMillionTokens: row.outputUsdPerMillionTokens,
+          cachedInputPriceMultiplier: row.cachedInputPriceMultiplier,
+          ...lifecycle,
+        },
+      };
+    });

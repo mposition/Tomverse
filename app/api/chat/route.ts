@@ -18,6 +18,10 @@ import {
 } from "@/lib/models";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { getActiveAiModel } from "@/lib/activeAiModel";
+import {
+    getModelGenerationSettings,
+    hasUnsupportedGeminiPrefill,
+} from "@/lib/modelGenerationCompatibility";
 import { getWebSearchCapability } from "@/lib/webSearchCapability";
 import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
 import { buildWebSearchToolConfig, WEB_SEARCH_TOOL_NAMES } from "@/lib/webSearchToolConfig";
@@ -622,6 +626,14 @@ export async function POST(req: Request) {
             return tracedJsonError(
                 "Unknown or disabled model.",
                 "MODEL_NOT_AVAILABLE",
+                400,
+                traceId
+            );
+        }
+        if (hasUnsupportedGeminiPrefill(modelConfig, messages)) {
+            return tracedJsonError(
+                "Gemini 3.6 and later requests must end with a user message.",
+                "GEMINI_PREFILLED_MODEL_TURN_UNSUPPORTED",
                 400,
                 traceId
             );
@@ -1429,6 +1441,7 @@ export async function POST(req: Request) {
                 modelConfig.provider === "perplexity"
                     ? perplexityUsageHeaders(traceId)
                     : undefined,
+            ...getModelGenerationSettings(modelConfig),
             ...(webSearchToolConfig ?? {}),
         });
 

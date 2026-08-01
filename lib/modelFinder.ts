@@ -317,9 +317,13 @@ export const getComplementaryModelSuggestion = (
   const selectedProviders = new Set(selectedModels.map((model) => model.provider));
 
   const hasReasoning =
-    selectedClasses.has("reasoning") || selectedClasses.has("premium-reasoning");
+    selectedClasses.has("reasoning") ||
+    selectedClasses.has("premium-reasoning") ||
+    selectedModels.some(
+      (model) => model.reasoning !== undefined && model.reasoning !== "none"
+    );
   if (!hasReasoning) {
-    const candidate = getModel("deepseek-r1");
+    const candidate = getModel("groq-gpt-oss-120b");
     if (candidate?.enabled && !selectedModelIds.includes(candidate.id)) {
       return { modelId: candidate.id, reason: "reasoning" };
     }

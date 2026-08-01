@@ -61,7 +61,7 @@ const MODEL_B = "claude-sonnet-5";
 const MODEL_C = "gemini-3-5-flash";
 const THREE_MODELS = [MODEL_A, MODEL_B, MODEL_C];
 /** Neither of these can search: the fully blocked state. */
-const NO_SEARCH_MODELS = ["gpt-5-4-mini", "gemini-2-5-flash"];
+const NO_SEARCH_MODELS = ["gpt-5-4-mini", "deepseek-v4-flash"];
 /** All three verified for provider-native search: the full-support state. */
 const ALL_SEARCH_MODELS = ["claude-haiku-4-5", "claude-sonnet-5", "gemini-3-5-flash"];
 const DEEP_RESEARCH_MODEL = "perplexity/sonar-deep-research";

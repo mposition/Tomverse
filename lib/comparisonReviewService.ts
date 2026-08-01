@@ -2,6 +2,7 @@ import "server-only";
 
 import { generateText, Output } from "ai";
 import { getActiveAiModel } from "@/lib/activeAiModel";
+import { getModelGenerationSettings } from "@/lib/modelGenerationCompatibility";
 import {
   accessibleComparisonReviewers,
   buildComparisonReviewPrompt,
@@ -244,7 +245,7 @@ export const runComparisonReview = async (
             system: reviewPrompt.system,
             prompt: reviewPrompt.prompt,
             output: Output.object({ schema: comparisonReviewResultSchema }),
-            temperature: 0.1,
+            ...getModelGenerationSettings(candidate, { temperature: 0.1 }),
             maxOutputTokens: budget.maxOutputTokens,
             maxRetries: 1,
             abortSignal: AbortSignal.timeout(45_000),

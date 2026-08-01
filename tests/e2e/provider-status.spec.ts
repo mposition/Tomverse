@@ -20,7 +20,7 @@ type StatusRecord = {
 // "selected" fixture below picks from here and every "non-selected" one
 // deliberately avoids it.
 const SELECTED = {
-  gemini: { id: "gemini-2-5-flash", provider: "google", name: "Gemini 3.1 Flash-Lite" },
+  gemini: { id: "gemini-2-5-flash", provider: "google", name: "Gemini 3.5 Flash-Lite" },
   gpt: { id: "gpt-5-4-mini", provider: "openai", name: "GPT-5.4 mini" },
   claude: { id: "claude-haiku-4-5", provider: "anthropic", name: "Claude Haiku 4.5" },
 } as const;
@@ -33,9 +33,9 @@ const SELECTED = {
 const UNSELECTED_SIX: Array<{ id: string; provider: string; name: string }> = [
   { id: "llama-3-1", provider: "groq", name: "Llama 3.1" },
   { id: "grok-3-mini", provider: "xai", name: "Grok 3 Mini" },
-  { id: "gemini-3-5-flash", provider: "google", name: "Gemini 3.5 Flash" },
+  { id: "qwen3.7-plus", provider: "qwen", name: "Qwen 3.7 Plus" },
   { id: "llama-3-3", provider: "groq", name: "Llama 3.3" },
-  { id: "grok-3", provider: "xai", name: "Grok 3" },
+  { id: "grok-4-3", provider: "xai", name: "Grok 4.3" },
   { id: "deepseek-v4-pro", provider: "deepseek", name: "DeepSeek-V4 Pro" },
 ];
 
@@ -968,7 +968,7 @@ test.describe("widespread selected outage copy and layout (RECON-OPS-002)", () =
   // correct output. The precondition below makes that trap loud instead of
   // letting a future model rename re-introduce it silently.
   const UNRELATED = [
-    { id: "gemini-3-5-flash", provider: "google", name: "Gemini 3.5 Flash" },
+    { id: "qwen3.7-plus", provider: "qwen", name: "Qwen 3.7 Plus" },
     { id: "llama-3-1", provider: "groq", name: "Llama 3.1" },
     { id: "llama-3-3", provider: "groq", name: "Llama 3.3" },
     { id: "mistral-large-3", provider: "mistral", name: "Mistral Large 3" },
@@ -1258,7 +1258,7 @@ test.describe("widespread selected outage copy and layout (RECON-OPS-002)", () =
  * did not fit included the model name: measured on the build before the fix,
  * the Korean title came apart as
  *
- *   root 24px: `Gemini 3.1 Flash-` / `Lite을(를)`
+ *   root 24px: `Gemini 3.5 Flash-` / `Lite을(를)`
  *   root 32px: `Gemini` / `3.1` / `Flash-` / `Lite을` / `(를)` / `일시적으` / `로 사용할`
  *
  * `Gemin / i` and `Flash- / Lite` are the two failure shapes: a mid-letter

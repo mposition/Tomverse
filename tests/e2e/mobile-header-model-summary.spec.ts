@@ -22,7 +22,7 @@ const MODELS = ["gpt-5-4-mini", "claude-haiku-4-5", "gemini-2-5-flash"];
 const MODEL_NAMES: Record<string, string> = {
   "gpt-5-4-mini": "GPT-5.4 mini",
   "claude-haiku-4-5": "Claude Haiku 4.5",
-  "gemini-2-5-flash": "Gemini 3.1 Flash-Lite",
+  "gemini-2-5-flash": "Gemini 3.5 Flash-Lite",
 };
 const CHAT_ID = "guest_header_summary";
 const TITLE = "Header summary test";
