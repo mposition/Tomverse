@@ -1,7 +1,9 @@
 import {
   canUseModelWithPlan,
+  getModel as getStaticModel,
   getModelUsageProfile,
   modelSupportsImageInput,
+  resolveSelectableModelId,
   type AiModel,
   type ModelTier,
 } from "./models.ts";
@@ -67,10 +69,10 @@ const USE_CASE_CANDIDATES: Record<
 > = {
   everyday: [
     "gpt-5-4-mini",
+    "gpt-5-6-luna",
     "grok-3-mini",
     "gemini-2-5-flash",
     "qwen3.6-flash",
-    "llama-3-1",
     "claude-haiku-4-5",
   ],
   writing: [
@@ -82,25 +84,27 @@ const USE_CASE_CANDIDATES: Record<
     "gpt-5-4-mini",
   ],
   analysis: [
-    "claude-sonnet-5",
+    "gpt-5-6-sol",
+    "gpt-5-6-terra",
     "gpt-5-5",
     "grok-4-5",
-    "deepseek-r1",
-    "gemini-3-1-pro",
-    "mistral-large-3",
+    "gemini-3-6-flash",
+    "claude-sonnet-5",
   ],
   multimodal: [
+    "gemini-3-6-flash",
     "gemini-3-5-flash",
     "gemini-2-5-flash",
     "gpt-5-4-mini",
     "gemini-3-1-pro",
   ],
   coding: [
+    "gpt-5-6-terra",
     "deepseek-v4-flash",
+    "groq-gpt-oss-120b",
     "codestral",
     "kimi-k2.7-code",
     "deepseek-v4-pro",
-    "deepseek-r1",
   ],
   search: [
     "perplexity/sonar",
@@ -108,8 +112,9 @@ const USE_CASE_CANDIDATES: Record<
     "perplexity/sonar-reasoning-pro",
   ],
   value: [
+    "gpt-5-6-luna",
     "gemini-2-5-flash",
-    "llama-3-1",
+    "groq-gpt-oss-120b",
     "mistral-small-4",
     "glm-5.2",
     "grok-3-mini",
@@ -210,7 +215,14 @@ export const getModelRecommendations = ({
   language = "en",
   requiresImageInput = false,
 }: ModelRecommendationInput): ModelRecommendation[] => {
-  const selected = new Set(selectedModelIds);
+  const catalogById = new Map(models.map((model) => [model.id, model]));
+  const resolveStoredId = (modelId: string) =>
+    resolveSelectableModelId(
+      modelId,
+      (candidateId) => catalogById.get(candidateId) ?? getStaticModel(candidateId)
+    ) ??
+    modelId;
+  const selected = new Set(selectedModelIds.map(resolveStoredId));
   const byId = new Map<string, AiModel>();
   for (const model of models) {
     // A retired or delisted model must never reach the picker, even if a use
@@ -279,7 +291,8 @@ export const getModelRecommendations = ({
   let favoritesTaken = 0;
   for (const modelId of favoriteModelIds) {
     if (favoritesTaken >= MAX_FAVORITE_MODEL_RECOMMENDATIONS) break;
-    if (take(build(modelId, bestUseCaseFor(modelId), "favorite"))) {
+    const resolvedModelId = resolveStoredId(modelId);
+    if (take(build(resolvedModelId, bestUseCaseFor(resolvedModelId), "favorite"))) {
       favoritesTaken += 1;
     }
   }
@@ -287,7 +300,8 @@ export const getModelRecommendations = ({
   let personalizedTaken = 0;
   for (const modelId of personalizedModelIds) {
     if (personalizedTaken >= MAX_PERSONALIZED_MODEL_RECOMMENDATIONS) break;
-    if (take(build(modelId, bestUseCaseFor(modelId), "personalized"))) {
+    const resolvedModelId = resolveStoredId(modelId);
+    if (take(build(resolvedModelId, bestUseCaseFor(resolvedModelId), "personalized"))) {
       personalizedTaken += 1;
     }
   }
@@ -295,7 +309,8 @@ export const getModelRecommendations = ({
   let recentsTaken = 0;
   for (const modelId of recentModelIds) {
     if (recentsTaken >= MAX_RECENT_MODEL_RECOMMENDATIONS) break;
-    if (take(build(modelId, bestUseCaseFor(modelId), "recent"))) {
+    const resolvedModelId = resolveStoredId(modelId);
+    if (take(build(resolvedModelId, bestUseCaseFor(resolvedModelId), "recent"))) {
       recentsTaken += 1;
     }
   }

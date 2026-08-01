@@ -4,7 +4,38 @@
    `style-src 'self'` is satisfied. */
 @import "highlight.js/styles/github-dark.css";
 
-@custom-variant dark (&:where(.dark, .dark *));
+/* UI-001. `dark:` used to mean one thing only: an ancestor carries `.dark`.
+   That is correct for an explicit choice and wrong for everyone who has not
+   made one, because the class can only be written by JavaScript -- so a
+   visitor whose OS is dark got a light first paint on every statically
+   prerendered marketing page, and the theme snapped after hydration.
+
+   Now it means either:
+     - an explicit choice is in effect (`.dark`), or
+     - the OS asks for dark and no explicit choice overrides it.
+
+   `.light` is what makes the second half safe. Without it, a visitor who
+   chose light while their OS is dark could not be represented at all: absence
+   of `.dark` would be indistinguishable from "no preference", and the media
+   query would override their choice. Both classes are written by the pre-paint
+   bootstrap in components/ThemeBootstrap.tsx and, on dynamic routes, by the
+   server from the theme cookie -- see components/DocumentShell.tsx.
+
+   The token block at `:root.dark` is mirrored under the same media query
+   below; tests/themeCssContract.test.mjs fails if the two drift apart. */
+@custom-variant dark {
+  &:where(.dark, .dark *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where(
+        :root:not(.light):not(.dark),
+        :root:not(.light):not(.dark) *
+      ) {
+      @slot;
+    }
+  }
+}
 
 :root {
   color-scheme: light;
@@ -225,6 +256,35 @@
   --tomverse-review-selected: #1e1b4b; /* indigo-950 */
   --tomverse-review-selected-border: #818cf8; /* indigo-400 */
   --tomverse-review-selected-text: #c7d2fe; /* indigo-200 */
+}
+
+/* UI-001. The same tokens for a visitor whose OS asks for dark and who has
+   made no explicit choice. This is what a `force-static` marketing page can
+   honour on its first paint: it depends on nothing but the media query, so it
+   is correct in prerendered HTML that no cookie ever reached.
+
+   Deliberately duplicated rather than folded into one selector list: a media
+   query cannot appear inside one, and rewriting every token as `light-dark()`
+   would touch far more of this file than the defect warrants. The duplication
+   is enforced instead of trusted -- tests/themeCssContract.test.mjs parses
+   both blocks and fails if a property or value exists in one and not the
+   other. Change them together. */
+@media (prefers-color-scheme: dark) {
+  :root:not(.light):not(.dark) {
+    color-scheme: dark;
+    --background: #0a0a0a;
+    --foreground: #ededed;
+
+    --tomverse-accent-start: #22d3ee; /* cyan-400 */
+    --tomverse-accent-mid: #60a5fa; /* blue-400 */
+    --tomverse-accent-end: #c084fc; /* purple-400 */
+
+    --tomverse-review-surface: #14152a;
+    --tomverse-review-border: #4f46e5; /* indigo-600 */
+    --tomverse-review-selected: #1e1b4b; /* indigo-950 */
+    --tomverse-review-selected-border: #818cf8; /* indigo-400 */
+    --tomverse-review-selected-text: #c7d2fe; /* indigo-200 */
+  }
 }
 
 body {

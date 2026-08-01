@@ -22,13 +22,17 @@ failed when #193's toast rewrite broke four specs with every check green. The
 job is measured at ~5 minutes against ~11 for the Chromium build job it runs
 beside, so it costs no wall-clock time.
 
-That workflow is not part of the `fast-gate` aggregation, so it is a visible
-check and not yet a *required* one — a red Admin Console E2E does not by
-itself block a merge today. Making it required is a branch protection change,
-not a file in this repository: add the check named
-`Admin Console E2E (PostgreSQL)` to the required checks for `develop` and
-`main`. Because the job reports on every pull request, it can be required
-without stranding unrelated pull requests on a check that never runs.
+`Admin Console E2E (PostgreSQL)` is a **required** check on `develop` and
+`main`. A red admin suite blocks the merge. It is required through branch
+protection rather than through the `fast-gate` aggregation in
+`pr-fast-gate.yml`, whose check name is load-bearing and whose member jobs are
+deliberately not required individually.
+
+Requiring it depends on the workflow having no `paths` filter. A workflow
+skipped by a path filter creates no check run at all, and a required check
+that never reports leaves a pull request pending forever — so if the filter is
+ever reintroduced, the check has to come out of branch protection in the same
+change, or every pull request that misses the filter becomes unmergeable.
 
 ---
 

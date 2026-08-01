@@ -138,7 +138,7 @@ test("duplicate and malformed entries are errors", () => {
   const problems = findPendingPriceRegisterProblems({
     models: AVAILABLE_MODELS,
     now: beforeAnyExpiry,
-    register: [base, base, { ...entry("grok-4-5"), expiresAt: "not-a-date" }],
+    register: [base, base, { ...entry("qwen3.7-max"), expiresAt: "not-a-date" }],
   });
   const reasons = problems
     .filter((problem) => problem.severity === "error")

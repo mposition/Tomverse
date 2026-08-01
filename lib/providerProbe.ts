@@ -2,6 +2,7 @@ import "server-only";
 
 import { generateText } from "ai";
 import { getActiveAiModel } from "@/lib/activeAiModel";
+import { getModelGenerationSettings } from "@/lib/modelGenerationCompatibility";
 import {
   AVAILABLE_MODELS,
   getModelBillingProfile,
@@ -204,6 +205,7 @@ export async function runProviderProbe(
   try {
     const result = await generate({
       model: getActiveAiModel(model),
+      ...getModelGenerationSettings(model),
       system: PROBE_SYSTEM_PROMPT,
       prompt: PROBE_PROMPT,
       // Deliberately no temperature: staging returned "invalid temperature:

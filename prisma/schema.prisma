@@ -1211,6 +1211,20 @@ model PlanChangeRequest {
 
   /// "previewed" | "pending" | "applied" | "cancelled" | "expired" | "failed"
   status           String    @default("previewed")
+
+  /// Carries `userId` exactly while `status = "pending"`, and null otherwise.
+  ///
+  /// This is what makes "one change in flight per account" a database
+  /// guarantee rather than an application check two racing confirms can both
+  /// pass. The natural way to write it is a partial unique index over
+  /// (userId) WHERE status = 'pending' -- but `prisma db push` builds a
+  /// database from this schema alone and never runs migration SQL, so a
+  /// constraint that lives only in a migration is absent from every db-push
+  /// environment, including the one the integration tests run against. A
+  /// nullable column with a plain unique index says the same thing in a form
+  /// both paths create: Postgres does not compare nulls, so any number of
+  /// settled rows coexist while at most one pending row can exist per account.
+  pendingForUserId String?   @unique
   appliesAt        DateTime?
   stripeScheduleId String?
   confirmedAt      DateTime?

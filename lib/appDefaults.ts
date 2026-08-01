@@ -20,7 +20,7 @@ export const GUEST_BRAND_TRIO_MODEL_IDS = ["gpt-5-4-mini", "claude-haiku-4-5", "
 // Backstops used only if one of the brand trio above is itself disabled or
 // ineligible, so the guest default still comes out to 3 distinct models
 // instead of silently collapsing via Set dedup.
-export const GUEST_FALLBACK_MODEL_IDS = ["llama-3-1", "grok-3-mini", "deepseek-v4-flash"];
+export const GUEST_FALLBACK_MODEL_IDS = ["qwen3.6-flash", "grok-3-mini", "deepseek-v4-flash"];
 
 /** Resolves a model id against whichever catalogue the caller is holding. */
 export type ModelLookup = (modelId: string) => AiModel | undefined;

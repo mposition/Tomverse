@@ -12,6 +12,9 @@ regexes = [
   # e.g. lib/models.ts, components/chat/*.tsx: apiModel: "claude-haiku-4-5-20251001"
   # A public provider model identifier, not a secret.
   '''apiModel:\s*"[A-Za-z0-9._/-]+"''',
+  # Mistral's public fixed model ID. The default generic-api-key rule flags
+  # this exact hyphenated identifier in apiModelId fields and assertions.
+  '''mistral-medium-3-5''',
   # SEC-009. The two shapes that actually appear in this repo for a `*_KEY`
   # constant, and nothing wider. The previous rule was
   # `[A-Z_]*_KEY = "[A-Za-z0-9._-]+"`, whose value class also describes a

@@ -50,7 +50,9 @@ import {
 } from "@/lib/guestChatInitialModels";
 import {
   canUseModelWithPlan,
+  getModel as getStaticModel,
   getModelUsageProfile,
+  resolveSelectableModelId,
   type AiModel,
 } from "@/lib/models";
 import { estimateRequestCredits } from "@/lib/webSearchCredits";
@@ -335,7 +337,7 @@ function ChatShellSkeleton({ label }: { label: string }) {
       <section className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-16 shrink-0 items-center gap-3 border-b border-zinc-200 px-4 dark:border-zinc-800 md:hidden">
           <div className="h-9 w-9 animate-pulse rounded-xl bg-zinc-200 dark:bg-zinc-800" />
-          <span className="font-black">Tomverse Insight</span>
+          <span className="text-lg font-black">Tomverse Insight</span>
         </header>
         <div className="flex min-h-0 flex-1 flex-col p-3 sm:p-4">
           <div className="h-11 w-56 max-w-[70vw] animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-900" />
@@ -832,9 +834,17 @@ export function ChatPageClient({
   const clampSelectedModels = useCallback(
     (models: string[]) =>
       Array.from(new Set(models))
+        .map((modelId) =>
+          resolveSelectableModelId(
+            modelId,
+            (candidateId) => getModel(candidateId) ?? getStaticModel(candidateId)
+          )
+        )
+        .filter((modelId): modelId is string => Boolean(modelId))
+        .filter((modelId, index, resolved) => resolved.indexOf(modelId) === index)
         .filter(isEnabledModelId)
         .slice(0, APP_DEFAULTS.maxSelectedModels),
-    [isEnabledModelId]
+    [getModel, isEnabledModelId]
   );
 
   const clampGuestSelectedModels = useMemo(

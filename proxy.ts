@@ -6,6 +6,11 @@ import {
 } from "@/lib/marketingRoutes";
 import { getStaticMarketingCspHashes } from "@/lib/staticMarketingCsp";
 import {
+  resolveThemePreference,
+  THEME_COOKIE_NAME,
+  THEME_HEADER,
+} from "@/lib/theme";
+import {
   getPublicReportOrigin,
   hasRequiredOriginSecret,
   isAllowedRequestHost,
@@ -201,6 +206,20 @@ export function proxy(request: NextRequest) {
   });
   requestHeaders.set(DOCUMENT_LANGUAGE_HEADER, documentLanguage.language);
   requestHeaders.set(DOCUMENT_LANGUAGE_SOURCE_HEADER, documentLanguage.source);
+  // UI-001. The theme travels the same way the document language does, and for
+  // the same reason: the root layout needs it before it renders `<html>`.
+  //
+  // Only on dynamic routes. A static marketing response is prerendered once
+  // and served from a public cache, so rendering one visitor's theme into it
+  // would hand that theme to everyone sharing the cache entry. Those routes
+  // get the media query from the stylesheet and, for an explicit choice that
+  // contradicts the OS, the pre-paint bootstrap in components/ThemeBootstrap.
+  if (!isStaticMarketingRequest) {
+    const theme = resolveThemePreference({
+      cookie: request.cookies.get(THEME_COOKIE_NAME)?.value,
+    });
+    requestHeaders.set(THEME_HEADER, theme);
+  }
   if (nonce) requestHeaders.set("x-nonce", nonce);
   requestHeaders.set(policyHeader, csp);
 
