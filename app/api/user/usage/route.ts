@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { prisma } from "@/lib/prisma";
+import { usageBucketCount } from "@/lib/chatUsageBucketCount";
 import { authOptions } from "@/lib/auth";
 import {
   getChatCostGuardrails,
@@ -101,7 +102,7 @@ export async function GET(req: Request) {
       }),
     ]);
     const count = (period: string) =>
-      rows.find((row) => row.period === period)?.count || 0;
+      usageBucketCount(rows.find((row) => row.period === period)?.count);
 
     const plan = normalizePlan(
       effectivePlanForAccess(
@@ -141,7 +142,7 @@ export async function GET(req: Request) {
     };
     const monthlyUsagePercents = monthlyRows.map((row) =>
       limits.creditsMonth > 0
-        ? Math.round((row.count / limits.creditsMonth) * 100)
+        ? Math.round((usageBucketCount(row.count) / limits.creditsMonth) * 100)
         : 0
     );
     const recommendation = recommendCreditAction({

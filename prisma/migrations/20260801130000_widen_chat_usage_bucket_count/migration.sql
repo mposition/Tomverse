@@ -1,0 +1,20 @@
+-- ChatUsageBucket."count" holds two different metrics: request and token
+-- counts, which are small, and operational cost guardrails, which are stored
+-- in micro-USD.
+--
+-- The cost guardrails are derived from the plan's own credit grant
+-- (lib/chatCostGuardrails.ts): monthly credits x 40,000 micro-USD per credit
+-- x 1.25 headroom, and the total-cost guardrail is 5x that again. The Max
+-- plan's default 10,000 monthly credits therefore produce a monthly
+-- total-cost limit of 2,500,000,000 micro-USD -- past int4's 2,147,483,647
+-- ceiling.
+--
+-- Every acquireChatAccess binds that limit into the guardrail's UPSERT, so on
+-- int4 the statement raised 22003 ("value out of range for type integer")
+-- instead of returning an allow/deny decision, and the chat request failed
+-- rather than being cleanly rejected. Any plan above ~8,590 monthly credits
+-- hit it, which is every Max account.
+--
+-- Widening is the only fix that keeps the intended behaviour: the stored
+-- counter itself legitimately has to reach the limit's value.
+ALTER TABLE "ChatUsageBucket" ALTER COLUMN "count" SET DATA TYPE BIGINT;

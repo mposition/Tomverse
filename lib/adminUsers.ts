@@ -5,6 +5,7 @@ import { unstable_cache } from "next/cache";
 import { FOUNDING_TESTER_PASS_STATUS, INTERNAL_PASS_FULFILLMENT } from "@/lib/foundingTesterPassCore";
 import { getUserChatUsageKey } from "@/lib/chatSecurity";
 import { prisma } from "@/lib/prisma";
+import { usageBucketCount } from "@/lib/chatUsageBucketCount";
 import { getZonedDayWindow } from "@/lib/userTimeZone";
 import type {
   AdminUserRow,
@@ -233,7 +234,9 @@ const getDailyMetricsByUserId = async (
     ),
   ]);
 
-  const usageByKey = new Map(usageRows.map((row) => [row.key, row.count]));
+  const usageByKey = new Map(
+    usageRows.map((row) => [row.key, usageBucketCount(row.count)])
+  );
   const messagesByUserId = new Map<string, number>();
   for (const group of messageGroups) {
     for (const conversation of group.conversations) {

@@ -1,6 +1,7 @@
 import "server-only";
 
 import { prisma } from "@/lib/prisma";
+import { usageBucketCount } from "@/lib/chatUsageBucketCount";
 import { AVAILABLE_MODELS, type AiProvider, type ModelTier } from "@/lib/models";
 import { getRuntimeModel, getRuntimeModels } from "@/lib/modelRegistry";
 import { sendManagedSlackMessage } from "@/lib/managedSlack";
@@ -704,7 +705,7 @@ const maybeNotifyProviderFailure = async (
     },
     select: { count: true },
   });
-  const failureCount = failure?.count || 0;
+  const failureCount = usageBucketCount(failure?.count);
   const policy = await alertPolicyFor(provider);
   if (failureCount < policy.providerFailureThreshold) return;
 
@@ -731,7 +732,7 @@ export const notifyProviderBudgetIfNeeded = async (provider: AiProvider) => {
     select: { count: true },
   });
   const budget = providerMonthlyBudgetMicroUsd(provider);
-  const used = usage?.count || 0;
+  const used = usageBucketCount(usage?.count);
   const percent = budget > 0 ? (used / budget) * 100 : 0;
   const policy = await alertPolicyFor(provider);
   const level =
@@ -922,7 +923,7 @@ export const recordModelFailure = async (
     },
     select: { count: true },
   });
-  const failureCount = failure?.count || 0;
+  const failureCount = usageBucketCount(failure?.count);
   const policy = await alertPolicyFor(resolvedProvider);
   if (failureCount < policy.modelFailureThreshold) return;
 
@@ -1130,12 +1131,14 @@ const latestFor = (rows: BucketRow[], prefix: string) =>
     .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())[0];
 
 const countFor = (rows: BucketRow[], key: string, period: string) =>
-  rows.find((row) => row.key === key && row.period === period)?.count || 0;
+  usageBucketCount(
+    rows.find((row) => row.key === key && row.period === period)?.count
+  );
 
 const sumFor = (rows: BucketRow[], key: string, period: string) =>
   rows
     .filter((row) => row.key === key && row.period === period)
-    .reduce((total, row) => total + row.count, 0);
+    .reduce((total, row) => total + usageBucketCount(row.count), 0);
 
 const eventContextFor = (event: ProviderErrorEventRow | undefined) => {
   if (!event) return "No event-level diagnostic was retained for this failure.";
@@ -1220,8 +1223,14 @@ export const getProviderHealthDashboard = async (
     fiveMinuteStart.getTime() -
       (PROVIDER_HEALTH_WINDOW_MINUTES - 5) * 60 * 1_000
   );
-  const [rows, usageRows, errorEvents, excludedHealthEvents, runtimeModels, healthStateRows] =
-    await Promise.all([
+  const [
+    rawBucketRows,
+    usageRows,
+    errorEvents,
+    excludedHealthEvents,
+    runtimeModels,
+    healthStateRows,
+  ] = await Promise.all([
     prisma.chatUsageBucket.findMany({
       where: {
         OR: [
@@ -1322,6 +1331,12 @@ export const getProviderHealthDashboard = async (
     getProviderCreditSummaries(MONITORED_PROVIDERS),
     getProviderBillingProfiles(MONITORED_PROVIDERS),
   ]);
+  // ChatUsageBucket."count" is a BigInt column (it also carries micro-USD cost
+  // guardrails); every reader below works in plain numbers.
+  const rows = rawBucketRows.map((row) => ({
+    ...row,
+    count: usageBucketCount(row.count),
+  }));
   const balanceByProvider = new Map(balanceEntries);
 
   const providers: ProviderHealthRow[] = MONITORED_PROVIDERS.map((provider) => {
@@ -1365,7 +1380,7 @@ export const getProviderHealthDashboard = async (
       .slice(0, 4)
       .map((row) => ({
         code: row.key.split(":error:")[1] || "UNKNOWN",
-        count: row.count,
+        count: usageBucketCount(row.count),
         updatedAt: row.updatedAt.toISOString(),
         explanation: errorExplanationFor(row.key.split(":error:")[1] || "UNKNOWN"),
       }));
@@ -1509,7 +1524,10 @@ export const getProviderHealthDashboard = async (
         ).length;
         const failureCount5m =
           failure?.period === "model-health-5m"
-            ? Math.max(0, failure.count - excludedFailureCount5m)
+            ? Math.max(
+                0,
+                usageBucketCount(failure.count) - excludedFailureCount5m
+              )
             : 0;
         if (failureCount5m <= 0) return null;
         const recentErrorCode = recentError?.key.split(":error:")[1] || null;
