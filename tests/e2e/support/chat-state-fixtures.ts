@@ -255,7 +255,15 @@ export type UsagePatch = {
     planRemainingCredits: number;
     purchasedRemainingCredits: number;
   }>;
-  limits?: Partial<{ creditsDay: number; creditsMonth: number; maxModels: number }>;
+  limits?: Partial<{
+    creditsDay: number;
+    creditsMonth: number;
+    maxModels: number;
+    /** Plan entitlements the sidebar's conversation menu gates on. */
+    allowAttachments: boolean;
+    allowSharing: boolean;
+    allowDownloads: boolean;
+  }>;
 };
 
 /** Overrides GET /api/user/usage on top of mockAuthenticatedApi's default. */
