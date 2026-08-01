@@ -1,0 +1,187 @@
+name: Back-merge main into develop
+#
+# Releases reach `main` as squash commits, which leaves `main` outside
+# `develop`'s ancestry: the trees agree, but git holds no commit connecting
+# them. A later edit on `develop` to code `main` already carries then has no
+# common base for that work and conflicts. #200 cost eighteen conflicted files
+# for this reason, and #209 opened the same gap again the same day.
+#
+# The recovery is a back-merge, and doing it by hand did not hold: of the three
+# opened on 2026-08-01, two (#203, #213) were squashed on the way in, which
+# discards the second parent and leaves the merge having done nothing at all.
+# A recovery step that is easy to nullify is a weak place to keep the
+# guarantee, so this workflow performs it instead of asking someone to.
+#
+# The real fix would be to forbid squashing the release pull request, but
+# GitHub's merge-method setting is repository-wide and cannot be scoped to one
+# target branch, and squash is wanted for feature pull requests into `develop`.
+# So this workflow makes the release's merge method stop mattering.
+#
+# Two jobs:
+#
+#   back-merge  performs it, and falls back to a pull request when the merge
+#               conflicts or the push is refused
+#   verify      asserts the invariant afterwards -- `main` reachable from
+#               `develop` -- and fails loudly when it is not, which is the
+#               signal that a human has to finish the job
+#
+# The invariant, and the one command that decides it:
+#
+#   git merge-base --is-ancestor origin/main origin/develop   # must exit 0
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Never two back-merges at once: they would race on the same develop ref.
+  group: back-merge-main-to-develop
+  cancel-in-progress: false
+
+jobs:
+  back-merge:
+    name: Back-merge main into develop
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ secrets.GH_AUTOMATION_PAT }}
+
+    steps:
+      # Full history: ancestry questions cannot be answered from a shallow
+      # clone, and the merge needs both branches whole.
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GH_AUTOMATION_PAT }}
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Check whether a back-merge is needed
+        id: needed
+        run: |
+          set -uo pipefail
+          git fetch origin main develop
+          if git merge-base --is-ancestor origin/main origin/develop; then
+            echo "main is already an ancestor of develop; nothing to do."
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "main ($(git rev-parse --short origin/main)) is not an ancestor of develop ($(git rev-parse --short origin/develop))."
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Merged, not resolved. A conflict here means main and develop both
+      # changed the same lines, and choosing a side is a judgement call --
+      # the eslint.config.mjs conflict in #217 was develop adding an ignore
+      # entry main lacked, which a machine cannot know to keep. So a conflict
+      # stops and becomes a pull request rather than a guess.
+      - name: Merge main into develop
+        id: merge
+        if: steps.needed.outputs.needed == 'true'
+        run: |
+          set -uo pipefail
+          git checkout -B develop origin/develop
+          if git merge --no-ff origin/main \
+            -m "Merge main into develop to restore the shared ancestry" \
+            -m "Automated back-merge. main reached this state as a squash commit, so develop and main share no commit for the released work even where they share its content. This merge records the ancestry that the squash could not, which is what keeps the next change to already-released code from conflicting." \
+            -m "See .github/workflows/back-merge-main-to-develop.yml."; then
+            echo "conflicted=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::The back-merge conflicted. Opening a pull request instead."
+            git merge --abort || true
+            echo "conflicted=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Reported for the log, and worth reading: a back-merge after a squashed
+      # release normally changes nothing, because the content is already on
+      # develop. A non-empty diff means main carries work develop never had --
+      # a hotfix landed straight on main, say -- which is exactly what a
+      # back-merge is also for, but worth seeing rather than assuming.
+      - name: Report what the merge changed
+        if: steps.merge.outputs.conflicted == 'false'
+        run: |
+          if git diff --quiet origin/develop HEAD; then
+            echo "The merge changes no file: the tree is identical to origin/develop."
+          else
+            echo "The merge brings content develop did not have:"
+            git diff --stat origin/develop HEAD
+          fi
+
+      - name: Push to develop
+        id: push
+        if: steps.merge.outputs.conflicted == 'false'
+        run: |
+          set -uo pipefail
+          if git push origin develop; then
+            echo "pushed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Pushing to develop was refused -- most likely branch protection. Opening a pull request instead."
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The fallback, for a conflict or a refused push alike. The branch keeps
+      # the merge commit, so merging this pull request WITH A MERGE COMMIT
+      # restores the ancestry. Squashing it would discard the second parent and
+      # achieve nothing -- which is what happened to #203 and #213.
+      - name: Open a pull request when the merge could not land
+        if: |
+          steps.needed.outputs.needed == 'true' &&
+          (steps.merge.outputs.conflicted == 'true' || steps.push.outputs.pushed == 'false')
+        run: |
+          set -uo pipefail
+          branch="automation/back-merge-main-$(git rev-parse --short origin/main)"
+          git checkout -B "$branch" origin/develop
+          git merge --no-ff origin/main -m "Merge main into develop to restore the shared ancestry" || true
+          if [ -n "$(git ls-files --unmerged)" ]; then
+            # Leave the conflict markers out of the branch; a human resolves it
+            # from this base. The branch is still the right starting point.
+            git merge --abort || true
+            echo "::error::The back-merge conflicts and needs a human. Start from origin/develop, merge origin/main, resolve, and merge the pull request WITH A MERGE COMMIT."
+            exit 1
+          fi
+          git push -u origin "$branch"
+          existing=$(gh pr list --head "$branch" --base develop --state open --json number --jq '.[0].number')
+          if [ -z "$existing" ]; then
+            gh pr create \
+              --head "$branch" \
+              --base develop \
+              --title "Merge main into develop to restore the shared ancestry" \
+              --body-file .github/workflows/back-merge-pr-body.md
+          fi
+
+  # Method 3: the guard. The back-merge above is the fix; this is what makes a
+  # failed fix visible instead of silent. It runs even when the back-merge job
+  # failed, because that is precisely when the invariant needs reporting.
+  verify:
+    name: main is in develop's ancestry
+    runs-on: ubuntu-latest
+    needs: back-merge
+    if: always()
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Assert the invariant
+        run: |
+          set -uo pipefail
+          git fetch origin main develop
+          main_sha=$(git rev-parse --short origin/main)
+          develop_sha=$(git rev-parse --short origin/develop)
+          if git merge-base --is-ancestor origin/main origin/develop; then
+            echo "main ($main_sha) is an ancestor of develop ($develop_sha)."
+            exit 0
+          fi
+          echo "::error::main ($main_sha) is NOT an ancestor of develop ($develop_sha). The back-merge did not land -- check the job above for a conflict, a refused push, or a pull request waiting to be merged with a merge commit. Until this is fixed, the next change to already-released code will conflict."
+          exit 1

@@ -70,10 +70,11 @@ const USE_CASE_CANDIDATES: Record<
   everyday: [
     "gpt-5-4-mini",
     "gpt-5-6-luna",
-    "grok-3-mini",
     "gemini-2-5-flash",
     "qwen3.6-flash",
     "claude-haiku-4-5",
+    "mistral-small-4",
+    "glm-5.2",
   ],
   writing: [
     "claude-haiku-4-5",
@@ -89,7 +90,9 @@ const USE_CASE_CANDIDATES: Record<
     "gpt-5-5",
     "grok-4-5",
     "gemini-3-6-flash",
+    "gemini-3-1-pro",
     "claude-sonnet-5",
+    "mistral-large-3",
   ],
   multimodal: [
     "gemini-3-6-flash",
@@ -101,7 +104,6 @@ const USE_CASE_CANDIDATES: Record<
   coding: [
     "gpt-5-6-terra",
     "deepseek-v4-flash",
-    "groq-gpt-oss-120b",
     "codestral",
     "kimi-k2.7-code",
     "deepseek-v4-pro",
@@ -114,10 +116,10 @@ const USE_CASE_CANDIDATES: Record<
   value: [
     "gpt-5-6-luna",
     "gemini-2-5-flash",
-    "groq-gpt-oss-120b",
+    "deepseek-v4-flash",
     "mistral-small-4",
     "glm-5.2",
-    "grok-3-mini",
+    "qwen3.6-flash",
     "deepseek-v4-pro",
   ],
 };

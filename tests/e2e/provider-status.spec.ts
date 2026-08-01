@@ -29,13 +29,17 @@ const SELECTED = {
  * Six public models no default selection contains. The guest-plan ones lead:
  * the catalogue shows a plan lock ahead of an outage reason, so only a model a
  * guest could otherwise select proves the outage itself is still disclosed.
+ *
+ * None of them may also be a *replacement* named elsewhere in this file: a
+ * model reported unavailable here is never offered as a swap, so an overlap
+ * would silently delete the recovery the other test is asserting on.
  */
 const UNSELECTED_SIX: Array<{ id: string; provider: string; name: string }> = [
-  { id: "llama-3-1", provider: "groq", name: "Llama 3.1" },
-  { id: "grok-3-mini", provider: "xai", name: "Grok 3 Mini" },
-  { id: "qwen3.7-plus", provider: "qwen", name: "Qwen 3.7 Plus" },
-  { id: "llama-3-3", provider: "groq", name: "Llama 3.3" },
-  { id: "grok-4-3", provider: "xai", name: "Grok 4.3" },
+  { id: "qwen3.6-flash", provider: "qwen", name: "Qwen 3.6" },
+  { id: "glm-5.2", provider: "zhipu", name: "GLM 5.2" },
+  { id: "gemini-3-5-flash", provider: "google", name: "Gemini 3.5 Flash" },
+  { id: "kimi-k2.7-code", provider: "moonshot", name: "Kimi K2.7" },
+  { id: "mistral-large-3", provider: "mistral", name: "Mistral Large 3" },
   { id: "deepseek-v4-pro", provider: "deepseek", name: "DeepSeek-V4 Pro" },
 ];
 
@@ -188,6 +192,40 @@ test("retired models stay out of the user model catalogue", async ({ page }) => 
   await expect(
     dialog.getByTestId("model-option").filter({ hasText: "Gemini 3.1 Pro" })
   ).toBeVisible();
+
+  // Every model retired with Groq's Llama hosting and with the xAI
+  // consolidation, checked by catalogue id so a display-name change cannot
+  // quietly let one back in.
+  for (const retiredModelId of [
+    "llama-3-1",
+    "llama-3-3",
+    "llama-4-scout",
+    "grok-4",
+    "grok-3",
+    "grok-3-mini",
+  ]) {
+    await expect(
+      dialog.locator(`[data-testid="model-option"][data-model-id="${retiredModelId}"]`)
+    ).toHaveCount(0);
+  }
+  // Grok 4.5 is the one xAI model that survives, and Kimi K2.7 keeps its
+  // place.
+  for (const liveModelId of ["grok-4-5", "kimi-k2.7-code"]) {
+    await expect(
+      dialog.locator(`[data-testid="model-option"][data-model-id="${liveModelId}"]`)
+    ).toHaveCount(1);
+  }
+  // Kimi K3's id is registered but the model is withheld until its unit
+  // economics are settled, so it must not reach the picker -- and it must not
+  // be teased there either, since a listed-but-unselectable entry is a
+  // promise the catalogue cannot keep.
+  await expect(
+    dialog.locator('[data-testid="model-option"][data-model-id="kimi-k3"]')
+  ).toHaveCount(0);
+  await expect(dialog.getByText(/kimi k3/i)).toHaveCount(0);
+  // GPT-OSS is Groq's suggested Llama successor and is deliberately not
+  // adopted, so nothing in the catalogue may advertise it.
+  await expect(dialog.getByText(/gpt-?oss/i)).toHaveCount(0);
 });
 
 /**
@@ -432,6 +470,81 @@ test.describe("contextual outage disclosure (UI-STATUS-002)", () => {
     await expect(page.locator("#chat-input-popover")).toBeVisible();
   });
 
+  // /api/models/status is public and cached, so its replacement list cannot
+  // know the viewer's plan. Consolidating xAI on the Pro-only Grok 4.5 made
+  // that gap reachable: a guest offered "switch to Grok 4.5" lands in the
+  // sign-in prompt instead of on a working model.
+  test("a replacement above the viewer's plan is skipped for one they can run", async ({
+    page,
+  }) => {
+    await prepareGuestPage(page, "en");
+    await mockProviderStatus(page, [
+      {
+        id: SELECTED.gemini.id,
+        provider: SELECTED.gemini.provider,
+        status: "unavailable",
+        // grok-4-5 is Pro-only; deepseek-v4-flash is guest-selectable.
+        fallbackModelIds: ["grok-4-5", "deepseek-v4-flash"],
+        fallbackHealth: "operational",
+      },
+      {
+        id: "grok-4-5",
+        provider: "xai",
+        status: "available",
+        fallbackModelIds: [],
+        fallbackHealth: "none",
+      },
+      {
+        id: "deepseek-v4-flash",
+        provider: "deepseek",
+        status: "available",
+        fallbackModelIds: [],
+        fallbackHealth: "none",
+      },
+    ]);
+
+    await page.goto("/chat");
+    await expect(banner(page)).toBeVisible();
+    await expect(
+      banner(page).getByRole("button", {
+        name: `Switch ${SELECTED.gemini.name} for DeepSeek-V4 Flash`,
+      })
+    ).toBeVisible();
+    await expect(banner(page)).not.toContainText("Grok 4.5");
+  });
+
+  test("a plan-locked replacement with no accessible alternative falls back to the picker", async ({
+    page,
+  }) => {
+    await prepareGuestPage(page, "en");
+    await mockProviderStatus(page, [
+      {
+        id: SELECTED.gemini.id,
+        provider: SELECTED.gemini.provider,
+        status: "unavailable",
+        fallbackModelIds: ["grok-4-5"],
+        fallbackHealth: "operational",
+      },
+      {
+        id: "grok-4-5",
+        provider: "xai",
+        status: "available",
+        fallbackModelIds: [],
+        fallbackHealth: "none",
+      },
+    ]);
+
+    await page.goto("/chat");
+    await expect(banner(page)).toBeVisible();
+    // Never a swap the guest cannot take, and never an upgrade pitch dressed
+    // up as a recovery -- the picker is the honest way out.
+    await expect(banner(page).getByTestId("provider-status-swap")).toHaveCount(0);
+    await expect(banner(page)).not.toContainText("Grok 4.5");
+    await expect(
+      banner(page).getByRole("button", { name: "Choose another model" })
+    ).toBeVisible();
+  });
+
   test("fallback health caveats survive the rescope", async ({ page }) => {
     const cases: Array<{
       health: "operational" | "degraded" | "unknown" | "none";
@@ -500,12 +613,12 @@ test.describe("contextual outage disclosure (UI-STATUS-002)", () => {
         id: SELECTED.gemini.id,
         provider: SELECTED.gemini.provider,
         status: "unavailable",
-        fallbackModelIds: ["llama-3-1", "mistral-small-4"],
+        fallbackModelIds: ["qwen3.6-flash", "mistral-small-4"],
         fallbackHealth: "operational",
       },
       {
-        id: "llama-3-1",
-        provider: "groq",
+        id: "qwen3.6-flash",
+        provider: "qwen",
         status: "unavailable",
         fallbackModelIds: [],
         fallbackHealth: "none",
@@ -521,7 +634,7 @@ test.describe("contextual outage disclosure (UI-STATUS-002)", () => {
         name: `Switch ${SELECTED.gemini.name} for Mistral Small 4`,
       })
     ).toBeVisible();
-    await expect(banner(page)).not.toContainText("Llama 3.1");
+    await expect(banner(page)).not.toContainText("Qwen 3.6");
   });
 
   test("with every candidate down the banner falls back to the picker", async ({
@@ -533,12 +646,12 @@ test.describe("contextual outage disclosure (UI-STATUS-002)", () => {
         id: SELECTED.gemini.id,
         provider: SELECTED.gemini.provider,
         status: "unavailable",
-        fallbackModelIds: ["llama-3-1"],
+        fallbackModelIds: ["qwen3.6-flash"],
         fallbackHealth: "operational",
       },
       {
-        id: "llama-3-1",
-        provider: "groq",
+        id: "qwen3.6-flash",
+        provider: "qwen",
         status: "unavailable",
         fallbackModelIds: [],
         fallbackHealth: "none",
@@ -959,20 +1072,20 @@ test.describe("widespread selected outage copy and layout (RECON-OPS-002)", () =
   const OUTAGE = [
     { model: SELECTED.gpt, replacementId: "mistral-small-4", replacement: "Mistral Small 4" },
     { model: SELECTED.claude, replacementId: "deepseek-v4-flash", replacement: "DeepSeek-V4 Flash" },
-    { model: SELECTED.gemini, replacementId: "grok-3-mini", replacement: "Grok 3 Mini" },
+    { model: SELECTED.gemini, replacementId: "qwen3.6-flash", replacement: "Qwen 3.6" },
   ];
   const REPLACEMENT_NAMES = OUTAGE.map((entry) => entry.replacement);
   // Six unrelated outages. None may be one of the replacements above, and no
-  // name may nest inside a name the banner legitimately prints -- "Grok 3" is
-  // a substring of "Grok 3 Mini", so a naive absence check on it would fail on
-  // correct output. The precondition below makes that trap loud instead of
-  // letting a future model rename re-introduce it silently.
+  // name may nest inside a name the banner legitimately prints -- the pair
+  // that first showed this up was "Grok 3" inside "Grok 3 Mini", where a naive
+  // absence check fails on correct output. The precondition below makes that
+  // trap loud instead of letting a future model rename re-introduce it.
   const UNRELATED = [
-    { id: "qwen3.7-plus", provider: "qwen", name: "Qwen 3.7 Plus" },
-    { id: "llama-3-1", provider: "groq", name: "Llama 3.1" },
-    { id: "llama-3-3", provider: "groq", name: "Llama 3.3" },
+    { id: "gemini-3-5-flash", provider: "google", name: "Gemini 3.5 Flash" },
+    { id: "glm-5.2", provider: "zhipu", name: "GLM 5.2" },
+    { id: "codestral", provider: "mistral", name: "Codestral" },
     { id: "mistral-large-3", provider: "mistral", name: "Mistral Large 3" },
-    { id: "grok-4", provider: "xai", name: "Grok 4" },
+    { id: "grok-4-5", provider: "xai", name: "Grok 4.5" },
     { id: "deepseek-v4-pro", provider: "deepseek", name: "DeepSeek-V4 Pro" },
   ];
   const NAMES_THE_BANNER_PRINTS = [
@@ -1308,7 +1421,10 @@ test.describe("provider banner keeps model names readable at every text size", (
             id: SELECTED.gemini.id,
             provider: SELECTED.gemini.provider,
             status: "unavailable",
-            fallbackModelIds: ["mistral-medium-3-1"],
+            // Guest-selectable on purpose: the banner only offers a
+            // replacement the viewer's plan allows, and this case needs the
+            // swap control present to measure it.
+            fallbackModelIds: ["deepseek-v4-flash"],
             fallbackHealth: "operational",
           },
         ]);
@@ -1370,7 +1486,7 @@ test.describe("provider banner keeps model names readable at every text size", (
         id: SELECTED.gemini.id,
         provider: SELECTED.gemini.provider,
         status: "unavailable",
-        fallbackModelIds: ["mistral-medium-3-1"],
+        fallbackModelIds: ["deepseek-v4-flash"],
         fallbackHealth: "operational",
       },
     ]);
