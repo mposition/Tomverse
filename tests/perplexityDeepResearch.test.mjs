@@ -482,7 +482,7 @@ test("pollDeepResearchJob treats a completed job with no message as an empty res
   );
 });
 
-test("pollDeepResearchJob surfaces the provider's failure message", async () => {
+test("pollDeepResearchJob replaces the provider failure message with safe copy", async () => {
   await withApiKey(() =>
     withMockFetch(
       async () => ({
@@ -496,7 +496,7 @@ test("pollDeepResearchJob surfaces the provider's failure message", async () => 
         const result = await pollDeepResearchJob("job-123");
         assert.deepEqual(result, {
           status: "FAILED",
-          errorMessage: "The model could not complete this request.",
+        errorMessage: "The Perplexity deep research job failed.",
         });
       }
     )
