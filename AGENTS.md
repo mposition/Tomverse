@@ -81,6 +81,10 @@ UI-012에서 승인된 정책(B안)입니다. accent 색은 **hue가 아니라 �
 - 모든 enabled premium 모델은 `lib/modelPricing.ts`에 명시적 가격 profile을
   가져야 합니다. `npm run check:model-pricing`이 PR Fast Gate에서 fail-closed로
   검사합니다.
+- 가격이 아직 검증되지 않은 premium 모델은 `PENDING_VERIFIED_PRICE_REGISTER`에
+  담당자·검증 티켓·등록일·기한·production 승인과 함께 등록합니다. 기한(최대
+  90일)이 지나면 같은 검사가 경고에서 실패로 바뀝니다. fallback 사용 비율과
+  예약 대비 정산 비율은 `GET /api/admin/fallback-pricing`에서 봅니다.
 - 가격 변경은 소급 적용하지 않습니다. `pricingVersion`과 `costSource`를
   reservation·settlement snapshot에 저장합니다.
 - 사용자 응답에 원시 내부 USD를 노출하지 않습니다. `internal*` 진단 필드는

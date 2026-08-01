@@ -89,6 +89,7 @@ run(
     "--test",
     "--test-concurrency=1",
     "tests/integration/credit-finance.db.test.ts",
+    "tests/integration/fallback-pricing-metrics.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     "tests/integration/admin-security.db.test.ts",
     "tests/integration/admin-users.db.test.ts",
@@ -98,7 +99,7 @@ run(
     "tests/integration/provider-recovery.db.test.ts",
     "tests/integration/provider-failure-scope.db.test.ts",
   ],
-  "Running financial, credit, model-registry, admin-security, admin-users, login-methods, account-deletion, conversation-title, provider-recovery, and provider-failure-scope transaction scenarios"
+  "Running financial, credit, fallback-pricing, model-registry, admin-security, admin-users, login-methods, account-deletion, conversation-title, provider-recovery, and provider-failure-scope transaction scenarios"
 );
 // Runs apart from the batch above: it drives the real route handlers, which
 // needs mock.module (--experimental-test-module-mocks) to replace the session
