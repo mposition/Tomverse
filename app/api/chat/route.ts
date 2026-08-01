@@ -1397,6 +1397,11 @@ export async function POST(req: Request) {
                 }).catch(() => {});
                 usageReservation = null;
                 if (!isMessageContractError) {
+                    // The provider's HTTP status is forwarded as structured
+                    // data so recordProviderFailure can tell a request-contract
+                    // rejection (400) from an actual Perplexity outage (5xx)
+                    // instead of counting both against the provider.
+                    const submitMetadata = safeErrorMetadata(error);
                     await recordProviderFailure(
                         modelConfig.provider,
                         "DEEP_RESEARCH_SUBMIT_FAILED",
@@ -1404,6 +1409,10 @@ export async function POST(req: Request) {
                             modelId: requestedModelId,
                             phase: "request",
                             traceId,
+                            errorName: submitMetadata.name,
+                            errorCode: submitMetadata.code,
+                            httpStatus: submitMetadata.statusCode,
+                            retryable: submitMetadata.isRetryable,
                             message:
                                 error instanceof Error
                                     ? error.message

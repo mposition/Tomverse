@@ -385,12 +385,25 @@ const checks = [
   {
     name: "Provider error details are sanitized, bounded, and retained temporarily",
     file: "lib/providerMonitoring.ts",
-    test: (source) =>
-      source.includes("providerErrorEvent.create") &&
-      source.includes("options.includeErrorEvents") &&
-      source.includes('"Bearer [REDACTED]"') &&
-      source.includes("safeText(event.message, 500)") &&
-      source.includes("safeText(event.traceId, 120)"),
+    test: (source) => {
+      // STG-R002: the redaction itself now lives in the shared, pure
+      // classification module so the administrator verification path uses the
+      // identical rules instead of a second copy that could drift. Both halves
+      // are pinned here: the shared redactor must still strip credentials, and
+      // providerMonitoring must still route every persisted field through it.
+      const classification = read("lib/providerErrorClassification.ts");
+      const verification = read("lib/providerVerification.ts");
+      return (
+        source.includes("providerErrorEvent.create") &&
+        source.includes("options.includeErrorEvents") &&
+        source.includes("redactProviderText") &&
+        source.includes("safeText(event.message, 500)") &&
+        source.includes("safeText(event.traceId, 120)") &&
+        classification.includes('"Bearer [REDACTED]"') &&
+        classification.includes("[REDACTED_KEY]") &&
+        verification.includes("redactProviderText(safeErrorMessage(error), 300)")
+      );
+    },
   },
   {
     name: "Admin provider health explicitly requests detailed error events",

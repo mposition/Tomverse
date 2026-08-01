@@ -1164,6 +1164,7 @@ export async function AdminWorkspace({ activeView }: { activeView: AdminWorkspac
                                 <AdminProviderHealthPanel
                                     initialDashboard={dashboard}
                                     canManageCredits={adminRole === "owner" || adminRole === "billing"}
+                                    canRunVerification={adminRole === "owner" || adminRole === "ops"}
                                 />
                                 <AdminModelMetricsPanel rows={modelMetricRows} />
                             </section>
@@ -1242,6 +1243,7 @@ export async function AdminWorkspace({ activeView }: { activeView: AdminWorkspac
                             <AdminProviderHealthPanel
                                 initialDashboard={dashboard}
                                 canManageCredits={adminRole === "owner" || adminRole === "billing"}
+                                canRunVerification={adminRole === "owner" || adminRole === "ops"}
                             />
                             <AdminModelMetricsPanel rows={modelMetricRows} />
                         </section>
