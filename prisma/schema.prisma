@@ -326,6 +326,20 @@ model ProviderHealthState {
   lastProbeSuccessAt       DateTime?
   lastProbeFailureAt       DateTime?
   consecutiveProbeFailures Int       @default(0)
+  // STG-R002: administrator-triggered live verification evidence. A third
+  // stream again, for the same reason: an operator proving the API answers is
+  // not the same claim as "real user traffic is being served", so it must
+  // never be written into lastSuccessAt. lib/providerPublicStatusCore.ts
+  // merges it explicitly under its own reason codes.
+  lastVerificationSuccessAt DateTime?
+  lastVerificationFailureAt DateTime?
+  // When the blocking consecutiveFailures counter was last cleared by a
+  // verified recovery, and the ProviderHealthCheck row that authorised it.
+  // Recovery is only ever performed against a successful verification, so this
+  // id is the audit trail linking "the block was lifted" to "here is the call
+  // that proved it was safe to lift".
+  lastRecoveryAt            DateTime?
+  lastRecoveryCheckId       String?
   updatedAt           DateTime  @updatedAt
 
   @@index([lastSuccessAt])
@@ -1016,20 +1030,48 @@ model AdminProviderIncident {
   @@index([modelId, status])
 }
 
+// Admin-triggered provider checks. Two kinds share this table (see `kind`):
+//
+//   "configuration"    -- the original readiness check. Reads environment
+//                         configuration only and never calls the provider.
+//   "live_verification" -- STG-R002. Sends one minimal, non-billed request to
+//                         the provider's cheapest simple model and records the
+//                         sanitized outcome. This row *is* the recovery
+//                         evidence: clearing a provider's blocking failure
+//                         counter requires a successful row of this kind that
+//                         has not already been consumed (recoveryApplied).
+//
+// Public-safe by contract: no API key, no Authorization header, no raw
+// provider response body, no prompt content -- only a sanitized diagnostic
+// code and a redacted message.
 model ProviderHealthCheck {
   id             String   @id @default(cuid())
   provider       String
   modelId        String?
+  kind           String   @default("configuration")
   status         String
   latencyMs      Int?
   errorCode      String?
+  /// Sanitized code in the shape providerDiagnosticCode() produces, e.g.
+  /// "PROVIDER_VERIFICATION_FAILED.HTTP_400".
+  diagnosticCode String?
   message        String?
+  traceId        String?
+  /// Set once, when this check has been consumed to clear a provider's
+  /// blocking consecutiveFailures counter. Guards double-submits: a check can
+  /// authorise exactly one recovery.
+  recoveryApplied Boolean @default(false)
+  recoveryAppliedAt DateTime?
+  /// consecutiveFailures immediately before the recovery this check
+  /// authorised, so the audit record states what was actually cleared.
+  previousConsecutiveFailures Int?
   createdById    String?
   createdByEmail String?
   createdAt      DateTime @default(now())
 
   @@index([provider, createdAt])
   @@index([status, createdAt])
+  @@index([provider, kind, createdAt])
 }
 
 model ProviderDailyUsage {
