@@ -19,15 +19,29 @@ import { mockUserUsage } from "./support/chat-state-fixtures";
 
 const EXPORT_BODY = "You: hello\nAssistant: hi\n";
 
-async function openSidebarOnMobile(page: Page) {
-  const openSidebar = page.getByRole("button", { name: /사이드바 열기|Open sidebar|打开侧边栏/ });
-  if (await openSidebar.count()) {
-    await openSidebar.first().click();
+/**
+ * Puts the conversation list on screen in whichever shell is running.
+ *
+ * The desktop sidebar is always mounted; the mobile one lives behind a drawer
+ * that has to be opened first, and `mobile-sidebar-open` is the trigger every
+ * other mobile spec uses. This looked the trigger up by an accessible name no
+ * shell renders -- the real label is `chat.openChatMenu` ("대화 메뉴 열기") --
+ * and skipped when it found none, so on mobile the drawer stayed shut and the
+ * next line waited 30 seconds for a menu that was never going to mount.
+ *
+ * Waiting for the menu here rather than assuming it keeps the next rename loud:
+ * a missing trigger fails on the trigger, not on something three lines away.
+ */
+async function showConversationList(page: Page) {
+  const openDrawer = page.getByTestId("mobile-sidebar-open");
+  if (await openDrawer.isVisible()) {
+    await openDrawer.click();
   }
+  await expect(page.getByTestId("conversation-menu").first()).toBeVisible();
 }
 
 async function openConversationMenu(page: Page) {
-  await openSidebarOnMobile(page);
+  await showConversationList(page);
   await page.getByTestId("conversation-menu").first().click();
   await expect(page.getByTestId("conversation-menu-panel")).toBeVisible();
 }
