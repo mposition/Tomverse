@@ -57,7 +57,7 @@ export function WorkflowContinuitySection() {
                   <span className="flex h-[40px] w-[40px] shrink-0 items-center justify-center rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400">
                     <Icon className="h-5 w-5" aria-hidden="true" />
                   </span>
-                  <span className="text-xs font-semibold text-zinc-400 md:mt-3 md:block dark:text-zinc-600">
+                  <span className="text-xs font-semibold text-zinc-600 md:mt-3 md:block dark:text-zinc-300">
                     0{index + 1}
                   </span>
                 </div>

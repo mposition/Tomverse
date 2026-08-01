@@ -168,7 +168,7 @@ export function ProductProofSection() {
             </p>
             <p
               data-testid="landing-review-terminology"
-              className="mt-4 text-xs leading-5 text-zinc-500"
+              className="mt-4 text-xs leading-5 text-zinc-300"
             >
               {copy.terminologyNote}
             </p>

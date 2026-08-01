@@ -113,7 +113,7 @@ export function LandingHeroAiReviewDemo({
             <span className="h-2 w-2 shrink-0 rounded-full bg-status-success-500" />
             {preview.title}
           </span>
-            <span className="shrink-0 text-[11px] font-semibold text-zinc-500">
+          <span className="shrink-0 text-[11px] font-semibold text-zinc-300">
             {stages[activeStage]?.title}
           </span>
         </div>
@@ -121,10 +121,10 @@ export function LandingHeroAiReviewDemo({
         <div className="p-[12px]">
           <div
             data-testid="landing-hero-demo-prompt"
-            className={`flex min-w-0 items-center gap-3 rounded-xl border px-[12px] py-[10px] transition-[border-color,background-color,opacity] duration-500 motion-reduce:transition-none ${
+            className={`flex min-w-0 items-center gap-3 rounded-xl border px-[12px] py-[10px] transition-[border-color,background-color] duration-500 motion-reduce:transition-none ${
               activeStage === 0
-                ? "border-blue-500 bg-blue-500/15 opacity-100"
-                : "border-zinc-800 bg-zinc-900/70 opacity-70"
+                ? "border-blue-500 bg-blue-500/15"
+                : "border-zinc-800 bg-zinc-900/70"
             }`}
           >
             <CornerDownRight className="h-4 w-4 shrink-0 text-blue-400" />
@@ -149,16 +149,16 @@ export function LandingHeroAiReviewDemo({
                 <article
                   key={model}
                   data-testid={`landing-hero-demo-model-${model.toLowerCase()}`}
-                  className={`min-w-0 rounded-2xl border bg-zinc-900/90 p-[12px] transition-[transform,opacity,border-color] duration-700 ease-out motion-reduce:transition-none ${
+                  className={`min-w-0 rounded-2xl border bg-zinc-900/90 p-[12px] transition-[transform,border-color] duration-700 ease-out motion-reduce:transition-none ${
                     answersVisible
-                      ? `translate-y-0 border-zinc-700 opacity-100 ${settledClass}`
-                      : "translate-y-3 border-zinc-800 opacity-35"
+                      ? `visible translate-y-0 border-zinc-700 ${settledClass}`
+                      : "invisible translate-y-3 border-zinc-800"
                   }`}
                   style={{ transitionDelay: answersVisible ? `${index * 90}ms` : "0ms" }}
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-sm font-bold">{model}</span>
-                    <span className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-500">
+                    <span className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-300">
                       <span
                         className={`h-1.5 w-1.5 rounded-full transition-colors duration-500 motion-reduce:transition-none ${
                           answersVisible ? "bg-status-success-500" : "bg-zinc-600"
@@ -181,10 +181,10 @@ export function LandingHeroAiReviewDemo({
 
           <div
             data-testid="landing-hero-demo-review"
-            className={`relative mt-3 overflow-hidden rounded-2xl border border-tomverse-review-border bg-tomverse-review-surface text-zinc-950 transition-[transform,opacity] duration-700 ease-out motion-reduce:transition-none dark:text-white ${
+            className={`relative mt-3 overflow-hidden rounded-2xl border border-tomverse-review-border bg-tomverse-review-surface text-zinc-950 transition-transform duration-700 ease-out motion-reduce:transition-none dark:text-white ${
               reviewVisible
-                ? "translate-y-0 opacity-100"
-                : "translate-y-3 opacity-35"
+                ? "visible translate-y-0"
+                : "invisible translate-y-3"
             }`}
           >
             <div className="h-1 bg-linear-to-r from-accent-ai-review-start-600 via-accent-ai-review-mid-600 to-accent-ai-review-end-600" />
@@ -194,7 +194,7 @@ export function LandingHeroAiReviewDemo({
                   <Sparkles className="h-3.5 w-3.5 shrink-0" />
                   {preview.reviewTitle}
                 </span>
-                <span className="shrink-0 font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
+                <span className="shrink-0 font-mono text-[11px] text-zinc-700 dark:text-zinc-300">
                   {stages[2]?.title}
                 </span>
               </div>
@@ -214,10 +214,10 @@ export function LandingHeroAiReviewDemo({
 
           <div
             data-testid="landing-hero-demo-next-action"
-            className={`mt-3 flex min-w-0 items-center justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-900/80 px-[12px] py-[10px] transition-[transform,opacity] duration-500 motion-reduce:transition-none ${
+            className={`mt-3 flex min-w-0 items-center justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-900/80 px-[12px] py-[10px] transition-transform duration-500 motion-reduce:transition-none ${
               nextActionVisible
-                ? "translate-y-0 opacity-100"
-                : "translate-y-2 opacity-35"
+                ? "visible translate-y-0"
+                : "invisible translate-y-2"
             }`}
           >
             <span className="min-w-0 break-words text-xs font-semibold text-zinc-300">
@@ -236,7 +236,7 @@ export function LandingHeroAiReviewDemo({
               className={`min-w-0 border-l px-[8px] first:border-l-0 first:pl-0 last:pr-0 transition-colors duration-300 motion-reduce:transition-none ${
                 index <= activeStage
                   ? "border-blue-500 text-blue-300"
-                  : "border-zinc-800 text-zinc-600"
+                  : "border-zinc-700 text-zinc-300"
               }`}
             >
               <span className="block text-[11px] font-semibold">

@@ -104,7 +104,7 @@ export function EvidenceSection() {
                   >
                     <Icon className="h-5 w-5" aria-hidden="true" />
                   </span>
-                  <span className="text-xs font-semibold tracking-[0.16em] text-zinc-400 dark:text-zinc-600">
+                  <span className="text-xs font-semibold tracking-[0.16em] text-zinc-600 dark:text-zinc-300">
                     0{index + 1}
                   </span>
                 </div>
