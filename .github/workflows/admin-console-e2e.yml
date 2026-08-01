@@ -21,38 +21,32 @@ name: Admin Console E2E
 # Chromium smoke tests" by name, and the jobs it aggregates are deliberately
 # not required checks. Adding a fourth job there would change what a green
 # fast-gate means without touching branch protection, which is a repository
-# setting this file cannot edit. Making this check required is a separate,
-# deliberate step in the repository settings.
+# setting this file cannot edit.
+#
+# So this is a visible check, not a required one. Making it required is a
+# branch protection change: add "Admin Console E2E (PostgreSQL)" to the
+# required checks for develop and main. Because the job now reports on every
+# pull request (see the trigger note below), it can be made required without
+# leaving unrelated pull requests waiting on a check that never runs.
 
+# Runs on every pull request, with no `paths` filter, for two reasons.
+#
+# A path filter would be a guess about which files can break the admin
+# console, and the guess is what failed last time: #193 broke four specs by
+# rewriting toast strings, and a filter is only as good as whoever remembers
+# to extend it when a new shared module starts feeding an admin surface.
+#
+# It also blocks this check from ever becoming a required one. A workflow
+# skipped by a `paths` filter creates no check run at all, so GitHub leaves a
+# required check pending forever and the pull request can never merge. Moving
+# the decision into a job-level `if` would avoid that, but it would keep the
+# guess -- so the filter is gone instead.
+#
+# The cost is nil in wall-clock terms: measured at 5m17s in run #210, against
+# ~11m for `Production build and Chromium smoke tests` in the same pull
+# request. This job finishes well inside the existing critical path.
 on:
   pull_request:
-    paths:
-      # The console itself, its API surface, and the sign-in and step-up pages
-      # the access-control specs drive.
-      - "app/(site)/(application)/admin/**"
-      - "app/(site)/(application)/auth/**"
-      - "app/api/admin/**"
-      - "app/api/auth/**"
-      - "components/admin/**"
-      # Shared modules the suite asserts through: authorization and approval,
-      # the model registry the fixture seeds, and the copy modules whose
-      # strings the mutation journeys assert verbatim.
-      - "lib/admin*.ts"
-      - "lib/auth.ts"
-      - "lib/requestOrigin.ts"
-      - "lib/modelRegistry*.ts"
-      - "lib/scheduledJobs.ts"
-      - "lib/notification*.ts"
-      # The harness and its fixtures.
-      - "tests/e2e-admin/**"
-      - "tests/adminE2eHarness.test.ts"
-      - "playwright.admin.config.ts"
-      - "scripts/run-admin-e2e.mjs"
-      # Schema changes reshape every fixture row.
-      - "prisma/**"
-      - "package.json"
-      - "package-lock.json"
-      - ".github/workflows/admin-console-e2e.yml"
   push:
     branches:
       - develop
