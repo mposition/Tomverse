@@ -20,7 +20,7 @@ type StatusRecord = {
 // "selected" fixture below picks from here and every "non-selected" one
 // deliberately avoids it.
 const SELECTED = {
-  gemini: { id: "gemini-2-5-flash", provider: "google", name: "Gemini 3.1 Flash-Lite" },
+  gemini: { id: "gemini-2-5-flash", provider: "google", name: "Gemini 3.5 Flash-Lite" },
   gpt: { id: "gpt-5-4-mini", provider: "openai", name: "GPT-5.4 mini" },
   claude: { id: "claude-haiku-4-5", provider: "anthropic", name: "Claude Haiku 4.5" },
 } as const;
@@ -1371,7 +1371,7 @@ test.describe("widespread selected outage copy and layout (RECON-OPS-002)", () =
  * did not fit included the model name: measured on the build before the fix,
  * the Korean title came apart as
  *
- *   root 24px: `Gemini 3.1 Flash-` / `Lite을(를)`
+ *   root 24px: `Gemini 3.5 Flash-` / `Lite을(를)`
  *   root 32px: `Gemini` / `3.1` / `Flash-` / `Lite을` / `(를)` / `일시적으` / `로 사용할`
  *
  * `Gemin / i` and `Flash- / Lite` are the two failure shapes: a mid-letter

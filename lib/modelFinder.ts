@@ -330,7 +330,11 @@ export const getComplementaryModelSuggestion = (
   const selectedProviders = new Set(selectedModels.map((model) => model.provider));
 
   const hasReasoning =
-    selectedClasses.has("reasoning") || selectedClasses.has("premium-reasoning");
+    selectedClasses.has("reasoning") ||
+    selectedClasses.has("premium-reasoning") ||
+    selectedModels.some(
+      (model) => model.reasoning !== undefined && model.reasoning !== "none"
+    );
   if (!hasReasoning) {
     // Was hardcoded to deepseek-r1, which silently stopped producing a
     // suggestion at all the moment DeepSeek retired deepseek-reasoner. Reading

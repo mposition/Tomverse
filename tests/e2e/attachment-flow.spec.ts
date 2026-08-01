@@ -138,7 +138,7 @@ test.describe("attachment UX", () => {
     expect(uploadState.finalizeCount).toBe(1);
   });
 
-  test("image attachments disable text-only models and keep vision models selectable", { tag: "@smoke" }, async ({ page }) => {
+  test("image attachments disable text-only models and keep a vision model available", { tag: "@smoke" }, async ({ page }) => {
     await attachFromComputer(page, {
       name: "vision-model-check.png",
       mimeType: "image/png",

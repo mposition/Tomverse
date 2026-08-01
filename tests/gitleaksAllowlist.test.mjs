@@ -52,6 +52,8 @@ const NON_SECRETS = [
   'const GUEST_DEFAULT_MODEL_KEY = "guestDefaultModelId";',
   '  process.env.PERPLEXITY_API_KEY = "test-key";',
   '        apiModel: "claude-haiku-4-5-20251001",',
+  '        apiModelId: "mistral-medium-3-5",',
+  '  assert.equal(mistral.apiModel, "mistral-medium-3-5");',
 ];
 
 // Credential-shaped canaries. None of these is a real secret, but each is

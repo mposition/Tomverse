@@ -64,6 +64,46 @@ test("All models reveals the full catalogue and its filters", async ({ page }) =
   await expectNoHorizontalOverflow(page);
 });
 
+test("new models are listed and historical retirements stay hidden on desktop and mobile", async ({
+  page,
+}) => {
+  const dialog = await openModelCatalogue(page);
+
+  for (const modelId of [
+    "gpt-5-6-sol",
+    "gpt-5-6-terra",
+    "gpt-5-6-luna",
+    "gemini-3-6-flash",
+    "grok-4-5",
+  ]) {
+    await expect(
+      dialog.locator(`[data-testid="model-option"][data-model-id="${modelId}"]`)
+    ).toHaveCount(1);
+  }
+
+  for (const modelId of [
+    "deepseek-r1",
+    "grok-3",
+    "grok-4-3",
+    "grok-4",
+    "grok-3-mini",
+    "llama-3-1",
+    "llama-3-3",
+    "llama-4-scout",
+  ]) {
+    await expect(
+      dialog.locator(`[data-testid="model-option"][data-model-id="${modelId}"]`)
+    ).toHaveCount(0);
+  }
+
+  await expect(
+    dialog.locator('[data-testid="model-option"][data-model-id="gemini-2-5-flash"]')
+  ).toContainText("Gemini 3.5 Flash-Lite");
+  await expect(
+    dialog.locator('[data-testid="model-option"][data-model-id="mistral-medium-3-1"]')
+  ).toContainText("Mistral Medium 3.5");
+});
+
 test("going back from All models keeps the selection intact", async ({ page }) => {
   await mockAuthenticatedApi(page, { selectedModels: ["gpt-5-4-mini"] });
   await page.reload();

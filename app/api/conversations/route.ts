@@ -5,7 +5,11 @@ import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { APP_DEFAULTS, WEB_SEARCH_MODES, isWebSearchMode } from "@/lib/appDefaults";
-import { clampRuntimeSelectedModels } from "@/lib/modelRegistry";
+import {
+  clampRuntimeSelectedModels,
+  clampSelectedModelsAgainstRuntime,
+  getRuntimeModels,
+} from "@/lib/modelRegistry";
 import { z } from "zod";
 import {
   conversationLockedResponse,
@@ -77,12 +81,23 @@ export async function GET(req: Request) {
       },
     });
 
-    const formattedConversations = conversations.map((conv) => ({
-      id: conv.id,
-      title: conv.title,
+    const runtimeModels = await getRuntimeModels();
+    const [resolvedDefaultEngine = APP_DEFAULTS.defaultModelId] =
+      clampSelectedModelsAgainstRuntime([defaultEngine], runtimeModels, 1);
+    const formattedConversations = conversations.map((conv) => {
+      const selectedModels = clampSelectedModelsAgainstRuntime(
+        safeParse(conv.selectedModels, [resolvedDefaultEngine]),
+        runtimeModels
+      );
+      return {
+        id: conv.id,
+        title: conv.title,
         projectId: conv.projectId || null,
-        selectedModels: safeParse(conv.selectedModels, [defaultEngine]),
-        disabledPanels: safeParse(conv.disabledPanels, []),
+        selectedModels:
+          selectedModels.length > 0 ? selectedModels : [resolvedDefaultEngine],
+        disabledPanels: safeParse(conv.disabledPanels, []).filter((modelId) =>
+          selectedModels.includes(modelId)
+        ),
         webSearchMode: isWebSearchMode(conv.webSearchMode)
           ? conv.webSearchMode
           : APP_DEFAULTS.defaultWebSearchMode,
@@ -93,8 +108,9 @@ export async function GET(req: Request) {
           conv.shareExpiresAt > new Date(),
         shareExpiresAt: conv.shareExpiresAt?.toISOString() || null,
         messageCount: conv._count.messages,
-        password: undefined
-    }));
+        password: undefined,
+      };
+    });
 
       return NextResponse.json(formattedConversations);
   } catch (error) {

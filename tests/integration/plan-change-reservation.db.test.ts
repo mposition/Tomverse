@@ -9,10 +9,15 @@ import { prisma } from "../../lib/prisma";
 // both reach the insert. A second reservation means two competing changes to
 // the same subscription, and whichever Stripe applies last silently wins.
 //
-// The guarantee therefore lives in the schema: a partial unique index over
-// PlanChangeRequest(userId) WHERE status = 'pending'. Partial indexes are not
-// expressible in schema.prisma, so this is the only place the constraint is
-// proven to exist.
+// The guarantee therefore lives in the schema, as a unique index on
+// `pendingForUserId` -- a column that carries the account id exactly while the
+// row is pending. The natural spelling is a partial unique index over (userId)
+// WHERE status = 'pending', but this suite builds its database with
+// `prisma db push`, which reads schema.prisma and never runs migration SQL: a
+// constraint written only in a migration is absent here, and these tests would
+// pass against a database that has no constraint at all. Postgres does not
+// compare nulls, so settled rows accumulate freely while the pending slot
+// stays single.
 
 const reset = async () => {
   await prisma.$executeRawUnsafe(`
@@ -41,11 +46,16 @@ const seedMaxAccount = async () => {
   return id;
 };
 
+/**
+ * Mirrors what lib/planChangeService.ts writes: `pendingForUserId` is set with
+ * the status and cleared with it, never independently.
+ */
 const reservation = (
   userId: string,
   status: string,
   overrides: Record<string, unknown> = {}
 ) => ({
+  pendingForUserId: status === "pending" ? userId : null,
   userId,
   direction: "downgrade",
   execution: "scheduled_downgrade",
@@ -77,9 +87,9 @@ test("an account cannot hold two changes in flight at once", async () => {
 });
 
 test("settled changes do not block a new one", async () => {
-  // The index is partial on purpose: history has to accumulate. An account that
-  // downgraded, changed its mind, and upgraded again would otherwise be locked
-  // out by its own past.
+  // History has to accumulate. An account that downgraded, changed its mind and
+  // upgraded again would otherwise be locked out by its own past, which is why
+  // the slot is a nullable column rather than a unique index on userId.
   const userId = await seedMaxAccount();
 
   for (const status of ["applied", "cancelled", "expired", "failed"]) {
@@ -120,13 +130,36 @@ test("a settled reservation frees the account for the next one", async () => {
 
   await prisma.planChangeRequest.update({
     where: { id: created.id },
-    data: { status: "cancelled", settledAt: new Date() },
+    // Cleared with the status, exactly as the service does it.
+    data: { status: "cancelled", pendingForUserId: null, settledAt: new Date() },
   });
 
   const next = await prisma.planChangeRequest.create({
     data: reservation(userId, "pending"),
   });
   assert.notEqual(next.id, created.id);
+});
+
+test("a settled row that keeps the slot locks the account out", async () => {
+  // The failure mode of this design, pinned so it cannot be introduced
+  // quietly: settling a change without clearing pendingForUserId leaves the
+  // account holding a slot it is no longer using, and every later change is
+  // refused by the database with nothing in the product to explain it.
+  const userId = await seedMaxAccount();
+  const created = await prisma.planChangeRequest.create({
+    data: reservation(userId, "pending"),
+  });
+
+  await prisma.planChangeRequest.update({
+    where: { id: created.id },
+    data: { status: "applied", settledAt: new Date() },
+  });
+
+  await assert.rejects(
+    () => prisma.planChangeRequest.create({ data: reservation(userId, "pending") }),
+    /Unique constraint|duplicate key/i,
+    "status and pendingForUserId must always be written together"
+  );
 });
 
 test("deleting the account takes its plan change history with it", async () => {

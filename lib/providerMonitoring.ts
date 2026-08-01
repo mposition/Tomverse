@@ -217,6 +217,7 @@ const PROVIDER_HEALTH_RECOVERY_SUCCESSES = 3;
 const isNonProviderHealthDiagnostic = (code: string | null | undefined) =>
   Boolean(code && NON_PROVIDER_HEALTH_DIAGNOSTIC_CODES.has(code));
 
+
 const providerSet = new Set<AiProvider>(
   AVAILABLE_MODELS.map((model) => model.provider)
 );

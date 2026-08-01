@@ -152,6 +152,24 @@ const flatTier = (
     },
 ];
 
+const gpt56Tiers = (
+    inputUsdPerMillionTokens: number,
+    outputUsdPerMillionTokens: number
+): readonly ModelPriceTier[] => [
+    {
+        maxPromptTokens: 272_000,
+        inputUsdPerMillionTokens,
+        outputUsdPerMillionTokens,
+        cachedInputPriceMultiplier: 0.1,
+    },
+    {
+        maxPromptTokens: null,
+        inputUsdPerMillionTokens: inputUsdPerMillionTokens * 2,
+        outputUsdPerMillionTokens: outputUsdPerMillionTokens * 1.5,
+        cachedInputPriceMultiplier: 0.1,
+    },
+];
+
 /**
  * Conservative defaults for a model with no explicit profile. Intentionally
  * expensive: an unpriced model should reserve too much, not too little, and
@@ -224,6 +242,54 @@ const DIRECT_STANDARD = {
 // ---------------------------------------------------------------------------
 export const MODEL_PRICING: readonly ModelPricingProfile[] = [
     {
+        modelId: "gpt-5-6-sol",
+        provider: "openai",
+        apiModelId: "gpt-5.6-sol",
+        ...DIRECT_STANDARD,
+        tiers: gpt56Tiers(5, 30),
+        reasoningTokenBilling: "billed_as_output",
+        nativeSearchCostMicroUsdPerQuery: 10_000,
+        maxOutputTokens: 128_000,
+        reservationOutputTokens: 16_384,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: true,
+        priceSource: "openai_gpt_5_6_sol_model_page",
+        pricingVersion: "openai-gpt-5.6-sol-2026-08-01",
+        effectiveDate: "2026-08-01",
+    },
+    {
+        modelId: "gpt-5-6-terra",
+        provider: "openai",
+        apiModelId: "gpt-5.6-terra",
+        ...DIRECT_STANDARD,
+        tiers: gpt56Tiers(2, 12),
+        reasoningTokenBilling: "billed_as_output",
+        nativeSearchCostMicroUsdPerQuery: 10_000,
+        maxOutputTokens: 128_000,
+        reservationOutputTokens: 8_192,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: true,
+        priceSource: "openai_gpt_5_6_terra_model_page",
+        pricingVersion: "openai-gpt-5.6-terra-2026-08-01",
+        effectiveDate: "2026-08-01",
+    },
+    {
+        modelId: "gpt-5-6-luna",
+        provider: "openai",
+        apiModelId: "gpt-5.6-luna",
+        ...DIRECT_STANDARD,
+        tiers: gpt56Tiers(0.2, 1.2),
+        reasoningTokenBilling: "billed_as_output",
+        nativeSearchCostMicroUsdPerQuery: 10_000,
+        maxOutputTokens: 128_000,
+        reservationOutputTokens: 4_096,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: true,
+        priceSource: "openai_gpt_5_6_luna_model_page",
+        pricingVersion: "openai-gpt-5.6-luna-2026-08-01",
+        effectiveDate: "2026-08-01",
+    },
+    {
         modelId: "gpt-5-5",
         provider: "openai",
         apiModelId: "gpt-5.5",
@@ -256,6 +322,39 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         cachedInputPricingVerified: false,
         priceSource: "openai_standard_api_list_price",
         pricingVersion: "openai-gpt-5.5-2026-08-01",
+        effectiveDate: "2026-08-01",
+    },
+    {
+        modelId: "gemini-3-6-flash",
+        provider: "google",
+        apiModelId: "gemini-3.6-flash",
+        ...DIRECT_STANDARD,
+        tiers: flatTier(1.5, 7.5, 0.1),
+        reasoningTokenBilling: "billed_as_output",
+        nativeSearchCostMicroUsdPerQuery: 14_000,
+        maxOutputTokens: 65_536,
+        reservationOutputTokens: 8_192,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: true,
+        priceSource: "google_gemini_3_6_flash_standard_api_list_price",
+        pricingVersion: "google-gemini-3.6-flash-2026-08-01",
+        effectiveDate: "2026-08-01",
+    },
+    {
+        // Stable Tomverse ID upgraded in place to Gemini 3.5 Flash-Lite.
+        modelId: "gemini-2-5-flash",
+        provider: "google",
+        apiModelId: "gemini-3.5-flash-lite",
+        ...DIRECT_STANDARD,
+        tiers: flatTier(0.3, 2.5, 0.1),
+        reasoningTokenBilling: "billed_as_output",
+        nativeSearchCostMicroUsdPerQuery: 14_000,
+        maxOutputTokens: 65_536,
+        reservationOutputTokens: 4_096,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: true,
+        priceSource: "google_gemini_3_5_flash_lite_standard_api_list_price",
+        pricingVersion: "google-gemini-3.5-flash-lite-2026-08-01",
         effectiveDate: "2026-08-01",
     },
     {
@@ -304,8 +403,71 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         pricingVersion: "anthropic-claude-opus-4-8-2026-08-01",
         effectiveDate: "2026-08-01",
     },
-    // Profiles migrated unchanged from the previous MODEL_BILLING_DEFAULTS map
-    // in lib/models.ts, so no existing settled cost changes with this refactor.
+    // Provider-verified profiles added by the 2026-08-01 catalogue migration.
+    {
+        modelId: "grok-4-3",
+        provider: "xai",
+        apiModelId: "grok-4.3",
+        ...DIRECT_STANDARD,
+        tiers: [
+            {
+                maxPromptTokens: 199_999,
+                inputUsdPerMillionTokens: 1.25,
+                outputUsdPerMillionTokens: 2.5,
+                cachedInputPriceMultiplier: 0.16,
+            },
+            {
+                maxPromptTokens: null,
+                inputUsdPerMillionTokens: 2.5,
+                outputUsdPerMillionTokens: 5,
+                cachedInputPriceMultiplier: 0.16,
+            },
+        ],
+        reasoningTokenBilling: "billed_as_output",
+        maxOutputTokens: 16_384,
+        reservationOutputTokens: 4_096,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: true,
+        priceSource: "xai_grok_4_3_standard_api_list_price",
+        pricingVersion: "xai-grok-4.3-2026-08-01",
+        effectiveDate: "2026-08-01",
+    },
+    {
+        // Load-bearing beyond ordinary chat accounting: consolidating xAI onto
+        // this model also made it the provider probe's target
+        // (lib/providerProbe.ts picks the cheapest enabled probe-safe model,
+        // and it is now the only xAI one). Probe cost is booked from this
+        // profile against a cap shared by every provider, so on the
+        // US$15/US$60 class fallback one xAI cycle cost US$0.00267 and 144
+        // cycles a day came to US$0.3845 -- 38% of the whole US$1 cap from one
+        // provider. At the published rate it is US$0.042.
+        modelId: "grok-4-5",
+        provider: "xai",
+        apiModelId: "grok-4.5",
+        ...DIRECT_STANDARD,
+        tiers: [
+            {
+                maxPromptTokens: 199_999,
+                inputUsdPerMillionTokens: 2,
+                outputUsdPerMillionTokens: 6,
+                cachedInputPriceMultiplier: 0.15,
+            },
+            {
+                maxPromptTokens: null,
+                inputUsdPerMillionTokens: 4,
+                outputUsdPerMillionTokens: 12,
+                cachedInputPriceMultiplier: 0.15,
+            },
+        ],
+        reasoningTokenBilling: "billed_as_output",
+        maxOutputTokens: 16_384,
+        reservationOutputTokens: 8_192,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: true,
+        priceSource: "xai_grok_4_5_standard_api_list_price",
+        pricingVersion: "xai-grok-4.5-2026-08-01",
+        effectiveDate: "2026-08-01",
+    },
     {
         modelId: "llama-4-scout",
         provider: "groq",
@@ -328,13 +490,13 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         ...DIRECT_STANDARD,
         tiers: flatTier(0.14, 0.28, 0.02),
         reasoningTokenBilling: "billed_as_output",
-        maxOutputTokens: 2_048,
-        reservationOutputTokens: 1_024,
+        maxOutputTokens: 384_000,
+        reservationOutputTokens: 4_096,
         reservationOutputBasis: "conservative_default",
         cachedInputPricingVerified: true,
         priceSource: "deepseek_published_cache_hit_and_miss_pricing",
-        pricingVersion: "deepseek-v4-flash-2026-06-01",
-        effectiveDate: "2026-06-01",
+        pricingVersion: "deepseek-v4-flash-2026-08-01",
+        effectiveDate: "2026-08-01",
     },
     {
         modelId: "deepseek-v4-pro",
@@ -343,43 +505,29 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         ...DIRECT_STANDARD,
         tiers: flatTier(0.435, 0.87, 1 / 120),
         reasoningTokenBilling: "billed_as_output",
-        maxOutputTokens: 4_096,
-        reservationOutputTokens: 2_048,
+        maxOutputTokens: 384_000,
+        reservationOutputTokens: 8_192,
         reservationOutputBasis: "conservative_default",
         cachedInputPricingVerified: true,
         priceSource: "deepseek_published_cache_hit_and_miss_pricing",
-        pricingVersion: "deepseek-v4-pro-2026-06-01",
-        effectiveDate: "2026-06-01",
+        pricingVersion: "deepseek-v4-pro-2026-08-01",
+        effectiveDate: "2026-08-01",
     },
     {
-        // xAI's published Grok 4.5 rates. Load-bearing beyond ordinary chat
-        // accounting: consolidating xAI onto this model also made it the
-        // provider probe's target (lib/providerProbe.ts picks the cheapest
-        // enabled probe-safe model, and it is now the only xAI one). Probe
-        // cost is booked from this profile against a cap shared by every
-        // provider, so on the US$15/US$60 class fallback one xAI cycle cost
-        // US$0.00267 and 144 cycles a day came to US$0.3845 -- 38% of the
-        // whole US$1 cap from one provider. At the published rate it is
-        // US$0.042.
-        //
-        // cachedInputPriceMultiplier is a multiple of the input price, so
-        // xAI's US$0.30 cached-input rate is 0.30 / 2.00.
-        modelId: "grok-4-5",
-        provider: "xai",
-        apiModelId: "grok-4.5",
+        modelId: "mistral-medium-3-1",
+        provider: "mistral",
+        apiModelId: "mistral-medium-3-5",
         ...DIRECT_STANDARD,
-        tiers: flatTier(2, 6, 0.3 / 2),
-        // Grok 4.5 reasons on every turn and xAI reports its thinking inside
-        // the usual completion token count, so the output rate already covers
-        // it. Only the reservation headroom is affected, which is why the
-        // output cap stays at the premium default rather than being narrowed.
+        tiers: flatTier(1.5, 7.5),
         reasoningTokenBilling: "billed_as_output",
-        maxOutputTokens: 8_192,
-        reservationOutputTokens: 2_048,
+        // Mistral publishes the context window but not a distinct output
+        // ceiling for this model. Keep an explicit operational request cap.
+        maxOutputTokens: 16_384,
+        reservationOutputTokens: 4_096,
         reservationOutputBasis: "conservative_default",
-        cachedInputPricingVerified: true,
-        priceSource: "xai_published_grok_4_5_pricing",
-        pricingVersion: "grok-4-5-2026-08-01",
+        cachedInputPricingVerified: false,
+        priceSource: "mistral_medium_3_5_model_card",
+        pricingVersion: "mistral-medium-3.5-2026-08-01",
         effectiveDate: "2026-08-01",
     },
     {
@@ -543,13 +691,18 @@ export const resolveModelPricing = (
         model.cachedInputPriceMultiplier ??
         boundedMultiplier(
             envCached,
-            // Two providers publish a flat cache discount that is not
-            // model-specific, so it stays a provider-level default.
-            model.provider === "mistral"
-                ? 0.1
-                : model.provider === "zhipu"
-                  ? 0.2
-                  : tier.cachedInputPriceMultiplier
+            // An explicit model profile wins over provider defaults. This is
+            // important for Medium 3.5: its input/output list price is
+            // verified, but no model-specific cached-input price was found,
+            // so its tier deliberately uses 1 (no discount) rather than the
+            // legacy Mistral-wide fallback below.
+            profile
+                ? tier.cachedInputPriceMultiplier
+                : model.provider === "mistral"
+                  ? 0.1
+                  : model.provider === "zhipu"
+                    ? 0.2
+                    : tier.cachedInputPriceMultiplier
         );
 
     const maxOutputTokens = Math.floor(

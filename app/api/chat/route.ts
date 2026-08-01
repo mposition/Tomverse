@@ -18,7 +18,10 @@ import {
 } from "@/lib/models";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { getActiveAiModel } from "@/lib/activeAiModel";
-import { buildReasoningProviderOptions } from "@/lib/chatReasoningOptions";
+import {
+    getModelGenerationSettings,
+    hasUnsupportedGeminiPrefill,
+} from "@/lib/modelGenerationCompatibility";
 import { getWebSearchCapability } from "@/lib/webSearchCapability";
 import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
 import { buildWebSearchToolConfig, WEB_SEARCH_TOOL_NAMES } from "@/lib/webSearchToolConfig";
@@ -644,6 +647,14 @@ export async function POST(req: Request) {
             return tracedJsonError(
                 "Unknown or disabled model.",
                 "MODEL_NOT_AVAILABLE",
+                400,
+                traceId
+            );
+        }
+        if (hasUnsupportedGeminiPrefill(modelConfig, messages)) {
+            return tracedJsonError(
+                "Gemini 3.6 and later requests must end with a user message.",
+                "GEMINI_PREFILLED_MODEL_TURN_UNSUPPORTED",
                 400,
                 traceId
             );
@@ -1442,23 +1453,16 @@ export async function POST(req: Request) {
         const webSearchToolConfig = nativeSearchEnabled
             ? buildWebSearchToolConfig(webSearchCapability)
             : null;
-        // A reasoning model has to be *asked* to reason -- see
-        // lib/chatReasoningOptions.ts for why this is OpenAI-only and what
-        // gpt-5-5-thinking was doing before it.
-        const reasoningProviderOptions =
-            buildReasoningProviderOptions(modelConfig);
         const result = await streamText({
             model: activeModel,
             messages: formattedMessages,
             maxOutputTokens: budget.maxOutputTokens,
-            ...(reasoningProviderOptions
-                ? { providerOptions: reasoningProviderOptions }
-                : {}),
             maxRetries: modelConfig.provider === "zhipu" ? 0 : undefined,
             headers:
                 modelConfig.provider === "perplexity"
                     ? perplexityUsageHeaders(traceId)
                     : undefined,
+            ...getModelGenerationSettings(modelConfig),
             ...(webSearchToolConfig ?? {}),
         });
 

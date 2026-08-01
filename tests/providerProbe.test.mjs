@@ -7,7 +7,7 @@ import {
   getProbeModelFor,
   runProviderProbe,
 } from "../lib/providerProbe.ts";
-import { getModelBillingProfile } from "../lib/models.ts";
+import { getModel, getModelBillingProfile } from "../lib/models.ts";
 import { calculateProviderUsageCost } from "../lib/providerUsageCost.ts";
 
 // getProbeModelFor and the no-op dev/test path never require an API key or
@@ -106,9 +106,6 @@ test("getProbeModelFor honors PROVIDER_PROBE_MODEL_OVERRIDES for a provider", as
     openai: "gpt-5-5",
   });
   try {
-    // Re-import isn't needed -- the module caches the parsed map lazily on
-    // first read, so exercise a fresh provider not read by an earlier test
-    // in this file to avoid cross-test cache bleed-through.
     const overridden = getProbeModelFor("openai");
     assert.ok(overridden);
   } finally {
@@ -172,11 +169,12 @@ test("runProviderProbe sends a request shape every provider accepts", async () =
   );
 });
 
-// PROVIDER_PROBE_REASONING_EFFORT. The probe has never sent reasoning_effort,
-// so switching this on adds a parameter rather than lowering one -- and the
-// two outages this file already documents were both caused by a probe
-// parameter a provider rejected. It therefore stays off unless an operator
-// asks for it, and applies only where it means something.
+// PROVIDER_PROBE_REASONING_EFFORT. getModelGenerationSettings sends a
+// reasoning model's *catalogue* effort, and every publicly listed reasoning
+// model is "high" -- so without an override here the health probe would ask
+// grok-4-5 for maximum reasoning 144 times a day to get back the word OK,
+// out of the same 32-token budget the answer comes from. The probe pins its
+// own effort instead, and an operator can still change it.
 const withEnv = async (name, value, run) => {
   const original = process.env[name];
   if (value === undefined) delete process.env[name];
@@ -200,38 +198,57 @@ const probeRequestFor = async (provider) => {
   return received;
 };
 
-test("no reasoning effort is sent unless an operator asks for one", async () => {
+test("the probe pins its own reasoning effort instead of the catalogue's", async () => {
   await withEnv("PROVIDER_PROBE_REASONING_EFFORT", undefined, async () => {
     const request = await probeRequestFor("xai");
-    assert.equal(
-      "providerOptions" in request,
-      false,
-      "the default probe must not introduce a parameter a provider could reject"
-    );
+    // grok-4-5's catalogue effort is "high"; a health check must not ask for
+    // it. forceReasoning is preserved from getModelProviderOptions -- without
+    // it the OpenAI SDK drops reasoning_effort before it reaches xAI.
+    assert.deepEqual(request.providerOptions, {
+      openai: { reasoningEffort: "low", forceReasoning: true },
+    });
+    assert.notEqual(getModel("grok-4-5").reasoning, "low");
   });
 });
 
 test("a configured reasoning effort reaches a reasoning probe target", async () => {
-  await withEnv("PROVIDER_PROBE_REASONING_EFFORT", "low", async () => {
+  await withEnv("PROVIDER_PROBE_REASONING_EFFORT", "minimal", async () => {
     const request = await probeRequestFor("xai");
     // xAI is reached through the OpenAI-compatible chat model, so this is the
     // namespace that becomes reasoning_effort on the wire.
-    assert.deepEqual(request.providerOptions, { openai: { reasoningEffort: "low" } });
+    assert.equal(request.providerOptions.openai.reasoningEffort, "minimal");
   });
 });
 
 test("a non-reasoning probe target is never sent a reasoning effort", async () => {
   await withEnv("PROVIDER_PROBE_REASONING_EFFORT", "low", async () => {
-    // openai's probe target is the standard-tier gpt-5-4-mini.
-    const request = await probeRequestFor("openai");
+    // mistral-small-4 carries no catalogue reasoning effort, so there is no
+    // reasoning request to shape and the parameter must not appear at all --
+    // an effort a provider does not implement is a rejected cycle, which the
+    // caller records as provider health.
+    assert.equal(getProbeModelFor("mistral").reasoning, undefined);
+    const request = await probeRequestFor("mistral");
     assert.equal("providerOptions" in request, false);
   });
 });
 
-test("an unrecognized reasoning effort is ignored rather than passed through", async () => {
+test("a reasoning probe target that is not xAI still gets the pinned effort", async () => {
+  await withEnv("PROVIDER_PROBE_REASONING_EFFORT", undefined, async () => {
+    // openai's cheapest probe-safe model is now a reasoning model, so this
+    // path is not xAI-specific -- and OpenAI needs no forceReasoning, since
+    // its own ids are on the SDK's reasoning allowlist already.
+    assert.equal(getProbeModelFor("openai").reasoning, "medium");
+    const request = await probeRequestFor("openai");
+    assert.deepEqual(request.providerOptions, {
+      openai: { reasoningEffort: "low" },
+    });
+  });
+});
+
+test("an unrecognized reasoning effort falls back rather than being passed through", async () => {
   await withEnv("PROVIDER_PROBE_REASONING_EFFORT", "cheapest-please", async () => {
     const request = await probeRequestFor("xai");
-    assert.equal("providerOptions" in request, false);
+    assert.equal(request.providerOptions.openai.reasoningEffort, "low");
   });
 });
 

@@ -9,6 +9,7 @@ import {
   isPubliclySelectableModel,
   isRetiredModel,
   isWithdrawnFromOfferModel,
+  resolveSelectableModelId,
   type AiModel,
 } from "../lib/models";
 
@@ -122,7 +123,7 @@ test("no publicly selectable model is simultaneously retired", () => {
 });
 
 test("groq llama-4-scout stays retired and unselectable", () => {
-  // The specific model the audit found still on offer through the live API.
+  // Groq removed Scout and recommends GPT-OSS as an open-model successor.
   const scout = CATALOG.find((entry) => entry.id === "llama-4-scout");
   assert.ok(scout, "llama-4-scout should remain in the catalog for history");
   assert.equal(isRetiredModel(scout!), true);
@@ -139,7 +140,7 @@ test("groq llama-4-scout stays retired and unselectable", () => {
 // ---------------------------------------------------------------------------
 
 const RETIRED_LLAMA_IDS = ["llama-3-1", "llama-3-3", "llama-4-scout"] as const;
-const RETIRED_GROK_IDS = ["grok-4", "grok-3", "grok-3-mini"] as const;
+const RETIRED_GROK_IDS = ["grok-4", "grok-4-3", "grok-3", "grok-3-mini"] as const;
 
 const entry = (id: string) => CATALOG.find((model) => model.id === id);
 
@@ -226,6 +227,48 @@ test("older Grok models stay resolvable as history but cannot be selected", () =
     assert.equal(isPubliclySelectableModel(model!), false);
     assert.equal(model!.replacementModelId, "grok-4-5");
   }
+});
+
+// The pointer above is only half of it: what a caller actually gets is
+// whatever resolveSelectableModelId lands on after following the chain. A
+// retirement whose target is itself retired resolves to undefined, which is
+// the failure this asserts against for every retirement in the catalogue.
+test("every retirement resolves to a model a user can actually select", () => {
+  const expected = new Map([
+    ["deepseek-r1", "deepseek-v4-flash"],
+    ["grok-4", "grok-4-5"],
+    ["grok-4-3", "grok-4-5"],
+    ["grok-3", "grok-4-5"],
+    ["grok-3-mini", "grok-4-5"],
+    ["llama-3-1", "deepseek-v4-flash"],
+    ["llama-3-3", "mistral-medium-3-1"],
+    ["llama-4-scout", "gemini-3-5-flash"],
+  ]);
+
+  for (const [id, replacementModelId] of expected) {
+    const model = entry(id);
+    assert.ok(model, `${id} must remain as a historical row`);
+    assert.equal(model!.enabled, false, id);
+    assert.equal(model!.status, "disabled", id);
+    assert.equal(model!.publiclyListed, false, id);
+    assert.equal(model!.replacementModelId, replacementModelId, id);
+    assert.equal(resolveSelectableModelId(id), replacementModelId, id);
+  }
+});
+
+test("replacement resolution follows bounded chains and rejects cycles", () => {
+  const entries = new Map([
+    ["old", model({ id: "old", enabled: false, status: "disabled", publiclyListed: false, replacementModelId: "middle" })],
+    ["middle", model({ id: "middle", enabled: false, status: "disabled", publiclyListed: false, replacementModelId: "live" })],
+    ["live", model({ id: "live" })],
+    ["cycle-a", model({ id: "cycle-a", enabled: false, status: "disabled", publiclyListed: false, replacementModelId: "cycle-b" })],
+    ["cycle-b", model({ id: "cycle-b", enabled: false, status: "disabled", publiclyListed: false, replacementModelId: "cycle-a" })],
+  ]);
+  const lookup = (id: string) => entries.get(id);
+
+  assert.equal(resolveSelectableModelId("old", lookup), "live");
+  assert.equal(resolveSelectableModelId("cycle-a", lookup), undefined);
+  assert.equal(resolveSelectableModelId("missing", lookup), undefined);
 });
 
 test("Kimi K3 and Kimi K2.7 are two distinct models, not a rename", () => {

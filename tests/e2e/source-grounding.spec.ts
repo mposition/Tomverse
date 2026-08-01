@@ -31,7 +31,7 @@ const responseMap = [
     responseId: "C",
     messageId: "41111111-1111-4111-8111-111111111111",
     modelId: reviewModels[2],
-    modelName: "Gemini 3.1 Flash-Lite",
+    modelName: "Gemini 3.5 Flash-Lite",
   },
 ];
 

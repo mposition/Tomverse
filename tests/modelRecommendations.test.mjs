@@ -164,7 +164,7 @@ test("a provider outage removes the model instead of recommending a dead slot", 
   );
   assert.equal(
     degraded.find((item) => item.useCase === "everyday").modelId,
-    "gemini-2-5-flash"
+    "gpt-5-6-luna"
   );
 });
 
@@ -174,7 +174,7 @@ test("a degraded provider loses its slot to a healthy alternative but is still s
     modelStatuses: { "gpt-5-4-mini": "limited" },
   });
   const everyday = recommendations.find((item) => item.useCase === "everyday");
-  assert.equal(everyday.modelId, "gemini-2-5-flash");
+  assert.equal(everyday.modelId, "gpt-5-6-luna");
   assert.equal(everyday.status, "available");
 
   // With no healthy alternative left, the limited model is offered and says so.
@@ -200,7 +200,7 @@ test("each use case is filled by a model that actually matches it", () => {
   const byUseCase = new Map(useCasePicks.map((item) => [item.useCase, item.modelId]));
   assert.equal(byUseCase.get("search"), "perplexity/sonar");
   assert.equal(byUseCase.get("coding"), "deepseek-v4-flash");
-  assert.equal(byUseCase.get("multimodal"), "gemini-3-5-flash");
+  assert.equal(byUseCase.get("multimodal"), "gemini-3-6-flash");
 });
 
 test("recommended cards carry the cost and capabilities the card renders", () => {
@@ -254,7 +254,7 @@ test("a thin registry returns only what is available instead of padding", () => 
 
 test("registry edits flow straight through to the recommendations", () => {
   const withoutFlash = PUBLIC_MODELS.map((model) =>
-    model.id === "gemini-3-5-flash"
+    model.id === "gemini-3-6-flash"
       ? { ...model, enabled: false, status: "disabled" }
       : model
   );
@@ -263,12 +263,12 @@ test("registry edits flow straight through to the recommendations", () => {
     models: withoutFlash,
   });
   assert.equal(
-    recommendations.some((item) => item.modelId === "gemini-3-5-flash"),
+    recommendations.some((item) => item.modelId === "gemini-3-6-flash"),
     false
   );
   assert.equal(
     recommendations.find((item) => item.useCase === "multimodal").modelId,
-    "gemini-2-5-flash"
+    "gemini-3-5-flash"
   );
 });
 
@@ -299,7 +299,7 @@ test("a non-English interface prefers a multilingual cost-efficient model", () =
   const korean = getModelRecommendations({ ...freeInput, language: "ko" });
   assert.equal(
     english.find((item) => item.useCase === "value").modelId,
-    "gemini-2-5-flash"
+    "gpt-5-6-luna"
   );
   assert.equal(
     korean.find((item) => item.useCase === "value").modelId,

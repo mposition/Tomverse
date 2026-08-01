@@ -35,6 +35,7 @@ test("picker exposes only decision-relevant special features", () => {
     "reasoning",
   ]);
   assert.deepEqual(getModelPickerFeatures(getModel("gemini-2-5-flash")), [
+    "search",
     "image",
   ]);
   assert.deepEqual(getModelPickerFeatures(getModel("perplexity/sonar")), [
@@ -59,7 +60,7 @@ test("recommended and capability filters use model behavior", () => {
   assert.deepEqual(RECOMMENDED_MODEL_IDS, [
     "gpt-5-4-mini",
     "claude-sonnet-5",
-    "grok-4-5",
+    "gemini-3-6-flash",
   ]);
   assert.equal(modelMatchesCapability(getModel("grok-4-5"), "reasoning"), true);
   // A retired model still classifies correctly -- the reasoning filter reads

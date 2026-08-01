@@ -3,6 +3,10 @@ import "server-only";
 import { generateText } from "ai";
 import { getActiveAiModel } from "@/lib/activeAiModel";
 import {
+  getModelGenerationSettings,
+  getModelProviderOptions,
+} from "@/lib/modelGenerationCompatibility";
+import {
   AVAILABLE_MODELS,
   getModelBillingProfile,
   type AiModel,
@@ -73,50 +77,55 @@ const PROBE_SYSTEM_PROMPT =
 const PROBE_REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high"] as const;
 
 /**
- * Optional `reasoning_effort` for probe requests, opt-in through
+ * The probe's `reasoning_effort`, overridable through
  * PROVIDER_PROBE_REASONING_EFFORT.
  *
- * Two facts decide the default, which is to send nothing at all:
+ * getModelGenerationSettings sends the model's *catalogue* reasoning effort,
+ * which is the right default for a real chat turn and the wrong one here.
+ * Every publicly listed reasoning model is "high", so consolidating xAI onto
+ * grok-4-5 would have had the health probe ask for maximum reasoning 144
+ * times a day to get back the word OK. Reasoning tokens come out of the same
+ * PROBE_MAX_OUTPUT_TOKENS budget as the answer, so a high-effort probe both
+ * costs more and is likelier to spend its whole budget thinking and return
+ * nothing -- which reads as a provider failure rather than a probe that asked
+ * for too much.
  *
- * 1. The probe has never sent this parameter. A model's catalogue
- *    `reasoning` field is a capability signal, not a request parameter (see
- *    the note on AiModel.reasoning) -- the only place it becomes one is
- *    Perplexity's deep-research submit. So there is no "high" here to lower;
- *    turning this on ADDS a parameter, it does not change one.
- * 2. Adding a parameter to the probe has broken it twice: OpenAI rejected
- *    max_output_tokens below its floor, and moonshot rejected any explicit
- *    temperature. Each cycle then failed provider-side and was recorded as
- *    provider health, which is how a healthy provider gets published as an
- *    incident. `reasoning_effort` support is per-model, and a rejection here
- *    is indistinguishable from an outage.
- *
- * The saving it buys is bounded by PROBE_MAX_OUTPUT_TOKENS -- reasoning
- * tokens come out of the same 32-token budget -- so it is worth at most a
- * few cents a month per provider. That is not worth risking a false incident
- * on an unverified model, hence: verify on staging with this set, then
- * decide whether production wants it.
- *
- * Applied only to models the catalogue marks as reasoning models, so a plain
- * chat model is never sent a parameter it has no use for.
+ * "low" rather than "none"/"minimal": the probe must exercise the same code
+ * path a real reasoning request takes, and some providers reject efforts they
+ * do not implement. Adding a parameter to the probe has broken it twice
+ * already (OpenAI rejected max_output_tokens below its floor, moonshot
+ * rejected any explicit temperature), and each time the rejection was
+ * recorded as provider health -- which is how a healthy provider gets
+ * published as an incident.
  */
-const probeReasoningEffort = (): (typeof PROBE_REASONING_EFFORTS)[number] | undefined => {
+const PROBE_DEFAULT_REASONING_EFFORT = "low" as const;
+
+const probeReasoningEffort = (): (typeof PROBE_REASONING_EFFORTS)[number] => {
   const raw = process.env.PROVIDER_PROBE_REASONING_EFFORT?.trim().toLowerCase();
-  return PROBE_REASONING_EFFORTS.find((effort) => effort === raw);
+  return (
+    PROBE_REASONING_EFFORTS.find((effort) => effort === raw) ??
+    PROBE_DEFAULT_REASONING_EFFORT
+  );
 };
 
 /**
- * Every OpenAI-compatible provider in this app is reached through
- * @ai-sdk/openai's chat model (see lib/activeAiModel.ts), so the `openai`
- * provider-options namespace is the one that reaches xAI, Moonshot, DeepSeek,
- * Mistral, Qwen, Zhipu and Groq alike. Anthropic and Google use their own
- * providers and ignore this namespace -- harmless, and neither of their probe
- * targets is a reasoning model.
+ * Built from getModelProviderOptions rather than from scratch so the probe
+ * keeps whatever else that helper decided -- notably `forceReasoning`, which
+ * is what stops the OpenAI SDK dropping reasoning_effort before it reaches
+ * xAI. Only the effort itself is replaced. A model the helper declines (no
+ * catalogue reasoning effort, or a provider that does not take one) gets no
+ * provider options here either.
  */
 const probeProviderOptions = (model: AiModel) => {
-  const reasoningEffort = probeReasoningEffort();
-  if (!reasoningEffort) return undefined;
-  if (!model.reasoning || model.reasoning === "none") return undefined;
-  return { openai: { reasoningEffort } };
+  const base = getModelProviderOptions(model);
+  if (!base) return undefined;
+  return {
+    ...base,
+    openai: {
+      ...(base.openai as Record<string, unknown>),
+      reasoningEffort: probeReasoningEffort(),
+    },
+  };
 };
 
 /**
@@ -282,6 +291,7 @@ export async function runProviderProbe(
   try {
     const result = await generate({
       model: getActiveAiModel(model),
+      ...getModelGenerationSettings(model),
       system: PROBE_SYSTEM_PROMPT,
       prompt: PROBE_PROMPT,
       // Deliberately no temperature: staging returned "invalid temperature:
@@ -292,9 +302,9 @@ export async function runProviderProbe(
       // provider-specific rejection.
       maxOutputTokens: PROBE_MAX_OUTPUT_TOKENS,
       maxRetries: 0,
-      // Absent unless PROVIDER_PROBE_REASONING_EFFORT is set, and even then
-      // only for reasoning models -- spread so the key does not appear at all
-      // in the default case.
+      // Deliberately after getModelGenerationSettings so the probe's own
+      // effort replaces the catalogue one. Absent entirely for a model that
+      // takes no reasoning effort at all.
       ...(providerOptions ? { providerOptions } : {}),
       abortSignal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });

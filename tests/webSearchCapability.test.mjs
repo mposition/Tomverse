@@ -11,6 +11,9 @@ test("confirmed-native models report the right tool provider and force/cost flag
   assert.equal(openai.returnsCitations, true);
   assert.equal(openai.hasAdditionalCost, true);
   assert.deepEqual(getWebSearchCapability("gpt-5-5-thinking"), openai);
+  for (const id of ["gpt-5-6-sol", "gpt-5-6-terra", "gpt-5-6-luna"]) {
+    assert.deepEqual(getWebSearchCapability(id), openai);
+  }
 
   const anthropic = getWebSearchCapability("claude-sonnet-5");
   assert.equal(anthropic.support, "native");
@@ -29,6 +32,8 @@ test("confirmed-native models report the right tool provider and force/cost flag
   assert.equal(google.provider, "google");
   assert.equal(google.canForceExecution, false);
   assert.deepEqual(getWebSearchCapability("gemini-3-1-pro"), google);
+  assert.deepEqual(getWebSearchCapability("gemini-3-6-flash"), google);
+  assert.deepEqual(getWebSearchCapability("gemini-2-5-flash"), google);
 });
 
 test("Perplexity search models are search-model support, not native", () => {
@@ -47,13 +52,13 @@ test("Perplexity search models are search-model support, not native", () => {
 
 test("models without a confirmed doc match are unverified, not assumed native", () => {
   assert.equal(getWebSearchCapability("gpt-5-4-mini").support, "unverified");
-  assert.equal(getWebSearchCapability("gemini-2-5-flash").support, "unverified");
 });
 
 test("models with no registry entry default to unsupported", () => {
   assert.equal(getWebSearchCapability("codestral").support, "unsupported");
   // A retired id still has to resolve rather than throw when old history is read.
   assert.equal(getWebSearchCapability("llama-3-1").support, "unsupported");
+  assert.equal(getWebSearchCapability("grok-4-3").support, "unsupported");
   assert.equal(getWebSearchCapability("not-a-real-model-id").support, "unsupported");
 });
 
