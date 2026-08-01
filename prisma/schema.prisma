@@ -280,7 +280,11 @@ model ChatUsageBucket {
   key         String
   period      String
   periodStart DateTime
-  count       Int      @default(0)
+  // BigInt, not Int: this counter also carries the micro-USD operational cost
+  // guardrails, whose limits are derived from the plan's credit grant and pass
+  // int4 for any plan above ~8,590 monthly credits (the Max default is
+  // 10,000). See 20260801130000_widen_chat_usage_bucket_count.
+  count       BigInt   @default(0)
   updatedAt   DateTime @updatedAt
 
   @@id([key, period, periodStart])

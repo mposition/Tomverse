@@ -133,3 +133,51 @@ test("guest and provider guardrails stay absolute and independently configured",
     { day: 5_000_000, month: 100_000_000 }
   );
 });
+
+// The Max plan's own default grant produces a total-cost guardrail past
+// int4's 2,147,483,647 ceiling. `ChatUsageBucket."count"` used to be an `Int`,
+// so acquireChatAccess bound that limit into the guardrail UPSERT as an int4
+// parameter and PostgreSQL raised 22003 instead of returning an allow/deny
+// decision -- every Max chat request failed. The column is BIGINT now
+// (prisma/migrations/20260801130000_widen_chat_usage_bucket_count); this test
+// pins the fact that the limits legitimately exceed int4, so nobody "fixes"
+// the overflow by capping the guardrail back below what the plan can buy.
+const INT4_MAX = 2_147_483_647;
+
+test("the Max plan's derived guardrails exceed int4, so the counter must be 64-bit", () => {
+  const limits = getCostGuardrailLimits("Max", MAX, {});
+  assert.ok(
+    limits.totalMonth > INT4_MAX,
+    `expected the Max total-month guardrail to exceed int4, got ${limits.totalMonth}`
+  );
+  assert.equal(
+    limits.totalMonth,
+    10_000 *
+      COST_PER_CREDIT_CEILING_MICRO_USD *
+      GUARDRAIL_HEADROOM_MULTIPLIER *
+      PURCHASED_CREDIT_HEADROOM_MULTIPLE
+  );
+});
+
+test("int4 overflows for any plan above roughly 8,590 monthly credits", () => {
+  // The exact boundary the defect sat on: below it the old int4 column
+  // happened to hold, above it every request for that plan threw.
+  const perCreditTotal =
+    COST_PER_CREDIT_CEILING_MICRO_USD *
+    GUARDRAIL_HEADROOM_MULTIPLIER *
+    PURCHASED_CREDIT_HEADROOM_MULTIPLE;
+  const lastSafeCredits = Math.floor(INT4_MAX / perCreditTotal);
+  assert.equal(lastSafeCredits, 8_589);
+
+  const safe = getCostGuardrailLimits("Custom", {
+    dailyCreditLimit: 0,
+    monthlyCreditLimit: lastSafeCredits,
+  }, {});
+  assert.ok(safe.totalMonth <= INT4_MAX);
+
+  const overflowing = getCostGuardrailLimits("Custom", {
+    dailyCreditLimit: 0,
+    monthlyCreditLimit: lastSafeCredits + 1,
+  }, {});
+  assert.ok(overflowing.totalMonth > INT4_MAX);
+});
