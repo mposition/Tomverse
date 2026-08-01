@@ -31,8 +31,15 @@ export async function GET(req: Request) {
     }
     const take = Math.min(Math.max(Number(url.searchParams.get("take") || 8), 1), 15);
 
-    const [users, feedback, refunds, auditLogs, conversations, messages] =
-      await Promise.all([
+    const [
+      users,
+      feedback,
+      refunds,
+      auditLogs,
+      conversations,
+      messages,
+      limitDecisions,
+    ] = await Promise.all([
         prisma.user.findMany({
           where: {
             OR: [
@@ -119,6 +126,22 @@ export async function GET(req: Request) {
             conversation: { select: { userId: true } },
           },
         }),
+        // A blocked user only ever has their Trace ID, so it has to resolve
+        // here as well as through /api/admin/limit-decisions.
+        prisma.chatLimitDecisionEvent.findMany({
+          where: { traceId: { contains: query, mode: "insensitive" } },
+          orderBy: { createdAt: "desc" },
+          take,
+          select: {
+            id: true,
+            traceId: true,
+            decision: true,
+            errorCode: true,
+            limitLayer: true,
+            plan: true,
+            createdAt: true,
+          },
+        }),
       ]);
 
     return NextResponse.json({
@@ -169,6 +192,14 @@ export async function GET(req: Request) {
           title: item.modelId || item.id,
           detail: `Conversation ${item.conversationId}`,
           href: `/admin/users/${encodeURIComponent(item.conversation.userId)}`,
+          createdAt: toIso(item.createdAt),
+        })),
+        ...limitDecisions.map((item) => ({
+          type: "Limit decision",
+          id: item.id,
+          title: item.traceId,
+          detail: `${item.decision}${item.errorCode ? ` / ${item.errorCode}` : ""} / ${item.limitLayer || "-"} / ${item.plan}`,
+          href: `/api/admin/limit-decisions?traceId=${encodeURIComponent(item.traceId)}`,
           createdAt: toIso(item.createdAt),
         })),
       ].slice(0, 40),

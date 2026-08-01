@@ -867,7 +867,7 @@ and removes expired or revoked share tokens and snapshots.
 
 Create a second Railway Cron service for durable AI-credit reservation recovery
 and set its Config File Path to `/railway.credit-reconciliation.json`. It runs
-every five minutes:
+every fifteen minutes:
 
 ```text
 npm run maintenance:credit-reservations
@@ -883,12 +883,28 @@ longer provider calls are expected:
 CHAT_RESERVATION_TTL_SECONDS=300
 ```
 
-Do not schedule this job less frequently than every five minutes. The daily
-cleanup also runs the reconciler as a fallback, but it is not a substitute for
-the five-minute Cron service. This five-minute job also runs the Railway, R2,
-PostgreSQL, and Prisma threshold monitor at most once every 15 minutes. Warning
-or error thresholds are sent through the DB-independent operational alert
-channels and appear as a separate scheduled-job row in Admin.
+**The reservation TTL and the sweep interval are independent, and the gap
+between them is visible to customers.** A reservation expires 5 minutes after it
+is taken, but nothing refunds it until the next sweep, so credits can stay out
+of a customer's available balance for up to `CHAT_RESERVATION_TTL_SECONDS` plus
+one cron interval — about 20 minutes at the defaults. Nothing is lost: the
+reservation is refunded in full on the next sweep, and the daily cleanup runs
+the reconciler again as a backstop. But during that window the customer sees a
+lower balance than they have, and a large enough reservation can make them look
+short of credits. Shorten the cron interval if that window matters more than
+the run cost.
+
+Do not schedule this job less frequently than every fifteen minutes without
+also widening `credit_reservation_reconciliation`'s silence budget in
+`lib/scheduledJobsCore.ts` — the admin dashboard reports a job late once it has
+been quiet for longer than that budget, so a cron slower than the budget marks
+a healthy job delayed on every cycle. `tests/scheduledJobsCore.test.mjs` reads
+this file's cron and fails if the two disagree. The daily cleanup also runs the
+reconciler as a fallback, but it is not a substitute for this Cron service. The
+same service runs the Railway, R2, PostgreSQL, and Prisma threshold monitor at
+most once every 15 minutes. Warning or error thresholds are sent through the
+DB-independent operational alert channels and appear as a separate
+scheduled-job row in Admin.
 
 Create a third Railway Cron service for the daily operations summary and
 set its Config File Path to `/railway.provider-usage-sync.json`. It runs at

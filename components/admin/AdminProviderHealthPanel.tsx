@@ -11,6 +11,7 @@ import {
   RefreshCw,
   Save,
   Settings2,
+  ShieldCheck,
 } from "lucide-react";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import type { AiProvider } from "@/lib/models";
@@ -25,6 +26,11 @@ import type {
   ProviderSettlementModel,
 } from "@/lib/providerBillingTypes";
 import type { PublicProviderStatus } from "@/lib/providerPublicStatusCore";
+import {
+  LIVE_VERIFICATION_KIND,
+  canOfferRecovery,
+  evaluateRecoveryEligibility,
+} from "@/lib/providerRecoveryCore";
 
 const REFRESH_INTERVAL_MS = 120_000;
 
@@ -129,6 +135,52 @@ const apiKeyClass = (configured: boolean) =>
     ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
     : "border-zinc-700 bg-zinc-900 text-zinc-400";
 
+// STG-R002: administrator-triggered live verification and verified recovery.
+// The two are separate actions on purpose. Verification is evidence; clearing
+// a provider's failure block is a state change that requires that evidence.
+// Recovery never writes lastSuccessAt -- it stops expired failures from
+// counting as current, it does not invent a success that never happened.
+type ProviderVerificationCheck = {
+  id: string;
+  status: string;
+  modelId: string | null;
+  latencyMs: number | null;
+  diagnosticCode: string | null;
+  errorCode: string | null;
+  message: string | null;
+  createdAt: string;
+  createdByEmail: string | null;
+  recoveryApplied: boolean;
+};
+
+type ProviderVerificationSummary = {
+  provider: string;
+  lastCheck: ProviderVerificationCheck | null;
+  recentRecoveries: Array<{
+    id: string;
+    modelId: string | null;
+    previousConsecutiveFailures: number | null;
+    recoveryAppliedAt: string | null;
+    createdByEmail: string | null;
+  }>;
+};
+
+type RunVerification = (provider: AiProvider) => Promise<boolean>;
+type RunRecovery = (provider: AiProvider, checkId: string) => Promise<boolean>;
+
+const verificationStatusCopy: Record<string, string> = {
+  success: "Verification succeeded",
+  failed: "Verification failed",
+  unavailable: "Verification unavailable",
+  running: "Verification in progress",
+};
+const verificationStatusClass: Record<string, string> = {
+  success: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
+  failed: "border-red-500/30 bg-red-500/10 text-red-300",
+  unavailable: "border-amber-500/30 bg-amber-500/10 text-amber-300",
+  running: "border-zinc-600/40 bg-zinc-700/20 text-zinc-300",
+};
+
 type SaveCredit = (
   provider: AiProvider,
   creditUsd: number,
@@ -146,20 +198,267 @@ type SaveBilling = (
   }
 ) => Promise<boolean>;
 
+function ProviderVerificationSection({
+  provider,
+  summary,
+  canRunVerification,
+  verifying,
+  recovering,
+  onVerify,
+  onRecover,
+}: {
+  provider: ProviderHealthRow;
+  summary: ProviderVerificationSummary | null;
+  canRunVerification: boolean;
+  verifying: boolean;
+  recovering: boolean;
+  onVerify: RunVerification;
+  onRecover: RunRecovery;
+}) {
+  const [confirmingVerification, setConfirmingVerification] = useState(false);
+  const lastCheck = summary?.lastCheck ?? null;
+  const busy = verifying || recovering;
+  const canVerify = canRunVerification && Boolean(provider.verificationModelId);
+
+  // The same rules the API re-applies inside its transaction. Mirrored here so
+  // the control's enabled state matches the server's answer -- but the button
+  // is a courtesy, never the control: /api/admin/provider-health/recover
+  // re-reads the evidence and decides for itself.
+  const eligibility = evaluateRecoveryEligibility({
+    now: new Date(),
+    provider: provider.provider,
+    evidence: lastCheck
+      ? {
+          provider: provider.provider,
+          kind: LIVE_VERIFICATION_KIND,
+          status: lastCheck.status,
+          createdAt: new Date(lastCheck.createdAt),
+          recoveryApplied: lastCheck.recoveryApplied,
+        }
+      : null,
+    consecutiveFailures: provider.consecutiveFailures,
+  });
+  const canRecover =
+    canRunVerification &&
+    canOfferRecovery({
+      publicStatus: provider.publicStatus,
+      consecutiveFailures: provider.consecutiveFailures,
+      eligibility,
+    });
+  const recoveryBlockedReason = eligibility.allowed ? null : eligibility.detail;
+
+  return (
+    // Scoped test id: the real console renders one of these per provider, so
+    // copy assertions need a container to resolve against rather than matching
+    // the same sentence in eleven rows.
+    <div
+      data-testid={`provider-verification-${provider.provider}`}
+      className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <PanelLabel>Verification and recovery</PanelLabel>
+          <p className="mt-2 text-xs leading-5 text-zinc-500">
+            Sends one minimal request to{" "}
+            <span className="font-mono text-zinc-400">
+              {provider.verificationModelId || "no eligible model"}
+            </span>
+            . This call is billed by the provider. It never creates a
+            conversation, a message, or a credit ledger entry, and never charges
+            a customer.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            data-testid={`provider-verify-${provider.provider}`}
+            onClick={() => {
+              if (busy || !canVerify) return;
+              setConfirmingVerification(true);
+            }}
+            disabled={busy || !canVerify || confirmingVerification}
+            aria-describedby={`provider-verification-note-${provider.provider}`}
+            className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-3 text-xs font-bold text-zinc-200 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
+            {verifying ? "Running verification" : "Run verification"}
+          </button>
+          <button
+            type="button"
+            data-testid={`provider-recover-${provider.provider}`}
+            onClick={() => {
+              if (busy || !canRecover || !lastCheck) return;
+              void onRecover(provider.provider, lastCheck.id);
+            }}
+            disabled={busy || !canRecover || !lastCheck}
+            title={recoveryBlockedReason || undefined}
+            className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 text-xs font-bold text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:border-zinc-700 disabled:bg-zinc-900 disabled:text-zinc-500"
+          >
+            <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
+            {recovering ? "Recovering" : "Recover provider status"}
+          </button>
+        </div>
+      </div>
+
+      {!canRunVerification ? (
+        <p className="mt-3 text-xs text-zinc-500">
+          Running a verification requires the ops or owner admin role.
+        </p>
+      ) : null}
+      {canRunVerification && !provider.verificationModelId ? (
+        <p className="mt-3 text-xs text-amber-300">
+          No enabled model is available to verify this provider with.
+        </p>
+      ) : null}
+
+      {confirmingVerification ? (
+        <div
+          role="alertdialog"
+          aria-label={`Confirm a live verification call to ${provider.displayName}`}
+          className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-3"
+        >
+          <p className="text-xs font-semibold text-amber-100">
+            This sends a real, billed request to {provider.displayName}.
+          </p>
+          <p className="mt-1 text-xs leading-5 text-amber-100/80">
+            One call to {provider.verificationModelId} with a minimal token
+            budget. A further verification for this provider is refused until
+            the cooldown elapses.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              data-testid={`provider-verify-confirm-${provider.provider}`}
+              onClick={() => {
+                if (busy) return;
+                setConfirmingVerification(false);
+                void onVerify(provider.provider);
+              }}
+              disabled={busy}
+              className="inline-flex h-8 cursor-pointer items-center rounded-lg border border-amber-500/40 bg-amber-500/20 px-3 text-xs font-bold text-amber-100 transition hover:bg-amber-500/30 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Confirm and run
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmingVerification(false)}
+              className="inline-flex h-8 cursor-pointer items-center rounded-lg border border-zinc-700 bg-zinc-900 px-3 text-xs font-bold text-zinc-300 transition hover:bg-zinc-800"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <div
+        id={`provider-verification-note-${provider.provider}`}
+        className="mt-3"
+        aria-live="polite"
+      >
+        {lastCheck ? (
+          <div
+            data-testid={`provider-verification-result-${provider.provider}`}
+            className={`rounded-xl border px-3 py-2.5 ${
+              verificationStatusClass[lastCheck.status] ||
+              verificationStatusClass.running
+            }`}
+          >
+            <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
+              <span>
+                {verificationStatusCopy[lastCheck.status] ||
+                  `Verification ${lastCheck.status}`}
+              </span>
+              <span className="text-[11px] font-normal opacity-80">
+                {dateLabel(lastCheck.createdAt, "Never run")}
+              </span>
+              {lastCheck.latencyMs !== null ? (
+                <span className="text-[11px] font-normal opacity-80">
+                  {lastCheck.latencyMs} ms
+                </span>
+              ) : null}
+              {lastCheck.modelId ? (
+                <code className="rounded bg-black/30 px-1.5 py-0.5 font-mono text-[10px] opacity-90">
+                  {lastCheck.modelId}
+                </code>
+              ) : null}
+              {lastCheck.recoveryApplied ? (
+                <span className="rounded-full bg-black/30 px-2 py-0.5 text-[10px] font-normal">
+                  Already used for a recovery
+                </span>
+              ) : null}
+            </div>
+            {lastCheck.diagnosticCode ? (
+              <p className="mt-1.5 break-all font-mono text-[10px] opacity-80">
+                {lastCheck.diagnosticCode}
+                {lastCheck.errorCode ? ` / ${lastCheck.errorCode}` : ""}
+              </p>
+            ) : null}
+            {lastCheck.message ? (
+              <p className="mt-1.5 break-words text-xs leading-5 opacity-90">
+                {lastCheck.message}
+              </p>
+            ) : null}
+          </div>
+        ) : (
+          <p className="text-xs text-zinc-500">
+            No live verification has been run for this provider yet.
+          </p>
+        )}
+      </div>
+
+      {recoveryBlockedReason && provider.consecutiveFailures > 0 ? (
+        <p className="mt-2 text-xs leading-5 text-zinc-500">
+          {recoveryBlockedReason}
+        </p>
+      ) : null}
+
+      {summary && summary.recentRecoveries.length > 0 ? (
+        <div className="mt-3">
+          <PanelLabel>Recovery history</PanelLabel>
+          <ul className="mt-2 space-y-1.5">
+            {summary.recentRecoveries.map((recovery) => (
+              <li
+                key={recovery.id}
+                className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2 text-[11px] leading-5 text-zinc-400"
+              >
+                {dateLabel(recovery.recoveryAppliedAt, "Unknown time")} · cleared{" "}
+                {recovery.previousConsecutiveFailures ?? 0} consecutive failures
+                {recovery.createdByEmail ? ` · ${recovery.createdByEmail}` : ""}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function ProviderRow({
   provider,
   canManageCredits,
+  canRunVerification,
+  verificationSummary,
+  verifying,
+  recovering,
   savingCredit,
   savingBilling,
   onSaveCredit,
   onSaveBilling,
+  onVerify,
+  onRecover,
 }: {
   provider: ProviderHealthRow;
   canManageCredits: boolean;
+  canRunVerification: boolean;
+  verificationSummary: ProviderVerificationSummary | null;
+  verifying: boolean;
+  recovering: boolean;
   savingCredit: boolean;
   savingBilling: boolean;
   onSaveCredit: SaveCredit;
   onSaveBilling: SaveBilling;
+  onVerify: RunVerification;
+  onRecover: RunRecovery;
 }) {
   const { getEnabledModel } = useModelCatalog();
   const [statusOpen, setStatusOpen] = useState(false);
@@ -444,6 +743,16 @@ function ProviderRow({
           </p>
         </div>
       )}
+
+      <ProviderVerificationSection
+        provider={provider}
+        summary={verificationSummary}
+        canRunVerification={canRunVerification}
+        verifying={verifying}
+        recovering={recovering}
+        onVerify={onVerify}
+        onRecover={onRecover}
+      />
 
       {detailsOpen && (
         <>
@@ -959,10 +1268,14 @@ function PanelLabel({ children }: { children: React.ReactNode }) {
 export function AdminProviderHealthPanel({
   initialDashboard,
   canManageCredits,
+  canRunVerification = false,
   providerFilter,
 }: {
   initialDashboard: ProviderHealthDashboard;
   canManageCredits: boolean;
+  /** ops:write. Gates the verification and recovery controls in the UI; the
+   *  API enforces the same permission independently. */
+  canRunVerification?: boolean;
   providerFilter?: AiProvider;
 }) {
   const [dashboard, setDashboard] = useState(initialDashboard);
@@ -970,6 +1283,17 @@ export function AdminProviderHealthPanel({
   const [savingProvider, setSavingProvider] = useState<AiProvider | null>(null);
   const [savingBillingProvider, setSavingBillingProvider] = useState<AiProvider | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [verificationSummaries, setVerificationSummaries] = useState<
+    Record<string, ProviderVerificationSummary>
+  >({});
+  // One provider at a time for each action, so a second click while a request
+  // is in flight cannot start a second billed call.
+  const [verifyingProvider, setVerifyingProvider] = useState<AiProvider | null>(
+    null
+  );
+  const [recoveringProvider, setRecoveringProvider] =
+    useState<AiProvider | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const refreshDashboard = useCallback(async () => {
     setRefreshing(true);
@@ -998,6 +1322,116 @@ export function AdminProviderHealthPanel({
       setRefreshing(false);
     }
   }, [providerFilter]);
+
+  const refreshVerification = useCallback(async () => {
+    if (!canRunVerification) return;
+    try {
+      const response = await fetch("/api/admin/provider-health/verify", {
+        cache: "no-store",
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) return;
+      const data = (await response.json()) as {
+        providers?: Record<string, ProviderVerificationSummary>;
+      };
+      setVerificationSummaries(data.providers || {});
+    } catch {
+      // Verification history is supplementary; the dashboard still renders
+      // without it, and the error banner is reserved for actions the operator
+      // actually asked for.
+    }
+  }, [canRunVerification]);
+
+  const runVerification = useCallback<RunVerification>(
+    async (provider) => {
+      if (verifyingProvider || recoveringProvider) return false;
+      setVerifyingProvider(provider);
+      setNotice(null);
+      try {
+        const response = await fetch("/api/admin/provider-health/verify", {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ provider, acknowledgeProviderCost: true }),
+        });
+        const data = (await response.json().catch(() => null)) as
+          | { check?: ProviderVerificationCheck; error?: string }
+          | null;
+        if (!response.ok) {
+          throw new Error(
+            data?.error || `Verification API returned ${response.status}.`
+          );
+        }
+        setNotice(
+          data?.check?.status === "success"
+            ? `Verification for ${provider} succeeded.`
+            : `Verification for ${provider} returned ${data?.check?.status || "no result"}.`
+        );
+        setError(null);
+        return data?.check?.status === "success";
+      } catch (verifyError) {
+        setError(
+          verifyError instanceof Error
+            ? verifyError.message
+            : "Provider verification failed."
+        );
+        return false;
+      } finally {
+        setVerifyingProvider(null);
+        await refreshVerification();
+        await refreshDashboard();
+      }
+    },
+    [recoveringProvider, refreshDashboard, refreshVerification, verifyingProvider]
+  );
+
+  const runRecovery = useCallback<RunRecovery>(
+    async (provider, checkId) => {
+      if (verifyingProvider || recoveringProvider) return false;
+      setRecoveringProvider(provider);
+      setNotice(null);
+      try {
+        const response = await fetch("/api/admin/provider-health/recover", {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ provider, checkId }),
+        });
+        const data = (await response.json().catch(() => null)) as
+          | {
+              previousConsecutiveFailures?: number;
+              error?: string;
+            }
+          | null;
+        if (!response.ok) {
+          throw new Error(
+            data?.error || `Recovery API returned ${response.status}.`
+          );
+        }
+        setNotice(
+          `Cleared ${data?.previousConsecutiveFailures ?? 0} consecutive failures for ${provider}. The last successful traffic timestamp was not modified.`
+        );
+        setError(null);
+        return true;
+      } catch (recoveryError) {
+        setError(
+          recoveryError instanceof Error
+            ? recoveryError.message
+            : "Provider recovery failed."
+        );
+        return false;
+      } finally {
+        setRecoveringProvider(null);
+        await refreshVerification();
+        await refreshDashboard();
+      }
+    },
+    [recoveringProvider, refreshDashboard, refreshVerification, verifyingProvider]
+  );
 
   const saveProviderCredit = useCallback<SaveCredit>(
     async (provider, creditUsd, note) => {
@@ -1095,7 +1529,12 @@ export function AdminProviderHealthPanel({
 
   useEffect(() => {
     const refreshWhenVisible = () => {
-      if (document.visibilityState === "visible") void refreshDashboard();
+      if (document.visibilityState !== "visible") return;
+      void refreshDashboard();
+      // Verification history rides the same cadence as the dashboard, so the
+      // "already used for a recovery" flag on a check can never be stale
+      // relative to the failure counter it would be used against.
+      void refreshVerification();
     };
     const initialRefresh = window.setTimeout(refreshWhenVisible, 0);
     const interval = window.setInterval(refreshWhenVisible, REFRESH_INTERVAL_MS);
@@ -1112,7 +1551,7 @@ export function AdminProviderHealthPanel({
       window.removeEventListener("admin:refresh", refreshWhenVisible);
       window.removeEventListener("focus", refreshWhenVisible);
     };
-  }, [refreshDashboard]);
+  }, [refreshDashboard, refreshVerification]);
 
   return (
     <div className="space-y-4">
@@ -1154,15 +1593,31 @@ export function AdminProviderHealthPanel({
           {error} Showing the last successful snapshot.
         </div>
       )}
+      {notice && (
+        <div
+          role="status"
+          data-testid="provider-verification-notice"
+          className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm font-semibold text-emerald-200"
+        >
+          <ShieldCheck className="h-4 w-4 shrink-0" aria-hidden="true" />
+          {notice}
+        </div>
+      )}
       {dashboard.providers.map((provider) => (
         <ProviderRow
           key={provider.provider}
           provider={provider}
           canManageCredits={canManageCredits}
+          canRunVerification={canRunVerification}
+          verificationSummary={verificationSummaries[provider.provider] ?? null}
+          verifying={verifyingProvider === provider.provider}
+          recovering={recoveringProvider === provider.provider}
           savingCredit={savingProvider === provider.provider}
           savingBilling={savingBillingProvider === provider.provider}
           onSaveCredit={saveProviderCredit}
           onSaveBilling={saveProviderBilling}
+          onVerify={runVerification}
+          onRecover={runRecovery}
         />
       ))}
     </div>

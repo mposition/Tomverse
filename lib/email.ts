@@ -5,6 +5,19 @@ type SendEmailInput = {
   subject: string;
   html: string;
   text: string;
+  /**
+   * Makes a send exactly-once at the provider for 24 hours.
+   *
+   * Resend records the key against the request it accepted, so a retry that
+   * carries the same key *and the same payload* is answered from that record
+   * instead of sending again. Only accepted sends are recorded, so a genuine
+   * failure still retries normally.
+   *
+   * This is what lets a durable retry queue be at-least-once on our side and
+   * still not deliver twice: whoever owns the retry must reuse one stable key
+   * per notification, and must render an identical payload every attempt.
+   */
+  idempotencyKey?: string;
 };
 
 const fromAddress = () =>
@@ -42,6 +55,10 @@ export async function sendTransactionalEmail(input: SendEmailInput) {
     headers: {
       Authorization: `Bearer ${resendApiKey}`,
       "Content-Type": "application/json",
+      // Resend caps the key at 256 characters.
+      ...(input.idempotencyKey
+        ? { "Idempotency-Key": input.idempotencyKey.slice(0, 256) }
+        : {}),
     },
     body: JSON.stringify({
       from: fromAddress(),

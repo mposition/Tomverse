@@ -16,16 +16,15 @@ import {
   trackProductEventOnce,
 } from "@/lib/productAnalyticsClient";
 import type { PurchaseAnalyticsTrigger } from "@/lib/productAnalyticsShared";
+import {
+  PRICING_PLANS_ANCHOR,
+  buildPricingIntentHref,
+} from "@/lib/purchaseIntent";
 
 type UpgradePlan = "Pro" | "Max";
 type CurrentPlan = "Free" | "Pro" | "Max";
 
 const UTM_KEYS = ["utm_source", "utm_medium", "utm_campaign"] as const;
-
-const basePricingHref = (
-  lang: string,
-  trigger: PurchaseAnalyticsTrigger
-) => `/pricing?lang=${encodeURIComponent(lang)}&trigger=${encodeURIComponent(trigger)}`;
 
 const isCampaignValue = (value: string | null | undefined) =>
   Boolean(value && !value.startsWith("("));
@@ -63,10 +62,6 @@ export function UpgradeCtaLink({
 }) {
   const { lang } = useLanguage();
   const linkRef = useRef<HTMLAnchorElement>(null);
-  const initialHref = useMemo(
-    () => basePricingHref(lang, trigger),
-    [lang, trigger]
-  );
   const locationSearch = useSyncExternalStore(
     subscribeToLocation,
     getLocationSearch,
@@ -91,8 +86,11 @@ export function UpgradeCtaLink({
     ]
   );
 
+  // The link used to say only "go to /pricing", with the plan the visitor
+  // actually asked for left behind. The pricing page then had to guess, and
+  // showed all three cards identically -- so a Pro subscriber who clicked
+  // "Upgrade" landed on a page that offered them Pro again.
   const href = useMemo(() => {
-    const next = new URL(initialHref, "https://tomverse.app");
     const current = new URLSearchParams(locationSearch);
     const attribution = getAnalyticsAttributionSnapshot();
     const attributionValues = {
@@ -100,18 +98,27 @@ export function UpgradeCtaLink({
       utm_medium: attribution?.utm_medium,
       utm_campaign: attribution?.utm_campaign,
     };
-
+    const utm: Partial<Record<(typeof UTM_KEYS)[number], string>> = {};
     UTM_KEYS.forEach((key) => {
       const currentValue = current.get(key);
       const fallbackValue = attributionValues[key];
       if (isCampaignValue(currentValue)) {
-        next.searchParams.set(key, currentValue!);
+        utm[key] = currentValue!;
       } else if (isCampaignValue(fallbackValue)) {
-        next.searchParams.set(key, fallbackValue!);
+        utm[key] = fallbackValue!;
       }
     });
-    return `${next.pathname}${next.search}`;
-  }, [initialHref, locationSearch]);
+
+    return buildPricingIntentHref({
+      lang,
+      intent: "subscription",
+      targetPlan: targetPlan === "Max" ? "max" : "pro",
+      trigger,
+      ctaLocation,
+      utm,
+      anchor: PRICING_PLANS_ANCHOR,
+    });
+  }, [ctaLocation, lang, locationSearch, targetPlan, trigger]);
 
   useEffect(() => {
     const link = linkRef.current;

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { displayHeadingClass } from "@/lib/displayHeading";
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Calculator,
   CheckCircle2,
@@ -21,7 +21,27 @@ import {
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
 import { UpgradeInterestButton } from "@/components/marketing/UpgradeInterestButton";
 import { usePublicBilling } from "@/components/marketing/usePublicBilling";
-import { trackProductEvent } from "@/lib/productAnalyticsClient";
+import { usePricingAccount } from "@/components/marketing/usePricingAccount";
+import { CreditPackPurchaseButton } from "@/components/billing/CreditPackPurchaseButton";
+import { purchaseCtaCopy } from "@/components/billing/purchaseCopy";
+import {
+  PRICING_CREDIT_PACKS_ANCHOR,
+  PRICING_PLANS_ANCHOR,
+  buildPlanChangeSupportHref,
+  buildPricingIntentHref,
+  buildPurchaseSignInHref,
+  normalizeCreditPackId,
+  parsePurchaseIntent,
+  resolvePlanCtaState,
+  shouldHideFreePlanCta,
+  type AccountPlanTier,
+  type PurchaseCreditPackId,
+  type PurchaseIntent,
+} from "@/lib/purchaseIntent";
+import {
+  trackProductEvent,
+  trackProductEventOnce,
+} from "@/lib/productAnalyticsClient";
 import {
   billingCurrencyFractionDigits,
   formatBillingAmount,
@@ -812,11 +832,38 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
   },
 };
 
+type BillingOutcome = {
+  status: "credits-success" | "credits-cancelled" | "cancelled";
+  packId: PurchaseCreditPackId | null;
+  planId: "pro" | "max" | null;
+};
+
 export function PricingPageContent() {
   const { lang } = useLanguage();
   const content = copy[lang] ?? copy.en;
   const billing = usePublicBilling();
+  const account = usePricingAccount();
+  const ctaText = purchaseCtaCopy[lang] ?? purchaseCtaCopy.en;
   const pricingViewTrackedRef = useRef(false);
+  // The purchase intent, the billing outcome, and the modal it drives.
+  //
+  // These are read from `window.location` in an effect rather than through
+  // `useSearchParams`, because this route's layout is `force-static`: calling
+  // that hook would opt the whole prerendered tree into client-side rendering
+  // up to the nearest Suspense boundary. Reading after hydration keeps the
+  // static HTML intact and cannot produce a hydration mismatch, and it is the
+  // pattern UpgradeCtaLink already uses for the same reason.
+  const [pageIntent, setPageIntent] = useState<PurchaseIntent | null>(null);
+  const [billingOutcome, setBillingOutcome] = useState<BillingOutcome | null>(
+    null
+  );
+  const [creditModal, setCreditModal] = useState<{
+    open: boolean;
+    packId: PurchaseCreditPackId | null;
+    ctaLocation: string;
+  }>({ open: false, packId: null, ctaLocation: "pricing_credit_pack_section" });
+  const purchaseResumedRef = useRef(false);
+  const creditPackCtaRef = useRef<HTMLDivElement | null>(null);
   const annualCopy = annualLabelByLanguage[lang] ?? annualLabelByLanguage.en!;
   const saleCopy = saleLabelByLanguage[lang] ?? saleLabelByLanguage.en!;
   const promotionDetail =
@@ -865,6 +912,159 @@ export function PricingPageContent() {
     pricingViewTrackedRef.current = true;
     trackProductEvent("pricing_view");
   }, []);
+
+  // One read of the URL, on mount. A billing outcome is consumed here and
+  // stripped from the address bar: leaving `?billing=credits-success` in place
+  // meant a refresh -- or a shared link -- re-announced a purchase that had
+  // already happened.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const search = window.location.search;
+    const intent = parsePurchaseIntent(search);
+    const params = new URLSearchParams(search);
+    const billingParam = params.get("billing");
+    const planParam = params.get("plan");
+    const outcome: BillingOutcome | null =
+      billingParam === "credits-success" ||
+      billingParam === "credits-cancelled" ||
+      billingParam === "cancelled"
+        ? {
+            status: billingParam,
+            packId: normalizeCreditPackId(params.get("pack")),
+            planId: planParam === "pro" || planParam === "max" ? planParam : null,
+          }
+        : null;
+    // Deferred so the effect body stays free of synchronous setState, which is
+    // the shape the repo's React Compiler lint rejects.
+    queueMicrotask(() => {
+      setPageIntent(intent);
+      if (outcome) setBillingOutcome(outcome);
+    });
+    if (!outcome) return;
+    for (const key of ["billing", "pack", "plan", "interval"]) params.delete(key);
+    const nextSearch = params.toString();
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${
+        window.location.hash
+      }`
+    );
+  }, []);
+
+  // Stripe sent the visitor back through `cancel_url`. That is a decision, not
+  // a failure, and reporting it as `checkout_failed` made the funnel's error
+  // rate unreadable.
+  useEffect(() => {
+    if (!billingOutcome) return;
+    if (billingOutcome.status === "credits-success") return;
+    trackProductEvent("checkout_cancelled", 0, {
+      cta_location: "pricing_checkout_return",
+      purchase_type:
+        billingOutcome.status === "credits-cancelled"
+          ? "credit_pack"
+          : "subscription",
+      ...(billingOutcome.packId ? { pack_id: billingOutcome.packId } : {}),
+      ...(billingOutcome.planId ? { target_plan: billingOutcome.planId } : {}),
+      ...(account.plan
+        ? { current_plan: account.plan.toLowerCase() as "free" | "pro" | "max" }
+        : {}),
+      authentication_state:
+        account.status === "loading" ? "loading" : account.status,
+    });
+    // The outcome is a one-shot announcement; re-firing it whenever the
+    // account state settles would count one cancellation several times.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [billingOutcome]);
+
+  // A visitor who signed in mid-purchase comes back with their intent intact.
+  // The modal is reopened on the pack they chose -- and nothing is charged:
+  // they still have to confirm the purchase themselves.
+  useEffect(() => {
+    if (purchaseResumedRef.current) return;
+    if (!pageIntent || pageIntent.intent !== "credit_pack") return;
+    if (account.status !== "authenticated" || !account.plan) return;
+    purchaseResumedRef.current = true;
+    trackProductEvent("purchase_intent_resumed", 0, {
+      cta_location: pageIntent.ctaLocation || "pricing_credit_pack_section",
+      purchase_type: "credit_pack",
+      authentication_state: "authenticated",
+      current_plan: account.plan.toLowerCase() as "free" | "pro" | "max",
+      ...(pageIntent.packId ? { pack_id: pageIntent.packId } : {}),
+      ...(pageIntent.trigger ? { trigger: pageIntent.trigger } : {}),
+      plan_credits_remaining: account.planCreditsRemaining,
+      addon_credits_remaining: account.addonCreditsRemaining,
+    });
+    queueMicrotask(() =>
+      setCreditModal({
+        open: true,
+        packId: pageIntent.packId,
+        ctaLocation: pageIntent.ctaLocation || "pricing_credit_pack_resume",
+      })
+    );
+
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    params.delete("intent");
+    params.delete("target");
+    const nextSearch = params.toString();
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${
+        window.location.hash
+      }`
+    );
+  }, [
+    account.addonCreditsRemaining,
+    account.plan,
+    account.planCreditsRemaining,
+    account.status,
+    pageIntent,
+  ]);
+
+  // The add-on CTA's impression, recorded once per resolved auth state. It is
+  // deliberately not fired while the session is still loading: an impression
+  // whose `authentication_state` is "loading" cannot be compared against the
+  // clicks that follow it.
+  useEffect(() => {
+    const node = creditPackCtaRef.current;
+    if (!node || account.status === "loading") return;
+    const authenticationState = account.status;
+    const fire = () =>
+      trackProductEventOnce(
+        `credit_pack_cta_view:${authenticationState}`,
+        "credit_pack_cta_view",
+        0,
+        {
+          cta_location: "pricing_credit_pack_section",
+          purchase_type: "credit_pack",
+          authentication_state: authenticationState,
+          ...(account.plan
+            ? {
+                current_plan: account.plan.toLowerCase() as
+                  | "free"
+                  | "pro"
+                  | "max",
+              }
+            : {}),
+        }
+      );
+    if (!("IntersectionObserver" in window)) {
+      fire();
+      return;
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry?.isIntersecting) return;
+        fire();
+        observer.disconnect();
+      },
+      { threshold: 0.4 }
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [account.plan, account.status]);
   const promotionEndDate = featuredPromotion
     ? new Intl.DateTimeFormat(promotionDateLocale[lang], {
         year: "numeric",
@@ -899,6 +1099,147 @@ export function PricingPageContent() {
       minimumFractionDigits: 0,
     }).format(fallbackUsd * discountMultiplier);
   };
+
+  // Where Stripe returns a credit-pack purchase. The server re-validates this
+  // against its own allowlist, so it is a proposal, not an instruction.
+  const creditPackReturnTo = useMemo(
+    () => `/pricing?lang=${encodeURIComponent(lang)}#${PRICING_CREDIT_PACKS_ANCHOR}`,
+    [lang]
+  );
+
+  const creditPackSignInHref = useCallback(
+    (packId: PurchaseCreditPackId | null, ctaLocation: string) =>
+      buildPurchaseSignInHref(
+        buildPricingIntentHref({
+          lang,
+          intent: "credit_pack",
+          packId,
+          trigger: pageIntent?.trigger,
+          ctaLocation,
+          utm: pageIntent?.utm,
+          anchor: PRICING_CREDIT_PACKS_ANCHOR,
+        })
+      ),
+    [lang, pageIntent]
+  );
+
+  const planSignInHref = useCallback(
+    (targetPlan: "pro" | "max") =>
+      buildPurchaseSignInHref(
+        buildPricingIntentHref({
+          lang,
+          intent: "subscription",
+          targetPlan,
+          trigger: pageIntent?.trigger,
+          ctaLocation: `pricing_plan_card_${targetPlan}`,
+          utm: pageIntent?.utm,
+          anchor: PRICING_PLANS_ANCHOR,
+        })
+      ),
+    [lang, pageIntent]
+  );
+
+  const trackCreditPackCtaClick = useCallback(
+    (packId: PurchaseCreditPackId | null, ctaLocation: string) => {
+      trackProductEvent("credit_pack_cta_click", 0, {
+        cta_location: ctaLocation,
+        purchase_type: "credit_pack",
+        authentication_state:
+          account.status === "loading" ? "loading" : account.status,
+        ...(packId ? { pack_id: packId } : {}),
+        ...(account.plan
+          ? {
+              current_plan: account.plan.toLowerCase() as "free" | "pro" | "max",
+            }
+          : {}),
+      });
+    },
+    [account.plan, account.status]
+  );
+
+  const creditCtaClass = (variant: "primary" | "secondary") =>
+    variant === "primary"
+      ? // `min-h-11` rather than `h-11`: a label that has to take two lines at
+        // 200% text must grow the button, not spill out of it. The width floor
+        // only applies from `sm` up, so a 320px viewport is never pushed.
+        "inline-flex min-h-11 w-full min-w-0 items-center justify-center rounded-xl bg-accent-promotion-700 px-5 py-2 text-center text-sm font-bold text-white transition hover:bg-accent-promotion-600 sm:w-auto sm:min-w-[13rem]"
+      : "inline-flex min-h-11 w-full min-w-0 items-center justify-center rounded-xl border border-accent-promotion-600/40 px-4 py-2 text-center text-sm font-bold text-accent-promotion-700 transition hover:bg-accent-promotion-500/10 dark:border-accent-promotion-400/40 dark:text-accent-promotion-300";
+
+  /**
+   * The add-on CTA, in whichever of its three states applies.
+   *
+   * The reported defect lived here: one link to `/chat`, labelled "Sign in to
+   * buy credits", rendered identically for everyone. A signed-in visitor was
+   * sent to the chat welcome screen and could not start a purchase at all.
+   */
+  const renderCreditPackCta = ({
+    packId,
+    ctaLocation,
+    variant,
+    testId,
+  }: {
+    packId: PurchaseCreditPackId | null;
+    ctaLocation: string;
+    variant: "primary" | "secondary";
+    testId: string;
+  }) => {
+    const className = creditCtaClass(variant);
+    // The section CTA keeps its general label even when it is armed with a
+    // pack to resume: "Buy this pack" belongs on a pack card, next to the
+    // pack it names.
+    const label =
+      variant === "secondary" ? ctaText.buyThisPack : ctaText.buyCredits;
+    if (account.status === "loading") {
+      return (
+        <span
+          data-testid={testId}
+          data-cta-state="loading"
+          aria-busy="true"
+          className={`${className} cursor-progress opacity-70`}
+        >
+          {ctaText.ctaLoading}
+        </span>
+      );
+    }
+    if (account.status === "unauthenticated") {
+      return (
+        <Link
+          href={creditPackSignInHref(packId, ctaLocation)}
+          data-testid={testId}
+          data-cta-state="signed_out"
+          onClick={() => trackCreditPackCtaClick(packId, ctaLocation)}
+          className={className}
+        >
+          {ctaText.signInToBuyCredits}
+        </Link>
+      );
+    }
+    return (
+      <button
+        type="button"
+        data-testid={testId}
+        data-cta-state="authenticated"
+        onClick={() => {
+          trackCreditPackCtaClick(packId, ctaLocation);
+          setCreditModal({ open: true, packId, ctaLocation });
+        }}
+        className={className}
+      >
+        {label}
+      </button>
+    );
+  };
+
+  // The two CTA surfaces a plan card can have. Extracted because every CTA
+  // state now needs it, and five inline copies of the same ternary is how the
+  // highlighted card ends up looking different in one state and not another.
+  const planCtaSurface = (highlighted?: boolean) =>
+    highlighted
+      ? "bg-white text-blue-700 hover:bg-blue-50"
+      : "border border-zinc-300 text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-zinc-800";
+
+  const packDisplayName = (packId: PurchaseCreditPackId | null) =>
+    packId ? creditPackGuide.packNames[packId] : creditPackGuide.title;
 
   return (
     <main className="min-h-screen bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">
@@ -942,9 +1283,45 @@ export function PricingPageContent() {
           ) : null}
         </div>
 
-        <div className="mt-14 grid gap-5 lg:grid-cols-3">
+        {billingOutcome?.status === "cancelled" ? (
+          <div
+            role="status"
+            data-testid="pricing-subscription-cancelled"
+            className="mt-10 rounded-2xl border border-blue-300 bg-blue-50 px-5 py-4 text-sm font-semibold leading-6 text-blue-950 dark:border-blue-900/70 dark:bg-blue-950/30 dark:text-blue-100"
+          >
+            {ctaText.purchaseCancelledTitle}
+            {" — "}
+            {ctaText.purchaseCancelledBody(
+              billingOutcome.planId === "max" ? "Max" : "Pro"
+            )}
+          </div>
+        ) : null}
+
+        {/* One page-level status region rather than one per card: three
+            simultaneously announcing "Checking your account" is noise, and the
+            neutral CTAs are already visible and labelled. */}
+        {account.status === "loading" ? (
+          <p role="status" className="sr-only">
+            {ctaText.ctaLoadingStatus}
+          </p>
+        ) : null}
+
+        <div id={PRICING_PLANS_ANCHOR} className="mt-14 grid scroll-mt-24 gap-5 lg:grid-cols-3">
           {content.plans.map((plan) => {
             const planId = plan.name === "Max" ? "max" : plan.name === "Pro" ? "pro" : "free";
+            const cardPlan: AccountPlanTier =
+              plan.name === "Max" ? "Max" : plan.name === "Pro" ? "Pro" : "Free";
+            const ctaState = resolvePlanCtaState({
+              sessionStatus: account.status,
+              currentPlan: account.plan,
+              cardPlan,
+              hasActiveSubscription: account.hasActiveSubscription,
+            });
+            // The card the visitor asked for when they clicked "Upgrade"
+            // elsewhere. Marked with a ring *and* a named region, so the
+            // identification is not carried by colour alone.
+            const isRequestedTarget =
+              planId !== "free" && pageIntent?.targetPlan === planId;
             const displayPrice =
               billing.formatPlanPrice(planId) || plan.price;
             const annualFallback = planId === "max" ? "$240" : planId === "pro" ? "$144" : "$0";
@@ -971,11 +1348,22 @@ export function PricingPageContent() {
               // overflowed its track -- 287px inside a 224px column at 320px
               // with 125% zoom, which is what pushed the whole page sideways.
               // `min-w-0` lets the track win; the content inside wraps instead.
+              data-testid={`pricing-plan-card-${planId}`}
+              data-cta-state={ctaState}
+              data-requested-target={isRequestedTarget ? "true" : undefined}
+              aria-labelledby={`pricing-plan-name-${planId}`}
               className={`relative flex min-h-full min-w-0 flex-col rounded-[1.75rem] border p-6 shadow-sm ${
                 plan.highlighted ? "border-blue-600 bg-blue-700 text-white shadow-2xl shadow-blue-950/20"
                   : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/40"
+              } ${
+                isRequestedTarget
+                  ? "ring-4 ring-blue-500/40 ring-offset-2 ring-offset-white dark:ring-offset-zinc-950"
+                  : ""
               }`}
             >
+              {isRequestedTarget ? (
+                <p className="sr-only">{ctaText.upgradeTo(plan.name)}</p>
+              ) : null}
               {promotionEligible && featuredPromotion ? (
                 <div className={`absolute -top-4 right-6 rounded-full px-4 py-2 text-xs font-bold shadow-xl ${
                   plan.highlighted
@@ -1013,7 +1401,7 @@ export function PricingPageContent() {
                   </span>
                 )}
               </div>
-              <h2 className={`mt-4 text-3xl font-black ${displayHeadingClass(lang)}`}>{plan.name}</h2>
+              <h2 id={`pricing-plan-name-${planId}`} className={`mt-4 text-3xl font-black ${displayHeadingClass(lang)}`}>{plan.name}</h2>
               <p className={`mt-3 min-h-14 text-sm leading-6 ${plan.highlighted ? "text-blue-50" : "text-zinc-600 dark:text-zinc-300"}`}>
                 {plan.description}
               </p>
@@ -1163,33 +1551,136 @@ export function PricingPageContent() {
               <p className={`mt-3 text-sm font-bold ${plan.highlighted ? "text-blue-50" : "text-zinc-700 dark:text-zinc-200"}`}>
                 {plan.usage}
               </p>
-              {planId === "free" ? (
-                <Link
-                  href={plan.href}
-                  onClick={() =>
-                    trackProductEvent("plan_selected", 0, {
-                      plan_id: "free",
-                      cta_location: "pricing_plan_card",
-                    })
-                  }
-                  className={`mt-8 inline-flex h-12 w-full items-center justify-center rounded-xl text-sm font-bold transition ${
-                    plan.highlighted ? "bg-white text-blue-700 hover:bg-blue-50"
-                      : "border border-zinc-300 text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-zinc-800"
-                  }`}
-                >
-                  {plan.cta}
-                </Link>
-              ) : (
-                <UpgradeInterestButton
-                  plan={plan.name === "Max" ? "Max" : "Pro"}
-                  className={`mt-8 inline-flex h-12 w-full items-center justify-center rounded-xl text-sm font-bold transition ${
-                    plan.highlighted ? "bg-white text-blue-700 hover:bg-blue-50"
-                      : "border border-zinc-300 text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-zinc-800"
-                  }`}
-                >
-                  {plan.cta}
-                </UpgradeInterestButton>
-              )}
+              {/*
+                The plan CTA is chosen by resolvePlanCtaState(), not by the
+                card's own name. Every card used to render the same "Upgrade"
+                button for everyone, so a Pro subscriber was offered Pro again
+                and a Pro-to-Max click reached a checkout the server rejects
+                with 409 -- there is no in-product subscription-change flow.
+
+                `min-h-12` with padding rather than a fixed `h-12`: a CTA label
+                that wraps at 200% text has to grow the button.
+              */}
+              <div
+                data-testid={`pricing-cta-${planId}`}
+                data-cta-state={
+                  planId === "free" &&
+                  shouldHideFreePlanCta(account.status, account.plan)
+                    ? "hidden"
+                    : ctaState
+                }
+                className="mt-8 empty:mt-0"
+              >
+                {/* A paying account has no use for a "Start free" button, and
+                    offering it reads as a downgrade prompt on the page that is
+                    supposed to be selling the upgrade. */}
+                {planId === "free" &&
+                shouldHideFreePlanCta(account.status, account.plan) ? null : ctaState ===
+                  "loading" ? (
+                  <span
+                    aria-busy="true"
+                    className={`inline-flex min-h-12 w-full cursor-progress items-center justify-center rounded-xl px-4 py-3 text-center text-sm font-bold opacity-70 transition ${planCtaSurface(plan.highlighted)}`}
+                  >
+                    {ctaText.ctaLoading}
+                  </span>
+                ) : ctaState === "current_plan" ? (
+                  <button
+                    type="button"
+                    disabled
+                    aria-current="true"
+                    className={`inline-flex min-h-12 w-full cursor-default items-center justify-center rounded-xl px-4 py-3 text-center text-sm font-bold opacity-80 transition ${planCtaSurface(plan.highlighted)}`}
+                  >
+                    {ctaText.currentPlan}
+                  </button>
+                ) : ctaState === "manage_plan" ? (
+                  // Support, not `/chat`. Account settings can cancel a
+                  // subscription; it cannot change one, so pointing there was
+                  // the same dead end as a 409 checkout, just slower to find.
+                  // See docs/policy/plan-change.md for the flow that replaces
+                  // this, and why the server keeps refusing until it exists.
+                  <Link
+                    href={buildPlanChangeSupportHref(lang)}
+                    onClick={() =>
+                      trackProductEvent("plan_selected", 0, {
+                        plan_id: planId,
+                        target_plan: planId,
+                        cta_location: "pricing_plan_card_manage",
+                        authentication_state: "authenticated",
+                        ...(account.plan
+                          ? {
+                              current_plan: account.plan.toLowerCase() as
+                                | "free"
+                                | "pro"
+                                | "max",
+                            }
+                          : {}),
+                      })
+                    }
+                    className={`inline-flex min-h-12 w-full items-center justify-center rounded-xl px-4 py-3 text-center text-sm font-bold transition ${planCtaSurface(plan.highlighted)}`}
+                  >
+                    {ctaText.managePlan}
+                  </Link>
+                ) : planId === "free" ? (
+                  <Link
+                    href={plan.href}
+                    onClick={() =>
+                      trackProductEvent("plan_selected", 0, {
+                        plan_id: "free",
+                        target_plan: "free",
+                        cta_location: "pricing_plan_card",
+                        authentication_state: "unauthenticated",
+                      })
+                    }
+                    className={`inline-flex min-h-12 w-full items-center justify-center rounded-xl px-4 py-3 text-center text-sm font-bold transition ${planCtaSurface(plan.highlighted)}`}
+                  >
+                    {plan.cta}
+                  </Link>
+                ) : ctaState === "signed_out" ? (
+                  <Link
+                    href={planSignInHref(planId)}
+                    onClick={() => {
+                      trackProductEvent("plan_selected", 0, {
+                        plan_id: planId,
+                        target_plan: planId,
+                        cta_location: `pricing_plan_card_${planId}`,
+                        authentication_state: "unauthenticated",
+                      });
+                      trackProductEvent("authentication_required", 0, {
+                        cta_location: `pricing_plan_card_${planId}`,
+                        purchase_type: "subscription",
+                        target_plan: planId,
+                        authentication_state: "unauthenticated",
+                      });
+                    }}
+                    className={`inline-flex min-h-12 w-full items-center justify-center rounded-xl px-4 py-3 text-center text-sm font-bold transition ${planCtaSurface(plan.highlighted)}`}
+                  >
+                    {ctaText.signInAndStart(plan.name)}
+                  </Link>
+                ) : (
+                  <UpgradeInterestButton
+                    plan={plan.name === "Max" ? "Max" : "Pro"}
+                    trigger={pageIntent?.trigger || undefined}
+                    className={`inline-flex min-h-12 w-full items-center justify-center rounded-xl px-4 py-3 text-center text-sm font-bold transition ${planCtaSurface(plan.highlighted)}`}
+                  >
+                    {plan.cta}
+                  </UpgradeInterestButton>
+                )}
+                {ctaState === "manage_plan" &&
+                !(
+                  planId === "free" &&
+                  shouldHideFreePlanCta(account.status, account.plan)
+                ) ? (
+                  <p
+                    className={`mt-2 text-xs font-semibold leading-5 ${
+                      plan.highlighted
+                        ? "text-blue-50"
+                        : "text-zinc-600 dark:text-zinc-300"
+                    }`}
+                  >
+                    {ctaText.managePlanHint}
+                  </p>
+                ) : null}
+              </div>
               <ul className="mt-8 space-y-3">
                 {plan.features.map((feature) => (
                   // UI-005. The bullet's icon is `shrink-0` and the label was a
@@ -1211,9 +1702,38 @@ export function PricingPageContent() {
         </div>
 
         <section
+          id={PRICING_CREDIT_PACKS_ANCHOR}
           data-testid="pricing-credit-packs"
-          className="mt-16 overflow-hidden rounded-[2rem] border border-accent-promotion-500/25 bg-gradient-to-br from-accent-promotion-500/10 via-white to-blue-500/5 dark:via-zinc-950 dark:to-blue-950/20"
+          className="mt-16 scroll-mt-24 overflow-hidden rounded-[2rem] border border-accent-promotion-500/25 bg-gradient-to-br from-accent-promotion-500/10 via-white to-blue-500/5 dark:via-zinc-950 dark:to-blue-950/20"
         >
+          {billingOutcome?.status === "credits-success" ||
+          billingOutcome?.status === "credits-cancelled" ? (
+            <div
+              role="status"
+              data-testid="pricing-credit-outcome"
+              data-outcome={billingOutcome.status}
+              className={`border-b p-5 text-sm font-semibold leading-6 sm:p-7 ${
+                billingOutcome.status === "credits-success"
+                  ? "border-status-success-500/30 bg-status-success-500/10 text-status-success-700 dark:text-status-success-200"
+                  : "border-zinc-200 bg-zinc-50 text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-200"
+              }`}
+            >
+              <p className="font-bold">
+                {billingOutcome.status === "credits-success"
+                  ? ctaText.purchaseSuccessTitle
+                  : ctaText.purchaseCancelledTitle}
+              </p>
+              <p className="mt-1 min-w-0 break-words">
+                {billingOutcome.status === "credits-success"
+                  ? ctaText.purchaseSuccessBody(
+                      packDisplayName(billingOutcome.packId)
+                    )
+                  : ctaText.purchaseCancelledBody(
+                      packDisplayName(billingOutcome.packId)
+                    )}
+              </p>
+            </div>
+          ) : null}
           {/*
             UI-005 again, on the text-scale axis (REAUDIT-P2-01). A grid item's
             default `min-width: auto` is its min-content width, and
@@ -1235,19 +1755,28 @@ export function PricingPageContent() {
                 {creditPackGuide.description}
               </p>
             </div>
-            <Link
-              href="/chat"
-              onClick={() =>
-                trackProductEvent("cta_start_click", 0, {
-                  cta_location: "pricing_credit_pack_section",
-                })
-              }
-              // `min-h-11` rather than `h-11`: a label that has to take two
-              // lines at 200% text must grow the button, not spill out of it.
-              className="inline-flex min-h-11 min-w-0 items-center justify-center rounded-xl bg-accent-promotion-700 px-5 py-2 text-center text-sm font-bold text-white transition hover:bg-accent-promotion-600"
-            >
-              {creditPackGuide.purchaseCta}
-            </Link>
+            {/*
+              This was a `<Link href="/chat">` labelled "Sign in to buy
+              credits" for every visitor, signed in or not: clicking it left
+              the pricing page and landed on the chat welcome screen, with no
+              purchase started and the chosen pack forgotten. It is now one of
+              three states, and the signed-in one opens the purchase modal in
+              place without navigating at all.
+            */}
+            <div ref={creditPackCtaRef} className="min-w-0">
+              {renderCreditPackCta({
+                // Only a *cancelled* purchase re-arms the section CTA with the
+                // pack that was abandoned. After a completed one there is
+                // nothing to resume.
+                packId:
+                  billingOutcome?.status === "credits-cancelled"
+                    ? billingOutcome.packId
+                    : null,
+                ctaLocation: "pricing_credit_pack_section",
+                variant: "primary",
+                testId: "credit-pack-section-cta",
+              })}
+            </div>
           </div>
 
           <div className="grid gap-4 border-t border-accent-promotion-500/20 p-5 sm:p-7 lg:grid-cols-3">
@@ -1325,6 +1854,17 @@ export function PricingPageContent() {
                   <p className="mt-4 min-w-0 break-words border-t border-zinc-200 pt-3 text-xs font-bold text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
                     {creditPackGuide.validity}
                   </p>
+                  {/* Per-pack CTA. The pack the visitor clicked is what the
+                      modal opens on, and what a sign-in detour carries back,
+                      so the choice is never made twice. */}
+                  <div className="mt-4 min-w-0">
+                    {renderCreditPackCta({
+                      packId: pack.id,
+                      ctaLocation: "pricing_credit_pack_card",
+                      variant: "secondary",
+                      testId: `credit-pack-card-cta-${pack.id}`,
+                    })}
+                  </div>
                 </article>
               ))
             )}
@@ -1346,6 +1886,24 @@ export function PricingPageContent() {
               ))}
             </ul>
           </div>
+
+          {/*
+            One modal for the whole section, opened by the section CTA, by any
+            pack card, or by a purchase resumed after sign-in. Rendering one
+            per CTA would mean four independent fetches of the same catalogue
+            and four focus traps competing for the same page.
+          */}
+          <CreditPackPurchaseButton
+            hideTrigger
+            open={creditModal.open}
+            onOpenChange={(open) =>
+              setCreditModal((current) => ({ ...current, open }))
+            }
+            initialPackId={creditModal.packId}
+            ctaLocation={creditModal.ctaLocation}
+            returnTo={creditPackReturnTo}
+            trigger={pageIntent?.trigger || "proactive"}
+          />
         </section>
 
         <section

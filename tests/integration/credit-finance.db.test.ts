@@ -5,13 +5,16 @@ import type Stripe from "stripe";
 import {
   acquireChatAccess,
   extendChatReservationExpiry,
+  getChatCostGuardrails,
   preflightChatComparisonAccess,
+  publicChatErrorDetails,
   reconcileExpiredChatCreditReservations,
   releaseChatAccess,
   settleChatUsage,
   type ChatAccess,
   type ChatBudget,
 } from "@/lib/chatSecurity";
+import { findChatLimitDecisionsByTraceId } from "@/lib/chatLimitDecisions";
 import {
   handleCreditPackDispute,
   handleCreditPackDisputeClosed,
@@ -21,6 +24,7 @@ import { lockCreditAccount } from "@/lib/creditDebt";
 import { reserveAddOnCredits, settleAddOnCredits } from "@/lib/creditLedger";
 import { getCreditPack } from "@/lib/creditPacks";
 import { prisma } from "@/lib/prisma";
+import { usageBucketCount } from "@/lib/chatUsageBucketCount";
 
 const resetFinanceTestData = () =>
   prisma.$executeRawUnsafe(`
@@ -100,6 +104,9 @@ const chatBudget = ({
   outputUsdPerMillionTokens: outputRate,
   cachedInputPriceMultiplier,
   provider,
+  pricingVersion: "test-fixture-pricing",
+  costSource: "registry",
+  longContextThresholdTokens: null,
 });
 
 const createAddOnLot = (
@@ -348,6 +355,15 @@ test("stores Mistral cached-token usage and the request-time pricing snapshot", 
     cachedInputCostMicroUsd: 202,
     outputCostMicroUsd: 180,
     totalCostMicroUsd: 392,
+    // The settlement snapshot is the audit record for a charge, so it also
+    // pins which price list produced it, which cost source the *reservation*
+    // used, and whether the token counts came from the provider or from the
+    // fallback estimator. See settleChatUsage in lib/chatSecurity.ts.
+    pricingVersion: "test-fixture-pricing",
+    reservationCostSource: "registry",
+    longContextThresholdTokens: null,
+    usageSource: "provider_usage_metadata",
+    reasoningTokens: null,
   });
 
   const providerUsage = await prisma.providerDailyUsage.findFirstOrThrow({
@@ -423,6 +439,11 @@ test("settles Perplexity from the provider-reported cost and keeps the token est
     outputCostMicroUsd: 3_333,
     tokenEstimatedTotalCostMicroUsd: 4_500,
     totalCostMicroUsd: 7_777,
+    pricingVersion: "test-fixture-pricing",
+    reservationCostSource: "registry",
+    longContextThresholdTokens: null,
+    usageSource: "provider_usage_metadata",
+    reasoningTokens: null,
   });
 
   await releaseChatAccess(acquired.leaseId);
@@ -476,6 +497,11 @@ test("adds native web search cost on top of the token cost and keeps both separa
     searchCostMicroUsd: 25_000,
     searchQueryCount: 3,
     totalCostMicroUsd: 33_000,
+    pricingVersion: "test-fixture-pricing",
+    reservationCostSource: "registry",
+    longContextThresholdTokens: null,
+    usageSource: "provider_usage_metadata",
+    reasoningTokens: null,
   });
 
   await releaseChatAccess(acquired.leaseId);
@@ -522,6 +548,11 @@ test("charges no search cost when the provider ran no native web search", async 
     cachedInputCostMicroUsd: 0,
     outputCostMicroUsd: 4_000,
     totalCostMicroUsd: 8_000,
+    pricingVersion: "test-fixture-pricing",
+    reservationCostSource: "registry",
+    longContextThresholdTokens: null,
+    usageSource: "provider_usage_metadata",
+    reasoningTokens: null,
   });
 
   await releaseChatAccess(acquired.leaseId);
@@ -699,12 +730,16 @@ test("serializes concurrent reservations without overspending plan or add-on bal
   );
   assert.equal(succeeded.length, 5);
   assert.equal(failed.length, 3);
+  // Both outcomes are entitlement decisions, told apart by whether the account
+  // still holds purchased credits: an account with none is told its plan is
+  // exhausted, one with some but not enough is told its balance is short.
   assert.ok(
     failed.every(
       (result) =>
         result.reason instanceof Error &&
         "code" in result.reason &&
-        result.reason.code === "CREDIT_BALANCE_INSUFFICIENT"
+        (result.reason.code === "CREDIT_BALANCE_INSUFFICIENT" ||
+          result.reason.code === "PLAN_ENTITLEMENT_EXHAUSTED")
     )
   );
   assert.equal(await prisma.chatCreditReservation.count(), 5);
@@ -716,7 +751,7 @@ test("serializes concurrent reservations without overspending plan or add-on bal
   const monthUsage = await prisma.chatUsageBucket.findFirstOrThrow({
     where: { key: chatAccess(user, 2).subjectKey, period: "month" },
   });
-  assert.equal(monthUsage.count, 2);
+  assert.equal(usageBucketCount(monthUsage.count), 2);
 
   await Promise.all(
     succeeded.map(({ value }) => releaseChatAccess(value.leaseId))
@@ -726,6 +761,9 @@ test("serializes concurrent reservations without overspending plan or add-on bal
 test("preflights and reserves three premium models without full-output quota collisions", async () => {
   const user = await createUser("Max");
   const access = chatAccess(user, 10_000);
+  // The retired per-user USD ceiling. Setting it must have no effect at all:
+  // this is the exact value and variable that blocked a paying Pro account
+  // with thousands of plan credits still available.
   const previousDailyLimit = process.env.CHAT_MAX_COST_MICROUSD_PER_DAY;
   process.env.CHAT_MAX_COST_MICROUSD_PER_DAY = "1500000";
 
@@ -746,7 +784,14 @@ test("preflights and reserves three premium models without full-output quota col
     assert.equal(preflight.modelCount, 3);
     assert.equal(preflight.requiredCredits, 24);
     assert.equal(preflight.reservedCostMicroUsd, 373_140);
+    // The reserved cost is well past the retired US$1.50/day ceiling and is
+    // still allowed, because the guardrail is derived from the plan's credits.
+    assert.ok(preflight.reservedCostMicroUsd < 1_500_000);
+    // A preflight writes nothing, so a refused request cannot consume usage.
     assert.equal(await prisma.chatUsageBucket.count(), 0);
+    // Reset instants handed to the client are always ahead of now.
+    assert.ok(preflight.dailyResetAt);
+    assert.ok(new Date(preflight.dailyResetAt!).getTime() > Date.now());
 
     const acquired = await Promise.all(
       budgets.map((budget) => acquireChatAccess(access, budget))
@@ -797,7 +842,7 @@ test("uses add-on credits beyond the plan daily guardrail", async () => {
       },
     },
   });
-  assert.equal(dailyUsage.count, 300);
+  assert.equal(usageBucketCount(dailyUsage.count), 300);
   const reservedLot = await prisma.creditLot.findUniqueOrThrow({
     where: { id: lot.id },
   });
@@ -808,5 +853,338 @@ test("uses add-on credits beyond the plan daily guardrail", async () => {
     outputTokens: 0,
     outcome: "completed",
   });
+  await releaseChatAccess(acquired.leaseId);
+});
+
+test("an answer longer than the reservation is settled up, not silently capped", async () => {
+  const user = await createUser("Pro");
+  const access = chatAccess(user, 3_000, 300);
+  const acquired = await acquireChatAccess(
+    access,
+    chatBudget({
+      credits: 8,
+      inputTokens: 3_469,
+      outputTokens: 8_192,
+      reservedOutputTokens: 2_048,
+      inputRate: 5,
+      outputRate: 30,
+    })
+  );
+  const reservedCost = 3_469 * 5 + 2_048 * 30;
+  const durable = await prisma.chatCreditReservation.findUniqueOrThrow({
+    where: { id: acquired.usageReservation.reservationId },
+  });
+  assert.equal(Number(durable.reservedCostMicroUsd), reservedCost);
+
+  // The model answered with 6,000 output tokens -- nearly three times the
+  // reservation, which is exactly the case a 2,048-token reservation missed.
+  await settleChatUsage(acquired.usageReservation, {
+    inputTokens: 3_469,
+    outputTokens: 6_000,
+    outcome: "completed",
+    usageFromProvider: true,
+  });
+
+  const settled = await prisma.chatCreditReservation.findUniqueOrThrow({
+    where: { id: durable.id },
+  });
+  const actualCost = 3_469 * 5 + 6_000 * 30;
+  assert.equal(Number(settled.settledCostMicroUsd), actualCost);
+  assert.ok(actualCost > reservedCost);
+  assert.equal(settled.settledOutputTokens, 6_000);
+
+  const planCostBucket = await prisma.chatUsageBucket.findFirstOrThrow({
+    where: { key: access.subjectKey, period: "cost-day" },
+  });
+  assert.equal(usageBucketCount(planCostBucket.count), actualCost);
+  const totalCostBucket = await prisma.chatUsageBucket.findFirstOrThrow({
+    where: { key: access.subjectKey, period: "op-cost-day" },
+  });
+  assert.equal(usageBucketCount(totalCostBucket.count), actualCost);
+
+  const snapshot = settled.pricingSnapshot as Record<string, unknown>;
+  assert.equal(snapshot.pricingVersion, "test-fixture-pricing");
+  assert.equal(snapshot.usageSource, "provider_usage_metadata");
+
+  await releaseChatAccess(acquired.leaseId);
+});
+
+test("a failed model refunds while a completed sibling settles", async () => {
+  const user = await createUser("Pro");
+  const access = chatAccess(user, 3_000, 300);
+  const budget = () =>
+    chatBudget({
+      credits: 8,
+      inputTokens: 1_000,
+      outputTokens: 8_192,
+      reservedOutputTokens: 4_096,
+      inputRate: 5,
+      outputRate: 25,
+    });
+
+  const completed = await acquireChatAccess(access, budget());
+  const failed = await acquireChatAccess(access, budget());
+
+  await settleChatUsage(completed.usageReservation, {
+    inputTokens: 1_000,
+    outputTokens: 2_000,
+    outcome: "completed",
+    usageFromProvider: true,
+  });
+  await settleChatUsage(failed.usageReservation, {
+    inputTokens: 0,
+    outputTokens: 0,
+    outcome: "failed",
+    usageFromProvider: true,
+  });
+
+  const completedCost = 1_000 * 5 + 2_000 * 25;
+  for (const period of ["cost-day", "cost-month", "op-cost-day", "op-cost-month"]) {
+    const bucket = await prisma.chatUsageBucket.findFirstOrThrow({
+      where: { key: access.subjectKey, period },
+    });
+    assert.equal(
+      usageBucketCount(bucket.count),
+      completedCost,
+      `${period} still carries the failed model's reservation`
+    );
+  }
+  // The failed model consumed no credits either.
+  const monthCredits = await prisma.chatUsageBucket.findFirstOrThrow({
+    where: { key: access.subjectKey, period: "month" },
+  });
+  assert.equal(usageBucketCount(monthCredits.count), 8);
+
+  await Promise.all([
+    releaseChatAccess(completed.leaseId),
+    releaseChatAccess(failed.leaseId),
+  ]);
+});
+
+test("plan exhaustion and the operational guardrail return different codes", async () => {
+  const planExhaustedUser = await createUser("Pro");
+  const planExhaustedAccess = chatAccess(planExhaustedUser, 8, 300);
+  await acquireChatAccess(
+    planExhaustedAccess,
+    chatBudget({ credits: 8, inputTokens: 1, outputTokens: 0 })
+  );
+  const planError = await acquireChatAccess(
+    planExhaustedAccess,
+    chatBudget({ credits: 8, inputTokens: 1, outputTokens: 0 })
+  ).catch((error) => error);
+  assert.equal(planError.code, "PLAN_ENTITLEMENT_EXHAUSTED");
+  assert.equal(planError.status, 402);
+
+  // Same plan, credits still available, but the internal cost guardrail is
+  // already spent -- a different layer and a different code.
+  const guardrailUser = await createUser("Pro");
+  const guardrailAccess = chatAccess(guardrailUser, 3_000, 300);
+  const now = new Date();
+  const dayStart = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+  );
+  const guardrails = getChatCostGuardrails("Pro", {
+    dailyMessageLimit: 300,
+    monthlyMessageLimit: 3_000,
+  });
+  await prisma.chatUsageBucket.create({
+    data: {
+      key: guardrailAccess.subjectKey,
+      period: "cost-day",
+      periodStart: dayStart,
+      count: guardrails.planDay,
+    },
+  });
+  const guardrailError = await acquireChatAccess(
+    guardrailAccess,
+    chatBudget({
+      credits: 8,
+      inputTokens: 1_000,
+      outputTokens: 4_096,
+      inputRate: 5,
+      outputRate: 25,
+    })
+  ).catch((error) => error);
+  assert.equal(guardrailError.code, "OPERATIONAL_COST_GUARDRAIL_TRIGGERED");
+  assert.equal(guardrailError.status, 429);
+  assert.equal(guardrailError.details.limitLayer, "operational_guardrail");
+  // Internal micro-USD is carried for logging but stripped from the response.
+  assert.equal(typeof guardrailError.details.internalLimitCostMicroUsd, "number");
+  const publicDetails = publicChatErrorDetails(guardrailError.details)!;
+  assert.equal("internalLimitCostMicroUsd" in publicDetails, false);
+  assert.equal("internalUsedCostMicroUsd" in publicDetails, false);
+  assert.ok(new Date(String(publicDetails.resetAt)).getTime() > Date.now());
+
+  // A refused request consumes nothing.
+  const guardrailCredits = await prisma.chatUsageBucket.findFirst({
+    where: { key: guardrailAccess.subjectKey, period: "month" },
+  });
+  assert.equal(guardrailCredits, null);
+});
+
+test("a preflight rejection is retrievable by its Trace ID", async () => {
+  const user = await createUser("Pro");
+  const access = chatAccess(user, 8, 300);
+  const traceId = randomUUID();
+  const budgets = ["premium-a", "premium-b"].map((modelId) => ({
+    ...chatBudget({
+      credits: 8,
+      inputTokens: 3_469,
+      outputTokens: 8_192,
+      reservedOutputTokens: 4_096,
+      inputRate: 5,
+      outputRate: 30,
+    }),
+    modelId,
+  }));
+
+  const error = await preflightChatComparisonAccess(access, budgets, {
+    traceId,
+    enabledTools: ["web_search"],
+  }).catch((thrown) => thrown);
+  assert.ok(error instanceof Error);
+
+  const decisions = await findChatLimitDecisionsByTraceId(traceId);
+  assert.equal(decisions.length, 1);
+  const decision = decisions[0];
+  assert.equal(decision.decision, "rejected");
+  assert.equal(decision.phase, "comparison_preflight");
+  assert.equal(decision.plan, "Pro");
+  assert.deepEqual(decision.modelIds, ["premium-a", "premium-b"]);
+  assert.deepEqual(decision.enabledTools, ["web_search"]);
+  assert.equal(decision.estimatedInputTokens, 3_469 * 2);
+  assert.equal(decision.estimatedOutputTokens, 4_096 * 2);
+  assert.equal(decision.requiredCredits, 16);
+  assert.deepEqual(decision.pricingVersions, ["test-fixture-pricing"]);
+  assert.ok(decision.timeZone);
+  // Nothing that could contain prompt text is stored.
+  assert.equal(JSON.stringify(decision).includes("prompt"), false);
+});
+
+test("purchased credits are not blocked a second time by the plan cost guardrail", async () => {
+  const user = await createUser("Pro");
+  const access = chatAccess(user, 3_000, 300);
+  const now = new Date();
+  const dayStart = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+  );
+  const guardrails = getChatCostGuardrails("Pro", {
+    dailyMessageLimit: 300,
+    monthlyMessageLimit: 3_000,
+  });
+  // Plan-funded cost for the day is already at its guardrail, and the daily
+  // plan credits are spent, so this request can only be add-on funded.
+  await prisma.chatUsageBucket.createMany({
+    data: [
+      {
+        key: access.subjectKey,
+        period: "cost-day",
+        periodStart: dayStart,
+        count: guardrails.planDay,
+      },
+      {
+        key: access.subjectKey,
+        period: "day",
+        periodStart: dayStart,
+        count: 300,
+      },
+    ],
+  });
+  const lot = await createAddOnLot(user.id, 20, 5_000_000);
+
+  const acquired = await acquireChatAccess(
+    access,
+    chatBudget({
+      credits: 8,
+      inputTokens: 1_000,
+      outputTokens: 4_096,
+      inputRate: 5,
+      outputRate: 25,
+    })
+  );
+  assert.equal(acquired.usageReservation.planReservedCredits, 0);
+  assert.equal(acquired.usageReservation.addOnReservedCredits, 8);
+
+  // The plan-funded bucket is untouched; only the total-cost guardrail moved.
+  const planCost = await prisma.chatUsageBucket.findUniqueOrThrow({
+    where: {
+      key_period_periodStart: {
+        key: access.subjectKey,
+        period: "cost-day",
+        periodStart: dayStart,
+      },
+    },
+  });
+  assert.equal(usageBucketCount(planCost.count), guardrails.planDay);
+  const totalCost = await prisma.chatUsageBucket.findFirstOrThrow({
+    where: { key: access.subjectKey, period: "op-cost-day" },
+  });
+  assert.equal(usageBucketCount(totalCost.count), 1_000 * 5 + 4_096 * 25);
+
+  await settleChatUsage(acquired.usageReservation, {
+    inputTokens: 1_000,
+    outputTokens: 1_000,
+    outcome: "completed",
+    usageFromProvider: true,
+  });
+  const settledLot = await prisma.creditLot.findUniqueOrThrow({
+    where: { id: lot.id },
+  });
+  assert.ok(settledLot.remainingCredits < 20);
+  await releaseChatAccess(acquired.leaseId);
+});
+
+// The int4 fix has two halves. The limit half -- binding a guardrail above
+// 2,147,483,647 µUSD into the guard query -- is covered by
+// tests/chatCostGuardrails.test.mjs and by the Max reservation scenarios above.
+// This covers the other half: the running total itself.
+//
+// `count = count + amount` overflowed on int4 just as the bound limit did, so
+// a bucket that had been quietly filling up would start failing once it
+// approached the ceiling -- later, and further from the cause, than the
+// original report. Widening the column fixed both, and this pins the second
+// one so a future narrowing (or an int cast in the guard query) cannot pass
+// the limit-side tests while breaking accumulation.
+test("a cost bucket accumulates past the old int4 ceiling", async () => {
+  const user = await createUser("Max");
+  const access = chatAccess(user, 10_000);
+  const now = new Date();
+  const monthStart = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)
+  );
+
+  // The operational total-cost bucket: its limit (totalMonth, 2,500,000,000
+  // µUSD for this plan) is the one that sits above the ceiling, so it is the
+  // only bucket whose running total can legitimately reach it. Seeded close
+  // enough that one reservation's cost carries the total across.
+  await prisma.chatUsageBucket.create({
+    data: {
+      key: access.subjectKey,
+      period: "op-cost-month",
+      periodStart: monthStart,
+      count: BigInt(2_147_450_000),
+    },
+  });
+
+  const acquired = await acquireChatAccess(
+    access,
+    chatBudget({
+      credits: 8,
+      inputTokens: 1_000,
+      outputTokens: 4_096,
+      inputRate: 5,
+      outputRate: 25,
+    })
+  );
+  assert.ok(acquired.usageReservation);
+
+  const bucket = await prisma.chatUsageBucket.findFirstOrThrow({
+    where: { key: access.subjectKey, period: "op-cost-month" },
+  });
+  assert.ok(
+    usageBucketCount(bucket.count) > 2_147_483_647,
+    `expected the running total to pass int4's ceiling, got ${bucket.count}`
+  );
+
   await releaseChatAccess(acquired.leaseId);
 });

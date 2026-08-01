@@ -626,6 +626,18 @@ export async function mockAuthenticatedApi(
           purchasedFundedCostMicroUsd: 0,
           purchasedEarliestExpiry: null,
         },
+        entitlement: {
+          dailyCreditLimit: 30,
+          dailyCreditsUsed: 0,
+          dailyCreditsRemaining: 30,
+          hasDailyCreditLimit: true,
+          dailyResetsAt: "2099-01-02T00:00:00.000Z",
+          timeZone: "Australia/Brisbane",
+          planCreditsRemaining: 300,
+          planResetsAt: "2099-02-01T00:00:00.000Z",
+          purchasedCreditsRemaining: 0,
+          creditsAvailableNow: 300,
+        },
         creditDebt: {
           credits: 0,
           fundedCostMicroUsd: 0,

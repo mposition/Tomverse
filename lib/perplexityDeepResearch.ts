@@ -16,7 +16,14 @@ import {
 const PERPLEXITY_ASYNC_BASE_URL = "https://api.perplexity.ai/v1/async/sonar";
 
 export class PerplexityDeepResearchError extends Error {
-  constructor(message: string) {
+  // STG-R002: the HTTP status is carried as structured data rather than left
+  // embedded in the message text. Provider health classification must be able
+  // to tell "400, we sent a malformed request" apart from "503, Perplexity is
+  // down" without pattern-matching a sentence.
+  constructor(
+    message: string,
+    public readonly status?: number
+  ) {
     super(message);
     this.name = "PerplexityDeepResearchError";
   }
@@ -286,7 +293,8 @@ export const submitDeepResearchJob = async ({
 
   if (!response.ok) {
     throw new PerplexityDeepResearchError(
-      `Perplexity async submit failed with HTTP ${response.status}.`
+      `Perplexity async submit failed with HTTP ${response.status}.`,
+      response.status
     );
   }
 
@@ -337,7 +345,8 @@ export const pollDeepResearchJob = async (
 
   if (!response.ok) {
     throw new PerplexityDeepResearchError(
-      `Perplexity async poll failed with HTTP ${response.status}.`
+      `Perplexity async poll failed with HTTP ${response.status}.`,
+      response.status
     );
   }
 

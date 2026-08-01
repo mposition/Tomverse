@@ -69,6 +69,15 @@ export function UsageLimitModal({
       const dialog = dialogRef.current;
       const panel = panelRef.current;
       if (!dialog || !panel) return;
+      const eventOwner =
+        event.target instanceof Element
+          ? event.target.closest<HTMLElement>('[role="dialog"][aria-modal="true"]')
+          : null;
+      // A nested portal can be earlier or later than this dialog in the body
+      // depending on the caller's render order. The event target is the stable
+      // ownership boundary: Escape and Tab from the purchase dialog must never
+      // close or cycle focus in the usage-limit dialog underneath it.
+      if (eventOwner && eventOwner !== dialog) return;
       const modalDialogs = Array.from(
         document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]')
       );
@@ -185,8 +194,17 @@ export function UsageLimitModal({
             </a>
           ) : (
             <>
+              {/* The purchase started here, so it has to come back here: the
+                  credit-pack checkout used to hard-code /chat and drop both
+                  the language and any acknowledgement of what happened. */}
               <CreditPackPurchaseButton
                 trigger="limit_hit"
+                ctaLocation="credit_limit_modal"
+                returnTo={`/chat?lang=${encodeURIComponent(lang)}`}
+                // Height deliberately unchanged: this button is inside the
+                // usage-limit modal's visual golden, and re-recording that
+                // baseline is out of scope here (and cannot be done on a
+                // non-canonical runner -- docs/qa/canonical-visual-baseline.md).
                 className="flex items-center justify-center rounded-xl bg-zinc-900 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200"
               >
                 {t("chat.continueWithAdditionalCredits")}

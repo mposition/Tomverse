@@ -255,7 +255,15 @@ export type UsagePatch = {
     planRemainingCredits: number;
     purchasedRemainingCredits: number;
   }>;
-  limits?: Partial<{ creditsDay: number; creditsMonth: number; maxModels: number }>;
+  limits?: Partial<{
+    creditsDay: number;
+    creditsMonth: number;
+    maxModels: number;
+    /** Plan entitlements the sidebar's conversation menu gates on. */
+    allowAttachments: boolean;
+    allowSharing: boolean;
+    allowDownloads: boolean;
+  }>;
 };
 
 /** Overrides GET /api/user/usage on top of mockAuthenticatedApi's default. */
@@ -288,6 +296,21 @@ export async function mockUserUsage(page: Page, patch: UsagePatch = {}) {
       purchasedFundedCostMicroUsd: 0,
       purchasedEarliestExpiry: null,
       ...patch.balances,
+    },
+    entitlement: {
+      dailyCreditLimit: patch.limits?.creditsDay ?? 30,
+      dailyCreditsUsed: patch.usage?.creditsDay ?? 0,
+      dailyCreditsRemaining:
+        (patch.limits?.creditsDay ?? 30) > 0
+          ? (patch.limits?.creditsDay ?? 30) - (patch.usage?.creditsDay ?? 0)
+          : null,
+      hasDailyCreditLimit: (patch.limits?.creditsDay ?? 30) > 0,
+      dailyResetsAt: "2099-01-02T00:00:00.000Z",
+      timeZone: "Australia/Brisbane",
+      planCreditsRemaining: patch.balances?.planRemainingCredits ?? 300,
+      planResetsAt: "2099-02-01T00:00:00.000Z",
+      purchasedCreditsRemaining: patch.balances?.purchasedRemainingCredits ?? 0,
+      creditsAvailableNow: patch.balances?.planRemainingCredits ?? 300,
     },
     creditDebt: {
       credits: 0,

@@ -641,7 +641,7 @@ test.describe("Insufficient credits state", () => {
 
     const purchaseTrigger = page.getByTestId("credit-pack-purchase-trigger");
     await purchaseTrigger.click();
-    const purchaseDialog = page.getByTestId("credit-pack-purchase-dialog");
+    const purchaseDialog = page.getByTestId("credit-pack-modal");
     await expect(purchaseDialog).toBeVisible();
     await expect(purchaseDialog.locator("button").first()).toBeFocused();
     await page.keyboard.press("Escape");

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import {
@@ -15,7 +15,20 @@ import {
 } from "lucide-react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { useTurnstile } from "@/components/chat/useTurnstile";
+import { TurnstileFormSlot } from "@/components/chat/TurnstileFormSlot";
+import { guestVerificationFailureKey } from "@/components/chat/guestVerificationCopy";
+import {
+  isGuestVerificationError,
+  type GuestVerificationFailure,
+} from "@/components/chat/guestVerificationFailure";
 import { dispatchAppToast } from "@/lib/appToast";
+import { submitFeedback } from "@/lib/feedbackClient";
+import {
+  feedbackFailureCopyKey,
+  feedbackMessageState,
+  FEEDBACK_MESSAGE_MAX_LENGTH,
+  FEEDBACK_MESSAGE_MIN_LENGTH,
+} from "@/lib/feedbackPolicy";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
 
 type SupportCopy = {
@@ -386,11 +399,28 @@ const copy: Record<Language, SupportCopy> = {
 };
 
 export function SupportPageContent() {
-  const { lang } = useLanguage();
+  const { lang, t } = useLanguage();
   const { status } = useSession();
   const page = copy[lang] ?? copy.en;
   const [type, setType] = useState<keyof SupportCopy["types"]>("support");
   const [email, setEmail] = useState("");
+  // A caller can preselect the request category with `?topic=`. The pricing
+  // page's plan-change CTA uses it: online plan changes are not supported yet
+  // (docs/policy/plan-change.md), so the CTA sends people here, and landing on
+  // a form already set to "Billing" is the difference between a handoff and
+  // being dropped at a generic contact page.
+  //
+  // Read from `window.location` in an effect rather than through
+  // `useSearchParams`, because this route is `force-static` and that hook
+  // would opt the prerendered tree into client-side rendering.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const requested = new URLSearchParams(window.location.search).get("topic");
+    if (!requested || !(requested in copy.en.types)) return;
+    queueMicrotask(() =>
+      setType(requested as keyof SupportCopy["types"])
+    );
+  }, []);
   const [traceId, setTraceId] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -398,36 +428,79 @@ export function SupportPageContent() {
   const {
     containerRef: turnstileContainerRef,
     getToken: getTurnstileToken,
+    cancel: cancelVerification,
+    failure: verificationFailure,
+    isChallengeVisible,
   } = useTurnstile(isGuestRequest, "support_request");
+  /**
+   * Synchronous duplicate guard: `busy` is state and only lands on the next
+   * render, so two submits in the same frame would both get past it.
+   */
+  const submittingRef = useRef(false);
+
+  const messageState = feedbackMessageState(message);
+  const canSubmit = messageState.isValid && Boolean(email.trim()) && !busy;
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (busy || message.trim().length < 5 || !email.trim()) return;
+    if (submittingRef.current) return;
+    if (!messageState.isValid || !email.trim()) return;
+    submittingRef.current = true;
     setBusy(true);
     try {
-      const turnstileToken = isGuestRequest
-        ? await getTurnstileToken()
-        : undefined;
-      const response = await fetch("/api/feedback", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type,
-          email,
-          message,
-          traceId: traceId || undefined,
-          path: typeof window !== "undefined" ? window.location.pathname : "/support",
-          userAgent: typeof navigator !== "undefined" ? navigator.userAgent : undefined,
-          ...(turnstileToken ? { turnstileToken } : {}),
-        }),
+      let turnstileToken: string | undefined;
+      if (isGuestRequest) {
+        try {
+          turnstileToken = await getTurnstileToken();
+        } catch (error) {
+          const failure = isGuestVerificationError(error)
+            ? error.kind
+            : ("failed" as GuestVerificationFailure);
+          dispatchAppToast(
+            t(guestVerificationFailureKey(failure, "feedback")),
+            "error"
+          );
+          return;
+        }
+      }
+
+      const outcome = await submitFeedback({
+        type,
+        email,
+        message,
+        traceId: traceId.trim() || undefined,
+        path: typeof window !== "undefined" ? window.location.pathname : "/support",
+        userAgent: typeof navigator !== "undefined" ? navigator.userAgent : undefined,
+        ...(turnstileToken ? { turnstileToken } : {}),
       });
-      if (!response.ok) throw new Error(`Support request failed: ${response.status}`);
+
+      if (!outcome.ok) {
+        // Only the shared, allow-listed failure copy -- never a string that
+        // came back in the response body.
+        const copyKey = feedbackFailureCopyKey(outcome.failure);
+        dispatchAppToast(
+          outcome.reference
+            ? t(copyKey).replaceAll("{reference}", outcome.reference)
+            : t(copyKey),
+          "error"
+        );
+        return;
+      }
+
+      // Cleared only once the submission is actually stored.
       setTraceId("");
       setMessage("");
-      dispatchAppToast(page.success, "success");
-    } catch {
-      dispatchAppToast(page.failed, "error");
+      dispatchAppToast(
+        outcome.reference
+          ? t("feedback.sentWithReference").replaceAll(
+              "{reference}",
+              outcome.reference
+            )
+          : page.success,
+        "success"
+      );
     } finally {
+      submittingRef.current = false;
       setBusy(false);
     }
   };
@@ -533,18 +606,55 @@ export function SupportPageContent() {
               {page.messageInput}
               <textarea
                 required
-                minLength={5}
-                maxLength={2000}
+                minLength={FEEDBACK_MESSAGE_MIN_LENGTH}
+                maxLength={FEEDBACK_MESSAGE_MAX_LENGTH}
                 value={message}
                 onChange={(event) => setMessage(event.target.value)}
                 rows={6}
+                aria-describedby="support-message-hint"
                 className="mt-2 w-full resize-none rounded-xl border border-zinc-200 bg-white p-3 text-sm leading-6 outline-none transition focus:border-blue-500 dark:border-zinc-800 dark:bg-zinc-950"
               />
               </label>
-            <div ref={turnstileContainerRef} className="hidden" />
+            <p
+              id="support-message-hint"
+              role="status"
+              data-testid="support-message-hint"
+              className="mt-1.5 text-xs font-semibold leading-5 text-zinc-500 break-keep dark:text-zinc-400"
+            >
+              {messageState.kind === "tooShort"
+                ? t("feedback.messageRemaining").replaceAll(
+                    "{count}",
+                    String(messageState.remaining)
+                  )
+                : t("feedback.messageHelp").replaceAll(
+                    "{min}",
+                    String(FEEDBACK_MESSAGE_MIN_LENGTH)
+                  )}
+              {" "}
+              {t("feedback.messageCounter")
+                .replaceAll("{count}", String(messageState.trimmedLength))
+                .replaceAll(
+                  "{max}",
+                  FEEDBACK_MESSAGE_MAX_LENGTH.toLocaleString("en-US")
+                )}
+            </p>
+            {/*
+              Kept mounted and renderable for the whole verification: Cloudflare
+              cannot run a challenge inside a `display: none` container, so an
+              interactive one had nowhere to appear before this.
+            */}
+            <TurnstileFormSlot
+              containerRef={turnstileContainerRef}
+              isChallengeVisible={isChallengeVisible}
+              failure={verificationFailure}
+              surface="feedback"
+              onCancel={cancelVerification}
+              testId="support-verification"
+            />
             <button
               type="submit"
-              disabled={busy || message.trim().length < 5 || !email.trim()}
+              data-testid="support-submit"
+              disabled={!canSubmit}
               className="mt-5 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 text-sm font-bold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Send className="h-4 w-4" />

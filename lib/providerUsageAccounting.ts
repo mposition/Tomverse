@@ -25,8 +25,12 @@ export type ProviderUsageRecordInput = {
   date?: Date;
   /** Defaults to "internal" (non-billed internal calls, e.g. conversation
    *  titles). AUD-R001's synthetic provider probes pass "probe" so their
-   *  cost stays queryable/cappable separately from other internal usage. */
-  source?: "internal" | "probe";
+   *  cost stays queryable/cappable separately from other internal usage, and
+   *  STG-R002's administrator verification calls pass "admin_verification" for
+   *  the same reason -- operator-triggered spend is answerable separately from
+   *  both user traffic and the automated probe budget. None of these are ever
+   *  billed to a user or written to a credit ledger. */
+  source?: "internal" | "probe" | "admin_verification";
 };
 
 export async function recordInternalProviderUsage({
