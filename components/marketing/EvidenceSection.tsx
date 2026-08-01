@@ -26,18 +26,26 @@ const CARD_STYLES = [
   {
     icon: Globe2,
     iconClass: "bg-accent-web-search-500/10 text-accent-web-search-500",
+    edgeClass: "bg-accent-web-search-500",
+    gridClass: "lg:col-span-7",
   },
   {
     icon: Telescope,
     iconClass: "bg-accent-deep-research-500/10 text-accent-deep-research-500",
+    edgeClass: "bg-accent-deep-research-500",
+    gridClass: "lg:col-span-5",
   },
   {
     icon: Quote,
     iconClass: "bg-status-success-500/10 text-status-success-600",
+    edgeClass: "bg-status-success-500",
+    gridClass: "lg:col-span-5",
   },
   {
     icon: SearchCheck,
     iconClass: "bg-accent-web-search-500/10 text-accent-web-search-500",
+    edgeClass: "bg-accent-web-search-500",
+    gridClass: "lg:col-span-7",
   },
 ] as const;
 
@@ -76,25 +84,41 @@ export function EvidenceSection() {
           headingId="landing-evidence-heading"
         />
 
-        <div className="mt-9 grid gap-4 md:grid-cols-2">
+        <div className="mt-10 grid gap-4 lg:grid-cols-12">
           {cards.map((card, index) => {
-            const { icon: Icon, iconClass } = CARD_STYLES[index];
+            const { icon: Icon, iconClass, edgeClass, gridClass } =
+              CARD_STYLES[index];
             return (
               <article
                 key={card.title}
                 data-testid={TEST_IDS[index]}
-                className="min-w-0 flex flex-col rounded-2xl border border-zinc-200 bg-white p-[20px] dark:border-zinc-800 dark:bg-zinc-950/40"
+                className={`relative min-w-0 overflow-hidden rounded-3xl border border-zinc-200 bg-white p-[20px] dark:border-zinc-800 dark:bg-zinc-950/60 sm:p-[28px] lg:min-h-[270px] ${gridClass}`}
               >
-                <span className={`flex h-[40px] w-[40px] items-center justify-center rounded-xl ${iconClass}`}>
-                  <Icon className="h-5 w-5" aria-hidden="true" />
-                </span>
-                <h3 className="mt-4 text-lg font-black break-words">{card.title}</h3>
-                <p className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-300 break-words">
-                  {card.description}
-                </p>
-                {card.condition && (
-                  <ConditionLine>{card.condition}</ConditionLine>
-                )}
+                <span
+                  aria-hidden="true"
+                  className={`absolute inset-x-0 top-0 h-1 ${edgeClass}`}
+                />
+                <div className="flex items-start justify-between gap-4">
+                  <span
+                    className={`flex h-[44px] w-[44px] shrink-0 items-center justify-center rounded-2xl ${iconClass}`}
+                  >
+                    <Icon className="h-5 w-5" aria-hidden="true" />
+                  </span>
+                  <span className="text-xs font-semibold tracking-[0.16em] text-zinc-400 dark:text-zinc-600">
+                    0{index + 1}
+                  </span>
+                </div>
+                <div className="mt-8 max-w-2xl">
+                  <h3 className="break-words text-xl font-black sm:text-2xl">
+                    {card.title}
+                  </h3>
+                  <p className="mt-3 break-words text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+                    {card.description}
+                  </p>
+                  {card.condition && (
+                    <ConditionLine>{card.condition}</ConditionLine>
+                  )}
+                </div>
               </article>
             );
           })}
