@@ -1,0 +1,138 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+  DEFAULT_PROCESSING_STALE_AFTER_MS,
+  REFUND_REQUEST_METADATA_KEY,
+  decideReconciliation,
+  findRefundForRequest,
+  refundIdempotencyKey,
+} from "../lib/refundSagaCore.ts";
+
+/**
+ * A refund crosses Stripe and PostgreSQL, which cannot share a transaction.
+ * These are the decisions that determine what a half-finished attempt means,
+ * kept free of both systems so they can be checked directly.
+ */
+
+const NOW = new Date("2026-08-01T12:00:00.000Z");
+const ago = (ms) => new Date(NOW.getTime() - ms);
+
+test("an idempotency key is scoped to the request, so a retry cannot refund twice", () => {
+  assert.equal(
+    refundIdempotencyKey("req_1"),
+    refundIdempotencyKey("req_1"),
+    "the same request must always present the same key"
+  );
+  assert.notEqual(refundIdempotencyKey("req_1"), refundIdempotencyKey("req_2"));
+  assert.ok(refundIdempotencyKey("req_1").includes("req_1"));
+});
+
+test("a request still inside the window is left alone", () => {
+  // The claim is held by a request that is simply still running. Reconciling it
+  // would race the attempt that owns it.
+  const decision = decideReconciliation({
+    status: "processing",
+    processingStartedAt: ago(DEFAULT_PROCESSING_STALE_AFTER_MS - 1_000),
+    providerRefund: null,
+    now: NOW,
+  });
+  assert.deepEqual(decision, { action: "wait", reason: "still_recent" });
+});
+
+test("a stale claim with a refund at the provider is completed, not released", () => {
+  // The money moved and the crash lost the record. Releasing this would offer
+  // the request for approval again and refund the customer twice.
+  const refund = {
+    id: "re_1",
+    status: "succeeded",
+    amountCents: 2000,
+    currency: "USD",
+    chargeId: "ch_1",
+  };
+  const decision = decideReconciliation({
+    status: "processing",
+    processingStartedAt: ago(DEFAULT_PROCESSING_STALE_AFTER_MS + 1_000),
+    providerRefund: refund,
+    now: NOW,
+  });
+  assert.deepEqual(decision, { action: "complete", refund });
+});
+
+test("a stale claim with no refund at the provider is released", () => {
+  const decision = decideReconciliation({
+    status: "processing",
+    processingStartedAt: ago(DEFAULT_PROCESSING_STALE_AFTER_MS + 1_000),
+    providerRefund: null,
+    now: NOW,
+  });
+  assert.deepEqual(decision, {
+    action: "release",
+    reason: "no_refund_at_provider",
+  });
+});
+
+test("only processing rows are reconciled", () => {
+  for (const status of ["pending", "approved", "rejected"]) {
+    assert.deepEqual(
+      decideReconciliation({
+        status,
+        processingStartedAt: ago(DEFAULT_PROCESSING_STALE_AFTER_MS + 1_000),
+        providerRefund: { id: "re_1", status: "succeeded", amountCents: 1, currency: "USD", chargeId: "ch_1" },
+        now: NOW,
+      }),
+      { action: "skip", reason: "not_processing" }
+    );
+  }
+});
+
+test("a processing row with no timestamp is not judged abandoned", () => {
+  // It cannot be aged, so it cannot be shown to be stale. Left for a human.
+  assert.deepEqual(
+    decideReconciliation({
+      status: "processing",
+      processingStartedAt: null,
+      providerRefund: null,
+      now: NOW,
+    }),
+    { action: "skip", reason: "no_started_at" }
+  );
+});
+
+test("a refund is matched by request metadata, never by amount", () => {
+  const refunds = [
+    // Same charge, same amount, different request. Matching on anything but
+    // the request id would record this one against the wrong refund.
+    { id: "re_other", amount: 2000, currency: "usd", charge: "ch_1", metadata: { [REFUND_REQUEST_METADATA_KEY]: "req_other" } },
+    { id: "re_mine", amount: 2000, currency: "usd", charge: "ch_1", status: "succeeded", metadata: { [REFUND_REQUEST_METADATA_KEY]: "req_mine" } },
+  ];
+  assert.deepEqual(findRefundForRequest("req_mine", refunds), {
+    id: "re_mine",
+    status: "succeeded",
+    amountCents: 2000,
+    currency: "USD",
+    chargeId: "ch_1",
+  });
+});
+
+test("a refund from before this metadata existed does not match", () => {
+  // The old code wrote `tomverseRefundRequest: "true"`, which identifies
+  // Tomverse but not the request. Claiming one of those would attach an
+  // unrelated refund to this request.
+  const refunds = [
+    { id: "re_legacy", amount: 2000, charge: "ch_1", metadata: { tomverseRefundRequest: "true" } },
+  ];
+  assert.equal(findRefundForRequest("req_mine", refunds), null);
+});
+
+test("an expanded charge object is read as its id", () => {
+  const refunds = [
+    {
+      id: "re_1",
+      amount: 500,
+      currency: "usd",
+      charge: { id: "ch_expanded" },
+      metadata: { [REFUND_REQUEST_METADATA_KEY]: "req_1" },
+    },
+  ];
+  assert.equal(findRefundForRequest("req_1", refunds)?.chargeId, "ch_expanded");
+});

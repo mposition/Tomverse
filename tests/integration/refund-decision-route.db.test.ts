@@ -55,6 +55,42 @@ globalThis.fetch = (async (input: unknown) => {
   return new Response(null, { status: 204 });
 }) as typeof fetch;
 
+/**
+ * The request's status at the instant the payment provider was called.
+ *
+ * This is the only place the pre-Stripe claim is observable: the claim exists
+ * precisely so that, while money may be moving, the row already says so. A
+ * decision that only claims inside its own transaction looks identical
+ * afterwards and differs only here.
+ */
+let statusWhenProviderCalled: string | null = null;
+let providerSubscriptionId: string | null = null;
+let stripeConfigured = false;
+
+mock.module(mod("lib/stripe.ts"), {
+  namedExports: {
+    isStripeConfigured: () => stripeConfigured,
+    getStripe: () => ({
+      subscriptions: {
+        retrieve: async () => {
+          const row = await prisma.refundRequest.findFirst({
+            where: { stripeSubscriptionId: providerSubscriptionId },
+            select: { status: true },
+          });
+          statusWhenProviderCalled = row?.status ?? null;
+          // No invoice: the approval path returns "no_payment_intent" and
+          // creates no refund, so nothing here can charge or refund anyone.
+          return { latest_invoice: null };
+        },
+        cancel: async () => ({}),
+      },
+      invoices: { retrieve: async () => null },
+      charges: { list: async () => ({ data: [] }) },
+      refunds: { create: async () => ({ id: "re_stub", status: "succeeded" }) },
+    }),
+  },
+});
+
 type RouteModule = {
   PATCH: (
     request: Request,
@@ -115,6 +151,9 @@ beforeEach(async () => {
   unexpectedHostCalls = [];
   sessionOverride = null;
   failNextEnqueue = false;
+  statusWhenProviderCalled = null;
+  providerSubscriptionId = null;
+  stripeConfigured = false;
 });
 
 after(async () => {
@@ -326,4 +365,127 @@ test("the opposite decision on a reviewed request is still refused", async () =>
   const deliveries = await deliveriesFor(request.id);
   assert.equal(deliveries.length, 1);
   assert.equal(deliveries[0]!.kind, "refund_request_rejected");
+});
+
+// --- the Stripe boundary -----------------------------------------------------
+//
+// The refund itself happens at Stripe, outside any transaction this process can
+// hold. `processing` is what makes that survivable: it is claimed before the
+// provider is called and left only after the local commit, so a crash in
+// between leaves a row that says "money may have moved and nobody wrote it
+// down" -- rather than a `pending` row that the next attempt would refund
+// again.
+//
+// Stripe is not configured in this file, so the approve path takes the "nothing
+// to refund at the provider" branch and the claim/release sequencing is what is
+// under test.
+
+test("the request is already claimed when the payment provider is called", async () => {
+  const { session } = await seedOwnerAdmin();
+  const customer = await prisma.user.create({
+    data: { email: `claim-${Date.now()}@tomverse.test`, plan: "Pro" },
+  });
+  providerSubscriptionId = `sub_claim_${Date.now()}`;
+  const request = await prisma.refundRequest.create({
+    data: {
+      userId: customer.id,
+      email: customer.email,
+      plan: "Pro",
+      stripeSubscriptionId: providerSubscriptionId,
+      status: "pending",
+    },
+  });
+  stripeConfigured = true;
+  sessionOverride = session;
+
+  assert.equal((await patch(request.id, { action: "approve" })).status, 200);
+
+  // The invariant the whole saga rests on. If the row were still `pending`
+  // here, a crash after the refund left it open for a second approval -- and a
+  // second refund.
+  assert.equal(
+    statusWhenProviderCalled,
+    "processing",
+    "the refund request must be claimed before the payment provider is called"
+  );
+
+  const stored = await prisma.refundRequest.findUniqueOrThrow({
+    where: { id: request.id },
+  });
+  assert.equal(stored.status, "approved");
+  // A claim that outlived its decision would be picked up by reconciliation as
+  // an abandoned attempt.
+  assert.equal(stored.processingStartedAt, null);
+});
+
+test("a request being processed is refused rather than retried", async () => {
+  const { session } = await seedOwnerAdmin();
+  const request = await seedPendingRequest();
+  sessionOverride = session;
+
+  // Stand in for an attempt that reached Stripe and has not come back.
+  await prisma.refundRequest.update({
+    where: { id: request.id },
+    data: { status: "processing", processingStartedAt: new Date() },
+  });
+
+  const response = await patch(request.id, { action: "approve" });
+  assert.equal(response.status, 409);
+  const payload = (await response.json()) as { error?: string };
+  // The refusal has to say why, or an operator reads it as "already reviewed"
+  // and goes looking for a decision that does not exist yet.
+  assert.match(payload.error || "", /processed|reconcil/i);
+
+  // Untouched: this is the state reconciliation needs to find.
+  const stored = await prisma.refundRequest.findUniqueOrThrow({
+    where: { id: request.id },
+  });
+  assert.equal(stored.status, "processing");
+  assert.equal(await prisma.adminAuditLog.count(), 0);
+  assert.equal((await deliveriesFor(request.id)).length, 0);
+});
+
+test("reconciliation releases a stale claim when the provider holds no refund", async () => {
+  const { reconcileProcessingRefundRequests } = (await import(
+    mod("lib/refundReconciliation.ts")
+  )) as typeof import("@/lib/refundReconciliation");
+
+  const request = await seedPendingRequest();
+  const startedAt = new Date(Date.now() - 30 * 60_000);
+  await prisma.refundRequest.update({
+    where: { id: request.id },
+    data: { status: "processing", processingStartedAt: startedAt },
+  });
+
+  // Stripe is not configured here, so the pass cannot ask and must not guess.
+  const skipped = await reconcileProcessingRefundRequests({ limit: 10 });
+  assert.equal(skipped.examined, 1);
+  assert.equal(skipped.unresolved, 1);
+  assert.equal(skipped.released, 0);
+  assert.equal(
+    (await prisma.refundRequest.findUniqueOrThrow({ where: { id: request.id } }))
+      .status,
+    "processing",
+    "an unreachable provider must leave the row exactly as it is"
+  );
+});
+
+test("reconciliation leaves a claim that is still inside its window", async () => {
+  const { reconcileProcessingRefundRequests } = (await import(
+    mod("lib/refundReconciliation.ts")
+  )) as typeof import("@/lib/refundReconciliation");
+
+  const request = await seedPendingRequest();
+  await prisma.refundRequest.update({
+    where: { id: request.id },
+    data: { status: "processing", processingStartedAt: new Date() },
+  });
+
+  const result = await reconcileProcessingRefundRequests({ limit: 10 });
+  assert.equal(result.waiting, 1);
+  assert.equal(result.released, 0);
+  assert.equal(result.completed, 0);
+  // No Stripe call is made for a request still in flight, which is also why a
+  // healthy queue costs nothing.
+  assert.deepEqual(unexpectedHostCalls, []);
 });

@@ -787,7 +787,16 @@ model RefundRequest {
   subscriptionCurrentPeriodEnd DateTime?
   subscriptionBillingInterval  String?
   reason                       String?
+  /// pending | processing | approved | rejected
+  ///
+  /// `processing` is claimed before the Stripe refund is created and released
+  /// or completed after it. It is what makes the money side recoverable: a
+  /// crash between Stripe and the local commit leaves the row here rather than
+  /// back in `pending`, where a retry would issue a second refund.
   status                       String                       @default("pending")
+  /// When the row entered `processing`. Reconciliation only looks at rows that
+  /// have been there longer than one request could reasonably take.
+  processingStartedAt          DateTime?
   adminNote                    String?
   reviewedByUserId             String?
   stripeRefundId               String?
@@ -800,6 +809,7 @@ model RefundRequest {
   updatedAt                    DateTime                     @updatedAt
   timelineEvents               RefundRequestTimelineEvent[]
 
+  @@index([status, processingStartedAt])
   @@index([status, requestedAt])
   @@index([userId, requestedAt])
   @@index([email])
