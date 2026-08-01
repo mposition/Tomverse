@@ -124,6 +124,33 @@ UI-012에서 승인된 정책(B안)입니다. accent 색은 **hue가 아니라 �
   초기화하지도, 추가 지급하지도, 이미 쓴 크레딧을 회수하지도 않습니다.
   업그레이드와 다운그레이드가 같은 함수를 씁니다.
 
+# Default model (GPT-5.6 Luna)
+
+`DEFAULT_MODEL_ID`, 게스트 기본값, `gpt-5-4-mini`의 lifecycle을 건드리기 전에
+읽습니다.
+
+- `docs/policy/default-model-luna-migration.md`
+
+- **기본 모델은 `gpt-5-6-luna`입니다.** `lib/models.ts`의 `DEFAULT_MODEL_ID`,
+  `lib/appDefaults.ts`의 `GUEST_DEFAULT_MODEL_ID`와 `GUEST_BRAND_TRIO_MODEL_IDS`,
+  Prisma 컬럼 기본값이 함께 움직입니다. 한쪽만 바꾸지 않습니다.
+- **`gpt-5-4-mini`는 은퇴하지 않았습니다.** enabled·publiclyListed 상태를
+  유지하는 것은 의도된 관찰 기간입니다. 정책 문서 4.3의 eval 기준을 실제로
+  충족하기 전에는 disabled로 내리지 않습니다.
+- OpenAI는 `gpt-5.4-mini`를 계속 서비스합니다. 은퇴하더라도 공급자 종료가
+  아니라 **Tomverse 제품 카탈로그 결정**이며, `operationalReason`이 이를
+  구분해야 합니다.
+- 두 모델 모두 Guest 계층 Standard **1크레딧**입니다. 은퇴 평가 중에 크레딧을
+  임의로 바꾸지 않고, 기존 mini 사용자를 Terra·Sol 같은 상위 유료 모델로
+  자동 이동시키지 않습니다.
+- 사용자 선택 상태(`UserSettings.defaultModel`,
+  `Conversation.selectedModels`)의 일괄 이전은
+  `scripts/run-default-model-reconciliation.mjs`가 담당하며 **은퇴 배포와 함께**
+  실행합니다. `Conversation.selectedModels`는 문자열 치환이 아니라 JSON 배열로
+  파싱해 변환하고, malformed 값은 파괴하지 않고 보고합니다.
+- 과거 `Message.modelId`, usage reservation/settlement의 modelId와 pricing
+  snapshot, 결제 ledger, `catalogDeleted`는 소급 변경하지 않습니다.
+
 <!-- BEGIN:mobile-chat-composer-invariant -->
 ## Mobile chat composer invariant
 

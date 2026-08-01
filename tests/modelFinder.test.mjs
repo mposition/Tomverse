@@ -121,8 +121,10 @@ test("complementary suggestion fills the missing capability in priority order", 
     "grok-4-5",
     "perplexity/sonar",
   ]);
+  // Tracks the head of STANDARD_CANDIDATE_ORDER, which gpt-5-6-luna took
+  // over from gpt-5-4-mini when it became the app default.
   assert.deepEqual(hasReasoningAndResearch, {
-    modelId: "gpt-5-4-mini",
+    modelId: "gpt-5-6-luna",
     reason: "different_provider",
   });
 });

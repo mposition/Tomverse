@@ -325,6 +325,47 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         effectiveDate: "2026-08-01",
     },
     {
+        // Added when gpt-5-6-luna took over as the default model and 5.4 mini
+        // became the baseline it is compared against. Until then this model
+        // had no explicit profile at all, so it resolved through the generic
+        // "standard" class fallback of US$0.50 in / US$1.00 out -- against a
+        // published US$4.50 output rate, i.e. every 5.4 mini answer was
+        // costed internally at roughly a fifth of what it actually costs, and
+        // its reservation was sized from that same wrong number.
+        //
+        // Flat-priced: unlike the GPT-5.6 family above, 5.4 mini publishes no
+        // long-context price step, so there is one unbounded tier rather than
+        // a gpt56Tiers() pair.
+        //
+        // Three separate output numbers, deliberately not collapsed:
+        //   * 128,000 -- the provider's published maximum output.
+        //   * maxOutputTokens -- the cap this app actually sends upstream
+        //     (app/api/chat/route.ts passes it straight to streamText), set
+        //     to the published maximum, matching every other OpenAI entry
+        //     here rather than inheriting the fallback's unrelated 2,048.
+        //   * reservationOutputTokens -- what the credit reservation carries,
+        //     kept identical to gpt-5-6-luna's 4,096 so the two models are
+        //     reserved on the same basis while they are being compared.
+        // The reservation basis stays "conservative_default" because no p90
+        // output-token telemetry was available to size it from.
+        modelId: "gpt-5-4-mini",
+        provider: "openai",
+        apiModelId: "gpt-5.4-mini",
+        ...DIRECT_STANDARD,
+        tiers: flatTier(0.75, 4.5, 0.1),
+        reasoningTokenBilling: "billed_as_output",
+        // No nativeSearchCostMicroUsdPerQuery: this model is "unverified" in
+        // lib/webSearchCapability.ts, so no native search tool is ever
+        // attached to it and there is no per-query cost to book.
+        maxOutputTokens: 128_000,
+        reservationOutputTokens: 4_096,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: true,
+        priceSource: "openai_gpt_5_4_mini_model_page",
+        pricingVersion: "openai-gpt-5.4-mini-2026-08-01",
+        effectiveDate: "2026-08-01",
+    },
+    {
         modelId: "gemini-3-6-flash",
         provider: "google",
         apiModelId: "gemini-3.6-flash",

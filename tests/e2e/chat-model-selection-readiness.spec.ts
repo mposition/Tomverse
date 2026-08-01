@@ -68,7 +68,13 @@ test.describe("desktop model selection readiness", () => {
 
     await expect(select).toBeEnabled();
     await expect(select).toHaveAttribute("aria-busy", "false");
-    await expect(select).toHaveValue("gpt-5-4-mini");
+    // /chat lands on the welcome screen without opening a conversation, so the
+    // panel settles on the compiled-in default rather than on the seeded
+    // conversation's selectedModels. This read gpt-5-4-mini until 2026-08-01
+    // and passed only because DEFAULT_MODEL_ID happened to be the same id the
+    // fixture seeds -- the assertion proved the select had a usable value once
+    // the gate lifted, not that conversation data had been applied.
+    await expect(select).toHaveValue("gpt-5-6-luna");
   });
 
   test("guest mode never gates the model select on conversation loading", async ({

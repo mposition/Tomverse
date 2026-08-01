@@ -152,19 +152,21 @@ test("signed-in users on Free are told to upgrade rather than sign in", () => {
 test("a provider outage removes the model instead of recommending a dead slot", () => {
   const healthy = getModelRecommendations(freeInput);
   const everydayPick = healthy.find((item) => item.useCase === "everyday");
-  assert.equal(everydayPick.modelId, "gpt-5-4-mini");
+  assert.equal(everydayPick.modelId, "gpt-5-6-luna");
 
   const degraded = getModelRecommendations({
     ...freeInput,
-    modelStatuses: { "gpt-5-4-mini": "unavailable" },
+    modelStatuses: { "gpt-5-6-luna": "unavailable" },
   });
   assert.equal(
-    degraded.some((item) => item.modelId === "gpt-5-4-mini"),
+    degraded.some((item) => item.modelId === "gpt-5-6-luna"),
     false
   );
+  // Falls through to the next everyday candidate, which is the model Luna
+  // replaced as the default and which is still enabled during observation.
   assert.equal(
     degraded.find((item) => item.useCase === "everyday").modelId,
-    "gpt-5-6-luna"
+    "gpt-5-4-mini"
   );
 });
 
@@ -297,9 +299,13 @@ test("guests get a stable set that does not depend on personalization", () => {
 test("a non-English interface prefers a multilingual cost-efficient model", () => {
   const english = getModelRecommendations({ ...freeInput, language: "en" });
   const korean = getModelRecommendations({ ...freeInput, language: "ko" });
+  // gpt-5-6-luna heads both the "everyday" and "value" candidate lists, but a
+  // model is only ever recommended once per response, so once it takes the
+  // everyday slot as the app default the value slot falls to the next
+  // candidate.
   assert.equal(
     english.find((item) => item.useCase === "value").modelId,
-    "gpt-5-6-luna"
+    "gemini-2-5-flash"
   );
   assert.equal(
     korean.find((item) => item.useCase === "value").modelId,

@@ -96,7 +96,7 @@ model UserSettings {
 
   theme                  String    @default("dark") // "dark", "light", "system"
   language               String    @default("en") // "ko", "en"
-  defaultModel           String    @default("gpt-5-4-mini")
+  defaultModel           String    @default("gpt-5-6-luna")
   preferredTasks         Json?
   preferredPriority      String?
   usesFilesFrequently    String?
@@ -179,7 +179,7 @@ model Conversation {
   title     String
   projectId String?
 
-  selectedModels String @default("[\"gpt-5-4-mini\"]")
+  selectedModels String @default("[\"gpt-5-6-luna\"]")
   disabledPanels String @default("[]")
   webSearchMode  String @default("off") // off | auto | always
 

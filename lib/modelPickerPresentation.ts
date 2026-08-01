@@ -12,8 +12,11 @@ export type ModelPickerFeature = "image" | "reasoning" | "search" | "code";
 // because after the xAI consolidation grok-4-5 is Pro-only and a filter every
 // visitor sees should not be two-thirds unreachable. Explicit reasoning is
 // still reachable below Pro through deepseek-v4-pro and gpt-5-6-terra.
+// The OpenAI slot follows DEFAULT_MODEL_ID, which moved to gpt-5-6-luna on
+// 2026-08-01. gpt-5-4-mini stays enabled and selectable from the full list;
+// it is simply no longer the model this filter puts in front of everyone.
 export const RECOMMENDED_MODEL_IDS = [
-  "gpt-5-4-mini",
+  "gpt-5-6-luna",
   "claude-sonnet-5",
   "gemini-3-6-flash",
 ] as const;

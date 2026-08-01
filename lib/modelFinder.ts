@@ -57,8 +57,16 @@ const REASONING_SUGGESTION_ORDER = [
   "gpt-5-5-thinking",
 ] as const;
 
+// gpt-5-6-luna holds the OpenAI generalist slot that gpt-5-4-mini used to
+// hold, because this wizard exists to pick a *default* for a new account and
+// the app default is now Luna. 5.4 mini is deliberately absent rather than
+// listed alongside it: it is still enabled and freely selectable from the
+// picker, but onboarding someone onto the model currently being evaluated for
+// retirement, when its successor is cheaper and longer-context, is not a
+// recommendation this wizard should make. Two near-identical OpenAI Standard
+// models would also crowd the three-slot result and cost it provider spread.
 const STANDARD_CANDIDATE_ORDER = [
-  "gpt-5-4-mini",
+  "gpt-5-6-luna",
   "gemini-2-5-flash",
   "claude-haiku-4-5",
   "deepseek-v4-flash",
@@ -69,21 +77,21 @@ const STANDARD_CANDIDATE_ORDER = [
 const TASK_SCORES: Record<ModelFinderTask, Partial<Record<string, number>>> = {
   documents: {
     "gemini-2-5-flash": 5,
-    "gpt-5-4-mini": 4,
+    "gpt-5-6-luna": 4,
     "claude-haiku-4-5": 3,
   },
   writing: {
     "claude-haiku-4-5": 11,
-    "gpt-5-4-mini": 3,
+    "gpt-5-6-luna": 3,
     "gemini-2-5-flash": 2,
   },
   coding: {
     "deepseek-v4-flash": 12,
-    "gpt-5-4-mini": 3,
+    "gpt-5-6-luna": 3,
     "qwen3.6-flash": 2,
   },
   research: {
-    "gpt-5-4-mini": 4,
+    "gpt-5-6-luna": 4,
     "gemini-2-5-flash": 4,
     "qwen3.6-flash": 2,
   },
@@ -93,7 +101,7 @@ const TASK_SCORES: Record<ModelFinderTask, Partial<Record<string, number>>> = {
     "gemini-2-5-flash": 3,
   },
   general: {
-    "gpt-5-4-mini": 5,
+    "gpt-5-6-luna": 5,
     "gemini-2-5-flash": 5,
     "claude-haiku-4-5": 2,
   },
@@ -105,21 +113,21 @@ const PRIORITY_SCORES: Record<
 > = {
   fast: {
     "gemini-2-5-flash": 5,
-    "gpt-5-4-mini": 3,
+    "gpt-5-6-luna": 3,
     "deepseek-v4-flash": 2,
   },
   balanced: {
-    "gpt-5-4-mini": 5,
+    "gpt-5-6-luna": 5,
     "gemini-2-5-flash": 4,
     "claude-haiku-4-5": 2,
   },
   deep: {
-    "gpt-5-4-mini": 5,
+    "gpt-5-6-luna": 5,
     "claude-haiku-4-5": 4,
     "gemini-2-5-flash": 2,
   },
   sources: {
-    "gpt-5-4-mini": 4,
+    "gpt-5-6-luna": 4,
     "gemini-2-5-flash": 4,
     "qwen3.6-flash": 2,
   },
@@ -131,21 +139,21 @@ const FILE_SCORES: Record<
 > = {
   documents: {
     "gemini-2-5-flash": 6,
-    "gpt-5-4-mini": 4,
+    "gpt-5-6-luna": 4,
     "claude-haiku-4-5": 3,
   },
   images: {
     "gemini-2-5-flash": 6,
-    "gpt-5-4-mini": 5,
+    "gpt-5-6-luna": 5,
   },
   rarely: {
-    "gpt-5-4-mini": 2,
+    "gpt-5-6-luna": 2,
     "deepseek-v4-flash": 1,
   },
 };
 
 const REASON_BY_MODEL: Record<string, string> = {
-  "gpt-5-4-mini": "modelFinder.reasons.general",
+  "gpt-5-6-luna": "modelFinder.reasons.general",
   "gemini-2-5-flash": "modelFinder.reasons.filesFast",
   "claude-haiku-4-5": "modelFinder.reasons.writing",
   "deepseek-v4-flash": "modelFinder.reasons.coding",
