@@ -5,6 +5,7 @@ import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { usageBucketCount } from "@/lib/chatUsageBucketCount";
 import {
     apiSecurityResponse,
     consumeApiRateLimit,
@@ -214,11 +215,14 @@ export async function POST(request: Request) {
         ]);
 
         const bucketCount = (period: string) =>
-            buckets.find((row) => row.period === period)?.count || 0;
+            usageBucketCount(buckets.find((row) => row.period === period)?.count);
         const providerBucketCount = (provider: string, period: string) =>
-            providerBuckets.find(
-                (row) => row.key === `provider:${provider}` && row.period === period
-            )?.count || 0;
+            usageBucketCount(
+                providerBuckets.find(
+                    (row) =>
+                        row.key === `provider:${provider}` && row.period === period
+                )?.count
+            );
 
         const requiredCredits = budgets.reduce(
             (sum, budget) => sum + budget.usageCredits,
