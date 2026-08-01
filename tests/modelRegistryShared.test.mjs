@@ -45,6 +45,15 @@ test("catalog reconciliation is exact-ID scoped and preserves operator-owned fie
   assert.equal(scout.data.publiclyListed, false);
   assert.equal(scout.data.status, "disabled");
   assert.equal(scout.data.replacementModelId, "groq-gpt-oss-120b");
+
+  for (const modelId of ["llama-3-1", "llama-3-3"]) {
+    const llama = rows.find((row) => row.id === modelId);
+    assert.ok(llama, modelId);
+    assert.equal(llama.data.enabled, false, modelId);
+    assert.equal(llama.data.publiclyListed, false, modelId);
+    assert.equal(llama.data.status, "disabled", modelId);
+    assert.equal(llama.data.replacementModelId, "groq-gpt-oss-120b", modelId);
+  }
 });
 
 test("model registry URL validation blocks SSRF-oriented endpoints", () => {

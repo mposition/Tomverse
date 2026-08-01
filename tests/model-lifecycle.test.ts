@@ -131,6 +131,8 @@ test("provider retirements remain historical rows with exact replacements", () =
   const expected = new Map([
     ["deepseek-r1", "deepseek-v4-flash"],
     ["grok-3", "grok-4-3"],
+    ["llama-3-1", "groq-gpt-oss-120b"],
+    ["llama-3-3", "groq-gpt-oss-120b"],
     ["llama-4-scout", "groq-gpt-oss-120b"],
   ]);
 

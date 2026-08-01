@@ -778,7 +778,7 @@ const reviewerIds = () => {
     .filter(Boolean);
   return configured?.length
     ? configured
-    : ["mistral-medium-3-1", "claude-sonnet-5", "llama-3-3"];
+    : ["mistral-medium-3-1", "claude-sonnet-5", "groq-gpt-oss-120b"];
 };
 
 const quickReviewerIds = () => {
@@ -793,9 +793,9 @@ const quickReviewerIds = () => {
         "gemini-2-5-flash",
         "claude-haiku-4-5",
         "mistral-small-4",
-        // Was llama-4-scout until Groq stopped serving it; kept a Groq model
-        // here so the default reviewer panel retains its provider spread.
-        "llama-3-3",
+        // Keep a Groq model here so the default reviewer panel retains its
+        // provider spread after the Llama shutdown migration.
+        "groq-gpt-oss-120b",
       ];
 };
 

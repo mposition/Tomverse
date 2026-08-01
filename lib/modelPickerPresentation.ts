@@ -465,7 +465,7 @@ export const modelMatchesCapability = (
     return support === "native" || support === "search-model";
   }
   const name = `${model.id} ${model.name}`.toLowerCase();
-  return ["mini", "flash", "haiku", "small", "lite", "llama-3-1"].some((term) =>
+  return ["mini", "flash", "haiku", "small", "lite", "luna"].some((term) =>
     name.includes(term)
   );
 };

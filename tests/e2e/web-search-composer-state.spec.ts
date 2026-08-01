@@ -15,10 +15,10 @@ import {
 // exception -- some models cannot search, or none can -- earns anything more.
 
 // From lib/webSearchCapability.ts: claude-haiku-4-5 has confirmed
-// provider-native search; gpt-5-4-mini is unverified and llama-3-1 is
+// provider-native search; gpt-5-4-mini is unverified and DeepSeek V4 Flash is
 // unsupported. All three are guest-selectable.
 const SUPPORTED = "claude-haiku-4-5";
-const UNSUPPORTED = ["gpt-5-4-mini", "llama-3-1"];
+const UNSUPPORTED = ["gpt-5-4-mini", "deepseek-v4-flash"];
 const TITLE = "Web search state";
 const CHAT_ID = "guest_web_search_state";
 

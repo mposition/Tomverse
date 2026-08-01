@@ -82,7 +82,13 @@ test("new models are listed and historical retirements stay hidden on desktop an
     ).toHaveCount(1);
   }
 
-  for (const modelId of ["deepseek-r1", "grok-3", "llama-4-scout"]) {
+  for (const modelId of [
+    "deepseek-r1",
+    "grok-3",
+    "llama-3-1",
+    "llama-3-3",
+    "llama-4-scout",
+  ]) {
     await expect(
       dialog.locator(`[data-testid="model-option"][data-model-id="${modelId}"]`)
     ).toHaveCount(0);
@@ -188,7 +194,7 @@ test("the filter sheet reports its active count, result count, and resets", asyn
     dialog.locator('[data-testid="model-option"][data-model-id="perplexity/sonar"]')
   ).toHaveCount(1);
   await expect(
-    dialog.locator('[data-testid="model-option"][data-model-id="llama-3-1"]')
+    dialog.locator('[data-testid="model-option"][data-model-id="deepseek-v4-flash"]')
   ).toHaveCount(0);
   await expect(
     dialog.locator('[data-testid="model-option"][data-model-id="gpt-5-4-mini"]')

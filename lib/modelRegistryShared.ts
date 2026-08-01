@@ -213,6 +213,8 @@ export const STATIC_CATALOG_RECONCILIATION_MODEL_IDS = [
   "grok-4-3",
   "grok-4-5",
   "grok-3",
+  "llama-3-1",
+  "llama-3-3",
   "llama-4-scout",
   "deepseek-v4-flash",
   "deepseek-v4-pro",

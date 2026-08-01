@@ -20,8 +20,6 @@ Tomverse Insight의 정적 카탈로그, 운영 registry bootstrap, 가격 및 �
 | 유지 | `gpt-5-5` | `gpt-5.5` | – | 공식 지원 중; 기본 모델 변경 없음 |
 | 유지 | `gpt-5-4-mini` | `gpt-5.4-mini` | – | 공식 지원 중; 기본 모델로 유지 |
 | 유지 | `grok-4-5` | `grok-4.5` | – | live catalog와 공식 모델 문서에서 확인 |
-| 유지 | `llama-3-1` | `llama-3.1-8b-instant` | – | 2026-08-16 종료 전이므로 2026-08-01에는 유지 |
-| 유지 | `llama-3-3` | `llama-3.3-70b-versatile` | – | 2026-08-16 종료 전이므로 2026-08-01에는 유지 |
 | 유지 | `claude-fable-5` | `claude-fable-5` | – | Anthropic 공식 상태 Active |
 | 유지 | `claude-opus-4-8` | `claude-opus-4-8` | – | Anthropic 공식 상태 Active |
 | 유지 | `claude-sonnet-5` | `claude-sonnet-5` | – | Anthropic 공식 상태 Active |
@@ -32,6 +30,8 @@ Tomverse Insight의 정적 카탈로그, 운영 registry bootstrap, 가격 및 �
 | 유지 | `perplexity/sonar-deep-research` | `sonar-deep-research` | – | 공식 Sonar Deep Research model page 유지 |
 | 은퇴 | `deepseek-r1` | `deepseek-reasoner` | `deepseek-v4-flash` | historical row 유지, disabled·delisted |
 | 은퇴 | `grok-3` | `grok-3` | `grok-4-3` | historical row 유지, disabled·delisted |
+| 선제 은퇴 | `llama-3-1` | `llama-3.1-8b-instant` | `groq-gpt-oss-120b` | Groq 종료일 전 Tomverse public catalog에서 제거 |
+| 선제 은퇴 | `llama-3-3` | `llama-3.3-70b-versatile` | `groq-gpt-oss-120b` | Groq 종료일 전 Tomverse public catalog에서 제거 |
 | 은퇴 유지/교체 변경 | `llama-4-scout` | `meta-llama/llama-4-scout-17b-16e-instruct` | `groq-gpt-oss-120b` | 종료 임박 Llama 3.3 replacement를 제거 |
 
 `gpt-5-5-thinking`은 Tomverse id를 유지합니다. `apiModel`은 기존처럼 `gpt-5.5`지만,
@@ -134,8 +134,9 @@ E2E는 DB 비활성 fixture 때문에 `127.0.0.1:1` P1001 진단 로그를 남�
   운영 cap과 cache 미검증 상태를 사용합니다.
 - Grok의 200K+ 장문 tier, GPT-5.6의 272K+ tier는 단위 테스트로 계산을 검증했지만
   비용이 큰 실제 장문 요청은 live로 실행하지 않았습니다.
-- `llama-3-1`, `llama-3-3`은 2026-08-16 종료 예정이므로 그 전에 별도 historical
-  retirement와 `groq-gpt-oss-120b` replacement migration을 배포해야 합니다.
+- `llama-3-1`, `llama-3-3`은 Groq의 2026-08-16 종료일보다 앞서 Tomverse에서
+  historical retirement로 전환했습니다. 운영 DB에는 exact-ID reconciliation으로
+  `groq-gpt-oss-120b` replacement가 적용됩니다.
 - Perplexity의 네 Sonar 모델은 정확한 공식 model page가 남아 있어 유지했지만 문서
   탐색 구조상 Sonar API가 `Legacy API` 아래에 있습니다. 명시된 종료일은 없으므로
   자동 은퇴하지 않았으며 Agent API 전환 공지를 catalog monitor와 함께 추적해야 합니다.

@@ -73,7 +73,6 @@ const USE_CASE_CANDIDATES: Record<
     "grok-3-mini",
     "gemini-2-5-flash",
     "qwen3.6-flash",
-    "llama-3-1",
     "claude-haiku-4-5",
   ],
   writing: [
@@ -116,7 +115,6 @@ const USE_CASE_CANDIDATES: Record<
     "gpt-5-6-luna",
     "gemini-2-5-flash",
     "groq-gpt-oss-120b",
-    "llama-3-1",
     "mistral-small-4",
     "glm-5.2",
     "grok-3-mini",
