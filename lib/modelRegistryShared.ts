@@ -207,6 +207,16 @@ export const STATIC_CATALOG_RECONCILIATION_MODEL_IDS = [
   "gpt-5-6-sol",
   "gpt-5-6-terra",
   "gpt-5-6-luna",
+  // Added 2026-08-01 with the Luna default switch. 5.4 mini is NOT being
+  // retired here -- it stays enabled, so the `lifecycle` branch below is not
+  // taken for it and its enabled/publiclyListed/status are left alone. What
+  // this entry does reach is the metadata the switch changed: its first
+  // explicit price profile (US$0.75/US$4.50, cached 0.1x), its 128K output
+  // cap and 4,096-token reservation, and its published 400K context window.
+  // Without it, an environment seeded before today would keep the generic
+  // US$0.50/US$1.00 class-fallback numbers frozen in its row forever, because
+  // createMany(skipDuplicates) never updates an existing row.
+  "gpt-5-4-mini",
   "gemini-3-6-flash",
   "gemini-2-5-flash",
   "grok-4",

@@ -68,8 +68,12 @@ const USE_CASE_CANDIDATES: Record<
   readonly string[]
 > = {
   everyday: [
-    "gpt-5-4-mini",
+    // Swapped on 2026-08-01 when gpt-5-6-luna became DEFAULT_MODEL_ID.
+    // gpt-5-4-mini keeps the slot behind it: it is still enabled and still a
+    // reasonable everyday pick, so it stays discoverable for the observation
+    // period, and this list skips it automatically if it is ever retired.
     "gpt-5-6-luna",
+    "gpt-5-4-mini",
     "gemini-2-5-flash",
     "qwen3.6-flash",
     "claude-haiku-4-5",
@@ -82,7 +86,7 @@ const USE_CASE_CANDIDATES: Record<
     "mistral-medium-3-1",
     "qwen3.7-plus",
     "claude-fable-5",
-    "gpt-5-4-mini",
+    "gpt-5-6-luna",
   ],
   analysis: [
     "gpt-5-6-sol",
@@ -98,7 +102,7 @@ const USE_CASE_CANDIDATES: Record<
     "gemini-3-6-flash",
     "gemini-3-5-flash",
     "gemini-2-5-flash",
-    "gpt-5-4-mini",
+    "gpt-5-6-luna",
     "gemini-3-1-pro",
   ],
   coding: [

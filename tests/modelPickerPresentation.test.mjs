@@ -58,7 +58,7 @@ test("usage bands supplement rather than replace exact credit values", () => {
 
 test("recommended and capability filters use model behavior", () => {
   assert.deepEqual(RECOMMENDED_MODEL_IDS, [
-    "gpt-5-4-mini",
+    "gpt-5-6-luna",
     "claude-sonnet-5",
     "gemini-3-6-flash",
   ]);

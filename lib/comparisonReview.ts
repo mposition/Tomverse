@@ -804,7 +804,7 @@ const reviewerIds = () => {
  * Qwen 3.6 keeps both the spread and the "quick" cost profile.
  */
 export const QUICK_COMPARISON_DEFAULT_MODEL_IDS = [
-  "gpt-5-4-mini",
+  "gpt-5-6-luna",
   "gemini-2-5-flash",
   "claude-haiku-4-5",
   "mistral-small-4",

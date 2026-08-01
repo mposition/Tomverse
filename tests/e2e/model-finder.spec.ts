@@ -90,7 +90,7 @@ test("the in-picker combo CTA recommends an AI combination and applies only the 
       tasks: ["documents"],
       priority: "fast",
     },
-    modelIds: ["gpt-5-4-mini", "gemini-2-5-flash"],
+    modelIds: ["gpt-5-6-luna", "gemini-2-5-flash"],
   });
 
   // Completing the combo should land on a fresh chat rather than swap the
@@ -165,9 +165,22 @@ test("selecting two models suggests one complementary model instead of the full 
 
   await page.getByTestId("model-combo-complementary-add").click();
   await openModelCatalogue(page);
-  await expect(
-    page.locator('[data-testid="model-option"][data-model-id="groq-gpt-oss-120b"]')
-  ).toHaveAttribute("aria-pressed", "true");
+
+  // The selection carries no reasoning model, so the complementary slot is
+  // filled from REASONING_SUGGESTION_ORDER. This asserted groq-gpt-oss-120b
+  // until that model left the catalogue, which left the expectation naming a
+  // model the picker can no longer render -- the assertion has been failing
+  // since, independently of which model is the app default.
+  //
+  // The live head of that order is grok-4-5, which is Pro-only. This viewer is
+  // on Free, so the suggestion is offered as an upgrade prompt and the add is
+  // refused rather than silently handing out a tier they have not paid for --
+  // the same rule the gated recommendations in model-picker.spec.ts assert.
+  const suggestedOption = page.locator(
+    '[data-testid="model-option"][data-model-id="grok-4-5"]'
+  );
+  await expect(suggestedOption).toHaveAttribute("data-model-plan-locked", "true");
+  await expect(suggestedOption).toHaveAttribute("aria-pressed", "false");
 });
 
 test("the picker shows a compact re-recommend link once the model cap is reached", async ({

@@ -141,7 +141,17 @@ const FULL_BINARY_INPUT = {
     nativePdf: true,
 } as const satisfies ModelInputCapabilities;
 
-export const DEFAULT_MODEL_ID = "gpt-5-4-mini";
+// Moved from gpt-5-4-mini to gpt-5-6-luna on 2026-08-01. Both are Guest-tier
+// Standard models costing 1 credit, so no user gains or loses access and no
+// plan is charged differently by the switch. Luna is the current GPT-5.6
+// price-performance entry: a 1.05M context window against 5.4 mini's 400K,
+// verified provider-native web search (lib/webSearchCapability.ts) where 5.4
+// mini is still "unverified", and materially cheaper published token rates.
+//
+// gpt-5-4-mini is deliberately still enabled and publicly listed. It is the
+// baseline this default is being measured against; retiring it is a separate,
+// evidence-gated decision (see docs/policy/default-model-luna-migration.md).
+export const DEFAULT_MODEL_ID = "gpt-5-6-luna";
 
 // Every model carries three separate identifiers. They are not
 // interchangeable, and support/incident work needs all three to line up:
@@ -173,7 +183,14 @@ export const AVAILABLE_MODELS = [
     { id: "gpt-5-6-luna", name: "GPT-5.6 Luna", apiModel: "gpt-5.6-luna", provider: "openai", icon: "🤖", bestFor: "Efficient high-volume questions and document work", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", reasoning: "medium", contextWindowTokens: 1_050_000, inputCapabilities: FULL_BINARY_INPUT },
     { id: "gpt-5-5", name: "GPT-5.5", apiModel: "gpt-5.5", provider: "openai", icon: "🤖", bestFor: "Complex analysis and important decisions", minimumPlan: "Pro", usageClass: "premium", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
     { id: "gpt-5-5-thinking", name: "GPT-5.5 Thinking", apiModel: "gpt-5.5", provider: "openai", icon: "🤖", bestFor: "Difficult problems that benefit from step-by-step reasoning", minimumPlan: "Pro", usageClass: "premium-reasoning", enabled: true, status: "enabled", reasoning: "high", inputCapabilities: FULL_BINARY_INPUT },
-    { id: "gpt-5-4-mini", name: "GPT-5.4 mini", apiModel: "gpt-5.4-mini", provider: "openai", icon: "🤖", bestFor: "Fast everyday questions and concise document work", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
+    // Still enabled and publicly listed on purpose: this is the baseline the
+    // new gpt-5-6-luna default is measured against, not a model on its way
+    // out this release. OpenAI still serves gpt-5.4-mini, so any eventual
+    // retirement here is a Tomverse catalogue decision, not a provider
+    // shutdown. `contextWindowTokens` records the published 400K window --
+    // the app's own input ceiling is 128K (lib/chatSecurity.ts), so this only
+    // ever guards the combined input+output check.
+    { id: "gpt-5-4-mini", name: "GPT-5.4 mini", apiModel: "gpt-5.4-mini", provider: "openai", icon: "🤖", bestFor: "Fast everyday questions and concise document work", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", contextWindowTokens: 400_000, inputCapabilities: FULL_BINARY_INPUT },
 
     { id: "claude-fable-5", name: "Claude Fable 5", apiModel: "claude-fable-5", provider: "anthropic", icon: "🧠", bestFor: "Polished writing, planning, and long-form analysis", minimumPlan: "Pro", usageClass: "premium", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
     { id: "claude-opus-4-8", name: "Claude Opus 4.8", apiModel: "claude-opus-4-8", provider: "anthropic", icon: "🧠", bestFor: "Nuanced reasoning across demanding, high-stakes tasks", minimumPlan: "Pro", usageClass: "premium", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
