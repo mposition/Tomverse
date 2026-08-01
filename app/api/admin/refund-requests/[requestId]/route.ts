@@ -24,6 +24,11 @@ import {
   deliverNotificationNow,
   enqueueNotificationDelivery,
 } from "@/lib/notificationDeliveries";
+import {
+  REFUND_REQUEST_METADATA_KEY,
+  REFUND_STATUS,
+  refundIdempotencyKey,
+} from "@/lib/refundSagaCore";
 import { getStripe, isStripeConfigured } from "@/lib/stripe";
 
 /**
@@ -172,15 +177,31 @@ async function createStripeRefundForSubscription(
         metadata: { amount, currency: charge.currency.toUpperCase(), chargeId: charge.id },
       });
     }
-    return stripe.refunds.create({
-      charge: charge.id,
-      amount,
-      reason: "requested_by_customer",
-      metadata: {
-        tomverseRefundRequest: "true",
-        subscriptionId,
+    return stripe.refunds.create(
+      {
+        charge: charge.id,
+        amount,
+        reason: "requested_by_customer",
+        metadata: {
+          tomverseRefundRequest: "true",
+          // Which request this belongs to. Without it a refund that succeeded
+          // while the local write failed could not be matched back to
+          // anything, so reconciliation had nothing to look for.
+          ...(approval
+            ? { [REFUND_REQUEST_METADATA_KEY]: approval.requestId }
+            : {}),
+          subscriptionId,
+        },
       },
-    });
+      approval
+        ? {
+            // Scoped to the request, so a retry after a crash is answered from
+            // Stripe's record of the first call instead of issuing a second
+            // refund.
+            idempotencyKey: refundIdempotencyKey(approval.requestId),
+          }
+        : undefined
+    );
   };
   const refund =
     approval &&
@@ -242,7 +263,20 @@ export async function PATCH(req: Request, context: RouteContext) {
     }
     const decision = REFUND_DECISIONS[body.action];
 
-    if (refundRequest.status !== "pending") {
+    if (refundRequest.status === REFUND_STATUS.processing) {
+      // Another attempt is between Stripe and the local commit. Refusing here
+      // is the point of the claim: retrying now is what would refund twice.
+      // Either it finishes on its own, or reconciliation resolves it.
+      return NextResponse.json(
+        {
+          error:
+            "This refund is being processed. It will finish or be reconciled automatically; try again shortly.",
+        },
+        { status: 409 }
+      );
+    }
+
+    if (refundRequest.status !== REFUND_STATUS.pending) {
       // A different decision is a real conflict and stays refused.
       if (refundRequest.status !== decision.status) {
         return NextResponse.json(
@@ -308,6 +342,23 @@ export async function PATCH(req: Request, context: RouteContext) {
           );
         }
       }
+      // Claim the request BEFORE any money moves.
+      //
+      // Stripe cannot join the local transaction, so the only way to make the
+      // gap between them survivable is to record that the attempt started.
+      // Claiming here does two things at once: it stops a second administrator
+      // reaching Stripe at all, and it means a crash after `refunds.create`
+      // leaves the row in `processing` -- where reconciliation will find it --
+      // rather than in `pending`, where the next attempt would refund again.
+      const processingClaim = await prisma.refundRequest.updateMany({
+        where: { id: refundRequest.id, status: REFUND_STATUS.pending },
+        data: {
+          status: REFUND_STATUS.processing,
+          processingStartedAt: new Date(),
+        },
+      });
+      if (processingClaim.count !== 1) throw new RefundDecisionRaceError();
+
       let stripeRefund;
       try {
         stripeRefund = await createStripeRefundForSubscription(
@@ -323,6 +374,16 @@ export async function PATCH(req: Request, context: RouteContext) {
           }
         );
       } catch (error) {
+        // The refund did not happen, so the claim has to come back off. An
+        // approval waiting on two-person sign-off is not a failure: leaving it
+        // `processing` would strand it, so it is released the same way.
+        await prisma.refundRequest.updateMany({
+          where: { id: refundRequest.id, status: REFUND_STATUS.processing },
+          data: {
+            status: REFUND_STATUS.pending,
+            processingStartedAt: null,
+          },
+        });
         if (error instanceof AdminApprovalRequiredError) throw error;
         console.error("Stripe refund creation failed:", error);
         await writeAdminAuditLog({
@@ -336,6 +397,7 @@ export async function PATCH(req: Request, context: RouteContext) {
             plan: refundRequest.plan,
             stripeCustomerId: refundRequest.stripeCustomerId,
             stripeSubscriptionId: refundRequest.stripeSubscriptionId,
+            releasedToPending: true,
           },
         });
         return NextResponse.json(
@@ -346,13 +408,13 @@ export async function PATCH(req: Request, context: RouteContext) {
 
       await cancelStripeSubscription(refundRequest.stripeSubscriptionId);
       const decided = await prisma.$transaction(async (tx) => {
-        // Conditional on `pending`, so two administrators reviewing at once
-        // cannot both write a decision: the loser matches no row and rolls
-        // back everything below.
+        // Conditional on the claim this request made, so a reconciliation pass
+        // that resolved the row in the meantime is not overwritten.
         const claimed = await tx.refundRequest.updateMany({
-          where: { id: refundRequest.id, status: "pending" },
+          where: { id: refundRequest.id, status: REFUND_STATUS.processing },
           data: {
             status: "approved",
+            processingStartedAt: null,
             adminNote: body.adminNote || null,
             reviewedByUserId: session.user.id,
             reviewedAt: new Date(),
