@@ -6,7 +6,7 @@
 - Applies to: Mobile chat shell and responsive compact layouts
 - Severity when violated: Release blocker
 - Owners: Product Design, Frontend, Accessibility, QA
-- Last reviewed: 2026-07-28
+- Last reviewed: 2026-08-01
 
 ## Purpose
 
@@ -24,6 +24,9 @@ The message canvas may be optimized for additional vertical space, but the prima
 | Guest verification bottom sheet | `components/chat/GuestVerificationSheet.tsx` |
 | Keyboard/landscape compaction signal | `components/chat/useCompactBottomDock.ts` |
 | Mobile shell detection | `components/chat/useIsMobileShell.ts` |
+| Visible-viewport measurement (keyboard inset, visible height) | `components/chat/useVisualViewport.ts` |
+| Provider outage banner above the composer | `components/chat/ProviderStatusBanner.tsx` |
+| New-chat welcome surface the composer portals into | `components/chat/ChatWelcomeScreen.tsx` |
 
 The contract binds the mobile shell (`useIsMobileShell()`) and every compact/responsive layout that renders the same composer, including landscape phones, keyboard-open states and browser zoom levels that produce a phone-width layout viewport.
 
@@ -62,6 +65,43 @@ As implemented, that is:
 - ChatMessageList optimization is subordinate to composer usability.
 - An attachment chip, its filename, and any attachment error occupy their own
   rows; none of them may narrow, cover or shorten the textarea's row.
+
+## Scroll ownership and the visible viewport
+
+The composer is only usable if the user can reach it, so reaching it is part of
+this contract, not a separate concern.
+
+- **At most one active scroll owner on the way to the composer.** Whichever
+  surface the composer is portalled into — the bottom dock of an ongoing
+  conversation, or the welcome screen of a new one — there must never be a
+  second scrolling ancestor between it and the shell. Two nested scrollers means
+  the user has to work out which surface to drag, and a test (or a user) that
+  drags the inner one can leave the composer under the keyboard.
+- **The page behind the shell is never that path.** `document`/`body` scrolling
+  is not an acceptable substitute for the shell's own scroll region.
+- **The new-chat welcome surface is normal flow and never shrinks.** It carries
+  the composer, so a flex rule that lets it collapse (`min-h-0 flex-1` under
+  `shrink-0` siblings that overrun the viewport) removes the composer from the
+  page entirely — clipped to a zero-height box, with `elementFromPoint`
+  returning the element painted behind it.
+- **Anything sized as a fraction of "the screen" measures the visible viewport,
+  never `dvh`, `vh` or `window.innerHeight`.** With the on-screen keyboard up,
+  iOS Safari and Android Chrome's default mode keep the layout viewport at the
+  phone's full height, so `45dvh` of an 844px phone is 380px — 73% of the 524px
+  the user can actually see. `useVisibleViewportHeight()` in
+  `components/chat/useVisualViewport.ts` is the single source for this, and it
+  shares one subscription with the keyboard inset and the compact-dock flag.
+- **The provider outage banner's cap is a measured budget.** The mobile shell
+  subtracts the header, the bottom dock, the composer (wherever it currently
+  lives) and a rem-based minimum for the conversation area from the visible
+  viewport, and caps the result at 45% of the visible viewport. The banner keeps
+  a rem-based floor and scrolls inside itself beyond it; it is never shrunk to a
+  caption, reduced to an icon, or hidden.
+- **Every sentence and action the banner carries stays.** "No eligible
+  replacement model is available" and its "Choose another model" action are the
+  user's only recovery path when nothing can replace the model they are standing
+  on. They may scroll inside the banner; they may not be dropped, truncated,
+  demoted behind a disclosure, or resized below the 44px touch floor.
 
 ## Allowed patterns
 
@@ -186,13 +226,21 @@ Every change affecting the mobile composer must verify:
 - keyboard-open layout remains usable;
 - 200% text scaling does not cause overlap;
 - 320px through 430px mobile widths pass;
-- screenshots cover the 3-model and web-search partial-support state.
+- screenshots cover the 3-model and web-search partial-support state;
+- the composer is reachable through at most one scroll owner, and never through
+  `document`, with the keyboard open;
+- every provider-banner fallback state is covered — no banner, a healthy
+  replacement, a degraded replacement, and *no* replacement — because the last
+  of those is the tallest the banner ever gets and is where the composer runs
+  out of room first.
 
 These are measured, not eyeballed: the specs compute the rectangles themselves (intersection area, left/right alignment, `scrollWidth > clientWidth`, width before/after focus, height before/after typing) rather than relying on screenshot diffs alone.
 
 Primary tests:
 
 - `tests/e2e/mobile-composer-contract.spec.ts` (the geometry contract itself)
+- `tests/e2e/mobile-composer-banner-reflow.spec.ts` (reachability under the
+  provider banner, every fallback state, keyboard and safe areas)
 - `tests/e2e/mobile-message-visibility.spec.ts` (composer vs. answer-canvas budget)
 - `tests/e2e/chat-keyboard-policy.spec.ts`
 - `tests/e2e/chat-tools.spec.ts`
@@ -229,6 +277,8 @@ Before approving a mobile composer change:
 - [ ] 320px viewport was tested
 - [ ] 200% text scaling was tested
 - [ ] Keyboard-open state was tested
+- [ ] The composer was reached through one scroll owner, not two
+- [ ] The provider banner's no-fallback state was tested with the keyboard open
 - [ ] Partial and unsupported web-search states were tested
 - [ ] Automated regression tests pass
 - [ ] Before-and-after screenshots were reviewed
@@ -243,5 +293,9 @@ A change is `NO-GO` for commercial release, regardless of whether other tests pa
 - any chip, badge or control has a non-zero intersection with the textarea or its placeholder;
 - the composer overflows horizontally or exposes a horizontal scrollbar;
 - Korean composition text or the caret can be hidden while typing;
+- reaching the composer requires scrolling more than one surface, or scrolling
+  the page behind the shell;
+- a notice above the composer is capped as a fraction of the layout viewport
+  rather than the visible one;
 - a web-search capability, credit or security warning was removed without an accessible replacement;
 - the required regression coverage above is missing from the change.
