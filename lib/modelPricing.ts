@@ -873,11 +873,17 @@ export const PENDING_VERIFIED_PRICE_REGISTER: readonly PendingVerifiedPriceEntry
     [
         {
             modelId: "claude-fable-5",
-            owner: null,
-            verificationTicket: null,
+            owner: "@mposition",
+            verificationTicket:
+                "https://github.com/mposition/tomverse/issues/244",
             registeredAt: "2026-08-01",
             expiresAt: "2026-10-30",
-            productionApproval: null,
+            productionApproval: {
+                approvedBy: "@mposition",
+                approvedAt: "2026-08-02T10:00:00.000Z",
+                rationale:
+                    "Approved temporary production use with conservative fallback pricing while the linked verification ticket is completed. Review is required before 2026-10-30.",
+            },
             settlementSource: "reservation_pricing",
         },
         // grok-4-5 left this register once its real profile went in above, from
@@ -886,29 +892,47 @@ export const PENDING_VERIFIED_PRICE_REGISTER: readonly PendingVerifiedPriceEntry
         // out by `enabled` and there is nothing left to exempt.
         {
             modelId: "mistral-large-3",
-            owner: null,
-            verificationTicket: null,
+            owner: "@mposition",
+            verificationTicket:
+                "https://github.com/mposition/tomverse/issues/246",
             registeredAt: "2026-08-01",
             expiresAt: "2026-10-30",
-            productionApproval: null,
+            productionApproval: {
+                approvedBy: "@mposition",
+                approvedAt: "2026-08-02T10:00:00.000Z",
+                rationale:
+                    "Approved temporary production use with conservative fallback pricing while the linked verification ticket is completed. Review is required before 2026-10-30.",
+            },
             settlementSource: "reservation_pricing",
         },
         {
             modelId: "qwen3.7-max",
-            owner: null,
-            verificationTicket: null,
+            owner: "@mposition",
+            verificationTicket:
+                "https://github.com/mposition/tomverse/issues/247",
             registeredAt: "2026-08-01",
             expiresAt: "2026-10-30",
-            productionApproval: null,
+            productionApproval: {
+                approvedBy: "@mposition",
+                approvedAt: "2026-08-02T10:00:00.000Z",
+                rationale:
+                    "Approved temporary production use with conservative fallback pricing while the linked verification ticket is completed. Review is required before 2026-10-30.",
+            },
             settlementSource: "reservation_pricing",
         },
         {
             modelId: "perplexity/sonar-deep-research",
-            owner: null,
-            verificationTicket: null,
+            owner: "@mposition",
+            verificationTicket:
+                "https://github.com/mposition/tomverse/issues/248",
             registeredAt: "2026-08-01",
             expiresAt: "2026-10-30",
-            productionApproval: null,
+            productionApproval: {
+                approvedBy: "@mposition",
+                approvedAt: "2026-08-02T10:00:00.000Z",
+                rationale:
+                    "Approved temporary production use with conservative fallback pricing while the linked verification ticket is completed. Review is required before 2026-10-30.",
+            },
             settlementSource: "provider_reported_usage",
             note: "Settles from the provider's own reported usage (lib/perplexityUsageCore.ts), so these rates only size the reservation. A deep-research turn issues many search queries and reasoning tokens, so a chat-shaped token reservation mis-sizes it in both directions; a dedicated reservation model is under review against the reserved/settled ratio this register reports.",
         },
